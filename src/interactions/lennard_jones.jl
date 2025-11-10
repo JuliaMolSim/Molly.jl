@@ -162,32 +162,16 @@ end
     ```
     with $F^A$ and $F^B$ being the regular Lennard-Jones forces in states $A$ and $B$ respectively.
 """
-struct LennardJonesSoftCoreBeutler{L, A, P, C, F, W, SA, SB} <: PairwiseInteraction
-    λ::L
-    α::A
-    p::P
-    cutoff::C
-    use_neighbors::Bool
-    inter_state_a::SA
-    inter_state_b::SB
-    shortcut::F
-    weight_special::W
-end
-
-function LennardJonesSoftCoreBeutler(;
-        λ,
-        α,
-        p = 1,
-        cutoff = NoCutoff(),
-        use_neighbors = false,
-        inter_state_a = nothing,
-        inter_state_b = (σ_mixing = lorentz_σ_mixing, ϵ_mixing = geometric_ϵ_mixing),
-        shortcut = lj_zero_shortcut,
-        weight_special = 1)
-    return LennardJonesSoftCoreBeutler{typeof(λ), typeof(α), typeof(p), typeof(cutoff),
-        typeof(shortcut), typeof(weight_special), typeof(inter_state_a), typeof(inter_state_b)}(
-        λ, α, p, cutoff, use_neighbors, inter_state_a,
-        inter_state_b, shortcut, weight_special)
+@kwdef struct LennardJonesSoftCoreBeutler{L, A, P, C, F, W, SA, SB} <: PairwiseInteraction
+    λ::L = 1
+    α::A = 1
+    p::P = 1
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    inter_state_a::SA = nothing
+    inter_state_b::SB = (σ_mixing = lorentz_σ_mixing, ϵ_mixing = geometric_ϵ_mixing)
+    shortcut::F = lj_zero_shortcut
+    weight_special::W = 1
 end
 
 use_neighbors(inter::LennardJonesSoftCoreBeutler) = inter.use_neighbors
@@ -230,10 +214,12 @@ const lennard_jones = LennardJones()
         force_units = u"kJ * mol^-1 * nm^-1",
         special = false,
         args...)
-    zero_force = ustrip(zero(dr[1])) * force_units
+    
     if sc.shortcut(atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
+
+    zero_force = ustrip(zero(dr[1])) * force_units
 
     r = norm(dr)
     params = (sc.λ, sc.α, sc.p, sc.inter_state_a, sc.inter_state_b, atom_i, atom_j, zero_force)
@@ -269,7 +255,7 @@ end
         σ_a2 = σ_a^2
         r_a = get_ra(r6, σ_a2, α, λ, p)
 
-        force_term_a = (1 - λ) * pairwise_force(lennard_jones, r_a, (σ_a2, ϵ_a)) * r6 / r_a^5
+        force_term_a = (1 - λ) * pairwise_force(lennard_jones, r_a, (σ_a2, ϵ_a)) * (r / r_a)^5
     end
 
     # force for system in state B
@@ -280,7 +266,7 @@ end
         σ_b2 = σ_b^2
         r_b = get_rb(r6, σ_b2, α, λ, p)
 
-        force_term_b = λ * pairwise_force(lennard_jones, r_b, (σ_b2, ϵ_b)) * r6 / r_b^5
+        force_term_b = λ * pairwise_force(lennard_jones, r_b, (σ_b2, ϵ_b)) * (r / r_b)^5
     end
 
     return force_term_a + force_term_b
@@ -323,7 +309,7 @@ end
         ϵ_a = inter_state_a.ϵ_mixing(atom_i, atom_j)
 
         σ_a2 = σ_a^2
-        r_a = cbrt(sqrt(α * σ_a2^3 * λ^p + r6))
+        r_a = get_ra(r6, σ_a2, α, λ, p)
 
         energy_term_a = (1 - λ) * pairwise_pe(lennard_jones, r_a, (σ_a2, ϵ_a))
     end
@@ -334,7 +320,7 @@ end
         ϵ_b = inter_state_b.ϵ_mixing(atom_i, atom_j)
 
         σ_b2 = σ_b^2
-        r_b = cbrt(sqrt(α * σ_b2^3 * (1 - λ)^p + r6))
+        r_b = get_rb(r6, σ_b2, α, λ, p)
 
         energy_term_b = λ * pairwise_pe(lennard_jones, r_b, (σ_b2, ϵ_b))
     end
@@ -366,7 +352,7 @@ end
         ϵ_a = sc.inter_state_a.ϵ_mixing(atom_i, atom_j)
 
         σ_a2 = σ_a^2
-        r_a = cbrt(sqrt(sc.α * σ_a2^3 * sc.λ^p + r6))
+        r_a = get_ra(r6, σ_a2, α, λ, p)
 
         term_state_a = pairwise_pe(lennard_jones, r_a, (σ_a2, ϵ_a)) +
                        (1 - sc.λ) * pairwise_force(lennard_jones, r_a, (σ_a2, ϵ_a)) /
@@ -379,7 +365,7 @@ end
         ϵ_b = sc.inter_state_b.ϵ_mixing(atom_i, atom_j)
 
         σ_b2 = σ_b^2
-        r_b = cbrt(sqrt(sc.α * σ_b2^3 * (1 - sc.λ)^sc.p + r6))
+        r_b = get_rb(r6, σ_b2, α, λ, p)
 
         term_state_b = pairwise_pe(lennard_jones, r_b, (σ_b2, ϵ_b)) +
                        pα_6 * sc.λ * pairwise_force(lennard_jones, r_b, (σ_b2, ϵ_b)) /
