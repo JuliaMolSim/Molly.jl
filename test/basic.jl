@@ -175,7 +175,7 @@
     mcs = Molly.molecule_centers(coords, boundary, topology)
     @test isapprox(mcs, [SVector(0.05, 0.0), SVector(1.0, 1.0)]; atol=1e-6)
 
-    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     for AT in array_list
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
@@ -237,6 +237,95 @@ end
         p2 = pdb_sys.coords[1]
         @test isapprox(p1, p2; rtol=0.001) # isapprox due to rounding errors in PDB file
     end
+end
+
+@testset "Different Formats" begin
+
+    ff = MolecularForceField(
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "gaff.xml", "imatinib.xml", "imatinib_frcmod.xml"])...;
+        units=true,
+    )
+
+    ff_custom = MolecularForceField(
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "gaff.xml", "imatinib.xml", "imatinib_frcmod.xml"])...;
+        units=true,
+        custom_residue_templates = joinpath(data_dir, "imatinib_topo.xml")
+    )
+
+    boundary = CubicBoundary(Inf*u"nm")
+    sys_mol2         = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary = boundary)
+    sys_pdb_connect  = System(joinpath(data_dir, "imatinib_conect.pdb"),  ff; boundary = boundary)
+    sys_pdb          = System(joinpath(data_dir, "imatinib.pdb"),  ff_custom; boundary = boundary)
+
+    @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
+    @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
+    @test_throws ArgumentError System(joinpath(data_dir, "imatinib.pdb"),  ff; boundary = boundary)
+
+end
+
+@testset "System Setup" begin
+
+    FT = Float64
+    AT = Array
+
+    dat_dir = joinpath(data_dir, "OpenMM_Refs/")
+
+    ff = MolecularForceField(
+        FT,
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
+        units=true,
+    )
+
+    names = ("a-synuclein_1",
+             "barn_bar",
+             "bpti",
+             "cd2_cd58",
+             "cole7_im7",
+             "drkN_SH3_1",
+             "gb3",
+             "hewl",
+             "NTail_1",
+             "PaaA2_1",
+             "sgpb_omtky3",
+             "ubiquitin")
+
+    for name in names
+
+        dat_file = joinpath(dat_dir, "$(name).dat")
+        pdb_file = joinpath(dat_dir, "$(name).pdb")
+
+        sys = System(pdb_file, ff;
+             array_type = AT,
+             nonbonded_method = :pme,
+             approximate_pme  = false,
+             disulfide_bonds  = true)
+
+        if name == "sgpb_omtky3"
+
+            @test_throws ArgumentError System(pdb_file, ff;
+                                              array_type = AT,
+                                              nonbonded_method = :pme,
+                                              approximate_pme  = false,
+                                              disulfide_bonds  = false) # Catch if disulfide bonds are not added properly
+
+        end
+
+        F_opeMM = SVector{3}[]
+        open(dat_file, "r") do f
+            for line in readlines(f)
+                fields = split(line, ",")
+                force = SVector{3}([parse(FT, split(val, " ")[1])*u"kJ * mol^-1 * nm^-1" for val in fields])
+                push!(F_opeMM, force)
+            end
+        end
+
+        F_Molly = forces(sys)
+
+        diff = mean(norm.(F_Molly .- F_opeMM))
+        @test diff < FT(0.15)u"kJ * mol^-1 * nm^-1"
+
+    end
+    
 end
 
 @testset "Neighbor lists" begin
@@ -320,7 +409,7 @@ end
     @test neighbors_dist == sort_nbs(neighbors.list)
 
     # Test all neighbor finders agree for a larger system
-    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     dist_cutoff = 1.2u"nm"
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
                  dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm")
