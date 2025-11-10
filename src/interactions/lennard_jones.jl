@@ -358,7 +358,7 @@ end
         r_a = get_ra(r6, σ_a2, α, λ, p)
 
         term_state_a = pairwise_pe(lennard_jones, r_a, (σ_a2, ϵ_a)) +
-                       (1 - sc.λ) * pairwise_force(lennard_jones, r_a, (σ_a2, ϵ_a)) /
+                       pα_6 * (1 - sc.λ) * pairwise_force(lennard_jones, r_a, (σ_a2, ϵ_a)) /
                        r_a^5 * σ_a2^3 * sc.λ^(p - 1)
     end
 
@@ -539,6 +539,59 @@ function pairwise_pe(inter::LennardJonesSoftCoreGapsys, r, (C12, C6))
                     ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
                     (91*C12*(invR6*invR6)) - (28*C6*(invR6))
     end
+end
+
+@inline function ∂H_∂λ(
+        sc::LennardJonesSoftCoreGapsys,
+        dr,
+        atom_i,
+        atom_j,
+        energy_units = u"kJ * mol^-1",
+        special = false)
+
+    zero_energy = ustrip(zero(dr[1])) * energy_units
+    if sc.shortcut(atom_i, atom_j)
+        return zero_energy
+    end
+
+    r = norm(dr)
+    r6 = r^6
+    pα_6 = sc.p * sc.α / 6
+
+    term_state_a, term_state_b = zero_energy, zero_energy
+
+    # ∂V/∂λ for system in state A
+    if !isnothing(sc.inter_state_a)
+        σ_a = sc.inter_state_a.σ_mixing(atom_i, atom_j)
+        ϵ_a = sc.inter_state_a.ϵ_mixing(atom_i, atom_j)
+
+        σ_a2 = σ_a^2
+        r_a = get_ra(r6, σ_a2, α, λ, p)
+
+        term_state_a = pairwise_pe(lennard_jones, r_a, (σ_a2, ϵ_a)) +
+                       (1 - sc.λ) * pairwise_force(lennard_jones, r_a, (σ_a2, ϵ_a)) /
+                       r_a^5 * σ_a2^3 * sc.λ^(p - 1)
+    end
+
+    # ∂V/∂λ for system in state B
+    if !isnothing(sc.inter_state_b)
+        σ_b = sc.inter_state_b.σ_mixing(atom_i, atom_j)
+        ϵ_b = sc.inter_state_b.ϵ_mixing(atom_i, atom_j)
+
+        σ_b2 = σ_b^2
+        r_b = get_rb(r6, σ_b2, α, λ, p)
+
+        term_state_b = pairwise_pe(lennard_jones, r_b, (σ_b2, ϵ_b)) +
+                       pα_6 * sc.λ * pairwise_force(lennard_jones, r_b, (σ_b2, ϵ_b)) /
+                       r_b^5 * σ_b2^3 * (1 - sc.λ)^(sc.p - 1)
+    end
+
+    if special
+        return (term_state_b - term_state_a) * sc.weight_special
+    else
+        return term_state_b - term_state_a
+    end
+
 end
 
 @doc raw"""
