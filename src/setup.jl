@@ -5,7 +5,6 @@
 export
     place_atoms,
     place_diatomics,
-    MolecularForceField,
     is_any_atom,
     is_heavy_atom,
     add_position_restraints
@@ -125,379 +124,6 @@ function place_diatomics(n_molecules::Integer,
     return wrap_coords.([coords...], (boundary,))
 end
 
-struct AtomType{C, M, S, E}
-    type::String
-    class::String # Currently this is not used
-    element::String
-    charge::Union{C, Missing}
-    mass::M
-    σ::S
-    ϵ::E
-end
-
-struct ResidueType{C}
-    name::String
-    types::Dict{String, String}
-    charges::Dict{String, Union{C, Missing}}
-    indices::Dict{String, Int}
-end
-
-struct PeriodicTorsionType{T, E}
-    periodicities::Vector{Int}
-    phases::Vector{T}
-    ks::Vector{E}
-    proper::Bool
-end
-
-"""
-    MolecularForceField(ff_files...; units=true, custom_residue_templates = nothing, custom_renaming_scheme = nothing)
-    MolecularForceField(T, ff_files...; units=true)
-    MolecularForceField(atom_types, residue_types, bond_types, angle_types,
-                        torsion_types, torsion_order, weight_14_coulomb,
-                        weight_14_lj, attributes_from_residue,
-                        residue_name_replacements, atom_name_replacements,
-                        standard_bonds)
-
-A molecular force field. 
-
-Read one or more OpenMM force field XML files by passing them to the constructor.
-
-In order to  assign force field parameters to the atoms in the simulation, the
-residues determined from a structure file are matched to templates provided by
-the force field file, as well as a template dictionary in .xml format, which defines
-the standard topology (bonds) of the residues to be found in the simulation. At the
-moment, Molly provides a dictionary for all standard aminoacids, nucleic acids and
-water for this purpose. If the system to be simulated contains other molecules, their
-template topologies must be defined either through `CONNECT` records in the .pdb file 
-or by prviding an extra custom template file with the `custom_residue_templates` keyword.
-
-"""
-struct MolecularForceField{T, M, D, E, K}
-    atom_types::Dict{String, AtomType{T, M, D, E}}
-    residues::Dict{String, ResidueTemplate{T}}
-    bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
-    angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
-    torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
-    torsion_order::String
-    weight_14_coulomb::T
-    weight_14_lj::T
-    attributes_from_residue::Vector{String}
-    residue_name_replacements::Dict{String,String}
-    atom_name_replacements::Dict{String,Dict{String,String}}
-    standard_bonds::Dict{String,Vector{Tuple{String, String}}}
-end
-
-function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true, 
-                             custom_residue_templates = nothing, 
-                             custom_renaming_scheme   = nothing)
-
-    atom_types = Dict{String, AtomType}()
-    bond_types = Dict{Tuple{String, String}, HarmonicBond}()
-    angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
-    torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}()
-    torsion_order = ""
-    weight_14_coulomb, weight_14_lj = one(T), one(T)
-    weight_14_coulomb_set, weight_14_lj_set = false, false
-    attributes_from_residue = String[]
-    residues  = Dict{String,ResidueTemplate}()
-    type_info = Dict{String,Tuple{String,String}}()
-
-    resname_replacements, atomname_replacements = load_replacements()
-    standard_bonds = load_bond_definitions()
-
-    if !isnothing(custom_renaming_scheme)
-        resname_replacements, atomname_replacements = load_replacements(; xmlpath = custom_residue_templates,
-                                                                          resname_replacements  = resname_replacements,
-                                                                          atomname_replacements = atomname_replacements)
-    end
-    if !isnothing(custom_residue_templates)
-        standard_bonds = load_bond_definitions(; xmlpath = custom_residue_templates,
-                                                 standardBonds = standard_bonds) 
-    end
-
-    for ff_file in ff_files
-        ff_xml = parsexml(read(ff_file))
-        ff = root(ff_xml)
-        
-        for entry in eachelement(ff)
-            entry_name = entry.name
-            if entry_name == "AtomTypes"
-                for atom_type in eachelement(entry)
-                    at_type = atom_type["name"]
-                    at_class = atom_type["class"]
-                    element = haskey(atom_type, "element") ? atom_type["element"] : "?"
-                    ch = missing # Updated later or defined in residue
-                    atom_mass = units ? parse(T, atom_type["mass"])u"g/mol" : parse(T, atom_type["mass"])
-                    σ = units ? T(-1u"nm") : T(-1) # Updated later
-                    ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
-                    atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
-                                                at_type, at_class, element, ch, atom_mass, σ, ϵ)
-                    type_info[at_type] = (element, at_class)
-                end
-            elseif entry_name == "Residues"
-                for residue in eachelement(entry)
-                    rname = residue["name"]
-                    atoms, types = String[], String[]
-                    charges = T[]
-                    elements = Symbol[]
-                    external_bonds_name = String[]
-                    externals = Int[]
-                    extras = BitVector()
-                    bonds_by_name = Tuple{String,String}[]
-
-                    for re in eachelement(residue)
-                        if re.name == "Atom"
-                            an = re["name"]
-                            tp = re["type"]
-                            q = parse(T, re["charge"])
-                            
-                            push!(atoms, an)
-                            push!(types, tp)
-                            push!(charges, q)
-                            push!(externals, 0)
-                            
-                            tel, tclass = type_info[tp]
-                            
-                            push!(extras, (tel == "?") || (tclass == "EP"))
-                            push!(elements, tel == "?" ? :X : Symbol(tel))
-                        
-                        elseif re.name == "Bond"
-                            push!(bonds_by_name, (re["atomName1"], re["atomName2"]))
-                        elseif re.name == "ExternalBond"
-                            push!(external_bonds_name, re["atomName"])
-                        end
-                    end
-
-                    name_to_idx = Dict(a => i for (i,a) in enumerate(atoms))
-                    bonds = Tuple{Int,Int}[]
-                    for (a1,a2) in bonds_by_name
-                        i = name_to_idx[a1]
-                        j = name_to_idx[a2]
-                        push!(bonds, i < j ? (i,j) : (j,i))
-                    end
-
-                    for nm in external_bonds_name
-                        if haskey(name_to_idx, nm)
-                            externals[name_to_idx[nm]] += 1
-                        end
-                    end
-
-                    residues[rname] = ResidueTemplate(rname, atoms, elements, types, bonds, externals, charges, extras)
-                end
-            elseif entry_name == "HarmonicBondForce"
-                for bond in eachelement(entry)
-                    k = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
-                    r0 = units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"])
-                    if haskey(bond, "class1")
-                        class_1 = bond["class1"]
-                        class_2 = bond["class2"]
-
-                        for (type_i, atom_i) in atom_types
-                            if atom_i.class == class_1
-                                for (type_j, atom_j) in atom_types
-                                    if atom_j.class == class_2
-                                        bond_types[(type_i, type_j)] = HarmonicBond(k, r0)
-                                    end
-                                end
-                            end
-                        end
-
-                    else
-                        atom_type_1 = bond["type1"]
-                        atom_type_2 = bond["type2"]
-                        bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(k, r0)
-
-                    end
-                    
-                end
-            elseif entry_name == "HarmonicAngleForce"
-                for ang in eachelement(entry)
-                    k = units ? parse(T, ang["k"])u"kJ * mol^-1" : parse(T, ang["k"])
-                    θ0 = parse(T, ang["angle"])
-                    if haskey(ang, "class1")
-                        class_1 = ang["class1"]
-                        class_2 = ang["class2"]
-                        class_3 = ang["class3"]
-
-                        for (type_i, atom_i) in atom_types
-                            if atom_i.class == class_1 
-                                for (type_j, atom_j) in atom_types
-                                    if atom_j.class == class_2
-                                        for (type_k, atom_k) in atom_types
-                                            if atom_k.class == class_3
-                                                angle_types[(type_i, type_j, type_k)] = HarmonicAngle(k, θ0)
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-
-                        
-                    else
-                        atom_type_1 = ang["type1"]
-                        atom_type_2 = ang["type2"]
-                        atom_type_3 = ang["type3"]
-                        angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
-                    end
-                    
-                end
-            elseif entry_name == "PeriodicTorsionForce"
-                torsion_order = haskey(entry, "ordering") ? entry["ordering"] : "default"
-                for torsion in eachelement(entry)
-                    
-                    proper = torsion.name == "Proper"
-                    periodicities = Int[]
-                    phases = T[]
-                    ks = units ? typeof(T(1u"kJ * mol^-1"))[] : T[]
-                    phase_i = 1
-                    phase_present = true
-                    while phase_present
-                        push!(periodicities, parse(Int, torsion["periodicity$phase_i"]))
-                        push!(phases, parse(T, torsion["phase$phase_i"]))
-                        push!(ks, units ? parse(T, torsion["k$phase_i"])u"kJ * mol^-1" : parse(T, torsion["k$phase_i"]))
-                        phase_i += 1
-                        phase_present = haskey(torsion, "periodicity$phase_i")
-                    end
-
-                    if haskey(torsion, "class1")
-                        class_1 = torsion["class1"]
-                        class_2 = torsion["class2"]
-                        class_3 = torsion["class3"]
-                        class_4 = torsion["class4"]
-
-                        for (type_i, atom_i) in atom_types
-                            if atom_i.class == class_1 || class_1 == ""
-                                for (type_j, atom_j) in atom_types
-                                    if atom_j.class == class_2 || class_2 == ""
-                                        for (type_k, atom_k) in atom_types
-                                            if atom_k.class == class_3 || class_3 == ""
-                                                for (type_l, atom_l) in atom_types
-                                                    if atom_l.class == class_4 || class_4 == ""
-                                                        t1 = class_1 == "" ? "" : type_i
-                                                        t2 = class_2 == "" ? "" : type_j
-                                                        t3 = class_3 == "" ? "" : type_k
-                                                        t4 = class_4 == "" ? "" : type_l
-                                                        if !haskey(torsion_types, (t1, t2, t3, t4))
-                                                            torsion_type = PeriodicTorsionType(periodicities, phases, ks, proper)
-                                                            torsion_types[(t1, t2, t3, t4)] = torsion_type
-                                                        end
-                                                    end
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    else
-                        
-                        atom_type_1 = torsion["type1"]
-                        atom_type_2 = torsion["type2"]
-                        atom_type_3 = torsion["type3"]
-                        atom_type_4 = torsion["type4"]
-                        
-                        torsion_type = PeriodicTorsionType(periodicities, phases, ks, proper)
-                        torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)] = torsion_type
-                    end
-                    
-                end
-            elseif entry_name == "NonbondedForce"
-                if haskey(entry, "coulomb14scale")
-                    weight_14_coulomb_new = parse(T, entry["coulomb14scale"])
-                    if weight_14_coulomb_set && weight_14_coulomb_new != weight_14_coulomb
-                        error("found multiple NonbondedForce entries with different coulomb14scale values")
-                    end
-                    weight_14_coulomb = weight_14_coulomb_new
-                    weight_14_coulomb_set = true
-                end
-                if haskey(entry, "lj14scale")
-                    weight_14_lj_new = parse(T, entry["lj14scale"])
-                    if weight_14_lj_set && weight_14_lj_new != weight_14_lj
-                        error("found multiple NonbondedForce entries with different lj14scale values")
-                    end
-                    weight_14_lj = weight_14_lj_new
-                    weight_14_lj_set = true
-                end
-                for atom_or_attr in eachelement(entry)
-                    if atom_or_attr.name == "Atom"
-                        ch = haskey(atom_or_attr, "charge") ? parse(T, atom_or_attr["charge"]) : missing
-                        σ = units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"])
-                        ϵ = units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"])
-                        if haskey(atom_or_attr, "class")
-                            class = atom_or_attr["class"] 
-                            for (type, atom) in atom_types
-                                if atom.class == class
-                                    if !haskey(atom_types, type)
-                                        # Skip types not defined above
-                                        continue
-                                    end
-                                    complete_type = AtomType{T, typeof(atom.mass), typeof(σ), typeof(ϵ)}(
-                                                type, atom.class, atom.element,
-                                                ch, atom.mass, σ, ϵ)
-                                    atom_types[type] = complete_type
-                                end
-                            end
-                        else
-                            # Update previous atom types
-                            atom_type = atom_or_attr["type"]
-                            if !haskey(atom_types, atom_type)
-                                # Skip types not defined above
-                                continue
-                            end
-                            partial_type = atom_types[atom_type]
-                            
-                            complete_type = AtomType{T, typeof(partial_type.mass), typeof(σ), typeof(ϵ)}(
-                                        partial_type.type, partial_type.class, partial_type.element,
-                                        ch, partial_type.mass, σ, ϵ)
-                            atom_types[atom_type] = complete_type
-                        end
-                        
-                    elseif atom_or_attr.name == "UseAttributeFromResidue"
-                        if !(atom_or_attr["name"] in attributes_from_residue)
-                            push!(attributes_from_residue, atom_or_attr["name"])
-                        end
-                        if atom_or_attr["name"] != "charge"
-                            @warn "UseAttributeFromResidue only currently supported for charge, " *
-                                  "this entry will be ignored"
-                        end
-                    end
-                end
-            elseif entry_name == "Patches"
-                @warn "Residue patches not currently supported, this entry will be ignored"
-            elseif entry_name == "Include"
-                @warn "File includes not currently supported, this entry will be ignored"
-            elseif entry_name in ("RBTorsionForce", "CMAPTorsionForce", "GBSAOBCForce",
-                                  "CustomBondForce", "CustomAngleForce", "CustomTorsionForce",
-                                  "CustomNonbondedForce", "CustomGBForce", "CustomHbondForce",
-                                  "CustomManyParticleForce", "LennardJonesForce")
-                @warn "$entry_name entries not currently supported, this entry will be ignored"
-            end
-        end
-    end
-
-    if units
-        M = typeof(T(1u"g/mol"))
-        D = typeof(T(1u"nm"))
-        E = typeof(T(1u"kJ * mol^-1"))
-        K = typeof(T(1u"kJ * mol^-1 * nm^-2"))
-    else
-        M, D, E, K = T, T, T, T
-    end
-    return MolecularForceField{T, M, D, E, K}(atom_types, residues, bond_types, angle_types,
-            torsion_types, torsion_order, weight_14_coulomb, weight_14_lj, attributes_from_residue,
-            resname_replacements, atomname_replacements, standard_bonds)
-end
-
-function MolecularForceField(ff_files::AbstractString...; kwargs...)
-    return MolecularForceField(DefaultFloat, ff_files...; kwargs...)
-end
-
-function Base.show(io::IO, ff::MolecularForceField)
-    print(io, "MolecularForceField with ", length(ff.atom_types), " atom types, ",
-            length(ff.residues), " residues, ", length(ff.bond_types), " bond types, ",
-            length(ff.angle_types), " angle types and ", length(ff.torsion_types), " torsion types")
-end
 
 get_res_id(res) = (Chemfiles.id(res), ("chainid" in Chemfiles.list_properties(res)) ? Chemfiles.property(res, "chainid") : "X")
 
@@ -592,7 +218,118 @@ function canonicalize_system(top,
 
 end
 
-is_pdb(name) = uppercase(split(name, ".")[end]) == "PDB"
+@inline function resolve_bond(ff::MolecularForceField, t1::String, t2::String)
+    # exact types first, both orders
+    if haskey(ff.bond_types,(t1,t2))
+        return ff.bond_types[(t1,t2)] 
+    end
+    if haskey(ff.bond_types,(t2,t1))
+        return ff.bond_types[(t2,t1)] 
+    end
+
+    key = (t1,t2)
+    if haskey(ff.bond_resolver.cache, key)
+        return ff.bond_resolver.cache[key]
+    end
+    cand = Int[]
+
+    append!(cand, get(ff.bond_resolver.idx, (:type,  t1, t2), Int[]))
+    append!(cand, get(ff.bond_resolver.idx, (:type,  t2, t1), Int[]))
+    c1, c2 = ff.class_of[t1], ff.class_of[t2]
+
+    append!(cand, get(ff.bond_resolver.idx, (:class, c1, c2), Int[]))
+    append!(cand, get(ff.bond_resolver.idx, (:class, c2, c1), Int[]))
+    append!(cand, get(ff.bond_resolver.idx, (:wild,  "", ""), Int[]))
+
+    best = nothing
+    bestspec = Int8(-1)
+    @inbounds for i in cand
+        r = ff.bond_resolver.rules[i]
+        if (matches(r.p1, t1, ff.class_of) && matches(r.p2, t2, ff.class_of)) ||
+           (matches(r.p1, t2, ff.class_of) && matches(r.p2, t1, ff.class_of))
+            if r.specificity > bestspec
+                bestspec = r.specificity
+                best = r.params
+            end
+        end
+    end
+    ff.bond_resolver.cache[key] = best
+    return best
+end
+
+@inline function resolve_angle(ff::MolecularForceField, t1::String,t2::String,t3::String)
+    # exact types first; also try reversed neighbors
+    if haskey(ff.angle_types,(t1,t2,t3)); return ff.angle_types[(t1,t2,t3)] end
+    if haskey(ff.angle_types,(t3,t2,t1)); return ff.angle_types[(t3,t2,t1)] end
+
+    key = (t1,t2,t3)
+    if haskey(ff.angle_resolver.cache, key)
+        return ff.angle_resolver.cache[key]
+    end
+
+    cand = Int[]
+    append!(cand, get(ff.angle_resolver.idx, (:type,  t2, ""), Int[]))
+    append!(cand, get(ff.angle_resolver.idx, (:class, ff.class_of[t2], ""), Int[]))
+    append!(cand, get(ff.angle_resolver.idx, (:wild,  "", ""), Int[]))
+
+    best = nothing; bestspec = Int8(-1)
+    @inbounds for i in cand
+        r = ff.angle_resolver.rules[i]
+        if matches(r.p1,t1,ff.class_of) & matches(r.p2,t2,ff.class_of) & matches(r.p3,t3,ff.class_of)
+            if r.specificity > bestspec
+                bestspec = r.specificity; best = r.params
+            end
+        end
+        # also accept neighbor-reversed matches
+        if matches(r.p1,t3,ff.class_of) & matches(r.p2,t2,ff.class_of) & matches(r.p3,t1,ff.class_of)
+            if r.specificity > bestspec
+                bestspec = r.specificity; best = r.params
+            end
+        end
+    end
+    ff.angle_resolver.cache[key] = best
+    return best
+end
+
+@inline function resolve_proper_torsion(ff::MolecularForceField,
+                                        t1::String,t2::String,t3::String,t4::String)
+    # Fast exact-type path kept
+    if haskey(ff.torsion_types, (t1,t2,t3,t4))
+        p = ff.torsion_types[(t1,t2,t3,t4)]
+        p.proper && return (p, (t1,t2,t3,t4))
+    end
+    if haskey(ff.torsion_types, (t4,t3,t2,t1))
+        p = ff.torsion_types[(t4,t3,t2,t1)]
+        p.proper && return (p, (t4,t3,t2,t1))
+    end
+    # Lazy class/wildcard resolution
+    p = find_torsion_params(t1,t2,t3,t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    if !(p === nothing) && p.proper
+        return (p, (t1,t2,t3,t4))
+    end
+    pr = find_torsion_params(t4,t3,t2,t1; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    if !(pr === nothing) && pr.proper
+        return (pr, (t4,t3,t2,t1))
+    end
+    return (nothing, ("","","",""))
+end
+
+@inline function resolve_improper_torsion(ff::MolecularForceField,
+                                          t1::String,t2::String,t3::String,t4::String)
+    # t1 is the central atom type by your convention
+    # Check the three peripheral permutations and take the first match
+    for (a,b,c) in ((t2,t3,t4), (t2,t4,t3), (t3,t2,t4), (t3,t4,t2), (t4,t2,t3), (t4,t3,t2))
+        if haskey(ff.torsion_types, (t1,a,b,c))
+            p = ff.torsion_types[(t1,a,b,c)]
+            !p.proper && return (p, (t1,a,b,c))
+        end
+        p = find_torsion_params(t1,a,b,c; resolver=ff.torsion_resolver, class_of=ff.class_of)
+        if !(p === nothing) && !p.proper
+            return (p, (t1,a,b,c))
+        end
+    end
+    return (nothing, ("","","",""))
+end
 
 """
     System(coordinate_file, force_field; <keyword arguments>)
@@ -688,8 +425,6 @@ function System(coord_file::AbstractString,
     atomname_replacements = force_field.atom_name_replacements
     standard_bonds        = force_field.standard_bonds
 
-    #return resname_replacements, atomname_replacements
-
     # ---- Read structure ----
     traj  = Chemfiles.Trajectory(coord_file)
     frame = Chemfiles.read(traj)
@@ -721,7 +456,6 @@ function System(coord_file::AbstractString,
         top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system, top_bonds)
     end
     top_bonds = read_extra_bonds(top, top_bonds, canonical_system)
-
 
     template_names       = keys(force_field.residues)
     # ---- Match each residue graph to a template and assign atom types/charges ----
@@ -828,87 +562,54 @@ function System(coord_file::AbstractString,
                                    chain_id=chain_from_atom_idx(ai, canonical_system), element=element_of[ai], hetero_atom=hetero))
         eligible[ai, ai] = false
     end
-
+    
     # Bonds
-    for (a1, a2) in top_bonds
+    for (a1,a2) in top_bonds
         t1, t2 = atom_type_of[a1], atom_type_of[a2]
+        hb = resolve_bond(force_field, t1, t2)
+        if isnothing(hb)
+            throw(ArgumentError("No bond parameters found for ($t1,$t2)"))
+        end
         push!(bonds_il.is, a1)
         push!(bonds_il.js, a2)
-        if haskey(force_field.bond_types, (t1,t2))
-            bt = force_field.bond_types[(t1,t2)]
-            push!(bonds_il.types, atom_types_to_string(t1,t2))
-        else
-            bt = force_field.bond_types[(t2,t1)]
-            push!(bonds_il.types, atom_types_to_string(t2,t1))
-        end
-        push!(bonds_il.inters, HarmonicBond(k=bt.k, r0=bt.r0))
+        push!(bonds_il.types, atom_types_to_string(t1,t2))
+        push!(bonds_il.inters, hb)
         eligible[a1,a2] = false
         eligible[a2,a1] = false
     end
 
     # Angles
     for (i,j,k) in top_angles
-        t = (atom_type_of[i], atom_type_of[j], atom_type_of[k])
-        push!(angles_il.is, i)
-        push!(angles_il.js, j)
-        push!(angles_il.ks, k)
-        if haskey(force_field.angle_types, t)
-            at = force_field.angle_types[t]
-            push!(angles_il.types, atom_types_to_string(t...))
-        else
-            tr = (t[3], t[2], t[1])
-            at = force_field.angle_types[tr]
-            push!(angles_il.types, atom_types_to_string(tr...))
+        t1,t2,t3 = atom_type_of[i], atom_type_of[j], atom_type_of[k]
+        ha = resolve_angle(force_field, t1,t2,t3)
+        if isnothing(ha)
+            throw(ArgumentError("No angle parameters found for ($t1,$t2,$t3)"))
         end
-        push!(angles_il.inters, HarmonicAngle(k=at.k, θ0=at.θ0))
+        push!(angles_il.is,i)
+        push!(angles_il.js,j)
+        push!(angles_il.ks,k)
+        push!(angles_il.types, atom_types_to_string(t1,t2,t3))
+        push!(angles_il.inters, ha)
         eligible[i,k] = false
         eligible[k,i] = false
     end
 
     # Proper torsions
     for (i,j,k,l) in top_torsions
-        t = (atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l])
-        best_key = t
-        tt = nothing
-        if haskey(force_field.torsion_types, t) && force_field.torsion_types[t].proper
-            tt = force_field.torsion_types[t]
-        elseif haskey(force_field.torsion_types, reverse(t)) && force_field.torsion_types[reverse(t)].proper
-            best_key = reverse(t)
-            tt       = force_field.torsion_types[best_key]
-        else
-            best_score = -1
-            best_key = ("","","","")
-            for kkey in keys(force_field.torsion_types)
-                force_field.torsion_types[kkey].proper || continue
-                for ke in (kkey, reverse(kkey))
-                    valid = true
-                    score = 0
-                    for (idx, v) in enumerate(ke)
-                        if v == t[idx]
-                            score += 1
-                        elseif v != ""
-                            valid = false
-                            break
-                        end
-                    end
-                    if valid && score >= best_score
-                        best_score = score
-                        best_key = kkey
-                    end
-                end
-            end
-            tt = force_field.torsion_types[best_key]
-        end
+        t1,t2,t3,t4 = atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l]
+        tt, key = resolve_proper_torsion(force_field, t1,t2,t3,t4)
+        tt === nothing && continue
+
         n_terms = length(tt.periodicities)
         for s in 1:torsion_n_terms:n_terms
             e = min(s+torsion_n_terms-1, n_terms)
-            push!(tors_il.is, i) 
+            push!(tors_il.is, i)
             push!(tors_il.js, j)
             push!(tors_il.ks, k)
             push!(tors_il.ls, l)
-            push!(tors_il.types, atom_types_to_string(best_key...))
+            push!(tors_il.types, atom_types_to_string(key...))
             push!(tors_il.inters, PeriodicTorsion(periodicities=tt.periodicities[s:e],
-                                                  phases=tt.phases[s:e], ks=tt.ks[s:e], proper=true))
+                                                phases=tt.phases[s:e], ks=tt.ks[s:e], proper=true))
         end
         special[i,l] = true
         special[l,i] = true
@@ -918,36 +619,16 @@ function System(coord_file::AbstractString,
     for (c, j, k, l) in top_impropers
         names_no1 = (j,k,l)
         types_no1 = (atom_type_of[j], atom_type_of[k], atom_type_of[l])
+
         if force_field.torsion_order == "amber"
             order = sortperm([t[1] == 'H' ? 'z'*t : t for t in types_no1])
             j, k, l = names_no1[order[1]], names_no1[order[2]], names_no1[order[3]]
         end
+
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
-        best_score = -1
-        best_key = ("","","","")
-        tt = nothing
-        for kkey in keys(force_field.torsion_types)
-            force_field.torsion_types[kkey].proper && continue
-            (kkey[1] == t1 || kkey[1] == "") || continue
-            for ke2 in permutations(kkey[2:end])
-                valid = true
-                score = (kkey[1] == t1 ? 1 : 0)
-                for (idx, v) in enumerate(ke2)
-                    if v == (t2,t3,t4)[idx]
-                        score += 1
-                    elseif v != ""
-                        valid = false
-                        break
-                    end
-                end
-                if valid && (score == 4 || best_score == -1)
-                    best_score = score
-                    best_key   = kkey
-                    tt         = force_field.torsion_types[kkey]
-                end
-            end
-        end
-        isnothing(tt) && continue
+
+        tt, key = resolve_improper_torsion(force_field, t1,t2,t3,t4)
+        tt === nothing && continue
 
         r2 = resnum_from_atom_idx(j, canonical_system)
         r3 = resnum_from_atom_idx(k, canonical_system)
@@ -969,7 +650,7 @@ function System(coord_file::AbstractString,
         # Workaround to be more consistent with AMBER.  It uses wildcards to define most of its
         # impropers, which leaves the ordering ambiguous.  ** It then follows some bizarre rules
         # to pick the order. **
-        if  !("" ∈ best_key) # If torsion does not have a wildcard
+        if  !("" ∈ key) # If torsion does not have a wildcard
 
             if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
                 (j,   l)   = (l,   j)
@@ -1011,7 +692,7 @@ function System(coord_file::AbstractString,
         push!(imps_il.js, k)
         push!(imps_il.ks, c)
         push!(imps_il.ls, l)
-        push!(imps_il.types, atom_types_to_string(best_key...))
+        push!(imps_il.types, atom_types_to_string(key...))
         push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
                                               phases=tt.phases, ks=tt.ks, proper=false))
     end
