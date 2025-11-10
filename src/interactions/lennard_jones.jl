@@ -144,9 +144,10 @@ end
 
     The Lennard-Jones soft core interaction as described by
     [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1). This interaction is a linear
-    interpolation between two Lennard-Jones interactions A and B controlled by a parameter λ. The
-    parameters `inter_state_a` and `inter_state_b` can be a named tuple of `σ_mixing` and `ϵ_mixing`
-    for the interaction in the respective state or `nothing` for no interaction in that state.
+    interpolation between two soft-core Lennard-Jones interactions A and B controlled by a parameter λ.
+    The system is in state A for λ = 0 and in state B for λ = 1. The parameters `inter_state_a` and
+    `inter_state_b` can be a named tuple of `σ_mixing` and `ϵ_mixing` for the interaction in the
+    respective state or `nothing` for no interaction in that state.
 
     The potential energy is defined as
     ````math
@@ -243,6 +244,7 @@ end
 
 @inline function pairwise_force(::LennardJonesSoftCoreBeutler, r,
         (λ, α, p, inter_state_a, inter_state_b, atom_i, atom_j, zero_force))
+    
     r6 = r^6
 
     force_term_a, force_term_b = zero_force, zero_force
@@ -280,6 +282,7 @@ end
         energy_units = u"kJ * mol^-1",
         special = false,
         args...)
+
     zero_energy = ustrip(zero(dr[1])) * energy_units
     if sc.shortcut(atom_i, atom_j)
         return zero_energy
@@ -296,9 +299,8 @@ end
     end
 end
 
-@inline function pairwise_pe(
-        ::LennardJonesSoftCoreBeutler, r, (
-            λ, α, p, inter_state_a, inter_state_b, atom_i, atom_j, zero_energy))
+@inline function pairwise_pe(::LennardJonesSoftCoreBeutler, r,
+    (λ, α, p, inter_state_a, inter_state_b, atom_i, atom_j, zero_energy))
     r6 = r^6
 
     energy_term_a, energy_term_b = zero_energy, zero_energy
@@ -335,6 +337,7 @@ end
         atom_j,
         energy_units = u"kJ * mol^-1",
         special = false)
+
     zero_energy = ustrip(zero(dr[1])) * energy_units
     if sc.shortcut(atom_i, atom_j)
         return zero_energy
