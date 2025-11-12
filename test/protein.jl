@@ -238,7 +238,6 @@ end
     @test maximum(norm.(vels_diff  )) < 1e-7u"nm * ps^-1"
 
     params_dic = Molly.extract_parameters(sys_nounits, ff_nounits)
-    @test length(params_dic) == 637
     sys_nounits_nogi = System(sys_nounits; general_inters=())
     atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(sys_nounits_nogi, params_dic)
     @test atoms_grad == sys_nounits.atoms

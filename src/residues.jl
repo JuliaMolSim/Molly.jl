@@ -495,7 +495,6 @@ function match_residue_to_template(res::ResidueGraph,
         isempty(cands) && return nothing
         candidates[i] = cands
     end
-
     # 6) Heuristic search order: fewest candidates first, then neighbors of chosen
     atomsToOrder = Set(1:numAtoms)
     searchOrder = Int[]
