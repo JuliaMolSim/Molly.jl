@@ -220,23 +220,16 @@ end
 
 @inline function resolve_bond(ff::MolecularForceField, t1::String, t2::String)
     # exact types first, both orders
-    if haskey(ff.bond_types,(t1,t2))
-        return ff.bond_types[(t1,t2)] 
-    end
-    if haskey(ff.bond_types,(t2,t1))
-        return ff.bond_types[(t2,t1)] 
-    end
-
     key = (t1,t2)
     if haskey(ff.bond_resolver.cache, key)
         return ff.bond_resolver.cache[key]
     end
-    cand = Int[]
 
+    cand = Int[]
     append!(cand, get(ff.bond_resolver.idx, (:type,  t1, t2), Int[]))
     append!(cand, get(ff.bond_resolver.idx, (:type,  t2, t1), Int[]))
-    c1, c2 = ff.class_of[t1], ff.class_of[t2]
-
+    c1 = get(ff.class_of, t1, "")
+    c2 = get(ff.class_of, t2, "")
     append!(cand, get(ff.bond_resolver.idx, (:class, c1, c2), Int[]))
     append!(cand, get(ff.bond_resolver.idx, (:class, c2, c1), Int[]))
     append!(cand, get(ff.bond_resolver.idx, (:wild,  "", ""), Int[]))
@@ -253,14 +246,13 @@ end
             end
         end
     end
-    ff.bond_resolver.cache[key] = best
+    # symmetric caching
+    ff.bond_resolver.cache[(t1,t2)] = best
+    ff.bond_resolver.cache[(t2,t1)] = best
     return best
 end
 
 @inline function resolve_angle(ff::MolecularForceField, t1::String,t2::String,t3::String)
-    # exact types first; also try reversed neighbors
-    if haskey(ff.angle_types,(t1,t2,t3)); return ff.angle_types[(t1,t2,t3)] end
-    if haskey(ff.angle_types,(t3,t2,t1)); return ff.angle_types[(t3,t2,t1)] end
 
     key = (t1,t2,t3)
     if haskey(ff.angle_resolver.cache, key)
@@ -269,66 +261,69 @@ end
 
     cand = Int[]
     append!(cand, get(ff.angle_resolver.idx, (:type,  t2, ""), Int[]))
-    append!(cand, get(ff.angle_resolver.idx, (:class, ff.class_of[t2], ""), Int[]))
+    append!(cand, get(ff.angle_resolver.idx, (:class, get(ff.class_of, t2, ""), ""), Int[]))
     append!(cand, get(ff.angle_resolver.idx, (:wild,  "", ""), Int[]))
 
     best = nothing; bestspec = Int8(-1)
     @inbounds for i in cand
         r = ff.angle_resolver.rules[i]
-        if matches(r.p1,t1,ff.class_of) & matches(r.p2,t2,ff.class_of) & matches(r.p3,t3,ff.class_of)
+        if matches(r.p1,t1,ff.class_of) && matches(r.p2,t2,ff.class_of) && matches(r.p3,t3,ff.class_of)
             if r.specificity > bestspec
                 bestspec = r.specificity; best = r.params
             end
         end
-        # also accept neighbor-reversed matches
-        if matches(r.p1,t3,ff.class_of) & matches(r.p2,t2,ff.class_of) & matches(r.p3,t1,ff.class_of)
+        # neighbor-reversed
+        if matches(r.p1,t3,ff.class_of) && matches(r.p2,t2,ff.class_of) && matches(r.p3,t1,ff.class_of)
             if r.specificity > bestspec
                 bestspec = r.specificity; best = r.params
             end
         end
     end
-    ff.angle_resolver.cache[key] = best
+    # symmetric caching
+    ff.angle_resolver.cache[(t1,t2,t3)] = best
+    ff.angle_resolver.cache[(t3,t2,t1)] = best
     return best
 end
 
-@inline function resolve_proper_torsion(ff::MolecularForceField,
-                                        t1::String,t2::String,t3::String,t4::String)
-    # Fast exact-type path kept
-    if haskey(ff.torsion_types, (t1,t2,t3,t4))
-        p = ff.torsion_types[(t1,t2,t3,t4)]
-        p.proper && return (p, (t1,t2,t3,t4))
-    end
-    if haskey(ff.torsion_types, (t4,t3,t2,t1))
-        p = ff.torsion_types[(t4,t3,t2,t1)]
-        p.proper && return (p, (t4,t3,t2,t1))
-    end
-    # Lazy class/wildcard resolution
-    p = find_torsion_params(t1,t2,t3,t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
-    if !(p === nothing) && p.proper
+
+@inline function resolve_proper_torsion(
+    ff::MolecularForceField,
+    t1::String,t2::String,t3::String,t4::String
+)
+    # OpenMM-style lazy resolution via resolver
+    p = find_proper_match(t1,t2,t3,t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    if p !== nothing
         return (p, (t1,t2,t3,t4))
     end
-    pr = find_torsion_params(t4,t3,t2,t1; resolver=ff.torsion_resolver, class_of=ff.class_of)
-    if !(pr === nothing) && pr.proper
+    pr = find_proper_match(t4,t3,t2,t1; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    if pr !== nothing
         return (pr, (t4,t3,t2,t1))
     end
     return (nothing, ("","","",""))
 end
 
-@inline function resolve_improper_torsion(ff::MolecularForceField,
-                                          t1::String,t2::String,t3::String,t4::String)
-    # t1 is the central atom type by your convention
-    # Check the three peripheral permutations and take the first match
-    for (a,b,c) in ((t2,t3,t4), (t2,t4,t3), (t3,t2,t4), (t3,t4,t2), (t4,t2,t3), (t4,t3,t2))
-        if haskey(ff.torsion_types, (t1,a,b,c))
-            p = ff.torsion_types[(t1,a,b,c)]
-            !p.proper && return (p, (t1,a,b,c))
-        end
-        p = find_torsion_params(t1,a,b,c; resolver=ff.torsion_resolver, class_of=ff.class_of)
-        if !(p === nothing) && !p.proper
-            return (p, (t1,a,b,c))
-        end
+@inline function resolve_improper_torsion(
+    ff::MolecularForceField,
+    t1::String,t2::String,t3::String,t4::String
+)
+
+    # Resolver scans all 6 permutations internally and caches the winner.
+    p = find_improper_match(t1,t2,t3,t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    if p === nothing
+        return (nothing, ("","","",""))
     end
-    return (nothing, ("","","",""))
+
+    # Recover matched permutation from cache to return the oriented key.
+    ic = ff.torsion_resolver.improper_cache
+    cache_hit = get(ic, (t1,t2,t3,t4), :miss)
+    if cache_hit === :miss
+        return (p, (t1,t2,t3,t4))  # fallback
+    else
+        perm, _ = cache_hit
+        src = (t1,t2,t3,t4)
+        key = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
+        return (p, key)
+    end
 end
 
 """
@@ -547,7 +542,7 @@ function System(coord_file::AbstractString,
         if use_charge_from_residue
             chrge = charge_of[ai]
         else
-            chrge = force_field.atom_types[ai]
+            chrge = force_field.atom_types[atype].charge
         end
         push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ))
 
@@ -619,17 +614,29 @@ function System(coord_file::AbstractString,
     for (c, j, k, l) in top_impropers
         names_no1 = (j,k,l)
         types_no1 = (atom_type_of[j], atom_type_of[k], atom_type_of[l])
-
         if force_field.torsion_order == "amber"
             order = sortperm([t[1] == 'H' ? 'z'*t : t for t in types_no1])
             j, k, l = names_no1[order[1]], names_no1[order[2]], names_no1[order[3]]
         end
-
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
+        # resolve improper params and oriented key (central first)
         tt, key = resolve_improper_torsion(force_field, t1,t2,t3,t4)
         tt === nothing && continue
 
+        # recover matched rule metadata from resolver cache
+        ic = force_field.torsion_resolver.improper_cache
+        hit = get(ic, (t1, t2, t3, t4), :miss)
+        ordering::String = "default"
+        has_wild::Bool = false
+        if hit !== :miss
+            perm, ridx = hit
+            r = force_field.torsion_resolver.rules[ridx]
+            ordering = r.ordering
+            has_wild = r.has_wildcard
+        end
+
+        # topology indices for current j,k,l
         r2 = resnum_from_atom_idx(j, canonical_system)
         r3 = resnum_from_atom_idx(k, canonical_system)
         r4 = resnum_from_atom_idx(l, canonical_system)
@@ -646,55 +653,106 @@ function System(coord_file::AbstractString,
         e3 = Symbol(element_of[k])
         e4 = Symbol(element_of[l])
 
-        # In OpenMM's own words:
-        # Workaround to be more consistent with AMBER.  It uses wildcards to define most of its
-        # impropers, which leaves the ordering ambiguous.  ** It then follows some bizarre rules
-        # to pick the order. **
-        if  !("" ∈ key) # If torsion does not have a wildcard
-
-            if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                (j,   l)   = (l,   j)
-                (r2,  r4)  = (r4,  r2)
-                (ta2, ta4) = (ta4, ta2) 
+        if ordering == "amber"
+            # OpenMM amber branch, with/without wildcards
+            if !has_wild
+                if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                    (j, l) = (l, j); (r2, r4) = (r4, r2); (ta2, ta4) = (ta4, ta2)
+                end
+                if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                    (k, l) = (l, k); (r3, r4) = (r4, r3); (ta3, ta4) = (ta4, ta3)
+                end
+                if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
+                    (j, k) = (k, j)
+                end
+            else
+                if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                    (j, l) = (l, j); (r2, r4) = (r4, r2); (ta2, ta4) = (ta4, ta2)
+                end
+                if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                    (k, l) = (l, k); (r3, r4) = (r4, r3); (ta3, ta4) = (ta4, ta3)
+                end
+                if r2 > r3 || (r2 == r3 && ta2 > ta3)
+                    (j, k) = (k, j)
+                end
+            end
+        elseif ordering == "charmm"
+            # If wildcards were used, apply the same AMBER tie-break; else unambiguous
+            if has_wild
+                if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                    (j, l) = (l, j); (r2, r4) = (r4, r2); (ta2, ta4) = (ta4, ta2)
+                end
+                if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                    (k, l) = (l, k); (r3, r4) = (r4, r3); (ta3, ta4) = (ta4, ta3)
+                end
             end
 
-            if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                (k,   l)   = (l,   k)
-                (r3,  r4)  = (r4,  r3)
-                (ta3, ta4) = (ta4, ta3)
+        elseif ordering == "smirnoff"
+            # SMIRNOFF: add the trefoil set
+            a1, a2, a3, a4 = c, j, k, l
+            for (x1, x2, x3, x4) in ((a1,a2,a3,a4),
+                                     (a1,a3,a4,a2),
+                                     (a1,a4,a2,a3))
+                p1, p2, cen, p3 = x2, x3, x1, x4
+                push!(imps_il.is, p1)
+                push!(imps_il.js, p2)
+                push!(imps_il.ks, cen)
+                push!(imps_il.ls, p3)
+                push!(imps_il.types, atom_types_to_string(key...))
+                push!(imps_il.inters, PeriodicTorsion(
+                    periodicities = tt.periodicities,
+                    phases        = tt.phases,
+                    ks            = tt.ks,
+                    proper        = false
+                ))
             end
-
-            if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
-                (j,   k)   = (k,   j)
-            end
+            continue  # skip the single-add fallback below
 
         else
+            # ordering == "default"
+            # Apply OpenMM's default tie-break ONLY if a wildcard participated.
+            if has_wild
+                # Use the cached permutation from the resolver, not type-name matching.
+                # `perm` indexes into (t1,t2,t3,t4) == (central, periph1, periph2, periph3).
+                # Mirror that permutation on the current topology atoms (c,j,k,l).
+                src_atoms = (c, j, k, l)
 
-            if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                (j,   l)   = (l,   j)
-                (r2,  r4)  = (r4,  r2)
-                (ta2, ta4) = (ta4, ta2)
+                # Matched oriented tuple would be:
+                # (src_atoms[perm[1]], src_atoms[perm[2]], src_atoms[perm[3]], src_atoms[perm[4]])
+                # We need the two peripheral atoms in positions 2 and 3, and the remaining peripheral in 4.
+                a1 = src_atoms[perm[2]]
+                a2 = src_atoms[perm[3]]
+                a4 = src_atoms[perm[4]]
+
+                # Elements and masses for tie-break (OpenMM _matchImproper "default" path).
+                e_a1 = Symbol(element_of[a1])
+                e_a2 = Symbol(element_of[a2])
+                m_a1 = force_field.atom_types[atom_type_of[a1]].mass
+                m_a2 = force_field.atom_types[atom_type_of[a2]].mass
+
+                # 1) If same element, lower atom index first.
+                # 2) Else, prefer carbon; else heavier mass first.
+                if e_a1 == e_a2
+                    if a1 > a2
+                        (a1, a2) = (a2, a1)
+                    end
+                elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
+                    (a1, a2) = (a2, a1)
+                end
+
+                # Reassign current triplet to ordered pair and remaining peripheral.
+                j, k, l = a1, a2, a4
             end
-
-            if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                (k,   l)   = (l,   k)
-                (r3,  r4)  = (r4,  r3)
-                (ta3, ta4) = (ta4, ta3)
-            end
-
-            if r2 > r3 || (r2 == r3 && ta2 > ta3)
-                (j,   k)   = (k,   j)
-            end
-
+            # If no wildcard was involved, the order is unambiguous; leave j,k,l as-is.
         end
-        
+
         push!(imps_il.is, j)
         push!(imps_il.js, k)
         push!(imps_il.ks, c)
         push!(imps_il.ls, l)
         push!(imps_il.types, atom_types_to_string(key...))
-        push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
-                                              phases=tt.phases, ks=tt.ks, proper=false))
+        push!(imps_il.inters, PeriodicTorsion(periodicities = tt.periodicities,
+                                            phases = tt.phases, ks = tt.ks, proper = false))
     end
 
     # ---- Units and coordinates ----
