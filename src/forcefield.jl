@@ -81,8 +81,8 @@ struct AngleRule{K,D}
 end
 struct AngleResolver{K,D}
     rules::Vector{AngleRule{K,D}}
-    # index primarily by central pair (p2 with p1/p3 hints)
-    idx::Dict{Tuple{Symbol,String,String}, Vector{Int}}  # (:type|:class|:wild, v2, key)
+    # index by center atom
+    idx::Dict{Tuple{Symbol,String}, Vector{Int}}  # (:type|:class|:wild, key)
     cache::Dict{NTuple{3,String}, Union{HarmonicAngle{K,D},Nothing}}
 end
 
@@ -98,14 +98,8 @@ struct TorsionRule{T,E}
     params::PeriodicTorsionType{T,E}
     specificity::UInt8         # TYPE=2, CLASS=1, WILD=0, used to bias towards specific definitions
 end
-
-# OpenMM-style indices + caches
 struct TorsionResolver{T,E}
     rules::Vector{TorsionRule{T,E}}
-
-    # central pair index (2–3). Only three buckets are used consistently:
-    # (:type, t2, t3), (:class, c2, c3), (:wild, "", "")
-    center_index::Dict{Tuple{Symbol,String,Symbol,String}, Vector{Int}}
 
     # candidate lists keyed by type1 or class1 for impropers, and by type2 or class2 for propers
     impropers_by_type1::Dict{String,Vector{Int}}
@@ -122,40 +116,15 @@ struct TorsionResolver{T,E}
     improper_cache::Dict{NTuple{4,String}, Any}
 end
 
-@inline function push_center_index!(
-    idx::Dict{Tuple{Symbol,String,Symbol,String}, Vector{Int}},
-    p2::AtomPattern, p3::AtomPattern, ridx::Int)
-
-    key = if p2.kind==TYPE  && p3.kind==TYPE
-        (:type,  p2.val, :type,  p3.val)
-    elseif p2.kind==CLASS && p3.kind==CLASS
-        (:class, p2.val, :class, p3.val)
-    elseif p2.kind==TYPE  && p3.kind==CLASS
-        (:type,  p2.val, :class, p3.val)
-    elseif p2.kind==CLASS && p3.kind==TYPE
-        (:class, p2.val, :type,  p3.val)
-    elseif p2.kind==TYPE  && p3.kind==WILD
-        (:type,  p2.val, :wild,  "")
-    elseif p2.kind==CLASS && p3.kind==WILD
-        (:class, p2.val, :wild,  "")
-    elseif p2.kind==WILD  && p3.kind==TYPE
-        (:wild,  "",     :type,  p3.val)
-    elseif p2.kind==WILD  && p3.kind==CLASS
-        (:wild,  "",     :class, p3.val)
-    else # WILD, WILD
-        (:wild,  "",     :wild,  "")
-    end
-    push!(get!(idx, key, Int[]), ridx)
-end
 
 # Proper torsions: lookup with cache
 @inline function find_proper_match(
     t1::String,t2::String,t3::String,t4::String;
     resolver::TorsionResolver{T,E},
     class_of::Dict{String,String}
-) where {T,E}
+) where {T, E}
     # unordered signature cache
-    sig = ((t1,t2,t3,t4),(t4,t3,t2,t1))
+    sig = ((t1, t2, t3, t4), (t4, t3, t2, t1))
     pc  = resolver.proper_cache
     if haskey(pc, sig)
         v = pc[sig]
@@ -233,7 +202,7 @@ end
         for i in cand
             r = resolver.rules[i]
             r.proper && continue
-            matches(r.p1, t1, class_of) || continue
+            matches(r.p1, t1, class_of) || continue # If key does not match do not even bother
             if matches(r.p2, p2, class_of) && matches(r.p3, p3, class_of) && matches(r.p4, p4, class_of)
                 if !r.has_wildcard
                     ic[key] = (perm, i)
@@ -281,9 +250,6 @@ or by prviding an extra custom template file with the `custom_residue_templates`
 struct MolecularForceField{T, M, D, DA, E, K, KA}
     atom_types::Dict{String, AtomType{T, M, D, E}}
     residues::Dict{String, ResidueTemplate{T}}
-    #bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
-    #angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{KA, DA}}
-    #torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}  # exact-type rules
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
@@ -304,9 +270,6 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                              custom_renaming_scheme   = nothing)
 
     atom_types = Dict{String, AtomType}()
-    #= bond_types = Dict{Tuple{String, String}, HarmonicBond}()
-    angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
-    torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}() =#
     torsion_order = ""
 
     weight_14_coulomb, weight_14_lj = one(T), one(T)
@@ -336,7 +299,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     bond_rule_specs   = Any[]
     angle_rule_specs  = Any[]
     torsion_rule_spec = Any[]
-    nb_class_updates  = Any[]   # keep NB class updates separate for clarity
+    nb_class_updates  = Any[]
 
     for ff_file in ff_files
         ff_xml = parsexml(read(ff_file))
@@ -372,8 +335,13 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
                     for re in eachelement(residue)
                         if re.name == "Atom"
-                            an = re["name"]; tp = re["type"]; q = parse(T, re["charge"])
-                            push!(atoms, an); push!(types, tp); push!(charges, q); push!(externals, 0)
+                            an = re["name"]
+                            tp = re["type"]
+                            q = parse(T, re["charge"])
+                            push!(atoms, an)
+                            push!(types, tp)
+                            push!(charges, q)
+                            push!(externals, 0)
                             tel, tclass = type_info[tp]
                             push!(extras, (tel == "?") || (tclass == "EP"))
                             push!(elements, tel == "?" ? :X : Symbol(tel))
@@ -402,53 +370,36 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 for bond in eachelement(entry)
                     k  = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
                     r0 = units ? parse(T, bond["length"])u"nm"           : parse(T, bond["length"])
-                    #if haskey(bond, "class1") || haskey(bond, "type1")
-                        p1 = pattern_from_attrs(bond, "type1","class1")
-                        p2 = pattern_from_attrs(bond, "type2","class2")
-                        push!(bond_rule_specs, (:bond_rule, p1,p2, HarmonicBond(k,r0)))
-                    #= else
-                        t1 = bond["type1"]; t2 = bond["type2"]
-                        bond_types[(t1,t2)] = HarmonicBond(k,r0)
-                    end =#
+                    p1 = pattern_from_attrs(bond, "type1","class1")
+                    p2 = pattern_from_attrs(bond, "type2","class2")
+                    push!(bond_rule_specs, (:bond_rule, p1,p2, HarmonicBond(k,r0)))
                 end
 
             elseif entry_name == "HarmonicAngleForce"
                 for ang in eachelement(entry)
                     k  = units ? parse(T, ang["k"])u"kJ * mol^-1" : parse(T, ang["k"])
                     θ0 = parse(T, ang["angle"])                   # dimensionless in file
-                    #if haskey(ang,"class1") || haskey(ang,"type1")
-                        p1 = pattern_from_attrs(ang, "type1","class1")
-                        p2 = pattern_from_attrs(ang, "type2","class2")
-                        p3 = pattern_from_attrs(ang, "type3","class3")
-                        push!(angle_rule_specs, (:angle_rule, p1,p2,p3, HarmonicAngle(k,θ0)))
-                    #= else
-                        t1 = ang["type1"]; t2 = ang["type2"]; t3 = ang["type3"]
-                        angle_types[(t1,t2,t3)] = HarmonicAngle(k,θ0)
-                    end =#
+                    p1 = pattern_from_attrs(ang, "type1","class1")
+                    p2 = pattern_from_attrs(ang, "type2","class2")
+                    p3 = pattern_from_attrs(ang, "type3","class3")
+                    push!(angle_rule_specs, (:angle_rule, p1,p2,p3, HarmonicAngle(k,θ0)))
                 end
 
             elseif entry_name == "PeriodicTorsionForce"
                 torsion_order = haskey(entry, "ordering") ? entry["ordering"] : torsion_order
                 local_ordering = haskey(entry, "ordering") ? entry["ordering"] : "default"
                 for torsion in eachelement(entry)
-                    proper = torsion.name == "Proper"
-                    periodicities = Int[]; phases = T[]; ks = units ? typeof(T(1u"kJ * mol^-1"))[] : T[]
+                    proper        = torsion.name == "Proper"
+                    periodicities = Int[]
+                    phases        = T[]
+                    ks            = units ? typeof(T(1u"kJ * mol^-1"))[] : T[]
                     i = 1
                     while haskey(torsion, "periodicity$i")
                         push!(periodicities, parse(Int, torsion["periodicity$i"]))
-                        push!(phases,       parse(T,   torsion["phase$i"]))
+                        push!(phases, parse(T,   torsion["phase$i"]))
                         push!(ks, units ? parse(T, torsion["k$i"])u"kJ * mol^-1" : parse(T, torsion["k$i"]))
                         i += 1
                     end
-
-                    v1 = haskey(torsion,"type1") ? torsion["type1"] : (haskey(torsion,"class1") ? torsion["class1"] : "")
-                    v2 = haskey(torsion,"type2") ? torsion["type2"] : (haskey(torsion,"class2") ? torsion["class2"] : "")
-                    v3 = haskey(torsion,"type3") ? torsion["type3"] : (haskey(torsion,"class3") ? torsion["class3"] : "")
-                    v4 = haskey(torsion,"type4") ? torsion["type4"] : (haskey(torsion,"class4") ? torsion["class4"] : "")
-
-                    #= if haskey(torsion,"type1") && haskey(torsion,"type2") && haskey(torsion,"type3") && haskey(torsion,"type4")
-                        torsion_types[(v1,v2,v3,v4)] = PeriodicTorsionType(periodicities, phases, ks, proper)
-                    end =#
 
                     p1 = pattern_from_attrs(torsion, "type1","class1")
                     p2 = pattern_from_attrs(torsion, "type2","class2")
@@ -458,7 +409,6 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     has_wildcard = (p1.kind==WILD || p2.kind==WILD || p3.kind==WILD || p4.kind==WILD)
                     spec = UInt8(spec_score(p1)+spec_score(p2)+spec_score(p3)+spec_score(p4))
                     params_any = (:params, periodicities, phases, ks, proper)
-                    idx = length(torsion_rule_spec) + 1
                     push!(torsion_rule_spec, (:torsion_rule, p1, p2, p3, p4, spec, params_any, local_ordering, has_wildcard))
                 end
 
@@ -468,14 +418,16 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     if weight_14_coulomb_set && w != weight_14_coulomb
                         error("multiple NonbondedForce entries with different coulomb14scale")
                     end
-                    weight_14_coulomb = w; weight_14_coulomb_set = true
+                    weight_14_coulomb = w
+                    weight_14_coulomb_set = true
                 end
                 if haskey(entry, "lj14scale")
                     w = parse(T, entry["lj14scale"])
                     if weight_14_lj_set && w != weight_14_lj
                         error("multiple NonbondedForce entries with different lj14scale")
                     end
-                    weight_14_lj = w; weight_14_lj_set = true
+                    weight_14_lj = w
+                    weight_14_lj_set = true
                 end
                 for atom_or_attr in eachelement(entry)
                     if atom_or_attr.name == "Atom"
@@ -544,7 +496,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         end
     end
 
-    # ---- Bonds resolver (pattern-based) ----
+    # Bonds resolver
     bond_rules = BondRule{K,D}[]
     bidx = Dict{Tuple{Symbol,String,String}, Vector{Int}}()
     for spec in bond_rule_specs
@@ -562,29 +514,32 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
             end
         end
     end
-    bond_resolver = BondResolver{K,D}(bond_rules, bidx, Dict{Tuple{String,String},Union{HarmonicBond{K,D},Nothing}}())
+    bond_resolver = BondResolver{K,D}(bond_rules,
+                                      bidx, 
+                                      Dict{Tuple{String,String}, Union{HarmonicBond{K,D}, Nothing}}())
 
-    # ---- Angles resolver (KA/DA consistent) ----
+    # Angles resolver
     angle_rules = AngleRule{KA,DA}[]
-    aidx = Dict{Tuple{Symbol,String,String}, Vector{Int}}()
+    aidx = Dict{Tuple{Symbol,String}, Vector{Int}}()
     for spec in angle_rule_specs
         _, p1::AtomPattern, p2::AtomPattern, p3::AtomPattern, ha::HarmonicAngle{KA,DA} = spec
         push!(angle_rules, AngleRule{KA,DA}(p1,p2,p3, ha, UInt8(spec_score(p1)+spec_score(p2)+spec_score(p3))))
         i = length(angle_rules)
         # central indexing: use p2 as key
         if p2.kind==TYPE
-            push!(get!(aidx, (:type,  p2.val, ""), Int[]), i)
+            push!(get!(aidx, (:type,  p2.val), Int[]), i)
         elseif p2.kind==CLASS
-            push!(get!(aidx, (:class, p2.val, ""), Int[]), i)
+            push!(get!(aidx, (:class, p2.val), Int[]), i)
         else
-            push!(get!(aidx, (:wild,  "", ""), Int[]), i)
+            push!(get!(aidx, (:wild,  ""), Int[]), i)
         end
     end
-    angle_resolver = AngleResolver{KA,DA}(angle_rules, aidx, Dict{NTuple{3,String},Union{HarmonicAngle{KA,DA},Nothing}}())
+    angle_resolver = AngleResolver{KA,DA}(angle_rules,
+                                          aidx,
+                                          Dict{NTuple{3,String}, Union{HarmonicAngle{KA,DA}, Nothing}}())
 
-    # ---- Torsion resolver (OpenMM-style) ----
+    # Torsion resolver
     torsion_rules = TorsionRule{T,E}[]
-    center_index = Dict{Tuple{Symbol,String,Symbol,String}, Vector{Int}}()
 
     # candidate lists
     propers_by_type2   = Dict{String,Vector{Int}}()
@@ -596,16 +551,13 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     for (idx_spec, item) in enumerate(torsion_rule_spec)
         if item[1] === :torsion_rule
-            # item = (:torsion_rule, p1,p2,p3,p4, spec, params_any, ordering, wildcard)
+            
             _, p1, p2, p3, p4, spec, params_any, ordering, wildcard  = item
             _, periodicities, phases, ks, proper = params_any
             params = PeriodicTorsionType{T,E}(periodicities, phases, ks, proper)
 
             push!(torsion_rules, TorsionRule{T,E}(p1, p2, p3, p4, proper, ordering, wildcard, params, spec))
             ridx = length(torsion_rules)
-
-            # central index
-            push_center_index!(center_index, p2, p3, ridx)
 
             # OpenMM-style candidate lists
             if proper
@@ -630,20 +582,18 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     torsion_resolver = TorsionResolver{T,E}(
         torsion_rules,
-        center_index,
         impropers_by_type1,
         impropers_by_class1,
         propers_by_type2,
         propers_by_class2,
         wild_impropers,
         wild_propers,
-        Dict{Tuple{NTuple{4,String},NTuple{4,String}},Any}(),  # proper_cache
-        Dict{NTuple{4,String},Any}(),                           # improper_cache
+        Dict{Tuple{NTuple{4,String}, NTuple{4,String}} ,Any}(),  # proper_cache
+        Dict{NTuple{4,String}, Any}(),                          # improper_cache
     )
 
     return MolecularForceField{T, M, D, DA, E, K, KA}(
-        atom_types, residues, #= bond_types, angle_types, =#
-        #= torsion_types, =# torsion_order, weight_14_coulomb, weight_14_lj, attributes_from_residue,
+        atom_types, residues, torsion_order, weight_14_coulomb, weight_14_lj, attributes_from_residue,
         resname_replacements, atomname_replacements, standard_bonds,
         class_of, bond_resolver, angle_resolver, torsion_resolver
     )

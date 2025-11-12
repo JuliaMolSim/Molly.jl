@@ -260,22 +260,25 @@ end
     end
 
     cand = Int[]
-    append!(cand, get(ff.angle_resolver.idx, (:type,  t2, ""), Int[]))
-    append!(cand, get(ff.angle_resolver.idx, (:class, get(ff.class_of, t2, ""), ""), Int[]))
-    append!(cand, get(ff.angle_resolver.idx, (:wild,  "", ""), Int[]))
+    append!(cand, get(ff.angle_resolver.idx, (:type,  t2), Int[]))
+    append!(cand, get(ff.angle_resolver.idx, (:class, get(ff.class_of, t2, "")), Int[]))
+    append!(cand, get(ff.angle_resolver.idx, (:wild,  ""), Int[]))
 
-    best = nothing; bestspec = Int8(-1)
+    best = nothing
+    bestspec = Int8(-1)
     @inbounds for i in cand
         r = ff.angle_resolver.rules[i]
         if matches(r.p1,t1,ff.class_of) && matches(r.p2,t2,ff.class_of) && matches(r.p3,t3,ff.class_of)
             if r.specificity > bestspec
-                bestspec = r.specificity; best = r.params
+                bestspec = r.specificity
+                best = r.params
             end
         end
         # neighbor-reversed
         if matches(r.p1,t3,ff.class_of) && matches(r.p2,t2,ff.class_of) && matches(r.p3,t1,ff.class_of)
             if r.specificity > bestspec
-                bestspec = r.specificity; best = r.params
+                bestspec = r.specificity
+                best = r.params
             end
         end
     end
@@ -425,13 +428,13 @@ function System(coord_file::AbstractString,
     atomname_replacements = force_field.atom_name_replacements
     standard_bonds        = force_field.standard_bonds
 
-    # ---- Read structure ----
+    # Read structure
     traj  = Chemfiles.Trajectory(coord_file)
     frame = Chemfiles.read(traj)
     top   = Chemfiles.Topology(frame)
     n_atoms = size(top)
 
-    # ---- Boundary ----
+    # Boundary
     boundary_used = isnothing(boundary) ? 
                     boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, (units ? u"nm" : NoUnits)) :
                     boundary
@@ -439,7 +442,7 @@ function System(coord_file::AbstractString,
         @warn "Minimum box side is less than 2 * dist_cutoff; this can be unphysical"
     end
 
-    # ---- Units and coordinates ----
+    # Units and coordinates
     if units
         coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     else
@@ -457,8 +460,8 @@ function System(coord_file::AbstractString,
     end
     top_bonds = read_extra_bonds(top, top_bonds, canonical_system)
 
-    template_names       = keys(force_field.residues)
-    # ---- Match each residue graph to a template and assign atom types/charges ----
+    template_names = keys(force_field.residues)
+    # Match each residue graph to a template and assign atom types/charges
     atom_type_of = Vector{String}(undef, n_atoms)
     charge_of    = Vector{T}(undef, n_atoms)
     element_of   = Vector{String}(undef, n_atoms)  # for AtomData
@@ -524,7 +527,7 @@ function System(coord_file::AbstractString,
     top_torsions  = build_torsions(adj, top_angles)
     top_impropers = build_impropers(adj)
 
-    # ---- Allocate interaction lists and particles ----
+    # Allocate interaction lists and particles
     atoms_abst = Atom[]
     atoms_data = AtomData[]
     bonds_il   = InteractionList2Atoms(HarmonicBond)
@@ -564,18 +567,18 @@ function System(coord_file::AbstractString,
     end
     
     # Bonds
-    for (a1,a2) in top_bonds
-        t1, t2 = atom_type_of[a1], atom_type_of[a2]
+    for (i, j) in top_bonds
+        t1, t2 = atom_type_of[i], atom_type_of[j]
         hb = resolve_bond(force_field, t1, t2)
         if isnothing(hb)
             throw(ArgumentError("No bond parameters found for ($t1,$t2)"))
         end
-        push!(bonds_il.is, a1)
-        push!(bonds_il.js, a2)
+        push!(bonds_il.is, i)
+        push!(bonds_il.js, j)
         push!(bonds_il.types, atom_types_to_string(t1,t2))
         push!(bonds_il.inters, hb)
-        eligible[a1,a2] = false
-        eligible[a2,a1] = false
+        eligible[i,j] = false
+        eligible[j,i] = false
     end
 
     # Angles
@@ -617,19 +620,14 @@ function System(coord_file::AbstractString,
 
     # Impropers (Amber ordering)
     for (c, j, k, l) in top_impropers
-        names_no1 = (j,k,l)
-        types_no1 = (atom_type_of[j], atom_type_of[k], atom_type_of[l])
-        if force_field.torsion_order == "amber"
-            order = sortperm([t[1] == 'H' ? 'z'*t : t for t in types_no1])
-            j, k, l = names_no1[order[1]], names_no1[order[2]], names_no1[order[3]]
-        end
+
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
         # resolve improper params and oriented key (central first)
         tt, key = resolve_improper_torsion(force_field, t1,t2,t3,t4)
         tt === nothing && continue
 
-        # recover matched rule metadata from resolver cache
+        # recover metadata from resolver cache
         ic = force_field.torsion_resolver.improper_cache
         hit = get(ic, (t1, t2, t3, t4), :miss)
         ordering::String = "default"
@@ -639,6 +637,15 @@ function System(coord_file::AbstractString,
             r = force_field.torsion_resolver.rules[ridx]
             ordering = r.ordering
             has_wild = r.has_wildcard
+
+            # Reorder indices based on how atoms were permuted
+            src_atoms = (c, j, k, l)
+            j = src_atoms[perm[2]]
+            k = src_atoms[perm[3]]
+            l = src_atoms[perm[4]]
+
+            # refresh types after remapping
+            t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
         end
 
         # topology indices for current j,k,l
@@ -662,38 +669,53 @@ function System(coord_file::AbstractString,
             # OpenMM amber branch, with/without wildcards
             if !has_wild
                 if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j, l) = (l, j); (r2, r4) = (r4, r2); (ta2, ta4) = (ta4, ta2)
+                    (j,   l)   = (l,   j)
+                    (r2,  r4)  = (r4,  r2)
+                    (ta2, ta4) = (ta4, ta2)
                 end
                 if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k, l) = (l, k); (r3, r4) = (r4, r3); (ta3, ta4) = (ta4, ta3)
+                    (k,   l)   = (l,   k)
+                    (r3,  r4)  = (r4,  r3)
+                    (ta3, ta4) = (ta4, ta3)
                 end
                 if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
                     (j, k) = (k, j)
                 end
             else
                 if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j, l) = (l, j); (r2, r4) = (r4, r2); (ta2, ta4) = (ta4, ta2)
+                    (j,   l)   = (l,   j)
+                    (r2,  r4)  = (r4,  r2)
+                    (ta2, ta4) = (ta4, ta2)
                 end
                 if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k, l) = (l, k); (r3, r4) = (r4, r3); (ta3, ta4) = (ta4, ta3)
+                    (k,   l)   = (l,   k)
+                    (r3,  r4)  = (r4,  r3)
+                    (ta3, ta4) = (ta4, ta3)
                 end
                 if r2 > r3 || (r2 == r3 && ta2 > ta3)
                     (j, k) = (k, j)
                 end
             end
+
+        # ATM there is no good way of testing these. Template matching for CHARMM force force fields
+        # breaks very easily as patches are not supported yet.
         elseif ordering == "charmm"
             # If wildcards were used, apply the same AMBER tie-break; else unambiguous
             if has_wild
                 if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j, l) = (l, j); (r2, r4) = (r4, r2); (ta2, ta4) = (ta4, ta2)
+                    (j,   l)   = (l,   j)
+                    (r2,  r4)  = (r4,  r2)
+                    (ta2, ta4) = (ta4, ta2)
                 end
                 if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k, l) = (l, k); (r3, r4) = (r4, r3); (ta3, ta4) = (ta4, ta3)
+                    (k,   l)   = (l,   k)
+                    (r3,  r4)  = (r4,  r3)
+                    (ta3, ta4) = (ta4, ta3)
                 end
             end
 
         elseif ordering == "smirnoff"
-            # SMIRNOFF: add the trefoil set
+            # add the trefoil set
             a1, a2, a3, a4 = c, j, k, l
             for (x1, x2, x3, x4) in ((a1,a2,a3,a4),
                                      (a1,a3,a4,a2),
@@ -715,21 +737,18 @@ function System(coord_file::AbstractString,
 
         else
             # ordering == "default"
-            # Apply OpenMM's default tie-break ONLY if a wildcard participated.
+            # ONLY if a wildcard is present
             if has_wild
-                # Use the cached permutation from the resolver, not type-name matching.
-                # `perm` indexes into (t1,t2,t3,t4) == (central, periph1, periph2, periph3).
-                # Mirror that permutation on the current topology atoms (c,j,k,l).
+                
+                # Mirror the permutation on the current topology atoms (c,j,k,l).
                 src_atoms = (c, j, k, l)
 
-                # Matched oriented tuple would be:
-                # (src_atoms[perm[1]], src_atoms[perm[2]], src_atoms[perm[3]], src_atoms[perm[4]])
                 # We need the two peripheral atoms in positions 2 and 3, and the remaining peripheral in 4.
                 a1 = src_atoms[perm[2]]
                 a2 = src_atoms[perm[3]]
                 a4 = src_atoms[perm[4]]
 
-                # Elements and masses for tie-break (OpenMM _matchImproper "default" path).
+                # Elements and masses for tie-break
                 e_a1 = Symbol(element_of[a1])
                 e_a2 = Symbol(element_of[a2])
                 m_a1 = force_field.atom_types[atom_type_of[a1]].mass
@@ -748,7 +767,7 @@ function System(coord_file::AbstractString,
                 # Reassign current triplet to ordered pair and remaining peripheral.
                 j, k, l = a1, a2, a4
             end
-            # If no wildcard was involved, the order is unambiguous; leave j,k,l as-is.
+            # If no wildcard leave j,k,l as-is.
         end
 
         push!(imps_il.is, j)
@@ -757,10 +776,10 @@ function System(coord_file::AbstractString,
         push!(imps_il.ls, l)
         push!(imps_il.types, atom_types_to_string(key...))
         push!(imps_il.inters, PeriodicTorsion(periodicities = tt.periodicities,
-                                            phases = tt.phases, ks = tt.ks, proper = false))
+                                              phases = tt.phases, ks = tt.ks, proper = false))
     end
 
-    # ---- Units and coordinates ----
+    # Units and coordinates
     if units
         coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     else
