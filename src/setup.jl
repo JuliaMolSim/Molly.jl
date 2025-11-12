@@ -291,15 +291,20 @@ end
     t1::String,t2::String,t3::String,t4::String
 )
     # OpenMM-style lazy resolution via resolver
-    p = find_proper_match(t1,t2,t3,t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
-    if p !== nothing
-        return (p, (t1,t2,t3,t4))
+    p,  pspec  = find_proper_match(t1,t2,t3,t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    pr, prspec = find_proper_match(t4,t3,t2,t1; resolver=ff.torsion_resolver, class_of=ff.class_of)
+
+    if !isnothing(p) && isnothing(pr)
+        return (p, (t1, t2, t3, t4))
+    elseif isnothing(p) && !isnothing(pr)
+        return (pr, (t4, t3, t2, t1))
+    elseif !isnothing(p) && !isnothing(pr)
+        ret = pspec > prspec ? (p, (t1, t2, t3, t4)) : (pr, (t4, t3, t2, t1))
+        return ret
+    else
+        return (nothing, ("","","",""))
     end
-    pr = find_proper_match(t4,t3,t2,t1; resolver=ff.torsion_resolver, class_of=ff.class_of)
-    if pr !== nothing
-        return (pr, (t4,t3,t2,t1))
-    end
-    return (nothing, ("","","",""))
+    
 end
 
 @inline function resolve_improper_torsion(

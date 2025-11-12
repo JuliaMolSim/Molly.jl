@@ -159,7 +159,7 @@ end
     pc  = resolver.proper_cache
     if haskey(pc, sig)
         v = pc[sig]
-        return v === :miss ? nothing : resolver.rules[v::Int].params
+        return v === :miss ? (nothing, nothing) : (resolver.rules[v::Int].params, resolver.rules[v::Int].specificity)
     end
 
     # candidates by central atom 2 (type → class → wild)
@@ -180,7 +180,7 @@ end
                matches(r.p3, q3, class_of) && matches(r.p4, q4, class_of)
                 if !r.has_wildcard
                     pc[sig] = i
-                    return r.params
+                    return (r.params, r.specificity)
                 elseif r.specificity > bestspec
                     bestspec = r.specificity
                     best = i
@@ -191,10 +191,10 @@ end
 
     if best == 0
         pc[sig] = :miss
-        return nothing
+        return (nothing, nothing)
     else
         pc[sig] = best
-        return resolver.rules[best].params
+        return (resolver.rules[best].params, resolver.rules[best].specificity)
     end
 end
 
