@@ -246,7 +246,6 @@ template topologies must be defined either through `CONNECT` records in the .pdb
 or by prviding an extra custom template file with the `custom_residue_templates` keyword.
 
 """
-# --- Force field container (angles use KA/DA consistently) ---
 struct MolecularForceField{T, M, D, DA, E, K, KA}
     atom_types::Dict{String, AtomType{T, M, D, E}}
     residues::Dict{String, ResidueTemplate{T}}
