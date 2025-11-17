@@ -8,7 +8,7 @@ struct AtomPattern
     val::String
 end
 
-@inline function matches(p::AtomPattern, t::String, class_of::Dict{String,String})
+function matches(p::AtomPattern, t::String, class_of::Dict{String,String})
     @inbounds begin
         if p.kind === WILD
             return true
@@ -24,7 +24,7 @@ end
 
 spec_score(ap::AtomPattern) = ap.kind==TYPE ? 2 : ap.kind==CLASS ? 1 : 0
 
-@inline function pattern_from_attrs(n::EzXML.Node, typekey::AbstractString, classkey::AbstractString)
+function pattern_from_attrs(n::EzXML.Node, typekey::AbstractString, classkey::AbstractString)
     if haskey(n, typekey)
         v = n[typekey]
         return isempty(v) ? AtomPattern(WILD, "") : AtomPattern(TYPE, v)
@@ -118,7 +118,7 @@ end
 
 
 # Proper torsions: lookup with cache
-@inline function find_proper_match(
+function find_proper_match(
     t1::String,t2::String,t3::String,t4::String;
     resolver::TorsionResolver{T,E},
     class_of::Dict{String,String}
@@ -168,7 +168,7 @@ end
 end
 
 # Impropers: lookup with 6-permutation scan and cache
-@inline function find_improper_match(
+function find_improper_match(
     t1::String,t2::String,t3::String,t4::String;
     resolver::TorsionResolver{T,E},
     class_of::Dict{String,String}

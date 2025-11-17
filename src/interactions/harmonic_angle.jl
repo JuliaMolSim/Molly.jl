@@ -32,7 +32,7 @@ end
 function extract_parameters!(params_dic,
                              inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:HarmonicAngle}},
                              ff)
-    @inbounds for (angle_type, ang) in zip(inter.types, from_device(inter.inters))
+    for (angle_type, ang) in zip(inter.types, from_device(inter.inters))
         key_prefix = "inter_HA_$(angle_type)_"
         if !haskey(params_dic, key_prefix * "k")
             params_dic[key_prefix * "k" ] = ang.k
