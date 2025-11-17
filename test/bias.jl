@@ -136,7 +136,7 @@ end
     )
 
     # test LinearBias
-    lb = LinearBias(k=1500u"kJ * mol^-1 * nm^-1", cv_target=0.5u"nm")
+    lb = LinearBias(1500u"kJ * mol^-1 * nm^-1", 0.5u"nm")
 
     cv_sim = 1u"nm"
     @test isapprox(
@@ -167,7 +167,7 @@ end
     )
 
     # test SquareBias
-    sb = SquareBias(k=3000u"kJ * mol^-1 * nm^-2", cv_target=0.75u"nm")
+    sb = SquareBias(3000u"kJ * mol^-1 * nm^-2", 0.75u"nm")
 
     cv_sim = 1u"nm"
     @test isapprox(
@@ -205,7 +205,7 @@ end
     )
 
     # test FlatBottomBias
-    fb = FlatBottomBias(k=3000u"kJ * mol^-1 * nm^-2", r_fb=0.5u"nm", cv_target=0.75u"nm")
+    fb = FlatBottomBias(3000u"kJ * mol^-1 * nm^-2", 0.5u"nm", 0.75u"nm")
 
     cv_sim = 1.5u"nm"
     @test isapprox(
@@ -238,21 +238,21 @@ end
     # test AtomsCalculators.potential_energy for dist between two atoms
     cd = CalcDist(1,2,:pbc_dist,:wrap)
 
-    lb = LinearBias(k=7500u"kJ * mol^-1 * nm^-1", cv_target=0.5u"nm") 
+    lb = LinearBias(7500u"kJ * mol^-1 * nm^-1", 0.5u"nm") 
     @test isapprox(
         AtomsCalculators.potential_energy(sys, BiasPotential(cd, lb)), 
         1500u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
 
-    sb = SquareBias(k=7500u"kJ * mol^-1 * nm^-2", cv_target=0.5u"nm") 
+    sb = SquareBias(7500u"kJ * mol^-1 * nm^-2", 0.5u"nm") 
     @test isapprox(
         AtomsCalculators.potential_energy(sys, BiasPotential(cd, sb)), 
         150u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
 
-    fb = FlatBottomBias(k=7500u"kJ * mol^-1 * nm^-2", r_fb=0.15u"nm", cv_target=0.5u"nm") 
+    fb = FlatBottomBias(7500u"kJ * mol^-1 * nm^-2", 0.15u"nm", 0.5u"nm") 
     @test isapprox(
         AtomsCalculators.potential_energy(sys, BiasPotential(cd, fb)), 
         9.375u"kJ * mol^-1";
@@ -261,7 +261,7 @@ end
 
     # test AtomsCalculators.forces! for dist between two atoms
     cd = CalcDist(1,2,:pbc_dist,:wrap)
-    lb = LinearBias(k=7500u"kJ * mol^-1 * nm^-1", cv_target=0.5u"nm") 
+    lb = LinearBias(7500u"kJ * mol^-1 * nm^-1", 0.5u"nm") 
 
     fs = Molly.zero_forces(sys)
     AtomsCalculators.forces!(fs, sys, BiasPotential(cd, lb))

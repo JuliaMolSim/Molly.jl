@@ -96,24 +96,24 @@ function calculate_cv(cv::CalcRMSD, coords, args...; kwargs...)
     return rmsd_val
 end
 
-@doc raw"""
-    calculate_cv_ustrip!(unit_arr, args...)
-
-Calculate the value of a collective variable of an input system with `calculate_cv(cv::cv_type, args...)` and return the value stripped of its unit. 
-"""
+#@doc raw"""
+#    calculate_cv_ustrip!(unit_arr, args...)
+#
+#Calculate the value of a collective variable of an input system with `calculate_cv(cv::cv_type, args...)` and return the value stripped of its unit. 
+#"""#
 function calculate_cv_ustrip!(unit_arr, args...)
     cv = calculate_cv(args...)  # calculcate cv
     unit_arr[1] = unit(cv)      # infer units of cv
     return ustrip(cv)           # return unitless cv
 end
 
-@doc raw"""
-    cv_gradient(cv_type, coords, atoms, boundary, velocities)
-
-Calculate the gradient of a collective variable of type `cv_type` with respect to the input coordinates. 
-
-Gradients of collective variables are generally calculated with automatic differentiation (AD), unless a `cv_gradient` method that does not rely on AD is defined for the input `cv_type`. 
-
-This method can be run on either unitful or unitless inputs, since `calculate_cv_ustrip!` is called prior to the AD call. 
-"""
+#@doc raw"""
+#    cv_gradient(cv_type, coords, atoms, boundary, velocities)
+#
+#Calculate the gradient of a collective variable of type `cv_type` with respect to the input coordinates. 
+#
+#Gradients of collective variables are generally calculated with automatic differentiation (AD), unless a `cv_gradient` method that does not rely on AD is defined for the input `cv_type`. 
+#
+#This method can be run on either unitful or unitless inputs, since `calculate_cv_ustrip!` is called prior to the AD call. 
+#"""
 function cv_gradient end

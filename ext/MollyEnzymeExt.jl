@@ -57,8 +57,6 @@ function EnzymeRules.reverse(config, ::Const{typeof(Molly.grad_safe_bfft!)}, dre
     return (nothing, nothing)
 end
 
-end
-
 # Calculate gradient of collective variable to bias simulation
 function Molly.cv_gradient(cv_type, coords, atoms, boundary, velocities) # this works for systems with and without units 
 
@@ -84,4 +82,6 @@ function Molly.cv_gradient(cv_type, coords, atoms, boundary, velocities) # this 
     end
         
     return d_coords, cv_val_ustrip * u   
+end
+
 end
