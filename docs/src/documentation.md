@@ -536,6 +536,111 @@ It should modify the coordinates as appropriate, accounting for any boundary con
 [`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
 [`MonteCarloLogger`](@ref) records various properties throughout the simulation.
 
+## Biased simulations
+
+Molly allows users to bias simulations along one or several collective variables (CVs). A bias potential needs to be defined for every CV using the BiasPotential struct, which specifies the CV function and the functional form of the bias potential:
+```julia
+struct BiasPotential{CV, B} 
+    cv_type::CV 
+    bias_type::B 
+end
+```
+
+BiasPotential is a general interaction type in Molly, and the potential energy and forces that result from the bias are calculated with `AtomsCalculators.potential_energy` and `AtomsCalculators.forces!` methods that take the BiasPotential struct as input. In the force calculation, the derivative of the bias potential with respect to the CV and the gradient of the CV function with respect to the system coordinates are calculated in two separate steps. Either calculation can be performed with an explicitely defined gradient function or with automatic differentiation. 
+
+A number of CV functions are available in Molly, including CV functions to calculate the distance between two atoms, the radius of gyration and the RMSD to a target structure. Other CV functions can be added by the user. Every CV type needs to have its own struct, an associated method of the `calculate_cv` function and potentially a method for the `cv_gradient` function. 
+
+To define your own CV function, first define the `struct`:
+```julia
+struct MyCV
+    # Properties of the CV, e.g. indices of atoms over which the CV should be calculated
+end
+```
+
+Next, you need to define a method for the `calculate_cv` function. The method should look like this, taking properties of the system rather than the system itself as input:  
+```julia
+function calculate_cv(cv::MyCV, coords, atoms, boundary, velocities, args...; kwargs...)
+    # Function to calculate the CV value given a system configuration and properties of the CV
+end
+```
+
+The gradient of `calculate_cv` is by default calculated with automatic differentiation. However, it is also possible to manually add a method to the `cv_gradient` function to calculate the gradient without using automatic differentiation: 
+```julia
+function cv_gradient(cv_type::MyCV, coords, atoms, boundary, velocities, args...; kwargs...)
+    # Function to calculate the gradient of the CV function with respect to the coordinates of the system
+end
+```
+
+The system can be biased along the choosen CV using different bias potentials. The bias potential is a function of the system's current CV value and the target CV value and maps e.g. the difference between these two values to a potential energy. Molly currently includes the bias potential types [`LinearBias`](@ref), [`SquareBias`](@ref) and [`FlatBottomBias`](@ref).
+
+You can define your own type of bias potential by first defining a new `struct`:
+```julia
+struct MyBias
+    # Properties of the bias, including a force constant and the CV target value
+end
+```
+
+The functional form of the bias potential is then defined by ading a method to the `potential_energy` function. The method should take `cv_sim` (the output of `calculate_cv`) as input: 
+```julia
+function potential_energy(bias_fn::bias_type, cv_sim; kwargs...) 
+    pe = ... # potential energy that is a function of the target value of the CV and cv_sim, the system's current CV value
+    return pe
+end
+```
+
+Finally, you need to add a method for `MyBias` to the `bias_gradient` function. The method must return the derivative of the `potential_energy` method for `MyBias` with respect to `cv_sim`:
+```julia
+function bias_gradient(bias_fn::bias_type, cv_sim;  kwargs...)
+    bias_grad = ... # derivative of bias with respect to cv_sim, potentially calculated with autodiff
+    return bias_grad
+end
+```
+
+Once the CV and the bias function have been defined, BiasPotential can be constructed and added as a general interaction in the system setup with `general_inters = (BiasPotential(cv_type, bias_type),)`. A system can be biased along multiple CVs simultaneously by adding several `BiasPotential`s to `general_inters`. 
+
+Below, we show an example of how to set up a simulation in which the distance between two atoms is biased in a simulation of a Lennard-Jones fluid:
+
+```julia
+using Molly
+using Enzyme # if automatic differentiation is used 
+
+n_atoms = 100
+boundary = CubicBoundary(10.0u"nm") 
+temp = 298.0u"K"
+atom_mass = 10.0u"g/mol"
+
+atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+pairwise_inters = (LennardJones(),)
+
+# bias distance between atoms 1 and 2
+define_cv = CalcDist(1,2,:pbc_dist,:wrap) 
+
+# apply harmonic/squared bias potential with force constant 400 kJ*mol^-1*nm^-2 and set target distance to 1.5 nm
+define_bias = SquareBias(400u"kJ * mol^-1 * nm^-2",1.5u"nm")
+
+# add bias to general interactions
+general_inters = (BiasPotential(define_cv, define_bias),)
+
+simulator = VelocityVerlet(
+    dt=0.002u"ps",
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    general_inters=general_inters,
+)
+
+simulate!(sys, simulator, 200_000)
+```
+
 ## Units
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.

@@ -3,6 +3,7 @@
 export
     displacements,
     distances,
+    kabsch,
     rmsd,
     radius_gyration,
     hydrodynamic_radius,
@@ -30,6 +31,42 @@ Calculate the pairwise distances of a set of coordinates, accounting for the
 periodic boundary conditions.
 """
 distances(coords, boundary) = norm.(displacements(coords, boundary))
+
+"""
+    kabsch(coords_1, coords_2)
+
+Superimpose two sets of 3D coordinates using the Kabsch algorithm. 
+
+Coodinates are superimposed by rotating and translating the first set
+of input coordinates and translating the second set of input coordinates. 
+
+Assumes the coordinates do not cross the bounding box, i.e. all
+coordinates in each set correspond to the same periodic image.
+"""
+function kabsch(coords_1::AbstractArray{SVector{D, T}},
+                coords_2::AbstractArray{SVector{D, T}}) where {D, T}
+    
+    n_atoms = length(coords_1)
+    trans_1 = mean(coords_1)
+    trans_2 = mean(coords_2)
+
+    p = Molly.from_device(reshape(reinterpret(T, coords_1), D, n_atoms)) .- repeat(reinterpret(T, trans_1), 1, n_atoms)
+    q = Molly.from_device(reshape(reinterpret(T, coords_2), D, n_atoms)) .- repeat(reinterpret(T, trans_2), 1, n_atoms)
+    
+    cov = p * transpose(q)
+    svd_res = svd(ustrip.(cov))
+    Ut = transpose(svd_res.U)
+    d = sign(det(svd_res.V * Ut))
+    dmat = [1 0 0; 0 1 0; 0 0 d]
+    rot = svd_res.V * dmat * Ut
+    
+    p_rot = rot * p
+    
+    p_rot_reshaped = SArray[SVector{D,T}(p_rot[i:i+2]) for i=1:3:length(p_rot)-2]
+    q_reshaped = SArray[SVector{D,T}(q[i:i+2]) for i=1:3:length(q)-2]
+
+    return p_rot_reshaped, q_reshaped # return p centered and rotated, q centered
+end
 
 """
     rmsd(coords_1, coords_2)
