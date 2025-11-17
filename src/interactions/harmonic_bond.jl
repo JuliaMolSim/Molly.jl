@@ -30,10 +30,9 @@ end
 function extract_parameters!(params_dic,
                              inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:HarmonicBond}},
                              ff)
-    for bond_type in inter.types
+    for (bond_type, bond) in zip(inter.types, from_device(inter.inters))
         key_prefix = "inter_HB_$(bond_type)_"
         if !haskey(params_dic, key_prefix * "k")
-            bond = ff.bond_types[atom_types_to_tuple(bond_type)]
             params_dic[key_prefix * "k" ] = bond.k
             params_dic[key_prefix * "r0"] = bond.r0
         end

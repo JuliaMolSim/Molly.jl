@@ -70,14 +70,13 @@ end
 function extract_parameters!(params_dic,
                              inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:PeriodicTorsion}},
                              ff)
-    for (torsion_type, torsion_inter) in zip(inter.types, from_device(inter.inters))
-        if torsion_inter.proper
+    for (torsion_type, torsion) in zip(inter.types, from_device(inter.inters))
+        if torsion.proper
             key_prefix = "inter_PT_$(torsion_type)_"
         else
             key_prefix = "inter_IT_$(torsion_type)_"
         end
         if !haskey(params_dic, key_prefix * "phase_1")
-            torsion = ff.torsion_types[atom_types_to_tuple(torsion_type)]
             for i in eachindex(torsion.phases)
                 params_dic[key_prefix * "phase_$i"] = torsion.phases[i]
                 params_dic[key_prefix * "k_$i"    ] = torsion.ks[i]
