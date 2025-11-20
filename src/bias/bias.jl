@@ -50,7 +50,7 @@ struct SquareBias{K, CVT}
 end
 
 function potential_energy(sb::SquareBias, cv_sim; kwargs...)  
-    pe = 0.5 * sb.k * (cv_sim - sb.cv_target)^2
+    pe = 1/2 * sb.k * (cv_sim - sb.cv_target)^2
     return pe
 end
 
@@ -90,7 +90,7 @@ function potential_energy(fb::FlatBottomBias, cv_sim; kwargs...)
     else
         H = 1
     end
-    pe = ( 0.5 * fb.k * (d_abs - fb.r_fb)^2 ) * H   
+    pe = ( 1/2 * fb.k * (d_abs - fb.r_fb)^2 ) * H   
     return pe
 end
 
@@ -134,7 +134,7 @@ function AtomsCalculators.potential_energy(
         coords = sys.coords 
     end
 
-    cv_sim = calculate_cv(bias.cv_type, coords, sys.atoms, sys.boundary, sys.velocities; kwargs...) 
+    cv_sim = calculate_cv(bias.cv_type, Molly.from_device(coords), Molly.from_device(sys.atoms), sys.boundary, Molly.from_device(sys.velocities); kwargs...) 
     energy = potential_energy(bias.bias_type, cv_sim; kwargs...) 
     
     return energy   
@@ -151,13 +151,14 @@ function AtomsCalculators.forces!(
     end
 
     # gradient of cv with respect to coordinates
-    d_coords, cv_sim = Molly.cv_gradient(bias.cv_type, coords, sys.atoms, sys.boundary, sys.velocities) 
+    d_coords, cv_sim = Molly.cv_gradient(bias.cv_type, Molly.from_device(coords), Molly.from_device(sys.atoms), sys.boundary, Molly.from_device(sys.velocities)) 
 
     # gradient of bias function with respect to cv
     d_bias = bias_gradient(bias.bias_type, cv_sim) 
 
     # calc forces 
-    fs .-= d_bias .* d_coords 
+    fs_svec = d_bias .* d_coords
+    fs .-= Molly.to_device(fs_svec, typeof(fs)) 
 
     return fs
 end

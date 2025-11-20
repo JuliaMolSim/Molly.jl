@@ -1,8 +1,8 @@
-# testing cv calculations, bias potentials and simulation with biased cv
+# test cv calculations, bias potentials and simulation with biased cv 
 
 @testset "cv" begin
 
-    # test calculate_cv(CalcDist, args...) 
+    # test calculate_cv(CalcDist, args...)
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(0.1, 1.0, 1.0)u"nm"
@@ -10,46 +10,170 @@
     c5 = SVector(1.0, 1.2, 1.3)u"nm"
     c6 = SVector(0.8, 0.7, 0.9)u"nm"
 
+    a1 = Atom(mass=10u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a2 = Atom(mass=10u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a3 = Atom(mass=20u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a4 = Atom(mass=5u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a5 = Atom(mass=10u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a6 = Atom(mass=15u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+
     coords = [c1, c2, c3, c4, c5, c6]
-    atoms = [Atom(mass=10u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i=1:length(coords)]
+    atoms = [a1, a2, a3, a4, a5, a6]
     boundary = CubicBoundary(2.0u"nm")
 
-    dist_cv = CalcDist(1,2,:pbc_dist,:wrap)
+    atom_inds_1 = [1,2,3]
+    atom_inds_2 = [4,5,6]
+    coords_1 = coords[atom_inds_1]
+    coords_2 = coords[atom_inds_2]
+    atoms_1 = atoms[atom_inds_1]
+    atoms_2 = atoms[atom_inds_2]
+
+    # centre of mass
+    @test isapprox(
+        Molly.centre_of_mass(coords_1,atoms_1),
+        SVector(0.625, 1.0, 1.0)u"nm";    
+        atol=1e-9u"nm",
+    )
+
+    @test isapprox(
+        Molly.centre_of_mass(coords_2,atoms_2),
+        SVector(1.0333333333333334, 0.9166666666666666, 1.05)u"nm";    
+        atol=1e-9u"nm", 
+    )
+
+    # com-com distance between two atom groups
+    cd = CalcComDist(:closest)
+    dist_cv = CalcDist(atom_inds_1,atom_inds_2,:wrap,cd)
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        0.4197386753154344u"nm";    
+        atol=1e-9u"nm", 
+    )
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        Molly.dist_between_groups(cd, coords_1, coords_2, boundary, atoms_1, atoms_2);    
+        atol=1e-9u"nm", 
+    )
+
+    # minimum distance between two atom groups
+    cd = CalcMinDist(:closest)
+    dist_cv = CalcDist(atom_inds_1,atom_inds_2,:wrap,cd)
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        0.3u"nm";    
+        atol=1e-9u"nm", 
+    )
+
+    cd = CalcMinDist(:raw)
+    dist_cv = CalcDist(atom_inds_1,atom_inds_2,:wrap,cd)
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        0.36055512754639896u"nm";  
+        atol=1e-9u"nm", 
+    )
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        Molly.dist_between_groups(cd, coords_1, coords_2, boundary); 
+        atol=1e-9u"nm", 
+    )
+
+    # maximum distance between two atom groups
+    cd = CalcMaxDist(:closest)
+    dist_cv = CalcDist(atom_inds_1,atom_inds_2,:wrap,cd)
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        0.9695359714832659u"nm";
+        atol=1e-9u"nm", 
+    )
+
+    cd = CalcMaxDist(:raw)
+    dist_cv = CalcDist(atom_inds_1,atom_inds_2,:wrap,cd)
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        1.7u"nm";
+        atol=1e-9u"nm", 
+    )
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        Molly.dist_between_groups(cd, coords_1, coords_2, boundary); 
+        atol=1e-9u"nm", 
+    )
+
+    # distance between two atoms 
+    cd = CalcSingleDist(:closest)   
+    dist_cv = CalcDist([3],[4],:wrap,cd)
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        0.3u"nm";
+        atol=1e-9u"nm", 
+    )
+
+    cd = CalcSingleDist(:raw)   
+    dist_cv = CalcDist([3],[4],:wrap,cd)
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        1.7u"nm";
+        atol=1e-9u"nm", 
+    )
+
+    @test isapprox(
+        calculate_cv(dist_cv, coords, atoms, boundary),
+        Molly.dist_between_groups(cd, [c3], [c4], boundary); 
+        atol=1e-9u"nm", 
+    )
+
+    dist_cv = CalcDist([1],[2],:wrap,CalcSingleDist(:closest))
+
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary), 
         0.3u"nm";
         atol=1e-9u"nm"
     )
 
-    dist_cv = CalcDist(3,4,:pbc_dist,:wrap)
+    dist_cv = CalcDist([3],[4],:wrap,CalcSingleDist(:closest))
+
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary), 
         0.3u"nm";
         atol=1e-9u"nm"
     )
 
-    dist_cv = CalcDist(5,6,:pbc_dist,:wrap)
+    dist_cv = CalcDist([5],[6],:wrap,CalcSingleDist(:closest))
+
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
         0.6708203932499369u"nm";
         atol=1e-9u"nm"
     )
 
-    dist_cv = CalcDist(1,2,:dist,:wrap)
+    dist_cv = CalcDist([1],[2],:wrap,CalcSingleDist(:raw))
+
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary), 
         0.3u"nm";
         atol=1e-9u"nm"
     )
 
-    dist_cv = CalcDist(3,4,:dist,:wrap)
+    dist_cv = CalcDist([3],[4],:wrap,CalcSingleDist(:raw))
+
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary), 
         1.7u"nm";
         atol=1e-9u"nm"
     )
 
-    dist_cv = CalcDist(5,6,:dist,:wrap)
+    dist_cv = CalcDist([5],[6],:wrap,CalcSingleDist(:raw))
+
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
         0.6708203932499369u"nm";
@@ -236,7 +360,7 @@ end
     )
 
     # test AtomsCalculators.potential_energy for dist between two atoms
-    cd = CalcDist(1,2,:pbc_dist,:wrap)
+    cd = CalcDist([1],[2],:wrap,CalcSingleDist(:closest))
 
     lb = LinearBias(7500u"kJ * mol^-1 * nm^-1", 0.5u"nm") 
     @test isapprox(
@@ -260,7 +384,7 @@ end
     )
 
     # test AtomsCalculators.forces! for dist between two atoms
-    cd = CalcDist(1,2,:pbc_dist,:wrap)
+    cd = CalcDist([1],[2],:wrap,CalcSingleDist(:closest))
     lb = LinearBias(7500u"kJ * mol^-1 * nm^-1", 0.5u"nm") 
 
     fs = Molly.zero_forces(sys)
@@ -288,141 +412,146 @@ end
 
     # define wrapper functions
     function pair_dist_wrapper_12(sys, args...; kwargs...)
-        coords_1 = sys.coords[1]
-        coords_2 = sys.coords[2] 
+        coords_1 = Molly.from_device(sys.coords)[1]
+        coords_2 = Molly.from_device(sys.coords)[2] 
         distances([coords_1,coords_2], sys.boundary)[2]
     end
 
     function pair_dist_wrapper_13(sys, args...; kwargs...)
-        coords_1 = sys.coords[1]
-        coords_2 = sys.coords[3]
+        coords_1 = Molly.from_device(sys.coords)[1]
+        coords_2 = Molly.from_device(sys.coords)[3]
         distances([coords_1,coords_2], sys.boundary)[2]
     end
 
-    # system setup
-    n_atoms = 10
-    boundary = CubicBoundary(10.0) 
-    temp = 298.0
-    atom_mass = 10.0
+    for AT in array_list
 
-    atoms = [Atom(mass=atom_mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3)
-    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+        # system setup
+        n_atoms = 10
+        boundary = CubicBoundary(10.0) 
+        temp = 298.0
+        atom_mass = 10.0
 
-    pairwise_inters = (LennardJones(),)
+        atoms = to_device([Atom(mass=atom_mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms], AT)
+        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3), AT)
+        velocities = to_device([random_velocity(atom_mass, temp) for i in 1:n_atoms], AT)
 
-    define_cv = CalcDist(1,2,:pbc_dist,:wrap) # bias distance between atoms 1 and 2
-    define_bias = SquareBias(400,1.5) # apply square bias potential with k=400 and target distance 1.5 nm
-    general_inters = (BiasPotential(define_cv, define_bias),) # add to general interactions
+        pairwise_inters = (LennardJones(),)
 
-    simulator = VelocityVerlet(
-        dt=0.002,
-        coupling=AndersenThermostat(temp, 1.0),
-    )
+        define_cv = CalcDist([1],[2],:wrap,CalcSingleDist(:closest)) # bias distance between atoms 1 and 2
+        define_bias = SquareBias(400,1.5) # apply square bias potential with k=400 and target distance 1.5 nm
+        general_inters = (BiasPotential(define_cv, define_bias),) # add to general interactions
 
-    sys = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        pairwise_inters=pairwise_inters,
-        general_inters=general_inters,
-        force_units=NoUnits,
-        energy_units=NoUnits,
-        loggers=(
-            pair_dist_12=GeneralObservableLogger(pair_dist_wrapper_12, Float64, 10), 
-            pair_dist_13=GeneralObservableLogger(pair_dist_wrapper_13, Float64, 10),
-            coords=CoordinatesLogger(Float64, 10)
-        ),
-    )
+        simulator = VelocityVerlet(
+            dt=0.002,
+            coupling=AndersenThermostat(temp, 1.0),
+        )
 
-    # simulate
-    simulate!(sys, simulator, 200_000)
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=pairwise_inters,
+            general_inters=general_inters,
+            force_units=NoUnits,
+            energy_units=NoUnits,
+            loggers=(
+                pair_dist_12=GeneralObservableLogger(pair_dist_wrapper_12, Float64, 10), 
+                pair_dist_13=GeneralObservableLogger(pair_dist_wrapper_13, Float64, 10),
+                coords=CoordinatesLogger(Float64, 10)
+            ),
+        )
 
-    # analyse
-    pair_dists_12 = values(sys.loggers.pair_dist_12)
-    pair_dists_13 =values(sys.loggers.pair_dist_13)
+        # simulate
+        simulate!(sys, simulator, 200_000)
 
-    dist_12_mean = mean(pair_dists_12[1000:end])
-    dist_13_mean = mean(pair_dists_13[1000:end]) 
-    dist_12_std = std(pair_dists_12[1000:100:end]) 
-    dist_13_std = std(pair_dists_13[1000:100:end])
+        # analyse
+        pair_dists_12 = values(sys.loggers.pair_dist_12)
+        pair_dists_13 =values(sys.loggers.pair_dist_13)
 
-    # test
-    @test isapprox(dist_12_mean, 1.5; atol=0.05,)
-    @test !isapprox(dist_13_mean, 1.5; atol=0.05,)
+        dist_12_mean = mean(pair_dists_12[1000:end])
+        dist_13_mean = mean(pair_dists_13[1000:end]) 
+        dist_12_std = std(pair_dists_12[1000:100:end]) 
+        dist_13_std = std(pair_dists_13[1000:100:end])
 
-    @test dist_13_mean > dist_12_mean
-    @test dist_13_std > dist_12_std
+        # test
+        @test isapprox(dist_12_mean, 1.5; atol=0.05,)
+        @test !isapprox(dist_13_mean, 1.5; atol=0.05,)
 
+        @test dist_13_mean > dist_12_mean
+        @test dist_13_std > dist_12_std
+    end
 end
 
 @testset "biased_simulation_unitful" begin
 
     # define wrapper functions
     function pair_dist_wrapper_12(sys, args...; kwargs...)
-        coords_1 = sys.coords[1]
-        coords_2 = sys.coords[2] 
+        coords_1 = Molly.from_device(sys.coords)[1]
+        coords_2 = Molly.from_device(sys.coords)[2] 
         distances([coords_1,coords_2], sys.boundary)[2]
     end
 
     function pair_dist_wrapper_13(sys, args...; kwargs...)
-        coords_1 = sys.coords[1]
-        coords_2 = sys.coords[3]
+        coords_1 = Molly.from_device(sys.coords)[1]
+        coords_2 = Molly.from_device(sys.coords)[3]
         distances([coords_1,coords_2], sys.boundary)[2]
     end
 
-    # system setup
-    n_atoms = 5
-    boundary = CubicBoundary(10.0u"nm") 
-    temp = 298.0u"K"
-    atom_mass = 10.0u"g/mol"
+    for AT in array_list
 
-    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+        # system setup
+        n_atoms = 5
+        boundary = CubicBoundary(10.0u"nm") 
+        temp = 298.0u"K"
+        atom_mass = 10.0u"g/mol"
 
-    pairwise_inters = (LennardJones(),)
+        atoms = to_device([Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms], AT)
+        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"), AT)
+        velocities = to_device([random_velocity(atom_mass, temp) for i in 1:n_atoms], AT)
 
-    define_cv = CalcDist(1,2,:pbc_dist,:wrap) # bias distance between atoms 1 and 2
-    define_bias = SquareBias(400u"kJ * mol^-1 * nm^-2",1.5u"nm") # apply square bias potential with k=400 and target distance 1.5 nm
-    general_inters = (BiasPotential(define_cv, define_bias),) # add to general interactions
+        pairwise_inters = (LennardJones(),)
 
-    simulator = VelocityVerlet(
-        dt=0.002u"ps",
-        coupling=AndersenThermostat(temp, 1.0u"ps"),
-    )
+        define_cv = CalcDist([1],[2],:wrap,CalcSingleDist(:closest)) # bias distance between atoms 1 and 2
+        define_bias = SquareBias(400u"kJ * mol^-1 * nm^-2",1.5u"nm") # apply square bias potential with k=400 and target distance 1.5 nm
+        general_inters = (BiasPotential(define_cv, define_bias),) # add to general interactions
 
-    sys = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        pairwise_inters=pairwise_inters,
-        general_inters=general_inters,
-        loggers=(
-            coords=CoordinatesLogger(10),
-            pair_dist_12=GeneralObservableLogger(pair_dist_wrapper_12, Any, 10), 
-            pair_dist_13=GeneralObservableLogger(pair_dist_wrapper_13, Any, 10),
-        ),
-    )
+        simulator = VelocityVerlet(
+            dt=0.002u"ps",
+            coupling=AndersenThermostat(temp, 1.0u"ps"),
+        )
 
-    # simulate
-    simulate!(sys, simulator, 200_000)
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=pairwise_inters,
+            general_inters=general_inters,
+            loggers=(
+                coords=CoordinatesLogger(10),
+                pair_dist_12=GeneralObservableLogger(pair_dist_wrapper_12, Any, 10), 
+                pair_dist_13=GeneralObservableLogger(pair_dist_wrapper_13, Any, 10),
+            ),
+        )
 
-    # analyse
-    pair_dists_12 = values(sys.loggers.pair_dist_12)
-    pair_dists_13 =values(sys.loggers.pair_dist_13)
+        # simulate
+        simulate!(sys, simulator, 200_000)
 
-    dist_12_mean = mean(pair_dists_12[1000:end])
-    dist_13_mean = mean(pair_dists_13[1000:end]) 
-    dist_12_std = std(pair_dists_12[1000:100:end]) 
-    dist_13_std = std(pair_dists_13[1000:100:end])
+        # analyse
+        pair_dists_12 = values(sys.loggers.pair_dist_12)
+        pair_dists_13 =values(sys.loggers.pair_dist_13)
 
-    # test
-    @test isapprox(dist_12_mean, 1.5u"nm"; atol=0.05u"nm",)
-    @test !isapprox(dist_13_mean, 1.5u"nm"; atol=0.05u"nm",)
+        dist_12_mean = mean(pair_dists_12[1000:end])
+        dist_13_mean = mean(pair_dists_13[1000:end]) 
+        dist_12_std = std(pair_dists_12[1000:100:end]) 
+        dist_13_std = std(pair_dists_13[1000:100:end])
 
-    @test dist_13_mean > dist_12_mean
-    @test dist_13_std > dist_12_std
+        # test
+        @test isapprox(dist_12_mean, 1.5u"nm"; atol=0.05u"nm",)
+        @test !isapprox(dist_13_mean, 1.5u"nm"; atol=0.05u"nm",)
+
+        @test dist_13_mean > dist_12_mean
+        @test dist_13_std > dist_12_std
+    end
 end

@@ -69,6 +69,21 @@ function kabsch(coords_1::AbstractArray{SVector{D, T}},
 end
 
 """
+    ref_kabsch(coords_1, coords_2)
+
+Wrapper function to return only the translated and rotated coordinates
+of coords_1 after superimposition of coords_1 and coords_2 by the Kabsch algorithm.
+
+Assumes the coordinates do not cross the bounding box, i.e. all
+coordinates in each set correspond to the same periodic image.
+"""
+function ref_kabsch(coords_1::AbstractArray{SVector{D, T}},
+                    coords_2::AbstractArray{SVector{D, T}}) where {D, T}
+    p_rot, _ = kabsch(coords_1, coords_2)
+    return p_rot
+end 
+
+"""
     rmsd(coords_1, coords_2)
 
 Calculate the root-mean-square deviation (RMSD) of two sets of
@@ -78,22 +93,10 @@ Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates in each set correspond to the same periodic image.
 """
 function rmsd(coords_1::AbstractArray{SVector{D, T}},
-                coords_2::AbstractArray{SVector{D, T}}) where {D, T}
-    n_atoms = length(coords_1)
-    trans_1 = mean(coords_1)
-    trans_2 = mean(coords_2)
-    p = from_device(reshape(reinterpret(T, coords_1), D, n_atoms)) .-
-                                repeat(reinterpret(T, trans_1), 1, n_atoms)
-    q = from_device(reshape(reinterpret(T, coords_2), D, n_atoms)) .-
-                                repeat(reinterpret(T, trans_2), 1, n_atoms)
-    cov = p * transpose(q)
-    svd_res = svd(ustrip.(cov))
-    Ut = transpose(svd_res.U)
-    d = sign(det(svd_res.V * Ut))
-    dmat = [1 0 0; 0 1 0; 0 0 d]
-    rot = svd_res.V * dmat * Ut
-    diffs = rot * p - q
-    msd = sum(abs2, diffs) / n_atoms
+              coords_2::AbstractArray{SVector{D, T}}) where {D, T}
+    p_rot, q = kabsch(coords_1, coords_2) 
+    diffs = p_rot - q
+    msd = mean(norm.(diffs).^2)
     return sqrt(msd)
 end
 

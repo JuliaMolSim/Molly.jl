@@ -24,7 +24,7 @@ EnzymeRules.inactive(::typeof(visualize), args...) = nothing
 EnzymeRules.inactive(::typeof(place_atoms), args...) = nothing
 EnzymeRules.inactive(::typeof(place_diatomics), args...) = nothing
 EnzymeRules.inactive(::typeof(read_frame!), args...) = nothing
-EnzymeRules.inactive(::typeof(kabsch), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.ref_kabsch), args...) = nothing
 
 # Differentiable PME
 
@@ -77,11 +77,12 @@ function Molly.cv_gradient(cv_type, coords, atoms, boundary, velocities) # this 
     
     u = only(unit_arr)
 
+    # if coords (and hence d_coords) are unitful, correct units
     if unit(d_coords[1][1]) == u"nm"
-        d_coords = d_coords .* 1u"nm^-1"
+        d_coords = d_coords .* u ./ u"nm"^2
     end
         
-    return d_coords, cv_val_ustrip * u   
+    return d_coords, cv_val_ustrip * u
 end
 
 end
