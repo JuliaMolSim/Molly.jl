@@ -129,12 +129,12 @@ function AtomsCalculators.potential_energy(
     )
 
     if bias.cv_type.correction == :pbc
-        coords = Molly.unwrap_molecules(sys) 
+        coords = unwrap_molecules(sys) 
     else
         coords = sys.coords 
     end
 
-    cv_sim = calculate_cv(bias.cv_type, Molly.from_device(coords), Molly.from_device(sys.atoms), sys.boundary, Molly.from_device(sys.velocities); kwargs...) 
+    cv_sim = calculate_cv(bias.cv_type, from_device(coords), from_device(sys.atoms), sys.boundary, from_device(sys.velocities); kwargs...) 
     energy = potential_energy(bias.bias_type, cv_sim; kwargs...) 
     
     return energy   
@@ -145,20 +145,20 @@ function AtomsCalculators.forces!(
     )
 
     if bias.cv_type.correction == :pbc
-        coords = Molly.unwrap_molecules(sys) 
+        coords = unwrap_molecules(sys) 
     else
         coords = sys.coords 
     end
 
     # gradient of cv with respect to coordinates
-    d_coords, cv_sim = Molly.cv_gradient(bias.cv_type, Molly.from_device(coords), Molly.from_device(sys.atoms), sys.boundary, Molly.from_device(sys.velocities)) 
+    d_coords, cv_sim = cv_gradient(bias.cv_type, from_device(coords), from_device(sys.atoms), sys.boundary, from_device(sys.velocities))
 
     # gradient of bias function with respect to cv
     d_bias = bias_gradient(bias.bias_type, cv_sim) 
 
     # calc forces 
     fs_svec = d_bias .* d_coords
-    fs .-= Molly.to_device(fs_svec, typeof(fs)) 
+    fs .-= to_device(fs_svec, typeof(fs)) 
 
     return fs
 end

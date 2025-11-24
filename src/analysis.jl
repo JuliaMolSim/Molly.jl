@@ -50,8 +50,8 @@ function kabsch(coords_1::AbstractArray{SVector{D, T}},
     trans_1 = mean(coords_1)
     trans_2 = mean(coords_2)
 
-    p = Molly.from_device(reshape(reinterpret(T, coords_1), D, n_atoms)) .- repeat(reinterpret(T, trans_1), 1, n_atoms)
-    q = Molly.from_device(reshape(reinterpret(T, coords_2), D, n_atoms)) .- repeat(reinterpret(T, trans_2), 1, n_atoms)
+    p = from_device(reshape(reinterpret(T, coords_1), D, n_atoms)) .- repeat(reinterpret(T, trans_1), 1, n_atoms)
+    q = from_device(reshape(reinterpret(T, coords_2), D, n_atoms)) .- repeat(reinterpret(T, trans_2), 1, n_atoms)
     
     cov = p * transpose(q)
     svd_res = svd(ustrip.(cov))
@@ -68,15 +68,13 @@ function kabsch(coords_1::AbstractArray{SVector{D, T}},
     return p_rot_reshaped, q_reshaped # return p centered and rotated, q centered
 end
 
-"""
-    ref_kabsch(coords_1, coords_2)
+#=  ref_kabsch(coords_1, coords_2)
 
 Wrapper function to return only the translated and rotated coordinates
 of coords_1 after superimposition of coords_1 and coords_2 by the Kabsch algorithm.
 
 Assumes the coordinates do not cross the bounding box, i.e. all
-coordinates in each set correspond to the same periodic image.
-"""
+coordinates in each set correspond to the same periodic image.=#
 function ref_kabsch(coords_1::AbstractArray{SVector{D, T}},
                     coords_2::AbstractArray{SVector{D, T}}) where {D, T}
     p_rot, _ = kabsch(coords_1, coords_2)
