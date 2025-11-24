@@ -71,5 +71,7 @@ include("setup.jl")
 include("trajectory.jl")
 include("free_energy/stats.jl")
 include("free_energy/mbar.jl")
+include("bias/bias.jl")
+include("bias/cv.jl")
 
 end
