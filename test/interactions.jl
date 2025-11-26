@@ -231,22 +231,22 @@
     inter = CoulombSoftCoreBeutler(α=0.3, λ=0.5)
     @test isapprox(
         force(inter, dr13, a1, a1),
-        SVector(842.06163558501, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(421.030817792505, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-5u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         force(inter, dr14, a1, a1),
-        SVector(57.48819886473348, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(28.74409943236674, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-5u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         potential_energy(inter, dr13, a1, a1),
-        345.81678703197457u"kJ * mol^-1";
+        172.90839351598729u"kJ * mol^-1";
         atol=1e-5u"kJ * mol^-1",
     )
     @test isapprox(
         potential_energy(inter, dr14, a1, a1),
-        634.3822744723304u"kJ * mol^-1";
+        317.1911372361652u"kJ * mol^-1";
         atol=1e-5u"kJ * mol^-1",
     )
 
