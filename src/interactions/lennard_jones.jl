@@ -149,15 +149,15 @@ the appearing and disappearing of atoms.
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
 The potential energy is defined as
 ```math
-V(r_{ij}) = \frac{C^{(12)}}{r_{LJ}^{12}} - \frac{C^{(6)}}{r_{LJ}^{6}}
+V(r_{ij}) = \lambda\left(\frac{C^{(12)}}{r_{LJ}^{12}} - \frac{C^{(6)}}{r_{LJ}^{6}}\right
 ```
 and the force on each atom by
 ```math
-\vec{F}_i = ((\frac{12C^{(12)}}{r_{LJ}^{13}} - \frac{6C^{(6)}}{r_{LJ}^7})(\frac{r_{ij}}{r_{LJ}})^5) \frac{\vec{r_{ij}}}{r_{ij}}
+\vec{F}_i = \lambda\left(\left(\frac{12C^{(12)}}{r_{LJ}^{13}} - \frac{6C^{(6)}}{r_{LJ}^7}\right)\left(\frac{r_{ij}}{r_{LJ}}\right)^5\right) \frac{\vec{r_{ij}}}{r_{ij}}
 ```
 where
 ```math
-r_{LJ} = (\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}
+r_{LJ} = \left(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6\right)^{1/6}
 ```
 and
 ```math
