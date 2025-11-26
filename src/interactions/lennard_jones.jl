@@ -169,11 +169,13 @@ end
     p::P = 1
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
-    inter_state_a::SA = nothing
+    inter_state_a::SA = NoInterState()
     inter_state_b::SB = (σ_mixing = lorentz_σ_mixing, ϵ_mixing = geometric_ϵ_mixing)
     shortcut::F = lj_zero_shortcut
     weight_special::W = 1
 end
+
+struct NoInterState end
 
 use_neighbors(inter::LennardJonesSoftCoreBeutler) = inter.use_neighbors
 
@@ -250,7 +252,7 @@ end
     force_term_a, force_term_b = zero_force, zero_force
 
     # force for system in state A
-    if !isnothing(inter_state_a)
+    if !isa(inter_state_a, NoInterState)
         σ_a = inter_state_a.σ_mixing(atom_i, atom_j)
         ϵ_a = inter_state_a.ϵ_mixing(atom_i, atom_j)
 
@@ -261,8 +263,8 @@ end
     end
 
     # force for system in state B
-    if !isnothing(inter_state_b)
-        σ_b = inter_state_b.σ_mixing(atom_i, atom_j)
+    if !isa(inter_state_b, NoInterState)
+    σ_b = inter_state_b.σ_mixing(atom_i, atom_j)
         ϵ_b = inter_state_b.ϵ_mixing(atom_i, atom_j)
 
         σ_b2 = σ_b^2
@@ -306,7 +308,7 @@ end
     energy_term_a, energy_term_b = zero_energy, zero_energy
 
     # energy for system in state A
-    if !isnothing(inter_state_a)
+    if !isa(inter_state_a, NoInterState)
         σ_a = inter_state_a.σ_mixing(atom_i, atom_j)
         ϵ_a = inter_state_a.ϵ_mixing(atom_i, atom_j)
 
@@ -317,7 +319,7 @@ end
     end
 
     # energy for system in state B
-    if !isnothing(inter_state_b)
+    if !isa(inter_state_b, NoInterState)
         σ_b = inter_state_b.σ_mixing(atom_i, atom_j)
         ϵ_b = inter_state_b.ϵ_mixing(atom_i, atom_j)
 
@@ -364,7 +366,7 @@ end
     term_state_a, term_state_b = zero_energy, zero_energy
 
     # ∂V/∂λ for system in state A
-    if !isnothing(inter_state_a)
+    if !isa(inter_state_a, NoInterState)
         σ_a = inter_state_a.σ_mixing(atom_i, atom_j)
         ϵ_a = inter_state_a.ϵ_mixing(atom_i, atom_j)
 
@@ -377,7 +379,7 @@ end
     end
 
     # ∂V/∂λ for system in state B
-    if !isnothing(inter_state_b)
+    if !isa(inter_state_b, NoInterState)
         σ_b = inter_state_b.σ_mixing(atom_i, atom_j)
         ϵ_b = inter_state_b.ϵ_mixing(atom_i, atom_j)
 
