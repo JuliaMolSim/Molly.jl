@@ -228,7 +228,7 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.σ6_fac)
+    params = (C6 * σ6, C6, inter.σ6_fac, inter.λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -239,10 +239,10 @@ end
     end
 end
 
-function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac))
+function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
     R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
     R6 = R^6
-    return (((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
+    return λ*(((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
 end
 
 @inline function potential_energy(inter::LennardJonesSoftCoreBeutler,
@@ -261,7 +261,7 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.σ6_fac)
+    params = (C6 * σ6, C6, inter.σ6_fac, inter.λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -271,9 +271,9 @@ end
     end
 end
 
-function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac))
+function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
     R6 = (σ6_fac*(C12/C6))+r^6
-    return ((C12/(R6*R6)) - (C6/(R6)))
+    return λ*((C12/(R6*R6)) - (C6/(R6)))
 end
 
 @doc raw"""
