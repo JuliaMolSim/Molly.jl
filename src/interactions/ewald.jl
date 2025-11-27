@@ -62,7 +62,7 @@ function find_excluded_pairs(eligible, special)
     return excluded_pairs
 end
 
-function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f, i, j,
+function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, i, j,
                             ::Val{T}, ::Val{calculate_forces}, ::Val{atomic},
                             ::Val{needs_vir}) where {T, calculate_forces, atomic, needs_vir}
     sqrt_π = sqrt(T(π))
@@ -73,9 +73,9 @@ function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f, i
     erf_αr = erf(αr)
     if erf_αr > T(1e-6)
         inv_r = inv(r)
-        exclusion_E = -f * charge_ij * inv_r * erf_αr
+        exclusion_E = -f_div_ϵr * charge_ij * inv_r * erf_αr
         if calculate_forces
-            dE_dr = f * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
+            dE_dr = f_div_ϵr * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
             F = dE_dr * vec_ij
             if atomic
                 for dim in 1:3
@@ -97,18 +97,18 @@ function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f, i
             end
         end
     else
-        exclusion_E = -α * 2 * f * charge_ij / sqrt_π
+        exclusion_E = -α * 2 * f_div_ϵr * charge_ij / sqrt_π
     end
     return exclusion_E
 end
 
 function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
-                                coords::Vector, boundary, α, f, force_units, energy_units,
+                                coords::Vector, boundary, α, f_div_ϵr, force_units, energy_units,
                                 calculate_forces, ::Val{T},
                                 ::Val{needs_vir}) where {T, needs_vir}
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
-        E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f,
+        E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr,
                             i, j, Val(T), Val(calculate_forces), Val(false), Val(needs_vir))
         exclusion_E += E
     end
@@ -116,8 +116,8 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
 end
 
 function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
-                                coords::AbstractVector{SVector{D, C}}, boundary, α, f, force_units,
-                                energy_units, calculate_forces, ::Val{T},
+                                coords::AbstractVector{SVector{D, C}}, boundary, α, f_div_ϵr,
+                                force_units, energy_units, calculate_forces, ::Val{T},
                                 ::Val{needs_vir}) where {D, C, T, needs_vir}
     if calculate_forces
         buffer_Fs .= zero(T)
@@ -128,8 +128,8 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
     backend = get_backend(atoms)
     n_threads_gpu = 128
     kernel! = excluded_interactions_kernel!(backend, n_threads_gpu)
-    kernel!(buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms, coords, boundary, α, f,
-            energy_units, Val(T), Val(calculate_forces), Val(needs_vir);
+    kernel!(buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms, coords, boundary, α,
+            f_div_ϵr, energy_units, Val(T), Val(calculate_forces), Val(needs_vir);
             ndrange=length(excluded_pairs))
 
     if calculate_forces
@@ -142,13 +142,13 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
 end
 
 @kernel function excluded_interactions_kernel!(Fs_mat, vir, exclusion_Es, @Const(excluded_pairs),
-                            @Const(atoms), @Const(coords), boundary, α, f, energy_units,
+                            @Const(atoms), @Const(coords), boundary, α, f_div_ϵr, energy_units,
                             ::Val{T}, ::Val{calculate_forces},
                             ::Val{needs_vir}) where {T, calculate_forces, needs_vir}
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
-        E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f,
+        E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f_div_ϵr,
                                 i, j, Val(T), Val(calculate_forces), Val(true), Val(needs_vir))
         exclusion_Es[ei] = ustrip(energy_units, E)
     end
@@ -173,6 +173,7 @@ excluded from long range calculation.
 
 This algorithm is O(N^2) and in general [`PME`](@ref) should be used instead.
 Only compatible with 3D systems and [`CubicBoundary`](@ref).
+Not compatible with infinite boundaries.
 Runs on the CPU, even for GPU systems.
 """
 struct Ewald{T, D} <: AbstractEwald
@@ -378,6 +379,7 @@ is based on the smooth PME algorithm from
 [Essmann et al. 1995](https://doi.org/10.1063/1.470117).
 
 Only compatible with 3D systems.
+Not compatible with infinite boundaries.
 """
 struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B} <: AbstractEwald
     dist_cutoff::D
@@ -945,10 +947,11 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
+    f_div_ϵr = f / ϵr
 
     exclusion_E = excluded_interactions!(Fs, vir, inter.excluded_buffer_Fs, inter.virial_buffer,
-                    inter.excluded_buffer_Es, inter.excluded_pairs, atoms, coords, boundary, α, f,
-                    force_units, energy_units, calculate_forces, Val(T), Val(needs_vir))
+                    inter.excluded_buffer_Es, inter.excluded_pairs, atoms, coords, boundary, α,
+                    f_div_ϵr, force_units, energy_units, calculate_forces, Val(T), Val(needs_vir))
 
     recip_box = invert_box_vectors(boundary)
     grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
@@ -958,7 +961,7 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     grad_safe_fft!(inter.charge_grid, inter.fft_plan)
     reciprocal_space_E = recip_conv!(vir, inter.virial_buffer, inter.charge_grid,
                     inter.recip_conv_buffer, inter.bsplines_moduli_x, inter.bsplines_moduli_y,
-                    inter.bsplines_moduli_z, recip_box, f / ϵr, α, mesh_dims, boundary,
+                    inter.bsplines_moduli_z, recip_box, f_div_ϵr, α, mesh_dims, boundary,
                     energy_units, Val(n_thr), Val(needs_vir))
     grad_safe_bfft!(inter.charge_grid, inter.bfft_plan)
     if calculate_forces
@@ -974,8 +977,8 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     else
         pc_sum, pc_abs2_sum = inter.pc_sum, inter.pc_abs2_sum
     end
-    charge_E = -f * T(π) * pc_sum^2 / (2 * V * α^2)
-    self_E = f * -pc_abs2_sum * α / sqrt(T(π)) + charge_E
+    charge_E = -f_div_ϵr * T(π) * pc_sum^2 / (2 * V * α^2)
+    self_E = f_div_ϵr * -pc_abs2_sum * α / sqrt(T(π)) + charge_E
     total_E = reciprocal_space_E + self_E + exclusion_E
     return total_E
 end
