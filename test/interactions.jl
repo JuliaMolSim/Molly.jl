@@ -47,22 +47,57 @@
     inter = LennardJonesSoftCoreBeutler(α=0.3, λ=0.5)
     @test isapprox(
         force(inter, dr14, a1, a1),
-        SVector(35.093676538737824, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(17.546838269368916, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         force(inter, dr13, a1, a1),
-        SVector(-1.3236594727846438, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(-0.6618297363923222, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         potential_energy(inter, dr14, a1, a1),
-        29.629058917654785u"kJ * mol^-1";
+        14.814529458827394u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
         potential_energy(inter, dr13, a1, a1),
-        -0.11464014233084913u"kJ * mol^-1";
+        -0.05732007116542457u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    @test isapprox(
+        Molly.∂H_∂λ(inter, dr12, a1, a2),
+        -0.12598966767217717u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        Molly.∂H_∂λ(inter, dr13, a1, a2),
+        -0.0317055834215144u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        Molly.∂H_∂λ(inter, dr14, a1, a2),
+        62.957442851334115u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    inter = LennardJonesSoftCoreBeutler(α=0.5, λ=0.8,
+        inter_state_a=(σ_mixing=Molly.lorentz_σ_mixing, ϵ_mixing=Molly.geometric_ϵ_mixing),
+        inter_state_b=nothing)
+    @test isapprox(
+        Molly.∂H_∂λ(inter, dr12, a1, a2),
+        -0.1197457491693602u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        Molly.∂H_∂λ(inter, dr13, a1, a2),
+        -0.031184500618766355u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        Molly.∂H_∂λ(inter, dr14, a1, a2),
+        3.4324768629314484u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
 
