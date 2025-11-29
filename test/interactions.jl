@@ -69,22 +69,22 @@
     inter = LennardJonesSoftCoreGapsys(α=0.85, λ=0.5)
     @test isapprox(
         force(inter, dr14, a1, a1),
-        SVector(516.8457758610879, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(258.42288793054365, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         force(inter, dr13, a1, a1),
-        SVector(-1.37550973892212, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(-0.68775486946106, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         potential_energy(inter, dr14, a1, a1),
-        51.814929518108826u"kJ * mol^-1";
+        45.35853723577515u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
         potential_energy(inter, dr13, a1, a1),
-        -0.1170417308807374u"kJ * mol^-1";
+        -0.12971227169036878u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
 
@@ -253,22 +253,22 @@
     inter = CoulombSoftCoreGapsys(α=0.3, λ=0.5, σQ=1u"nm")
     @test isapprox(
         force(inter, dr13, a1, a1),
-        SVector(731.0108657043696, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(365.5054328521848, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-5u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         force(inter, dr14, a1, a1),
-        SVector(1276.8008892849266, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(638.4004446424633, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-5u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         potential_energy(inter, dr13, a1, a1),
-        341.80053925707637u"kJ * mol^-1";
+        170.90026962853818u"kJ * mol^-1";
         atol=1e-5u"kJ * mol^-1",
     )
     @test isapprox(
         potential_energy(inter, dr14, a1, a1),
-        642.9723025054708u"kJ * mol^-1";
+        321.4861512527354u"kJ * mol^-1";
         atol=1e-5u"kJ * mol^-1",
     )
 

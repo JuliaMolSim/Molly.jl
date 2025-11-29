@@ -368,7 +368,7 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6)
+    params = (C6 * σ6, C6, inter.λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -379,16 +379,16 @@ end
     end
 end
 
-function pairwise_force(inter::LennardJonesSoftCoreGapsys, r, (C12, C6))
+function pairwise_force(inter::LennardJonesSoftCoreGapsys, r, (C12, C6, λ))
     R = inter.α*sqrt(cbrt((26*(C12/C6)*(1-inter.λ)/7)))
     r6 = r^6
     invR = inv(R)
     invR2 = invR^2
     invR6 = invR^6
     if r >= R
-        return (((12*C12)/(r6*r6*r))-((6*C6)/(r6*r)))
+        return λ * (((12*C12)/(r6*r6*r))-((6*C6)/(r6*r)))
     elseif r < R
-        return (((-156*C12*(invR6*invR6*invR2)) + (42*C6*(invR2*invR6)))*r +
+        return λ * (((-156*C12*(invR6*invR6*invR2)) + (42*C6*(invR2*invR6)))*r +
                     (168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))
     end
 end
@@ -409,7 +409,7 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6)
+    params = (C6 * σ6, C6, inter.λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -419,16 +419,16 @@ end
     end
 end
 
-function pairwise_pe(inter::LennardJonesSoftCoreGapsys, r, (C12, C6))
+function pairwise_pe(inter::LennardJonesSoftCoreGapsys, r, (C12, C6, λ))
     R = inter.α*sqrt(cbrt((26*(C12/C6)*(1-inter.λ)/7)))
     r6 = r^6
     invR = inv(R)
     invR2 = invR^2
     invR6 = invR^6
     if r >= R
-        return (C12/(r6*r6))-(C6/(r6))
+        return λ * (C12/(r6*r6))-(C6/(r6))
     elseif r < R
-        return ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
+        return λ * ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
                     ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
                     (91*C12*(invR6*invR6)) - (28*C6*(invR6))
     end

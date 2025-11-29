@@ -321,7 +321,7 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, qi, qj, inter.σQ, inter.σ6_fac)
+    params = (ke, qi, qj, inter.σQ, inter.σ6_fac, inter.λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -332,13 +332,13 @@ end
     end
 end
 
-function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac))
+function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ))
     qij = qi * qj
     R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
     if r >= R
-        return ke * (qij/(r^2))
+        return λ * ke * (qij/(r^2))
     elseif r < R
-        return ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2)))
+        return λ * ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2)))
     end
 end
 
@@ -353,7 +353,7 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, qi, qj, inter.σQ, inter.σ6_fac)
+    params = (ke, qi, qj, inter.σQ, inter.σ6_fac, inter.λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -363,13 +363,13 @@ end
     end
 end
 
-function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac))
+function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ))
     qij = qi * qj
     R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
     if r >= R
-        return ke * (qij/r)
+        return λ * ke * (qij/r)
     elseif r < R
-        return ke * (((qij/(R^3))*(r^2))-(((3*qij)/(R^2))*r)+((3*qij)/R))
+        return λ * ke * (((qij/(R^3))*(r^2))-(((3*qij)/(R^2))*r)+((3*qij)/R))
     end
 end
 
