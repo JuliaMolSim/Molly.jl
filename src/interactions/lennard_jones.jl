@@ -149,15 +149,15 @@ the appearing and disappearing of atoms.
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
 The potential energy is defined as
 ```math
-V(r_{ij}) = \frac{C^{(12)}}{r_{LJ}^{12}} - \frac{C^{(6)}}{r_{LJ}^{6}}
+V(r_{ij}) = \lambda\left(\frac{C^{(12)}}{r_{LJ}^{12}} - \frac{C^{(6)}}{r_{LJ}^{6}}\right
 ```
 and the force on each atom by
 ```math
-\vec{F}_i = ((\frac{12C^{(12)}}{r_{LJ}^{13}} - \frac{6C^{(6)}}{r_{LJ}^7})(\frac{r_{ij}}{r_{LJ}})^5) \frac{\vec{r_{ij}}}{r_{ij}}
+\vec{F}_i = \lambda\left(\left(\frac{12C^{(12)}}{r_{LJ}^{13}} - \frac{6C^{(6)}}{r_{LJ}^7}\right)\left(\frac{r_{ij}}{r_{LJ}}\right)^5\right) \frac{\vec{r_{ij}}}{r_{ij}}
 ```
 where
 ```math
-r_{LJ} = (\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}
+r_{LJ} = \left(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6\right)^{1/6}
 ```
 and
 ```math
@@ -228,7 +228,7 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.σ6_fac)
+    params = (C6 * σ6, C6, inter.σ6_fac, inter.λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -239,10 +239,10 @@ end
     end
 end
 
-function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac))
+function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
     R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
     R6 = R^6
-    return (((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
+    return λ*(((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
 end
 
 @inline function potential_energy(inter::LennardJonesSoftCoreBeutler,
@@ -261,7 +261,7 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.σ6_fac)
+    params = (C6 * σ6, C6, inter.σ6_fac, inter.λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -271,9 +271,9 @@ end
     end
 end
 
-function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac))
+function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
     R6 = (σ6_fac*(C12/C6))+r^6
-    return ((C12/(R6*R6)) - (C6/(R6)))
+    return λ*((C12/(R6*R6)) - (C6/(R6)))
 end
 
 @doc raw"""
@@ -368,7 +368,7 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6)
+    params = (C6 * σ6, C6, inter.λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -379,16 +379,16 @@ end
     end
 end
 
-function pairwise_force(inter::LennardJonesSoftCoreGapsys, r, (C12, C6))
+function pairwise_force(inter::LennardJonesSoftCoreGapsys, r, (C12, C6, λ))
     R = inter.α*sqrt(cbrt((26*(C12/C6)*(1-inter.λ)/7)))
     r6 = r^6
     invR = inv(R)
     invR2 = invR^2
     invR6 = invR^6
     if r >= R
-        return (((12*C12)/(r6*r6*r))-((6*C6)/(r6*r)))
+        return λ * (((12*C12)/(r6*r6*r))-((6*C6)/(r6*r)))
     elseif r < R
-        return (((-156*C12*(invR6*invR6*invR2)) + (42*C6*(invR2*invR6)))*r +
+        return λ * (((-156*C12*(invR6*invR6*invR2)) + (42*C6*(invR2*invR6)))*r +
                     (168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))
     end
 end
@@ -409,7 +409,7 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6)
+    params = (C6 * σ6, C6, inter.λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -419,16 +419,16 @@ end
     end
 end
 
-function pairwise_pe(inter::LennardJonesSoftCoreGapsys, r, (C12, C6))
+function pairwise_pe(inter::LennardJonesSoftCoreGapsys, r, (C12, C6, λ))
     R = inter.α*sqrt(cbrt((26*(C12/C6)*(1-inter.λ)/7)))
     r6 = r^6
     invR = inv(R)
     invR2 = invR^2
     invR6 = invR^6
     if r >= R
-        return (C12/(r6*r6))-(C6/(r6))
+        return λ * (C12/(r6*r6))-(C6/(r6))
     elseif r < R
-        return ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
+        return λ * ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
                     ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
                     (91*C12*(invR6*invR6)) - (28*C6*(invR6))
     end

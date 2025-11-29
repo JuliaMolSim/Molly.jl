@@ -118,15 +118,15 @@ the appearing and disappearing of atoms.
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
 The potential energy is defined as
 ```math
-V(r_{ij}) = \frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_Q^{1/6}}
+V(r_{ij}) = \lambda\frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_Q^{1/6}}
 ```
 and the force on each atom by
 ```math
-\vec{F}_i = \frac{1}{4\pi\epsilon_0} \frac{q_iq_jr_{ij}^5}{r_Q^{7/6}}\frac{\vec{r_{ij}}}{r_{ij}}
+\vec{F}_i = \lambda\frac{1}{4\pi\epsilon_0} \frac{q_iq_jr_{ij}^5}{r_Q^{7/6}}\frac{\vec{r_{ij}}}{r_{ij}}
 ```
 where
 ```math
-r_{Q} = (\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}})+r_{ij}^6)
+r_{Q} = \left(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}\right)+r_{ij}^6
 ```
 and
 ```math
@@ -194,7 +194,7 @@ end
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
     C6 = 4 * ϵ * σ6
-    params = (ke, qi, qj, C6 * σ6, C6, inter.σ6_fac)
+    params = (ke, qi, qj, C6 * σ6, C6, inter.σ6_fac, inter.λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -205,10 +205,10 @@ end
     end
 end
 
-function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac))
+function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac, λ))
     r3 = r^3
     R = ((σ6_fac*(C12/C6))+(r3*r3))*sqrt(cbrt(((σ6_fac*(C12/C6))+(r3*r3))))
-    return ke * ((qi*qj)/R) * (r3*r*r)
+    return λ * ke * ((qi*qj)/R) * (r3*r*r)
 end
 
 @inline function potential_energy(inter::CoulombSoftCoreBeutler,
@@ -225,7 +225,7 @@ end
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
     C6 = 4 * ϵ * σ6
-    params = (ke, qi, qj, C6 *σ6, C6, inter.σ6_fac)
+    params = (ke, qi, qj, C6 *σ6, C6, inter.σ6_fac, inter.λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -235,9 +235,9 @@ end
     end
 end
 
-function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac))
+function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac, λ))
     R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
-    return ke * ((qi * qj)/R)
+    return λ * ke * ((qi * qj)/R)
 end
 
 @doc raw"""
@@ -321,7 +321,7 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, qi, qj, inter.σQ, inter.σ6_fac)
+    params = (ke, qi, qj, inter.σQ, inter.σ6_fac, inter.λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -332,13 +332,13 @@ end
     end
 end
 
-function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac))
+function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ))
     qij = qi * qj
     R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
     if r >= R
-        return ke * (qij/(r^2))
+        return λ * ke * (qij/(r^2))
     elseif r < R
-        return ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2)))
+        return λ * ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2)))
     end
 end
 
@@ -353,7 +353,7 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, qi, qj, inter.σQ, inter.σ6_fac)
+    params = (ke, qi, qj, inter.σQ, inter.σ6_fac, inter.λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -363,13 +363,13 @@ end
     end
 end
 
-function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac))
+function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ))
     qij = qi * qj
     R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
     if r >= R
-        return ke * (qij/r)
+        return λ * ke * (qij/r)
     elseif r < R
-        return ke * (((qij/(R^3))*(r^2))-(((3*qij)/(R^2))*r)+((3*qij)/R))
+        return λ * ke * (((qij/(R^3))*(r^2))-(((3*qij)/(R^2))*r)+((3*qij)/R))
     end
 end
 
