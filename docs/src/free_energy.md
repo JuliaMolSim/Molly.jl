@@ -233,7 +233,7 @@ ff_dir   = joinpath(data_dir, "force_fields")
 
 ff = MolecularForceField(
     FT,
-    joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
+    joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
 
@@ -354,7 +354,7 @@ ff_dir = joinpath(data_dir, "force_fields")
 
 ff = MolecularForceField(
     FT,
-    joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
+    joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
 
@@ -449,7 +449,7 @@ trajs_dir = "./" # Or wherever you have saved the umbrella simulations
 
 ff = MolecularForceField(
     FT,
-    joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
+    joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
 

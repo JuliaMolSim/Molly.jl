@@ -330,7 +330,6 @@ ff = MolecularForceField(
     T,
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
-    joinpath(data_dir, "force_fields", "his.xml"),
 )
 
 sys = System(
@@ -440,7 +439,6 @@ data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
-    joinpath(data_dir, "force_fields", "his.xml"),
 )
 
 sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff)

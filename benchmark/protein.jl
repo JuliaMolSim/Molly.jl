@@ -15,7 +15,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
     T = (f32 ? Float32 : Float64)
     ff = MolecularForceField(
         T,
-        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
         units=units,
     )
 

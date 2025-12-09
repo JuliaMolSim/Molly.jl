@@ -104,7 +104,6 @@ ff = MolecularForceField(
     T,
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
-    joinpath(data_dir, "force_fields", "his.xml"),
 )
 
 sys = System(

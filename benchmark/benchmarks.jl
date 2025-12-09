@@ -145,7 +145,7 @@ data_dir = normpath(@__DIR__, "..", "data")
 ff_dir = joinpath(data_dir, "force_fields")
 openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
-ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
 velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
 sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; velocities=velocities)
 sim = VelocityVerlet(dt=0.0005u"ps")
