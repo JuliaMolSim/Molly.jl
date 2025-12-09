@@ -223,6 +223,8 @@ function find_improper_match(
     end
 end
 
+element_string_to_symbol(el) = (el == "?" ? :X : Symbol(el))
+
 """
     MolecularForceField(ff_files...; units=true, custom_residue_templates = nothing, custom_renaming_scheme = nothing)
     MolecularForceField(T, ff_files...; units=true)
@@ -274,8 +276,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     weight_14_coulomb, weight_14_lj = one(T), one(T)
     weight_14_coulomb_set, weight_14_lj_set = false, false
     attributes_from_residue = String[]
-    residues = Dict{String,ResidueTemplate}()
-    type_info = Dict{String,Tuple{String,String}}()  # type => (element, class)
+    residues = Dict{String, ResidueTemplate}()
+    patches = Dict{String, ResidueTemplatePatch}()
+    type_info = Dict{String, Tuple{String, String}}()  # type => (element, class)
 
     resname_replacements, atomname_replacements = load_replacements()
     standard_bonds = load_bond_definitions()
@@ -329,6 +332,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     elements = Symbol[]
                     external_bonds_name = String[]
                     externals = Int[]
+                    allowed_patches = String[]
                     extras = BitVector()
                     bonds_by_name = Tuple{String,String}[]
 
@@ -343,11 +347,15 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             push!(externals, 0)
                             tel, tclass = type_info[tp]
                             push!(extras, (tel == "?") || (tclass == "EP"))
-                            push!(elements, tel == "?" ? :X : Symbol(tel))
+                            push!(elements, element_string_to_symbol(tel))
                         elseif re.name == "Bond"
                             push!(bonds_by_name, (re["atomName1"], re["atomName2"]))
                         elseif re.name == "ExternalBond"
                             push!(external_bonds_name, re["atomName"])
+                        elseif re.name == "AllowPatch"
+                            push!(allowed_patches, re["name"])
+                        elseif re.name == "VirtualSite"
+                            throw(ArgumentError("virtual sites not currently supported"))
                         end
                     end
 
@@ -362,7 +370,50 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             externals[name_to_idx[nm]] += 1
                         end
                     end
-                    residues[rname] = ResidueTemplate(rname, atoms, elements, types, bonds, externals, charges, extras)
+                    residues[rname] = ResidueTemplate(rname, atoms, elements, types, bonds,
+                                                      externals, allowed_patches, charges, extras)
+                end
+
+            elseif entry_name == "Patches"
+                for patch in eachelement(entry)
+                    pname = patch["name"]
+                    if haskey(patch, "residues") && patch["residues"] != "1"
+                        @warn "Residue patches altering multiple templates not currently " *
+                              "supported; ignoring patch $pname"
+                        continue
+                    end
+
+                    add_atoms = Tuple{String, String, T}[]
+                    change_atoms = Tuple{String, String, T}[]
+                    remove_atoms = String[]
+                    add_bonds = Tuple{String, String}[]
+                    remove_bonds = Tuple{String, String}[]
+                    add_external_bonds = String[]
+                    remove_external_bonds = String[]
+                    apply_to_residues = String[]
+
+                    for pa in eachelement(patch)
+                        if pa.name == "AddAtom"
+                            push!(add_atoms, (pa["name"], pa["type"], parse(T, pa["charge"])))
+                        elseif pa.name == "ChangeAtom"
+                            push!(change_atoms, (pa["name"], pa["type"], parse(T, pa["charge"])))
+                        elseif pa.name == "RemoveAtom"
+                            push!(remove_atoms, pa["name"])
+                        elseif pa.name == "AddBond"
+                            push!(add_bonds, (pa["atomName1"], pa["atomName2"]))
+                        elseif pa.name == "RemoveBond"
+                            push!(remove_bonds, (pa["atomName1"], pa["atomName2"]))
+                        elseif pa.name == "AddExternalBond"
+                            push!(add_external_bonds, pa["atomName"])
+                        elseif pa.name == "RemoveExternalBond"
+                            push!(remove_external_bonds, pa["atomName"])
+                        elseif pa.name == "ApplyToResidue"
+                            push!(apply_to_residues, pa["name"])
+                        end
+                    end
+                    patches[pname] = ResidueTemplatePatch(pname, add_atoms, change_atoms,
+                                        remove_atoms, add_bonds, remove_bonds, add_external_bonds,
+                                        remove_external_bonds, apply_to_residues)
                 end
 
             elseif entry_name == "HarmonicBondForce"
@@ -453,8 +504,6 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     end
                 end
 
-            elseif entry_name == "Patches"
-                @warn "Residue patches not currently supported; ignoring"
             elseif entry_name == "Include"
                 @warn "File includes not currently supported; ignoring"
             elseif entry_name in ("RBTorsionForce","CMAPTorsionForce","GBSAOBCForce",
@@ -462,6 +511,40 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                                   "CustomNonbondedForce","CustomGBForce","CustomHbondForce",
                                   "CustomManyParticleForce","LennardJonesForce")
                 @warn "$entry_name not currently supported; ignoring"
+            end
+        end
+    end
+
+    # Apply residue patches
+    for res_name in collect(keys(residues)) # collect required since residues changes
+        patches_to_apply = copy(residues[res_name].allowed_patches)
+        for patch_name in keys(patches)
+            for rn in patches[patch_name].apply_to_residues
+                if rn == res_name
+                    push!(patches_to_apply, patch_name)
+                    break
+                end
+            end
+        end
+        patches_to_apply = collect(Set(patches_to_apply))
+
+        for patch_name in patches_to_apply
+            patch_res_name = ""
+            suffix = 0
+            free_name_found = false
+            while !free_name_found
+                suffix_str = (iszero(suffix) ? "" : "_$suffix")
+                patch_res_name = "$(res_name)_$patch_name$suffix_str"
+                if !haskey(residues, patch_res_name)
+                    free_name_found = true
+                end
+                suffix += 1
+            end
+
+            patched_res = apply_residue_patch(residues[res_name], patches[patch_name],
+                                              patch_res_name, res_name, patch_name, atom_types)
+            if !isnothing(patched_res) # Invalid patches warn and return nothing
+                residues[patch_res_name] = patched_res
             end
         end
     end
@@ -605,5 +688,5 @@ end
 
 function Base.show(io::IO, ff::MolecularForceField)
     print(io, "MolecularForceField with ", length(ff.atom_types), " atom types and ",
-            length(ff.residues), " residues.")
+            length(ff.residues), " residue templates")
 end

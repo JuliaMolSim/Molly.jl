@@ -5,10 +5,23 @@ struct ResidueTemplate{T}
     atoms::Vector{String}                 # atom names
     elements::Vector{Symbol}              # element symbols
     types::Vector{String}                 # atom types
-    bonds::Vector{Tuple{Int,Int}}         # internal bonds
+    bonds::Vector{Tuple{Int, Int}}        # internal bonds
     external_bonds::Vector{Int}           # count of external connections per atom
+    allowed_patches::Vector{String}
     charges::Vector{T}
     extras::BitVector                     # marks extra particles
+end
+
+struct ResidueTemplatePatch{T}
+    pname::String
+    add_atoms::Vector{Tuple{String, String, T}}
+    change_atoms::Vector{Tuple{String, String, T}}
+    remove_atoms::Vector{String}
+    add_bonds::Vector{Tuple{String, String}}
+    remove_bonds::Vector{Tuple{String, String}}
+    add_external_bonds::Vector{String}
+    remove_external_bonds::Vector{String}
+    apply_to_residues::Vector{String}
 end
 
 # Equivalent to the struct above, but this represents a residue read from the 
@@ -690,4 +703,145 @@ function build_impropers(adj::Vector{Vector{Int}})
         end
     end
     return top_impropers
+end
+
+function find_bond_ind(i, j, bonds)
+    return findfirst(bij -> (bij[1] == i && bij[2] == j) || (bij[1] == j && bij[2] == i), bonds)
+end
+
+function shift_bond_ind(bi, i)
+    if bi < i
+        return bi
+    else # bi > i due to previous checks
+        return bi - 1
+    end
+end
+
+shift_bond_inds(bij, i) = (shift_bond_ind(bij[1], i), shift_bond_ind(bij[2], i))
+
+function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_name, atom_types)
+    atoms           = copy(residue.atoms)
+    elements        = copy(residue.elements)
+    types           = copy(residue.types)
+    bonds           = copy(residue.bonds)
+    external_bonds  = copy(residue.external_bonds)
+    partial_charges = copy(residue.charges)
+    extras          = copy(residue.extras)
+
+    for (atom_name, atom_type, partial_charge) in patch.add_atoms
+        i = findfirst(isequal(atom_name), atoms)
+        if !isnothing(i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name already present"
+            return nothing
+        end
+        el = atom_types[atom_type].element
+        push!(atoms, atom_name)
+        push!(elements, element_string_to_symbol(el))
+        push!(types, atom_type)
+        push!(external_bonds, 0)
+        push!(partial_charges, partial_charge)
+        push!(extras, 0)
+    end
+
+    for (atom_name, atom_type, partial_charge) in patch.change_atoms
+        i = findfirst(isequal(atom_name), atoms)
+        if isnothing(i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name missing"
+            return nothing
+        end
+        types[i] = atom_type
+        partial_charges[i] = partial_charge
+    end
+
+    for (atom_name_1, atom_name_2) in patch.remove_bonds
+        # This comes before remove_atoms as one of the atoms may be removed later
+        i = findfirst(isequal(atom_name_1), atoms)
+        if isnothing(i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name_1 missing"
+            return nothing
+        end
+        j = findfirst(isequal(atom_name_2), atoms)
+        if isnothing(j)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name_2 missing"
+            return nothing
+        end
+        bond_i = find_bond_ind(i, j, bonds)
+        if isnothing(bond_i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "bond between $atom_name_1 and $atom_name_2 missing"
+            return nothing
+        end
+        deleteat!(bonds, bond_i)
+    end
+
+    for atom_name in patch.remove_atoms
+        i = findfirst(isequal(atom_name), atoms)
+        if isnothing(i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name missing"
+            return nothing
+        end
+        deleteat!(atoms, i)
+        deleteat!(elements, i)
+        deleteat!(types, i)
+        deleteat!(external_bonds, i)
+        deleteat!(partial_charges, i)
+        deleteat!(extras, i)
+        if any(bij -> (bij[1] == i || bij[2] == i), bonds)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name can't be removed as it is part of a bond"
+        end
+        bonds .= shift_bond_inds.(bonds, i)
+    end
+
+    for (atom_name_1, atom_name_2) in patch.add_bonds
+        i = findfirst(isequal(atom_name_1), atoms)
+        if isnothing(i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name_1 missing"
+            return nothing
+        end
+        j = findfirst(isequal(atom_name_2), atoms)
+        if isnothing(j)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name_2 missing"
+            return nothing
+        end
+        bond_i = find_bond_ind(i, j, bonds)
+        if !isnothing(bond_i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "bond between $atom_name_1 and $atom_name_2 already present"
+            return nothing
+        end
+        push!(bonds, (i, j))
+    end
+
+    for atom_name in patch.add_external_bonds
+        i = findfirst(isequal(atom_name), atoms)
+        if isnothing(i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name missing"
+            return nothing
+        end
+        external_bonds[i] += 1
+    end
+
+    for atom_name in patch.remove_external_bonds
+        i = findfirst(isequal(atom_name), atoms)
+        if isnothing(i)
+            @warn "Can't apply patch $patch_name to residue template $res_name: " *
+                  "atom name $atom_name missing"
+            return nothing
+        end
+        external_bonds[i] = max(external_bonds[i] - 1, 0)
+    end
+
+    return ResidueTemplate(
+        patch_res_name, atoms, elements, types, bonds, external_bonds,
+        String[], partial_charges, extras,
+    )
 end
