@@ -826,148 +826,7 @@ function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarlo
         return false
     end
 
-    Pxx, Pyy, Pzz = barostat.pressure[1,1], barostat.pressure[2,2], barostat.pressure[3,3]
-    kT = energy_remove_mol(sys.k * barostat.temperature)
-    n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
-    recompute_forces = false
-    old_coords = similar(sys.coords)
-
-    if barostat.coupling_type == :isotropic
-        for attempt_n in 1:barostat.n_iterations
-            E  = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-            V  = volume(sys.boundary)
-            dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
-
-            v_scale = (V + dV)/V
-            l_scale = cbrt(v_scale)
-            old_coords  .= sys.coords
-            old_boundary = sys.boundary
-            scale_coords!(sys, SMatrix{D, D, T}([l_scale 0 0;
-                                                 0 l_scale 0;
-                                                 0 0 l_scale]))
-
-            if barostat.trial_find_neighbors
-                neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                 n_threads=n_threads)
-            else
-                # Assume neighbors are unchanged by the change in coordinates
-                # This may not be valid for larger changes
-                neighbors_trial = neighbors
-            end
-
-            E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
-            dE = energy_remove_mol(E_trial - E)
-
-            dW = dE + uconvert(unit(dE), tr(barostat.pressure) * dV / 3) -
-                                                        n_molecules * kT * log(v_scale)
-
-            if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
-                recompute_forces = true
-                barostat.n_accepted += 1
-            else
-                sys.coords .= old_coords
-                sys.boundary = old_boundary
-            end
-            barostat.n_attempted += 1
-        end
-    elseif barostat.coupling_type == :semiisotropic
-        for attempt_n in 1:barostat.n_iterations
-            E         = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-            V         = volume(sys.boundary)
-            dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
-            V_plus_dV = V + dV
-
-            v_scale = V_plus_dV/V
-
-            w1, w2 = rand(rng, T), rand(rng, T)
-            s = w1+w2
-            w1 = w1/s
-            w2 = w2/s
-
-            l_scale_xy = v_scale^w1
-            l_scale_z  = v_scale^w2
-
-            old_coords  .= sys.coords
-            old_boundary = sys.boundary
-            scale_coords!(sys, SMatrix{D, D, T}([l_scale_xy 0 0;
-                                                 0 l_scale_xy 0;
-                                                 0 0 l_scale_z]))
-
-            if barostat.trial_find_neighbors
-                neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                 n_threads=n_threads)
-            else
-                # Assume neighbors are unchanged by the change in coordinates
-                # This may not be valid for larger changes
-                neighbors_trial = neighbors
-            end
-
-            E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
-            dE = energy_remove_mol(E_trial - E)
-
-            work = ((w1/2)*Pxx + (w1/2)*Pyy + w2*Pzz) * V_plus_dV * log(v_scale)
-
-            dW = dE + uconvert(unit(dE), work) - n_molecules * kT * log(v_scale)
-
-            if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
-                recompute_forces = true
-                barostat.n_accepted += 1
-            else
-                sys.coords .= old_coords
-                sys.boundary = old_boundary
-            end
-            barostat.n_attempted += 1
-        end
-    elseif barostat.coupling_type == :anisotropic
-        for attempt_n in 1:barostat.n_iterations
-            E         = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-            V         = volume(sys.boundary)
-            dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
-            V_plus_dV = V + dV
-
-            v_scale = V_plus_dV / V
-            w1, w2, w3 = rand(rng, T), rand(rng, T), rand(rng, T)
-
-            s = w1+w2+w3
-            w1 = w1/s
-            w2 = w2/s
-            w3 = w3/s
-
-            l_scale_x = v_scale^w1
-            l_scale_y = v_scale^w2
-            l_scale_z = v_scale^w3
-
-            old_coords .= sys.coords
-            old_boundary = sys.boundary
-            scale_coords!(sys, SMatrix{D, D, T}([l_scale_x 0 0;
-                                                 0 l_scale_y 0;
-                                                 0 0 l_scale_z]))
-
-            if barostat.trial_find_neighbors
-                neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                 n_threads=n_threads)
-            else
-                # Assume neighbors are unchanged by the change in coordinates
-                # This may not be valid for larger changes
-                neighbors_trial = neighbors
-            end
-
-            E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
-            dE = energy_remove_mol(E_trial - E)
-
-            work = (w1*Pxx + w2*Pyy + w3*Pzz) * V_plus_dV * log(v_scale)
-            dW = dE + uconvert(unit(dE), work) - n_molecules * kT * log(v_scale)
-
-            if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
-                recompute_forces = true
-                barostat.n_accepted += 1
-            else
-                sys.coords .= old_coords
-                sys.boundary = old_boundary
-            end
-            barostat.n_attempted += 1
-        end
-    end
+    recompute_forces = apply_coupling_mc!(sys, barostat, Val(barostat.coupling_type), neighbors, step_n; n_threads=n_threads, rng=rng)
 
     if barostat.n_attempted >= 10
         V_now = volume(sys.boundary)
@@ -981,6 +840,176 @@ function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarlo
         barostat.n_accepted  = 0
     end
 
+    return recompute_forces
+end
+
+function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic}, neighbors, step_n::Integer;
+                            n_threads::Integer=Threads.nthreads(), rng=Random.default_rng()) where {D, T}
+
+    kT = energy_remove_mol(sys.k * barostat.temperature)
+    n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
+    recompute_forces = false
+    old_coords = similar(sys.coords)
+
+    for attempt_n in 1:barostat.n_iterations
+        E  = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+        V  = volume(sys.boundary)
+        dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
+
+        v_scale = (V + dV)/V
+        l_scale = cbrt(v_scale)
+        old_coords  .= sys.coords
+        old_boundary = sys.boundary
+        scale_matrix = SMatrix{D, D, T}([l_scale zero(T) zero(T);
+                                            zero(T) l_scale zero(T);
+                                            zero(T) zero(T) l_scale])
+        scale_coords!(sys, scale_matrix)
+
+        if barostat.trial_find_neighbors
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                                n_threads=n_threads)
+        else
+            # Assume neighbors are unchanged by the change in coordinates
+            # This may not be valid for larger changes
+            neighbors_trial = neighbors
+        end
+
+        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+        dE = energy_remove_mol(E_trial - E)
+
+        dW = dE + uconvert(unit(dE), tr(barostat.pressure) * dV / 3) -
+                                                    n_molecules * kT * log(v_scale)
+
+        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+            recompute_forces = true
+            barostat.n_accepted += 1
+        else
+            sys.coords .= old_coords
+            sys.boundary = old_boundary
+        end
+        barostat.n_attempted += 1
+    end
+    return recompute_forces
+end
+
+function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotropic}, neighbors, step_n::Integer;
+                            n_threads::Integer=Threads.nthreads(), rng=Random.default_rng()) where {D, T}
+
+    Pxx, Pyy, Pzz = barostat.pressure[1,1], barostat.pressure[2,2], barostat.pressure[3,3]
+    kT = energy_remove_mol(sys.k * barostat.temperature)
+    n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
+    recompute_forces = false
+    old_coords = similar(sys.coords)
+
+    for attempt_n in 1:barostat.n_iterations
+        E         = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+        V         = volume(sys.boundary)
+        dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
+        V_plus_dV = V + dV
+
+        v_scale = V_plus_dV/V
+
+        w1, w2 = rand(rng, T), rand(rng, T)
+        s = w1+w2
+        w1 = w1/s
+        w2 = w2/s
+
+        l_scale_xy = v_scale^w1
+        l_scale_z  = v_scale^w2
+
+        old_coords  .= sys.coords
+        old_boundary = sys.boundary
+
+        scale_coords!(sys, SMatrix{D, D, T}([l_scale_xy zero(T) zero(T);
+                                             zero(T) l_scale_xy zero(T);
+                                             zero(T) zero(T) l_scale_z]))
+
+        if barostat.trial_find_neighbors
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                                n_threads=n_threads)
+        else
+            # Assume neighbors are unchanged by the change in coordinates
+            # This may not be valid for larger changes
+            neighbors_trial = neighbors
+        end
+
+        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+        dE = energy_remove_mol(E_trial - E)
+
+        work = ((w1/2)*Pxx + (w1/2)*Pyy + w2*Pzz) * V_plus_dV * log(v_scale)
+
+        dW = dE + uconvert(unit(dE), work) - n_molecules * kT * log(v_scale)
+
+        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+            recompute_forces = true
+            barostat.n_accepted += 1
+        else
+            sys.coords .= old_coords
+            sys.boundary = old_boundary
+        end
+        barostat.n_attempted += 1
+    end
+    return recompute_forces
+end
+
+function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotropic}, neighbors, step_n::Integer;
+                            n_threads::Integer=Threads.nthreads(), rng=Random.default_rng()) where {D, T}
+
+    Pxx, Pyy, Pzz = barostat.pressure[1,1], barostat.pressure[2,2], barostat.pressure[3,3]
+    kT = energy_remove_mol(sys.k * barostat.temperature)
+    n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
+    recompute_forces = false
+    old_coords = similar(sys.coords)
+
+    for attempt_n in 1:barostat.n_iterations
+        E         = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+        V         = volume(sys.boundary)
+        dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
+        V_plus_dV = V + dV
+
+        v_scale = V_plus_dV / V
+        w1, w2, w3 = rand(rng, T), rand(rng, T), rand(rng, T)
+
+        s = w1+w2+w3
+        w1 = w1/s
+        w2 = w2/s
+        w3 = w3/s
+
+        l_scale_x = v_scale^w1
+        l_scale_y = v_scale^w2
+        l_scale_z = v_scale^w3
+
+        old_coords .= sys.coords
+        old_boundary = sys.boundary
+
+        scale_coords!(sys, SMatrix{D, D, T}([l_scale_x zero(T)   zero(T);
+                                             zero(T)   l_scale_y zero(T);
+                                             zero(T)   zero(T)   l_scale_z]))
+
+        if barostat.trial_find_neighbors
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                                n_threads=n_threads)
+        else
+            # Assume neighbors are unchanged by the change in coordinates
+            # This may not be valid for larger changes
+            neighbors_trial = neighbors
+        end
+
+        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+        dE = energy_remove_mol(E_trial - E)
+
+        work = (w1*Pxx + w2*Pyy + w3*Pzz) * V_plus_dV * log(v_scale)
+        dW = dE + uconvert(unit(dE), work) - n_molecules * kT * log(v_scale)
+
+        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+            recompute_forces = true
+            barostat.n_accepted += 1
+        else
+            sys.coords .= old_coords
+            sys.boundary = old_boundary
+        end
+        barostat.n_attempted += 1
+    end
     return recompute_forces
 end
 
