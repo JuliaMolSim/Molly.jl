@@ -724,7 +724,9 @@ Note that the barostat can change the bounding box of the system.
 Does not currently work with shear stresses, the anisotropic variant only applies
 independent linear scaling of the box vectors.
 If shear deformation is required the [`BerendsenBarostat`](@ref) or,
-preferrably, the [`CRescaleBarostat`](@ref) should be used instead.
+preferably, the [`CRescaleBarostat`](@ref) should be used instead.
+Due to the stochastic nature of the Monte Carlo acceptance criteria, this barostat
+may not propagate gradients correctly with differentiable simulation.
 """
 mutable struct MonteCarloBarostat{T, P, K, V}
     pressure::P
@@ -826,7 +828,9 @@ function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarlo
         return false
     end
 
-    recompute_forces = apply_coupling_mc!(sys, barostat, Val(barostat.coupling_type), neighbors, step_n; n_threads=n_threads, rng=rng)
+    # Separate function avoids Enzyme error
+    recompute_forces = apply_coupling_mc!(sys, barostat, Val(barostat.coupling_type), neighbors,
+                                          step_n; n_threads=n_threads, rng=rng)
 
     if barostat.n_attempted >= 10
         V_now = volume(sys.boundary)
