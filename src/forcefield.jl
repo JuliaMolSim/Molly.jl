@@ -98,6 +98,7 @@ struct TorsionRule{T,E}
     params::PeriodicTorsionType{T,E}
     specificity::UInt8         # TYPE=2, CLASS=1, WILD=0, used to bias towards specific definitions
 end
+
 struct TorsionResolver{T,E}
     rules::Vector{TorsionRule{T,E}}
 

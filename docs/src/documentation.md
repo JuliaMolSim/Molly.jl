@@ -427,6 +427,31 @@ sys_res = add_position_restraints(
 )
 ```
 
+### Supported OpenMM force field XML tags
+
+See the [OpenMM documentation](https://docs.openmm.org/latest/userguide/application/06_creating_ffs.html#writing-the-xml-file) for the available tags.
+The following tags are supported:
+- `<AtomTypes>`: both atom types and atom classes are supported
+- `<Residues>`: `<VirtualSite>` tags are not supported
+- `<Patches>`: patches that apply to multiple residue templates and multiple patches acting on one residue template are not supported
+- `<HarmonicBondForce>`
+- `<HarmonicAngleForce>`
+- `<PeriodicTorsionForce>`: both `<Proper>` and `<Improper>` tags are supported
+- `<NonbondedForce>`: `<UseAttributeFromResidue name="charge"/>` should be present, other `<UseAttributeFromResidue>` tags are not supported
+
+The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
+- `<RBTorsionForce>`
+- `<CMAPTorsionForce>`
+- `<GBSAOBCForce>`
+- `<CustomBondForce>`
+- `<CustomAngleForce>`
+- `<CustomTorsionForce>`
+- `<CustomNonbondedForce>`
+- `<CustomGBForce>`
+- `<CustomHbondForce>`
+- `<CustomManyParticleForce>`
+- `<LennardJonesForce>`
+
 ## Enhanced sampling
 
 Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`TemperatureREMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
