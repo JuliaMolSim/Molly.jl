@@ -17,7 +17,7 @@ makedocs(
         "Exercises"                 => "exercises.md",
         "Publications"              => "publications.md",
         "Related software"          => "related.md",
-        "Development"               => "development.md",
+        "Developer documentation"   => "developer.md",
         "API"                       => "api.md",
     ],
 )
