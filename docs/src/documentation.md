@@ -363,28 +363,24 @@ The above 5 ps simulation looks something like this when you view it in PyMOL:
 The system setup procedure is tested against OpenMM, following their template matching procedure
 to assign force field parameters to the structures read from the structure file. Some margin in 
 residue and atom naming is allowed, as the naming present in the structure files is queried against
-a renaming dictionary that contains common alternative names present in pdb files, which you can consult
-in `src/data/force_fields/pdbNames.xml`. You can extend this dictionary yourself, if you really want
+a renaming dictionary that contains common alternative names present in PDB files, which you can consult
+in [pdbNames.xml](https://github.com/JuliaMolSim/Molly.jl/blob/master/data/force_fields/pdbNames.xml). You can extend this dictionary yourself, if you really want
 to use your own naming; or you can build a standalone renaming dictionary following the same structure
 as the one mentioned above, and pass it as a keyword argument `custom_renaming_scheme` when you build
 your [`MolecularForceField`](@ref).
 The bonding topology of the system is automatically inferred for standard residues (protein and nucleic
 acids, plus water). If your simulation contains other types of molecules, you must provide the topology 
 for them. You can do this either by using a structure file format with explicit bond definitions,
-such as `mol2` or `mmCIF`, by defining the appropriate `CONNECT` records in a `pdb` file, or by providing
-a custom topology template in a format equivalent to the one found in `/src/data/force_fields/residues.xml`. 
-Residue patches, virtual sites, file includes and any force types other than `HarmonicBondForce`/`HarmonicAngleForce`/`PeriodicTorsionForce`/`NonbondedForce` are currently ignored.
+such as Mol2 or mmCIF, by defining the appropriate `CONECT` records in a PDB file, or by providing
+a custom topology template in a format equivalent to the one found in [residues.xml](https://github.com/JuliaMolSim/Molly.jl/blob/master/data/force_fields/residues.xml). 
 
 !!! tip "Obtaining compatible structure files"
 
     The following tips may help you to read in a file correctly and without errors:
 
     * Make sure there are no missing residues or heavy atoms. Tools such as [MODELLER](https://salilab.org/modeller) and [SCWRL4](http://dunbrack.fccc.edu/lab/scwrl) can fix these issues.
-    * Make sure that the naming in your structure file is either supported by your custom renaming convention, or does not use
-    names that deviate widely from the conventional residue namings.
-    * Make sure your structure file provides explicit chemical elements per particle or that at least the chemical element is
-    easily inferrable from the atom names, as a fundamental part of template matching for force field parameters assignement
-    revolves around comparing the molecular formulas of the residues and potential templates.
+    * Make sure that the naming in your structure file is either supported by your custom renaming convention, or does not use names that deviate widely from the conventional residue namings.
+    * Make sure your structure file provides explicit chemical elements per particle or that at least the chemical element is easily inferrable from the atom names, as a fundamental part of template matching for force field parameters assignment involves comparing the molecular formulas of the residues and potential templates.
 
     Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
 
@@ -1559,41 +1555,6 @@ The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [
 When using a neighbor finder you should in general also use an interaction cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor finder distance.
 The difference between the two should be larger than an atom can move in the time of the `n_steps` defined by the neighbor finder.
 The exception is [`GPUNeighborFinder`](@ref), which uses the algorithm from [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413) to avoid calculating a neighbor list and should have `dist_cutoff` set to the interaction cutoff distance.
-
-To define your own neighbor finder, first define the `struct`:
-```julia
-struct MyNeighborFinder
-    eligible::BitArray{2}
-    special::BitArray{2}
-    n_steps::Int
-    # Any other properties, e.g. a distance cutoff
-end
-```
-Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
-Then, define the neighbor finding function that is called every step by the simulator:
-```julia
-function Molly.find_neighbors(sys,
-                              nf::MyNeighborFinder,
-                              current_neighbors=nothing,
-                              step_n::Integer=0,
-                              force_recompute::Bool=false;
-                              n_threads::Integer=Threads.nthreads())
-    if force_recompute || step_n % nf.n_steps == 0
-        if isnothing(current_neighbors)
-            neighbors = NeighborList()
-        else
-            neighbors = current_neighbors
-        end
-        empty!(neighbors)
-        # Add to neighbors, for example
-        push!(neighbors, (1, 2, false)) # atom i, atom j and whether they are in a special interaction
-        return neighbors
-    else
-        return current_neighbors
-    end
-end
-```
-To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`System`](@ref).
 
 ## Analysis
 

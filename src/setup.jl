@@ -439,7 +439,9 @@ function System(coord_file::AbstractString,
                     boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, (units ? u"nm" : NoUnits)) :
                     boundary
     if minimum(box_sides(boundary_used)) < (2 * dist_cutoff)
-        @warn "Minimum box side is less than 2 * dist_cutoff; this can be unphysical"
+        @warn "Minimum box side is less than 2 * dist_cutoff, this will lead to unphysical " *
+              "simulations since multiple copies of the same atom are seen but only one is " *
+              "considered due to the minimum image convention"
     end
 
     # Units and coordinates
