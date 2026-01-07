@@ -447,6 +447,7 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
 - `<LennardJonesForce>`
+- `<Script>`
 
 ## Enhanced sampling
 
