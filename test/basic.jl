@@ -239,36 +239,35 @@ end
     end
 end
 
-@testset "Different Formats" begin
-
+@testset "Structure file formats" begin
     ff = MolecularForceField(
-        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "gaff.xml", "imatinib.xml", "imatinib_frcmod.xml"])...;
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "gaff.xml", "imatinib.xml",
+                           "imatinib_frcmod.xml"])...;
         units=true,
     )
-
     ff_custom = MolecularForceField(
-        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "gaff.xml", "imatinib.xml", "imatinib_frcmod.xml"])...;
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "gaff.xml", "imatinib.xml",
+                           "imatinib_frcmod.xml"])...;
         units=true,
-        custom_residue_templates = joinpath(data_dir, "imatinib_topo.xml")
+        custom_residue_templates=joinpath(data_dir, "imatinib_topo.xml"),
     )
-
     boundary = CubicBoundary(Inf*u"nm")
-    sys_mol2         = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary = boundary)
-    sys_pdb_connect  = System(joinpath(data_dir, "imatinib_conect.pdb"),  ff; boundary = boundary)
-    sys_pdb          = System(joinpath(data_dir, "imatinib.pdb"),  ff_custom; boundary = boundary)
 
-    @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
-    @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
-    @test_throws ArgumentError System(joinpath(data_dir, "imatinib.pdb"),  ff; boundary = boundary)
+    # Suppress MOL2 invalid sybyl type warning
+    @suppress_err begin
+        sys_mol2         = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary=boundary)
+        sys_pdb_connect  = System(joinpath(data_dir, "imatinib_conect.pdb"), ff; boundary=boundary)
+        sys_pdb          = System(joinpath(data_dir, "imatinib.pdb"), ff_custom; boundary=boundary)
 
+        @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
+        @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
+        @test_throws ArgumentError System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
+    end
 end
 
-@testset "System Setup" begin
-
+@testset "System setup" begin
     FT = Float64
     AT = Array
-
-    dat_dir = joinpath(data_dir, "OpenMM_Refs/")
 
     ff = MolecularForceField(
         FT,
@@ -276,56 +275,59 @@ end
         units=true,
     )
 
-    names = ("a-synuclein_1",
-             "barn_bar",
-             "bpti",
-             "cd2_cd58",
-             "cole7_im7",
-             "drkN_SH3_1",
-             "gb3",
-             "hewl",
-             "NTail_1",
-             "PaaA2_1",
-             "sgpb_omtky3",
-             "ubiquitin")
+    struc_names = [
+        "a-synuclein_1",
+        "barn_bar",
+        "bpti",
+        "cd2_cd58",
+        "cole7_im7",
+        "drkN_SH3_1",
+        "gb3",
+        "hewl",
+        "NTail_1",
+        "PaaA2_1",
+        "sgpb_omtky3",
+        "ubiquitin",
+    ]
 
-    for name in names
+    for struc_name in struc_names
+        dat_file = joinpath(data_dir, "openmm_refs", "$struc_name.dat")
+        pdb_file = joinpath(data_dir, "openmm_refs", "$struc_name.pdb")
 
-        dat_file = joinpath(dat_dir, "$(name).dat")
-        pdb_file = joinpath(dat_dir, "$(name).pdb")
+        sys = System(
+            pdb_file,
+            ff;
+            array_type=AT,
+            nonbonded_method=:pme,
+            approximate_pme=false,
+            disulfide_bonds=true,
+        )
 
-        sys = System(pdb_file, ff;
-             array_type = AT,
-             nonbonded_method = :pme,
-             approximate_pme  = false,
-             disulfide_bonds  = true)
-
-        if name == "sgpb_omtky3"
-
-            @test_throws ArgumentError System(pdb_file, ff;
-                                              array_type = AT,
-                                              nonbonded_method = :pme,
-                                              approximate_pme  = false,
-                                              disulfide_bonds  = false) # Catch if disulfide bonds are not added properly
-
+        if struc_name == "sgpb_omtky3"
+            # Catch if disulfide bonds are not added properly
+            @test_throws ArgumentError System(
+                pdb_file,
+                ff;
+                array_type = AT,
+                nonbonded_method=:pme,
+                approximate_pme=false,
+                disulfide_bonds=false,
+            )
         end
 
-        F_opeMM = SVector{3}[]
+        fs_openmm = SVector{3, FT}[]
         open(dat_file, "r") do f
             for line in readlines(f)
-                fields = split(line, ",")
-                force = SVector{3}([parse(FT, split(val, " ")[1])*u"kJ * mol^-1 * nm^-1" for val in fields])
-                push!(F_opeMM, force)
+                cols = split(line, ",")
+                f = SVector{3, FT}([parse(FT, split(val, " ")[1])*u"kJ * mol^-1 * nm^-1"
+                                for val in cols])
+                push!(fs_openmm, f)
             end
         end
 
-        F_Molly = forces(sys)
-
-        diff = mean(norm.(F_Molly .- F_opeMM))
+        diff = mean(norm.(forces(sys) .- fs_openmm))
         @test diff < FT(0.15)u"kJ * mol^-1 * nm^-1"
-
     end
-    
 end
 
 @testset "Neighbor lists" begin

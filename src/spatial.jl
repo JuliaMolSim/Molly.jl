@@ -642,12 +642,15 @@ function unwrap_global(coords::AbstractVector{<:SVector{D}},
     adj = [Int[] for _ in 1:N]
     if topology !== nothing
         @inbounds for (i32,j32) in topology.bonded_atoms
-            i = Int(i32); j = Int(j32); push!(adj[i], j); push!(adj[j], i)
+            i, j = Int(i32), Int(j32)
+            push!(adj[i], j)
+            push!(adj[j], i)
         end
         if neighbors !== nothing
             @inbounds for ni in eachindex(neighbors)
                 i, j = neighbors[ni][1], neighbors[ni][2]
-                push!(adj[i], j); push!(adj[j], i)
+                push!(adj[i], j)
+                push!(adj[j], i)
             end
         end
     end
@@ -661,7 +664,8 @@ function unwrap_global(coords::AbstractVector{<:SVector{D}},
         visited[seed] = true
         stack = Int[seed]
         while !isempty(stack)
-            i = pop!(stack); fi = f[i]; ui = u[i]
+            i = pop!(stack)
+            fi, ui = f[i], u[i]
             for j in adj[i]
                 visited[j] && continue
                 df = f[j] - fi

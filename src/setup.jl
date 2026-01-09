@@ -124,8 +124,10 @@ function place_diatomics(n_molecules::Integer,
     return wrap_coords.([coords...], (boundary,))
 end
 
-
-get_res_id(res) = (Chemfiles.id(res), ("chainid" in Chemfiles.list_properties(res)) ? Chemfiles.property(res, "chainid") : "X")
+get_res_id(res) = (
+    Chemfiles.id(res),
+    "chainid" in Chemfiles.list_properties(res) ? Chemfiles.property(res, "chainid") : "X",
+)
 
 # Return the residue name with N or C added for terminal residues
 function residue_name(res, res_id_to_standard::Dict, rename_terminal_res::Bool=true)
@@ -169,23 +171,20 @@ function chemfiles_name(top, ai)
 end
 
 # Creates a Dict representation of the system Chains -> Residues -> Graphs
-# Useful as to have all the necessary data in one hashable object. Also ensures
-# that the correct names are used for downstream template matching. 
-function canonicalize_system(top,
-                             resname_replacements, atomname_replacements)
-
+# It is useful to have all the necessary data in one hashable object
+# It also ensures that the correct names are used for downstream template matching
+function canonicalize_system(top, resname_replacements, atomname_replacements)
     canon_system = Dict{String, Dict{Int, ResidueGraph}}()
 
     for ri in 1:Chemfiles.count_residues(top)
-
-        res      = chemfiles_residue(top, ri-1)
-        res_id   = get_res_id(res)
+        res = chemfiles_residue(top, ri-1)
+        res_id = get_res_id(res)
         res_name = Chemfiles.name(res)
-        res_name = haskey(resname_replacements, res_name) ? resname_replacements[res_name] : res_name
+        res_name = (haskey(resname_replacements, res_name) ? resname_replacements[res_name] : res_name)
         atom_inds_zero = Int.(Chemfiles.atoms(res))
-        atom_inds      = atom_inds_zero .+ 1
-        atom_names     = Molly.chemfiles_name.((top,), atom_inds_zero)
-        atom_elements  = Symbol[]
+        atom_inds = atom_inds_zero .+ 1
+        atom_names = Molly.chemfiles_name.((top,), atom_inds_zero)
+        atom_elements = Symbol[]
         for atom_idx in atom_inds_zero
             atom = Chemfiles.Atom(top, atom_idx)
             an = Int(Chemfiles.atomic_number(atom))
@@ -197,8 +196,9 @@ function canonicalize_system(top,
             end
         end
         if haskey(atomname_replacements, res_name)
-            lookup     = atomname_replacements[res_name]
-            atom_names = [haskey(lookup, a) ? (lookup[a], aidx+1) : (a, aidx+1) for (a, aidx) in zip(atom_names, atom_inds_zero)]
+            lookup = atomname_replacements[res_name]
+            atom_names = [(haskey(lookup, a) ? (lookup[a], aidx+1) : (a, aidx+1))
+                          for (a, aidx) in zip(atom_names, atom_inds_zero)]
         else
             atom_names = [(a, aidx+1) for (a, aidx) in zip(atom_names, atom_inds_zero)]
         end
@@ -211,16 +211,13 @@ function canonicalize_system(top,
         else
             canon_system[res_id[2]][res_id[1]] = rgraph
         end
-
     end
-
     return canon_system
-
 end
 
-@inline function resolve_bond(ff::MolecularForceField, t1::String, t2::String)
-    # exact types first, both orders
-    key = (t1,t2)
+function resolve_bond(ff::MolecularForceField, t1::AbstractString, t2::AbstractString)
+    # Exact types first, both orders
+    key = (t1, t2)
     if haskey(ff.bond_resolver.cache, key)
         return ff.bond_resolver.cache[key]
     end
@@ -236,7 +233,7 @@ end
 
     best = nothing
     bestspec = Int8(-1)
-    @inbounds for i in cand
+    for i in cand
         r = ff.bond_resolver.rules[i]
         if (matches(r.p1, t1, ff.class_of) && matches(r.p2, t2, ff.class_of)) ||
            (matches(r.p1, t2, ff.class_of) && matches(r.p2, t1, ff.class_of))
@@ -246,15 +243,15 @@ end
             end
         end
     end
-    # symmetric caching
-    ff.bond_resolver.cache[(t1,t2)] = best
-    ff.bond_resolver.cache[(t2,t1)] = best
+    # Symmetric caching
+    ff.bond_resolver.cache[(t1, t2)] = best
+    ff.bond_resolver.cache[(t2, t1)] = best
     return best
 end
 
-@inline function resolve_angle(ff::MolecularForceField, t1::String,t2::String,t3::String)
-
-    key = (t1,t2,t3)
+function resolve_angle(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
+                       t3::AbstractString)
+    key = (t1, t2, t3)
     if haskey(ff.angle_resolver.cache, key)
         return ff.angle_resolver.cache[key]
     end
@@ -266,69 +263,64 @@ end
 
     best = nothing
     bestspec = Int8(-1)
-    @inbounds for i in cand
+    for i in cand
         r = ff.angle_resolver.rules[i]
-        if matches(r.p1,t1,ff.class_of) && matches(r.p2,t2,ff.class_of) && matches(r.p3,t3,ff.class_of)
+        if matches(r.p1,t1,ff.class_of) && matches(r.p2,t2,ff.class_of) &&
+                                                    matches(r.p3,t3,ff.class_of)
             if r.specificity > bestspec
                 bestspec = r.specificity
                 best = r.params
             end
         end
-        # neighbor-reversed
-        if matches(r.p1,t3,ff.class_of) && matches(r.p2,t2,ff.class_of) && matches(r.p3,t1,ff.class_of)
+        # Neighbor-reversed
+        if matches(r.p1,t3,ff.class_of) && matches(r.p2,t2,ff.class_of) &&
+                                                    matches(r.p3,t1,ff.class_of)
             if r.specificity > bestspec
                 bestspec = r.specificity
                 best = r.params
             end
         end
     end
-    # symmetric caching
-    ff.angle_resolver.cache[(t1,t2,t3)] = best
-    ff.angle_resolver.cache[(t3,t2,t1)] = best
+    # Symmetric caching
+    ff.angle_resolver.cache[(t1, t2, t3)] = best
+    ff.angle_resolver.cache[(t3, t2, t1)] = best
     return best
 end
 
-
-@inline function resolve_proper_torsion(
-    ff::MolecularForceField,
-    t1::String,t2::String,t3::String,t4::String
-)
+function resolve_proper_torsion(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
+                                t3::AbstractString, t4::AbstractString)
     # OpenMM-style lazy resolution via resolver
-    p,  pspec  = find_proper_match(t1,t2,t3,t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
-    pr, prspec = find_proper_match(t4,t3,t2,t1; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    p,  pspec  = find_proper_match(t1, t2, t3, t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    pr, prspec = find_proper_match(t4, t3, t2, t1; resolver=ff.torsion_resolver, class_of=ff.class_of)
 
     if !isnothing(p) && isnothing(pr)
         return (p, (t1, t2, t3, t4))
     elseif isnothing(p) && !isnothing(pr)
         return (pr, (t4, t3, t2, t1))
     elseif !isnothing(p) && !isnothing(pr)
-        ret = pspec > prspec ? (p, (t1, t2, t3, t4)) : (pr, (t4, t3, t2, t1))
+        ret = (pspec > prspec ? (p, (t1, t2, t3, t4)) : (pr, (t4, t3, t2, t1)))
         return ret
     else
-        return (nothing, ("","","",""))
+        return (nothing, ("", "", "", ""))
     end
-    
 end
 
-@inline function resolve_improper_torsion(
-    ff::MolecularForceField,
-    t1::String,t2::String,t3::String,t4::String
-)
-
-    # Resolver scans all 6 permutations internally and caches the winner.
-    p = find_improper_match(t1,t2,t3,t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
-    if p === nothing
-        return (nothing, ("","","",""))
+function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
+                                  t3::AbstractString, t4::AbstractString)
+    # Resolver scans all 6 permutations internally and caches the winner
+    p = find_improper_match(t1, t2, t3, t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    if isnothing(p)
+        return (nothing, ("", "", "", ""))
     end
 
-    # Recover matched permutation from cache to return the oriented key.
+    # Recover matched permutation from cache to return the oriented key
     ic = ff.torsion_resolver.improper_cache
-    cache_hit = get(ic, (t1,t2,t3,t4), :miss)
+    cache_hit = get(ic, (t1, t2, t3, t4), :miss)
     if cache_hit === :miss
-        return (p, (t1,t2,t3,t4))  # fallback
+        return (p, (t1, t2, t3, t4)) # Fallback
     else
         perm, _ = cache_hit
-        src = (t1,t2,t3,t4)
+        src = (t1, t2, t3, t4)
         key = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         return (p, key)
     end
@@ -390,9 +382,9 @@ Gromacs file reading should be considered experimental.
     `:none`, `:obc1`, `:obc2` and `:gbn2`.
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
     is used.
-- `disulfide_bonds=true`: wether or not to look for disulfide bonds between CYS
+- `disulfide_bonds=true`: whether or not to look for disulfide bonds between CYS
     residues in the structure file and add them to the topology. Uses geometric
-    constraints to define them.
+    arguments to assign them.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
     with Enzyme.jl and `nonbonded_method` is `:pme`.
 """
@@ -416,8 +408,7 @@ function System(coord_file::AbstractString,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
                 disulfide_bonds=true,
-                grad_safe::Bool=false) where {AT<:AbstractArray}
-
+                grad_safe::Bool=false) where {AT <: AbstractArray}
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
@@ -435,12 +426,17 @@ function System(coord_file::AbstractString,
     n_atoms = size(top)
 
     # Boundary
-    boundary_used = isnothing(boundary) ? 
-                    boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, (units ? u"nm" : NoUnits)) :
-                    boundary
-    if minimum(box_sides(boundary_used)) < (2 * dist_cutoff)
-        @warn "Minimum box side is less than 2 * dist_cutoff, this will lead to unphysical " *
-              "simulations since multiple copies of the same atom are seen but only one is " *
+    if isnothing(boundary)
+        boundary_used = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T,
+                                                            (units ? u"nm" : NoUnits))
+    else
+        boundary_used = boundary
+    end
+    min_box_side = minimum(box_sides(boundary_used))
+    if min_box_side < (2 * dist_cutoff)
+        @warn "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
+              "($(2 * dist_cutoff)), this can lead to unphysical simulations" *
+              "since multiple copies of the same atom are seen but only one is " *
               "considered due to the minimum image convention"
     end
 
@@ -453,7 +449,8 @@ function System(coord_file::AbstractString,
     if center_coords
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
-    
+    coords = wrap_coords.(coords, (boundary_used,))
+
     canonical_system = canonicalize_system(top, resname_replacements, atomname_replacements)
 
     top_bonds = create_bonds(canonical_system, standard_bonds)
@@ -465,17 +462,16 @@ function System(coord_file::AbstractString,
     template_names = keys(force_field.residues)
     # Match each residue graph to a template and assign atom types/charges
     atom_type_of = Vector{String}(undef, n_atoms)
-    charge_of    = Vector{T}(undef, n_atoms)
-    element_of   = Vector{String}(undef, n_atoms)  # for AtomData
+    charge_of = Vector{T}(undef, n_atoms)
+    element_of = Vector{String}(undef, n_atoms)
+    use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
 
-    use_charge_from_residue = "charge" in force_field.attributes_from_residue
-    
     for (chain, resids) in canonical_system
         for (res_id, rgraph) in resids
             matched = false
-            if rgraph.res_name ∈ template_names
+            if rgraph.res_name in template_names
                 template = force_field.residues[rgraph.res_name]
-                matches  =  match_residue_to_template(rgraph, template)
+                matches = match_residue_to_template(rgraph, template)
                 if isnothing(matches)
                     for (templ_name, template) in force_field.residues
                         # Dont check it again
@@ -488,8 +484,8 @@ function System(coord_file::AbstractString,
                             for (r_i, m_i) in enumerate(matches)
                                 global_idx = rgraph.atom_inds[r_i]
                                 atom_type_of[global_idx] = template.types[m_i]
-                                charge_of[global_idx]    = template.charges[m_i]
-                                element_of[global_idx]   = force_field.atom_types[template.types[m_i]].element
+                                charge_of[global_idx] = template.charges[m_i]
+                                element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                             end
                             break
                         end
@@ -499,8 +495,8 @@ function System(coord_file::AbstractString,
                     for (r_i, m_i) in enumerate(matches)
                         global_idx = rgraph.atom_inds[r_i]
                         atom_type_of[global_idx] = template.types[m_i]
-                        charge_of[global_idx]    = template.charges[m_i]
-                        element_of[global_idx]   = force_field.atom_types[template.types[m_i]].element
+                        charge_of[global_idx] = template.charges[m_i]
+                        element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                     end
                 end
             else
@@ -511,15 +507,15 @@ function System(coord_file::AbstractString,
                         for (r_i, m_i) in enumerate(matches)
                             global_idx = rgraph.atom_inds[r_i]
                             atom_type_of[global_idx] = template.types[m_i]
-                            charge_of[global_idx]    = template.charges[m_i]
-                            element_of[global_idx]   = force_field.atom_types[template.types[m_i]].element
+                            charge_of[global_idx] = template.charges[m_i]
+                            element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                         end
                         break
                     end
                 end
             end
             if !matched
-                throw(ArgumentError("Could not match residue $(rgraph.res_name) to any of the provided templates."))
+                throw(ArgumentError("could not match residue $(rgraph.res_name) to any of the provided templates"))
             end
         end
     end
@@ -541,11 +537,13 @@ function System(coord_file::AbstractString,
     torsion_n_terms = 6
     weight_14_coulomb, weight_14_lj = force_field.weight_14_coulomb, force_field.weight_14_lj
 
-    # Particles
+    # Atoms
     for ai in 1:n_atoms
         atype = atom_type_of[ai]
         at = force_field.atom_types[atype]
-        ismissing(charge_of[ai]) && error("atom $ai type $atype has missing charge")
+        if ismissing(charge_of[ai])
+            error("atom $ai type $atype has missing charge")
+        end
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom $ai type $atype has unset σ or ϵ")
         end
@@ -556,24 +554,25 @@ function System(coord_file::AbstractString,
         end
         push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ))
 
-        # minimal AtomData
-        res     = residue_from_atom_idx(ai, canonical_system)
+        res = residue_from_atom_idx(ai, canonical_system)
         res_cfl = chemfiles_residue_for_atom(top, ai - 1)
-        hetero = ("is_standard_pdb" in Chemfiles.list_properties(res_cfl)) ? 
-                 !Chemfiles.property(res_cfl,"is_standard_pdb") :
-                 false
+        if "is_standard_pdb" in Chemfiles.list_properties(res_cfl)
+            hetero = !Chemfiles.property(res_cfl, "is_standard_pdb")
+        else
+            hetero = false
+        end
         push!(atoms_data, AtomData(atom_type=atype, atom_name=atom_name_from_index(ai, canonical_system),
                                    res_number=resnum_from_atom_idx(ai, canonical_system), res_name=res.res_name,
                                    chain_id=chain_from_atom_idx(ai, canonical_system), element=element_of[ai], hetero_atom=hetero))
         eligible[ai, ai] = false
     end
-    
+
     # Bonds
     for (i, j) in top_bonds
         t1, t2 = atom_type_of[i], atom_type_of[j]
         hb = resolve_bond(force_field, t1, t2)
         if isnothing(hb)
-            throw(ArgumentError("No bond parameters found for ($t1,$t2)"))
+            throw(ArgumentError("no bond parameters found for ($t1, $t2)"))
         end
         push!(bonds_il.is, i)
         push!(bonds_il.js, j)
@@ -584,11 +583,11 @@ function System(coord_file::AbstractString,
     end
 
     # Angles
-    for (i,j,k) in top_angles
+    for (i, j, k) in top_angles
         t1,t2,t3 = atom_type_of[i], atom_type_of[j], atom_type_of[k]
         ha = resolve_angle(force_field, t1,t2,t3)
         if isnothing(ha)
-            throw(ArgumentError("No angle parameters found for ($t1,$t2,$t3)"))
+            throw(ArgumentError("no angle parameters found for ($t1, $t2, $t3)"))
         end
         push!(angles_il.is,i)
         push!(angles_il.js,j)
@@ -602,8 +601,8 @@ function System(coord_file::AbstractString,
     # Proper torsions
     for (i,j,k,l) in top_torsions
         t1,t2,t3,t4 = atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l]
-        tt, key = resolve_proper_torsion(force_field, t1,t2,t3,t4)
-        tt === nothing && continue
+        tt, key = resolve_proper_torsion(force_field, t1, t2, t3, t4)
+        isnothing(tt) && continue
 
         n_terms = length(tt.periodicities)
         for s in 1:torsion_n_terms:n_terms
@@ -622,14 +621,13 @@ function System(coord_file::AbstractString,
 
     # Impropers (Amber ordering)
     for (c, j, k, l) in top_impropers
-
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
-        # resolve improper params and oriented key (central first)
+        # Resolve improper params and oriented key (central first)
         tt, key = resolve_improper_torsion(force_field, t1,t2,t3,t4)
-        tt === nothing && continue
+        isnothing(tt) && continue
 
-        # recover metadata from resolver cache
+        # Recover metadata from resolver cache
         ic = force_field.torsion_resolver.improper_cache
         hit = get(ic, (t1, t2, t3, t4), :miss)
         ordering::String = "default"
@@ -698,11 +696,8 @@ function System(coord_file::AbstractString,
                     (j, k) = (k, j)
                 end
             end
-
-        # ATM there is no good way of testing these. Template matching for CHARMM force force fields
-        # breaks very easily as patches are not supported yet.
         elseif ordering == "charmm"
-            # If wildcards were used, apply the same AMBER tie-break; else unambiguous
+            # If wildcards were used then apply the same Amber tie-break, else unambiguous
             if has_wild
                 if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
                     (j,   l)   = (l,   j)
@@ -715,9 +710,8 @@ function System(coord_file::AbstractString,
                     (ta3, ta4) = (ta4, ta3)
                 end
             end
-
         elseif ordering == "smirnoff"
-            # add the trefoil set
+            # Add the trefoil set
             a1, a2, a3, a4 = c, j, k, l
             for (x1, x2, x3, x4) in ((a1,a2,a3,a4),
                                      (a1,a3,a4,a2),
@@ -728,24 +722,19 @@ function System(coord_file::AbstractString,
                 push!(imps_il.ks, cen)
                 push!(imps_il.ls, p3)
                 push!(imps_il.types, atom_types_to_string(key...))
-                push!(imps_il.inters, PeriodicTorsion(
-                    periodicities = tt.periodicities,
-                    phases        = tt.phases,
-                    ks            = tt.ks,
-                    proper        = false
-                ))
+                push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
+                                            phases=tt.phases, ks=tt.ks, proper=false))
             end
-            continue  # skip the single-add fallback below
-
+            continue # Skip the single-add fallback below
         else
             # ordering == "default"
-            # ONLY if a wildcard is present
+            # Only if a wildcard is present
             if has_wild
-                
-                # Mirror the permutation on the current topology atoms (c,j,k,l).
+                # Mirror the permutation on the current topology atoms (c,j,k,l)
                 src_atoms = (c, j, k, l)
 
-                # We need the two peripheral atoms in positions 2 and 3, and the remaining peripheral in 4.
+                # We need the two peripheral atoms in positions 2 and 3, and the remaining
+                #   peripheral in 4
                 a1 = src_atoms[perm[2]]
                 a2 = src_atoms[perm[3]]
                 a4 = src_atoms[perm[4]]
@@ -756,8 +745,8 @@ function System(coord_file::AbstractString,
                 m_a1 = force_field.atom_types[atom_type_of[a1]].mass
                 m_a2 = force_field.atom_types[atom_type_of[a2]].mass
 
-                # 1) If same element, lower atom index first.
-                # 2) Else, prefer carbon; else heavier mass first.
+                # 1) If same element, lower atom index first
+                # 2) Else, prefer carbon; else heavier mass first
                 if e_a1 == e_a2
                     if a1 > a2
                         (a1, a2) = (a2, a1)
@@ -766,10 +755,10 @@ function System(coord_file::AbstractString,
                     (a1, a2) = (a2, a1)
                 end
 
-                # Reassign current triplet to ordered pair and remaining peripheral.
+                # Reassign current triplet to ordered pair and remaining peripheral
                 j, k, l = a1, a2, a4
             end
-            # If no wildcard leave j,k,l as-is.
+            # If no wildcard leave j, k, l as-is
         end
 
         push!(imps_il.is, j)
@@ -777,20 +766,9 @@ function System(coord_file::AbstractString,
         push!(imps_il.ks, c)
         push!(imps_il.ls, l)
         push!(imps_il.types, atom_types_to_string(key...))
-        push!(imps_il.inters, PeriodicTorsion(periodicities = tt.periodicities,
-                                              phases = tt.phases, ks = tt.ks, proper = false))
+        push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
+                                              phases=tt.phases, ks=tt.ks, proper=false))
     end
-
-    # Units and coordinates
-    if units
-        coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
-    else
-        coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
-    end
-    if center_coords
-        coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
-    end
-    coords = wrap_coords.(coords, (boundary_used,))
 
     tors_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
                                 proper=t.proper, n_terms=torsion_n_terms) for t in tors_il.inters]
@@ -1035,7 +1013,9 @@ function System(T::Type,
     min_box_side = minimum(box_sides(boundary_used))
     if min_box_side < (2 * dist_cutoff)
         @warn "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
-              "($(2 * dist_cutoff)), this can lead to unphysical simulations"
+              "($(2 * dist_cutoff)), this can lead to unphysical simulations" *
+              "since multiple copies of the same atom are seen but only one is " *
+              "considered due to the minimum image convention"
     end
 
     coords_abst = SArray[]

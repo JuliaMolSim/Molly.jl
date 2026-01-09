@@ -42,7 +42,6 @@ function extract_parameters!(params_dic,
     return params_dic
 end
 
-
 @inline function force(a::HarmonicAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)
