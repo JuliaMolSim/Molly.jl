@@ -118,11 +118,11 @@ the appearing and disappearing of atoms.
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
 The potential energy is defined as
 ```math
-V(r_{ij}) = \lambda\frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_Q^{1/6}}
+V(r_{ij}) = \lambda \frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_Q^{1/6}}
 ```
 and the force on each atom by
 ```math
-\vec{F}_i = \lambda\frac{1}{4\pi\epsilon_0} \frac{q_iq_jr_{ij}^5}{r_Q^{7/6}}\frac{\vec{r_{ij}}}{r_{ij}}
+\vec{F}_i = \lambda \frac{1}{4\pi\epsilon_0} \frac{q_iq_jr_{ij}^5}{r_Q^{7/6}}\frac{\vec{r_{ij}}}{r_{ij}}
 ```
 where
 ```math
@@ -250,15 +250,15 @@ See [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p).
 The potential energy is defined as
 ```math
 V(r_{ij}) = \left\{ \begin{array}{cl}
-\frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_{ij}}, & \text{if} & r \ge r_{LJ} \\
-\frac{1}{4\pi\epsilon_0} (\frac{q_iq_j}{r_{Q}^3}r_{ij}^2-\frac{3q_iq_j}{r_{Q}^2}r_{ij}+\frac{3q_iq_j}{r_{Q}}), & \text{if} & r \lt r_{LJ} \\
+\lambda \frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_{ij}}, & \text{if} & r \ge r_{LJ} \\
+\lambda \frac{1}{4\pi\epsilon_0} (\frac{q_iq_j}{r_{Q}^3}r_{ij}^2-\frac{3q_iq_j}{r_{Q}^2}r_{ij}+\frac{3q_iq_j}{r_{Q}}), & \text{if} & r \lt r_{LJ} \\
 \end{array} \right.
 ```
 and the force on each atom by
 ```math
 \vec{F}_i = \left\{ \begin{array}{cl}
-\frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_{ij}^2}\frac{\vec{r_{ij}}}{r_{ij}}, & \text{if} & r \ge r_{LJ} \\
-\frac{1}{4\pi\epsilon_0} (\frac{-2q_iq_j}{r_{Q}^3}r_{ij}+\frac{3q_iq_j}{r_{Q}^2})\frac{\vec{r_{ij}}}{r_{ij}}, & \text{if} & r \lt r_{LJ} \\
+\lambda \frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_{ij}^2}\frac{\vec{r_{ij}}}{r_{ij}}, & \text{if} & r \ge r_{LJ} \\
+\lambda \frac{1}{4\pi\epsilon_0} (\frac{-2q_iq_j}{r_{Q}^3}r_{ij}+\frac{3q_iq_j}{r_{Q}^2})\frac{\vec{r_{ij}}}{r_{ij}}, & \text{if} & r \lt r_{LJ} \\
 \end{array} \right.
 ```
 where
