@@ -179,7 +179,7 @@
     coords_2 = SVector{3, Float64}.(eachcol(cm_2)) / 10 * u"nm"
 
     # RMSD of all atoms
-    rmsd_cv = CalcRMSD([], [], coords_2, :pdb)
+    rmsd_cv = CalcRMSD(ref_coords=coords_2)
     @test calculate_cv(rmsd_cv, coords_1) ≈ 2.54859467758795u"Å"
 
     # RMSD of a subset of atoms
@@ -187,7 +187,7 @@
     subset_inds = collect(1:n_atoms_subset)
     coords_1_subset = coords_1[1:n_atoms_subset]
     coords_2_subset = coords_2[1:n_atoms_subset]
-    rmsd_cv = CalcRMSD(subset_inds, subset_inds, coords_2, :pdb)
+    rmsd_cv = CalcRMSD(atom_inds=subset_inds, ref_atom_inds=subset_inds, ref_coords=coords_2)
     @test isapprox(
         calculate_cv(rmsd_cv, coords_1),
         rmsd(coords_1_subset, coords_2_subset);
@@ -200,7 +200,7 @@
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
 
     # Rg of all atoms
-    rg_cv = CalcRg([], :pdb)
+    rg_cv = CalcRg()
     @test isapprox(
         calculate_cv(rg_cv, coords, atoms),
         11.51225678195222u"Å";
@@ -211,7 +211,7 @@
     n_atoms_subset = 20
     coords_subset = coords[1:n_atoms_subset]
     atoms_subset = atoms[1:n_atoms_subset]
-    rg_cv = CalcRg([i for i=1:n_atoms_subset], :pdb)
+    rg_cv = CalcRg(atom_inds=[i for i=1:n_atoms_subset])
     @test isapprox(
         calculate_cv(rg_cv, coords, atoms),
         radius_gyration(coords_subset,atoms_subset);

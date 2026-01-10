@@ -179,7 +179,7 @@ Bias the radius of gyration.
 - `correction::Symbol=:pbc`: molecules are unwrapped prior to the calculation. Should be `:wrap` to keep system wrapped in the unit cell.
 """
 @kwdef struct CalcRg
-    atom_inds::Vector{Int}
+    atom_inds::Vector{Int} = Int[]
     correction::Symbol = :pbc
 end
 
@@ -207,8 +207,8 @@ The RMSD can be differentiated with respect to the system coordinates without di
 - `correction::Symbol=:pbc`: molecules are unwrapped prior to the RMSD calculation. Should be `:wrap` to keep system wrapped in the unit cell.
 """
 @kwdef struct CalcRMSD{RC}
-    atom_inds::Vector{Int}
-    ref_atom_inds::Vector{Int}
+    atom_inds::Vector{Int} = Int[]
+    ref_atom_inds::Vector{Int} = Int[]
     ref_coords::RC
     correction::Symbol = :pbc
 end
