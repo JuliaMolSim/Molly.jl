@@ -315,11 +315,11 @@ end
             )
         end
 
-        fs_openmm = SVector{3, FT}[]
+        fs_openmm = SVector{3}[]
         open(dat_file, "r") do f
             for line in readlines(f)
                 cols = split(line, ",")
-                f = SVector{3, FT}([parse(FT, split(val, " ")[1])*u"kJ * mol^-1 * nm^-1"
+                f = SVector{3}([parse(FT, split(val, " ")[1])*u"kJ * mol^-1 * nm^-1"
                                 for val in cols])
                 push!(fs_openmm, f)
             end
