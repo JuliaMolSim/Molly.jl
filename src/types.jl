@@ -502,6 +502,8 @@ interface described there.
     implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`.
 - `constraints::CN=()`: the constraints for bonds and angles in the system.
     Should be a `Tuple` or `NamedTuple`.
+- `virtual_sites::VS=[]`: the virtual sites present in the system; these are
+    mass-less particles determined by the positions of other atoms.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
@@ -514,7 +516,7 @@ interface described there.
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
-mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
                       L, F, E, K, M, TM, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
@@ -526,6 +528,8 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     specific_inter_lists::SI
     general_inters::GI
     constraints::CN
+    virtual_sites::VS
+    virtual_site_flags::VF
     neighbor_finder::NF
     loggers::L
     df::Int
@@ -548,6 +552,7 @@ function System(;
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
+                virtual_sites=[],
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
@@ -565,11 +570,13 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
+    VS = typeof(virtual_sites)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
     DA = typeof(data)
+    n_atoms = length(atoms)
 
     if isnothing(velocities)
         if force_units == NoUnits
@@ -583,14 +590,14 @@ function System(;
     end
     V = typeof(vels)
 
-    if length(atoms) != length(coords)
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(coords)) coordinates"))
+    if n_atoms != length(coords)
+        throw(ArgumentError("there are $n_atoms atoms but $(length(coords)) coordinates"))
     end
-    if length(atoms) != length(vels)
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(vels)) velocities"))
+    if n_atoms != length(vels)
+        throw(ArgumentError("there are $n_atoms atoms but $(length(vels)) velocities"))
     end
-    if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+    if length(atoms_data) > 0 && n_atoms != length(atoms_data)
+        throw(ArgumentError("there are $n_atoms atoms but $(length(atoms_data)) atom data entries"))
     end
 
     if isa(atoms, AbstractGPUArray) && !isbitstype(eltype(atoms))
@@ -654,7 +661,7 @@ function System(;
               "of SVectors for performance"
     end
 
-    df = n_dof(D, length(atoms), boundary)
+    df = n_dof(D, n_atoms, boundary)
     if length(constraints) > 0
         for ca in constraints
             for cluster_type in cluster_keys(ca)
@@ -666,13 +673,17 @@ function System(;
     constraints = Tuple(setup_constraints!(ca, neighbor_finder, AT) for ca in constraints)
     CN = typeof(constraints)
 
+    virtual_site_flags = calc_virtual_site_flags(virtual_sites, atom_masses, AT)
+    VF = typeof(virtual_site_flags)
+
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}(
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
-                    specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
-                    df, force_units, energy_units, k_converted, atom_masses, total_mass, data)
+                    specific_inter_lists, general_inters, constraints, virtual_sites,
+                    virtual_site_flags, neighbor_finder, loggers, df, force_units, energy_units,
+                    k_converted, atom_masses, total_mass, data)
 end
 
 """
@@ -694,6 +705,7 @@ function System(sys::System;
                 specific_inter_lists=sys.specific_inter_lists,
                 general_inters=sys.general_inters,
                 constraints=sys.constraints,
+                virtual_sites=sys.virtual_sites,
                 neighbor_finder=sys.neighbor_finder,
                 loggers=sys.loggers,
                 force_units=sys.force_units,
@@ -711,6 +723,7 @@ function System(sys::System;
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         constraints=constraints,
+        virtual_sites=virtual_sites,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=force_units,
@@ -920,6 +933,11 @@ construction where `n` is the number of threads to be used per replica.
     passed to the argument `replica_constraints`.
 - `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
     replica.
+- `virtual_sites::VS=[]`: the virtual sites present in the system (to be used if the same for all
+    replicas); these are mass-less particles determined by the positions of other atoms. This is
+    only used if no value is passed to the argument `replica_virtual_sites`.
+- `replica_virtual_sites=[[] for _ in 1:n_replicas]`: the virtual_sites in each
+    replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation. It is duplicated for each replica.
 - `replica_loggers=[() for _ in 1:n_replicas]`: the loggers for each replica
@@ -964,6 +982,8 @@ function ReplicaSystem(;
                         replica_general_inters=nothing,
                         constraints=(),
                         replica_constraints=nothing,
+                        virtual_sites=[],
+                        replica_virtual_sites=nothing,
                         neighbor_finder=NoNeighborFinder(),
                         replica_loggers=[() for _ in 1:n_replicas],
                         exchange_logger=nothing,
@@ -979,6 +999,7 @@ function ReplicaSystem(;
     DA = typeof(data)
     C = typeof(replica_coords[1])
     NF = typeof(neighbor_finder)
+    n_atoms = length(atoms)
 
     if isnothing(replica_boundaries)
         replica_boundaries = fill(boundary, n_replicas)
@@ -1027,7 +1048,12 @@ function ReplicaSystem(;
                             * "does not match number of replicas ($n_replicas)"))
     end
 
-    df = n_dof(D, length(atoms), replica_boundaries[1])
+    atom_masses = mass.(atoms)
+    M = typeof(atom_masses)
+    total_mass = sum(atom_masses)
+    TM = typeof(total_mass)
+
+    df = n_dof(D, n_atoms, replica_boundaries[1])
     if isnothing(replica_constraints)
         if length(constraints) > 0
             for ca in constraints
@@ -1049,6 +1075,15 @@ function ReplicaSystem(;
             end
         end
     end
+
+    if isnothing(replica_virtual_sites)
+        replica_virtual_sites = [deepcopy(virtual_sites) for _ in 1:n_replicas]
+    elseif length(replica_virtual_sites) != n_replicas
+        throw(ArgumentError("number of virtual sites ($(length(replica_virtual_sites)))"
+                            * "does not match number of replicas ($n_replicas)"))
+    end
+    replica_virtual_site_flags = [calc_virtual_site_flags(vss, atom_masses, AT)
+                                  for vss in replica_virtual_sites]
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
@@ -1079,14 +1114,14 @@ function ReplicaSystem(;
         throw(ArgumentError("some replicas have different number of velocities"))
     end
 
-    if length(atoms) != length(replica_coords[1])
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(replica_coords[1])) coordinates"))
+    if n_atoms != length(replica_coords[1])
+        throw(ArgumentError("there are $n_atoms atoms but $(length(replica_coords[1])) coordinates"))
     end
-    if length(atoms) != length(replica_velocities[1])
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(replica_velocities[1])) velocities"))
+    if n_atoms != length(replica_velocities[1])
+        throw(ArgumentError("there are $n_atoms atoms but $(length(replica_velocities[1])) velocities"))
     end
-    if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+    if length(atoms_data) > 0 && n_atoms != length(atoms_data)
+        throw(ArgumentError("there are $n_atoms atoms but $(length(atoms_data)) atom data entries"))
     end
 
     n_gpu_array = sum(y -> isa(y, AbstractGPUArray), replica_coords)
@@ -1111,23 +1146,20 @@ function ReplicaSystem(;
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
-    atom_masses = mass.(atoms)
-    M = typeof(atom_masses)
-    total_mass = sum(atom_masses)
-    TM = typeof(total_mass)
-
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
     replicas = Tuple(System{D, AT, T, A, C, typeof(replica_boundaries[i]), V, AD, TO,
                         typeof(replica_pairwise_inters[i]), typeof(replica_specific_inter_lists[i]),
-                        typeof(replica_general_inters[i]), typeof(replica_constraints[i]), NF,
-                        typeof(replica_loggers[i]), F, E, K, M, TM, Nothing}(
+                        typeof(replica_general_inters[i]), typeof(replica_constraints[i]),
+                        typeof(replica_virtual_sites[i]), typeof(replica_virtual_site_flags[i]),
+                        NF, typeof(replica_loggers[i]), F, E, K, M, TM, Nothing}(
             atoms, replica_coords[i], replica_boundaries[i], replica_velocities[i],
             atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], replica_constraints[i],
-            deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i], force_units,
-            energy_units, k_converted, atom_masses, total_mass, nothing) for i in 1:n_replicas)
+            replica_general_inters[i], replica_constraints[i], replica_virtual_sites[i],
+            replica_virtual_site_flags[i], deepcopy(neighbor_finder), replica_loggers[i],
+            replica_dfs[i], force_units, energy_units, k_converted, atom_masses,
+            total_mass, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA}(

@@ -2,11 +2,12 @@
 
 # Struct to carry the information necessary to represent the residue templates
 #   defined in the force field XML files
-struct ResidueTemplate{T}
+struct ResidueTemplate{T, C}
     name::String
     atoms::Vector{String}
     elements::Vector{Symbol}
     types::Vector{String}
+    virtual_sites::Vector{VirtualSiteTemplate{T, C}}
     bonds::Vector{Tuple{Int, Int}}
     external_bonds::Vector{Int} # Count of external connections per atom
     allowed_patches::Vector{String}
@@ -721,6 +722,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
     atoms           = copy(residue.atoms)
     elements        = copy(residue.elements)
     types           = copy(residue.types)
+    virtual_sites   = copy(residue.virtual_sites)
     bonds           = copy(residue.bonds)
     external_bonds  = copy(residue.external_bonds)
     partial_charges = copy(residue.charges)
@@ -839,7 +841,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
     end
 
     return ResidueTemplate(
-        patch_res_name, atoms, elements, types, bonds, external_bonds,
-        String[], partial_charges, extras,
+        patch_res_name, atoms, elements, types, virtual_sites,
+        bonds, external_bonds, String[], partial_charges, extras,
     )
 end

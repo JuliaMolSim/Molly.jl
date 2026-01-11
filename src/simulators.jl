@@ -71,6 +71,7 @@ Constraints are applied during minimization, which can lead to issues.
     # @inline needed to avoid Enzyme error
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
     E = potential_energy(sys, neighbors, buffers; n_threads=n_threads)
@@ -90,6 +91,7 @@ Constraints are applied during minimization, which can lead to issues.
         sys.coords .+= hn .* F ./ max_force
         using_constraints && apply_position_constraints!(sys, coords_copy; n_threads=n_threads)
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
 
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -147,12 +149,13 @@ end
                            rng=Random.default_rng())
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), 0; n_threads=n_threads)
-    accels_t = forces_t ./ masses(sys)
+    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
@@ -173,9 +176,10 @@ end
         using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
                                                          sim.dt; n_threads=n_threads)
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
 
         forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t_dt .= forces_t_dt ./ masses(sys)
+        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys), sys.virtual_site_flags)
 
         sys.velocities .+= (accels_t .+ accels_t_dt) .* dt_div2
         using_constraints && apply_velocity_constraints!(sys; n_threads=n_threads)
@@ -191,7 +195,7 @@ end
         if recompute_forces
             forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
             forces_t .= forces_t_dt
-            accels_t .= forces_t ./ masses(sys)
+            accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
         else
             forces_t .= forces_t_dt
             accels_t .= accels_t_dt
@@ -235,12 +239,13 @@ end
                            rng=Random.default_rng())
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
-    accels_t = forces_t ./ masses(sys)
+    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
@@ -249,7 +254,7 @@ end
     for step_n in 1:n_steps
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t .= forces_t ./ masses(sys)
+        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
 
         sys.velocities .+= accels_t .* sim.dt
 
@@ -265,6 +270,7 @@ end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -310,19 +316,20 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
                            rng=Random.default_rng())
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
     coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
-    accels_t = forces_t ./ masses(sys)
+    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
     using_constraints = (length(sys.constraints) > 0)
     dt_sq = sim.dt^2
 
     for step_n in 1:n_steps
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t .= forces_t ./ masses(sys)
+        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
 
         coords_copy .= sys.coords
         if step_n == 1
@@ -335,6 +342,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
         using_constraints && apply_position_constraints!(sys, coords_copy; n_threads=n_threads)
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
         # This is accurate to O(dt)
         sys.velocities .= vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
 
@@ -393,12 +401,13 @@ end
                            rng=Random.default_rng())
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
-    accels_t = forces_t ./ masses(sys)
+    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
     noise = zero(sys.velocities)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -410,7 +419,7 @@ end
     for step_n in 1:n_steps
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t .= forces_t ./ masses(sys)
+        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
 
         sys.velocities .+= accels_t .* sim.dt
         apply_velocity_constraints!(sys; n_threads=n_threads)
@@ -428,6 +437,7 @@ end
         using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
                                                          sim.dt; n_threads=n_threads)
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -500,13 +510,14 @@ end
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
 
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
     forces!(forces_t, sys, neighbors, buffers, Val(false), 0; n_threads=n_threads)
-    accels_t = forces_t ./ masses(sys)
+    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
     noise = zero(sys.velocities)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
@@ -547,6 +558,7 @@ end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -562,6 +574,7 @@ end
 function A_step!(sys, dt_eff, neighbors, step_n)
     sys.coords .+= sys.velocities .* dt_eff
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     return sys
 end
 
@@ -569,7 +582,7 @@ function B_step!(sys, forces_t, buffers, accels_t, dt_eff,
                  compute_forces::Bool, n_threads::Integer, neighbors, step_n::Integer)
     if compute_forces
         forces!(forces_t, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
-        accels_t .= forces_t ./ masses(sys)
+        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
     end
     sys.velocities .+= dt_eff .* accels_t
     return sys
@@ -618,22 +631,24 @@ end
               "constraints will be ignored"
     end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
-    accels_t = forces_t ./ masses(sys)
+    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
     noise = zero(sys.velocities)
     noise_prefac = sqrt((2 / sim.friction) * sim.dt)
 
     for step_n in 1:n_steps
         forces!(forces_t, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
-        accels_t .= forces_t ./ masses(sys)
+        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
 
         random_velocities!(noise, sys, sim.temperature; rng=rng)
         sys.coords .+= (accels_t ./ sim.friction) .* sim.dt .+ noise_prefac .* noise
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -692,12 +707,13 @@ end
     end
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     forces!(forces_t, sys, neighbors, buffers, Val(true), 0; n_threads=n_threads)
-    accels_t = forces_t ./ masses(sys)
+    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
     v_half = zero(sys.velocities)
@@ -710,6 +726,7 @@ end
 
         sys.coords .+= v_half .* sim.dt
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) *
                         ((temperature(sys; kin_tensor=buffers.kin_tensor) / sim.temperature) - 1)
@@ -718,7 +735,7 @@ end
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
         forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t_dt .= forces_t_dt ./ masses(sys)
+        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys), sys.virtual_site_flags)
 
         sys.velocities .= (v_half .+ accels_t_dt .* dt_div2) ./
                           (1 + (zeta * dt_div2))
@@ -734,7 +751,7 @@ end
         if recompute_forces
             forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
             forces_t .= forces_t_dt
-            accels_t .= forces_t ./ masses(sys)
+            accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
         else
             forces_t .= forces_t_dt
             accels_t .= accels_t_dt
@@ -1047,6 +1064,8 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
     E_old = potential_energy(sys, neighbors, buffers; n_threads=n_threads)
@@ -1055,6 +1074,8 @@ end
     for step_n in 1:n_steps
         coords_old .= sys.coords
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
         neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
         E_new = potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads)
 
@@ -1088,7 +1109,7 @@ in range [0, 1) scaled by `shift_size` which should have appropriate length unit
 function random_uniform_translation!(sys::System{D, <:Any, T};
                                      shift_size=oneunit(eltype(eltype(sys.coords))),
                                      rng=Random.default_rng()) where {D, T}
-    rand_idx = rand(rng, eachindex(sys))
+    rand_idx = pick_non_virtual_site(rng, sys)
     direction = random_unit_vector(T, D, rng)
     magnitude = rand(rng, T) * shift_size
     sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
@@ -1108,7 +1129,7 @@ which should have appropriate length units.
 function random_normal_translation!(sys::System{D, <:Any, T};
                                     shift_size=oneunit(eltype(eltype(sys.coords))),
                                     rng=Random.default_rng()) where {D, T}
-    rand_idx = rand(rng, eachindex(sys))
+    rand_idx = pick_non_virtual_site(rng, sys)
     direction = random_unit_vector(T, D, rng)
     magnitude = randn(rng, T) * shift_size
     sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
