@@ -723,55 +723,65 @@ function random_velocity(atom_mass::Real, temp::Real,
     return SVector([maxwell_boltzmann(atom_mass, temp, k; rng=rng) for i in 1:dims]...)
 end
 
-function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
-                            rng=Random.default_rng())
-    return SVector(
+function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
+                            temp::Unitful.Temperature, rng=Random.default_rng())
+    v = SVector(
         maxwell_boltzmann(atom_mass, temp; rng=rng),
         maxwell_boltzmann(atom_mass, temp; rng=rng),
         maxwell_boltzmann(atom_mass, temp; rng=rng),
     )
+    return v * !virtual_site_flag
 end
 
-function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
+function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
+                            temp::Unitful.Temperature,
                             k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits},
                             rng=Random.default_rng())
-    return SVector(
+    v = SVector(
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
     )
+    return v * !virtual_site_flag
 end
 
-function random_velocity_3D(atom_mass::Real, temp::Real, k::Real, rng=Random.default_rng())
-    return SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-end
-
-function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
+function random_velocity_3D(atom_mass::Real, virtual_site_flag, temp::Real, k::Real,
                             rng=Random.default_rng())
-    return SVector(
+    v = SVector(
+        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
+        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
+        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
+    )
+    return v * !virtual_site_flag
+end
+
+function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
+                            temp::Unitful.Temperature, rng=Random.default_rng())
+    v = SVector(
         maxwell_boltzmann(atom_mass, temp; rng=rng),
         maxwell_boltzmann(atom_mass, temp; rng=rng),
     )
+    return v * !virtual_site_flag
 end
 
-function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
+function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
+                            temp::Unitful.Temperature,
                             k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits},
                             rng=Random.default_rng())
-    return SVector(
+    v = SVector(
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
     )
+    return v * !virtual_site_flag
 end
 
-function random_velocity_2D(atom_mass::Real, temp::Real, k::Real, rng=Random.default_rng())
-    return SVector(
+function random_velocity_2D(atom_mass::Real, virtual_site_flag, temp::Real, k::Real,
+                            rng=Random.default_rng())
+    v = SVector(
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
     )
+    return v * !virtual_site_flag
 end
 
 """
@@ -816,23 +826,19 @@ end
 
 Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
+
+Virtual sites are given a velocity of zero.
 """
-function random_velocities(sys::AtomsBase.AbstractSystem{3}, temp; rng=Random.default_rng())
-    return random_velocity_3D.(masses(sys), temp, sys.k, rng)
+function random_velocities(sys::System{3, AT}, temp; rng=Random.default_rng()) where AT
+    vels = random_velocity_3D.(from_device(masses(sys)), from_device(sys.virtual_site_flags),
+                               temp, sys.k, rng)
+    return to_device(vels, AT)
 end
 
-function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.default_rng())
-    return random_velocity_2D.(masses(sys), temp, sys.k, rng)
-end
-
-function random_velocities(sys::System{3, AT}, temp;
-                           rng=Random.default_rng()) where AT <: AbstractGPUArray
-    return to_device(random_velocity_3D.(from_device(masses(sys)), temp, sys.k, rng), AT)
-end
-
-function random_velocities(sys::System{2, AT}, temp;
-                           rng=Random.default_rng()) where AT <: AbstractGPUArray
-    return to_device(random_velocity_2D.(from_device(masses(sys)), temp, sys.k, rng), AT)
+function random_velocities(sys::System{2, AT}, temp; rng=Random.default_rng()) where AT
+    vels = random_velocity_2D.(from_device(masses(sys)), from_device(sys.virtual_site_flags),
+                               temp, sys.k, rng)
+    return to_device(vels, AT)
 end
 
 """
@@ -841,6 +847,8 @@ end
 
 Set the velocities of a [`System`](@ref), or a vector, to random velocities
 generated from the Maxwell-Boltzmann distribution.
+
+Virtual sites are given a velocity of zero.
 """
 function random_velocities!(sys, temp; rng=Random.default_rng())
     sys.velocities .= random_velocities(sys, temp; rng=rng)

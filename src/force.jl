@@ -130,7 +130,7 @@ Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.
 Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
-struct BuffersCPU{F, A, V, VN, VC, KT, PT}
+struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     fs_nounits::F
     fs_chunks::A
     virial::V
@@ -138,6 +138,7 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT}
     vir_chunks::VC
     kin_tensor::KT
     pres_tensor::PT
+    fs_mat::FM
 end
 
 function init_buffers!(sys::System{D}, n_threads) where D
@@ -152,7 +153,9 @@ function init_buffers!(sys::System{D}, n_threads) where D
     n_copies = (n_threads == 1 ? 0 : n_threads)
     fs_chunks  = [similar(fs_nounits) for _ in 1:n_copies]
     vir_chunks = [similar(vir_nounits) for _ in 1:n_copies]
-    return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres)
+    # fs_mat is only used for virtual sites to do atomic addition
+    fs_mat = (length(sys.virtual_sites) > 0 ? zeros(CT, D, length(sys)) : nothing)
+    return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
 end
 
 struct BuffersGPU{F, P, V, VN, VR, KT, PT, C, M, R}
@@ -286,6 +289,7 @@ function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, buffers::BuffersCP
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
     end
+    distribute_forces!(fs, sys, buffers)
 
     return fs, buffers
 end
@@ -567,6 +571,7 @@ function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, buffers::
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
     end
+    distribute_forces!(fs, sys, buffers)
 
     return fs, buffers
 end

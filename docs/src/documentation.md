@@ -108,6 +108,7 @@ sys.velocities
 sys.topology
 sys.pairwise_inters
 sys.constraints
+sys.virtual_sites
 sys.neighbor_finder
 sys.loggers
 sys.total_mass
