@@ -408,7 +408,11 @@ function System(coord_file::AbstractString,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
                 disulfide_bonds=true,
-                grad_safe::Bool=false) where {AT <: AbstractArray}
+                grad_safe::Bool=false,
+                rename_terminal_res=nothing) where {AT <: AbstractArray}
+    if !isnothing(rename_terminal_res)
+        @info "rename_terminal_res is no longer required and will be removed in a future breaking release"
+    end
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end

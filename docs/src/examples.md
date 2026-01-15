@@ -534,7 +534,7 @@ Downloads.download(
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(joinpath(data_dir, "force_fields", "ff99SBildn.xml"))
-sys = System("dipeptide_nowater.pdb", ff; rename_terminal_res=false)
+sys = System("dipeptide_nowater.pdb", ff)
 
 mc = pyimport("mace.calculators")
 ase_calc = mc.mace_off(model="medium", device="cuda")
