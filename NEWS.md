@@ -1,5 +1,17 @@
 # Molly.jl release notes
 
+## v0.23.1 - Jan 2026
+
+### New features
+- Force field loading from OpenMM XML format is made more flexible and is now closer to OpenMM's behaviour. In particular, residues are matched to templates according to their molecular graph, meaning that there is more variability allowed in residue and atom naming. The `rename_terminal_res` argument during setup is no longer used.
+- Support for residue patches in OpenMM XML force field files is added.
+- Common bias potentials and collective variables (CVs) are added via `BiasPotential`, `LinearBias`, `SquareBias`, `FlatBottomSquareBias`, `CalcDist`, `CalcRg` and `CalcRMSD`. Alternatives can be defined by the user. Enzyme is used by default to calculate the gradient of the CV to obtain the force.
+
+### Bug fixes
+- A bug in the Lennard-Jones and Coulomb soft core potentials is fixed.
+- A bug in PME when using non-default parameters is fixed.
+- A bug when taking gradients with `MonteCarloBarostat` is fixed.
+
 ## v0.23.0 - Nov 2025
 
 ### Breaking changes
