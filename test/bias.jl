@@ -25,25 +25,26 @@
     atoms_2 = atoms[atom_inds_2]
 
     @test isapprox(
-        Molly.centre_of_mass(coords_1,atoms_1),
+        Molly.center_of_mass(coords_1,atoms_1),
         SVector(0.625, 1.0, 1.0)u"nm";
         atol=1e-9u"nm",
     )
 
     @test isapprox(
-        Molly.centre_of_mass(coords_2,atoms_2),
+        Molly.center_of_mass(coords_2,atoms_2),
         SVector(1.0333333333333334, 0.9166666666666666, 1.05)u"nm";
         atol=1e-9u"nm",
     )
 
-    calc_dist = CalcCMDist(:closest)
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, :wrap, calc_dist)
+    calc_dist = CalcCMDist()
+    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
         0.4197386753154344u"nm";
         atol=1e-9u"nm",
     )
+    Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -51,17 +52,18 @@
         atol=1e-9u"nm",
     )
 
-    calc_dist = CalcMinDist(:closest)
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, :wrap, calc_dist)
+    calc_dist = CalcMinDist()
+    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
         0.3u"nm";
         atol=1e-9u"nm",
     )
+    Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
     calc_dist = CalcMinDist(:raw)
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, :wrap, calc_dist)
+    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -75,17 +77,18 @@
         atol=1e-9u"nm",
     )
 
-    calc_dist = CalcMaxDist(:closest)
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, :wrap, calc_dist)
+    calc_dist = CalcMaxDist()
+    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
         0.9695359714832659u"nm";
         atol=1e-9u"nm",
     )
+    Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
     calc_dist = CalcMaxDist(:raw)
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, :wrap, calc_dist)
+    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -99,17 +102,18 @@
         atol=1e-9u"nm",
     )
 
-    calc_dist = CalcSingleDist(:closest)
-    dist_cv = CalcDist([3], [4], :wrap, calc_dist)
+    calc_dist = CalcSingleDist()
+    dist_cv = CalcDist([3], [4], calc_dist, :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
         0.3u"nm";
         atol=1e-9u"nm",
     )
+    Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
     calc_dist = CalcSingleDist(:raw)
-    dist_cv = CalcDist([3], [4], :wrap, calc_dist)
+    dist_cv = CalcDist([3], [4], calc_dist, :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -123,7 +127,7 @@
         atol=1e-9u"nm",
     )
 
-    dist_cv = CalcDist([1], [2], :wrap, CalcSingleDist(:closest))
+    dist_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -131,7 +135,7 @@
         atol=1e-9u"nm",
     )
 
-    dist_cv = CalcDist([3], [4], :wrap, CalcSingleDist(:closest))
+    dist_cv = CalcDist([3], [4], CalcSingleDist(), :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -139,7 +143,7 @@
         atol=1e-9u"nm",
     )
 
-    dist_cv = CalcDist([5], [6], :wrap, CalcSingleDist(:closest))
+    dist_cv = CalcDist([5], [6], CalcSingleDist(), :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -147,7 +151,7 @@
         atol=1e-9u"nm",
     )
 
-    dist_cv = CalcDist([1], [2], :wrap, CalcSingleDist(:raw))
+    dist_cv = CalcDist([1], [2], CalcSingleDist(:raw), :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -155,7 +159,7 @@
         atol=1e-9u"nm",
     )
 
-    dist_cv = CalcDist([3], [4], :wrap, CalcSingleDist(:raw))
+    dist_cv = CalcDist([3], [4], CalcSingleDist(:raw), :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -163,7 +167,7 @@
         atol=1e-9u"nm",
     )
 
-    dist_cv = CalcDist([5], [6], :wrap, CalcSingleDist(:raw))
+    dist_cv = CalcDist([5], [6], CalcSingleDist(:raw), :wrap)
 
     @test isapprox(
         calculate_cv(dist_cv, coords, atoms, boundary),
@@ -179,20 +183,22 @@
     coords_2 = SVector{3, Float64}.(eachcol(cm_2)) / 10 * u"nm"
 
     # RMSD of all atoms
-    rmsd_cv = CalcRMSD(ref_coords=coords_2)
+    rmsd_cv = CalcRMSD(coords_2)
     @test calculate_cv(rmsd_cv, coords_1) ≈ 2.54859467758795u"Å"
+    @test Molly.cv_gradient(rmsd_cv, coords_1)[2] ≈ 2.54859467758795u"Å"
 
     # RMSD of a subset of atoms
     n_atoms_subset = 20
     subset_inds = collect(1:n_atoms_subset)
     coords_1_subset = coords_1[1:n_atoms_subset]
     coords_2_subset = coords_2[1:n_atoms_subset]
-    rmsd_cv = CalcRMSD(atom_inds=subset_inds, ref_atom_inds=subset_inds, ref_coords=coords_2)
+    rmsd_cv = CalcRMSD(coords_2, subset_inds, subset_inds)
     @test isapprox(
         calculate_cv(rmsd_cv, coords_1),
         rmsd(coords_1_subset, coords_2_subset);
         atol=1e-9u"nm",
     )
+    @test Molly.cv_gradient(rmsd_cv, coords_1)[2] ≈ calculate_cv(rmsd_cv, coords_1)
 
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)
     coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
@@ -206,17 +212,19 @@
         11.51225678195222u"Å";
         atol=1e-6u"nm",
     )
+    @test Molly.cv_gradient(rg_cv, coords, atoms)[2] ≈ calculate_cv(rg_cv, coords, atoms)
 
     # Rg of a subset of atoms
     n_atoms_subset = 20
     coords_subset = coords[1:n_atoms_subset]
     atoms_subset = atoms[1:n_atoms_subset]
-    rg_cv = CalcRg(atom_inds=[i for i=1:n_atoms_subset])
+    rg_cv = CalcRg([i for i=1:n_atoms_subset])
     @test isapprox(
         calculate_cv(rg_cv, coords, atoms),
         radius_gyration(coords_subset,atoms_subset);
         atol=1e-6u"nm",
     )
+    @test Molly.cv_gradient(rg_cv, coords, atoms)[2] ≈ calculate_cv(rg_cv, coords, atoms)
 end
 
 @testset "Bias potentials" begin
@@ -265,14 +273,14 @@ end
 
     cv_sim = 1u"nm"
     @test isapprox(
-        bias_gradient(lb, cv_sim),
+        Molly.bias_gradient(lb, cv_sim),
         1500u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
     cv_sim = 0.1u"nm"
     @test isapprox(
-        bias_gradient(lb, cv_sim),
+        Molly.bias_gradient(lb, cv_sim),
         -1500u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
@@ -295,21 +303,21 @@ end
 
     cv_sim = 1u"nm"
     @test isapprox(
-        bias_gradient(sb, cv_sim),
+        Molly.bias_gradient(sb, cv_sim),
         750u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
     cv_sim = 0.1u"nm"
     @test isapprox(
-        bias_gradient(sb, cv_sim),
+        Molly.bias_gradient(sb, cv_sim),
         -1950u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
     cv_sim = 0.75u"nm"
     @test isapprox(
-        bias_gradient(sb, cv_sim),
+        Molly.bias_gradient(sb, cv_sim),
         0u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
@@ -332,19 +340,19 @@ end
 
     cv_sim = 1.5u"nm"
     @test isapprox(
-        bias_gradient(fb, cv_sim),
+        Molly.bias_gradient(fb, cv_sim),
         750u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
     cv_sim = 1u"nm"
     @test isapprox(
-        bias_gradient(fb, cv_sim),
+        Molly.bias_gradient(fb, cv_sim),
         0u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
-    calc_dist = CalcDist([1], [2], :wrap, CalcSingleDist(:closest))
+    calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
 
     lb = LinearBias(7500u"kJ * mol^-1 * nm^-1", 0.5u"nm")
     @test isapprox(
@@ -367,7 +375,7 @@ end
         atol=1e-9u"kJ * mol^-1",
     )
 
-    calc_dist = CalcDist([1], [2], :wrap, CalcSingleDist(:closest))
+    calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
     lb = LinearBias(7500u"kJ * mol^-1 * nm^-1", 0.5u"nm")
 
     fs = Molly.zero_forces(sys)
@@ -416,7 +424,7 @@ end
         velocities = to_device([random_velocity(atom_mass, temp) for i in 1:n_atoms], AT)
         pairwise_inters = (LennardJones(),)
 
-        define_cv = CalcDist([1], [2], :wrap, CalcSingleDist(:closest))
+        define_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
         define_bias = SquareBias(400, 1.5)
         general_inters = (BiasPotential(define_cv, define_bias),)
         simulator = VelocityVerlet(
@@ -468,7 +476,7 @@ end
         velocities = to_device([random_velocity(atom_mass, temp) for i in 1:n_atoms], AT)
         pairwise_inters = (LennardJones(),)
 
-        define_cv = CalcDist([1], [2], :wrap, CalcSingleDist(:closest))
+        define_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
         define_bias = SquareBias(400u"kJ * mol^-1 * nm^-2", 1.5u"nm")
         general_inters = (BiasPotential(define_cv, define_bias),)
         simulator = VelocityVerlet(
