@@ -258,6 +258,81 @@ axislegend()
 ```
 ![Fraction SIR](images/fraction_sir.png)
 
+## Protein bias potential
+
+Here we use a [`BiasPotential`](@ref) to make the radius of gyration (Rg) of a protein match a target value.
+Flexible bias potentials can be applied by changing the collective variable.
+```julia
+using Molly
+using Enzyme
+using CUDA
+using GLMakie
+
+T = Float32
+AT = CuArray
+protein_inds = 1:1170
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff = MolecularForceField(
+    T,
+    joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
+    joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
+)
+
+function rg_wrapper(sys, args...; kwargs...)
+    return radius_gyration(
+        Molly.unwrap_molecules(sys)[protein_inds],
+        Molly.from_device(sys.atoms[protein_inds]),
+    )
+end
+
+function GyrationLogger(n_steps)
+    return GeneralObservableLogger(rg_wrapper, typeof(one(T)*u"nm"), n_steps)
+end
+
+sys = System(
+    joinpath(data_dir, "6mrr_equil.pdb"),
+    ff;
+    nonbonded_method=:pme,
+    loggers=(gyration=GyrationLogger(50),),
+    array_type=AT,
+)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+temp = T(298.0)u"K"
+random_velocities!(sys, temp)
+
+simulator = Langevin(
+    dt=T(0.001)u"ps",
+    temperature=temp,
+    friction=T(1.0)u"ps^-1",
+)
+
+bias = LinearBias(10_000u"kJ * mol^-1 * nm^-1", 1.5u"nm")
+bias_pot = BiasPotential(CalcRg(protein_inds), bias)
+gis = (sys.general_inters..., bias_pot)
+sys_bias = System(deepcopy(sys); general_inters=gis)
+
+simulate!(sys, simulator, 5_000)
+simulate!(sys_bias, simulator, 5_000)
+
+f = Figure(size=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel="Time / ps",
+    ylabel="Rg / nm",
+)
+xs = [(i - 1) / 20 for i in eachindex(values(sys.loggers.gyration))]
+lines!(ax, xs, ustrip.(values(sys.loggers.gyration)), label="No bias")
+lines!(ax, xs, ustrip.(values(sys_bias.loggers.gyration)), label="Bias to Rg 1.5 nm")
+axislegend()
+xlims!(extrema(xs)...)
+ylims!(0.5, 2.0)
+save("rg_bias.png", f)
+```
+![Rg bias](images/rg_bias.png)
+
 ## Polymer melt
 
 Here we use [`FENEBond`](@ref), [`CosineAngle`](@ref) and [`LennardJones`](@ref) to simulate interacting polymers.
