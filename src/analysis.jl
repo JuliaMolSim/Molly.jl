@@ -62,8 +62,8 @@ end
 
 # Wrapper function to return only the translated and rotated coordinates of coords_1
 #   after superimposition of coords_1 and coords_2 by the Kabsch algorithm
-function ref_kabsch(coords_1::AbstractArray{SVector{D, T}},
-                    coords_2::AbstractArray{SVector{D, T}}) where {D, T}
+# Marked as non-differentiable, useful for CalcRMSD bias
+function kabsch_nograd(coords_1, coords_2)
     p_rot, _ = kabsch(coords_1, coords_2)
     return p_rot
 end

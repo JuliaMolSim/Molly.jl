@@ -162,6 +162,7 @@ general interactions.
     potential_energy(inter, coord_i, coord_j, coord_k, coord_l, boundary, atom_i, atom_j,
                      atom_k, atom_l, energy_units, velocity_i, velocity_j, velocity_k,
                      velocity_l, step_n)
+    potential_energy(bias_pot, cv; kwargs...)
 
 Calculate the potential energy due to a given interaction type.
 

@@ -24,7 +24,7 @@ EnzymeRules.inactive(::typeof(visualize), args...) = nothing
 EnzymeRules.inactive(::typeof(place_atoms), args...) = nothing
 EnzymeRules.inactive(::typeof(place_diatomics), args...) = nothing
 EnzymeRules.inactive(::typeof(read_frame!), args...) = nothing
-EnzymeRules.inactive(::typeof(Molly.ref_kabsch), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.kabsch_nograd), args...) = nothing
 
 # Differentiable PME
 
@@ -57,9 +57,9 @@ function EnzymeRules.reverse(config, ::Const{typeof(Molly.grad_safe_bfft!)}, dre
     return (nothing, nothing)
 end
 
-# Calculate gradient of collective variable to bias simulation
+# Calculate the gradient of a CV with respect to the input coordinates
 # Works for systems with and without units
-function Molly.cv_gradient(cv_type, coords, atoms, boundary, velocities)
+function Molly.cv_gradient(cv_type, coords, atoms=nothing, boundary=nothing, velocities=nothing)
     d_coords = zero(coords)
     unit_arr = Any[u"nm"]
 
@@ -72,7 +72,7 @@ function Molly.cv_gradient(cv_type, coords, atoms, boundary, velocities)
         Duplicated(coords, d_coords),
         Const(atoms),
         Const(boundary),
-        Const(velocities)
+        Const(velocities),
     )
 
     # Correct the units after the ustrip

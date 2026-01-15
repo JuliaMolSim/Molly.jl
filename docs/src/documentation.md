@@ -576,9 +576,10 @@ struct MyCV
 end
 ```
 
-Next, you need to define a method for the [`calculate_cv`](@ref) function. The method should look like this, taking properties of the system rather than the system itself as input:
+Next, you need to define a method for the [`calculate_cv`](@ref) function.
+The method should look as follows, taking properties of the system rather than the system itself as input:
 ```julia
-function calculate_cv(cv::MyCV, coords, atoms, boundary, velocities, args...; kwargs...)
+function Molly.calculate_cv(cv::MyCV, coords, atoms, boundary, velocities; kwargs...)
     # Function to calculate the CV value given a system configuration and properties of the CV
 end
 ```
@@ -586,7 +587,7 @@ end
 The gradient of [`calculate_cv`](@ref) is by default calculated with automatic differentiation.
 However, it is also possible to manually add a method to the `cv_gradient` function to calculate the gradient without using automatic differentiation:
 ```julia
-function cv_gradient(cv_type::MyCV, coords, atoms, boundary, velocities, args...; kwargs...)
+function Molly.cv_gradient(cv_type::MyCV, coords, atoms, boundary, velocities; kwargs...)
     # Function to calculate the gradient of the CV function with respect to the coordinates of the system
 end
 ```
@@ -602,7 +603,8 @@ struct MyBias
 end
 ```
 
-The functional form of the bias potential is then defined by ading a method to the `potential_energy` function. The method should take `cv_sim` (the output of [`calculate_cv`](@ref)) as input:
+The functional form of the bias potential is then defined by adding a method to the [`potential_energy`](@ref) function.
+The method should take `cv_sim` (the output of [`calculate_cv`](@ref)) as input:
 ```julia
 function potential_energy(bias_fn::bias_type, cv_sim; kwargs...)
     pe = ... # Determined by the target value of the CV and cv_sim, the system's current CV value
@@ -611,9 +613,9 @@ end
 ```
 
 Finally, you need to add a method for `MyBias` to the `bias_gradient` function.
-The method must return the derivative of the `potential_energy` method for `MyBias` with respect to `cv_sim`:
+The method must return the derivative of the [`potential_energy`](@ref) method for `MyBias` with respect to `cv_sim`:
 ```julia
-function bias_gradient(bias_fn::bias_type, cv_sim;  kwargs...)
+function Molly.bias_gradient(bias_fn::bias_type, cv_sim;  kwargs...)
     bias_grad = ... # Derivative of bias with respect to cv_sim, potentially calculated with autodiff
     return bias_grad
 end
@@ -640,7 +642,7 @@ velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 pairwise_inters = (LennardJones(),)
 
 # Bias distance between atoms 1 and 2
-define_cv = CalcDist(1, 2, :pbc_dist, :wrap)
+define_cv = CalcDist([1], [2])
 
 # Harmonic bias potential with a target distance of 1.5 nm
 define_bias = SquareBias(400u"kJ * mol^-1 * nm^-2", 1.5u"nm")
@@ -661,7 +663,7 @@ sys = System(
     general_inters=general_inters,
 )
 
-simulate!(sys, simulator, 200_000)
+simulate!(sys, simulator, 100_000)
 ```
 
 ## Units
