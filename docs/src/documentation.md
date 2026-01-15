@@ -548,7 +548,7 @@ It should modify the coordinates as appropriate, accounting for any boundary con
 [`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
 [`MonteCarloLogger`](@ref) records various properties throughout the simulation.
 
-## Biased simulations
+## Biased simulation
 
 Molly allows users to bias simulations along one or several collective variables (CVs).
 A bias potential needs to be defined for every CV using the [`BiasPotential`](@ref) struct, which specifies the CV function and the functional form of the bias potential:
@@ -625,7 +625,6 @@ Once the CV and the bias function have been defined, a [`BiasPotential`](@ref) c
 A system can be biased along multiple CVs simultaneously by adding several [`BiasPotential`](@ref)s to `general_inters`.
 
 Below, we show an example of how to set up a simulation in which the distance between two atoms is biased in a simulation of a Lennard-Jones fluid:
-
 ```julia
 using Molly
 using Enzyme
@@ -665,6 +664,7 @@ sys = System(
 
 simulate!(sys, simulator, 100_000)
 ```
+See also [this example](@ref "Protein bias potential").
 
 ## Units
 

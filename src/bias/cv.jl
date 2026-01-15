@@ -200,7 +200,7 @@ Calculate the value of a collective variable (CV) with the current system state.
 
 New CV types should implement this function.
 This function does not apply the molecule correction over the boundaries; if
-required, `coords` can be obtained from [`unwrap_molecules`](@ref) first.
+required, `coords` can be obtained from `unwrap_molecules` first.
 The gradient of this function with respect to coordinates, used to calculate forces,
 is by default calculated with automatic differentiation when Enzyme is imported.
 Alternatively, the `cv_gradient` function can be defined for a new CV type.

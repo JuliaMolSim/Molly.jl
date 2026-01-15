@@ -229,7 +229,7 @@ We can now load the initial configuration into a [`System`](@ref):
 # pulling.jl
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
-ff_dir   = joinpath(data_dir, "force_fields")
+ff_dir = joinpath(data_dir, "force_fields")
 
 ff = MolecularForceField(
     FT,
@@ -238,11 +238,10 @@ ff = MolecularForceField(
 )
 
 sys_0 = System(
-    joinpath(data_dir, "dipeptide_equil.pdb"),
+    joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
-    array_type          = AT,
-    rename_terminal_res = false,
-    nonbonded_method    = :cutoff,
+    array_type=AT,
+    nonbonded_method=:cutoff,
 )
 
 random_velocities!(sys_0, T0) # Initialize velocities from M-B distribution at target temperature
@@ -359,11 +358,10 @@ ff = MolecularForceField(
 )
 
 sys = System(
-    joinpath("./", "./pull_$(SIM_N).pdb"), # Now we load the final structure for a given pull simulation
+    "pull_$(SIM_N).pdb", # Now we load the final structure for a given pull simulation
     ff;
-    array_type          = AT,
-    rename_terminal_res = false,
-    nonbonded_method    = :cutoff,
+    array_type=AT,
+    nonbonded_method=:cutoff,
 )
 
 random_velocities!(sys, T0)
@@ -454,11 +452,10 @@ ff = MolecularForceField(
 )
 
 sys_nobias = System(
-    joinpath(data_dir, "./dipeptide_equil.pdb"),
+    joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
-    array_type          = AT,
-    rename_terminal_res = false,
-    nonbonded_method    = :cutoff,
+    array_type=AT,
+    nonbonded_method=:cutoff,
 )
 
 # Atom indices defining dihedral
