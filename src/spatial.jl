@@ -39,6 +39,7 @@ Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct CubicBoundary{D, T, C} <: AbstractBoundary{D, T, C}
     side_lengths::SVector{3, C}
+
     function CubicBoundary(side_lengths::SVector{3, C2}; check_positive::Bool=true) where C2
         if check_positive && any(l -> l <= zero(l), side_lengths)
             throw(DomainError("side lengths must be positive, got $side_lengths"))
@@ -92,6 +93,7 @@ Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct RectangularBoundary{D, T, C} <: AbstractBoundary{D, T, C}
     side_lengths::SVector{2, C}
+
     function RectangularBoundary(side_lengths::SVector{2, C2}; check_positive::Bool=true) where C2
         if check_positive && any(l -> l <= zero(l), side_lengths)
             throw(DomainError("side lengths must be positive, got $side_lengths"))
@@ -265,7 +267,7 @@ end
 TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
 TriclinicBoundary(arr; kwargs...)        = TriclinicBoundary(SVector{3}(arr); kwargs...)
 
-boxmatrix(b::TriclinicBoundary) = SMatrix{3,3}(hcat(b.basis_vectors...))
+boxmatrix(b::TriclinicBoundary) = SMatrix{3, 3}(hcat(b.basis_vectors...))
 
 Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
@@ -614,49 +616,50 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     return v_wrap
 end
 
-function unwrap_global(coords::AbstractVector{<:SVector{D}},
-                       boundary, topology; neighbors=nothing) where {D}
-    # --- frac<->cart ---
+# Unwrap coordinates so that molecules are not split over the boundary
+# Returns coordinates on CPU
+unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+
+function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topology) where D
+    coords_cpu = from_device(coords)
+    if isnothing(topology)
+        return coords_cpu
+    end
+
+    # Fractional to Cartesian conversion
     if hasproperty(boundary, :basis_vectors)
-        @assert D == 3
-        Bm = reduce(hcat, boundary.basis_vectors)   # unitful
-        B  = SMatrix{3,3}(Bm)
-        to_frac = (r::SVector{3}) -> B \ r          # dimensionless
-        to_cart = (f::SVector{3}) -> B * f          # length units
+        if D != 3
+            error("Triclinic boundary only defined for 3-dimensions")
+        end
+        Bm = reduce(hcat, boundary.basis_vectors)
+        B  = SMatrix{3, 3}(Bm)
+        to_frac = (r::SVector{3}) -> B \ r # Dimensionless
+        to_cart = (f::SVector{3}) -> B * f # Length units
     else
-        sl = boundary.side_lengths                  # SVector{D} with length units
-        to_frac = (r::SVector{D}) -> r ./ sl        # dimensionless
-        to_cart = (f::SVector{D}) -> f .* sl        # length units
+        sl = boundary.side_lengths
+        to_frac = (r::SVector{D}) -> r ./ sl # Dimensionless
+        to_cart = (f::SVector{D}) -> f .* sl # Length units
     end
-    wrap01(v) = v .- floor.(v .+ eps(eltype(v)))     # keep in [0,1)
+    wrap01(v) = v .- floor.(v .+ eps(eltype(v))) # Keep in [0,1)
 
-    # --- wrapped fractional coords ---
-    N  = length(coords)
-    f1 = to_frac(coords[1])
-    f  = Vector{typeof(f1)}(undef, N)                # dimensionless
+    # Wrapped fractional coords
+    N  = length(coords_cpu)
+    f1 = to_frac(coords_cpu[1])
+    f  = Vector{typeof(f1)}(undef, N) # Dimensionless
     @inbounds for i in 1:N
-        f[i] = wrap01(to_frac(coords[i]))
+        f[i] = wrap01(to_frac(coords_cpu[i]))
     end
 
-    # --- global adjacency: bonds ∪ neighbor-list pairs ---
+    # Bond adjacency
     adj = [Int[] for _ in 1:N]
-    if topology !== nothing
-        @inbounds for (i32,j32) in topology.bonded_atoms
-            i, j = Int(i32), Int(j32)
-            push!(adj[i], j)
-            push!(adj[j], i)
-        end
-        if neighbors !== nothing
-            @inbounds for ni in eachindex(neighbors)
-                i, j = neighbors[ni][1], neighbors[ni][2]
-                push!(adj[i], j)
-                push!(adj[j], i)
-            end
-        end
+    @inbounds for (i32, j32) in topology.bonded_atoms
+        i, j = Int(i32), Int(j32)
+        push!(adj[i], j)
+        push!(adj[j], i)
     end
 
-    # --- BFS over whole system (one lattice tiling) ---
-    u = similar(f)                                   # dimensionless
+    # BFS over whole system (one lattice tiling)
+    u = similar(f) # Dimensionless
     visited = falses(N)
     @inbounds for seed in 1:N
         visited[seed] && continue
@@ -669,7 +672,7 @@ function unwrap_global(coords::AbstractVector{<:SVector{D}},
             for j in adj[i]
                 visited[j] && continue
                 df = f[j] - fi
-                df -= round.(df)                     # shift to (-0.5,0.5]
+                df -= round.(df) # Shift to (-0.5,0.5]
                 u[j] = ui + df
                 visited[j] = true
                 push!(stack, j)
@@ -677,22 +680,18 @@ function unwrap_global(coords::AbstractVector{<:SVector{D}},
         end
     end
 
-    # --- back to Cartesian with units ---
-    out = Vector{typeof(coords[1])}(undef, N)
+    # Back to Cartesian with units
+    out = Vector{typeof(coords_cpu[1])}(undef, N)
     @inbounds for i in 1:N
         out[i] = to_cart(u[i])
     end
     return out
 end
 
-# Unwrap coordinates so that every bonded pair is placed using the minimum-image displacement
-# Molecule connectivity is preserved
-function unwrap_molecules(sys; neighbors=nothing)
-    return unwrap_global(from_device(sys.coords), sys.boundary, sys.topology; neighbors)
-end
-
-function unwrap_molecules(coords, boundary, topology)
-    return unwrap_global(from_device(coords), boundary, topology; neighbors=nothing)
+function check_correction_arg(correction)
+    if !(correction in (:pbc, :wrap))
+        throw(ArgumentError("correction argument must be :pbc or :wrap, found $correction"))
+    end
 end
 
 """
@@ -1011,7 +1010,7 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
 
     is_triclinic = hasproperty(boundary, :basis_vectors)
     if is_triclinic && D != 3
-        error("Triclinic boundary only defined for D=3")
+        error("Triclinic boundary only defined for 3-dimensions")
     end
 
     # Build frac<->cart transforms

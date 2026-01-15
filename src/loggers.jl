@@ -627,9 +627,7 @@ The CRYST1 record is not written for infinite boundaries.
 function write_structure(filepath, sys; format::AbstractString="", correction::Symbol=:pbc,
                          atom_inds=Int[], excluded_res=(), write_velocities::Bool=false,
                          write_boundary=true)
-    if !(correction in (:pbc, :wrap))
-        throw(ArgumentError("correction argument must be :wrap or :pbc, found $correction"))
-    end
+    check_correction_arg(correction)
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         # Special case PDB so more residue information can be written
         open(filepath, "w") do output
@@ -698,9 +696,7 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           format::AbstractString="", correction::Symbol=:pbc, atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
                           write_boundary::Bool=true)
-    if !(correction in (:pbc, :wrap))
-        throw(ArgumentError("correction argument must be :wrap or :pbc, found $correction"))
-    end
+    check_correction_arg(correction)
     topology = Chemfiles.Topology() # Added to later when sys is available
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         format_used = "PDB"

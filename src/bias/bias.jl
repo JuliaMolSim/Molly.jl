@@ -101,7 +101,7 @@ A potential to bias a simulation along a collective variable (CV), implemented
 as an AtomsCalculators.jl calculator.
 
 The `cv_type` could for example be [`CalcDist`](@ref) and the `bias_type`
-could be [`CalcDist`](@ref).
+could be [`LinearBias`](@ref).
 
 Forces resulting from the bias potential are evaluated in two steps, specfically by
 (1) calculating the gradient of the bias potential with respect to the value of the CV, and

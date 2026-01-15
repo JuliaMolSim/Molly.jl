@@ -42,6 +42,7 @@ struct AngleConstraint{D, I}
     dist_ij::D
     dist_jk::D
     dist_ik::D
+
     function AngleConstraint(i, j, k, angle_ijk, dist_ij, dist_jk)
         cos_θ = cos(angle_ijk)
         if cos_θ == -1
