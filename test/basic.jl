@@ -651,9 +651,9 @@ end
                 LU, MU, EU, FU, TU, AU = NoUnits, NoUnits, NoUnits, NoUnits, NoUnits, NoUnits
             end
             vs_flags = to_device(BitVector([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1]), AT)
-            atom_masses = map(x -> (x ? 0.0 : 10.0) * MU, vs_flags)
+            atom_masses = map(x -> (x ? 0.0 : 10.0), vs_flags) .* MU
             atoms = to_device([Atom(mass=m, σ=(0.1 * LU), ϵ=(0.2 * EU))
-                               for m in atom_masses], AT)
+                               for m in from_device(atom_masses)], AT)
             coords = to_device([
                 SVector(2.0, 2.0, 2.0),
                 SVector(2.0, 2.0, 2.2),
