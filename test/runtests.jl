@@ -130,6 +130,7 @@ if GROUP in ("All", "NotGradients")
     include("bias.jl")
     include("coupling.jl")
     include("constraints.jl")
+    include("analysis.jl")
 end
 
 if GROUP in ("All", "Protein", "NotGradients")
