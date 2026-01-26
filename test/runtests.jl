@@ -19,7 +19,6 @@ using Metal
 using oneAPI
 import SimpleCrystals
 using Suppressor
-using StaticArrays
 
 using DelimitedFiles
 using LinearAlgebra
