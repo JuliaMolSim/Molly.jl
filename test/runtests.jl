@@ -13,6 +13,7 @@ using CUDA
 using Enzyme
 using FiniteDifferences
 using GPUArrays
+using StaticArrays
 using KernelDensity
 using Measurements
 using Metal

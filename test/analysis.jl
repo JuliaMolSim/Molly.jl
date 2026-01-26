@@ -1,7 +1,3 @@
-using Molly
-using Test
-using StaticArrays
-
 @testset "Analysis" begin
     @testset "Displacements and distances" begin
         coords = [SVector(1.0, 1.0, 1.0), SVector(2.0, 2.0, 2.0)]
