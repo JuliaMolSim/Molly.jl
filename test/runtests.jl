@@ -13,13 +13,13 @@ using CUDA
 using Enzyme
 using FiniteDifferences
 using GPUArrays
-using StaticArrays
 using KernelDensity
 using Measurements
 using Metal
 using oneAPI
 import SimpleCrystals
 using Suppressor
+using StaticArrays
 
 using DelimitedFiles
 using LinearAlgebra
