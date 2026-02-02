@@ -1,6 +1,3 @@
-using Molly
-using Test
-
 # Mock interaction for testing cutoffs in isolation
 struct MockInter end
 # V(r) = 1/r^6, F(r) = -dV/dr = 6/r^7
