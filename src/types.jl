@@ -20,7 +20,8 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator
+    ASECalculator,
+    LAMMPSCalculator
 
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64
@@ -1557,6 +1558,56 @@ struct ASECalculator{T}
 end
 
 function update_ase_calc! end
+
+"""
+    LAMMPSCalculator(
+        sys::System{3, AT, T},
+        lammps_unit_system::String,
+        potential_definition::Union{String, Array{String}};
+        extra_lammps_commands::Union{String, Array{String}} = "",
+        logfile_path::String = "none",
+        calculate_potential::Bool = false
+    )
+
+Defines a general interaction that will call LAMMPS to calculate forces and energies. Forces
+and energies are calculated on a single thread. You must call LAMMPS.MPI.Init() for LAMMPS.jl
+to load the LAMMPS executable on systems where MPI is available.
+
+The LAMMPS potential files can be found at:
+`abspath(dirname(LAMMPS.locate()), "..", "share", "lammps", "potentials")`
+
+Restrictions:
+-------------
+- CPU only
+- Floats promote to Float64
+- No TriclinicBoundary
+- 3D systems only
+- Fully periodic systems only
+
+Arguments:
+----------
+- `sys::System{3}`: The system object this interaction will be applied to. You still have to add this
+    interaction to the system object yourself after constructing the LAMMPSCalculator.
+- `lammps_unit_system::String` : String representing unit system passed to lammps unit command (e.g., metal)
+- `potential_definition::Union{String, Array{String}}` : Commands passed to lammps which define your interaction.
+    For example, to define LJ you pass:
+    `lj_cmds = ["pair_style lj/cut 8.5", "pair_coeff * * 0.0104 3.4", "pair_modify shift yes"]`
+- `label_type_map::Dict{Symbol, Int} = Dict{Symbol, Int}()` : By default atom types are assigned in the 
+    order they appear in the system. This can make defining the potential for multi-atomic systems
+    difficult. By providing this dictionary you can overide the type label assigned to each unique species. 
+- `extra_lammps_commands::Union{String, Array{String}}` : Any other commands you want to pass to LAMMPS. 
+    This feature is untested, but allows flexability to modify the LAMMPS system. 
+- `logfile_path::String = "none"` : Path where LAMMPS logfile is written. Defaults to no log file.
+- `calculate_potential::Bool = false`: Flag to set if LAMMPS should calculate potential energy. Will
+    automatically be turned on if loggers requiring potential energy are detected. Other use cases
+    like Monte-Carlo (and its associated barostat) require setting this flag to true. 
+"""
+mutable struct LAMMPSCalculator{T, E, L}
+    lmp::T # T will be LMP but that is not available here
+    last_updated::Int
+    energy_unit::E
+    length_unit::L
+end
 
 iszero_value(x) = iszero(x)
 

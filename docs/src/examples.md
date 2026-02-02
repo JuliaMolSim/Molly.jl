@@ -607,6 +607,84 @@ sys = System(
 
 potential_energy(sys) # -2080.2391023908813 eV
 ```
+## LAMMPS Calculator
+
+[`LAMMPSCalculator`](@ref) is made available by using [LAMMPS.jl](https://github.com/cesmix-mit/LAMMPS.jl) with Molly. This allows force/energy calculation using a potential from LAMMPS. This calculator is limited to fully periodic, 3D systems, with rectangular or cubic cells (i.e., no triclinic boundaries). These limitations are not fundamental and can be supported through a pull request. Furthermore, this calculator will always promote floats to Float64 as LAMMPS always uses double precision, and the data must reside on the CPU. 
+
+This calculator will always use a single thread as Molly does not yet depend on MPI. Despite this, LAMMPS.jl expects MPI to be initialized on systems that support MPI. You must call `LAMMPS.MPI.Init()` at the start of your script for [`LAMMPSCalculator`](@ref) to initialize properly. Do NOT try to call Molly with `mpirun` (until the date that is supported)
+
+To use the [`LAMMPSCalculator`](@ref) requires a Molly [`System`](@ref) whose energy and force units are commensurate with the unit system chosen for LAMMPS. For example, if `metal` units are chosen the system should have energy of eV and force units of eV / angstrom. The mass unit is automatically converted. Next you must define your potential. This is simply the string used to define the potential in a LAMMPS input file. For example, for Lennard-Jones you could define:
+
+```julia
+lj_cmds = ["pair_style lj/cut 8.5", "pair_coeff * * 0.0104 3.4", "pair_modify shift yes"]
+```
+
+The optional argument, `label_type_map` allows you to define the atom types that Molly will pass to LAMMPS. This makes it possible to define multi-atomic potentials which require the types to be specified in the definition of the potential. By default, types are assigned in the order they are discovered in the system. For monoatomic systems (this never needs to be defined) the `label_type_map` could be defined as `Dict(:Al => 1)`. 
+
+The `calculate_potential` tells LAMMPS to calculate potential energy. This will be turned on automatically if Molly detects that your system has a `PotentialEnergyLogger` or `TotalEnergyLogger`. For other, less explicit uses of potential energy (e.g. Monte-Carlo) this flag must be set manually. 
+
+
+```julia
+
+using LAMMPS
+using Molly
+using SimpleCrystals
+
+LAMMPS.MPI.Init()
+
+dt = 1.0u"fs"
+damping = 0.5u"ps^-1"
+
+ar_crystal = FCC(5.2468u"Å", :Ar, SVector(4,4,4))
+diamond_crystal = Diamond(5.43u"Å", :Si, SVector(3, 3, 3))
+al_crystal = FCC(4.041u"Å", :Al, SVector(4,4,4))
+
+pot_basepath = abspath(dirname(LAMMPS.locate()), "..", "share", "lammps", "potentials")
+
+eam_pot = joinpath(pot_basepath, "Al_zhou.eam.alloy")
+sw_pot = joinpath(pot_basepath, "Si.sw")
+
+# these are LJ argon params, but will use with silicon just to see if energy the same.
+lj_cmds = ["pair_style lj/cut 8.5", "pair_coeff * * 0.0104 3.4", "pair_modify shift yes"]
+sw_cmds = ["pair_style sw", "pair_coeff * * \"$(sw_pot)\" Si"]
+eam_cmds = ["pair_style eam/alloy", "pair_coeff * * \"$(eam_pot)\" Al"]
+
+pots = (
+    (lj_cmds, ar_crystal, "LJ", -19.85644u"eV"),
+    (sw_cmds, diamond_crystal, "SW", -936.70522u"eV"),
+    (eam_cmds, al_crystal, "EAM", -915.27403u"eV")
+)
+
+for (pot_cmd, crys, pot_type, E_pot) in pots
+
+    sys = System(
+        crys,
+        energy_units = u"eV",
+        force_units = u"eV / angstrom",
+        loggers = (PotentialEnergyLogger(typeof(1.0 * u"eV"), 10),)
+    )
+
+    inter = LAMMPSCalculator(
+        sys,
+        "metal", 
+        pot_cmd;
+        logfile_path = joinpath(@__DIR__, "log.lammps"),
+        calculate_potential = true
+    )
+
+    random_velocities!(sys, 100u"K")
+
+    sys = System(sys; general_inters = (inter, ))
+
+    sim = Langevin(dt = dt, temperature = 100u"K", friction = damping)
+
+    simulate!(sys, sim, 1)
+    PE_LAMMPS = values(sys.loggers[1])[1]
+    println("LAMMPS Calculator through Molly got: $(PE_LAMMPS)")
+    println("Potential energy calculated via C++ LAMMPS: $(E_pot)")
+end
+```
+
 
 ## Density functional theory
 

@@ -640,3 +640,115 @@ end
         test_forces(ab_sys, calc)
     end
 end
+
+
+@testset "LAMMPSCalculator" begin
+    
+    LAMMPS.MPI.Init()
+
+    dt = 1.0u"fs"
+    damping = 0.5u"ps^-1"
+
+    ar_crystal = FCC(5.2468u"Å", :Ar, SVector(4,4,4))
+    ar_crystal_real = FCC(5.2468u"Å", 39.95u"g/mol", SVector(4,4,4))
+    diamond_crystal = Diamond(5.43u"Å", :Si, SVector(3, 3, 3))
+    al_crystal = FCC(4.041u"Å", :Al, SVector(4,4,4))
+
+    pot_basepath = abspath(dirname(LAMMPS.locate()), "..", "share", "lammps", "potentials")
+
+    eam_pot = joinpath(pot_basepath, "Al_zhou.eam.alloy")
+    sw_pot = joinpath(pot_basepath, "Si.sw")
+
+    # these are LJ argon params, but will use with silicon just to see if energy the same.
+    lj_cmds = ["pair_style lj/cut 8.5", "pair_coeff * * 0.0104 3.4", "pair_modify shift yes"]
+    lj_cmds_real = ["pair_style lj/cut 8.5", "pair_coeff * * 0.24037 3.4", "pair_modify shift yes"]
+    sw_cmds = ["pair_style sw", "pair_coeff * * \"$(sw_pot)\" Si"]
+    eam_cmds = ["pair_style eam/alloy", "pair_coeff * * \"$(eam_pot)\" Al"]
+
+    pots = (
+        (lj_cmds, ar_crystal, "LJ", -19.85644u"eV"),
+        (lj_cmds_real, ar_crystal_real, "LJ-real", -458.93197u"kcal/mol"),
+        (sw_cmds, diamond_crystal, "SW", -936.70522u"eV"),
+        (eam_cmds, al_crystal, "EAM", -915.27403u"eV")
+    )
+
+    for (pot_cmd, crys, pot_type, E_pot) in pots
+
+        unit_sys = pot_type == "LJ-real" ? "real" : "metal"
+
+        sys = System(
+            crys,
+            energy_units = unit(E_pot),
+            force_units = unit(E_pot) / u"angstrom",
+            loggers = (PotentialEnergyLogger(typeof(1.0 * unit(E_pot)), 10),)
+        )
+
+        if pot_type == "LJ_real"
+            new_atoms_data = []
+            for i in eachindex(sys)
+                push!(new_atoms_data, Molly.AtomData(element = "Ar"))
+            end
+
+            sys = System(sys; atoms_data=[new_atoms_data...])
+        end
+
+        inter = LAMMPSCalculator(
+            sys,
+            unit_sys, 
+            pot_cmd;
+            logfile_path = joinpath(@__DIR__, "log.lammps"),
+            calculate_potential = true
+        )
+
+        random_velocities!(sys, 100u"K")
+
+        sys = System(sys; general_inters = (inter, ))
+
+        sim = Langevin(dt = dt, temperature = 100u"K", friction = damping)
+
+        simulate!(sys, sim, 1)
+        PE_LAMMPS = values(sys.loggers[1])[1]
+
+        @test PE_LAMMPS ≈ E_pot
+
+        LAMMPS.close!(inter.lmp)
+    end
+
+    sys = System(
+            ar_crystal,
+            energy_units = u"eV",
+            force_units = u"eV / angstrom",
+            loggers = (PotentialEnergyLogger(typeof(1.0u"eV"), 10),)
+    )
+
+    @test_throws ArgumentError LAMMPSCalculator(
+        sys,
+        "metal", 
+        eam_cmds;
+        label_type_map = Dict(:Al => 1, :Si => 2, :Ar => 3),
+        logfile_path = joinpath(@__DIR__, "log.lammps"),
+        calculate_potential = true
+    )
+
+    @test_throws ArgumentError LAMMPSCalculator(
+        sys,
+        "real", 
+        eam_cmds;
+        label_type_map = Dict(:Al => 1),
+        logfile_path = joinpath(@__DIR__, "log.lammps"),
+        calculate_potential = true
+    )
+
+    @test_throws ArgumentError LAMMPSCalculator(
+        sys,
+        "fake-unit-system", 
+        eam_cmds;
+        label_type_map = Dict(:Al => 1),
+        logfile_path = joinpath(@__DIR__, "log.lammps"),
+        calculate_potential = true
+    )
+
+    LAMMPS.MPI.Finalize()
+
+
+end
