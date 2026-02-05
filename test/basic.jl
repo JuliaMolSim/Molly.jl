@@ -670,10 +670,10 @@ end
             ] * LU, AT)
             boundary = CubicBoundary(7.0 * LU)
             virtual_sites = to_device([
-                TwoParticleAverageSite(3, 1, 2, 0.6, 0.4),
-                ThreeParticleAverageSite(7, 4, 5, 6, 0.2, 0.3, 0.5),
+                TwoParticleAverageSite(3, 1, 2, 0.6, 0.4, 0.0 / LU),
+                ThreeParticleAverageSite(7, 4, 5, 6, 0.2, 0.3, 0.5, 0.0 / LU),
                 OutOfPlaneSite(11, 8, 9, 10, 0.4, 0.4, 0.2 / LU),
-                TwoParticleAverageSite(12, 10, 9, 0.7, 0.3),
+                TwoParticleAverageSite(12, 10, 9, 0.7, 0.3, 0.0 / LU),
             ], AT)
             pis = (LennardJones(),)
             sys = System(

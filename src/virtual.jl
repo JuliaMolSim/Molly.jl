@@ -37,19 +37,22 @@ end
 
 """
 
+
+Optional weight_cross
 """
-function TwoParticleAverageSite(atom_ind, atom_1, atom_2, weight_1::T, weight_2::T) where T
+function TwoParticleAverageSite(atom_ind, atom_1, atom_2, weight_1::T, weight_2::T,
+                                weight_cross=(zero(T) * u"nm^-1")) where T
     return VirtualSite(1, atom_ind, atom_1, atom_2, 0, weight_1, weight_2,
-                       zero(T), zero(T), zero(T), zero(T))
+                       zero(T), zero(T), zero(T), weight_cross)
 end
 
 """
 
 """
-function ThreeParticleAverageSite(atom_ind, atom_1, atom_2, atom_3, weight_1::T,
-                                  weight_2::T, weight_3::T) where T
+function ThreeParticleAverageSite(atom_ind, atom_1, atom_2, atom_3, weight_1::T, weight_2::T,
+                                  weight_3::T, weight_cross=(zero(T) * u"nm^-1")) where T
     return VirtualSite(2, atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2,
-                       weight_3, zero(T), zero(T), zero(T))
+                       weight_3, zero(T), zero(T), weight_cross)
 end
 
 """
@@ -67,6 +70,9 @@ function calc_virtual_site_flags(virtual_sites, atom_masses, AT=Array)
     virtual_sites_cpu = from_device(virtual_sites)
     for (vi, vs) in enumerate(virtual_sites_cpu)
         i = vs.atom_ind
+        if !(vs.type in (1, 2, 3))
+            error("unrecognised virtual site type $(vs.type), should be 1/2/3")
+        end
         if i > n_atoms
             error("virtual site $vi defines atom number $i but there are only " *
                   "$n_atoms atoms present")
@@ -103,23 +109,6 @@ function calc_virtual_site_flags(virtual_sites, atom_masses, AT=Array)
     return to_device(virtual_site_flags, AT)
 end
 
-function place_virtual_site(coords, boundary, vs, ::Val{1})
-    return vs.weight_1 * coords[vs.atom_1] + vs.weight_2 * coords[vs.atom_2]
-end
-
-function place_virtual_site(coords, boundary, vs, ::Val{2})
-    return vs.weight_1 * coords[vs.atom_1] + vs.weight_2 * coords[vs.atom_2] +
-           vs.weight_3 * coords[vs.atom_3]
-end
-
-function place_virtual_site(coords, boundary, vs, ::Val{3})
-    r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-    r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-    cross_r12_r13 = cross(r12, r13) # Units L^2
-    return coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
-           vs.weight_cross * cross_r12_r13
-end
-
 """
 
 Assumes each virtual site is only defined once.
@@ -141,7 +130,18 @@ end
     i = @index(Global, Linear)
     if i <= length(virtual_sites)
         vs = virtual_sites[i]
-        vs_coord = place_virtual_site(coords, boundary, vs, Val(vs.type))
+        if vs.type == 1
+            vs_coord = vs.weight_1 * coords[vs.atom_1] + vs.weight_2 * coords[vs.atom_2]
+        elseif vs.type == 2
+            vs_coord = vs.weight_1 * coords[vs.atom_1] + vs.weight_2 * coords[vs.atom_2] +
+                       vs.weight_3 * coords[vs.atom_3]
+        elseif vs.type == 3
+            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+            cross_r12_r13 = cross(r12, r13) # Units L^2
+            vs_coord = coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
+                       vs.weight_cross * cross_r12_r13
+        end
         coords[vs.atom_ind] = wrap_coords(vs_coord, boundary)
     end
 end
@@ -165,7 +165,7 @@ function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
     return fs
 end
 
-@kernel function distribute_forces_kernel!(fs_mat::Matrix{T}, @Const(coords),
+@kernel function distribute_forces_kernel!(fs_mat::AbstractMatrix{T}, @Const(coords),
                         boundary::AbstractBoundary{D}, @Const(virtual_sites)) where {T, D}
     i = @index(Global, Linear)
     if i <= length(virtual_sites)
@@ -204,8 +204,6 @@ end
                 Atomix.@atomic fs_mat[dim, vs.atom_2] += ustrip(f2[dim])
                 Atomix.@atomic fs_mat[dim, vs.atom_3] += ustrip(f3[dim])
             end
-        else
-            error("unrecognised virtual site type $(vs.type), should be 1/2/3")
         end
         # Now the virtual site force has been distributed onto the other atoms,
         #   it can be set to zero

@@ -422,8 +422,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             externals[name_to_idx[nm]] += 1
                         end
                     end
-                    residues[rname] = ResidueTemplate(rname, atoms, elements, types, bonds,
-                                                      externals, allowed_patches, charges, extras)
+                    residues[rname] = ResidueTemplate(rname, atoms, elements, types, virtual_sites,
+                                            bonds, externals, allowed_patches, charges, extras)
                 end
 
             elseif entry_name == "Patches"
