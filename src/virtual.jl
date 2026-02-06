@@ -7,7 +7,7 @@ export
     place_virtual_sites!,
     distribute_forces!
 
-struct VirtualSiteTemplate{T, C}
+struct VirtualSiteTemplate{T, IC}
     type::Int # 1/2/3 for TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite
     name::String
     atom_name_1::String
@@ -18,10 +18,10 @@ struct VirtualSiteTemplate{T, C}
     weight_3::T
     weight_12::T
     weight_13::T
-    weight_cross::C # Units are 1/L
+    weight_cross::IC # Units are 1/L
 end
 
-struct VirtualSite{T, C}
+struct VirtualSite{T, IC}
     type::Int # 1/2/3 for TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite
     atom_ind::Int
     atom_1::Int
@@ -32,7 +32,7 @@ struct VirtualSite{T, C}
     weight_3::T
     weight_12::T
     weight_13::T
-    weight_cross::C # Units are 1/L
+    weight_cross::IC # Units are 1/L
 end
 
 """

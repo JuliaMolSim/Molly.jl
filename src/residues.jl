@@ -2,12 +2,12 @@
 
 # Struct to carry the information necessary to represent the residue templates
 #   defined in the force field XML files
-struct ResidueTemplate{T, C}
+struct ResidueTemplate{T, IC}
     name::String
     atoms::Vector{String}
     elements::Vector{Symbol}
     types::Vector{String}
-    virtual_sites::Vector{VirtualSiteTemplate{T, C}}
+    virtual_sites::Vector{VirtualSiteTemplate{T, IC}}
     bonds::Vector{Tuple{Int, Int}}
     external_bonds::Vector{Int} # Count of external connections per atom
     allowed_patches::Vector{String}
@@ -187,7 +187,7 @@ end
 
 # Builds the topology of the system read from a structure file given the
 #   template bonds
-function create_bonds(canon_sys, standard_bonds)
+function create_bonds!(canon_sys, standard_bonds)
     bonds = Tuple{Int, Int}[]
 
     for (chain, resids) in canon_sys
@@ -347,7 +347,7 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
 end
 
 # Add bonds only if they have not been added by the previous steps
-function read_extra_bonds(top, top_bonds, canonical_system)
+function read_extra_bonds!(canonical_system, top, top_bonds)
     chfl_bonds = Vector{Int}[is .+ 1 for is in eachcol(Int.(Chemfiles.bonds(top)))]
     for (i, j) in chfl_bonds
         res_i = residue_from_atom_idx(i, canonical_system)
@@ -499,7 +499,7 @@ function match_residue_to_template(res::ResidueGraph,
 
             # Degree and external-bond checks
             r_deg == t_deg || continue
-            ignoreExternalBonds || (r_ext == t_ext) || continue
+            (ignoreExternalBonds || (r_ext == t_ext)) || continue
 
             push!(cands, k) # Store template new-index k
         end
