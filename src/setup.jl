@@ -1283,8 +1283,18 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     end
     pairwise_inters = (lj, coul)
 
-    if length(bonds_all.is) > 0
-        topology = MolecularTopology(bonds_all.is, bonds_all.js, length(coords_dev))
+    # For the purposes of assigning molecules, add connections from atoms to virtual sites
+    bonds_all_vs_is, bonds_all_vs_js = copy(bonds_all.is), copy(bonds_all.js)
+    for vs in virtual_sites
+        for ai in (vs.atom_1, vs.atom_2, vs.atom_3)
+            if !iszero(ai)
+                push!(bonds_all_vs_is, ai)
+                push!(bonds_all_vs_js, vs.atom_ind)
+            end
+        end
+    end
+    if length(bonds_all_vs_is) > 0
+        topology = MolecularTopology(bonds_all_vs_is, bonds_all_vs_js, length(coords_dev))
     else
         topology = nothing
     end
