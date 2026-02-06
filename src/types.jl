@@ -661,7 +661,11 @@ function System(;
               "of SVectors for performance"
     end
 
-    df = n_dof(D, n_atoms, boundary)
+    virtual_site_flags = calc_virtual_site_flags(virtual_sites, atom_masses, AT)
+    VF = typeof(virtual_site_flags)
+    n_virtual_sites = sum(virtual_site_flags)
+
+    df = n_dof(D, n_atoms - n_virtual_sites, boundary)
     if length(constraints) > 0
         for ca in constraints
             for cluster_type in cluster_keys(ca)
@@ -672,9 +676,6 @@ function System(;
     end
     constraints = Tuple(setup_constraints!(ca, neighbor_finder, AT) for ca in constraints)
     CN = typeof(constraints)
-
-    virtual_site_flags = calc_virtual_site_flags(virtual_sites, atom_masses, AT)
-    VF = typeof(virtual_site_flags)
 
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
@@ -1053,29 +1054,6 @@ function ReplicaSystem(;
     total_mass = sum(atom_masses)
     TM = typeof(total_mass)
 
-    df = n_dof(D, n_atoms, replica_boundaries[1])
-    if isnothing(replica_constraints)
-        if length(constraints) > 0
-            for ca in constraints
-                df -= n_dof_lost(D, ca.clusters)
-            end
-        end
-        replica_dfs = fill(df, n_replicas)
-        replica_constraints = [constraints for _ in 1:n_replicas]
-    elseif length(replica_constraints) != n_replicas
-        throw(ArgumentError("number of constraints ($(length(replica_constraints)))"
-                            * "does not match number of replicas ($n_replicas)"))
-    else
-        replica_dfs = fill(df, n_replicas)
-        for (i, rcs) in enumerate(replica_constraints)
-            if length(rcs) > 0
-                for ca in rcs
-                    replica_dfs[i] -= n_dof_lost(D, ca.clusters)
-                end
-            end
-        end
-    end
-
     if isnothing(replica_virtual_sites)
         replica_virtual_sites = [deepcopy(virtual_sites) for _ in 1:n_replicas]
     elseif length(replica_virtual_sites) != n_replicas
@@ -1084,6 +1062,29 @@ function ReplicaSystem(;
     end
     replica_virtual_site_flags = [calc_virtual_site_flags(vss, atom_masses, AT)
                                   for vss in replica_virtual_sites]
+    replica_n_virtual_sites = [sum(vsfs) for vsfs in replica_virtual_site_flags]
+
+    replica_dfs = [n_dof(D, n_atoms - n_virtual_sites, rb)
+                   for (n_virtual_sites, rb) in zip(replica_n_virtual_sites, replica_boundaries)]
+    if isnothing(replica_constraints)
+        if length(constraints) > 0
+            for ca in constraints
+                replica_dfs .-= n_dof_lost(D, ca.clusters)
+            end
+        end
+        replica_constraints = [constraints for _ in 1:n_replicas]
+    elseif length(replica_constraints) != n_replicas
+        throw(ArgumentError("number of constraints ($(length(replica_constraints)))" *
+                            "does not match number of replicas ($n_replicas)"))
+    else
+        for (i, rcs) in enumerate(replica_constraints)
+            if length(rcs) > 0
+                for ca in rcs
+                    replica_dfs[i] -= n_dof_lost(D, ca.clusters)
+                end
+            end
+        end
+    end
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
