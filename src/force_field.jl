@@ -231,6 +231,9 @@ end
 
 element_string_to_symbol(el) = (el == "?" ? :X : Symbol(el))
 
+# Version of get for EzXML objects
+get_ezxml(collection, key, default) = (haskey(collection, key) ? collection[key] : default)
+
 """
     MolecularForceField(ff_files...; units=true, custom_residue_templates=nothing,
                         custom_renaming_scheme=nothing)
@@ -278,7 +281,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                              custom_residue_templates=nothing, custom_renaming_scheme=nothing)
     atom_types = Dict{String, AtomType}()
     torsion_order = ""
-    C = (units ? typeof(zero(T) * u"nm^-1") : T)
+    IC = (units ? typeof(zero(T) * u"nm^-1") : T)
 
     weight_14_coulomb, weight_14_lj = one(T), one(T)
     weight_14_coulomb_set, weight_14_lj_set = false, false
@@ -321,7 +324,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 for atom_type in eachelement(entry)
                     at_type  = atom_type["name"]
                     at_class = atom_type["class"]
-                    element = (haskey(atom_type, "element") ? atom_type["element"] : "?")
+                    element = get_ezxml(atom_type, "element", "?")
                     ch = missing
                     atom_mass = (units ? parse(T, atom_type["mass"])u"g/mol" : parse(T, atom_type["mass"]))
                     σ = (units ? T(-1u"nm") : T(-1))
@@ -337,7 +340,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     atoms, types = String[], String[]
                     charges = T[]
                     elements = Symbol[]
-                    virtual_sites = VirtualSiteTemplate{T, C}[]
+                    virtual_sites = VirtualSiteTemplate{T, IC}[]
                     external_bonds_name = String[]
                     externals = Int[]
                     allowed_patches = String[]
@@ -357,31 +360,71 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             push!(extras, (tel == "?") || (tclass == "EP"))
                             push!(elements, element_string_to_symbol(tel))
                         elseif re.name == "Bond"
-                            push!(bonds_by_name, (re["atomName1"], re["atomName2"]))
+                            if haskey(re, "atomName1")
+                                an1 = re["atomName1"]
+                            else
+                                # Allow the deprecated "from/to" syntax
+                                an1 = atoms[parse(Int, re["from"]) + 1]
+                            end
+                            if haskey(re, "atomName2")
+                                an2 = re["atomName2"]
+                            else
+                                # Allow the deprecated "from/to" syntax
+                                an2 = atoms[parse(Int, re["to"]) + 1]
+                            end
+                            push!(bonds_by_name, (an1, an2))
                         elseif re.name == "ExternalBond"
-                            push!(external_bonds_name, re["atomName"])
+                            if haskey(re, "atomName")
+                                an = re["atomName"]
+                            else
+                                an = atoms[parse(Int, re["from"]) + 1]
+                            end
+                            push!(external_bonds_name, an)
                         elseif re.name == "AllowPatch"
                             push!(allowed_patches, re["name"])
                         elseif re.name == "VirtualSite"
-                            vs_type, vs_name = re["type"], re["siteName"]
-                            atom_name_1, atom_name_2 = re["atomName1"], re["atomName2"]
+                            vs_type = re["type"]
+                            if haskey(re, "siteName")
+                                vs_name = re["siteName"]
+                            else
+                                # Allow the deprecated "index/atom1/atom2/atom3" syntax
+                                vs_name = atoms[parse(Int, re["index"]) + 1]
+                            end
+                            if haskey(re, "atomName1")
+                                atom_name_1 = re["atomName1"]
+                            else
+                                atom_name_1 = atoms[parse(Int, re["atom1"]) + 1]
+                            end
+                            if haskey(re, "atomName2")
+                                atom_name_2 = re["atomName2"]
+                            else
+                                atom_name_2 = atoms[parse(Int, re["atom2"]) + 1]
+                            end
                             if vs_type == "average2"
                                 weight_1 = parse(T, re["weight1"])
                                 weight_2 = parse(T, re["weight2"])
                                 vs = VirtualSiteTemplate(1, vs_name, atom_name_1, atom_name_2,
-                                        "", weight_1, weight_2, zero(T), zero(T), zero(T), zero(C))
+                                        "", weight_1, weight_2, zero(T), zero(T), zero(T), zero(IC))
                                 push!(virtual_sites, vs)
                             elseif vs_type == "average3"
-                                atom_name_3 = re["atomName3"]
+                                if haskey(re, "atomName3")
+                                    atom_name_3 = re["atomName3"]
+                                else
+                                    atom_name_3 = atoms[parse(Int, re["atom3"]) + 1]
+                                end
                                 weight_1 = parse(T, re["weight1"])
                                 weight_2 = parse(T, re["weight2"])
                                 weight_3 = parse(T, re["weight3"])
                                 vs = VirtualSiteTemplate(2, vs_name, atom_name_1, atom_name_2,
                                         atom_name_3, weight_1, weight_2, weight_3, zero(T),
-                                        zero(T), zero(C))
+                                        zero(T), zero(IC))
                                 push!(virtual_sites, vs)
                             elseif vs_type == "outOfPlane"
-                                atom_name_3 = re["atomName3"]
+                                if haskey(re, "atomName3")
+                                    atom_name_3 = re["atomName3"]
+                                else
+                                    atom_name_3 = atoms[parse(Int, re["atom3"]) + 1]
+                                end
                                 weight_12 = parse(T, re["weight12"])
                                 weight_13 = parse(T, re["weight13"])
                                 weight_cross = parse(T, re["weightCross"]) * (units ? u"nm^-1" : NoUnits)
@@ -488,8 +531,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 end
 
             elseif entry_name == "PeriodicTorsionForce"
-                torsion_order  = (haskey(entry, "ordering") ? entry["ordering"] : torsion_order)
-                local_ordering = (haskey(entry, "ordering") ? entry["ordering"] : "default")
+                torsion_order  = get_ezxml(entry, "ordering", torsion_order)
+                local_ordering = get_ezxml(entry, "ordering", "default")
                 for torsion in eachelement(entry)
                     proper = torsion.name == "Proper"
                     periodicities = Int[]
@@ -732,7 +775,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         Dict{NTuple{4, String}, Any}(),                            # Improper_cache
     )
 
-    return MolecularForceField{T, M, D, DA, E, K, KA, C}(
+    return MolecularForceField{T, M, D, DA, E, K, KA, IC}(
         atom_types, residues, torsion_order, weight_14_coulomb, weight_14_lj,
         attributes_from_residue, resname_replacements, atomname_replacements, standard_bonds,
         class_of, bond_resolver, angle_resolver, torsion_resolver,
