@@ -1,4 +1,5 @@
 # Types
+import Base: ==, hash
 
 export
     PairwiseInteraction,
@@ -200,6 +201,70 @@ function Base.:+(il1::InteractionList4Atoms{I, T}, il2::InteractionList4Atoms{I,
         il1.inters .+ il2.inters,
         il1.types,
     )
+end
+
+function ==(a::InteractionList1Atoms, b::InteractionList1Atoms)
+    return a.is == b.is && 
+           a.inters == b.inters && 
+           a.types == b.types
+end
+
+function ==(a::InteractionList2Atoms, b::InteractionList2Atoms)
+    return a.is == b.is && 
+           a.js == b.js && 
+           a.inters == b.inters && 
+           a.types == b.types
+end
+
+function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
+    return a.is == b.is && 
+           a.js == b.js && 
+           a.ks == b.ks && 
+           a.inters == b.inters && 
+           a.types == b.types
+end
+
+function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
+    return a.is == b.is && 
+           a.js == b.js && 
+           a.ks == b.ks && 
+           a.ls == b.ls && 
+           a.inters == b.inters && 
+           a.types == b.types
+end
+
+function hash(a::InteractionList1Atoms, h::UInt)
+    is     = from_device(a.is)
+    inters = from_device(a.inters)
+    types  = from_device(a.types)
+    return hash(is, hash(inters, hash(types, h)))
+end
+
+function hash(a::InteractionList2Atoms, h::UInt)
+    is     = from_device(a.is)
+    js     = from_device(a.js)
+    inters = from_device(a.inters)
+    types  = from_device(a.types)
+    return hash(is, hash(js, hash(inters, hash(types, h))))
+end
+
+function hash(a::InteractionList3Atoms, h::UInt)
+    is     = from_device(a.is)
+    js     = from_device(a.js)
+    ks     = from_device(a.ks)
+    inters = from_device(a.inters)
+    types  = from_device(a.types)
+    return hash(is, hash(js, hash(ks, hash(inters, hash(types, h)))))
+end
+
+function hash(a::InteractionList4Atoms, h::UInt)
+    is     = from_device(a.is)
+    js     = from_device(a.js)
+    ks     = from_device(a.ks)
+    ls     = from_device(a.ls)
+    inters = from_device(a.inters)
+    types  = from_device(a.types)
+    return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, h))))))
 end
 
 function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
