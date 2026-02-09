@@ -47,6 +47,8 @@ struct NoCoupling end
 
 apply_coupling!(sys, buffers, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
+abstract type AbstractThermostat end
+
 @doc raw"""
     ImmediateThermostat(temperature)
 
@@ -61,7 +63,7 @@ The scaling factor for the velocities each step is
 This thermostat should be used with caution as it can lead to simulation
 artifacts.
 """
-struct ImmediateThermostat{T}
+struct ImmediateThermostat{T} <: AbstractThermostat
     temperature::T
 end
 
@@ -93,7 +95,7 @@ Define ``c = e^{-Δt/τ}``. Draw ``R \sim 𝒩(0,1)`` and ``S \sim \chi^{2}_{Nf-
 \qquad v' = \lambda\,v .
 ```
 """
-struct VelocityRescaleThermostat{T, C, N}
+struct VelocityRescaleThermostat{T, C, N} <: AbstractThermostat
     temperature::T
     coupling_const::C
     n_steps::N
@@ -158,7 +160,7 @@ The velocity of each atom is randomly changed each time step with probability
 `dt / coupling_const` to a velocity drawn from the Maxwell-Boltzmann distribution.
 See [Andersen 1980](https://doi.org/10.1063/1.439486).
 """
-struct AndersenThermostat{T, C}
+struct AndersenThermostat{T, C} <: AbstractThermostat
     temperature::T
     coupling_const::C
 end
@@ -202,7 +204,7 @@ The scaling factor for the velocities each step is
 This thermostat should be used with caution as it can lead to simulation
 artifacts.
 """
-struct BerendsenThermostat{T, C}
+struct BerendsenThermostat{T, C} <: AbstractThermostat
     temperature::T
     coupling_const::C
 end
@@ -214,6 +216,8 @@ function apply_coupling!(sys, buffers, thermostat::BerendsenThermostat, sim, nei
     sys.velocities .*= sqrt(λ2)
     return false
 end
+
+abstract type AbstractBarostat end
 
 @doc raw"""
     BerendsenBarostat(pressure, coupling_const;
@@ -236,7 +240,7 @@ Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 This barostat should be used with caution as it known not to properly sample
 isobaric ensembles and therefore can lead to simulation artifacts.
 """
-struct BerendsenBarostat{P, C, S, IC, T}
+struct BerendsenBarostat{P, C, S, IC, T} <: AbstractBarostat
     pressure::P
     coupling_const::C
     coupling_type::S
@@ -458,7 +462,7 @@ The scaling factor ``\mu`` is a matrix, allowing non-isotropic
 pressure control.
 Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 """
-struct CRescaleBarostat{P, C, S, IC, T}
+struct CRescaleBarostat{P, C, S, IC, T} <: AbstractBarostat
     pressure::P
     coupling_const::C
     coupling_type::S
@@ -728,7 +732,7 @@ preferably, the [`CRescaleBarostat`](@ref) should be used instead.
 Due to the stochastic nature of the Monte Carlo acceptance criteria, this barostat
 may not propagate gradients correctly with differentiable simulation.
 """
-mutable struct MonteCarloBarostat{T, P, K, V}
+mutable struct MonteCarloBarostat{T, P, K, V} <: AbstractBarostat
     pressure::P
     temperature::K
     coupling_type::Symbol
