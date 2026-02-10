@@ -266,7 +266,7 @@ function Base.:+(a1::Atom, a2::Atom)
 end
 
 # get function errors with AD
-dict_get(dic, key, default) = (haskey(dic, key) ? dic[key] : default)
+dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
 
 function inject_atom(at, at_data, params_dic)
     key_prefix = "atom_$(at_data.atom_type)_"
