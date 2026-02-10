@@ -170,31 +170,29 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct LennardJonesSoftCoreBeutler{C, A, L, H, S, E, W, R} <: PairwiseInteraction
+@kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1
-    λ::L = 0
     use_neighbors::Bool = false
     shortcut::H = lj_zero_shortcut
     σ_mixing::S = lorentz_σ_mixing
     ϵ_mixing::E = geometric_ϵ_mixing
+    λ_mixing::LM = lorentz_λ_mixing
     weight_special::W = 1
-    σ6_fac::R = (α * (1-λ))
 end
 
 use_neighbors(inter::LennardJonesSoftCoreBeutler) = inter.use_neighbors
 
-function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, L, H, S, E, W, R}) where {C, A, L, H, S, E, W, R}
+function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, W}) where {C, A, H, S, E, LM, W}
     return LennardJonesSoftCoreBeutler(
         lj.cutoff,
         zero(A),
-        zero(L),
         lj.use_neighbors,
         lj.shortcut,
         lj.σ_mixing,
         lj.ϵ_mixing,
+        lj.λ_mixing,
         zero(W),
-        zero(R),
     )
 end
 
@@ -202,13 +200,12 @@ function Base.:+(l1::LennardJonesSoftCoreBeutler, l2::LennardJonesSoftCoreBeutle
     return LennardJonesSoftCoreBeutler(
         l1.cutoff,
         l1.α + l2.α,
-        l1.λ + l2.λ,
         l1.use_neighbors,
         l1.shortcut,
         l1.σ_mixing,
         l1.ϵ_mixing,
-        l1.weight_special + l2.weight_special,
-        l1.σ6_fac + l2.σ6_fac,
+        l1.λ_mixing,
+        l1.weight_special + l2.weight_special
     )
 end
 
@@ -219,24 +216,47 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    # If lambda is 1, the soft core formula reduces to standard LJ
+    # We explicity branch to save compute.
+    if λ >= 1.0
+        # Replicates logic from standard LennardJones force
+        if inter.shortcut(atom_i, atom_j)
+            return ustrip.(zero(dr)) * force_units
+        end
+        σ = inter.σ_mixing(atom_i, atom_j)
+        ϵ = inter.ϵ_mixing(atom_i, atom_j)
+        r = norm(dr)
+        σ2 = σ^2
+        params = (σ2, ϵ)
+        
+        # Call standard LJ cutoff logic.
+        f = force_cutoff(inter.cutoff, LennardJones(), r, params) 
+        fdr = (f / r) * dr
+        
+        return special ? fdr * inter.weight_special : fdr
+    end
+
+    # 3. Alchemical Path: Soft Core Lennard Jones
     if inter.shortcut(atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
+    
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    ϵ  = inter.ϵ_mixing(atom_i, atom_j)
 
-    cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.σ6_fac, inter.λ)
+    C12 = C6 * σ6
+    σ6_fac = inter.α * (1 - λ)
+    params = (C12, C6, σ6_fac, λ)
 
-    f = force_cutoff(cutoff, inter, r, params)
+    f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = (f / r) * dr
-    if special
-        return fdr * inter.weight_special
-    else
-        return fdr
-    end
+    
+    return special ? fdr * inter.weight_special : fdr
 end
 
 function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
@@ -252,6 +272,34 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    # If lambda is 1, the soft core formula reduces to standard LJ
+    # We explicity branch to save compute.
+    if λ >= 1.0
+        if inter.shortcut(atom_i, atom_j)
+            return ustrip(zero(dr[1])) * energy_units
+        end
+        σ = inter.σ_mixing(atom_i, atom_j)
+        ϵ = inter.ϵ_mixing(atom_i, atom_j)
+
+        r = norm(dr)
+        σ2 = σ^2
+        params = (σ2, ϵ)
+
+        # Dispatch to the standard LennardJones
+        lj_std = LennardJones(cutoff=inter.cutoff)
+        pe = pe_cutoff(inter.cutoff, lj_std, r, params)
+        
+        if special
+            return pe * inter.weight_special
+        else
+            return pe
+        end
+    end
+
+    # Alchemical Path: Soft Core Lennard Jones
     if inter.shortcut(atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
@@ -261,7 +309,9 @@ end
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.σ6_fac, inter.λ)
+    C12 = C6 * σ6
+    σ6_fac = inter.α * (1 - λ)
+    params = (C12, C6, σ6_fac, λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -272,8 +322,8 @@ end
 end
 
 function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
-    R6 = (σ6_fac*(C12/C6))+r^6
-    return λ*((C12/(R6*R6)) - (C6/(R6)))
+    R6 = (σ6_fac * (C12 / C6)) + r^6
+    return λ * ((C12 / (R6 * R6)) - (C6 / R6))
 end
 
 @doc raw"""
@@ -313,28 +363,28 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct LennardJonesSoftCoreGapsys{C, A, L, H, S, E, W} <: PairwiseInteraction
+@kwdef struct LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1
-    λ::L = 0
     use_neighbors::Bool = false
     shortcut::H = lj_zero_shortcut
     σ_mixing::S = lorentz_σ_mixing
     ϵ_mixing::E = geometric_ϵ_mixing
+    λ_mixing::LM = lorentz_λ_mixing
     weight_special::W = 1
 end
 
 use_neighbors(inter::LennardJonesSoftCoreGapsys) = inter.use_neighbors
 
-function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, L, H, S, E, W}) where {C, A, L, H, S, E, W}
+function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, W}) where {C, A, H, S, E, LM, W}
     return LennardJonesSoftCoreGapsys(
         lj.cutoff,
         zero(A),
-        zero(L),
         lj.use_neighbors,
         lj.shortcut,
         lj.σ_mixing,
         lj.ϵ_mixing,
+        lj.λ_mixing,
         zero(W),
     )
 end
@@ -343,11 +393,11 @@ function Base.:+(l1::LennardJonesSoftCoreGapsys, l2::LennardJonesSoftCoreGapsys)
     return LennardJonesSoftCoreGapsys(
         l1.cutoff,
         l1.α + l2.α,
-        l1.λ + l2.λ,
         l1.use_neighbors,
         l1.shortcut,
         l1.σ_mixing,
         l1.ϵ_mixing,
+        l1.λ_mixing,
         l1.weight_special + l2.weight_special,
     )
 end
@@ -359,16 +409,54 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    # Interaction Off
+    if λ <= 0.0
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    # Fast Path: Standard Lennard Jones
+    if λ >= 1.0
+        if inter.shortcut(atom_i, atom_j)
+            return ustrip.(zero(dr)) * force_units
+        end
+        σ = inter.σ_mixing(atom_i, atom_j)
+        ϵ = inter.ϵ_mixing(atom_i, atom_j)
+
+        r = norm(dr)
+        σ2 = σ^2
+        params = (σ2, ϵ)
+
+        lj_std = LennardJones(cutoff=inter.cutoff)
+        f = force_cutoff(inter.cutoff, lj_std, r, params)
+        fdr = (f / r) * dr
+        
+        if special
+            return fdr * inter.weight_special
+        else
+            return fdr
+        end
+    end
+
+    # Alchemical Path
     if inter.shortcut(atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
+    
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r = norm(dr)
+    
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.λ)
+    C12 = C6 * σ6
+    val = (26 * σ6 * (1 - λ)) / 7
+    R = inter.α * sqrt(cbrt(val))
+
+    params = (C12, C6, λ, R)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -379,15 +467,16 @@ end
     end
 end
 
-function pairwise_force(inter::LennardJonesSoftCoreGapsys, r, (C12, C6, λ))
-    R = inter.α*sqrt(cbrt((26*(C12/C6)*(1-inter.λ)/7)))
+function pairwise_force(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R))
+
     r6 = r^6
-    invR = inv(R)
-    invR2 = invR^2
-    invR6 = invR^6
+    
     if r >= R
-        return λ * (((12*C12)/(r6*r6*r))-((6*C6)/(r6*r)))
-    elseif r < R
+        return λ * (((12*C12)/(r6*r6*r)) - ((6*C6)/(r6*r)))
+    else
+        invR = inv(R)
+        invR2 = invR^2
+        invR6 = invR^6
         return λ * (((-156*C12*(invR6*invR6*invR2)) + (42*C6*(invR2*invR6)))*r +
                     (168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))
     end
@@ -400,16 +489,55 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    # Interaction Off
+    if λ <= 0.0
+        return ustrip(zero(dr[1])) * energy_units
+    end
+
+    # Fast Path: Standard Lennard Jones
+    if λ >= 1.0
+        if inter.shortcut(atom_i, atom_j)
+            return ustrip(zero(dr[1])) * energy_units
+        end
+        σ = inter.σ_mixing(atom_i, atom_j)
+        ϵ = inter.ϵ_mixing(atom_i, atom_j)
+
+        r = norm(dr)
+        σ2 = σ^2
+        params = (σ2, ϵ)
+
+        lj_std = LennardJones(cutoff=inter.cutoff)
+        pe = pe_cutoff(inter.cutoff, lj_std, r, params)
+        
+        if special
+            return pe * inter.weight_special
+        else
+            return pe
+        end
+    end
+
+    # Alchemical Path
     if inter.shortcut(atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
+    
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r = norm(dr)
+    
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.λ)
+    C12 = C6 * σ6
+    
+    # Calculate Gapsys R_LJ dynamically
+    val = (26 * σ6 * (1 - λ)) / 7
+    R = inter.α * sqrt(cbrt(val))
+
+    params = (C12, C6, λ, R)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -419,18 +547,18 @@ end
     end
 end
 
-function pairwise_pe(inter::LennardJonesSoftCoreGapsys, r, (C12, C6, λ))
-    R = inter.α*sqrt(cbrt((26*(C12/C6)*(1-inter.λ)/7)))
+function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R))
     r6 = r^6
-    invR = inv(R)
-    invR2 = invR^2
-    invR6 = invR^6
+    
     if r >= R
-        return λ * (C12/(r6*r6))-(C6/(r6))
-    elseif r < R
+        return λ * ((C12/(r6*r6)) - (C6/(r6)))
+    else
+        invR = inv(R)
+        invR2 = invR^2
+        invR6 = invR^6
         return λ * ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
-                    ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
-                    (91*C12*(invR6*invR6)) - (28*C6*(invR6))
+                   ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
+                   (91*C12*(invR6*invR6)) - (28*C6*(invR6))
     end
 end
 

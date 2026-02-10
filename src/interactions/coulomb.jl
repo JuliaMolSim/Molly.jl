@@ -138,31 +138,29 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct CoulombSoftCoreBeutler{C, A, L, S, E, W, T, R} <: PairwiseInteraction
+@kwdef struct CoulombSoftCoreBeutler{C, A, S, E, LM, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1
-    λ::L = 0
     use_neighbors::Bool = false
     σ_mixing::S = lorentz_σ_mixing
     ϵ_mixing::E = geometric_ϵ_mixing
+    λ_mixing::LM = lorentz_λ_mixing
     weight_special::W = 1
     coulomb_const::T = coulomb_const
-    σ6_fac::R = (α * (1-λ))
 end
 
 use_neighbors(inter::CoulombSoftCoreBeutler) = inter.use_neighbors
 
-function Base.zero(coul::CoulombSoftCoreBeutler{C, A, L, S, E, W, T, R}) where {C, A, L, S, E, W, T, R}
+function Base.zero(coul::CoulombSoftCoreBeutler{C, A, S, E, LM, W, T}) where {C, A, S, E, LM, W, T}
     return CoulombSoftCoreBeutler(
         coul.cutoff,
         zero(A),
-        zero(L),
         coul.use_neighbors,
         coul.σ_mixing,
         coul.ϵ_mixing,
+        coul.λ_mixing,
         zero(W),
         zero(T),
-        zero(R),
     )
 end
 
@@ -170,13 +168,12 @@ function Base.:+(c1::CoulombSoftCoreBeutler, c2::CoulombSoftCoreBeutler)
     return CoulombSoftCoreBeutler(
         c1.cutoff,
         c1.α + c2.α,
-        c1.λ + c2.λ,
         c1.use_neighbors,
         c1.σ_mixing,
         c1.ϵ_mixing,
+        c1.λ_mixing,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
-        c1.σ6_fac + c2.σ6_fac,
     )
 end
 
@@ -187,14 +184,54 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    # Interaction Off
+    if λ <= 0.0
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    # Fast Path: Standard Coulomb
+    if λ >= 1.0
+        r = norm(dr)
+        # Standard Coulomb doesn't need σ/ϵ mixing
+        coul_std = Coulomb(
+            cutoff=inter.cutoff, 
+            coulomb_const=inter.coulomb_const,
+            weight_special=inter.weight_special
+        )
+        
+        ke = inter.coulomb_const
+        qi, qj = atom_i.charge, atom_j.charge
+        params = (ke, qi, qj)
+
+        f = force_cutoff(inter.cutoff, coul_std, r, params)
+        fdr = (f / r) * dr
+        
+        if special
+            return fdr * inter.weight_special
+        else
+            return fdr
+        end
+    end
+
+    # Alchemical Path
     r = norm(dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
+    
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
-    C6 = 4 * ϵ * σ6
-    params = (ke, qi, qj, C6 * σ6, C6, inter.σ6_fac, inter.λ)
+    # We need C12/C6 ratio which is exactly σ^6. 
+    # The existing pairwise_force expects C12, C6, but only uses ratio.
+    # We can pass dummy C12, C6 such that C12/C6 = σ6.
+    # Let C6 = 1.0, then C12 = σ6.
+    C6 = 1.0
+    C12 = σ6
+    σ6_fac = inter.α * (1 - λ)
+    
+    params = (ke, qi, qj, C12, C6, σ6_fac, λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -207,8 +244,11 @@ end
 
 function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac, λ))
     r3 = r^3
-    R = ((σ6_fac*(C12/C6))+(r3*r3))*sqrt(cbrt(((σ6_fac*(C12/C6))+(r3*r3))))
-    return λ * ke * ((qi*qj)/R) * (r3*r*r)
+    # r_Q = (α(1-λ)σ^6) + r^6
+    term = (σ6_fac * (C12 / C6)) + (r3 * r3)
+    # R here effectively represents r_Q^(7/6)
+    R = term * sqrt(cbrt(term))
+    return λ * ke * ((qi * qj) / R) * (r3 * r * r)
 end
 
 @inline function potential_energy(inter::CoulombSoftCoreBeutler,
@@ -218,14 +258,46 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    # Interaction Off
+    if λ <= 0.0
+        return ustrip(zero(dr[1])) * energy_units
+    end
+
+    # Fast Path: Standard Coulomb
+    if λ >= 1.0
+        r = norm(dr)
+        coul_std = Coulomb(
+            cutoff=inter.cutoff, 
+            coulomb_const=inter.coulomb_const,
+            weight_special=inter.weight_special
+        )
+        ke = inter.coulomb_const
+        qi, qj = atom_i.charge, atom_j.charge
+        params = (ke, qi, qj)
+
+        pe = pe_cutoff(inter.cutoff, coul_std, r, params)
+        if special
+            return pe * inter.weight_special
+        else
+            return pe
+        end
+    end
+
+    # Alchemical Path
     r = norm(dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
+    
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
-    C6 = 4 * ϵ * σ6
-    params = (ke, qi, qj, C6 *σ6, C6, inter.σ6_fac, inter.λ)
+    C6 = 1.0
+    C12 = σ6
+    σ6_fac = inter.α * (1 - λ)
+
+    params = (ke, qi, qj, C12, C6, σ6_fac, λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -236,8 +308,8 @@ end
 end
 
 function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac, λ))
-    R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
-    return λ * ke * ((qi * qj)/R)
+    R = sqrt(cbrt((σ6_fac * (C12 / C6)) + r^6))
+    return λ * ke * ((qi * qj) / R)
 end
 
 @doc raw"""
@@ -271,29 +343,27 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct CoulombSoftCoreGapsys{C, A, L, S, W, T, R} <: PairwiseInteraction
+@kwdef struct CoulombSoftCoreGapsys{C, A, S, LM, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1
-    λ::L = 0
     σQ::S = 1.0
     use_neighbors::Bool = false
+    λ_mixing::LM = lorentz_λ_mixing
     weight_special::W = 1
     coulomb_const::T = coulomb_const
-    σ6_fac::R = (α * sqrt(cbrt(1-λ)))
 end
 
 use_neighbors(inter::CoulombSoftCoreGapsys) = inter.use_neighbors
 
-function Base.zero(coul::CoulombSoftCoreGapsys{C, A, L, S, W, T, R}) where {C, A, L, S, W, T, R}
+function Base.zero(coul::CoulombSoftCoreGapsys{C, A, S, LM, W, T}) where {C, A, S, LM, W, T}
     return CoulombSoftCoreGapsys(
         coul.cutoff,
         zero(A),
-        zero(L),
-        zero(Q),
+        coul.σQ,
         coul.use_neighbors,
+        coul.λ_mixing,
         zero(W),
         zero(T),
-        zero(R),
     )
 end
 
@@ -301,12 +371,11 @@ function Base.:+(c1::CoulombSoftCoreGapsys, c2::CoulombSoftCoreGapsys)
     return CoulombSoftCoreGapsys(
         c1.cutoff,
         c1.α + c2.α,
-        c1.λ + c2.λ,
         c1.σQ + c2.σQ,
         c1.use_neighbors,
+        c1.λ_mixing,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
-        c1.σ6_fac + c2.σ6_fac,
     )
 end
 
@@ -317,11 +386,43 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    # Interaction Off
+    if λ <= 0.0
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    # Fast Path: Standard Coulomb
+    if λ >= 1.0
+        r = norm(dr)
+        coul_std = Coulomb(
+            cutoff=inter.cutoff, 
+            coulomb_const=inter.coulomb_const,
+            weight_special=inter.weight_special
+        )
+        ke = inter.coulomb_const
+        qi, qj = atom_i.charge, atom_j.charge
+        params = (ke, qi, qj)
+
+        f = force_cutoff(inter.cutoff, coul_std, r, params)
+        fdr = (f / r) * dr
+        
+        if special
+            return fdr * inter.weight_special
+        else
+            return fdr
+        end
+    end
+
+    # Alchemical Path
     r = norm(dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, qi, qj, inter.σQ, inter.σ6_fac, inter.λ)
+    σ6_fac = inter.α * sqrt(cbrt(1 - λ))
+    params = (ke, qi, qj, inter.σQ, σ6_fac, λ)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -334,11 +435,13 @@ end
 
 function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ))
     qij = qi * qj
-    R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
+    R = σ6_fac * (oneunit(r) + (σQ * abs(qij)))
+    
     if r >= R
-        return λ * ke * (qij/(r^2))
-    elseif r < R
-        return λ * ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2)))
+        # Standard Coulomb scaled by λ
+        return λ * ke * (qij / (r^2))
+    else
+        return λ * ke * (-(((2 * qij) / (R^3)) * r) + ((3 * qij) / (R^2)))
     end
 end
 
@@ -349,11 +452,41 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    # Interaction Off
+    if λ <= 0.0
+        return ustrip(zero(dr[1])) * energy_units
+    end
+
+    # Fast Path: Standard Coulomb
+    if λ >= 1.0
+        r = norm(dr)
+        coul_std = Coulomb(
+            cutoff=inter.cutoff, 
+            coulomb_const=inter.coulomb_const,
+            weight_special=inter.weight_special
+        )
+        ke = inter.coulomb_const
+        qi, qj = atom_i.charge, atom_j.charge
+        params = (ke, qi, qj)
+
+        pe = pe_cutoff(inter.cutoff, coul_std, r, params)
+        if special
+            return pe * inter.weight_special
+        else
+            return pe
+        end
+    end
+
+    # Alchemical Path
     r = norm(dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, qi, qj, inter.σQ, inter.σ6_fac, inter.λ)
+    σ6_fac = inter.α * sqrt(cbrt(1 - λ))
+    params = (ke, qi, qj, inter.σQ, σ6_fac, λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -365,11 +498,11 @@ end
 
 function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ))
     qij = qi * qj
-    R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
+    R = σ6_fac * (oneunit(r) + (σQ * abs(qij)))
     if r >= R
-        return λ * ke * (qij/r)
-    elseif r < R
-        return λ * ke * (((qij/(R^3))*(r^2))-(((3*qij)/(R^2))*r)+((3*qij)/R))
+        return λ * ke * (qij / r)
+    else
+        return λ * ke * (((qij / (R^3)) * (r^2)) - (((3 * qij) / (R^2)) * r) + ((3 * qij) / R))
     end
 end
 
