@@ -373,7 +373,7 @@ If your simulation contains other types of molecules, you must provide the topol
 
     * Make sure there are no missing residues or heavy atoms. Tools such as [MODELLER](https://salilab.org/modeller) and [SCWRL4](http://dunbrack.fccc.edu/lab/scwrl) can fix these issues.
     * Make sure that the naming in your structure file is either supported by your custom renaming convention, or does not use names that deviate widely from the conventional residue namings.
-    * Make sure your structure file provides explicit chemical elements per particle or that at least the chemical element is easily inferrable from the atom names, as a fundamental part of template matching for force field parameters assignment involves comparing the molecular formulas of the residues and potential templates.
+    * Make sure your structure file provides explicit chemical elements per particle or that at least the chemical element is easily inferable from the atom names, as a fundamental part of template matching for force field parameter assignment involves comparing the molecular formulas of the residues and potential templates. For example, atom names "C" and "C2" will be guessed as carbon but "CA" would not due to ambiguity with calcium.
 
     Some PDB files that read in fine can be found [here](https://github.com/JuliaMolSim/Molly.jl/tree/master/data/openmm_refs).
 

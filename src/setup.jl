@@ -188,11 +188,21 @@ function canonicalize_system(top, resname_replacements, atomname_replacements)
         for atom_idx in atom_inds_zero
             atom = Chemfiles.Atom(top, atom_idx)
             an = Int(Chemfiles.atomic_number(atom))
-            if an == 0 # Extra particle returns 0 from chemfiles
+            # Chemfiles treats e.g. "C" but not "C2" as carbon
+            # Here we search for elements after removing numbers, so "C2" is treated as carbon
+            # Cases that are ambiguous, such as "CA" with calcium, are not assigned (i.e. X)
+            if iszero(an)
+                atom_name_nonum = replace(Chemfiles.name(atom), r"\d+" => "")
+                element_symbol = Symbol(atom_name_nonum)
+                if haskey(PeriodicTable.elements, element_symbol)
+                    an = PeriodicTable.elements[element_symbol].number
+                end
+            end
+            if iszero(an) # Extra particle returns 0 from chemfiles
                 push!(atom_elements, :X)
             else
-                elm = PeriodicTable.elements[an].symbol
-                push!(atom_elements, Symbol(elm))
+                elm_str = PeriodicTable.elements[an].symbol
+                push!(atom_elements, Symbol(elm_str))
             end
         end
         if haskey(atomname_replacements, res_name)
@@ -884,7 +894,7 @@ function System(T::Type,
     current_field = ""
     for l in eachline(top_file)
         sl = strip(l)
-        if length(sl) == 0 || startswith(sl, ';')
+        if iszero(length(sl)) || startswith(sl, ';')
             continue
         end
         if startswith(sl, '[') && endswith(sl, ']')
