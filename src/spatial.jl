@@ -921,7 +921,6 @@ function remove_CM_motion!(sys)
         cm_momentum += velocities_cpu[i] * masses_cpu[i]
     end
     cm_velocity = cm_momentum / sys.total_mass
-    sys.velocities .= sys.velocities .- (cm_velocity,)
     for i in eachindex(sys)
         if !sys.virtual_site_flags[i]
             sys.velocities[i] -= cm_velocity

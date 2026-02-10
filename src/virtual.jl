@@ -246,3 +246,5 @@ function pick_non_virtual_site(rng, sys)
         return i
     end
 end
+
+zero_vs_velocity(v, vsf) = (vsf ? zero(v) : v)

@@ -810,9 +810,9 @@ function System(crystal::Crystal{D};
 end
 
 function Base.zero(sys::System{D, AT, T, A, C, B, V,
-                   AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}) where {D, AT, T,
-                                A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}(
+                   AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}) where {D, AT, T,
+                            A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}(
         zero.(sys.atoms),
         zero(sys.coords),
         zero(sys.boundary),
@@ -823,6 +823,8 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
         zero.(sys.specific_inter_lists),
         zero.(sys.general_inters),
         sys.constraints,
+        sys.virtual_sites,
+        sys.virtual_site_flags,
         sys.neighbor_finder,
         sys.loggers,
         sys.df,

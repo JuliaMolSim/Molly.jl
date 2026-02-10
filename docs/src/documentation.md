@@ -585,7 +585,7 @@ function Molly.calculate_cv(cv::MyCV, coords, atoms, boundary, velocities; kwarg
 end
 ```
 
-The gradient of [`calculate_cv`](@ref) is by default calculated with automatic differentiation.
+The gradient of [`calculate_cv`](@ref) is by default calculated with automatic differentiation if Enzyme is imported.
 However, it is also possible to manually add a method to the `cv_gradient` function to calculate the gradient without using automatic differentiation:
 ```julia
 function Molly.cv_gradient(cv_type::MyCV, coords, atoms, boundary, velocities; kwargs...)
@@ -1275,7 +1275,7 @@ Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
-Contributions from constraints and implicit solvent methods are ignored.
+Contributions from constraints, implicit solvent methods and bias potentials are ignored.
 As described previously, custom general interactions should implement virial calculation if required.
 
 ## Loggers

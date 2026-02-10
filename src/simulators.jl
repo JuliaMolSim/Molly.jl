@@ -344,7 +344,10 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
         # This is accurate to O(dt)
-        sys.velocities .= vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
+        sys.velocities .= zero_vs_velocity.(
+            vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt,
+            sys.virtual_site_flags,
+        )
 
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
