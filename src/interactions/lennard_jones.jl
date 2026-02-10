@@ -409,68 +409,55 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    # Mix Lambda
     λ = inter.λ_mixing(atom_i, atom_j)
 
-    # Interaction Off
     if λ <= 0.0
         return ustrip.(zero(dr)) * force_units
     end
-
-    # Fast Path: Standard Lennard Jones
-    if λ >= 1.0
-        if inter.shortcut(atom_i, atom_j)
-            return ustrip.(zero(dr)) * force_units
-        end
-        σ = inter.σ_mixing(atom_i, atom_j)
-        ϵ = inter.ϵ_mixing(atom_i, atom_j)
-
-        r = norm(dr)
-        σ2 = σ^2
-        params = (σ2, ϵ)
-
-        lj_std = LennardJones(cutoff=inter.cutoff)
-        f = force_cutoff(inter.cutoff, lj_std, r, params)
-        fdr = (f / r) * dr
-        
-        if special
-            return fdr * inter.weight_special
-        else
-            return fdr
-        end
-    end
-
-    # Alchemical Path
     if inter.shortcut(atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
-    
-    σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r = norm(dr)
-    
+    σ = inter.σ_mixing(atom_i, atom_j)
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ6 = σ^6
+
+    # 3. Fast Path: Standard Lennard Jones
+    if λ >= 1.0
+        # Pass standard LJ params tuple (Length 2)
+        params = (σ^2, ϵ, nothing, nothing)
+        f = force_cutoff(cutoff, inter, r, params)
+        fdr = (f / r) * dr
+        return special ? fdr * inter.weight_special : fdr
+    end
+
+    # 4. Alchemical Path: Soft Core Gapsys
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
     val = (26 * σ6 * (1 - λ)) / 7
     R = inter.α * sqrt(cbrt(val))
 
+    # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
-
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
-    if special
-        return fdr * inter.weight_special
-    else
-        return fdr
-    end
+    return special ? fdr * inter.weight_special : fdr
 end
 
-function pairwise_force(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R))
+# Dispatch 1: Standard LJ Logic (Matches Tuple length 2)
+@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, params::Tuple{Quantity, Quantity, Nothing, Nothing})
+    (σ2, ϵ) = params
+    inv_r2 = inv(r^2)
+    six_term = (σ2 * inv_r2)^3
+    return (24 * ϵ * inv_r2) * (2 * six_term^2 - six_term)
+end
 
+# Dispatch 2: Soft Core Logic (Matches Tuple length 4)
+@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, params::Tuple{Quantity, Quantity, Real, Quantity})
+    (C12, C6, λ, R) = params
     r6 = r^6
-    
     if r >= R
         return λ * (((12*C12)/(r6*r6*r)) - ((6*C6)/(r6*r)))
     else
@@ -489,67 +476,53 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    # Mix Lambda
     λ = inter.λ_mixing(atom_i, atom_j)
 
-    # Interaction Off
     if λ <= 0.0
         return ustrip(zero(dr[1])) * energy_units
     end
-
-    # Fast Path: Standard Lennard Jones
-    if λ >= 1.0
-        if inter.shortcut(atom_i, atom_j)
-            return ustrip(zero(dr[1])) * energy_units
-        end
-        σ = inter.σ_mixing(atom_i, atom_j)
-        ϵ = inter.ϵ_mixing(atom_i, atom_j)
-
-        r = norm(dr)
-        σ2 = σ^2
-        params = (σ2, ϵ)
-
-        lj_std = LennardJones(cutoff=inter.cutoff)
-        pe = pe_cutoff(inter.cutoff, lj_std, r, params)
-        
-        if special
-            return pe * inter.weight_special
-        else
-            return pe
-        end
-    end
-
-    # Alchemical Path
     if inter.shortcut(atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
-    
-    σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r = norm(dr)
-    
+    σ = inter.σ_mixing(atom_i, atom_j)
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ6 = σ^6
+
+    # 3. Fast Path: Standard Lennard Jones
+    if λ >= 1.0
+        # Pass standard LJ params tuple (Length 2)
+        params = (σ^2, ϵ, nothing, nothing)
+        pe = pe_cutoff(cutoff, inter, r, params)
+        return special ? pe * inter.weight_special : pe
+    end
+
+    # 4. Alchemical Path: Soft Core Gapsys
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
-    
-    # Calculate Gapsys R_LJ dynamically
     val = (26 * σ6 * (1 - λ)) / 7
     R = inter.α * sqrt(cbrt(val))
 
+    # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
-
     pe = pe_cutoff(cutoff, inter, r, params)
-    if special
-        return pe * inter.weight_special
-    else
-        return pe
-    end
+    return special ? pe * inter.weight_special : pe
 end
 
-function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R))
+# Dispatch 1: Standard LJ Logic (Matches Tuple length 2)
+@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, params::Tuple{Quantity, Quantity, Nothing, Nothing})
+    (σ2, ϵ) = params
+    inv_r2 = inv(r^2)
+    six_term = (σ2 * inv_r2)^3
+    return 4 * ϵ * (six_term^2 - six_term)
+end
+
+# Dispatch 2: Soft Core Logic (Matches Tuple length 4)
+@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, params::Tuple{Quantity, Quantity, <: Real, Quantity})
+    (C12, C6, λ, R) = params
     r6 = r^6
-    
     if r >= R
         return λ * ((C12/(r6*r6)) - (C6/(r6)))
     else
