@@ -4,8 +4,7 @@ export
     TwoParticleAverageSite,
     ThreeParticleAverageSite,
     OutOfPlaneSite,
-    place_virtual_sites!,
-    distribute_forces!
+    place_virtual_sites!
 
 struct VirtualSiteTemplate{T, IC}
     type::Int # 1/2/3 for TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite
@@ -35,19 +34,33 @@ struct VirtualSite{T, IC}
     weight_cross::IC # Units are 1/L
 end
 
-"""
+@doc raw"""
+    TwoParticleAverageSite(atom_ind, atom_1, atom_2, weight_1, weight_2)
 
+A virtual site defined by the weighted average of the coordinates of two atoms.
 
-Optional weight_cross
+Returns a `VirtualSite` defined by:
+```math
+\mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2
+```
 """
 function TwoParticleAverageSite(atom_ind, atom_1, atom_2, weight_1::T, weight_2::T,
                                 weight_cross=(zero(T) * u"nm^-1")) where T
+    # Optional weight_cross allows arrays of different virtual site types to be
+    #   concretely typed with and without units
     return VirtualSite(1, atom_ind, atom_1, atom_2, 0, weight_1, weight_2,
                        zero(T), zero(T), zero(T), weight_cross)
 end
 
-"""
+@doc raw"""
+    ThreeParticleAverageSite(atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2, weight_3)
 
+A virtual site defined by the weighted average of the coordinates of three atoms.
+
+Returns a `VirtualSite` defined by:
+```math
+\mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2 + w_3 \mathbf{r}_3
+```
 """
 function ThreeParticleAverageSite(atom_ind, atom_1, atom_2, atom_3, weight_1::T, weight_2::T,
                                   weight_3::T, weight_cross=(zero(T) * u"nm^-1")) where T
@@ -55,8 +68,16 @@ function ThreeParticleAverageSite(atom_ind, atom_1, atom_2, atom_3, weight_1::T,
                        weight_3, zero(T), zero(T), weight_cross)
 end
 
-"""
+@doc raw"""
+    OutOfPlaneSite(atom_ind, atom_1, atom_2, atom_3, weight_12, weight_13, weight_cross)
 
+A virtual site defined by the weighted average of the coordinates of three atoms
+and the cross product of their relative displacements.
+
+Returns a `VirtualSite` defined by:
+```math
+\mathbf{r} = \mathbf{r}_1 + w_{12} \mathbf{r}_{12} + w_{13} \mathbf{r}_{13} + w_{\mathrm{cross}} (\mathbf{r}_{12} \times \mathbf{r}_{13})
+```
 """
 function OutOfPlaneSite(atom_ind, atom_1, atom_2, atom_3, weight_12::T,
                         weight_13::T, weight_cross) where T
@@ -110,10 +131,12 @@ function setup_virtual_sites(virtual_sites, atom_masses, AT=Array)
 end
 
 """
+    place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
 
-Assumes each virtual site is only defined once.
+Set the coordinates of virtual sites based on the coordinates of the atoms that define them.
 """
 function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+    # Assumes that each virtual site is only defined once
     if length(virtual_sites) > 0
         backend = get_backend(sys.coords)
         n_threads_dev = 32
@@ -123,9 +146,6 @@ function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
     return sys
 end
 
-"""
-
-"""
 @kernel function place_virtual_sites_kernel!(coords, boundary, @Const(virtual_sites))
     i = @index(Global, Linear)
     if i <= length(virtual_sites)
@@ -146,12 +166,9 @@ end
     end
 end
 
-"""
-
-Assumes each virtual site is only defined once.
-"""
 function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
                             virtual_sites=sys.virtual_sites) where {D, T}
+    # Assumes that each virtual site is only defined once
     if length(virtual_sites) > 0
         buffers.fs_mat .= reshape(reinterpret(T, ustrip_vec.(fs)), D, length(sys))
         backend = get_backend(sys.coords)
