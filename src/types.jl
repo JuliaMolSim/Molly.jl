@@ -294,6 +294,7 @@ The mass of an [`Atom`](@ref).
 
 Custom atom types should implement this function unless they have a `mass` field
 defined, which the function accesses by default.
+Virtual sites should have zero mass, and non-virtual sites should have non-zero mass.
 """
 mass(atom) = atom.mass
 
@@ -616,6 +617,14 @@ function System(;
     if isa(vels, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
+    if length(virtual_sites) > 0
+        if isa(atoms, AbstractGPUArray) && !isa(virtual_sites, AbstractGPUArray)
+            throw(ArgumentError("the atoms are on the GPU but the virtual sites are not"))
+        end
+        if isa(virtual_sites, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
+            throw(ArgumentError("the virtual sites are on the GPU but the atoms are not"))
+        end
+    end
 
     if !any(TT -> (pairwise_inters isa TT), (Tuple, NamedTuple))
         throw(ArgumentError("pairwise_inters should be a Tuple or a NamedTuple but has " *
@@ -661,7 +670,7 @@ function System(;
               "of SVectors for performance"
     end
 
-    virtual_site_flags = calc_virtual_site_flags(virtual_sites, atom_masses, AT)
+    virtual_site_flags = setup_virtual_sites(virtual_sites, atom_masses, AT)
     VF = typeof(virtual_site_flags)
     n_virtual_sites = sum(virtual_site_flags)
 
@@ -1060,7 +1069,7 @@ function ReplicaSystem(;
         throw(ArgumentError("number of virtual sites ($(length(replica_virtual_sites)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
-    replica_virtual_site_flags = [calc_virtual_site_flags(vss, atom_masses, AT)
+    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, AT)
                                   for vss in replica_virtual_sites]
     replica_n_virtual_sites = [sum(vsfs) for vsfs in replica_virtual_site_flags]
 

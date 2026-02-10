@@ -64,7 +64,7 @@ function OutOfPlaneSite(atom_ind, atom_1, atom_2, atom_3, weight_12::T,
                        zero(T), weight_12, weight_13, weight_cross)
 end
 
-function calc_virtual_site_flags(virtual_sites, atom_masses, AT=Array)
+function setup_virtual_sites(virtual_sites, atom_masses, AT=Array)
     n_atoms = length(atom_masses)
     virtual_site_flags = falses(n_atoms)
     virtual_sites_cpu = from_device(virtual_sites)
@@ -93,9 +93,9 @@ function calc_virtual_site_flags(virtual_sites, atom_masses, AT=Array)
     end
     warn_vs, warn_nvs = false, false
     for (vsf, atom_mass) in zip(virtual_site_flags, from_device(atom_masses))
-        if vsf && !iszero(atom_mass)
+        if vsf && !iszero_value(atom_mass)
             warn_vs = true
-        elseif !vsf && iszero(atom_mass)
+        elseif !vsf && iszero_value(atom_mass)
             warn_nvs = true
         end
     end
@@ -212,9 +212,6 @@ end
         end
     end
 end
-
-# Apply F = ma but give virtual sites zero acceleration
-calc_accels(f, m, vsf) = (vsf ? zero(f / oneunit(m)) : f / m)
 
 function pick_non_virtual_site(rng, sys)
     if iszero(length(sys.virtual_sites))

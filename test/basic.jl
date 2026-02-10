@@ -686,7 +686,7 @@ end
                 energy_units=EU,
             )
 
-            @test Molly.calc_virtual_site_flags(virtual_sites, atom_masses, AT) == vs_flags
+            @test Molly.setup_virtual_sites(virtual_sites, atom_masses, AT) == vs_flags
             place_virtual_sites!(sys)
             coords_true = to_device([
                 SVector(2.0  , 2.0 , 2.0 ),
