@@ -218,6 +218,12 @@ end
                        args...)
     # Mix Lambda
     λ = inter.λ_mixing(atom_i, atom_j)
+    if λ <= 0.0
+        return ustrip.(zero(dr)) * force_units
+    end
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip.(zero(dr)) * force_units
+    end
 
     # If lambda is 1, the soft core formula reduces to standard LJ
     # We explicity branch to save compute.
@@ -230,10 +236,10 @@ end
         ϵ = inter.ϵ_mixing(atom_i, atom_j)
         r = norm(dr)
         σ2 = σ^2
-        params = (σ2, ϵ)
+        params = (σ2, ϵ, nothing, nothing)
         
         # Call standard LJ cutoff logic.
-        f = force_cutoff(inter.cutoff, LennardJones(), r, params) 
+        f = force_cutoff(inter.cutoff, inter, r, params) 
         fdr = (f / r) * dr
         
         return special ? fdr * inter.weight_special : fdr
@@ -251,7 +257,7 @@ end
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
     σ6_fac = inter.α * (1 - λ)
-    params = (C12, C6, σ6_fac, λ)
+    params = (C12, C6, λ, σ6_fac)
 
     f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -259,7 +265,14 @@ end
     return special ? fdr * inter.weight_special : fdr
 end
 
-function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
+# Dispatch 1: Standard LJ Logic
+@inline function pairwise_force(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+    six_term = (σ2 / r^2)^3
+    return (24 * ϵ / r) * (2 * six_term^2 - six_term)
+end
+
+# Dispatch 2: Soft Core Logic
+function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_fac)::Tuple{<:Quantity, <:Quantity, <:Real, <:Real})
     R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
     R6 = R^6
     return λ*(((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
@@ -274,6 +287,13 @@ end
                                   args...)
     # Mix Lambda
     λ = inter.λ_mixing(atom_i, atom_j)
+    if λ <= 0.0
+        return ustrip(zero(dr[1])) * energy_units
+    end
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip(zero(dr[1])) * energy_units
+    end
+
 
     # If lambda is 1, the soft core formula reduces to standard LJ
     # We explicity branch to save compute.
@@ -286,11 +306,9 @@ end
 
         r = norm(dr)
         σ2 = σ^2
-        params = (σ2, ϵ)
+        params = (σ2, ϵ, nothing, nothing)
 
-        # Dispatch to the standard LennardJones
-        lj_std = LennardJones(cutoff=inter.cutoff)
-        pe = pe_cutoff(inter.cutoff, lj_std, r, params)
+        pe = pe_cutoff(inter.cutoff, inter, r, params)
         
         if special
             return pe * inter.weight_special
@@ -321,6 +339,14 @@ end
     end
 end
 
+# Dispatch 1: Standard LJ Logic
+@inline function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+    inv_r2 = inv(r^2)
+    six_term = (σ2 * inv_r2)^3
+    return 4 * ϵ * (six_term^2 - six_term)
+end
+
+# Dispatch 2: Soft Core Logic (Matches Tuple length 4)
 function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
     R6 = (σ6_fac * (C12 / C6)) + r^6
     return λ * ((C12 / (R6 * R6)) - (C6 / R6))
@@ -447,16 +473,13 @@ end
 end
 
 # Dispatch 1: Standard LJ Logic (Matches Tuple length 2)
-@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, params::Tuple{Quantity, Quantity, Nothing, Nothing})
-    (σ2, ϵ) = params
-    inv_r2 = inv(r^2)
-    six_term = (σ2 * inv_r2)^3
-    return (24 * ϵ * inv_r2) * (2 * six_term^2 - six_term)
+@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+    six_term = (σ2 / r^2)^3
+    return (24 * ϵ / r) * (2 * six_term^2 - six_term)
 end
 
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
-@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, params::Tuple{Quantity, Quantity, Real, Quantity})
-    (C12, C6, λ, R) = params
+@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{<:Quantity, <:Quantity, <:Real, <:Quantity})
     r6 = r^6
     if r >= R
         return λ * (((12*C12)/(r6*r6*r)) - ((6*C6)/(r6*r)))
@@ -512,16 +535,14 @@ end
 end
 
 # Dispatch 1: Standard LJ Logic (Matches Tuple length 2)
-@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, params::Tuple{Quantity, Quantity, Nothing, Nothing})
-    (σ2, ϵ) = params
+@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
     inv_r2 = inv(r^2)
     six_term = (σ2 * inv_r2)^3
     return 4 * ϵ * (six_term^2 - six_term)
 end
 
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
-@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, params::Tuple{Quantity, Quantity, <: Real, Quantity})
-    (C12, C6, λ, R) = params
+@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{<:Quantity, <:Quantity, <:Real, <:Quantity})
     r6 = r^6
     if r >= R
         return λ * ((C12/(r6*r6)) - (C6/(r6)))

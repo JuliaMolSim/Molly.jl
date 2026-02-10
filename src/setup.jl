@@ -556,7 +556,7 @@ function System(coord_file::AbstractString,
         else
             chrge = force_field.atom_types[atype].charge
         end
-        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ))
+        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ, λ=one(T)))
 
         res = residue_from_atom_idx(ai, canonical_system)
         res_cfl = chemfiles_residue_for_atom(top, ai - 1)
@@ -1202,7 +1202,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=using_neighbors,
-        weight_special=weight_14_lj,
+        weight_special=weight_14_lj
     )
     if nonbonded_method == :none
         coul = Coulomb(
