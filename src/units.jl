@@ -93,7 +93,7 @@ end
 
 function validate_energy_units(energy_units)
     valid_energy_dimensions = [u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2", u"𝐋^2 * 𝐌 * 𝐓^-2", NoDims]
-    if dimension(energy_units) ∉ valid_energy_dimensions
+    if !(dimension(energy_units) in valid_energy_dimensions)
         throw(ArgumentError("$energy_units do not have dimensions of energy. Energy units must " *
             "be energy, energy/number, or NoUnits, e.g. kcal or kcal/mol."))
     end
@@ -108,7 +108,7 @@ function validate_masses(masses)
     valid_mass_dimensions = [u"𝐌", u"𝐌* 𝐍^-1", NoDims]
     mass_dimension = dimension(eltype(masses))
 
-    if mass_dimension ∉ valid_mass_dimensions
+    if !(mass_dimension in valid_mass_dimensions)
         throw(ArgumentError("mass units have dimension $mass_dimension. Mass units must be " *
             "mass, mass/number or NoUnits, e.g. 1.0u\"kg\", 1.0u\"kg/mol\" or 1.0."))
     end
@@ -128,7 +128,7 @@ function validate_coords(coords)
     valid_length_dimensions = [u"𝐋", NoDims]
     coord_dimension = (dimension ∘ eltype ∘ eltype)(coords)
 
-    if coord_dimension ∉ valid_length_dimensions
+    if !(coord_dimension in valid_length_dimensions)
         throw(ArgumentError("coordinate units have dimension $coord_dimension. Length units " *
             "must be length or NoUnits, e.g. 1.0u\"m\" or 1.0."))
     end
@@ -148,7 +148,7 @@ function validate_velocities(velocities)
     valid_velocity_dimensions = [u"𝐋 * 𝐓^-1", NoDims]
     velocity_dimension = (dimension ∘ eltype ∘ eltype)(velocities)
 
-    if velocity_dimension ∉ valid_velocity_dimensions
+    if !(velocity_dimension in valid_velocity_dimensions)
         throw(ArgumentError("velocity units have dimension $velocity_dimension. Velocity units " *
             "must be velocity or NoUnits, e.g. 1.0u\"m/s\" or 1.0."))
     end

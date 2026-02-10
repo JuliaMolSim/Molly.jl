@@ -1467,7 +1467,7 @@ function add_position_restraints(sys::System{<:Any, AT},
     is = Int32[]
     types = String[]
     inters = HarmonicPositionRestraint[]
-    atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : fill(nothing, length(sys))
+    atoms_data = (length(sys.atoms_data) > 0 ? sys.atoms_data : fill(nothing, length(sys)))
     for (i, (at, at_data, k_res, x0)) in enumerate(zip(from_device(sys.atoms), atoms_data, k_array,
                                                        from_device(restrain_coords)))
         if atom_selector(at, at_data)

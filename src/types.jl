@@ -1355,7 +1355,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
     is_cubic = true
     for (i, bv) in enumerate(bb)
         for j in 1:(i - 1)
-            if !iszero(bv[j])
+            if !iszero_value(bv[j])
                 is_cubic = false
             end
         end
@@ -1591,6 +1591,8 @@ end
 
 function update_ase_calc! end
 
+# ForwardDiff.jl checks both value and derivative
+# This could be extended to only check the value for Duals
 iszero_value(x) = iszero(x)
 
 # Only use threading if a condition is true

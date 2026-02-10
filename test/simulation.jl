@@ -401,7 +401,6 @@ end
             coords=CoordinatesLogger(100),
             disp=DisplacementsLogger(100, coords),
         ),
-
     )
 
     @test_throws ArgumentError DisplacementsLogger(100, coords; n_steps_update=17)

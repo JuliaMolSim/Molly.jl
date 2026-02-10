@@ -516,8 +516,8 @@ function mbar_weights(u::AbstractMatrix,
         throw(DomainError(w, "infinite value found in w_target"))
     end
 
-    any(iszero, W) && @warn "W_samp contains zeros, possible underflow"
-    any(iszero, w) && @warn "w_target contains zeros, possible underflow"
+    any(iszero_value, W) && @warn "W_samp contains zeros, possible underflow"
+    any(iszero_value, w) && @warn "w_target contains zeros, possible underflow"
 
     if check
         N, K = size(u)
@@ -719,7 +719,7 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
     if !all(isfinite, W_na)
         throw(DomainError(W_na, "infinite value found in W_na"))
     end
-    any(iszero, W_na) && @warn "W_na contains zeros, possible underflow"
+    any(iszero_value, W_na) && @warn "W_na contains zeros, possible underflow"
 
     # Prepare outputs
     p       = zeros(Float64, nb) # Bin probabilities under target
