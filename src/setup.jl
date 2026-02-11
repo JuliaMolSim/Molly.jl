@@ -618,8 +618,8 @@ function System(coord_file::AbstractString,
         push!(bonds_il.js, j)
         push!(bonds_il.types, atom_types_to_string(t1,t2))
         push!(bonds_il.inters, hb)
-        eligible[i,j] = false
-        eligible[j,i] = false
+        eligible[i, j] = false
+        eligible[j, i] = false
     end
 
     # Angles
@@ -634,8 +634,26 @@ function System(coord_file::AbstractString,
         push!(angles_il.ks,k)
         push!(angles_il.types, atom_types_to_string(t1,t2,t3))
         push!(angles_il.inters, ha)
-        eligible[i,k] = false
-        eligible[k,i] = false
+        eligible[i, k] = false
+        eligible[k, i] = false
+    end
+
+    # Virtual sites share all the non-bonded exclusions of, and are excluded from,
+    #   their parent atoms
+    for vs in virtual_sites
+        i = vs.atom_ind
+        for j in (vs.atom_1, vs.atom_2, vs.atom_3)
+            if !iszero(j)
+                for k in 1:n_atoms
+                    if !eligible[j, k]
+                        eligible[i, k] = false
+                        eligible[k, i] = false
+                    end
+                end
+                eligible[i, j] = false
+                eligible[j, i] = false
+            end
+        end
     end
 
     # Proper torsions
@@ -655,8 +673,8 @@ function System(coord_file::AbstractString,
             push!(tors_il.inters, PeriodicTorsion(periodicities=tt.periodicities[s:e],
                                                 phases=tt.phases[s:e], ks=tt.ks[s:e], proper=true))
         end
-        special[i,l] = true
-        special[l,i] = true
+        special[i, l] = true
+        special[l, i] = true
     end
 
     # Impropers (Amber ordering)
