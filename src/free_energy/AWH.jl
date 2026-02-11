@@ -47,15 +47,17 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     ref_sys = thermo_states[1].system
     
     # ---------------------------------------------------------
-    # 1. Identify Solute Indices (Atoms active in ANY λ window)
+    # 1. Identify Global Solute Indices (Union of all λ < 1)
     # ---------------------------------------------------------
-    # We must treat any atom that is EVER modified as "Solute" for the purpose of 
-    # the Master/Residual split. The Master system can only contain atoms that 
-    # are Solvent in ALL windows.
+    # We MUST exclude the UNION of all atoms that ever change from the Master system.
+    # If we didn't, Master would contain an interaction that is valid for Window A
+    # but invalid for Window B.
     solute_indices = Set{Int}()
+    
     for tstate in thermo_states
         atoms_cpu = from_device(tstate.system.atoms) 
         for atom in atoms_cpu
+            # Any atom that is not fully coupled (λ < 1) in THIS window is active
             if atom.λ < 1.0
                 push!(solute_indices, atom.index)
             end
@@ -65,22 +67,24 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     # ---------------------------------------------------------
     # 2. Partition Neighbor Lists (Eligible Matrices)
     # ---------------------------------------------------------
-    # Retrieve base matrix (contains bond exclusions) on CPU for manipulation
+    # Retrieve base matrix on CPU for manipulation
     ref_nfinder = ref_sys.neighbor_finder
     base_eligible_cpu = copy(from_device(ref_nfinder.eligible))
     n_atoms = size(base_eligible_cpu, 1)
     
     # A. Generate Master Eligible Matrix (Solvent-Solvent ONLY)
-    # Logic: Mask out any pair involving a solute atom.
+    # Logic: Mask out any pair involving a 'solute' atom.
     master_eligible_cpu = copy(base_eligible_cpu)
     for idx in solute_indices
         master_eligible_cpu[idx, :] .= false
         master_eligible_cpu[:, idx] .= false
     end
     
-    # B. Generate Specific Eligible Matrix Pattern (Interactions involving Solute)
+    # B. Generate Specific Eligible Matrix Pattern (Inverse of Master)
     # Logic: Mask out the pure Solvent-Solvent block.
     # We keep Solute-Solute and Solute-Solvent interactions enabled.
+    # This must cover ALL atoms in `solute_indices` to ensure we compute the 
+    # interactions excluded from Master.
     specific_eligible_cpu = copy(base_eligible_cpu)
     solvent_indices = [i for i in 1:n_atoms if !(i in solute_indices)]
     
@@ -88,15 +92,13 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         specific_eligible_cpu[solvent_indices, solvent_indices] .= false
     end
 
-    # C. Move matrices to the correct device (GPU/CPU)
-    # We use array_type(ref_sys) to pass the TYPE (e.g. CuArray), not the instance.
-    sys_array_type = array_type(ref_sys)
-    master_eligible = to_device(master_eligible_cpu, sys_array_type)
+    # C. Move matrices to the correct device
+    # We use ref_sys.coords to detect if we should use CuArray or Array
+    AT = array_type(ref_sys)
+    master_eligible = to_device(master_eligible_cpu, AT)
+    d_specific      = to_device(specific_eligible_cpu, AT)
     
-    # Create the vector of eligible matrices (one per window)
-    # Note: We share the same GPU array reference initially to save memory.
-    # If windows need unique masks later, deepcopy them here.
-    d_specific = to_device(specific_eligible_cpu, sys_array_type)
+    # We populate the vector. Currently they are identical because the Master system is static.
     λ_eligible = [d_specific for _ in 1:n_λ]
 
     # ---------------------------------------------------------
@@ -144,8 +146,10 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         u_g = setdiff(all_gils[i], master_gils)
         λ_general[i] = (u_g...,)
 
-        u_p = setdiff(all_pils[i], master_pils)
-        λ_pairwise[i] = (u_p...,)
+        # For Pairwise interactions, we do NOT use setdiff.
+        # Since we use the eligible matrix to split the "Pair Space" (Solvent-Solvent vs The Rest),
+        # we must apply the full set of interactions to the Residual term.
+        λ_pairwise[i] = (all_pils[i]...,)
     end
 
     # ---------------------------------------------------------
@@ -157,16 +161,37 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         master_nf = DistanceNeighborFinder(
             eligible = master_eligible, 
             dist_cutoff = ref_nfinder.dist_cutoff,
-            n_steps = ref_nfinder.n_steps
+            special   = ref_nfinder.special,
+            n_steps = ref_nfinder.n_steps,
+            neighbors = ref_nfinder.neighbors
         )
     elseif ref_nfinder isa CellListMapNeighborFinder
         master_nf = CellListMapNeighborFinder(
             eligible = master_eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
+            special = ref_nfinder.special,
             n_steps = ref_nfinder.n_steps,
             x0 = ref_sys.coords,
-            unit_cell = ref_sys.boundary
+            unit_cell = ref_sys.boundary,
+            dims = ref_nfinder.dims
         )
+    elseif ref_nfinder isa GPUNeighborFinder
+        master_nf = GPUNeighborFinder(
+            eligible = master_eligible,
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special = ref_nfinder.special,
+            n_steps_reorder = ref_nfinder.n_steps_reorder,
+            initialized = ref_nfinder.initialized
+        )
+    elseif ref_nfinder isa TreeNeighborFinder
+        master_nf = TreeNeighborFinder(
+            eligible = master_eligible,
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special = ref_nfinder.special,
+            n_steps = ref_nfinder.n_steps
+        )
+    elseif ref_nfinder isa NoNeighborFinder
+        master_nf = NoNeighborFinder()
     else
         @warn "Unknown NeighborFinder type $(typeof(ref_nfinder)). Using default DistanceNeighborFinder for Master System."
         master_nf = DistanceNeighborFinder(
@@ -207,7 +232,7 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         λ_pairwise, 
         λ_specific, 
         λ_general,
-        λ_eligible,        # Vector of matrices
+        λ_eligible,        
         zeros(FT, n_λ),    # f
         rho_val,           # rho
         log_ρ,             # log_rho
