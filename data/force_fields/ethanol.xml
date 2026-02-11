@@ -1,0 +1,23 @@
+<ForceField>
+ <Residues>
+    <Residue name="ETH">
+        <Atom name="C1" type="c3" charge="-0.13610011111111114"/>
+        <Atom name="C2" type="c3" charge="0.12639988888888887"/>
+        <Atom name="O1" type="oh" charge="-0.5998001111111111"/>
+        <Atom name="H1" type="hc" charge="0.04236688888888887"/>
+        <Atom name="H2" type="hc" charge="0.04236688888888887"/>
+        <Atom name="H3" type="hc" charge="0.04236688888888887"/>
+        <Atom name="H4" type="h1" charge="0.04319988888888887"/>
+        <Atom name="H5" type="h1" charge="0.04319988888888887"/>
+        <Atom name="H6" type="ho" charge="0.3959998888888889"/>
+        <Bond atomName1="C1" atomName2="C2"/>
+        <Bond atomName1="C2" atomName2="O1"/>
+        <Bond atomName1="C1" atomName2="H1"/>
+        <Bond atomName1="C1" atomName2="H2"/>
+        <Bond atomName1="C1" atomName2="H3"/>
+        <Bond atomName1="C2" atomName2="H4"/>
+        <Bond atomName1="C2" atomName2="H5"/>
+        <Bond atomName1="O1" atomName2="H6"/>
+    </Residue>
+ </Residues>
+</ForceField>
