@@ -697,6 +697,10 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           excluded_res=String[], write_velocities::Bool=false,
                           write_boundary::Bool=true)
     check_correction_arg(correction)
+    if isfile(filepath)
+        @warn "TrajectoryWriter created with a file path ($filepath) that already exists, " *
+              "will try to append to this file"
+    end
     topology = Chemfiles.Topology() # Added to later when sys is available
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         format_used = "PDB"
