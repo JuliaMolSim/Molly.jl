@@ -1413,6 +1413,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     general_inters = (general_inters_ewald..., general_inters_is...)
 
     k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
+    virtual_sites_dev = (length(virtual_sites) > 0 ? to_device(virtual_sites, AT) : virtual_sites)
+
     return System(
         atoms=atoms,
         coords=coords_dev,
@@ -1424,7 +1426,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         constraints=constraints,
-        virtual_sites=virtual_sites,
+        virtual_sites=virtual_sites_dev,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),

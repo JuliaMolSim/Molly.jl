@@ -6,8 +6,22 @@ export
     OutOfPlaneSite,
     place_virtual_sites!
 
-struct VirtualSiteTemplate{T, IC}
+struct VirtualSite{T, IC}
     type::Int # 1/2/3 for TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite
+    atom_ind::Int
+    atom_1::Int
+    atom_2::Int
+    atom_3::Int # 0 in TwoParticleAverageSite case
+    weight_1::T
+    weight_2::T
+    weight_3::T
+    weight_12::T
+    weight_13::T
+    weight_cross::IC # Units are 1/L
+end
+
+struct VirtualSiteTemplate{T, IC}
+    type::Int
     name::String
     atom_name_1::String
     atom_name_2::String
@@ -17,21 +31,7 @@ struct VirtualSiteTemplate{T, IC}
     weight_3::T
     weight_12::T
     weight_13::T
-    weight_cross::IC # Units are 1/L
-end
-
-struct VirtualSite{T, IC}
-    type::Int # 1/2/3 for TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite
-    atom_ind::Int
-    atom_1::Int
-    atom_2::Int
-    atom_3::Int
-    weight_1::T
-    weight_2::T
-    weight_3::T
-    weight_12::T
-    weight_13::T
-    weight_cross::IC # Units are 1/L
+    weight_cross::IC
 end
 
 @doc raw"""
@@ -43,11 +43,16 @@ Returns a `VirtualSite` defined by:
 ```math
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2
 ```
+where ``w_1 + w_2`` must equal 1.
 """
 function TwoParticleAverageSite(atom_ind, atom_1, atom_2, weight_1::T, weight_2::T,
                                 weight_cross=(zero(T) * u"nm^-1")) where T
     # Optional weight_cross allows arrays of different virtual site types to be
     #   concretely typed with and without units
+    if !isapprox(weight_1 + weight_2, 1)
+        throw(ArgumentError("weight_1 + weight_2 must equal 1 for a TwoParticleAverageSite, " *
+                            "found $(weight_1 + weight_2)"))
+    end
     return VirtualSite(1, atom_ind, atom_1, atom_2, 0, weight_1, weight_2,
                        zero(T), zero(T), zero(T), weight_cross)
 end
@@ -61,9 +66,14 @@ Returns a `VirtualSite` defined by:
 ```math
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2 + w_3 \mathbf{r}_3
 ```
+where ``w_1 + w_2 + w_3`` must equal 1.
 """
 function ThreeParticleAverageSite(atom_ind, atom_1, atom_2, atom_3, weight_1::T, weight_2::T,
                                   weight_3::T, weight_cross=(zero(T) * u"nm^-1")) where T
+    if !isapprox(weight_1 + weight_2 + weight_3, 1)
+        throw(ArgumentError("weight_1 + weight_2 + weight_3 must equal 1 for a " *
+                            "ThreeParticleAverageSite, found $(weight_1 + weight_2 + weight_3)"))
+    end
     return VirtualSite(2, atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2,
                        weight_3, zero(T), zero(T), weight_cross)
 end
@@ -139,7 +149,7 @@ function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
     # Assumes that each virtual site is only defined once
     if length(virtual_sites) > 0
         backend = get_backend(sys.coords)
-        n_threads_dev = 32
+        n_threads_dev = 256
         kernel! = place_virtual_sites_kernel!(backend, n_threads_dev)
         kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=length(virtual_sites))
     end
@@ -150,13 +160,16 @@ end
     i = @index(Global, Linear)
     if i <= length(virtual_sites)
         vs = virtual_sites[i]
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
         if vs.type == 1
-            vs_coord = vs.weight_1 * coords[vs.atom_1] + vs.weight_2 * coords[vs.atom_2]
+            # w1 r1 + w2 r2 can't be used here since r1 and r2 may be in different periodic images
+            # Only one absolute coordinate, r1, can be used, with others defined relatively
+            # This is why w1 + w2 must equal 1, which is assumed here
+            vs_coord = coords[vs.atom_1] + vs.weight_2 * r12
         elseif vs.type == 2
-            vs_coord = vs.weight_1 * coords[vs.atom_1] + vs.weight_2 * coords[vs.atom_2] +
-                       vs.weight_3 * coords[vs.atom_3]
+            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+            vs_coord = coords[vs.atom_1] + vs.weight_2 * r12 + vs.weight_3 * r13
         elseif vs.type == 3
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
             r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
             cross_r12_r13 = cross(r12, r13) # Units L^2
             vs_coord = coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
@@ -172,7 +185,7 @@ function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
     if length(virtual_sites) > 0
         buffers.fs_mat .= reshape(reinterpret(T, ustrip_vec.(fs)), D, length(sys))
         backend = get_backend(sys.coords)
-        n_threads_dev = 32
+        n_threads_dev = 128
         kernel! = distribute_forces_kernel!(backend, n_threads_dev)
         kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites;
                 ndrange=length(virtual_sites))
