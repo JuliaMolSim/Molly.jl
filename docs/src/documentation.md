@@ -421,7 +421,7 @@ sys_res = add_position_restraints(
 See the [OpenMM documentation](https://docs.openmm.org/latest/userguide/application/06_creating_ffs.html#writing-the-xml-file) for the available tags.
 The following tags are supported:
 - `<AtomTypes>`: both atom types and atom classes are supported
-- `<Residues>`: `<VirtualSite>` tags are not supported
+- `<Residues>`: `<VirtualSite>` tags are supported except for `type="localCoords"`
 - `<Patches>`: patches that apply to multiple residue templates and multiple patches acting on one residue template are not supported
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
@@ -1276,6 +1276,7 @@ Molly.needs_virial(c::MyCoupler) = Inf
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
 Contributions from constraints, implicit solvent methods and bias potentials are ignored.
+The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 As described previously, custom general interactions should implement virial calculation if required.
 
 ## Loggers
@@ -1547,6 +1548,17 @@ These constraints provide enough flexibility to constrain all hydrogen atoms in 
 All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse.
 The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented.
 Other methods can be used to solve larger constraint clusters, these are not yet supported by Molly.
+
+## Virtual sites
+
+Virtual sites are massless particles whose coordinates are defined by the coordinates of other atoms.
+One use case is to carry partial charge at a location separate from the atom centers, as seen in four-point water models like TIP4P.
+Molly allows virtual sites to be defined in the following ways:
+-
+-
+-
+
+Virtual sites share all the non-bonded exclusions of, and are excluded from, their parent atoms.
 
 ## Neighbor finders
 
