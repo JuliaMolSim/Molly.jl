@@ -403,7 +403,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             if vs_type == "average2"
                                 weight_1 = parse(T, re["weight1"])
                                 weight_2 = parse(T, re["weight2"])
-                                vs = VirtualSiteTemplate(1, vs_name, atom_name_1, atom_name_2,
+                                vs = VirtualSiteTemplate(2, vs_name, atom_name_1, atom_name_2,
                                         "", weight_1, weight_2, zero(T), zero(T), zero(T), zero(IC))
                                 push!(virtual_sites, vs)
                             elseif vs_type == "average3"
@@ -415,7 +415,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                                 weight_1 = parse(T, re["weight1"])
                                 weight_2 = parse(T, re["weight2"])
                                 weight_3 = parse(T, re["weight3"])
-                                vs = VirtualSiteTemplate(2, vs_name, atom_name_1, atom_name_2,
+                                vs = VirtualSiteTemplate(3, vs_name, atom_name_1, atom_name_2,
                                         atom_name_3, weight_1, weight_2, weight_3, zero(T),
                                         zero(T), zero(IC))
                                 push!(virtual_sites, vs)
@@ -428,7 +428,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                                 weight_12 = parse(T, re["weight12"])
                                 weight_13 = parse(T, re["weight13"])
                                 weight_cross = parse(T, re["weightCross"]) * (units ? u"nm^-1" : NoUnits)
-                                vs = VirtualSiteTemplate(3, vs_name, atom_name_1, atom_name_2,
+                                vs = VirtualSiteTemplate(4, vs_name, atom_name_1, atom_name_2,
                                         atom_name_3, zero(T), zero(T), zero(T), weight_12,
                                         weight_13, weight_cross)
                                 push!(virtual_sites, vs)

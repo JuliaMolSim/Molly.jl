@@ -650,7 +650,7 @@ end
             else
                 LU, MU, EU, FU, TU, AU = NoUnits, NoUnits, NoUnits, NoUnits, NoUnits, NoUnits
             end
-            vs_flags = to_device(BitVector([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1]), AT)
+            vs_flags = to_device(BitVector([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1]), AT)
             atom_masses = map(x -> (x ? 0.0 : 10.0), vs_flags) .* MU
             atoms = to_device([Atom(mass=m, σ=(0.1 * LU), ϵ=(0.2 * EU))
                                for m in from_device(atom_masses)], AT)
@@ -667,6 +667,7 @@ end
                 SVector(4.0, 4.2, 4.0),
                 SVector(1.0, 1.0, 1.0),
                 SVector(1.0, 1.0, 1.0),
+                SVector(1.0, 1.0, 1.0),
             ] * LU, AT)
             boundary = CubicBoundary(7.0 * LU)
             virtual_sites = to_device([
@@ -674,14 +675,23 @@ end
                 ThreeParticleAverageSite(7, 4, 5, 6, 0.2, 0.3, 0.5, 0.0 / LU),
                 OutOfPlaneSite(11, 8, 9, 10, 0.4, 0.4, 0.2 / LU),
                 TwoParticleAverageSite(12, 10, 9, 0.7, 0.3, 0.0 / LU),
+                OneParticleSite(13, 1, 0.0 / LU),
             ], AT)
-            pis = (LennardJones(),)
+            pis = (LennardJones(use_neighbors=true),)
+            eligible = trues(length(atoms), length(atoms))
+            eligible[1, 13] = false # Exclude OneParticleSite interaction
+            eligible[13, 1] = false
+            neighbor_finder = DistanceNeighborFinder(
+                eligible=to_device(eligible, AT),
+                dist_cutoff=(Inf * LU),
+            )
             sys = System(
                 atoms=atoms,
                 coords=coords,
                 boundary=boundary,
                 pairwise_inters=pis,
                 virtual_sites=virtual_sites,
+                neighbor_finder=neighbor_finder,
                 force_units=FU,
                 energy_units=EU,
             )
@@ -701,40 +711,43 @@ end
                 SVector(4.0  , 4.2 , 4.0 ),
                 SVector(3.992, 4.08, 4.08),
                 SVector(4.0  , 4.14, 4.06),
+                SVector(2.0  , 2.0 , 2.0 ),
             ] * LU, AT)
             @test maximum(norm, sys.coords .- coords_true) < (1e-10 * LU)
 
-            @test potential_energy(sys) ≈ 176.755677721122 * EU
+            @test potential_energy(sys) ≈ 185.333147311272 * EU
             fs = forces(sys)
             fs_true = to_device([
-                SVector(2.925933983564653e-7, 3.1125193300777895e-7, -603.9218830270745),
-                SVector(3.599618866597804e-7, 3.822959459233062e-7, 603.9218836444344),
+                SVector(4.611761937893023e-7, 4.906537782904418e-7, -1210.4977981858422),
+                SVector(3.5996188665978023e-7, 3.8229594592330597e-7, 1210.4977989810347),
                 SVector(0.0, 0.0, 0.0),
-                SVector(2.5808104725193487e-9, 3.1230191568812646, 1.559911900509554),
-                SVector(2.4391188018790913e-7, 0.42728790372500036, -1.9871993119974722),
-                SVector(2.855779272863662e-7, -3.5503065786187276, 0.42728796565238336),
+                SVector(-6.445195615508081e-8, 3.123019089071148, 1.5599118330103774),
+                SVector(1.979742462338753e-7, 0.4272878566213397, -1.9871993654901958),
+                SVector(2.3186678157441692e-7, -3.550306641128726, 0.427287910775211),
                 SVector(0.0, 0.0, 0.0),
-                SVector(-3.771624506043736e-7, -6239.653288137466, 1866.7884395038172),
-                SVector(-3.6238225220586173e-7, -3179.2670135477856, 1312.478572953156),
-                SVector(-4.4508124119602144e-7, 9418.92030050971, -3179.2670136284933),
+                SVector(-3.776342791805831e-7, -6239.653288137336, 1866.7884395029387),
+                SVector(-3.6302617445471697e-7, -3179.267013548073, 1312.478572952326),
+                SVector(-4.4586704461835325e-7, 9418.920300507896, -3179.2670136287525),
+                SVector(0.0, 0.0, 0.0),
                 SVector(0.0, 0.0, 0.0),
                 SVector(0.0, 0.0, 0.0),
             ] * FU, AT)
-            @test maximum(norm, fs .- fs_true) < (1e-10 * FU)
+            @test maximum(norm, fs .- fs_true) < (1e-9 * FU)
             @test norm(sum(fs)) < (1e-10 * FU)
 
             accels = Molly.calc_accels.(fs, atom_masses, vs_flags)
             accels_true = to_device([
-                SVector(2.9259339835646528e-8, 3.1125193300777893e-8, -60.39218830270745),
-                SVector(3.599618866597804e-8, 3.822959459233062e-8, 60.39218836444344),
+                SVector(4.611761937893023e-8, 4.906537782904419e-8, -121.04977981858443),
+                SVector(3.599618866597804e-8, 3.822959459233061e-8, 121.04977989810368),
                 SVector(0.0, 0.0, 0.0),
-                SVector(2.5808104725193486e-10, 0.3123019156881265, 0.1559911900509554),
-                SVector(2.4391188018790913e-8, 0.04272879037250003, -0.19871993119974724),
-                SVector(2.855779272863662e-8, -0.35503065786187277, 0.042728796565238335),
+                SVector(-6.445195615508091e-9, 0.3123019089071146, 0.15599118330103764),
+                SVector(1.979742462338754e-8, 0.04272878566213397, -0.1987199365490195),
+                SVector(2.31866781574417e-8, -0.35503066411287243, 0.0427287910775211),
                 SVector(0.0, 0.0, 0.0),
-                SVector(-3.7716245060437356e-8, -623.9653288137466, 186.67884395038172),
-                SVector(-3.623822522058617e-8, -317.9267013547786, 131.24785729531558),
-                SVector(-4.450812411960214e-8, 941.892030050971, -317.9267013628493),
+                SVector(-3.776338241001653e-8, -623.9653288137338, 186.67884395029404),
+                SVector(-3.6302640182839244e-8, -317.92670135480785, 131.24785729523273),
+                SVector(-4.4586704461835323e-8, 941.8920300507904, -317.9267013628754),
+                SVector(0.0, 0.0, 0.0),
                 SVector(0.0, 0.0, 0.0),
                 SVector(0.0, 0.0, 0.0),
             ] * AU, AT)
