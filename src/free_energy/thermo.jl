@@ -69,3 +69,16 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
     
     return ThermoState(final_name, integrator, beta, press, sys)
 end
+
+function logsumexp(x::AbstractVector{T}) where T
+    isempty(x) && return -T(Inf)
+    x_max = maximum(x)
+    # If all weights are -Inf (e.g. huge energy overlap issues), return -Inf
+    !isfinite(x_max) && return x_max 
+    
+    s = zero(T)
+    for val in x
+        s += exp(val - x_max)
+    end
+    return x_max + log(s)
+end

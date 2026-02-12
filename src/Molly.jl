@@ -32,6 +32,7 @@ using LinearAlgebra
 using Random
 using SparseArrays
 using Statistics
+using StatsBase
 
 include("types.jl")
 include("units.jl")

@@ -1,4 +1,7 @@
-export AWHState
+export 
+    AWHState,
+    AWHSimulation,
+    simulate!
 
 function build_neighbor_finder(ref_nfinder, eligible; 
                                reuse_neighbors::Bool = true)
@@ -8,7 +11,7 @@ function build_neighbor_finder(ref_nfinder, eligible;
             eligible = eligible, 
             dist_cutoff = ref_nfinder.dist_cutoff,
             special   = ref_nfinder.special,
-            n_steps = ref_nfinder.n_steps,
+            n_steps = 1,
             neighbors = ref_nfinder.neighbors
         )
     elseif ref_nfinder isa CellListMapNeighborFinder
@@ -16,7 +19,7 @@ function build_neighbor_finder(ref_nfinder, eligible;
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = ref_nfinder.special,
-            n_steps = ref_nfinder.n_steps,
+            n_steps = 1,
             x0 = ref_sys.coords,
             unit_cell = ref_sys.boundary,
             dims = ref_nfinder.dims
@@ -27,7 +30,7 @@ function build_neighbor_finder(ref_nfinder, eligible;
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special = ref_nfinder.special,
-                n_steps_reorder = ref_nfinder.n_steps_reorder,
+                n_steps_reorder = 1,
                 initialized = ref_nfinder.initialized
             )
         else
@@ -35,7 +38,7 @@ function build_neighbor_finder(ref_nfinder, eligible;
                 eligible = eligible, 
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special   = ref_nfinder.special,
-                n_steps = ref_nfinder.n_steps_reorder
+                n_steps = 1
             )
         end
     elseif ref_nfinder isa TreeNeighborFinder
@@ -43,7 +46,7 @@ function build_neighbor_finder(ref_nfinder, eligible;
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = ref_nfinder.special,
-            n_steps = ref_nfinder.n_steps
+            n_steps = 1
         )
     elseif ref_nfinder isa NoNeighborFinder
         nf = NoNeighborFinder()
@@ -52,7 +55,7 @@ function build_neighbor_finder(ref_nfinder, eligible;
         nf = DistanceNeighborFinder(
             eligible = master_eligible,
             dist_cutoff = 1.0u"nm",
-            n_steps = 10
+            n_steps = 1
         )
     end
 
@@ -78,6 +81,17 @@ mutable struct AWHState{T}
     master_sys::System
     # λ System (Unique interactions per λ window)
     λ_sys::System
+    # Active System, contains all interactions to run actual MD simulation
+    active_sys::System
+
+    # Active integrator
+    active_intg
+
+    # λ Integrators, each window carries its own integrator to account for different temperatures / pressures
+    λ_integrators::Vector
+
+    # λ Inverse temperatures
+    λ_β::Vector
 
     # Per λ interactions
     λ_hamiltonians::Vector{LambdaHamiltonian}
@@ -104,12 +118,13 @@ mutable struct AWHState{T}
 end
 
 function AWHState(thermo_states::AbstractArray{ThermoState};
+                  first_state::Int = 1,
                   n_bias::Int = 100,
                   ρ::Union{Nothing, AbstractArray{T}} = nothing,
                   reuse_neighbors::Bool = true) where T
 
     n_λ = length(thermo_states)
-    ref_sys = thermo_states[1].system
+    ref_sys = thermo_states[first_state].system
     
     # ---------------------------------------------------------
     # 1. Identify Global Solute Indices (Union of all λ < 1)
@@ -119,9 +134,14 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     # but invalid for Window B.
     solute_indices = Set{Int}()
     λ_atoms = []
+    λ_integrators = []
+    λ_β = []
     for tstate in thermo_states
-        atoms     = tstate.system.atoms
+        atoms = tstate.system.atoms
+        intg  = tstate.integrator
         push!(λ_atoms, atoms)
+        push!(λ_integrators, intg)
+        push!(λ_β, tstate.beta)
         atoms_cpu = from_device(atoms)
         for atom in atoms_cpu
             # Any atom that is not fully coupled (λ < 1) in THIS window is active
@@ -130,6 +150,8 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
             end
         end
     end
+
+    active_intg = λ_integrators[first_state]
     
     # ---------------------------------------------------------
     # 2. Partition Neighbor Lists (Eligible Matrices)
@@ -225,6 +247,8 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     master_nf = build_neighbor_finder(ref_nfinder, master_eligible; reuse_neighbors = reuse_neighbors)
     λ_nf      = build_neighbor_finder(ref_nfinder, λ_eligible; reuse_neighbors = reuse_neighbors)
 
+    active_sys = System(deepcopy(ref_sys))
+
     master_sys = System(deepcopy(ref_sys); 
         pairwise_inters      = (master_pils...,),
         general_inters       = (master_gils...,),
@@ -267,6 +291,10 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     return AWHState(
         master_sys,
         λ_sys,
+        active_sys,
+        active_intg,
+        λ_integrators,
+        λ_β,
         hamiltonians,
         λ_atoms,        
         zeros(FT, n_λ),    # f
@@ -280,4 +308,181 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         true,              # in_initial_stage
         Set{Int}(),        # visited_windows
     )
+end
+
+struct AWHSimulation{T}
+    n_windows::Int
+    initial_sampl_n::T
+    n_md_steps::Int         # Number of MD steps to run between samplings
+    update_freq::Int        # Number of samples between f-updates
+    well_tempered_fac::T    # Well-tempered factor (Inf = Standard AWH/Uniform)
+    coverage_threshold::T   # Fraction of windows visited to trigger doubling
+    significant_weight::T   # Threshold to count a window as "visited"
+    log_freq::Int           # Frequency of storing data to history
+    state::AWHState{T}
+end
+
+function AWHSimulation(
+    awh_state::AWHState{T};
+    num_md_steps::Int = 10,
+    update_freq::Int = 1,
+    well_tempered_factor::Real = 10.0,
+    coverage_threshold::Real = 1.0,
+    significant_weight::Real = 0.1,
+    log_freq::Int = 100
+) where T
+
+    n_win = length(awh_state.λ_hamiltonians)
+
+    return AWHSimulation(n_win,
+                         copy(awh_state.N_bias),
+                         num_md_steps,
+                         update_freq,
+                         T(well_tempered_factor),
+                         T(coverage_threshold),
+                         T(significant_weight),
+                         log_freq, awh_state)
+
+end
+
+function process_sample(awh::AWHState{FT};
+                        weight_relevance::Real = 0.1) where FT
+
+    n_states = length(awh.λ_hamiltonians)
+
+    coords = awh.active_sys.coords
+    bound  = awh.active_sys.boundary
+
+    awh.master_sys.coords   = coords
+    awh.master_sys.boundary = bound
+    master_pe = potential_energy(awh.master_sys)
+
+    awh.λ_sys.coords   = coords
+    awh.λ_sys.boundary = bound
+    nbrs = find_neighbors(awh.λ_sys)
+
+    potentials = Vector{FT}(undef, n_states)
+
+    for (n, (atoms, haml, β)) in enumerate(zip(awh.λ_atoms, awh.λ_hamiltonians, awh.λ_β))
+
+        awh.λ_sys.atoms                = atoms
+        awh.λ_sys.pairwise_inters      = haml.pairwise_inters
+        awh.λ_sys.specific_inter_lists = haml.specific_inter_lists
+        awh.λ_sys.general_inters       = haml.general_inters
+
+        pe = master_pe + potential_energy(awh.λ_sys, nbrs, 0)
+
+        potentials[n] = β * pe
+
+    end
+
+    z = awh.log_rho .+ awh.f .- potentials
+    log_den = Molly.logsumexp(z)
+    w = exp.(z .- log_den)
+
+    awh.w_seg .+= w
+    awh.w_last .= w
+
+    awh.n_accum += 1
+    awh.N_eff   += 1
+
+    for (i, val) in enumerate(w)
+        if val > weight_relevance/n_states
+            push!(awh.visited_windows, i)
+        end
+    end
+end
+
+function gibbs_sample_window(state::AWHState)
+    return sample(1:length(state.w_last), Weights(state.w_last))
+end
+
+function update_awh_bias!(awh_sim::AWHSimulation)
+    if awh_sim.state.n_accum < awh_sim.update_freq
+        return nothing 
+    end
+
+    # A. Select N 
+    current_N = awh_sim.state.in_initial_stage ? awh_sim.state.N_bias : (awh_sim.initial_sampl_n + awh_sim.state.N_eff)
+
+    # B. Update Free Energy
+    # delta_f is essentially ln(Sampled / Target)
+    numerator   = current_N .* awh_sim.state.rho .+ awh_sim.state.w_seg
+    denominator = current_N .* awh_sim.state.rho .+ (awh_sim.state.n_accum .* awh_sim.state.rho)
+    delta_f     = log.(numerator ./ denominator)
+    
+    awh_sim.state.f .-= delta_f
+    awh_sim.state.f .-= awh_sim.state.f[1] # Pin first window to 0
+
+    # E. Log Diagnostics (Log BEFORE updating rho, to match samples to generating distribution)
+    # if step_idx % awh_sim.log_freq == 0
+    #     log_awh_statistics!(state, step_idx, delta_f, current_N)
+    # end
+
+    # C. Update Target Distribution (Well-Tempered)
+    # If gamma is Finite -> Well-Tempered Update
+    # If gamma is Inf    -> Do nothing (Rho stays Uniform, which is the default)
+    if isfinite(awh_sim.well_tempered_fac)
+        f_min = minimum(awh_sim.state.f)
+        @. awh_sim.state.rho = exp( - (awh_sim.state.f - f_min) / awh_sim.well_tempered_fac )
+        awh_sim.state.rho ./= sum(awh_sim.state.rho)
+        @. awh_sim.state.log_rho = log(awh_sim.state.rho)
+    end
+
+    # D. Initial Stage Heuristics
+    if awh_sim.state.in_initial_stage
+        cov_count = length(awh_sim.state.visited_windows)
+        
+        # Check for covering -> Doubling
+        if cov_count >= floor(Int, awh_sim.coverage_threshold * awh_sim.n_windows)
+            awh_sim.state.N_bias *= 2
+            empty!(awh_sim.state.visited_windows)
+            
+            # Check for Exit Condition: N_bias >= N0 + S(t)
+            if awh_sim.state.N_bias >= (awh_sim.initial_sampl_n + awh_sim.state.N_eff)
+                awh_sim.state.in_initial_stage = false
+            end
+        end
+    end
+
+    # F. Reset Accumulator
+    fill!(awh_sim.state.w_seg, 0)
+    awh_sim.state.n_accum = 0
+    
+    return delta_f
+end
+
+function simulate!(awh_sim::AWHSimulation,
+                   n_steps::Int;)
+
+    n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
+
+    master_specific = awh_sim.state.master_sys.specific_inter_lists
+    master_general  = awh_sim.state.master_sys.general_inters
+
+    for iteration_n in 1:n_iterations
+
+        # Run simulation for current lambda
+        simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
+
+        # Compute and accumulate weigths
+        process_sample(awh_sim.state)
+
+        # Choose new active state
+        active_idx = gibbs_sample_window(awh_sim.state)
+
+        # Swap Hamiltonians
+        awh_sim.state.active_sys.atoms                = awh_sim.state.λ_atoms[active_idx]
+        # Pairwise are not explicitly updated, that info is carried by the atoms (λ fields there)
+        awh_sim.state.active_sys.specific_inter_lists = (master_specific...,
+                                                         awh_sim.state.λ_hamiltonians[active_idx].specific_inter_lists...)
+        awh_sim.state.active_sys.general_inters       = (master_general..., 
+                                                         awh_sim.state.λ_hamiltonians[active_idx].general_inters...)
+
+        awh_sim.state.active_intg = awh_sim.state.λ_integrators[active_idx]
+
+        update_awh_bias!(awh_sim)
+
+    end
+
 end
