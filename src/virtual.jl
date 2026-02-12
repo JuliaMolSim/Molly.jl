@@ -108,6 +108,7 @@ Returns a `VirtualSite` defined by:
 \mathbf{r} = \mathbf{r}_1 + w_{12} \mathbf{r}_{12} + w_{13} \mathbf{r}_{13} + w_{\mathrm{cross}} (\mathbf{r}_{12} \times \mathbf{r}_{13})
 ```
 
+Only compatible with 3D systems.
 Not currently compatible with virial calculation.
 """
 function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, atom_3::Integer,
@@ -116,7 +117,7 @@ function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, ato
                        zero(T), weight_12, weight_13, weight_cross)
 end
 
-function setup_virtual_sites(virtual_sites, atom_masses, AT=Array)
+function setup_virtual_sites(virtual_sites, atom_masses, AT, D)
     n_atoms = length(atom_masses)
     virtual_site_flags = falses(n_atoms)
     virtual_sites_cpu = from_device(virtual_sites)
@@ -124,6 +125,9 @@ function setup_virtual_sites(virtual_sites, atom_masses, AT=Array)
         i = vs.atom_ind
         if !(vs.type in 1:4)
             error("unrecognised virtual site type $(vs.type), should be 1/2/3/4")
+        end
+        if D != 3 && vs.type == 4
+            error("OutOfPlaneSite is only compatible with 3D systems")
         end
         if i > n_atoms
             error("virtual site $vi defines atom number $i but there are only " *
@@ -194,6 +198,7 @@ end
             r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
             vs_coord = coords[vs.atom_1] + vs.weight_2 * r12 + vs.weight_3 * r13
         elseif vs.type == 4
+            # Assumes 3D
             r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
             r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
             cross_r12_r13 = cross(r12, r13) # Units L^2
@@ -244,6 +249,7 @@ end
                 Atomix.@atomic fs_mat[dim, vs.atom_3] += vs.weight_3 * f
             end
         elseif vs.type == 4
+            # Assumes 3D
             r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
             r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
             f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind]) *

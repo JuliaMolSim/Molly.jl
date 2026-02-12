@@ -670,7 +670,7 @@ function System(;
               "of SVectors for performance"
     end
 
-    virtual_site_flags = setup_virtual_sites(virtual_sites, atom_masses, AT)
+    virtual_site_flags = setup_virtual_sites(virtual_sites, atom_masses, AT, D)
     VF = typeof(virtual_site_flags)
     n_virtual_sites = sum(virtual_site_flags)
 
@@ -1068,10 +1068,10 @@ function ReplicaSystem(;
     if isnothing(replica_virtual_sites)
         replica_virtual_sites = [deepcopy(virtual_sites) for _ in 1:n_replicas]
     elseif length(replica_virtual_sites) != n_replicas
-        throw(ArgumentError("number of virtual sites ($(length(replica_virtual_sites)))"
-                            * "does not match number of replicas ($n_replicas)"))
+        throw(ArgumentError("number of virtual sites ($(length(replica_virtual_sites))) " *
+                            "does not match number of replicas ($n_replicas)"))
     end
-    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, AT)
+    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, AT, D)
                                   for vss in replica_virtual_sites]
     replica_n_virtual_sites = [sum(vsfs) for vsfs in replica_virtual_site_flags]
 
