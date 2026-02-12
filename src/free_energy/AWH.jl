@@ -1,5 +1,71 @@
 export AWHState
 
+function build_neighbor_finder(ref_nfinder, eligible; 
+                               reuse_neighbors::Bool = true)
+
+    if ref_nfinder isa DistanceNeighborFinder
+        nf = DistanceNeighborFinder(
+            eligible = eligible, 
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special   = ref_nfinder.special,
+            n_steps = ref_nfinder.n_steps,
+            neighbors = ref_nfinder.neighbors
+        )
+    elseif ref_nfinder isa CellListMapNeighborFinder
+        nf = CellListMapNeighborFinder(
+            eligible = eligible,
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special = ref_nfinder.special,
+            n_steps = ref_nfinder.n_steps,
+            x0 = ref_sys.coords,
+            unit_cell = ref_sys.boundary,
+            dims = ref_nfinder.dims
+        )
+    elseif ref_nfinder isa GPUNeighborFinder
+        if !reuse_neighbors
+            nf = GPUNeighborFinder(
+                eligible = eligible,
+                dist_cutoff = ref_nfinder.dist_cutoff,
+                special = ref_nfinder.special,
+                n_steps_reorder = ref_nfinder.n_steps_reorder,
+                initialized = ref_nfinder.initialized
+            )
+        else
+            nf = DistanceNeighborFinder(
+                eligible = eligible, 
+                dist_cutoff = ref_nfinder.dist_cutoff,
+                special   = ref_nfinder.special,
+                n_steps = ref_nfinder.n_steps_reorder
+            )
+        end
+    elseif ref_nfinder isa TreeNeighborFinder
+        nf = TreeNeighborFinder(
+            eligible = eligible,
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special = ref_nfinder.special,
+            n_steps = ref_nfinder.n_steps
+        )
+    elseif ref_nfinder isa NoNeighborFinder
+        nf = NoNeighborFinder()
+    else
+        @warn "Unknown NeighborFinder type $(typeof(ref_nfinder)). Using default DistanceNeighborFinder for Master System."
+        nf = DistanceNeighborFinder(
+            eligible = master_eligible,
+            dist_cutoff = 1.0u"nm",
+            n_steps = 10
+        )
+    end
+
+    return nf
+
+end
+
+struct LambdaHamiltonian{PI, SI, GI}
+    pairwise_inters::PI
+    specific_inter_lists::SI
+    general_inters::GI
+end
+
 """
     AWHState(thermo_states; n_bias=100, ρ=nothing)
 
@@ -10,14 +76,13 @@ differential "Specific" interactions (solute-solute and solute-solvent) for each
 mutable struct AWHState{T}
     # Master System (Common interactions, e.g., Solvent-Solvent)
     master_sys::System
+    # λ System (Unique interactions per λ window)
+    λ_sys::System
 
     # Per λ interactions
-    λ_pairwise::Vector{Tuple}
-    λ_specific::Vector{Tuple}
-    λ_general::Vector{Tuple}
-
-    # Per λ Neighbor Masks (Vector of matrices, one per window)
-    λ_eligible::Vector  
+    λ_hamiltonians::Vector{LambdaHamiltonian}
+    # Per λ atoms
+    λ_atoms::Vector
 
     # Probability & Free Energy
     f::Vector{T}            # Free energy of each window
@@ -41,7 +106,7 @@ end
 function AWHState(thermo_states::AbstractArray{ThermoState};
                   n_bias::Int = 100,
                   ρ::Union{Nothing, AbstractArray{T}} = nothing,
-) where T
+                  reuse_neighbors::Bool = true) where T
 
     n_λ = length(thermo_states)
     ref_sys = thermo_states[1].system
@@ -53,9 +118,11 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     # If we didn't, Master would contain an interaction that is valid for Window A
     # but invalid for Window B.
     solute_indices = Set{Int}()
-    
+    λ_atoms = []
     for tstate in thermo_states
-        atoms_cpu = from_device(tstate.system.atoms) 
+        atoms     = tstate.system.atoms
+        push!(λ_atoms, atoms)
+        atoms_cpu = from_device(atoms)
         for atom in atoms_cpu
             # Any atom that is not fully coupled (λ < 1) in THIS window is active
             if atom.λ < 1.0
@@ -96,10 +163,8 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     # We use ref_sys.coords to detect if we should use CuArray or Array
     AT = array_type(ref_sys)
     master_eligible = to_device(master_eligible_cpu, AT)
-    d_specific      = to_device(specific_eligible_cpu, AT)
+    λ_eligible      = to_device(specific_eligible_cpu, AT)
     
-    # We populate the vector. Currently they are identical because the Master system is static.
-    λ_eligible = [d_specific for _ in 1:n_λ]
 
     # ---------------------------------------------------------
     # 3. Extract and Partition Interaction Lists
@@ -157,51 +222,10 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     # ---------------------------------------------------------
     
     # Reconstruct the NeighborFinder using the new master_eligible matrix
-    if ref_nfinder isa DistanceNeighborFinder
-        master_nf = DistanceNeighborFinder(
-            eligible = master_eligible, 
-            dist_cutoff = ref_nfinder.dist_cutoff,
-            special   = ref_nfinder.special,
-            n_steps = ref_nfinder.n_steps,
-            neighbors = ref_nfinder.neighbors
-        )
-    elseif ref_nfinder isa CellListMapNeighborFinder
-        master_nf = CellListMapNeighborFinder(
-            eligible = master_eligible,
-            dist_cutoff = ref_nfinder.dist_cutoff,
-            special = ref_nfinder.special,
-            n_steps = ref_nfinder.n_steps,
-            x0 = ref_sys.coords,
-            unit_cell = ref_sys.boundary,
-            dims = ref_nfinder.dims
-        )
-    elseif ref_nfinder isa GPUNeighborFinder
-        master_nf = GPUNeighborFinder(
-            eligible = master_eligible,
-            dist_cutoff = ref_nfinder.dist_cutoff,
-            special = ref_nfinder.special,
-            n_steps_reorder = ref_nfinder.n_steps_reorder,
-            initialized = ref_nfinder.initialized
-        )
-    elseif ref_nfinder isa TreeNeighborFinder
-        master_nf = TreeNeighborFinder(
-            eligible = master_eligible,
-            dist_cutoff = ref_nfinder.dist_cutoff,
-            special = ref_nfinder.special,
-            n_steps = ref_nfinder.n_steps
-        )
-    elseif ref_nfinder isa NoNeighborFinder
-        master_nf = NoNeighborFinder()
-    else
-        @warn "Unknown NeighborFinder type $(typeof(ref_nfinder)). Using default DistanceNeighborFinder for Master System."
-        master_nf = DistanceNeighborFinder(
-            eligible = master_eligible,
-            dist_cutoff = 1.2u"nm",
-            n_steps = 10
-        )
-    end
+    master_nf = build_neighbor_finder(ref_nfinder, master_eligible; reuse_neighbors = reuse_neighbors)
+    λ_nf      = build_neighbor_finder(ref_nfinder, λ_eligible; reuse_neighbors = reuse_neighbors)
 
-    master_sys = System(ref_sys; 
+    master_sys = System(deepcopy(ref_sys); 
         pairwise_inters      = (master_pils...,),
         general_inters       = (master_gils...,),
         specific_inter_lists = (master_sils_1a..., 
@@ -211,7 +235,20 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         neighbor_finder      = master_nf
     )
 
-    FT = typeof(ustrip(master_sys.total_mass)) 
+    λ_sys = System(deepcopy(ref_sys); 
+        pairwise_inters      = (λ_pairwise[1]...,),
+        general_inters       = (λ_general[1]...,),
+        specific_inter_lists = (λ_specific[1]...,),
+        neighbor_finder      = λ_nf
+    )
+
+
+    FT = typeof(ustrip(master_sys.total_mass))
+    hamiltonians = LambdaHamiltonian[]
+    for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
+        ham = LambdaHamiltonian(λ_p, λ_s, λ_g)
+        push!(hamiltonians, ham)
+    end
 
     # ---------------------------------------------------------
     # 5. Handle Target Distribution (ρ)
@@ -229,10 +266,9 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
 
     return AWHState(
         master_sys,
-        λ_pairwise, 
-        λ_specific, 
-        λ_general,
-        λ_eligible,        
+        λ_sys,
+        hamiltonians,
+        λ_atoms,        
         zeros(FT, n_λ),    # f
         rho_val,           # rho
         log_ρ,             # log_rho
