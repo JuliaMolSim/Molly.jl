@@ -3,6 +3,16 @@ export
     AWHSimulation,
     simulate!
 
+# --- Statistics & Logging (Storage) ---
+mutable struct AWHStats{T}
+    step_indices::Vector{Int}
+    active_λ::Vector{Int}
+    f_history::Vector{Vector{T}}
+    n_effective_history::Vector{T} # Logs the ACTIVE N (N_bias or N_ref)
+    stage_history::Vector{Symbol}  # :initial or :linear
+    max_delta_f_history::Vector{T}
+end
+
 function build_neighbor_finder(ref_nfinder, eligible; 
                                reuse_neighbors::Bool = true)
 
@@ -81,6 +91,9 @@ mutable struct AWHState{T}
     master_sys::System
     # λ System (Unique interactions per λ window)
     λ_sys::System
+
+    active_idx::Int
+
     # Active System, contains all interactions to run actual MD simulation
     active_sys::System
 
@@ -115,6 +128,9 @@ mutable struct AWHState{T}
     # State Flags
     in_initial_stage::Bool    # Keeps track if we are in initial or linear Δf scaling stage
     visited_windows::Set{Int} # Keeps track of λ windows representative of sampled frames 
+
+    # Stats
+    stats::AWHStats
 end
 
 function AWHState(thermo_states::AbstractArray{ThermoState};
@@ -288,9 +304,19 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     end
     log_ρ = log.(rho_val)
 
+    stats = AWHStats(
+        Int[],              # step_indices
+        Int[],             # Active λ
+        Vector{FT}[],        # f_history
+        FT[],                # n_effective_history
+        Symbol[],           # stage_history
+        FT[]                 # max_delta_f_history
+    )
+
     return AWHState(
         master_sys,
         λ_sys,
+        first_state,
         active_sys,
         active_intg,
         λ_integrators,
@@ -307,6 +333,7 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         0,                 # n_accum
         true,              # in_initial_stage
         Set{Int}(),        # visited_windows
+        stats,
     )
 end
 
@@ -342,6 +369,25 @@ function AWHSimulation(
                          T(coverage_threshold),
                          T(significant_weight),
                          log_freq, awh_state)
+
+end
+
+function update_active_sys!(awh_state::AWHState, active_idx::Int)
+
+    awh_state.active_idx = active_idx
+
+    master_specific = awh_state.master_sys.specific_inter_lists
+    master_general  = awh_state.master_sys.general_inters
+
+    # Swap Hamiltonians
+    awh_state.active_sys.atoms                = awh_state.λ_atoms[active_idx]
+    # Pairwise are not explicitly updated, that info is carried by the atoms (λ fields there)
+    awh_state.active_sys.specific_inter_lists = (master_specific...,
+                                                 awh_state.λ_hamiltonians[active_idx].specific_inter_lists...)
+    awh_state.active_sys.general_inters       = (master_general..., 
+                                                 awh_state.λ_hamiltonians[active_idx].general_inters...)
+
+    awh_state.active_intg = awh_state.λ_integrators[active_idx]
 
 end
 
@@ -397,7 +443,23 @@ function gibbs_sample_window(state::AWHState)
     return sample(1:length(state.w_last), Weights(state.w_last))
 end
 
-function update_awh_bias!(awh_sim::AWHSimulation)
+function log_awh_statistics!(state::AWHState, step_idx::Int, delta_f, current_N)
+    stats = state.stats
+    
+    # 1. Metric: Max |Delta f| (Primary convergence indicator)
+    max_change = maximum(abs.(delta_f))
+
+    # Store Data
+    push!(stats.step_indices, step_idx)
+    push!(stats.active_λ, state.active_idx)
+    push!(stats.f_history, copy(state.f))
+    push!(stats.n_effective_history, current_N)
+    push!(stats.stage_history, state.in_initial_stage ? :initial : :linear)
+    push!(stats.max_delta_f_history, max_change)
+
+end
+
+function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     if awh_sim.state.n_accum < awh_sim.update_freq
         return nothing 
     end
@@ -415,9 +477,9 @@ function update_awh_bias!(awh_sim::AWHSimulation)
     awh_sim.state.f .-= awh_sim.state.f[1] # Pin first window to 0
 
     # E. Log Diagnostics (Log BEFORE updating rho, to match samples to generating distribution)
-    # if step_idx % awh_sim.log_freq == 0
-    #     log_awh_statistics!(state, step_idx, delta_f, current_N)
-    # end
+    if iteration_n % awh_sim.log_freq == 0
+        log_awh_statistics!(awh_sim.state, iteration_n, delta_f, current_N)
+    end
 
     # C. Update Target Distribution (Well-Tempered)
     # If gamma is Finite -> Well-Tempered Update
@@ -457,8 +519,7 @@ function simulate!(awh_sim::AWHSimulation,
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
 
-    master_specific = awh_sim.state.master_sys.specific_inter_lists
-    master_general  = awh_sim.state.master_sys.general_inters
+    active_idx = 1
 
     for iteration_n in 1:n_iterations
 
@@ -469,19 +530,15 @@ function simulate!(awh_sim::AWHSimulation,
         process_sample(awh_sim.state)
 
         # Choose new active state
-        active_idx = gibbs_sample_window(awh_sim.state)
+        active_idx_new = gibbs_sample_window(awh_sim.state)
+        if active_idx_new != active_idx
+            println("New active Hamiltonian $(active_idx) -> $(active_idx_new). Iteration $(iteration_n)")
+            active_idx = active_idx_new
+        end
 
-        # Swap Hamiltonians
-        awh_sim.state.active_sys.atoms                = awh_sim.state.λ_atoms[active_idx]
-        # Pairwise are not explicitly updated, that info is carried by the atoms (λ fields there)
-        awh_sim.state.active_sys.specific_inter_lists = (master_specific...,
-                                                         awh_sim.state.λ_hamiltonians[active_idx].specific_inter_lists...)
-        awh_sim.state.active_sys.general_inters       = (master_general..., 
-                                                         awh_sim.state.λ_hamiltonians[active_idx].general_inters...)
+        update_active_sys!(awh_sim.state, active_idx)
 
-        awh_sim.state.active_intg = awh_sim.state.λ_integrators[active_idx]
-
-        update_awh_bias!(awh_sim)
+        update_awh_bias!(awh_sim, iteration_n)
 
     end
 
