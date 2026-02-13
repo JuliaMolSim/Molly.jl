@@ -670,7 +670,7 @@ function System(;
               "of SVectors for performance"
     end
 
-    virtual_site_flags = setup_virtual_sites(virtual_sites, atom_masses, AT, D)
+    virtual_site_flags = setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D)
     VF = typeof(virtual_site_flags)
     n_virtual_sites = sum(virtual_site_flags)
 
@@ -1066,34 +1066,28 @@ function ReplicaSystem(;
     TM = typeof(total_mass)
 
     if isnothing(replica_virtual_sites)
-        replica_virtual_sites = [deepcopy(virtual_sites) for _ in 1:n_replicas]
+        replica_virtual_sites = [virtual_sites for _ in 1:n_replicas]
     elseif length(replica_virtual_sites) != n_replicas
         throw(ArgumentError("number of virtual sites ($(length(replica_virtual_sites))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
-    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, AT, D)
-                                  for vss in replica_virtual_sites]
-    replica_n_virtual_sites = [sum(vsfs) for vsfs in replica_virtual_site_flags]
 
-    replica_dfs = [n_dof(D, n_atoms - n_virtual_sites, rb)
-                   for (n_virtual_sites, rb) in zip(replica_n_virtual_sites, replica_boundaries)]
     if isnothing(replica_constraints)
-        if length(constraints) > 0
-            for ca in constraints
-                replica_dfs .-= n_dof_lost(D, ca.clusters)
-            end
-        end
         replica_constraints = [constraints for _ in 1:n_replicas]
     elseif length(replica_constraints) != n_replicas
         throw(ArgumentError("number of constraints ($(length(replica_constraints)))" *
                             "does not match number of replicas ($n_replicas)"))
-    else
-        for (i, rcs) in enumerate(replica_constraints)
-            if length(rcs) > 0
-                for ca in rcs
-                    replica_dfs[i] -= n_dof_lost(D, ca.clusters)
-                end
-            end
+    end
+
+    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, cs, AT, D)
+                                  for (vss, cs) in zip(replica_virtual_sites, replica_constraints)]
+    replica_n_virtual_sites = [sum(vsfs) for vsfs in replica_virtual_site_flags]
+    replica_dfs = [n_dof(D, n_atoms - n_virtual_sites, rb)
+                   for (n_virtual_sites, rb) in zip(replica_n_virtual_sites, replica_boundaries)]
+
+    for (i, rcs) in enumerate(replica_constraints)
+        for ca in rcs
+            replica_dfs[i] -= n_dof_lost(D, ca.clusters)
         end
     end
 

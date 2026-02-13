@@ -95,6 +95,23 @@ end
 
 cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_clusters)
 
+function constrained_atom_inds(sr::SHAKE_RATTLE)
+    atom_inds = Int[]
+    for cl in sr.clusters12
+        push!(atom_inds, cl.k1, cl.k2)
+    end
+    for cl in sr.clusters23
+        push!(atom_inds, cl.k1, cl.k2, cl.k3)
+    end
+    for cl in sr.clusters34
+        push!(atom_inds, cl.k1, cl.k2, cl.k3, cl.k4)
+    end
+    for cl in sr.angle_clusters
+        push!(atom_inds, cl.k1, cl.k2, cl.k3)
+    end
+    return atom_inds
+end
+
 function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
     # Disable Neighbor interactions that are constrained
     if typeof(neighbor_finder) != NoNeighborFinder

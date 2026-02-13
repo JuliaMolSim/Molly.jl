@@ -117,10 +117,11 @@ function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, ato
                        zero(T), weight_12, weight_13, weight_cross)
 end
 
-function setup_virtual_sites(virtual_sites, atom_masses, AT, D)
+function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D)
     n_atoms = length(atom_masses)
     virtual_site_flags = falses(n_atoms)
     virtual_sites_cpu = from_device(virtual_sites)
+
     for (vi, vs) in enumerate(virtual_sites_cpu)
         i = vs.atom_ind
         if !(vs.type in 1:4)
@@ -139,6 +140,7 @@ function setup_virtual_sites(virtual_sites, atom_masses, AT, D)
         end
         virtual_site_flags[i] = true
     end
+
     for (vi, vs) in enumerate(virtual_sites_cpu)
         if (vs.atom_1 > 0 && virtual_site_flags[vs.atom_1]) ||
                 (vs.atom_2 > 0 && virtual_site_flags[vs.atom_2]) ||
@@ -147,6 +149,7 @@ function setup_virtual_sites(virtual_sites, atom_masses, AT, D)
                   "is itself a virtual site")
         end
     end
+
     warn_vs, warn_nvs = false, false
     for (vsf, atom_mass) in zip(virtual_site_flags, from_device(atom_masses))
         if vsf && !iszero_value(atom_mass)
@@ -161,6 +164,14 @@ function setup_virtual_sites(virtual_sites, atom_masses, AT, D)
     if warn_nvs
         @warn "One or more atoms not marked as a virtual site has zero mass, " *
               "this may lead to problems"
+    end
+
+    for ca in constraints
+        for i in constrained_atom_inds(ca)
+            if virtual_site_flags[i]
+                error("atom $i is a virtual site but is also in a constraint")
+            end
+        end
     end
     return to_device(virtual_site_flags, AT)
 end
