@@ -1,6 +1,7 @@
 export 
     AWHState,
     AWHSimulation,
+    AWHPMFDeconvolution,
     simulate!
 
 # --- Statistics & Logging (Storage) ---
@@ -12,6 +13,121 @@ mutable struct AWHStats{T}
     stage_history::Vector{Symbol}  # :initial or :linear
     max_delta_f_history::Vector{T}
 end
+
+# --- PMF Deconvolution Struct (Generalized) ---
+"""
+    AWHPMFDeconvolution{N, T, F_CV, F_Coup}
+
+Stores the histograms required to compute the Potential of Mean Force (PMF) 
+using the AWH deconvolution method (Lindahl et al. 2014, Eq. 9).
+
+# Fields
+- `min_vals`: Tuple of minimum boundaries for the PMF grid (per dimension).
+- `bin_widths`: Tuple of bin widths.
+- `shape`: Tuple of grid dimensions (number of bins).
+- `cv_function`: Function `coords -> ξ` (Tuple). Calculates the reaction coordinate.
+- `coupling_function`: Function `(ξ, λ_index) -> Q`. Returns the *dimensionless* bias energy.
+- `numerator_hist`: Accumulator for Eq. 9 numerator.
+- `denominator_hist`: Accumulator for Eq. 9 denominator.
+- `sample_count`: Total samples accumulated.
+"""
+mutable struct AWHPMFDeconvolution{N, T, F_CV, F_Coup}
+    min_vals::NTuple{N, T}
+    bin_widths::NTuple{N, T}
+    shape::NTuple{N, Int}
+
+    cv_function::F_CV         
+    coupling_function::F_Coup 
+
+    numerator_hist::Array{T, N}
+    denominator_hist::Array{T, N}
+    
+    sample_count::Int
+end
+
+function AWHPMFDeconvolution(
+    min_vals::NTuple{N, T},
+    max_vals::NTuple{N, T},
+    n_bins::NTuple{N, Int},
+    cv_function::F_CV,
+    coupling_function::F_Coup
+) where {N, T, F_CV, F_Coup}
+    
+    bin_widths = (max_vals .- min_vals) ./ n_bins
+    
+    return AWHPMFDeconvolution{N, T, F_CV, F_Coup}(
+        min_vals,
+        bin_widths,
+        n_bins,
+        cv_function,
+        coupling_function,
+        zeros(T, n_bins...),
+        zeros(T, n_bins...),
+        0
+    )
+end
+
+function update_pmf!(
+    pmf::AWHPMFDeconvolution{N, T, F_CV, F_Coup},
+    awh_state, # Untyped to avoid circular dependency issues in definitions
+    curr_coords
+) where {N, T, F_CV, F_Coup}
+    
+    # 1. Calculate current CV ξ(t)
+    # The cv_function should return a Tuple (even for 1D) or we wrap it
+    val = pmf.cv_function(curr_coords)
+    current_cv = val isa Tuple ? val : (val,)
+
+    # 2. Determine which bin the current sample falls into
+    # We use index math: idx = floor((val - min)/width) + 1
+    # This assumes the grid covers the domain of interest.
+    current_indices = ntuple(N) do d
+        # Clamp to grid edges to avoid bounds errors, or let it fail if stricter
+        rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
+        idx = Int(floor(rel)) + 1
+        clamp(idx, 1, pmf.shape[d])
+    end
+    current_cartesian = CartesianIndex(current_indices)
+
+    # 3. Pre-calc effective bias factors g(λ) = f(λ) + ln ρ(λ)
+    # P_sim ~ exp(-E + g). We need to unbias by exp(-g).
+    # Lindahl Eq 9 uses e^{-gamma} = sum_lambda exp(g - Q).
+    g = awh_state.f .+ awh_state.log_rho
+    n_windows = length(g)
+
+    # 4. Iterate over the entire PMF Grid (The Deconvolution)
+    # We calculate gamma(xi) for every bin center.
+    
+    # Helper to get bin center coordinate
+    get_bin_center(d, i) = pmf.min_vals[d] + (i - 0.5) * pmf.bin_widths[d]
+
+    for I in CartesianIndices(pmf.shape)
+        # Construct ξ for this bin
+        xi = ntuple(d -> get_bin_center(d, I[d]), N)
+        
+        # Calculate sum_lambda exp(g(λ) - Q(ξ, λ))
+        sum_exp = zero(T)
+        for k in 1:n_windows
+            # Generalized coupling: User provides Q(ξ, k)
+            Q = pmf.coupling_function(xi, k)
+            sum_exp += exp(g[k] - Q)
+        end
+        
+        # Unbiasing factor e^{gamma(xi)} = 1 / sum_exp
+        term = 1.0 / sum_exp
+        
+        # Update Denominator (Everywhere)
+        pmf.denominator_hist[I] += term
+        
+        # Update Numerator (Only at sampled position)
+        if I == current_cartesian
+            pmf.numerator_hist[I] += term
+        end
+    end
+    
+    pmf.sample_count += 1
+end
+
 
 function build_neighbor_finder(ref_nfinder, eligible; 
                                reuse_neighbors::Bool = true)
@@ -30,8 +146,8 @@ function build_neighbor_finder(ref_nfinder, eligible;
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = ref_nfinder.special,
             n_steps = 1,
-            x0 = ref_sys.coords,
-            unit_cell = ref_sys.boundary,
+            x0 = ref_nfinder.x0, # Assuming x0 available or generic ref
+            unit_cell = ref_nfinder.unit_cell,
             dims = ref_nfinder.dims
         )
     elseif ref_nfinder isa GPUNeighborFinder
@@ -63,14 +179,13 @@ function build_neighbor_finder(ref_nfinder, eligible;
     else
         @warn "Unknown NeighborFinder type $(typeof(ref_nfinder)). Using default DistanceNeighborFinder for Master System."
         nf = DistanceNeighborFinder(
-            eligible = master_eligible,
+            eligible = eligible,
             dist_cutoff = 1.0u"nm",
             n_steps = 1
         )
     end
 
     return nf
-
 end
 
 struct LambdaHamiltonian{PI, SI, GI}
@@ -142,12 +257,7 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     n_λ = length(thermo_states)
     ref_sys = thermo_states[first_state].system
     
-    # ---------------------------------------------------------
-    # 1. Identify Global Solute Indices (Union of all λ < 1)
-    # ---------------------------------------------------------
-    # We MUST exclude the UNION of all atoms that ever change from the Master system.
-    # If we didn't, Master would contain an interaction that is valid for Window A
-    # but invalid for Window B.
+    # 1. Identify Global Solute Indices
     solute_indices = Set{Int}()
     λ_atoms = []
     λ_integrators = []
@@ -160,7 +270,6 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         push!(λ_β, tstate.beta)
         atoms_cpu = from_device(atoms)
         for atom in atoms_cpu
-            # Any atom that is not fully coupled (λ < 1) in THIS window is active
             if atom.λ < 1.0
                 push!(solute_indices, atom.index)
             end
@@ -169,27 +278,17 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
 
     active_intg = λ_integrators[first_state]
     
-    # ---------------------------------------------------------
-    # 2. Partition Neighbor Lists (Eligible Matrices)
-    # ---------------------------------------------------------
-    # Retrieve base matrix on CPU for manipulation
+    # 2. Partition Neighbor Lists
     ref_nfinder = ref_sys.neighbor_finder
     base_eligible_cpu = copy(from_device(ref_nfinder.eligible))
     n_atoms = size(base_eligible_cpu, 1)
     
-    # A. Generate Master Eligible Matrix (Solvent-Solvent ONLY)
-    # Logic: Mask out any pair involving a 'solute' atom.
     master_eligible_cpu = copy(base_eligible_cpu)
     for idx in solute_indices
         master_eligible_cpu[idx, :] .= false
         master_eligible_cpu[:, idx] .= false
     end
     
-    # B. Generate Specific Eligible Matrix Pattern (Inverse of Master)
-    # Logic: Mask out the pure Solvent-Solvent block.
-    # We keep Solute-Solute and Solute-Solvent interactions enabled.
-    # This must cover ALL atoms in `solute_indices` to ensure we compute the 
-    # interactions excluded from Master.
     specific_eligible_cpu = copy(base_eligible_cpu)
     solvent_indices = [i for i in 1:n_atoms if !(i in solute_indices)]
     
@@ -197,16 +296,11 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         specific_eligible_cpu[solvent_indices, solvent_indices] .= false
     end
 
-    # C. Move matrices to the correct device
-    # We use ref_sys.coords to detect if we should use CuArray or Array
     AT = array_type(ref_sys)
     master_eligible = to_device(master_eligible_cpu, AT)
     λ_eligible      = to_device(specific_eligible_cpu, AT)
     
-
-    # ---------------------------------------------------------
     # 3. Extract and Partition Interaction Lists
-    # ---------------------------------------------------------
     list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_λ]
     list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_λ]
     list_3a = [Vector{InteractionList3Atoms}() for _ in 1:n_λ]
@@ -226,7 +320,6 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     all_gils = [collect(thermo_states[n].system.general_inters) for n in 1:n_λ]
     all_pils = [collect(thermo_states[n].system.pairwise_inters) for n in 1:n_λ]
 
-    # Compute "Master" (Common) Sets
     master_sils_1a = intersect(list_1a...)
     master_sils_2a = intersect(list_2a...)
     master_sils_3a = intersect(list_3a...)
@@ -234,7 +327,6 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     master_gils    = intersect(all_gils...)
     master_pils    = intersect(all_pils...)
 
-    # Compute Per-State Residuals (The "Unique" parts)
     λ_specific = Vector{Tuple}(undef, n_λ)
     λ_general  = Vector{Tuple}(undef, n_λ)
     λ_pairwise = Vector{Tuple}(undef, n_λ)
@@ -248,18 +340,10 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         
         u_g = setdiff(all_gils[i], master_gils)
         λ_general[i] = (u_g...,)
-
-        # For Pairwise interactions, we do NOT use setdiff.
-        # Since we use the eligible matrix to split the "Pair Space" (Solvent-Solvent vs The Rest),
-        # we must apply the full set of interactions to the Residual term.
         λ_pairwise[i] = (all_pils[i]...,)
     end
 
-    # ---------------------------------------------------------
     # 4. Construct Master System
-    # ---------------------------------------------------------
-    
-    # Reconstruct the NeighborFinder using the new master_eligible matrix
     master_nf = build_neighbor_finder(ref_nfinder, master_eligible; reuse_neighbors = reuse_neighbors)
     λ_nf      = build_neighbor_finder(ref_nfinder, λ_eligible; reuse_neighbors = reuse_neighbors)
 
@@ -282,7 +366,6 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         neighbor_finder      = λ_nf
     )
 
-
     FT = typeof(ustrip(master_sys.total_mass))
     hamiltonians = LambdaHamiltonian[]
     for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
@@ -290,9 +373,7 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         push!(hamiltonians, ham)
     end
 
-    # ---------------------------------------------------------
     # 5. Handle Target Distribution (ρ)
-    # ---------------------------------------------------------
     if isnothing(ρ)
         rho_val = fill(FT(1/n_λ), n_λ)
     else
@@ -356,10 +437,20 @@ function AWHSimulation(
     well_tempered_factor::Real = 10.0,
     coverage_threshold::Real = 1.0,
     significant_weight::Real = 0.1,
-    log_freq::Int = 100
+    log_freq::Int = 100,
+    # Optional PMF args
+    pmf_cv = nothing,
+    pmf_coupling = nothing,
+    pmf_grid = nothing
 ) where T
 
     n_win = length(awh_state.λ_hamiltonians)
+
+    pmf_calc = nothing
+    if !isnothing(pmf_cv) && !isnothing(pmf_coupling) && !isnothing(pmf_grid)
+        min_vals, max_vals, n_bins = pmf_grid
+        pmf_calc = AWHPMFDeconvolution(min_vals, max_vals, n_bins, pmf_cv, pmf_coupling)
+    end
 
     return AWHSimulation(n_win,
                          copy(awh_state.N_bias),
@@ -368,34 +459,22 @@ function AWHSimulation(
                          T(well_tempered_factor),
                          T(coverage_threshold),
                          T(significant_weight),
-                         log_freq, awh_state)
-
+                         log_freq, awh_state,
+                         pmf_calc)
 end
 
 function update_active_sys!(awh_state::AWHState, active_idx::Int)
-
     awh_state.active_idx = active_idx
-
     master_specific = awh_state.master_sys.specific_inter_lists
     master_general  = awh_state.master_sys.general_inters
-
-    # Swap Hamiltonians
-    awh_state.active_sys.atoms                = awh_state.λ_atoms[active_idx]
-    # Pairwise are not explicitly updated, that info is carried by the atoms (λ fields there)
-    awh_state.active_sys.specific_inter_lists = (master_specific...,
-                                                 awh_state.λ_hamiltonians[active_idx].specific_inter_lists...)
-    awh_state.active_sys.general_inters       = (master_general..., 
-                                                 awh_state.λ_hamiltonians[active_idx].general_inters...)
-
+    awh_state.active_sys.atoms = awh_state.λ_atoms[active_idx]
+    awh_state.active_sys.specific_inter_lists = (master_specific..., awh_state.λ_hamiltonians[active_idx].specific_inter_lists...)
+    awh_state.active_sys.general_inters       = (master_general..., awh_state.λ_hamiltonians[active_idx].general_inters...)
     awh_state.active_intg = awh_state.λ_integrators[active_idx]
-
 end
 
-function process_sample(awh::AWHState{FT};
-                        weight_relevance::Real = 0.1) where FT
-
+function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where FT
     n_states = length(awh.λ_hamiltonians)
-
     coords = awh.active_sys.coords
     bound  = awh.active_sys.boundary
 
@@ -410,16 +489,12 @@ function process_sample(awh::AWHState{FT};
     potentials = Vector{FT}(undef, n_states)
 
     for (n, (atoms, haml, β)) in enumerate(zip(awh.λ_atoms, awh.λ_hamiltonians, awh.λ_β))
-
-        awh.λ_sys.atoms                = atoms
+        awh.λ_sys.atoms          = atoms
         awh.λ_sys.pairwise_inters      = haml.pairwise_inters
         awh.λ_sys.specific_inter_lists = haml.specific_inter_lists
         awh.λ_sys.general_inters       = haml.general_inters
-
         pe = master_pe + potential_energy(awh.λ_sys, nbrs, 0)
-
         potentials[n] = β * pe
-
     end
 
     z = awh.log_rho .+ awh.f .- potentials
@@ -428,7 +503,6 @@ function process_sample(awh::AWHState{FT};
 
     awh.w_seg .+= w
     awh.w_last .= w
-
     awh.n_accum += 1
     awh.N_eff   += 1
 
@@ -445,18 +519,13 @@ end
 
 function log_awh_statistics!(state::AWHState, step_idx::Int, delta_f, current_N)
     stats = state.stats
-    
-    # 1. Metric: Max |Delta f| (Primary convergence indicator)
     max_change = maximum(abs.(delta_f))
-
-    # Store Data
     push!(stats.step_indices, step_idx)
     push!(stats.active_λ, state.active_idx)
     push!(stats.f_history, copy(state.f))
     push!(stats.n_effective_history, current_N)
     push!(stats.stage_history, state.in_initial_stage ? :initial : :linear)
     push!(stats.max_delta_f_history, max_change)
-
 end
 
 function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
@@ -464,26 +533,20 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
         return nothing 
     end
 
-    # A. Select N 
-    current_N = awh_sim.state.in_initial_stage ? awh_sim.state.N_bias : (awh_sim.initial_sampl_n + awh_sim.state.N_eff)
+    current_N = awh_sim.state.in_initial_stage ?
+        awh_sim.state.N_bias : (awh_sim.initial_sampl_n + awh_sim.state.N_eff)
 
-    # B. Update Free Energy
-    # delta_f is essentially ln(Sampled / Target)
     numerator   = current_N .* awh_sim.state.rho .+ awh_sim.state.w_seg
     denominator = current_N .* awh_sim.state.rho .+ (awh_sim.state.n_accum .* awh_sim.state.rho)
     delta_f     = log.(numerator ./ denominator)
     
     awh_sim.state.f .-= delta_f
-    awh_sim.state.f .-= awh_sim.state.f[1] # Pin first window to 0
+    awh_sim.state.f .-= awh_sim.state.f[1] 
 
-    # E. Log Diagnostics (Log BEFORE updating rho, to match samples to generating distribution)
     if iteration_n % awh_sim.log_freq == 0
         log_awh_statistics!(awh_sim.state, iteration_n, delta_f, current_N)
     end
 
-    # C. Update Target Distribution (Well-Tempered)
-    # If gamma is Finite -> Well-Tempered Update
-    # If gamma is Inf    -> Do nothing (Rho stays Uniform, which is the default)
     if isfinite(awh_sim.well_tempered_fac)
         f_min = minimum(awh_sim.state.f)
         @. awh_sim.state.rho = exp( - (awh_sim.state.f - f_min) / awh_sim.well_tempered_fac )
@@ -491,45 +554,39 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
         @. awh_sim.state.log_rho = log(awh_sim.state.rho)
     end
 
-    # D. Initial Stage Heuristics
     if awh_sim.state.in_initial_stage
         cov_count = length(awh_sim.state.visited_windows)
-        
-        # Check for covering -> Doubling
         if cov_count >= floor(Int, awh_sim.coverage_threshold * awh_sim.n_windows)
             awh_sim.state.N_bias *= 2
             empty!(awh_sim.state.visited_windows)
-            
-            # Check for Exit Condition: N_bias >= N0 + S(t)
             if awh_sim.state.N_bias >= (awh_sim.initial_sampl_n + awh_sim.state.N_eff)
                 awh_sim.state.in_initial_stage = false
             end
         end
     end
 
-    # F. Reset Accumulator
     fill!(awh_sim.state.w_seg, 0)
     awh_sim.state.n_accum = 0
     
     return delta_f
 end
 
-function simulate!(awh_sim::AWHSimulation,
-                   n_steps::Int;)
+function simulate!(awh_sim::AWHSimulation, n_steps::Int)
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
-
     active_idx = 1
 
     for iteration_n in 1:n_iterations
-
-        # Run simulation for current lambda
         simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
 
-        # Compute and accumulate weigths
         process_sample(awh_sim.state)
 
-        # Choose new active state
+        # --- PMF Deconvolution Update ---
+        if !isnothing(awh_sim.pmf_calc)
+            update_pmf!(awh_sim.pmf_calc, awh_sim.state, awh_sim.state.active_sys.coords)
+        end
+        # --------------------------------
+
         active_idx_new = gibbs_sample_window(awh_sim.state)
         if active_idx_new != active_idx
             println("New active Hamiltonian $(active_idx) -> $(active_idx_new). Iteration $(iteration_n)")
@@ -537,9 +594,6 @@ function simulate!(awh_sim::AWHSimulation,
         end
 
         update_active_sys!(awh_sim.state, active_idx)
-
         update_awh_bias!(awh_sim, iteration_n)
-
     end
-
 end
