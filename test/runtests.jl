@@ -114,14 +114,7 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
 Enzyme.Compiler.VERBOSE_ERRORS[] = true
 
 if GROUP in ("All", "NotGradients")
-    # Some failures due to dependencies but there is an unbound args error
-    Aqua.test_all(
-        Molly;
-        ambiguities=(recursive=false),
-        unbound_args=false,
-        piracies=false,
-    )
-
+    Aqua.test_all(Molly)
     include("basic.jl")
     include("interactions.jl")
     include("minimization.jl")

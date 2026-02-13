@@ -554,7 +554,8 @@ function System(coord_file::AbstractString,
             end
             if !matched
                 throw(ArgumentError("could not match residue $(rgraph.res_name) to any of " *
-                                    "the provided templates"))
+                                    "the provided templates, make sure that the atoms match " *
+                                    "and have elements assigned"))
             end
         end
     end

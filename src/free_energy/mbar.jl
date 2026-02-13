@@ -95,8 +95,8 @@ MBARInput with:
 function assemble_mbar_inputs(coords_k,
                               boundaries_k,
                               states::Vector{ThermoState};
-                              target_state::Union{Nothing, ThermoState{<:Any, <:Any, <:System{D, AT, T}}}=nothing,
-                              shift::Bool=false) where {D, AT, T}
+                              target_state::Union{Nothing, ThermoState}=nothing,
+                              shift::Bool=false)
     K = length(states)
     if length(coords_k) != K || length(boundaries_k) != K
         throw(ArgumentError("length of coordinates, boundaries and states do not match"))
@@ -151,7 +151,7 @@ function assemble_mbar_inputs(coords_k,
         βk = β[k]
         pk = p[k]
         # We initialize the buffers here to avoid copy overhead in GPU
-        if AT <: AbstractGPUArray
+        if !isnothing(target_state) && is_on_gpu(target_state.system)
             buffers = init_buffers!(sys, 1, true)
         else
             buffers = nothing
@@ -187,7 +187,7 @@ end
 
 # Assembles the reduced potentials vector for the target thermodynamic state
 function assemble_target_u(all_coords, all_boundaries, all_volumes,
-                           target::ThermoState{<:Any, <:Any, <:System{D, AT, T}}) where {D, AT, T}
+                           target::ThermoState{<:Any, <:Any, <:System{<:Any, AT}}) where AT
     N  = length(all_coords)
     βa = target.β
     pa = target.p

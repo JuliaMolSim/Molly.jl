@@ -1194,7 +1194,7 @@ The array type of a [`System`](@ref), [`ReplicaSystem`](@ref) or array, for exam
 `Array` for systems on CPU or `CuArray` for systems on a NVIDIA GPU.
 """
 array_type(::AT) where AT = AT.name.wrapper
-array_type(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT
+array_type(::Union{System{<:Any, AT}, ReplicaSystem{<:Any, AT}}) where {AT} = AT
 
 """
     is_on_gpu(sys)
@@ -1202,7 +1202,9 @@ array_type(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT
 
 Whether a [`System`](@ref), [`ReplicaSystem`](@ref) or array type is on the GPU.
 """
-is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}, AT}) where {D, AT} = AT <: AbstractGPUArray
+function is_on_gpu(::Union{System{<:Any, AT}, ReplicaSystem{<:Any, AT}, AT}) where AT
+    return AT <: AbstractGPUArray
+end
 
 """
     float_type(sys)
@@ -1210,7 +1212,7 @@ is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}, AT}) where {D, AT} = AT <
 
 The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
 """
-float_type(::Union{System{D, AT, T}, ReplicaSystem{D, AT, T}}) where {D, AT, T} = T
+float_type(::Union{System{<:Any, <:Any, T}, ReplicaSystem{<:Any, <:Any, T}}) where {T} = T
 
 """
     masses(sys)
@@ -1229,7 +1231,9 @@ charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
 charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
 charge(s::Union{System, ReplicaSystem}, ::Colon) = charge.(s.atoms)
 
-Base.getindex(s::Union{System, ReplicaSystem}, i::Union{Integer, AbstractVector}) = s.atoms[i]
+# Separate methods to avoid method ambiguity with AtomsBase
+Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = s.atoms[i]
+Base.getindex(s::Union{System, ReplicaSystem}, is::AbstractVector{Bool}) = s.atoms[is]
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
 Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
