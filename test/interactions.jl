@@ -379,6 +379,20 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
+    # Test HarmonicBond at equilibrium distance
+    b_eq = HarmonicBond(k=100_000.0u"kJ * mol^-1 * nm^-2", r0=0.3u"nm")
+    fs_eq = force(b_eq, c1, c2, boundary)
+    @test isapprox(
+        fs_eq.f1,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(b_eq, c1, c2, boundary),
+        0.0u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
     b1 = MorseBond(D=100.0u"kJ * mol^-1", a=10.0u"nm^-1", r0=0.2u"nm")
     b2 = MorseBond(D=200.0u"kJ * mol^-1", a=5.0u"nm^-1" , r0=0.6u"nm")
     fs = force(b1, c1, c2, boundary)
@@ -474,6 +488,32 @@
     @test isapprox(
         potential_energy(a1, c1, c2, c3a, boundary),
         0.2908039228u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    # Test HarmonicAngle for collinear atoms (180 degrees)
+    c3_colin = SVector(1.6, 1.0, 1.0)u"nm"
+    a_colin = HarmonicAngle(k=100.0u"kJ * mol^-1", θ0=π)
+    fs_colin = force(a_colin, c1, c2, c3_colin, boundary)
+    @test isapprox(
+        fs_colin.f1,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(a_colin, c1, c2, c3_colin, boundary),
+        0.0u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    # Test HarmonicAngle for 90 degree angle
+    c3_90 = SVector(1.3, 1.3, 1.0)u"nm"
+    a_90 = HarmonicAngle(k=200.0u"kJ * mol^-1", θ0=π/2)
+    fs_90 = force(a_90, c1, c2, c3_90, boundary)
+    pe_90 = potential_energy(a_90, c1, c2, c3_90, boundary)
+    @test isapprox(
+        pe_90,
+        0.0u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
 
@@ -578,6 +618,86 @@
         atol=1e-7u"kJ * mol^-1",
     )
 
+    # RBTorsion tests
+    c1t = SVector(0.0, 0.0, 0.0)u"nm"
+    c2t = SVector(0.1, 0.0, 0.0)u"nm"
+    c3t = SVector(0.2, 0.0, 0.0)u"nm"
+    c4t = SVector(0.3, 0.0, 0.0)u"nm"
+    c4t_ang = SVector(0.2, 0.1, 0.0)u"nm"
+    boundary_rb = CubicBoundary(5.0u"nm")
+    
+    rb1 = RBTorsion(f1=10.0u"kJ * mol^-1", f2=20.0u"kJ * mol^-1",
+                    f3=30.0u"kJ * mol^-1", f4=5.0u"kJ * mol^-1")
+    
+    # Test for collinear atoms (torsion angle = 0 or π)
+    fs = force(rb1, c1t, c2t, c3t, c4t, boundary_rb)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    
+    # Test potential energy for collinear case
+    pe = potential_energy(rb1, c1t, c2t, c3t, c4t, boundary_rb)
+    @test isapprox(
+        pe,
+        (10.0 * (1 + cos(0.0)) + 20.0 * (1 - cos(0.0)) + 30.0 * (1 + cos(0.0)) + 5.0) / 2u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    
+    # Test with non-collinear atoms
+    fs = force(rb1, c1t, c2t, c3t, c4t_ang, boundary_rb)
+    @test norm(fs.f1) > 0.0u"kJ * mol^-1 * nm^-1"
+    @test norm(fs.f2) > 0.0u"kJ * mol^-1 * nm^-1"
+    @test norm(fs.f3) > 0.0u"kJ * mol^-1 * nm^-1"
+    @test norm(fs.f4) > 0.0u"kJ * mol^-1 * nm^-1"
+
+    # PeriodicTorsion tests
+    pt1 = PeriodicTorsion(periodicities=(1, 2, 3), phases=(0.0, Float64(π/2), Float64(π)),
+                          ks=(10.0u"kJ * mol^-1", 5.0u"kJ * mol^-1", 2.0u"kJ * mol^-1"),
+                          proper=true)
+    
+    # Test for collinear atoms
+    fs = force(pt1, c1t, c2t, c3t, c4t, boundary_rb)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    
+    # Test potential energy
+    pe = potential_energy(pt1, c1t, c2t, c3t, c4t, boundary_rb)
+    # For torsion angle = 0: V = k1*(1+cos(0)) + k2*(1+cos(-π/2)) + k3*(1+cos(-π))
+    expected_pe = 10.0 * (1 + cos(0.0)) + 5.0 * (1 + cos(-π/2)) + 2.0 * (1 + cos(-π))
+    @test isapprox(
+        pe,
+        expected_pe * u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    
+    # Test with non-collinear atoms
+    fs = force(pt1, c1t, c2t, c3t, c4t_ang, boundary_rb)
+    @test norm(fs.f1) > 0.0u"kJ * mol^-1 * nm^-1"
+    
+    # Test zero PeriodicTorsion
+    pt_zero = zero(pt1)
+    @test pt_zero.ks == (0.0u"kJ * mol^-1", 0.0u"kJ * mol^-1", 0.0u"kJ * mol^-1")
+    
+    # Test addition of PeriodicTorsion (ensure types match)
+    pt2 = PeriodicTorsion(periodicities=(1, 2, 3), phases=(0.0, π/4, π/3),
+                          ks=(1.0u"kJ * mol^-1", 2.0u"kJ * mol^-1", 3.0u"kJ * mol^-1"),
+                          proper=true)
+    pt_sum = pt1 + pt2
+    @test pt_sum.ks[1] ≈ 11.0u"kJ * mol^-1"
+    @test pt_sum.ks[2] ≈ 7.0u"kJ * mol^-1"
+    @test pt_sum.ks[3] ≈ 5.0u"kJ * mol^-1"
+
+    # Test improper torsion
+    pt_improper = PeriodicTorsion(periodicities=(2,), phases=(Float64(π),),
+                                  ks=(15.0u"kJ * mol^-1",), proper=false)
+    pe_improper = potential_energy(pt_improper, c1t, c2t, c3t, c4t, boundary_rb)
+    @test pe_improper isa typeof(1.0u"kJ * mol^-1")
+
     do_shortcut(atom_i, atom_j) = true
 
     for inter in (
@@ -602,6 +722,50 @@
             atol=1e-9u"kJ * mol^-1",
         )
     end
+
+    # Test Mie potential with different m and n values
+    mie_soft = Mie(m=4, n=6)  # Softer than LJ
+    @test isapprox(
+        force(mie_soft, dr12, a1, a1)[1],
+        -2.6666666666u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(mie_soft, dr12, a1, a1),
+        -0.1111111111u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    mie_hard = Mie(m=12, n=24)  # Harder than LJ
+    f_hard = force(mie_hard, dr12, a1, a1)[1]
+    pe_hard = potential_energy(mie_hard, dr12, a1, a1)
+    @test abs(f_hard) > 0.0u"kJ * mol^-1 * nm^-1"
+    @test abs(pe_hard) >= 0.0u"kJ * mol^-1"
+
+    # Test soft-core with λ=0 (should give zero interaction)
+    lj_sc_zero = LennardJonesSoftCoreBeutler(α=0.5, λ=0.0)
+    @test isapprox(
+        potential_energy(lj_sc_zero, dr12, a1, a1),
+        0.0u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    # Test weight_special parameter
+    coulomb_weighted = Coulomb(weight_special=0.5)
+    f_full = force(Coulomb(), dr12, a1, a1)
+    f_weighted = force(coulomb_weighted, dr12, a1, a1, u"kJ * mol^-1 * nm^-1", true)
+    @test isapprox(f_weighted, f_full .* 0.5; atol=1e-9u"kJ * mol^-1 * nm^-1")
+
+    pe_full = potential_energy(Coulomb(), dr12, a1, a1)
+    pe_weighted = potential_energy(coulomb_weighted, dr12, a1, a1, u"kJ * mol^-1 * nm^-1", true)
+    @test isapprox(pe_weighted, pe_full * 0.5; atol=1e-9u"kJ * mol^-1")
+
+    # Test mixing rules with edge cases (zero values)
+    a_zero = Atom(charge=0.0, σ=0.0u"nm", ϵ=0.0u"kJ * mol^-1")
+    @test Molly.lorentz_σ_mixing(a1, a_zero) ≈ 0.15u"nm"
+    @test Molly.lorentz_ϵ_mixing(a1, a_zero) ≈ 0.1u"kJ * mol^-1"
+    @test Molly.geometric_σ_mixing(a1, a_zero) ≈ 0.0u"nm"
+    @test Molly.geometric_ϵ_mixing(a1, a_zero) ≈ 0.0u"kJ * mol^-1"
 end
 
 @testset "Cutoffs" begin
