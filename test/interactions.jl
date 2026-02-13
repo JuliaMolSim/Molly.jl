@@ -638,7 +638,7 @@ end
 
     # Test that force and potential energy are zero after the cutoff distance
     c3 = SVector(2.0, 1.0, 1.0)u"nm"  # Distance of 1.0 nm > dist_cut (0.8 nm)
-    c4 = SVector(2.2, 1.0, 1.0)u"nm"  # Distance of 1.2 nm > dist_cut (0.8 nm)
+    c4 = SVector(1.95, 1.0, 1.0)u"nm"  # Distance of 0.95 nm > dist_cut (0.8 nm)
     dr13 = vector(c1, c3, boundary)
     dr14 = vector(c1, c4, boundary)
 
@@ -662,7 +662,7 @@ end
             0.0u"kJ * mol^-1";
             atol=1e-12u"kJ * mol^-1",
         )
-        # Test at distance 1.2 nm (well beyond cutoff)
+        # Test at distance 0.95 nm (beyond cutoff)
         @test isapprox(
             force(inter, dr14, a1, a1)[1],
             0.0u"kJ * mol^-1 * nm^-1";
