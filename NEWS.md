@@ -1,5 +1,12 @@
 # Molly.jl release notes
 
+## v0.23.2 - Feb 2026
+
+### New features
+- Support for virtual sites is added. `OneParticleSite`, `TwoParticleAverageSite`, `ThreeParticleAverageSite` and `OutOfPlaneSite` are available. Virtual sites can be involved in any interaction type.
+- Elements are now inferred more generally from atom names in structure files, for example "C2" is inferred as carbon.
+- The old "from/to" bond syntax in OpenMM force field XML files is supported.
+
 ## v0.23.1 - Jan 2026
 
 ### New features
