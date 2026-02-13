@@ -114,7 +114,13 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
 Enzyme.Compiler.VERBOSE_ERRORS[] = true
 
 if GROUP in ("All", "NotGradients")
-    Aqua.test_all(Molly)
+    if VERSION < v"1.12-"
+        # AtomType has missing union, PeriodicTorsion has NTuple
+        Aqua.test_all(Molly; unbound_args=false)
+    else
+        Aqua.test_all(Molly)
+    end
+
     include("basic.jl")
     include("interactions.jl")
     include("minimization.jl")
