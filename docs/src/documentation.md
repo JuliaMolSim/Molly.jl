@@ -109,6 +109,7 @@ sys.topology
 sys.pairwise_inters
 sys.constraints
 sys.virtual_sites
+sys.virtual_site_flags
 sys.neighbor_finder
 sys.loggers
 sys.total_mass
@@ -1554,11 +1555,57 @@ Other methods can be used to solve larger constraint clusters, these are not yet
 Virtual sites are massless particles whose coordinates are defined by the coordinates of other atoms.
 One use case is to carry partial charge at a location separate from the atom centers, as seen in four-point water models like TIP4P.
 Molly allows virtual sites to be defined in the following ways:
--
--
--
+- [`OneParticleSite`](@ref): defined to have the same coordinates as another atom, can be useful in alchemical simulations when multiple versions of an atom are required.
+- [`TwoParticleAverageSite`](@ref): defined by the weighted average of the coordinates of two atoms.
+- [`ThreeParticleAverageSite`](@ref): defined by the weighted average of the coordinates of three atoms.
+- [`OutOfPlaneSite`](@ref): defined by the weighted average of the coordinates of three atoms and the cross product of their relative displacements.
 
-Virtual sites share all the non-bonded exclusions of, and are excluded from, their parent atoms.
+Virtual sites should have an entry in the atom, coordinate and velocity arrays.
+They can be involved in any interaction type, with the forces being distributed back to the parent atoms automatically after all forces have been calculated.
+[`forces`](@ref), [`accelerations`](@ref) and `sys.velocities` are zero for virtual site atoms since they are not integrated.
+They share all the non-bonded exclusions of, and are excluded from, their parent atoms.
+The parent atoms must not be virtual sites themselves.
+They cannot participate in constraints.
+Virtual sites apart from [`OutOfPlaneSite`](@ref) are compatible with virial calculation.
+
+A virtual site can be set up manually, for example for a molecule of TIP4P water:
+```julia
+using Molly
+
+coords = [
+    SVector(0.5558, 1.9020, 1.2139), # O
+    SVector(0.4860, 1.9198, 1.2769), # H1
+    SVector(0.5800, 1.9881, 1.1799), # H2
+    SVector(1.0   , 1.0   , 1.0   ), # Virtual site, initial coordinates not used
+] * u"nm"
+
+# Virtual sites should have zero mass
+atoms = [
+    Atom(mass=15.99943u"g/mol", charge=0.0      , σ=0.316555u"nm", ϵ=0.749279u"kJ * mol^-1"),
+    Atom(mass=1.007947u"g/mol", charge=0.525868 , σ=0.0u"nm"     , ϵ=0.0u"kJ * mol^-1"     ),
+    Atom(mass=1.007947u"g/mol", charge=0.525868 , σ=0.0u"nm"     , ϵ=0.0u"kJ * mol^-1"     ),
+    Atom(mass=0.0u"g/mol"     , charge=-1.051736, σ=0.0u"nm"     , ϵ=0.0u"kJ * mol^-1"     ),
+]
+
+boundary = CubicBoundary(3.0u"nm")
+
+virtual_sites = [
+    # Atom 4 is a virtual site defined by atoms 1/2/3
+    ThreeParticleAverageSite(4, 1, 2, 3, 0.820314, 0.089843, 0.089843),
+]
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    virtual_sites=virtual_sites,
+)
+
+sys.virtual_site_flags # [false, false, false, true]
+```
+
+Virtual sites are set up appropriately when reading in a structure file.
+The virtual site atoms need to be present in the structure file to assign the correct residue template, which should have the virtual sites defined by `<VirtualSite>` entries.
 
 ## Neighbor finders
 
