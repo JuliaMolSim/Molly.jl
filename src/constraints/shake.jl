@@ -95,6 +95,23 @@ end
 
 cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_clusters)
 
+function constrained_atom_inds(sr::SHAKE_RATTLE)
+    atom_inds = Int[]
+    for cl in sr.clusters12
+        push!(atom_inds, cl.k1, cl.k2)
+    end
+    for cl in sr.clusters23
+        push!(atom_inds, cl.k1, cl.k2, cl.k3)
+    end
+    for cl in sr.clusters34
+        push!(atom_inds, cl.k1, cl.k2, cl.k3, cl.k4)
+    end
+    for cl in sr.angle_clusters
+        push!(atom_inds, cl.k1, cl.k2, cl.k3)
+    end
+    return atom_inds
+end
+
 function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
     # Disable Neighbor interactions that are constrained
     if typeof(neighbor_finder) != NoNeighborFinder
@@ -135,7 +152,7 @@ end
 @inline function solve_2x2_exactly(λ, A, C)
     determinant = (A[1, 1] * A[2, 2]) - (A[1, 2] * A[2, 1])
 
-    if iszero(determinant)
+    if iszero_value(determinant)
         error("SHAKE determinant is zero, cannot solve")
     end
     inv_det = inv(determinant)
@@ -149,7 +166,7 @@ end
     determinant = A[1,1]*A[2,2]*A[3,3] + A[1,2]*A[2,3]*A[3,1] + A[1,3]*A[2,1]*A[3,2] -
                   A[1,1]*A[2,3]*A[3,2] - A[1,2]*A[2,1]*A[3,3] - A[1,3]*A[2,2]*A[3,1]
 
-    if iszero(determinant)
+    if iszero_value(determinant)
         error("SHAKE determinant is zero, cannot solve")
     end
     inv_det = inv(determinant)

@@ -1,0 +1,310 @@
+# Virtual sites
+
+export
+    OneParticleSite,
+    TwoParticleAverageSite,
+    ThreeParticleAverageSite,
+    OutOfPlaneSite,
+    place_virtual_sites!
+
+struct VirtualSite{T, IC}
+    type::Int # 1/2/3/4 for OneParticleSite/TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite
+    atom_ind::Int
+    atom_1::Int
+    atom_2::Int # 0 in OneParticleSite case
+    atom_3::Int # 0 in OneParticleSite/TwoParticleAverageSite case
+    weight_1::T # Weights are zero when not relevant
+    weight_2::T
+    weight_3::T
+    weight_12::T
+    weight_13::T
+    weight_cross::IC # Units are 1/L
+end
+
+struct VirtualSiteTemplate{T, IC}
+    type::Int
+    name::String
+    atom_name_1::String
+    atom_name_2::String
+    atom_name_3::String
+    weight_1::T
+    weight_2::T
+    weight_3::T
+    weight_12::T
+    weight_13::T
+    weight_cross::IC
+end
+
+@doc raw"""
+    OneParticleSite(atom_ind, atom_1)
+
+A virtual site defined to have the same coordinates as another atom.
+
+Returns a `VirtualSite` defined by:
+```math
+\mathbf{r} = \mathbf{r}_1
+```
+This can be useful in alchemical simulations when multiple versions of an atom are required.
+"""
+function OneParticleSite(atom_ind::Integer, atom_1::Integer, weight_cross=0.0u"nm^-1")
+    # Optional weight_cross allows arrays of different virtual site types to be
+    #   concretely typed with and without units
+    T = typeof(ustrip(weight_cross))
+    return VirtualSite(1, atom_ind, atom_1, 0, 0, zero(T), zero(T),
+                       zero(T), zero(T), zero(T), weight_cross)
+end
+
+@doc raw"""
+    TwoParticleAverageSite(atom_ind, atom_1, atom_2, weight_1, weight_2)
+
+A virtual site defined by the weighted average of the coordinates of two atoms.
+
+Returns a `VirtualSite` defined by:
+```math
+\mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2
+```
+where ``w_1 + w_2`` must equal 1.
+"""
+function TwoParticleAverageSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, weight_1::T,
+                                weight_2::T, weight_cross=(zero(T) * u"nm^-1")) where T
+    if !isapprox(weight_1 + weight_2, 1)
+        throw(ArgumentError("weight_1 + weight_2 must equal 1 for a TwoParticleAverageSite, " *
+                            "found $(weight_1 + weight_2)"))
+    end
+    return VirtualSite(2, atom_ind, atom_1, atom_2, 0, weight_1, weight_2,
+                       zero(T), zero(T), zero(T), weight_cross)
+end
+
+@doc raw"""
+    ThreeParticleAverageSite(atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2, weight_3)
+
+A virtual site defined by the weighted average of the coordinates of three atoms.
+
+Returns a `VirtualSite` defined by:
+```math
+\mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2 + w_3 \mathbf{r}_3
+```
+where ``w_1 + w_2 + w_3`` must equal 1.
+"""
+function ThreeParticleAverageSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer,
+                                  atom_3::Integer, weight_1::T, weight_2::T, weight_3::T,
+                                  weight_cross=(zero(T) * u"nm^-1")) where T
+    if !isapprox(weight_1 + weight_2 + weight_3, 1)
+        throw(ArgumentError("weight_1 + weight_2 + weight_3 must equal 1 for a " *
+                            "ThreeParticleAverageSite, found $(weight_1 + weight_2 + weight_3)"))
+    end
+    return VirtualSite(3, atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2,
+                       weight_3, zero(T), zero(T), weight_cross)
+end
+
+@doc raw"""
+    OutOfPlaneSite(atom_ind, atom_1, atom_2, atom_3, weight_12, weight_13, weight_cross)
+
+A virtual site defined by the weighted average of the coordinates of three atoms
+and the cross product of their relative displacements.
+
+Returns a `VirtualSite` defined by:
+```math
+\mathbf{r} = \mathbf{r}_1 + w_{12} \mathbf{r}_{12} + w_{13} \mathbf{r}_{13} + w_{\mathrm{cross}} (\mathbf{r}_{12} \times \mathbf{r}_{13})
+```
+
+Only compatible with 3D systems.
+Not currently compatible with virial calculation.
+"""
+function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, atom_3::Integer,
+                        weight_12::T, weight_13::T, weight_cross) where T
+    return VirtualSite(4, atom_ind, atom_1, atom_2, atom_3, zero(T), zero(T),
+                       zero(T), weight_12, weight_13, weight_cross)
+end
+
+function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D)
+    n_atoms = length(atom_masses)
+    virtual_site_flags = falses(n_atoms)
+    virtual_sites_cpu = from_device(virtual_sites)
+
+    for (vi, vs) in enumerate(virtual_sites_cpu)
+        i = vs.atom_ind
+        if !(vs.type in 1:4)
+            error("unrecognised virtual site type $(vs.type), should be 1/2/3/4")
+        end
+        if D != 3 && vs.type == 4
+            error("OutOfPlaneSite is only compatible with 3D systems")
+        end
+        if i > n_atoms
+            error("virtual site $vi defines atom number $i but there are only " *
+                  "$n_atoms atoms present")
+        end
+        if virtual_site_flags[i]
+            error("virtual site $vi defines atom number $i but a previous virtual " *
+                  "site already defined this atom")
+        end
+        virtual_site_flags[i] = true
+    end
+
+    for (vi, vs) in enumerate(virtual_sites_cpu)
+        if (vs.atom_1 > 0 && virtual_site_flags[vs.atom_1]) ||
+                (vs.atom_2 > 0 && virtual_site_flags[vs.atom_2]) ||
+                (vs.atom_3 > 0 && virtual_site_flags[vs.atom_3])
+            error("virtual site $vi is defined in terms of an atom that " *
+                  "is itself a virtual site")
+        end
+    end
+
+    warn_vs, warn_nvs = false, false
+    for (vsf, atom_mass) in zip(virtual_site_flags, from_device(atom_masses))
+        if vsf && !iszero_value(atom_mass)
+            warn_vs = true
+        elseif !vsf && iszero_value(atom_mass)
+            warn_nvs = true
+        end
+    end
+    if warn_vs
+        @warn "One or more virtual sites has a non-zero mass, this may lead to problems"
+    end
+    if warn_nvs
+        @warn "One or more atoms not marked as a virtual site has zero mass, " *
+              "this may lead to problems"
+    end
+
+    for ca in constraints
+        for i in constrained_atom_inds(ca)
+            if virtual_site_flags[i]
+                error("atom $i is a virtual site but is also in a constraint")
+            end
+        end
+    end
+    return to_device(virtual_site_flags, AT)
+end
+
+"""
+    place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+
+Set the coordinates of virtual sites based on the coordinates of the atoms that define them.
+"""
+function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+    # Assumes that each virtual site is only defined once
+    if length(virtual_sites) > 0
+        backend = get_backend(sys.coords)
+        n_threads_dev = 256
+        kernel! = place_virtual_sites_kernel!(backend, n_threads_dev)
+        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=length(virtual_sites))
+    end
+    return sys
+end
+
+@kernel function place_virtual_sites_kernel!(coords, boundary, @Const(virtual_sites))
+    i = @index(Global, Linear)
+    if i <= length(virtual_sites)
+        vs = virtual_sites[i]
+        if vs.type == 1
+            vs_coord = coords[vs.atom_1]
+        elseif vs.type == 2
+            # w1 r1 + w2 r2 can't be used here since r1 and r2 may be in different periodic images
+            # Only one absolute coordinate, r1, can be used, with others defined relatively
+            # This is why w1 + w2 must equal 1, which is assumed here and checked on creation
+            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+            vs_coord = coords[vs.atom_1] + vs.weight_2 * r12
+        elseif vs.type == 3
+            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+            vs_coord = coords[vs.atom_1] + vs.weight_2 * r12 + vs.weight_3 * r13
+        elseif vs.type == 4
+            # Assumes 3D
+            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+            cross_r12_r13 = cross(r12, r13) # Units L^2
+            vs_coord = coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
+                       vs.weight_cross * cross_r12_r13
+        end
+        coords[vs.atom_ind] = wrap_coords(vs_coord, boundary)
+    end
+end
+
+function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
+                            virtual_sites=sys.virtual_sites) where {D, T}
+    # Assumes that each virtual site is only defined once
+    if length(virtual_sites) > 0
+        buffers.fs_mat .= reshape(reinterpret(T, ustrip_vec.(fs)), D, length(sys))
+        backend = get_backend(sys.coords)
+        n_threads_dev = 128
+        kernel! = distribute_forces_kernel!(backend, n_threads_dev)
+        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites;
+                ndrange=length(virtual_sites))
+        fs_mat_flat = reshape(buffers.fs_mat, length(sys) * D)
+        fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* sys.force_units
+    end
+    return fs
+end
+
+@kernel function distribute_forces_kernel!(fs_mat::AbstractMatrix{T}, @Const(coords),
+                        boundary::AbstractBoundary{D}, @Const(virtual_sites)) where {T, D}
+    i = @index(Global, Linear)
+    if i <= length(virtual_sites)
+        vs = virtual_sites[i]
+        if vs.type == 1
+            for dim in 1:D
+                f = fs_mat[dim, vs.atom_ind]
+                Atomix.@atomic fs_mat[dim, vs.atom_1] += f
+            end
+        elseif vs.type == 2
+            for dim in 1:D
+                f = fs_mat[dim, vs.atom_ind]
+                Atomix.@atomic fs_mat[dim, vs.atom_1] += vs.weight_1 * f
+                Atomix.@atomic fs_mat[dim, vs.atom_2] += vs.weight_2 * f
+            end
+        elseif vs.type == 3
+            for dim in 1:D
+                f = fs_mat[dim, vs.atom_ind]
+                Atomix.@atomic fs_mat[dim, vs.atom_1] += vs.weight_1 * f
+                Atomix.@atomic fs_mat[dim, vs.atom_2] += vs.weight_2 * f
+                Atomix.@atomic fs_mat[dim, vs.atom_3] += vs.weight_3 * f
+            end
+        elseif vs.type == 4
+            # Assumes 3D
+            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+            f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind]) *
+                                                        unit(eltype(r12))
+            f2 = SVector(
+                vs.weight_12 * f[1] - vs.weight_cross * r13[3] * f[2] + vs.weight_cross * r13[2] * f[3],
+                vs.weight_cross * r13[3] * f[1] + vs.weight_12 * f[2] - vs.weight_cross * r13[1] * f[3],
+                -vs.weight_cross * r13[2] * f[1] + vs.weight_cross * r13[1] * f[2] + vs.weight_12 * f[3],
+            )
+            f3 = SVector(
+                vs.weight_13 * f[1] + vs.weight_cross * r12[3] * f[2] - vs.weight_cross * r12[2] * f[3],
+                -vs.weight_cross * r12[3] * f[1] + vs.weight_13 * f[2] + vs.weight_cross * r12[1] * f[3],
+                vs.weight_cross * r12[2] * f[1] - vs.weight_cross * r12[1] * f[2] + vs.weight_13 * f[3],
+            )
+            f1 = f - f2 - f3
+            for dim in 1:D
+                Atomix.@atomic fs_mat[dim, vs.atom_1] += ustrip(f1[dim])
+                Atomix.@atomic fs_mat[dim, vs.atom_2] += ustrip(f2[dim])
+                Atomix.@atomic fs_mat[dim, vs.atom_3] += ustrip(f3[dim])
+            end
+        end
+        # Now the virtual site force has been distributed onto the other atoms,
+        #   it can be set to zero
+        for dim in 1:D
+            fs_mat[dim, vs.atom_ind] = zero(T)
+        end
+    end
+end
+
+function pick_non_virtual_site(rng, sys)
+    if iszero(length(sys.virtual_sites))
+        return rand(rng, eachindex(sys))
+    else
+        flags = from_device(sys.virtual_site_flags)
+        found = false
+        i = 0
+        while !found
+            i = rand(rng, eachindex(sys))
+            if !flags[i]
+                found = true
+            end
+        end
+        return i
+    end
+end
+
+zero_vs_velocity(v, vsf) = (vsf ? zero(v) : v)

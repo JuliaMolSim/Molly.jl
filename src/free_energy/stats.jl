@@ -40,7 +40,7 @@ function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,
     end
 
     s2 = sum(abs2, x) / (N - 1) # Sample variance
-    if !isfinite(s2) || iszero(s2)
+    if !isfinite(s2) || iszero_value(s2)
         return StatisticalInefficiency(1.0, 1, N, N, 0)
     end
 

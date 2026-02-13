@@ -256,21 +256,36 @@ end
         if forward
             grad_enzyme = (
                 autodiff(
-                    set_runtime_activity(Forward), loss, Duplicated,
-                    Duplicated(σ, one(T)), Const(r0), Duplicated(copy(coords), zero(coords)),
-                    Duplicated(copy(velocities), zero(velocities)), const_args...,
+                    set_runtime_activity(Forward),
+                    loss,
+                    Duplicated,
+                    Duplicated(σ, one(T)),
+                    Const(r0),
+                    Duplicated(copy(coords), zero(coords)),
+                    Duplicated(copy(velocities), zero(velocities)),
+                    const_args...,
                 )[1],
                 autodiff(
-                    set_runtime_activity(Forward), loss, Duplicated,
-                    Const(σ), Duplicated(r0, one(T)), Duplicated(copy(coords), zero(coords)),
-                    Duplicated(copy(velocities), zero(velocities)), const_args...,
+                    set_runtime_activity(Forward),
+                    loss,
+                    Duplicated,
+                    Const(σ),
+                    Duplicated(r0, one(T)),
+                    Duplicated(copy(coords), zero(coords)),
+                    Duplicated(copy(velocities), zero(velocities)),
+                    const_args...,
                 )[1],
             )
         else
             grad_enzyme = autodiff(
-                set_runtime_activity(Reverse), loss, Active,
-                Active(σ), Active(r0), Duplicated(copy(coords), zero(coords)),
-                Duplicated(copy(velocities), zero(velocities)), const_args...,
+                set_runtime_activity(Reverse),
+                loss,
+                Active,
+                Active(σ),
+                Active(r0),
+                Duplicated(copy(coords), zero(coords)),
+                Duplicated(copy(velocities), zero(velocities)),
+                const_args...,
             )[1][1:2]
         end
 
@@ -322,8 +337,6 @@ end
             kappa=0.7,
         )
     end
-
-    EnzymeRules.inactive(::typeof(create_sys), args...) = nothing
 
     function test_energy_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
         atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
@@ -492,8 +505,11 @@ end
             n_threads = (parallel ? Threads.nthreads() : 1)
             grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
             autodiff(
-                set_runtime_activity(Reverse), test_fn, Active,
-                Duplicated(params_dic, grads_enzyme), Const(sys_ref),
+                set_runtime_activity(Reverse),
+                test_fn,
+                Active,
+                Duplicated(params_dic, grads_enzyme),
+                Const(sys_ref),
                 Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
                 Duplicated(sys_ref.neighbor_finder, sys_ref.neighbor_finder),
                 Const(n_threads),

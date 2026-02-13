@@ -266,7 +266,7 @@ function Base.:+(a1::Atom, a2::Atom)
 end
 
 # get function errors with AD
-dict_get(dic, key, default) = (haskey(dic, key) ? dic[key] : default)
+dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
 
 function inject_atom(at, at_data, params_dic)
     key_prefix = "atom_$(at_data.atom_type)_"
@@ -294,6 +294,7 @@ The mass of an [`Atom`](@ref).
 
 Custom atom types should implement this function unless they have a `mass` field
 defined, which the function accesses by default.
+Virtual sites should have zero mass, and non-virtual sites should have non-zero mass.
 """
 mass(atom) = atom.mass
 
@@ -502,6 +503,8 @@ interface described there.
     implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`.
 - `constraints::CN=()`: the constraints for bonds and angles in the system.
     Should be a `Tuple` or `NamedTuple`.
+- `virtual_sites::VS=[]`: the virtual sites present in the system; these are
+    mass-less particles determined by the positions of other atoms.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
@@ -514,7 +517,7 @@ interface described there.
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
-mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
                       L, F, E, K, M, TM, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
@@ -526,6 +529,8 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     specific_inter_lists::SI
     general_inters::GI
     constraints::CN
+    virtual_sites::VS
+    virtual_site_flags::VF
     neighbor_finder::NF
     loggers::L
     df::Int
@@ -548,6 +553,7 @@ function System(;
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
+                virtual_sites=[],
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
@@ -565,11 +571,13 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
+    VS = typeof(virtual_sites)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
     DA = typeof(data)
+    n_atoms = length(atoms)
 
     if isnothing(velocities)
         if force_units == NoUnits
@@ -583,14 +591,14 @@ function System(;
     end
     V = typeof(vels)
 
-    if length(atoms) != length(coords)
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(coords)) coordinates"))
+    if n_atoms != length(coords)
+        throw(ArgumentError("there are $n_atoms atoms but $(length(coords)) coordinates"))
     end
-    if length(atoms) != length(vels)
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(vels)) velocities"))
+    if n_atoms != length(vels)
+        throw(ArgumentError("there are $n_atoms atoms but $(length(vels)) velocities"))
     end
-    if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+    if length(atoms_data) > 0 && n_atoms != length(atoms_data)
+        throw(ArgumentError("there are $n_atoms atoms but $(length(atoms_data)) atom data entries"))
     end
 
     if isa(atoms, AbstractGPUArray) && !isbitstype(eltype(atoms))
@@ -608,6 +616,14 @@ function System(;
     end
     if isa(vels, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
+    end
+    if length(virtual_sites) > 0
+        if isa(atoms, AbstractGPUArray) && !isa(virtual_sites, AbstractGPUArray)
+            throw(ArgumentError("the atoms are on the GPU but the virtual sites are not"))
+        end
+        if isa(virtual_sites, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
+            throw(ArgumentError("the virtual sites are on the GPU but the atoms are not"))
+        end
     end
 
     if !any(TT -> (pairwise_inters isa TT), (Tuple, NamedTuple))
@@ -654,7 +670,11 @@ function System(;
               "of SVectors for performance"
     end
 
-    df = n_dof(D, length(atoms), boundary)
+    virtual_site_flags = setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D)
+    VF = typeof(virtual_site_flags)
+    n_virtual_sites = sum(virtual_site_flags)
+
+    df = n_dof(D, n_atoms - n_virtual_sites, boundary)
     if length(constraints) > 0
         for ca in constraints
             for cluster_type in cluster_keys(ca)
@@ -669,10 +689,11 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}(
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
-                    specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
-                    df, force_units, energy_units, k_converted, atom_masses, total_mass, data)
+                    specific_inter_lists, general_inters, constraints, virtual_sites,
+                    virtual_site_flags, neighbor_finder, loggers, df, force_units, energy_units,
+                    k_converted, atom_masses, total_mass, data)
 end
 
 """
@@ -694,6 +715,7 @@ function System(sys::System;
                 specific_inter_lists=sys.specific_inter_lists,
                 general_inters=sys.general_inters,
                 constraints=sys.constraints,
+                virtual_sites=sys.virtual_sites,
                 neighbor_finder=sys.neighbor_finder,
                 loggers=sys.loggers,
                 force_units=sys.force_units,
@@ -711,6 +733,7 @@ function System(sys::System;
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         constraints=constraints,
+        virtual_sites=virtual_sites,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=force_units,
@@ -787,9 +810,9 @@ function System(crystal::Crystal{D};
 end
 
 function Base.zero(sys::System{D, AT, T, A, C, B, V,
-                   AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}) where {D, AT, T,
-                                A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}(
+                   AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}) where {D, AT, T,
+                            A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}(
         zero.(sys.atoms),
         zero(sys.coords),
         zero(sys.boundary),
@@ -800,6 +823,8 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
         zero.(sys.specific_inter_lists),
         zero.(sys.general_inters),
         sys.constraints,
+        sys.virtual_sites,
+        sys.virtual_site_flags,
         sys.neighbor_finder,
         sys.loggers,
         sys.df,
@@ -920,6 +945,11 @@ construction where `n` is the number of threads to be used per replica.
     passed to the argument `replica_constraints`.
 - `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
     replica.
+- `virtual_sites::VS=[]`: the virtual sites present in the system (to be used if the same for all
+    replicas); these are mass-less particles determined by the positions of other atoms. This is
+    only used if no value is passed to the argument `replica_virtual_sites`.
+- `replica_virtual_sites=[[] for _ in 1:n_replicas]`: the virtual_sites in each
+    replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation. It is duplicated for each replica.
 - `replica_loggers=[() for _ in 1:n_replicas]`: the loggers for each replica
@@ -964,6 +994,8 @@ function ReplicaSystem(;
                         replica_general_inters=nothing,
                         constraints=(),
                         replica_constraints=nothing,
+                        virtual_sites=[],
+                        replica_virtual_sites=nothing,
                         neighbor_finder=NoNeighborFinder(),
                         replica_loggers=[() for _ in 1:n_replicas],
                         exchange_logger=nothing,
@@ -979,6 +1011,7 @@ function ReplicaSystem(;
     DA = typeof(data)
     C = typeof(replica_coords[1])
     NF = typeof(neighbor_finder)
+    n_atoms = length(atoms)
 
     if isnothing(replica_boundaries)
         replica_boundaries = fill(boundary, n_replicas)
@@ -1027,26 +1060,34 @@ function ReplicaSystem(;
                             * "does not match number of replicas ($n_replicas)"))
     end
 
-    df = n_dof(D, length(atoms), replica_boundaries[1])
+    atom_masses = mass.(atoms)
+    M = typeof(atom_masses)
+    total_mass = sum(atom_masses)
+    TM = typeof(total_mass)
+
+    if isnothing(replica_virtual_sites)
+        replica_virtual_sites = [virtual_sites for _ in 1:n_replicas]
+    elseif length(replica_virtual_sites) != n_replicas
+        throw(ArgumentError("number of virtual sites ($(length(replica_virtual_sites))) " *
+                            "does not match number of replicas ($n_replicas)"))
+    end
+
     if isnothing(replica_constraints)
-        if length(constraints) > 0
-            for ca in constraints
-                df -= n_dof_lost(D, ca.clusters)
-            end
-        end
-        replica_dfs = fill(df, n_replicas)
         replica_constraints = [constraints for _ in 1:n_replicas]
     elseif length(replica_constraints) != n_replicas
-        throw(ArgumentError("number of constraints ($(length(replica_constraints)))"
-                            * "does not match number of replicas ($n_replicas)"))
-    else
-        replica_dfs = fill(df, n_replicas)
-        for (i, rcs) in enumerate(replica_constraints)
-            if length(rcs) > 0
-                for ca in rcs
-                    replica_dfs[i] -= n_dof_lost(D, ca.clusters)
-                end
-            end
+        throw(ArgumentError("number of constraints ($(length(replica_constraints)))" *
+                            "does not match number of replicas ($n_replicas)"))
+    end
+
+    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, cs, AT, D)
+                                  for (vss, cs) in zip(replica_virtual_sites, replica_constraints)]
+    replica_n_virtual_sites = [sum(vsfs) for vsfs in replica_virtual_site_flags]
+    replica_dfs = [n_dof(D, n_atoms - n_virtual_sites, rb)
+                   for (n_virtual_sites, rb) in zip(replica_n_virtual_sites, replica_boundaries)]
+
+    for (i, rcs) in enumerate(replica_constraints)
+        for ca in rcs
+            replica_dfs[i] -= n_dof_lost(D, ca.clusters)
         end
     end
 
@@ -1079,14 +1120,14 @@ function ReplicaSystem(;
         throw(ArgumentError("some replicas have different number of velocities"))
     end
 
-    if length(atoms) != length(replica_coords[1])
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(replica_coords[1])) coordinates"))
+    if n_atoms != length(replica_coords[1])
+        throw(ArgumentError("there are $n_atoms atoms but $(length(replica_coords[1])) coordinates"))
     end
-    if length(atoms) != length(replica_velocities[1])
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(replica_velocities[1])) velocities"))
+    if n_atoms != length(replica_velocities[1])
+        throw(ArgumentError("there are $n_atoms atoms but $(length(replica_velocities[1])) velocities"))
     end
-    if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
-        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+    if length(atoms_data) > 0 && n_atoms != length(atoms_data)
+        throw(ArgumentError("there are $n_atoms atoms but $(length(atoms_data)) atom data entries"))
     end
 
     n_gpu_array = sum(y -> isa(y, AbstractGPUArray), replica_coords)
@@ -1111,23 +1152,20 @@ function ReplicaSystem(;
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
-    atom_masses = mass.(atoms)
-    M = typeof(atom_masses)
-    total_mass = sum(atom_masses)
-    TM = typeof(total_mass)
-
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
     replicas = Tuple(System{D, AT, T, A, C, typeof(replica_boundaries[i]), V, AD, TO,
                         typeof(replica_pairwise_inters[i]), typeof(replica_specific_inter_lists[i]),
-                        typeof(replica_general_inters[i]), typeof(replica_constraints[i]), NF,
-                        typeof(replica_loggers[i]), F, E, K, M, TM, Nothing}(
+                        typeof(replica_general_inters[i]), typeof(replica_constraints[i]),
+                        typeof(replica_virtual_sites[i]), typeof(replica_virtual_site_flags[i]),
+                        NF, typeof(replica_loggers[i]), F, E, K, M, TM, Nothing}(
             atoms, replica_coords[i], replica_boundaries[i], replica_velocities[i],
             atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], replica_constraints[i],
-            deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i], force_units,
-            energy_units, k_converted, atom_masses, total_mass, nothing) for i in 1:n_replicas)
+            replica_general_inters[i], replica_constraints[i], replica_virtual_sites[i],
+            replica_virtual_site_flags[i], deepcopy(neighbor_finder), replica_loggers[i],
+            replica_dfs[i], force_units, energy_units, k_converted, atom_masses,
+            total_mass, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA}(
@@ -1150,7 +1188,7 @@ The array type of a [`System`](@ref), [`ReplicaSystem`](@ref) or array, for exam
 `Array` for systems on CPU or `CuArray` for systems on a NVIDIA GPU.
 """
 array_type(::AT) where AT = AT.name.wrapper
-array_type(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT
+array_type(::Union{System{<:Any, AT}, ReplicaSystem{<:Any, AT}}) where {AT} = AT
 
 """
     is_on_gpu(sys)
@@ -1158,7 +1196,9 @@ array_type(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT
 
 Whether a [`System`](@ref), [`ReplicaSystem`](@ref) or array type is on the GPU.
 """
-is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}, AT}) where {D, AT} = AT <: AbstractGPUArray
+function is_on_gpu(::Union{System{<:Any, AT}, ReplicaSystem{<:Any, AT}, AT}) where AT
+    return AT <: AbstractGPUArray
+end
 
 """
     float_type(sys)
@@ -1166,7 +1206,7 @@ is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}, AT}) where {D, AT} = AT <
 
 The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
 """
-float_type(::Union{System{D, AT, T}, ReplicaSystem{D, AT, T}}) where {D, AT, T} = T
+float_type(::Union{System{<:Any, <:Any, T}, ReplicaSystem{<:Any, <:Any, T}}) where {T} = T
 
 """
     masses(sys)
@@ -1185,7 +1225,9 @@ charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
 charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
 charge(s::Union{System, ReplicaSystem}, ::Colon) = charge.(s.atoms)
 
-Base.getindex(s::Union{System, ReplicaSystem}, i::Union{Integer, AbstractVector}) = s.atoms[i]
+# Separate methods to avoid method ambiguity with AtomsBase
+Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = s.atoms[i]
+Base.getindex(s::Union{System, ReplicaSystem}, is::AbstractVector{Bool}) = s.atoms[is]
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
 Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
@@ -1322,7 +1364,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
     is_cubic = true
     for (i, bv) in enumerate(bb)
         for j in 1:(i - 1)
-            if !iszero(bv[j])
+            if !iszero_value(bv[j])
                 is_cubic = false
             end
         end
@@ -1558,6 +1600,8 @@ end
 
 function update_ase_calc! end
 
+# ForwardDiff.jl checks both value and derivative
+# This could be extended to only check the value for Duals
 iszero_value(x) = iszero(x)
 
 # Only use threading if a condition is true
