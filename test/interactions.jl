@@ -635,6 +635,52 @@ end
             atol=1e-9u"kJ * mol^-1",
         )
     end
+
+    # Test that force and potential energy are zero after the cutoff distance
+    c3 = SVector(2.0, 1.0, 1.0)u"nm"  # Distance of 1.0 nm > dist_cut (0.8 nm)
+    c4 = SVector(2.2, 1.0, 1.0)u"nm"  # Distance of 1.2 nm > dist_cut (0.8 nm)
+    dr13 = vector(c1, c3, boundary)
+    dr14 = vector(c1, c4, boundary)
+
+    cutoffs_with_cutoff = [
+        DistanceCutoff(dist_cut),
+        ShiftedPotentialCutoff(dist_cut),
+        ShiftedForceCutoff(dist_cut),
+        CubicSplineCutoff(dist_act, dist_cut),
+    ]
+
+    for cutoff in cutoffs_with_cutoff
+        inter = LennardJones(cutoff=cutoff)
+        # Test at distance 1.0 nm (beyond cutoff)
+        @test isapprox(
+            force(inter, dr13, a1, a1)[1],
+            0.0u"kJ * mol^-1 * nm^-1";
+            atol=1e-12u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr13, a1, a1),
+            0.0u"kJ * mol^-1";
+            atol=1e-12u"kJ * mol^-1",
+        )
+        # Test at distance 1.2 nm (well beyond cutoff)
+        @test isapprox(
+            force(inter, dr14, a1, a1)[1],
+            0.0u"kJ * mol^-1 * nm^-1";
+            atol=1e-12u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr14, a1, a1),
+            0.0u"kJ * mol^-1";
+            atol=1e-12u"kJ * mol^-1",
+        )
+    end
+
+    # Test that NoCutoff still has non-zero values at large distances
+    inter_no_cutoff = LennardJones(cutoff=NoCutoff())
+    f_no_cutoff = force(inter_no_cutoff, dr13, a1, a1)[1]
+    pe_no_cutoff = potential_energy(inter_no_cutoff, dr13, a1, a1)
+    @test abs(f_no_cutoff) > 1e-6u"kJ * mol^-1 * nm^-1"
+    @test abs(pe_no_cutoff) > 1e-9u"kJ * mol^-1"
 end
 
 @testset "Ewald" begin
