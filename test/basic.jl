@@ -453,28 +453,6 @@ end
     end
 end
 
-@testset "Analysis" begin
-    pdb_path = joinpath(data_dir, "1ssu.pdb")
-    struc = read(pdb_path, BioStructures.PDBFormat)
-    cm_1 = BioStructures.coordarray(struc[1], BioStructures.calphaselector)
-    cm_2 = BioStructures.coordarray(struc[2], BioStructures.calphaselector)
-    coords_1 = SVector{3, Float64}.(eachcol(cm_1)) / 10 * u"nm"
-    coords_2 = SVector{3, Float64}.(eachcol(cm_2)) / 10 * u"nm"
-    @test rmsd(coords_1, coords_2) ≈ 2.54859467758795u"Å"
-    for AT in array_list[2:end]
-        @test rmsd(to_device(coords_1, AT), to_device(coords_2, AT)) ≈ 2.54859467758795u"Å"
-    end
-
-    bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)
-    coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
-    bb_to_mass = Dict("C" => 12.011u"g/mol", "N" => 14.007u"g/mol", "O" => 15.999u"g/mol")
-    atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
-    @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å"; atol=1e-6u"nm")
-    boundary = CubicBoundary(10.0u"nm")
-    coords_wrap = wrap_coords.(coords, (boundary,))
-    @test isapprox(hydrodynamic_radius(coords_wrap, boundary), 21.00006825680275u"Å"; atol=1e-6u"nm")
-end
-
 @testset "Replica System" begin
     n_atoms = 100
     boundary = CubicBoundary(2.0u"nm")

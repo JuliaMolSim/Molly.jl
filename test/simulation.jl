@@ -514,7 +514,7 @@ end
         Gravity(G=G, use_neighbors=true), Gravity(G=G, use_neighbors=false),
     )
 
-    @testset "$inter" for inter in pairwise_inter_types
+    for inter in pairwise_inter_types
         if use_neighbors(inter)
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
