@@ -4,40 +4,34 @@ export
     AWHPMFDeconvolution,
     simulate!
 
-# --- Statistics & Logging (Storage) ---
+# --- Statistics & Logging ---
 mutable struct AWHStats{T}
     step_indices::Vector{Int}
     active_λ::Vector{Int}
     f_history::Vector{Vector{T}}
-    n_effective_history::Vector{T} # Logs the ACTIVE N (N_bias or N_ref)
-    stage_history::Vector{Symbol}  # :initial or :linear
+    n_effective_history::Vector{T}
+    stage_history::Vector{Symbol}
     max_delta_f_history::Vector{T}
 end
 
-# --- PMF Deconvolution Struct (Generalized) ---
+# --- Optimized PMF Deconvolution Struct ---
 """
-    AWHPMFDeconvolution{N, T, F_CV, F_Coup}
+    AWHPMFDeconvolution
 
-Stores the histograms required to compute the Potential of Mean Force (PMF) 
-using the AWH deconvolution method (Lindahl et al. 2014, Eq. 9).
-
-# Fields
-- `min_vals`: Tuple of minimum boundaries for the PMF grid (per dimension).
-- `bin_widths`: Tuple of bin widths.
-- `shape`: Tuple of grid dimensions (number of bins).
-- `cv_function`: Function `coords -> ξ` (Tuple). Calculates the reaction coordinate.
-- `coupling_function`: Function `(ξ, λ_index) -> Q`. Returns the *dimensionless* bias energy.
-- `numerator_hist`: Accumulator for Eq. 9 numerator.
-- `denominator_hist`: Accumulator for Eq. 9 denominator.
-- `sample_count`: Total samples accumulated.
+Optimized implementation of the AWH Deconvolution (Lindahl et al. 2014).
+Pre-computes the coupling matrix Q to avoid evaluating restraint functions 
+at every simulation step.
 """
-mutable struct AWHPMFDeconvolution{N, T, F_CV, F_Coup}
+mutable struct AWHPMFDeconvolution{N, T, F_CV}
     min_vals::NTuple{N, T}
     bin_widths::NTuple{N, T}
     shape::NTuple{N, Int}
 
     cv_function::F_CV         
-    coupling_function::F_Coup 
+
+    # Optimization: Pre-computed exp(-Q(xi, lambda))
+    # Rows: Linearized Bin Index, Cols: Window Index
+    coupling_matrix::Matrix{T} 
 
     numerator_hist::Array{T, N}
     denominator_hist::Array{T, N}
@@ -50,17 +44,38 @@ function AWHPMFDeconvolution(
     max_vals::NTuple{N, T},
     n_bins::NTuple{N, Int},
     cv_function::F_CV,
-    coupling_function::F_Coup
-) where {N, T, F_CV, F_Coup}
+    coupling_function, # Function(xi, k) -> Q
+    n_windows::Int
+) where {N, T, F_CV}
     
     bin_widths = (max_vals .- min_vals) ./ n_bins
+    total_bins = prod(n_bins)
     
-    return AWHPMFDeconvolution{N, T, F_CV, F_Coup}(
+    # --- PRE-COMPUTATION STEP ---
+    # We populate the matrix M[bin, window] = exp(-Q(bin, window))
+    coupling_matrix = Matrix{T}(undef, total_bins, n_windows)
+    
+    # Helper to iterate N-dimensional grid
+    cartesian_indices = CartesianIndices(n_bins)
+    
+    # Iterate all bins (linear index i)
+    for (i, idx) in enumerate(cartesian_indices)
+        # Determine center of this bin ξ
+        xi = ntuple(d -> min_vals[d] + (idx[d] - 0.5) * bin_widths[d], N)
+        
+        # Iterate all windows k
+        for k in 1:n_windows
+            Q = coupling_function(xi, k)
+            coupling_matrix[i, k] = exp(-Q)
+        end
+    end
+    
+    return AWHPMFDeconvolution{N, T, F_CV}(
         min_vals,
         bin_widths,
         n_bins,
         cv_function,
-        coupling_function,
+        coupling_matrix,
         zeros(T, n_bins...),
         zeros(T, n_bins...),
         0
@@ -68,60 +83,51 @@ function AWHPMFDeconvolution(
 end
 
 function update_pmf!(
-    pmf::AWHPMFDeconvolution{N, T, F_CV, F_Coup},
-    awh_state, # Untyped to avoid circular dependency issues in definitions
+    pmf::AWHPMFDeconvolution{N, T, F_CV},
+    awh_state, 
     curr_coords
-) where {N, T, F_CV, F_Coup}
+) where {N, T, F_CV}
     
     # 1. Calculate current CV ξ(t)
-    # The cv_function should return a Tuple (even for 1D) or we wrap it
     val = pmf.cv_function(curr_coords)
     current_cv = val isa Tuple ? val : (val,)
 
-    # 2. Determine which bin the current sample falls into
-    # We use index math: idx = floor((val - min)/width) + 1
-    # This assumes the grid covers the domain of interest.
+    # 2. Determine Linear Index of current sample
+    # (Needed to update the Numerator)
     current_indices = ntuple(N) do d
-        # Clamp to grid edges to avoid bounds errors, or let it fail if stricter
         rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
         idx = Int(floor(rel)) + 1
         clamp(idx, 1, pmf.shape[d])
     end
     current_cartesian = CartesianIndex(current_indices)
+    current_linear_idx = LinearIndices(pmf.shape)[current_cartesian]
 
-    # 3. Pre-calc effective bias factors g(λ) = f(λ) + ln ρ(λ)
-    # P_sim ~ exp(-E + g). We need to unbias by exp(-g).
-    # Lindahl Eq 9 uses e^{-gamma} = sum_lambda exp(g - Q).
+    # 3. Compute Dynamic Weights
+    # g(λ) = f(λ) + ln ρ(λ)
+    # weights = exp(g)
     g = awh_state.f .+ awh_state.log_rho
-    n_windows = length(g)
-
-    # 4. Iterate over the entire PMF Grid (The Deconvolution)
-    # We calculate gamma(xi) for every bin center.
+    weights = exp.(g) 
     
-    # Helper to get bin center coordinate
-    get_bin_center(d, i) = pmf.min_vals[d] + (i - 0.5) * pmf.bin_widths[d]
-
-    for I in CartesianIndices(pmf.shape)
-        # Construct ξ for this bin
-        xi = ntuple(d -> get_bin_center(d, I[d]), N)
-        
-        # Calculate sum_lambda exp(g(λ) - Q(ξ, λ))
-        sum_exp = zero(T)
-        for k in 1:n_windows
-            # Generalized coupling: User provides Q(ξ, k)
-            Q = pmf.coupling_function(xi, k)
-            sum_exp += exp(g[k] - Q)
-        end
-        
-        # Unbiasing factor e^{gamma(xi)} = 1 / sum_exp
-        term = 1.0 / sum_exp
+    # 4. Global Update (Matrix Multiplication)
+    # Denominator vector D = Matrix * Weights
+    # D[i] = Sum_k ( M[i,k] * weights[k] )
+    # This replaces the nested loop and function calls
+    denom_vector = pmf.coupling_matrix * weights
+    
+    # 5. Accumulate Histograms
+    # The denom_vector contains 1/e^{gamma(xi)} for every bin
+    
+    # We iterate the linear index to update arrays
+    # (Using linear indexing on arrays is faster here)
+    for i in eachindex(pmf.denominator_hist)
+        term = 1.0 / denom_vector[i]
         
         # Update Denominator (Everywhere)
-        pmf.denominator_hist[I] += term
+        pmf.denominator_hist[i] += term
         
-        # Update Numerator (Only at sampled position)
-        if I == current_cartesian
-            pmf.numerator_hist[I] += term
+        # Update Numerator (Only at visited bin)
+        if i == current_linear_idx
+            pmf.numerator_hist[i] += term
         end
     end
     
@@ -418,16 +424,19 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     )
 end
 
+# Updated AWHSimulation Constructor to match new Deconvolution signature
 struct AWHSimulation{T}
     n_windows::Int
     initial_sampl_n::T
-    n_md_steps::Int         # Number of MD steps to run between samplings
-    update_freq::Int        # Number of samples between f-updates
-    well_tempered_fac::T    # Well-tempered factor (Inf = Standard AWH/Uniform)
-    coverage_threshold::T   # Fraction of windows visited to trigger doubling
-    significant_weight::T   # Threshold to count a window as "visited"
-    log_freq::Int           # Frequency of storing data to history
+    n_md_steps::Int 
+    update_freq::Int        
+    well_tempered_fac::T    
+    coverage_threshold::T   
+    significant_weight::T   
+    log_freq::Int           
     state::AWHState{T}
+    
+    pmf_calc::Union{AWHPMFDeconvolution, Nothing}
 end
 
 function AWHSimulation(
@@ -449,7 +458,11 @@ function AWHSimulation(
     pmf_calc = nothing
     if !isnothing(pmf_cv) && !isnothing(pmf_coupling) && !isnothing(pmf_grid)
         min_vals, max_vals, n_bins = pmf_grid
-        pmf_calc = AWHPMFDeconvolution(min_vals, max_vals, n_bins, pmf_cv, pmf_coupling)
+        # We pass n_win here so Deconvolution can build the matrix
+        pmf_calc = AWHPMFDeconvolution(
+            min_vals, max_vals, n_bins, 
+            pmf_cv, pmf_coupling, n_win
+        )
     end
 
     return AWHSimulation(n_win,
@@ -581,11 +594,9 @@ function simulate!(awh_sim::AWHSimulation, n_steps::Int)
 
         process_sample(awh_sim.state)
 
-        # --- PMF Deconvolution Update ---
         if !isnothing(awh_sim.pmf_calc)
             update_pmf!(awh_sim.pmf_calc, awh_sim.state, awh_sim.state.active_sys.coords)
         end
-        # --------------------------------
 
         active_idx_new = gibbs_sample_window(awh_sim.state)
         if active_idx_new != active_idx
