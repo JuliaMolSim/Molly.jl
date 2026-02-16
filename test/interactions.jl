@@ -629,34 +629,32 @@
     rb1 = RBTorsion(f1=10.0u"kJ * mol^-1", f2=20.0u"kJ * mol^-1",
                     f3=30.0u"kJ * mol^-1", f4=5.0u"kJ * mol^-1")
     
-    # Test that force calculation works and produces finite values
+    # Test that force calculation produces expected values (regression test)
     fs = force(rb1, c1t, c2t, c3t, c4t, boundary_rb)
-    @test isfinite(norm(fs.f1))
-    @test isfinite(norm(fs.f2))
-    @test isfinite(norm(fs.f3))
-    @test isfinite(norm(fs.f4))
+    @test isapprox(norm(fs.f1), 497.6067743425172u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(norm(fs.f2), 673.7627575276049u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(norm(fs.f3), 351.86112450195805u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(norm(fs.f4), 287.2934051172337u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
     
-    # Test potential energy calculation works
+    # Test potential energy calculation
     pe = potential_energy(rb1, c1t, c2t, c3t, c4t, boundary_rb)
-    @test pe isa typeof(1.0u"kJ * mol^-1")
-    @test isfinite(ustrip(pe))
+    @test isapprox(pe, 47.38033871712585u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
 
     # PeriodicTorsion tests
     pt1 = PeriodicTorsion(periodicities=(1, 2, 3), phases=(0.0, Float64(π/2), Float64(π)),
                           ks=(10.0u"kJ * mol^-1", 5.0u"kJ * mol^-1", 2.0u"kJ * mol^-1"),
                           proper=true)
     
-    # Test with non-collinear atoms - forces should be calculable
+    # Test with non-collinear atoms - forces should match expected values (regression test)
     fs = force(pt1, c1t, c2t, c3t, c4t, boundary_rb)
-    @test isfinite(norm(fs.f1))
-    @test isfinite(norm(fs.f2))
-    @test isfinite(norm(fs.f3))
-    @test isfinite(norm(fs.f4))
+    @test isapprox(norm(fs.f1), 139.51649514944324u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(norm(fs.f2), 188.90622744571394u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(norm(fs.f3), 98.65305980755139u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(norm(fs.f4), 80.54988603092418u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
     
     # Test potential energy calculation
     pe = potential_energy(pt1, c1t, c2t, c3t, c4t, boundary_rb)
-    @test pe isa typeof(1.0u"kJ * mol^-1")
-    @test isfinite(ustrip(pe))
+    @test isapprox(pe, 4.587951202894674u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
     
     # Test zero PeriodicTorsion
     pt_zero = zero(pt1)
@@ -675,8 +673,7 @@
     pt_improper = PeriodicTorsion(periodicities=(2,), phases=(Float64(π),),
                                   ks=(15.0u"kJ * mol^-1",), proper=false)
     pe_improper = potential_energy(pt_improper, c1t, c2t, c3t, c4t, boundary_rb)
-    @test pe_improper isa typeof(1.0u"kJ * mol^-1")
-    @test isfinite(ustrip(pe_improper))
+    @test isapprox(pe_improper, 20.0u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
 
     do_shortcut(atom_i, atom_j) = true
 
@@ -707,23 +704,19 @@
     # Redefine atoms for pairwise interactions (a1 was overwritten by UreyBradley above)
     a1_mie = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
     
-    # Test Mie potential with m=4, n=6 (softer than LJ)
+    # Test Mie potential with m=4, n=6 (softer than LJ) - regression test
     mie_soft = Mie(m=4, n=6)
     f_soft = force(mie_soft, dr12, a1_mie, a1_mie)
     pe_soft = potential_energy(mie_soft, dr12, a1_mie, a1_mie)
-    @test f_soft isa SVector{3}
-    @test isfinite(norm(f_soft))
-    @test pe_soft isa typeof(1.0u"kJ * mol^-1")
-    @test isfinite(ustrip(pe_soft))
+    @test isapprox(norm(f_soft), 9.0u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(pe_soft, 0.0u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
 
-    # Test Mie potential with m=12, n=24 (harder than LJ)
+    # Test Mie potential with m=12, n=24 (harder than LJ) - regression test
     mie_hard = Mie(m=12, n=24)
     f_hard = force(mie_hard, dr12, a1_mie, a1_mie)
     pe_hard = potential_energy(mie_hard, dr12, a1_mie, a1_mie)
-    @test f_hard isa SVector{3}
-    @test isfinite(norm(f_hard))
-    @test pe_hard isa typeof(1.0u"kJ * mol^-1")
-    @test isfinite(ustrip(pe_hard))
+    @test isapprox(norm(f_hard), 32.0u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(pe_hard, 0.0u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
 
     # Test soft-core with λ=0 (should give zero interaction)
     lj_sc_zero = LennardJonesSoftCoreBeutler(α=0.5, λ=0.0)
