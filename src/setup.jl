@@ -326,7 +326,7 @@ function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t
     # Recover matched permutation from cache to return the oriented key
     ic = ff.torsion_resolver.improper_cache
     cache_hit = get(ic, (t1, t2, t3, t4), :miss)
-    if cache_hit === :miss
+    if cache_hit == :miss
         return (p, (t1, t2, t3, t4)) # Fallback
     else
         perm, _ = cache_hit
@@ -496,7 +496,7 @@ function System(coord_file::AbstractString,
     template_names = keys(force_field.residues)
     # Match each residue graph to a template and assign atom types/charges
     atom_type_of = Vector{String}(undef, n_atoms)
-    charge_of = Vector{T}(undef, n_atoms)
+    charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
 
@@ -582,18 +582,21 @@ function System(coord_file::AbstractString,
     for ai in 1:n_atoms
         atype = atom_type_of[ai]
         at = force_field.atom_types[atype]
-        if ismissing(charge_of[ai])
-            error("atom $ai type $atype has missing charge")
-        end
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom $ai type $atype has unset σ or ϵ")
         end
         if use_charge_from_residue
-            chrge = charge_of[ai]
+            ch = charge_of[ai]
+            if ismissing(ch)
+                error("atom $ai type $atype has charge missing from residue template")
+            end
         else
-            chrge = force_field.atom_types[atype].charge
+            ch = force_field.atom_types[atype].charge
+            if ismissing(ch)
+                error("atom $ai type $atype has charge missing")
+            end
         end
-        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ))
+        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
 
         res = residue_from_atom_idx(ai, canonical_system)
         res_cfl = chemfiles_residue_for_atom(top, ai - 1)
@@ -607,6 +610,7 @@ function System(coord_file::AbstractString,
                                    chain_id=chain_from_atom_idx(ai, canonical_system), element=element_of[ai], hetero_atom=hetero))
         eligible[ai, ai] = false
     end
+    atoms = to_device([atoms_abst...], AT)
 
     # Bonds
     for (i, j) in top_bonds
@@ -834,7 +838,7 @@ function System(coord_file::AbstractString,
     imps_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
                                 proper=t.proper, n_terms=torsion_n_terms) for t in imps_il.inters]
 
-    return System(T, AT, to_device([atoms_abst...], AT), coords, boundary_used, velocities,
+    return System(T, AT, atoms, coords, boundary_used, velocities,
                   atoms_data, virtual_sites_type, loggers, data, bonds_il, angles_il, tors_il,
                   imps_il, tors_pad, imps_pad, eligible, special, units, dist_cutoff,
                   constraints, rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,

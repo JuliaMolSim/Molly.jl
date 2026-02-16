@@ -11,14 +11,14 @@ struct ResidueTemplate{T, IC}
     bonds::Vector{Tuple{Int, Int}}
     external_bonds::Vector{Int} # Count of external connections per atom
     allowed_patches::Vector{String}
-    charges::Vector{T}
+    charges::Vector{Union{T, Missing}}
     extras::BitVector # Marks extra particles
 end
 
-struct ResidueTemplatePatch{T}
+struct ResiduePatchTemplate
     pname::String
-    add_atoms::Vector{Tuple{String, String, T}}
-    change_atoms::Vector{Tuple{String, String, T}}
+    add_atoms::Vector{Tuple{String, String, Any}}
+    change_atoms::Vector{Tuple{String, String, Any}}
     remove_atoms::Vector{String}
     add_bonds::Vector{Tuple{String, String}}
     remove_bonds::Vector{Tuple{String, String}}

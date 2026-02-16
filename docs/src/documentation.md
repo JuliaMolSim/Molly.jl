@@ -427,7 +427,7 @@ The following tags are supported:
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
 - `<PeriodicTorsionForce>`: both `<Proper>` and `<Improper>` tags are supported
-- `<NonbondedForce>`: `<UseAttributeFromResidue name="charge"/>` should be present, other `<UseAttributeFromResidue>` tags are not supported
+- `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported
 
 The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
 - `<RBTorsionForce>`

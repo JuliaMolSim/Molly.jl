@@ -128,7 +128,7 @@ function find_proper_match(t1::AbstractString, t2::AbstractString, t3::AbstractS
     pc = resolver.proper_cache
     if haskey(pc, sig)
         v = pc[sig]
-        if v === :miss
+        if v == :miss
             return (nothing, nothing)
         else
             return (resolver.rules[v::Int].params, resolver.rules[v::Int].specificity)
@@ -179,7 +179,7 @@ function find_improper_match(t1::AbstractString, t2::AbstractString, t3::Abstrac
     ic = resolver.improper_cache
     if haskey(ic, key)
         v = ic[key]
-        if v === :miss
+        if v == :miss
             return nothing
         else
             return resolver.rules[(v::Tuple{NTuple{4, Int}, Int})[2]].params
@@ -287,7 +287,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     weight_14_coulomb_set, weight_14_lj_set = false, false
     attributes_from_residue = String[]
     residues = Dict{String, ResidueTemplate}()
-    patches = Dict{String, ResidueTemplatePatch}()
+    patches = Dict{String, ResiduePatchTemplate}()
     type_info = Dict{String, Tuple{String, String}}() # Type => (element, class)
 
     resname_replacements, atomname_replacements = load_replacements()
@@ -338,7 +338,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 for residue in eachelement(entry)
                     rname = residue["name"]
                     atoms, types = String[], String[]
-                    charges = T[]
+                    charges = Union{T, Missing}[]
                     elements = Symbol[]
                     virtual_sites = VirtualSiteTemplate{T, IC}[]
                     external_bonds_name = String[]
@@ -351,7 +351,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                         if re.name == "Atom"
                             an = re["name"]
                             tp = re["type"]
-                            q = parse(T, re["charge"])
+                            q = (haskey(re, "charge") ? parse(T, re["charge"]) : missing)
                             push!(atoms, an)
                             push!(types, tp)
                             push!(charges, q)
@@ -433,9 +433,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                                         weight_13, weight_cross)
                                 push!(virtual_sites, vs)
                             elseif vs_type == "localCoords"
-                                @warn "Virtual site type $vs_type not currently supported; ignoring"
+                                @warn "Virtual site type $vs_type not currently supported, ignoring"
                             else
-                                @warn "Unrecognised virtual site type $vs_type; ignoring"
+                                @warn "Unrecognised virtual site type $vs_type, ignoring"
                             end
                         end
                     end
@@ -474,12 +474,12 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     pname = patch["name"]
                     if haskey(patch, "residues") && patch["residues"] != "1"
                         @warn "Residue patches altering multiple templates not currently " *
-                              "supported; ignoring patch $pname"
+                              "supported, ignoring patch $pname"
                         continue
                     end
 
-                    add_atoms = Tuple{String, String, T}[]
-                    change_atoms = Tuple{String, String, T}[]
+                    add_atoms = Tuple{String, String, Any}[]
+                    change_atoms = Tuple{String, String, Any}[]
                     remove_atoms = String[]
                     add_bonds = Tuple{String, String}[]
                     remove_bonds = Tuple{String, String}[]
@@ -489,9 +489,11 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
                     for pa in eachelement(patch)
                         if pa.name == "AddAtom"
-                            push!(add_atoms, (pa["name"], pa["type"], parse(T, pa["charge"])))
+                            q = (haskey(pa, "charge") ? parse(T, pa["charge"]) : missing)
+                            push!(add_atoms, (pa["name"], pa["type"], q))
                         elseif pa.name == "ChangeAtom"
-                            push!(change_atoms, (pa["name"], pa["type"], parse(T, pa["charge"])))
+                            q = (haskey(pa, "charge") ? parse(T, pa["charge"]) : missing)
+                            push!(change_atoms, (pa["name"], pa["type"], q))
                         elseif pa.name == "RemoveAtom"
                             push!(remove_atoms, pa["name"])
                         elseif pa.name == "AddBond"
@@ -506,7 +508,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             push!(apply_to_residues, pa["name"])
                         end
                     end
-                    patches[pname] = ResidueTemplatePatch(pname, add_atoms, change_atoms,
+                    patches[pname] = ResiduePatchTemplate(pname, add_atoms, change_atoms,
                                         remove_atoms, add_bonds, remove_bonds, add_external_bonds,
                                         remove_external_bonds, apply_to_residues)
                 end
@@ -591,22 +593,24 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             end
                         end
                     elseif atom_or_attr.name == "UseAttributeFromResidue"
-                        if !(atom_or_attr["name"] in attributes_from_residue)
-                            push!(attributes_from_residue, atom_or_attr["name"])
+                        use_attr = atom_or_attr["name"]
+                        if !(use_attr in attributes_from_residue)
+                            push!(attributes_from_residue, use_attr)
                         end
-                        if atom_or_attr["name"] != "charge"
-                            @warn "UseAttributeFromResidue only supported for charge; ignoring"
+                        if use_attr != "charge"
+                            @warn "UseAttributeFromResidue only supported for charge, " *
+                                  "ignoring $use_attr"
                         end
                     end
                 end
 
             elseif entry_name == "Include"
-                @warn "File includes not currently supported; ignoring"
+                @warn "File includes not currently supported, ignoring"
             elseif entry_name in ("RBTorsionForce","CMAPTorsionForce","GBSAOBCForce",
                                   "CustomBondForce","CustomAngleForce","CustomTorsionForce",
                                   "CustomNonbondedForce","CustomGBForce","CustomHbondForce",
                                   "CustomManyParticleForce","LennardJonesForce")
-                @warn "$entry_name not currently supported; ignoring"
+                @warn "$entry_name not currently supported, ignoring"
             end
         end
     end
@@ -733,7 +737,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     wild_impropers = Int[]
 
     for (idx_spec, item) in enumerate(torsion_rule_spec)
-        if item[1] === :torsion_rule
+        if item[1] == :torsion_rule
             _, p1, p2, p3, p4, spec, params_any, ordering, wildcard = item
             _, periodicities, phases, ks, proper = params_any
             params = PeriodicTorsionType{T, E}(periodicities, phases, ks, proper)
