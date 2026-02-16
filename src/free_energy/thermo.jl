@@ -2,22 +2,17 @@ export
     ThermoState
 
 """
-    ThermoState(name::AbstractString, β, p, system)
-    ThermoState(system::System, β, p; name::Union{Nothing, AbstractString}=nothing)
+    ThermoState(system::System, integrator; name=nothing)
 
-Thermodynamic state wrapper carrying inverse temperature `β = 1/kBT`, pressure `p`,
-and the [`System`](@ref) used to evaluate energies.
+Thermodynamic state wrapper carrying the system, integrator, and derived thermodynamic properties 
+(inverse temperature `β` and pressure `p`).
 
-Fields:
-- `name::String` - label for the state.
-- `t_couple` - Temperature coupling scheme. If NoCoupling is used, make sure to use an
-integrator that implicitly accounts for temperature, e.g., Langevin.
-- `p_couple` - Pressure coupling scheme. Can be NoCoupling.
-- `β` - inverse temperature with units compatible with `1/system.energy_units`.
-- `system::System` - simulation system used to compute potential energy.
-
-The second constructor checks unit consistency for `β` and `p` and sets a default
-`name` when not provided.
+# Arguments
+- `system::System`: The simulation system used to evaluate energies.
+- `integrator`: The integrator used to simulate the system. Must define temperature and/or pressure couplings 
+    (e.g., [`Langevin`](@ref), [`VelocityVerlet`](@ref) with thermostat/barostat).
+- `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on 
+    temperature and pressure is generated.
 """
 mutable struct ThermoState{I, B, P, S}
     name::String

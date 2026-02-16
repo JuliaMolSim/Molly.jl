@@ -1,10 +1,10 @@
 export 
     AWHState,
     AWHSimulation,
-    AWHPMFDeconvolution,
     simulate!
 
-# --- Statistics & Logging ---
+# Convenience struct to store relevant things
+# when running an AWH simulation.
 mutable struct AWHStats{T}
     step_indices::Vector{Int}
     active_λ::Vector{Int}
@@ -14,14 +14,10 @@ mutable struct AWHStats{T}
     max_delta_f_history::Vector{T}
 end
 
-# --- Optimized PMF Deconvolution Struct ---
-"""
-    AWHPMFDeconvolution
-
-Optimized implementation of the AWH Deconvolution (Lindahl et al. 2014).
-Pre-computes the coupling matrix Q to avoid evaluating restraint functions 
-at every simulation step.
-"""
+# Implements the deconvolution method to obtain
+# the unbiased PMF if AWH is run with biases,
+# contrary to running it for alchemical transformations.
+# See Lindahl et al. 2014
 mutable struct AWHPMFDeconvolution{N, T, F_CV}
     min_vals::NTuple{N, T}
     bin_widths::NTuple{N, T}
@@ -88,12 +84,11 @@ function update_pmf!(
     curr_coords
 ) where {N, T, F_CV}
     
-    # 1. Calculate current CV ξ(t)
+    # Calculate current CV ξ(t)
     val = pmf.cv_function(curr_coords)
     current_cv = val isa Tuple ? val : (val,)
 
-    # 2. Determine Linear Index of current sample
-    # (Needed to update the Numerator)
+    # Determine Linear Index of current sample
     current_indices = ntuple(N) do d
         rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
         idx = Int(floor(rel)) + 1
@@ -102,30 +97,28 @@ function update_pmf!(
     current_cartesian = CartesianIndex(current_indices)
     current_linear_idx = LinearIndices(pmf.shape)[current_cartesian]
 
-    # 3. Compute Dynamic Weights
+    # Compute Dynamic Weights
     # g(λ) = f(λ) + ln ρ(λ)
     # weights = exp(g)
     g = awh_state.f .+ awh_state.log_rho
     weights = exp.(g) 
     
-    # 4. Global Update (Matrix Multiplication)
-    # Denominator vector D = Matrix * Weights
+    # Global Update
+    # Denominator vector: D = Matrix * Weights
     # D[i] = Sum_k ( M[i,k] * weights[k] )
-    # This replaces the nested loop and function calls
     denom_vector = pmf.coupling_matrix * weights
     
-    # 5. Accumulate Histograms
+    # Accumulate Histograms
     # The denom_vector contains 1/e^{gamma(xi)} for every bin
     
     # We iterate the linear index to update arrays
-    # (Using linear indexing on arrays is faster here)
     for i in eachindex(pmf.denominator_hist)
         term = 1.0 / denom_vector[i]
         
-        # Update Denominator (Everywhere)
+        # Update Denominator
         pmf.denominator_hist[i] += term
         
-        # Update Numerator (Only at visited bin)
+        # Update Numerator
         if i == current_linear_idx
             pmf.numerator_hist[i] += term
         end
@@ -134,7 +127,9 @@ function update_pmf!(
     pmf.sample_count += 1
 end
 
-
+# Convenience function that builds neighbor finders.
+# This is needed to be able to properly separate 
+# alchemical atoms from normal atoms
 function build_neighbor_finder(ref_nfinder, eligible; 
                                reuse_neighbors::Bool = true)
 
@@ -152,7 +147,7 @@ function build_neighbor_finder(ref_nfinder, eligible;
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = ref_nfinder.special,
             n_steps = 1,
-            x0 = ref_nfinder.x0, # Assuming x0 available or generic ref
+            x0 = ref_nfinder.x0,
             unit_cell = ref_nfinder.unit_cell,
             dims = ref_nfinder.dims
         )
@@ -194,6 +189,9 @@ function build_neighbor_finder(ref_nfinder, eligible;
     return nf
 end
 
+# Convenience struct that stores the interactions
+# lists that change along the RC when performing
+# AWH. Allows efficient swap of Hamiltonians
 struct LambdaHamiltonian{PI, SI, GI}
     pairwise_inters::PI
     specific_inter_lists::SI
@@ -201,11 +199,25 @@ struct LambdaHamiltonian{PI, SI, GI}
 end
 
 """
-    AWHState(thermo_states; n_bias=100, ρ=nothing)
+    AWHState(thermo_states::AbstractArray{ThermoState};
+             first_state::Int                    = 1,
+             n_bias::Int                         = 100,
+             ρ::Union{Nothing, AbstractArray{T}} = nothing,
+             reuse_neighbors::Bool               = true)
 
-Represents the state of an AWH (Adaptive Biasing Force) simulation. 
-This struct manages the "Master" system (common solvent-solvent interactions) and the 
-differential "Specific" interactions (solute-solute and solute-solvent) for each lambda window.
+Represents the state of an AWH simulation.
+
+# Arguments
+- `thermo_states::AbstractArray{ThermoState}`: Iterable that carries the [`ThermoState`](@ref) structs that are used
+    as the different λ states used when running AWH.
+- `first_state::Int = 1`: The index of the [`ThermoState`](@ref) that will be used as the starting point of the AWH
+    simulation
+- `n_bias::Int = 100`: Fictitious effective sampling size to be used during the initial stage of the AWH simulation.
+    Smaller values imply a more aggressive sampling during this stage.
+- `ρ::Union{Nothing, AbstractArray{T}} = Nothing`: Target distribution along λ. If `nothing` is passed, defaults to 
+    uniform distribution.
+- `reuse_neighbors::Bool = true`: Wether to reuse the same neighbor finder for the reweighting step for a given sampled
+    conformation. Usually improves performance.
 """
 mutable struct AWHState{T}
     # Master System (Common interactions, e.g., Solvent-Solvent)
@@ -424,7 +436,48 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     )
 end
 
-# Updated AWHSimulation Constructor to match new Deconvolution signature
+"""
+    AWHSimulation(awh_state::AWHState{T};
+                  num_md_steps::Int          = 10,
+                  update_freq::Int           = 1,
+                  well_tempered_factor::Real = 10.0,
+                  coverage_threshold::Real   = 1.0,
+                  significant_weight::Real   = 0.1,
+                  log_freq::Int              = 100,
+                  pmf_cv                     = nothing,
+                  pmf_coupling               = nothing,
+                  pmf_grid                   = nothing)
+
+Prepares and runs an AWH simulation. This can be run with or without the deconvolution
+method described in [Lindahl et al.](https://doi.org/10.1063/1.4890371), in order to
+obtain an unbiased estimator og the true PMF. 
+For simulations where the λ coordinate is a biased reaction coordinate, e.g., using an 
+umbrella potential, the deconvolution approach is preferred. Alchemical transformations 
+do not require this method.
+
+# Arguments
+- `awh_state::AWHState{T}`: The [`AWHState`](@ref) defined to carry the necessary λ windows to run 
+    the simulation
+- `num_md_steps::Int = 10`: Number of MD steps to run between coordinate sampling.
+- `update_freq::Int = 1`: Number of samples to collect before updating the AWH bias. Note: the original
+    developers of AWH mention that there is not a clear advantage of setting this number > 1.
+- `well_tempered_factor::Real = 10.0`: If this number is set to anything other than `Inf` 
+    the AWH target distribution (ρ) is dynamically updated to favour low energy λ windows. Smaller
+    values accentuate this behaviour.
+- `coverage_threshold::Real = 1.0`: Proportion of λ windows that must be visited to advance the
+    initial stage of the algorithm, moving away from the fictitious effective sampling size.
+- `significant_weight::Real = 0.1`: When checking if a λ window has been visited, this value 
+    represents the fraction of an ideally uniform histogram of weights at a given bin, in order
+    to consider said bin has been actually visited. This effectively filts sampling noise.
+- `log_freq::Int = 100`: Number of AWH iterations between logging statistics.
+- `pmf_cv = nothing`: If something other than `nothing` is passed, the deconvolution method 
+    to obtain the unbiased PMF will be used. This must be a function that takes the coordinates 
+    of the system and returns a tuple of scalar Collective Variables `ξ::Real`.
+- `pmf_coupling = nothing`: Reqired if the previous argument was provided. Must be a function 
+    that returns the dimensionless bias energy given the tuple of CVs and a `lambda_idx::Int`.
+- `pmf_grid = nothing`: If the two previous arguments are passed this must be a tuple of tuples,
+    indicating the `((min,), (max,), (number_of_bins,))` for each CV.
+"""
 struct AWHSimulation{T}
     n_windows::Int
     initial_sampl_n::T
@@ -476,6 +529,7 @@ function AWHSimulation(
                          pmf_calc)
 end
 
+# Swaps Hamiltionians
 function update_active_sys!(awh_state::AWHState, active_idx::Int)
     awh_state.active_idx = active_idx
     master_specific = awh_state.master_sys.specific_inter_lists
@@ -486,6 +540,7 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
     awh_state.active_intg = awh_state.λ_integrators[active_idx]
 end
 
+# Reweights coordinates along λ windows and accumulates histogram
 function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where FT
     n_states = length(awh.λ_hamiltonians)
     coords = awh.active_sys.coords
@@ -526,10 +581,12 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
     end
 end
 
+# Decides which is the new Hamiltonian given some weights
 function gibbs_sample_window(state::AWHState)
     return sample(1:length(state.w_last), Weights(state.w_last))
 end
 
+# Logs important stuff
 function log_awh_statistics!(state::AWHState, step_idx::Int, delta_f, current_N)
     stats = state.stats
     max_change = maximum(abs.(delta_f))
@@ -541,6 +598,9 @@ function log_awh_statistics!(state::AWHState, step_idx::Int, delta_f, current_N)
     push!(stats.max_delta_f_history, max_change)
 end
 
+# Calculates the update free energy for each λ window
+# Updates target distribution if well tempered is required
+# Decides if to remain in initial sampling stage or move to linear stage
 function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     if awh_sim.state.n_accum < awh_sim.update_freq
         return nothing 
@@ -584,6 +644,17 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     return delta_f
 end
 
+"""
+    simulate!(awh_sim::AWHSimulation, n_steps::Int)
+
+Runs an AWH simulation. Number of AWH iterations is automatically determinded
+from the total number of MD steps requested and the number of MD steps to be
+taken between AWH loop.
+
+# Arguments
+- `awh_sim::AWHSimulation`: The [`AWHSimulation`](@ref) struct defining the system to be run.
+- `n_steps::Int`: Total number of MD steps to be run.
+"""
 function simulate!(awh_sim::AWHSimulation, n_steps::Int)
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
