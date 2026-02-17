@@ -195,7 +195,7 @@ end
 function AtomsCalculators.forces!(
     fs, sys, bias::BiasPotential;
     needs_vir::Bool = false,
-    buffers::Union{Nothing, BuffersCPU, BuffersGPU} = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
+    buffers = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
     kwargs...
 )
     if bias.cv_type.correction == :pbc
@@ -219,7 +219,7 @@ function AtomsCalculators.forces!(
     fs_svec = d_bias .* d_coords
     
     if needs_vir && bias.cv_type.has_virial
-        calculate_virial(bias.cv_type, from_device(coords), -fs_svec, from_device(sys.atoms), buffers, sys.boundary)
+        calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec, from_device(sys.atoms), sys.boundary)
     end
 
     fs .-= to_device(fs_svec, typeof(fs))

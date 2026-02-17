@@ -347,7 +347,7 @@ function AWHPMFDeconvolution(
     pmf_grid::Tuple
 ) where T
     
-    # 1. Parse Grid Dimensions
+    # Parse Grid Dimensions
     # pmf_grid format: ((min_1, min_2...), (max_1, max_2...), (bins_1, bins_2...))
     min_vals = T.(pmf_grid[1])
     max_vals = T.(pmf_grid[2])
@@ -356,7 +356,7 @@ function AWHPMFDeconvolution(
     N = length(n_bins)
     bin_widths = (max_vals .- min_vals) ./ n_bins
     
-    # 2. Inspect the first window to find BiasPotentials
+    # Inspect the first window to find BiasPotentials
     # We assume the structure of biases is consistent across windows
     first_ham = awh_state.λ_hamiltonians[1]
     
@@ -371,7 +371,7 @@ function AWHPMFDeconvolution(
         error("Found $(length(bias_indices)) BiasPotentials but grid is $(N)D.")
     end
 
-    # 3. Construct the CV Function (Closure)
+    # Construct the CV Function
     # We grab the cv_types from the first window
     cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
     
@@ -389,7 +389,7 @@ function AWHPMFDeconvolution(
         end
     end
 
-    # 4. Pre-compute Coupling Matrix
+    # Pre-compute Coupling Matrix
     # Matrix size: (Total Bins) x (Total Windows)
     total_bins = prod(n_bins)
     n_windows  = length(awh_state.λ_hamiltonians)

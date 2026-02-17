@@ -18,6 +18,8 @@ function center_of_mass(coords, atoms)
     return only(com)
 end
 
+function calculate_virial(cv, args...; kwargs...) end
+
 function pairwise_distance_matrix(coords_1::AbstractArray{SVector{D, C}},
                                   coords_2::AbstractArray{SVector{D, C}},
                                   calc_type,
@@ -216,11 +218,11 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     return dist_val
 end
 
-function calculate_virial(cv::CalcDist, coords, forces, atoms, buffers, boundary)
-    calculate_virial_dist(cv.dist_type, cv, coords, forces, atoms, buffers, boundary)
+function calculate_virial!(virial_buff, cv::CalcDist, coords, forces, atoms, boundary)
+    calculate_virial_dist!(virial_buff, cv.dist_type, cv, coords, forces, atoms, boundary)
 end
 
-function calculate_virial_dist(dt::CalcSingleDist, cv, coords, forces, atoms, buffers, boundary)
+function calculate_virial_dist!(virial_buff, dt::CalcSingleDist, cv, coords, forces, atoms, boundary)
     i = cv.atom_inds_1[1]
     j = cv.atom_inds_2[1]
     f_i = forces[i]
@@ -231,10 +233,10 @@ function calculate_virial_dist(dt::CalcSingleDist, cv, coords, forces, atoms, bu
         r_ji = coords[i] - coords[j]
     end
 
-    buffers.virial .+= r_ji * transpose(f_i)
+    virial_buff .+= r_ji * transpose(f_i)
 end
 
-function calculate_virial_dist(dt::CalcMinDist, cv, coords, forces, atoms, buffers, boundary)
+function calculate_virial_dist!(virial_buff, dt::CalcMinDist, cv, coords, forces, atoms, boundary)
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
     
@@ -265,10 +267,10 @@ function calculate_virial_dist(dt::CalcMinDist, cv, coords, forces, atoms, buffe
     # The total force on group 1 is the sum of forces on its atoms.
     # For MinDist, this is effectively the force on the closest atom.
     f_sum = sum(forces[cv.atom_inds_1])
-    buffers.virial .+= r_ji * transpose(f_sum)
+    virial_buff .+= r_ji * transpose(f_sum)
 end
 
-function calculate_virial_dist(dt::CalcMaxDist, cv, coords, forces, atoms, buffers, boundary)
+function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces, atoms, boundary)
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
     
@@ -297,10 +299,10 @@ function calculate_virial_dist(dt::CalcMaxDist, cv, coords, forces, atoms, buffe
     end
     
     f_sum = sum(forces[cv.atom_inds_1])
-    buffers.virial .+= r_ji * transpose(f_sum)
+    virial_buff .+= r_ji * transpose(f_sum)
 end
 
-function calculate_virial_dist(dt::CalcCMDist, cv, coords, forces, atoms, buffers, boundary)
+function calculate_virial_dist!(virial_buff, dt::CalcCMDist, cv, coords, forces, atoms, boundary)
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
     a1 = @view atoms[cv.atom_inds_1]
@@ -316,7 +318,7 @@ function calculate_virial_dist(dt::CalcCMDist, cv, coords, forces, atoms, buffer
     end
 
     f_sum = sum(forces[cv.atom_inds_1])
-    buffers.virial .+= r_12 * transpose(f_sum)
+    virial_buff .+= r_12 * transpose(f_sum)
 end
 
 """
@@ -369,7 +371,7 @@ end
 # Note: we cannot just compute Σ r_i ⊗ F_i as this will give 
 # different results depending on the choice of origin of coordinates.
 
-function calculate_virial(cv::CalcRg, coords, forces, atoms, buffers, boundary)
+function calculate_virial!(virial_buff, cv::CalcRg, coords, forces, atoms, boundary)
     # Select the relevant atoms/coordinates
     ids = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
     c_used = @view coords[ids]
@@ -383,7 +385,7 @@ function calculate_virial(cv::CalcRg, coords, forces, atoms, buffers, boundary)
     for (c, f) in zip(c_used, f_used)
         # Vector from COM to atom i (r_i - r_com), handling PBC
         r_ic = vector(com, c, boundary) 
-        buffers.virial .+= r_ic * transpose(f)
+        virial_buff .+= r_ic * transpose(f)
     end
 end
 
@@ -443,7 +445,7 @@ function calculate_cv_ustrip!(unit_arr, args...)
     return ustrip(cv)
 end
 
-function calculate_virial(cv::CalcRMSD, coords, forces, atoms, buffers, boundary)
+function calculate_virial!(virial_buff, cv::CalcRMSD, coords, forces, atoms, boundary)
     # Select the relevant atoms/coordinates
     ids = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
     c_used = @view coords[ids]
@@ -457,7 +459,7 @@ function calculate_virial(cv::CalcRMSD, coords, forces, atoms, buffers, boundary
     for (c, f) in zip(c_used, f_used)
         # Vector from centroid to atom i
         r_ic = vector(com, c, boundary)
-        buffers.virial .+= r_ic * transpose(f)
+        virial_buff .+= r_ic * transpose(f)
     end
 end
 
@@ -489,7 +491,7 @@ function calculate_cv(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs.
     return  torsion_angle(c[1], c[2], c[3], c[4], boundary)
 end
 
-function calculate_virial(cv::CalcTorsion, coords, forces, atoms, buffers, boundary)
+function calculate_virial!(virial_buff, cv::CalcTorsion, coords, forces, atoms, boundary)
     ids = collect(cv.atom_inds)
     c = @view coords[ids]
     f = @view forces[ids]
@@ -497,9 +499,9 @@ function calculate_virial(cv::CalcTorsion, coords, forces, atoms, buffers, bound
     r_jk = vector(c[2], c[3], boundary) # r_k - r_j
     r_jl = vector(c[2], c[4], boundary) # r_l - r_j
 
-    buffers.virial .+= r_ji * transpose(f[1]) +
-                       r_jk * transpose(f[3]) +
-                       r_jl * transpose(f[4])
+    virial_buff .+= r_ji * transpose(f[1]) +
+                    r_jk * transpose(f[3]) +
+                    r_jl * transpose(f[4])
 end
 
 # Calculate the gradient of a CV with respect to the input coordinates
