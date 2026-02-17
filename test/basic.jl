@@ -255,9 +255,9 @@ end
 
     # Suppress MOL2 invalid sybyl type warning
     @suppress_err begin
-        sys_mol2         = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary=boundary)
-        sys_pdb_connect  = System(joinpath(data_dir, "imatinib_conect.pdb"), ff; boundary=boundary)
-        sys_pdb          = System(joinpath(data_dir, "imatinib.pdb"), ff_custom; boundary=boundary)
+        sys_mol2        = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary=boundary)
+        sys_pdb_connect = System(joinpath(data_dir, "imatinib_conect.pdb"), ff; boundary=boundary)
+        sys_pdb         = System(joinpath(data_dir, "imatinib.pdb"), ff_custom; boundary=boundary)
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms

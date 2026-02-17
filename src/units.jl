@@ -172,14 +172,15 @@ end
 
 # Convert the Boltzmann constant k to suitable units and float type
 # Assumes temperature units are Kelvin
-function convert_k_units(T, k, energy_units)
+function convert_k_units(T, k, energy_units, strictness)
     if energy_units == NoUnits
         if unit(k) == NoUnits
             # Use user-supplied unitless Boltzmann constant
             k_converted = T(k)
         else
-            @warn "Units will be stripped from Boltzmann constant: energy_units was passed as " *
-                  "NoUnits and units were provided on k: $(unit(k))"
+            err_str = "Units will be stripped from Boltzmann constant: energy_units was passed " *
+                      "as NoUnits and units were provided on k: $(unit(k))"
+            report_issue(err_str, strictness)
             k_converted = T(ustrip(k))
         end
     elseif dimension(energy_units) in (u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2", u"𝐋^2 * 𝐌 * 𝐓^-2")

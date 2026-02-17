@@ -240,53 +240,51 @@ end
 
         coords_unc = [c .± (abs(randn()) / 100)u"nm"         for c in s.coords    ]
         vels_unc   = [v .± (abs(randn()) / 100)u"nm * ps^-1" for v in s.velocities]
-        @suppress_err begin
-            sys_unc = System(
-                atoms=[Atom(index=i, mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
-                    for i in 1:n_atoms],
-                coords=coords_unc,
-                boundary=boundary,
-                velocities=vels_unc,
-                atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR",
-                                    chain_id="B", element="Ar")
-                            for i in 1:n_atoms],
-                pairwise_inters=(LennardJones(use_neighbors=true),),
-                neighbor_finder=DistanceNeighborFinder(
-                    eligible=trues(n_atoms, n_atoms),
-                    n_steps=10,
-                    dist_cutoff=2.0u"nm",
-                ),
-                loggers=(
-                    temp=TemperatureLogger(100),
-                    coords=CoordinatesLogger(100),
-                    vels=VelocitiesLogger(100),
-                    energy=TotalEnergyLogger(100),
-                    ke=KineticEnergyLogger(100),
-                    pe=PotentialEnergyLogger(100),
-                    force=ForcesLogger(100),
-                    dcd_writer=TrajectoryWriter(100, temp_fp_dcd),
-                    trr_writer=TrajectoryWriter(100, temp_fp_trr; write_velocities=true),
-                    pdb_writer=TrajectoryWriter(100, temp_fp_pdb),
-                    potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
-                    velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
-                ),
-            )
-            for n_threads in n_threads_list
-                @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
-                                    typeof((1.0 ± 0.1)u"kJ * mol^-1")
-                @test abs(potential_energy(sys_unc; n_threads=n_threads) -
-                                    potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
-                @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
-                @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
-                @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
-                @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
-                                    typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
-            end
-            simulator_unc = VelocityVerlet(dt=0.002u"ps")
-            for n_threads in n_threads_list
-                simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads,
-                          run_loggers=false)
-            end
+        sys_unc = System(
+            atoms=[Atom(index=i, mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+                   for i in 1:n_atoms],
+            coords=coords_unc,
+            boundary=boundary,
+            velocities=vels_unc,
+            atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR",
+                                 chain_id="B", element="Ar")
+                        for i in 1:n_atoms],
+            pairwise_inters=(LennardJones(use_neighbors=true),),
+            neighbor_finder=DistanceNeighborFinder(
+                eligible=trues(n_atoms, n_atoms),
+                n_steps=10,
+                dist_cutoff=2.0u"nm",
+            ),
+            loggers=(
+                temp=TemperatureLogger(100),
+                coords=CoordinatesLogger(100),
+                vels=VelocitiesLogger(100),
+                energy=TotalEnergyLogger(100),
+                ke=KineticEnergyLogger(100),
+                pe=PotentialEnergyLogger(100),
+                force=ForcesLogger(100),
+                dcd_writer=TrajectoryWriter(100, temp_fp_dcd),
+                trr_writer=TrajectoryWriter(100, temp_fp_trr; write_velocities=true),
+                pdb_writer=TrajectoryWriter(100, temp_fp_pdb),
+                potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
+                velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
+            ),
+            strictness=:nowarn
+        )
+        for n_threads in n_threads_list
+            @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
+                                typeof((1.0 ± 0.1)u"kJ * mol^-1")
+            @test abs(potential_energy(sys_unc; n_threads=n_threads) -
+                                potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
+            @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
+            @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
+            @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
+            @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
+                                typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
+        end
+        simulator_unc = VelocityVerlet(dt=0.002u"ps")
+        for n_threads in n_threads_list
+            simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads, run_loggers=false)
         end
     end
 end

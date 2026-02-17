@@ -3,7 +3,7 @@ export SHAKE_RATTLE
 """
     SHAKE_RATTLE(n_atoms, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
                  dist_constraints=nothing, angle_constraints=nothing,
-                 gpu_block_size=128, max_iters=25)
+                 gpu_block_size=128, max_iters=25, strictness=:warn)
 
 Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
 Either or both of `dist_constraints` and `angle_constraints` must be given.
@@ -31,6 +31,9 @@ for the M-SHAKE algorithm.
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 - `max_iters=25`: the maximum number of iterations to perform when doing SHAKE. If this
     number if iterations is reached, some constraints may not be satisfied.
+- `strictness=:warn`: determines behavior when encountering possible problems,
+    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
+    `:error` to error.
 """
 struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer}
     clusters12::A
@@ -49,9 +52,11 @@ function SHAKE_RATTLE(n_atoms,
                       dist_constraints=nothing,
                       angle_constraints=nothing,
                       gpu_block_size=128,
-                      max_iters=25)
+                      max_iters=25,
+                      strictness=:warn)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance ) > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
+    check_strictness(strictness)
 
     dc_present = !isnothing(dist_constraints ) && length(dist_constraints ) > 0
     ac_present = !isnothing(angle_constraints) && length(angle_constraints) > 0
@@ -61,13 +66,15 @@ function SHAKE_RATTLE(n_atoms,
     end
 
     if typeof(ustrip(dist_tolerance)) == Float32 && ustrip(dist_tolerance) < Float32(1e-6)
-        @warn "Using Float32 with a SHAKE dist_tolerance less than 1e-6, this may lead " *
-              "to convergence issues"
+        err_str = "Using Float32 with a SHAKE dist_tolerance less than 1e-6, this may lead " *
+                  "to convergence issues"
+        report_issue(err_str, strictness)
     end
 
     if typeof(ustrip(vel_tolerance)) == Float32 && ustrip(vel_tolerance) < Float32(1e-6)
-        @warn "Using Float32 with a RATTLE vel_tolerance less than 1e-6, this may lead " *
-              "to convergence issues"
+        err_str = "Using Float32 with a RATTLE vel_tolerance less than 1e-6, this may lead " *
+                  "to convergence issues"
+        report_issue(err_str, strictness)
     end
 
     if isa(dist_constraints, AbstractGPUArray) || isa(angle_constraints, AbstractGPUArray)
@@ -76,7 +83,7 @@ function SHAKE_RATTLE(n_atoms,
     end
 
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints,
-                                                                        angle_constraints)
+                                                                angle_constraints, strictness)
 
     return SHAKE_RATTLE(clusters12, clusters23, clusters34, angle_clusters, dist_tolerance,
                         vel_tolerance, gpu_block_size, max_iters)

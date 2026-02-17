@@ -236,9 +236,9 @@ get_ezxml(collection, key, default) = (haskey(collection, key) ? collection[key]
 
 """
     MolecularForceField(ff_files...; units=true, custom_residue_templates=nothing,
-                        custom_renaming_scheme=nothing)
+                        custom_renaming_scheme=nothing, strictness=:warn)
     MolecularForceField(T, ff_files...; units=true, custom_residue_templates=nothing,
-                        custom_renaming_scheme=nothing)
+                        custom_renaming_scheme=nothing, strictness=:warn)
     MolecularForceField(atom_types, residue_types, bond_types, angle_types,
                         torsion_types, torsion_order, weight_14_coulomb,
                         weight_14_lj, attributes_from_residue,
@@ -259,7 +259,10 @@ At the moment, Molly provides a dictionary for all standard amino acids, nucleic
 water for this purpose.
 If the system to be simulated contains other molecules, their template topologies must be
 defined either through `CONECT` records in the PDB file or by providing an extra
-custom template file with the `custom_residue_templates` keyword.
+custom template file to the `custom_residue_templates` keyword argument.
+
+Behavior with unsupported files is determined by the `strictness` keyword argument.
+This can be `:warn` to emit warnings, `:nowarn` to suppress warnings or `:error` to error.
 """
 struct MolecularForceField{T, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
@@ -278,7 +281,9 @@ struct MolecularForceField{T, M, D, DA, E, K, KA, C}
 end
 
 function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true,
-                             custom_residue_templates=nothing, custom_renaming_scheme=nothing)
+                             custom_residue_templates=nothing, custom_renaming_scheme=nothing,
+                             strictness=:warn)
+    check_strictness(strictness)
     atom_types = Dict{String, AtomType}()
     torsion_order = ""
     IC = (units ? typeof(zero(T) * u"nm^-1") : T)
@@ -316,6 +321,10 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     for ff_file in ff_files
         ff_xml = parsexml(read(ff_file))
         ff = root(ff_xml)
+        if ff.name != "ForceField"
+            throw(ArgumentError("file $ff_file does not have a ForceField top level " *
+                                "tag, found $(ff.name)"))
+        end
 
         for entry in eachelement(ff)
             entry_name = entry.name
@@ -433,9 +442,15 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                                         weight_13, weight_cross)
                                 push!(virtual_sites, vs)
                             elseif vs_type == "localCoords"
-                                @warn "Virtual site type $vs_type not currently supported, ignoring"
+                                report_issue(
+                                    "Virtual site type $vs_type not currently supported, ignoring",
+                                    strictness,
+                                )
                             else
-                                @warn "Unrecognised virtual site type $vs_type, ignoring"
+                                report_issue(
+                                    "Unrecognised virtual site type $vs_type, ignoring",
+                                    strictness,
+                                )
                             end
                         end
                     end
@@ -473,8 +488,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 for patch in eachelement(entry)
                     pname = patch["name"]
                     if haskey(patch, "residues") && patch["residues"] != "1"
-                        @warn "Residue patches altering multiple templates not currently " *
-                              "supported, ignoring patch $pname"
+                        err_str = "Residue patches altering multiple templates not currently " *
+                                  "supported, ignoring patch $pname"
+                        report_issue(err_str, strictness)
                         continue
                     end
 
@@ -598,19 +614,20 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             push!(attributes_from_residue, use_attr)
                         end
                         if use_attr != "charge"
-                            @warn "UseAttributeFromResidue only supported for charge, " *
-                                  "ignoring $use_attr"
+                            err_str = "UseAttributeFromResidue only supported for charge, " *
+                                      "ignoring $use_attr"
+                            report_issue(err_str, strictness)
                         end
                     end
                 end
 
             elseif entry_name == "Include"
-                @warn "File includes not currently supported, ignoring"
+                report_issue("File includes not currently supported, ignoring", strictness)
             elseif entry_name in ("RBTorsionForce","CMAPTorsionForce","GBSAOBCForce",
                                   "CustomBondForce","CustomAngleForce","CustomTorsionForce",
                                   "CustomNonbondedForce","CustomGBForce","CustomHbondForce",
                                   "CustomManyParticleForce","LennardJonesForce")
-                @warn "$entry_name not currently supported, ignoring"
+                report_issue("$entry_name not currently supported, ignoring", strictness)
             end
         end
     end
@@ -642,7 +659,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
             end
 
             patched_res = apply_residue_patch(residues[res_name], patches[patch_name],
-                                              patch_res_name, res_name, patch_name, atom_types)
+                                    patch_res_name, res_name, patch_name, atom_types, strictness)
             if !isnothing(patched_res) # Invalid patches warn and return nothing
                 residues[patch_res_name] = patched_res
             end
