@@ -5,6 +5,7 @@ export
     bias_gradient,
     SquareBias,
     FlatBottomSquareBias,
+    PeriodicFlatBottomBias,
     BiasPotential
 
 @doc raw"""
@@ -94,6 +95,60 @@ function bias_gradient(fb::FlatBottomSquareBias, cv_sim)
     return H * fb.k * (d_abs - fb.r_fb) * d / d_abs
 end
 
+@doc raw"""
+    PeriodicFlatBottomBias(k, cv_target, width)
+
+A periodic flat-bottom potential on a collective variable (CV).
+Behaves like a harmonic potential outside the `width`, but is zero inside.
+Handles -π to π periodicity.
+
+The potential energy is defined as:
+V(ξ) = 0                                if |d| <= width
+V(ξ) = 0.5 * k * (|d| - width)^2        if |d| >  width
+where d is the minimum image distance between ξ and cv_target.
+"""
+struct PeriodicFlatBottomBias{K, T, W}
+    k::K
+    cv_target::T
+    width::W
+end
+
+function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
+    # Calculate signed distance in periodic bounds [-π, π]
+    d = cv_sim - pb.cv_target
+    d_wrapped = d - 2π * round(d / 2π)
+    
+    # Check flat-bottom condition
+    dist = abs(d_wrapped)
+    
+    if dist <= pb.width
+        # Inside flat region: return zero with correct units/type
+        # We calculate a dummy energy to get the zero of the correct type
+        return zero(0.5 * pb.k * pb.width^2)
+    else
+        # Outside: Harmonic penalty
+        disp = dist - pb.width
+        return 0.5 * pb.k * disp^2
+    end
+end
+
+function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
+    # 1. Calculate signed distance in periodic bounds [-π, π]
+    d = cv_sim - pb.cv_target
+    d_wrapped = d - 2π * round(d / 2π)
+    
+    dist = abs(d_wrapped)
+    
+    if dist <= pb.width
+        # Inside flat region: zero gradient
+        return zero(pb.k * pb.width)
+    else
+        # Outside: Gradient is k * (|d| - w) * sign(d)
+        disp = dist - pb.width
+        return pb.k * disp * sign(d_wrapped)
+    end
+end
+
 """
     BiasPotential(cv_type, bias_type)
 
@@ -137,7 +192,12 @@ function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
     return potential_energy(bias.bias_type, cv_sim; kwargs...)
 end
 
-function AtomsCalculators.forces!(fs, sys, bias::BiasPotential; kwargs...)
+function AtomsCalculators.forces!(
+    fs, sys, bias::BiasPotential;
+    needs_vir::Bool = false,
+    buffers::Union{Nothing, BuffersCPU, BuffersGPU} = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
+    kwargs...
+)
     if bias.cv_type.correction == :pbc
         coords = unwrap_molecules(sys)
     else
@@ -157,6 +217,11 @@ function AtomsCalculators.forces!(fs, sys, bias::BiasPotential; kwargs...)
     d_bias = bias_gradient(bias.bias_type, cv_sim)
 
     fs_svec = d_bias .* d_coords
+    
+    if needs_vir && bias.cv_type.has_virial
+        calculate_virial(bias.cv_type, coords, fs_svec, buffers, sys.boundary)
+    end
+
     fs .-= to_device(fs_svec, typeof(fs))
     return fs
 end

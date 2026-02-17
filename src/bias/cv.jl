@@ -8,7 +8,8 @@ export
     CalcDist,
     calculate_cv,
     CalcRg,
-    CalcRMSD
+    CalcRMSD,
+    CalcTorsion
 
 # Does not account for periodic boundary conditions, assumes appropriate unwrapping
 function center_of_mass(coords, atoms)
@@ -185,11 +186,12 @@ struct CalcDist{DT}
     atom_inds_2::Vector{Int}
     dist_type::DT
     correction::Symbol
+    has_virial::Bool
 
     function CalcDist(atom_inds_1, atom_inds_2, dist_type::DT=CalcMinDist(),
-                      correction=:pbc) where DT
+                      correction=:pbc, has_virial = true) where DT
         check_correction_arg(correction)
-        return new{DT}(atom_inds_1, atom_inds_2, dist_type, correction)
+        return new{DT}(atom_inds_1, atom_inds_2, dist_type, correction, has_virial)
     end
 end
 
@@ -214,6 +216,20 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     return dist_val
 end
 
+function calculate_virial(cv::CalcDist, coords, forces, buffers, boundary)
+    ids_1 = collect(cv.atom_inds_1)
+    ids_2 = collect(cv.atom_inds_2)
+    c_1 = @view coords[ids_1]
+    c_2 = @view coords[ids_2]
+    f_2 = @view forces[ids_1]
+
+    for (c1, c2, f2) in zip(c_1, c_2, f_2)
+        r_ji = vector(c2, c1, boundary)
+        buffers.virial .+= r_ji * transpose(f2)
+    end
+
+end
+
 """
     CalcRg(atom_inds=[], correction=:pbc)
 
@@ -230,10 +246,11 @@ Given as an argument to [`BiasPotential`](@ref).
 struct CalcRg
     atom_inds::Vector{Int}
     correction::Symbol
+    has_virial::Bool
 
-    function CalcRg(atom_inds=[], correction=:pbc)
+    function CalcRg(atom_inds=[], correction=:pbc, has_virial = false)
         check_correction_arg(correction)
-        return new(atom_inds, correction)
+        return new(atom_inds, correction, has_virial)
     end
 end
 
@@ -267,12 +284,13 @@ struct CalcRMSD{RC}
     atom_inds::Vector{Int}
     ref_atom_inds::Vector{Int}
     correction::Symbol
+    has_virial::Bool
 
-    function CalcRMSD(ref_coords, atom_inds=[], ref_atom_inds=[], correction=:pbc)
+    function CalcRMSD(ref_coords, atom_inds=[], ref_atom_inds=[], correction=:pbc, has_virial = false)
         check_correction_arg(correction)
         ref_coords_cpu = from_device(ref_coords)
         RC = typeof(ref_coords_cpu)
-        new{RC}(ref_coords_cpu, atom_inds, ref_atom_inds, correction)
+        new{RC}(ref_coords_cpu, atom_inds, ref_atom_inds, correction, has_virial)
     end
 end
 
@@ -298,6 +316,35 @@ function calculate_cv_ustrip!(unit_arr, args...)
     # We strip the unit, store it and add it back on later
     unit_arr[1] = unit(cv)
     return ustrip(cv)
+end
+
+struct CalcTorsion
+    atom_inds::Vector{Int}
+    correction::Symbol
+    has_virial::Bool
+
+    function CalcTorsion(atom_inds=[],correction=:pbc, has_virial = true)
+        check_correction_arg(correction)
+        return new(atom_inds, correction, has_virial)
+    end
+end
+
+function calculate_cv(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs...)
+    c = @view coords[collect(cv.atom_inds)]
+    return  torsion_angle(c[1], c[2], c[3], c[4], boundary)
+end
+
+function calculate_virial(cv::CalcTorsion, coords, forces, buffers, boundary)
+    ids = collect(cv.atom_inds)
+    c = @view coords[ids]
+    f = @view forces[ids]
+    r_ji = vector(c[2], c[1], boundary) # r_i - r_j
+    r_jk = vector(c[2], c[3], boundary) # r_k - r_j
+    r_jl = vector(c[2], c[4], boundary) # r_l - r_j
+
+    buffers.virial .+= r_ji * transpose(f[1]) +
+                       r_jk * transpose(f[3]) +
+                       r_jl * transpose(f[4])
 end
 
 # Calculate the gradient of a CV with respect to the input coordinates
