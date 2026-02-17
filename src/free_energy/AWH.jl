@@ -14,119 +14,6 @@ mutable struct AWHStats{T}
     max_delta_f_history::Vector{T}
 end
 
-# Implements the deconvolution method to obtain
-# the unbiased PMF if AWH is run with biases,
-# contrary to running it for alchemical transformations.
-# See Lindahl et al. 2014
-mutable struct AWHPMFDeconvolution{N, T, F_CV}
-    min_vals::NTuple{N, T}
-    bin_widths::NTuple{N, T}
-    shape::NTuple{N, Int}
-
-    cv_function::F_CV         
-
-    # Optimization: Pre-computed exp(-Q(xi, lambda))
-    # Rows: Linearized Bin Index, Cols: Window Index
-    coupling_matrix::Matrix{T} 
-
-    numerator_hist::Array{T, N}
-    denominator_hist::Array{T, N}
-    
-    sample_count::Int
-end
-
-function AWHPMFDeconvolution(
-    min_vals::NTuple{N, T},
-    max_vals::NTuple{N, T},
-    n_bins::NTuple{N, Int},
-    cv_function::F_CV,
-    coupling_function, # Function(xi, k) -> Q
-    n_windows::Int
-) where {N, T, F_CV}
-    
-    bin_widths = (max_vals .- min_vals) ./ n_bins
-    total_bins = prod(n_bins)
-    
-    # --- PRE-COMPUTATION STEP ---
-    # We populate the matrix M[bin, window] = exp(-Q(bin, window))
-    coupling_matrix = Matrix{T}(undef, total_bins, n_windows)
-    
-    # Helper to iterate N-dimensional grid
-    cartesian_indices = CartesianIndices(n_bins)
-    
-    # Iterate all bins (linear index i)
-    for (i, idx) in enumerate(cartesian_indices)
-        # Determine center of this bin ξ
-        xi = ntuple(d -> min_vals[d] + (idx[d] - 0.5) * bin_widths[d], N)
-        
-        # Iterate all windows k
-        for k in 1:n_windows
-            Q = coupling_function(xi, k)
-            coupling_matrix[i, k] = exp(-Q)
-        end
-    end
-    
-    return AWHPMFDeconvolution{N, T, F_CV}(
-        min_vals,
-        bin_widths,
-        n_bins,
-        cv_function,
-        coupling_matrix,
-        zeros(T, n_bins...),
-        zeros(T, n_bins...),
-        0
-    )
-end
-
-function update_pmf!(
-    pmf::AWHPMFDeconvolution{N, T, F_CV},
-    awh_state, 
-    curr_coords
-) where {N, T, F_CV}
-    
-    # Calculate current CV ξ(t)
-    val = pmf.cv_function(curr_coords)
-    current_cv = val isa Tuple ? val : (val,)
-
-    # Determine Linear Index of current sample
-    current_indices = ntuple(N) do d
-        rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
-        idx = Int(floor(rel)) + 1
-        clamp(idx, 1, pmf.shape[d])
-    end
-    current_cartesian = CartesianIndex(current_indices)
-    current_linear_idx = LinearIndices(pmf.shape)[current_cartesian]
-
-    # Compute Dynamic Weights
-    # g(λ) = f(λ) + ln ρ(λ)
-    # weights = exp(g)
-    g = awh_state.f .+ awh_state.log_rho
-    weights = exp.(g) 
-    
-    # Global Update
-    # Denominator vector: D = Matrix * Weights
-    # D[i] = Sum_k ( M[i,k] * weights[k] )
-    denom_vector = pmf.coupling_matrix * weights
-    
-    # Accumulate Histograms
-    # The denom_vector contains 1/e^{gamma(xi)} for every bin
-    
-    # We iterate the linear index to update arrays
-    for i in eachindex(pmf.denominator_hist)
-        term = 1.0 / denom_vector[i]
-        
-        # Update Denominator
-        pmf.denominator_hist[i] += term
-        
-        # Update Numerator
-        if i == current_linear_idx
-            pmf.numerator_hist[i] += term
-        end
-    end
-    
-    pmf.sample_count += 1
-end
-
 # Convenience function that builds neighbor finders.
 # This is needed to be able to properly separate 
 # alchemical atoms from normal atoms
@@ -436,6 +323,173 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     )
 end
 
+# Implements the deconvolution method to obtain the unbiased PMF
+# See Lindahl et al. 2014
+mutable struct AWHPMFDeconvolution{N, T, F_CV}
+    min_vals::NTuple{N, T}
+    bin_widths::NTuple{N, T}
+    shape::NTuple{N, Int}
+
+    cv_function::F_CV         
+
+    # Optimization: Pre-computed exp(-Q(xi, lambda)) = exp(-beta_k * V_bias(xi))
+    # Rows: Linearized Bin Index, Cols: Window Index
+    coupling_matrix::Matrix{T} 
+
+    numerator_hist::Array{T, N}
+    denominator_hist::Array{T, N}
+    
+    sample_count::Int
+end
+
+function AWHPMFDeconvolution(
+    awh_state::AWHState{T},
+    pmf_grid::Tuple
+) where T
+    
+    # 1. Parse Grid Dimensions
+    # pmf_grid format: ((min_1, min_2...), (max_1, max_2...), (bins_1, bins_2...))
+    min_vals = T.(pmf_grid[1])
+    max_vals = T.(pmf_grid[2])
+    n_bins   = Int.(pmf_grid[3])
+    
+    N = length(n_bins)
+    bin_widths = (max_vals .- min_vals) ./ n_bins
+    
+    # 2. Inspect the first window to find BiasPotentials
+    # We assume the structure of biases is consistent across windows
+    first_ham = awh_state.λ_hamiltonians[1]
+    
+    # Find indices of all BiasPotentials in general_inters
+    bias_indices = findall(x -> x isa BiasPotential, first_ham.general_inters)
+    
+    if isempty(bias_indices)
+        error("No BiasPotential found in AWHState. Cannot auto-detect PMF settings.")
+    end
+    
+    if length(bias_indices) != N
+        error("Found $(length(bias_indices)) BiasPotentials but grid is $(N)D.")
+    end
+
+    # 3. Construct the CV Function (Closure)
+    # We grab the cv_types from the first window
+    cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
+    
+    # We capture 'awh_state' to access the updated boundary and atoms during simulation
+    auto_cv_func = (coords) -> begin
+        sys = awh_state.active_sys
+        return ntuple(N) do d
+            Molly.calculate_cv(
+                cv_types[d], 
+                coords, 
+                sys.atoms, 
+                sys.boundary, 
+                sys.velocities
+            )
+        end
+    end
+
+    # 4. Pre-compute Coupling Matrix
+    # Matrix size: (Total Bins) x (Total Windows)
+    total_bins = prod(n_bins)
+    n_windows  = length(awh_state.λ_hamiltonians)
+    coupling_mat = Matrix{T}(undef, total_bins, n_windows)
+    
+    # CartesianIndices for iterating over the grid
+    cart_indices = CartesianIndices(n_bins)
+    linear_indices = LinearIndices(n_bins)
+
+    for (k, ham_k) in enumerate(awh_state.λ_hamiltonians)
+        # Get inverse temperature for this window
+        beta_k = awh_state.λ_β[k]
+        
+        for idx in cart_indices
+            linear_i = linear_indices[idx]
+            
+            # Determine CV value at the center of this bin
+            # val[d] = min[d] + (idx[d] - 0.5) * width[d]
+            cv_val_tuple = ntuple(N) do d
+                min_vals[d] + (idx[d] - 0.5) * bin_widths[d]
+            end
+            
+            # Calculate Total Bias Energy at this grid point
+            total_bias_energy = zero(T)*awh_state.active_sys.energy_units
+            
+            for (d, bias_idx) in enumerate(bias_indices)
+                bias_inter = ham_k.general_inters[bias_idx]
+                # bias_inter.bias_type holds parameters (k, target, etc.)
+                # potential_energy(bias_type, val) returns V(xi)
+                total_bias_energy += Molly.potential_energy(bias_inter.bias_type, cv_val_tuple[d])
+            end
+            
+            # Store coupling term: exp(-beta * V)
+            coupling_mat[linear_i, k] = exp(-beta_k * total_bias_energy)
+        end
+    end
+
+    # 5. Initialize Histograms
+    num_hist = zeros(T, n_bins)
+    den_hist = zeros(T, n_bins)
+
+    return AWHPMFDeconvolution(
+        min_vals, 
+        bin_widths, 
+        n_bins,
+        auto_cv_func,
+        coupling_mat,
+        num_hist,
+        den_hist,
+        0
+    )
+end
+
+function update_pmf!(
+    pmf::AWHPMFDeconvolution{N, T, F_CV},
+    awh_state, 
+    curr_coords;
+    weight_factor::T = one(T) # Default to 1.0 (Linear Stage behavior)
+) where {N, T, F_CV}
+    
+    # Calculate current CV ξ(t)
+    val = pmf.cv_function(from_device(curr_coords))
+    current_cv = val isa Tuple ? val : (val,)
+
+    # Determine Linear Index of current sample
+    current_indices = ntuple(N) do d
+        rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
+        idx = Int(floor(rel)) + 1
+        clamp(idx, 1, pmf.shape[d])
+    end
+    current_cartesian = CartesianIndex(current_indices)
+    current_linear_idx = LinearIndices(pmf.shape)[current_cartesian]
+
+    # Compute Dynamic Weights
+    # g(λ) = f(λ) + ln ρ(λ)
+    g = awh_state.f .+ awh_state.log_rho
+    weights = exp.(g) 
+    
+    # Global Update
+    # denom_vector[i] corresponds to e^{-gamma(xi)}
+    denom_vector = pmf.coupling_matrix * weights
+    
+    # Iterate to update arrays
+    for i in eachindex(pmf.denominator_hist)
+        # Apply the a(t) factor here. 
+        # term = a(t) * e^{gamma(xi)}
+        term = weight_factor / denom_vector[i]
+        
+        # Update Denominator
+        pmf.denominator_hist[i] += term
+        
+        # Update Numerator
+        if i == current_linear_idx
+            pmf.numerator_hist[i] += term
+        end
+    end
+    
+    pmf.sample_count += 1
+end
+
 """
     AWHSimulation(awh_state::AWHState{T};
                   num_md_steps::Int          = 10,
@@ -501,21 +555,14 @@ function AWHSimulation(
     significant_weight::Real = 0.1,
     log_freq::Int = 100,
     # Optional PMF args
-    pmf_cv = nothing,
-    pmf_coupling = nothing,
     pmf_grid = nothing
 ) where T
 
     n_win = length(awh_state.λ_hamiltonians)
 
     pmf_calc = nothing
-    if !isnothing(pmf_cv) && !isnothing(pmf_coupling) && !isnothing(pmf_grid)
-        min_vals, max_vals, n_bins = pmf_grid
-        # We pass n_win here so Deconvolution can build the matrix
-        pmf_calc = AWHPMFDeconvolution(
-            min_vals, max_vals, n_bins, 
-            pmf_cv, pmf_coupling, n_win
-        )
+    if !isnothing(pmf_grid)
+        pmf_calc = AWHPMFDeconvolution(awh_state, pmf_grid)
     end
 
     return AWHSimulation(n_win,
@@ -655,7 +702,7 @@ taken between AWH loop.
 - `awh_sim::AWHSimulation`: The [`AWHSimulation`](@ref) struct defining the system to be run.
 - `n_steps::Int`: Total number of MD steps to be run.
 """
-function simulate!(awh_sim::AWHSimulation, n_steps::Int)
+function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
     active_idx = 1
@@ -666,11 +713,30 @@ function simulate!(awh_sim::AWHSimulation, n_steps::Int)
         process_sample(awh_sim.state)
 
         if !isnothing(awh_sim.pmf_calc)
-            update_pmf!(awh_sim.pmf_calc, awh_sim.state, awh_sim.state.active_sys.coords)
+            # Calculate a(t) factor for PMF Deconvolution [Lindahl et al. 2014, Eq. 9 text]
+            # Initial Stage: N is constant => Delta N = 0 => a = N / (N + n_lambda)
+            # Linear Stage: N grows => Delta N = n_lambda => a = 1.0
+            
+            w_fac = one(T)
+            if awh_sim.state.in_initial_stage
+                # N_bias is the constant N used in this stage
+                # update_freq corresponds to n_lambda (samples per update)
+                current_N = awh_sim.state.N_bias
+                n_lambda  = T(awh_sim.update_freq)
+                w_fac = current_N / (current_N + n_lambda)
+            end
+
+            update_pmf!(
+                awh_sim.pmf_calc, 
+                awh_sim.state, 
+                awh_sim.state.active_sys.coords; 
+                weight_factor=w_fac
+            )
         end
 
         active_idx_new = gibbs_sample_window(awh_sim.state)
         if active_idx_new != active_idx
+            # verbose logging can be adjusted or removed
             println("New active Hamiltonian $(active_idx) -> $(active_idx_new). Iteration $(iteration_n)")
             active_idx = active_idx_new
         end
