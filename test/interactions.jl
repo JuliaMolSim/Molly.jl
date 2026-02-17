@@ -607,9 +607,13 @@ end
 @testset "Cutoffs" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.7, 1.0, 1.0)u"nm"
+    c3 = SVector(2.0, 1.0, 1.0)u"nm"  # Distance of 1.0 nm > dist_cut (0.8 nm)
+    c4 = SVector(1.95, 1.0, 1.0)u"nm"  # Distance of 0.95 nm > dist_cut (0.8 nm)
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
     boundary = CubicBoundary(2.0u"nm")
     dr12 = vector(c1, c2, boundary)
+    dr13 = vector(c1, c3, boundary)
+    dr14 = vector(c1, c4, boundary)
     dist_cut = 0.8u"nm"
     dist_act = 0.6u"nm"
     fu, eu = u"kJ * mol^-1 * nm^-1", u"kJ * mol^-1"
@@ -634,6 +638,30 @@ end
             pe_ref;
             atol=1e-9u"kJ * mol^-1",
         )
+
+        # Test that force and potential energy are zero after the cutoff distance
+        if !(cutoff isa NoCutoff)
+            @test isapprox(
+                force(inter, dr13, a1, a1)[1],
+                0.0u"kJ * mol^-1 * nm^-1";
+                atol=1e-12u"kJ * mol^-1 * nm^-1",
+            )
+            @test isapprox(
+                potential_energy(inter, dr13, a1, a1),
+                0.0u"kJ * mol^-1";
+                atol=1e-12u"kJ * mol^-1",
+            )
+            @test isapprox(
+                force(inter, dr14, a1, a1)[1],
+                0.0u"kJ * mol^-1 * nm^-1";
+                atol=1e-12u"kJ * mol^-1 * nm^-1",
+            )
+            @test isapprox(
+                potential_energy(inter, dr14, a1, a1),
+                0.0u"kJ * mol^-1";
+                atol=1e-12u"kJ * mol^-1",
+            )
+        end
     end
 end
 
