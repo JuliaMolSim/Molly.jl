@@ -337,7 +337,7 @@ struct CalcRg
     correction::Symbol
     has_virial::Bool
 
-    function CalcRg(atom_inds=[], correction=:pbc, has_virial = false)
+    function CalcRg(atom_inds=[], correction=:pbc, has_virial = true)
         check_correction_arg(correction)
         return new(atom_inds, correction, has_virial)
     end
@@ -349,6 +349,42 @@ function calculate_cv(cv::CalcRg, coords, atoms, args...; kwargs...)
     atoms_used = @view atoms[atom_inds_used]
     rg_val = radius_gyration(coords_used, atoms_used)
     return rg_val
+end
+
+# For Rg and also for the RMSD the forces applied to the atoms 
+# are dependent only on the relative configuration of said
+# atoms, making them translationally invariant. Therefore:
+#
+# Σ F_i = 0
+#
+# We can exploit this fact to obtain the virial by computing 
+#
+# Ξ = Σ (r_i - r_COM) ⊗ F_i; 
+#
+# rearranging:
+#
+# Ξ = Σ ( r_i ⊗ F_i ) - r_COM ⊗ Σ F_i = Σ r_i ⊗ F_i
+#
+# which is equivalent to the standard definition of the virial!
+# Note: we cannot just compute Σ r_i ⊗ F_i as this will give 
+# different results depending on the choice of origin of coordinates.
+
+function calculate_virial(cv::CalcRg, coords, forces, atoms, buffers, boundary)
+    # Select the relevant atoms/coordinates
+    ids = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
+    c_used = @view coords[ids]
+    f_used = @view forces[ids]
+    a_used = @view atoms[ids]
+    
+    # Calculate Center of Mass of the group to define relative coordinates
+    com = center_of_mass(c_used, a_used)
+
+    # Accumulate sum( (r_i - r_com) * F_i^T )
+    for (c, f) in zip(c_used, f_used)
+        # Vector from COM to atom i (r_i - r_com), handling PBC
+        r_ic = vector(com, c, boundary) 
+        buffers.virial .+= r_ic * transpose(f)
+    end
 end
 
 """
@@ -375,7 +411,7 @@ struct CalcRMSD{RC}
     correction::Symbol
     has_virial::Bool
 
-    function CalcRMSD(ref_coords, atom_inds=[], ref_atom_inds=[], correction=:pbc, has_virial = false)
+    function CalcRMSD(ref_coords, atom_inds=[], ref_atom_inds=[], correction=:pbc, has_virial = true)
         check_correction_arg(correction)
         ref_coords_cpu = from_device(ref_coords)
         RC = typeof(ref_coords_cpu)
@@ -407,6 +443,36 @@ function calculate_cv_ustrip!(unit_arr, args...)
     return ustrip(cv)
 end
 
+function calculate_virial(cv::CalcRMSD, coords, forces, atoms, buffers, boundary)
+    # Select the relevant atoms/coordinates
+    ids = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
+    c_used = @view coords[ids]
+    f_used = @view forces[ids]
+    
+    # RMSD with centering is translationally invariant.
+    # We use the centroid of the current configuration as the reference point.
+    com = mean(c_used)
+
+    # Accumulate sum( (r_i - r_centroid) * F_i^T )
+    for (c, f) in zip(c_used, f_used)
+        # Vector from centroid to atom i
+        r_ic = vector(com, c, boundary)
+        buffers.virial .+= r_ic * transpose(f)
+    end
+end
+
+"""
+    CalcTorsion(atom_inds::AbstractVector{Int}; correction=:pbc, has_virial::Bool=true)
+
+A collective variable that calculates the torsion angle (dihedral) defined by four atoms.
+
+The angle is defined by the intersection of the planes formed by atoms (i, j, k) and (j, k, l), where the indices are given by `atom_inds`.
+
+# Fields
+- `atom_inds::AbstractVector{Int}`: The indices of the four atoms (i, j, k, l) defining the torsion.
+- `correction::Symbol`: The method used to handle periodic boundary conditions. Defaults to `:pbc`.
+- `has_virial::Bool`: Whether the virial contribution should be calculated for this collective variable. Defaults to `true`.
+"""
 struct CalcTorsion
     atom_inds::Vector{Int}
     correction::Symbol
