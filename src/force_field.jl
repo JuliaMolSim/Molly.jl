@@ -234,6 +234,326 @@ element_string_to_symbol(el) = (el == "?" ? :X : Symbol(el))
 # Version of get for EzXML objects
 get_ezxml(collection, key, default) = (haskey(collection, key) ? collection[key] : default)
 
+# Having this as a function allows recursion to support <Include> tags
+# Modifies most arguments
+function read_ff_xml!(ff_file, ff_param_array, atom_types, attributes_from_residue,
+                      residues, patches, type_info, bond_rule_specs, angle_rule_specs,
+                      torsion_rule_spec, nb_class_updates, units, strictness, T, IC)
+    ff_xml = parsexml(read(ff_file))
+    ff = root(ff_xml)
+    if ff.name != "ForceField"
+        throw(ArgumentError("file $ff_file does not have a ForceField top level " *
+                            "tag, found $(ff.name)"))
+    end
+
+    for entry in eachelement(ff)
+        entry_name = entry.name
+        if entry_name == "Include"
+            read_ff_xml!(entry["file"], ff_param_array, atom_types, attributes_from_residue,
+                         residues, patches, type_info, bond_rule_specs, angle_rule_specs,
+                         torsion_rule_spec, nb_class_updates, units, strictness, T, IC)
+
+        elseif entry_name == "AtomTypes"
+            for atom_type in eachelement(entry)
+                at_type  = atom_type["name"]
+                at_class = atom_type["class"]
+                element = get_ezxml(atom_type, "element", "?")
+                ch = missing
+                atom_mass = (units ? parse(T, atom_type["mass"])u"g/mol" : parse(T, atom_type["mass"]))
+                σ = (units ? T(-1u"nm") : T(-1))
+                ϵ = (units ? T(-1u"kJ * mol^-1") : T(-1))
+                atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
+                    at_type, at_class, element, ch, atom_mass, σ, ϵ)
+                type_info[at_type] = (element, at_class)
+            end
+
+        elseif entry_name == "Residues"
+            for residue in eachelement(entry)
+                rname = residue["name"]
+                atoms, types = String[], String[]
+                charges = Union{T, Missing}[]
+                elements = Symbol[]
+                virtual_sites = VirtualSiteTemplate{T, IC}[]
+                external_bonds_name = String[]
+                externals = Int[]
+                allowed_patches = String[]
+                extras = BitVector()
+                bonds_by_name = Tuple{String,String}[]
+
+                for re in eachelement(residue)
+                    if re.name == "Atom"
+                        an = re["name"]
+                        tp = re["type"]
+                        q = (haskey(re, "charge") ? parse(T, re["charge"]) : missing)
+                        push!(atoms, an)
+                        push!(types, tp)
+                        push!(charges, q)
+                        push!(externals, 0)
+                        tel, tclass = type_info[tp]
+                        push!(extras, (tel == "?") || (tclass == "EP"))
+                        push!(elements, element_string_to_symbol(tel))
+                    elseif re.name == "Bond"
+                        if haskey(re, "atomName1")
+                            an1 = re["atomName1"]
+                        else
+                            # Allow the deprecated "from/to" syntax
+                            an1 = atoms[parse(Int, re["from"]) + 1]
+                        end
+                        if haskey(re, "atomName2")
+                            an2 = re["atomName2"]
+                        else
+                            # Allow the deprecated "from/to" syntax
+                            an2 = atoms[parse(Int, re["to"]) + 1]
+                        end
+                        push!(bonds_by_name, (an1, an2))
+                    elseif re.name == "ExternalBond"
+                        if haskey(re, "atomName")
+                            an = re["atomName"]
+                        else
+                            an = atoms[parse(Int, re["from"]) + 1]
+                        end
+                        push!(external_bonds_name, an)
+                    elseif re.name == "AllowPatch"
+                        push!(allowed_patches, re["name"])
+                    elseif re.name == "VirtualSite"
+                        vs_type = re["type"]
+                        if haskey(re, "siteName")
+                            vs_name = re["siteName"]
+                        else
+                            # Allow the deprecated "index/atom1/atom2/atom3" syntax
+                            vs_name = atoms[parse(Int, re["index"]) + 1]
+                        end
+                        if haskey(re, "atomName1")
+                            atom_name_1 = re["atomName1"]
+                        else
+                            atom_name_1 = atoms[parse(Int, re["atom1"]) + 1]
+                        end
+                        if haskey(re, "atomName2")
+                            atom_name_2 = re["atomName2"]
+                        else
+                            atom_name_2 = atoms[parse(Int, re["atom2"]) + 1]
+                        end
+                        if vs_type == "average2"
+                            weight_1 = parse(T, re["weight1"])
+                            weight_2 = parse(T, re["weight2"])
+                            vs = VirtualSiteTemplate(2, vs_name, atom_name_1, atom_name_2,
+                                    "", weight_1, weight_2, zero(T), zero(T), zero(T), zero(IC))
+                            push!(virtual_sites, vs)
+                        elseif vs_type == "average3"
+                            if haskey(re, "atomName3")
+                                atom_name_3 = re["atomName3"]
+                            else
+                                atom_name_3 = atoms[parse(Int, re["atom3"]) + 1]
+                            end
+                            weight_1 = parse(T, re["weight1"])
+                            weight_2 = parse(T, re["weight2"])
+                            weight_3 = parse(T, re["weight3"])
+                            vs = VirtualSiteTemplate(3, vs_name, atom_name_1, atom_name_2,
+                                    atom_name_3, weight_1, weight_2, weight_3, zero(T),
+                                    zero(T), zero(IC))
+                            push!(virtual_sites, vs)
+                        elseif vs_type == "outOfPlane"
+                            if haskey(re, "atomName3")
+                                atom_name_3 = re["atomName3"]
+                            else
+                                atom_name_3 = atoms[parse(Int, re["atom3"]) + 1]
+                            end
+                            weight_12 = parse(T, re["weight12"])
+                            weight_13 = parse(T, re["weight13"])
+                            weight_cross = parse(T, re["weightCross"]) * (units ? u"nm^-1" : NoUnits)
+                            vs = VirtualSiteTemplate(4, vs_name, atom_name_1, atom_name_2,
+                                    atom_name_3, zero(T), zero(T), zero(T), weight_12,
+                                    weight_13, weight_cross)
+                            push!(virtual_sites, vs)
+                        elseif vs_type == "localCoords"
+                            report_issue(
+                                "Virtual site type $vs_type not currently supported, ignoring",
+                                strictness,
+                            )
+                        else
+                            report_issue(
+                                "Unrecognised virtual site type $vs_type, ignoring",
+                                strictness,
+                            )
+                        end
+                    end
+                end
+
+                vs_atom_names = Set(vs.name for vs in virtual_sites)
+                for a1_a2 in bonds_by_name
+                    for nm in a1_a2
+                        if nm in vs_atom_names
+                            error("virtual site $nm in residue $rname appears in a bond")
+                        end
+                    end
+                end
+                for nm in external_bonds_name
+                    if nm in vs_atom_names
+                        error("virtual site $nm in residue $rname appears in an external bond")
+                    end
+                end
+
+                name_to_idx = Dict(a => i for (i,a) in enumerate(atoms))
+                bonds = Tuple{Int, Int}[]
+                for (a1, a2) in bonds_by_name
+                    i, j = name_to_idx[a1], name_to_idx[a2]
+                    push!(bonds, (i < j ? (i, j) : (j, i)))
+                end
+                for nm in external_bonds_name
+                    if haskey(name_to_idx, nm)
+                        externals[name_to_idx[nm]] += 1
+                    end
+                end
+                residues[rname] = ResidueTemplate(rname, atoms, elements, types, virtual_sites,
+                                        bonds, externals, allowed_patches, charges, extras)
+            end
+
+        elseif entry_name == "Patches"
+            for patch in eachelement(entry)
+                pname = patch["name"]
+                if haskey(patch, "residues") && patch["residues"] != "1"
+                    err_str = "Residue patches altering multiple templates not currently " *
+                                "supported, ignoring patch $pname"
+                    report_issue(err_str, strictness)
+                    continue
+                end
+
+                add_atoms = Tuple{String, String, Any}[]
+                change_atoms = Tuple{String, String, Any}[]
+                remove_atoms = String[]
+                add_bonds = Tuple{String, String}[]
+                remove_bonds = Tuple{String, String}[]
+                add_external_bonds = String[]
+                remove_external_bonds = String[]
+                apply_to_residues = String[]
+
+                for pa in eachelement(patch)
+                    if pa.name == "AddAtom"
+                        q = (haskey(pa, "charge") ? parse(T, pa["charge"]) : missing)
+                        push!(add_atoms, (pa["name"], pa["type"], q))
+                    elseif pa.name == "ChangeAtom"
+                        q = (haskey(pa, "charge") ? parse(T, pa["charge"]) : missing)
+                        push!(change_atoms, (pa["name"], pa["type"], q))
+                    elseif pa.name == "RemoveAtom"
+                        push!(remove_atoms, pa["name"])
+                    elseif pa.name == "AddBond"
+                        push!(add_bonds, (pa["atomName1"], pa["atomName2"]))
+                    elseif pa.name == "RemoveBond"
+                        push!(remove_bonds, (pa["atomName1"], pa["atomName2"]))
+                    elseif pa.name == "AddExternalBond"
+                        push!(add_external_bonds, pa["atomName"])
+                    elseif pa.name == "RemoveExternalBond"
+                        push!(remove_external_bonds, pa["atomName"])
+                    elseif pa.name == "ApplyToResidue"
+                        push!(apply_to_residues, pa["name"])
+                    end
+                end
+                patches[pname] = ResiduePatchTemplate(pname, add_atoms, change_atoms,
+                                    remove_atoms, add_bonds, remove_bonds, add_external_bonds,
+                                    remove_external_bonds, apply_to_residues)
+            end
+
+        elseif entry_name == "HarmonicBondForce"
+            for bond in eachelement(entry)
+                k  = (units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"]))
+                r0 = (units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"]))
+                p1 = pattern_from_attrs(bond, "type1","class1")
+                p2 = pattern_from_attrs(bond, "type2","class2")
+                push!(bond_rule_specs, (:bond_rule, p1,p2, HarmonicBond(k,r0)))
+            end
+
+        elseif entry_name == "HarmonicAngleForce"
+            for ang in eachelement(entry)
+                k  = (units ? parse(T, ang["k"])u"kJ * mol^-1" : parse(T, ang["k"]))
+                θ0 = parse(T, ang["angle"])
+                p1 = pattern_from_attrs(ang, "type1","class1")
+                p2 = pattern_from_attrs(ang, "type2","class2")
+                p3 = pattern_from_attrs(ang, "type3","class3")
+                push!(angle_rule_specs, (:angle_rule, p1, p2, p3, HarmonicAngle(k, θ0)))
+            end
+
+        elseif entry_name == "PeriodicTorsionForce"
+            ff_param_array[1] = get_ezxml(entry, "ordering", ff_param_array[1])
+            local_ordering    = get_ezxml(entry, "ordering", "default")
+            for torsion in eachelement(entry)
+                proper = torsion.name == "Proper"
+                periodicities = Int[]
+                phases = T[]
+                ks = (units ? typeof(T(1u"kJ * mol^-1"))[] : T[])
+                i = 1
+                while haskey(torsion, "periodicity$i")
+                    push!(periodicities, parse(Int, torsion["periodicity$i"]))
+                    push!(phases, parse(T,   torsion["phase$i"]))
+                    push!(ks, (units ? parse(T, torsion["k$i"])u"kJ * mol^-1" : parse(T, torsion["k$i"])))
+                    i += 1
+                end
+
+                p1 = pattern_from_attrs(torsion, "type1", "class1")
+                p2 = pattern_from_attrs(torsion, "type2", "class2")
+                p3 = pattern_from_attrs(torsion, "type3", "class3")
+                p4 = pattern_from_attrs(torsion, "type4", "class4")
+
+                has_wildcard = (p1.kind == WILD || p2.kind == WILD || p3.kind == WILD || p4.kind == WILD)
+                spec = UInt8(spec_score(p1) + spec_score(p2) + spec_score(p3) + spec_score(p4))
+                params_any = (:params, periodicities, phases, ks, proper)
+                push!(torsion_rule_spec, (:torsion_rule, p1, p2, p3, p4, spec, params_any,
+                                            local_ordering, has_wildcard))
+            end
+
+        elseif entry_name == "NonbondedForce"
+            if haskey(entry, "coulomb14scale")
+                w = parse(T, entry["coulomb14scale"])
+                if ff_param_array[4] && w != ff_param_array[2]
+                    error("multiple NonbondedForce entries with different coulomb14scale")
+                end
+                ff_param_array[2] = w
+                ff_param_array[4] = true
+            end
+            if haskey(entry, "lj14scale")
+                w = parse(T, entry["lj14scale"])
+                if ff_param_array[5] && w != ff_param_array[3]
+                    error("multiple NonbondedForce entries with different lj14scale")
+                end
+                ff_param_array[3] = w
+                ff_param_array[5] = true
+            end
+            for atom_or_attr in eachelement(entry)
+                if atom_or_attr.name == "Atom"
+                    ch = (haskey(atom_or_attr, "charge") ? parse(T, atom_or_attr["charge"]) : missing)
+                    σ = (units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"]))
+                    ϵ = (units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"]))
+                    if haskey(atom_or_attr, "class")
+                        push!(nb_class_updates, (:nb_class, atom_or_attr["class"], ch, σ, ϵ))
+                    else
+                        atom_type = atom_or_attr["type"]
+                        if haskey(atom_types, atom_type)
+                            at = atom_types[atom_type]
+                            atom_types[atom_type] = AtomType{T, typeof(at.mass), typeof(σ), typeof(ϵ)}(
+                                at.type, at.class, at.element, ch, at.mass, σ, ϵ)
+                        end
+                    end
+                elseif atom_or_attr.name == "UseAttributeFromResidue"
+                    use_attr = atom_or_attr["name"]
+                    if !(use_attr in attributes_from_residue)
+                        push!(attributes_from_residue, use_attr)
+                    end
+                    if use_attr != "charge"
+                        err_str = "UseAttributeFromResidue only supported for charge, " *
+                                    "ignoring $use_attr"
+                        report_issue(err_str, strictness)
+                    end
+                end
+            end
+
+        elseif entry_name in ("RBTorsionForce", "CMAPTorsionForce", "GBSAOBCForce",
+                              "CustomBondForce", "CustomAngleForce", "CustomTorsionForce",
+                              "CustomNonbondedForce", "CustomGBForce", "CustomHbondForce",
+                              "CustomManyParticleForce", "LennardJonesForce")
+            report_issue("$entry_name not currently supported, ignoring", strictness)
+        end
+    end
+end
+
 """
     MolecularForceField(ff_files...; units=true, custom_residue_templates=nothing,
                         custom_renaming_scheme=nothing, strictness=:warn)
@@ -285,352 +605,28 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                              strictness=:warn)
     check_strictness(strictness)
     atom_types = Dict{String, AtomType}()
-    torsion_order = ""
     IC = (units ? typeof(zero(T) * u"nm^-1") : T)
 
-    weight_14_coulomb, weight_14_lj = one(T), one(T)
-    weight_14_coulomb_set, weight_14_lj_set = false, false
+    # Torsion order, weight_14_coulomb, weight_14_lj, weight_14_coulomb_set, weight_14_lj_set
+    ff_param_array = ["", one(T), one(T), false, false]
     attributes_from_residue = String[]
     residues = Dict{String, ResidueTemplate}()
     patches = Dict{String, ResiduePatchTemplate}()
     type_info = Dict{String, Tuple{String, String}}() # Type => (element, class)
 
-    resname_replacements, atomname_replacements = load_replacements()
-    standard_bonds = load_bond_definitions()
-
-    if !isnothing(custom_renaming_scheme)
-        resname_replacements, atomname_replacements = load_replacements(
-            xmlpath=custom_residue_templates,
-            resname_replacements=resname_replacements,
-            atomname_replacements=atomname_replacements,
-        )
-    end
-    if !isnothing(custom_residue_templates)
-        standard_bonds = load_bond_definitions(
-            xmlpath=custom_residue_templates,
-            standardBonds=standard_bonds,
-        )
-    end
-
     # Accumulators for pattern rules
-    bond_rule_specs   = Any[]
-    angle_rule_specs  = Any[]
-    torsion_rule_spec = Any[]
-    nb_class_updates  = Any[]
+    bond_rule_specs   = []
+    angle_rule_specs  = []
+    torsion_rule_spec = []
+    nb_class_updates  = []
 
     for ff_file in ff_files
-        ff_xml = parsexml(read(ff_file))
-        ff = root(ff_xml)
-        if ff.name != "ForceField"
-            throw(ArgumentError("file $ff_file does not have a ForceField top level " *
-                                "tag, found $(ff.name)"))
-        end
-
-        for entry in eachelement(ff)
-            entry_name = entry.name
-
-            if entry_name == "AtomTypes"
-                for atom_type in eachelement(entry)
-                    at_type  = atom_type["name"]
-                    at_class = atom_type["class"]
-                    element = get_ezxml(atom_type, "element", "?")
-                    ch = missing
-                    atom_mass = (units ? parse(T, atom_type["mass"])u"g/mol" : parse(T, atom_type["mass"]))
-                    σ = (units ? T(-1u"nm") : T(-1))
-                    ϵ = (units ? T(-1u"kJ * mol^-1") : T(-1))
-                    atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
-                        at_type, at_class, element, ch, atom_mass, σ, ϵ)
-                    type_info[at_type] = (element, at_class)
-                end
-
-            elseif entry_name == "Residues"
-                for residue in eachelement(entry)
-                    rname = residue["name"]
-                    atoms, types = String[], String[]
-                    charges = Union{T, Missing}[]
-                    elements = Symbol[]
-                    virtual_sites = VirtualSiteTemplate{T, IC}[]
-                    external_bonds_name = String[]
-                    externals = Int[]
-                    allowed_patches = String[]
-                    extras = BitVector()
-                    bonds_by_name = Tuple{String,String}[]
-
-                    for re in eachelement(residue)
-                        if re.name == "Atom"
-                            an = re["name"]
-                            tp = re["type"]
-                            q = (haskey(re, "charge") ? parse(T, re["charge"]) : missing)
-                            push!(atoms, an)
-                            push!(types, tp)
-                            push!(charges, q)
-                            push!(externals, 0)
-                            tel, tclass = type_info[tp]
-                            push!(extras, (tel == "?") || (tclass == "EP"))
-                            push!(elements, element_string_to_symbol(tel))
-                        elseif re.name == "Bond"
-                            if haskey(re, "atomName1")
-                                an1 = re["atomName1"]
-                            else
-                                # Allow the deprecated "from/to" syntax
-                                an1 = atoms[parse(Int, re["from"]) + 1]
-                            end
-                            if haskey(re, "atomName2")
-                                an2 = re["atomName2"]
-                            else
-                                # Allow the deprecated "from/to" syntax
-                                an2 = atoms[parse(Int, re["to"]) + 1]
-                            end
-                            push!(bonds_by_name, (an1, an2))
-                        elseif re.name == "ExternalBond"
-                            if haskey(re, "atomName")
-                                an = re["atomName"]
-                            else
-                                an = atoms[parse(Int, re["from"]) + 1]
-                            end
-                            push!(external_bonds_name, an)
-                        elseif re.name == "AllowPatch"
-                            push!(allowed_patches, re["name"])
-                        elseif re.name == "VirtualSite"
-                            vs_type = re["type"]
-                            if haskey(re, "siteName")
-                                vs_name = re["siteName"]
-                            else
-                                # Allow the deprecated "index/atom1/atom2/atom3" syntax
-                                vs_name = atoms[parse(Int, re["index"]) + 1]
-                            end
-                            if haskey(re, "atomName1")
-                                atom_name_1 = re["atomName1"]
-                            else
-                                atom_name_1 = atoms[parse(Int, re["atom1"]) + 1]
-                            end
-                            if haskey(re, "atomName2")
-                                atom_name_2 = re["atomName2"]
-                            else
-                                atom_name_2 = atoms[parse(Int, re["atom2"]) + 1]
-                            end
-                            if vs_type == "average2"
-                                weight_1 = parse(T, re["weight1"])
-                                weight_2 = parse(T, re["weight2"])
-                                vs = VirtualSiteTemplate(2, vs_name, atom_name_1, atom_name_2,
-                                        "", weight_1, weight_2, zero(T), zero(T), zero(T), zero(IC))
-                                push!(virtual_sites, vs)
-                            elseif vs_type == "average3"
-                                if haskey(re, "atomName3")
-                                    atom_name_3 = re["atomName3"]
-                                else
-                                    atom_name_3 = atoms[parse(Int, re["atom3"]) + 1]
-                                end
-                                weight_1 = parse(T, re["weight1"])
-                                weight_2 = parse(T, re["weight2"])
-                                weight_3 = parse(T, re["weight3"])
-                                vs = VirtualSiteTemplate(3, vs_name, atom_name_1, atom_name_2,
-                                        atom_name_3, weight_1, weight_2, weight_3, zero(T),
-                                        zero(T), zero(IC))
-                                push!(virtual_sites, vs)
-                            elseif vs_type == "outOfPlane"
-                                if haskey(re, "atomName3")
-                                    atom_name_3 = re["atomName3"]
-                                else
-                                    atom_name_3 = atoms[parse(Int, re["atom3"]) + 1]
-                                end
-                                weight_12 = parse(T, re["weight12"])
-                                weight_13 = parse(T, re["weight13"])
-                                weight_cross = parse(T, re["weightCross"]) * (units ? u"nm^-1" : NoUnits)
-                                vs = VirtualSiteTemplate(4, vs_name, atom_name_1, atom_name_2,
-                                        atom_name_3, zero(T), zero(T), zero(T), weight_12,
-                                        weight_13, weight_cross)
-                                push!(virtual_sites, vs)
-                            elseif vs_type == "localCoords"
-                                report_issue(
-                                    "Virtual site type $vs_type not currently supported, ignoring",
-                                    strictness,
-                                )
-                            else
-                                report_issue(
-                                    "Unrecognised virtual site type $vs_type, ignoring",
-                                    strictness,
-                                )
-                            end
-                        end
-                    end
-
-                    vs_atom_names = Set(vs.name for vs in virtual_sites)
-                    for a1_a2 in bonds_by_name
-                        for nm in a1_a2
-                            if nm in vs_atom_names
-                                error("virtual site $nm in residue $rname appears in a bond")
-                            end
-                        end
-                    end
-                    for nm in external_bonds_name
-                        if nm in vs_atom_names
-                            error("virtual site $nm in residue $rname appears in an external bond")
-                        end
-                    end
-
-                    name_to_idx = Dict(a => i for (i,a) in enumerate(atoms))
-                    bonds = Tuple{Int, Int}[]
-                    for (a1, a2) in bonds_by_name
-                        i, j = name_to_idx[a1], name_to_idx[a2]
-                        push!(bonds, (i < j ? (i, j) : (j, i)))
-                    end
-                    for nm in external_bonds_name
-                        if haskey(name_to_idx, nm)
-                            externals[name_to_idx[nm]] += 1
-                        end
-                    end
-                    residues[rname] = ResidueTemplate(rname, atoms, elements, types, virtual_sites,
-                                            bonds, externals, allowed_patches, charges, extras)
-                end
-
-            elseif entry_name == "Patches"
-                for patch in eachelement(entry)
-                    pname = patch["name"]
-                    if haskey(patch, "residues") && patch["residues"] != "1"
-                        err_str = "Residue patches altering multiple templates not currently " *
-                                  "supported, ignoring patch $pname"
-                        report_issue(err_str, strictness)
-                        continue
-                    end
-
-                    add_atoms = Tuple{String, String, Any}[]
-                    change_atoms = Tuple{String, String, Any}[]
-                    remove_atoms = String[]
-                    add_bonds = Tuple{String, String}[]
-                    remove_bonds = Tuple{String, String}[]
-                    add_external_bonds = String[]
-                    remove_external_bonds = String[]
-                    apply_to_residues = String[]
-
-                    for pa in eachelement(patch)
-                        if pa.name == "AddAtom"
-                            q = (haskey(pa, "charge") ? parse(T, pa["charge"]) : missing)
-                            push!(add_atoms, (pa["name"], pa["type"], q))
-                        elseif pa.name == "ChangeAtom"
-                            q = (haskey(pa, "charge") ? parse(T, pa["charge"]) : missing)
-                            push!(change_atoms, (pa["name"], pa["type"], q))
-                        elseif pa.name == "RemoveAtom"
-                            push!(remove_atoms, pa["name"])
-                        elseif pa.name == "AddBond"
-                            push!(add_bonds, (pa["atomName1"], pa["atomName2"]))
-                        elseif pa.name == "RemoveBond"
-                            push!(remove_bonds, (pa["atomName1"], pa["atomName2"]))
-                        elseif pa.name == "AddExternalBond"
-                            push!(add_external_bonds, pa["atomName"])
-                        elseif pa.name == "RemoveExternalBond"
-                            push!(remove_external_bonds, pa["atomName"])
-                        elseif pa.name == "ApplyToResidue"
-                            push!(apply_to_residues, pa["name"])
-                        end
-                    end
-                    patches[pname] = ResiduePatchTemplate(pname, add_atoms, change_atoms,
-                                        remove_atoms, add_bonds, remove_bonds, add_external_bonds,
-                                        remove_external_bonds, apply_to_residues)
-                end
-
-            elseif entry_name == "HarmonicBondForce"
-                for bond in eachelement(entry)
-                    k  = (units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"]))
-                    r0 = (units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"]))
-                    p1 = pattern_from_attrs(bond, "type1","class1")
-                    p2 = pattern_from_attrs(bond, "type2","class2")
-                    push!(bond_rule_specs, (:bond_rule, p1,p2, HarmonicBond(k,r0)))
-                end
-
-            elseif entry_name == "HarmonicAngleForce"
-                for ang in eachelement(entry)
-                    k  = (units ? parse(T, ang["k"])u"kJ * mol^-1" : parse(T, ang["k"]))
-                    θ0 = parse(T, ang["angle"])
-                    p1 = pattern_from_attrs(ang, "type1","class1")
-                    p2 = pattern_from_attrs(ang, "type2","class2")
-                    p3 = pattern_from_attrs(ang, "type3","class3")
-                    push!(angle_rule_specs, (:angle_rule, p1, p2, p3, HarmonicAngle(k, θ0)))
-                end
-
-            elseif entry_name == "PeriodicTorsionForce"
-                torsion_order  = get_ezxml(entry, "ordering", torsion_order)
-                local_ordering = get_ezxml(entry, "ordering", "default")
-                for torsion in eachelement(entry)
-                    proper = torsion.name == "Proper"
-                    periodicities = Int[]
-                    phases = T[]
-                    ks = (units ? typeof(T(1u"kJ * mol^-1"))[] : T[])
-                    i = 1
-                    while haskey(torsion, "periodicity$i")
-                        push!(periodicities, parse(Int, torsion["periodicity$i"]))
-                        push!(phases, parse(T,   torsion["phase$i"]))
-                        push!(ks, (units ? parse(T, torsion["k$i"])u"kJ * mol^-1" : parse(T, torsion["k$i"])))
-                        i += 1
-                    end
-
-                    p1 = pattern_from_attrs(torsion, "type1", "class1")
-                    p2 = pattern_from_attrs(torsion, "type2", "class2")
-                    p3 = pattern_from_attrs(torsion, "type3", "class3")
-                    p4 = pattern_from_attrs(torsion, "type4", "class4")
-
-                    has_wildcard = (p1.kind == WILD || p2.kind == WILD || p3.kind == WILD || p4.kind == WILD)
-                    spec = UInt8(spec_score(p1) + spec_score(p2) + spec_score(p3) + spec_score(p4))
-                    params_any = (:params, periodicities, phases, ks, proper)
-                    push!(torsion_rule_spec, (:torsion_rule, p1, p2, p3, p4, spec, params_any,
-                                              local_ordering, has_wildcard))
-                end
-
-            elseif entry_name == "NonbondedForce"
-                if haskey(entry, "coulomb14scale")
-                    w = parse(T, entry["coulomb14scale"])
-                    if weight_14_coulomb_set && w != weight_14_coulomb
-                        error("multiple NonbondedForce entries with different coulomb14scale")
-                    end
-                    weight_14_coulomb = w
-                    weight_14_coulomb_set = true
-                end
-                if haskey(entry, "lj14scale")
-                    w = parse(T, entry["lj14scale"])
-                    if weight_14_lj_set && w != weight_14_lj
-                        error("multiple NonbondedForce entries with different lj14scale")
-                    end
-                    weight_14_lj = w
-                    weight_14_lj_set = true
-                end
-                for atom_or_attr in eachelement(entry)
-                    if atom_or_attr.name == "Atom"
-                        ch = (haskey(atom_or_attr, "charge") ? parse(T, atom_or_attr["charge"]) : missing)
-                        σ = (units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"]))
-                        ϵ = (units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"]))
-                        if haskey(atom_or_attr, "class")
-                            push!(nb_class_updates, (:nb_class, atom_or_attr["class"], ch, σ, ϵ))
-                        else
-                            atom_type = atom_or_attr["type"]
-                            if haskey(atom_types, atom_type)
-                                at = atom_types[atom_type]
-                                atom_types[atom_type] = AtomType{T, typeof(at.mass), typeof(σ), typeof(ϵ)}(
-                                    at.type, at.class, at.element, ch, at.mass, σ, ϵ)
-                            end
-                        end
-                    elseif atom_or_attr.name == "UseAttributeFromResidue"
-                        use_attr = atom_or_attr["name"]
-                        if !(use_attr in attributes_from_residue)
-                            push!(attributes_from_residue, use_attr)
-                        end
-                        if use_attr != "charge"
-                            err_str = "UseAttributeFromResidue only supported for charge, " *
-                                      "ignoring $use_attr"
-                            report_issue(err_str, strictness)
-                        end
-                    end
-                end
-
-            elseif entry_name == "Include"
-                report_issue("File includes not currently supported, ignoring", strictness)
-            elseif entry_name in ("RBTorsionForce","CMAPTorsionForce","GBSAOBCForce",
-                                  "CustomBondForce","CustomAngleForce","CustomTorsionForce",
-                                  "CustomNonbondedForce","CustomGBForce","CustomHbondForce",
-                                  "CustomManyParticleForce","LennardJonesForce")
-                report_issue("$entry_name not currently supported, ignoring", strictness)
-            end
-        end
+        read_ff_xml!(ff_file, ff_param_array, atom_types, attributes_from_residue,
+                     residues, patches, type_info, bond_rule_specs, angle_rule_specs,
+                     torsion_rule_spec, nb_class_updates, units, strictness, T, IC)
     end
+    torsion_order = ff_param_array[1]
+    weight_14_coulomb, weight_14_lj = ff_param_array[2], ff_param_array[3]
 
     # Apply residue patches
     for res_name in collect(keys(residues)) # Collect required since residues changes
@@ -664,6 +660,23 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 residues[patch_res_name] = patched_res
             end
         end
+    end
+
+    resname_replacements, atomname_replacements = load_replacements()
+    standard_bonds = load_bond_definitions()
+
+    if !isnothing(custom_renaming_scheme)
+        resname_replacements, atomname_replacements = load_replacements(
+            xmlpath=custom_residue_templates,
+            resname_replacements=resname_replacements,
+            atomname_replacements=atomname_replacements,
+        )
+    end
+    if !isnothing(custom_residue_templates)
+        standard_bonds = load_bond_definitions(
+            xmlpath=custom_residue_templates,
+            standardBonds=standard_bonds,
+        )
     end
 
     # Units parametric types
