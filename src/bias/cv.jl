@@ -216,18 +216,107 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     return dist_val
 end
 
-function calculate_virial(cv::CalcDist, coords, forces, buffers, boundary)
-    ids_1 = collect(cv.atom_inds_1)
-    ids_2 = collect(cv.atom_inds_2)
-    c_1 = @view coords[ids_1]
-    c_2 = @view coords[ids_2]
-    f_2 = @view forces[ids_1]
+function calculate_virial(cv::CalcDist, coords, forces, atoms, buffers, boundary)
+    calculate_virial_dist(cv.dist_type, cv, coords, forces, atoms, buffers, boundary)
+end
 
-    for (c1, c2, f2) in zip(c_1, c_2, f_2)
-        r_ji = vector(c2, c1, boundary)
-        buffers.virial .+= r_ji * transpose(f2)
+function calculate_virial_dist(dt::CalcSingleDist, cv, coords, forces, atoms, buffers, boundary)
+    i = cv.atom_inds_1[1]
+    j = cv.atom_inds_2[1]
+    f_i = forces[i]
+
+    if dt.calc_type == :closest
+        r_ji = vector(coords[j], coords[i], boundary)
+    else
+        r_ji = coords[i] - coords[j]
     end
 
+    buffers.virial .+= r_ji * transpose(f_i)
+end
+
+function calculate_virial_dist(dt::CalcMinDist, cv, coords, forces, atoms, buffers, boundary)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+    
+    min_d2 = typemax(eltype(eltype(coords)))
+    min_idx = (1, 1)
+    
+    # Find the pair minimizing the distance to get the correct vector
+    if dt.calc_type == :closest
+        for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
+            d2 = sum(abs2, vector(p1, p2, boundary))
+            if d2 < min_d2
+                min_d2 = d2
+                min_idx = (i, j)
+            end
+        end
+        r_ji = vector(c2[min_idx[2]], c1[min_idx[1]], boundary)
+    else
+        for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
+            d2 = sum(abs2, p2 - p1)
+            if d2 < min_d2
+                min_d2 = d2
+                min_idx = (i, j)
+            end
+        end
+        r_ji = c1[min_idx[1]] - c2[min_idx[2]]
+    end
+    
+    # The total force on group 1 is the sum of forces on its atoms.
+    # For MinDist, this is effectively the force on the closest atom.
+    f_sum = sum(forces[cv.atom_inds_1])
+    buffers.virial .+= r_ji * transpose(f_sum)
+end
+
+function calculate_virial_dist(dt::CalcMaxDist, cv, coords, forces, atoms, buffers, boundary)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+    
+    max_d2 = typemin(eltype(eltype(coords)))
+    max_idx = (1, 1)
+    
+    # Find the pair maximizing the distance
+    if dt.calc_type == :closest
+        for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
+            d2 = sum(abs2, vector(p1, p2, boundary))
+            if d2 > max_d2
+                max_d2 = d2
+                max_idx = (i, j)
+            end
+        end
+        r_ji = vector(c2[max_idx[2]], c1[max_idx[1]], boundary)
+    else
+        for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
+            d2 = sum(abs2, p2 - p1)
+            if d2 > max_d2
+                max_d2 = d2
+                max_idx = (i, j)
+            end
+        end
+        r_ji = c1[max_idx[1]] - c2[max_idx[2]]
+    end
+    
+    f_sum = sum(forces[cv.atom_inds_1])
+    buffers.virial .+= r_ji * transpose(f_sum)
+end
+
+function calculate_virial_dist(dt::CalcCMDist, cv, coords, forces, atoms, buffers, boundary)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+    a1 = @view atoms[cv.atom_inds_1]
+    a2 = @view atoms[cv.atom_inds_2]
+
+    com1 = center_of_mass(c1, a1)
+    com2 = center_of_mass(c2, a2)
+
+    if dt.calc_type == :closest
+        r_12 = vector(com2, com1, boundary)
+    else
+        r_12 = com1 - com2
+    end
+
+    f_sum = sum(forces[cv.atom_inds_1])
+    buffers.virial .+= r_12 * transpose(f_sum)
 end
 
 """
@@ -334,7 +423,7 @@ function calculate_cv(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs.
     return  torsion_angle(c[1], c[2], c[3], c[4], boundary)
 end
 
-function calculate_virial(cv::CalcTorsion, coords, forces, buffers, boundary)
+function calculate_virial(cv::CalcTorsion, coords, forces, atoms, buffers, boundary)
     ids = collect(cv.atom_inds)
     c = @view coords[ids]
     f = @view forces[ids]
