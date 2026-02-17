@@ -99,6 +99,7 @@
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
+        strictness=:nowarn,
     )
 
     @time simulate!(sys, simulator, n_steps; n_threads=1, rng=rng)

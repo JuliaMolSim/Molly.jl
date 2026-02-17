@@ -117,7 +117,7 @@ function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, ato
                        zero(T), weight_12, weight_13, weight_cross)
 end
 
-function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D)
+function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D, strictness=:warn)
     n_atoms = length(atom_masses)
     virtual_site_flags = falses(n_atoms)
     virtual_sites_cpu = from_device(virtual_sites)
@@ -159,11 +159,15 @@ function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D)
         end
     end
     if warn_vs
-        @warn "One or more virtual sites has a non-zero mass, this may lead to problems"
+        report_issue(
+            "One or more virtual sites has a non-zero mass, this may lead to problems",
+            strictness,
+        )
     end
     if warn_nvs
-        @warn "One or more atoms not marked as a virtual site has zero mass, " *
-              "this may lead to problems"
+        err_str = "One or more atoms not marked as a virtual site has zero mass, " *
+                  "this may lead to problems"
+        report_issue(err_str, strictness)
     end
 
     for ca in constraints

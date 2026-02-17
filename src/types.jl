@@ -516,6 +516,9 @@ interface described there.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the system.
+- `strictness=:warn`: determines behavior when encountering possible problems,
+    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
+    `:error` to error.
 """
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
                       L, F, E, K, M, TM, DA} <: AtomsBase.AbstractSystem{D}
@@ -559,7 +562,9 @@ function System(;
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
-                data=nothing)
+                data=nothing,
+                strictness=:warn)
+    check_strictness(strictness)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)
@@ -653,8 +658,9 @@ function System(;
                             "uses the neighbor list"))
     end
     if !(neighbor_finder isa NoNeighborFinder) && !all(use_neighbors, values(pairwise_inters))
-        @warn "A neighbor finder is used but one of pairwise_inters does not use the neighbor " *
-              "finder, this may not be intended"
+        err_str = "A neighbor finder is used but one of pairwise_inters does not use the " *
+                  "neighbor finder, this may not be intended"
+        report_issue(err_str, strictness)
     end
 
     atom_masses = mass.(atoms)
@@ -662,15 +668,17 @@ function System(;
     total_mass = sum(atom_masses)
     TM = typeof(total_mass)
 
-    k_converted = convert_k_units(T, k, energy_units)
+    k_converted = convert_k_units(T, k, energy_units, strictness)
     K = typeof(k_converted)
 
     if !isbitstype(eltype(coords)) || !isbitstype(eltype(vels))
-        @warn "eltype of coords or velocities is not isbits, it is recomended to use a vector " *
-              "of SVectors for performance"
+        err_str = "eltype of coords or velocities is not isbits, it is recomended to use a " *
+                  "vector of SVectors for performance"
+        report_issue(err_str, strictness)
     end
 
-    virtual_site_flags = setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D)
+    virtual_site_flags = setup_virtual_sites(virtual_sites, atom_masses, constraints,
+                                             AT, D, strictness)
     VF = typeof(virtual_site_flags)
     n_virtual_sites = sum(virtual_site_flags)
 
@@ -721,7 +729,8 @@ function System(sys::System;
                 force_units=sys.force_units,
                 energy_units=sys.energy_units,
                 k=sys.k,
-                data=sys.data)
+                data=sys.data,
+                strictness=:warn)
     return System(
         atoms=atoms,
         coords=coords,
@@ -740,6 +749,7 @@ function System(sys::System;
         energy_units=energy_units,
         k=k,
         data=data,
+        strictness=strictness,
     )
 end
 
@@ -963,6 +973,9 @@ construction where `n` is the number of threads to be used per replica.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the replica system.
+- `strictness=:warn`: determines behavior when encountering possible problems,
+    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
+    `:error` to error.
 """
 mutable struct ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
@@ -1002,7 +1015,9 @@ function ReplicaSystem(;
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         k=default_k(energy_units),
-                        data=nothing)
+                        data=nothing,
+                        strictness=:warn)
+    check_strictness(strictness)
     AT = array_type(replica_coords[1])
     A = typeof(atoms)
     AD = typeof(atoms_data)
@@ -1079,7 +1094,7 @@ function ReplicaSystem(;
                             "does not match number of replicas ($n_replicas)"))
     end
 
-    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, cs, AT, D)
+    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, cs, AT, D, strictness)
                                   for (vss, cs) in zip(replica_virtual_sites, replica_constraints)]
     replica_n_virtual_sites = [sum(vsfs) for vsfs in replica_virtual_site_flags]
     replica_dfs = [n_dof(D, n_atoms - n_virtual_sites, rb)
@@ -1152,7 +1167,7 @@ function ReplicaSystem(;
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
-    k_converted = convert_k_units(T, k, energy_units)
+    k_converted = convert_k_units(T, k, energy_units, strictness)
     K = typeof(k_converted)
 
     replicas = Tuple(System{D, AT, T, A, C, typeof(replica_boundaries[i]), V, AD, TO,
@@ -1613,4 +1628,19 @@ macro maybe_threads(flag, expr)
             $expr
         end
     end |> esc
+end
+
+function check_strictness(strictness)
+    if !(strictness in (:warn, :nowarn, :error))
+        throw(ArgumentError("strictness argument must be :warn, :nowarn or :error, " *
+                            "found $strictness"))
+    end
+end
+
+function report_issue(err_str, strictness)
+    if strictness == :warn
+        @warn err_str
+    elseif strictness == :error
+        error(err_str)
+    end
 end

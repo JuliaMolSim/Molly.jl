@@ -326,7 +326,7 @@ function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t
     # Recover matched permutation from cache to return the oriented key
     ic = ff.torsion_resolver.improper_cache
     cache_hit = get(ic, (t1, t2, t3, t4), :miss)
-    if cache_hit === :miss
+    if cache_hit == :miss
         return (p, (t1, t2, t3, t4)) # Fallback
     else
         perm, _ = cache_hit
@@ -416,6 +416,9 @@ Gromacs file reading should be considered experimental.
     arguments to assign them.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
     with Enzyme.jl and `nonbonded_method` is `:pme`.
+- `strictness=:warn`: determines behavior when encountering possible problems,
+    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
+    `:error` to error.
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
@@ -438,10 +441,12 @@ function System(coord_file::AbstractString,
                 kappa=0.0u"nm^-1",
                 disulfide_bonds=true,
                 grad_safe::Bool=false,
+                strictness=:warn,
                 rename_terminal_res=nothing) where {AT <: AbstractArray}
     if !isnothing(rename_terminal_res)
         @info "rename_terminal_res is no longer required and will be removed in a future breaking release"
     end
+    check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
@@ -468,10 +473,11 @@ function System(coord_file::AbstractString,
     end
     min_box_side = minimum(box_sides(boundary_used))
     if min_box_side < (2 * dist_cutoff)
-        @warn "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
-              "($(2 * dist_cutoff)), this can lead to unphysical simulations" *
-              "since multiple copies of the same atom are seen but only one is " *
-              "considered due to the minimum image convention"
+        err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
+                  "($(2 * dist_cutoff)), this can lead to unphysical simulations" *
+                  "since multiple copies of the same atom are seen but only one is " *
+                  "considered due to the minimum image convention"
+        report_issue(err_str, strictness)
     end
 
     # Units and coordinates
@@ -496,7 +502,7 @@ function System(coord_file::AbstractString,
     template_names = keys(force_field.residues)
     # Match each residue graph to a template and assign atom types/charges
     atom_type_of = Vector{String}(undef, n_atoms)
-    charge_of = Vector{T}(undef, n_atoms)
+    charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
 
@@ -582,18 +588,21 @@ function System(coord_file::AbstractString,
     for ai in 1:n_atoms
         atype = atom_type_of[ai]
         at = force_field.atom_types[atype]
-        if ismissing(charge_of[ai])
-            error("atom $ai type $atype has missing charge")
-        end
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom $ai type $atype has unset σ or ϵ")
         end
         if use_charge_from_residue
-            chrge = charge_of[ai]
+            ch = charge_of[ai]
+            if ismissing(ch)
+                error("atom $ai type $atype has charge missing from residue template")
+            end
         else
-            chrge = force_field.atom_types[atype].charge
+            ch = force_field.atom_types[atype].charge
+            if ismissing(ch)
+                error("atom $ai type $atype has charge missing")
+            end
         end
-        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ))
+        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
 
         res = residue_from_atom_idx(ai, canonical_system)
         res_cfl = chemfiles_residue_for_atom(top, ai - 1)
@@ -607,6 +616,7 @@ function System(coord_file::AbstractString,
                                    chain_id=chain_from_atom_idx(ai, canonical_system), element=element_of[ai], hetero_atom=hetero))
         eligible[ai, ai] = false
     end
+    atoms = to_device([atoms_abst...], AT)
 
     # Bonds
     for (i, j) in top_bonds
@@ -834,12 +844,12 @@ function System(coord_file::AbstractString,
     imps_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
                                 proper=t.proper, n_terms=torsion_n_terms) for t in imps_il.inters]
 
-    return System(T, AT, to_device([atoms_abst...], AT), coords, boundary_used, velocities,
+    return System(T, AT, atoms, coords, boundary_used, velocities,
                   atoms_data, virtual_sites_type, loggers, data, bonds_il, angles_il, tors_il,
                   imps_il, tors_pad, imps_pad, eligible, special, units, dist_cutoff,
                   constraints, rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                   neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                  weight_14_lj, weight_14_coulomb)
+                  weight_14_lj, weight_14_coulomb, strictness)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1158,13 +1168,14 @@ function System(T::Type,
     torsion_inters_pad = torsions.inters
     improper_inters_pad = impropers.inters
     virtual_sites = []
+    strictness = :warn
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
                   improper_inters_pad, eligible, special, units, dist_cutoff, constraints,
                   rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                   neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                  weight_14_lj, weight_14_coulomb)
+                  weight_14_lj, weight_14_coulomb, strictness)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1189,7 +1200,7 @@ function find_bond_r0(bonds_all, i, j)
 end
 
 function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
-                              rigid_water, units)
+                              rigid_water, units, strictness)
     if (constraints_type == :none && !rigid_water) || iszero(length(bonds_all.is))
         return (), bonds_all, angles_all
     end
@@ -1240,6 +1251,7 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
             (units ? T(1e-6)u"nm^2 * ps^-1" : T(1e-6));
             dist_constraints=[dist_constraints...],
             angle_constraints=[angle_constraints...],
+            strictness=strictness,
         )
         constraints = (shake,)
     else
@@ -1253,7 +1265,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 improper_inters_pad, eligible, special, units, dist_cutoff, constraints_type,
                 rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                weight_14_lj, weight_14_coulomb)
+                weight_14_lj, weight_14_coulomb, strictness)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
@@ -1329,7 +1341,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     end
 
     constraints, bonds, angles = exchange_constraints(T, bonds_all, angles_all, atoms_data,
-                                                      constraints_type, rigid_water, units)
+                                            constraints_type, rigid_water, units, strictness)
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
@@ -1452,6 +1464,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
         data=data,
+        strictness=strictness,
     )
 end
 
