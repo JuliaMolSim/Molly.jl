@@ -10,13 +10,13 @@
     dr13 = vector(c1, c3, boundary)
     dr14 = vector(c1, c4, boundary)
 
-    @test Molly.lorentz_σ_mixing(a1, a2)        ≈ 0.25u"nm"
-    @test Molly.lorentz_ϵ_mixing(a1, a2)        ≈ 0.15u"kJ * mol^-1"
-    @test Molly.geometric_σ_mixing(a1, a2)      ≈ 0.2449489742783178u"nm"
-    @test Molly.geometric_ϵ_mixing(a1, a2)      ≈ 0.14142135623730953u"kJ * mol^-1"
-    @test Molly.waldman_hagler_σ_mixing(a1, a2) ≈ 0.271044458112581u"nm"
-    @test Molly.waldman_hagler_ϵ_mixing(a1, a2) ≈ 0.07704164677744986u"kJ * mol^-1"
-    @test Molly.fender_halsey_ϵ_mixing(a1, a2)  ≈ 0.13333333333333333u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.LorentzMixing(), a1, a2)       ≈ 0.25u"nm"
+    @test Molly.ϵ_mixing(Molly.LorentzMixing(), a1, a2)       ≈ 0.15u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.GeometricMixing(), a1, a2)     ≈ 0.2449489742783178u"nm"
+    @test Molly.ϵ_mixing(Molly.GeometricMixing(), a1, a2)     ≈ 0.14142135623730953u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.WaldmanHaglerMixing(), a1, a2) ≈ 0.271044458112581u"nm"
+    @test Molly.ϵ_mixing(Molly.WaldmanHaglerMixing(), a1, a2) ≈ 0.07704164677744986u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(Molly.FenderHalseyMixing(), a1, a2)  ≈ 0.13333333333333333u"kJ * mol^-1"
 
     @test !use_neighbors(LennardJones())
     @test  use_neighbors(LennardJones(use_neighbors=true))
@@ -675,16 +675,18 @@
     pe_improper = potential_energy(pt_improper, c1t, c2t, c3t, c4t, boundary_rb)
     @test isapprox(pe_improper, 20.0u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
 
-    do_shortcut(atom_i, atom_j) = true
+    struct AlwaysShortcut end
+
+    Molly.shortcut_pair(::AlwaysShortcut, args...) = true
 
     for inter in (
-            LennardJones(; shortcut=do_shortcut),
-            LennardJonesSoftCoreBeutler(α=1, λ=0; shortcut=do_shortcut),
-            LennardJonesSoftCoreGapsys(α=1, λ=0; shortcut=do_shortcut),
-            AshbaughHatch(; shortcut=do_shortcut),
-            SoftSphere(; shortcut=do_shortcut),
-            Mie(m=6, n=12; shortcut=do_shortcut),
-            Buckingham(; shortcut=do_shortcut),
+            LennardJones(; shortcut=AlwaysShortcut()),
+            LennardJonesSoftCoreBeutler(α=1, λ=0; shortcut=AlwaysShortcut()),
+            LennardJonesSoftCoreGapsys(α=1, λ=0; shortcut=AlwaysShortcut()),
+            AshbaughHatch(; shortcut=AlwaysShortcut()),
+            SoftSphere(; shortcut=AlwaysShortcut()),
+            Mie(m=6, n=12; shortcut=AlwaysShortcut()),
+            Buckingham(; shortcut=AlwaysShortcut()),
         )
 
         @test isapprox(
@@ -738,10 +740,10 @@
 
     # Test mixing rules with edge cases (zero values)
     a_zero = Atom(charge=0.0, σ=0.0u"nm", ϵ=0.0u"kJ * mol^-1")
-    @test Molly.lorentz_σ_mixing(a1_mie, a_zero) ≈ 0.15u"nm"
-    @test Molly.lorentz_ϵ_mixing(a1_mie, a_zero) ≈ 0.1u"kJ * mol^-1"
-    @test Molly.geometric_σ_mixing(a1_mie, a_zero) ≈ 0.0u"nm"
-    @test Molly.geometric_ϵ_mixing(a1_mie, a_zero) ≈ 0.0u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.LorentzMixing(), a1_mie, a_zero) ≈ 0.15u"nm"
+    @test Molly.ϵ_mixing(Molly.LorentzMixing(), a1_mie, a_zero) ≈ 0.1u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.GeometricMixing(), a1_mie, a_zero) ≈ 0.0u"nm"
+    @test Molly.ϵ_mixing(Molly.GeometricMixing(), a1_mie, a_zero) ≈ 0.0u"kJ * mol^-1"
 end
 
 @testset "Cutoffs" begin
