@@ -126,6 +126,9 @@ mutable struct AWHState{T}
     # λ Inverse temperatures
     λ_β::Vector
 
+    # λ Target Pressures (Precomputed in internal units)
+    λ_p::Vector
+
     # Per λ interactions
     λ_hamiltonians::Vector{LambdaHamiltonian}
     # Per λ atoms
@@ -164,15 +167,39 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
     
     # 1. Identify Global Solute Indices
     solute_indices = Set{Int}()
+    
     λ_atoms = []
     λ_integrators = []
     λ_β = []
+    λ_p = [] # New pressure vector
+
+    # Pre-fetch units for pressure conversion
+    e_unit = ref_sys.energy_units
+    l_unit = unit(ref_sys.boundary.side_lengths[1])
+    p_unit = e_unit / (l_unit^3)
+
     for tstate in thermo_states
         atoms = tstate.system.atoms
         intg  = tstate.integrator
         push!(λ_atoms, atoms)
         push!(λ_integrators, intg)
         push!(λ_β, tstate.beta)
+        
+        # Precompute Pressure
+        p_val = zero(T)
+        if hasfield(typeof(intg), :coupling)
+            couplers = intg.coupling isa Tuple ? intg.coupling : (intg.coupling,)
+            for c in couplers
+                if hasfield(typeof(c), :pressure)
+                    # Convert P_bar to P_molar (internal E/V)
+                    # P_molar = P_bar * Na
+                    p_molar = T(1/3 * tr(c.pressure)) * Unitful.Na
+                    p_val = T(ustrip(uconvert(p_unit, p_molar)))
+                end
+            end
+        end
+        push!(λ_p, p_val)
+
         atoms_cpu = from_device(atoms)
         for atom in atoms_cpu
             if atom.λ < 1.0
@@ -307,6 +334,7 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         active_intg,
         λ_integrators,
         λ_β,
+        λ_p,
         hamiltonians,
         λ_atoms,        
         zeros(FT, n_λ),    # f
@@ -677,7 +705,8 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
 end
 
 # Reweights coordinates along λ windows and accumulates histogram
-function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where FT
+function process_sample(awh::AWHState{FT};
+                        weight_relevance::Real = 0.1) where FT
     n_states = length(awh.λ_hamiltonians)
     coords = awh.active_sys.coords
     bound  = awh.active_sys.boundary
@@ -691,13 +720,21 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
     nbrs = find_neighbors(awh.λ_sys)
 
     potentials = Vector{FT}(undef, n_states)
+    active_pe = nothing # Store active PE here
 
     for (n, (atoms, haml, β)) in enumerate(zip(awh.λ_atoms, awh.λ_hamiltonians, awh.λ_β))
-        awh.λ_sys.atoms                = atoms
+        awh.λ_sys.atoms = atoms
         awh.λ_sys.pairwise_inters      = haml.pairwise_inters
         awh.λ_sys.specific_inter_lists = haml.specific_inter_lists
         awh.λ_sys.general_inters       = haml.general_inters
+        
+        # Total PE for this lambda state
         pe = master_pe + potential_energy(awh.λ_sys, nbrs, 0)
+        
+        # Capture the PE if this is the active window
+        if n == awh.active_idx
+            active_pe = pe
+        end
         
         if β isa Quantity
             potentials[n] = ustrip(β * pe)
@@ -720,6 +757,8 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
             push!(awh.visited_windows, i)
         end
     end
+    
+    return active_pe
 end
 
 # Decides which is the new Hamiltonian given some weights
@@ -803,7 +842,8 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
     for iteration_n in 1:n_iterations
         simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
 
-        process_sample(awh_sim.state)
+
+        active_pe_units = process_sample(awh_sim.state)
 
         if !isnothing(awh_sim.pmf_calc)
             # Calculate a(t) factor for PMF Deconvolution [Lindahl et al. 2014, Eq. 9 text]
@@ -817,21 +857,15 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
                 w_fac = current_N / (current_N + n_lambda)
             end
 
-            # [NEW] Extract and Strip Variables
+            # Extract System Info
             sys = awh_sim.state.active_sys
             e_unit = sys.energy_units
             
-            pot_eng = ustrip(e_unit, Molly.potential_energy(sys))
+            pot_eng = ustrip(e_unit, active_pe_units)
             
-            b = sys.boundary
-            vol_val = zero(T)
-            if hasfield(typeof(b), :side_lengths)
-                l_unit = unit(b.side_lengths[1])
-                v_unit = l_unit^3
-                vol_q = b.side_lengths[1] * b.side_lengths[2] * b.side_lengths[3]
-                vol_val = T(ustrip(v_unit, vol_q))
-            end
+            vol_val = T(ustrip(volume(sys.boundary)))
 
+            # Beta processing
             raw_beta = awh_sim.state.λ_β[awh_sim.state.active_idx]
             cur_beta = zero(T)
             if raw_beta isa Quantity
@@ -840,22 +874,8 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
                 cur_beta = T(raw_beta)
             end
             
-            cur_press = zero(T)
-            intg = awh_sim.state.active_intg
-            if hasfield(typeof(intg), :coupling)
-                couplers = intg.coupling isa Tuple ? intg.coupling : (intg.coupling,)
-                for c in couplers
-                    if hasfield(typeof(c), :pressure)
-                        # FIXED: Convert P_bar to P_molar (internal E/V)
-                        # P_molar = P_bar * Na
-                        l_unit = unit(b.side_lengths[1])
-                        p_unit = e_unit / (l_unit^3)
-                        p_molar = T(1/3 * tr(c.pressure)) * Unitful.Na
-                        
-                        cur_press = T(ustrip(uconvert(p_unit, p_molar)))
-                    end
-                end
-            end
+            # Read precomputed pressure
+            cur_press = awh_sim.state.λ_p[awh_sim.state.active_idx]
 
             update_pmf!(
                 awh_sim.pmf_calc, 
