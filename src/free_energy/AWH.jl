@@ -373,6 +373,9 @@ mutable struct AWHPMFDeconvolution{N, T, F_CV}
 
     target_beta::Union{T, Nothing}
     target_pressure::Union{T, Nothing}
+    
+    cv_history::Vector{NTuple{N, T}}
+    active_idx_history::Vector{Int}
 end
 
 function AWHPMFDeconvolution(
@@ -527,7 +530,9 @@ function AWHPMFDeconvolution(
         den_hist,
         0,
         tgt_beta,
-        tgt_press
+        tgt_press,
+        Vector{NTuple{N, T}}(),
+        Vector{Int}()
     )
 end
 
@@ -545,6 +550,10 @@ function update_pmf!(
     # Calculate current CV
     val = pmf.cv_function(from_device(curr_coords))
     current_cv = val isa Tuple ? val : (val,)
+
+    # Convert to T to ensure type stability within the struct
+    push!(pmf.cv_history, T.(current_cv))
+    push!(pmf.active_idx_history, awh_state.active_idx)
 
     # Determine Index
     current_indices = ntuple(N) do d
