@@ -164,7 +164,9 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
 
     n_λ = length(thermo_states)
     ref_sys = thermo_states[first_state].system
-    
+
+    FT = typeof(ustrip(ref_sys.total_mass))
+
     # 1. Identify Global Solute Indices
     solute_indices = Set{Int}()
     
@@ -186,15 +188,15 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         push!(λ_β, tstate.beta)
         
         # Precompute Pressure
-        p_val = zero(T)
+        p_val = zero(FT)
         if hasfield(typeof(intg), :coupling)
             couplers = intg.coupling isa Tuple ? intg.coupling : (intg.coupling,)
             for c in couplers
                 if hasfield(typeof(c), :pressure)
                     # Convert P_bar to P_molar (internal E/V)
                     # P_molar = P_bar * Na
-                    p_molar = T(1/3 * tr(c.pressure)) * Unitful.Na
-                    p_val = T(ustrip(uconvert(p_unit, p_molar)))
+                    p_molar = FT(1/3 * tr(c.pressure)) * Unitful.Na
+                    p_val = FT(ustrip(uconvert(p_unit, p_molar)))
                 end
             end
         end
@@ -298,7 +300,7 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         neighbor_finder      = λ_nf
     )
 
-    FT = typeof(ustrip(master_sys.total_mass))
+    # FT = typeof(ustrip(master_sys.total_mass))
     hamiltonians = LambdaHamiltonian[]
     for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
         ham = LambdaHamiltonian(λ_p, λ_s, λ_g)
