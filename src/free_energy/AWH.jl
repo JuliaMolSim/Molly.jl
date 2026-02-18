@@ -85,7 +85,7 @@ struct LambdaHamiltonian{PI, SI, GI}
     general_inters::GI
 end
 
-"""
+@doc raw"""
     AWHState(thermo_states::AbstractArray{ThermoState};
              first_state::Int                    = 1,
              n_bias::Int                         = 100,
@@ -124,9 +124,9 @@ mutable struct AWHState{T}
     λ_integrators::Vector
 
     # λ Inverse temperatures
-    λ_β::Vector
+    λ_β::Vector{T}
 
-    # λ Target Pressures (Precomputed in internal units)
+    # λ Target Pressures 
     λ_p::Vector
 
     # Per λ interactions
@@ -142,6 +142,10 @@ mutable struct AWHState{T}
     # Weight Accumulators
     w_seg::Vector{T}        # For current update segment
     w_last::Vector{T}       # For Gibbs sampling
+
+    # Scratch buffers for process_sample to avoid allocations
+    scratch_potentials::Vector{T}
+    scratch_z::Vector{T}
     
     # Dynamics Variables
     N_eff::T                # Real effective samples
@@ -169,23 +173,31 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
 
     # 1. Identify Global Solute Indices
     solute_indices = Set{Int}()
-    
-    λ_atoms = []
-    λ_integrators = []
-    λ_β = []
-    λ_p = [] # New pressure vector
 
     # Pre-fetch units for pressure conversion
     e_unit = ref_sys.energy_units
     l_unit = unit(ref_sys.boundary.side_lengths[1])
     p_unit = e_unit / (l_unit^3)
+    
+    λ_atoms = []
+    λ_integrators = []
+    λ_β = FT[]
+    λ_p = FT[] # New pressure vector
 
     for tstate in thermo_states
         atoms = tstate.system.atoms
         intg  = tstate.integrator
         push!(λ_atoms, atoms)
         push!(λ_integrators, intg)
-        push!(λ_β, tstate.beta)
+
+        # Precompute Beta in internal units
+        beta_val = zero(FT)
+        if tstate.beta isa Quantity
+            beta_val = FT(ustrip(uconvert(inv(e_unit), tstate.beta)))
+        else
+            beta_val = FT(tstate.beta)
+        end
+        push!(λ_β, beta_val)
         
         # Precompute Pressure
         p_val = zero(FT)
@@ -300,7 +312,6 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         neighbor_finder      = λ_nf
     )
 
-    # FT = typeof(ustrip(master_sys.total_mass))
     hamiltonians = LambdaHamiltonian[]
     for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
         ham = LambdaHamiltonian(λ_p, λ_s, λ_g)
@@ -344,6 +355,8 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
         log_ρ,             # log_rho
         zeros(FT, n_λ),    # w_seg
         zeros(FT, n_λ),    # w_last
+        zeros(FT, n_λ),    # scratch_potentials
+        zeros(FT, n_λ),    # scratch_z
         zero(FT),          # N_eff
         FT(n_bias),        # N_bias
         0,                 # n_accum
@@ -376,6 +389,10 @@ mutable struct AWHPMFDeconvolution{N, T, F_CV}
     
     cv_history::Vector{NTuple{N, T}}
     active_idx_history::Vector{Int}
+
+    scratch_g::Vector{T}        # For g(λ)
+    scratch_weights::Vector{T}  # For exp(g)
+    scratch_denom::Vector{T}    # For coupling_matrix * weights
 end
 
 function AWHPMFDeconvolution(
@@ -500,7 +517,7 @@ function AWHPMFDeconvolution(
     
     tgt_press = nothing
     if !isnothing(target_pressure)
-        # FIXED: DimensionError fix
+
         # Molly Energies are per mole. P*V is just energy.
         # We need (P*V) to have units of J/mol.
         # P (bar) * Na (mol^-1) gives the correct dimensionality to match e_unit/v_unit.
@@ -520,6 +537,9 @@ function AWHPMFDeconvolution(
     num_hist = zeros(T, n_bins)
     den_hist = zeros(T, n_bins)
 
+    n_wins = length(awh_state.λ_hamiltonians)
+    n_bins_total = prod(n_bins)
+
     return AWHPMFDeconvolution(
         min_vals, 
         bin_widths, 
@@ -532,7 +552,10 @@ function AWHPMFDeconvolution(
         tgt_beta,
         tgt_press,
         Vector{NTuple{N, T}}(),
-        Vector{Int}()
+        Vector{Int}(),
+        zeros(T, n_wins),
+        zeros(T, n_wins),
+        zeros(T, n_bins_total)
     )
 end
 
@@ -564,14 +587,14 @@ function update_pmf!(
     current_cartesian = CartesianIndex(current_indices)
     current_linear_idx = LinearIndices(pmf.shape)[current_cartesian]
 
-    # Compute Dynamic Weights
+    # Compute Dynamic Weights (In-Place)
     # g(λ) = f(λ) + ln ρ(λ)
-    g = awh_state.f .+ awh_state.log_rho
-    weights = exp.(g) 
+    @. pmf.scratch_g = awh_state.f + awh_state.log_rho
+    @. pmf.scratch_weights = exp(pmf.scratch_g)
     
-    # Global Update
-    # denom_vector[i] corresponds to e^{-gamma(xi)}
-    denom_vector = pmf.coupling_matrix * weights
+    # Global Update (In-Place Matrix Multiplication)
+    # denom_vector = pmf.coupling_matrix * weights
+    mul!(pmf.scratch_denom, pmf.coupling_matrix, pmf.scratch_weights)
 
     # Calculate Reweighting Factor W
     # W = exp( - [ (beta_tgt - beta_curr)U + (beta_tgt*P_tgt - beta_curr*P_curr)V ] )
@@ -589,16 +612,12 @@ function update_pmf!(
     
     w_reweight = exp(reweight_log)
     
-    # Iterate to update arrays
+    # Iterate to update arrays using scratch_denom
     for i in eachindex(pmf.denominator_hist)
-        # Apply the a(t) factor here. 
-        # term = a(t) * e^{gamma(xi)}
-        term = weight_factor / denom_vector[i]
+        term = weight_factor / pmf.scratch_denom[i]
         
-        # Update Denominator
         pmf.denominator_hist[i] += term
         
-        # Update Numerator
         if i == current_linear_idx
             pmf.numerator_hist[i] += term * w_reweight
         end
@@ -607,7 +626,7 @@ function update_pmf!(
     pmf.sample_count += 1
 end
 
-"""
+@doc raw"""
     AWHSimulation(awh_state::AWHState{T};
                   num_md_steps::Int          = 10,
                   update_freq::Int           = 1,
@@ -730,8 +749,9 @@ function process_sample(awh::AWHState{FT};
     awh.λ_sys.boundary = bound
     nbrs = find_neighbors(awh.λ_sys)
 
-    potentials = Vector{FT}(undef, n_states)
-    active_pe = nothing # Store active PE here
+    # Use pre-allocated scratch buffer instead of creating new Vector
+    potentials = awh.scratch_potentials 
+    active_pe = nothing
 
     for (n, (atoms, haml, β)) in enumerate(zip(awh.λ_atoms, awh.λ_hamiltonians, awh.λ_β))
         awh.λ_sys.atoms = atoms
@@ -742,28 +762,31 @@ function process_sample(awh::AWHState{FT};
         # Total PE for this lambda state
         pe = master_pe + potential_energy(awh.λ_sys, nbrs, 0)
         
-        # Capture the PE if this is the active window
         if n == awh.active_idx
             active_pe = pe
         end
         
-        if β isa Quantity
-            potentials[n] = ustrip(β * pe)
-        else
-            potentials[n] = β * ustrip(pe)
-        end
+        # β is now already a raw float in correct units
+        potentials[n] = β * ustrip(pe)
     end
 
-    z = awh.log_rho .+ awh.f .- potentials
-    log_den = Molly.logsumexp(z)
-    w = exp.(z .- log_den)
+    # Calculate Z in-place
+    # z = awh.log_rho .+ awh.f .- potentials
+    @. awh.scratch_z = awh.log_rho + awh.f - potentials
+    
+    log_den = Molly.logsumexp(awh.scratch_z)
+    
+    # Calculate W directly into w_last (which acts as the storage for 'w')
+    # w = exp.(z .- log_den)
+    @. awh.w_last = exp(awh.scratch_z - log_den)
 
-    awh.w_seg .+= w
-    awh.w_last .= w
+    # Accumulate
+    awh.w_seg .+= awh.w_last
     awh.n_accum += 1
     awh.N_eff   += 1
 
-    for (i, val) in enumerate(w)
+    # Check visited windows using w_last
+    for (i, val) in enumerate(awh.w_last)
         if val > weight_relevance/n_states
             push!(awh.visited_windows, i)
         end
@@ -834,7 +857,7 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     return delta_f
 end
 
-"""
+@doc raw"""
     simulate!(awh_sim::AWHSimulation, n_steps::Int)
 
 Runs an AWH simulation. Number of AWH iterations is automatically determinded
@@ -876,16 +899,7 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
             
             vol_val = T(ustrip(volume(sys.boundary)))
 
-            # Beta processing
-            raw_beta = awh_sim.state.λ_β[awh_sim.state.active_idx]
-            cur_beta = zero(T)
-            if raw_beta isa Quantity
-                cur_beta = T(ustrip(uconvert(inv(e_unit), raw_beta)))
-            else
-                cur_beta = T(raw_beta)
-            end
-            
-            # Read precomputed pressure
+            cur_beta = awh_sim.state.λ_β[awh_sim.state.active_idx]            
             cur_press = awh_sim.state.λ_p[awh_sim.state.active_idx]
 
             update_pmf!(
