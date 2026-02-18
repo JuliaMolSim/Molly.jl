@@ -344,7 +344,9 @@ end
 
 function AWHPMFDeconvolution(
     awh_state::AWHState{T},
-    pmf_grid::Tuple
+    pmf_grid::Tuple;
+    cv_func = nothing,
+    coupling_func = nothing
 ) where T
     
     # Parse Grid Dimensions
@@ -356,78 +358,94 @@ function AWHPMFDeconvolution(
     N = length(n_bins)
     bin_widths = (max_vals .- min_vals) ./ n_bins
     
-    # Inspect the first window to find BiasPotentials
-    # We assume the structure of biases is consistent across windows
-    first_ham = awh_state.λ_hamiltonians[1]
+    # --- CV Function Setup ---
+    local final_cv_func
     
-    # Find indices of all BiasPotentials in general_inters
-    bias_indices = findall(x -> x isa BiasPotential, first_ham.general_inters)
-    
-    if isempty(bias_indices)
-        error("No BiasPotential found in AWHState. Cannot auto-detect PMF settings.")
-    end
-    
-    if length(bias_indices) != N
-        error("Found $(length(bias_indices)) BiasPotentials but grid is $(N)D.")
-    end
+    if !isnothing(cv_func)
+        # User provided explicit CV function
+        final_cv_func = cv_func
+    else
+        # Default: Auto-detect from BiasPotentials in the first window
+        first_ham = awh_state.λ_hamiltonians[1]
+        bias_indices = findall(x -> x isa BiasPotential, first_ham.general_inters)
+        
+        if isempty(bias_indices)
+            error("No BiasPotential found in AWHState. Cannot auto-detect PMF settings.")
+        end
+        if length(bias_indices) != N
+            error("Found $(length(bias_indices)) BiasPotentials but grid is $(N)D.")
+        end
 
-    # Construct the CV Function
-    # We grab the cv_types from the first window
-    cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
-    
-    # We capture 'awh_state' to access the updated boundary and atoms during simulation
-    auto_cv_func = (coords) -> begin
-        sys = awh_state.active_sys
-        return ntuple(N) do d
-            Molly.calculate_cv(
-                cv_types[d], 
-                coords, 
-                sys.atoms, 
-                sys.boundary, 
-                sys.velocities
-            )
+        cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
+        
+        # Capture awh_state for system info (atoms, boundary, etc)
+        final_cv_func = (coords) -> begin
+            sys = awh_state.active_sys
+            return ntuple(N) do d
+                Molly.calculate_cv(
+                    cv_types[d], 
+                    coords, 
+                    sys.atoms, 
+                    sys.boundary, 
+                    sys.velocities
+                )
+            end
         end
     end
 
-    # Pre-compute Coupling Matrix
-    # Matrix size: (Total Bins) x (Total Windows)
+    # --- Coupling Matrix Setup ---
     total_bins = prod(n_bins)
     n_windows  = length(awh_state.λ_hamiltonians)
     coupling_mat = Matrix{T}(undef, total_bins, n_windows)
     
-    # CartesianIndices for iterating over the grid
     cart_indices = CartesianIndices(n_bins)
     linear_indices = LinearIndices(n_bins)
 
+    # Pre-compute exp(-Q(xi, lambda))
+    # If user provides coupling_func, it must return dimensionless energy (beta * E)
+    if !isnothing(cv_func) && isnothing(coupling_func)
+        error("If a custom `pmf_cv` is provided, `pmf_coupling` must also be provided.")
+    end
+
     for (k, ham_k) in enumerate(awh_state.λ_hamiltonians)
-        # Get inverse temperature for this window
         beta_k = awh_state.λ_β[k]
         
+        # If auto-detecting, find bias indices for this window once
+        local bias_indices_k
+        if isnothing(coupling_func)
+             bias_indices_k = findall(x -> x isa BiasPotential, ham_k.general_inters)
+        end
+
         for idx in cart_indices
             linear_i = linear_indices[idx]
             
             # Determine CV value at the center of this bin
-            # val[d] = min[d] + (idx[d] - 0.5) * width[d]
             cv_val_tuple = ntuple(N) do d
                 min_vals[d] + (idx[d] - 0.5) * bin_widths[d]
             end
             
-            # Calculate Total Bias Energy at this grid point
-            total_bias_energy = zero(T)*awh_state.active_sys.energy_units
-            
-            for (d, bias_idx) in enumerate(bias_indices)
-                bias_inter = ham_k.general_inters[bias_idx]
-                # bias_inter.bias_type holds parameters (k, target, etc.)
-                # potential_energy(bias_type, val) returns V(xi)
-                total_bias_energy += Molly.potential_energy(bias_inter.bias_type, cv_val_tuple[d])
+            dim_less_bias = zero(T)
+
+            if !isnothing(coupling_func)
+                # User provided coupling: returns dimensionless energy directly
+                dim_less_bias = coupling_func(cv_val_tuple, k)
+            else
+                # Auto-detect: Calculate physical energy and multiply by beta
+                physical_bias_energy = zero(T) * awh_state.active_sys.energy_units
+                
+                for (d, bias_idx) in enumerate(bias_indices_k)
+                    bias_inter = ham_k.general_inters[bias_idx]
+                    physical_bias_energy += Molly.potential_energy(bias_inter.bias_type, cv_val_tuple[d])
+                end
+                dim_less_bias = beta_k * physical_bias_energy
             end
             
             # Store coupling term: exp(-beta * V)
-            coupling_mat[linear_i, k] = exp(-beta_k * total_bias_energy)
+            coupling_mat[linear_i, k] = exp(-dim_less_bias)
         end
     end
 
-    # 5. Initialize Histograms
+    # Initialize Histograms
     num_hist = zeros(T, n_bins)
     den_hist = zeros(T, n_bins)
 
@@ -435,7 +453,7 @@ function AWHPMFDeconvolution(
         min_vals, 
         bin_widths, 
         n_bins,
-        auto_cv_func,
+        final_cv_func,
         coupling_mat,
         num_hist,
         den_hist,
@@ -555,14 +573,22 @@ function AWHSimulation(
     significant_weight::Real = 0.1,
     log_freq::Int = 100,
     # Optional PMF args
-    pmf_grid = nothing
+    pmf_grid = nothing,
+    pmf_cv = nothing,
+    pmf_coupling = nothing
 ) where T
 
     n_win = length(awh_state.λ_hamiltonians)
 
     pmf_calc = nothing
     if !isnothing(pmf_grid)
-        pmf_calc = AWHPMFDeconvolution(awh_state, pmf_grid)
+        # Pass the new optional arguments to the constructor
+        pmf_calc = AWHPMFDeconvolution(
+            awh_state, 
+            pmf_grid; 
+            cv_func=pmf_cv, 
+            coupling_func=pmf_coupling
+        )
     end
 
     return AWHSimulation(n_win,
