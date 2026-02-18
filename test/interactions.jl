@@ -3,8 +3,9 @@
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     c4 = SVector(1.1, 1.0, 1.0)u"nm"
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1")
+    a1 = Atom(atom_type=1, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a2 = Atom(atom_type=2, charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1")
+    a3 = Atom(atom_type=3, charge=1.0, σ=0.4u"nm", ϵ=0.4u"kJ * mol^-1")
     boundary = CubicBoundary(2.0u"nm")
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
@@ -17,6 +18,34 @@
     @test Molly.σ_mixing(Molly.WaldmanHaglerMixing(), a1, a2) ≈ 0.271044458112581u"nm"
     @test Molly.ϵ_mixing(Molly.WaldmanHaglerMixing(), a1, a2) ≈ 0.07704164677744986u"kJ * mol^-1"
     @test Molly.ϵ_mixing(Molly.FenderHalseyMixing(), a1, a2)  ≈ 0.13333333333333333u"kJ * mol^-1"
+
+    σ_exceptions_dict = Dict((2, 1) => 0.5u"nm", (3, 3) => 0.6u"nm")
+    σ_exceptions_static = Molly.ExceptionList(
+        SVector{2}([(2, 1), (3, 3)]),
+        SVector(0.5u"nm", 0.6u"nm"),
+    )
+    lorentz_mixing_dict = Molly.MixingException(Molly.LorentzMixing(), σ_exceptions_dict)
+    lorentz_mixing_static = Molly.MixingException(Molly.LorentzMixing(), σ_exceptions_static)
+    @test Molly.σ_mixing(lorentz_mixing_dict  , a1, a2) ≈ 0.5u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_dict  , a1, a3) ≈ 0.35u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_dict  , a3, a3) ≈ 0.6u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_static, a1, a2) ≈ 0.5u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_static, a1, a3) ≈ 0.35u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_static, a3, a3) ≈ 0.6u"nm"
+
+    ϵ_exceptions_dict = Dict((2, 1) => 0.5u"kJ * mol^-1", (3, 3) => 0.6u"kJ * mol^-1")
+    ϵ_exceptions_static = Molly.ExceptionList(
+        SVector{2}([(2, 1), (3, 3)]),
+        SVector(0.5u"kJ * mol^-1", 0.6u"kJ * mol^-1"),
+    )
+    geometric_mixing_dict = Molly.MixingException(Molly.GeometricMixing(), ϵ_exceptions_dict)
+    geometric_mixing_static = Molly.MixingException(Molly.GeometricMixing(), ϵ_exceptions_static)
+    @test Molly.ϵ_mixing(geometric_mixing_dict  , a1, a2) ≈ 0.5u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_dict  , a1, a3) ≈ 0.28284271247461906u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_dict  , a3, a3) ≈ 0.6u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_static, a1, a2) ≈ 0.5u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_static, a1, a3) ≈ 0.28284271247461906u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_static, a3, a3) ≈ 0.6u"kJ * mol^-1"
 
     @test !use_neighbors(LennardJones())
     @test  use_neighbors(LennardJones(use_neighbors=true))
