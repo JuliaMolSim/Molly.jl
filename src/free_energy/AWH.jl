@@ -2,7 +2,7 @@ export
     AWHState,
     AWHSimulation,
     simulate!
-
+    
 # Convenience struct to store relevant things
 # when running an AWH simulation.
 mutable struct AWHStats{T}
@@ -340,13 +340,18 @@ mutable struct AWHPMFDeconvolution{N, T, F_CV}
     denominator_hist::Array{T, N}
     
     sample_count::Int
+
+    target_beta::Union{T, Nothing}
+    target_pressure::Union{T, Nothing}
 end
 
 function AWHPMFDeconvolution(
     awh_state::AWHState{T},
     pmf_grid::Tuple;
     cv_func = nothing,
-    coupling_func = nothing
+    coupling_func = nothing,
+    target_temp = nothing,
+    target_pressure = nothing
 ) where T
     
     # Parse Grid Dimensions
@@ -378,7 +383,7 @@ function AWHPMFDeconvolution(
 
         cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
         
-        # Capture awh_state for system info (atoms, boundary, etc)
+        # Capture awh_state for system info
         final_cv_func = (coords) -> begin
             sys = awh_state.active_sys
             return ntuple(N) do d
@@ -437,15 +442,48 @@ function AWHPMFDeconvolution(
                     bias_inter = ham_k.general_inters[bias_idx]
                     physical_bias_energy += Molly.potential_energy(bias_inter.bias_type, cv_val_tuple[d])
                 end
-                dim_less_bias = beta_k * physical_bias_energy
+                
+                if beta_k isa Quantity
+                    dim_less_bias = ustrip(beta_k * physical_bias_energy)
+                else
+                    dim_less_bias = beta_k * ustrip(physical_bias_energy)
+                end
             end
-            
-            # Store coupling term: exp(-beta * V)
             coupling_mat[linear_i, k] = exp(-dim_less_bias)
         end
     end
 
-    # Initialize Histograms
+    # [NEW] Setup Reweighting Constants
+    sys = awh_state.active_sys
+    e_unit = sys.energy_units
+    
+    tgt_beta = nothing
+    if !isnothing(target_temp)
+        # Convert kBT to system energy unit (kJ/mol) using R (Gas Constant)
+        kBT_q = uconvert(e_unit, Unitful.R * target_temp)
+        # Invert and Strip to get Beta in [1/energy_unit]
+        tgt_beta = T(1.0 / ustrip(kBT_q))
+    end
+    
+    tgt_press = nothing
+    if !isnothing(target_pressure)
+        # FIXED: DimensionError fix
+        # Molly Energies are per mole. P*V is just energy.
+        # We need (P*V) to have units of J/mol.
+        # P (bar) * Na (mol^-1) gives the correct dimensionality to match e_unit/v_unit.
+        
+        l_unit = unit(sys.boundary.side_lengths[1])
+        v_unit = l_unit^3
+        
+        # Internal pressure unit: Energy / Volume (per mole)
+        p_unit = e_unit / v_unit # e.g. kJ mol^-1 nm^-3
+        
+        # We scale the macroscopic pressure by Avogadro's constant to get "Molar Pressure"
+        p_val_molar = target_pressure * Unitful.Na
+        
+        tgt_press = T(ustrip(uconvert(p_unit, p_val_molar)))
+    end
+
     num_hist = zeros(T, n_bins)
     den_hist = zeros(T, n_bins)
 
@@ -457,7 +495,9 @@ function AWHPMFDeconvolution(
         coupling_mat,
         num_hist,
         den_hist,
-        0
+        0,
+        tgt_beta,
+        tgt_press
     )
 end
 
@@ -465,14 +505,18 @@ function update_pmf!(
     pmf::AWHPMFDeconvolution{N, T, F_CV},
     awh_state, 
     curr_coords;
-    weight_factor::T = one(T) # Default to 1.0 (Linear Stage behavior)
+    weight_factor::T = one(T), 
+    potential_energy::T = zero(T),
+    box_volume::T = zero(T),
+    current_beta::T = one(T),
+    current_pressure::T = zero(T)
 ) where {N, T, F_CV}
     
-    # Calculate current CV ξ(t)
+    # Calculate current CV
     val = pmf.cv_function(from_device(curr_coords))
     current_cv = val isa Tuple ? val : (val,)
 
-    # Determine Linear Index of current sample
+    # Determine Index
     current_indices = ntuple(N) do d
         rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
         idx = Int(floor(rel)) + 1
@@ -489,6 +533,22 @@ function update_pmf!(
     # Global Update
     # denom_vector[i] corresponds to e^{-gamma(xi)}
     denom_vector = pmf.coupling_matrix * weights
+
+    # Calculate Reweighting Factor W
+    # W = exp( - [ (beta_tgt - beta_curr)U + (beta_tgt*P_tgt - beta_curr*P_curr)V ] )
+    reweight_log = zero(T)
+    
+    if !isnothing(pmf.target_beta)
+        reweight_log -= (pmf.target_beta - current_beta) * potential_energy
+    end
+    
+    if !isnothing(pmf.target_pressure)
+        target_work  = pmf.target_beta * pmf.target_pressure
+        current_work = current_beta * current_pressure
+        reweight_log -= (target_work - current_work) * box_volume
+    end
+    
+    w_reweight = exp(reweight_log)
     
     # Iterate to update arrays
     for i in eachindex(pmf.denominator_hist)
@@ -501,7 +561,7 @@ function update_pmf!(
         
         # Update Numerator
         if i == current_linear_idx
-            pmf.numerator_hist[i] += term
+            pmf.numerator_hist[i] += term * w_reweight
         end
     end
     
@@ -575,19 +635,22 @@ function AWHSimulation(
     # Optional PMF args
     pmf_grid = nothing,
     pmf_cv = nothing,
-    pmf_coupling = nothing
+    pmf_coupling = nothing,
+    target_temp = nothing,
+    target_pressure = nothing
 ) where T
 
     n_win = length(awh_state.λ_hamiltonians)
 
     pmf_calc = nothing
     if !isnothing(pmf_grid)
-        # Pass the new optional arguments to the constructor
         pmf_calc = AWHPMFDeconvolution(
             awh_state, 
             pmf_grid; 
             cv_func=pmf_cv, 
-            coupling_func=pmf_coupling
+            coupling_func=pmf_coupling,
+            target_temp=target_temp,
+            target_pressure=target_pressure
         )
     end
 
@@ -630,12 +693,17 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
     potentials = Vector{FT}(undef, n_states)
 
     for (n, (atoms, haml, β)) in enumerate(zip(awh.λ_atoms, awh.λ_hamiltonians, awh.λ_β))
-        awh.λ_sys.atoms          = atoms
+        awh.λ_sys.atoms                = atoms
         awh.λ_sys.pairwise_inters      = haml.pairwise_inters
         awh.λ_sys.specific_inter_lists = haml.specific_inter_lists
         awh.λ_sys.general_inters       = haml.general_inters
         pe = master_pe + potential_energy(awh.λ_sys, nbrs, 0)
-        potentials[n] = β * pe
+        
+        if β isa Quantity
+            potentials[n] = ustrip(β * pe)
+        else
+            potentials[n] = β * ustrip(pe)
+        end
     end
 
     z = awh.log_rho .+ awh.f .- potentials
@@ -679,8 +747,7 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
         return nothing 
     end
 
-    current_N = awh_sim.state.in_initial_stage ?
-        awh_sim.state.N_bias : (awh_sim.initial_sampl_n + awh_sim.state.N_eff)
+    current_N = awh_sim.state.in_initial_stage ? awh_sim.state.N_bias : (awh_sim.initial_sampl_n + awh_sim.state.N_eff)
 
     numerator   = current_N .* awh_sim.state.rho .+ awh_sim.state.w_seg
     denominator = current_N .* awh_sim.state.rho .+ (awh_sim.state.n_accum .* awh_sim.state.rho)
@@ -745,25 +812,66 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
             
             w_fac = one(T)
             if awh_sim.state.in_initial_stage
-                # N_bias is the constant N used in this stage
-                # update_freq corresponds to n_lambda (samples per update)
                 current_N = awh_sim.state.N_bias
                 n_lambda  = T(awh_sim.update_freq)
                 w_fac = current_N / (current_N + n_lambda)
+            end
+
+            # [NEW] Extract and Strip Variables
+            sys = awh_sim.state.active_sys
+            e_unit = sys.energy_units
+            
+            pot_eng = ustrip(e_unit, Molly.potential_energy(sys))
+            
+            b = sys.boundary
+            vol_val = zero(T)
+            if hasfield(typeof(b), :side_lengths)
+                l_unit = unit(b.side_lengths[1])
+                v_unit = l_unit^3
+                vol_q = b.side_lengths[1] * b.side_lengths[2] * b.side_lengths[3]
+                vol_val = T(ustrip(v_unit, vol_q))
+            end
+
+            raw_beta = awh_sim.state.λ_β[awh_sim.state.active_idx]
+            cur_beta = zero(T)
+            if raw_beta isa Quantity
+                cur_beta = T(ustrip(uconvert(inv(e_unit), raw_beta)))
+            else
+                cur_beta = T(raw_beta)
+            end
+            
+            cur_press = zero(T)
+            intg = awh_sim.state.active_intg
+            if hasfield(typeof(intg), :coupling)
+                couplers = intg.coupling isa Tuple ? intg.coupling : (intg.coupling,)
+                for c in couplers
+                    if hasfield(typeof(c), :pressure)
+                        # FIXED: Convert P_bar to P_molar (internal E/V)
+                        # P_molar = P_bar * Na
+                        l_unit = unit(b.side_lengths[1])
+                        p_unit = e_unit / (l_unit^3)
+                        p_molar = T(1/3 * tr(c.pressure)) * Unitful.Na
+                        
+                        cur_press = T(ustrip(uconvert(p_unit, p_molar)))
+                    end
+                end
             end
 
             update_pmf!(
                 awh_sim.pmf_calc, 
                 awh_sim.state, 
                 awh_sim.state.active_sys.coords; 
-                weight_factor=w_fac
+                weight_factor=w_fac,
+                potential_energy=pot_eng,
+                box_volume=vol_val,
+                current_beta=cur_beta,
+                current_pressure=cur_press
             )
         end
 
         active_idx_new = gibbs_sample_window(awh_sim.state)
         if active_idx_new != active_idx
-            # verbose logging can be adjusted or removed
-            println("New active Hamiltonian $(active_idx) -> $(active_idx_new). Iteration $(iteration_n)")
+            println("New active Hamiltonian $(active_idx) -> $(active_idx_new). Iteration $(iteration_n) out of $(n_iterations)")
             active_idx = active_idx_new
         end
 
