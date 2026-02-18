@@ -56,3 +56,56 @@ end
 struct InverseMixing end
 
 B_mixing(::InverseMixing, atom_i, atom_j, args...) = 2 / (inv(atom_i.B) + inv(atom_j.B))
+
+# Dict can be used on CPU but doesn't seem faster than ExceptionList for a few exceptions
+function get_pair(d::Dict, i, j, default)
+    k1 = (i, j)
+    k2 = (j, i)
+    if haskey(d, k1)
+        return d[k1]
+    elseif haskey(d, k2)
+        return d[k2]
+    else
+        return default
+    end
+end
+
+# GPU-compatible dictionary-like object for pair lookup
+struct ExceptionList{N, K, V}
+    keys::SVector{N, K}
+    values::SVector{N, V}
+end
+
+# Avoiding branches helps GPU performance
+function get_pair(d::ExceptionList{N}, i, j, default) where N
+    k1 = (i, j)
+    k2 = (j, i)
+    val = default
+    for ki in 1:N
+        if d.keys[ki] == k1 || d.keys[ki] == k2
+            val = d.values[ki]
+        end
+    end
+    return val
+end
+
+# Provide exceptions (NBFix) for specific pairs of atom types
+struct MixingException{M, E}
+    mixing::M
+    exceptions::E
+end
+
+function σ_mixing(me::MixingException, atom_i, atom_j, args...)
+    default = σ_mixing(me.mixing, atom_i, atom_j, args...)
+    return get_pair(me.exceptions, atom_i.atom_type, atom_j.atom_type, default)
+end
+
+function ϵ_mixing(me::MixingException, atom_i, atom_j, args...)
+    default = ϵ_mixing(me.mixing, atom_i, atom_j, args...)
+    return get_pair(me.exceptions, atom_i.atom_type, atom_j.atom_type, default)
+end
+
+function λ_mixing(me::MixingException, atom_i, atom_j, args...)
+    default = λ_mixing(me.mixing, atom_i, atom_j, args...)
+    return get_pair(me.exceptions, atom_i.atom_type, atom_j.atom_type, default)
+end
