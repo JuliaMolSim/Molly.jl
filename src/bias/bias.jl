@@ -113,7 +113,9 @@ struct PeriodicFlatBottomBias{K, T, W}
     width::W
 end
 
-function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
+function potential_energy(pb::PeriodicFlatBottomBias{K, T, W}, cv_sim; kwargs...) where {K, T, W}
+
+    FT = typeof(ustrip(pb.cv_target))
     # Calculate signed distance in periodic bounds [-π, π]
     d = cv_sim - pb.cv_target
     d_wrapped = d - 2π * round(d / 2π)
@@ -124,15 +126,17 @@ function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     if dist <= pb.width
         # Inside flat region: return zero with correct units/type
         # We calculate a dummy energy to get the zero of the correct type
-        return zero(0.5 * pb.k * pb.width^2)
+        return zero(FT(0.5 * pb.k * pb.width^2))
     else
         # Outside: Harmonic penalty
         disp = dist - pb.width
-        return 0.5 * pb.k * disp^2
+        return FT(0.5 * pb.k * disp^2)
     end
 end
 
 function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
+
+    FT = typeof(ustrip(pb.cv_target))
     # 1. Calculate signed distance in periodic bounds [-π, π]
     d = cv_sim - pb.cv_target
     d_wrapped = d - 2π * round(d / 2π)
@@ -141,11 +145,11 @@ function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
     
     if dist <= pb.width
         # Inside flat region: zero gradient
-        return zero(pb.k * pb.width)
+        return zero(FT(pb.k * pb.width))
     else
         # Outside: Gradient is k * (|d| - w) * sign(d)
         disp = dist - pb.width
-        return pb.k * disp * sign(d_wrapped)
+        return FT(pb.k * disp * sign(d_wrapped))
     end
 end
 

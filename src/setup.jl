@@ -927,7 +927,7 @@ function System(T::Type,
             atom_index = length(atoms_abst) + 1
             el = element_from_mass(atom_mass, element_names, element_masses)
             push!(atoms_abst, Atom(index=atom_index, mass=atom_mass, charge=ch, σ=atomtypes[attype].σ,
-                                ϵ=atomtypes[attype].ϵ))
+                                ϵ=atomtypes[attype].ϵ, T(1)))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
                                         res_name=c[4], element=el))
         elseif current_field == "bonds"
@@ -1043,7 +1043,7 @@ function System(T::Type,
             atom_index = length(atoms_abst) + 1
             el = element_from_mass(atom_mass, element_names, element_masses)
             push!(atoms_abst, Atom(index=atom_index, mass=atom_mass, charge=temp_charge,
-                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ, T(1)))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
                                         res_name=strip(l[6:10]), element=el))
 

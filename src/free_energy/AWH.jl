@@ -490,7 +490,7 @@ function AWHPMFDeconvolution(
                 
                 for (d, bias_idx) in enumerate(bias_indices_k)
                     bias_inter = ham_k.general_inters[bias_idx]
-                    physical_bias_energy += Molly.potential_energy(bias_inter.bias_type, cv_val_tuple[d])
+                    physical_bias_energy += potential_energy(bias_inter.bias_type, cv_val_tuple[d])
                 end
                 
                 if beta_k isa Quantity
