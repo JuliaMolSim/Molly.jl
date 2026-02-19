@@ -514,3 +514,109 @@ end
         @test dist_13_std > dist_12_std
     end
 end
+
+@testset "Analytical Gradients" begin
+
+    function cv_gradient_enz(cv_type, coords, atoms=nothing, boundary=nothing, velocities=nothing)
+        d_coords = zero(coords)
+        unit_arr = Any[u"nm"]
+
+        _, cv_val_ustrip = autodiff(
+            set_runtime_activity(ReverseWithPrimal), # set_runtime_activity necessary for units
+            Molly.calculate_cv_ustrip!,
+            Active,
+            Const(unit_arr),
+            Const(cv_type),
+            Duplicated(coords, d_coords),
+            Const(atoms),
+            Const(boundary),
+            Const(velocities),
+        )
+
+        # Correct the units after the ustrip
+        u = only(unit_arr)
+        d_coords = d_coords .* u ./ unit(d_coords[1][1])^2
+
+        return d_coords, cv_val_ustrip * u
+    end
+
+    function forces!(
+        fs, sys, bias::BiasPotential;
+        grad_cv = cv_gradient_enz,
+        kwargs...
+    )
+        if bias.cv_type.correction == :pbc
+            coords = Molly.unwrap_molecules(sys)
+        else
+            coords = sys.coords
+        end
+
+        # Gradient of CV with respect to coordinates
+        d_coords, cv_sim = grad_cv(
+            bias.cv_type,
+            Molly.from_device(coords),
+            Molly.from_device(sys.atoms),
+            sys.boundary,
+            Molly.from_device(sys.velocities),
+        )
+
+        # Gradient of bias function with respect to CV
+        d_bias = bias_gradient(bias.bias_type, cv_sim)
+
+        fs_svec = d_bias .* d_coords
+
+        fs .-= Molly.to_device(fs_svec, typeof(fs))
+        return fs
+    end
+
+    n_atoms = 100
+    boundary = CubicBoundary(2.0u"nm")
+    temp = 298.0u"K"
+    atom_mass = 10.0u"g/mol"
+
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+    coords_ref = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+    cv_d_s   = CalcDist([1], [5], CalcSingleDist())
+    cv_d_min = CalcDist([1, 2, 3, 4], [5, 6, 7, 8], CalcMinDist())
+    cv_d_max = CalcDist([1, 2, 3, 4], [5, 6, 7, 8], CalcMaxDist())
+    cv_d_cm  = CalcDist([1, 2, 3, 4], [5, 6, 7, 8], CalcCMDist())
+    cv_rg    = CalcRg([1, 2, 3, 4])
+    cv_rmsd  = CalcRMSD(coords_ref, [1,2,3,4],[1,2,3,4]) 
+    cv_tor   = CalcTorsion([1,2,3,4])
+
+    cvs = (cv_d_s, cv_d_min, cv_d_max, cv_d_cm, cv_rg, cv_rmsd, cv_tor)
+    
+    b1 = LinearBias(100.0u"kJ*mol^-1*nm^-1", 0.2u"nm")
+    b2 = LinearBias(100.0u"kJ*mol^-1", 0.2)
+
+    bias = (b1, b1, b1, b1, b1, b1, b2)
+
+    for (c, b) in zip(cvs, bias)
+
+        bias_pot = BiasPotential(c, b)
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=(),
+            general_inters=(bias_pot,)
+        )
+
+        fs = forces(sys)
+
+        fs_zero_enz = zero(fs)
+        fs_zero_anl = zero(fs)
+
+        forces!(fs_zero_enz, sys, bias_pot; grad_cv = cv_gradient_enz)
+        forces!(fs_zero_anl, sys, bias_pot; grad_cv = cv_gradient)
+
+        @test isapprox(ustrip.(fs_zero_anl), ustrip.(fs_zero_enz); atol = 1e-6)
+
+    end
+
+
+end
