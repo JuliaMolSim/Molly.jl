@@ -235,8 +235,8 @@ function resolve_bond(ff::MolecularForceField, t1::AbstractString, t2::AbstractS
     cand = Int[]
     append!(cand, get(ff.bond_resolver.idx, (:type,  t1, t2), Int[]))
     append!(cand, get(ff.bond_resolver.idx, (:type,  t2, t1), Int[]))
-    c1 = get(ff.class_of, t1, "")
-    c2 = get(ff.class_of, t2, "")
+    c1 = get(ff.type_to_class, t1, "")
+    c2 = get(ff.type_to_class, t2, "")
     append!(cand, get(ff.bond_resolver.idx, (:class, c1, c2), Int[]))
     append!(cand, get(ff.bond_resolver.idx, (:class, c2, c1), Int[]))
     append!(cand, get(ff.bond_resolver.idx, (:wild,  "", ""), Int[]))
@@ -245,8 +245,8 @@ function resolve_bond(ff::MolecularForceField, t1::AbstractString, t2::AbstractS
     bestspec = Int8(-1)
     for i in cand
         r = ff.bond_resolver.rules[i]
-        if (matches(r.p1, t1, ff.class_of) && matches(r.p2, t2, ff.class_of)) ||
-           (matches(r.p1, t2, ff.class_of) && matches(r.p2, t1, ff.class_of))
+        if (matches(r.p1, t1, ff.type_to_class) && matches(r.p2, t2, ff.type_to_class)) ||
+           (matches(r.p1, t2, ff.type_to_class) && matches(r.p2, t1, ff.type_to_class))
             if r.specificity > bestspec
                 bestspec = r.specificity
                 best = r.params
@@ -268,23 +268,23 @@ function resolve_angle(ff::MolecularForceField, t1::AbstractString, t2::Abstract
 
     cand = Int[]
     append!(cand, get(ff.angle_resolver.idx, (:type,  t2), Int[]))
-    append!(cand, get(ff.angle_resolver.idx, (:class, get(ff.class_of, t2, "")), Int[]))
+    append!(cand, get(ff.angle_resolver.idx, (:class, get(ff.type_to_class, t2, "")), Int[]))
     append!(cand, get(ff.angle_resolver.idx, (:wild,  ""), Int[]))
 
     best = nothing
     bestspec = Int8(-1)
     for i in cand
         r = ff.angle_resolver.rules[i]
-        if matches(r.p1,t1,ff.class_of) && matches(r.p2,t2,ff.class_of) &&
-                                                    matches(r.p3,t3,ff.class_of)
+        if matches(r.p1,t1,ff.type_to_class) && matches(r.p2,t2,ff.type_to_class) &&
+                                                    matches(r.p3,t3,ff.type_to_class)
             if r.specificity > bestspec
                 bestspec = r.specificity
                 best = r.params
             end
         end
         # Neighbor-reversed
-        if matches(r.p1,t3,ff.class_of) && matches(r.p2,t2,ff.class_of) &&
-                                                    matches(r.p3,t1,ff.class_of)
+        if matches(r.p1,t3,ff.type_to_class) && matches(r.p2,t2,ff.type_to_class) &&
+                                                    matches(r.p3,t1,ff.type_to_class)
             if r.specificity > bestspec
                 bestspec = r.specificity
                 best = r.params
@@ -300,8 +300,10 @@ end
 function resolve_proper_torsion(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
                                 t3::AbstractString, t4::AbstractString)
     # OpenMM-style lazy resolution via resolver
-    p,  pspec  = find_proper_match(t1, t2, t3, t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
-    pr, prspec = find_proper_match(t4, t3, t2, t1; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    p,  pspec  = find_proper_match(t1, t2, t3, t4; resolver=ff.torsion_resolver,
+                                                        type_to_class=ff.type_to_class)
+    pr, prspec = find_proper_match(t4, t3, t2, t1; resolver=ff.torsion_resolver,
+                                                        type_to_class=ff.type_to_class)
 
     if !isnothing(p) && isnothing(pr)
         return (p, (t1, t2, t3, t4))
@@ -318,7 +320,8 @@ end
 function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
                                   t3::AbstractString, t4::AbstractString)
     # Resolver scans all 6 permutations internally and caches the winner
-    p = find_improper_match(t1, t2, t3, t4; resolver=ff.torsion_resolver, class_of=ff.class_of)
+    p = find_improper_match(t1, t2, t3, t4; resolver=ff.torsion_resolver,
+                                                type_to_class=ff.type_to_class)
     if isnothing(p)
         return (nothing, ("", "", "", ""))
     end
