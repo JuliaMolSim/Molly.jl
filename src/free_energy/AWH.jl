@@ -87,24 +87,23 @@ end
 
 @doc raw"""
     AWHState(thermo_states::AbstractArray{ThermoState};
-             first_state::Int                    = 1,
-             n_bias::Int                         = 100,
-             ρ::Union{Nothing, AbstractArray{T}} = nothing,
-             reuse_neighbors::Bool               = true)
+             <keyword arguments>)
 
-Represents the state of an AWH simulation.
+State of an Accelerated Weight Histogram (AWH) simulation.
+
+Maintains the physical state of the system across multiple λ windows, as well as the
+accumulated statistical weights, free energy estimates, and target distribution parameters.
 
 # Arguments
-- `thermo_states::AbstractArray{ThermoState}`: Iterable that carries the [`ThermoState`](@ref) structs that are used
-    as the different λ states used when running AWH.
-- `first_state::Int = 1`: The index of the [`ThermoState`](@ref) that will be used as the starting point of the AWH
-    simulation
-- `n_bias::Int = 100`: Fictitious effective sampling size to be used during the initial stage of the AWH simulation.
-    Smaller values imply a more aggressive sampling during this stage.
-- `ρ::Union{Nothing, AbstractArray{T}} = Nothing`: Target distribution along λ. If `nothing` is passed, defaults to 
-    uniform distribution.
-- `reuse_neighbors::Bool = true`: Wether to reuse the same neighbor finder for the reweighting step for a given sampled
-    conformation. Usually improves performance.
+- `thermo_states::AbstractArray{ThermoState}`: Iterable containing the [`ThermoState`](@ref) structs 
+    defining each λ window of the AWH simulation.
+- `first_state::Int=1`: The index of the initial active λ state.
+- `n_bias::Int=100`: Fictitious effective sampling size used during the initial stage. Smaller values
+    yield more aggressive free energy updates.
+- `ρ::Union{Nothing, AbstractArray{T}}=nothing`: Target distribution array along λ. If `nothing`,
+    a uniform distribution is used.
+- `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
+    energies for adjacent λ windows. Generally improves performance.
 """
 mutable struct AWHState{T}
     # Master System (Common interactions, e.g., Solvent-Solvent)
@@ -628,45 +627,39 @@ end
 
 @doc raw"""
     AWHSimulation(awh_state::AWHState{T};
-                  num_md_steps::Int          = 10,
-                  update_freq::Int           = 1,
-                  well_tempered_factor::Real = 10.0,
-                  coverage_threshold::Real   = 1.0,
-                  significant_weight::Real   = 0.1,
-                  log_freq::Int              = 100,
-                  pmf_cv                     = nothing,
-                  pmf_coupling               = nothing,
-                  pmf_grid                   = nothing)
+                  <keyword arguments>)
 
-Prepares and runs an AWH simulation. This can be run with or without the deconvolution
-method described in [Lindahl et al.](https://doi.org/10.1063/1.4890371), in order to
-obtain an unbiased estimator og the true PMF. 
-For simulations where the λ coordinate is a biased reaction coordinate, e.g., using an 
-umbrella potential, the deconvolution approach is preferred. Alchemical transformations 
-do not require this method.
+Prepares an Accelerated Weight Histogram (AWH) simulation.
+
+This struct stores the parameters controlling the AWH updates. It can optionally perform
+on-the-fly PMF deconvolution to obtain an unbiased estimate of the true PMF, as described
+in [Lindahl et al. (2014)](https://doi.org/10.1063/1.4890371). Deconvolution is recommended
+for simulations where the λ coordinate represents a biased reaction coordinate (e.g., an 
+umbrella potential). It is typically not required for standard alchemical transformations.
 
 # Arguments
-- `awh_state::AWHState{T}`: The [`AWHState`](@ref) defined to carry the necessary λ windows to run 
-    the simulation
-- `num_md_steps::Int = 10`: Number of MD steps to run between coordinate sampling.
-- `update_freq::Int = 1`: Number of samples to collect before updating the AWH bias. Note: the original
-    developers of AWH mention that there is not a clear advantage of setting this number > 1.
-- `well_tempered_factor::Real = 10.0`: If this number is set to anything other than `Inf` 
-    the AWH target distribution (ρ) is dynamically updated to favour low energy λ windows. Smaller
-    values accentuate this behaviour.
-- `coverage_threshold::Real = 1.0`: Proportion of λ windows that must be visited to advance the
-    initial stage of the algorithm, moving away from the fictitious effective sampling size.
-- `significant_weight::Real = 0.1`: When checking if a λ window has been visited, this value 
-    represents the fraction of an ideally uniform histogram of weights at a given bin, in order
-    to consider said bin has been actually visited. This effectively filts sampling noise.
-- `log_freq::Int = 100`: Number of AWH iterations between logging statistics.
-- `pmf_cv = nothing`: If something other than `nothing` is passed, the deconvolution method 
-    to obtain the unbiased PMF will be used. This must be a function that takes the coordinates 
-    of the system and returns a tuple of scalar Collective Variables `ξ::Real`.
-- `pmf_coupling = nothing`: Reqired if the previous argument was provided. Must be a function 
-    that returns the dimensionless bias energy given the tuple of CVs and a `lambda_idx::Int`.
-- `pmf_grid = nothing`: If the two previous arguments are passed this must be a tuple of tuples,
-    indicating the `((min,), (max,), (number_of_bins,))` for each CV.
+- `awh_state::AWHState{T}`: The [`AWHState`](@ref) containing the λ windows and accumulators.
+- `num_md_steps::Int=10`: Number of MD integration steps to perform between AWH coordinate 
+    sampling and reweighting.
+- `update_freq::Int=1`: Number of samples to collect before applying an update to the AWH bias.
+- `well_tempered_factor::Real=10.0`: If finite, the AWH target distribution (ρ) is dynamically 
+    scaled to favor low-energy λ windows. Smaller values accentuate this behavior. Use `Inf` to disable.
+- `coverage_threshold::Real=1.0`: Proportion of λ windows that must be visited to double the
+    fictitious sample size and advance the initial stage.
+- `significant_weight::Real=0.1`: The fractional weight threshold (relative to an ideally uniform 
+    distribution) required for a λ window to be considered "visited". This filters out sampling noise.
+- `log_freq::Int=100`: Number of AWH iterations between logging statistics.
+- `pmf_grid=nothing`: Tuple of tuples defining the PMF grid `((min_1, ...), (max_1, ...), (bins_1, ...))`.
+    Required if running with PMF deconvolution.
+- `pmf_cv=nothing`: Function taking system coordinates and returning a tuple of scalar Collective 
+    Variables (CVs). If omitted when `pmf_grid` is provided, Molly attempts to auto-detect CVs from 
+    the active `BiasPotential`s.
+- `pmf_coupling=nothing`: Function returning the dimensionless bias energy given the CV tuple and 
+    a `lambda_idx`. If omitted when `pmf_grid` is provided, Molly computes this automatically.
+- `target_temp=nothing`: Target temperature for the unbiased PMF. Recommended for proper reweighting 
+    if λ states have varying temperatures.
+- `target_pressure=nothing`: Target pressure for the unbiased PMF. Recommended for proper reweighting 
+    if λ states have varying pressures.
 """
 struct AWHSimulation{T}
     n_windows::Int
@@ -860,13 +853,14 @@ end
 @doc raw"""
     simulate!(awh_sim::AWHSimulation, n_steps::Int)
 
-Runs an AWH simulation. Number of AWH iterations is automatically determinded
-from the total number of MD steps requested and the number of MD steps to be
-taken between AWH loop.
+Run an AWH simulation for a given number of molecular dynamics steps.
+
+The total number of AWH iterations is automatically determined by dividing `n_steps` 
+by the `num_md_steps` defined in the `AWHSimulation` struct.
 
 # Arguments
-- `awh_sim::AWHSimulation`: The [`AWHSimulation`](@ref) struct defining the system to be run.
-- `n_steps::Int`: Total number of MD steps to be run.
+- `awh_sim::AWHSimulation`: The [`AWHSimulation`](@ref) struct defining the AWH parameters and state.
+- `n_steps::Int`: The total number of molecular dynamics steps to perform.
 """
 function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
 

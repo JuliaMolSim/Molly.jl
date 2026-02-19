@@ -8,6 +8,8 @@ export
     PeriodicFlatBottomBias,
     BiasPotential
 
+abstract type BiasType end
+
 @doc raw"""
     LinearBias(k, cv_target)
 
@@ -18,16 +20,43 @@ The potential energy is defined as
 V(\boldsymbol{s}) = k |\boldsymbol{s} - \boldsymbol{s}_t|
 ```
 where $s$ and $s_t$ are the system and target CV values respectively.
+
+# Arguments
+- `k`: The energy constant for the bias. Must be compliant with the
+    [`System`](@ref) energy units.
+- `cv_target`: The target value of the collective variable.
 """
-struct LinearBias{K, C}
+struct LinearBias{K, C} <: BiasType
     k::K
     cv_target::C
 end
 
+@doc raw"""
+    potential_energy(bias::BiasType, cv_sim::Real; kwargs...)
+
+Method that calculates the potential energy contribution given 
+a particular bias type, such as the [`LinearBias`](@ref).
+
+# Arguments
+- `b::BiasType`: A struct that defines the type of bias to be used.
+- `cv_sim::Real`: The value of a measured collective variable given
+    the coordinates of a simulation.
+"""
 function potential_energy(lb::LinearBias, cv_sim; kwargs...)
     return lb.k * abs(cv_sim - lb.cv_target)
 end
 
+"""
+    bias_gradient(bias::BiasType, cv_sim::Real)
+
+Calculate the gradient of a bias potential with respect to the value of a
+collective variable.
+
+# Arguments
+- `b::BiasType`: A struct that defines the type of bias to be used.
+- `cv_sim::Real`: The value of a measured collective variable given
+    the coordinates of a simulation.
+"""
 function bias_gradient(lb::LinearBias, cv_sim)
     return lb.k * (cv_sim - lb.cv_target) / abs(cv_sim - lb.cv_target)
 end
@@ -35,15 +64,20 @@ end
 @doc raw"""
     SquareBias(k, cv_target)
 
-A square (harmonic) bias on a collective variable (CV) towards a target value.
+A harmonic bias on a collective variable (CV) towards a target value.
 
 The potential energy is defined as
 ```math
 V(\boldsymbol{s}) = \frac{1}{2} k (\boldsymbol{s} - \boldsymbol{s}_t)^2
 ```
 where $s$ and $s_t$ are the system and target CV values respectively.
+
+# Arguments
+- `k`: The energy constant for the bias. Must be compliant with the
+    [`System`](@ref) energy units.
+- `cv_target`: The target value of the collective variable.
 """
-struct SquareBias{K, C}
+struct SquareBias{K, C} <: BiasType
     k::K
     cv_target::C
 end
@@ -75,8 +109,15 @@ H = \left\{ \begin{array}{cl}
 1 & \text{if} & |\boldsymbol{s} - \boldsymbol{s}_t| \geq r_{fb} \\
 \end{array} \right.
 ```
+
+# Arguments
+- `k`: The energy constant for the bias. Must be compliant with the
+    [`System`](@ref) energy units.
+- `r_fb`: Width of flat-bottom potential well. Inside this region the
+    bias potential is always 0.
+- `cv_target`: The target value of the collective variable.
 """
-struct FlatBottomSquareBias{K, R, C}
+struct FlatBottomSquareBias{K, R, C} <: BiasType
     k::K
     r_fb::R
     cv_target::C
@@ -98,19 +139,36 @@ end
 @doc raw"""
     PeriodicFlatBottomBias(k, cv_target, width)
 
-A periodic flat-bottom potential on a collective variable (CV).
-Behaves like a harmonic potential outside the `width`, but is zero inside.
-Handles -π to π periodicity.
+A flat-bottomed square (harmonic) bias on a collective variable (CV) towards a target value.
 
-The potential energy is defined as:
-V(ξ) = 0                                if |d| <= width
-V(ξ) = 0.5 * k * (|d| - width)^2        if |d| >  width
-where d is the minimum image distance between ξ and cv_target.
+The bias is zero when the value of the collective variable does not deviate
+from `cv_target` by more than `r_fb`, and is square (harmonic) outside this range.
+
+This variant handles periodicity in the CV wrapping around the (-π, π) range.
+
+The potential energy is defined as
+```math
+V(\boldsymbol{s}) = \frac{1}{2} k (|\boldsymbol{s} - \boldsymbol{s}_t| - r_{fb})^2 H
+```
+where $s$ and $s_t$ are the system and target CV values respectively, and
+```math
+H = \left\{ \begin{array}{cl}
+0 & \text{if} & |\boldsymbol{s} - \boldsymbol{s}_t| < r_{fb} \\
+1 & \text{if} & |\boldsymbol{s} - \boldsymbol{s}_t| \geq r_{fb} \\
+\end{array} \right.
+```
+
+# Arguments
+- `k`: The energy constant for the bias. Must be compliant with the
+    [`System`](@ref) energy units.
+- `r_fb`: Width of flat-bottom potential well. Inside this region the
+    bias potential is always 0.
+- `cv_target`: The target value of the collective variable.
 """
-struct PeriodicFlatBottomBias{K, T, W}
+struct PeriodicFlatBottomBias{K, R, T} <: BiasType
     k::K
+    r_bf::R
     cv_target::T
-    width::W
 end
 
 function potential_energy(pb::PeriodicFlatBottomBias{K, T, W}, cv_sim; kwargs...) where {K, T, W}
@@ -123,13 +181,13 @@ function potential_energy(pb::PeriodicFlatBottomBias{K, T, W}, cv_sim; kwargs...
     # Check flat-bottom condition
     dist = abs(d_wrapped)
     
-    if dist <= pb.width
+    if dist <= pb.r_bf
         # Inside flat region: return zero with correct units/type
         # We calculate a dummy energy to get the zero of the correct type
-        return zero(FT(0.5 * pb.k * pb.width^2))
+        return zero(FT(0.5 * pb.k * pb.r_bf^2))
     else
         # Outside: Harmonic penalty
-        disp = dist - pb.width
+        disp = dist - pb.r_bf
         return FT(0.5 * pb.k * disp^2)
     end
 end
@@ -143,12 +201,12 @@ function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
     
     dist = abs(d_wrapped)
     
-    if dist <= pb.width
+    if dist <= pb.r_bf
         # Inside flat region: zero gradient
-        return zero(FT(pb.k * pb.width))
+        return zero(FT(pb.k * pb.r_bf))
     else
         # Outside: Gradient is k * (|d| - w) * sign(d)
-        disp = dist - pb.width
+        disp = dist - pb.r_bf
         return FT(pb.k * disp * sign(d_wrapped))
     end
 end
@@ -170,7 +228,7 @@ Gradients can be calculated with either automatic differentiation or explicitly 
 gradient functions.
 Enzyme should be imported in the first case.
 
-Not currently compatible with virial calculation.
+Virial contributions must be explicitly defined.
 """
 struct BiasPotential{C, B}
     cv_type::C
