@@ -53,6 +53,15 @@ struct PeriodicTorsionType{T, E}
     proper::Bool
 end
 
+struct NBFixPair{S, E}
+    type1::String
+    type2::String
+    class1::String
+    class2::String
+    σ::S
+    ϵ::E
+end
+
 # These are used to materialise the bonded terms present
 # in the structure file, comparing them to the rules defined
 # in the force field. Should be agnostic to class/type definitions.
@@ -237,10 +246,9 @@ get_ezxml(collection, key, default) = (haskey(collection, key) ? collection[key]
 
 # Having this as a function allows recursion to support <Include> tags
 # Modifies most arguments
-function read_ff_xml!(ff_file, ff_param_array, atom_types, attributes_from_residue,
-                      residues, patches, type_info, bond_rule_specs, angle_rule_specs,
-                      torsion_rule_spec, nb_atom_classes, ljforce_atom_classes, units,
-                      strictness, T, IC)
+function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attributes_from_residue,
+                      residues, patches, bond_rule_specs, angle_rule_specs, torsion_rule_spec,
+                      nb_atom_classes, ljforce_atom_classes, nbfix_pairs, units, strictness, T, IC)
     ff_xml = parsexml(read(ff_file))
     ff = root(ff_xml)
     if ff.name != "ForceField"
@@ -251,10 +259,10 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, attributes_from_resid
     for entry in eachelement(ff)
         entry_name = entry.name
         if entry_name == "Include"
-            read_ff_xml!(entry["file"], ff_param_array, atom_types, attributes_from_residue,
-                         residues, patches, type_info, bond_rule_specs, angle_rule_specs,
-                         torsion_rule_spec, nb_atom_classes, ljforce_atom_classes, units,
-                         strictness, T, IC)
+            read_ff_xml!(entry["file"], ff_param_array, atom_types, atom_type_order,
+                         attributes_from_residue, residues, patches, bond_rule_specs,
+                         angle_rule_specs, torsion_rule_spec, nb_atom_classes, ljforce_atom_classes,
+                         nbfix_pairs, units, strictness, T, IC)
 
         elseif entry_name == "AtomTypes"
             for atom_type in eachelement(entry)
@@ -267,7 +275,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, attributes_from_resid
                 ϵ = (units ? T(-1u"kJ * mol^-1") : T(-1))
                 atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
                     at_type, at_class, element, ch, atom_mass, σ, ϵ)
-                type_info[at_type] = (element, at_class)
+                push!(atom_type_order, at_type)
             end
 
         elseif entry_name == "Residues"
@@ -285,16 +293,15 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, attributes_from_resid
 
                 for re in eachelement(residue)
                     if re.name == "Atom"
-                        an = re["name"]
-                        tp = re["type"]
+                        at_type = re["type"]
                         q = (haskey(re, "charge") ? parse(T, re["charge"]) : missing)
-                        push!(atoms, an)
-                        push!(types, tp)
+                        push!(atoms, re["name"])
+                        push!(types, at_type)
                         push!(charges, q)
                         push!(externals, 0)
-                        tel, tclass = type_info[tp]
-                        push!(extras, (tel == "?") || (tclass == "EP"))
-                        push!(elements, element_string_to_symbol(tel))
+                        at = atom_types[at_type]
+                        push!(extras, (at.element == "?") || (at.class == "EP"))
+                        push!(elements, element_string_to_symbol(at.element))
                     elseif re.name == "Bond"
                         if haskey(re, "atomName1")
                             an1 = re["atomName1"]
@@ -582,7 +589,16 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, attributes_from_resid
                         end
                     end
                 elseif atom_or_nbfix.name == "NBFixPair"
-                    error("NBFixPair entries not supported for LennardJonesForce")
+                    if haskey(atom_or_nbfix, "type1")
+                        type1, type2 = atom_or_nbfix["type1"], atom_or_nbfix["type2"]
+                        class1, class2 = "", ""
+                    else
+                        type1, type2 = "", ""
+                        class1, class2 = atom_or_nbfix["class1"], atom_or_nbfix["class2"]
+                    end
+                    σ = (units ? parse(T, atom_or_nbfix["sigma"])u"nm" : parse(T, atom_or_nbfix["sigma"]))
+                    ϵ = (units ? parse(T, atom_or_nbfix["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_nbfix["epsilon"]))
+                    push!(nbfix_pairs, NBFixPair(type1, type2, class1, class2, σ, ϵ))
                 end
             end
 
@@ -600,11 +616,6 @@ end
                         custom_renaming_scheme=nothing, strictness=:warn)
     MolecularForceField(T, ff_files...; units=true, custom_residue_templates=nothing,
                         custom_renaming_scheme=nothing, strictness=:warn)
-    MolecularForceField(atom_types, residue_types, bond_types, angle_types,
-                        torsion_types, torsion_order, weight_14_coulomb,
-                        weight_14_lj, attributes_from_residue,
-                        residue_name_replacements, atom_name_replacements,
-                        standard_bonds)
 
 A molecular force field.
 
@@ -625,17 +636,20 @@ custom template file to the `custom_residue_templates` keyword argument.
 Behavior with unsupported files is determined by the `strictness` keyword argument.
 This can be `:warn` to emit warnings, `:nowarn` to suppress warnings or `:error` to error.
 """
-struct MolecularForceField{T, M, D, DA, E, K, KA, C}
+struct MolecularForceField{T, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
+    atom_type_order::Vector{String}
     residues::Dict{String, ResidueTemplate{T, C}}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
+    nbfix_pairs::NB
     attributes_from_residue::Vector{String}
     residue_name_replacements::Dict{String,String}
     atom_name_replacements::Dict{String, Dict{String, String}}
     standard_bonds::Dict{String, Vector{Tuple{String, String}}}
     type_to_class::Dict{String, String}
+    class_to_types::Dict{String, Vector{String}}
     bond_resolver::BondResolver{K, D}
     angle_resolver::AngleResolver{KA, DA}
     torsion_resolver::TorsionResolver{T, E}
@@ -655,19 +669,18 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     attributes_from_residue = String[]
     residues = Dict{String, ResidueTemplate}()
     patches = Dict{String, ResiduePatchTemplate}()
-    type_info = Dict{String, Tuple{String, String}}() # Type => (element, class)
 
-    # Accumulators for pattern rules
-    bond_rule_specs   = []
+    atom_type_order = String[]
+    bond_rule_specs   = [] # Accumulators for pattern rules
     angle_rule_specs  = []
     torsion_rule_spec = []
     nb_atom_classes, ljforce_atom_classes = AtomType[], AtomType[]
+    nbfix_pairs = NBFixPair[]
 
     for ff_file in ff_files
-        read_ff_xml!(ff_file, ff_param_array, atom_types, attributes_from_residue,
-                     residues, patches, type_info, bond_rule_specs, angle_rule_specs,
-                     torsion_rule_spec, nb_atom_classes, ljforce_atom_classes, units,
-                     strictness, T, IC)
+        read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attributes_from_residue,
+                     residues, patches, bond_rule_specs, angle_rule_specs, torsion_rule_spec,
+                     nb_atom_classes, ljforce_atom_classes, nbfix_pairs, units, strictness, T, IC)
     end
     torsion_order = ff_param_array[1]
     weight_14_coulomb = ff_param_array[2]
@@ -736,6 +749,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     else
         M, D, DA, E, K, KA = T, T, T, T, T, T
     end
+    nbfix_pairs_conc = [nbfix_pairs...]
+    NB = typeof(nbfix_pairs_conc)
 
     # Build class maps once
     type_to_class = Dict{String, String}(t => atom_types[t].class for t in keys(atom_types))
@@ -859,14 +874,15 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         propers_by_class2,
         wild_impropers,
         wild_propers,
-        Dict{Tuple{NTuple{4, String}, NTuple{4, String}} ,Any}(),  # Proper_cache
-        Dict{NTuple{4, String}, Any}(),                            # Improper_cache
+        Dict{Tuple{NTuple{4, String}, NTuple{4, String}} ,Any}(), # Proper cache
+        Dict{NTuple{4, String}, Any}(),                           # Improper cache
     )
 
-    return MolecularForceField{T, M, D, DA, E, K, KA, IC}(
-        atom_types, residues, torsion_order, weight_14_coulomb, weight_14_lj,
-        attributes_from_residue, resname_replacements, atomname_replacements, standard_bonds,
-        type_to_class, bond_resolver, angle_resolver, torsion_resolver,
+    return MolecularForceField{T, NB, M, D, DA, E, K, KA, IC}(
+        atom_types, atom_type_order, residues, torsion_order, weight_14_coulomb, weight_14_lj,
+        nbfix_pairs_conc, attributes_from_residue, resname_replacements, atomname_replacements,
+        standard_bonds, type_to_class, class_to_types, bond_resolver, angle_resolver,
+        torsion_resolver
     )
 end
 

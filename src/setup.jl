@@ -591,6 +591,8 @@ function System(coord_file::AbstractString,
     for ai in 1:n_atoms
         atype = atom_type_of[ai]
         at = force_field.atom_types[atype]
+        # Convert atom type to an index
+        ati = findfirst(isequal(atype), force_field.atom_type_order)
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom $ai type $atype has unset σ or ϵ")
         end
@@ -605,7 +607,7 @@ function System(coord_file::AbstractString,
                 error("atom $ai type $atype has charge missing")
             end
         end
-        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
+        push!(atoms_abst, Atom(index=ai, atom_type=ati, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
 
         res = residue_from_atom_idx(ai, canonical_system)
         res_cfl = chemfiles_residue_for_atom(top, ai - 1)
@@ -847,12 +849,41 @@ function System(coord_file::AbstractString,
     imps_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
                                 proper=t.proper, n_terms=torsion_n_terms) for t in imps_il.inters]
 
+    lj_exceptions_σ = Dict{Tuple{Int, Int}, typeof(first(atoms).σ)}()
+    lj_exceptions_ϵ = Dict{Tuple{Int, Int}, typeof(first(atoms).ϵ)}()
+    atis_present = Set(a.atom_type for a in atoms)
+    # Loop over classes first as types are more specific than classes
+    for nbfix_pair in force_field.nbfix_pairs
+        if nbfix_pair.class1 != ""
+            for type1 in force_field.class_to_types[nbfix_pair.class1]
+                for type2 in force_field.class_to_types[nbfix_pair.class2]
+                    ati1 = findfirst(isequal(type1), force_field.atom_type_order)
+                    ati2 = findfirst(isequal(type2), force_field.atom_type_order)
+                    if ati1 in atis_present && ati2 in atis_present
+                        lj_exceptions_σ[(ati1, ati2)] = nbfix_pair.σ
+                        lj_exceptions_ϵ[(ati1, ati2)] = nbfix_pair.ϵ
+                    end
+                end
+            end
+        end
+    end
+    for nbfix_pair in force_field.nbfix_pairs
+        if nbfix_pair.type1 != ""
+            ati1 = findfirst(isequal(nbfix_pair.type1), force_field.atom_type_order)
+            ati2 = findfirst(isequal(nbfix_pair.type2), force_field.atom_type_order)
+            if ati1 in atis_present && ati2 in atis_present
+                lj_exceptions_σ[(ati1, ati2)] = nbfix_pair.σ
+                lj_exceptions_ϵ[(ati1, ati2)] = nbfix_pair.ϵ
+            end
+        end
+    end
+
     return System(T, AT, atoms, coords, boundary_used, velocities,
                   atoms_data, virtual_sites_type, loggers, data, bonds_il, angles_il, tors_il,
-                  imps_il, tors_pad, imps_pad, eligible, special, units, dist_cutoff,
-                  constraints, rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
-                  neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                  weight_14_lj, weight_14_coulomb, strictness)
+                  imps_il, tors_pad, imps_pad, lj_exceptions_σ, lj_exceptions_ϵ, eligible, special,
+                  units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
+                  approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
+                  dist_neighbors, weight_14_lj, weight_14_coulomb, strictness)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1171,14 +1202,15 @@ function System(T::Type,
     torsion_inters_pad = torsions.inters
     improper_inters_pad = impropers.inters
     virtual_sites = []
+    lj_exceptions_σ, lj_exceptions_ϵ = Dict(), Dict()
     strictness = :warn
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
-                  improper_inters_pad, eligible, special, units, dist_cutoff, constraints,
-                  rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
-                  neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                  weight_14_lj, weight_14_coulomb, strictness)
+                  improper_inters_pad, lj_exceptions_σ, lj_exceptions_ϵ, eligible, special, units,
+                  dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
+                  approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
+                  dist_neighbors, weight_14_lj, weight_14_coulomb, strictness)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1265,17 +1297,31 @@ end
 
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                 loggers, data, bonds_all, angles_all, torsions, impropers, torsion_inters_pad,
-                improper_inters_pad, eligible, special, units, dist_cutoff, constraints_type,
-                rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
-                neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                weight_14_lj, weight_14_coulomb, strictness)
+                improper_inters_pad, lj_exceptions_σ, lj_exceptions_ϵ, eligible, special, units,
+                dist_cutoff, constraints_type, rigid_water, nonbonded_method, ewald_error_tol,
+                approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
+                dist_neighbors, weight_14_lj, weight_14_coulomb, strictness)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
+
+    if length(lj_exceptions_σ) > 0
+        σ_mix = MixingException(LorentzMixing(), ExceptionList(lj_exceptions_σ))
+    else
+        σ_mix = LorentzMixing()
+    end
+    if length(lj_exceptions_ϵ) > 0
+        ϵ_mix = MixingException(GeometricMixing(), ExceptionList(lj_exceptions_ϵ))
+    else
+        ϵ_mix = GeometricMixing()
+    end
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=using_neighbors,
+        σ_mixing=σ_mix,
+        ϵ_mixing=ϵ_mix,
         weight_special=weight_14_lj,
     )
+
     if nonbonded_method == :none
         coul = Coulomb(
             cutoff=DistanceCutoff(T(dist_cutoff)),

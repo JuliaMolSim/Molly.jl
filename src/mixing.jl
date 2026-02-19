@@ -76,6 +76,13 @@ struct ExceptionList{N, K, V}
     values::SVector{N, V}
 end
 
+function ExceptionList(d::AbstractDict)
+    n = length(d)
+    ks = SVector{n}(collect(keys(d)))
+    vs = SVector{n}(d[k] for k in ks)
+    return ExceptionList(ks, vs)
+end
+
 # Avoiding branches helps GPU performance
 function get_pair(d::ExceptionList{N}, i, j, default) where N
     k1 = (i, j)
