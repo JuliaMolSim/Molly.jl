@@ -7,6 +7,7 @@ export
     CalcSingleDist,
     CalcDist,
     calculate_cv,
+    cv_gradient,
     CalcRg,
     CalcRMSD,
     CalcTorsion
@@ -218,6 +219,208 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     return dist_val
 end
 
+@doc raw"""
+    cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, velocities; kwargs...)
+
+Computes the analytical gradient of the distance between two atoms.
+
+### Mathematics
+Let the coordinates of the two atoms be $\mathbf{r}_i$ and $\mathbf{r}_j$.
+The minimum image vector from atom $i$ to atom $j$ is $\mathbf{r}_{ij} = \mathbf{r}_j - \mathbf{r}_i$.
+The distance is given by $d = |\mathbf{r}_{ij}|$.
+The gradients with respect to the atomic coordinates are:
+```math
+\nabla_{\mathbf{r}_i} d = -\frac{\mathbf{r}_{ij}}{d}, \quad \nabla_{\mathbf{r}_j} d = \frac{\mathbf{r}_{ij}}{d}
+```
+"""
+function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, velocities; kwargs...)
+    i, j = cv.atom_inds_1[1], cv.atom_inds_2[1]
+    c1, c2 = coords[i], coords[j]
+
+    if cv.dist_type.calc_type == :closest
+        r_ij = vector(c1, c2, boundary)
+    else
+        r_ij = c2 - c1
+    end
+
+    d = norm(r_ij)
+    grad = zero(coords)
+
+    if d > 0
+        dir = r_ij / d
+        grad[i] = -dir
+        grad[j] = dir
+    end
+
+    return grad, d
+end
+
+@doc raw"""
+    cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, velocities; kwargs...)
+
+Computes the analytical gradient of the minimum distance between two groups of atoms.
+
+### Mathematics
+Let A and B be two sets of atoms. The minimum distance is defined by the specific pair 
+$\left( i^*, j^* \right)$ ∈  A x B that minimizes $d_{i,j}​ = ∣ \mathbf{r}_{i,j}​∣$.
+The gradient evaluates to zero for all atoms except $i^∗$ and $j^∗$, for which it reduces to
+the single distance gradient:
+```math
+\nabla_{\mathbf{r}_{i^*}} d = -\frac{\mathbf{r}_{i^*j^*}}{d}, \quad \nabla_{\mathbf{r}_{j^*}} d = \frac{\mathbf{r}_{i^*j^*}}{d}
+```
+"""
+function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, velocities; kwargs...)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+
+    min_d2 = typemax(eltype(eltype(coords)))
+    min_idx = (1, 1)
+
+    if cv.dist_type.calc_type == :closest
+        for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
+            d2 = sum(abs2, vector(p1, p2, boundary))
+            if d2 < min_d2
+                min_d2 = d2
+                min_idx = (i, j)
+            end
+        end
+        r_ij = vector(c1[min_idx[1]], c2[min_idx[2]], boundary)
+    else
+        for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
+            d2 = sum(abs2, p2 - p1)
+            if d2 < min_d2
+                min_d2 = d2
+                min_idx = (i, j)
+            end
+        end
+        r_ij = c2[min_idx[2]] - c1[min_idx[1]]
+    end
+
+    d = sqrt(min_d2)
+    grad = zero(coords)
+
+    if d > 0
+        dir = r_ij / d
+        grad[cv.atom_inds_1[min_idx[1]]] = -dir
+        grad[cv.atom_inds_2[min_idx[2]]] = dir
+    end
+
+    return grad, d
+
+end
+
+@doc raw"""
+    cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, velocities; kwargs...)
+
+Computes the analytical gradient of the maximum distance between two groups of atoms.
+Mathematics
+
+### Mathematics
+Let A and B be two sets of atoms. The minimum distance is defined by the specific pair 
+$\left( i^*, j^* \right)$ ∈  A x B that mmaximizes $d_{i,j}​ = ∣ \mathbf{r}_{i,j}​∣$.
+The gradient is equivalent to the single distance gradient applied exclusively to this maximizing pair.
+"""
+function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, velocities; kwargs...)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+
+    max_d2 = typemin(eltype(eltype(coords)))
+    max_idx = (1, 1)
+
+    if cv.dist_type.calc_type == :closest
+        for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
+            d2 = sum(abs2, vector(p1, p2, boundary))
+            if d2 > max_d2
+                max_d2 = d2
+                max_idx = (i, j)
+            end
+        end
+        r_ij = vector(c1[max_idx[1]], c2[max_idx[2]], boundary)
+    else
+        for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
+            d2 = sum(abs2, p2 - p1)
+            if d2 > max_d2
+                max_d2 = d2
+                max_idx = (i, j)
+            end
+        end
+        r_ij = c2[max_idx[2]] - c1[max_idx[1]]
+    end
+
+    d = sqrt(max_d2)
+    grad = zero(coords)
+
+    if d > 0
+        dir = r_ij / d
+        grad[cv.atom_inds_1[max_idx[1]]] = -dir
+        grad[cv.atom_inds_2[max_idx[2]]] = dir
+    end
+
+    return grad, d
+
+end
+
+@doc raw"""
+    cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, velocities; kwargs...)
+
+Computes the analytical gradient of the center-of-mass distance between two groups of atoms.
+
+### Mathematics
+Let $M_{\mathrm{A}}$ and $M_{\mathrm{B}}$ be the total masses of groups A and B.
+Let $\mathbf{R}_{\mathrm{A}}$​ and $\mathbf{R}_{\mathrm{B}}$​ be their respective centers of mass, 
+and $D = ∣\mathbf{R}_{\mathrm{B}} − \mathbf{R}_{\mathrm{A}}​∣$.
+
+Applying the chain rule through the center of mass definition, the gradients for individual atoms are
+proportional to their fractional mass:
+
+```math
+\nabla_{\mathbf{r}_i} D = -\frac{m_i}{M_A} \frac{\mathbf{R}_{AB}}{D} \quad \forall i \in A
+```
+
+and
+
+```math
+\nabla_{\mathbf{r}_j} D = \frac{m_j}{M_B} \frac{\mathbf{R}_{AB}}{D} \quad \forall j \in B
+```
+"""
+function cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, velocities; kwargs...)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+    a1 = @view atoms[cv.atom_inds_1]
+    a2 = @view atoms[cv.atom_inds_2]
+
+    com1 = center_of_mass(c1, a1)
+    com2 = center_of_mass(c2, a2)
+
+    if cv.dist_type.calc_type == :closest
+        r_12 = vector(com1, com2, boundary)
+    else
+        r_12 = com2 - com1
+    end
+
+    d = norm(r_12)
+    grad = zero(coords)
+
+    if d > 0
+        dir = r_12 / d
+        
+        m1 = mass.(a1)
+        m2 = mass.(a2)
+        M1 = sum(m1)
+        M2 = sum(m2)
+        
+        for (idx, i) in enumerate(cv.atom_inds_1)
+            grad[i] += -dir * (m1[idx] / M1)
+        end
+        for (idx, j) in enumerate(cv.atom_inds_2)
+            grad[j] += dir * (m2[idx] / M2)
+        end
+    end
+
+    return grad, d
+
+end
+
 function calculate_virial!(virial_buff, cv::CalcDist, coords, forces, atoms, boundary)
     calculate_virial_dist!(virial_buff, cv.dist_type, cv, coords, forces, atoms, boundary)
 end
@@ -353,6 +556,60 @@ function calculate_cv(cv::CalcRg, coords, atoms, args...; kwargs...)
     return rg_val
 end
 
+@doc raw"""
+    cv_gradient(cv::CalcRg, coords, atoms, boundary, velocities; kwargs...)
+
+Computes the analytical gradient of the radius of gyration, as computed by
+[`radius_gyration`](@ref).
+
+### Mathematics
+The mass-weighted radius of gyration is:
+
+```math
+R_{g} = \sqrt{\frac{1}{M} \sum_{k} m_{k} | \mathbf{r}_{k} - \mathbf{R}_{COM} |^{2}}
+```
+
+Differentiating with respect to the coordinates of atom $k$ yields:
+
+```math
+\nabla_{\mathbf{r}_k} R_g = \frac{m_k}{M \cdot R_g} (\mathbf{r}_k - \mathbf{R}_{COM})
+```
+
+Note: The derivative of the center of mass $R_{COM}$​ with respect to rk​ cancels out
+in the summation due to the definition of the center of mass.
+
+"""
+function cv_gradient(cv::CalcRg, coords, atoms, boundary, velocities; kwargs...)
+    atom_inds_used = iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds
+    c_used = @view coords[atom_inds_used]
+    a_used = @view atoms[atom_inds_used]
+
+    com = center_of_mass(c_used, a_used)
+    m_used = mass.(a_used)
+    M_total = sum(m_used)
+
+    rg_sq = zero(eltype(eltype(coords)))
+    for (idx, c) in enumerate(c_used)
+        r_ic = vector(com, c, boundary)
+        rg_sq += m_used[idx] * sum(abs2, r_ic)
+    end
+    rg_sq /= M_total
+    rg = sqrt(rg_sq)
+
+    grad = zero(coords)
+
+    if rg > 0
+        factor = 1 / (M_total * rg)
+        for (idx, i) in enumerate(atom_inds_used)
+            r_ic = vector(com, c_used[idx], boundary)
+            grad[i] += factor * m_used[idx] * r_ic
+        end
+    end
+
+    return grad, rg
+
+end
+
 # For Rg and also for the RMSD the forces applied to the atoms 
 # are dependent only on the relative configuration of said
 # atoms, making them translationally invariant. Therefore:
@@ -445,6 +702,55 @@ function calculate_cv_ustrip!(unit_arr, args...)
     return ustrip(cv)
 end
 
+@doc raw"""
+    cv_gradient(cv::CalcRMSD, coords, atoms, boundary, velocities; kwargs...)
+
+Computes the analytical gradient of the optimal Root-Mean-Square Deviation (RMSD)
+using Kabsch alignment.
+
+### Mathematics
+Let $\mathbf{r}_{k}^{sys}$ be the current system coordinates and $\mathbf{R}_{COM}^{sys}$
+be their centroid. Let $\mathbf{r}_{k}^{ref}$ be the centered reference coordinates.
+The optimally aligned RMSD distance is:
+
+```math
+d_{RMSD} = \sqrt{ \frac{1}{N} \sum_{k=1}^N \left| (\mathbf{r}_k^{\text{sys}} - \mathbf{R}_{COM}^{\text{sys}}) - Q \mathbf{r}_k^{\text{ref}} \right|^2 }
+```
+
+Because the rotation matrix $Q$ optimally minimizes the distance, the derivative of $Q$ with
+respect to coordinates vanishes. The exact analytical gradient for an evaluated atom $k$ simplifies to:
+
+```math
+\nabla_{\mathbf{r}_k} d_{RMSD} = \frac{1}{N \cdot d_{RMSD}} \left( (\mathbf{r}_k^{\text{sys}} - \mathbf{R}_{COM}^{\text{sys}}) - Q \mathbf{r}_k^{\text{ref}} \right)
+```
+"""
+function cv_gradient(cv::CalcRMSD, coords, atoms, boundary, velocities; kwargs...)
+    atom_inds_used = iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds
+    ref_atom_inds_used = iszero(length(cv.ref_atom_inds)) ? eachindex(cv.ref_coords) : cv.ref_atom_inds
+
+    c_used = coords[atom_inds_used]
+    ref_c_used = cv.ref_coords[ref_atom_inds_used]
+    N = length(c_used)
+
+    p_rot = kabsch_nograd(ref_c_used, c_used)
+    centroid = mean(c_used)
+    q = c_used .- (centroid,)
+    diffs = p_rot .- q
+    rmsd_val = sqrt(mean(sum_abs2, diffs))
+
+    grad = zero(coords)
+
+    if rmsd_val > 0
+        factor = 1 / (N * rmsd_val)
+        for (idx, i) in enumerate(atom_inds_used)
+            grad[i] += factor * -diffs[idx] # diffs is (p_rot - q), we need (q - p_rot)
+        end
+    end
+
+    return grad, rmsd_val
+end
+
+
 function calculate_virial!(virial_buff, cv::CalcRMSD, coords, forces, atoms, boundary)
     # Select the relevant atoms/coordinates
     ids = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
@@ -489,6 +795,79 @@ end
 function calculate_cv(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs...)
     c = @view coords[collect(cv.atom_inds)]
     return  torsion_angle(c[1], c[2], c[3], c[4], boundary)
+end
+
+@doc raw"""
+    cv_gradient(cv::CalcTorsion, coords, atoms, boundary, velocities; kwargs...)
+
+Computes the analytical gradient of the torsion (dihedral) angle defined by four atoms.
+
+### Mathematics
+Let the four atoms be $i, j, k, l$. Define bond vectors: $\mathbf{b}_{1} = \mathbf{r}_{j} - \mathbf{r}_{i}$,
+$\mathbf{b}_{2} = \mathbf{r}_{k} - \mathbf{r}_{j}$, $\mathbf{b}_{3} = \mathbf{r}_{l} - \mathbf{r}_{k}$.
+Define normal vectors to the planes: $\mathbf{m} = \mathbf{b}_{1}$ x $\mathbf{b}_{2}$, 
+$\mathbf{n} = \mathbf{b}_{2}$ x $\mathbf{b}_{3}$. The gradients are evaluated via the chain rule on:
+
+```math
+\phi = \mathrm{atan2}\left( |\mathbf{b}_{2}|\mathbf{b}_{1} \cdot \mathbf{n}, \mathbf{m} \cdot \mathbf{n} \right)
+```
+
+we get:
+
+```math
+\nabla_{\mathbf{r}_i} \phi =  \frac{|\mathbf{b}_2|}{|\mathbf{m}|^2} \mathbf{m}
+```
+
+```math
+\nabla_{\mathbf{r}_l} \phi = -\frac{|\mathbf{b}_2|}{|\mathbf{n}|^2} \mathbf{n}
+```
+
+```math
+\nabla_{\mathbf{r}_j} \phi = \left( \frac{\mathbf{b}_1 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} - 1 \right) \nabla_{\mathbf{r}_i} \phi - \frac{\mathbf{b}_3 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} \nabla_{\mathbf{r}_l} \phi
+```
+
+```math
+\nabla_{\mathbf{r}_k} \phi = \left( \frac{\mathbf{b}_3 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} - 1 \right) \nabla_{\mathbf{r}_l} \phi - \frac{\mathbf{b}_1 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} \nabla_{\mathbf{r}_i} \phi
+```
+
+"""
+function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, velocities; kwargs...)
+    i, j, k, l = cv.atom_inds
+    ri, rj, rk, rl = coords[i], coords[j], coords[k], coords[l]
+
+    b1 = vector(ri, rj, boundary)
+    b2 = vector(rj, rk, boundary)
+    b3 = vector(rk, rl, boundary)
+
+    m = cross(b1, b2)
+    n = cross(b2, b3)
+
+    m_sq = sum(abs2, m)
+    n_sq = sum(abs2, n)
+    b2_norm = norm(b2)
+    b2_sq = b2_norm^2
+
+    grad = zero(coords)
+    phi = torsion_angle(ri, rj, rk, rl, boundary)
+
+    if m_sq > 0 && n_sq > 0 && b2_sq > 0
+        grad_i = (b2_norm / m_sq) * m
+        grad_l = -(b2_norm / n_sq) * n
+        
+        b1_dot_b2 = dot(b1, b2)
+        b3_dot_b2 = dot(b3, b2)
+        
+        grad_j = ((b1_dot_b2 / b2_sq) - 1) * grad_i - (b3_dot_b2 / b2_sq) * grad_l
+        grad_k = ((b3_dot_b2 / b2_sq) - 1) * grad_l - (b1_dot_b2 / b2_sq) * grad_i
+        
+        grad[i] = grad_i
+        grad[j] = grad_j
+        grad[k] = grad_k
+        grad[l] = grad_l
+    end
+
+    return grad, phi
+
 end
 
 function calculate_virial!(virial_buff, cv::CalcTorsion, coords, forces, atoms, boundary)
