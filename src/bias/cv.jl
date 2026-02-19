@@ -244,9 +244,9 @@ function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, velo
     end
 
     d = norm(r_ij)
-    grad = zero(coords)
+    grad = ustrip.(zero(coords))
 
-    if d > 0
+    if d > 0u"nm"
         dir = r_ij / d
         grad[i] = -dir
         grad[j] = dir
@@ -273,7 +273,7 @@ function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, velocit
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
 
-    min_d2 = typemax(eltype(eltype(coords)))
+    min_d2 = typemax(eltype(eltype(coords)))u"nm"
     min_idx = (1, 1)
 
     if cv.dist_type.calc_type == :closest
@@ -297,9 +297,9 @@ function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, velocit
     end
 
     d = sqrt(min_d2)
-    grad = zero(coords)
+    grad = ustrip.(zero(coords))
 
-    if d > 0
+    if d > 0u"nm"
         dir = r_ij / d
         grad[cv.atom_inds_1[min_idx[1]]] = -dir
         grad[cv.atom_inds_2[min_idx[2]]] = dir
@@ -324,7 +324,7 @@ function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, velocit
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
 
-    max_d2 = typemin(eltype(eltype(coords)))
+    max_d2 = typemin(eltype(eltype(coords)))u"nm"
     max_idx = (1, 1)
 
     if cv.dist_type.calc_type == :closest
@@ -348,9 +348,9 @@ function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, velocit
     end
 
     d = sqrt(max_d2)
-    grad = zero(coords)
+    grad = ustrip.(zero(coords))
 
-    if d > 0
+    if d > 0u"nm"
         dir = r_ij / d
         grad[cv.atom_inds_1[max_idx[1]]] = -dir
         grad[cv.atom_inds_2[max_idx[2]]] = dir
@@ -399,9 +399,9 @@ function cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, velociti
     end
 
     d = norm(r_12)
-    grad = zero(coords)
+    grad = ustrip.(zero(coords))
 
-    if d > 0
+    if d > 0u"nm"
         dir = r_12 / d
         
         m1 = mass.(a1)
@@ -588,7 +588,7 @@ function cv_gradient(cv::CalcRg, coords, atoms, boundary, velocities; kwargs...)
     m_used = mass.(a_used)
     M_total = sum(m_used)
 
-    rg_sq = zero(eltype(eltype(coords)))
+    rg_sq = zero(eltype(eltype(coords)))u"nm * g * mol^-1"
     for (idx, c) in enumerate(c_used)
         r_ic = vector(com, c, boundary)
         rg_sq += m_used[idx] * sum(abs2, r_ic)
@@ -596,9 +596,9 @@ function cv_gradient(cv::CalcRg, coords, atoms, boundary, velocities; kwargs...)
     rg_sq /= M_total
     rg = sqrt(rg_sq)
 
-    grad = zero(coords)
+    grad = ustrip.(zero(coords))
 
-    if rg > 0
+    if rg > 0u"nm"
         factor = 1 / (M_total * rg)
         for (idx, i) in enumerate(atom_inds_used)
             r_ic = vector(com, c_used[idx], boundary)
@@ -738,9 +738,9 @@ function cv_gradient(cv::CalcRMSD, coords, atoms, boundary, velocities; kwargs..
     diffs = p_rot .- q
     rmsd_val = sqrt(mean(sum_abs2, diffs))
 
-    grad = zero(coords)
+    grad = ustrip.(zero(coords))
 
-    if rmsd_val > 0
+    if rmsd_val > 0u"nm"
         factor = 1 / (N * rmsd_val)
         for (idx, i) in enumerate(atom_inds_used)
             grad[i] += factor * -diffs[idx] # diffs is (p_rot - q), we need (q - p_rot)
