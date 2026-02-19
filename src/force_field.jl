@@ -270,9 +270,9 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 at_class = atom_type["class"]
                 element = get_ezxml(atom_type, "element", "?")
                 ch = missing # This is set later
-                atom_mass = (units ? parse(T, atom_type["mass"])u"g/mol" : parse(T, atom_type["mass"]))
-                σ = (units ? T(-1u"nm") : T(-1))
-                ϵ = (units ? T(-1u"kJ * mol^-1") : T(-1))
+                atom_mass = add_units(parse(T, atom_type["mass"]), u"g/mol", units)
+                σ = add_units(T(-1), u"nm", units)
+                ϵ = add_units(T(-1), u"kJ * mol^-1", units)
                 atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
                     at_type, at_class, element, ch, atom_mass, σ, ϵ)
                 push!(atom_type_order, at_type)
@@ -370,7 +370,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             end
                             weight_12 = parse(T, re["weight12"])
                             weight_13 = parse(T, re["weight13"])
-                            weight_cross = parse(T, re["weightCross"]) * (units ? u"nm^-1" : NoUnits)
+                            weight_cross = add_units(parse(T, re["weightCross"]), u"nm^-1", units)
                             vs = VirtualSiteTemplate(4, vs_name, atom_name_1, atom_name_2,
                                     atom_name_3, zero(T), zero(T), zero(T), weight_12,
                                     weight_13, weight_cross)
@@ -465,8 +465,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "HarmonicBondForce"
             for bond in eachelement(entry)
-                k  = (units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"]))
-                r0 = (units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"]))
+                k = add_units(parse(T, bond["k"]), u"kJ * mol^-1 * nm^-2", units)
+                r0 = add_units(parse(T, bond["length"]), u"nm", units)
                 p1 = pattern_from_attrs(bond, "type1","class1")
                 p2 = pattern_from_attrs(bond, "type2","class2")
                 push!(bond_rule_specs, (:bond_rule, p1,p2, HarmonicBond(k,r0)))
@@ -474,7 +474,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "HarmonicAngleForce"
             for ang in eachelement(entry)
-                k  = (units ? parse(T, ang["k"])u"kJ * mol^-1" : parse(T, ang["k"]))
+                k = add_units(parse(T, ang["k"]), u"kJ * mol^-1", units)
                 θ0 = parse(T, ang["angle"])
                 p1 = pattern_from_attrs(ang, "type1","class1")
                 p2 = pattern_from_attrs(ang, "type2","class2")
@@ -494,7 +494,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 while haskey(torsion, "periodicity$i")
                     push!(periodicities, parse(Int, torsion["periodicity$i"]))
                     push!(phases, parse(T,   torsion["phase$i"]))
-                    push!(ks, (units ? parse(T, torsion["k$i"])u"kJ * mol^-1" : parse(T, torsion["k$i"])))
+                    push!(ks, add_units(parse(T, torsion["k$i"]), u"kJ * mol^-1", units))
                     i += 1
                 end
 
@@ -530,8 +530,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             for atom_or_attr in eachelement(entry)
                 if atom_or_attr.name == "Atom"
                     ch = (haskey(atom_or_attr, "charge") ? parse(T, atom_or_attr["charge"]) : missing)
-                    σ = (units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"]))
-                    ϵ = (units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"]))
+                    σ = add_units(parse(T, atom_or_attr["sigma"]), u"nm", units)
+                    ϵ = add_units(parse(T, atom_or_attr["epsilon"]), u"kJ * mol^-1", units)
                     if haskey(atom_or_attr, "class")
                         push!(nb_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
                                             "", atom_or_attr["class"], "", ch, zero(T), σ, ϵ))
@@ -574,8 +574,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     if haskey(atom_or_nbfix, "sigma14") || haskey(atom_or_nbfix, "epsilon14")
                         error("sigma14 and epsilon14 not supported for LennardJonesForce")
                     end
-                    σ = (units ? parse(T, atom_or_nbfix["sigma"])u"nm" : parse(T, atom_or_nbfix["sigma"]))
-                    ϵ = (units ? parse(T, atom_or_nbfix["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_nbfix["epsilon"]))
+                    σ = add_units(parse(T, atom_or_nbfix["sigma"]), u"nm", units)
+                    ϵ = add_units(parse(T, atom_or_nbfix["epsilon"]), u"kJ * mol^-1", units)
                     if haskey(atom_or_nbfix, "class")
                         push!(ljforce_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
                                             "", atom_or_attr["class"], "", zero(T), zero(T), σ, ϵ))
@@ -596,8 +596,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         type1, type2 = "", ""
                         class1, class2 = atom_or_nbfix["class1"], atom_or_nbfix["class2"]
                     end
-                    σ = (units ? parse(T, atom_or_nbfix["sigma"])u"nm" : parse(T, atom_or_nbfix["sigma"]))
-                    ϵ = (units ? parse(T, atom_or_nbfix["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_nbfix["epsilon"]))
+                    σ = add_units(parse(T, atom_or_nbfix["sigma"]), u"nm", units)
+                    ϵ = add_units(parse(T, atom_or_nbfix["epsilon"]), u"kJ * mol^-1", units)
                     push!(nbfix_pairs, NBFixPair(type1, type2, class1, class2, σ, ϵ))
                 end
             end

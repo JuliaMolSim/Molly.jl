@@ -7,6 +7,8 @@ export ustrip_vec
 @derived_dimension BoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1
 @derived_dimension MolarBoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1*Unitful.𝐍^-1
 
+add_units(val, u, add_unit) = (add_unit ? val * u : val)
+
 """
     ustrip_vec(x)
     ustrip_vec(u, x)

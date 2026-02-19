@@ -430,8 +430,8 @@ function System(coord_file::AbstractString,
                 loggers=(),
                 units::Bool=true,
                 array_type::Type{AT}=Array,
-                dist_cutoff=(units ? 1.0u"nm" : 1.0),
-                dist_buffer=(units ? 0.2u"nm" : 0.2),
+                dist_cutoff=add_units(1.0, u"nm", units),
+                dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,
                 rigid_water=false,
                 nonbonded_method=:none,
@@ -484,11 +484,11 @@ function System(coord_file::AbstractString,
     end
 
     # Units and coordinates
-    if units
-        coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
-    else
-        coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
-    end
+    coords = add_units(
+        [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))],
+        u"nm",
+        units,
+    )
     if center_coords
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
@@ -906,8 +906,8 @@ function System(T::Type,
                 loggers=(),
                 units::Bool=true,
                 array_type::Type{AT}=Array,
-                dist_cutoff=(units ? 1.0u"nm" : 1.0),
-                dist_buffer=(units ? 0.2u"nm" : 0.2),
+                dist_cutoff=add_units(1.0, u"nm", units),
+                dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,
                 rigid_water=false,
                 nonbonded_method=:none,
@@ -966,20 +966,18 @@ function System(T::Type,
         end
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
         if current_field == "bondtypes"
-            if units
-                bondtype = HarmonicBond(parse(T, c[5])u"kJ * mol^-1 * nm^-2", parse(T, c[4])u"nm")
-            else
-                bondtype = HarmonicBond(parse(T, c[5]), parse(T, c[4]))
-            end
+            bondtype = HarmonicBond(
+                add_units(parse(T, c[5]), u"kJ * mol^-1 * nm^-2", units),
+                add_units(parse(T, c[4]), u"nm", units),
+            )
             bondtypes["$(c[1])/$(c[2])"] = bondtype
             bondtypes["$(c[2])/$(c[1])"] = bondtype
         elseif current_field == "angletypes"
             # Convert θ0 to radians
-            if units
-                angletype = HarmonicAngle(parse(T, c[6])u"kJ * mol^-1", deg2rad(parse(T, c[5])))
-            else
-                angletype = HarmonicAngle(parse(T, c[6]), deg2rad(parse(T, c[5])))
-            end
+            angletype = HarmonicAngle(
+                add_units(parse(T, c[6]), u"kJ * mol^-1", units),
+                deg2rad(parse(T, c[5])),
+            )
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
         elseif current_field == "dihedraltypes" && c[1] != "#define"
@@ -1109,7 +1107,7 @@ function System(T::Type,
 
     if isnothing(boundary)
         box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
-        box_size = (units ? (box_size_vals)u"nm" : box_size_vals)
+        box_size = add_units(box_size_vals, u"nm", units)
         boundary_used = CubicBoundary(box_size)
     else
         boundary_used = boundary
@@ -1282,8 +1280,8 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
     if length(dist_constraints) > 0 || length(angle_constraints) > 0
         shake = SHAKE_RATTLE(
             length(atoms_data),
-            (units ? T(1e-6)u"nm" : T(1e-6)),
-            (units ? T(1e-6)u"nm^2 * ps^-1" : T(1e-6));
+            add_units(T(1e-6), u"nm", units),
+            add_units(T(1e-6), u"nm^2 * ps^-1", units);
             dist_constraints=[dist_constraints...],
             angle_constraints=[angle_constraints...],
             strictness=strictness,
