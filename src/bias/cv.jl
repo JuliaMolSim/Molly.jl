@@ -823,51 +823,50 @@ we get:
 ```
 
 ```math
-\nabla_{\mathbf{r}_j} \phi = \left( \frac{\mathbf{b}_1 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} - 1 \right) \nabla_{\mathbf{r}_i} \phi - \frac{\mathbf{b}_3 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} \nabla_{\mathbf{r}_l} \phi
+\nabla_{\mathbf{r}_j} \phi = - \left( 1 + \frac{\mathbf{b}_1 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} \right) \nabla_{\mathbf{r}_i} \phi + \left( \frac{\mathbf{b}_2 \cdot \mathbf{b}_3}{|\mathbf{b}_2|^2} \right) \nabla_{\mathbf{r}_l} \phi
 ```
 
 ```math
-\nabla_{\mathbf{r}_k} \phi = \left( \frac{\mathbf{b}_3 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} - 1 \right) \nabla_{\mathbf{r}_l} \phi - \frac{\mathbf{b}_1 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} \nabla_{\mathbf{r}_i} \phi
+\nabla_{\mathbf{r}_k} \phi = \left( \frac{\mathbf{b}_1 \cdot \mathbf{b}_2}{|\mathbf{b}_2|^2} \right) \nabla_{\mathbf{r}_i} \phi - \left( 1 + \frac{\mathbf{b}_2 \cdot \mathbf{b}_3}{|\mathbf{b}_2|^2} \right) \nabla_{\mathbf{r}_l} \phi
 ```
 
 """
 function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, velocities; kwargs...)
     i, j, k, l = cv.atom_inds
     ri, rj, rk, rl = coords[i], coords[j], coords[k], coords[l]
-
+    
     b1 = vector(ri, rj, boundary)
     b2 = vector(rj, rk, boundary)
     b3 = vector(rk, rl, boundary)
-
+    
     m = cross(b1, b2)
     n = cross(b2, b3)
-
+    
     m_sq = sum(abs2, m)
     n_sq = sum(abs2, n)
     b2_norm = norm(b2)
     b2_sq = b2_norm^2
-
-    grad = zero(coords)
+    
+    grad = ustrip.(zero(coords))u"nm^-1"
     phi = torsion_angle(ri, rj, rk, rl, boundary)
-
-    if m_sq > 0 && n_sq > 0 && b2_sq > 0
-        grad_i = (b2_norm / m_sq) * m
+    
+    if m_sq > 0u"nm^4" && n_sq > 0u"nm^4" && b2_sq > 0u"nm^2"
+        grad_i =  (b2_norm / m_sq) * m
         grad_l = -(b2_norm / n_sq) * n
         
         b1_dot_b2 = dot(b1, b2)
         b3_dot_b2 = dot(b3, b2)
         
-        grad_j = ((b1_dot_b2 / b2_sq) - 1) * grad_i - (b3_dot_b2 / b2_sq) * grad_l
-        grad_k = ((b3_dot_b2 / b2_sq) - 1) * grad_l - (b1_dot_b2 / b2_sq) * grad_i
+        grad_j = -(1 + b1_dot_b2 / b2_sq) * grad_i + (b3_dot_b2 / b2_sq) * grad_l
+        grad_k = (b1_dot_b2 / b2_sq) * grad_i - (1 + b3_dot_b2 / b2_sq) * grad_l
         
         grad[i] = grad_i
         grad[j] = grad_j
         grad[k] = grad_k
         grad[l] = grad_l
     end
-
-    return grad, phi
-
+    
+    return -grad, phi
 end
 
 function calculate_virial!(virial_buff, cv::CalcTorsion, coords, forces, atoms, boundary)
