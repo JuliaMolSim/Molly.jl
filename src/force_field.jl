@@ -44,6 +44,8 @@ struct AtomType{C, M, S, E}
     mass::M
     σ::S
     ϵ::E
+    σ14::Union{S, Missing}
+    ϵ14::Union{E, Missing}
 end
 
 struct PeriodicTorsionType{T, E}
@@ -274,7 +276,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 σ = add_units(T(-1), u"nm", units)
                 ϵ = add_units(T(-1), u"kJ * mol^-1", units)
                 atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
-                    at_type, at_class, element, ch, atom_mass, σ, ϵ)
+                    at_type, at_class, element, ch, atom_mass, σ, ϵ, missing, missing)
                 push!(atom_type_order, at_type)
             end
 
@@ -534,13 +536,13 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     ϵ = add_units(parse(T, atom_or_attr["epsilon"]), u"kJ * mol^-1", units)
                     if haskey(atom_or_attr, "class")
                         push!(nb_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
-                                            "", atom_or_attr["class"], "", ch, zero(T), σ, ϵ))
+                                "", atom_or_attr["class"], "", ch, zero(T), σ, ϵ, missing, missing))
                     else
                         atom_type = atom_or_attr["type"]
                         if haskey(atom_types, atom_type)
                             at = atom_types[atom_type]
                             atom_types[atom_type] = AtomType{T, typeof(at.mass), typeof(σ), typeof(ϵ)}(
-                                at.type, at.class, at.element, ch, at.mass, σ, ϵ)
+                                at.type, at.class, at.element, ch, at.mass, σ, ϵ, missing, missing)
                         end
                     end
                 elseif atom_or_attr.name == "UseAttributeFromResidue"
@@ -571,21 +573,28 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             end
             for atom_or_nbfix in eachelement(entry)
                 if atom_or_nbfix.name == "Atom"
-                    if haskey(atom_or_nbfix, "sigma14") || haskey(atom_or_nbfix, "epsilon14")
-                        error("sigma14 and epsilon14 not supported for LennardJonesForce")
+                    if haskey(atom_or_nbfix, "sigma14")
+                        σ14 = add_units(parse(T, atom_or_nbfix["sigma14"]), u"nm", units)
+                    else
+                        σ14 = missing
+                    end
+                    if haskey(atom_or_nbfix, "epsilon14")
+                        ϵ14 = add_units(parse(T, atom_or_nbfix["epsilon14"]), u"kJ * mol^-1", units)
+                    else
+                        ϵ14 = missing
                     end
                     σ = add_units(parse(T, atom_or_nbfix["sigma"]), u"nm", units)
                     ϵ = add_units(parse(T, atom_or_nbfix["epsilon"]), u"kJ * mol^-1", units)
                     if haskey(atom_or_nbfix, "class")
                         push!(ljforce_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
-                                            "", atom_or_attr["class"], "", zero(T), zero(T), σ, ϵ))
+                                "", atom_or_attr["class"], "", zero(T), zero(T), σ, ϵ, σ14, ϵ14))
                     else
                         atom_type = atom_or_nbfix["type"]
                         if haskey(atom_types, atom_type)
                             at = atom_types[atom_type]
                             # Re-use charge from NonbondedForce entry if present
                             atom_types[atom_type] = AtomType{T, typeof(at.mass), typeof(σ), typeof(ϵ)}(
-                                at.type, at.class, at.element, at.charge, at.mass, σ, ϵ)
+                                at.type, at.class, at.element, at.charge, at.mass, σ, ϵ, σ14, ϵ14)
                         end
                     end
                 elseif atom_or_nbfix.name == "NBFixPair"
@@ -764,7 +773,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         for t in class_to_types[ac.class]
             at = atom_types[t]
             atom_types[t] = AtomType{T, typeof(at.mass), typeof(ac.σ), typeof(ac.ϵ)}(
-                at.type, at.class, at.element, ac.charge, at.mass, ac.σ, ac.ϵ)
+                at.type, at.class, at.element, ac.charge, at.mass, ac.σ, ac.ϵ, ac.σ14, ac.ϵ14)
         end
     end
 
@@ -773,7 +782,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
             at = atom_types[t]
             # Re-use charge from NonbondedForce entry if present
             atom_types[t] = AtomType{T, typeof(at.mass), typeof(ac.σ), typeof(ac.ϵ)}(
-                at.type, at.class, at.element, at.charge, at.mass, ac.σ, ac.ϵ)
+                at.type, at.class, at.element, at.charge, at.mass, ac.σ, ac.ϵ, ac.σ14, ac.ϵ14)
         end
     end
 

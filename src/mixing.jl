@@ -1,8 +1,6 @@
 # Mixing functions for non-bonded parameters
 
-struct NoShortcut end
-
-shortcut_pair(::NoShortcut, args...) = false
+shortcut_pair(::Nothing, args...) = false
 
 struct LJZeroShortcut end
 
@@ -20,21 +18,23 @@ end
 
 struct LorentzMixing end
 
-σ_mixing(::LorentzMixing, atom_i, atom_j, args...) = (atom_i.σ + atom_j.σ) / 2
-ϵ_mixing(::LorentzMixing, atom_i, atom_j, args...) = (atom_i.ϵ + atom_j.ϵ) / 2
-λ_mixing(::LorentzMixing, atom_i, atom_j, args...) = (atom_i.λ + atom_j.λ) / 2
-A_mixing(::LorentzMixing, atom_i, atom_j, args...) = (atom_i.A + atom_j.A) / 2
-B_mixing(::LorentzMixing, atom_i, atom_j, args...) = (atom_i.B + atom_j.B) / 2
-C_mixing(::LorentzMixing, atom_i, atom_j, args...) = (atom_i.C + atom_j.C) / 2
+xy_mixing(::LorentzMixing, x, y, args...) = (x + y) / 2
+σ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.σ , atom_j.σ, args...)
+ϵ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.ϵ , atom_j.ϵ, args...)
+λ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.λ , atom_j.λ, args...)
+A_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.A , atom_j.A, args...)
+B_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.B , atom_j.B, args...)
+C_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.C , atom_j.C, args...)
 
 struct GeometricMixing end
 
-σ_mixing(::GeometricMixing, atom_i, atom_j, args...) = sqrt(atom_i.σ * atom_j.σ)
-ϵ_mixing(::GeometricMixing, atom_i, atom_j, args...) = sqrt(atom_i.ϵ * atom_j.ϵ)
-λ_mixing(::GeometricMixing, atom_i, atom_j, args...) = sqrt(atom_i.λ * atom_j.λ)
-A_mixing(::GeometricMixing, atom_i, atom_j, args...) = sqrt(atom_i.A * atom_j.A)
-B_mixing(::GeometricMixing, atom_i, atom_j, args...) = sqrt(atom_i.B * atom_j.B)
-C_mixing(::GeometricMixing, atom_i, atom_j, args...) = sqrt(atom_i.C * atom_j.C)
+xy_mixing(::GeometricMixing, x, y, args...) = sqrt(x * y)
+σ_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.σ, atom_j.σ, args...)
+ϵ_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.ϵ, atom_j.ϵ, args...)
+λ_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.λ, atom_j.λ, args...)
+A_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.A, atom_j.A, args...)
+B_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.B, atom_j.B, args...)
+C_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.C, atom_j.C, args...)
 
 struct WaldmanHaglerMixing end
 
