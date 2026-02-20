@@ -311,7 +311,9 @@ The types used should be bits types if the GPU is going to be used.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
-- `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
+- `λ_coul::L=1.0`: scaling parameter of Coulombic interactions, used for alchemical 
+    transformations
+- `λ_vdw::L=1.0`: scaling parameter of Van der Waals interactions, used for alchemical 
     transformations
 """
 @kwdef struct Atom{T, M, C, S, E, L}
@@ -321,16 +323,17 @@ The types used should be bits types if the GPU is going to be used.
     charge::C = 0.0
     σ::S = 0.0u"nm"
     ϵ::E = 0.0u"kJ * mol^-1"
-    λ::L = 1.0
+    λ_coul::L = 1.0
+    λ_vdw::L = 1.0
 end
 
 function Base.zero(::Atom{T, M, C, S, E, L}) where {T, M, C, S, E, L}
-    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E), zero(L))
+    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), zero(L))
 end
 
 function Base.:+(a1::Atom, a2::Atom)
     return Atom(a1.index, a1.atom_type, a1.mass + a2.mass, a1.charge + a2.charge,
-                a1.σ + a2.σ, a1.ϵ + a2.ϵ, a1.λ + a2.λ)
+                a1.σ + a2.σ, a1.ϵ + a2.ϵ, a1.λ_coul + a2.λ_coul, a1.λ_vdw + a2.λ_vdw)
 end
 
 # get function errors with AD
@@ -345,7 +348,8 @@ function inject_atom(at, at_data, params_dic)
         at.charge, # Residue-specific
         dict_get(params_dic, key_prefix * "σ"     , at.σ   ),
         dict_get(params_dic, key_prefix * "ϵ"     , at.ϵ   ),
-        at.λ # Preserve lambda from existing atom
+        at.λ_coul, # Preserve lambda from existing atom,
+        at.λ_vdw
     )
 end
 
@@ -378,7 +382,7 @@ end
 
 function Base.show(io::IO, a::Atom)
     print(io, "Atom with index=", a.index, ", atom_type=", a.atom_type, ", mass=", mass(a),
-          ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ, ", λ=", a.λ)
+          ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ, ", λ_coul=", a.λ_coul, " λ_vdw=", a.λ_vdw)
 end
 
 function lj_zero_shortcut(atom_i, atom_j)
@@ -390,11 +394,13 @@ no_shortcut(atom_i, atom_j) = false
 
 lorentz_σ_mixing(atom_i, atom_j) = (atom_i.σ + atom_j.σ) / 2
 lorentz_ϵ_mixing(atom_i, atom_j) = (atom_i.ϵ + atom_j.ϵ) / 2
-lorentz_λ_mixing(atom_i, atom_j) = (atom_i.λ + atom_j.λ) / 2
+lorentz_λ_coul_mixing(atom_i, atom_j) = (atom_i.λ_coul + atom_j.λ_coul) / 2
+lorentz_λ_vdw_mixing(atom_i, atom_j) = (atom_i.λ_vdw + atom_j.λ_vdw) / 2
 
 geometric_σ_mixing(atom_i, atom_j) = sqrt(atom_i.σ * atom_j.σ)
 geometric_ϵ_mixing(atom_i, atom_j) = sqrt(atom_i.ϵ * atom_j.ϵ)
-geometric_λ_mixing(atom_i, atom_j) = sqrt(atom_i.λ * atom_j.λ)
+geometric_λ_coul_mixing(atom_i, atom_j) = sqrt(atom_i.λ_coul * atom_j.λ_coul)
+geometric_λ_vdw_mixing(atom_i, atom_j) = sqrt(atom_i.λ_vdw * atom_j.λ_vdw)
 
 function waldman_hagler_σ_mixing(atom_i, atom_j)
     T = typeof(ustrip(atom_i.σ))

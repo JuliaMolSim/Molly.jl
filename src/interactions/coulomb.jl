@@ -140,11 +140,11 @@ If ``\lambda`` is zero the interaction is turned off.
 """
 @kwdef struct CoulombSoftCoreBeutler{C, A, S, E, LM, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 1.0
+    α::A = 0.3
     use_neighbors::Bool = false
     σ_mixing::S = lorentz_σ_mixing
     ϵ_mixing::E = geometric_ϵ_mixing
-    λ_mixing::LM = lorentz_λ_mixing
+    λ_mixing::LM = lorentz_λ_coul_mixing
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
@@ -313,10 +313,10 @@ If ``\lambda`` is zero the interaction is turned off.
 """
 @kwdef struct CoulombSoftCoreGapsys{C, A, S, LM, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 1
+    α::A = 0.3
     σQ::S = 1.0u"nm"
     use_neighbors::Bool = false
-    λ_mixing::LM = lorentz_λ_mixing
+    λ_mixing::LM = lorentz_λ_coul_mixing
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end

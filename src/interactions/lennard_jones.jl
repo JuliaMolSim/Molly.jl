@@ -172,12 +172,12 @@ If ``\lambda`` is zero the interaction is turned off.
 """
 @kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 1
+    α::A = 0.85
     use_neighbors::Bool = false
     shortcut::H = lj_zero_shortcut
     σ_mixing::S = lorentz_σ_mixing
     ϵ_mixing::E = geometric_ϵ_mixing
-    λ_mixing::LM = lorentz_λ_mixing
+    λ_mixing::LM = lorentz_λ_vdw_mixing
     weight_special::W = 1
 end
 
@@ -391,12 +391,12 @@ If ``\lambda`` is zero the interaction is turned off.
 """
 @kwdef struct LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 1
+    α::A = 0.85
     use_neighbors::Bool = false
     shortcut::H = lj_zero_shortcut
     σ_mixing::S = lorentz_σ_mixing
     ϵ_mixing::E = geometric_ϵ_mixing
-    λ_mixing::LM = lorentz_λ_mixing
+    λ_mixing::LM = lorentz_λ_vdw_mixing
     weight_special::W = 1
 end
 

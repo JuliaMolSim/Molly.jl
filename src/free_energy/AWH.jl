@@ -215,7 +215,7 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
 
         atoms_cpu = from_device(atoms)
         for atom in atoms_cpu
-            if atom.λ < 1.0
+            if (atom.λ_coul < 1.0) || (atom.λ_vdw < 0)
                 push!(solute_indices, atom.index)
             end
         end
