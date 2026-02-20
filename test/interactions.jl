@@ -50,7 +50,12 @@
     @test !use_neighbors(LennardJones())
     @test  use_neighbors(LennardJones(use_neighbors=true))
 
-    for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCoreBeutler(α=1, λ=1), LennardJonesSoftCoreGapsys(α=1, λ=1))
+    for inter in (
+            LennardJones(),
+            Mie(m=6, n=12),
+            LennardJonesSoftCoreBeutler(α=1, λ=1),
+            LennardJonesSoftCoreGapsys(α=1, λ=1),
+        )
         @test isapprox(
             force(inter, dr12, a1, a1),
             SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
@@ -72,6 +77,28 @@
             atol=1e-9u"kJ * mol^-1",
         )
     end
+
+    inter = Molly.LennardJones14(0.3u"nm", 0.2u"kJ * mol^-1", 1)
+    @test isapprox(
+        force(inter, c1, c3, c4, c2, boundary).f4,
+        SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(inter, c1, c2, c4, c3, boundary).f4,
+        SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, c1, c3, c4, c2, boundary),
+        0.0u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, c1, c2, c4, c3, boundary),
+        -0.1170417309u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
 
     inter = LennardJonesSoftCoreBeutler(α=0.3, λ=0.5)
     @test isapprox(
