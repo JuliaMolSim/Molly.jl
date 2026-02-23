@@ -162,14 +162,11 @@ function init_buffers!(sys::System{D}, n_threads) where D
     return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
 end
 
-struct BuffersGPU{F, P, V, VN, VR, KT, PT, C, M, R}
+struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R}
     fs_mat::F
     pe_vec_nounits::P
-    virial::V # Main virial buffer
-    virial_nounits::VN # For KernelAbstractions
-    virial_row_1::VR # For pairwise GPU CUDA kernel
-    virial_row_2::VR
-    virial_row_3::VR
+    virial::V 
+    virial_nounits::VN 
     kin_tensor::KT
     pres_tensor::PT
     box_mins::C
@@ -182,19 +179,17 @@ struct BuffersGPU{F, P, V, VN, VR, KT, PT, C, M, R}
 end
 
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
-                       for_pe::Bool=false) where {D, T}
+                   for_pe::Bool=false) where {D, T}
     N = length(sys)
     C = eltype(eltype(sys.coords))
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     n_blocks = cld(N, 32)
     backend = get_backend(sys.coords)
+    
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
     pe_vec_noun  = KernelAbstractions.zeros(backend, T, 1)
     virial       = zeros(CT, D, D) .* sys.energy_units
     virial_nu    = KernelAbstractions.zeros(backend, T, D, D)
-    virial_row_1 = KernelAbstractions.zeros(backend, T, D, N)
-    virial_row_2 = KernelAbstractions.zeros(backend, T, D, N)
-    virial_row_3 = KernelAbstractions.zeros(backend, T, D, N)
     kin          = zero(virial)
     pres         = ustrip_vec.(zero(virial)) * (sys.energy_units == NoUnits ? NoUnits : u"bar")
     box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
@@ -204,12 +199,13 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
     compressed_eligible = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
     compressed_special = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
+    
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
-    return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, virial_row_1, virial_row_2,
-                      virial_row_3, kin, pres, box_mins, box_maxs, morton_seq,
-                      morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
+    
+    return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
+                      morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
                       compressed_special)
 end
 
@@ -538,9 +534,6 @@ function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, buffers::
                  n_threads::Integer=Threads.nthreads()) where {D, T, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
-        fill!(buffers.virial_row_1, zero(T))
-        fill!(buffers.virial_row_2, zero(T))
-        fill!(buffers.virial_row_3, zero(T))
         fill!(buffers.virial_nounits, zero(T))
     end
     fill!(buffers.kin_tensor, zero(T) * sys.energy_units)
