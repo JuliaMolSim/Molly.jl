@@ -1,6 +1,7 @@
 export 
     AWHState,
     AWHSimulation,
+    get_pmf,
     simulate!
     
 # Convenience struct to store relevant things
@@ -623,6 +624,35 @@ function update_pmf!(
     end
     
     pmf.sample_count += 1
+end
+
+@doc raw"""
+    get_pmf(pmf_calc::AWHPMFDeconvolution)
+
+Extracts the unbiased Potential of Mean Force (PMF) from the accumulated numerator 
+and denominator histograms. Unsampled bins are assigned a value of `Inf`, and the 
+global minimum of the valid PMF is shifted to zero.
+"""
+function get_pmf(pmf_calc::AWHPMFDeconvolution{N, T, F_CV}) where {N, T, F_CV}
+    num = pmf_calc.numerator_hist
+    den = pmf_calc.denominator_hist
+    
+    # Identify bins with non-zero samples to avoid domain errors in log
+    valid = (num .> zero(T)) .& (den .> zero(T))
+    
+    # Initialize PMF array with infinity for unsampled regions
+    pmf = fill(T(Inf), size(num))
+    
+    # Calculate unbiased PMF for valid bins
+    pmf[valid] .= -log.(num[valid] ./ den[valid])
+    
+    # Shift the global minimum to zero
+    if any(valid)
+        min_val = minimum(pmf[valid])
+        pmf[valid] .-= min_val
+    end
+    
+    return pmf
 end
 
 @doc raw"""
