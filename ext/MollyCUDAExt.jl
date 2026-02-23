@@ -60,7 +60,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
         sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
         sys.neighbor_finder.initialized = true
-        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+        @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
@@ -72,11 +72,11 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
         )
         Hinv = inv(H)
-        CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
+        @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
                 sys.boundary, Val(D))
     else
-        CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max!(
+        @cuda blocks=n_blocks threads=32 kernel_min_max!(
                     buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
                     sys.boundary, Val(D))
     end
@@ -125,7 +125,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     morton_bits = 4
     w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
     sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
-    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+    @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     if sys.boundary isa TriclinicBoundary
@@ -135,15 +135,15 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
         )
         Hinv = inv(H)
-        CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
+        @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
                 sys.boundary, Val(D))
     else
-        CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
+        @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
                 Val(N), sys.boundary, Val(D))
     end
-    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
+    @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
             buffers.morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
