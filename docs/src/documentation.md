@@ -443,6 +443,7 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
 - `<Script>`
+In general, custom forces should be implemented as described in [Forces and energies](@ref).
 
 ## Enhanced sampling
 
@@ -754,10 +755,24 @@ For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairw
 ### Pairwise interactions
 
 Some pairwise interactions define mixing functions which determine how the parameters from each atom are combined.
-For example, the default `σ_mixing` for [`LennardJones`](@ref) is `Molly.lorentz_σ_mixing`, which is defined as `(atom_i.σ + atom_j.σ) / 2`.
-Other mixing functions are available, such as `Molly.waldman_hagler_σ_mixing` and `Molly.fender_halsey_ϵ_mixing`.
-Custom mixing functions can be given instead and should take in the two atoms as arguments.
+For example, the default `σ_mixing` for [`LennardJones`](@ref) is `Molly.LorentzMixing()`, which calculates `(atom_i.σ + atom_j.σ) / 2`.
+Other mixing functions are available, such as `Molly.GeometricMixing()` and `Molly.WaldmanHaglerMixing()`.
+Custom mixing functions can be used instead by defining the struct and appropriate functions such as `Molly.σ_mixing` and `Molly.ϵ_mixing`.
+For example:
+```julia
+struct MyMixing end
+
+Molly.σ_mixing(m::MyMixing, atom_i, atom_j, special) = (atom_i.σ + atom_j.σ) / 2
+Molly.ϵ_mixing(m::MyMixing, atom_i, atom_j, special) = (atom_i.ϵ + atom_j.ϵ) / 2
+```
 The `atom_type` field of the atoms is available, allowing features like changing the weight of solute-solvent interactions.
+Shortcut functions are also available to skip the interaction entirely, with similar logic.
+Specific exceptions can be given for pairs of atom types by using `Molly.MixingException`:
+```julia
+d = Dict((1, 2) => 0.3u"nm") # Pairs of atom type 1 and 2 have a σ value of 0.3 nm
+exceptions = Molly.ExceptionList(d)
+σ_mix = Molly.MixingException(MyMixing(), exceptions) # Give as e.g. σ_mixing argument to LennardJones
+```
 
 To define your own pairwise interaction, first define the `struct`, which must be a subtype of [`PairwiseInteraction`](@ref):
 ```julia
