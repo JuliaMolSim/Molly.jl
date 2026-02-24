@@ -797,16 +797,24 @@ function simulate!(sys::ReplicaSystem,
                    rng=Random.default_rng())
     
     if assign_velocities
-        k_B = sys.partition.master_sys.k
+        master_sys = sys.partition.master_sys
+        k_B = master_sys.k
+        e_unit = master_sys.energy_units
+        
+        # Extract the raw float value of the Boltzmann constant in internal units
+        # If the system does not use units, k_B is already a raw float
+        k_B_val = e_unit == NoUnits ? k_B : ustrip(uconvert(e_unit / u"K", k_B))
+        
         for i in 1:sys.n_replicas
             state_idx = sys.state_indices[i]
             beta = sys.betas[state_idx]
             
             # Derive target temperature from internal beta: T = 1 / (k_B * beta)
-            T_target = uconvert(u"K", 1 / (k_B * beta))
+            T_val = 1 / (k_B_val * beta)
+            T_target = e_unit == NoUnits ? T_val : (T_val * u"K")
             
             # Assign random velocities directly to the replica's array
-            random_velocities!(sys.replica_velocities[i], sys.partition.master_sys, T_target; rng=rng)
+            random_velocities!(sys.replica_velocities[i], master_sys, T_target; rng=rng)
         end
     end
 
@@ -903,8 +911,9 @@ function simulate_remd!(sys::ReplicaSystem,
                 loggers = sys.replica_loggers[i]
             )
             
+            # Enforce n_threads >= 1 to prevent buffer chunk crashes
             Threads.@spawn simulate!(active_sys, integrator, cycle_length;
-                                     n_threads=thread_div[i], run_loggers=run_loggers, rng=rng)
+                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers, rng=rng)
         end
 
         cycle_parity = cycle % 2
@@ -938,7 +947,7 @@ function simulate_remd!(sys::ReplicaSystem,
             )
             
             Threads.@spawn simulate!(active_sys, integrator, remaining_steps;
-                                     n_threads=thread_div[i], run_loggers=run_loggers, rng=rng)
+                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers, rng=rng)
         end
     end
 

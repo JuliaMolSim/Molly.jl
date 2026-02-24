@@ -171,8 +171,7 @@ function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = tr
             eligible = eligible, 
             dist_cutoff = ref_nfinder.dist_cutoff,
             special   = ref_nfinder.special,
-            n_steps = 1,
-            neighbors = ref_nfinder.neighbors
+            n_steps = 1
         )
     elseif ref_nfinder isa CellListMapNeighborFinder
         return CellListMapNeighborFinder(

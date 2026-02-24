@@ -1295,9 +1295,11 @@ AtomsBase.velocity(s::System, ::Colon) = s.velocities
 AtomsBase.velocity(s::ReplicaSystem, i::Union{Integer, AbstractVector}) = s.replica_velocities[1][i]
 AtomsBase.velocity(s::ReplicaSystem, ::Colon) = s.replica_velocities[1]
 
-AtomsBase.mass(s::Union{System, ReplicaSystem}, i::Union{Integer, AbstractVector}) = mass(s.atoms[i])
+AtomsBase.mass(s::System, i::Union{Integer, AbstractVector}) = mass(s.atoms[i])
 AtomsBase.mass(s::System, ::Colon) = s.masses
+AtomsBase.mass(s::ReplicaSystem, i::Integer) = mass(s.partition.master_sys.atoms[i])
 AtomsBase.mass(s::ReplicaSystem, ::Colon) = mass.(s.partition.master_sys.atoms)
+AtomsBase.mass(s::ReplicaSystem, is::AbstractVector) = mass.(s.partition.master_sys.atoms[is])
 
 function AtomsBase.species(s::System, i::Integer)
     return AtomsBase.ChemicalSpecies(Symbol(s.atoms_data[i].element))
