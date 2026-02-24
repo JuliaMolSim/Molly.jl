@@ -14,6 +14,7 @@ export
     MolecularTopology,
     NeighborList,
     System,
+    ThermoState,
     ReplicaSystem,
     array_type,
     is_on_gpu,
@@ -968,22 +969,108 @@ function extract_parameters(sys, ff)
     return params_dic
 end
 
+@doc raw"""
+    ThermoState(system::System, integrator; <keyword arguments>)
+
+Thermodynamic state wrapper carrying the system, integrator, and derived thermodynamic properties 
+(inverse temperature `beta` and pressure `p`). This serves as the definitive container for a 
+single thermodynamic state across all generalized ensemble methods.
+
+# Arguments
+- `system::System`: The simulation system used to evaluate energies.
+- `integrator`: The integrator used to simulate the system.
+- `temperature=nothing`: Explicit target temperature. If `nothing`, it is inferred from the integrator's 
+    thermostat or implicit temperature coupling.
+- `pressure=nothing`: Explicit target pressure. If `nothing`, it is inferred from the integrator's barostat.
+- `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on 
+    the temperature and pressure is generated.
 """
-    ReplicaSystem(; <keyword arguments>)
+struct ThermoState{S, I, B, P}
+    system::S
+    integrator::I
+    beta::B         # Inverse temperature in internal energy units
+    p::P            # Isotropic pressure in internal pressure units
+    name::String
+end
 
-A wrapper for replicas in a replica exchange simulation.
+function ThermoState(sys::System{D, AT, FT}, integrator; 
+                     temperature=nothing, pressure=nothing,
+                     name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
 
-Each individual replica is a [`System`](@ref).
-Properties unused in the simulation or in analysis can be left with their default values.
-The minimal required arguments are `atoms`, `replica_coords`, `boundary` and `n_replicas`.
-`atoms` and the elements in `replica_coords` should have the same length, along with
-`atoms_data` and the elements in `replica_velocities` if these are provided.
-The number of elements in `replica_coords`, `replica_boundaries`, `replica_velocities`,
-`replica_loggers` and the interaction arguments `replica_pairwise_inters`,
-`replica_specific_inter_lists`, `replica_general_inters` and `replica_constraints` should
-be equal to `n_replicas` if used.
-This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
-interface described there.
+    temp_source = temperature
+    press_source = pressure
+
+    # Infer thermodynamic targets from the integrator if not explicitly overridden
+    if hasproperty(integrator, :coupling) && !(integrator.coupling isa NoCoupling)
+        couplers = integrator.coupling isa Tuple ? integrator.coupling : (integrator.coupling,)
+        for coupler in couplers
+            if isnothing(temp_source) && coupler isa AbstractThermostat
+                temp_source = coupler.temperature
+            end
+            if isnothing(press_source) && coupler isa AbstractBarostat
+                if hasproperty(coupler, :pressure)
+                    press_source = coupler.pressure
+                end
+            end
+        end
+    end
+
+    # Check for integrators with implicit temperature control (e.g., Langevin, NoseHoover)
+    if isnothing(temp_source) && hasproperty(integrator, :temperature)
+        temp_source = integrator.temperature
+    end
+
+    if isnothing(temp_source)
+        throw(ArgumentError("No temperature provided or inferred from the integrator. " * "You must provide an explicit temperature, use a thermostat, or " * "use an integrator with an implicit temperature."))
+    end
+
+    # Calculate beta (inverse temperature) in system-compatible units (e.g., mol/kJ)
+    # Molly evaluates energy per mole by default, requiring the molar gas constant R
+    beta_val = try
+        kBT = uconvert(sys.energy_units, Unitful.R * temp_source)
+        FT(ustrip(1/kBT))
+    catch
+        throw(ArgumentError("Temperature provided is not compatible with system energy units."))
+    end
+
+    # Calculate isotropic pressure in internal units (Energy / Volume) if applicable
+    p_val = nothing
+    if !isnothing(press_source)
+        # Handle scalar pressure or tensor (matrix) pressure representations
+        p_raw = press_source isa AbstractArray ? (1/3 * tr(press_source)) : press_source
+        
+        l_unit = unit(sys.boundary.side_lengths[1])
+        v_unit = l_unit^3
+        p_unit = sys.energy_units / v_unit
+
+        # Convert macroscopic pressure (e.g., bar) to internal molar pressure
+        p_molar = p_raw * Unitful.Na
+        p_val = FT(ustrip(uconvert(p_unit, p_molar)))
+    end
+
+    final_name = isnothing(name) ? "state_T$(temp_source)" * (isnothing(p_val) ? "" : "_P$(press_source)") : String(name)
+    
+    return ThermoState{typeof(sys), typeof(integrator), typeof(beta_val), typeof(p_val)}(
+        sys, integrator, beta_val, p_val, final_name
+    )
+end
+
+@doc raw"""
+    ReplicaSystem(thermo_states, replica_coords; <keyword arguments>)
+
+A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD).
+
+Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles 
+an [`AlchemicalPartition`](@ref) from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed 
+topological and interactive components (e.g., bulk solvent) from state-specific perturbations. 
+During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
+necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
+
+Furthermore, upon a successful exchange, coordinates and velocities are no longer physically swapped in memory; 
+the system simply updates internal pointers mapping the physical replica to its new thermodynamic state.
+
+This is a sub-type of [`AbstractSystem`](@ref) from AtomsBase.jl and implements the interface described there, 
+routing standard atomic property queries back to the unperturbed master system.
 
 When using `ReplicaSystem` with [`CellListMapNeighborFinder`](@ref), the number of threads used for
 both the simulation of replicas and the neighbor finder should be set to be the same.
@@ -991,277 +1078,104 @@ This can be done by passing `nbatches=(min(n, 8), n)` to [`CellListMapNeighborFi
 construction where `n` is the number of threads to be used per replica.
 
 # Arguments
-- `atoms::A`: the atoms, or atom equivalents, in the system. Can be
-    of any type but should be a bits type if the GPU is used.
-- `replica_coords`: the coordinates of the atoms in each replica.
-- `n_replicas::Integer`: the number of replicas of the system.
-- `boundary=nothing`: the bounding box in which the simulation takes place. This is only
-    used if no value is passed to the argument `replica_pairwise_inters`.
-- `replica_boundaries=nothing`: the bounding box for each replica.
-- `replica_velocities=[zero(replica_coords[1]) * u"ps^-1" for _ in 1:n_replicas]`:
-    the velocities of the atoms in each replica.
-- `atoms_data::AD`: other data associated with the atoms, allowing the atoms to
-    be bits types and hence work on the GPU.
-- `topology::TO=nothing`: topological information about the system such as which
-    atoms are in the same molecule (to be used if the same for all replicas).
-    This is only used if no value is passed to the argument `replica_topology`.
-- `replica_topology=[nothing for _ in 1:n_replicas]`: the topological information for
-    each replica.
-- `pairwise_inters=()`: the pairwise interactions in the system, i.e. interactions
-    between all or most atom pairs such as electrostatics (to be used if the same for all replicas).
-    Should be a `Tuple` or `NamedTuple` of `PairwiseInteraction`s. This is only used if no
-    value is passed to the argument `replica_pairwise_inters`.
-- `replica_pairwise_inters=[() for _ in 1:n_replicas]`: the pairwise interactions for
-    each replica.
-- `specific_inter_lists=()`: the specific interactions in the system, i.e. interactions
-    between specific atoms such as bonds or angles (to be used if the same for all replicas).
-    Should be a `Tuple` or `NamedTuple`. This is only used if no value is passed to the argument
-    `replica_specific_inter_lists`.
-- `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in
-    each replica.
-- `general_inters=()`: the general interactions in the system, i.e. interactions involving
-    all atoms such as implicit solvent (to be used if the same for all replicas). Each should
-    implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`. This is
-    only used if no value is passed to the argument `replica_general_inters`.
-- `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for
-    each replica.
-- `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if the same
-    for all replicas). Should be a `Tuple` or `NamedTuple`. This is only used if no value is
-    passed to the argument `replica_constraints`.
-- `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
-    replica.
-- `virtual_sites::VS=[]`: the virtual sites present in the system (to be used if the same for all
-    replicas); these are mass-less particles determined by the positions of other atoms. This is
-    only used if no value is passed to the argument `replica_virtual_sites`.
-- `replica_virtual_sites=[[] for _ in 1:n_replicas]`: the virtual_sites in each
-    replica.
-- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
-    close atoms and save on computation. It is duplicated for each replica.
-- `replica_loggers=[() for _ in 1:n_replicas]`: the loggers for each replica
-    that record properties of interest during a simulation.
-- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: the logger used to record
+- `thermo_states::AbstractArray{<:ThermoState}`: An array of thermodynamic states defining the 
+    replica ladder. Each state encapsulates its specific `System` interactions, integrator, 
+    inverse temperature (`beta`), and pressure (`p`). The number of states dictates `n_replicas`.
+- `replica_coords`: The coordinates of the atoms in each replica. The number of elements 
+    must equal the length of `thermo_states`.
+- `replica_velocities=nothing`: The velocities of the atoms in each replica. If not provided, 
+    they default to zero velocities using the system's units.
+- `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
+    to duplicating the boundary of the reference system (the first `ThermoState`).
+- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: The logger used to record
     the exchange of replicas.
-- `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
-    Should be set to `NoUnits` if units are not being used.
-- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
-    be set to `NoUnits` if units are not being used.
-- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
-    modified in some simulations. `k` is chosen based on the `energy_units` given.
-- `data::DA=nothing`: arbitrary data associated with the replica system.
-- `strictness=:warn`: determines behavior when encountering possible problems,
-    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
-    `:error` to error.
+- `data::DA=nothing`: Arbitrary data associated with the replica system.
+- `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
+    energies for perturbed state differences. Generally improves performance.
 """
-mutable struct ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA} <: AtomsBase.AbstractSystem{D}
-    atoms::A
+mutable struct ReplicaSystem{D, AT, T, P, C, V, B, EL, DA} <: AtomsBase.AbstractSystem{D}
+    partition::P
     n_replicas::Int
-    atoms_data::AD
+    replica_coords::C
+    replica_velocities::V
+    replica_boundaries::B
+    state_indices::Vector{Int}
     exchange_logger::EL
-    force_units::F
-    energy_units::E
-    k::K
-    replicas::R
     data::DA
 end
 
-function ReplicaSystem(;
-                        atoms,
-                        replica_coords,
-                        n_replicas,
-                        boundary=nothing,
-                        replica_boundaries=nothing,
-                        replica_velocities=nothing,
-                        atoms_data=[],
-                        topology=nothing,
-                        replica_topology=nothing,
-                        pairwise_inters=(),
-                        replica_pairwise_inters=nothing,
-                        specific_inter_lists=(),
-                        replica_specific_inter_lists=nothing,
-                        general_inters=(),
-                        replica_general_inters=nothing,
-                        constraints=(),
-                        replica_constraints=nothing,
-                        virtual_sites=[],
-                        replica_virtual_sites=nothing,
-                        neighbor_finder=NoNeighborFinder(),
-                        replica_loggers=[() for _ in 1:n_replicas],
-                        exchange_logger=nothing,
-                        force_units=u"kJ * mol^-1 * nm^-1",
-                        energy_units=u"kJ * mol^-1",
-                        k=default_k(energy_units),
-                        data=nothing,
-                        strictness=:warn)
-    check_strictness(strictness)
+function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
+                       replica_coords;
+                       replica_velocities=nothing,
+                       replica_boundaries=nothing,
+                       exchange_logger=nothing,
+                       data=nothing,
+                       reuse_neighbors::Bool=true)
+    
+    n_replicas = length(thermo_states)
+    
+    if length(replica_coords) != n_replicas
+        throw(ArgumentError("Number of replica_coords ($(length(replica_coords))) " *
+                            "does not match number of ThermoStates ($n_replicas)"))
+    end
+
+    ref_sys = thermo_states[1].system
+    D = AtomsBase.n_dimensions(ref_sys.boundary)
+    T = float_type(ref_sys.boundary)
     AT = array_type(replica_coords[1])
-    A = typeof(atoms)
-    AD = typeof(atoms_data)
-    F = typeof(force_units)
-    E = typeof(energy_units)
-    DA = typeof(data)
-    C = typeof(replica_coords[1])
-    NF = typeof(neighbor_finder)
-    n_atoms = length(atoms)
 
     if isnothing(replica_boundaries)
-        replica_boundaries = fill(boundary, n_replicas)
+        replica_boundaries = [ref_sys.boundary for _ in 1:n_replicas]
     elseif length(replica_boundaries) != n_replicas
-        throw(ArgumentError("number of boundaries ($(length(replica_boundaries)))"
-                            * " does not match number of replicas ($n_replicas)"))
+        throw(ArgumentError("Number of boundaries ($(length(replica_boundaries))) " *
+                            "does not match number of replicas ($n_replicas)"))
     end
-    D = AtomsBase.n_dimensions(replica_boundaries[1])
-    T = float_type(replica_boundaries[1])
 
     if isnothing(replica_velocities)
-        if force_units == NoUnits
+        if ref_sys.force_units == NoUnits
             replica_velocities = [zero(replica_coords[1]) for _ in 1:n_replicas]
         else
             replica_velocities = [zero(replica_coords[1]) * u"ps^-1" for _ in 1:n_replicas]
         end
-    end
-    V = typeof(replica_velocities[1])
-
-    if isnothing(replica_topology)
-        replica_topology = [topology for _ in 1:n_replicas]
-    elseif length(replica_topology) != n_replicas
-        throw(ArgumentError("number of topologies ($(length(replica_topology)))"
-                            * "does not match number of replicas ($n_replicas)"))
-    end
-    TO = eltype(replica_topology)
-
-    if isnothing(replica_pairwise_inters)
-        replica_pairwise_inters = [pairwise_inters for _ in 1:n_replicas]
-    elseif length(replica_pairwise_inters) != n_replicas
-        throw(ArgumentError("number of pairwise interactions ($(length(replica_pairwise_inters)))"
-                            * "does not match number of replicas ($n_replicas)"))
-    end
-
-    if isnothing(replica_specific_inter_lists)
-        replica_specific_inter_lists = [specific_inter_lists for _ in 1:n_replicas]
-    elseif length(replica_specific_inter_lists) != n_replicas
-        throw(ArgumentError("number of specific interaction lists ($(length(replica_specific_inter_lists)))"
-                            * "does not match number of replicas ($n_replicas)"))
-    end
-
-    if isnothing(replica_general_inters)
-        replica_general_inters = [general_inters for _ in 1:n_replicas]
-    elseif length(replica_general_inters) != n_replicas
-        throw(ArgumentError("number of general interactions ($(length(replica_general_inters)))"
-                            * "does not match number of replicas ($n_replicas)"))
-    end
-
-    atom_masses = mass.(atoms)
-    M = typeof(atom_masses)
-    total_mass = sum(atom_masses)
-    TM = typeof(total_mass)
-
-    if isnothing(replica_virtual_sites)
-        replica_virtual_sites = [virtual_sites for _ in 1:n_replicas]
-    elseif length(replica_virtual_sites) != n_replicas
-        throw(ArgumentError("number of virtual sites ($(length(replica_virtual_sites))) " *
+    elseif length(replica_velocities) != n_replicas
+        throw(ArgumentError("Number of velocities ($(length(replica_velocities))) " *
                             "does not match number of replicas ($n_replicas)"))
-    end
-
-    if isnothing(replica_constraints)
-        replica_constraints = [constraints for _ in 1:n_replicas]
-    elseif length(replica_constraints) != n_replicas
-        throw(ArgumentError("number of constraints ($(length(replica_constraints)))" *
-                            "does not match number of replicas ($n_replicas)"))
-    end
-
-    replica_virtual_site_flags = [setup_virtual_sites(vss, atom_masses, cs, AT, D, strictness)
-                                  for (vss, cs) in zip(replica_virtual_sites, replica_constraints)]
-    replica_n_virtual_sites = [sum(vsfs) for vsfs in replica_virtual_site_flags]
-    replica_dfs = [n_dof(D, n_atoms - n_virtual_sites, rb)
-                   for (n_virtual_sites, rb) in zip(replica_n_virtual_sites, replica_boundaries)]
-
-    for (i, rcs) in enumerate(replica_constraints)
-        for ca in rcs
-            replica_dfs[i] -= n_dof_lost(D, ca.clusters)
-        end
     end
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
     end
-    EL = typeof(exchange_logger)
 
-    if !all(y -> typeof(y) == C, replica_coords)
-        throw(ArgumentError("the coordinates for all the replicas are not of the same type"))
-    end
-    if !all(y -> typeof(y) == V, replica_velocities)
-        throw(ArgumentError("the velocities for all the replicas are not of the same type"))
-    end
+    # Initialize the AlchemicalPartition using the array of ThermoStates
+    partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
+    
+    # Track which thermodynamic state is currently assigned to each replica
+    # Initially, replica i is in state i
+    state_indices = collect(1:n_replicas)
 
-    if length(replica_coords) != n_replicas
-        throw(ArgumentError("there are $(length(replica_coords)) coordinates for replicas but $n_replicas replicas"))
-    end
-    if length(replica_velocities) != n_replicas
-        throw(ArgumentError("there are $(length(replica_velocities)) velocities for replicas but $n_replicas replicas"))
-    end
-    if length(replica_loggers) != n_replicas
-        throw(ArgumentError("there are $(length(replica_loggers)) loggers but $n_replicas replicas"))
-    end
-
-    if !all(y -> length(y) == length(replica_coords[1]), replica_coords)
-        throw(ArgumentError("some replicas have different number of coordinates"))
-    end
-    if !all(y -> length(y) == length(replica_velocities[1]), replica_velocities)
-        throw(ArgumentError("some replicas have different number of velocities"))
-    end
-
-    if n_atoms != length(replica_coords[1])
-        throw(ArgumentError("there are $n_atoms atoms but $(length(replica_coords[1])) coordinates"))
-    end
-    if n_atoms != length(replica_velocities[1])
-        throw(ArgumentError("there are $n_atoms atoms but $(length(replica_velocities[1])) velocities"))
-    end
-    if length(atoms_data) > 0 && n_atoms != length(atoms_data)
-        throw(ArgumentError("there are $n_atoms atoms but $(length(atoms_data)) atom data entries"))
-    end
-
-    n_gpu_array = sum(y -> isa(y, AbstractGPUArray), replica_coords)
-    if !(n_gpu_array == n_replicas || n_gpu_array == 0)
-        throw(ArgumentError("the coordinates for $n_gpu_array out of $n_replicas replicas are on GPU"))
-    end
-    if isa(atoms, AbstractGPUArray) && n_gpu_array != n_replicas
-        throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
-    end
-    if n_gpu_array == n_replicas && !isa(atoms, AbstractGPUArray)
-        throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
-    end
-
-    n_gpu_array = sum(y -> isa(y, AbstractGPUArray), replica_velocities)
-    if !(n_gpu_array == n_replicas || n_gpu_array == 0)
-        throw(ArgumentError("the velocities for $n_gpu_array out of $n_replicas replicas are on GPU"))
-    end
-    if isa(atoms, AbstractGPUArray) && n_gpu_array != n_replicas
-        throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
-    end
-    if n_gpu_array == n_replicas && !isa(atoms, AbstractGPUArray)
-        throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
-    end
-
-    k_converted = convert_k_units(T, k, energy_units, strictness)
-    K = typeof(k_converted)
-
-    replicas = Tuple(System{D, AT, T, A, C, typeof(replica_boundaries[i]), V, AD, TO,
-                        typeof(replica_pairwise_inters[i]), typeof(replica_specific_inter_lists[i]),
-                        typeof(replica_general_inters[i]), typeof(replica_constraints[i]),
-                        typeof(replica_virtual_sites[i]), typeof(replica_virtual_site_flags[i]),
-                        NF, typeof(replica_loggers[i]), F, E, K, M, TM, Nothing}(
-            atoms, replica_coords[i], replica_boundaries[i], replica_velocities[i],
-            atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], replica_constraints[i], replica_virtual_sites[i],
-            replica_virtual_site_flags[i], deepcopy(neighbor_finder), replica_loggers[i],
-            replica_dfs[i], force_units, energy_units, k_converted, atom_masses,
-            total_mass, nothing) for i in 1:n_replicas)
-    R = typeof(replicas)
-
-    return ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA}(
-            atoms, n_replicas, atoms_data, exchange_logger, force_units,
-            energy_units, k_converted, replicas, data)
+    return ReplicaSystem{D, AT, T, typeof(partition), typeof(replica_coords), 
+                         typeof(replica_velocities), typeof(replica_boundaries), 
+                         typeof(exchange_logger), typeof(data)}(
+        partition, n_replicas, replica_coords, replica_velocities, replica_boundaries, 
+        state_indices, exchange_logger, data
+    )
 end
+
+
+function AtomsBase.atomic_number(s::ReplicaSystem)
+    if length(s.partition.master_sys.atoms_data) > 0
+        return map(s.partition.master_sys.atoms_data) do ad
+            if ad.element != "?"
+                PeriodicTable.elements[Symbol(ad.element)].number
+            else
+                :unknown
+            end
+        end
+    else
+        return fill(:unknown, length(s))
+    end
+end
+
 
 # Avoid unnecessary Array calls on CPU
 from_device(x::Array) = x
@@ -1304,21 +1218,27 @@ float_type(::Union{System{<:Any, <:Any, T}, ReplicaSystem{<:Any, <:Any, T}}) whe
 The masses of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 """
 masses(s::System) = s.masses
-masses(s::ReplicaSystem) = mass.(s.atoms)
+masses(s::ReplicaSystem) = mass.(s.partition.master_sys.atoms)
 
 """
     charges(sys)
 
 The partial charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 """
-charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
-charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
-charge(s::Union{System, ReplicaSystem}, ::Colon) = charge.(s.atoms)
+charges(s::System) = charge.(s.atoms)
+charges(s::ReplicaSystem) = charge.(s.partition.master_sys.atoms)
+charge(s::System, i::Integer) = charge(s.atoms[i])
+charge(s::ReplicaSystem, i::Integer) = charge(s.partition.master_sys.atoms[i])
+charge(s::System, ::Colon) = charge.(s.atoms)
+charge(s::ReplicaSystem, ::Colon) = charge.(s.partition.master_sys.atoms)
 
 # Separate methods to avoid method ambiguity with AtomsBase
-Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = s.atoms[i]
-Base.getindex(s::Union{System, ReplicaSystem}, is::AbstractVector{Bool}) = s.atoms[is]
-Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
+Base.getindex(s::System, i::Integer) = s.atoms[i]
+Base.getindex(s::ReplicaSystem, i::Integer) = s.partition.master_sys.atoms[i]
+Base.getindex(s::System, is::AbstractVector{Bool}) = s.atoms[is]
+Base.getindex(s::ReplicaSystem, is::AbstractVector{Bool}) = s.partition.master_sys.atoms[is]
+Base.length(s::System) = length(s.atoms)
+Base.length(s::ReplicaSystem) = length(s.partition.master_sys.atoms)
 Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
 AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :mass, :atomic_number, :charge)
@@ -1334,24 +1254,30 @@ Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) =
 
 AtomsBase.position(s::System, i::Union{Integer, AbstractVector}) = s.coords[i]
 AtomsBase.position(s::System, ::Colon) = s.coords
-AtomsBase.position(s::ReplicaSystem, i::Union{Integer, AbstractVector}) = s.replicas[1].coords[i]
-AtomsBase.position(s::ReplicaSystem, ::Colon) = s.replicas[1].coords
+AtomsBase.position(s::ReplicaSystem, i::Union{Integer, AbstractVector}) = s.replica_coords[1][i]
+AtomsBase.position(s::ReplicaSystem, ::Colon) = s.replica_coords[1]
 
 AtomsBase.velocity(s::System, i::Union{Integer, AbstractVector}) = s.velocities[i]
 AtomsBase.velocity(s::System, ::Colon) = s.velocities
-AtomsBase.velocity(s::ReplicaSystem, i::Union{Integer, AbstractVector}) = s.replicas[1].velocities[i]
-AtomsBase.velocity(s::ReplicaSystem, ::Colon) = s.replicas[1].velocities
+AtomsBase.velocity(s::ReplicaSystem, i::Union{Integer, AbstractVector}) = s.replica_velocities[1][i]
+AtomsBase.velocity(s::ReplicaSystem, ::Colon) = s.replica_velocities[1]
 
 AtomsBase.mass(s::Union{System, ReplicaSystem}, i::Union{Integer, AbstractVector}) = mass(s.atoms[i])
 AtomsBase.mass(s::System, ::Colon) = s.masses
-AtomsBase.mass(s::ReplicaSystem, ::Colon) = mass.(s.atoms)
+AtomsBase.mass(s::ReplicaSystem, ::Colon) = mass.(s.partition.master_sys.atoms)
 
-function AtomsBase.species(s::Union{System, ReplicaSystem}, i::Integer)
+function AtomsBase.species(s::System, i::Integer)
     return AtomsBase.ChemicalSpecies(Symbol(s.atoms_data[i].element))
 end
+function AtomsBase.species(s::ReplicaSystem, i::Integer)
+    return AtomsBase.ChemicalSpecies(Symbol(s.partition.master_sys.atoms_data[i].element))
+end
 
-function AtomsBase.species(s::Union{System, ReplicaSystem}, i::Union{AbstractVector, Colon})
+function AtomsBase.species(s::System, i::Union{AbstractVector, Colon})
     return AtomsBase.ChemicalSpecies.(Symbol.(getfield.(s.atoms_data[i], :element)))
+end
+function AtomsBase.species(s::ReplicaSystem, i::Union{AbstractVector, Colon})
+    return AtomsBase.ChemicalSpecies.(Symbol.(getfield.(s.partition.master_sys.atoms_data[i], :element)))
 end
 
 function Base.getindex(sys::Union{System, ReplicaSystem}, i, x::Symbol)
@@ -1367,17 +1293,31 @@ function Base.getindex(sys::Union{System, ReplicaSystem}, i, x::Symbol)
     end
 end
 
-function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem})
+function AtomsBase.atomic_symbol(s::System)
     if length(s.atoms_data) > 0
         return map(ad -> Symbol(ad.element), s.atoms_data)
     else
         return fill(:unknown, length(s))
     end
 end
+function AtomsBase.atomic_symbol(s::ReplicaSystem)
+    if length(s.partition.master_sys.atoms_data) > 0
+        return map(ad -> Symbol(ad.element), s.partition.master_sys.atoms_data)
+    else
+        return fill(:unknown, length(s))
+    end
+end
 
-function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem}, i::Integer)
+function AtomsBase.atomic_symbol(s::System, i::Integer)
     if length(s.atoms_data) > 0
         return Symbol(s.atoms_data[i].element)
+    else
+        return :unknown
+    end
+end
+function AtomsBase.atomic_symbol(s::ReplicaSystem, i::Integer)
+    if length(s.partition.master_sys.atoms_data) > 0
+        return Symbol(s.partition.master_sys.atoms_data[i].element)
     else
         return :unknown
     end
@@ -1397,16 +1337,23 @@ function AtomsBase.atomic_number(s::Union{System, ReplicaSystem})
     end
 end
 
-function AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer)
+function AtomsBase.atomic_number(s::System , i::Integer)
     if length(s.atoms_data) > 0 && s.atoms_data[i].element != "?"
         return PeriodicTable.elements[Symbol(s.atoms_data[i].element)].number
     else
         return :unknown
     end
 end
+function AtomsBase.atomic_number(s::ReplicaSystem, i::Integer)
+    if length(s.partition.master_sys.atoms_data) > 0 && s.partition.master_sys.atoms_data[i].element != "?"
+        return PeriodicTable.elements[Symbol(s.partition.master_sys.atoms_data[i].element)].number
+    else
+        return :unknown
+    end
+end
 
 AtomsBase.cell_vectors(s::System) = AtomsBase.cell_vectors(s.boundary)
-AtomsBase.cell_vectors(s::ReplicaSystem) = AtomsBase.cell_vectors(s.replicas[1])
+AtomsBase.cell_vectors(s::ReplicaSystem) = AtomsBase.cell_vectors(s.replica_boundaries[1])
 
 function AtomsBase.cell(sys::System{D}) where D
     return AtomsBase.PeriodicCell(
@@ -1416,7 +1363,7 @@ function AtomsBase.cell(sys::System{D}) where D
     )
 end
 
-AtomsBase.cell(sys::ReplicaSystem) = AtomsBase.cell(sys.replicas[1])
+AtomsBase.cell(sys::ReplicaSystem) = AtomsBase.cell(sys.partition.master_sys)
 
 function Base.show(io::IO, s::System)
     print(io, "System with ", length(s), " atoms, boundary ", s.boundary)
