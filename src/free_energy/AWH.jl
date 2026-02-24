@@ -758,8 +758,8 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
 end
 
 # Reweights coordinates along λ windows and accumulates histogram
-function process_sample(awh::AWHState{FT};
-                        weight_relevance::Real = 0.1) where FT
+# Reweights coordinates along λ windows and accumulates histogram
+function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where FT
     n_states = length(awh.λ_hamiltonians)
     coords = awh.active_sys.coords
     bound  = awh.active_sys.boundary
@@ -789,8 +789,15 @@ function process_sample(awh::AWHState{FT};
             active_pe = pe
         end
         
+        pe_val = ustrip(pe)
+        
+        # Trap r=0 Lennard-Jones overlaps (Inf - Inf = NaN)
+        if isnan(pe_val)
+            pe_val = typemax(FT)
+        end
+        
         # β is now already a raw float in correct units
-        potentials[n] = β * ustrip(pe)
+        potentials[n] = β * pe_val
     end
 
     # Calculate Z in-place
@@ -799,8 +806,7 @@ function process_sample(awh::AWHState{FT};
     
     log_den = Molly.logsumexp(awh.scratch_z)
     
-    # Calculate W directly into w_last (which acts as the storage for 'w')
-    # w = exp.(z .- log_den)
+    # Calculate W directly into w_last
     @. awh.w_last = exp(awh.scratch_z - log_den)
 
     # Accumulate
@@ -847,7 +853,16 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
 
     numerator   = current_N .* awh_sim.state.rho .+ awh_sim.state.w_seg
     denominator = current_N .* awh_sim.state.rho .+ (awh_sim.state.n_accum .* awh_sim.state.rho)
-    delta_f     = log.(numerator ./ denominator)
+    
+    # Safe log ratio to prevent 0/0 -> NaN if rho and w_seg underflow
+    delta_f = zeros(eltype(numerator), length(numerator))
+    for i in eachindex(delta_f)
+        if denominator[i] > 0
+            delta_f[i] = log(numerator[i] / denominator[i])
+        else
+            delta_f[i] = zero(eltype(numerator))
+        end
+    end
     
     awh_sim.state.f .-= delta_f
     awh_sim.state.f .-= awh_sim.state.f[1] 
@@ -859,7 +874,14 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     if isfinite(awh_sim.well_tempered_fac)
         f_min = minimum(awh_sim.state.f)
         @. awh_sim.state.rho = exp( - (awh_sim.state.f - f_min) / awh_sim.well_tempered_fac )
-        awh_sim.state.rho ./= sum(awh_sim.state.rho)
+        
+        sum_rho = sum(awh_sim.state.rho)
+        if sum_rho > 0
+            awh_sim.state.rho ./= sum_rho
+        end
+        
+        # Clamp to prevent log(0)
+        @. awh_sim.state.rho = max(awh_sim.state.rho, floatmin(eltype(awh_sim.state.rho)))
         @. awh_sim.state.log_rho = log(awh_sim.state.rho)
     end
 
