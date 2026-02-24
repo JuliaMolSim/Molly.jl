@@ -1,68 +1,371 @@
 export 
-    ThermoState
+    ThermoState,
+    LambdaHamiltonian,
+    AlchemicalPartition,
+    evaluate_energy!,
+    evaluate_energy_all!
 
-"""
-    ThermoState(system::System, integrator; name=nothing)
+@doc raw"""
+    ThermoState(system::System, integrator; <keyword arguments>)
 
 Thermodynamic state wrapper carrying the system, integrator, and derived thermodynamic properties 
-(inverse temperature `β` and pressure `p`).
+(inverse temperature `beta` and pressure `p`). This serves as the definitive container for a 
+single thermodynamic state across all generalized ensemble methods.
 
 # Arguments
 - `system::System`: The simulation system used to evaluate energies.
-- `integrator`: The integrator used to simulate the system. Must define temperature and/or pressure couplings 
-    (e.g., [`Langevin`](@ref), [`VelocityVerlet`](@ref) with thermostat/barostat).
+- `integrator`: The integrator used to simulate the system.
+- `temperature=nothing`: Explicit target temperature. If `nothing`, it is inferred from the integrator's 
+    thermostat or implicit temperature coupling.
+- `pressure=nothing`: Explicit target pressure. If `nothing`, it is inferred from the integrator's barostat.
 - `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on 
-    temperature and pressure is generated.
+    the temperature and pressure is generated.
 """
-mutable struct ThermoState{I, B, P, S}
+struct ThermoState{S, I, B, P}
+    system::S
+    integrator::I
+    beta::B         # Inverse temperature in internal energy units
+    p::P            # Isotropic pressure in internal pressure units
     name::String
-    integrator::I # Integrator scheme
-    beta::B      # Inverse temperature
-    p::P         # Pressure
-    system::S    # How to evaluate U_i on given coords and boundary
 end
 
 function ThermoState(sys::System{D, AT, FT}, integrator; 
-    name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
+                     temperature=nothing, pressure=nothing,
+                     name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
 
-    temp_source = nothing
-    press_source = nothing
+    temp_source = temperature
+    press_source = pressure
 
-    # We treat NoCoupling generally, skipping the loop if empty/irrelevant
-    if !(integrator.coupling isa NoCoupling)
-        for coupler in integrator.coupling
-            if coupler isa AbstractThermostat
+    # Infer thermodynamic targets from the integrator if not explicitly overridden
+    if hasproperty(integrator, :coupling) && !(integrator.coupling isa NoCoupling)
+        couplers = integrator.coupling isa Tuple ? integrator.coupling : (integrator.coupling,)
+        for coupler in couplers
+            if isnothing(temp_source) && coupler isa AbstractThermostat
                 temp_source = coupler.temperature
-            elseif coupler isa AbstractBarostat
-                press_source = coupler.pressure
+            end
+            if isnothing(press_source) && coupler isa AbstractBarostat
+                if hasproperty(coupler, :pressure)
+                    press_source = coupler.pressure
+                end
             end
         end
     end
 
-    # If no thermostat was found in couplings, check if the integrator itself controls T
-    if isnothing(temp_source) && (integrator isa Langevin || integrator isa LangevinSplitting || integrator isa NoseHoover)
+    # Check for integrators with implicit temperature control (e.g., Langevin, NoseHoover)
+    if isnothing(temp_source) && hasproperty(integrator, :temperature)
         temp_source = integrator.temperature
     end
 
     if isnothing(temp_source)
-        throw(ArgumentError("No way was provided to maintain a constant temperature. " * "You must choose either an explicit thermostat or an " * "integrator with an implicit temperature coupling scheme."))
+        throw(ArgumentError("No temperature provided or inferred from the integrator. " * "You must provide an explicit temperature, use a thermostat, or " * "use an integrator with an implicit temperature."))
     end
 
-    # Calculate Beta
-    beta = try
-        # Convert to Energy Units (1/kT)
-        FT(1 / uconvert(sys.energy_units, Unitful.R * temp_source))
+    # Calculate beta (inverse temperature) in system-compatible units (e.g., mol/kJ)
+    # Molly evaluates energy per mole by default, requiring the molar gas constant R
+    beta_val = try
+        kBT = uconvert(sys.energy_units, Unitful.R * temp_source)
+        FT(ustrip(1/kBT))
     catch
         throw(ArgumentError("Temperature provided is not compatible with system energy units."))
     end
 
-    # Calculate Pressure
-    press = isnothing(press_source) ? nothing : FT(1/3 * tr(press_source))
+    # Calculate isotropic pressure in internal units (Energy / Volume) if applicable
+    p_val = nothing
+    if !isnothing(press_source)
+        # Handle scalar pressure or tensor (matrix) pressure representations
+        p_raw = press_source isa AbstractArray ? (1/3 * tr(press_source)) : press_source
+        
+        l_unit = unit(sys.boundary.side_lengths[1])
+        v_unit = l_unit^3
+        p_unit = sys.energy_units / v_unit
 
-    # Fixed the 'pressure' vs 'press' bug here
-    final_name = isnothing(name) ? "system_$(beta)_$(press)" : name
+        # Convert macroscopic pressure (e.g., bar) to internal molar pressure
+        p_molar = p_raw * Unitful.Na
+        p_val = FT(ustrip(uconvert(p_unit, p_molar)))
+    end
+
+    final_name = isnothing(name) ? "state_T$(temp_source)" * (isnothing(p_val) ? "" : "_P$(press_source)") : String(name)
     
-    return ThermoState(final_name, integrator, beta, press, sys)
+    return ThermoState{typeof(sys), typeof(integrator), typeof(beta_val), typeof(p_val)}(
+        sys, integrator, beta_val, p_val, final_name
+    )
+end
+
+# Convenience struct that stores the interaction lists that change 
+# across thermodynamic states (e.g., along a reaction coordinate or replica states).
+struct LambdaHamiltonian{PI, SI, GI}
+    pairwise_inters::PI
+    specific_inter_lists::SI
+    general_inters::GI
+end
+
+@doc raw"""
+    AlchemicalPartition(thermo_states::AbstractArray{ThermoState}; <keyword arguments>)
+
+Isolates shared topological and interactive components (the `master_sys`) from components 
+that are unique to specific thermodynamic states (the `λ_sys` and `λ_hamiltonians`).
+This guarantees that unperturbed components (e.g., bulk solvent) are evaluated 
+exactly once when checking cross-energies or evaluating multiple states.
+"""
+mutable struct AlchemicalPartition{S, L, A, H, C, T}
+    master_sys::S
+    λ_sys::L
+    λ_atoms::A
+    λ_hamiltonians::H
+    
+    # State cache for master energy to prevent redundant calculations 
+    # across multiple single-state queries
+    cached_coords::C
+    cached_master_pe::T
+end
+
+function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState}; 
+                             reuse_neighbors::Bool=true)
+    n_λ = length(thermo_states)
+    ref_sys = thermo_states[1].system
+    FT = typeof(ustrip(ref_sys.total_mass))
+
+    # 1. Identify Global Solute Indices (Perturbed Atoms)
+    solute_indices = Set{Int}()
+    λ_atoms = []
+
+    for tstate in thermo_states
+        atoms = tstate.system.atoms
+        push!(λ_atoms, atoms)
+
+        atoms_cpu = from_device(atoms)
+        for atom in atoms_cpu
+            # Flag if the atom possesses alchemical scaling properties,
+            # or if its properties explicitly diverge from the reference.
+            if (atom.λ_coul < 1.0) || (atom.λ_vdw < 0) || 
+               (atom.λ_coul != ref_sys.atoms[atom.index].λ_coul) || 
+               (atom.λ_vdw != ref_sys.atoms[atom.index].λ_vdw)
+                push!(solute_indices, atom.index)
+            end
+        end
+    end
+
+    # 2. Partition Neighbor Lists
+    ref_nfinder = ref_sys.neighbor_finder
+    base_eligible_cpu = copy(from_device(ref_nfinder.eligible))
+    n_atoms = size(base_eligible_cpu, 1)
+    
+    master_eligible_cpu = copy(base_eligible_cpu)
+    for idx in solute_indices
+        master_eligible_cpu[idx, :] .= false
+        master_eligible_cpu[:, idx] .= false
+    end
+    
+    specific_eligible_cpu = copy(base_eligible_cpu)
+    solvent_indices = [i for i in 1:n_atoms if !(i in solute_indices)]
+    
+    if !isempty(solvent_indices)
+        specific_eligible_cpu[solvent_indices, solvent_indices] .= false
+    end
+
+    AT = array_type(ref_sys)
+    master_eligible = to_device(master_eligible_cpu, AT)
+    λ_eligible      = to_device(specific_eligible_cpu, AT)
+    
+    # 3. Extract and Partition Interaction Lists
+    list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_λ]
+    list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_λ]
+    list_3a = [Vector{InteractionList3Atoms}() for _ in 1:n_λ]
+    list_4a = [Vector{InteractionList4Atoms}() for _ in 1:n_λ]
+
+    @inbounds for (i, tstate) in enumerate(thermo_states)
+        sils = tstate.system.specific_inter_lists
+        for inter in sils
+            if inter isa InteractionList1Atoms push!(list_1a[i], inter)
+            elseif inter isa InteractionList2Atoms push!(list_2a[i], inter)
+            elseif inter isa InteractionList3Atoms push!(list_3a[i], inter)
+            elseif inter isa InteractionList4Atoms push!(list_4a[i], inter)
+            end
+        end
+    end
+
+    all_gils = [collect(tstate.system.general_inters) for tstate in thermo_states]
+    all_pils = [collect(tstate.system.pairwise_inters) for tstate in thermo_states]
+
+    # Calculate interactions that are identical across ALL states
+    master_sils_1a = intersect(list_1a...)
+    master_sils_2a = intersect(list_2a...)
+    master_sils_3a = intersect(list_3a...)
+    master_sils_4a = intersect(list_4a...)
+    master_gils    = intersect(all_gils...)
+    master_pils    = intersect(all_pils...)
+
+    λ_specific = Vector{Tuple}(undef, n_λ)
+    λ_general  = Vector{Tuple}(undef, n_λ)
+    λ_pairwise = Vector{Tuple}(undef, n_λ)
+
+    # Distill state-specific interactions by subtracting the master subset
+    for i in 1:n_λ
+        u_1 = setdiff(list_1a[i], master_sils_1a)
+        u_2 = setdiff(list_2a[i], master_sils_2a)
+        u_3 = setdiff(list_3a[i], master_sils_3a)
+        u_4 = setdiff(list_4a[i], master_sils_4a)
+        λ_specific[i] = (u_1..., u_2..., u_3..., u_4...)
+        
+        u_g = setdiff(all_gils[i], master_gils)
+        λ_general[i] = (u_g...,)
+        λ_pairwise[i] = (all_pils[i]...,)
+    end
+
+    # 4. Construct Partitioned Systems
+    master_nf = build_neighbor_finder(ref_nfinder, master_eligible; reuse_neighbors=reuse_neighbors)
+    λ_nf      = build_neighbor_finder(ref_nfinder, λ_eligible; reuse_neighbors=reuse_neighbors)
+
+    master_sys = System(deepcopy(ref_sys); 
+        pairwise_inters      = (master_pils...,),
+        general_inters       = (master_gils...,),
+        specific_inter_lists = (master_sils_1a..., 
+                                master_sils_2a..., 
+                                master_sils_3a..., 
+                                master_sils_4a...),
+        neighbor_finder      = master_nf
+    )
+
+    λ_sys = System(deepcopy(ref_sys); 
+        pairwise_inters      = (λ_pairwise[1]...,),
+        general_inters       = (λ_general[1]...,),
+        specific_inter_lists = (λ_specific[1]...,),
+        neighbor_finder      = λ_nf
+    )
+
+    hamiltonians = LambdaHamiltonian[]
+    for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
+        ham = LambdaHamiltonian(λ_p, λ_s, λ_g)
+        push!(hamiltonians, ham)
+    end
+
+    # Initialize cache values with safe defaults
+    initial_pe = zero(FT) * master_sys.energy_units
+    
+    return AlchemicalPartition(
+        master_sys,
+        λ_sys,
+        λ_atoms,
+        hamiltonians,
+        copy(ref_sys.coords),
+        initial_pe
+    )
+end
+
+function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = true)
+    if ref_nfinder isa DistanceNeighborFinder
+        return DistanceNeighborFinder(
+            eligible = eligible, 
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special   = ref_nfinder.special,
+            n_steps = 1,
+            neighbors = ref_nfinder.neighbors
+        )
+    elseif ref_nfinder isa CellListMapNeighborFinder
+        return CellListMapNeighborFinder(
+            eligible = eligible,
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special = ref_nfinder.special,
+            n_steps = 1
+        )
+    elseif ref_nfinder isa GPUNeighborFinder
+        if !reuse_neighbors
+            return GPUNeighborFinder(
+                eligible = eligible,
+                dist_cutoff = ref_nfinder.dist_cutoff,
+                special = ref_nfinder.special,
+                n_steps_reorder = 1,
+                initialized = ref_nfinder.initialized
+            )
+        else
+            return DistanceNeighborFinder(
+                eligible = eligible, 
+                dist_cutoff = ref_nfinder.dist_cutoff,
+                special   = ref_nfinder.special,
+                n_steps = 1
+            )
+        end
+    elseif ref_nfinder isa TreeNeighborFinder
+        return TreeNeighborFinder(
+            eligible = eligible,
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special = ref_nfinder.special,
+            n_steps = 1
+        )
+    elseif ref_nfinder isa NoNeighborFinder
+        return NoNeighborFinder()
+    else
+        @warn "Unknown NeighborFinder type $(typeof(ref_nfinder)). Using default DistanceNeighborFinder for Master System."
+        return DistanceNeighborFinder(
+            eligible = eligible,
+            dist_cutoff = 1.0u"nm",
+            n_steps = 1
+        )
+    end
+end
+
+"""
+    evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int; force_recompute::Bool=false)
+
+Calculates the total potential energy for a specific thermodynamic state. Caches the `master_sys` 
+energy. If `coords` is identical to `cached_coords`, the `master_sys` energy is not recomputed 
+unless `force_recompute` is true.
+"""
+function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int; 
+                          force_recompute::Bool=false)
+    # Check if the master system needs re-evaluation
+    if force_recompute || partition.cached_coords !== coords
+        partition.master_sys.coords = coords
+        partition.master_sys.boundary = boundary
+        partition.cached_master_pe = potential_energy(partition.master_sys)
+        # Update cache tracking. Only update reference to avoid allocation where possible.
+        partition.cached_coords = coords
+    end
+    
+    partition.λ_sys.coords = coords
+    partition.λ_sys.boundary = boundary
+    nbrs = find_neighbors(partition.λ_sys)
+    
+    # Load specific interactions for the requested state
+    partition.λ_sys.atoms = partition.λ_atoms[state_index]
+    partition.λ_sys.pairwise_inters = partition.λ_hamiltonians[state_index].pairwise_inters
+    partition.λ_sys.specific_inter_lists = partition.λ_hamiltonians[state_index].specific_inter_lists
+    partition.λ_sys.general_inters = partition.λ_hamiltonians[state_index].general_inters
+    
+    pe_specific = potential_energy(partition.λ_sys, nbrs, 0)
+    
+    return partition.cached_master_pe + pe_specific
+end
+
+"""
+    evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
+
+Efficiently evaluates the potential energy of the current coordinates mapped across all 
+thermodynamic states simultaneously, evaluating the unperturbed `master_sys` only once.
+"""
+function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
+    partition.master_sys.coords = coords
+    partition.master_sys.boundary = boundary
+    partition.cached_master_pe = potential_energy(partition.master_sys)
+    partition.cached_coords = coords
+    
+    partition.λ_sys.coords = coords
+    partition.λ_sys.boundary = boundary
+    nbrs = find_neighbors(partition.λ_sys)
+    
+    energies = Vector{typeof(partition.cached_master_pe)}(undef, length(partition.λ_hamiltonians))
+    
+    for state_index in eachindex(partition.λ_hamiltonians)
+        partition.λ_sys.atoms = partition.λ_atoms[state_index]
+        partition.λ_sys.pairwise_inters = partition.λ_hamiltonians[state_index].pairwise_inters
+        partition.λ_sys.specific_inter_lists = partition.λ_hamiltonians[state_index].specific_inter_lists
+        partition.λ_sys.general_inters = partition.λ_hamiltonians[state_index].general_inters
+        
+        pe_specific = potential_energy(partition.λ_sys, nbrs, 0)
+        energies[state_index] = partition.cached_master_pe + pe_specific
+    end
+    
+    return energies
 end
 
 function logsumexp(x::AbstractVector{T}) where T
