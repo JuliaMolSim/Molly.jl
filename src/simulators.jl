@@ -10,10 +10,9 @@ export
     LangevinSplitting,
     OverdampedLangevin,
     NoseHoover,
-    TemperatureREMD,
-    remd_exchange!,
-    HamiltonianREMD,
+    ReplicaExchangeMD,
     simulate_remd!,
+    remd_exchange!,
     MetropolisMonteCarlo,
     random_uniform_translation!,
     random_normal_translation!
@@ -766,234 +765,120 @@ end
     return sys
 end
 
-"""
-    TemperatureREMD(; <keyword arguments>)
+@doc raw"""
+    ReplicaExchangeMD(; dt, exchange_time)
 
-A simulator for a parallel temperature replica exchange MD (T-REMD) simulation on a
-[`ReplicaSystem`](@ref).
-
-See [Sugita and Okamoto 1999](https://doi.org/10.1016/S0009-2614(99)01123-9).
-The corresponding [`ReplicaSystem`](@ref) should have the same number of replicas as
-the number of temperatures in the simulator.
-When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
-whether to assign random velocities at the appropriate temperature for each replica.
+A generalized simulator for Replica Exchange Molecular Dynamics (REMD). 
+Handles Temperature REMD, Hamiltonian REMD, or multi-dimensional combinations 
+automatically based on the definitions in the `ThermoState`s of the `ReplicaSystem`.
 
 # Arguments
 - `dt::DT`: the time step of the simulation.
-- `temperatures::TP`: the temperatures corresponding to the replicas.
-- `simulators::ST`: individual simulators for simulating each replica.
 - `exchange_time::ET`: the time interval between replica exchange attempts.
 """
-struct TemperatureREMD{N, T, DT, TP, ST, ET}
+struct ReplicaExchangeMD{DT, ET}
     dt::DT
-    temperatures::TP
-    simulators::ST
     exchange_time::ET
 end
 
-function TemperatureREMD(;
-                         dt,
-                         temperatures,
-                         simulators,
-                         exchange_time)
-    T = eltype(temperatures)
-    N = length(temperatures)
-    DT = typeof(dt)
-    TP = typeof(temperatures)
-    ET = typeof(exchange_time)
-
-    if length(simulators) != length(temperatures)
-        throw(ArgumentError("number of temperatures ($(length(temperatures))) must match " *
-                            "number of simulators ($(length(simulators)))"))
-    end
+function ReplicaExchangeMD(; dt, exchange_time)
     if exchange_time <= dt
         throw(ArgumentError("exchange time ($exchange_time) must be greater than the time step ($dt)"))
     end
-
-    simulators = Tuple(simulators[i] for i in 1:N)
-    ST = typeof(simulators)
-
-    return TemperatureREMD{N, T, DT, TP, ST, ET}(dt, temperatures, simulators, exchange_time)
+    return ReplicaExchangeMD(dt, exchange_time)
 end
 
 function simulate!(sys::ReplicaSystem,
-                    sim::TemperatureREMD,
-                    n_steps::Integer;
-                    assign_velocities::Bool=false,
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true,
-                    rng=Random.default_rng())
-    if sys.n_replicas != length(sim.simulators)
-        throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
-                "and simulators in TemperatureREMD ($(length(sim.simulators))) do not match"))
-    end
-
+                   sim::ReplicaExchangeMD,
+                   n_steps::Integer;
+                   assign_velocities::Bool=false,
+                   n_threads::Integer=Threads.nthreads(),
+                   run_loggers=true,
+                   rng=Random.default_rng())
+    
     if assign_velocities
-        for i in eachindex(sys.replicas)
-            random_velocities!(sys.replicas[i], sim.temperatures[i]; rng=rng)
+        k_B = sys.partition.master_sys.k
+        for i in 1:sys.n_replicas
+            state_idx = sys.state_indices[i]
+            beta = sys.betas[state_idx]
+            
+            # Derive target temperature from internal beta: T = 1 / (k_B * beta)
+            T_target = uconvert(u"K", 1 / (k_B * beta))
+            
+            # Assign random velocities directly to the replica's array
+            random_velocities!(sys.replica_velocities[i], sys.partition.master_sys, T_target; rng=rng)
         end
     end
 
     return simulate_remd!(sys, sim, n_steps; n_threads=n_threads, run_loggers=run_loggers, rng=rng)
 end
 
-"""
-    remd_exchange!(sys, sim, n, m; n_threads=Threads.nthreads(), rng=Random.default_rng())
+@doc raw"""
+    remd_exchange!(sys::ReplicaSystem, sim::ReplicaExchangeMD, i::Integer, j::Integer; <keyword arguments>)
 
-Attempt an exchange of replicas `n` and `m` in a [`ReplicaSystem`](@ref) during a REMD simulation.
-
-Successful exchanges should exchange coordinates and velocities as appropriate.
-Returns acceptance quantity `Δ` and a `Bool` indicating whether the exchange was successful.
+Attempt a generalized replica exchange between physical replicas `i` and `j`. 
 """
 function remd_exchange!(sys::ReplicaSystem,
-                        sim::TemperatureREMD,
-                        n::Integer,
-                        m::Integer;
-                        n_threads::Integer=Threads.nthreads(),
+                        sim::ReplicaExchangeMD,
+                        i::Integer,
+                        j::Integer;
                         rng=Random.default_rng())
-    T_n, T_m = sim.temperatures[n], sim.temperatures[m]
-    β_n, β_m = inv(sys.k * T_n), inv(sys.k * T_m)
-    neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
-                                    n_threads=n_threads)
-    neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
-                                    n_threads=n_threads)
-    V_n = potential_energy(sys.replicas[n], neighbors_n; n_threads=n_threads)
-    V_m = potential_energy(sys.replicas[m], neighbors_m; n_threads=n_threads)
-    Δ = (β_m - β_n) * (V_n - V_m)
-    should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)
-
+    
+    # Identify the current thermodynamic states (m and n) assigned to physical replicas i and j
+    m = sys.state_indices[i]
+    n = sys.state_indices[j]
+    
+    # Retrieve inverse temperatures directly from the betas array
+    beta_m = sys.betas[m]
+    beta_n = sys.betas[n]
+    
+    coords_i = sys.replica_coords[i]
+    coords_j = sys.replica_coords[j]
+    bound_i  = sys.replica_boundaries[i]
+    bound_j  = sys.replica_boundaries[j]
+    
+    # Evaluate energies via AlchemicalPartition API
+    U_m_xi = evaluate_energy!(sys.partition, coords_i, bound_i, m; force_recompute=false)
+    U_n_xi = evaluate_energy!(sys.partition, coords_i, bound_i, n; force_recompute=false)
+    
+    U_n_xj = evaluate_energy!(sys.partition, coords_j, bound_j, n; force_recompute=false)
+    U_m_xj = evaluate_energy!(sys.partition, coords_j, bound_j, m; force_recompute=false)
+    
+    # Strip units for Metropolis math
+    e_unit = sys.partition.master_sys.energy_units
+    U_m_xi_val = ustrip(e_unit, U_m_xi)
+    U_n_xi_val = ustrip(e_unit, U_n_xi)
+    U_n_xj_val = ustrip(e_unit, U_n_xj)
+    U_m_xj_val = ustrip(e_unit, U_m_xj)
+    
+    # Generalized Metropolis Criterion
+    delta = beta_n * U_n_xi_val - beta_m * U_m_xi_val + beta_m * U_m_xj_val - beta_n * U_n_xj_val
+    
+    should_exchange = delta <= 0 || rand(rng) < exp(-delta)
+    
     if should_exchange
-        # Exchange coordinates and velocities
-        sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
-        sys.replicas[n].velocities, sys.replicas[m].velocities = sys.replicas[m].velocities, sys.replicas[n].velocities
-        # Scale velocities
-        sys.replicas[n].velocities .*= sqrt(T_n / T_m)
-        sys.replicas[m].velocities .*= sqrt(T_m / T_n)
-    end
-
-    return Δ, should_exchange
-end
-
-"""
-    HamiltonianREMD(; <keyword arguments>)
-
-A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation on a
-[`ReplicaSystem`](@ref).
-
-The replicas are expected to have different Hamiltonians, i.e. different interactions.
-When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
-whether to assign random velocities at the appropriate temperature for each replica.
-
-# Arguments
-- `dt::DT`: the time step of the simulation.
-- `temperature::T`: the temperatures of the simulation.
-- `simulators::ST`: individual simulators for simulating each replica.
-- `exchange_time::ET`: the time interval between replica exchange attempts.
-"""
-struct HamiltonianREMD{N, T, DT, ST, ET}
-    dt::DT
-    temperature::T
-    simulators::ST
-    exchange_time::ET
-end
-
-function HamiltonianREMD(;
-                         dt,
-                         temperature,
-                         simulators,
-                         exchange_time)
-    N = length(simulators)
-    DT = typeof(dt)
-    T = typeof(temperature)
-    ST = typeof(simulators)
-    ET = typeof(exchange_time)
-
-    if exchange_time <= dt
-        throw(ArgumentError("exchange time ($exchange_time) must be greater than the time step ($dt)"))
-    end
-
-    return HamiltonianREMD{N, T, DT, ST, ET}(dt, temperature, simulators, exchange_time)
-end
-
-function simulate!(sys::ReplicaSystem,
-                    sim::HamiltonianREMD,
-                    n_steps::Integer;
-                    assign_velocities::Bool=false,
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true,
-                    rng=Random.default_rng())
-    if sys.n_replicas != length(sim.simulators)
-        throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
-                "and simulators in HamiltonianREMD ($(length(sim.simulators))) do not match"))
-    end
-
-    if assign_velocities
-        for i in eachindex(sys.replicas)
-            random_velocities!(sys.replicas[i], sim.temperature; rng=rng)
+        # Swap the state assignments pointers
+        sys.state_indices[i] = n
+        sys.state_indices[j] = m
+        
+        # Rescale velocities to obey equipartition if the exchange involves a temperature differential
+        if beta_m != beta_n
+            sys.replica_velocities[i] .*= sqrt(beta_m / beta_n)
+            sys.replica_velocities[j] .*= sqrt(beta_n / beta_m)
         end
     end
-
-    return simulate_remd!(sys, sim, n_steps; n_threads=n_threads, run_loggers=run_loggers, rng=rng)
+    
+    return delta, should_exchange
 end
 
-function remd_exchange!(sys::ReplicaSystem,
-                        sim::HamiltonianREMD,
-                        n::Integer,
-                        m::Integer;
-                        n_threads::Integer=Threads.nthreads(),
-                        rng=Random.default_rng())
-    T_sim = sim.temperature
-    β_sim = inv(sys.k * T_sim)
-    neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
-                                    n_threads=n_threads)
-    neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
-                                    n_threads=n_threads)
-    V_n_i = potential_energy(sys.replicas[n], neighbors_n; n_threads=n_threads)
-    V_m_i = potential_energy(sys.replicas[m], neighbors_m; n_threads=n_threads)
-
-    sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
-    V_n_f = potential_energy(sys.replicas[n], neighbors_m; n_threads=n_threads) # Use already calculated neighbors
-    V_m_f = potential_energy(sys.replicas[m], neighbors_n; n_threads=n_threads)
-
-    Δ = β_sim * (V_n_f - V_n_i + V_m_f - V_m_i)
-    should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)
-
-    if should_exchange
-        # Exchange velocities
-        sys.replicas[n].velocities, sys.replicas[m].velocities = sys.replicas[m].velocities, sys.replicas[n].velocities
-    else
-        # Revert coordinate exchange
-        sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
-    end
-
-    return Δ, should_exchange
-end
-
-"""
-    simulate_remd!(sys, remd_sim, n_steps; n_threads=Threads.nthreads(),
-                   run_loggers=true, rng=Random.default_rng())
-
-Run a REMD simulation on a [`ReplicaSystem`](@ref) using a REMD simulator.
-
-Not currently compatible with interactions that depend on step number.
-"""
 function simulate_remd!(sys::ReplicaSystem,
-                        remd_sim,
+                        remd_sim::ReplicaExchangeMD,
                         n_steps::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         run_loggers=true,
                         rng=Random.default_rng())
-    if sys.n_replicas != length(remd_sim.simulators)
-        throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
-            "and simulators in the REMD simulator ($(length(remd_sim.simulators))) do not match"))
-    end
-
-    if n_threads > sys.n_replicas
-        thread_div = equal_parts(n_threads, sys.n_replicas)
-    else
-        # Use 1 thread per replica
-        thread_div = equal_parts(sys.n_replicas, sys.n_replicas)
-    end
+    
+    thread_div = equal_parts(n_threads, sys.n_replicas)
 
     n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
     cycle_length = n_cycles > 0 ? n_steps ÷ n_cycles : 0
@@ -1001,28 +886,59 @@ function simulate_remd!(sys::ReplicaSystem,
     n_attempts = 0
 
     for cycle in 1:n_cycles
-        @sync for idx in eachindex(remd_sim.simulators)
-            Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], cycle_length;
-                                     n_threads=thread_div[idx], run_loggers=run_loggers, rng=rng)
+        @sync for i in 1:sys.n_replicas
+            state_idx = sys.state_indices[i]
+            integrator = sys.integrators[state_idx]
+            
+            # Construct active_sys with the FULL interaction lists for standard MD forces
+            active_sys = System(sys.partition.master_sys;
+                coords = sys.replica_coords[i],
+                velocities = sys.replica_velocities[i],
+                boundary = sys.replica_boundaries[i],
+                atoms = sys.partition.λ_atoms[state_idx],
+                pairwise_inters = sys.state_pairwise_inters[state_idx],
+                specific_inter_lists = sys.state_specific_inter_lists[state_idx],
+                general_inters = sys.state_general_inters[state_idx],
+                neighbor_finder = sys.replica_neighbor_finders[i],
+                loggers = sys.replica_loggers[i]
+            )
+            
+            Threads.@spawn simulate!(active_sys, integrator, cycle_length;
+                                     n_threads=thread_div[i], run_loggers=run_loggers, rng=rng)
         end
 
-        # Alternate checking even pairs 2-3/4-5/6-7/... and odd pairs 1-2/3-4/5-6/...
         cycle_parity = cycle % 2
         for n in (1 + cycle_parity):2:(sys.n_replicas - 1)
             n_attempts += 1
             m = n + 1
-            Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; n_threads=n_threads, rng=rng)
+            Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; rng=rng)
+            
             if run_loggers != false && exchanged && !isnothing(sys.exchange_logger)
                 log_property!(sys.exchange_logger, sys, nothing, nothing, cycle * cycle_length;
-                                    indices=(n, m), delta=Δ, n_threads=n_threads)
+                              indices=(n, m), delta=Δ, n_threads=n_threads)
             end
         end
     end
 
     if remaining_steps > 0
-        @sync for idx in eachindex(remd_sim.simulators)
-            Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], remaining_steps;
-                                     n_threads=thread_div[idx], run_loggers=run_loggers, rng=rng)
+        @sync for i in 1:sys.n_replicas
+            state_idx = sys.state_indices[i]
+            integrator = sys.integrators[state_idx]
+            
+            active_sys = System(sys.partition.master_sys;
+                coords = sys.replica_coords[i],
+                velocities = sys.replica_velocities[i],
+                boundary = sys.replica_boundaries[i],
+                atoms = sys.partition.λ_atoms[state_idx],
+                pairwise_inters = sys.state_pairwise_inters[state_idx],
+                specific_inter_lists = sys.state_specific_inter_lists[state_idx],
+                general_inters = sys.state_general_inters[state_idx],
+                neighbor_finder = sys.replica_neighbor_finders[i],
+                loggers = sys.replica_loggers[i]
+            )
+            
+            Threads.@spawn simulate!(active_sys, integrator, remaining_steps;
+                                     n_threads=thread_div[i], run_loggers=run_loggers, rng=rng)
         end
     end
 

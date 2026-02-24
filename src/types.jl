@@ -1093,12 +1093,19 @@ construction where `n` is the number of threads to be used per replica.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for perturbed state differences. Generally improves performance.
 """
-mutable struct ReplicaSystem{D, AT, T, P, C, V, B, EL, DA} <: AtomsBase.AbstractSystem{D}
+mutable struct ReplicaSystem{D, AT, T, P, B, I, C, V, BO, NF, RL, SPI, SSI, SGI, EL, DA} <: AtomsBase.AbstractSystem{D}
     partition::P
     n_replicas::Int
+    betas::B
+    integrators::I
     replica_coords::C
     replica_velocities::V
-    replica_boundaries::B
+    replica_boundaries::BO
+    replica_neighbor_finders::NF
+    replica_loggers::RL
+    state_pairwise_inters::SPI
+    state_specific_inter_lists::SSI
+    state_general_inters::SGI
     state_indices::Vector{Int}
     exchange_logger::EL
     data::DA
@@ -1108,6 +1115,8 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        replica_coords;
                        replica_velocities=nothing,
                        replica_boundaries=nothing,
+                       replica_neighbor_finders=nothing,
+                       replica_loggers=nothing,
                        exchange_logger=nothing,
                        data=nothing,
                        reuse_neighbors::Bool=true)
@@ -1142,21 +1151,45 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                             "does not match number of replicas ($n_replicas)"))
     end
 
+    if isnothing(replica_neighbor_finders)
+        replica_neighbor_finders = [deepcopy(ts.system.neighbor_finder) for ts in thermo_states]
+    elseif length(replica_neighbor_finders) != n_replicas
+        throw(ArgumentError("Number of neighbor finders ($(length(replica_neighbor_finders))) " *
+                            "does not match number of replicas ($n_replicas)"))
+    end
+
+    if isnothing(replica_loggers)
+        replica_loggers = [() for _ in 1:n_replicas]
+    elseif length(replica_loggers) != n_replicas
+        throw(ArgumentError("Number of loggers arrays ($(length(replica_loggers))) " *
+                            "does not match number of replicas ($n_replicas)"))
+    end
+
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
     end
 
-    # Initialize the AlchemicalPartition using the array of ThermoStates
     partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
     
-    # Track which thermodynamic state is currently assigned to each replica
-    # Initially, replica i is in state i
+    betas = [ts.beta for ts in thermo_states]
+    integrators = [ts.integrator for ts in thermo_states]
+
+    # Extract complete interaction lists for full force integration
+    state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states]
+    state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states]
+    state_general_inters = [ts.system.general_inters for ts in thermo_states]
+
     state_indices = collect(1:n_replicas)
 
-    return ReplicaSystem{D, AT, T, typeof(partition), typeof(replica_coords), 
-                         typeof(replica_velocities), typeof(replica_boundaries), 
+    return ReplicaSystem{D, AT, T, typeof(partition), typeof(betas), typeof(integrators), 
+                         typeof(replica_coords), typeof(replica_velocities), 
+                         typeof(replica_boundaries), typeof(replica_neighbor_finders), 
+                         typeof(replica_loggers), typeof(state_pairwise_inters), 
+                         typeof(state_specific_inter_lists), typeof(state_general_inters),
                          typeof(exchange_logger), typeof(data)}(
-        partition, n_replicas, replica_coords, replica_velocities, replica_boundaries, 
+        partition, n_replicas, betas, integrators, replica_coords, replica_velocities, 
+        replica_boundaries, replica_neighbor_finders, replica_loggers, 
+        state_pairwise_inters, state_specific_inter_lists, state_general_inters,
         state_indices, exchange_logger, data
     )
 end
