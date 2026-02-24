@@ -20,7 +20,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
     )
 
     velocities_nounits = SVector{3, T}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))
-    velocities = (units ? velocities_nounits * u"nm * ps^-1" : velocities_nounits)
+    velocities = Molly.add_units(velocities_nounits, u"nm * ps^-1", units)
     dist_cutoff = T(1.0)
 
     sys = System(
@@ -29,12 +29,12 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
         velocities=AT(velocities),
         units=units,
         array_type=AT,
-        dist_cutoff=(units ? dist_cutoff * u"nm" : dist_cutoff),
+        dist_cutoff=Molly.add_units(dist_cutoff, u"nm", units),
         nonbonded_method=:cutoff,
     )
 
     dt = T(0.0005)
-    sim = VelocityVerlet(dt=(units ? dt * u"ps" : dt), remove_CM_motion=false)
+    sim = VelocityVerlet(dt=Molly.add_units(dt, u"ps", units), remove_CM_motion=false)
 
     return sys, sim
 end
