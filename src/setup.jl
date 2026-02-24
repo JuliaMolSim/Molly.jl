@@ -602,7 +602,7 @@ function System(coord_file::AbstractString,
                 error("atom $ai type $atype has charge missing")
             end
         end
-        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ, λ_coul=one(T), λ_vdw=one(T)))
+        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ, λ_coul=one(T), λ_vdw=one(T)))
 
         res = residue_from_atom_idx(ai, canonical_system)
         res_cfl = chemfiles_residue_for_atom(top, ai - 1)
