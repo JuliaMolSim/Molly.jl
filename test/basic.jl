@@ -713,7 +713,7 @@ end
             @test maximum(norm, fs .- fs_true) < (1e-9 * FU)
             @test norm(sum(fs)) < (1e-10 * FU)
 
-            accels = Molly.calc_accels.(fs, atom_masses, vs_flags)
+            accels = Molly.calc_accels.(fs, atom_masses)
             accels_true = to_device([
                 SVector(4.611761937893023e-8, 4.906537782904419e-8, -121.04977981858443),
                 SVector(3.599618866597804e-8, 3.822959459233061e-8, 121.04977989810368),
