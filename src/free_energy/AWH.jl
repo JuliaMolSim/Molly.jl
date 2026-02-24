@@ -36,61 +36,45 @@ accumulated statistical weights, free energy estimates, and target distribution 
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for adjacent λ windows. Generally improves performance.
 """
-mutable struct AWHState{T}
-    # Master System (Common interactions, e.g., Solvent-Solvent)
-    master_sys::System
-    # λ System (Unique interactions per λ window)
-    λ_sys::System
-
+mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI}
+    partition::P
+    
     active_idx::Int
-
-    # Active System, contains all interactions to run actual MD simulation
-    active_sys::System
-
-    # Active integrator
-    active_intg
-
-    # λ Integrators, each window carries its own integrator to account for different temperatures / pressures
-    λ_integrators::Vector
-
-    # λ Inverse temperatures
-    λ_β::Vector{T}
-
-    # λ Target Pressures 
-    λ_p::Vector
-
-    # Per λ interactions
-    λ_hamiltonians::Vector{LambdaHamiltonian}
-    # Per λ atoms
-    λ_atoms::Vector
+    active_sys::S
+    active_intg::I
+    
+    λ_integrators::Vector{I}
+    λ_β::B
+    λ_p::PR
+    
+    # Store full interactions for accurate MD integration forces
+    state_pairwise_inters::SPI
+    state_specific_inter_lists::SSI
+    state_general_inters::SGI
 
     # Probability & Free Energy
-    f::Vector{T}            # Free energy of each window
-    rho::Vector{T}          # Target distribution
-    log_rho::Vector{T}      # Log of target distribution (precomputed)
+    f::Vector{T}
+    rho::Vector{T}
+    log_rho::Vector{T}
     
     # Weight Accumulators
-    w_seg::Vector{T}        # For current update segment
-    w_last::Vector{T}       # For Gibbs sampling
+    w_seg::Vector{T}
+    w_last::Vector{T}
 
-    # Scratch buffers for process_sample to avoid allocations
     scratch_potentials::Vector{T}
     scratch_z::Vector{T}
     
-    # Dynamics Variables
-    N_eff::T                # Real effective samples
-    N_bias::T               # Artificial bias samples for the initial stage
-    n_accum::Int            # Samples in current segment
+    N_eff::T
+    N_bias::T          
+    n_accum::Int
 
-    # State Flags
-    in_initial_stage::Bool    # Keeps track if we are in initial or linear Δf scaling stage
-    visited_windows::Set{Int} # Keeps track of λ windows representative of sampled frames 
+    in_initial_stage::Bool
+    visited_windows::Set{Int}
 
-    # Stats
-    stats::AWHStats
+    stats::AWHStats{T}
 end
 
-function AWHState(thermo_states::AbstractArray{ThermoState};
+function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   first_state::Int = 1,
                   n_bias::Int = 100,
                   ρ::Union{Nothing, AbstractArray{T}} = nothing,
@@ -98,201 +82,65 @@ function AWHState(thermo_states::AbstractArray{ThermoState};
 
     n_λ = length(thermo_states)
     ref_sys = thermo_states[first_state].system
-
     FT = typeof(ustrip(ref_sys.total_mass))
 
-    # 1. Identify Global Solute Indices
-    solute_indices = Set{Int}()
+    # Delegate the separation of interactions to the core abstraction
+    partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
 
-    # Pre-fetch units for pressure conversion
-    e_unit = ref_sys.energy_units
-    l_unit = unit(ref_sys.boundary.side_lengths[1])
-    p_unit = e_unit / (l_unit^3)
-    
-    λ_atoms = []
-    λ_integrators = []
-    λ_β = FT[]
-    λ_p = FT[] # New pressure vector
+    # Extract integrators and parameters
+    λ_integrators = [ts.integrator for ts in thermo_states]
+    λ_β = [ts.beta for ts in thermo_states]
+    λ_p = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states]
 
-    for tstate in thermo_states
-        atoms = tstate.system.atoms
-        intg  = tstate.integrator
-        push!(λ_atoms, atoms)
-        push!(λ_integrators, intg)
+    # Extract complete interaction lists for standard MD forces
+    state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states]
+    state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states]
+    state_general_inters = [ts.system.general_inters for ts in thermo_states]
 
-        # Precompute Beta in internal units
-        beta_val = zero(FT)
-        if tstate.beta isa Quantity
-            beta_val = FT(ustrip(uconvert(inv(e_unit), tstate.beta)))
-        else
-            beta_val = FT(tstate.beta)
-        end
-        push!(λ_β, beta_val)
-        
-        # Precompute Pressure
-        p_val = zero(FT)
-        if hasfield(typeof(intg), :coupling)
-            couplers = intg.coupling isa Tuple ? intg.coupling : (intg.coupling,)
-            for c in couplers
-                if hasfield(typeof(c), :pressure)
-                    # Convert P_bar to P_molar (internal E/V)
-                    # P_molar = P_bar * Na
-                    p_molar = FT(1/3 * tr(c.pressure)) * Unitful.Na
-                    p_val = FT(ustrip(uconvert(p_unit, p_molar)))
-                end
-            end
-        end
-        push!(λ_p, p_val)
-
-        atoms_cpu = from_device(atoms)
-        for atom in atoms_cpu
-            if (atom.λ_coul < 1.0) || (atom.λ_vdw < 0)
-                push!(solute_indices, atom.index)
-            end
-        end
-    end
-
+    active_sys = System(deepcopy(ref_sys);
+        atoms = partition.λ_atoms[first_state],
+        pairwise_inters = state_pairwise_inters[first_state],
+        specific_inter_lists = state_specific_inter_lists[first_state],
+        general_inters = state_general_inters[first_state]
+    )
     active_intg = λ_integrators[first_state]
-    
-    # 2. Partition Neighbor Lists
-    ref_nfinder = ref_sys.neighbor_finder
-    base_eligible_cpu = copy(from_device(ref_nfinder.eligible))
-    n_atoms = size(base_eligible_cpu, 1)
-    
-    master_eligible_cpu = copy(base_eligible_cpu)
-    for idx in solute_indices
-        master_eligible_cpu[idx, :] .= false
-        master_eligible_cpu[:, idx] .= false
-    end
-    
-    specific_eligible_cpu = copy(base_eligible_cpu)
-    solvent_indices = [i for i in 1:n_atoms if !(i in solute_indices)]
-    
-    if !isempty(solvent_indices)
-        specific_eligible_cpu[solvent_indices, solvent_indices] .= false
-    end
 
-    AT = array_type(ref_sys)
-    master_eligible = to_device(master_eligible_cpu, AT)
-    λ_eligible      = to_device(specific_eligible_cpu, AT)
-    
-    # 3. Extract and Partition Interaction Lists
-    list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_λ]
-    list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_λ]
-    list_3a = [Vector{InteractionList3Atoms}() for _ in 1:n_λ]
-    list_4a = [Vector{InteractionList4Atoms}() for _ in 1:n_λ]
-
-    @inbounds for (i, tstate) in enumerate(thermo_states)
-        sils = tstate.system.specific_inter_lists
-        for inter in sils
-            if inter isa InteractionList1Atoms push!(list_1a[i], inter)
-            elseif inter isa InteractionList2Atoms push!(list_2a[i], inter)
-            elseif inter isa InteractionList3Atoms push!(list_3a[i], inter)
-            elseif inter isa InteractionList4Atoms push!(list_4a[i], inter)
-            end
-        end
-    end
-
-    all_gils = [collect(thermo_states[n].system.general_inters) for n in 1:n_λ]
-    all_pils = [collect(thermo_states[n].system.pairwise_inters) for n in 1:n_λ]
-
-    master_sils_1a = intersect(list_1a...)
-    master_sils_2a = intersect(list_2a...)
-    master_sils_3a = intersect(list_3a...)
-    master_sils_4a = intersect(list_4a...)
-    master_gils    = intersect(all_gils...)
-    master_pils    = intersect(all_pils...)
-
-    λ_specific = Vector{Tuple}(undef, n_λ)
-    λ_general  = Vector{Tuple}(undef, n_λ)
-    λ_pairwise = Vector{Tuple}(undef, n_λ)
-
-    for i in 1:n_λ
-        u_1 = setdiff(list_1a[i], master_sils_1a)
-        u_2 = setdiff(list_2a[i], master_sils_2a)
-        u_3 = setdiff(list_3a[i], master_sils_3a)
-        u_4 = setdiff(list_4a[i], master_sils_4a)
-        λ_specific[i] = (u_1..., u_2..., u_3..., u_4...)
-        
-        u_g = setdiff(all_gils[i], master_gils)
-        λ_general[i] = (u_g...,)
-        λ_pairwise[i] = (all_pils[i]...,)
-    end
-
-    # 4. Construct Master System
-    master_nf = build_neighbor_finder(ref_nfinder, master_eligible; reuse_neighbors = reuse_neighbors)
-    λ_nf      = build_neighbor_finder(ref_nfinder, λ_eligible; reuse_neighbors = reuse_neighbors)
-
-    active_sys = System(deepcopy(ref_sys))
-
-    master_sys = System(deepcopy(ref_sys); 
-        pairwise_inters      = (master_pils...,),
-        general_inters       = (master_gils...,),
-        specific_inter_lists = (master_sils_1a..., 
-                                master_sils_2a..., 
-                                master_sils_3a..., 
-                                master_sils_4a...),
-        neighbor_finder      = master_nf
-    )
-
-    λ_sys = System(deepcopy(ref_sys); 
-        pairwise_inters      = (λ_pairwise[1]...,),
-        general_inters       = (λ_general[1]...,),
-        specific_inter_lists = (λ_specific[1]...,),
-        neighbor_finder      = λ_nf
-    )
-
-    hamiltonians = LambdaHamiltonian[]
-    for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
-        ham = LambdaHamiltonian(λ_p, λ_s, λ_g)
-        push!(hamiltonians, ham)
-    end
-
-    # 5. Handle Target Distribution (ρ)
+    # Handle Target Distribution (ρ)
     if isnothing(ρ)
         rho_val = fill(FT(1/n_λ), n_λ)
     else
-        if eltype(ρ) != FT
-             rho_val = FT.(ρ) 
-        else
-             rho_val = ρ
-        end
+        rho_val = eltype(ρ) != FT ? FT.(ρ) : ρ
     end
     log_ρ = log.(rho_val)
 
-    stats = AWHStats(
-        Int[],              # step_indices
-        Int[],             # Active λ
-        Vector{FT}[],        # f_history
-        FT[],                # n_effective_history
-        Symbol[],           # stage_history
-        FT[]                 # max_delta_f_history
-    )
+    stats = AWHStats(Int[], Int[], Vector{FT}[], FT[], Symbol[], FT[])
 
-    return AWHState(
-        master_sys,
-        λ_sys,
+    return AWHState{FT, typeof(partition), typeof(active_sys), typeof(active_intg), 
+                    typeof(λ_β), typeof(λ_p), typeof(state_pairwise_inters),
+                    typeof(state_specific_inter_lists), typeof(state_general_inters)}(
+        partition,
         first_state,
         active_sys,
         active_intg,
         λ_integrators,
         λ_β,
         λ_p,
-        hamiltonians,
-        λ_atoms,        
-        zeros(FT, n_λ),    # f
-        rho_val,           # rho
-        log_ρ,             # log_rho
-        zeros(FT, n_λ),    # w_seg
-        zeros(FT, n_λ),    # w_last
-        zeros(FT, n_λ),    # scratch_potentials
-        zeros(FT, n_λ),    # scratch_z
-        zero(FT),          # N_eff
-        FT(n_bias),        # N_bias
-        0,                 # n_accum
-        true,              # in_initial_stage
-        Set{Int}(),        # visited_windows
-        stats,
+        state_pairwise_inters,
+        state_specific_inter_lists,
+        state_general_inters,
+        zeros(FT, n_λ),
+        rho_val,
+        log_ρ,
+        zeros(FT, n_λ),
+        zeros(FT, n_λ),
+        zeros(FT, n_λ),
+        zeros(FT, n_λ),
+        zero(FT),
+        FT(n_bias),
+        0,
+        true,
+        Set{Int}(),
+        stats
     )
 end
 
@@ -351,7 +199,7 @@ function AWHPMFDeconvolution(
         final_cv_func = cv_func
     else
         # Default: Auto-detect from BiasPotentials in the first window
-        first_ham = awh_state.λ_hamiltonians[1]
+        first_ham = awh_state.partition.λ_hamiltonians[1]
         bias_indices = findall(x -> x isa BiasPotential, first_ham.general_inters)
         
         if isempty(bias_indices)
@@ -380,7 +228,7 @@ function AWHPMFDeconvolution(
 
     # --- Coupling Matrix Setup ---
     total_bins = prod(n_bins)
-    n_windows  = length(awh_state.λ_hamiltonians)
+    n_windows  = length(awh_state.partition.λ_hamiltonians)
     coupling_mat = Matrix{T}(undef, total_bins, n_windows)
     
     cart_indices = CartesianIndices(n_bins)
@@ -392,7 +240,7 @@ function AWHPMFDeconvolution(
         error("If a custom `pmf_cv` is provided, `pmf_coupling` must also be provided.")
     end
 
-    for (k, ham_k) in enumerate(awh_state.λ_hamiltonians)
+    for (k, ham_k) in enumerate(awh_state.partition.λ_hamiltonians)
         beta_k = awh_state.λ_β[k]
         
         # If auto-detecting, find bias indices for this window once
@@ -651,7 +499,7 @@ function AWHSimulation(
     target_pressure = nothing
 ) where T
 
-    n_win = length(awh_state.λ_hamiltonians)
+    n_win = length(awh_state.partition.λ_hamiltonians)
 
     pmf_calc = nothing
     if !isnothing(pmf_grid)
@@ -679,42 +527,27 @@ end
 # Swaps Hamiltionians
 function update_active_sys!(awh_state::AWHState, active_idx::Int)
     awh_state.active_idx = active_idx
-    master_specific = awh_state.master_sys.specific_inter_lists
-    master_general  = awh_state.master_sys.general_inters
-    awh_state.active_sys.atoms = awh_state.λ_atoms[active_idx]
-    awh_state.active_sys.specific_inter_lists = (master_specific..., awh_state.λ_hamiltonians[active_idx].specific_inter_lists...)
-    awh_state.active_sys.general_inters       = (master_general..., awh_state.λ_hamiltonians[active_idx].general_inters...)
+    awh_state.active_sys.atoms = awh_state.partition.λ_atoms[active_idx]
+    awh_state.active_sys.pairwise_inters = awh_state.state_pairwise_inters[active_idx]
+    awh_state.active_sys.specific_inter_lists = awh_state.state_specific_inter_lists[active_idx]
+    awh_state.active_sys.general_inters = awh_state.state_general_inters[active_idx]
     awh_state.active_intg = awh_state.λ_integrators[active_idx]
 end
 
 # Reweights coordinates along λ windows and accumulates histogram
-# Reweights coordinates along λ windows and accumulates histogram
 function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where FT
-    n_states = length(awh.λ_hamiltonians)
+    n_states = length(awh.λ_β)
     coords = awh.active_sys.coords
     bound  = awh.active_sys.boundary
 
-    awh.master_sys.coords   = coords
-    awh.master_sys.boundary = bound
-    master_pe = potential_energy(awh.master_sys)
-
-    awh.λ_sys.coords   = coords
-    awh.λ_sys.boundary = bound
-    nbrs = find_neighbors(awh.λ_sys)
-
-    # Use pre-allocated scratch buffer instead of creating new Vector
+    # Exploit the AlchemicalPartition abstraction
+    energies = evaluate_energy_all!(awh.partition, coords, bound)
+    
     potentials = awh.scratch_potentials 
     active_pe = nothing
 
-    for (n, (atoms, haml, β)) in enumerate(zip(awh.λ_atoms, awh.λ_hamiltonians, awh.λ_β))
-        awh.λ_sys.atoms = atoms
-        awh.λ_sys.pairwise_inters      = haml.pairwise_inters
-        awh.λ_sys.specific_inter_lists = haml.specific_inter_lists
-        awh.λ_sys.general_inters       = haml.general_inters
-        
-        # Total PE for this lambda state
-        pe = master_pe + potential_energy(awh.λ_sys, nbrs, 0)
-        
+    for n in 1:n_states
+        pe = energies[n]
         if n == awh.active_idx
             active_pe = pe
         end
@@ -726,12 +559,11 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
             pe_val = typemax(FT)
         end
         
-        # β is now already a raw float in correct units
-        potentials[n] = β * pe_val
+        # β is already converted to a raw float in correct units
+        potentials[n] = awh.λ_β[n] * pe_val
     end
 
     # Calculate Z in-place
-    # z = awh.log_rho .+ awh.f .- potentials
     @. awh.scratch_z = awh.log_rho + awh.f - potentials
     
     log_den = Molly.logsumexp(awh.scratch_z)
