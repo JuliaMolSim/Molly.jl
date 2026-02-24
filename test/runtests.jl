@@ -114,13 +114,12 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
 Enzyme.Compiler.VERBOSE_ERRORS[] = true
 
 if GROUP in ("All", "NotGradients")
-    # Some failures due to dependencies but there is an unbound args error
-    Aqua.test_all(
-        Molly;
-        ambiguities=(recursive=false),
-        unbound_args=false,
-        piracies=false,
-    )
+    if VERSION < v"1.12-"
+        # AtomType has missing union, PeriodicTorsion has NTuple
+        Aqua.test_all(Molly; unbound_args=false)
+    else
+        Aqua.test_all(Molly)
+    end
 
     include("basic.jl")
     include("interactions.jl")

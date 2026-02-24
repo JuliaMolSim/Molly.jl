@@ -85,13 +85,13 @@ The virial, in its most general form, is defined as:
 \bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}
 ```
 where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
-respectively, acting on the i``^{th}`` atom.
-In Molly.jl, we implement the
-[virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html),
-and take into account pairwise and specific interactions, as well as the K-space
-contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, computed as indicated
-in the [Essmann et al. 1995](https://doi.org/10.1063/1.470117).
-Contributions from constraints are ignored.
+respectively, acting on atom ``i``.
+The [virial definition from LAMMPS](https://docs.lammps.org/compute_stress_atom.html)
+is used, taking into account pairwise interactions, specific interactions, and the
+[`Ewald`](@ref) and [`PME`](@ref) methods computed as indicated in
+[Essmann et al. 1995](https://doi.org/10.1063/1.470117).
+Contributions from constraints, implicit solvent methods and bias potentials are ignored.
+Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 
 To calculate the scalar virial, see [`scalar_virial`](@ref).
 """

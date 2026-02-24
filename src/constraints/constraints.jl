@@ -165,7 +165,8 @@ end
 # Check for interactions between angle and non-angle clusters,
 # builds only non-angle clusters
 function build_central_atom_clusters(num_atoms::Integer,
-                            dist_constraints::AbstractVector{<:DistanceConstraint{D}}) where D
+                                     dist_constraints::AbstractVector{<:DistanceConstraint{D}},
+                                     strictness) where D
     # Store constraints as directed edges, direction is arbitrary but necessary
     constraint_graph = SimpleDiGraph(num_atoms)
     idx_dist_pairs = spzeros(D, num_atoms, num_atoms)
@@ -177,7 +178,10 @@ function build_central_atom_clusters(num_atoms::Integer,
             idx_dist_pairs[i, j] = constraint.dist
             idx_dist_pairs[j, i] = constraint.dist
         else
-            @warn "Duplicate constraint in the system between atoms $i and $j, it will be ignored"
+            report_issue(
+                "Duplicate constraint in the system between atoms $i and $j, it will be ignored",
+                strictness,
+            )
         end
     end
 
@@ -226,7 +230,7 @@ function build_central_atom_clusters(num_atoms::Integer,
     return StructArray(clusters12), StructArray(clusters23), StructArray(clusters34)
 end
 
-function build_clusters(n_atoms::Integer, dist_constraints, angle_constraints)
+function build_clusters(n_atoms::Integer, dist_constraints, angle_constraints, strictness)
     if isnothing(dist_constraints)
         dist_constraints_cp = []
     else
@@ -244,7 +248,7 @@ function build_clusters(n_atoms::Integer, dist_constraints, angle_constraints)
 
     # Check for interactions between clusters and build non-angle clusters
     clusters12, clusters23, clusters34 = build_central_atom_clusters(n_atoms,
-                                                            [dist_constraints_cp...])
+                                                    [dist_constraints_cp...], strictness)
 
     # Now that we know angle_constraints do not interact with
     # any of the distance constraints we can build their clusters

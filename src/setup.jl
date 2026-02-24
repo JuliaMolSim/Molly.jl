@@ -188,11 +188,21 @@ function canonicalize_system(top, resname_replacements, atomname_replacements)
         for atom_idx in atom_inds_zero
             atom = Chemfiles.Atom(top, atom_idx)
             an = Int(Chemfiles.atomic_number(atom))
-            if an == 0 # Extra particle returns 0 from chemfiles
+            # Chemfiles treats e.g. "C" but not "C2" as carbon
+            # Here we search for elements after removing numbers, so "C2" is treated as carbon
+            # Cases that are ambiguous, such as "CA" with calcium, are not assigned (i.e. X)
+            if iszero(an)
+                atom_name_nonum = replace(Chemfiles.name(atom), r"\d+" => "")
+                element_symbol = Symbol(atom_name_nonum)
+                if haskey(PeriodicTable.elements, element_symbol)
+                    an = PeriodicTable.elements[element_symbol].number
+                end
+            end
+            if iszero(an) # Extra particle returns 0 from chemfiles
                 push!(atom_elements, :X)
             else
-                elm = PeriodicTable.elements[an].symbol
-                push!(atom_elements, Symbol(elm))
+                elm_str = PeriodicTable.elements[an].symbol
+                push!(atom_elements, Symbol(elm_str))
             end
         end
         if haskey(atomname_replacements, res_name)
@@ -316,7 +326,7 @@ function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t
     # Recover matched permutation from cache to return the oriented key
     ic = ff.torsion_resolver.improper_cache
     cache_hit = get(ic, (t1, t2, t3, t4), :miss)
-    if cache_hit === :miss
+    if cache_hit == :miss
         return (p, (t1, t2, t3, t4)) # Fallback
     else
         perm, _ = cache_hit
@@ -324,6 +334,25 @@ function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t
         key = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         return (p, key)
     end
+end
+
+# Map an atom name in a residue to the global atom index
+function atom_name_to_global_i(atom_name, template_atoms, rgraph_atom_inds, matches)
+    atom_name_ind = findfirst(isequal(atom_name), template_atoms)
+    return rgraph_atom_inds[findfirst(isequal(atom_name_ind), matches)]
+end
+
+function add_virtual_sites!(virtual_sites, template, rgraph, matches)
+    for vst in template.virtual_sites
+        atom_ind = atom_name_to_global_i(vst.name       , template.atoms, rgraph.atom_inds, matches)
+        atom_1   = atom_name_to_global_i(vst.atom_name_1, template.atoms, rgraph.atom_inds, matches)
+        atom_2   = atom_name_to_global_i(vst.atom_name_2, template.atoms, rgraph.atom_inds, matches)
+        atom_3   = atom_name_to_global_i(vst.atom_name_3, template.atoms, rgraph.atom_inds, matches)
+        vs = VirtualSite(vst.type, atom_ind, atom_1, atom_2, atom_3, vst.weight_1, vst.weight_2,
+                         vst.weight_3, vst.weight_12, vst.weight_13, vst.weight_cross)
+        push!(virtual_sites, vs)
+    end
+    return virtual_sites
 end
 
 """
@@ -387,6 +416,9 @@ Gromacs file reading should be considered experimental.
     arguments to assign them.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
     with Enzyme.jl and `nonbonded_method` is `:pme`.
+- `strictness=:warn`: determines behavior when encountering possible problems,
+    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
+    `:error` to error.
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
@@ -409,24 +441,27 @@ function System(coord_file::AbstractString,
                 kappa=0.0u"nm^-1",
                 disulfide_bonds=true,
                 grad_safe::Bool=false,
+                strictness=:warn,
                 rename_terminal_res=nothing) where {AT <: AbstractArray}
     if !isnothing(rename_terminal_res)
         @info "rename_terminal_res is no longer required and will be removed in a future breaking release"
     end
+    check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
+    IC = (units ? typeof(zero(T) * u"nm^-1") : T)
 
     resname_replacements  = force_field.residue_name_replacements
     atomname_replacements = force_field.atom_name_replacements
     standard_bonds        = force_field.standard_bonds
 
     # Read structure
-    traj  = Chemfiles.Trajectory(coord_file)
+    traj = Chemfiles.Trajectory(coord_file)
     frame = Chemfiles.read(traj)
-    top   = Chemfiles.Topology(frame)
+    top = Chemfiles.Topology(frame)
     n_atoms = size(top)
 
     # Boundary
@@ -438,10 +473,11 @@ function System(coord_file::AbstractString,
     end
     min_box_side = minimum(box_sides(boundary_used))
     if min_box_side < (2 * dist_cutoff)
-        @warn "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
-              "($(2 * dist_cutoff)), this can lead to unphysical simulations" *
-              "since multiple copies of the same atom are seen but only one is " *
-              "considered due to the minimum image convention"
+        err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
+                  "($(2 * dist_cutoff)), this can lead to unphysical simulations" *
+                  "since multiple copies of the same atom are seen but only one is " *
+                  "considered due to the minimum image convention"
+        report_issue(err_str, strictness)
     end
 
     # Units and coordinates
@@ -457,19 +493,20 @@ function System(coord_file::AbstractString,
 
     canonical_system = canonicalize_system(top, resname_replacements, atomname_replacements)
 
-    top_bonds = create_bonds(canonical_system, standard_bonds)
+    top_bonds = create_bonds!(canonical_system, standard_bonds)
     if disulfide_bonds
         top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system, top_bonds)
     end
-    top_bonds = read_extra_bonds(top, top_bonds, canonical_system)
+    top_bonds = read_extra_bonds!(canonical_system, top, top_bonds)
 
     template_names = keys(force_field.residues)
     # Match each residue graph to a template and assign atom types/charges
     atom_type_of = Vector{String}(undef, n_atoms)
-    charge_of = Vector{T}(undef, n_atoms)
+    charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
 
+    virtual_sites = VirtualSite{T, IC}[]
     for (chain, resids) in canonical_system
         for (res_id, rgraph) in resids
             matched = false
@@ -483,7 +520,7 @@ function System(coord_file::AbstractString,
                             continue
                         end
                         matches = match_residue_to_template(rgraph, template)
-                        if !(isnothing(matches))
+                        if !isnothing(matches)
                             matched = true
                             for (r_i, m_i) in enumerate(matches)
                                 global_idx = rgraph.atom_inds[r_i]
@@ -491,6 +528,7 @@ function System(coord_file::AbstractString,
                                 charge_of[global_idx] = template.charges[m_i]
                                 element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                             end
+                            add_virtual_sites!(virtual_sites, template, rgraph, matches)
                             break
                         end
                     end
@@ -502,11 +540,12 @@ function System(coord_file::AbstractString,
                         charge_of[global_idx] = template.charges[m_i]
                         element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                     end
+                    add_virtual_sites!(virtual_sites, template, rgraph, matches)
                 end
             else
                 for (templ_name, template) in force_field.residues
                     matches = match_residue_to_template(rgraph, template)
-                    if !(isnothing(matches))
+                    if !isnothing(matches)
                         matched = true
                         for (r_i, m_i) in enumerate(matches)
                             global_idx = rgraph.atom_inds[r_i]
@@ -514,15 +553,19 @@ function System(coord_file::AbstractString,
                             charge_of[global_idx] = template.charges[m_i]
                             element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                         end
+                        add_virtual_sites!(virtual_sites, template, rgraph, matches)
                         break
                     end
                 end
             end
             if !matched
-                throw(ArgumentError("could not match residue $(rgraph.res_name) to any of the provided templates"))
+                throw(ArgumentError("could not match residue $(rgraph.res_name) to any of " *
+                                    "the provided templates, make sure that the atoms match " *
+                                    "and have elements assigned"))
             end
         end
     end
+    virtual_sites_type = (length(virtual_sites) > 0 ? virtual_sites : [])
 
     adj           = build_adjacency(n_atoms, top_bonds)
     top_angles    = build_angles(adj, top_bonds)
@@ -545,16 +588,19 @@ function System(coord_file::AbstractString,
     for ai in 1:n_atoms
         atype = atom_type_of[ai]
         at = force_field.atom_types[atype]
-        if ismissing(charge_of[ai])
-            error("atom $ai type $atype has missing charge")
-        end
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom $ai type $atype has unset σ or ϵ")
         end
         if use_charge_from_residue
-            chrge = charge_of[ai]
+            ch = charge_of[ai]
+            if ismissing(ch)
+                error("atom $ai type $atype has charge missing from residue template")
+            end
         else
-            chrge = force_field.atom_types[atype].charge
+            ch = force_field.atom_types[atype].charge
+            if ismissing(ch)
+                error("atom $ai type $atype has charge missing")
+            end
         end
         push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ, λ_coul=one(T), λ_vdw=one(T)))
 
@@ -570,6 +616,7 @@ function System(coord_file::AbstractString,
                                    chain_id=chain_from_atom_idx(ai, canonical_system), element=element_of[ai], hetero_atom=hetero))
         eligible[ai, ai] = false
     end
+    atoms = to_device([atoms_abst...], AT)
 
     # Bonds
     for (i, j) in top_bonds
@@ -582,8 +629,8 @@ function System(coord_file::AbstractString,
         push!(bonds_il.js, j)
         push!(bonds_il.types, atom_types_to_string(t1,t2))
         push!(bonds_il.inters, hb)
-        eligible[i,j] = false
-        eligible[j,i] = false
+        eligible[i, j] = false
+        eligible[j, i] = false
     end
 
     # Angles
@@ -598,8 +645,26 @@ function System(coord_file::AbstractString,
         push!(angles_il.ks,k)
         push!(angles_il.types, atom_types_to_string(t1,t2,t3))
         push!(angles_il.inters, ha)
-        eligible[i,k] = false
-        eligible[k,i] = false
+        eligible[i, k] = false
+        eligible[k, i] = false
+    end
+
+    # Virtual sites share all the non-bonded exclusions of, and are excluded from,
+    #   their parent atoms
+    for vs in virtual_sites
+        i = vs.atom_ind
+        for j in (vs.atom_1, vs.atom_2, vs.atom_3)
+            if !iszero(j)
+                for k in 1:n_atoms
+                    if !eligible[j, k]
+                        eligible[i, k] = false
+                        eligible[k, i] = false
+                    end
+                end
+                eligible[i, j] = false
+                eligible[j, i] = false
+            end
+        end
     end
 
     # Proper torsions
@@ -619,8 +684,8 @@ function System(coord_file::AbstractString,
             push!(tors_il.inters, PeriodicTorsion(periodicities=tt.periodicities[s:e],
                                                 phases=tt.phases[s:e], ks=tt.ks[s:e], proper=true))
         end
-        special[i,l] = true
-        special[l,i] = true
+        special[i, l] = true
+        special[l, i] = true
     end
 
     # Impropers (Amber ordering)
@@ -779,11 +844,12 @@ function System(coord_file::AbstractString,
     imps_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
                                 proper=t.proper, n_terms=torsion_n_terms) for t in imps_il.inters]
 
-    return System(T, AT, to_device([atoms_abst...], AT), coords, boundary_used, velocities, atoms_data,
-                  loggers, data, bonds_il, angles_il, tors_il, imps_il, tors_pad, imps_pad,
-                  eligible, special, units, dist_cutoff, constraints, rigid_water, nonbonded_method,
-                  ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent, kappa,
-                  grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb)
+    return System(T, AT, atoms, coords, boundary_used, velocities,
+                  atoms_data, virtual_sites_type, loggers, data, bonds_il, angles_il, tors_il,
+                  imps_il, tors_pad, imps_pad, eligible, special, units, dist_cutoff,
+                  constraints, rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
+                  neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
+                  weight_14_lj, weight_14_coulomb, strictness)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -857,7 +923,7 @@ function System(T::Type,
     current_field = ""
     for l in eachline(top_file)
         sl = strip(l)
-        if length(sl) == 0 || startswith(sl, ';')
+        if iszero(length(sl)) || startswith(sl, ';')
             continue
         end
         if startswith(sl, '[') && endswith(sl, ']')
@@ -1101,13 +1167,15 @@ function System(T::Type,
 
     torsion_inters_pad = torsions.inters
     improper_inters_pad = impropers.inters
+    virtual_sites = []
+    strictness = :warn
 
-    return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
+    return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
                   improper_inters_pad, eligible, special, units, dist_cutoff, constraints,
                   rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                   neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                  weight_14_lj, weight_14_coulomb)
+                  weight_14_lj, weight_14_coulomb, strictness)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1132,7 +1200,7 @@ function find_bond_r0(bonds_all, i, j)
 end
 
 function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
-                              rigid_water, units)
+                              rigid_water, units, strictness)
     if (constraints_type == :none && !rigid_water) || iszero(length(bonds_all.is))
         return (), bonds_all, angles_all
     end
@@ -1183,6 +1251,7 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
             (units ? T(1e-6)u"nm^2 * ps^-1" : T(1e-6));
             dist_constraints=[dist_constraints...],
             angle_constraints=[angle_constraints...],
+            strictness=strictness,
         )
         constraints = (shake,)
     else
@@ -1191,12 +1260,12 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
     return constraints, bonds, angles
 end
 
-function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
+function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                 loggers, data, bonds_all, angles_all, torsions, impropers, torsion_inters_pad,
                 improper_inters_pad, eligible, special, units, dist_cutoff, constraints_type,
                 rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                weight_14_lj, weight_14_coulomb)
+                weight_14_lj, weight_14_coulomb, strictness)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
@@ -1255,14 +1324,24 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
     end
     pairwise_inters = (lj, coul)
 
-    if length(bonds_all.is) > 0
-        topology = MolecularTopology(bonds_all.is, bonds_all.js, length(coords_dev))
+    # For the purposes of assigning molecules, add connections from atoms to virtual sites
+    bonds_all_vs_is, bonds_all_vs_js = copy(bonds_all.is), copy(bonds_all.js)
+    for vs in virtual_sites
+        for ai in (vs.atom_1, vs.atom_2, vs.atom_3)
+            if !iszero(ai)
+                push!(bonds_all_vs_is, ai)
+                push!(bonds_all_vs_js, vs.atom_ind)
+            end
+        end
+    end
+    if length(bonds_all_vs_is) > 0
+        topology = MolecularTopology(bonds_all_vs_is, bonds_all_vs_js, length(coords_dev))
     else
         topology = nothing
     end
 
     constraints, bonds, angles = exchange_constraints(T, bonds_all, angles_all, atoms_data,
-                                                      constraints_type, rigid_water, units)
+                                            constraints_type, rigid_water, units, strictness)
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
@@ -1365,6 +1444,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
     general_inters = (general_inters_ewald..., general_inters_is...)
 
     k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
+    virtual_sites_dev = (length(virtual_sites) > 0 ? to_device(virtual_sites, AT) : virtual_sites)
+
     return System(
         atoms=atoms,
         coords=coords_dev,
@@ -1376,12 +1457,14 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         constraints=constraints,
+        virtual_sites=virtual_sites_dev,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
         energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
         data=data,
+        strictness=strictness,
     )
 end
 
@@ -1428,7 +1511,7 @@ function add_position_restraints(sys::System{<:Any, AT},
     is = Int32[]
     types = String[]
     inters = HarmonicPositionRestraint[]
-    atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : fill(nothing, length(sys))
+    atoms_data = (length(sys.atoms_data) > 0 ? sys.atoms_data : fill(nothing, length(sys)))
     for (i, (at, at_data, k_res, x0)) in enumerate(zip(from_device(sys.atoms), atoms_data, k_array,
                                                        from_device(restrain_coords)))
         if atom_selector(at, at_data)
@@ -1450,6 +1533,7 @@ function add_position_restraints(sys::System{<:Any, AT},
         specific_inter_lists=sis,
         general_inters=deepcopy(sys.general_inters),
         constraints=deepcopy(sys.constraints),
+        virtual_sites=deepcopy(sys.virtual_sites),
         neighbor_finder=deepcopy(sys.neighbor_finder),
         loggers=deepcopy(sys.loggers),
         force_units=sys.force_units,

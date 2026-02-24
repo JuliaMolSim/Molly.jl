@@ -799,7 +799,7 @@ end
         if i != j
             coord_i, coord_j = coords[i], coords[j]
             r = norm(vector(coord_i, coord_j, boundary))
-            if iszero(dist_cutoff) || r <= dist_cutoff
+            if iszero_value(dist_cutoff) || r <= dist_cutoff
                 I = zero(coord_i[1] / unit(dist_cutoff)^2)
                 I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
                 ori, orj = offset_radii[i], offset_radii[j]
@@ -993,14 +993,14 @@ end
         dr = vector(coords[i], coords[j], boundary)
         r2 = sum(abs2, dr)
 
-        if iszero(dist_cutoff) || r2 <= dist_cutoff^2
+        if iszero_value(dist_cutoff) || r2 <= dist_cutoff^2
             Bi, Bj = Bs[i], Bs[j]
             alpha2_ij = Bi * Bj
             D_term = r2 / (4 * alpha2_ij)
             exp_term = exp(-D_term)
             denominator2 = r2 + alpha2_ij * exp_term
             denominator = sqrt(denominator2)
-            if iszero(kappa)
+            if iszero_value(kappa)
                 pre_factor = factor_solute + factor_solvent
             else
                 pre_factor = factor_solute + exp(-kappa * denominator) * factor_solvent +
@@ -1045,7 +1045,7 @@ end
             dr = vector(coords[i], coords[j], boundary)
             r = norm(dr)
 
-            if iszero(dist_cutoff) || r <= dist_cutoff
+            if iszero_value(dist_cutoff) || r <= dist_cutoff
                 ori, srj = or[i], sor[j]
                 rsrj = r + srj
                 if ori < rsrj
