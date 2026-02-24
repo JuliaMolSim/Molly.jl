@@ -1,5 +1,12 @@
 # Molly.jl release notes
 
+## v0.23.3 - Feb 2026
+
+### New features
+- The `strictness` keyword argument can be given to various functions, for example force field loading and system setup, to determine behavior when encountering possible problems. The options are `:warn` to emit warnings (the default), `:nowarn` to suppress warnings or `:error` to error.
+- Specifying partial charges in the `<NonbondedForce>` entries of force field XML files is supported.
+- `<Include>` tags in force field XML files are supported.
+
 ## v0.23.2 - Feb 2026
 
 ### New features
