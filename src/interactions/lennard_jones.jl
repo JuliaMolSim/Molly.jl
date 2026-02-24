@@ -598,7 +598,7 @@ If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
     shortcut::H = lj_zero_shortcut
     σ_mixing::S = lorentz_σ_mixing
     ϵ_mixing::E = lorentz_ϵ_mixing
-    λ_mixing::L = lorentz_λ_mixing
+    λ_mixing::L = lorentz_λ_vdw_mixing
     weight_special::W = 1
 end
 
