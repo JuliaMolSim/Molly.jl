@@ -143,8 +143,8 @@ If ``\lambda`` is zero the interaction is turned off.
     α::A = 1
     λ::L = 0
     use_neighbors::Bool = false
-    σ_mixing::S = lorentz_σ_mixing
-    ϵ_mixing::E = geometric_ϵ_mixing
+    σ_mixing::S = LorentzMixing()
+    ϵ_mixing::E = GeometricMixing()
     weight_special::W = 1
     coulomb_const::T = coulomb_const
     σ6_fac::R = (α * (1-λ))
@@ -191,8 +191,8 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
+    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
     C6 = 4 * ϵ * σ6
     params = (ke, qi, qj, C6 * σ6, C6, inter.σ6_fac, inter.λ)
 
@@ -222,8 +222,8 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
+    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
     C6 = 4 * ϵ * σ6
     params = (ke, qi, qj, C6 *σ6, C6, inter.σ6_fac, inter.λ)
 

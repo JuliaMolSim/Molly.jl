@@ -12,8 +12,8 @@ export
     forces,
     forces_virial
 
-# Apply F = ma but give virtual sites zero acceleration
-calc_accels(f, m, vsf) = (vsf ? zero(f / oneunit(m)) : f / m)
+# Apply F = ma but give massless particles zero acceleration
+calc_accels(f, m) = (iszero(m) ? zero(f / oneunit(m)) : (f / m))
 
 """
     accelerations(system, neighbors=find_neighbors(system), step_n=0;
@@ -28,7 +28,7 @@ end
 
 function accelerations(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     fs = forces(sys, neighbors, step_n; n_threads=n_threads)
-    return calc_accels.(fs, masses(sys), sys.virtual_site_flags)
+    return calc_accels.(fs, masses(sys))
 end
 
 """

@@ -155,7 +155,7 @@ end
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), 0; n_threads=n_threads)
-    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+    accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
@@ -179,7 +179,7 @@ end
         place_virtual_sites!(sys)
 
         forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys), sys.virtual_site_flags)
+        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .+= (accels_t .+ accels_t_dt) .* dt_div2
         using_constraints && apply_velocity_constraints!(sys; n_threads=n_threads)
@@ -195,7 +195,7 @@ end
         if recompute_forces
             forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
             forces_t .= forces_t_dt
-            accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+            accels_t .= calc_accels.(forces_t, masses(sys))
         else
             forces_t .= forces_t_dt
             accels_t .= accels_t_dt
@@ -245,7 +245,7 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
-    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+    accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
@@ -254,7 +254,7 @@ end
     for step_n in 1:n_steps
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+        accels_t .= calc_accels.(forces_t, masses(sys))
 
         sys.velocities .+= accels_t .* sim.dt
 
@@ -322,14 +322,14 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
     coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
-    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+    accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     dt_sq = sim.dt^2
 
     for step_n in 1:n_steps
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+        accels_t .= calc_accels.(forces_t, masses(sys))
 
         coords_copy .= sys.coords
         if step_n == 1
@@ -410,7 +410,7 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
-    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+    accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -422,7 +422,7 @@ end
     for step_n in 1:n_steps
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+        accels_t .= calc_accels.(forces_t, masses(sys))
 
         sys.velocities .+= accels_t .* sim.dt
         apply_velocity_constraints!(sys; n_threads=n_threads)
@@ -520,7 +520,7 @@ end
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
     forces!(forces_t, sys, neighbors, buffers, Val(false), 0; n_threads=n_threads)
-    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+    accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
@@ -585,7 +585,7 @@ function B_step!(sys, forces_t, buffers, accels_t, dt_eff,
                  compute_forces::Bool, n_threads::Integer, neighbors, step_n::Integer)
     if compute_forces
         forces!(forces_t, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
-        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+        accels_t .= calc_accels.(forces_t, masses(sys))
     end
     sys.velocities .+= dt_eff .* accels_t
     return sys
@@ -640,13 +640,13 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
-    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+    accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     noise_prefac = sqrt((2 / sim.friction) * sim.dt)
 
     for step_n in 1:n_steps
         forces!(forces_t, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
-        accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+        accels_t .= calc_accels.(forces_t, masses(sys))
 
         random_velocities!(noise, sys, sim.temperature; rng=rng)
         sys.coords .+= (accels_t ./ sim.friction) .* sim.dt .+ noise_prefac .* noise
@@ -716,7 +716,7 @@ end
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     forces!(forces_t, sys, neighbors, buffers, Val(true), 0; n_threads=n_threads)
-    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+    accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
     v_half = zero(sys.velocities)
@@ -738,7 +738,7 @@ end
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
         forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys), sys.virtual_site_flags)
+        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .= (v_half .+ accels_t_dt .* dt_div2) ./
                           (1 + (zeta * dt_div2))
@@ -754,7 +754,7 @@ end
         if recompute_forces
             forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
             forces_t .= forces_t_dt
-            accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+            accels_t .= calc_accels.(forces_t, masses(sys))
         else
             forces_t .= forces_t_dt
             accels_t .= accels_t_dt

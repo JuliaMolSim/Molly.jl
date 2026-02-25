@@ -313,32 +313,6 @@ function Base.show(io::IO, a::Atom)
           ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 
-function lj_zero_shortcut(atom_i, atom_j)
-    return iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-           iszero_value(atom_i.σ) || iszero_value(atom_j.σ)
-end
-
-no_shortcut(atom_i, atom_j) = false
-
-lorentz_σ_mixing(atom_i, atom_j) = (atom_i.σ + atom_j.σ) / 2
-lorentz_ϵ_mixing(atom_i, atom_j) = (atom_i.ϵ + atom_j.ϵ) / 2
-lorentz_λ_mixing(atom_i, atom_j) = (atom_i.λ + atom_j.λ) / 2
-
-geometric_σ_mixing(atom_i, atom_j) = sqrt(atom_i.σ * atom_j.σ)
-geometric_ϵ_mixing(atom_i, atom_j) = sqrt(atom_i.ϵ * atom_j.ϵ)
-geometric_λ_mixing(atom_i, atom_j) = sqrt(atom_i.λ * atom_j.λ)
-
-function waldman_hagler_σ_mixing(atom_i, atom_j)
-    T = typeof(ustrip(atom_i.σ))
-    return ((atom_i.σ^6 + atom_j.σ^6) / 2) ^ T(1/6)
-end
-
-function waldman_hagler_ϵ_mixing(atom_i, atom_j)
-    return 2 * sqrt(atom_i.ϵ * atom_j.ϵ) * ((atom_i.σ^3 * atom_j.σ^3) / (atom_i.σ^6 + atom_j.σ^6))
-end
-
-fender_halsey_ϵ_mixing(atom_i, atom_j) = (2 * atom_i.ϵ * atom_j.ϵ) / (atom_i.ϵ + atom_j.ϵ)
-
 """
     AtomData(; atom_type="?", atom_name="?", res_number=1, res_name="???",
              chain_id="A", element="?", hetero_atom=false)

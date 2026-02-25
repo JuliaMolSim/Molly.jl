@@ -3,25 +3,59 @@
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     c4 = SVector(1.1, 1.0, 1.0)u"nm"
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1")
+    a1 = Atom(atom_type=1, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a2 = Atom(atom_type=2, charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1")
+    a3 = Atom(atom_type=3, charge=1.0, σ=0.4u"nm", ϵ=0.4u"kJ * mol^-1")
     boundary = CubicBoundary(2.0u"nm")
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
     dr14 = vector(c1, c4, boundary)
 
-    @test Molly.lorentz_σ_mixing(a1, a2)        ≈ 0.25u"nm"
-    @test Molly.lorentz_ϵ_mixing(a1, a2)        ≈ 0.15u"kJ * mol^-1"
-    @test Molly.geometric_σ_mixing(a1, a2)      ≈ 0.2449489742783178u"nm"
-    @test Molly.geometric_ϵ_mixing(a1, a2)      ≈ 0.14142135623730953u"kJ * mol^-1"
-    @test Molly.waldman_hagler_σ_mixing(a1, a2) ≈ 0.271044458112581u"nm"
-    @test Molly.waldman_hagler_ϵ_mixing(a1, a2) ≈ 0.07704164677744986u"kJ * mol^-1"
-    @test Molly.fender_halsey_ϵ_mixing(a1, a2)  ≈ 0.13333333333333333u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.LorentzMixing(), a1, a2)       ≈ 0.25u"nm"
+    @test Molly.ϵ_mixing(Molly.LorentzMixing(), a1, a2)       ≈ 0.15u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.GeometricMixing(), a1, a2)     ≈ 0.2449489742783178u"nm"
+    @test Molly.ϵ_mixing(Molly.GeometricMixing(), a1, a2)     ≈ 0.14142135623730953u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.WaldmanHaglerMixing(), a1, a2) ≈ 0.271044458112581u"nm"
+    @test Molly.ϵ_mixing(Molly.WaldmanHaglerMixing(), a1, a2) ≈ 0.07704164677744986u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(Molly.FenderHalseyMixing(), a1, a2)  ≈ 0.13333333333333333u"kJ * mol^-1"
+
+    σ_exceptions_dict = Dict((2, 1) => 0.5u"nm", (3, 3) => 0.6u"nm")
+    σ_exceptions_static = Molly.ExceptionList(
+        SVector{2}([(2, 1), (3, 3)]),
+        SVector(0.5u"nm", 0.6u"nm"),
+    )
+    lorentz_mixing_dict = Molly.MixingException(Molly.LorentzMixing(), σ_exceptions_dict)
+    lorentz_mixing_static = Molly.MixingException(Molly.LorentzMixing(), σ_exceptions_static)
+    @test Molly.σ_mixing(lorentz_mixing_dict  , a1, a2) ≈ 0.5u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_dict  , a1, a3) ≈ 0.35u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_dict  , a3, a3) ≈ 0.6u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_static, a1, a2) ≈ 0.5u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_static, a1, a3) ≈ 0.35u"nm"
+    @test Molly.σ_mixing(lorentz_mixing_static, a3, a3) ≈ 0.6u"nm"
+
+    ϵ_exceptions_dict = Dict((2, 1) => 0.5u"kJ * mol^-1", (3, 3) => 0.6u"kJ * mol^-1")
+    ϵ_exceptions_static = Molly.ExceptionList(
+        SVector{2}([(2, 1), (3, 3)]),
+        SVector(0.5u"kJ * mol^-1", 0.6u"kJ * mol^-1"),
+    )
+    geometric_mixing_dict = Molly.MixingException(Molly.GeometricMixing(), ϵ_exceptions_dict)
+    geometric_mixing_static = Molly.MixingException(Molly.GeometricMixing(), ϵ_exceptions_static)
+    @test Molly.ϵ_mixing(geometric_mixing_dict  , a1, a2) ≈ 0.5u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_dict  , a1, a3) ≈ 0.28284271247461906u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_dict  , a3, a3) ≈ 0.6u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_static, a1, a2) ≈ 0.5u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_static, a1, a3) ≈ 0.28284271247461906u"kJ * mol^-1"
+    @test Molly.ϵ_mixing(geometric_mixing_static, a3, a3) ≈ 0.6u"kJ * mol^-1"
 
     @test !use_neighbors(LennardJones())
     @test  use_neighbors(LennardJones(use_neighbors=true))
 
-    for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCoreBeutler(α=1, λ=1), LennardJonesSoftCoreGapsys(α=1, λ=1))
+    for inter in (
+            LennardJones(),
+            Mie(m=6, n=12),
+            LennardJonesSoftCoreBeutler(α=1, λ=1),
+            LennardJonesSoftCoreGapsys(α=1, λ=1),
+        )
         @test isapprox(
             force(inter, dr12, a1, a1),
             SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
@@ -43,6 +77,28 @@
             atol=1e-9u"kJ * mol^-1",
         )
     end
+
+    inter = Molly.LennardJones14(0.3u"nm", 0.2u"kJ * mol^-1", 1)
+    @test isapprox(
+        force(inter, c1, c3, c4, c2, boundary).f4,
+        SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(inter, c1, c2, c4, c3, boundary).f4,
+        SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, c1, c3, c4, c2, boundary),
+        0.0u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, c1, c2, c4, c3, boundary),
+        -0.1170417309u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
 
     inter = LennardJonesSoftCoreBeutler(α=0.3, λ=0.5)
     @test isapprox(
@@ -675,16 +731,18 @@
     pe_improper = potential_energy(pt_improper, c1t, c2t, c3t, c4t, boundary_rb)
     @test isapprox(pe_improper, 20.0u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
 
-    do_shortcut(atom_i, atom_j) = true
+    struct AlwaysShortcut end
+
+    Molly.shortcut_pair(::AlwaysShortcut, args...) = true
 
     for inter in (
-            LennardJones(; shortcut=do_shortcut),
-            LennardJonesSoftCoreBeutler(α=1, λ=0; shortcut=do_shortcut),
-            LennardJonesSoftCoreGapsys(α=1, λ=0; shortcut=do_shortcut),
-            AshbaughHatch(; shortcut=do_shortcut),
-            SoftSphere(; shortcut=do_shortcut),
-            Mie(m=6, n=12; shortcut=do_shortcut),
-            Buckingham(; shortcut=do_shortcut),
+            LennardJones(; shortcut=AlwaysShortcut()),
+            LennardJonesSoftCoreBeutler(α=1, λ=0; shortcut=AlwaysShortcut()),
+            LennardJonesSoftCoreGapsys(α=1, λ=0; shortcut=AlwaysShortcut()),
+            AshbaughHatch(; shortcut=AlwaysShortcut()),
+            SoftSphere(; shortcut=AlwaysShortcut()),
+            Mie(m=6, n=12; shortcut=AlwaysShortcut()),
+            Buckingham(; shortcut=AlwaysShortcut()),
         )
 
         @test isapprox(
@@ -738,10 +796,10 @@
 
     # Test mixing rules with edge cases (zero values)
     a_zero = Atom(charge=0.0, σ=0.0u"nm", ϵ=0.0u"kJ * mol^-1")
-    @test Molly.lorentz_σ_mixing(a1_mie, a_zero) ≈ 0.15u"nm"
-    @test Molly.lorentz_ϵ_mixing(a1_mie, a_zero) ≈ 0.1u"kJ * mol^-1"
-    @test Molly.geometric_σ_mixing(a1_mie, a_zero) ≈ 0.0u"nm"
-    @test Molly.geometric_ϵ_mixing(a1_mie, a_zero) ≈ 0.0u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.LorentzMixing(), a1_mie, a_zero) ≈ 0.15u"nm"
+    @test Molly.ϵ_mixing(Molly.LorentzMixing(), a1_mie, a_zero) ≈ 0.1u"kJ * mol^-1"
+    @test Molly.σ_mixing(Molly.GeometricMixing(), a1_mie, a_zero) ≈ 0.0u"nm"
+    @test Molly.ϵ_mixing(Molly.GeometricMixing(), a1_mie, a_zero) ≈ 0.0u"kJ * mol^-1"
 end
 
 @testset "Cutoffs" begin
