@@ -324,17 +324,16 @@ The types used should be bits types if the GPU is going to be used.
     charge::C = 0.0
     σ::S = 0.0u"nm"
     ϵ::E = 0.0u"kJ * mol^-1"
-    λ_coul::L = 1.0
-    λ_vdw::L = 1.0
+    λ::L = 1.0
 end
 
 function Base.zero(::Atom{T, M, C, S, E, L}) where {T, M, C, S, E, L}
-    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), zero(L))
+    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E), zero(L))
 end
 
 function Base.:+(a1::Atom, a2::Atom)
     return Atom(a1.index, a1.atom_type, a1.mass + a2.mass, a1.charge + a2.charge,
-                a1.σ + a2.σ, a1.ϵ + a2.ϵ, a1.λ_coul + a2.λ_coul, a1.λ_vdw + a2.λ_vdw)
+                a1.σ + a2.σ, a1.ϵ + a2.ϵ, a1.λ + a2.λ)
 end
 
 # get function errors with AD
@@ -349,8 +348,7 @@ function inject_atom(at, at_data, params_dic)
         at.charge, # Residue-specific
         dict_get(params_dic, key_prefix * "σ"     , at.σ   ),
         dict_get(params_dic, key_prefix * "ϵ"     , at.ϵ   ),
-        at.λ_coul, # Preserve lambda from existing atom,
-        at.λ_vdw
+        at.λ # Preserve lambda from existing atom,
     )
 end
 
@@ -384,7 +382,7 @@ end
 
 function Base.show(io::IO, a::Atom)
     print(io, "Atom with index=", a.index, ", atom_type=", a.atom_type, ", mass=", mass(a),
-          ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ, ", λ_coul=", a.λ_coul, " λ_vdw=", a.λ_vdw)
+          ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ, ", λ=", a.λ)
 end
 
 """

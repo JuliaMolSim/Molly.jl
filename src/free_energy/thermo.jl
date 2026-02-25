@@ -50,9 +50,8 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         for atom in atoms_cpu
             # Flag if the atom possesses alchemical scaling properties,
             # or if its properties explicitly diverge from the reference.
-            if (atom.λ_coul < 1.0) || (atom.λ_vdw < 0) || 
-               (atom.λ_coul != ref_sys.atoms[atom.index].λ_coul) || 
-               (atom.λ_vdw != ref_sys.atoms[atom.index].λ_vdw)
+            if (atom.λ < 1.0) || 
+               (atom.λ != from_device(ref_sys.atoms)[atom.index].λ)
                 push!(solute_indices, atom.index)
             end
         end

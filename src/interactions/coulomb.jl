@@ -144,6 +144,7 @@ If ``\lambda`` is zero the interaction is turned off.
     use_neighbors::Bool = false
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
+    λ_mixing::LM = MinimumMixing()
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
@@ -186,7 +187,7 @@ end
     # 1. Type stability: Cast lambda to match the precision of coulomb_const (e.g. Float32)
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = T(inter.λ_mixing(atom_i, atom_j))
+    λ = λ_mixing(inter.λ_mixing, atom_i, atom_j)
 
     if λ <= 0
         return ustrip.(zero(dr)) * force_units
@@ -195,12 +196,21 @@ end
     r = norm(dr)
     qi, qj = atom_i.charge, atom_j.charge
     cutoff = inter.cutoff
-    ke = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
-    C6 = 4 * ϵ * σ6
-    params = (ke, qi, qj, C6 * σ6, C6, inter.σ6_fac, inter.λ)
+
+    # 2. Fast Path: Standard Coulomb (λ >= 1.0)
+    # Use tuple padding (Nothing) to match length 7 of the alchemical path
+    if λ >= 1
+        params = (ke, qi, qj, nothing, nothing, nothing, nothing)
+        f = force_cutoff(cutoff, inter, r, params)
+        fdr = (f / r) * dr
+        return special ? fdr * inter.weight_special : fdr
+    end
+
+    # 3. Alchemical Path
+    σ6 = inter.σ_mixing(atom_i, atom_j)^6
+    C6 = T(1.0)
+    C12 = σ6
+    σ6_fac = inter.α * (1 - λ)
 
     params = (ke, qi, qj, C12, C6, σ6_fac, λ)
     f = force_cutoff(cutoff, inter, r, params)
@@ -240,12 +250,19 @@ end
     r = norm(dr)
     qi, qj = atom_i.charge, atom_j.charge
     cutoff = inter.cutoff
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
-    C6 = 4 * ϵ * σ6
-    params = (ke, qi, qj, C6 *σ6, C6, inter.σ6_fac, inter.λ)
-    ke = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
+
+    # 2. Fast Path: Standard Coulomb (λ >= 1.0)
+    if λ >= 1
+        params = (ke, qi, qj, nothing, nothing, nothing, nothing)
+        pe = pe_cutoff(cutoff, inter, r, params)
+        return special ? pe * inter.weight_special : pe
+    end
+
+    # 3. Alchemical Path
+    σ6 = inter.σ_mixing(atom_i, atom_j)^6
+    C6 = T(1.0)
+    C12 = σ6
+    σ6_fac = inter.α * (1 - λ)
 
     params = (ke, qi, qj, C12, C6, σ6_fac, λ)
     pe = pe_cutoff(cutoff, inter, r, params)
@@ -299,7 +316,7 @@ If ``\lambda`` is zero the interaction is turned off.
     α::A = 0.3
     σQ::S = 1.0u"nm"
     use_neighbors::Bool = false
-    λ_mixing::LM = lorentz_λ_coul_mixing
+    λ_mixing::LM = MinimumMixing()
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
@@ -340,7 +357,7 @@ end
     # 1. Type stability
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = T(inter.λ_mixing(atom_i, atom_j))
+    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
     if λ <= 0
         return ustrip.(zero(dr)) * force_units

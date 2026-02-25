@@ -611,7 +611,7 @@ function System(coord_file::AbstractString,
                 error("atom $ai type $atype has charge missing")
             end
         end
-        push!(atoms_abst, Atom(index=ai, atom_type=ati, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
+        push!(atoms_abst, Atom(index=ai, atom_type=ati, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ, λ=T(1.0)))
 
         if !ismissing(at.σ14)
             push!(σs_14, at.σ14)

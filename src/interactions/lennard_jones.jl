@@ -177,6 +177,7 @@ If ``\lambda`` is zero the interaction is turned off.
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
+    λ_mixing::LM = MinimumMixing()
     weight_special::W = 1
 end
 
@@ -215,11 +216,42 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+    # Mix Lambda
+    λ = inter.λ_mixing(atom_i, atom_j)
+    if λ <= 0.0
         return ustrip.(zero(dr)) * force_units
     end
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    # If lambda is 1, the soft core formula reduces to standard LJ
+    # We explicity branch to save compute.
+    if λ >= 1.0
+        # Replicates logic from standard LennardJones force
+        if inter.shortcut(atom_i, atom_j)
+            return ustrip.(zero(dr)) * force_units
+        end
+        σ = inter.σ_mixing(atom_i, atom_j)
+        ϵ = inter.ϵ_mixing(atom_i, atom_j)
+        r = norm(dr)
+        σ2 = σ^2
+        params = (σ2, ϵ, nothing, nothing)
+        
+        # Call standard LJ cutoff logic.
+        f = force_cutoff(inter.cutoff, inter, r, params) 
+        fdr = (f / r) * dr
+        
+        return special ? fdr * inter.weight_special : fdr
+    end
+
+    # 3. Alchemical Path: Soft Core Lennard Jones
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip.(zero(dr)) * force_units
+    end
+    
+    σ6 = inter.σ_mixing(atom_i, atom_j)^6
+    ϵ  = inter.ϵ_mixing(atom_i, atom_j)
 
     r = norm(dr)
     C6 = 4 * ϵ * σ6
@@ -253,11 +285,35 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+    # Mix Lambda
+    λ = λ_mixing(inter.λ_mixing, atom_i, atom_j)
+    if inter.shortcut(atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
+
+
+    # If lambda is 1, the soft core formula reduces to standard LJ
+    # We explicity branch to save compute.
+    if λ >= 1.0
+
+        σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+        ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+
+        r = norm(dr)
+        σ2 = σ^2
+        params = (σ2, ϵ, nothing, nothing)
+
+        pe = pe_cutoff(inter.cutoff, inter, r, params)
+        
+        if special
+            return pe * inter.weight_special
+        else
+            return pe
+        end
+    end
+
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
     r = norm(dr)
@@ -331,6 +387,7 @@ If ``\lambda`` is zero the interaction is turned off.
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
+    λ_mixing::LM = MinimumMixing()
     weight_special::W = 1
 end
 
@@ -369,16 +426,16 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+
+    λ = λ_mixing(inter.λ_mixing, atom_i, atom_j)
+    if inter.shortcut(atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = norm(dr)
-    σ = inter.σ_mixing(atom_i, atom_j)
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     σ6 = σ^6
 
     # 3. Fast Path: Standard Lennard Jones
@@ -430,16 +487,15 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+    λ = λ_mixing(inter.λ_mixing, atom_i, atom_j)
+    if inter.shortcut(atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = norm(dr)
-    σ = inter.σ_mixing(atom_i, atom_j)
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     σ6 = σ^6
 
     # 3. Fast Path: Standard Lennard Jones

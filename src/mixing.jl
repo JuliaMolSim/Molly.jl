@@ -6,7 +6,8 @@ struct LJZeroShortcut end
 
 function shortcut_pair(::LJZeroShortcut, atom_i, atom_j, args...)
     return iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-           iszero_value(atom_i.σ) || iszero_value(atom_j.σ)
+           iszero_value(atom_i.σ) || iszero_value(atom_j.σ) ||
+           iszero_value(atom_i.λ) || iszero_value(atom_j.λ)
 end
 
 struct BuckinghamZeroShortcut end
@@ -115,4 +116,11 @@ end
 function λ_mixing(me::MixingException, atom_i, atom_j, args...)
     default = λ_mixing(me.mixing, atom_i, atom_j, args...)
     return get_pair(me.exceptions, atom_i.atom_type, atom_j.atom_type, default)
+end
+
+
+struct MinimumMixing end
+
+function λ_mixing(m::MinimumMixing, a, b, args...)
+    return min(1.0, min(a.λ, b.λ))
 end
