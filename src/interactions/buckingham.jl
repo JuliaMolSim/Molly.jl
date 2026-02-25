@@ -1,26 +1,5 @@
 export Buckingham
 
-function buckingham_zero_shortcut(atom_i, atom_j)
-    return (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
-           (iszero_value(atom_i.C) || iszero_value(atom_j.C))
-end
-
-function geometric_A_mixing(atom_i, atom_j)
-    return sqrt(atom_i.A * atom_j.A)
-end
-
-function geometric_B_mixing(atom_i, atom_j)
-    return sqrt(atom_i.B * atom_j.B)
-end
-
-function geometric_C_mixing(atom_i, atom_j)
-    return sqrt(atom_i.C * atom_j.C)
-end
-
-function inverse_B_mixing(atom_i, atom_j)
-    return 2 / (inv(atom_i.B) + inv(atom_j.B))
-end
-
 @doc raw"""
     Buckingham(; cutoff, use_neighbors, shortcut, A_mixing, B_mixing,
                C_mixing, weight_special)
@@ -48,10 +27,10 @@ so atoms that use this interaction should have fields `A`, `B` and `C` available
 @kwdef struct Buckingham{C, S, A, B, M, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
-    shortcut::S = buckingham_zero_shortcut
-    A_mixing::A = geometric_A_mixing
-    B_mixing::B = inverse_B_mixing
-    C_mixing::M = geometric_C_mixing
+    shortcut::S = BuckinghamZeroShortcut()
+    A_mixing::A = GeometricMixing()
+    B_mixing::B = InverseMixing()
+    C_mixing::M = GeometricMixing()
     weight_special::W = 1
 end
 
@@ -74,12 +53,12 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    if inter.shortcut(atom_i, atom_j)
+    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
         return ustrip.(zero(dr)) * force_units
     end
-    A = inter.A_mixing(atom_i, atom_j)
-    B = inter.B_mixing(atom_i, atom_j)
-    C = inter.C_mixing(atom_i, atom_j)
+    A = A_mixing(inter.A_mixing, atom_i, atom_j, special)
+    B = B_mixing(inter.B_mixing, atom_i, atom_j, special)
+    C = C_mixing(inter.C_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = norm(dr)
@@ -105,12 +84,12 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    if inter.shortcut(atom_i, atom_j)
+    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
         return ustrip(zero(dr[1])) * energy_units
     end
-    A = inter.A_mixing(atom_i, atom_j)
-    B = inter.B_mixing(atom_i, atom_j)
-    C = inter.C_mixing(atom_i, atom_j)
+    A = A_mixing(inter.A_mixing, atom_i, atom_j, special)
+    B = B_mixing(inter.B_mixing, atom_i, atom_j, special)
+    C = C_mixing(inter.C_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = norm(dr)

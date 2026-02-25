@@ -13,9 +13,9 @@ V(r_{ij}) = 4\varepsilon_{ij} \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12}
 @kwdef struct SoftSphere{C, H, S, E} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
-    shortcut::H = lj_zero_shortcut
-    σ_mixing::S = lorentz_σ_mixing
-    ϵ_mixing::E = geometric_ϵ_mixing
+    shortcut::H = LJZeroShortcut()
+    σ_mixing::S = LorentzMixing()
+    ϵ_mixing::E = GeometricMixing()
 end
 
 use_neighbors(inter::SoftSphere) = inter.use_neighbors
@@ -34,11 +34,11 @@ end
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
                        args...)
-    if inter.shortcut(atom_i, atom_j)
+    if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
-    σ = inter.σ_mixing(atom_i, atom_j)
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
     r = norm(dr)
@@ -60,11 +60,11 @@ end
                                   atom_j,
                                   energy_units=u"kJ * mol^-1",
                                   args...)
-    if inter.shortcut(atom_i, atom_j)
+    if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
-    σ = inter.σ_mixing(atom_i, atom_j)
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
     r = norm(dr)

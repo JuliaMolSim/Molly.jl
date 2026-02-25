@@ -32,9 +32,9 @@ function Mie(;
              n,
              cutoff=NoCutoff(),
              use_neighbors=false,
-             shortcut=lj_zero_shortcut,
-             σ_mixing=lorentz_σ_mixing,
-             ϵ_mixing=geometric_ϵ_mixing,
+             shortcut=LJZeroShortcut(),
+             σ_mixing=LorentzMixing(),
+             ϵ_mixing=GeometricMixing(),
              weight_special=1)
     m_p, n_p, mn_fac = promote(m, n, (n / (n - m)) * (n / m) ^ (m / (n - m)))
     return Mie(m_p, n_p, cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
@@ -69,11 +69,11 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    if inter.shortcut(atom_i, atom_j)
+    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
         return ustrip.(zero(dr)) * force_units
     end
-    σ = inter.σ_mixing(atom_i, atom_j)
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = norm(dr)
@@ -103,11 +103,11 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    if inter.shortcut(atom_i, atom_j)
+    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
         return ustrip(zero(dr[1])) * energy_units
     end
-    σ = inter.σ_mixing(atom_i, atom_j)
-    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = norm(dr)
