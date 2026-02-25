@@ -873,15 +873,17 @@ This will output a robust 2D free energy map of the alanine dipeptide Ramachandr
 
 ## Calculating Alchemical Free Energies with AWH
 
-### The alchemical transformation
+### The alchemical transformation and the two-leg cycle
 
-While AWH is highly effective for sampling spatial reaction coordinates, its statistical mechanics foundation seamlessly extends to alchemical transformations. In an alchemical free energy calculation, the collective variable is not a geometric property, but rather an alchemical parameter $\lambda$ that interpolates the Hamiltonian between two thermodynamic end states. A classic example is the calculation of a solvation free energy, which involves the transformation between a "coupled" state (a solute fully interacting with the solvent) and a "decoupled" state (the solute acts as an ideal gas non-interacting phantom within the solvent).
+In an alchemical free energy calculation, the collective variable is an alchemical parameter $\lambda$ that interpolates the Hamiltonian between two thermodynamic end states. Using AWH eliminates the need to manually optimize a dense ladder of intermediate $\lambda$ states, as the algorithm dynamically enforces a uniform target distribution, dedicating more sampling time to high-gradient regions. 
 
-Using AWH for alchemical transformations presents a significant advantage over equilibrium methods like MBAR. In MBAR, one must meticulously define a dense ladder of intermediate $\lambda$ states to ensure sufficient phase-space overlap between adjacent windows. AWH eliminates this manual optimization. Because AWH dynamically updates the bias to enforce a target uniform distribution across the $\lambda$ space, the simulation will naturally adapt, spending more time sampling the specific $\lambda$ bottleneck regions where the free energy gradient is steepest. 
+For a rigorous standard state solvation calculation, a two-leg thermodynamic cycle must be used to account for intramolecular self-interactions and conformational entropy changes that occur upon removing the solvent:
+1.  **Solvent Leg (Annihilation):** Both solute-solvent and solute-solute non-bonded interactions are turned off.
+2.  **Vacuum Leg (Annihilation):** The isolated solute is simulated, and its intramolecular non-bonded interactions are turned off.
 
-In this example, we will calculate the solvation free energy of ethanol. A standard and robust approach to avoid numerical instabilities (the "endpoint catastrophe") is to perform the decoupling in two stages: first, linearly decouple the electrostatic interactions, and subsequently decouple the Lennard-Jones (van der Waals) interactions using a soft-core potential.
+Subtracting the vacuum annihilation work from the solvent annihilation work perfectly isolates the free energy of solvation.
 
-We start by defining our simulation parameters and the $\lambda$ schedule:
+To prevent numerical instability when atoms overlap at low $\lambda$ values, the schedule decouples electrostatic interactions linearly first, followed by van der Waals interactions using a soft-core potential. The timestep is set to **1 fs** to maintain stable numerical integration against the steep potential gradients present in highly decoupled states.
 
 ```julia
 # alchemical_awh.jl
@@ -895,12 +897,11 @@ using StatsBase
 # --- Simulation Constants ---
 FT = Float32
 AT = CuArray
-Δt = FT(2)u"fs"
+Δt = FT(1)u"fs"
 T0 = FT(310)u"K"
 P0 = FT(1)u"bar"
 
 # Define Lambda Schedule: (Charge Scaling, VdW Scaling)
-# Electrostatics are decoupled linearly first, followed by soft-core Lennard-Jones.
 lambda_schedule = [
     (1.0, 1.0), (0.9, 1.0), (0.8, 1.0), (0.7, 1.0), (0.6, 1.0), 
     (0.5, 1.0), (0.4, 1.0), (0.3, 1.0), (0.2, 1.0), (0.1, 1.0),
@@ -909,68 +910,53 @@ lambda_schedule = [
     (0.0, 0.5), (0.0, 0.4), (0.0, 0.3), (0.0, 0.2), 
     (0.0, 0.1), (0.0, 0.0)
 ]
-```
-
-### Decoupling the solute: Soft-core potentials and mixing rules
-
-To accurately represent the intermediate alchemical states, we must ensure that we are only decoupling the solute from the solvent, while leaving the solvent-solvent interactions fully intact. Molly handles this by assigning `λ_coul` and `λ_vdw` properties directly to the [`Atom`](@ref) structs. We can define custom $\lambda$-mixing rules that are passed to the interaction potentials.
-
-By taking the minimum of the two interacting atoms' $\lambda$ values, a solute atom (with $\lambda$<1.0) interacting with a solvent atom (with $\lambda$=1.0) will be scaled by the solute's $\lambda$. Meanwhile, two solvent atoms ($\lambda$=1.0) will always interact with a combined $\lambda$ of 1.0.
-
-```julia
-# alchemical_awh.jl
 
 # --- Force Field Setup ---
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir   = joinpath(data_dir, "force_fields")
 ff = MolecularForceField(FT, joinpath.(ff_dir, ["tip3p_standard.xml", "gaff.xml", "ethanol.xml"])...; units=true)
+```
 
-# --- Custom Lambda Mixing Rules for Decoupling ---
-function decoupling_λ_vdw_mixing(a, b)
-    if a.λ_vdw == b.λ_vdw
-        # Solute-solute or solvent-solvent: clamp to force soft-core evaluation
-        return typeof(a.λ_vdw)(0.99999)
-    else
-        # Solute-solvent: strictly decouple, but clamp maximum
-        return min(typeof(a.λ_vdw)(0.99999), min(a.λ_vdw, b.λ_vdw))
-    end
+### Annihilation mixing rules
+
+To properly annihilate the solute, custom λ-mixing rules are required. By using a nested minimum function and clamping the highest value, both solute-solvent and solute-solute interactions are appropriately scaled down to zero. Note that using a Lorentz mixing rule in this case is not correct, since for a completely turned off solute $\lambda_{solute} = 0$ and a completely turned on solvend $\lambda_{solvent} = 1$ the overall lambda would yield $\lambda = (0 + 1)/2 = 0.5$. A geometric mixig such as $\sqrt{\lambda \cdot \lambda}$ could be used instead, but that would lead to a non-linear scaling along the alchemical coordinate and would potentially degrade the convergence if the algorithm.
+
+```julia
+# alchemical_awh.jl
+
+function annihilation_λ_vdw_mixing(a, b)
+    return min(typeof(a.λ_vdw)(0.99999), min(a.λ_vdw, b.λ_vdw))
 end
 
-function decoupling_λ_coul_mixing(a, b)
-    if a.λ_coul == b.λ_coul
-        return typeof(a.λ_coul)(0.99999)
-    else
-        return min(typeof(a.λ_coul)(0.99999), min(a.λ_coul, b.λ_coul))
-    end
+function annihilation_λ_coul_mixing(a, b)
+    return min(typeof(a.λ_coul)(0.99999), min(a.λ_coul, b.λ_coul))
 end
 ```
 
 ### Setting up the alchemical thermodynamic states
 
-Next, we define the [`ThermoState`](@ref) structs that construct the AWH grid. We will build a function that reads the fully coupled structure and iteratively modifies the atomic $\lambda$ parameters according to our schedule.
+The `setup_alchemical_awh` function constructs the [`AWHState`](@ref) grid. The function handles ensemble selection via the `is_vacuum` flag: an NPT ensemble ([`VelocityRescaleThermostat`](@ref) and [`CRescaleBarostat`](@ref)) is applied for the solvent leg, whereas an NVT ensemble (thermostat only) is applied for the vacuum leg to prevent the unconstrained simulation box from catastrophically collapsing.
 
-To prevent the singularity that occurs when two atoms perfectly overlap at $\lambda$ → 0, we replace the standard Coulomb and Lennard-Jones interactions with their soft-core counterparts, [`CoulombSoftCoreBeutler`](@ref) and [`LennardJonesSoftCoreBeutler`](@ref).
+Soft-core potentials ([`CoulombSoftCoreBeutler`](@ref) and [`LennardJonesSoftCoreBeutler`](@ref)) replace the standard non-bonded interactions.
 
 ```julia
 # alchemical_awh.jl
 
-function setup_alchemical_awh(pdb_file, solute_indices)
-    sys_base = System(
-        pdb_file,
-        ff;
-        array_type=AT,
-        nonbonded_method=:none
-    )
+function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false)
+    sys_base = System(pdb_file, ff; array_type=AT, nonbonded_method=:none)
 
     thermostat = VelocityRescaleThermostat(T0, FT(0.1)u"ps")
-    barostat = CRescaleBarostat(P0, FT(1)u"ps"; n_steps=250)
-    integrator = VelocityVerlet(Δt, (thermostat, barostat), 100)
+    
+    if is_vacuum
+        integrator = VelocityVerlet(Δt, (thermostat,), 100)
+    else
+        barostat = CRescaleBarostat(P0, FT(1)u"ps"; n_steps=250)
+        integrator = VelocityVerlet(Δt, (thermostat, barostat), 100)
+    end
 
-    # Minimize the fully coupled system first
     minim = SteepestDescentMinimizer(step_size=FT(0.01)u"nm", max_steps=1000)
     simulate!(sys_base, minim)
 
-    # Extract base non-bonded interactions
     p_inters = sys_base.pairwise_inters
     idx_lj   = findfirst(x -> x isa LennardJones, p_inters)
     idx_coul = findfirst(x -> x isa Coulomb, p_inters)
@@ -981,25 +967,22 @@ function setup_alchemical_awh(pdb_file, solute_indices)
     atoms_cpu = Molly.from_device(sys_base.atoms)
     thermo_states = ThermoState[]
 
-    # Construct each thermodynamic state along the alchemical path
     for (λ_coul, λ_lj) in lambda_schedule
-        
         lj_sc = LennardJonesSoftCoreBeutler(
             cutoff = lj_0.cutoff,
-            λ_mixing = decoupling_λ_vdw_mixing,
+            λ_mixing = annihilation_λ_vdw_mixing,
             α = FT(0.85),
             use_neighbors = lj_0.use_neighbors
         )
 
         coul_sc = CoulombSoftCoreBeutler(
             cutoff = cl_0.cutoff,
-            λ_mixing = decoupling_λ_coul_mixing,
-            α = FT(0.01), # Minimal shift to shield the r=0 singularity in Float32
+            λ_mixing = annihilation_λ_coul_mixing,
+            α = FT(0.1), 
             coulomb_const = cl_0.coulomb_const,
             use_neighbors = cl_0.use_neighbors
         )
 
-        # Assign the current λ values to the solute atoms only
         acopy = Atom[]
         for a in atoms_cpu
             if a.index ∈ solute_indices
@@ -1027,42 +1010,102 @@ end
 
 ### Execution and Standard State Corrections
 
-With our states configured, we can launch the AWH simulation. Since the alchemical parameter $\lambda$ itself is the discrete index tracked by AWH, the resulting free energy vector $f(\lambda)$ represents the direct alchemical free energy profile without any need for PMF deconvolution.
+The calculation integrates both the solvated and vacuum legs. Since $\lambda$ is tracked dynamically by AWH as a discrete index, the output vector $f(\lambda)$ yields the alchemical free energy profile directly, requiring no PMF deconvolution.
 
-Because we are calculating a solvation free energy, we must apply a standard state volume correction. The simulation itself calculates the work of decoupling exactly one solute molecule from the solvent within a finite simulation box of volume $V_{sim}$​. This means it effectively computes the free energy of transferring the solute from a solvated state at $V_{sim}$​ to an ideal gas state at the exact same volume. To obtain the standard free energy of solvation ($\Delta G_{solv}^{∘}$​), defined as the transfer from an ideal gas at 1 bar to a 1 Molar solution, we must apply an analytical volume correction. The correction term evaluated in the script ($k_{B} ​T \ln(\frac{V_{gas}}{V_{std​}})$) accounts for these concentration differences, shifting both the initial and final states of our thermodynamic cycle to their respective macroscopic standard states.
+An analytical standard state volume correction, $k_{B}​T \ln(V_{gas}​/V_{std}​)$, shifts the initial and final states from the finite simulation volume to their macroscopic standard definitions (an ideal gas at 1 bar to a 1 Molar solution).
 
 ```julia
 # alchemical_awh.jl
 
-# --- Execution ---
 md_time  = FT(10)u"ns"
 md_steps = Int(floor(uconvert(unit(Δt), md_time) / Δt))
-solute_idx = 1:9 # Ethanol has 9 atoms
+solute_idx = 1:9
 
-println("Running Solvated AWH...")
-awh_solv, sys_solv = setup_alchemical_awh("ethanol_solv.pdb", solute_idx)
+# 1. Solvated Leg
+println("Running Solvated AWH Leg...")
+awh_solv, sys_solv = setup_alchemical_awh("ethanol_solv.pdb", solute_idx; is_vacuum=false)
 simulate!(awh_solv, md_steps)
-
-# Calculate the decoupling free energy (Coupled -> Decoupled)
 dF_solv = awh_solv.state.f[end] - awh_solv.state.f[1]
 
+# 2. Vacuum Leg
+println("Running Vacuum AWH Leg...")
+awh_vac, sys_vac = setup_alchemical_awh("ethanol.pdb", solute_idx; is_vacuum=true)
+simulate!(awh_vac, md_steps)
+dF_vac = awh_vac.state.f[end] - awh_vac.state.f[1]
+
 # --- Thermodynamic Cycle ---
-
-# Standard gas state (1 bar) volume per molecule at T0
 V_gas = ustrip(u"nm^3", Unitful.k * T0 / P0)
-
-# Standard solution state (1 M = 1 mol/L) volume per molecule
 V_std = ustrip(u"nm^3", 1.0u"L" / (1.0u"mol" * Unitful.Na))
-
-# Analytical standard state correction
 dG_std_corr = log(V_gas / V_std)
 
-# Final Solvation Free Energy (Decoupled -> Coupled)
-dG_solv = -dF_solv + dG_std_corr
+dG_solv = dF_vac - dF_solv + dG_std_corr
+beta = awh_solv.state.λ_β[1]
 
 println("=========================================")
-println("Decoupling in solvent (kBT):     ", dF_solv)
-println("Standard State Correction (kBT): ", dG_std_corr)
-println("Solvation Free Energy (kBT):     ", dG_solv)
+println("Annihilation in solvent (kJ mol^-1):   ", dF_solv / beta)
+println("Annihilation in vacuum (kJ mol^-1):    ", dF_vac / beta)
+println("Standard State Correction (kJ mol^-1): ", dG_std_corr / beta)
+println("Solvation Free Energy (kJ mol^-1):     ", dG_solv / beta)
 println("=========================================")
 ```
+
+```
+=========================================
+Annihilation in solvent (kJ mol^-1):   52.39459
+Annihilation in vacuum (kJ mol^-1):    14.510403
+Standard State Correction (kJ mol^-1): 8.375271054356045
+Solvation Free Energy (kJ mol^-1):     -29.508914674463064
+=========================================
+```
+
+### Analyzing Convergence and Free Energy Profiles
+
+The `max_delta_f_history` array records the maximum bias update applied over time. Plotted logarithmically, this variable confirms convergence once it transitions into a linear $1/t$ decay regime.
+
+```julia
+# alchemical_awh.jl
+
+function smooth_array(arr; smooth_n = 4)
+    N = length(arr)
+    return [mean(arr[max(i - smooth_n, 1):min(i + smooth_n, N)]) for i in eachindex(arr)]
+end
+
+steps_solv = length(awh_solv.state.stats.max_delta_f_history)
+time_solv  = [ustrip(md_time) * n/steps_solv for n in 1:steps_solv]
+steps_vac = length(awh_vac.state.stats.max_delta_f_history)
+time_vac  = [ustrip(md_time) * n/steps_vac for n in 1:steps_vac]
+
+fig_conv = Figure(size = (720, 720))
+ax_conv = Axis(fig_conv[1,1], title = L"\textbf{Max. ΔF Convergence}", xlabel = L"\textbf{Time / ns}", ylabel = L"\textbf{log}$_{10}$\textbf{(ΔF)}")
+
+lines!(ax_conv, time_solv, log10.(smooth_array(awh_solv.state.stats.max_delta_f_history)), color = :royalblue, label = "Solvent Leg")
+lines!(ax_conv, time_vac, log10.(smooth_array(awh_vac.state.stats.max_delta_f_history)), color = :firebrick, label = "Vacuum Leg")
+
+axislegend(ax_conv, position = :rt)
+save("awh_alchemical_convergence.png", fig_conv)
+```
+
+![Convergence of Alchemical AWH](images/awh_alchemical_convergence.png)
+
+The resulting alchemical free energy profiles can be extracted and plotted directly from the converged `f` vectors.
+
+```julia
+# alchemical_awh.jl
+
+λ_indices = collect(eachindex(awh_solv.state.λ_β))
+
+fig_fe = Figure(size = (720, 720))
+ax_fe = Axis(fig_fe[1,1], title = L"\textbf{Alchemical Free Energy}", xlabel = L"\textbf{Alchemical State (\lambda)}", ylabel = L"\textbf{F / k_{B}T}")
+
+lines!(ax_fe, λ_indices, awh_solv.state.f, color = :royalblue, linewidth = 5.0, label = "Solvent Leg")
+lines!(ax_fe, λ_indices, awh_vac.state.f, color = :firebrick, linewidth = 5.0, label = "Vacuum Leg")
+
+text!(ax_fe, 1.0, awh_solv.state.f[1], text = L"\text{Fully coupled}", align = (:left, :bottom), offset = (5, 5), fontsize = 18)
+text!(ax_fe, 11.0, awh_solv.state.f[11], text = L"\text{Charges switched off}", align = (:left, :top), offset = (5, -15), fontsize = 18)
+text!(ax_fe, 21.0, awh_solv.state.f[21], text = L"\text{VdW switched off}", align = (:right, :top), offset = (-5, -25), fontsize = 18)
+
+axislegend(ax_fe, position = :lt)
+save("awh_alchemical_profile.png", fig_fe)
+```
+
+![Free Energy Alchemical Profile](images/awh_alchemical_profile.png)
