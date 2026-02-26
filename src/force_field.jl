@@ -611,7 +611,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 end
             end
 
-        elseif entry_name in ("RBTorsionForce", "CMAPTorsionForce", "GBSAOBCForce",
+        elseif entry_name in ("AmoebaUreyBradleyForce", "RBTorsionForce", "CMAPTorsionForce", "GBSAOBCForce",
                               "CustomBondForce", "CustomAngleForce", "CustomTorsionForce",
                               "CustomNonbondedForce", "CustomGBForce", "CustomHbondForce",
                               "CustomManyParticleForce")

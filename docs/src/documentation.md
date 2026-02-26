@@ -432,6 +432,7 @@ The following tags are supported:
 - `<Include>`
 
 The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
+- `<AmoebaUreyBradleyForce>`
 - `<RBTorsionForce>`
 - `<CMAPTorsionForce>`
 - `<GBSAOBCForce>`
