@@ -195,9 +195,10 @@ end
     # 1. Fetch alchemical roles from the contiguous array
     role_i = atom_i.alch_role
     role_j = atom_j.alch_role
-    pair_role = mix_roles(role_i, role_j)
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
 
     # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
     λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
@@ -255,9 +256,10 @@ end
     # 1. Fetch alchemical roles from the contiguous array
     role_i = atom_i.alch_role
     role_j = atom_j.alch_role
-    pair_role = mix_roles(role_i, role_j)
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
 
     # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
     λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
@@ -381,9 +383,10 @@ end
     # 1. Fetch alchemical roles from the contiguous array
     role_i = atom_i.alch_role
     role_j = atom_j.alch_role
-    pair_role = mix_roles(role_i, role_j)
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
 
     # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
     λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
@@ -441,9 +444,10 @@ end
     # 1. Fetch alchemical roles from the contiguous array
     role_i = atom_i.alch_role
     role_j = atom_j.alch_role
-    pair_role = mix_roles(role_i, role_j)
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
 
     # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
     λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0

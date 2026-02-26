@@ -226,10 +226,10 @@ end
     # 1. Fetch alchemical roles from the contiguous array
     role_i = atom_i.alch_role
     role_j = atom_j.alch_role
-    pair_role = mix_roles(role_i, role_j)
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
 
     # 2. Dispatch to the scheduler for the effective sterics lambda
-    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
@@ -295,10 +295,10 @@ end
     # 1. Fetch alchemical roles from the contiguous array
     role_i = atom_i.alch_role
     role_j = atom_j.alch_role
-    pair_role = mix_roles(role_i, role_j)
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
 
     # 2. Dispatch to the scheduler for the effective sterics lambda
-    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
@@ -449,10 +449,11 @@ end
     # 1. Fetch alchemical roles from the contiguous array
     role_i = atom_i.alch_role
     role_j = atom_j.alch_role
-    pair_role = mix_roles(role_i, role_j)
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
 
     # 2. Dispatch to the scheduler for the effective sterics lambda
-    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+    # Changed scale_elec to scale_sterics
+    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
@@ -514,7 +515,17 @@ end
                                   special=false,
                                   args...)
     T = typeof(ustrip(atom_i.σ))
-    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
+    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end

@@ -3,13 +3,23 @@ export
     DefaultLambdaScheduler,
     NAMDLambdaScheduler,
     QuartersLambdaScheduler,
-    EleScaledLambdaScheduler
+    EleScaledLambdaScheduler,
+    AlchemicalRole,
+    CoreRole,
+    InsertRole,
+    DeleteRole
 
-@enum AlchemicalRole CoreRole=0 InsertRole=1 DeleteRole=2
+const AlchemicalRole = UInt8
 
-# Rule for combining roles during a pairwise interaction. 
-# (Assumes inserting and deleting atoms do not directly interact with each other).
-@inline function mix_roles(role_i::AlchemicalRole, role_j::AlchemicalRole)
+const CoreRole::AlchemicalRole   = 0x00
+const InsertRole::AlchemicalRole = 0x01
+const DeleteRole::AlchemicalRole = 0x02
+
+abstract type AbstractLambdaScheduler end
+
+# Rule for combining roles during a pairwise interaction.
+# Dispatched on the scheduler to allow custom overriding by users.
+@inline function mix_roles(::AbstractLambdaScheduler, role_i::AlchemicalRole, role_j::AlchemicalRole)
     if role_i == InsertRole || role_j == InsertRole
         return InsertRole
     elseif role_i == DeleteRole || role_j == DeleteRole
@@ -18,8 +28,6 @@ export
         return CoreRole
     end
 end
-
-abstract type AbstractLambdaScheduler end
 
 struct DefaultLambdaScheduler <: AbstractLambdaScheduler end
 
@@ -90,7 +98,6 @@ end
 struct EleScaledLambdaScheduler <: AbstractLambdaScheduler end
 
 @inline function scale_sterics(::EleScaledLambdaScheduler, λ::Real, role::AlchemicalRole)
-    # The Python reference falls back to the default sterics protocol for ele-scaled
     if role == InsertRole
         return λ < 0.5 ? 2.0 * λ : 1.0
     elseif role == DeleteRole
