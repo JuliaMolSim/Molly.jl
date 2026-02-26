@@ -170,7 +170,7 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, W} <: PairwiseInteraction
+@kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, R, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 0.85
     use_neighbors::Bool = false
@@ -178,12 +178,14 @@ If ``\lambda`` is zero the interaction is turned off.
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
     λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+    roles::R = AlchemicalRole[]
     weight_special::W = 1
 end
 
 use_neighbors(inter::LennardJonesSoftCoreBeutler) = inter.use_neighbors
 
-function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, W}) where {C, A, H, S, E, LM, W}
+function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, R, W}) where {C, A, H, S, E, LM, SCH, R, W}
     return LennardJonesSoftCoreBeutler(
         lj.cutoff,
         zero(A),
@@ -192,6 +194,8 @@ function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, W}) where 
         lj.σ_mixing,
         lj.ϵ_mixing,
         lj.λ_mixing,
+        lj.scheduler,
+        lj.roles,
         zero(W),
     )
 end
@@ -205,6 +209,8 @@ function Base.:+(l1::LennardJonesSoftCoreBeutler, l2::LennardJonesSoftCoreBeutle
         l1.σ_mixing,
         l1.ϵ_mixing,
         l1.λ_mixing,
+        l1.scheduler,
+        l1.roles,
         l1.weight_special + l2.weight_special
     )
 end
@@ -218,7 +224,16 @@ end
                        args...)
     # Mix Lambda
     T = typeof(ustrip(atom_i.σ))
-    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = inter.roles[atom_i.index]
+    role_j = inter.roles[atom_j.index]
+    pair_role = mix_roles(role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
@@ -278,7 +293,16 @@ end
                                   args...)
     # Mix Lambda
     T = typeof(ustrip(atom_i.σ))
-    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = inter.roles[atom_i.index]
+    role_j = inter.roles[atom_j.index]
+    pair_role = mix_roles(role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
@@ -372,7 +396,7 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, W} <: PairwiseInteraction
+@kwdef struct LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, R, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 0.85
     use_neighbors::Bool = false
@@ -380,12 +404,14 @@ If ``\lambda`` is zero the interaction is turned off.
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
     λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+    roles::R = AlchemicalRole[]
     weight_special::W = 1
 end
 
 use_neighbors(inter::LennardJonesSoftCoreGapsys) = inter.use_neighbors
 
-function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, W}) where {C, A, H, S, E, LM, W}
+function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, R, W}) where {C, A, H, S, E, LM, SCH, R, W}
     return LennardJonesSoftCoreGapsys(
         lj.cutoff,
         zero(A),
@@ -394,6 +420,8 @@ function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, W}) where {
         lj.σ_mixing,
         lj.ϵ_mixing,
         lj.λ_mixing,
+        lj.scheduler,
+        lj.roles,
         zero(W),
     )
 end
@@ -407,6 +435,8 @@ function Base.:+(l1::LennardJonesSoftCoreGapsys, l2::LennardJonesSoftCoreGapsys)
         l1.σ_mixing,
         l1.ϵ_mixing,
         l1.λ_mixing,
+        l1.scheduler,
+        l1.roles,
         l1.weight_special + l2.weight_special,
     )
 end
@@ -420,7 +450,16 @@ end
                        args...)
 
     T = typeof(ustrip(atom_i.σ))
-    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = inter.roles[atom_i.index]
+    role_j = inter.roles[atom_j.index]
+    pair_role = mix_roles(role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+    
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end

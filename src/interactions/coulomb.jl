@@ -138,20 +138,22 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct CoulombSoftCoreBeutler{C, A, S, E, LM, W, T} <: PairwiseInteraction
+@kwdef struct CoulombSoftCoreBeutler{C, A, S, E, LM, SCH, R, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 0.3
     use_neighbors::Bool = false
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
     λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+    roles::R = AlchemicalRole[]
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
 
 use_neighbors(inter::CoulombSoftCoreBeutler) = inter.use_neighbors
 
-function Base.zero(coul::CoulombSoftCoreBeutler{C, A, S, E, LM, W, T}) where {C, A, S, E, LM, W, T}
+function Base.zero(coul::CoulombSoftCoreBeutler{C, A, S, E, LM, SCH, R, W, T}) where {C, A, S, E, LM, SCH, R, W, T}
     return CoulombSoftCoreBeutler(
         coul.cutoff,
         zero(A),
@@ -159,6 +161,8 @@ function Base.zero(coul::CoulombSoftCoreBeutler{C, A, S, E, LM, W, T}) where {C,
         coul.σ_mixing,
         coul.ϵ_mixing,
         coul.λ_mixing,
+        coul.scheduler,
+        coul.roles,
         zero(W),
         zero(T),
     )
@@ -172,6 +176,8 @@ function Base.:+(c1::CoulombSoftCoreBeutler, c2::CoulombSoftCoreBeutler)
         c1.σ_mixing,
         c1.ϵ_mixing,
         c1.λ_mixing,
+        c1.scheduler,
+        c1.roles,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
     )
@@ -187,7 +193,15 @@ end
     # 1. Type stability
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = inter.roles[atom_i.index]
+    role_j = inter.roles[atom_j.index]
+    pair_role = mix_roles(role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
         return ustrip.(zero(dr)) * force_units
@@ -239,7 +253,15 @@ end
     # 1. Type stability
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = inter.roles[atom_i.index]
+    role_j = inter.roles[atom_j.index]
+    pair_role = mix_roles(role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
         return ustrip(zero(dr[1])) * energy_units
@@ -307,25 +329,29 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct CoulombSoftCoreGapsys{C, A, S, LM, W, T} <: PairwiseInteraction
+@kwdef struct CoulombSoftCoreGapsys{C, A, S, LM, SCH, R, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 0.3
     σQ::S = 1.0u"nm"
     use_neighbors::Bool = false
     λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+    roles::R = AlchemicalRole[]
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
 
 use_neighbors(inter::CoulombSoftCoreGapsys) = inter.use_neighbors
 
-function Base.zero(coul::CoulombSoftCoreGapsys{C, A, S, LM, W, T}) where {C, A, S, LM, W, T}
+function Base.zero(coul::CoulombSoftCoreGapsys{C, A, S, LM, SCH, R, W, T}) where {C, A, S, LM, SCH, R, W, T}
     return CoulombSoftCoreGapsys(
         coul.cutoff,
         zero(A),
         coul.σQ,
         coul.use_neighbors,
         coul.λ_mixing,
+        coul.scheduler,
+        coul.roles,
         zero(W),
         zero(T),
     )
@@ -338,6 +364,8 @@ function Base.:+(c1::CoulombSoftCoreGapsys, c2::CoulombSoftCoreGapsys)
         c1.σQ + c2.σQ,
         c1.use_neighbors,
         c1.λ_mixing,
+        c1.scheduler,
+        c1.roles,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
     )
@@ -353,7 +381,16 @@ end
 
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = inter.roles[atom_i.index]
+    role_j = inter.roles[atom_j.index]
+    pair_role = mix_roles(role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+
     if λ <= 0
         return ustrip.(zero(dr)) * force_units
     end
@@ -404,7 +441,16 @@ end
 
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = inter.roles[atom_i.index]
+    role_j = inter.roles[atom_j.index]
+    pair_role = mix_roles(role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+    
     if λ <= 0
         return ustrip(zero(dr[1])) * energy_units
     end
