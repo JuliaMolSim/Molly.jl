@@ -8,7 +8,6 @@ export
     PeriodicFlatBottomBias,
     BiasPotential
 
-abstract type BiasType end
 
 @doc raw"""
     LinearBias(k, cv_target)
@@ -26,22 +25,11 @@ where $s$ and $s_t$ are the system and target CV values respectively.
     [`System`](@ref) energy units.
 - `cv_target`: The target value of the collective variable.
 """
-struct LinearBias{K, C} <: BiasType
+struct LinearBias{K, C}
     k::K
     cv_target::C
 end
 
-@doc raw"""
-    potential_energy(bias::BiasType, cv_sim::Real; kwargs...)
-
-Method that calculates the potential energy contribution given 
-a particular bias type, such as the [`LinearBias`](@ref).
-
-# Arguments
-- `b::BiasType`: A struct that defines the type of bias to be used.
-- `cv_sim::Real`: The value of a measured collective variable given
-    the coordinates of a simulation.
-"""
 function potential_energy(lb::LinearBias, cv_sim; kwargs...)
     return lb.k * abs(cv_sim - lb.cv_target)
 end
@@ -77,7 +65,7 @@ where $s$ and $s_t$ are the system and target CV values respectively.
     [`System`](@ref) energy units.
 - `cv_target`: The target value of the collective variable.
 """
-struct SquareBias{K, C} <: BiasType
+struct SquareBias{K, C}
     k::K
     cv_target::C
 end
@@ -117,7 +105,7 @@ H = \left\{ \begin{array}{cl}
     bias potential is always 0.
 - `cv_target`: The target value of the collective variable.
 """
-struct FlatBottomSquareBias{K, R, C} <: BiasType
+struct FlatBottomSquareBias{K, R, C}
     k::K
     r_fb::R
     cv_target::C
@@ -165,7 +153,7 @@ H = \left\{ \begin{array}{cl}
     bias potential is always 0.
 - `cv_target`: The target value of the collective variable.
 """
-struct PeriodicFlatBottomBias{K, R, T} <: BiasType
+struct PeriodicFlatBottomBias{K, R, T}
     k::K
     r_bf::R
     cv_target::T

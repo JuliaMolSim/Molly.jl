@@ -50,7 +50,7 @@ apply_coupling!(sys, buffers, ::NoCoupling, sim, neighbors, step_n; kwargs...) =
 abstract type AbstractThermostat end
 
 @doc raw"""
-    ImmediateThermostat(temperature)
+    ImmediateThermostat(temperature) <: AbstractThermostat
 
 The immediate velocity rescaling thermostat for controlling temperature.
 
@@ -75,7 +75,7 @@ function apply_coupling!(sys, buffers, thermostat::ImmediateThermostat, sim, nei
 end
 
 @doc raw"""
-    VelocityRescaleThermostat(temperature, coupling_const; n_steps=1)
+    VelocityRescaleThermostat(temperature, coupling_const; n_steps=1) <: AbstractThermostat
 
 The stochastic velocity rescaling thermostat.
 
@@ -152,7 +152,7 @@ function apply_coupling!(sys::System{<:Any, AT}, buffers, thermostat::VelocityRe
 end
 
 """
-    AndersenThermostat(temperature, coupling_const)
+    AndersenThermostat(temperature, coupling_const) <: AbstractThermostat
 
 The Andersen thermostat for controlling temperature.
 
@@ -194,7 +194,7 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
 end
 
 @doc raw"""
-    BerendsenThermostat(temperature, coupling_const)
+    BerendsenThermostat(temperature, coupling_const) <: AbstractThermostat
 
 The Berendsen thermostat for controlling temperature.
 
@@ -225,7 +225,7 @@ abstract type AbstractBarostat end
     BerendsenBarostat(pressure, coupling_const;
                       coupling_type=:isotropic,
                       compressibility=4.6e-5u"bar^-1",
-                      max_scale_frac=0.1, n_steps=1)
+                      max_scale_frac=0.1, n_steps=1) <: AbstractBarostat
 
 The Berendsen barostat for controlling pressure.
 
@@ -444,7 +444,7 @@ end
     CRescaleBarostat(pressure, coupling_const;
                      coupling_type=:isotropic,
                      compressibility=4.6e-5u"bar^-1",
-                     max_scale_frac=0.1, n_steps=1)
+                     max_scale_frac=0.1, n_steps=1) <: AbstractBarostat
 
 The stochastic cell rescale barostat.
 
@@ -689,7 +689,7 @@ end
     MonteCarloBarostat(pressure, temperature, boundary; coupling_type=:isotropic,
                        n_steps=30, n_iterations=1,
                        scale_factor=0.01, scale_increment=1.1, max_volume_frac=0.3,
-                       trial_find_neighbors=false)
+                       trial_find_neighbors=false) <: AbstractBarostat
 
 The Monte Carlo barostat for controlling pressure.
 

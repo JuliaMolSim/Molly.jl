@@ -724,7 +724,6 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
 
         active_idx_new = gibbs_sample_window(awh_sim.state)
         if active_idx_new != active_idx
-            println("New active Hamiltonian $(active_idx) -> $(active_idx_new). Iteration $(iteration_n) out of $(n_iterations)")
             active_idx = active_idx_new
         end
 

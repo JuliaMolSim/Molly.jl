@@ -879,6 +879,21 @@ function remd_exchange!(sys::ReplicaSystem,
     return delta, should_exchange
 end
 
+@doc raw"""
+    simulate_remd!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, n_steps::Integer; <keyword arguments>)
+
+Run a Replica Exchange Molecular Dynamics (REMD) simulation on a multiple-replica system.
+
+The simulation divides the total `n_steps` into cycles based on the time step and exchange time specified in the `ReplicaExchangeMD` simulator. Within each cycle, standard molecular dynamics propagation is independently executed for each replica. At the end of every cycle, replica exchange attempts are made between neighboring states. Any remaining steps that do not fit evenly into the exchange cycles are executed at the end of the run.
+
+# Arguments
+- `sys::ReplicaSystem`: the partitioned system containing the replicas and thermodynamic states.
+- `remd_sim::ReplicaExchangeMD`: the simulator containing the specific time step and exchange time interval.
+- `n_steps::Integer`: the total number of MD steps to simulate for each replica.
+- `n_threads::Integer=Threads.nthreads()`: the total number of threads to use, which are equally partitioned among the individual replicas.
+- `run_loggers=true`: whether to run the loggers during the simulation, including the exchange logger.
+- `rng=Random.default_rng()`: the random number generator used for the exchange accept/reject criteria and any stochastic dynamics.
+"""
 function simulate_remd!(sys::ReplicaSystem,
                         remd_sim::ReplicaExchangeMD,
                         n_steps::Integer;

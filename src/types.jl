@@ -997,12 +997,16 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
 
     # Calculate beta (inverse temperature) in system-compatible units (e.g., mol/kJ)
     # Molly evaluates energy per mole by default, requiring the molar gas constant R
-    beta_val = try
-        kBT = uconvert(sys.energy_units, Unitful.R * temp_source)
-        FT(ustrip(1/kBT))
-    catch
-        throw(ArgumentError("Temperature provided is not compatible with system energy units."))
+    kBT_raw = Unitful.R * temp_source
+    
+    if Unitful.dimension(sys.energy_units) != Unitful.dimension(kBT_raw)
+        throw(ArgumentError("Temperature provided is not compatible with system energy units. " *
+                            "Expected dimension $(Unitful.dimension(sys.energy_units)), " *
+                            "but got $(Unitful.dimension(kBT_raw))."))
     end
+
+    kBT = uconvert(sys.energy_units, kBT_raw)
+    beta_val = FT(ustrip(1 / kBT))
 
     # Calculate isotropic pressure in internal units (Energy / Volume) if applicable
     p_val = nothing
@@ -1040,7 +1044,7 @@ necessary subset of perturbed interactions, completely avoiding redundant evalua
 Furthermore, upon a successful exchange, coordinates and velocities are no longer physically swapped in memory; 
 the system simply updates internal pointers mapping the physical replica to its new thermodynamic state.
 
-This is a sub-type of [`AbstractSystem`](@ref) from AtomsBase.jl and implements the interface described there, 
+This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the interface described there, 
 routing standard atomic property queries back to the unperturbed master system.
 
 When using `ReplicaSystem` with [`CellListMapNeighborFinder`](@ref), the number of threads used for

@@ -635,9 +635,11 @@ end
     temp = 298.0u"K"
     atom_mass = 10.0u"g/mol"
 
+    rng = Xoshiro(15)
+
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    coords_ref = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    coords_ref = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng = rng)
+    coords     = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng = rng)
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
     cv_d_s   = CalcDist([1], [5], CalcSingleDist())
