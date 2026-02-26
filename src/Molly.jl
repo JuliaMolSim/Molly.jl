@@ -22,6 +22,7 @@ using Graphs
 using KernelAbstractions
 using NearestNeighbors
 import PeriodicTable
+using ProgressMeter
 using SimpleCrystals
 using SpecialFunctions
 using Unitful

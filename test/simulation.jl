@@ -186,7 +186,7 @@ end
         @test length(neighbors.list) == length(neighbors_tree.list)
         @test all(nn in neighbors_tree.list for nn in neighbors.list)
 
-        @time simulate!(s, simulator, n_steps; n_threads=n_threads)
+        @time simulate!(s, simulator, n_steps; n_threads=n_threads, show_progress=true)
 
         show(devnull, s.loggers.temp)
         show(devnull, s.loggers.coords)
