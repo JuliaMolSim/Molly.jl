@@ -313,9 +313,10 @@ The types used should be bits types if the GPU is going to be used.
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 - `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
-    transformations
+    transformations.
+- `alch_role::R=CoreRole`: Role of the atom in an alchemical transformation.
 """
-@kwdef struct Atom{T, M, C, S, E, L}
+@kwdef struct Atom{T, M, C, S, E, L, R}
     index::Int = 1
     atom_type::T = 1
     mass::M = 1.0u"g/mol"
@@ -323,15 +324,16 @@ The types used should be bits types if the GPU is going to be used.
     σ::S = 0.0u"nm"
     ϵ::E = 0.0u"kJ * mol^-1"
     λ::L = 1.0
+    alch_role::R = CoreRole
 end
 
 function Base.zero(::Atom{T, M, C, S, E, L}) where {T, M, C, S, E, L}
-    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E), zero(L))
+    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), CoreRole)
 end
 
 function Base.:+(a1::Atom, a2::Atom)
     return Atom(a1.index, a1.atom_type, a1.mass + a2.mass, a1.charge + a2.charge,
-                a1.σ + a2.σ, a1.ϵ + a2.ϵ, a1.λ + a2.λ)
+                a1.σ + a2.σ, a1.ϵ + a2.ϵ, a1.λ + a2.λ, a1.alch_role)
 end
 
 # get function errors with AD
@@ -346,7 +348,8 @@ function inject_atom(at, at_data, params_dic)
         at.charge, # Residue-specific
         dict_get(params_dic, key_prefix * "σ"     , at.σ   ),
         dict_get(params_dic, key_prefix * "ϵ"     , at.ϵ   ),
-        at.λ # Preserve lambda from existing atom,
+        at.λ, # Preserve lambda from existing atom,
+        at.alch_role
     )
 end
 
@@ -380,7 +383,7 @@ end
 
 function Base.show(io::IO, a::Atom)
     print(io, "Atom with index=", a.index, ", atom_type=", a.atom_type, ", mass=", mass(a),
-          ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ, ", λ=", a.λ)
+          ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ, ", λ=", a.λ, ", role=", a.alch_role)
 end
 
 """
