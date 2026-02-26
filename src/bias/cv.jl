@@ -246,7 +246,7 @@ function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, velo
     d = norm(r_ij)
     grad = ustrip.(zero(coords))
 
-    if d > 0u"nm"
+    if d > zero(d)
         dir = r_ij / d
         grad[i] = -dir
         grad[j] = dir
@@ -273,7 +273,10 @@ function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, velocit
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
 
-    min_d2 = typemax(eltype(eltype(coords)))u"nm"
+    # Correctly initialize min_d2 by using the numeric typemax of the coordinate's float type
+    T = eltype(eltype(coords))
+    sample_d2 = oneunit(T)^2
+    min_d2 = typemax(typeof(ustrip(sample_d2))) * oneunit(sample_d2)
     min_idx = (1, 1)
 
     if cv.dist_type.calc_type == :closest
@@ -299,14 +302,13 @@ function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, velocit
     d = sqrt(min_d2)
     grad = ustrip.(zero(coords))
 
-    if d > 0u"nm"
+    if d > zero(d)
         dir = r_ij / d
         grad[cv.atom_inds_1[min_idx[1]]] = -dir
         grad[cv.atom_inds_2[min_idx[2]]] = dir
     end
 
     return grad, d
-
 end
 
 @doc raw"""
@@ -324,7 +326,9 @@ function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, velocit
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
 
-    max_d2 = typemin(eltype(eltype(coords)))u"nm"
+    T = eltype(eltype(coords))
+    sample_d2 = oneunit(T)^2
+    max_d2 = typemin(typeof(ustrip(sample_d2))) * oneunit(sample_d2)
     max_idx = (1, 1)
 
     if cv.dist_type.calc_type == :closest
@@ -350,14 +354,13 @@ function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, velocit
     d = sqrt(max_d2)
     grad = ustrip.(zero(coords))
 
-    if d > 0u"nm"
+    if d > zero(d)
         dir = r_ij / d
         grad[cv.atom_inds_1[max_idx[1]]] = -dir
         grad[cv.atom_inds_2[max_idx[2]]] = dir
     end
 
     return grad, d
-
 end
 
 @doc raw"""
@@ -401,7 +404,7 @@ function cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, velociti
     d = norm(r_12)
     grad = ustrip.(zero(coords))
 
-    if d > 0u"nm"
+    if d > zero(d)
         dir = r_12 / d
         
         m1 = mass.(a1)
@@ -418,7 +421,6 @@ function cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, velociti
     end
 
     return grad, d
-
 end
 
 function calculate_virial!(virial_buff, cv::CalcDist, coords, forces, atoms, boundary)
@@ -443,10 +445,11 @@ function calculate_virial_dist!(virial_buff, dt::CalcMinDist, cv, coords, forces
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
     
-    min_d2 = typemax(eltype(eltype(coords)))
+    T = eltype(eltype(coords))
+    sample_d2 = oneunit(T)^2
+    min_d2 = typemax(typeof(ustrip(sample_d2))) * oneunit(sample_d2)
     min_idx = (1, 1)
     
-    # Find the pair minimizing the distance to get the correct vector
     if dt.calc_type == :closest
         for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
             d2 = sum(abs2, vector(p1, p2, boundary))
@@ -467,8 +470,6 @@ function calculate_virial_dist!(virial_buff, dt::CalcMinDist, cv, coords, forces
         r_ji = c1[min_idx[1]] - c2[min_idx[2]]
     end
     
-    # The total force on group 1 is the sum of forces on its atoms.
-    # For MinDist, this is effectively the force on the closest atom.
     f_sum = sum(forces[cv.atom_inds_1])
     virial_buff .+= r_ji * transpose(f_sum)
 end
@@ -477,10 +478,11 @@ function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
     
-    max_d2 = typemin(eltype(eltype(coords)))
+    T = eltype(eltype(coords))
+    sample_d2 = oneunit(T)^2
+    max_d2 = typemin(typeof(ustrip(sample_d2))) * oneunit(sample_d2)
     max_idx = (1, 1)
     
-    # Find the pair maximizing the distance
     if dt.calc_type == :closest
         for (i, p1) in enumerate(c1), (j, p2) in enumerate(c2)
             d2 = sum(abs2, vector(p1, p2, boundary))
@@ -588,17 +590,20 @@ function cv_gradient(cv::CalcRg, coords, atoms, boundary, velocities; kwargs...)
     m_used = mass.(a_used)
     M_total = sum(m_used)
 
-    rg_sq = zero(eltype(eltype(coords)))u"nm * g * mol^-1"
+    sample_r2 = sum(abs2, vector(com, c_used[1], boundary))
+    rg_sq = zero(eltype(m_used)) * sample_r2
+
     for (idx, c) in enumerate(c_used)
         r_ic = vector(com, c, boundary)
         rg_sq += m_used[idx] * sum(abs2, r_ic)
     end
+    
     rg_sq /= M_total
     rg = sqrt(rg_sq)
 
     grad = ustrip.(zero(coords))
 
-    if rg > 0u"nm"
+    if rg > zero(rg)
         factor = 1 / (M_total * rg)
         for (idx, i) in enumerate(atom_inds_used)
             r_ic = vector(com, c_used[idx], boundary)
@@ -607,7 +612,6 @@ function cv_gradient(cv::CalcRg, coords, atoms, boundary, velocities; kwargs...)
     end
 
     return grad, rg
-
 end
 
 # For Rg and also for the RMSD the forces applied to the atoms 
@@ -736,14 +740,15 @@ function cv_gradient(cv::CalcRMSD, coords, atoms, boundary, velocities; kwargs..
     centroid = mean(c_used)
     q = c_used .- (centroid,)
     diffs = p_rot .- q
+    
     rmsd_val = sqrt(mean(sum_abs2, diffs))
 
     grad = ustrip.(zero(coords))
 
-    if rmsd_val > 0u"nm"
+    if rmsd_val > zero(rmsd_val)
         factor = 1 / (N * rmsd_val)
         for (idx, i) in enumerate(atom_inds_used)
-            grad[i] += factor * -diffs[idx] # diffs is (p_rot - q), we need (q - p_rot)
+            grad[i] += factor * -diffs[idx]
         end
     end
 
@@ -846,17 +851,17 @@ function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, velocities; kwarg
     n_sq = sum(abs2, n)
     b2_norm = norm(b2)
     b2_sq = b2_norm^2
-    
-    grad = ustrip.(zero(coords))u"nm^-1"
+   
+    grad = ustrip.(zero(coords)) / oneunit(eltype(eltype(coords)))
     phi = torsion_angle(ri, rj, rk, rl, boundary)
     
-    if m_sq > 0u"nm^4" && n_sq > 0u"nm^4" && b2_sq > 0u"nm^2"
+    if m_sq > zero(m_sq) && n_sq > zero(n_sq) && b2_sq > zero(b2_sq)
         grad_i =  (b2_norm / m_sq) * m
         grad_l = -(b2_norm / n_sq) * n
         
         b1_dot_b2 = dot(b1, b2)
         b3_dot_b2 = dot(b3, b2)
-        
+     
         grad_j = -(1 + b1_dot_b2 / b2_sq) * grad_i + (b3_dot_b2 / b2_sq) * grad_l
         grad_k = (b1_dot_b2 / b2_sq) * grad_i - (1 + b3_dot_b2 / b2_sq) * grad_l
         
@@ -865,7 +870,7 @@ function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, velocities; kwarg
         grad[k] = grad_k
         grad[l] = grad_l
     end
-    
+ 
     return -grad, phi
 end
 

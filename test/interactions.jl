@@ -3,8 +3,9 @@
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     c4 = SVector(1.1, 1.0, 1.0)u"nm"
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ_coul = 1.0, λ_vdw = 1.0)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ_coul = 1.0, λ_vdw = 1.0)
+    a1 = Atom(atom_type=1, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 1.0)
+    a2 = Atom(atom_type=2, charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 1.0)
+    a3 = Atom(atom_type=3, charge=1.0, σ=0.4u"nm", ϵ=0.4u"kJ * mol^-1", λ = 1.0)
     boundary = CubicBoundary(2.0u"nm")
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
@@ -72,8 +73,8 @@
         )
     end
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ_coul = 1.0, λ_vdw = 0.5)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ_coul = 1.0, λ_vdw = 0.5)
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5)
     inter = LennardJonesSoftCoreBeutler(α=0.3)
     @test isapprox(
         force(inter, dr14, a1, a1),
@@ -118,7 +119,7 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ_vdw=1.0)
+    AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 1.0)
     inter = AshbaughHatch(weight_special=0.5)
     @test isapprox(
         force(inter, dr12, AH_a1, AH_a1, boundary),
@@ -141,7 +142,7 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ_vdw=0.5)
+    AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
     @test isapprox(
         potential_energy(inter, dr13, AH_a1, AH_a1),
         -0.058520865u"kJ * mol^-1";
@@ -236,8 +237,8 @@
     )
 
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ_coul = 1.0, λ_vdw = 1.0)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ_coul = 1.0, λ_vdw = 1.0)
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 1.0)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 1.0)
     for inter in (Coulomb(), CoulombSoftCoreBeutler(α=1), CoulombSoftCoreGapsys(α=1, σQ=1u"nm"))
         @test isapprox(
             force(inter, dr12, a1, a1),
@@ -261,8 +262,8 @@
         )
     end
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ_coul = 0.5, λ_vdw = 0.5)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ_coul = 0.5, λ_vdw = 0.5)
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5)
     inter = CoulombSoftCoreBeutler(α=0.3)
     @test isapprox(
         force(inter, dr13, a1, a1),
@@ -712,34 +713,39 @@
 
     struct AlwaysShortcut end
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ_coul = 0.0, λ_vdw = 0.0)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ_coul = 0.0, λ_vdw = 0.0)
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 1.0)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 1.0)
     for inter in (
-            LennardJones(; shortcut=do_shortcut),
-            LennardJonesSoftCoreBeutler(α=1; shortcut=do_shortcut),
-            LennardJonesSoftCoreGapsys(α=1; shortcut=do_shortcut),
-            AshbaughHatch(; shortcut=do_shortcut),
-            SoftSphere(; shortcut=do_shortcut),
-            Mie(m=6, n=12; shortcut=do_shortcut),
-            Buckingham(; shortcut=do_shortcut),
+            LennardJones(),
+            Mie(m=6, n=12),
+            LennardJonesSoftCoreBeutler(α=1),
+            LennardJonesSoftCoreGapsys(α=1),
         )
-
         @test isapprox(
             force(inter, dr12, a1, a1),
-            SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+            SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
             atol=1e-9u"kJ * mol^-1 * nm^-1",
         )
-
+        @test isapprox(
+            force(inter, dr13, a1, a1),
+            SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+            atol=1e-9u"kJ * mol^-1 * nm^-1",
+        )
         @test isapprox(
             potential_energy(inter, dr12, a1, a1),
             0.0u"kJ * mol^-1";
+            atol=1e-9u"kJ * mol^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr13, a1, a1),
+            -0.1170417309u"kJ * mol^-1";
             atol=1e-9u"kJ * mol^-1",
         )
     end
 
     # Test Mie potential with different m and n values
     # Redefine atoms for pairwise interactions (a1 was overwritten by UreyBradley above)
-    a1_mie = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ_coul = 1.0, λ_vdw = 0.0)
+    a1_mie = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 1.0)
     
     # Test Mie potential with m=4, n=6 (softer than LJ) - regression test
     mie_soft = Mie(m=4, n=6)

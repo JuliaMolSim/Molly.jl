@@ -184,10 +184,10 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    # 1. Type stability: Cast lambda to match the precision of coulomb_const (e.g. Float32)
+    # 1. Type stability
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = λ_mixing(inter.λ_mixing, atom_i, atom_j)
+    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
     if λ <= 0
         return ustrip.(zero(dr)) * force_units
@@ -198,35 +198,33 @@ end
     cutoff = inter.cutoff
 
     # 2. Fast Path: Standard Coulomb (λ >= 1.0)
-    # Use tuple padding (Nothing) to match length 7 of the alchemical path
+    # Use tuple padding (Nothing) to match length 5 of the alchemical path
     if λ >= 1
-        params = (ke, qi, qj, nothing, nothing, nothing, nothing)
+        params = (ke, qi, qj, nothing, nothing)
         f = force_cutoff(cutoff, inter, r, params)
         fdr = (f / r) * dr
         return special ? fdr * inter.weight_special : fdr
     end
 
     # 3. Alchemical Path
-    σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    C6 = T(1.0)
-    C12 = σ6
-    σ6_fac = inter.α * (1 - λ)
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    σ6_fac = inter.α * (1 - λ) * σ6
 
-    params = (ke, qi, qj, C12, C6, σ6_fac, λ)
+    params = (ke, qi, qj, σ6_fac, λ)
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     return special ? fdr * inter.weight_special : fdr
 end
 
-# Dispatch 1: Standard Coulomb Logic (Matches Tuple length 7 with Nothings)
-@inline function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, _, _, _, _)::Tuple{Any, Any, Any, Nothing, Nothing, Nothing, Nothing})
+# Dispatch 1: Standard Coulomb Logic (Matches Tuple length 5 with Nothings)
+@inline function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, _, _)::Tuple{Any, Any, Any, Nothing, Nothing})
     return (ke * qi * qj) / r^2
 end
 
-# Dispatch 2: Soft Core Logic (Matches Tuple length 7 with Real/Quantities)
-@inline function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac, λ)::Tuple{Any, Any, Any, Any, Any, Any, Any})
+# Dispatch 2: Soft Core Logic (Matches Tuple length 5 with Real/Quantities)
+@inline function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, σ6_fac, λ)::Tuple{Any, Any, Any, Any, Any})
     r3 = r^3
-    term = (σ6_fac * (C12 / C6)) + (r3 * r3)
+    term = σ6_fac + (r3 * r3)
     R = term * sqrt(cbrt(term))
     return λ * ke * ((qi * qj) / R) * (r3 * r * r)
 end
@@ -241,7 +239,7 @@ end
     # 1. Type stability
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = T(inter.λ_mixing(atom_i, atom_j))
+    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
     if λ <= 0
         return ustrip(zero(dr[1])) * energy_units
@@ -253,30 +251,28 @@ end
 
     # 2. Fast Path: Standard Coulomb (λ >= 1.0)
     if λ >= 1
-        params = (ke, qi, qj, nothing, nothing, nothing, nothing)
+        params = (ke, qi, qj, nothing, nothing)
         pe = pe_cutoff(cutoff, inter, r, params)
         return special ? pe * inter.weight_special : pe
     end
 
     # 3. Alchemical Path
-    σ6 = inter.σ_mixing(atom_i, atom_j)^6
-    C6 = T(1.0)
-    C12 = σ6
-    σ6_fac = inter.α * (1 - λ)
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    σ6_fac = inter.α * (1 - λ) * σ6
 
-    params = (ke, qi, qj, C12, C6, σ6_fac, λ)
+    params = (ke, qi, qj, σ6_fac, λ)
     pe = pe_cutoff(cutoff, inter, r, params)
     return special ? pe * inter.weight_special : pe
 end
 
 # Dispatch 1: Standard Coulomb PE
-@inline function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, _, _, _, _)::Tuple{Any, Any, Any, Nothing, Nothing, Nothing, Nothing})
+@inline function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, _, _)::Tuple{Any, Any, Any, Nothing, Nothing})
     return (ke * qi * qj) * inv(r)
 end
 
 # Dispatch 2: Soft Core PE
-@inline function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac, λ)::Tuple{Any, Any, Any, Any, Any, Any, Any})
-    R = sqrt(cbrt((σ6_fac * (C12 / C6)) + r^6))
+@inline function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, σ6_fac, λ)::Tuple{Any, Any, Any, Any, Any})
+    R = sqrt(cbrt(σ6_fac + r^6))
     return λ * ke * ((qi * qj) / R)
 end
 
@@ -347,56 +343,51 @@ function Base.:+(c1::CoulombSoftCoreGapsys, c2::CoulombSoftCoreGapsys)
     )
 end
 
-@inline function force(inter::CoulombSoftCoreGapsys,
+@inline function force(inter::CoulombSoftCoreGapsys, 
                        dr,
                        atom_i,
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    # 1. Type stability
+
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
     λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
-
     if λ <= 0
         return ustrip.(zero(dr)) * force_units
     end
 
     r = norm(dr)
     qi, qj = atom_i.charge, atom_j.charge
+    qij = qi * qj 
     cutoff = inter.cutoff
 
-    # 2. Fast Path: Standard Coulomb (λ >= 1.0)
-    # Use tuple padding (Nothing) to match length 6 of the alchemical path
+    # Fast Path: Standard Coulomb (Length 4)
     if λ >= 1
-        params = (ke, qi, qj, nothing, nothing, nothing)
+        params = (ke, qij, nothing, nothing)
         f = force_cutoff(cutoff, inter, r, params)
         fdr = (f / r) * dr
         return special ? fdr * inter.weight_special : fdr
     end
 
-    # 3. Alchemical Path
+    # Alchemical Path
+    # R is precomputed here, saving absolute value and unit math inside the inner loop
     σ6_fac = inter.α * sqrt(cbrt(1 - λ))
-    params = (ke, qi, qj, inter.σQ, σ6_fac, λ)
+    R = σ6_fac * (oneunit(r) + (inter.σQ * abs(qij)))
+    params = (ke, qij, λ, R)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     return special ? fdr * inter.weight_special : fdr
 end
 
-# Dispatch 1: Standard Coulomb Logic (Matches Tuple length 6 with Nothings)
-@inline function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, _, _, _)::Tuple{Any, Any, Any, Nothing, Nothing, Nothing})
-    return (ke * qi * qj) / r^2
+@inline function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qij, _, _)::Tuple{Any, Any, Nothing, Nothing})
+    return (ke * qij) / r^2
 end
 
-# Dispatch 2: Soft Core Logic (Matches Tuple length 6 with Real/Quantities)
-@inline function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ)::Tuple{Any, Any, Any, Any, Any, Any})
-    qij = qi * qj
-    R = σ6_fac * (oneunit(r) + (σQ * abs(qij)))
-    
+@inline function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qij, λ, R)::Tuple{Any, Any, Any, Any})
     if r >= R
-        # Standard Coulomb scaled by λ
         return λ * ke * (qij / (r^2))
     else
         return λ * ke * (-(((2 * qij) / (R^3)) * r) + ((3 * qij) / (R^2)))
@@ -410,43 +401,39 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    # 1. Type stability
+
     ke = inter.coulomb_const
     T = typeof(ustrip(ke))
-    λ = T(inter.λ_mixing(atom_i, atom_j))
-
+    λ = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
     if λ <= 0
         return ustrip(zero(dr[1])) * energy_units
     end
 
     r = norm(dr)
     qi, qj = atom_i.charge, atom_j.charge
+    qij = qi * qj
     cutoff = inter.cutoff
 
-    # 2. Fast Path: Standard Coulomb (λ >= 1.0)
     if λ >= 1
-        params = (ke, qi, qj, nothing, nothing, nothing)
+        params = (ke, qij, nothing, nothing)
         pe = pe_cutoff(cutoff, inter, r, params)
         return special ? pe * inter.weight_special : pe
     end
 
-    # 3. Alchemical Path
+    # Precompute R
     σ6_fac = inter.α * sqrt(cbrt(1 - λ))
-    params = (ke, qi, qj, inter.σQ, σ6_fac, λ)
+    R = σ6_fac * (oneunit(r) + (inter.σQ * abs(qij)))
+    params = (ke, qij, λ, R)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     return special ? pe * inter.weight_special : pe
 end
 
-# Dispatch 1: Standard Coulomb PE
-@inline function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, _, _, _)::Tuple{Any, Any, Any, Nothing, Nothing, Nothing})
-    return (ke * qi * qj) * inv(r)
+@inline function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qij, _, _)::Tuple{Any, Any, Nothing, Nothing})
+    return (ke * qij) * inv(r)
 end
 
-# Dispatch 2: Soft Core PE
-@inline function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ)::Tuple{Any, Any, Any, Any, Any, Any})
-    qij = qi * qj
-    R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
+@inline function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qij, λ, R)::Tuple{Any, Any, Any, Any})
     if r >= R
         return λ * (ke * (qij/r))
     else

@@ -312,9 +312,7 @@ The types used should be bits types if the GPU is going to be used.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
-- `λ_coul::L=1.0`: scaling parameter of Coulombic interactions, used for alchemical 
-    transformations
-- `λ_vdw::L=1.0`: scaling parameter of Van der Waals interactions, used for alchemical 
+- `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
     transformations
 """
 @kwdef struct Atom{T, M, C, S, E, L}

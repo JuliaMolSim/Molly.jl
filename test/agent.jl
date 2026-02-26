@@ -8,6 +8,7 @@
         mass::Float64
         σ::Float64
         ϵ::Float64
+        λ::Float64
     end
 
     # Custom pairwise interaction
@@ -68,7 +69,7 @@
     n_steps = 1_000
     n_people = 500
     n_starting = 2
-    atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
+    atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02, 1.0) for i in 1:n_people]
     coords = place_atoms(n_people, boundary; min_dist=0.1, rng=rng)
     velocities = [random_velocity(1.0, temp; dims=2, rng=rng) for i in 1:n_people]
 

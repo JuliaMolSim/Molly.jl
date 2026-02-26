@@ -899,7 +899,7 @@ end
     for i in 1:n_replicas
         # Embed the lambda values directly into the atoms for this thermodynamic state
         atoms_λ = [Atom(mass=atom_mass, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", 
-                        λ_vdw=λ_vals[i], λ_coul=λ_vals[i]) for _ in 1:n_atoms]
+                        λ =λ_vals[i]) for _ in 1:n_atoms]
         
         sys = System(
             atoms=atoms_λ,
@@ -1223,7 +1223,7 @@ end
     for i in 1:n_windows
         # Embed the lambda values directly into the atoms
         atoms_λ = [Atom(mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", 
-                        λ_vdw=λ_vals[i], λ_coul=λ_vals[i]) for _ in 1:n_atoms]
+                        λ = λ_vals[i]) for _ in 1:n_atoms]
         
         # Define the system at this specific lambda state
         sys = System(
