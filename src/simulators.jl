@@ -17,6 +17,8 @@ export
     random_uniform_translation!,
     random_normal_translation!
 
+shortcut_sim(::Nothing, args...; kwargs...) = false
+
 function default_show_progress()
     if haskey(ENV, "MOLLY_SHOW_PROGRESS")
         return parse(Bool, lowercase(ENV["MOLLY_SHOW_PROGRESS"]))
@@ -92,6 +94,8 @@ Constraints are applied during minimization, which can lead to issues.
 - `run_loggers`: whether to run the loggers during the simulation. Can be `true`, `false`
     or `:skipzero`, in which case the loggers are not run before the first step. `run_loggers`
     is `true` by default except for [`SteepestDescentMinimizer`](@ref), where it is `false`.
+- `shortcut=nothing`: when to stop the simulation early. A struct with the `shortcut_sim`
+    method defined can be provided. Unused for REMD simulations.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
     the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
     environmental variable `MOLLY_SHOW_PROGRESS`.
@@ -113,6 +117,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            sim::SteepestDescentMinimizer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=false,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     # @inline needed to avoid Enzyme error
@@ -164,6 +169,10 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         if max_force < sim.tol
             break
         end
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
+                        current_potential_energy=E)
+            break
+        end
         ProgressMeter.update!(progress, ustrip(max_force))
     end
     return sys
@@ -195,6 +204,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
@@ -254,6 +264,10 @@ end
 
         apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
+                        current_forces=forces_t)
+            break
+        end
         next!(progress)
     end
     return sys
@@ -288,6 +302,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
@@ -337,6 +352,10 @@ end
 
         apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
+                        current_forces=forces_t)
+            break
+        end
         next!(progress)
     end
     return sys
@@ -368,6 +387,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
@@ -415,6 +435,10 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 
         apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
+                        current_forces=forces_t)
+            break
+        end
         next!(progress)
     end
     return sys
@@ -459,6 +483,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
@@ -514,6 +539,10 @@ end
 
         apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
+                        current_forces=forces_t)
+            break
+        end
         next!(progress)
     end
     return sys
@@ -564,6 +593,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     if length(sys.constraints) > 0
@@ -633,6 +663,9 @@ end
                                    n_threads=n_threads)
 
         apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads)
+            break
+        end
         next!(progress)
     end
     return sys
@@ -692,6 +725,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     if length(sys.constraints) > 0
@@ -728,6 +762,10 @@ end
 
         apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
+                        current_forces=forces_t)
+            break
+        end
         next!(progress)
     end
     return sys
@@ -770,6 +808,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     if length(sys.constraints) > 0
@@ -831,6 +870,10 @@ end
 
         apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
+                        current_forces=forces_t)
+            break
+        end
         next!(progress)
     end
     return sys
@@ -860,7 +903,6 @@ function ReplicaExchangeMD(; dt, exchange_time)
 end
 
 function simulate!(sys::ReplicaSystem,
-<<<<<<< HEAD
                    sim::ReplicaExchangeMD,
                    n_steps::Integer;
                    assign_velocities::Bool=false,
@@ -868,20 +910,6 @@ function simulate!(sys::ReplicaSystem,
                    run_loggers=true,
                    rng=Random.default_rng())
     
-=======
-                    sim::TemperatureREMD,
-                    n_steps::Integer;
-                    assign_velocities::Bool=false,
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true,
-                    show_progress=default_show_progress(),
-                    rng=Random.default_rng())
-    if sys.n_replicas != length(sim.simulators)
-        throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
-                "and simulators in TemperatureREMD ($(length(sim.simulators))) do not match"))
-    end
-
->>>>>>> e31f1329 (progress bar)
     if assign_velocities
         master_sys = sys.partition.master_sys
         k_B = master_sys.k
@@ -905,7 +933,7 @@ function simulate!(sys::ReplicaSystem,
     end
 
     return simulate_remd!(sys, sim, n_steps; n_threads=n_threads, run_loggers=run_loggers,
-                          show_progress=show_progress, rng=rng)
+                          shortcut=shortcut, show_progress=show_progress, rng=rng)
 end
 
 @doc raw"""
@@ -986,6 +1014,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         n_steps::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         run_loggers=true,
+                        shortcut=nothing, # Unused
                         show_progress=default_show_progress(),
                         rng=Random.default_rng())
     
@@ -1096,6 +1125,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
+                           shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng())
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -1126,6 +1156,9 @@ end
             apply_loggers!(sys, nothing, neighbors, step_n, run_loggers; n_threads=n_threads,
                            current_potential_energy=E_old, success=false,
                            energy_rate=(E_old / (sys.k * sim.temperature)))
+        end
+        if shortcut_sim(shortcut, sys, nothing, neighbors, step_n; n_threads=n_threads)
+            break
         end
         next!(progress)
     end
