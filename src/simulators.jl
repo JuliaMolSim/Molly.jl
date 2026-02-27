@@ -63,19 +63,11 @@ Steepest descent energy minimization.
     finish minimization.
 - `log_stream::L=devnull`: stream to print minimization progress to.
 """
-struct SteepestDescentMinimizer{D, F, L}
-    step_size::D
-    max_steps::Int
-    tol::F
-    log_stream::L
-end
-
-function SteepestDescentMinimizer(;
-                                    step_size=0.01u"nm",
-                                    max_steps=1_000,
-                                    tol=1000.0u"kJ * mol^-1 * nm^-1",
-                                    log_stream=devnull)
-    return SteepestDescentMinimizer(step_size, max_steps, tol, log_stream)
+@kwdef struct SteepestDescentMinimizer{D, F, L}
+    step_size::D = 0.01u"nm"
+    max_steps::Int = 1_000
+    tol::F = 1000.0u"kJ * mol^-1 * nm^-1"
+    log_stream::L = devnull
 end
 
 """
@@ -375,12 +367,10 @@ Does not currently remove the center of mass motion.
 - `dt::T`: the time step of the simulation.
 - `coupling::C=nothing`: the coupling which applies during the simulation.
 """
-struct StormerVerlet{T, C}
+@kwdef struct StormerVerlet{T, C}
     dt::T
-    coupling::C
+    coupling::C = nothing
 end
-
-StormerVerlet(; dt, coupling=nothing) = StormerVerlet(dt, coupling)
 
 @inline function simulate!(sys,
                            sim::StormerVerlet,
