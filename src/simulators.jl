@@ -185,7 +185,7 @@ The velocity Verlet integrator.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
-- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `coupling::C=nothing`: the coupling which applies during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
@@ -195,7 +195,7 @@ struct VelocityVerlet{T, C}
     remove_CM_motion::Int
 end
 
-function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
+function VelocityVerlet(; dt, coupling=nothing, remove_CM_motion=1)
     return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
@@ -283,7 +283,7 @@ behind the positions.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
-- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `coupling::C=nothing`: the coupling which applies during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
@@ -293,7 +293,7 @@ struct Verlet{T, C}
     remove_CM_motion::Int
 end
 
-function Verlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
+function Verlet(; dt, coupling=nothing, remove_CM_motion=1)
     return Verlet(dt, coupling, Int(remove_CM_motion))
 end
 
@@ -373,14 +373,14 @@ Does not currently remove the center of mass motion.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
-- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `coupling::C=nothing`: the coupling which applies during the simulation.
 """
 struct StormerVerlet{T, C}
     dt::T
     coupling::C
 end
 
-StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
+StormerVerlet(; dt, coupling=nothing) = StormerVerlet(dt, coupling)
 
 @inline function simulate!(sys,
                            sim::StormerVerlet,
@@ -457,7 +457,7 @@ behind the positions.
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
-- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `coupling::C=nothing`: the coupling which applies during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
@@ -471,7 +471,7 @@ struct Langevin{S, K, F, C, T}
     noise_scale::T
 end
 
-function Langevin(; dt, temperature, friction, coupling=NoCoupling(), remove_CM_motion=1)
+function Langevin(; dt, temperature, friction, coupling=nothing, remove_CM_motion=1)
     vel_scale = exp(-dt * friction)
     noise_scale = sqrt(1 - vel_scale^2)
     return Langevin(dt, temperature, friction, coupling, Int(remove_CM_motion),
@@ -787,7 +787,7 @@ without applying constraints.
 - `dt::T`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `damping::D=100*dt`: the temperature damping time scale.
-- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `coupling::C=nothing`: the coupling which applies during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
@@ -799,7 +799,7 @@ struct NoseHoover{T, K, D, C}
     remove_CM_motion::Int
 end
 
-function NoseHoover(; dt, temperature, damping=100*dt, coupling=NoCoupling(), remove_CM_motion=1)
+function NoseHoover(; dt, temperature, damping=100*dt, coupling=nothing, remove_CM_motion=1)
     return NoseHoover(dt, temperature, damping, coupling, Int(remove_CM_motion))
 end
 

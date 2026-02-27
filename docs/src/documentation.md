@@ -1230,7 +1230,6 @@ You do not have to define different versions though: you may only intend to use 
 
 Some simulators can be modified by adding coupling methods to allow properties like temperature and pressure to be controlled during a simulation.
 The available couplers are:
-- [`NoCoupling`](@ref)
 - [`ImmediateThermostat`](@ref)
 - [`VelocityRescaleThermostat`](@ref)
 - [`AndersenThermostat`](@ref)
@@ -1238,7 +1237,7 @@ The available couplers are:
 - [`BerendsenBarostat`](@ref)
 - [`CRescaleBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
-Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
+Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
 temp = 300.0u"K"

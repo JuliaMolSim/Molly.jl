@@ -2,7 +2,6 @@
 
 export
     apply_coupling!,
-    NoCoupling,
     ImmediateThermostat,
     VelocityRescaleThermostat,
     AndersenThermostat,
@@ -38,14 +37,7 @@ end
 # By default, couplers do not require the virial
 needs_virial(c) = Inf
 
-"""
-    NoCoupling()
-
-Placeholder coupler that does nothing.
-"""
-struct NoCoupling end
-
-apply_coupling!(sys, buffers, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
+apply_coupling!(sys, buffers, ::Nothing, sim, neighbors, step_n; kwargs...) = false
 
 abstract type AbstractThermostat end
 abstract type AbstractBarostat end
