@@ -445,11 +445,7 @@ function System(coord_file::AbstractString,
                 disulfide_bonds=true,
                 grad_safe::Bool=false,
                 strictness=:warn,
-                force_separate_lj14=false, # Mainly for testing
-                rename_terminal_res=nothing) where {AT <: AbstractArray}
-    if !isnothing(rename_terminal_res)
-        @info "rename_terminal_res is no longer required and will be removed in a future breaking release"
-    end
+                force_separate_lj14=false) where {AT <: AbstractArray}
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
