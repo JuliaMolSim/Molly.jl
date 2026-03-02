@@ -344,14 +344,14 @@ end
 end
 
 # Dispatch 1: Standard LJ Logic
-@inline function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+@inline function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{Any, Any, Nothing, Nothing})
     inv_r2 = inv(r^2)
     six_term = (σ2 * inv_r2)^3
     return 4 * ϵ * (six_term^2 - six_term)
 end
 
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
-function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
+function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ)::Tuple{Any, Any, Any, Any})
     R6 = (σ6_fac * (C12 / C6)) + r^6
     return λ * ((C12 / (R6 * R6)) - (C6 / R6))
 end

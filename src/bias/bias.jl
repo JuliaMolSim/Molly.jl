@@ -161,6 +161,7 @@ end
 
 function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     # Calculate signed distance in periodic bounds [-π, π] with inferred units
+    FT = typeof(ustrip(pb.cv_target))
     d = cv_sim - pb.cv_target
     twopi = 2 * pi * oneunit(d)
     d_wrapped = d - twopi * round(d / twopi)
@@ -171,7 +172,7 @@ function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
         return zero(pb.k * pb.r_bf^2)
     else
         disp = dist - pb.r_bf
-        return 0.5 * pb.k * disp^2
+        return FT(0.5) * pb.k * disp^2
     end
 end
 
