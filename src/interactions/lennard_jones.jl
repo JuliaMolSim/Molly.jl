@@ -172,7 +172,7 @@ If ``\lambda`` is zero the interaction is turned off.
 """
 @kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 0.85
+    α::A = 1.0
     use_neighbors::Bool = false
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
@@ -237,7 +237,7 @@ end
 
     # If lambda is 1, the soft core formula reduces to standard LJ
     # We explicity branch to save compute.
-    if λ >= 1.0
+    if λ >= 1
 
         σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
         ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
@@ -307,7 +307,7 @@ end
 
     # If lambda is 1, the soft core formula reduces to standard LJ
     # We explicity branch to save compute.
-    if λ >= 1.0
+    if λ >= 1
 
         σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
         ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
@@ -466,7 +466,7 @@ end
     σ6 = σ^6
 
     # 3. Fast Path: Standard Lennard Jones
-    if λ >= 1.0
+    if λ >= 1
         # Pass standard LJ params tuple (Length 2)
         params = (σ^2, ϵ, nothing, nothing)
         f = force_cutoff(cutoff, inter, r, params)
@@ -488,13 +488,13 @@ end
 end
 
 # Dispatch 1: Standard LJ Logic (Matches Tuple length 2)
-@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (σ2, ϵ, _, _)::Tuple{Any, Any, Nothing, Nothing})
     six_term = (σ2 / r^2)^3
     return (24 * ϵ / r) * (2 * six_term^2 - six_term)
 end
 
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
-@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{<:Quantity, <:Quantity, <:Real, <:Quantity})
+@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{Any, Any, Any, Any})
     r6 = r^6
     if r >= R
         return λ * (((12*C12)/(r6*r6*r)) - ((6*C6)/(r6*r)))
@@ -537,7 +537,7 @@ end
     σ6 = σ^6
 
     # 3. Fast Path: Standard Lennard Jones
-    if λ >= 1.0
+    if λ >= 1
         # Pass standard LJ params tuple (Length 2)
         params = (σ^2, ϵ, nothing, nothing)
         pe = pe_cutoff(cutoff, inter, r, params)
@@ -557,14 +557,14 @@ end
 end
 
 # Dispatch 1: Standard LJ Logic (Matches Tuple length 2)
-@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (σ2, ϵ, _, _)::Tuple{Any, Any, Nothing, Nothing})
     inv_r2 = inv(r^2)
     six_term = (σ2 * inv_r2)^3
     return 4 * ϵ * (six_term^2 - six_term)
 end
 
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
-@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{<:Quantity, <:Quantity, <:Real, <:Quantity})
+@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{Any, Any, Any, Any})
     r6 = r^6
     if r >= R
         return λ * ((C12/(r6*r6)) - (C6/(r6)))

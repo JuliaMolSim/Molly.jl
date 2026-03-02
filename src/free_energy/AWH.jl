@@ -1,8 +1,7 @@
 export 
     AWHState,
     AWHSimulation,
-    get_pmf,
-    simulate!
+    calc_pmf
     
 # Convenience struct to store relevant things
 # when running an AWH simulation.
@@ -145,7 +144,8 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
 end
 
 # Implements the deconvolution method to obtain the unbiased PMF
-# See Lindahl et al. 2014
+# See Lindahl et al. 2014 https://doi.org/10.1063/1.4890371
+
 mutable struct AWHPMFDeconvolution{N, T, F_CV}
     min_vals::NTuple{N, T}
     bin_widths::NTuple{N, T}
@@ -405,13 +405,13 @@ function update_pmf!(
 end
 
 @doc raw"""
-    get_pmf(pmf_calc::AWHPMFDeconvolution)
+    calc_pmf(pmf_calc::AWHPMFDeconvolution)
 
 Extracts the unbiased Potential of Mean Force (PMF) from the accumulated numerator 
 and denominator histograms. Unsampled bins are assigned a value of `Inf`, and the 
 global minimum of the valid PMF is shifted to zero.
 """
-function get_pmf(pmf_calc::AWHPMFDeconvolution{N, T, F_CV}) where {N, T, F_CV}
+function calc_pmf(pmf_calc::AWHPMFDeconvolution{N, T, F_CV}) where {N, T, F_CV}
     num = pmf_calc.numerator_hist
     den = pmf_calc.denominator_hist
     
@@ -664,18 +664,6 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     return delta_f
 end
 
-@doc raw"""
-    simulate!(awh_sim::AWHSimulation, n_steps::Int)
-
-Run an AWH simulation for a given number of molecular dynamics steps.
-
-The total number of AWH iterations is automatically determined by dividing `n_steps` 
-by the `num_md_steps` defined in the `AWHSimulation` struct.
-
-# Arguments
-- `awh_sim::AWHSimulation`: The [`AWHSimulation`](@ref) struct defining the AWH parameters and state.
-- `n_steps::Int`: The total number of molecular dynamics steps to perform.
-"""
 function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))

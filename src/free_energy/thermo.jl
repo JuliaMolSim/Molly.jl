@@ -88,10 +88,14 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     @inbounds for (i, tstate) in enumerate(thermo_states)
         sils = tstate.system.specific_inter_lists
         for inter in sils
-            if inter isa InteractionList1Atoms push!(list_1a[i], inter)
-            elseif inter isa InteractionList2Atoms push!(list_2a[i], inter)
-            elseif inter isa InteractionList3Atoms push!(list_3a[i], inter)
-            elseif inter isa InteractionList4Atoms push!(list_4a[i], inter)
+            if inter isa InteractionList1Atoms 
+                push!(list_1a[i], inter)
+            elseif inter isa InteractionList2Atoms 
+                push!(list_2a[i], inter)
+            elseif inter isa InteractionList3Atoms 
+                push!(list_3a[i], inter)
+            elseif inter isa InteractionList4Atoms 
+                push!(list_4a[i], inter)
             end
         end
     end
@@ -206,12 +210,7 @@ function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = tr
     elseif ref_nfinder isa NoNeighborFinder
         return NoNeighborFinder()
     else
-        @warn "Unknown NeighborFinder type $(typeof(ref_nfinder)). Using default DistanceNeighborFinder for Master System."
-        return DistanceNeighborFinder(
-            eligible = eligible,
-            dist_cutoff = 1.0u"nm",
-            n_steps = 1
-        )
+        throw(ArgumentError("Unknown NeighborFinder type $(typeof(ref_nfinder))"))
     end
 end
 

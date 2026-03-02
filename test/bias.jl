@@ -601,7 +601,7 @@ end
         return d_coords, cv_val_ustrip * u
     end
 
-    function forces!(
+    function forces_test!(
         fs, sys, bias::BiasPotential;
         grad_cv = cv_gradient_enz,
         kwargs...
@@ -673,8 +673,8 @@ end
         fs_zero_enz = zero(fs)
         fs_zero_anl = zero(fs)
 
-        forces!(fs_zero_enz, sys, bias_pot; grad_cv = cv_gradient_enz)
-        forces!(fs_zero_anl, sys, bias_pot; grad_cv = cv_gradient)
+        forces_test!(fs_zero_enz, sys, bias_pot; grad_cv = cv_gradient_enz)
+        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv = cv_gradient)
 
         @test isapprox(ustrip.(fs_zero_anl), ustrip.(fs_zero_enz); atol = 1e-6)
 

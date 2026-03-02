@@ -48,6 +48,7 @@ struct NoCoupling end
 apply_coupling!(sys, buffers, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
 abstract type AbstractThermostat end
+abstract type AbstractBarostat end
 
 @doc raw"""
     ImmediateThermostat(temperature) <: AbstractThermostat
@@ -219,7 +220,7 @@ function apply_coupling!(sys, buffers, thermostat::BerendsenThermostat, sim, nei
     return false
 end
 
-abstract type AbstractBarostat end
+
 
 @doc raw"""
     BerendsenBarostat(pressure, coupling_const;

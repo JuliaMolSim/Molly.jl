@@ -47,6 +47,7 @@ end
 """
     simulate!(system, simulator, n_steps; <keyword arguments>)
     simulate!(system, simulator; <keyword arguments>)
+    simulate!(awh_sim::AWHSimulation, n_steps::Int)
 
 Run a simulation on a system according to the rules of the given simulator.
 
@@ -61,6 +62,17 @@ Constraints are applied during minimization, which can lead to issues.
     is `true` by default except for [`SteepestDescentMinimizer`](@ref), where it is `false`.
 - `rng=Random.default_rng()`: the random number generator used for the simulation. Setting
     this allows reproducible stochastic simulations.
+
+Alternatively:
+
+Run an AWH simulation for a given number of molecular dynamics steps.
+
+The total number of AWH iterations is automatically determined by dividing `n_steps` 
+by the `num_md_steps` defined in the `AWHSimulation` struct.
+
+# Arguments
+- `awh_sim::AWHSimulation`: The [`AWHSimulation`](@ref) struct defining the AWH parameters and state.
+- `n_steps::Int`: The total number of molecular dynamics steps to perform.
 """
 @inline function simulate!(sys,
                            sim::SteepestDescentMinimizer;

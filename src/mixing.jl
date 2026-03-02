@@ -122,5 +122,5 @@ end
 struct MinimumMixing end
 
 function λ_mixing(m::MinimumMixing, a, b, args...)
-    return min(1.0, min(a.λ, b.λ))
+    return min(one(a.λ), min(a.λ, b.λ))
 end
