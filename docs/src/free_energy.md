@@ -630,3 +630,497 @@ Now one can put this into a graph, for example using a scatter for the free ener
 
 ![PMF along the dipeptide torsion in kBT units](images/dihedral_pmf_kbt.png)
 ![PMF along the dipeptide torsion in energy units](images/dihedral_pmf_enr.png)
+
+# Free energies with AWH
+
+## An overview
+
+One of the major challenges in MD is the timescale limitation when exploring complex free energy (FE) landscapes. While methods like MBAR excel at extracting free energies from a set of equilibrium simulations, obtaining that equilibrium sampling is often hindered by high free energy barriers. When a system gets trapped in a local minimum, standard MD, and even parallel equilibrium simulations, might fail to sample the transition regions adequately.
+
+To overcome this, researchers turn their attention to adaptive biasing techniques. Rather than applying a static bias, adaptive methods build a bias potential on the fly to actively push the system out of local minima and drive the exploration of the collective variable (CV) space. Pioneering methods in this family include the Wang-Landau algorithm and Metadynamics. These approaches continuously add bias to previously visited states, effectively flattening the free energy landscape over time. However, a common drawback of these early adaptive methods is the need for heuristic parameters to decrease the bias update rate as the simulation progresses. If the bias update is shrunk too quickly, the system might not converge to the true free energy; if shrunk too slowly, the bias will continue to fluctuate, adding noise to the final FE estimate.
+
+In 2012, Jack Lidmar [introduced](https://doi.org/10.1103/PhysRevE.85.056708) the Accelerated Weight Histogram (AWH) method to solve this convergence problem. AWH continuously adapts a bias function to steer the simulation toward a predefined target distribution, using a rigorous statistical mechanics foundation that guarantees asymptotic convergence.
+
+### The Mathematics of AWH
+
+AWH operates within the framework of an extended ensemble. Instead of simulating a system at a fixed thermodynamic state, an state parameter $\lambda$ is promoted to be a dynamic variable alongside the atomic coordinates $x$. In Molly, $\lambda$ typically represents an index mapping to a specific discrete state (such as a specific umbrella restraint, an alchemical Hamiltonian, a particular temperature...). The goal of the extended ensemble is to sample the joint probability distribution:
+
+```math
+P(x, \lambda) \propto \exp\left( - \beta_\lambda E_\lambda(x) + g(\lambda) \right)
+```
+
+Here, $\beta_{\lambda}​E_{\lambda}​(x)$ is the dimensionless potential energy of configuration $x$ evaluated at state $\lambda$, and $g(\lambda)$ is a (fictitious) bias function. We want the marginal distribution of the sampled states $P(\lambda)$ to match a specific, user-defined target distribution $\rho(\lambda)$ (which is often simply a flat, uniform distribution). To achieve this, the exact bias required is $g(\lambda) = F(\lambda) + \log \rho (\lambda)$, where $F(\lambda)$ is the true dimensionless free energy. Because $F(\lambda)$ is initially unknown, AWH substitutes it with an iteratively refined estimate, $f(\lambda)$:
+
+```math
+g(\lambda) = f(\lambda) + \ln \rho(\lambda)
+```
+
+In Molly's implementation, the dynamics of $x$ and $\lambda$ are decoupled using a Gibbs sampling approach. The simulation proceeds by integrating the equations of motion for the coordinates $x$ using the Hamiltonian of the currently active state $\lambda$. Periodically, the simulation pauses the integration of $x$ to sample a new $\lambda$ state.
+
+To do this, AWH leverages the same reweighting principles found in MBAR. The current configuration $x$ is re-evaluated across all available Hamiltonians $\mathcal{H}_{k}$​ to compute the dimensionless potentials $\beta_{k}​E_{k}​(x)$. From these, a transition probability, or weight, is calculated for every state k:
+
+```math
+\omega_k(x) = \frac{\exp\left( f_k + \ln \rho_k - \beta_k E_k(x) \right)}{\sum_j \exp\left( f_j + \ln \rho_j - \beta_j E_j(x) \right)}
+```
+
+A new active state $\lambda$ is then drawn randomly according to these weights $\omega_{k}$​. This allows the system to make arbitrarily large jumps in $\lambda$-space as long as there is sufficient phase-space overlap.
+
+### The Free Energy Update
+
+As the simulation progresses, the calculated weights $\omega_{k}$​ are accumulated into a segment histogram $W_{k}$​. After a set number of steps, AWH updates its free energy estimate $f_{k}$​. The core principle of AWH is that the accumulated weights represent fluctuations on top of an ideal reference weight histogram containing an effective number of samples $N$. The update equation is:
+
+```math
+f_k \leftarrow f_k - \ln \left( \frac{N \rho_k + W_k}{N \rho_k + n \rho_k} \right)
+```
+
+where $n$ is the number of samples collected in the current update segment.
+
+The magnitude of the free energy update is governed by $N$. AWH dictates a highly robust two-stage update scheme for $N$:
+
+1. **Initial Stage**: $N$ is kept artificially small and constant. This causes the $\Delta f$ updates to remain large, rapidly filling in free energy basins and aggressively bootstrapping the system across high energy barriers. Once the system has sufficiently covered the $\lambda$ space, $N$ is scaled up exponentially.
+
+2. **Linear Stage**: Once the initial exploration is complete, $N$ is allowed to grow linearly with the simulation time ($N \propto t$). Consequently, the magnitude of the free energy updates scales down exactly as $1/t$, which is the theoretically optimal statistical rate for convergence.
+
+## How to run AWH with Molly
+
+### Defining a 2D collective variable space
+
+In this example, we will calculate the free energy landscape of an alanine dipeptide molecule, but this time we will explore a two-dimensional reaction coordinate: both the $\phi$ and $\psi$ central torsions. While running standard Umbrella Sampling and MBAR on a 2D grid is possible, the number of required independent simulations grows geometrically (e.g., a $15 \times 15$ grid requires 225 independent simulations!). Accelerated Weight Histogram (AWH) bypasses this issue. By treating the discrete bias grid as an extended ensemble parameter $\lambda$, AWH can dynamically explore the entire 2D space within a single, continuous molecular dynamics simulation.
+
+We will begin by defining the basic simulation parameters. We want our 2D grid to span the entire periodic range from $-\pi$ to $\pi$ for both dihedral angles, using 15 bins per dimension.
+
+```julia
+# awh_2d.jl
+
+using Molly
+using LinearAlgebra
+using Statistics
+using Unitful
+using CUDA
+using GLMakie
+
+# --- 1. Simulation Parameters ---
+
+FT = Float32
+AT = CuArray
+T_sim = FT(310.0)u"K"
+K_bias = FT(500.0)u"kJ * mol^-1" # Bias force constant
+DT = FT(1.0)u"fs"
+
+tu = unit(DT)
+sim_t = uconvert(tu, FT(20)u"ns")
+sim_steps = Int(floor(sim_t / DT))
+
+# AWH Parameters (2D)
+PMF_MIN = FT(-π)
+PMF_MAX = FT(π)
+N_BINS = 15 # 15x15 = 225 discrete λ states
+GRID_WIDTH = FT((PMF_MAX - PMF_MIN) / N_BINS)
+
+DELTA_R = FT(12.0)u"°" 
+WIDTH_RAD = ustrip(u"rad", DELTA_R)
+
+# Atom Indices for Alanine Dipeptide (ACE-ALA-NME)
+phi_inds = [5, 7, 9, 15] 
+psi_inds = [7, 9, 15, 17]
+```
+
+Next, we load the initial configuration and define our standard base [`System`](@ref) and integration algorithms, exactly as we would for a normal MD run.
+
+```julia
+# awh_2d.jl
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff_dir = joinpath(data_dir, "force_fields")
+ff = MolecularForceField(FT, joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...; units=true)
+
+# Load PDB
+sys = System(
+    joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
+    ff;
+    array_type=AT,
+    nonbonded_method=:cutoff,
+)
+
+# Initialize standard integrator
+thermostat = VelocityRescaleThermostat(T_sim, FT(1)u"ps")
+barostat   = CRescaleBarostat(FT(1)u"bar", FT(1)u"ps"; n_steps = 100)
+
+simulator = VelocityVerlet(
+    dt=DT,
+    coupling=(thermostat, barostat),
+    remove_CM_motion = 100
+)
+```
+
+### Setting up the AWH thermodynamic states
+
+AWH requires a collection of [`ThermoState`](@ref) objects, where each state represents a specific point $\lambda$ in our extended ensemble. In our case, each $\lambda$ is a unique combination of a $\phi$ and $\psi$ restraint target.
+
+We will loop over our 15 × 15 grid. For each coordinate pair, we define the respective collective variables and biases. Notice a crucial optimization step here: instead of deep-copying the entire [`System`](@ref) 225 times (which would heavily bloat GPU memory with duplicate coordinate and atom arrays), we create shallow systems that share the heavy arrays but use unique `general_inters` lists containing the specific [`BiasPotential`](@ref) for that window.
+
+```julia
+# awh_2d.jl
+
+thermo_states = ThermoState[]
+grid_points = range(PMF_MIN, PMF_MAX, length=N_BINS)
+
+println("Generating $(N_BINS*N_BINS) thermodynamic states...")
+
+for phi_target in grid_points
+    for psi_target in grid_points
+        
+        # --- Bias 1: Phi ---
+        cv_phi = CalcTorsion(phi_inds, :pbc, true)
+        bias_phi = PeriodicFlatBottomBias(K_bias, WIDTH_RAD, phi_target)
+        bp_phi = BiasPotential(cv_phi, bias_phi)
+
+        # --- Bias 2: Psi ---
+        cv_psi = CalcTorsion(psi_inds, :pbc, true)
+        bias_psi = PeriodicFlatBottomBias(K_bias, WIDTH_RAD, psi_target)
+        bp_psi = BiasPotential(cv_psi, bias_psi)
+        
+        # --- Create System with Dual Bias ---
+        # We share heavy arrays (atoms, coords) to save memory
+        sys_window = System(
+            atoms=sys.atoms,
+            coords=sys.coords,
+            boundary=sys.boundary,
+            pairwise_inters=sys.pairwise_inters,
+            specific_inter_lists=sys.specific_inter_lists,
+            general_inters=(sys.general_inters..., bp_phi, bp_psi), # Inject the active biases
+            neighbor_finder=sys.neighbor_finder
+        )
+        
+        push!(thermo_states, ThermoState(sys_window, simulator))
+    end
+end
+```
+
+### Initializing and running the AWH simulation
+
+With our discrete grid of states ready, we initialize the [`AWHState`](@ref) and the [`AWHSimulation`](@ref).
+
+Because our $\lambda$ states represent harmonically biased umbrellas rather than true alchemical intermediates, the free energy $f(\lambda)$ evaluated directly by AWH will be convoluted by the umbrella potentials. To obtain the unbiased PMF $\Phi(\xi)$, Molly provides an on-the-fly PMF deconvolution scheme. By providing the `pmf_grid` argument to [`AWHSimulation`](@ref), Molly will continuously reweight the sampled coordinates to build a high-resolution, deconvoluted PMF during the simulation itself.
+
+```julia
+# awh_2d.jl
+
+println("Initializing AWH State...")
+awh_state = AWHState(thermo_states; n_bias=100)
+
+println("Setting up Simulation...")
+
+# Note the tuple structure for 2D pmf_grid: ((min_x, min_y), (max_x, max_y), (bins_x, bins_y))
+awh_sim = AWHSimulation(
+    awh_state;
+    num_md_steps = 10,
+    update_freq  = 1,
+    well_tempered_factor = FT(500.0),
+    pmf_grid = ((PMF_MIN, PMF_MIN), (PMF_MAX, PMF_MAX), (60, 60)) # Deconvolve onto a 60x60 high-res grid
+)
+
+println("Starting Simulation...")
+simulate!(awh_sim, sim_steps)
+println("Simulation Complete.")
+```
+
+### Extracting and plotting the PMF
+
+Once the simulation completes, our deconvoluted PMF is safely stored inside `awh_sim.pmf_calc`. We can extract it by calculating the negative logarithm of the reweighted histogram ratio. We will write a small helper function to safely handle unvisited bins, shifting the global minimum of the free energy surface to zero.
+
+```julia
+# awh_2d.jl
+
+function get_pmf(pmf_struct)
+    num = pmf_struct.numerator_hist
+    den = pmf_struct.denominator_hist
+    
+    # Avoid log(0) for unsampled regions
+    valid = (num .> 0) .& (den .> 0)
+    
+    # Create PMF array (implicitly 2D based on input)
+    pmf = fill(FT(Inf), size(num))
+    pmf[valid] .= -log.(num[valid] ./ den[valid])
+    
+    # Shift global minimum to 0
+    min_val = minimum(pmf[valid])
+    pmf[valid] .-= min_val
+    return pmf
+end
+
+final_pmf = get_pmf(awh_sim.pmf_calc)
+
+# Prepare grid axes in degrees for plotting
+phi_vals = rad2deg.(range(PMF_MIN, PMF_MAX, length=60))
+psi_vals = rad2deg.(range(PMF_MIN, PMF_MAX, length=60))
+
+# Plot the 2D surface using GLMakie
+fig = Figure(resolution = (800, 600))
+ax = Axis(fig[1, 1], 
+    title = "Alanine Dipeptide 2D PMF (AWH)",
+    xlabel = "Phi (degrees)",
+    ylabel = "Psi (degrees)"
+)
+
+hm = heatmap!(ax, phi_vals, psi_vals, final_pmf, colormap=:viridis, colorrange=(0, 25))
+Colorbar(fig[1, 2], hm, label="Free Energy (kBT)")
+
+save("ala_dipeptide_2d_pmf.png", fig)
+```
+
+This will output a robust 2D free energy map of the alanine dipeptide Ramachandran plot. All achieved without the need for manual sequential equilibration, thanks to the continuous adaptive biasing of AWH!
+
+## Calculating Alchemical Free Energies with AWH
+
+### The alchemical transformation and the two-leg cycle
+
+In an alchemical free energy calculation, the collective variable is an alchemical parameter $\lambda$ that interpolates the Hamiltonian between two thermodynamic end states. Using AWH eliminates the need to manually optimize a dense ladder of intermediate $\lambda$ states, as the algorithm dynamically enforces a uniform target distribution, dedicating more sampling time to high-gradient regions. 
+
+For a rigorous standard state solvation calculation, a two-leg thermodynamic cycle must be used to account for intramolecular self-interactions and conformational entropy changes that occur upon removing the solvent:
+1.  **Solvent Leg (Annihilation):** Both solute-solvent and solute-solute non-bonded interactions are turned off.
+2.  **Vacuum Leg (Annihilation):** The isolated solute is simulated, and its intramolecular non-bonded interactions are turned off.
+
+Subtracting the vacuum annihilation work from the solvent annihilation work perfectly isolates the free energy of solvation.
+
+To prevent numerical instability when atoms overlap at low $\lambda$ values, the schedule decouples electrostatic interactions linearly first, followed by van der Waals interactions using a soft-core potential. The timestep is set to **1 fs** to maintain stable numerical integration against the steep potential gradients present in highly decoupled states.
+
+```julia
+# alchemical_awh.jl
+
+using Molly
+using CUDA
+using Unitful
+using GLMakie
+using StatsBase
+
+# --- Simulation Constants ---
+FT = Float32
+AT = CuArray
+Δt = FT(1)u"fs"
+T0 = FT(310)u"K"
+P0 = FT(1)u"bar"
+
+# 1D Lambda Schedule: Annihilate by running from 1.0 down to 0.0
+# The DefaultLambdaScheduler (with InsertRole) will automatically turn off 
+# electrostatics (1.0 -> 0.5) and then sterics (0.5 -> 0.0).
+lambda_schedule = FT.(range(1.0, stop=0.0, length=21))
+
+# --- Force Field Setup ---
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff_dir   = joinpath(data_dir, "force_fields")
+ff = MolecularForceField(FT, joinpath.(ff_dir, ["tip3p_standard.xml", "gaff.xml", "ethanol.xml"])...; units=true)
+```
+
+### Annihilation mixing rules
+
+To properly annihilate the solute, custom λ-mixing rules are required. By using a nested minimum function and clamping the highest value, both solute-solvent and solute-solute interactions are appropriately scaled down to zero. Note that using a Lorentz mixing rule in this case is not correct, since for a completely turned off solute $\lambda_{solute} = 0$ and a completely turned on solvend $\lambda_{solvent} = 1$ the overall lambda would yield $\lambda = (0 + 1)/2 = 0.5$. A geometric mixig such as $\sqrt{\lambda \cdot \lambda}$ could be used instead, but that would lead to a non-linear scaling along the alchemical coordinate and would potentially degrade the convergence if the algorithm.
+
+```julia
+# alchemical_awh.jl
+
+function annihilation_λ_vdw_mixing(a, b)
+    return min(typeof(a.λ_vdw)(0.99999), min(a.λ_vdw, b.λ_vdw))
+end
+
+function annihilation_λ_coul_mixing(a, b)
+    return min(typeof(a.λ_coul)(0.99999), min(a.λ_coul, b.λ_coul))
+end
+```
+
+### Setting up the alchemical thermodynamic states
+
+The `setup_alchemical_awh` function constructs the [`AWHState`](@ref) grid. The function handles ensemble selection via the `is_vacuum` flag: an NPT ensemble ([`VelocityRescaleThermostat`](@ref) and [`CRescaleBarostat`](@ref)) is applied for the solvent leg, whereas an NVT ensemble (thermostat only) is applied for the vacuum leg to prevent the unconstrained simulation box from catastrophically collapsing.
+
+Soft-core potentials ([`CoulombSoftCoreBeutler`](@ref) and [`LennardJonesSoftCoreBeutler`](@ref)) replace the standard non-bonded interactions.
+
+```julia
+# alchemical_awh.jl
+
+function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false)
+    sys_base = System(
+        pdb_file,
+        ff;
+        array_type=AT,
+        nonbonded_method=:none
+    )
+
+    thermostat = VelocityRescaleThermostat(T0, FT(0.1)u"ps")
+    
+    if is_vacuum
+        integrator = VelocityVerlet(Δt, (thermostat,), 100)
+    else
+        barostat = CRescaleBarostat(P0, FT(1)u"ps"; n_steps=250)
+        integrator = VelocityVerlet(Δt, (thermostat, barostat), 100)
+    end
+
+    minim = SteepestDescentMinimizer(step_size=FT(0.01)u"nm", max_steps=1000)
+    simulate!(sys_base, minim)
+
+    p_inters = sys_base.pairwise_inters
+    idx_lj   = findfirst(x -> x isa LennardJones, p_inters)
+    idx_coul = findfirst(x -> x isa Coulomb, p_inters)
+    
+    lj_0 = p_inters[idx_lj]
+    cl_0 = p_inters[idx_coul]
+
+    atoms_cpu = Molly.from_device(sys_base.atoms)
+    thermo_states = ThermoState[]
+
+    lj_sc = LennardJonesSoftCoreBeutler(
+        cutoff = lj_0.cutoff,
+        α = FT(0.85),
+        use_neighbors = lj_0.use_neighbors,
+        scheduler = DefaultLambdaScheduler()
+    )
+
+    coul_sc = CoulombSoftCoreBeutler(
+        cutoff = cl_0.cutoff,
+        α = FT(0.3), 
+        coulomb_const = cl_0.coulomb_const,
+        use_neighbors = cl_0.use_neighbors,
+        scheduler = DefaultLambdaScheduler()
+    )
+
+    for λ in lambda_schedule
+        acopy = Atom[]
+        for (i, a) in enumerate(atoms_cpu)
+            if a.index ∈ solute_indices
+                # Only update the global lambda; the scheduler handles the component logic
+                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, FT(λ), i ∈ solute_indices ? Molly.InsertRole : Molly.CoreRole))
+            else
+                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, a.λ, a.alch_role))
+            end
+        end
+
+        sys_w = System(
+            deepcopy(sys_base);
+            atoms = Molly.to_device([acopy...], AT),
+            pairwise_inters = (coul_sc, lj_sc)
+        )
+
+        push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
+    end
+
+    awh_state = AWHState(thermo_states; reuse_neighbors=true)
+    awh_sim   = AWHSimulation(awh_state; num_md_steps = 10, log_freq=100, well_tempered_factor=Inf)
+    
+    return awh_sim, sys_base
+end
+```
+
+### Execution and Standard State Corrections
+
+The calculation integrates both the solvated and vacuum legs. Since $\lambda$ is tracked dynamically by AWH as a discrete index, the output vector $f(\lambda)$ yields the alchemical free energy profile directly, requiring no PMF deconvolution.
+
+An analytical standard state volume correction, $k_{B}​T \ln(V_{gas}​/V_{std}​)$, shifts the initial and final states from the finite simulation volume to their macroscopic standard definitions (an ideal gas at 1 bar to a 1 Molar solution).
+
+```julia
+# alchemical_awh.jl
+
+md_time  = FT(10)u"ns"
+md_steps = Int(floor(uconvert(unit(Δt), md_time) / Δt))
+solute_idx = 1:9
+
+# 1. Solvated Leg
+println("Running Solvated AWH Leg...")
+awh_solv, sys_solv = setup_alchemical_awh("ethanol_solv.pdb", solute_idx; is_vacuum=false)
+simulate!(awh_solv, md_steps)
+dF_solv = awh_solv.state.f[end] - awh_solv.state.f[1]
+
+# 2. Vacuum Leg
+println("Running Vacuum AWH Leg...")
+awh_vac, sys_vac = setup_alchemical_awh("ethanol.pdb", solute_idx; is_vacuum=true)
+simulate!(awh_vac, md_steps)
+dF_vac = awh_vac.state.f[end] - awh_vac.state.f[1]
+
+# --- Thermodynamic Cycle ---
+V_gas = ustrip(u"nm^3", Unitful.k * T0 / P0)
+V_std = ustrip(u"nm^3", 1.0u"L" / (1.0u"mol" * Unitful.Na))
+dG_std_corr = log(V_gas / V_std)
+
+dG_solv = dF_vac - dF_solv + dG_std_corr
+beta = awh_solv.state.λ_β[1]
+
+println("=========================================")
+println("Annihilation in solvent (kBT):   ", dF_solv)
+println("Annihilation in vacuum (kBT):    ", dF_vac)
+println("Standard State Correction (kBT): ", dG_std_corr)
+println("Solvation Free Energy (kBT):     ", dG_solv)
+println("=========================================")
+
+println("=========================================")
+println("Annihilation in solvent (kJ mol^-1):   ", dF_solv / beta)
+println("Annihilation in vacuum (kJ mol^-1):    ", dF_vac / beta)
+println("Standard State Correction (kJ mol^-1): ", dG_std_corr / beta)
+println("Solvation Free Energy (kJ mol^-1):     ", dG_solv / beta)
+println("=========================================")
+```
+
+```
+=========================================
+Annihilation in solvent (kBT):   23.419682
+Annihilation in vacuum (kBT):    5.6188874
+Standard State Correction (kBT): 3.249398594044294
+Solvation Free Energy (kBT):     -14.551396007396136
+=========================================
+
+=========================================
+Annihilation in solvent (kJ mol^-1):   60.363842
+Annihilation in vacuum (kJ mol^-1):    14.48259
+Standard State Correction (kJ mol^-1): 8.375271054356045
+Solvation Free Energy (kJ mol^-1):     -37.505982185316256
+=========================================
+```
+
+### Analyzing Convergence and Free Energy Profiles
+
+The `max_delta_f_history` array records the maximum bias update applied over time. Plotted logarithmically, this variable confirms convergence once it transitions into a linear $1/t$ decay regime.
+
+```julia
+# alchemical_awh.jl
+
+function smooth_array(arr; smooth_n = 4)
+    N = length(arr)
+    return [mean(arr[max(i - smooth_n, 1):min(i + smooth_n, N)]) for i in eachindex(arr)]
+end
+
+steps_solv = length(awh_solv.state.stats.max_delta_f_history)
+time_solv  = [ustrip(md_time) * n/steps_solv for n in 1:steps_solv]
+steps_vac = length(awh_vac.state.stats.max_delta_f_history)
+time_vac  = [ustrip(md_time) * n/steps_vac for n in 1:steps_vac]
+
+fig_conv = Figure(size = (720, 720))
+ax_conv = Axis(fig_conv[1,1], title = L"\textbf{Max. ΔF Convergence}", xlabel = L"\textbf{Time / ns}", ylabel = L"\textbf{log}$_{10}$\textbf{(ΔF)}")
+
+lines!(ax_conv, time_solv, log10.(smooth_array(awh_solv.state.stats.max_delta_f_history)), color = :royalblue, label = "Solvent Leg")
+lines!(ax_conv, time_vac, log10.(smooth_array(awh_vac.state.stats.max_delta_f_history)), color = :firebrick, label = "Vacuum Leg")
+
+axislegend(ax_conv, position = :rt)
+save("awh_alchemical_convergence.png", fig_conv)
+```
+
+![Convergence of Alchemical AWH](images/awh_alchemical_convergence.png)
+
+The resulting alchemical free energy profiles can be extracted and plotted directly from the converged `f` vectors.
+
+```julia
+# alchemical_awh.jl
+
+λ_indices = collect(eachindex(awh_solv.state.λ_β))
+
+fig_fe = Figure(size = (720, 720))
+ax_fe = Axis(fig_fe[1,1], title = L"\textbf{Alchemical Free Energy}", xlabel = L"\textbf{Alchemical State (\lambda)}", ylabel = L"\textbf{F / k_{B}T}")
+
+lines!(ax_fe, λ_indices, awh_solv.state.f, color = :royalblue, linewidth = 5.0, label = "Solvent Leg")
+lines!(ax_fe, λ_indices, awh_vac.state.f, color = :firebrick, linewidth = 5.0, label = "Vacuum Leg")
+
+text!(ax_fe, 1.0, awh_solv.state.f[1], text = L"\text{Fully coupled}", align = (:left, :bottom), offset = (5, 5), fontsize = 18)
+text!(ax_fe, 11.0, awh_solv.state.f[11], text = L"\text{Charges switched off}", align = (:left, :top), offset = (5, -15), fontsize = 18)
+text!(ax_fe, 21.0, awh_solv.state.f[21], text = L"\text{VdW switched off}", align = (:right, :top), offset = (-5, -25), fontsize = 18)
+
+axislegend(ax_fe, position = :lt)
+save("awh_alchemical_profile.png", fig_fe)
+```
+
+![Free Energy Alchemical Profile](images/awh_alchemical_profile.png)

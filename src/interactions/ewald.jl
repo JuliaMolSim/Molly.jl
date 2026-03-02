@@ -1,5 +1,6 @@
 # Long range electrostatic summation methods
 # Based on the OpenMM source code
+import Base: ==, hash
 
 export
     Ewald,
@@ -350,6 +351,18 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
     return total_E
 end
 
+function ==(a::Ewald, b::Ewald)
+    return a.dist_cutoff == b.dist_cutoff &&
+           a.error_tol   == b.error_tol   &&
+           a.excluded_pairs == b.excluded_pairs
+end
+
+function hash(a::Ewald, h::UInt)
+    v = hash(a.dist_cutoff, h)
+    v = hash(a.error_tol, v)
+    return hash(a.excluded_pairs, v)
+end
+
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
@@ -549,6 +562,27 @@ function Base.zero(pme::PME)
         pme.bfft_plan,
         pme.grad_safe,
     )
+end
+
+function ==(a::PME, b::PME)
+    return a.dist_cutoff == b.dist_cutoff &&
+           a.error_tol   == b.error_tol   &&
+           a.order       == b.order       &&
+           a.ϵr          == b.ϵr          &&
+           a.α           == b.α           &&
+           a.mesh_dims   == b.mesh_dims   &&
+           a.grad_safe   == b.grad_safe
+end
+
+function hash(a::PME, h::UInt)
+    v = hash(a.dist_cutoff, h)
+    v = hash(a.error_tol, v)
+    v = hash(a.order, v)
+    v = hash(a.ϵr, v)
+    v = hash(a.α, v)
+    v = hash(a.mesh_dims, v)
+    v = hash(a.grad_safe, v)
+    return v
 end
 
 function pme_params(side_length, α, error_tol::T) where T

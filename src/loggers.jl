@@ -7,6 +7,7 @@ export
     log_property!,
     TemperatureLogger,
     CoordinatesLogger,
+    BoxLogger,
     VelocitiesLogger,
     TotalEnergyLogger,
     KineticEnergyLogger,
@@ -142,6 +143,30 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
     print(io, "CoordinatesLogger{", eltype(eltype(values(cl))), "} with n_steps ",
             cl.n_steps, ", ", length(values(cl)), " frames recorded for ",
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
+end
+
+box_wrapper(sys, args...; kwargs...) = boxmatrix(sys.boundary)
+
+"""
+    BoxLogger(n_steps)
+    BoxLogger(T, n_steps)
+
+Log the boundary of a system throughout a simulation,
+represented as its box matrix.
+Useful for NPT simulations where the box dimensions fluctuate.
+"""
+function BoxLogger(T::Type, n_steps::Integer)
+    return GeneralObservableLogger(box_wrapper,
+        T, 
+        n_steps,
+    )
+end
+
+BoxLogger(n_steps::Integer; dims::Integer=3) = BoxLogger(typeof(Matrix{DefaultFloat}(undef, dims, dims)*u"nm"), n_steps)
+
+function Base.show(io::IO, bl::GeneralObservableLogger{T, typeof(box_wrapper)}) where T
+    print(io, "BoxLogger{", eltype(values(bl)), "} with n_steps ",
+            bl.n_steps, ", ", length(values(bl)), " boundaries recorded")
 end
 
 velocities_wrapper(sys, args...; kwargs...) = copy(sys.velocities)

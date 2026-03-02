@@ -447,10 +447,11 @@ In general, custom forces should be implemented as described in [Forces and ener
 
 ## Enhanced sampling
 
-Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`TemperatureREMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
+Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`ReplicaExchangeMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
 On CPU these are run in parallel by dividing up the number of available threads.
 For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1 ps:
 ```julia
+using Molly
 using Statistics
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
@@ -464,46 +465,43 @@ sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff)
 minimizer = SteepestDescentMinimizer()
 simulate!(sys, minimizer)
 
-n_replicas = 4
+dt            = 0.0005u"ps"
+n_replicas    = 4
+temps         = [240.0u"K", 280.0u"K", 320.0u"K", 360.0u"K"]
+thermo_states = ThermoState[]
+
+for temp in temps
+        intg = Langevin(dt=dt, temperature=temp, friction=1.0u"ps^-1")
+        push!(thermo_states, ThermoState(sys, intg; temperature=temp))
+end
+
+replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)) for i in 1:n_replicas]
 
 rep_sys = ReplicaSystem(
-    atoms=sys.atoms,
-    replica_coords=[copy(sys.coords) for _ in 1:n_replicas],
-    boundary=sys.boundary,
-    n_replicas=n_replicas,
-    atoms_data=sys.atoms_data,
-    pairwise_inters=sys.pairwise_inters,
-    specific_inter_lists=sys.specific_inter_lists,
-    general_inters=sys.general_inters,
-    neighbor_finder=sys.neighbor_finder,
-    replica_loggers=[(temp=TemperatureLogger(10),) for _ in 1:n_replicas],
+    thermo_states,
+    [copy(sys.coords) for _ in 1:n_replicas];
+    replica_loggers=replica_loggers,
 )
 
-temps = [240.0u"K", 280.0u"K", 320.0u"K", 360.0u"K"]
-dt = 0.0005u"ps"
-simulators = [Langevin(dt=dt, temperature=temp, friction=1.0u"ps^-1") for temp in temps]
-
-sim = TemperatureREMD(
-    dt=dt,
-    temperatures=temps,
-    simulators=simulators,
-    exchange_time=1.0u"ps",
-)
+sim = ReplicaExchangeMD(dt=dt, exchange_time=2.5u"ps")
 
 simulate!(rep_sys, sim, 40_000; assign_velocities=true)
 
 println(rep_sys.exchange_logger.n_attempts)
-# 30
+# 12
 
-for i in 1:n_replicas
-    final_temps = values(rep_sys.replicas[i].loggers.temp)[(end - 10):end]
-    println(mean(final_temps))
+for id in 1:n_replicas
+        mean_temp = mean(values(rep_sys.replica_loggers[id].temp)[(end - 10):end])
+        # Given physical coordinates swap thermal states, they should average out across the ladder bounds
+        println(mean_temp)
 end
-# 240.1691457033836 K
-# 281.3783250460198 K
-# 320.44985840482974 K
-# 357.710520769689 K
+# 242.68166672295013 K
+# 285.37217289488996 K
+# 314.0608014652237 K
+# 362.86427110336984 K
 ```
+
+The Accelerated Weight Histogram method ([`AWHState`](@ref), [`AWHSimulation`](@ref)) has also been implemented in Molly.jl, allowing to perform enhanced sampling and obtaining on-the-fly estimators of free energies along arbitrary collective variables and alchemical transformations. A more detailed overview of this can be found in the Free Energy section of the documentation.
 
 ## Monte Carlo sampling
 
@@ -1120,8 +1118,7 @@ The available simulators are:
 - [`LangevinSplitting`](@ref)
 - [`OverdampedLangevin`](@ref)
 - [`NoseHoover`](@ref)
-- [`TemperatureREMD`](@ref)
-- [`HamiltonianREMD`](@ref)
+- [`ReplicaExchangeMD`](@ref)
 - [`MetropolisMonteCarlo`](@ref)
 
 Many of these require a time step `dt` as an argument.
