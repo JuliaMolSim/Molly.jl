@@ -295,21 +295,18 @@ function AWHPMFDeconvolution(
     
     tgt_press = nothing
     if !isnothing(target_pressure)
-
-        # Molly Energies are per mole. P*V is just energy.
-        # We need (P*V) to have units of J/mol.
-        # P (bar) * Na (mol^-1) gives the correct dimensionality to match e_unit/v_unit.
-        
         l_unit = unit(sys.boundary.side_lengths[1])
         v_unit = l_unit^3
+        p_unit = e_unit / v_unit
         
-        # Internal pressure unit: Energy / Volume (per mole)
-        p_unit = e_unit / v_unit # e.g. kJ mol^-1 nm^-3
+        # Deal with molar units
+        e_val = 1.0 * e_unit
+        molar_scaling = e_val / energy_remove_mol(e_val)
         
-        # We scale the macroscopic pressure by Avogadro's constant to get "Molar Pressure"
-        p_val_molar = target_pressure * Unitful.Na
+        # Scale macroscopic pressure to match the system's internal pressure dimensionality
+        p_val_scaled = target_pressure * molar_scaling
         
-        tgt_press = T(ustrip(uconvert(p_unit, p_val_molar)))
+        tgt_press = T(ustrip(uconvert(p_unit, p_val_scaled)))
     end
 
     num_hist = zeros(T, n_bins)

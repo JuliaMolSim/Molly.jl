@@ -42,6 +42,9 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     solute_indices = Set{Int}()
     λ_atoms = []
 
+    # Bring the reference atoms off the device outside of the loop
+    ref_atoms_cpu = from_device(ref_sys.atoms)
+
     for tstate in thermo_states
         atoms = tstate.system.atoms
         push!(λ_atoms, atoms)
@@ -51,7 +54,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
             # Flag if the atom possesses alchemical scaling properties,
             # or if its properties explicitly diverge from the reference.
             if (atom.λ < 1.0) || 
-               (atom.λ != from_device(ref_sys.atoms)[atom.index].λ)
+               (atom.λ != ref_atoms_cpu[atom.index].λ)
                 push!(solute_indices, atom.index)
             end
         end
