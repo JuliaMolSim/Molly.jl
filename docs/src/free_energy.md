@@ -901,15 +901,10 @@ AT = CuArray
 T0 = FT(310)u"K"
 P0 = FT(1)u"bar"
 
-# Define Lambda Schedule: (Charge Scaling, VdW Scaling)
-lambda_schedule = [
-    (1.0, 1.0), (0.9, 1.0), (0.8, 1.0), (0.7, 1.0), (0.6, 1.0), 
-    (0.5, 1.0), (0.4, 1.0), (0.3, 1.0), (0.2, 1.0), (0.1, 1.0),
-    (0.0, 1.0),
-    (0.0, 0.9), (0.0, 0.8), (0.0, 0.7), (0.0, 0.6), 
-    (0.0, 0.5), (0.0, 0.4), (0.0, 0.3), (0.0, 0.2), 
-    (0.0, 0.1), (0.0, 0.0)
-]
+# 1D Lambda Schedule: Annihilate by running from 1.0 down to 0.0
+# The DefaultLambdaScheduler (with InsertRole) will automatically turn off 
+# electrostatics (1.0 -> 0.5) and then sterics (0.5 -> 0.0).
+lambda_schedule = FT.(range(1.0, stop=0.0, length=21))
 
 # --- Force Field Setup ---
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
@@ -943,7 +938,12 @@ Soft-core potentials ([`CoulombSoftCoreBeutler`](@ref) and [`LennardJonesSoftCor
 # alchemical_awh.jl
 
 function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false)
-    sys_base = System(pdb_file, ff; array_type=AT, nonbonded_method=:none)
+    sys_base = System(
+        pdb_file,
+        ff;
+        array_type=AT,
+        nonbonded_method=:none
+    )
 
     thermostat = VelocityRescaleThermostat(T0, FT(0.1)u"ps")
     
@@ -967,28 +967,29 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false)
     atoms_cpu = Molly.from_device(sys_base.atoms)
     thermo_states = ThermoState[]
 
-    for (λ_coul, λ_lj) in lambda_schedule
-        lj_sc = LennardJonesSoftCoreBeutler(
-            cutoff = lj_0.cutoff,
-            λ_mixing = annihilation_λ_vdw_mixing,
-            α = FT(0.85),
-            use_neighbors = lj_0.use_neighbors
-        )
+    lj_sc = LennardJonesSoftCoreBeutler(
+        cutoff = lj_0.cutoff,
+        α = FT(0.85),
+        use_neighbors = lj_0.use_neighbors,
+        scheduler = DefaultLambdaScheduler()
+    )
 
-        coul_sc = CoulombSoftCoreBeutler(
-            cutoff = cl_0.cutoff,
-            λ_mixing = annihilation_λ_coul_mixing,
-            α = FT(0.1), 
-            coulomb_const = cl_0.coulomb_const,
-            use_neighbors = cl_0.use_neighbors
-        )
+    coul_sc = CoulombSoftCoreBeutler(
+        cutoff = cl_0.cutoff,
+        α = FT(0.3), 
+        coulomb_const = cl_0.coulomb_const,
+        use_neighbors = cl_0.use_neighbors,
+        scheduler = DefaultLambdaScheduler()
+    )
 
+    for λ in lambda_schedule
         acopy = Atom[]
-        for a in atoms_cpu
+        for (i, a) in enumerate(atoms_cpu)
             if a.index ∈ solute_indices
-                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, FT(λ_coul), FT(λ_lj)))
+                # Only update the global lambda; the scheduler handles the component logic
+                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, FT(λ), i ∈ solute_indices ? Molly.InsertRole : Molly.CoreRole))
             else
-                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, a.λ_coul, a.λ_vdw))
+                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, a.λ, a.alch_role))
             end
         end
 
@@ -1002,7 +1003,7 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false)
     end
 
     awh_state = AWHState(thermo_states; reuse_neighbors=true)
-    awh_sim   = AWHSimulation(awh_state; num_md_steps = 5, log_freq=100, well_tempered_factor=Inf)
+    awh_sim   = AWHSimulation(awh_state; num_md_steps = 10, log_freq=100, well_tempered_factor=Inf)
     
     return awh_sim, sys_base
 end
@@ -1042,6 +1043,13 @@ dG_solv = dF_vac - dF_solv + dG_std_corr
 beta = awh_solv.state.λ_β[1]
 
 println("=========================================")
+println("Annihilation in solvent (kBT):   ", dF_solv)
+println("Annihilation in vacuum (kBT):    ", dF_vac)
+println("Standard State Correction (kBT): ", dG_std_corr)
+println("Solvation Free Energy (kBT):     ", dG_solv)
+println("=========================================")
+
+println("=========================================")
 println("Annihilation in solvent (kJ mol^-1):   ", dF_solv / beta)
 println("Annihilation in vacuum (kJ mol^-1):    ", dF_vac / beta)
 println("Standard State Correction (kJ mol^-1): ", dG_std_corr / beta)
@@ -1051,10 +1059,17 @@ println("=========================================")
 
 ```
 =========================================
-Annihilation in solvent (kJ mol^-1):   52.39459
-Annihilation in vacuum (kJ mol^-1):    14.510403
+Annihilation in solvent (kBT):   23.419682
+Annihilation in vacuum (kBT):    5.6188874
+Standard State Correction (kBT): 3.249398594044294
+Solvation Free Energy (kBT):     -14.551396007396136
+=========================================
+
+=========================================
+Annihilation in solvent (kJ mol^-1):   60.363842
+Annihilation in vacuum (kJ mol^-1):    14.48259
 Standard State Correction (kJ mol^-1): 8.375271054356045
-Solvation Free Energy (kJ mol^-1):     -29.508914674463064
+Solvation Free Energy (kJ mol^-1):     -37.505982185316256
 =========================================
 ```
 
