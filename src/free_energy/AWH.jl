@@ -661,22 +661,24 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     return delta_f
 end
 
-function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
+function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshold=nothing) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
-    active_idx = 1
+    active_idx = awh_sim.state.active_idx # Initialize from current state
 
     for iteration_n in 1:n_iterations
+        # --- NEW: Sync active index to the logger ---
+        if hasproperty(awh_sim.state.active_sys.loggers, :awh_logger)
+            awh_sim.state.active_sys.loggers.awh_logger.active_idx = active_idx
+        end
+
         simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
 
 
         active_pe_units = process_sample(awh_sim.state)
 
         if !isnothing(awh_sim.pmf_calc)
-            # Calculate a(t) factor for PMF Deconvolution [Lindahl et al. 2014, Eq. 9 text]
-            # Initial Stage: N is constant => Delta N = 0 => a = N / (N + n_lambda)
-            # Linear Stage: N grows => Delta N = n_lambda => a = 1.0
-            
+            # PMF update logic
             w_fac = one(T)
             if awh_sim.state.in_initial_stage
                 current_N = awh_sim.state.N_bias
@@ -713,6 +715,20 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
         end
 
         update_active_sys!(awh_sim.state, active_idx)
-        update_awh_bias!(awh_sim, iteration_n)
+        
+        delta_f = update_awh_bias!(awh_sim, iteration_n)
+
+        # --- NEW: Convergence Evaluation ---
+        if !isnothing(convergence_threshold) && !isnothing(delta_f)
+            # Strict enforcement: only evaluate convergence during the linear stage
+            if !awh_sim.state.in_initial_stage
+                max_change = maximum(abs.(delta_f))
+                println("ΔF = $(max_change); threshold = $(convergence_threshold)")
+                if max_change <= convergence_threshold
+                    @info "AWH converged at iteration $iteration_n (max ΔF = $max_change <= $convergence_threshold)"
+                    break
+                end
+            end
+        end
     end
 end

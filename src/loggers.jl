@@ -26,7 +26,8 @@ export
     AutoCorrelationLogger,
     AverageObservableLogger,
     ReplicaExchangeLogger,
-    MonteCarloLogger
+    MonteCarloLogger,
+    AWHEnsembleLogger
 
 """
     apply_loggers!(system, buffers, neighbors=nothing, step_n=0, run_loggers=true;
@@ -1084,4 +1085,38 @@ function log_property!(mcl::MonteCarloLogger{T},
     end
     push!(mcl.state_changed, success)
     push!(mcl.energy_rates, energy_rate)
+end
+
+mutable struct AWHEnsembleLogger{T}
+    n_steps::Int
+    global_step::Int
+    should_log::Bool
+    active_idx::Int
+    
+    active_idx_history::Vector{Int}
+    coords_history::Vector{Vector{SVector{3, T}}}
+    volume_history::Vector{T}
+    potential_energy_history::Vector{T}
+end
+
+function AWHEnsembleLogger(T::DataType, n_steps::Int)
+    return AWHEnsembleLogger{T}(
+        n_steps, 0, false, 1,
+        Int[], Vector{SVector{3, T}}[], T[], T[]
+    )
+end
+
+function Molly.log_property!(logger::AWHEnsembleLogger{T}, sys, buffers, neighbors, step_n::Integer=0; kwargs...) where {T}
+    # Only collect data during Phase 2 (Production)
+    if logger.should_log
+        logger.global_step += 1
+        if logger.global_step % logger.n_steps == 0
+            push!(logger.active_idx_history, logger.active_idx)
+            push!(logger.coords_history, copy(Array(sys.coords)))
+            push!(logger.volume_history, T(ustrip(volume(sys.boundary))))
+            
+            # Use buffers in potential_energy if available, or just pass neighbors
+            push!(logger.potential_energy_history, T(ustrip(potential_energy(sys, neighbors))))
+        end
+    end
 end
