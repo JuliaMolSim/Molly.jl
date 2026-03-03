@@ -1087,36 +1087,37 @@ function log_property!(mcl::MonteCarloLogger{T},
     push!(mcl.energy_rates, energy_rate)
 end
 
-mutable struct AWHEnsembleLogger{T}
+mutable struct AWHEnsembleLogger{T_coord, T_vol, T_en}
     n_steps::Int
     global_step::Int
     should_log::Bool
     active_idx::Int
     
     active_idx_history::Vector{Int}
-    coords_history::Vector{Vector{SVector{3, T}}}
-    volume_history::Vector{T}
-    potential_energy_history::Vector{T}
+    coords_history::Vector{Vector{SVector{3, T_coord}}}
+    volume_history::Vector{T_vol}
+    potential_energy_history::Vector{T_en}
 end
 
-function AWHEnsembleLogger(T::DataType, n_steps::Int)
-    return AWHEnsembleLogger{T}(
+function AWHEnsembleLogger(T_coord::DataType, T_vol::DataType, T_en::DataType, n_steps::Int)
+    return AWHEnsembleLogger{T_coord, T_vol, T_en}(
         n_steps, 0, false, 1,
-        Int[], Vector{SVector{3, T}}[], T[], T[]
+        Int[], Vector{SVector{3, T_coord}}[], T_vol[], T_en[]
     )
 end
 
-function Molly.log_property!(logger::AWHEnsembleLogger{T}, sys, buffers, neighbors, step_n::Integer=0; kwargs...) where {T}
-    # Only collect data during Phase 2 (Production)
+function Molly.log_property!(logger::AWHEnsembleLogger, sys, buffers, neighbors, step_n::Integer=0; kwargs...)
     if logger.should_log
         logger.global_step += 1
         if logger.global_step % logger.n_steps == 0
             push!(logger.active_idx_history, logger.active_idx)
-            push!(logger.coords_history, copy(Array(sys.coords)))
-            push!(logger.volume_history, T(ustrip(volume(sys.boundary))))
             
-            # Use buffers in potential_energy if available, or just pass neighbors
-            push!(logger.potential_energy_history, T(ustrip(potential_energy(sys, neighbors))))
+            # Array() pulls from GPU to CPU, preserving the Unitful Quantities
+            push!(logger.coords_history, copy(Array(sys.coords)))
+            
+            # Record directly with units
+            push!(logger.volume_history, volume(sys.boundary))
+            push!(logger.potential_energy_history, potential_energy(sys, neighbors))
         end
     end
 end
