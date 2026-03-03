@@ -212,6 +212,27 @@ function Base.:+(l1::LennardJonesSoftCoreBeutler, l2::LennardJonesSoftCoreBeutle
     )
 end
 
+function Molly.inject_interaction(inter::LennardJonesSoftCoreBeutler, params_dic)
+    key_prefix = "inter_LJ_"
+    return LennardJonesSoftCoreBeutler(
+        inter.cutoff,
+        inter.α,
+        inter.use_neighbors,
+        inter.shortcut,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
+        inter.λ_mixing,
+        inter.scheduler,
+        Molly.dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+    )
+end
+
+function Molly.extract_parameters!(params_dic, inter::LennardJonesSoftCoreBeutler, ff)
+    key_prefix = "inter_LJ_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
+end
+
 @inline function force(inter::LennardJonesSoftCoreBeutler,
                        dr,
                        atom_i,
@@ -433,6 +454,27 @@ function Base.:+(l1::LennardJonesSoftCoreGapsys, l2::LennardJonesSoftCoreGapsys)
         l1.scheduler,
         l1.weight_special + l2.weight_special,
     )
+end
+
+function Molly.inject_interaction(inter::LennardJonesSoftCoreGapsys, params_dic)
+    key_prefix = "inter_LJ_"
+    return LennardJonesSoftCoreGapsys(
+        inter.cutoff,
+        inter.α,
+        inter.use_neighbors,
+        inter.shortcut,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
+        inter.λ_mixing,
+        inter.scheduler,
+        Molly.dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+    )
+end
+
+function Molly.extract_parameters!(params_dic, inter::LennardJonesSoftCoreGapsys, ff)
+    key_prefix = "inter_LJ_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
 end
 
 @inline function force(inter::LennardJonesSoftCoreGapsys,

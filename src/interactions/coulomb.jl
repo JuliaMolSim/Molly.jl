@@ -180,6 +180,28 @@ function Base.:+(c1::CoulombSoftCoreBeutler, c2::CoulombSoftCoreBeutler)
     )
 end
 
+function Molly.inject_interaction(inter::CoulombSoftCoreBeutler, params_dic)
+    key_prefix = "inter_CO_"
+    return CoulombSoftCoreBeutler(
+        inter.cutoff,
+        inter.α,
+        inter.use_neighbors,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
+        inter.λ_mixing,
+        inter.scheduler,
+        Molly.dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        Molly.dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
+    )
+end
+
+function Molly.extract_parameters!(params_dic, inter::CoulombSoftCoreBeutler, ff)
+    key_prefix = "inter_CO_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
+    return params_dic
+end
+
 @inline function force(inter::CoulombSoftCoreBeutler,
                        dr,
                        atom_i,
@@ -366,6 +388,27 @@ function Base.:+(c1::CoulombSoftCoreGapsys, c2::CoulombSoftCoreGapsys)
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
     )
+end
+
+function Molly.inject_interaction(inter::CoulombSoftCoreGapsys, params_dic)
+    key_prefix = "inter_CO_"
+    return CoulombSoftCoreGapsys(
+        inter.cutoff,
+        inter.α,
+        inter.σQ,
+        inter.use_neighbors,
+        inter.λ_mixing,
+        inter.scheduler,
+        Molly.dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        Molly.dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
+    )
+end
+
+function Molly.extract_parameters!(params_dic, inter::CoulombSoftCoreGapsys, ff)
+    key_prefix = "inter_CO_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
+    return params_dic
 end
 
 @inline function force(inter::CoulombSoftCoreGapsys, 
