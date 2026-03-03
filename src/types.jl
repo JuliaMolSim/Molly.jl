@@ -999,7 +999,7 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
     press_source = pressure
 
     # Infer thermodynamic targets from the integrator if not explicitly overridden
-    if hasproperty(integrator, :coupling) && !(integrator.coupling isa NoCoupling)
+    if hasproperty(integrator, :coupling) && !isnothing(integrator.coupling)
         couplers = integrator.coupling isa Tuple ? integrator.coupling : (integrator.coupling,)
         for coupler in couplers
             if isnothing(temp_source) && coupler isa AbstractThermostat

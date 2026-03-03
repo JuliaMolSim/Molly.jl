@@ -911,6 +911,8 @@ function simulate!(sys::ReplicaSystem,
                    assign_velocities::Bool=false,
                    n_threads::Integer=Threads.nthreads(),
                    run_loggers=true,
+                   shortcut=nothing,
+                   show_progress=default_show_progress(),
                    rng=Random.default_rng())
     
     if assign_velocities
