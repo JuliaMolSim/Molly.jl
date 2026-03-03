@@ -55,5 +55,5 @@ end
 
 Unitful.ustrip(b::HarmonicBond) = HarmonicBond(
     k = ustrip(b.k),
-    θ0 = ustrip(b.r0)
+    r0 = ustrip(b.r0)
 )

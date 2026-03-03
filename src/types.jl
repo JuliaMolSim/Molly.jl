@@ -299,31 +299,29 @@ end
 
 # These structures hold index arrays (is, js, ks, ls) and a generic interaction array (inters).
 # The indices are purely integer types, so we only broadcast ustrip over the interaction parameters.
-Unitful.ustrip(il::InteractionList1Atoms) = InteractionList1Atoms(
-    il.is, 
-    ustrip.(il.inters)
-)
+function Unitful.ustrip(il::InteractionList1Atoms)
+    AT = array_type(il.inters)
+    unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
+    return InteractionList1Atoms(il.is, unitless_inters, il.types)
+end
 
-Unitful.ustrip(il::InteractionList2Atoms) = InteractionList2Atoms(
-    il.is, 
-    il.js, 
-    ustrip.(il.inters)
-)
+function Unitful.ustrip(il::InteractionList2Atoms)
+    AT = array_type(il.inters)
+    unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
+    return InteractionList2Atoms(il.is, il.js, unitless_inters, il.types)
+end
 
-Unitful.ustrip(il::InteractionList3Atoms) = InteractionList3Atoms(
-    il.is, 
-    il.js, 
-    il.ks, 
-    ustrip.(il.inters)
-)
+function Unitful.ustrip(il::InteractionList3Atoms)
+    AT = array_type(il.inters)
+    unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
+    return InteractionList3Atoms(il.is, il.js, il.ks, unitless_inters, il.types)
+end
 
-Unitful.ustrip(il::InteractionList4Atoms) = InteractionList4Atoms(
-    il.is, 
-    il.js, 
-    il.ks, 
-    il.ls, 
-    ustrip.(il.inters)
-)
+function Unitful.ustrip(il::InteractionList4Atoms)
+    AT = array_type(il.inters)
+    unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
+    return InteractionList4Atoms(il.is, il.js, il.ks, il.ls, unitless_inters, il.types)
+end
 
 """
     Atom(; <keyword arguments>)
@@ -987,20 +985,27 @@ end
 
 # Reconstructs the core simulation state by recursively stripping the arrays and parameter fields.
 function Unitful.ustrip(sys::System)
+    AT = array_type(sys.coords)
+
+    # Safely strip units on the CPU for all arrays to prevent GPU kernel crashes
+    unitless_atoms  = to_device(ustrip.(from_device(sys.atoms)), AT)
+    unitless_coords = to_device(ustrip.(from_device(sys.coords)), AT)
+    unitless_vels   = to_device(ustrip.(from_device(sys.velocities)), AT)
+
     return System(
-        atoms = ustrip.(sys.atoms),
-        atoms_data = sys.atoms_data, # Typically strings or Element structs; no units.
+        atoms = unitless_atoms,
+        atoms_data = sys.atoms_data,
         pairwise_inters = ustrip(sys.pairwise_inters),
         specific_inter_lists = ustrip(sys.specific_inter_lists),
         general_inters = ustrip(sys.general_inters),
-        coords = ustrip.(sys.coords),
-        velocities = ustrip.(sys.velocities),
+        coords = unitless_coords,
+        velocities = unitless_vels,
         boundary = ustrip(sys.boundary),
         neighbor_finder = ustrip(sys.neighbor_finder),
-        loggers = NamedTuple(), # Loggers are stripped out to prevent AD graph breaks
+        loggers = NamedTuple(), 
         force_units = NoUnits,
         energy_units = NoUnits,
-        k = sys.k
+        k = ustrip(sys.k)
     )
 end
 
