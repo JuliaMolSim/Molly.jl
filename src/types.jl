@@ -57,6 +57,13 @@ struct InteractionList1Atoms{I, T} <: SpecificInteractionList{1}
     is::I
     inters::T
     types::Vector{String}
+
+    function InteractionList1Atoms(is, inters, types)
+        if !(length(is) == length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList1Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters)}(is, inters, types)
+    end
 end
 
 """
@@ -71,6 +78,13 @@ struct InteractionList2Atoms{I, T} <: SpecificInteractionList{2}
     js::I
     inters::T
     types::Vector{String}
+
+    function InteractionList2Atoms(is, js, inters, types)
+        if !(length(is) == length(js) == length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList2Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters)}(is, js, inters, types)
+    end
 end
 
 """
@@ -86,6 +100,13 @@ struct InteractionList3Atoms{I, T} <: SpecificInteractionList{3}
     ks::I
     inters::T
     types::Vector{String}
+
+    function InteractionList3Atoms(is, js, ks, inters, types)
+        if !(length(is) == length(js) == length(ks) == length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList3Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters)}(is, js, ks, inters, types)
+    end
 end
 
 """
@@ -102,6 +123,13 @@ struct InteractionList4Atoms{I, T} <: SpecificInteractionList{4}
     ls::I
     inters::T
     types::Vector{String}
+
+    function InteractionList4Atoms(is, js, ks, ls, inters, types)
+        if !(length(is) == length(js) == length(ks) == length(ls) == length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList4Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters)}(is, js, ks, ls, inters, types)
+    end
 end
 
 InteractionList1Atoms(is, inters) = InteractionList1Atoms(is, inters, fill("", length(is)))
@@ -111,71 +139,70 @@ InteractionList3Atoms(is, js, ks, inters) = InteractionList3Atoms(is, js, ks, in
 InteractionList4Atoms(is, js, ks, ls, inters) = InteractionList4Atoms(is, js, ks, ls, inters,
                                                                       fill("", length(is)))
 
-InteractionList1Atoms(T) = InteractionList1Atoms{Vector{Int32}, Vector{T}}([], T[], [])
-InteractionList2Atoms(T) = InteractionList2Atoms{Vector{Int32}, Vector{T}}([], [], T[], [])
-InteractionList3Atoms(T) = InteractionList3Atoms{Vector{Int32}, Vector{T}}([], [], [], T[], [])
-InteractionList4Atoms(T) = InteractionList4Atoms{Vector{Int32}, Vector{T}}([], [], [], [], T[], [])
+InteractionList1Atoms(T) = InteractionList1Atoms(Int32[], T[], [])
+InteractionList2Atoms(T) = InteractionList2Atoms(Int32[], Int32[], T[], [])
+InteractionList3Atoms(T) = InteractionList3Atoms(Int32[], Int32[], Int32[], T[], [])
+InteractionList4Atoms(T) = InteractionList4Atoms(Int32[], Int32[], Int32[], Int32[], T[], [])
 
-interaction_type(::InteractionList1Atoms{I, T}) where {I, T} = eltype(T)
-interaction_type(::InteractionList2Atoms{I, T}) where {I, T} = eltype(T)
-interaction_type(::InteractionList3Atoms{I, T}) where {I, T} = eltype(T)
-interaction_type(::InteractionList4Atoms{I, T}) where {I, T} = eltype(T)
+interaction_type(::InteractionList1Atoms{<:Any, T}) where {T} = eltype(T)
+interaction_type(::InteractionList2Atoms{<:Any, T}) where {T} = eltype(T)
+interaction_type(::InteractionList3Atoms{<:Any, T}) where {T} = eltype(T)
+interaction_type(::InteractionList4Atoms{<:Any, T}) where {T} = eltype(T)
 
-Base.length(inter_list::Union{InteractionList1Atoms, InteractionList2Atoms,
-                              InteractionList3Atoms, InteractionList4Atoms}) = length(inter_list.is)
+Base.length(inter_list::SpecificInteractionList) = length(inter_list.is)
 
-function Base.zero(inter_list::InteractionList1Atoms{I, T}) where {I, T}
+function Base.zero(inter_list::InteractionList1Atoms)
     n_inters = length(inter_list)
-    return InteractionList1Atoms{I, T}(
-        fill(0, n_inters),
+    return InteractionList1Atoms(
+        zero(inter_list.is),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
 end
 
-function Base.zero(inter_list::InteractionList2Atoms{I, T}) where {I, T}
+function Base.zero(inter_list::InteractionList2Atoms)
     n_inters = length(inter_list)
-    return InteractionList2Atoms{I, T}(
-        fill(0, n_inters),
-        fill(0, n_inters),
+    return InteractionList2Atoms(
+        zero(inter_list.is),
+        zero(inter_list.js),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
 end
 
-function Base.zero(inter_list::InteractionList3Atoms{I, T}) where {I, T}
+function Base.zero(inter_list::InteractionList3Atoms)
     n_inters = length(inter_list)
-    return InteractionList3Atoms{I, T}(
-        fill(0, n_inters),
-        fill(0, n_inters),
-        fill(0, n_inters),
+    return InteractionList3Atoms(
+        zero(inter_list.is),
+        zero(inter_list.js),
+        zero(inter_list.ks),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
 end
 
-function Base.zero(inter_list::InteractionList4Atoms{I, T}) where {I, T}
+function Base.zero(inter_list::InteractionList4Atoms)
     n_inters = length(inter_list)
-    return InteractionList4Atoms{I, T}(
-        fill(0, n_inters),
-        fill(0, n_inters),
-        fill(0, n_inters),
-        fill(0, n_inters),
+    return InteractionList4Atoms(
+        zero(inter_list.is),
+        zero(inter_list.js),
+        zero(inter_list.ks),
+        zero(inter_list.ls),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
 end
 
-function Base.:+(il1::InteractionList1Atoms{I, T}, il2::InteractionList1Atoms{I, T}) where {I, T}
-    return InteractionList1Atoms{I, T}(
+function Base.:+(il1::InteractionList1Atoms, il2::InteractionList1Atoms)
+    return InteractionList1Atoms(
         il1.is,
         il1.inters .+ il2.inters,
         il1.types,
     )
 end
 
-function Base.:+(il1::InteractionList2Atoms{I, T}, il2::InteractionList2Atoms{I, T}) where {I, T}
-    return InteractionList2Atoms{I, T}(
+function Base.:+(il1::InteractionList2Atoms, il2::InteractionList2Atoms)
+    return InteractionList2Atoms(
         il1.is,
         il1.js,
         il1.inters .+ il2.inters,
@@ -183,8 +210,8 @@ function Base.:+(il1::InteractionList2Atoms{I, T}, il2::InteractionList2Atoms{I,
     )
 end
 
-function Base.:+(il1::InteractionList3Atoms{I, T}, il2::InteractionList3Atoms{I, T}) where {I, T}
-    return InteractionList3Atoms{I, T}(
+function Base.:+(il1::InteractionList3Atoms, il2::InteractionList3Atoms)
+    return InteractionList3Atoms(
         il1.is,
         il1.js,
         il1.ks,
@@ -193,8 +220,8 @@ function Base.:+(il1::InteractionList3Atoms{I, T}, il2::InteractionList3Atoms{I,
     )
 end
 
-function Base.:+(il1::InteractionList4Atoms{I, T}, il2::InteractionList4Atoms{I, T}) where {I, T}
-    return InteractionList4Atoms{I, T}(
+function Base.:+(il1::InteractionList4Atoms, il2::InteractionList4Atoms)
+    return InteractionList4Atoms(
         il1.is,
         il1.js,
         il1.ks,

@@ -1499,7 +1499,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 to_device(torsions.ks[inds_used], AT),
                 to_device(torsions.ls[inds_used], AT),
                 to_device([lj14_inters...], AT),
-                torsions.types,
+                torsions.types[inds_used],
             ))
         end
     end

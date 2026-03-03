@@ -223,7 +223,7 @@ end
             imp_obc2 = ImplicitSolventOBC(
                 to_device(atoms_setup, AT),
                 [AtomData(element="O") for i in 1:n_atoms],
-                InteractionList2Atoms(bond_is, bond_js, nothing);
+                InteractionList2Atoms(bond_is, bond_js, fill(0, length(bond_is)));
                 kappa=T(0.7),
                 use_OBC2=true,
             )
@@ -232,7 +232,7 @@ end
             imp_gbn2 = ImplicitSolventGBN2(
                 to_device(atoms_setup, AT),
                 [AtomData(element="O") for i in 1:n_atoms],
-                InteractionList2Atoms(bond_is, bond_js, nothing);
+                InteractionList2Atoms(bond_is, bond_js, fill(0, length(bond_is)));
                 kappa=T(0.7),
             )
             general_inters = (imp_gbn2,)
