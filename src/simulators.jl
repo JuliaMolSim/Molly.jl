@@ -24,32 +24,45 @@ function default_show_progress()
         return parse(Bool, lowercase(ENV["MOLLY_SHOW_PROGRESS"]))
     else
         # true in interactive contexts, false otherwise
-        return isdefined(Base, :active_repl) ||
-                    (isdefined(Main, :IJulia) && Main.IJulia.inited) ||
-                    isdefined(Main, :PlutoRunner)
+        return isdefined(Base, :active_repl) || isdefined(Main, :IJulia) ||
+                                                        isdefined(Main, :PlutoRunner)
     end
 end
 
 function setup_progress(n_steps, show_progress)
-    return Progress(
-        n_steps;
-        enabled=show_progress,
-        showspeed=true,
-        desc="Simulating:",
-        color=:green,
-        barglyphs=BarGlyphs('|', '█', ['▁', '▂', '▃', '▄', '▅', '▆', '▇'], ' ', '|'),
-    )
+    if show_progress
+        return Progress(
+            n_steps;
+            enabled=true,
+            showspeed=true,
+            desc="Simulating:",
+            color=:green,
+            barglyphs=BarGlyphs('|', '█', ['▁', '▂', '▃', '▄', '▅', '▆', '▇'], ' ', '|'),
+        )
+    else
+        return nothing
+    end
 end
 
 function setup_progress_minimizer(threshold, show_progress)
-    return ProgressThresh(
-        threshold;
-        enabled=show_progress,
-        showspeed=true,
-        desc="Minimizing:",
-        color=:green,
-    )
+    if show_progress
+        return ProgressThresh(
+            threshold;
+            enabled=true,
+            showspeed=true,
+            desc="Minimizing:",
+            color=:green,
+        )
+    else
+        return nothing
+    end
 end
+
+# Marked as inactive for Enzyme
+next_nograd!(progress) = next!(progress)
+next_nograd!(::Nothing) = nothing
+update_nograd!(progress, val) = ProgressMeter.update!(progress, val)
+update_nograd!(::Nothing, val) = nothing
 
 """
     SteepestDescentMinimizer(; <keyword arguments>)
@@ -165,7 +178,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                         current_potential_energy=E)
             break
         end
-        ProgressMeter.update!(progress, ustrip(max_force))
+        update_nograd!(progress, ustrip(max_force))
     end
     return sys
 end
@@ -260,7 +273,7 @@ end
                         current_forces=forces_t)
             break
         end
-        next!(progress)
+        next_nograd!(progress)
     end
     return sys
 end
@@ -348,7 +361,7 @@ end
                         current_forces=forces_t)
             break
         end
-        next!(progress)
+        next_nograd!(progress)
     end
     return sys
 end
@@ -429,7 +442,7 @@ end
                         current_forces=forces_t)
             break
         end
-        next!(progress)
+        next_nograd!(progress)
     end
     return sys
 end
@@ -533,7 +546,7 @@ end
                         current_forces=forces_t)
             break
         end
-        next!(progress)
+        next_nograd!(progress)
     end
     return sys
 end
@@ -656,7 +669,7 @@ end
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads)
             break
         end
-        next!(progress)
+        next_nograd!(progress)
     end
     return sys
 end
@@ -756,7 +769,7 @@ end
                         current_forces=forces_t)
             break
         end
-        next!(progress)
+        next_nograd!(progress)
     end
     return sys
 end
@@ -864,7 +877,7 @@ end
                         current_forces=forces_t)
             break
         end
-        next!(progress)
+        next_nograd!(progress)
     end
     return sys
 end
@@ -1050,7 +1063,7 @@ function simulate_remd!(sys::ReplicaSystem,
                               indices=(n, m), delta=Δ, n_threads=n_threads)
             end
         end
-        next!(progress)
+        next_nograd!(progress)
     end
 
     if remaining_steps > 0
@@ -1150,7 +1163,7 @@ end
         if shortcut_sim(shortcut, sys, nothing, neighbors, step_n; n_threads=n_threads)
             break
         end
-        next!(progress)
+        next_nograd!(progress)
     end
 
     return sys
