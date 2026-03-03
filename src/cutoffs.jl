@@ -198,3 +198,22 @@ function force_apply_cutoff(cutoff::CubicSplineCutoff, inter, r, params)
     return -(6t^2 - 6t) * pe_act / (cutoff.dist_cutoff - cutoff.dist_activation) -
                     (3t^2 - 4t + 1) * dpe_dr_act
 end
+
+Unitful.ustrip(c::NoCutoff) = c
+
+Unitful.ustrip(c::DistanceCutoff) = DistanceCutoff(
+    ustrip(c.dist_cutoff)
+)
+
+Unitful.ustrip(c::ShiftedPotentialCutoff) = ShiftedPotentialCutoff(
+    ustrip(c.dist_cutoff)
+)
+
+Unitful.ustrip(c::ShiftedForceCutoff) = ShiftedForceCutoff(
+    ustrip(c.dist_cutoff)
+)
+
+Unitful.ustrip(c::CubicSplineCutoff) = CubicSplineCutoff(
+    ustrip(c.dist_activation),
+    ustrip(c.dist_cutoff)
+)

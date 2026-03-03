@@ -819,3 +819,66 @@ end
     six_term = (σ2 / r2) ^ 3
     return inter.weight_14 * 4 * inter.ϵ14_mixed * (six_term ^ 2 - six_term)
 end
+
+Unitful.ustrip(lj::LennardJones) = LennardJones(
+    cutoff = ustrip(lj.cutoff),
+    use_neighbors = lj.use_neighbors,
+    shortcut = lj.shortcut,
+    σ_mixing = lj.σ_mixing,
+    ϵ_mixing = lj.ϵ_mixing,
+    weight_special = ustrip(lj.weight_special)
+)
+
+Unitful.ustrip(lj::LennardJonesSoftCoreBeutler) = LennardJonesSoftCoreBeutler(
+    cutoff = ustrip(lj.cutoff),
+    α = ustrip(lj.α),
+    use_neighbors = lj.use_neighbors,
+    shortcut = lj.shortcut,
+    σ_mixing = lj.σ_mixing,
+    ϵ_mixing = lj.ϵ_mixing,
+    λ_mixing = lj.λ_mixing,
+    scheduler = lj.scheduler,
+    weight_special = ustrip(lj.weight_special)
+)
+
+Unitful.ustrip(lj::LennardJonesSoftCoreGapsys) = LennardJonesSoftCoreGapsys(
+    cutoff = ustrip(lj.cutoff),
+    α = ustrip(lj.α),
+    use_neighbors = lj.use_neighbors,
+    shortcut = lj.shortcut,
+    σ_mixing = lj.σ_mixing,
+    ϵ_mixing = lj.ϵ_mixing,
+    λ_mixing = lj.λ_mixing,
+    scheduler = lj.scheduler,
+    weight_special = ustrip(lj.weight_special)
+)
+
+# --- Ashbaugh-Hatch Interactions ---
+
+Unitful.ustrip(ah::AshbaughHatch) = AshbaughHatch(
+    cutoff = ustrip(ah.cutoff),
+    use_neighbors = ah.use_neighbors,
+    shortcut = ah.shortcut,
+    σ_mixing = ah.σ_mixing,
+    ϵ_mixing = ah.ϵ_mixing,
+    λ_mixing = ah.λ_mixing,
+    weight_special = ustrip(ah.weight_special)
+)
+
+Unitful.ustrip(aha::AshbaughHatchAtom) = AshbaughHatchAtom(
+    index = aha.index,
+    atom_type = aha.atom_type,
+    mass = ustrip(aha.mass),
+    charge = ustrip(aha.charge),
+    σ = ustrip(aha.σ),
+    ϵ = ustrip(aha.ϵ),
+    λ = ustrip(aha.λ)
+)
+
+# --- Specific 1-4 Interactions ---
+
+Unitful.ustrip(lj14::LennardJones14) = LennardJones14(
+    ustrip(lj14.σ14_mixed),
+    ustrip(lj14.ϵ14_mixed),
+    ustrip(lj14.weight_14)
+)

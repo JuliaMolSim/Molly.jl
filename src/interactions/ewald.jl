@@ -1016,3 +1016,41 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     total_E = reciprocal_space_E + self_E + exclusion_E
     return total_E
 end
+
+# --- Ewald ---
+
+Unitful.ustrip(e::Ewald) = Ewald(
+    ustrip(e.dist_cutoff),
+    ustrip(e.error_tol),
+    e.excluded_pairs
+)
+
+# --- PME (Particle Mesh Ewald) ---
+
+Unitful.ustrip(pme::PME) = PME(
+    ustrip(pme.dist_cutoff),
+    ustrip(pme.error_tol),
+    pme.order,
+    ustrip(pme.ϵr),
+    pme.excluded_pairs,
+    ustrip(pme.α),
+    pme.mesh_dims,
+    pme.grid_indices,
+    pme.grid_fractions,
+    pme.bsplines_θ,
+    pme.bsplines_dθ,
+    pme.bsplines_moduli_x,
+    pme.bsplines_moduli_y,
+    pme.bsplines_moduli_z,
+    pme.charge_grid,
+    pme.charge_grid_buffer,
+    pme.excluded_buffer_Fs, # Already dimensionless (allocated via T)
+    pme.excluded_buffer_Es, # Already dimensionless (allocated via T)
+    pme.recip_conv_buffer,
+    pme.virial_buffer,
+    ustrip(pme.pc_sum),
+    ustrip(pme.pc_abs2_sum),
+    pme.fft_plan,           # Pass-through to prevent re-allocation
+    pme.bfft_plan,          # Pass-through to prevent re-allocation
+    pme.grad_safe
+)

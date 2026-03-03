@@ -52,3 +52,8 @@ end
     r = norm(dr)
     return (b.k / 2) * (r - b.r0) ^ 2
 end
+
+Unitful.ustrip(b::HarmonicBond) = HarmonicBond(
+    k = ustrip(b.k),
+    θ0 = ustrip(b.r0)
+)

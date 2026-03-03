@@ -34,6 +34,8 @@ using SparseArrays
 using Statistics
 using StatsBase
 
+import Unitful: ustrip
+
 include("types.jl")
 include("units.jl")
 include("spatial.jl")

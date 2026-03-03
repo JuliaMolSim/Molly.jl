@@ -65,3 +65,8 @@ end
     θ = bond_angle(coords_i, coords_j, coords_k, boundary)
     return (a.k / 2) * (θ - a.θ0) ^ 2
 end
+
+Unitful.ustrip(a::HarmonicAngle) = HarmonicAngle(
+    k = ustrip(a.k),
+    θ0 = ustrip(a.θ0)
+)

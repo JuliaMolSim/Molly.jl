@@ -24,6 +24,11 @@ export
     MollyCalculator,
     ASECalculator
 
+
+# Required for interactions that may be explicitly set to `nothing` (e.g., in some implicit solvent models)
+Unitful.ustrip(::Nothing) = nothing
+Unitful.ustrip(x::Tuple) = map(ustrip, x)
+
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64
 const DefaultFloat = Float64
@@ -292,6 +297,34 @@ function inject_interaction_list(inter::InteractionList4Atoms, params_dic, AT)
     InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
 end
 
+# These structures hold index arrays (is, js, ks, ls) and a generic interaction array (inters).
+# The indices are purely integer types, so we only broadcast ustrip over the interaction parameters.
+Unitful.ustrip(il::InteractionList1Atoms) = InteractionList1Atoms(
+    il.is, 
+    ustrip.(il.inters)
+)
+
+Unitful.ustrip(il::InteractionList2Atoms) = InteractionList2Atoms(
+    il.is, 
+    il.js, 
+    ustrip.(il.inters)
+)
+
+Unitful.ustrip(il::InteractionList3Atoms) = InteractionList3Atoms(
+    il.is, 
+    il.js, 
+    il.ks, 
+    ustrip.(il.inters)
+)
+
+Unitful.ustrip(il::InteractionList4Atoms) = InteractionList4Atoms(
+    il.is, 
+    il.js, 
+    il.ks, 
+    il.ls, 
+    ustrip.(il.inters)
+)
+
 """
     Atom(; <keyword arguments>)
 
@@ -385,6 +418,18 @@ function Base.show(io::IO, a::Atom)
     print(io, "Atom with index=", a.index, ", atom_type=", a.atom_type, ", mass=", mass(a),
           ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ, ", λ=", a.λ, ", role=", a.alch_role)
 end
+
+# Atom parameters (mass, charge, σ, ϵ) typically carry units during a standard simulation.
+Unitful.ustrip(a::Atom) = Atom(
+    index = a.index, 
+    atom_type = a.atom_type, 
+    mass = ustrip(a.mass), 
+    charge = ustrip(a.charge), 
+    σ = ustrip(a.σ), 
+    ϵ = ustrip(a.ϵ), 
+    λ = a.λ, 
+    alch_role = a.alch_role
+)
 
 """
     AtomData(; atom_type="?", atom_name="?", res_number=1, res_name="???",
@@ -938,6 +983,25 @@ function extract_parameters(sys, ff)
     end
 
     return params_dic
+end
+
+# Reconstructs the core simulation state by recursively stripping the arrays and parameter fields.
+function Unitful.ustrip(sys::System)
+    return System(
+        atoms = ustrip.(sys.atoms),
+        atoms_data = sys.atoms_data, # Typically strings or Element structs; no units.
+        pairwise_inters = ustrip(sys.pairwise_inters),
+        specific_inter_lists = ustrip(sys.specific_inter_lists),
+        general_inters = ustrip(sys.general_inters),
+        coords = ustrip.(sys.coords),
+        velocities = ustrip.(sys.velocities),
+        boundary = ustrip(sys.boundary),
+        neighbor_finder = ustrip(sys.neighbor_finder),
+        loggers = NamedTuple(), # Loggers are stripped out to prevent AD graph breaks
+        force_units = NoUnits,
+        energy_units = NoUnits,
+        k = sys.k
+    )
 end
 
 @doc raw"""

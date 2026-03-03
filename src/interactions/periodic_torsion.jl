@@ -153,3 +153,10 @@ end
     end
     return E
 end
+
+Unitful.ustrip(pt::PeriodicTorsion) = PeriodicTorsion(
+    periodicities = pt.periodicities,
+    phases = ustrip.(pt.phases),
+    ks = ustrip.(pt.ks),
+    proper = pt.proper
+)

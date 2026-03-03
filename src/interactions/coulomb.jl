@@ -880,3 +880,60 @@ end
 function pairwise_pe(::Yukawa, r, (coulomb_const, qi, qj, kappa))
     return (coulomb_const * qi * qj) * inv(r) * exp(-kappa * r)
 end
+
+Unitful.ustrip(c::Coulomb) = Coulomb(
+    cutoff = ustrip(c.cutoff),
+    use_neighbors = c.use_neighbors,
+    weight_special = ustrip(c.weight_special),
+    coulomb_const = ustrip(c.coulomb_const)
+)
+
+Unitful.ustrip(c::CoulombSoftCoreBeutler) = CoulombSoftCoreBeutler(
+    cutoff = ustrip(c.cutoff),
+    α = ustrip(c.α),
+    use_neighbors = c.use_neighbors,
+    σ_mixing = c.σ_mixing,
+    ϵ_mixing = c.ϵ_mixing,
+    λ_mixing = c.λ_mixing,
+    scheduler = c.scheduler,
+    weight_special = ustrip(c.weight_special),
+    coulomb_const = ustrip(c.coulomb_const)
+)
+
+Unitful.ustrip(c::CoulombSoftCoreGapsys) = CoulombSoftCoreGapsys(
+    cutoff = ustrip(c.cutoff),
+    α = ustrip(c.α),
+    σQ = ustrip(c.σQ),
+    use_neighbors = c.use_neighbors,
+    λ_mixing = c.λ_mixing,
+    scheduler = c.scheduler,
+    weight_special = ustrip(c.weight_special),
+    coulomb_const = ustrip(c.coulomb_const)
+)
+
+Unitful.ustrip(c::CoulombReactionField) = CoulombReactionField(
+    dist_cutoff = ustrip(c.dist_cutoff),
+    solvent_dielectric = ustrip(c.solvent_dielectric),
+    use_neighbors = c.use_neighbors,
+    weight_special = ustrip(c.weight_special),
+    coulomb_const = ustrip(c.coulomb_const)
+)
+
+# CoulombEwald does not use @kwdef; it builds α internally or accepts it positionally
+Unitful.ustrip(c::CoulombEwald) = CoulombEwald(
+    ustrip(c.dist_cutoff),
+    ustrip(c.error_tol),
+    c.use_neighbors,
+    ustrip(c.weight_special),
+    ustrip(c.coulomb_const),
+    ustrip(c.α),
+    c.approximate_erfc
+)
+
+Unitful.ustrip(c::Yukawa) = Yukawa(
+    cutoff = ustrip(c.cutoff),
+    use_neighbors = c.use_neighbors,
+    weight_special = ustrip(c.weight_special),
+    coulomb_const = ustrip(c.coulomb_const),
+    kappa = ustrip(c.kappa)
+)

@@ -30,3 +30,8 @@ end
     dr = vector(coord_i, pr.x0, boundary)
     return (pr.k / 2) * dot(dr, dr)
 end
+
+Unitful.ustrip(pr::HarmonicPositionRestraint) = HarmonicPositionRestraint(
+    k = ustrip(pr.k),
+    x0 = ustrip.(pr.x0)
+)

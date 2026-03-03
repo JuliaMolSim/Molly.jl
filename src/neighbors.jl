@@ -417,3 +417,37 @@ function Base.show(io::IO, neighbor_finder::GPUNeighborFinder)
     println(io, "  n_steps_reorder = " , neighbor_finder.n_steps_reorder)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end
+
+Unitful.ustrip(nf::NoNeighborFinder) = nf
+
+Unitful.ustrip(nf::GPUNeighborFinder) = GPUNeighborFinder(
+    eligible = nf.eligible,
+    dist_cutoff = ustrip(nf.dist_cutoff),
+    special = nf.special,
+    n_steps_reorder = nf.n_steps_reorder,
+    initialized = nf.initialized
+)
+
+Unitful.ustrip(nf::DistanceNeighborFinder) = DistanceNeighborFinder(
+    eligible = nf.eligible,
+    dist_cutoff = ustrip(nf.dist_cutoff),
+    special = nf.special,
+    n_steps = nf.n_steps
+)
+
+Unitful.ustrip(nf::TreeNeighborFinder) = TreeNeighborFinder(
+    eligible = nf.eligible,
+    dist_cutoff = ustrip(nf.dist_cutoff),
+    special = nf.special,
+    n_steps = nf.n_steps
+)
+
+# For CellListMap, we must extract the dimension N from the type signature 
+# to properly rebuild the internal CellList buffers without needing dummy coordinates.
+Unitful.ustrip(nf::CellListMapNeighborFinder{N, T}) where {N, T} = CellListMapNeighborFinder(
+    eligible = nf.eligible,
+    dist_cutoff = ustrip(nf.dist_cutoff),
+    special = nf.special,
+    n_steps = nf.n_steps,
+    dims = N 
+)
