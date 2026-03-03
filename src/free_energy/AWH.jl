@@ -1,7 +1,8 @@
 export 
     AWHState,
     AWHSimulation,
-    calc_pmf
+    calc_pmf,
+    extract_awh_data
     
 # Convenience struct to store relevant things
 # when running an AWH simulation.
@@ -731,4 +732,21 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshol
             end
         end
     end
+end
+
+@doc raw"""
+    extract_awh_data(awh_sim::AWHSimulation)
+
+Extracts the converged free energy profile (f), target distribution (rho), 
+log target distribution (log_rho), and statistics from an AWH simulation.
+Returns a NamedTuple containing deepcopied arrays to ensure the reference 
+data is preserved independently of the ongoing simulation state.
+"""
+function extract_awh_data(awh_sim::AWHSimulation)
+    return (
+        f = copy(awh_sim.state.f),
+        rho = copy(awh_sim.state.rho),
+        log_rho = copy(awh_sim.state.log_rho),
+        stats = deepcopy(awh_sim.state.stats)
+    )
 end

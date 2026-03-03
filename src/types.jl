@@ -1189,6 +1189,110 @@ end
 from_device(x::Array) = x
 from_device(x) = Array(x)
 
+# -----------------------------------------------------------------------------
+# Device transfer for Interaction Lists
+# -----------------------------------------------------------------------------
+from_device(il::InteractionList1Atoms) = InteractionList1Atoms(from_device(il.is), from_device(il.inters), il.types)
+from_device(il::InteractionList2Atoms) = InteractionList2Atoms(from_device(il.is), from_device(il.js), from_device(il.inters), il.types)
+from_device(il::InteractionList3Atoms) = InteractionList3Atoms(from_device(il.is), from_device(il.js), from_device(il.ks), from_device(il.inters), il.types)
+from_device(il::InteractionList4Atoms) = InteractionList4Atoms(from_device(il.is), from_device(il.js), from_device(il.ks), from_device(il.ls), from_device(il.inters), il.types)
+
+to_device(il::InteractionList1Atoms, ::Type{AT}) where {AT} = InteractionList1Atoms(to_device(il.is, AT), to_device(il.inters, AT), il.types)
+to_device(il::InteractionList2Atoms, ::Type{AT}) where {AT} = InteractionList2Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.inters, AT), il.types)
+to_device(il::InteractionList3Atoms, ::Type{AT}) where {AT} = InteractionList3Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.ks, AT), to_device(il.inters, AT), il.types)
+to_device(il::InteractionList4Atoms, ::Type{AT}) where {AT} = InteractionList4Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.ks, AT), to_device(il.ls, AT), to_device(il.inters, AT), il.types)
+
+_from_device_inter_lists(x::Tuple) = map(from_device, x)
+_from_device_inter_lists(x::NamedTuple) = map(from_device, x)
+_from_device_inter_lists(x) = x
+
+_to_device_inter_lists(x::Tuple, ::Type{AT}) where {AT} = map(i -> to_device(i, AT), x)
+_to_device_inter_lists(x::NamedTuple, ::Type{AT}) where {AT} = map(i -> to_device(i, AT), x)
+_to_device_inter_lists(x, ::Type{AT}) where {AT} = x
+
+# -----------------------------------------------------------------------------
+# Device transfer for System
+# -----------------------------------------------------------------------------
+function from_device(sys::System)
+    !is_on_gpu(sys) && return sys
+    
+    nf = sys.neighbor_finder
+    if nf isa GPUNeighborFinder || nf isa DistanceNeighborFinder
+        cpu_nf = DistanceNeighborFinder(
+            eligible = from_device(nf.eligible),
+            dist_cutoff = nf.dist_cutoff,
+            special = from_device(nf.special),
+            n_steps = nf isa GPUNeighborFinder ? nf.n_steps_reorder : nf.n_steps
+        )
+    else
+        cpu_nf = nf
+    end
+    
+    return System(
+        atoms = from_device(sys.atoms),
+        coords = from_device(sys.coords),
+        boundary = sys.boundary,
+        velocities = from_device(sys.velocities),
+        atoms_data = sys.atoms_data,
+        topology = sys.topology,
+        pairwise_inters = sys.pairwise_inters,
+        specific_inter_lists = _from_device_inter_lists(sys.specific_inter_lists),
+        general_inters = sys.general_inters,
+        constraints = sys.constraints, 
+        virtual_sites = from_device(sys.virtual_sites),
+        neighbor_finder = cpu_nf,
+        loggers = sys.loggers,
+        force_units = sys.force_units,
+        energy_units = sys.energy_units,
+        k = sys.k,
+        data = sys.data
+    )
+end
+
+function to_device(sys::System, ::Type{AT}) where {AT}
+    is_on_gpu(sys) && return sys
+    
+    nf = sys.neighbor_finder
+    if nf isa DistanceNeighborFinder && uses_gpu_neighbor_finder(AT)
+        gpu_nf = GPUNeighborFinder(
+            eligible = to_device(nf.eligible, AT),
+            dist_cutoff = nf.dist_cutoff,
+            special = to_device(nf.special, AT),
+            n_steps_reorder = nf.n_steps
+        )
+    elseif nf isa DistanceNeighborFinder
+         gpu_nf = DistanceNeighborFinder(
+            eligible = to_device(nf.eligible, AT),
+            dist_cutoff = nf.dist_cutoff,
+            special = to_device(nf.special, AT),
+            n_steps = nf.n_steps
+        )
+    else
+        gpu_nf = nf
+    end
+    
+    return System(
+        atoms = to_device(sys.atoms, AT),
+        coords = to_device(sys.coords, AT),
+        boundary = sys.boundary,
+        velocities = to_device(sys.velocities, AT),
+        atoms_data = sys.atoms_data,
+        topology = sys.topology,
+        pairwise_inters = sys.pairwise_inters,
+        specific_inter_lists = _to_device_inter_lists(sys.specific_inter_lists, AT),
+        general_inters = sys.general_inters,
+        constraints = sys.constraints,
+        virtual_sites = to_device(sys.virtual_sites, AT),
+        neighbor_finder = gpu_nf,
+        loggers = sys.loggers,
+        force_units = sys.force_units,
+        energy_units = sys.energy_units,
+        k = sys.k,
+        data = sys.data
+    )
+end
+
+
 to_device(x::Array, ::Type{<:Array}) = x
 to_device(x, ::Type{AT}) where AT = AT(x)
 

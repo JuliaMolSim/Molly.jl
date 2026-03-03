@@ -413,6 +413,7 @@ end
     params = (ke, qij, λ, R)
 
     f = force_cutoff(cutoff, inter, r, params)
+    # Check Gapsys paper because for samller than cutoff it should not be divided by r
     fdr = (f / r) * dr
     return special ? fdr * inter.weight_special : fdr
 end
