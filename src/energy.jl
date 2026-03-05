@@ -172,100 +172,91 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads())
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads())
-    # Allow types like those from Measurements.jl, T from System is different
-    T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
+@inline has_nonl_inters(inters::Tuple{}) = false
+@inline has_nonl_inters(inters::Tuple) = !use_neighbors(first(inters)) || has_nonl_inters(Base.tail(inters))
 
-    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
-    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+@inline has_nl_inters(inters::Tuple{}) = false
+@inline has_nl_inters(inters::Tuple) = use_neighbors(first(inters)) || has_nl_inters(Base.tail(inters))
 
-    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
-    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
-    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
-    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
-
-    return potential_energy(sys, neighbors,
-                            pairwise_inters_nonl, pairwise_inters_nl,
-                            sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
-                            buffers,
-                            0;
-                            n_threads = n_threads)
+@inline eval_pe_nonl(inters::Tuple{}, dr, atom_i, atom_j, eu, ci, cj, bnd, vi, vj, step_n, ::Val{T}) where T = zero(T) * eu
+@inline function eval_pe_nonl(inters::Tuple, dr, atom_i, atom_j, eu, ci, cj, bnd, vi, vj, step_n, ::Val{T}) where T
+    pe_current = if !use_neighbors(first(inters))
+        potential_energy(first(inters), dr, atom_i, atom_j, eu, false, ci, cj, bnd, vi, vj, step_n)
+    else
+        zero(T) * eu
+    end
+    return pe_current + eval_pe_nonl(Base.tail(inters), dr, atom_i, atom_j, eu, ci, cj, bnd, vi, vj, step_n, Val(T))
 end
 
-function potential_energy(sys::System, neighbors,
-                          pairwise_inters_nonl,
-                          pairwise_inters_nl,
-                          sils_1_atoms::Tuple{InteractionList1Atoms},
-                          sils_2_atoms::Tuple{InteractionList2Atoms},
-                          sils_3_atoms::Tuple{InteractionList3Atoms},
-                          sils_4_atoms::Tuple{InteractionList4Atoms},
-                          buffers=nothing,
-                          step_n::Integer=0;
+@inline eval_pe_nl(inters::Tuple{}, dr, atom_i, atom_j, eu, special, ci, cj, bnd, vi, vj, step_n, ::Val{T}) where T = zero(T) * eu
+@inline function eval_pe_nl(inters::Tuple, dr, atom_i, atom_j, eu, special, ci, cj, bnd, vi, vj, step_n, ::Val{T}) where T
+    pe_current = if use_neighbors(first(inters))
+        potential_energy(first(inters), dr, atom_i, atom_j, eu, special, ci, cj, bnd, vi, vj, step_n)
+    else
+        zero(T) * eu
+    end
+    return pe_current + eval_pe_nl(Base.tail(inters), dr, atom_i, atom_j, eu, special, ci, cj, bnd, vi, vj, step_n, Val(T))
+end
+
+@inline eval_specific(inters::Tuple{}, atoms, coords, velocities, boundary, energy_units, step_n, ::Val{T}) where T = zero(T) * energy_units
+@inline eval_specific(inters::Tuple, atoms, coords, velocities, boundary, energy_units, step_n, ::Val{T}) where T = 
+    calc_pe_list(first(inters), atoms, coords, velocities, boundary, energy_units, step_n, Val(T)) + 
+    eval_specific(Base.tail(inters), atoms, coords, velocities, boundary, energy_units, step_n, Val(T))
+
+@inline eval_general(inters::Tuple{}, sys, neighbors, step_n, n_threads, ::Val{T}) where T = zero(T) * sys.energy_units
+@inline function eval_general(inters::Tuple, sys, neighbors, step_n, n_threads, ::Val{T}) where T
+    pe_current = uconvert(sys.energy_units, AtomsCalculators.potential_energy(sys, first(inters); neighbors=neighbors, step_n=step_n, n_threads=n_threads))
+    return pe_current + eval_general(Base.tail(inters), sys, neighbors, step_n, n_threads, Val(T))
+end
+
+function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads())
-    # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
 
-    if length(sys.pairwise_inters) > 0
-        pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                              neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
-                              pairwise_inters_nl, Val(T), Val(n_threads), step_n)
-    else
-        pe = zero(T) * sys.energy_units
-    end
+    pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
+                          neighbors, sys.energy_units, length(sys.coords), sys.pairwise_inters,
+                          Val(T), Int(n_threads), step_n)
 
-    if length(sys.specific_inter_lists) > 0
-        pe += specific_pe(sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units,
-                          sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, Val(T), step_n)
-    end
+    pe += eval_specific(sys.specific_inter_lists, sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units, step_n, Val(T))
 
-    for inter in values(sys.general_inters)
-        pe += uconvert(
-            sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
-                                              step_n=step_n, n_threads=n_threads),
-        )
-    end
+    pe += eval_general(sys.general_inters, sys, neighbors, step_n, Int(n_threads), Val(T))
 
     return pe
 end
 
 function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
-                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, ::Val{T},
-                          ::Val{1}, step_n=0) where T
+                          n_atoms, pairwise_inters, ::Val{T},
+                          n_threads::Int, step_n=0) where T
+    if n_threads == 1
+        return pairwise_pe_loop_single(atoms, coords, velocities, boundary, neighbors, energy_units, n_atoms, pairwise_inters, Val(T), step_n)
+    else
+        return pairwise_pe_loop_threaded(atoms, coords, velocities, boundary, neighbors, energy_units, n_atoms, pairwise_inters, Val(T), n_threads, step_n)
+    end
+end
+
+function pairwise_pe_loop_single(atoms, coords, velocities, boundary, neighbors, energy_units,
+                                 n_atoms, pairwise_inters, ::Val{T}, step_n) where T
     pe = zero(T) * energy_units
 
-    @inbounds if length(pairwise_inters_nonl) > 0
-        n_atoms = length(coords)
+    @inbounds if has_nonl_inters(pairwise_inters)
         for i in 1:n_atoms
             for j in (i + 1):n_atoms
                 dr = vector(coords[i], coords[j], boundary)
-                pe_sum = potential_energy(pairwise_inters_nonl[1], dr, atoms[i], atoms[j],
-                                energy_units, false, coords[i], coords[j], boundary,
-                                velocities[i], velocities[j], step_n)
-                for inter in pairwise_inters_nonl[2:end]
-                    pe_sum += potential_energy(inter, dr, atoms[i], atoms[j], energy_units, false,
-                                coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-                end
+                pe_sum = eval_pe_nonl(pairwise_inters, dr, atoms[i], atoms[j], energy_units, coords[i], coords[j], boundary, velocities[i], velocities[j], step_n, Val(T))
                 check_energy_units(pe_sum, energy_units)
                 pe += pe_sum
             end
         end
     end
 
-    @inbounds if length(pairwise_inters_nl) > 0
+    @inbounds if has_nl_inters(pairwise_inters)
         if isnothing(neighbors)
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
         for ni in eachindex(neighbors)
             i, j, special = neighbors[ni]
             dr = vector(coords[i], coords[j], boundary)
-            pe_sum = potential_energy(pairwise_inters_nl[1], dr, atoms[i], atoms[j], energy_units, special,
-                            coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-            for inter in pairwise_inters_nl[2:end]
-                pe_sum += potential_energy(inter, dr, atoms[i], atoms[j], energy_units, special,
-                            coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-            end
+            pe_sum = eval_pe_nl(pairwise_inters, dr, atoms[i], atoms[j], energy_units, special, coords[i], coords[j], boundary, velocities[i], velocities[j], step_n, Val(T))
             check_energy_units(pe_sum, energy_units)
             pe += pe_sum
         end
