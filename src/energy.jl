@@ -177,9 +177,36 @@ function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integ
     # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
 
+    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+
+    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
+    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
+    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
+    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
+
+    return potential_energy(sys, neighbors,
+                            pairwise_inters_nonl, pairwise_inters_nl,
+                            sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
+                            buffers,
+                            0;
+                            n_threads = n_threads)
+end
+
+function potential_energy(sys::System, neighbors,
+                          pairwise_inters_nonl,
+                          pairwise_inters_nl,
+                          sils_1_atoms::Tuple{InteractionList1Atoms},
+                          sils_2_atoms::Tuple{InteractionList2Atoms},
+                          sils_3_atoms::Tuple{InteractionList3Atoms},
+                          sils_4_atoms::Tuple{InteractionList4Atoms},
+                          buffers=nothing,
+                          step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads())
+    # Allow types like those from Measurements.jl, T from System is different
+    T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
+
     if length(sys.pairwise_inters) > 0
-        pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
-        pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
         pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
                               neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
                               pairwise_inters_nl, Val(T), Val(n_threads), step_n)
@@ -188,10 +215,6 @@ function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integ
     end
 
     if length(sys.specific_inter_lists) > 0
-        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
-        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
-        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
-        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
         pe += specific_pe(sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, Val(T), step_n)
     end
