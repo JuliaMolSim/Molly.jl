@@ -326,7 +326,7 @@ end
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), 0; n_threads=n_threads)
-    accels_t = calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+    accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
@@ -359,7 +359,7 @@ end
 
         # Compute forces at new positions with predicted velocities
         forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
-        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys), sys.virtual_site_flags)
+        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         # Final velocity: v(t+dt) = v(t) + (dt/2)*(a(t) + a(t+dt))
         sys.velocities .= velocities_t .+ (accels_t .+ accels_t_dt) .* dt_div2
@@ -376,7 +376,7 @@ end
         if recompute_forces
             forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
             forces_t .= forces_t_dt
-            accels_t .= calc_accels.(forces_t, masses(sys), sys.virtual_site_flags)
+            accels_t .= calc_accels.(forces_t, masses(sys))
         else
             forces_t .= forces_t_dt
             accels_t .= accels_t_dt
