@@ -297,7 +297,7 @@ Should be used with [`DPDInteraction`](@ref) as the pairwise interaction.
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `λ::L=0.65`: the velocity prediction parameter (typically 0.5–0.65).
-- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `coupling::C=nothing`: the coupling which applies during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
@@ -308,7 +308,7 @@ struct DPDVerlet{T, L, C}
     remove_CM_motion::Int
 end
 
-function DPDVerlet(; dt, λ=0.65, coupling=NoCoupling(), remove_CM_motion=1)
+function DPDVerlet(; dt, λ=0.65, coupling=nothing, remove_CM_motion=1)
     return DPDVerlet(dt, λ, coupling, Int(remove_CM_motion))
 end
 
