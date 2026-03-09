@@ -4,6 +4,7 @@ export
     SteepestDescentMinimizer,
     simulate!,
     VelocityVerlet,
+    DPDVerlet,
     Verlet,
     StormerVerlet,
     Langevin,
@@ -274,6 +275,115 @@ end
             break
         end
         next_nograd!(progress)
+    end
+    return sys
+end
+
+"""
+    DPDVerlet(; <keyword arguments>)
+
+The modified velocity Verlet integrator for dissipative particle dynamics.
+
+Implements the Groot-Warren modified velocity-Verlet (MVV) algorithm from
+[Groot and Warren 1997](https://doi.org/10.1063/1.474784).
+
+Because DPD dissipative forces depend on particle velocities, a velocity
+prediction step is used before recomputing forces at the new positions.
+The `λ` parameter controls this prediction: `v_predicted = v(t) + λ * dt * a(t)`.
+A value of 0.65 is commonly used.
+
+Should be used with [`DPDInteraction`](@ref) as the pairwise interaction.
+
+# Arguments
+- `dt::T`: the time step of the simulation.
+- `λ::L=0.65`: the velocity prediction parameter (typically 0.5–0.65).
+- `coupling::C=nothing`: the coupling which applies during the simulation.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
+    set to `false` or `0` to not remove center of mass motion.
+"""
+struct DPDVerlet{T, L, C}
+    dt::T
+    λ::L
+    coupling::C
+    remove_CM_motion::Int
+end
+
+function DPDVerlet(; dt, λ=0.65, coupling=nothing, remove_CM_motion=1)
+    return DPDVerlet(dt, λ, coupling, Int(remove_CM_motion))
+end
+
+@inline function simulate!(sys,
+                           sim::DPDVerlet,
+                           n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true,
+                           rng=Random.default_rng())
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
+    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
+    buffers = init_buffers!(sys, n_threads)
+    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), 0; n_threads=n_threads)
+    accels_t = calc_accels.(forces_t, masses(sys))
+    accels_t_dt = zero(accels_t)
+    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
+    using_constraints = (length(sys.constraints) > 0)
+    if using_constraints
+        cons_coord_storage = zero(sys.coords)
+        cons_vel_storage = zero(sys.velocities)
+    end
+    velocities_t = zero(sys.velocities)
+    dt_div2 = sim.dt / 2
+    dt_sq_div2 = sim.dt^2 / 2
+    λ_dt = sim.λ * sim.dt
+
+    for step_n in 1:n_steps
+        if using_constraints
+            cons_coord_storage .= sys.coords
+        end
+        needs_vir = (step_n % needs_vir_steps == 0)
+
+        velocities_t .= sys.velocities
+
+        # Position update: r(t+dt) = r(t) + v(t)*dt + a(t)*dt²/2
+        sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
+        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
+                                                         sim.dt; n_threads=n_threads)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        place_virtual_sites!(sys)
+
+        # Velocity prediction for dissipative force evaluation
+        sys.velocities .= velocities_t .+ accels_t .* λ_dt
+
+        # Compute forces at new positions with predicted velocities
+        forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
+
+        # Final velocity: v(t+dt) = v(t) + (dt/2)*(a(t) + a(t+dt))
+        sys.velocities .= velocities_t .+ (accels_t .+ accels_t_dt) .* dt_div2
+        using_constraints && apply_velocity_constraints!(sys; n_threads=n_threads)
+
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
+        recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads, rng=rng)
+
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
+        if recompute_forces
+            forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+            forces_t .= forces_t_dt
+            accels_t .= calc_accels.(forces_t, masses(sys))
+        else
+            forces_t .= forces_t_dt
+            accels_t .= accels_t_dt
+        end
+
+        apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
     end
     return sys
 end
