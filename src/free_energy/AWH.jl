@@ -46,6 +46,9 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI}
     λ_β::B
     λ_p::PR
     
+    target_β::Union{T, Nothing}
+    target_p::Union{T, Nothing}
+    
     # Store full interactions for accurate MD integration forces
     state_pairwise_inters::SPI
     state_specific_inter_lists::SSI
@@ -55,7 +58,7 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI}
     f::Vector{T}
     rho::Vector{T}
     log_rho::Vector{T}
-    
+   
     # Weight Accumulators
     w_seg::Vector{T}
     w_last::Vector{T}
@@ -74,6 +77,7 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI}
 end
 
 function AWHState(thermo_states::AbstractArray{<:ThermoState};
+                  target_state::Union{ThermoState, Nothing} = nothing,
                   first_state::Int = 1,
                   n_bias::Int = 100,
                   ρ::Union{Nothing, AbstractArray{T}} = nothing,
@@ -83,13 +87,34 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     ref_sys = thermo_states[first_state].system
     FT = typeof(ustrip(ref_sys.total_mass))
 
-    # Delegate the separation of interactions to the core abstraction
-    partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
+    partition = AlchemicalPartition(thermo_states; 
+                                    target_state=target_state, 
+                                    reuse_neighbors=reuse_neighbors)
 
     # Extract integrators and parameters
     λ_integrators = [ts.integrator for ts in thermo_states]
     λ_β = [ts.beta for ts in thermo_states]
     λ_p = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states]
+
+    # Extract Target Thermodynamics for PMF
+    local target_β_val = nothing
+    local target_p_val = nothing
+    
+    if !isnothing(target_state)
+        e_unit = ref_sys.energy_units
+        kBT_q = uconvert(e_unit, Unitful.R * target_state.beta)
+        target_β_val = FT(1.0 / ustrip(kBT_q))
+        
+        target_p_val = zero(FT)
+        if !isnothing(target_state.p)
+            l_unit = unit(ref_sys.boundary.side_lengths[1])
+            p_unit = e_unit / (l_unit^3)
+            e_val = 1.0 * e_unit
+            molar_scaling = e_val / energy_remove_mol(e_val)
+            p_val_scaled = target_state.p * molar_scaling
+            target_p_val = FT(ustrip(uconvert(p_unit, p_val_scaled)))
+        end
+    end
 
     # Extract complete interaction lists for standard MD forces
     state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states]
@@ -102,6 +127,7 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
         specific_inter_lists = state_specific_inter_lists[first_state],
         general_inters = state_general_inters[first_state]
     )
+  
     active_intg = λ_integrators[first_state]
 
     # Handle Target Distribution (ρ)
@@ -124,6 +150,8 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
         λ_integrators,
         λ_β,
         λ_p,
+        target_β_val,
+        target_p_val,
         state_pairwise_inters,
         state_specific_inter_lists,
         state_general_inters,
@@ -168,45 +196,31 @@ mutable struct AWHPMFDeconvolution{N, T, F_CV}
     min_vals::NTuple{N, T}
     bin_widths::NTuple{N, T}
     shape::NTuple{N, Int}
-    
-    # Flags to determine if a CV dimension wraps periodically (From Step 3)
     is_periodic::NTuple{N, Bool} 
-
     cv_function::F_CV         
 
     numerator_hist::Array{T, N}
     denominator_hist::Array{T, N}
-    
     sample_count::Int
 
-    target_beta::Union{T, Nothing}
-    target_pressure::Union{T, Nothing}
-
-    scratch_denom::Vector{T}    
+    target_beta::T
+    target_pressure::T
 end
 
 function AWHPMFDeconvolution(
     awh_state::AWHState{T},
     pmf_grid::Tuple;
     cv_func = nothing,
-    coupling_func = nothing, # Kept for API compatibility, but safely ignored
-    target_temp = nothing,
-    target_pressure = nothing,
     is_periodic = nothing
 ) where T
     
-    # Parse Grid Dimensions
     min_vals = T.(pmf_grid[1])
     max_vals = T.(pmf_grid[2])
     n_bins   = Int.(pmf_grid[3])
-    
     N = length(n_bins)
     bin_widths = (max_vals .- min_vals) ./ n_bins
-
-    # Handle Periodicity
     periodic_flags = isnothing(is_periodic) ? ntuple(_ -> false, N) : Tuple(Bool.(is_periodic))
     
-    # --- CV Function Setup ---
     local final_cv_func
     
     if !isnothing(cv_func)
@@ -229,45 +243,9 @@ function AWHPMFDeconvolution(
         end
     end
 
-    # --- Setup Reweighting Constants ---
-    sys = awh_state.active_sys
-    e_unit = sys.energy_units
-    
-    tgt_beta = nothing
-    if !isnothing(target_temp)
-        kBT_q = uconvert(e_unit, Unitful.R * target_temp)
-        tgt_beta = T(1.0 / ustrip(kBT_q))
-    end
-    
-    tgt_press = nothing
-    if !isnothing(target_pressure)
-        l_unit = unit(sys.boundary.side_lengths[1])
-        v_unit = l_unit^3
-        p_unit = e_unit / v_unit
-        
-        e_val = 1.0 * e_unit
-        molar_scaling = e_val / energy_remove_mol(e_val)
-        p_val_scaled = target_pressure * molar_scaling
-        
-        tgt_press = T(ustrip(uconvert(p_unit, p_val_scaled)))
-    end
-
-    num_hist = zeros(T, n_bins)
-    den_hist = zeros(T, n_bins)
-    n_wins = length(awh_state.partition.λ_hamiltonians)
-
     return AWHPMFDeconvolution(
-        min_vals, 
-        bin_widths, 
-        n_bins,
-        periodic_flags,
-        final_cv_func,
-        num_hist,
-        den_hist,
-        0,
-        tgt_beta,
-        tgt_press,
-        zeros(T, n_wins) # scratch_denom dynamically tracks the frame mixture
+        min_vals, bin_widths, n_bins, periodic_flags, final_cv_func,
+        zeros(T, n_bins), zeros(T, n_bins), 0, awh_state.target_β, awh_state.target_p
     )
 end
 
@@ -276,13 +254,9 @@ function update_pmf!(
     awh_state, 
     curr_coords;
     weight_factor::T = one(T), 
-    potential_energy::T = zero(T),
-    box_volume::T = zero(T),
-    current_beta::T = one(T),
-    current_pressure::T = zero(T)
+    box_volume::T = zero(T)
 ) where {N, T, F_CV}
     
-    # Calculate current CV
     val = pmf.cv_function(from_device(curr_coords))
     current_cv = val isa Tuple ? val : (val,)
 
@@ -299,56 +273,37 @@ function update_pmf!(
     end
     current_linear_idx = LinearIndices(pmf.shape)[CartesianIndex(current_indices)]
 
-    # --- 1. Dynamically compute the exact reduced potentials ---
-    # Exploits the AlchemicalPartition to rapidly evaluate forces for all λ states
-    energies = evaluate_energy_all!(awh_state.partition, curr_coords, awh_state.active_sys.boundary)
+    # 1. Mixture Denominator W_mix = \sum_k exp(f_k + ln ρ_k - u_k(x))
+    # Read directly from the preceding process_sample step
+    log_W_mix = Molly.logsumexp(awh_state.scratch_z)
     
-    n_states = length(awh_state.λ_β)
-    for k in 1:n_states
-        pe_val = ustrip(energies[k])
-        if isnan(pe_val)
-            pe_val = typemax(T) # Trap steric clashes
-        end
-        
-        # Exact reduced potential: u_k(x) = β_k * (U_k(x) + P_k * V)
-        pv_work = awh_state.λ_p[k] * box_volume
-        u_k = awh_state.λ_β[k] * (pe_val + pv_work)
-        
-        # Populate scratch_denom with the extended ensemble mixture weight
-        pmf.scratch_denom[k] = awh_state.f[k] + awh_state.log_rho[k] - u_k
+    # 2. Evaluate Exact Target Energy
+    target_pe_units = evaluate_energy!(
+        awh_state.partition, 
+        curr_coords, 
+        awh_state.active_sys.boundary, 
+        awh_state.partition.target_hamiltonian, 
+        awh_state.partition.target_atoms
+    )
+    
+    unbiased_pe = ustrip(target_pe_units)
+    if isnan(unbiased_pe)
+        unbiased_pe = typemax(T)
     end
     
-    # Mixture Denominator W_mix = \sum_k exp(f_k + ln ρ_k - u_k(x))
-    log_W_mix = Molly.logsumexp(pmf.scratch_denom)
+    # 3. Calculate MBAR Reweighting Factor targeting the exact physical state
+    u_target = pmf.target_beta * (unbiased_pe + pmf.target_pressure * box_volume)
+    unbias_log = -u_target - log_W_mix
+    w_frame = exp(unbias_log)
     
-    # --- 2. Calculate MBAR Reweighting Factor ---
-    # W_unbiased = exp( -u_active(x) ) / W_mix
-    u_active = current_beta * (potential_energy + current_pressure * box_volume)
-    unbias_log = -u_active - log_W_mix
-    
-    reweight_log = zero(T)
-    if !isnothing(pmf.target_beta)
-        reweight_log -= (pmf.target_beta - current_beta) * potential_energy
-    end
-    
-    if !isnothing(pmf.target_pressure)
-        target_work  = pmf.target_beta * pmf.target_pressure
-        current_work = current_beta * current_pressure
-        reweight_log -= (target_work - current_work) * box_volume
-    end
-    
-    # Total exact weight for this coordinate frame
-    w_frame = exp(unbias_log + reweight_log)
-    
-    # --- 3. Exponential Forgetting & Accumulation ---
+    # 4. Exponential Forgetting & Accumulation
     if weight_factor < one(T)
         pmf.numerator_hist .*= weight_factor
         pmf.denominator_hist .*= weight_factor
     end
     
     pmf.numerator_hist[current_linear_idx] += w_frame
-    pmf.denominator_hist[current_linear_idx] += one(T) # Track baseline samples unscaled
-    
+    pmf.denominator_hist[current_linear_idx] += one(T)
     pmf.sample_count += 1
 end
 
@@ -441,9 +396,6 @@ function AWHSimulation(
     log_freq::Int = 100,
     pmf_grid = nothing,
     pmf_cv = nothing,
-    pmf_coupling = nothing,
-    target_temp = nothing,
-    target_pressure = nothing,
     pmf_is_periodic = nothing
 ) where T
 
@@ -451,13 +403,14 @@ function AWHSimulation(
 
     pmf_calc = nothing
     if !isnothing(pmf_grid)
+        if isnothing(awh_state.target_β)
+            error("PMF deconvolution requires a target_state to be passed during AWHState initialization.")
+        end
+        
         pmf_calc = AWHPMFDeconvolution(
             awh_state, 
-            pmf_grid; 
+            pmf_grid;
             cv_func=pmf_cv, 
-            coupling_func=pmf_coupling,
-            target_temp=target_temp,
-            target_pressure=target_pressure,
             is_periodic=pmf_is_periodic
         )
     end
@@ -671,24 +624,14 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
 
             # Extract System Info
             sys = awh_sim.state.active_sys
-            e_unit = sys.energy_units
-            
-            pot_eng = ustrip(e_unit, active_pe_units)
-            
             vol_val = T(ustrip(volume(sys.boundary)))
-
-            cur_beta = awh_sim.state.λ_β[awh_sim.state.active_idx]            
-            cur_press = awh_sim.state.λ_p[awh_sim.state.active_idx]
 
             update_pmf!(
                 awh_sim.pmf_calc, 
                 awh_sim.state, 
                 awh_sim.state.active_sys.coords; 
                 weight_factor=w_fac,
-                potential_energy=pot_eng,
-                box_volume=vol_val,
-                current_beta=cur_beta,
-                current_pressure=cur_press
+                box_volume=vol_val
             )
         end
 

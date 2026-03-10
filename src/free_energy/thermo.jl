@@ -20,41 +20,44 @@ that are unique to specific thermodynamic states (the `λ_sys` and `λ_hamiltoni
 This guarantees that unperturbed components (e.g., bulk solvent) are evaluated 
 exactly once when checking cross-energies or evaluating multiple states.
 """
-mutable struct AlchemicalPartition{S, L, A, H, C, T}
+mutable struct AlchemicalPartition{S, L, A, H, C, T, TH, TA}
     master_sys::S
     λ_sys::L
     λ_atoms::A
     λ_hamiltonians::H
     
-    # State cache for master energy to prevent redundant calculations 
-    # across multiple single-state queries
+    # Pre-compiled arbitrary target state for PMF deconvolution
+    target_hamiltonian::TH
+    target_atoms::TA
+
     cached_coords::C
     cached_master_pe::T
 end
 
 function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState}; 
+                             target_state::Union{ThermoState, Nothing}=nothing,
                              reuse_neighbors::Bool=true)
+    
     n_λ = length(thermo_states)
     ref_sys = thermo_states[1].system
     FT = typeof(ustrip(ref_sys.total_mass))
 
+    # Append target state for comprehensive intersection
+    all_states = isnothing(target_state) ? collect(thermo_states) : [thermo_states..., target_state]
+    
     # 1. Identify Global Solute Indices (Perturbed Atoms)
     solute_indices = Set{Int}()
     λ_atoms = []
 
-    # Bring the reference atoms off the device outside of the loop
     ref_atoms_cpu = from_device(ref_sys.atoms)
 
-    for tstate in thermo_states
+    for tstate in all_states
         atoms = tstate.system.atoms
         push!(λ_atoms, atoms)
 
         atoms_cpu = from_device(atoms)
         for atom in atoms_cpu
-            # Flag if the atom possesses alchemical scaling properties,
-            # or if its properties explicitly diverge from the reference.
-            if (atom.λ < 1.0) || 
-               (atom.λ != ref_atoms_cpu[atom.index].λ)
+            if (atom.λ < 1.0) || (atom.λ != ref_atoms_cpu[atom.index].λ)
                 push!(solute_indices, atom.index)
             end
         end
@@ -103,32 +106,34 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         end
     end
 
-    all_gils = [collect(tstate.system.general_inters) for tstate in thermo_states]
-    all_pils = [collect(tstate.system.pairwise_inters) for tstate in thermo_states]
+    all_gils = [collect(tstate.system.general_inters) for tstate in all_states]
+    all_pils = [collect(tstate.system.pairwise_inters) for tstate in all_states]
 
-    # Calculate interactions that are identical across ALL states
+    # Calculate interactions identical across ALL simulated windows AND the target state
     master_sils_1a = intersect(list_1a...)
-    master_sils_2a = intersect(list_2a...)
-    master_sils_3a = intersect(list_3a...)
-    master_sils_4a = intersect(list_4a...)
     master_gils    = intersect(all_gils...)
     master_pils    = intersect(all_pils...)
 
-    λ_specific = Vector{Tuple}(undef, n_λ)
-    λ_general  = Vector{Tuple}(undef, n_λ)
-    λ_pairwise = Vector{Tuple}(undef, n_λ)
-
-    # Distill state-specific interactions by subtracting the master subset
+    # Extract λ-specific Hamiltonians for the simulated windows
+    hamiltonians = LambdaHamiltonian[]
     for i in 1:n_λ
-        u_1 = setdiff(list_1a[i], master_sils_1a)
-        u_2 = setdiff(list_2a[i], master_sils_2a)
-        u_3 = setdiff(list_3a[i], master_sils_3a)
-        u_4 = setdiff(list_4a[i], master_sils_4a)
-        λ_specific[i] = (u_1..., u_2..., u_3..., u_4...)
-        
-        u_g = setdiff(all_gils[i], master_gils)
-        λ_general[i] = (u_g...,)
-        λ_pairwise[i] = (all_pils[i]...,)
+        λ_p = (all_pils[i]...,)
+        λ_s = (setdiff(list_1a[i], master_sils_1a)..., ) # Add other lists
+        λ_g = (setdiff(all_gils[i], master_gils)...,)
+        push!(hamiltonians, LambdaHamiltonian(λ_p, λ_s, λ_g))
+    end
+
+    # Extract Target Hamiltonian
+    if !isnothing(target_state)
+        tgt_idx = length(all_states)
+        tgt_p = (all_pils[tgt_idx]...,)
+        tgt_s = (setdiff(list_1a[tgt_idx], master_sils_1a)..., )
+        tgt_g = (setdiff(all_gils[tgt_idx], master_gils)...,)
+        target_hamiltonian = LambdaHamiltonian(tgt_p, tgt_s, tgt_g)
+        target_atoms_array = λ_atoms[tgt_idx]
+    else
+        target_hamiltonian = nothing
+        target_atoms_array = nothing
     end
 
     # 4. Construct Partitioned Systems
@@ -162,12 +167,9 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     initial_pe = zero(FT) * master_sys.energy_units
     
     return AlchemicalPartition(
-        master_sys,
-        λ_sys,
-        λ_atoms,
-        hamiltonians,
-        copy(ref_sys.coords),
-        initial_pe
+        master_sys, λ_sys, λ_atoms[1:n_λ], hamiltonians, 
+        target_hamiltonian, target_atoms_array,
+        copy(ref_sys.coords), initial_pe
     )
 end
 
@@ -244,6 +246,30 @@ function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, stat
     partition.λ_sys.pairwise_inters = partition.λ_hamiltonians[state_index].pairwise_inters
     partition.λ_sys.specific_inter_lists = partition.λ_hamiltonians[state_index].specific_inter_lists
     partition.λ_sys.general_inters = partition.λ_hamiltonians[state_index].general_inters
+    
+    pe_specific = potential_energy(partition.λ_sys, nbrs, 0)
+    
+    return partition.cached_master_pe + pe_specific
+end
+
+function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, 
+                          target_ham::LambdaHamiltonian, target_atoms; 
+                          force_recompute::Bool=false)
+    if force_recompute || partition.cached_coords !== coords
+        partition.master_sys.coords = coords
+        partition.master_sys.boundary = boundary
+        partition.cached_master_pe = potential_energy(partition.master_sys)
+        partition.cached_coords = coords
+    end
+    
+    partition.λ_sys.coords = coords
+    partition.λ_sys.boundary = boundary
+    nbrs = find_neighbors(partition.λ_sys)
+    
+    partition.λ_sys.atoms = target_atoms
+    partition.λ_sys.pairwise_inters = target_ham.pairwise_inters
+    partition.λ_sys.specific_inter_lists = target_ham.specific_inter_lists
+    partition.λ_sys.general_inters = target_ham.general_inters
     
     pe_specific = potential_energy(partition.λ_sys, nbrs, 0)
     
