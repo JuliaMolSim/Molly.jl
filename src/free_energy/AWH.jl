@@ -337,11 +337,17 @@ function update_pmf!(
     end
     
     # Total exact weight for this coordinate frame
-    w_frame = weight_factor * exp(unbias_log + reweight_log)
+    # Note: weight_factor is applied to the history, not the incoming frame
+    w_frame = exp(unbias_log + reweight_log)
     
-    # --- 3. Accumulate Directly ---
+    # --- 3. Exponential Forgetting & Accumulation ---
+    if weight_factor < one(T)
+        pmf.numerator_hist .*= weight_factor
+        pmf.denominator_hist .*= weight_factor
+    end
+    
     pmf.numerator_hist[current_linear_idx] += w_frame
-    pmf.denominator_hist[current_linear_idx] += weight_factor # Tracking baseline samples
+    pmf.denominator_hist[current_linear_idx] += one(T) # Track baseline samples unscaled
     
     pmf.sample_count += 1
 end
@@ -350,21 +356,21 @@ end
     calc_pmf(pmf_calc::AWHPMFDeconvolution)
 
 Extracts the unbiased Potential of Mean Force (PMF) from the accumulated numerator 
-and denominator histograms. Unsampled bins are assigned a value of `Inf`, and the 
+histograms. Unsampled bins are assigned a value of `Inf`, and the 
 global minimum of the valid PMF is shifted to zero.
 """
 function calc_pmf(pmf_calc::AWHPMFDeconvolution{N, T, F_CV}) where {N, T, F_CV}
     num = pmf_calc.numerator_hist
-    den = pmf_calc.denominator_hist
     
-    # Identify bins with non-zero samples to avoid domain errors in log
-    valid = (num .> zero(T)) .& (den .> zero(T))
+    # Identify bins with non-zero reweighted samples to avoid domain errors in log.
+    # The denominator histogram is no longer used for the free energy calculation.
+    valid = num .> zero(T)
     
     # Initialize PMF array with infinity for unsampled regions
     pmf = fill(T(Inf), size(num))
     
-    # Calculate unbiased PMF for valid bins
-    pmf[valid] .= -log.(num[valid] ./ den[valid])
+    # Calculate absolute unbiased PMF for valid bins based directly on the sum of MBAR weights
+    pmf[valid] .= -log.(num[valid])
     
     # Shift the global minimum to zero
     if any(valid)
@@ -467,8 +473,21 @@ function AWHSimulation(
                          pmf_calc)
 end
 
-# Swaps Hamiltionians
+# Swaps Hamiltonians and enforces kinetic energy continuity across temperature jumps
 function update_active_sys!(awh_state::AWHState, active_idx::Int)
+    old_idx = awh_state.active_idx
+    
+    # Perform instantaneous velocity rescaling if the temperature target changes
+    if old_idx != active_idx
+        β_old = awh_state.λ_β[old_idx]
+        β_new = awh_state.λ_β[active_idx]
+        
+        if β_old != β_new
+            velocity_scaling_factor = sqrt(β_old / β_new)
+            awh_state.active_sys.velocities .*= velocity_scaling_factor
+        end
+    end
+
     awh_state.active_idx = active_idx
     awh_state.active_sys.atoms = awh_state.partition.λ_atoms[active_idx]
     awh_state.active_sys.pairwise_inters = awh_state.state_pairwise_inters[active_idx]
