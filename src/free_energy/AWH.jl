@@ -145,16 +145,16 @@ end
 
 # Implements the deconvolution method to obtain the unbiased PMF
 # See Lindahl et al. 2014 https://doi.org/10.1063/1.4890371
-
 mutable struct AWHPMFDeconvolution{N, T, F_CV}
     min_vals::NTuple{N, T}
     bin_widths::NTuple{N, T}
     shape::NTuple{N, Int}
+    
+    # Flags to determine if a CV dimension wraps periodically
+    is_periodic::NTuple{N, Bool} 
 
     cv_function::F_CV         
 
-    # Optimization: Pre-computed exp(-Q(xi, lambda)) = exp(-beta_k * V_bias(xi))
-    # Rows: Linearized Bin Index, Cols: Window Index
     coupling_matrix::Matrix{T} 
 
     numerator_hist::Array{T, N}
@@ -164,13 +164,10 @@ mutable struct AWHPMFDeconvolution{N, T, F_CV}
 
     target_beta::Union{T, Nothing}
     target_pressure::Union{T, Nothing}
-    
-    cv_history::Vector{NTuple{N, T}}
-    active_idx_history::Vector{Int}
 
-    scratch_g::Vector{T}        # For g(λ)
-    scratch_weights::Vector{T}  # For exp(g)
-    scratch_denom::Vector{T}    # For coupling_matrix * weights
+    scratch_g::Vector{T}        
+    scratch_weights::Vector{T}  
+    scratch_denom::Vector{T}    
 end
 
 function AWHPMFDeconvolution(
@@ -179,17 +176,20 @@ function AWHPMFDeconvolution(
     cv_func = nothing,
     coupling_func = nothing,
     target_temp = nothing,
-    target_pressure = nothing
+    target_pressure = nothing,
+    is_periodic = nothing
 ) where T
     
     # Parse Grid Dimensions
-    # pmf_grid format: ((min_1, min_2...), (max_1, max_2...), (bins_1, bins_2...))
     min_vals = T.(pmf_grid[1])
     max_vals = T.(pmf_grid[2])
     n_bins   = Int.(pmf_grid[3])
     
     N = length(n_bins)
     bin_widths = (max_vals .- min_vals) ./ n_bins
+
+    # Handle Periodicity
+    periodic_flags = isnothing(is_periodic) ? ntuple(_ -> false, N) : Tuple(Bool.(is_periodic))
     
     # --- CV Function Setup ---
     local final_cv_func
@@ -281,7 +281,7 @@ function AWHPMFDeconvolution(
         end
     end
 
-    # [NEW] Setup Reweighting Constants
+    # Setup Reweighting Constants
     sys = awh_state.active_sys
     e_unit = sys.energy_units
     
@@ -312,13 +312,14 @@ function AWHPMFDeconvolution(
     num_hist = zeros(T, n_bins)
     den_hist = zeros(T, n_bins)
 
-    n_wins = length(awh_state.λ_hamiltonians)
+    n_wins = length(awh_state.partition.λ_hamiltonians)
     n_bins_total = prod(n_bins)
 
     return AWHPMFDeconvolution(
         min_vals, 
         bin_widths, 
         n_bins,
+        periodic_flags,
         final_cv_func,
         coupling_mat,
         num_hist,
@@ -326,8 +327,6 @@ function AWHPMFDeconvolution(
         0,
         tgt_beta,
         tgt_press,
-        Vector{NTuple{N, T}}(),
-        Vector{Int}(),
         zeros(T, n_wins),
         zeros(T, n_wins),
         zeros(T, n_bins_total)
@@ -349,15 +348,18 @@ function update_pmf!(
     val = pmf.cv_function(from_device(curr_coords))
     current_cv = val isa Tuple ? val : (val,)
 
-    # Convert to T to ensure type stability within the struct
-    push!(pmf.cv_history, T.(current_cv))
-    push!(pmf.active_idx_history, awh_state.active_idx)
-
-    # Determine Index
+    # Determine Index with conditional periodic wrapping
     current_indices = ntuple(N) do d
         rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
         idx = Int(floor(rel)) + 1
-        clamp(idx, 1, pmf.shape[d])
+        
+        if pmf.is_periodic[d]
+            # Wrap around using 1-based modulo arithmetic
+            mod(idx - 1, pmf.shape[d]) + 1
+        else
+            # Strictly bound non-periodic variables
+            clamp(idx, 1, pmf.shape[d])
+        end
     end
     current_cartesian = CartesianIndex(current_indices)
     current_linear_idx = LinearIndices(pmf.shape)[current_cartesian]
@@ -488,12 +490,12 @@ function AWHSimulation(
     coverage_threshold::Real = 1.0,
     significant_weight::Real = 0.1,
     log_freq::Int = 100,
-    # Optional PMF args
     pmf_grid = nothing,
     pmf_cv = nothing,
     pmf_coupling = nothing,
     target_temp = nothing,
-    target_pressure = nothing
+    target_pressure = nothing,
+    pmf_is_periodic = nothing
 ) where T
 
     n_win = length(awh_state.partition.λ_hamiltonians)
@@ -506,7 +508,8 @@ function AWHSimulation(
             cv_func=pmf_cv, 
             coupling_func=pmf_coupling,
             target_temp=target_temp,
-            target_pressure=target_pressure
+            target_pressure=target_pressure,
+            is_periodic=pmf_is_periodic
         )
     end
 
@@ -565,8 +568,13 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
     
     log_den = Molly.logsumexp(awh.scratch_z)
     
-    # Calculate W directly into w_last
-    @. awh.w_last = exp(awh.scratch_z - log_den)
+    # Prevent NaN propagation if all potentials evaluate to typemax(FT)
+    if isinf(log_den) && log_den < zero(FT)
+        fill!(awh.w_last, one(FT) / n_states)
+    else
+        # Calculate W directly into w_last
+        @. awh.w_last = exp(awh.scratch_z - log_den)
+    end
 
     # Accumulate
     awh.w_seg .+= awh.w_last
