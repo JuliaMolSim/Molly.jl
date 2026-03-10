@@ -130,7 +130,7 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
         rho_val = FT.(ρ)
         length(rho_val) == n_λ || throw(ArgumentError("`ρ` length $(length(rho_val)) does not match number of states $n_λ."))
         all(isfinite, rho_val) || throw(ArgumentError("`ρ` must contain only finite values."))
-        any(<(zero(FT)), rho_val) && throw(ArgumentError("`ρ` must be nonnegative."))
+        any(x -> x < zero(FT), rho_val) && throw(ArgumentError("`ρ` must be nonnegative."))
         rho_sum = sum(rho_val)
         rho_sum > zero(FT) || throw(ArgumentError("`ρ` must have positive total weight."))
         rho_val ./= rho_sum
@@ -443,6 +443,11 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
             m_new = mass(new_atoms[i])
             
             if β_old != β_new || m_old != m_new
+                # Zero-mass particles have no kinetic contribution; avoid 0/0
+                # when swapping between temperatures or mass-scaled states.
+                if iszero(m_old) || iszero(m_new)
+                    continue
+                end
                 # ustrip ensures the resulting scalar is a raw float, preventing Unitful type instability
                 velocity_scaling_factor = sqrt(ustrip((β_old * m_old) / (β_new * m_new)))
                 awh_state.active_sys.velocities[i] .*= velocity_scaling_factor
@@ -513,7 +518,7 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
 
     # Check visited windows using w_last
     for (i, val) in enumerate(awh.w_last)
-        if val > weight_relevance/n_states
+        if val > weight_relevance * awh.rho[i]
             push!(awh.visited_windows, i)
         end
     end
@@ -546,7 +551,13 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
         return nothing 
     end
 
-    current_N = awh_sim.state.in_initial_stage ? awh_sim.state.N_bias : (awh_sim.initial_sampl_n + awh_sim.state.N_eff)
+    current_N = if awh_sim.state.in_initial_stage
+        awh_sim.state.N_bias
+    else
+        # In the linear stage, Eq. (4) uses the reference histogram size
+        # before the current update block is folded in.
+        awh_sim.initial_sampl_n + (awh_sim.state.N_eff - awh_sim.state.n_accum)
+    end
 
     numerator   = current_N .* awh_sim.state.rho .+ awh_sim.state.w_seg
     denominator = current_N .* awh_sim.state.rho .+ (awh_sim.state.n_accum .* awh_sim.state.rho)
@@ -584,7 +595,9 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
 
     if awh_sim.state.in_initial_stage
         cov_count = length(awh_sim.state.visited_windows)
-        if cov_count >= floor(Int, awh_sim.coverage_threshold * awh_sim.n_windows)
+        n_target_windows = count(x -> x > zero(eltype(awh_sim.state.rho)), awh_sim.state.rho)
+        required_cov = floor(Int, awh_sim.coverage_threshold * n_target_windows)
+        if cov_count >= required_cov
             awh_sim.state.N_bias *= 2
             empty!(awh_sim.state.visited_windows)
             if awh_sim.state.N_bias >= (awh_sim.initial_sampl_n + awh_sim.state.N_eff)

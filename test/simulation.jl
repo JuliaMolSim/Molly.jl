@@ -1269,4 +1269,89 @@ end
     
     # 4. AWH enforces a structural constraint where the first state acts as the reference (f = 0.0)
     @test awh_sim.state.f[1] == 0.0
+
+    # 5. Custom target distributions must be accepted and normalized
+    custom_rho = [0.1, 0.2, 0.3, 0.4]
+    awh_state_rho = AWHState(thermo_states; first_state=1, n_bias=10, ρ=custom_rho)
+    @test isapprox(sum(awh_state_rho.rho), 1.0; atol=1e-12)
+    @test awh_state_rho.rho ≈ custom_rho ./ sum(custom_rho)
+
+    # 6. In the linear stage, Eq. (4) must use the reference N before
+    #    adding the currently accumulated block (n_accum samples).
+    awh_state_linear = AWHState(thermo_states; first_state=1, n_bias=20)
+    awh_sim_linear = AWHSimulation(
+        awh_state_linear;
+        update_freq=3,
+        well_tempered_factor=Inf,
+        log_freq=1000
+    )
+
+    st = awh_sim_linear.state
+    st.in_initial_stage = false
+    st.N_eff = 11.0
+    st.n_accum = 3
+    st.w_seg .= [1.5, 0.5, 0.7, 0.3]
+    st.rho .= fill(0.25, n_windows)
+    st.log_rho .= log.(st.rho)
+    st.f .= [0.0, 0.2, -0.1, 0.3]
+
+    f_before = copy(st.f)
+    N_ref = awh_sim_linear.initial_sampl_n + (st.N_eff - st.n_accum)
+    delta_expected = log.((N_ref .* st.rho .+ st.w_seg) ./ (N_ref .* st.rho .+ st.n_accum .* st.rho))
+    f_expected = f_before .- delta_expected
+    f_expected .-= f_expected[1]
+
+    Molly.update_awh_bias!(awh_sim_linear, 1)
+    @test st.f ≈ f_expected
+
+    # 7. Coverage in the initial stage must be evaluated over the active
+    #    target support only (ρ > 0), otherwise zero-target windows can block exit.
+    awh_state_cov = AWHState(thermo_states; first_state=1, n_bias=10, ρ=[0.5, 0.5, 0.0, 0.0])
+    awh_sim_cov = AWHSimulation(
+        awh_state_cov;
+        update_freq=1,
+        well_tempered_factor=Inf,
+        coverage_threshold=1.0,
+        log_freq=1000
+    )
+
+    st_cov = awh_sim_cov.state
+    st_cov.n_accum = 1
+    st_cov.w_seg .= st_cov.rho
+    union!(st_cov.visited_windows, (1, 2))
+
+    n_bias_before = st_cov.N_bias
+    Molly.update_awh_bias!(awh_sim_cov, 1)
+    @test st_cov.N_bias == 2n_bias_before
+
+    # 8. Zero-mass atoms must not generate NaN velocities when swapping
+    #    between states with different temperatures.
+    zm_boundary = CubicBoundary(2.0u"nm")
+    zm_atoms = [Atom(mass=0.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)]
+    zm_coords = place_atoms(1, zm_boundary; min_dist=0.1u"nm")
+    zm_nf = DistanceNeighborFinder(
+        eligible=trues(1, 1),
+        n_steps=1,
+        dist_cutoff=1.0u"nm",
+    )
+    zm_sys_1 = System(
+        atoms=zm_atoms,
+        coords=zm_coords,
+        boundary=zm_boundary,
+        pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+        neighbor_finder=zm_nf
+    )
+    zm_sys_2 = System(
+        atoms=zm_atoms,
+        coords=zm_coords,
+        boundary=zm_boundary,
+        pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+        neighbor_finder=zm_nf
+    )
+    zm_intg_1 = Langevin(dt=0.005u"ps", temperature=300.0u"K", friction=0.1u"ps^-1")
+    zm_intg_2 = Langevin(dt=0.005u"ps", temperature=600.0u"K", friction=0.1u"ps^-1")
+    zm_states = [ThermoState(zm_sys_1, zm_intg_1), ThermoState(zm_sys_2, zm_intg_2)]
+    awh_state_zm = AWHState(zm_states; first_state=1, n_bias=10)
+    Molly.update_active_sys!(awh_state_zm, 2)
+    @test all(isfinite, ustrip.(awh_state_zm.active_sys.velocities[1]))
 end
