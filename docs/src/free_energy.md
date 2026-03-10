@@ -807,7 +807,8 @@ Because our $\lambda$ states represent harmonically biased umbrellas rather than
 # awh_2d.jl
 
 println("Initializing AWH State...")
-awh_state = AWHState(thermo_states; n_bias=100)
+target_state = ThermoState(sys, simulator) # Unbiased thermodynamic target for PMF reweighting
+awh_state = AWHState(thermo_states; target_state=target_state, n_bias=100)
 
 println("Setting up Simulation...")
 
@@ -827,29 +828,12 @@ println("Simulation Complete.")
 
 ### Extracting and plotting the PMF
 
-Once the simulation completes, our deconvoluted PMF is safely stored inside `awh_sim.pmf_calc`. We can extract it by calculating the negative logarithm of the reweighted histogram ratio. We will write a small helper function to safely handle unvisited bins, shifting the global minimum of the free energy surface to zero.
+Once the simulation completes, our deconvoluted PMF is safely stored inside `awh_sim.pmf_calc`. We can extract it directly with [`calc_pmf`](@ref), which returns `Inf` for unsampled bins and shifts the global minimum to zero.
 
 ```julia
 # awh_2d.jl
 
-function get_pmf(pmf_struct)
-    num = pmf_struct.numerator_hist
-    den = pmf_struct.denominator_hist
-    
-    # Avoid log(0) for unsampled regions
-    valid = (num .> 0) .& (den .> 0)
-    
-    # Create PMF array (implicitly 2D based on input)
-    pmf = fill(FT(Inf), size(num))
-    pmf[valid] .= -log.(num[valid] ./ den[valid])
-    
-    # Shift global minimum to 0
-    min_val = minimum(pmf[valid])
-    pmf[valid] .-= min_val
-    return pmf
-end
-
-final_pmf = get_pmf(awh_sim.pmf_calc)
+final_pmf = calc_pmf(awh_sim.pmf_calc)
 
 # Prepare grid axes in degrees for plotting
 phi_vals = rad2deg.(range(PMF_MIN, PMF_MAX, length=60))
