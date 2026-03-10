@@ -35,7 +35,7 @@ accumulated statistical weights, free energy estimates, and target distribution 
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for adjacent λ windows. Generally improves performance.
 """
-mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI}
+mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI, SNF, SCN, SVS, SVF, SLG, SM, STM}
     partition::P
     
     active_idx::Int
@@ -53,6 +53,14 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI}
     state_pairwise_inters::SPI
     state_specific_inter_lists::SSI
     state_general_inters::SGI
+    state_neighbor_finders::SNF
+    state_constraints::SCN
+    state_virtual_sites::SVS
+    state_virtual_site_flags::SVF
+    state_loggers::SLG
+    state_masses::SM
+    state_total_masses::STM
+    state_dfs::Vector{Int}
 
     # Probability & Free Energy
     f::Vector{T}
@@ -113,12 +121,24 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states]
     state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states]
     state_general_inters = [ts.system.general_inters for ts in thermo_states]
+    state_neighbor_finders = [deepcopy(ts.system.neighbor_finder) for ts in thermo_states]
+    state_constraints = [ts.system.constraints for ts in thermo_states]
+    state_virtual_sites = [ts.system.virtual_sites for ts in thermo_states]
+    state_virtual_site_flags = [ts.system.virtual_site_flags for ts in thermo_states]
+    state_loggers = [ts.system.loggers for ts in thermo_states]
+    state_masses = [ts.system.masses for ts in thermo_states]
+    state_total_masses = [ts.system.total_mass for ts in thermo_states]
+    state_dfs = [ts.system.df for ts in thermo_states]
 
     active_sys = System(deepcopy(ref_sys);
         atoms = partition.λ_atoms[first_state],
         pairwise_inters = state_pairwise_inters[first_state],
         specific_inter_lists = state_specific_inter_lists[first_state],
-        general_inters = state_general_inters[first_state]
+        general_inters = state_general_inters[first_state],
+        constraints = state_constraints[first_state],
+        virtual_sites = state_virtual_sites[first_state],
+        neighbor_finder = state_neighbor_finders[first_state],
+        loggers = state_loggers[first_state]
     )
   
     active_intg = λ_integrators[first_state]
@@ -141,7 +161,10 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
 
     return AWHState{FT, typeof(partition), typeof(active_sys), typeof(active_intg), 
                     typeof(λ_β), typeof(λ_p), typeof(state_pairwise_inters),
-                    typeof(state_specific_inter_lists), typeof(state_general_inters)}(
+                    typeof(state_specific_inter_lists), typeof(state_general_inters),
+                    typeof(state_neighbor_finders), typeof(state_constraints),
+                    typeof(state_virtual_sites), typeof(state_virtual_site_flags),
+                    typeof(state_loggers), typeof(state_masses), typeof(state_total_masses)}(
         partition,
         first_state,
         active_sys,
@@ -154,6 +177,14 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
         state_pairwise_inters,
         state_specific_inter_lists,
         state_general_inters,
+        state_neighbor_finders,
+        state_constraints,
+        state_virtual_sites,
+        state_virtual_site_flags,
+        state_loggers,
+        state_masses,
+        state_total_masses,
+        state_dfs,
         zeros(FT, n_λ),
         rho_val,
         log_ρ,
@@ -237,7 +268,13 @@ function AWHPMFDeconvolution(
         final_cv_func = (coords) -> begin
             sys = awh_state.active_sys
             return ntuple(N) do d
-                Molly.calculate_cv(cv_types[d], coords, sys.atoms, sys.boundary, sys.velocities)
+                Molly.calculate_cv(
+                    cv_types[d],
+                    coords,
+                    from_device(sys.atoms),
+                    sys.boundary,
+                    from_device(sys.velocities),
+                )
             end
         end
     end
@@ -365,12 +402,8 @@ umbrella potential). It is typically not required for standard alchemical transf
 - `pmf_cv=nothing`: Function taking system coordinates and returning a tuple of scalar Collective 
     Variables (CVs). If omitted when `pmf_grid` is provided, Molly attempts to auto-detect CVs from 
     the active `BiasPotential`s.
-- `pmf_coupling=nothing`: Function returning the dimensionless bias energy given the CV tuple and 
-    a `lambda_idx`. If omitted when `pmf_grid` is provided, Molly computes this automatically.
-- `target_temp=nothing`: Target temperature for the unbiased PMF. Recommended for proper reweighting 
-    if λ states have varying temperatures.
-- `target_pressure=nothing`: Target pressure for the unbiased PMF. Recommended for proper reweighting 
-    if λ states have varying pressures.
+- `target_state` in [`AWHState`](@ref): Required when using PMF deconvolution (`pmf_grid`) and
+    defines the exact unbiased thermodynamic state used for MBAR frame reweighting.
 """
 struct AWHSimulation{T}
     n_windows::Int
@@ -435,23 +468,39 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
         β_old = awh_state.λ_β[old_idx]
         β_new = awh_state.λ_β[active_idx]
         
-        old_atoms = awh_state.partition.λ_atoms[old_idx]
-        new_atoms = awh_state.partition.λ_atoms[active_idx]
-        
-        for i in eachindex(awh_state.active_sys.velocities)
-            m_old = mass(old_atoms[i])
-            m_new = mass(new_atoms[i])
-            
-            if β_old != β_new || m_old != m_new
-                # Zero-mass particles have no kinetic contribution; avoid 0/0
-                # when swapping between temperatures or mass-scaled states.
-                if iszero(m_old) || iszero(m_new)
-                    continue
+        old_masses = from_device(awh_state.state_masses[old_idx])
+        new_masses = from_device(awh_state.state_masses[active_idx])
+        temps_or_masses_change = (β_old != β_new)
+
+        if !temps_or_masses_change
+            for i in eachindex(old_masses, new_masses)
+                if old_masses[i] != new_masses[i]
+                    temps_or_masses_change = true
+                    break
                 end
-                # ustrip ensures the resulting scalar is a raw float, preventing Unitful type instability
-                velocity_scaling_factor = sqrt(ustrip((β_old * m_old) / (β_new * m_new)))
-                awh_state.active_sys.velocities[i] .*= velocity_scaling_factor
             end
+        end
+
+        if temps_or_masses_change
+            vels_cpu = copy(from_device(awh_state.active_sys.velocities))
+
+            for i in eachindex(vels_cpu, old_masses, new_masses)
+                m_old = old_masses[i]
+                m_new = new_masses[i]
+
+                if β_old != β_new || m_old != m_new
+                    # Zero-mass particles have no kinetic contribution; avoid 0/0
+                    # when swapping between temperatures or mass-scaled states.
+                    if iszero(m_old) || iszero(m_new)
+                        continue
+                    end
+                    # ustrip ensures the resulting scalar is a raw float, preventing Unitful type instability
+                    velocity_scaling_factor = sqrt(ustrip((β_old * m_old) / (β_new * m_new)))
+                    vels_cpu[i] = vels_cpu[i] * velocity_scaling_factor
+                end
+            end
+
+            awh_state.active_sys.velocities .= to_device(vels_cpu, array_type(awh_state.active_sys))
         end
     end
 
@@ -460,6 +509,14 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
     awh_state.active_sys.pairwise_inters = awh_state.state_pairwise_inters[active_idx]
     awh_state.active_sys.specific_inter_lists = awh_state.state_specific_inter_lists[active_idx]
     awh_state.active_sys.general_inters = awh_state.state_general_inters[active_idx]
+    awh_state.active_sys.constraints = awh_state.state_constraints[active_idx]
+    awh_state.active_sys.virtual_sites = awh_state.state_virtual_sites[active_idx]
+    awh_state.active_sys.virtual_site_flags = awh_state.state_virtual_site_flags[active_idx]
+    awh_state.active_sys.neighbor_finder = awh_state.state_neighbor_finders[active_idx]
+    awh_state.active_sys.loggers = awh_state.state_loggers[active_idx]
+    awh_state.active_sys.masses = awh_state.state_masses[active_idx]
+    awh_state.active_sys.total_mass = awh_state.state_total_masses[active_idx]
+    awh_state.active_sys.df = awh_state.state_dfs[active_idx]
     awh_state.active_intg = awh_state.λ_integrators[active_idx]
 end
 

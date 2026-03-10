@@ -1354,4 +1354,75 @@ end
     awh_state_zm = AWHState(zm_states; first_state=1, n_bias=10)
     Molly.update_active_sys!(awh_state_zm, 2)
     @test all(isfinite, ustrip.(awh_state_zm.active_sys.velocities[1]))
+
+    # 9. Temperature swaps with immutable velocity vectors (SVector) must
+    #    rescale velocities without raising setindex! errors.
+    tv_boundary = CubicBoundary(2.0u"nm")
+    tv_atoms = [Atom(mass=2.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)]
+    tv_coords = [SVector(0.0, 0.0, 0.0)u"nm"]
+    tv_vels = [SVector(1.0, -0.5, 0.25)u"nm/ps"]
+    tv_nf = DistanceNeighborFinder(eligible=trues(1, 1), n_steps=1, dist_cutoff=1.0u"nm")
+    tv_sys_1 = System(
+        atoms=tv_atoms,
+        coords=tv_coords,
+        velocities=tv_vels,
+        boundary=tv_boundary,
+        pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+        neighbor_finder=tv_nf,
+    )
+    tv_sys_2 = System(
+        atoms=tv_atoms,
+        coords=tv_coords,
+        velocities=tv_vels,
+        boundary=tv_boundary,
+        pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+        neighbor_finder=tv_nf,
+    )
+    tv_intg_1 = Langevin(dt=0.005u"ps", temperature=300.0u"K", friction=0.1u"ps^-1")
+    tv_intg_2 = Langevin(dt=0.005u"ps", temperature=600.0u"K", friction=0.1u"ps^-1")
+    tv_states = [ThermoState(tv_sys_1, tv_intg_1), ThermoState(tv_sys_2, tv_intg_2)]
+    awh_state_tv = AWHState(tv_states; first_state=1, n_bias=10)
+    v_before = awh_state_tv.active_sys.velocities[1]
+    β_scale = sqrt(awh_state_tv.λ_β[1] / awh_state_tv.λ_β[2])
+    Molly.update_active_sys!(awh_state_tv, 2)
+    v_after = awh_state_tv.active_sys.velocities[1]
+    @test all(isapprox.(ustrip.(v_after), ustrip.(v_before .* β_scale); atol=1e-12, rtol=1e-12))
+
+    # 10. Swapping to a new λ state must synchronize cached system fields
+    #     that are used by integrators (masses/total_mass/df) and neighbor finder.
+    ms_boundary = CubicBoundary(2.0u"nm")
+    ms_coords = place_atoms(2, ms_boundary; min_dist=0.2u"nm")
+    ms_atoms_1 = [
+        Atom(index=1, mass=1.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=1.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+    ]
+    ms_atoms_2 = [
+        Atom(index=1, mass=2.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=2.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+    ]
+    ms_nf_1 = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=1.0u"nm")
+    ms_nf_2 = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=0.7u"nm")
+    ms_intg = Langevin(dt=0.005u"ps", temperature=300.0u"K", friction=0.1u"ps^-1")
+    ms_sys_1 = System(
+        atoms=ms_atoms_1,
+        coords=ms_coords,
+        boundary=ms_boundary,
+        pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+        neighbor_finder=ms_nf_1,
+    )
+    ms_sys_2 = System(
+        atoms=ms_atoms_2,
+        coords=ms_coords,
+        boundary=ms_boundary,
+        pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+        neighbor_finder=ms_nf_2,
+    )
+    ms_states = [ThermoState(ms_sys_1, ms_intg), ThermoState(ms_sys_2, ms_intg)]
+    awh_state_ms = AWHState(ms_states; first_state=1, n_bias=10)
+    Molly.update_active_sys!(awh_state_ms, 2)
+
+    @test awh_state_ms.active_sys.neighbor_finder.dist_cutoff == 0.7u"nm"
+    @test masses(awh_state_ms.active_sys) == mass.(awh_state_ms.active_sys.atoms)
+    @test awh_state_ms.active_sys.total_mass == sum(mass.(awh_state_ms.active_sys.atoms))
+    @test awh_state_ms.active_sys.df == ms_sys_2.df
 end
