@@ -310,8 +310,9 @@ function update_pmf!(
             pe_val = typemax(T) # Trap steric clashes
         end
         
-        # Exact reduced potential: u_k(x) = β_k * U_k(x)
-        u_k = awh_state.λ_β[k] * pe_val
+        # Exact reduced potential: u_k(x) = β_k * (U_k(x) + P_k * V)
+        pv_work = awh_state.λ_p[k] * box_volume
+        u_k = awh_state.λ_β[k] * (pe_val + pv_work)
         
         # Populate scratch_denom with the extended ensemble mixture weight
         pmf.scratch_denom[k] = awh_state.f[k] + awh_state.log_rho[k] - u_k
@@ -322,7 +323,7 @@ function update_pmf!(
     
     # --- 2. Calculate MBAR Reweighting Factor ---
     # W_unbiased = exp( -u_active(x) ) / W_mix
-    u_active = current_beta * potential_energy
+    u_active = current_beta * (potential_energy + current_pressure * box_volume)
     unbias_log = -u_active - log_W_mix
     
     reweight_log = zero(T)
@@ -337,7 +338,6 @@ function update_pmf!(
     end
     
     # Total exact weight for this coordinate frame
-    # Note: weight_factor is applied to the history, not the incoming frame
     w_frame = exp(unbias_log + reweight_log)
     
     # --- 3. Exponential Forgetting & Accumulation ---
@@ -505,6 +505,9 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
     # Exploit the AlchemicalPartition abstraction
     energies = evaluate_energy_all!(awh.partition, coords, bound)
     
+    # Extract volume in consistent units
+    vol_val = FT(ustrip(volume(bound)))
+    
     potentials = awh.scratch_potentials 
     active_pe = nothing
 
@@ -521,8 +524,11 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
             pe_val = typemax(FT)
         end
         
+        # Include Pressure-Volume work for NPT ensemble validity
+        pv_work = awh.λ_p[n] * vol_val
+        
         # β is already converted to a raw float in correct units
-        potentials[n] = awh.λ_β[n] * pe_val
+        potentials[n] = awh.λ_β[n] * (pe_val + pv_work)
     end
 
     # Calculate Z in-place
