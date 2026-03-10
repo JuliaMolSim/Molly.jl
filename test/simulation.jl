@@ -1270,6 +1270,38 @@ end
     # 4. AWH enforces a structural constraint where the first state acts as the reference (f = 0.0)
     @test awh_sim.state.f[1] == 0.0
 
+    # 4b. simulate!(awh_sim, n_steps) must also execute remainder steps when
+    #     n_steps is not divisible by num_md_steps.
+    rem_boundary = CubicBoundary(10.0u"nm")
+    rem_atoms = [Atom(index=1, mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)]
+    rem_coords = [SVector(0.0, 0.0, 0.0)u"nm"]
+    rem_vels = [SVector(1.0, 0.0, 0.0)u"nm/ps"]
+    rem_sys = System(
+        atoms=rem_atoms,
+        coords=rem_coords,
+        velocities=rem_vels,
+        boundary=rem_boundary,
+        pairwise_inters=(),
+        neighbor_finder=NoNeighborFinder(),
+    )
+    rem_intg = VelocityVerlet(dt=0.1u"ps", remove_CM_motion=0)
+    rem_states = [ThermoState(rem_sys, rem_intg; temperature=300.0u"K")]
+    rem_awh_state = AWHState(rem_states; n_bias=5)
+    rem_awh_sim = AWHSimulation(
+        rem_awh_state;
+        num_md_steps=4,
+        update_freq=1,
+        well_tempered_factor=Inf,
+        log_freq=1000,
+    )
+    rem_x0 = rem_awh_sim.state.active_sys.coords[1][1]
+    simulate!(rem_awh_sim, 6)
+    rem_x1 = rem_awh_sim.state.active_sys.coords[1][1]
+    @test isapprox(ustrip(u"nm", rem_x1 - rem_x0), 0.6; atol=1e-12, rtol=1e-12)
+    @test simulate!(rem_awh_sim, 4) === rem_awh_sim
+    @test simulate!(rem_awh_sim, 5) === rem_awh_sim
+    @test_throws ArgumentError simulate!(rem_awh_sim, -1)
+
     # 5. Custom target distributions must be accepted and normalized
     custom_rho = [0.1, 0.2, 0.3, 0.4]
     awh_state_rho = AWHState(thermo_states; first_state=1, n_bias=10, ρ=custom_rho)
@@ -1401,7 +1433,7 @@ end
         Atom(index=2, mass=2.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
     ]
     ms_nf_1 = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=1.0u"nm")
-    ms_nf_2 = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=0.7u"nm")
+    ms_nf_2 = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=1.0u"nm")
     ms_intg = Langevin(dt=0.005u"ps", temperature=300.0u"K", friction=0.1u"ps^-1")
     ms_sys_1 = System(
         atoms=ms_atoms_1,
@@ -1421,10 +1453,48 @@ end
     awh_state_ms = AWHState(ms_states; first_state=1, n_bias=10)
     Molly.update_active_sys!(awh_state_ms, 2)
 
-    @test awh_state_ms.active_sys.neighbor_finder.dist_cutoff == 0.7u"nm"
+    @test awh_state_ms.active_sys.neighbor_finder.dist_cutoff == 1.0u"nm"
     @test masses(awh_state_ms.active_sys) == mass.(awh_state_ms.active_sys.atoms)
     @test awh_state_ms.active_sys.total_mass == sum(mass.(awh_state_ms.active_sys.atoms))
     @test awh_state_ms.active_sys.df == ms_sys_2.df
+
+    # 10b. update_active_sys! must support heterogeneous interaction and
+    #      integrator types across states without type-conversion failures.
+    sw_boundary = CubicBoundary(2.0u"nm")
+    sw_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.45, 0.0, 0.0)u"nm"]
+    sw_atoms = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+    ]
+    sw_nf = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=1.5u"nm")
+    sw_sys_1 = System(
+        atoms=sw_atoms,
+        coords=sw_coords,
+        boundary=sw_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=sw_nf,
+    )
+    sw_sys_2 = System(
+        atoms=sw_atoms,
+        coords=sw_coords,
+        boundary=sw_boundary,
+        pairwise_inters=(SoftSphere(use_neighbors=true),),
+        neighbor_finder=sw_nf,
+    )
+    sw_intg_1 = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    sw_intg_2 = VelocityVerlet(dt=0.001u"ps", remove_CM_motion=0)
+    sw_states = [
+        ThermoState(sw_sys_1, sw_intg_1; temperature=300.0u"K"),
+        ThermoState(sw_sys_2, sw_intg_2; temperature=300.0u"K"),
+    ]
+    awh_state_sw = AWHState(sw_states; first_state=1, n_bias=10)
+    Molly.update_active_sys!(awh_state_sw, 2)
+    @test awh_state_sw.active_sys.pairwise_inters == awh_state_sw.state_pairwise_inters[2]
+    @test awh_state_sw.active_intg === awh_state_sw.λ_integrators[2]
+    @test isfinite(ustrip(Molly.process_sample(awh_state_sw)))
+    Molly.update_active_sys!(awh_state_sw, 1)
+    @test awh_state_sw.active_sys.pairwise_inters == awh_state_sw.state_pairwise_inters[1]
+    @test awh_state_sw.active_intg === awh_state_sw.λ_integrators[1]
 
     # 11. Pairwise interactions that do not use neighbor lists must not be
     #     double-counted by the AlchemicalPartition split.
@@ -1450,6 +1520,135 @@ end
     nn_ref = potential_energy(nn_sys)
     nn_eval = evaluate_energy!(nn_part, nn_sys.coords, nn_sys.boundary, 1; force_recompute=true)
     @test nn_eval ≈ nn_ref
+    nn_energies = [zero(nn_eval) for _ in 1:length(nn_states)]
+    nn_energies_out = evaluate_energy_all!(nn_part, nn_sys.coords, nn_sys.boundary, nn_energies)
+    @test nn_energies_out === nn_energies
+    @test all(E -> E ≈ nn_ref, nn_energies)
+    nn_energies_alloc = evaluate_energy_all!(nn_part, nn_sys.coords, nn_sys.boundary)
+    @test nn_energies_alloc ≈ nn_energies
+
+    # 11b. Perturbed atom detection must not depend on Atom.index values,
+    #      which are optional metadata and may be non-unique.
+    idx_boundary = CubicBoundary(2.0u"nm")
+    idx_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.4, 0.0, 0.0)u"nm", SVector(0.8, 0.0, 0.0)u"nm"]
+    idx_nf = DistanceNeighborFinder(eligible=trues(3, 3), n_steps=1, dist_cutoff=1.5u"nm")
+    idx_atoms_1 = [Atom(mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0) for _ in 1:3]
+    idx_atoms_2 = [Atom(mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.6) for _ in 1:3]
+    idx_sys_1 = System(
+        atoms=idx_atoms_1,
+        coords=idx_coords,
+        boundary=idx_boundary,
+        pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+        neighbor_finder=idx_nf,
+    )
+    idx_sys_2 = System(
+        atoms=idx_atoms_2,
+        coords=idx_coords,
+        boundary=idx_boundary,
+        pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+        neighbor_finder=idx_nf,
+    )
+    idx_intg = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    idx_states = [ThermoState(idx_sys_1, idx_intg), ThermoState(idx_sys_2, idx_intg)]
+    idx_part = AlchemicalPartition(idx_states)
+    idx_direct = potential_energy(idx_sys_2)
+    idx_eval = evaluate_energy!(idx_part, idx_sys_2.coords, idx_sys_2.boundary, 2; force_recompute=true)
+    @test idx_eval ≈ idx_direct
+
+    # 11c. If pairwise interactions differ between states but atoms are unchanged,
+    #      λ-specific pairwise terms must still be evaluated correctly.
+    diff_boundary = CubicBoundary(2.0u"nm")
+    diff_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.45, 0.0, 0.0)u"nm"]
+    diff_nf = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=1.5u"nm")
+    diff_atoms = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+    ]
+    diff_sys_1 = System(
+        atoms=diff_atoms,
+        coords=diff_coords,
+        boundary=diff_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=diff_nf,
+    )
+    diff_sys_2 = System(
+        atoms=diff_atoms,
+        coords=diff_coords,
+        boundary=diff_boundary,
+        pairwise_inters=(SoftSphere(use_neighbors=true),),
+        neighbor_finder=diff_nf,
+    )
+    diff_intg = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    diff_states = [ThermoState(diff_sys_1, diff_intg), ThermoState(diff_sys_2, diff_intg)]
+    diff_part = AlchemicalPartition(diff_states)
+    diff_direct = potential_energy(diff_sys_2)
+    diff_eval = evaluate_energy!(diff_part, diff_sys_2.coords, diff_sys_2.boundary, 2; force_recompute=true)
+    @test diff_eval ≈ diff_direct
+
+    # 11d. The master-energy cache must invalidate when coordinates are
+    #      mutated in-place without changing the array object identity.
+    cache_boundary = CubicBoundary(2.0u"nm")
+    cache_atoms = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0),
+    ]
+    cache_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.9, 0.0, 0.0)u"nm"]
+    cache_sys = System(
+        atoms=cache_atoms,
+        coords=cache_coords,
+        boundary=cache_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=false),),
+        neighbor_finder=NoNeighborFinder(),
+    )
+    cache_intg = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    cache_states = [ThermoState(cache_sys, cache_intg), ThermoState(cache_sys, cache_intg)]
+    cache_part = AlchemicalPartition(cache_states)
+    coords_mut = copy(cache_coords)
+    E_cache_initial = evaluate_energy!(cache_part, coords_mut, cache_boundary, 1; force_recompute=true)
+    coords_mut[2] = SVector(0.7, 0.0, 0.0)u"nm"
+    E_cache_mut = evaluate_energy!(cache_part, coords_mut, cache_boundary, 1; force_recompute=false)
+    E_cache_direct_mut = potential_energy(System(cache_sys; coords=coords_mut))
+    @test E_cache_mut ≈ E_cache_direct_mut
+    @test E_cache_mut != E_cache_initial
+
+    # 11e. The master-energy cache must invalidate when only the boundary changes.
+    boundary_new = CubicBoundary(1.0u"nm")
+    E_cache_boundary = evaluate_energy!(cache_part, coords_mut, boundary_new, 1; force_recompute=false)
+    E_cache_direct_boundary = potential_energy(System(cache_sys; coords=coords_mut, boundary=boundary_new))
+    @test E_cache_boundary ≈ E_cache_direct_boundary
+
+    # 11f. AlchemicalPartition enforces a shared neighbor-finder policy
+    #      across all λ windows (and target), rejecting mismatched setups.
+    nf_state_boundary = CubicBoundary(2.0u"nm")
+    nf_state_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.9, 0.0, 0.0)u"nm"]
+    nf_state_atoms_1 = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+    ]
+    nf_state_atoms_2 = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.6),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+    ]
+    nf_small = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=0.8u"nm")
+    nf_large = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=1.2u"nm")
+    nf_state_sys_1 = System(
+        atoms=nf_state_atoms_1,
+        coords=nf_state_coords,
+        boundary=nf_state_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=nf_small,
+    )
+    nf_state_sys_2 = System(
+        atoms=nf_state_atoms_2,
+        coords=nf_state_coords,
+        boundary=nf_state_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=nf_large,
+    )
+    nf_state_intg = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    nf_states = [ThermoState(nf_state_sys_1, nf_state_intg), ThermoState(nf_state_sys_2, nf_state_intg)]
+    @test_throws ArgumentError AlchemicalPartition(nf_states)
+    @test_throws ArgumentError AWHState(nf_states; n_bias=10)
 
     # 12. AWH must support NoNeighborFinder when pairwise interactions do not use neighbor lists.
     no_nf_boundary = CubicBoundary(2.0u"nm")

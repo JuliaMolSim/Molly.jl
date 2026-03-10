@@ -14,6 +14,12 @@ mutable struct AWHStats{T}
     max_delta_f_history::Vector{T}
 end
 
+@inline host_view_for_cv!(::Nothing, arr) = arr
+@inline function host_view_for_cv!(buffer, arr)
+    copyto!(buffer, arr)
+    return buffer
+end
+
 
 @doc raw"""
     AWHState(thermo_states::AbstractArray{ThermoState};
@@ -35,7 +41,7 @@ accumulated statistical weights, free energy estimates, and target distribution 
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for adjacent λ windows. Generally improves performance.
 """
-mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI, SNF, SCN, SVS, SVF, SLG, SM, STM}
+mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI, SNF, SCN, SVS, SVF, SLG, SM, STM, SE}
     partition::P
     
     active_idx::Int
@@ -71,6 +77,7 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI, SNF, SCN, SVS, SVF, SL
     w_seg::Vector{T}
     w_last::Vector{T}
 
+    scratch_energies::SE
     scratch_potentials::Vector{T}
     scratch_z::Vector{T}
     
@@ -103,7 +110,8 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
                                     reuse_neighbors=reuse_neighbors)
 
     # Extract integrators and parameters
-    λ_integrators = [ts.integrator for ts in thermo_states]
+    # Keep as Vector{Any} so mixed integrator types can be switched safely.
+    λ_integrators = Any[ts.integrator for ts in thermo_states]
     λ_β = [ts.beta for ts in thermo_states]
     λ_p = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states]
 
@@ -156,15 +164,17 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
         rho_val ./= rho_sum
     end
     log_ρ = log.(rho_val)
+    scratch_energies = [zero(partition.cached_master_pe) for _ in 1:n_λ]
 
     stats = AWHStats(Int[], Int[], Vector{FT}[], FT[], Symbol[], FT[])
 
-    return AWHState{FT, typeof(partition), typeof(active_sys), typeof(active_intg), 
+    return AWHState{FT, typeof(partition), System, Any, 
                     typeof(λ_β), typeof(λ_p), typeof(state_pairwise_inters),
                     typeof(state_specific_inter_lists), typeof(state_general_inters),
                     typeof(state_neighbor_finders), typeof(state_constraints),
                     typeof(state_virtual_sites), typeof(state_virtual_site_flags),
-                    typeof(state_loggers), typeof(state_masses), typeof(state_total_masses)}(
+                    typeof(state_loggers), typeof(state_masses), typeof(state_total_masses),
+                    typeof(scratch_energies)}(
         partition,
         first_state,
         active_sys,
@@ -190,6 +200,7 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
         log_ρ,
         zeros(FT, n_λ),
         zeros(FT, n_λ),
+        scratch_energies,
         zeros(FT, n_λ),
         zeros(FT, n_λ),
         zero(FT),
@@ -280,9 +291,13 @@ function AWHPMFDeconvolution(
     end
     
     local final_cv_func
+    coords_host_buffer = awh_state.active_sys.coords isa Array ? nothing : copy(from_device(awh_state.active_sys.coords))
     
     if !isnothing(cv_func)
-        final_cv_func = cv_func
+        final_cv_func = (coords) -> begin
+            coords_cv = host_view_for_cv!(coords_host_buffer, coords)
+            return cv_func(coords_cv)
+        end
     else
         first_ham = awh_state.partition.λ_hamiltonians[1]
         bias_indices = findall(x -> x isa BiasPotential, first_ham.general_inters)
@@ -296,22 +311,27 @@ function AWHPMFDeconvolution(
             "Auto-detected $(length(cv_types)) bias CVs but PMF dimensionality is $N. " *
             "Provide a matching `pmf_grid`, or pass `pmf_cv` explicitly."
         ))
+        state_atoms_host = [from_device(atoms) for atoms in awh_state.partition.λ_atoms]
+        velocities_host_buffer = awh_state.active_sys.velocities isa Array ? nothing : copy(from_device(awh_state.active_sys.velocities))
         
         final_cv_func = (coords) -> begin
             sys = awh_state.active_sys
+            coords_cv = host_view_for_cv!(coords_host_buffer, coords)
+            velocities_cv = host_view_for_cv!(velocities_host_buffer, sys.velocities)
+            atoms_cv = state_atoms_host[awh_state.active_idx]
             return ntuple(N) do d
                 Molly.calculate_cv(
                     cv_types[d],
-                    coords,
-                    from_device(sys.atoms),
+                    coords_cv,
+                    atoms_cv,
                     sys.boundary,
-                    from_device(sys.velocities),
+                    velocities_cv,
                 )
             end
         end
     end
 
-    sample_val = final_cv_func(from_device(awh_state.active_sys.coords))
+    sample_val = final_cv_func(awh_state.active_sys.coords)
     sample_tuple = sample_val isa Tuple ? sample_val : (sample_val,)
     length(sample_tuple) == N || throw(ArgumentError(
         "`pmf_cv` returned $(length(sample_tuple)) values but PMF dimensionality is $N."
@@ -332,7 +352,7 @@ function update_pmf!(
     apply_forgetting::Bool = true
 ) where {N, T}
     
-    val = pmf.cv_function(from_device(curr_coords))
+    val = pmf.cv_function(curr_coords)
     current_cv = val isa Tuple ? val : (val,)
     length(current_cv) == N || throw(ArgumentError(
         "PMF CV function returned $(length(current_cv)) values, expected $N."
@@ -524,6 +544,23 @@ function AWHSimulation(
                          pmf_calc)
 end
 
+# Fast-path check: if all target state fields are type-compatible with the
+# current `active_sys`, update in place; otherwise rebuild `active_sys`.
+function can_update_active_sys_inplace(awh_state::AWHState, active_idx::Int)
+    sys = awh_state.active_sys
+    return awh_state.partition.λ_atoms[active_idx] isa typeof(sys.atoms) &&
+           awh_state.state_pairwise_inters[active_idx] isa typeof(sys.pairwise_inters) &&
+           awh_state.state_specific_inter_lists[active_idx] isa typeof(sys.specific_inter_lists) &&
+           awh_state.state_general_inters[active_idx] isa typeof(sys.general_inters) &&
+           awh_state.state_constraints[active_idx] isa typeof(sys.constraints) &&
+           awh_state.state_virtual_sites[active_idx] isa typeof(sys.virtual_sites) &&
+           awh_state.state_virtual_site_flags[active_idx] isa typeof(sys.virtual_site_flags) &&
+           awh_state.state_neighbor_finders[active_idx] isa typeof(sys.neighbor_finder) &&
+           awh_state.state_loggers[active_idx] isa typeof(sys.loggers) &&
+           awh_state.state_masses[active_idx] isa typeof(sys.masses) &&
+           awh_state.state_total_masses[active_idx] isa typeof(sys.total_mass)
+end
+
 # Swaps Hamiltonians and enforces kinetic energy continuity across temperature jumps and mass changes
 function update_active_sys!(awh_state::AWHState, active_idx::Int)
     old_idx = awh_state.active_idx
@@ -570,18 +607,42 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
     end
 
     awh_state.active_idx = active_idx
-    awh_state.active_sys.atoms = awh_state.partition.λ_atoms[active_idx]
-    awh_state.active_sys.pairwise_inters = awh_state.state_pairwise_inters[active_idx]
-    awh_state.active_sys.specific_inter_lists = awh_state.state_specific_inter_lists[active_idx]
-    awh_state.active_sys.general_inters = awh_state.state_general_inters[active_idx]
-    awh_state.active_sys.constraints = awh_state.state_constraints[active_idx]
-    awh_state.active_sys.virtual_sites = awh_state.state_virtual_sites[active_idx]
-    awh_state.active_sys.virtual_site_flags = awh_state.state_virtual_site_flags[active_idx]
-    awh_state.active_sys.neighbor_finder = awh_state.state_neighbor_finders[active_idx]
-    awh_state.active_sys.loggers = awh_state.state_loggers[active_idx]
-    awh_state.active_sys.masses = awh_state.state_masses[active_idx]
-    awh_state.active_sys.total_mass = awh_state.state_total_masses[active_idx]
-    awh_state.active_sys.df = awh_state.state_dfs[active_idx]
+    if can_update_active_sys_inplace(awh_state, active_idx)
+        awh_state.active_sys.atoms = awh_state.partition.λ_atoms[active_idx]
+        awh_state.active_sys.pairwise_inters = awh_state.state_pairwise_inters[active_idx]
+        awh_state.active_sys.specific_inter_lists = awh_state.state_specific_inter_lists[active_idx]
+        awh_state.active_sys.general_inters = awh_state.state_general_inters[active_idx]
+        awh_state.active_sys.constraints = awh_state.state_constraints[active_idx]
+        awh_state.active_sys.virtual_sites = awh_state.state_virtual_sites[active_idx]
+        awh_state.active_sys.virtual_site_flags = awh_state.state_virtual_site_flags[active_idx]
+        awh_state.active_sys.neighbor_finder = awh_state.state_neighbor_finders[active_idx]
+        awh_state.active_sys.loggers = awh_state.state_loggers[active_idx]
+        awh_state.active_sys.masses = awh_state.state_masses[active_idx]
+        awh_state.active_sys.total_mass = awh_state.state_total_masses[active_idx]
+        awh_state.active_sys.df = awh_state.state_dfs[active_idx]
+    else
+        sys = awh_state.active_sys
+        awh_state.active_sys = System(
+            sys;
+            atoms = awh_state.partition.λ_atoms[active_idx],
+            coords = sys.coords,
+            boundary = sys.boundary,
+            velocities = sys.velocities,
+            pairwise_inters = awh_state.state_pairwise_inters[active_idx],
+            specific_inter_lists = awh_state.state_specific_inter_lists[active_idx],
+            general_inters = awh_state.state_general_inters[active_idx],
+            constraints = awh_state.state_constraints[active_idx],
+            virtual_sites = awh_state.state_virtual_sites[active_idx],
+            neighbor_finder = awh_state.state_neighbor_finders[active_idx],
+            loggers = awh_state.state_loggers[active_idx],
+            strictness = :nowarn,
+        )
+        # Keep per-state cached values exactly as provided by ThermoState.
+        awh_state.active_sys.virtual_site_flags = awh_state.state_virtual_site_flags[active_idx]
+        awh_state.active_sys.masses = awh_state.state_masses[active_idx]
+        awh_state.active_sys.total_mass = awh_state.state_total_masses[active_idx]
+        awh_state.active_sys.df = awh_state.state_dfs[active_idx]
+    end
     awh_state.active_intg = awh_state.λ_integrators[active_idx]
 end
 
@@ -592,19 +653,16 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
     bound  = awh.active_sys.boundary
 
     # Exploit the AlchemicalPartition abstraction
-    energies = evaluate_energy_all!(awh.partition, coords, bound)
+    energies = evaluate_energy_all!(awh.partition, coords, bound, awh.scratch_energies)
     
     # Extract volume in consistent units
     vol_val = FT(ustrip(volume(bound)))
     
     potentials = awh.scratch_potentials 
-    active_pe = nothing
+    active_pe = energies[awh.active_idx]
 
     for n in 1:n_states
         pe = energies[n]
-        if n == awh.active_idx
-            active_pe = pe
-        end
         
         pe_val = ustrip(pe)
         
@@ -735,8 +793,10 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
 end
 
 function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
+    n_steps >= 0 || throw(ArgumentError("`n_steps` must be non-negative, got $n_steps."))
 
-    n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
+    n_iterations = fld(n_steps, awh_sim.n_md_steps)
+    remaining_steps = n_steps - n_iterations * awh_sim.n_md_steps
     active_idx = awh_sim.state.active_idx
 
     for iteration_n in 1:n_iterations
@@ -780,4 +840,11 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
         update_active_sys!(awh_sim.state, active_idx)
         update_awh_bias!(awh_sim, iteration_n)
     end
+
+    # Preserve the exact total number of requested MD steps.
+    if remaining_steps > 0
+        simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, remaining_steps)
+    end
+
+    return awh_sim
 end
