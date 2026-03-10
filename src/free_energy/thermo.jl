@@ -44,6 +44,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
 
     # Append target state for comprehensive intersection
     all_states = isnothing(target_state) ? collect(thermo_states) : [thermo_states..., target_state]
+    n_all = length(all_states)
     
     # 1. Identify Global Solute Indices (Perturbed Atoms)
     solute_indices = Set{Int}()
@@ -86,12 +87,14 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     λ_eligible      = to_device(specific_eligible_cpu, AT)
     
     # 3. Extract and Partition Interaction Lists
-    list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_λ]
-    list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_λ]
-    list_3a = [Vector{InteractionList3Atoms}() for _ in 1:n_λ]
-    list_4a = [Vector{InteractionList4Atoms}() for _ in 1:n_λ]
+    # Size correctly for ALL states including the target
+    list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_all]
+    list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_all]
+    list_3a = [Vector{InteractionList3Atoms}() for _ in 1:n_all]
+    list_4a = [Vector{InteractionList4Atoms}() for _ in 1:n_all]
 
-    @inbounds for (i, tstate) in enumerate(thermo_states)
+    # Iterate over all_states to capture target interactions for valid intersection
+    @inbounds for (i, tstate) in enumerate(all_states)
         sils = tstate.system.specific_inter_lists
         for inter in sils
             if inter isa InteractionList1Atoms 
@@ -111,6 +114,9 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
 
     # Calculate interactions identical across ALL simulated windows AND the target state
     master_sils_1a = intersect(list_1a...)
+    master_sils_2a = intersect(list_2a...)
+    master_sils_3a = intersect(list_3a...)
+    master_sils_4a = intersect(list_4a...)
     master_gils    = intersect(all_gils...)
     master_pils    = intersect(all_pils...)
 
@@ -118,16 +124,22 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     hamiltonians = LambdaHamiltonian[]
     for i in 1:n_λ
         λ_p = (all_pils[i]...,)
-        λ_s = (setdiff(list_1a[i], master_sils_1a)..., ) # Add other lists
+        λ_s = (setdiff(list_1a[i], master_sils_1a)..., 
+               setdiff(list_2a[i], master_sils_2a)...,
+               setdiff(list_3a[i], master_sils_3a)...,
+               setdiff(list_4a[i], master_sils_4a)...)
         λ_g = (setdiff(all_gils[i], master_gils)...,)
         push!(hamiltonians, LambdaHamiltonian(λ_p, λ_s, λ_g))
     end
 
-    # Extract Target Hamiltonian
+    # Extract Target Hamiltonian (Safe because lists are length n_all)
     if !isnothing(target_state)
-        tgt_idx = length(all_states)
+        tgt_idx = n_all
         tgt_p = (all_pils[tgt_idx]...,)
-        tgt_s = (setdiff(list_1a[tgt_idx], master_sils_1a)..., )
+        tgt_s = (setdiff(list_1a[tgt_idx], master_sils_1a)..., 
+                 setdiff(list_2a[tgt_idx], master_sils_2a)...,
+                 setdiff(list_3a[tgt_idx], master_sils_3a)...,
+                 setdiff(list_4a[tgt_idx], master_sils_4a)...)
         tgt_g = (setdiff(all_gils[tgt_idx], master_gils)...,)
         target_hamiltonian = LambdaHamiltonian(tgt_p, tgt_s, tgt_g)
         target_atoms_array = λ_atoms[tgt_idx]
@@ -150,20 +162,14 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         neighbor_finder      = master_nf
     )
 
+    # Use the first simulated state's difference Hamiltonian to initialize λ_sys
     λ_sys = System(deepcopy(ref_sys); 
-        pairwise_inters      = (λ_pairwise[1]...,),
-        general_inters       = (λ_general[1]...,),
-        specific_inter_lists = (λ_specific[1]...,),
+        pairwise_inters      = hamiltonians[1].pairwise_inters,
+        general_inters       = hamiltonians[1].general_inters,
+        specific_inter_lists = hamiltonians[1].specific_inter_lists,
         neighbor_finder      = λ_nf
     )
 
-    hamiltonians = LambdaHamiltonian[]
-    for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
-        ham = LambdaHamiltonian(λ_p, λ_s, λ_g)
-        push!(hamiltonians, ham)
-    end
-
-    # Initialize cache values with safe defaults
     initial_pe = zero(FT) * master_sys.energy_units
     
     return AlchemicalPartition(
