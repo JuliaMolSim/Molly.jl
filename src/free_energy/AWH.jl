@@ -473,18 +473,27 @@ function AWHSimulation(
                          pmf_calc)
 end
 
-# Swaps Hamiltonians and enforces kinetic energy continuity across temperature jumps
+# Swaps Hamiltonians and enforces kinetic energy continuity across temperature jumps and mass changes
 function update_active_sys!(awh_state::AWHState, active_idx::Int)
     old_idx = awh_state.active_idx
     
-    # Perform instantaneous velocity rescaling if the temperature target changes
+    # Perform instantaneous velocity rescaling if the temperature target or atomic masses change
     if old_idx != active_idx
         β_old = awh_state.λ_β[old_idx]
         β_new = awh_state.λ_β[active_idx]
         
-        if β_old != β_new
-            velocity_scaling_factor = sqrt(β_old / β_new)
-            awh_state.active_sys.velocities .*= velocity_scaling_factor
+        old_atoms = awh_state.partition.λ_atoms[old_idx]
+        new_atoms = awh_state.partition.λ_atoms[active_idx]
+        
+        for i in eachindex(awh_state.active_sys.velocities)
+            m_old = mass(old_atoms[i])
+            m_new = mass(new_atoms[i])
+            
+            if β_old != β_new || m_old != m_new
+                # ustrip ensures the resulting scalar is a raw float, preventing Unitful type instability
+                velocity_scaling_factor = sqrt(ustrip((β_old * m_old) / (β_new * m_new)))
+                awh_state.active_sys.velocities[i] .*= velocity_scaling_factor
+            end
         end
     end
 
