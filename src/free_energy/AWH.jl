@@ -222,10 +222,10 @@ end
 # implementation now abandons the spatial coupling matrix. Instead using 
 # exact MBAR reweighting by evaluating the full physical Hamiltonian for every 
 # sampled coordinate frame across all states to compute the exact mixture weight.
-mutable struct AWHPMFDeconvolution{N, T, F_CV}
-    min_vals::NTuple{N, T}
-    bin_widths::NTuple{N, T}
-    shape::NTuple{N, Int}
+mutable struct AWHPMFDeconvolution{N, T, F_CV, MV, BW, SH, TP}
+    min_vals::MV
+    bin_widths::BW
+    shape::SH
     is_periodic::NTuple{N, Bool} 
     cv_function::F_CV         
 
@@ -234,7 +234,7 @@ mutable struct AWHPMFDeconvolution{N, T, F_CV}
     sample_count::Int
 
     target_beta::T
-    target_pressure::T
+    target_pressure::TP
 end
 
 function AWHPMFDeconvolution(
@@ -243,13 +243,41 @@ function AWHPMFDeconvolution(
     cv_func = nothing,
     is_periodic = nothing
 ) where T
-    
-    min_vals = T.(pmf_grid[1])
-    max_vals = T.(pmf_grid[2])
-    n_bins   = Int.(pmf_grid[3])
+    length(pmf_grid) == 3 || throw(ArgumentError(
+        "`pmf_grid` must be a 3-tuple: (mins, maxs, bins)."
+    ))
+
+    min_vals = Tuple(pmf_grid[1])
+    max_vals = Tuple(pmf_grid[2])
+    n_bins   = Tuple(Int.(pmf_grid[3]))
     N = length(n_bins)
-    bin_widths = (max_vals .- min_vals) ./ n_bins
-    periodic_flags = isnothing(is_periodic) ? ntuple(_ -> false, N) : Tuple(Bool.(is_periodic))
+    length(min_vals) == N || throw(ArgumentError(
+        "PMF mins length $(length(min_vals)) must match bins length $N."
+    ))
+    length(max_vals) == N || throw(ArgumentError(
+        "PMF maxs length $(length(max_vals)) must match bins length $N."
+    ))
+    all(>(0), n_bins) || throw(ArgumentError("All PMF bin counts must be positive."))
+
+    bin_widths = ntuple(N) do d
+        width = (max_vals[d] - min_vals[d]) / n_bins[d]
+        if !(width > zero(width))
+            throw(ArgumentError(
+                "PMF axis $d must satisfy max > min; got min=$(min_vals[d]), max=$(max_vals[d])."
+            ))
+        end
+        width
+    end
+
+    periodic_flags = if isnothing(is_periodic)
+        ntuple(_ -> false, N)
+    else
+        flags = Tuple(Bool.(is_periodic))
+        length(flags) == N || throw(ArgumentError(
+            "`pmf_is_periodic` length $(length(flags)) must match PMF dimensionality $N."
+        ))
+        flags
+    end
     
     local final_cv_func
     
@@ -264,6 +292,10 @@ function AWHPMFDeconvolution(
         end
 
         cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
+        length(cv_types) == N || throw(ArgumentError(
+            "Auto-detected $(length(cv_types)) bias CVs but PMF dimensionality is $N. " *
+            "Provide a matching `pmf_grid`, or pass `pmf_cv` explicitly."
+        ))
         
         final_cv_func = (coords) -> begin
             sys = awh_state.active_sys
@@ -279,6 +311,12 @@ function AWHPMFDeconvolution(
         end
     end
 
+    sample_val = final_cv_func(from_device(awh_state.active_sys.coords))
+    sample_tuple = sample_val isa Tuple ? sample_val : (sample_val,)
+    length(sample_tuple) == N || throw(ArgumentError(
+        "`pmf_cv` returned $(length(sample_tuple)) values but PMF dimensionality is $N."
+    ))
+
     return AWHPMFDeconvolution(
         min_vals, bin_widths, n_bins, periodic_flags, final_cv_func,
         zeros(T, n_bins), zeros(T, n_bins), 0, awh_state.target_β, awh_state.target_p
@@ -286,21 +324,26 @@ function AWHPMFDeconvolution(
 end
 
 function update_pmf!(
-    pmf::AWHPMFDeconvolution{N, T, F_CV},
+    pmf::AWHPMFDeconvolution{N, T},
     awh_state, 
     curr_coords;
     weight_factor::T = one(T), 
     box_volume::T = zero(T),
     apply_forgetting::Bool = true
-) where {N, T, F_CV}
+) where {N, T}
     
     val = pmf.cv_function(from_device(curr_coords))
     current_cv = val isa Tuple ? val : (val,)
+    length(current_cv) == N || throw(ArgumentError(
+        "PMF CV function returned $(length(current_cv)) values, expected $N."
+    ))
 
     # Determine Index with conditional periodic wrapping
     current_indices = ntuple(N) do d
         rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
-        idx = Int(floor(rel)) + 1
+        rel_val = ustrip(rel)
+        isfinite(rel_val) || throw(ArgumentError("Non-finite PMF CV value encountered on axis $d."))
+        idx = Int(floor(rel_val)) + 1
         
         if pmf.is_periodic[d]
             mod(idx - 1, pmf.shape[d]) + 1
@@ -313,6 +356,9 @@ function update_pmf!(
     # 1. Mixture Denominator W_mix = \sum_k exp(f_k + ln ρ_k - u_k(x))
     # Read directly from the preceding process_sample step
     log_W_mix = Molly.logsumexp(awh_state.scratch_z)
+    if !isfinite(log_W_mix)
+        return nothing
+    end
     
     # 2. Evaluate Exact Target Energy
     target_pe_units = evaluate_energy!(
@@ -331,7 +377,13 @@ function update_pmf!(
     # 3. Calculate MBAR Reweighting Factor targeting the exact physical state
     u_target = pmf.target_beta * (unbiased_pe + pmf.target_pressure * box_volume)
     unbias_log = -u_target - log_W_mix
+    if !isfinite(unbias_log)
+        return nothing
+    end
     w_frame = exp(unbias_log)
+    if !isfinite(w_frame)
+        return nothing
+    end
     
     # 4. Exponential Forgetting & Accumulation
     if apply_forgetting && weight_factor < one(T)
@@ -351,7 +403,7 @@ Extracts the unbiased Potential of Mean Force (PMF) from the accumulated numerat
 histograms. Unsampled bins are assigned a value of `Inf`, and the 
 global minimum of the valid PMF is shifted to zero.
 """
-function calc_pmf(pmf_calc::AWHPMFDeconvolution{N, T, F_CV}) where {N, T, F_CV}
+function calc_pmf(pmf_calc::AWHPMFDeconvolution{N, T}) where {N, T}
     num = pmf_calc.numerator_hist
     
     # Identify bins with non-zero reweighted samples to avoid domain errors in log.
@@ -431,6 +483,19 @@ function AWHSimulation(
     pmf_cv = nothing,
     pmf_is_periodic = nothing
 ) where T
+
+    num_md_steps > 0 || throw(ArgumentError("`num_md_steps` must be positive, got $num_md_steps."))
+    update_freq > 0 || throw(ArgumentError("`update_freq` must be positive, got $update_freq."))
+    log_freq > 0 || throw(ArgumentError("`log_freq` must be positive, got $log_freq."))
+    0 < coverage_threshold <= 1 || throw(ArgumentError(
+        "`coverage_threshold` must be in (0, 1], got $coverage_threshold."
+    ))
+    significant_weight >= 0 || throw(ArgumentError(
+        "`significant_weight` must be non-negative, got $significant_weight."
+    ))
+    (isinf(well_tempered_factor) || well_tempered_factor > 0) || throw(ArgumentError(
+        "`well_tempered_factor` must be positive or `Inf`, got $well_tempered_factor."
+    ))
 
     n_win = length(awh_state.partition.λ_hamiltonians)
 
@@ -653,7 +718,7 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     if awh_sim.state.in_initial_stage
         cov_count = length(awh_sim.state.visited_windows)
         n_target_windows = count(x -> x > zero(eltype(awh_sim.state.rho)), awh_sim.state.rho)
-        required_cov = floor(Int, awh_sim.coverage_threshold * n_target_windows)
+        required_cov = max(1, ceil(Int, awh_sim.coverage_threshold * n_target_windows))
         if cov_count >= required_cov
             awh_sim.state.N_bias *= 2
             empty!(awh_sim.state.visited_windows)

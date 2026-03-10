@@ -1425,4 +1425,151 @@ end
     @test masses(awh_state_ms.active_sys) == mass.(awh_state_ms.active_sys.atoms)
     @test awh_state_ms.active_sys.total_mass == sum(mass.(awh_state_ms.active_sys.atoms))
     @test awh_state_ms.active_sys.df == ms_sys_2.df
+
+    # 11. Pairwise interactions that do not use neighbor lists must not be
+    #     double-counted by the AlchemicalPartition split.
+    nn_boundary = CubicBoundary(2.0u"nm")
+    nn_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.4, 0.0, 0.0)u"nm", SVector(0.8, 0.0, 0.0)u"nm"]
+    nn_atoms = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+        Atom(index=3, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+    ]
+    nn_nf = DistanceNeighborFinder(eligible=trues(3, 3), n_steps=1, dist_cutoff=1.5u"nm")
+    nn_sys = System(
+        atoms=nn_atoms,
+        coords=nn_coords,
+        boundary=nn_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=false),),
+        neighbor_finder=nn_nf,
+        strictness=:nowarn,
+    )
+    nn_intg = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    nn_states = [ThermoState(nn_sys, nn_intg), ThermoState(nn_sys, nn_intg)]
+    nn_part = AlchemicalPartition(nn_states)
+    nn_ref = potential_energy(nn_sys)
+    nn_eval = evaluate_energy!(nn_part, nn_sys.coords, nn_sys.boundary, 1; force_recompute=true)
+    @test nn_eval ≈ nn_ref
+
+    # 12. AWH must support NoNeighborFinder when pairwise interactions do not use neighbor lists.
+    no_nf_boundary = CubicBoundary(2.0u"nm")
+    no_nf_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.5, 0.0, 0.0)u"nm"]
+    no_nf_atoms = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0),
+    ]
+    no_nf_sys = System(
+        atoms=no_nf_atoms,
+        coords=no_nf_coords,
+        boundary=no_nf_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=false),),
+        neighbor_finder=NoNeighborFinder(),
+    )
+    no_nf_intg = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    no_nf_states = [ThermoState(no_nf_sys, no_nf_intg), ThermoState(no_nf_sys, no_nf_intg)]
+    awh_state_no_nf = AWHState(no_nf_states; n_bias=5)
+    @test awh_state_no_nf.active_sys.neighbor_finder isa NoNeighborFinder
+    pe_no_nf = Molly.process_sample(awh_state_no_nf)
+    @test isfinite(ustrip(pe_no_nf))
+
+    # 13. Coverage criteria must require at least one visited window.
+    awh_state_cov_min = AWHState(thermo_states; first_state=1, n_bias=10)
+    awh_sim_cov_min = AWHSimulation(
+        awh_state_cov_min;
+        update_freq=1,
+        well_tempered_factor=Inf,
+        coverage_threshold=0.4,
+        log_freq=1000,
+    )
+    st_cov_min = awh_sim_cov_min.state
+    st_cov_min.n_accum = 1
+    st_cov_min.w_seg .= st_cov_min.rho
+    n_bias_before_min = st_cov_min.N_bias
+    Molly.update_awh_bias!(awh_sim_cov_min, 1)
+    @test st_cov_min.N_bias == n_bias_before_min
+    @test st_cov_min.in_initial_stage
+
+    # 14. Invalid AWHSimulation inputs should throw.
+    @test_throws ArgumentError AWHSimulation(awh_state; log_freq=0)
+    @test_throws ArgumentError AWHSimulation(awh_state; update_freq=0)
+    @test_throws ArgumentError AWHSimulation(awh_state; num_md_steps=0)
+    @test_throws ArgumentError AWHSimulation(awh_state; coverage_threshold=0.0)
+
+    # 15-17. PMF deconvolution validation and numerical safeguards.
+    pmf_boundary = CubicBoundary(2.0u"nm")
+    pmf_atoms = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0),
+    ]
+    pmf_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.5, 0.0, 0.0)u"nm"]
+    pmf_nf = DistanceNeighborFinder(eligible=trues(2, 2), n_steps=1, dist_cutoff=1.5u"nm")
+    pmf_cv = CalcDist([1], [2], CalcSingleDist(:raw), :pbc)
+    pmf_bias_1 = BiasPotential(pmf_cv, SquareBias(100.0u"kJ * mol^-1 * nm^-2", 0.4u"nm"))
+    pmf_bias_2 = BiasPotential(pmf_cv, SquareBias(100.0u"kJ * mol^-1 * nm^-2", 0.6u"nm"))
+    pmf_sys_1 = System(
+        atoms=pmf_atoms,
+        coords=pmf_coords,
+        boundary=pmf_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        general_inters=(pmf_bias_1,),
+        neighbor_finder=pmf_nf,
+    )
+    pmf_sys_2 = System(
+        atoms=pmf_atoms,
+        coords=pmf_coords,
+        boundary=pmf_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        general_inters=(pmf_bias_2,),
+        neighbor_finder=pmf_nf,
+    )
+    pmf_target_sys = System(
+        atoms=pmf_atoms,
+        coords=pmf_coords,
+        boundary=pmf_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=pmf_nf,
+    )
+    pmf_intg = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    pmf_states = [ThermoState(pmf_sys_1, pmf_intg), ThermoState(pmf_sys_2, pmf_intg)]
+    pmf_target_state = ThermoState(pmf_target_sys, pmf_intg)
+    pmf_awh_state = AWHState(pmf_states; target_state=pmf_target_state, n_bias=10)
+
+    @test_throws ArgumentError AWHSimulation(
+        pmf_awh_state;
+        pmf_grid=((0.0, 0.0), (1.0, 1.0), (10, 10)),
+    )
+
+    pmf_calc_unitful = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0u"nm",), (1.0u"nm",), (10,));
+        cv_func=(coords) -> (norm(coords[2] - coords[1]),),
+    )
+    Molly.process_sample(pmf_awh_state)
+    Molly.update_pmf!(
+        pmf_calc_unitful,
+        pmf_awh_state,
+        pmf_awh_state.active_sys.coords;
+        box_volume=ustrip(volume(pmf_awh_state.active_sys.boundary)),
+        apply_forgetting=false,
+    )
+    @test pmf_calc_unitful.sample_count == 1
+    @test all(isfinite, pmf_calc_unitful.numerator_hist)
+
+    pmf_calc_guard = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (0.5,),
+    )
+    pmf_awh_state.scratch_z .= -Inf
+    hist_before = copy(pmf_calc_guard.numerator_hist)
+    count_before = pmf_calc_guard.sample_count
+    Molly.update_pmf!(
+        pmf_calc_guard,
+        pmf_awh_state,
+        pmf_awh_state.active_sys.coords;
+        box_volume=ustrip(volume(pmf_awh_state.active_sys.boundary)),
+        apply_forgetting=false,
+    )
+    @test pmf_calc_guard.sample_count == count_before
+    @test pmf_calc_guard.numerator_hist == hist_before
 end
