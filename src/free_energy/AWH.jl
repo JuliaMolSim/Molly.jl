@@ -84,6 +84,9 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   reuse_neighbors::Bool = true) where T
 
     n_λ = length(thermo_states)
+    n_λ > 0 || throw(ArgumentError("`thermo_states` cannot be empty."))
+    1 <= first_state <= n_λ || throw(ArgumentError("`first_state`=$first_state is out of bounds for $n_λ states."))
+    n_bias > 0 || throw(ArgumentError("`n_bias` must be positive, got $n_bias."))
     ref_sys = thermo_states[first_state].system
     FT = typeof(ustrip(ref_sys.total_mass))
 
@@ -101,19 +104,9 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     local target_p_val = nothing
     
     if !isnothing(target_state)
-        e_unit = ref_sys.energy_units
-        kBT_q = uconvert(e_unit, Unitful.R * target_state.beta)
-        target_β_val = FT(1.0 / ustrip(kBT_q))
-        
-        target_p_val = zero(FT)
-        if !isnothing(target_state.p)
-            l_unit = unit(ref_sys.boundary.side_lengths[1])
-            p_unit = e_unit / (l_unit^3)
-            e_val = 1.0 * e_unit
-            molar_scaling = e_val / energy_remove_mol(e_val)
-            p_val_scaled = target_state.p * molar_scaling
-            target_p_val = FT(ustrip(uconvert(p_unit, p_val_scaled)))
-        end
+        # ThermoState stores beta and pressure in Molly-internal units already.
+        target_β_val = FT(target_state.beta)
+        target_p_val = isnothing(target_state.p) ? zero(FT) : FT(target_state.p)
     end
 
     # Extract complete interaction lists for standard MD forces
@@ -134,7 +127,13 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     if isnothing(ρ)
         rho_val = fill(FT(1/n_λ), n_λ)
     else
-        rho_val = eltype(ρ) != FT ? FT.(ρ) : ρ
+        rho_val = FT.(ρ)
+        length(rho_val) == n_λ || throw(ArgumentError("`ρ` length $(length(rho_val)) does not match number of states $n_λ."))
+        all(isfinite, rho_val) || throw(ArgumentError("`ρ` must contain only finite values."))
+        any(<(zero(FT)), rho_val) && throw(ArgumentError("`ρ` must be nonnegative."))
+        rho_sum = sum(rho_val)
+        rho_sum > zero(FT) || throw(ArgumentError("`ρ` must have positive total weight."))
+        rho_val ./= rho_sum
     end
     log_ρ = log.(rho_val)
 
@@ -254,7 +253,8 @@ function update_pmf!(
     awh_state, 
     curr_coords;
     weight_factor::T = one(T), 
-    box_volume::T = zero(T)
+    box_volume::T = zero(T),
+    apply_forgetting::Bool = true
 ) where {N, T, F_CV}
     
     val = pmf.cv_function(from_device(curr_coords))
@@ -297,7 +297,7 @@ function update_pmf!(
     w_frame = exp(unbias_log)
     
     # 4. Exponential Forgetting & Accumulation
-    if weight_factor < one(T)
+    if apply_forgetting && weight_factor < one(T)
         pmf.numerator_hist .*= weight_factor
         pmf.denominator_hist .*= weight_factor
     end
@@ -602,13 +602,13 @@ end
 function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
-    active_idx = 1
+    active_idx = awh_sim.state.active_idx
 
     for iteration_n in 1:n_iterations
         simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
 
 
-        active_pe_units = process_sample(awh_sim.state)
+        process_sample(awh_sim.state; weight_relevance=awh_sim.significant_weight)
 
         if !isnothing(awh_sim.pmf_calc)
             # Calculate a(t) factor for PMF Deconvolution [Lindahl et al. 2014, Eq. 9 text]
@@ -625,13 +625,15 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
             # Extract System Info
             sys = awh_sim.state.active_sys
             vol_val = T(ustrip(volume(sys.boundary)))
+            apply_forgetting = awh_sim.state.n_accum == 1
 
             update_pmf!(
                 awh_sim.pmf_calc, 
                 awh_sim.state, 
                 awh_sim.state.active_sys.coords; 
                 weight_factor=w_fac,
-                box_volume=vol_val
+                box_volume=vol_val,
+                apply_forgetting=apply_forgetting
             )
         end
 
