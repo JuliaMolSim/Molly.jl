@@ -7,6 +7,8 @@ using Molly
 using Enzyme
 using FFTW
 
+EnzymeRules.inactive(::typeof(default_strictness), args...) = nothing
+EnzymeRules.inactive(::typeof(check_strictness), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.n_infinite_dims), args...) = nothing
 EnzymeRules.inactive(::typeof(random_coord), args...) = nothing

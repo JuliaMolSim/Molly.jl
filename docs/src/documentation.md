@@ -386,6 +386,8 @@ To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
 The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
 Other options detailed in the docstring for [`System`](@ref) include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_buffer`).
+The `strictness` keyword argument determines behavior when encountering possible problems and can be set to `:error` or `:nowarn` rather than the default `:warn`.
+It can be set globally with the `MOLLY_STRICTNESS` environmental variable.
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files, which should be considered experimental. For example:
 ```julia

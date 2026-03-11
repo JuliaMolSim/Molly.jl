@@ -129,7 +129,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     # @inline needed to avoid Enzyme error
     check_strictness(strictness)
     needs_vir = false
@@ -218,7 +218,7 @@ end
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -427,7 +427,7 @@ end
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -512,7 +512,7 @@ end
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -610,7 +610,7 @@ end
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -722,7 +722,7 @@ end
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     check_strictness(strictness)
     if length(sys.constraints) > 0
         err_str = "LangevinSplitting is not currently compatible with constraints, " *
@@ -857,7 +857,7 @@ end
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     check_strictness(strictness)
     if length(sys.constraints) > 0
         err_str = "OverdampedLangevin is not currently compatible with constraints, " *
@@ -943,7 +943,7 @@ end
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     check_strictness(strictness)
     if length(sys.constraints) > 0
         err_str = "NoseHoover is not currently compatible with constraints, " *
@@ -1046,7 +1046,7 @@ function simulate!(sys::ReplicaSystem,
                    shortcut=nothing,
                    show_progress=default_show_progress(),
                    rng=Random.default_rng(),
-                   strictness=:warn)
+                   strictness=default_strictness())
     check_strictness(strictness)
     if assign_velocities
         master_sys = sys.partition.master_sys
@@ -1159,7 +1159,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         shortcut=nothing, # Unused
                         show_progress=default_show_progress(),
                         rng=Random.default_rng(),
-                        strictness=:warn)
+                        strictness=default_strictness())
     check_strictness(strictness)
     thread_div = equal_parts(n_threads, sys.n_replicas)
 
@@ -1273,7 +1273,7 @@ end
                            shortcut=nothing,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=:warn)
+                           strictness=default_strictness())
     check_strictness(strictness)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)

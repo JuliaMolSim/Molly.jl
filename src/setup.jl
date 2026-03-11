@@ -444,7 +444,7 @@ function System(coord_file::AbstractString,
                 kappa=0.0u"nm^-1",
                 disulfide_bonds=true,
                 grad_safe::Bool=false,
-                strictness=:warn,
+                strictness=default_strictness(),
                 force_separate_lj14=false) where {AT <: AbstractArray}
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
@@ -1215,7 +1215,7 @@ function System(T::Type,
     improper_inters_pad = impropers.inters
     virtual_sites = []
     lj_exceptions_σ, lj_exceptions_ϵ = Dict(), Dict()
-    strictness = :warn
+    strictness = default_strictness()
     σs_14, ϵs_14 = [], []
     separate_lj14 = false
 

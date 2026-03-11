@@ -666,7 +666,7 @@ end
 
 function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true,
                              custom_residue_templates=nothing, custom_renaming_scheme=nothing,
-                             strictness=:warn)
+                             strictness=default_strictness())
     check_strictness(strictness)
     atom_types = Dict{String, AtomType}()
     IC = (units ? typeof(zero(T) * u"nm^-1") : T)
