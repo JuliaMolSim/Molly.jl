@@ -637,7 +637,7 @@ function System(;
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
                 data=nothing,
-                strictness=:warn)
+                strictness=default_strictness())
     check_strictness(strictness)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
@@ -804,7 +804,7 @@ function System(sys::System;
                 energy_units=sys.energy_units,
                 k=sys.k,
                 data=sys.data,
-                strictness=:warn)
+                strictness=default_strictness())
     return System(
         atoms=atoms,
         coords=coords,
@@ -1687,6 +1687,14 @@ macro maybe_threads(flag, expr)
             $expr
         end
     end |> esc
+end
+
+function default_strictness()
+    if haskey(ENV, "MOLLY_STRICTNESS")
+        return Symbol(lowercase(ENV["MOLLY_STRICTNESS"]))
+    else
+        return :warn
+    end
 end
 
 function check_strictness(strictness)

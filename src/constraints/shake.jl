@@ -53,7 +53,7 @@ function SHAKE_RATTLE(n_atoms,
                       angle_constraints=nothing,
                       gpu_block_size=128,
                       max_iters=25,
-                      strictness=:warn)
+                      strictness=default_strictness())
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance ) > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
     check_strictness(strictness)

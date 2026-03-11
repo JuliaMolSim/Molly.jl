@@ -117,7 +117,8 @@ function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, ato
                        zero(T), weight_12, weight_13, weight_cross)
 end
 
-function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D, strictness=:warn)
+function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D,
+                             strictness=default_strictness())
     n_atoms = length(atom_masses)
     virtual_site_flags = falses(n_atoms)
     virtual_sites_cpu = from_device(virtual_sites)
