@@ -1771,4 +1771,318 @@ end
     )
     @test pmf_calc_guard.sample_count == count_before
     @test pmf_calc_guard.numerator_hist == hist_before
+
+    # 18. Additional AWHState/AWHSimulation input validation.
+    @test_throws ArgumentError AWHState(ThermoState[]; n_bias=10, ρ=Float64[])
+    @test_throws ArgumentError AWHState(thermo_states; first_state=0, n_bias=10)
+    @test_throws ArgumentError AWHState(thermo_states; first_state=n_windows + 1, n_bias=10)
+    @test_throws ArgumentError AWHState(thermo_states; n_bias=0)
+    @test_throws ArgumentError AWHState(thermo_states; n_bias=10, ρ=[1.0, 0.0])
+    @test_throws ArgumentError AWHState(thermo_states; n_bias=10, ρ=[0.25, NaN, 0.25, 0.5])
+    @test_throws ArgumentError AWHState(thermo_states; n_bias=10, ρ=[0.5, -0.1, 0.4, 0.2])
+    @test_throws ArgumentError AWHState(thermo_states; n_bias=10, ρ=zeros(4))
+    @test_throws ArgumentError AWHSimulation(awh_state; significant_weight=-0.1)
+    @test_throws ArgumentError AWHSimulation(awh_state; coverage_threshold=1.1)
+    @test_throws ArgumentError AWHSimulation(awh_state; well_tempered_factor=0.0)
+
+    # 19. PMF constructor and PMF-related argument validation.
+    @test_throws ErrorException AWHSimulation(
+        AWHState(pmf_states; n_bias=10);
+        pmf_grid=((0.0u"nm",), (1.0u"nm",), (10,)),
+    )
+    @test_throws ArgumentError Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,));
+        cv_func=(coords) -> (0.5,),
+    )
+    @test_throws ArgumentError Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((1.0,), (1.0,), (10,));
+        cv_func=(coords) -> (0.5,),
+    )
+    @test_throws ArgumentError Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (0.5,),
+        is_periodic=(true, false),
+    )
+    @test_throws ArgumentError Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0, 0.0), (1.0, 1.0), (10, 10));
+        cv_func=(coords) -> (0.5,),
+    )
+    no_bias_states = [ThermoState(rem_sys, rem_intg; temperature=300.0u"K")]
+    no_bias_target_state = ThermoState(rem_sys, rem_intg; temperature=300.0u"K")
+    no_bias_awh_state = AWHState(no_bias_states; target_state=no_bias_target_state, n_bias=5)
+    @test_throws ErrorException Molly.AWHPMFDeconvolution(
+        no_bias_awh_state,
+        ((0.0,), (1.0,), (10,)),
+    )
+
+    # 20. PMF auto-detection and periodic indexing paths should run.
+    pmf_calc_auto = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0u"nm",), (1.0u"nm",), (10,)),
+    )
+    Molly.process_sample(pmf_awh_state)
+    Molly.update_pmf!(
+        pmf_calc_auto,
+        pmf_awh_state,
+        pmf_awh_state.active_sys.coords;
+        box_volume=ustrip(volume(pmf_awh_state.active_sys.boundary)),
+        apply_forgetting=false,
+    )
+    @test pmf_calc_auto.sample_count == 1
+
+    pmf_calc_periodic = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (1.2,),
+        is_periodic=(true,),
+    )
+    Molly.process_sample(pmf_awh_state)
+    Molly.update_pmf!(
+        pmf_calc_periodic,
+        pmf_awh_state,
+        pmf_awh_state.active_sys.coords;
+        box_volume=ustrip(volume(pmf_awh_state.active_sys.boundary)),
+        apply_forgetting=false,
+    )
+    rel_periodic = (1.2 - pmf_calc_periodic.min_vals[1]) / pmf_calc_periodic.bin_widths[1]
+    idx_periodic = Int(floor(rel_periodic)) + 1
+    idx_periodic = mod(idx_periodic - 1, pmf_calc_periodic.shape[1]) + 1
+    @test pmf_calc_periodic.sample_count == 1
+    @test pmf_calc_periodic.denominator_hist[idx_periodic] == 1.0
+    @test count(>(0.0), pmf_calc_periodic.denominator_hist) == 1
+
+    # 21. PMF update guards and forgetting behavior.
+    pmf_calc_nan_cv = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (NaN,),
+    )
+    Molly.process_sample(pmf_awh_state)
+    @test_throws ArgumentError Molly.update_pmf!(
+        pmf_calc_nan_cv,
+        pmf_awh_state,
+        pmf_awh_state.active_sys.coords;
+        box_volume=ustrip(volume(pmf_awh_state.active_sys.boundary)),
+        apply_forgetting=false,
+    )
+
+    pmf_calc_nonfinite = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (0.5,),
+    )
+    Molly.process_sample(pmf_awh_state)
+    pmf_calc_nonfinite.target_beta = Inf
+    hist_before_nonfinite = copy(pmf_calc_nonfinite.numerator_hist)
+    count_before_nonfinite = pmf_calc_nonfinite.sample_count
+    Molly.update_pmf!(
+        pmf_calc_nonfinite,
+        pmf_awh_state,
+        pmf_awh_state.active_sys.coords;
+        box_volume=ustrip(volume(pmf_awh_state.active_sys.boundary)),
+        apply_forgetting=false,
+    )
+    @test pmf_calc_nonfinite.sample_count == count_before_nonfinite
+    @test pmf_calc_nonfinite.numerator_hist == hist_before_nonfinite
+
+    pmf_calc_overflow = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (0.5,),
+    )
+    pmf_awh_state.scratch_z .= -1000.0
+    pmf_calc_overflow.target_beta = 0.0
+    hist_before_overflow = copy(pmf_calc_overflow.numerator_hist)
+    count_before_overflow = pmf_calc_overflow.sample_count
+    Molly.update_pmf!(
+        pmf_calc_overflow,
+        pmf_awh_state,
+        pmf_awh_state.active_sys.coords;
+        box_volume=ustrip(volume(pmf_awh_state.active_sys.boundary)),
+        apply_forgetting=false,
+    )
+    @test pmf_calc_overflow.sample_count == count_before_overflow
+    @test pmf_calc_overflow.numerator_hist == hist_before_overflow
+
+    # 21b. NaN target energies should be guarded via typemax fallback in PMF updates.
+    pmf_nan_target_atoms = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=NaN * u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0),
+    ]
+    pmf_nan_target_sys = System(
+        atoms=pmf_nan_target_atoms,
+        coords=pmf_coords,
+        boundary=pmf_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=pmf_nf,
+    )
+    pmf_nan_target_state = ThermoState(pmf_nan_target_sys, pmf_intg)
+    pmf_awh_state_nan_target = AWHState(pmf_states; target_state=pmf_nan_target_state, n_bias=10)
+    pmf_calc_nan_target = Molly.AWHPMFDeconvolution(
+        pmf_awh_state_nan_target,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (0.5,),
+    )
+    Molly.process_sample(pmf_awh_state_nan_target)
+    hist_before_nan_target = copy(pmf_calc_nan_target.numerator_hist)
+    count_before_nan_target = pmf_calc_nan_target.sample_count
+    Molly.update_pmf!(
+        pmf_calc_nan_target,
+        pmf_awh_state_nan_target,
+        pmf_awh_state_nan_target.active_sys.coords;
+        box_volume=ustrip(volume(pmf_awh_state_nan_target.active_sys.boundary)),
+        apply_forgetting=false,
+    )
+    @test pmf_calc_nan_target.sample_count == count_before_nan_target
+    @test pmf_calc_nan_target.numerator_hist == hist_before_nan_target
+
+    pmf_calc_forgetting = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (0.5,),
+    )
+    pmf_calc_forgetting.numerator_hist[6] = 2.0
+    pmf_calc_forgetting.denominator_hist[6] = 4.0
+    Molly.process_sample(pmf_awh_state)
+    Molly.update_pmf!(
+        pmf_calc_forgetting,
+        pmf_awh_state,
+        pmf_awh_state.active_sys.coords;
+        weight_factor=0.5,
+        box_volume=ustrip(volume(pmf_awh_state.active_sys.boundary)),
+        apply_forgetting=true,
+    )
+    @test pmf_calc_forgetting.sample_count == 1
+    @test isapprox(pmf_calc_forgetting.denominator_hist[6], 3.0; atol=1e-12, rtol=0.0)
+
+    # 22. PMF extraction utility must preserve Inf in unsampled bins and zero the minimum.
+    pmf_calc_profile = Molly.AWHPMFDeconvolution(
+        pmf_awh_state,
+        ((0.0,), (1.0,), (10,));
+        cv_func=(coords) -> (0.5,),
+    )
+    pmf_calc_profile.numerator_hist .= 0.0
+    pmf_calc_profile.numerator_hist[2] = 4.0
+    pmf_calc_profile.numerator_hist[5] = 1.0
+    pmf_profile = calc_pmf(pmf_calc_profile)
+    @test isinf(pmf_profile[1])
+    @test isapprox(pmf_profile[2], 0.0; atol=1e-12, rtol=0.0)
+    @test isapprox(pmf_profile[5], log(4.0); atol=1e-12, rtol=0.0)
+
+    # 23. process_sample must fall back to uniform weights when all log-weights underflow.
+    awh_state_underflow = AWHState(thermo_states; first_state=1, n_bias=10)
+    awh_state_underflow.f .= -Inf
+    Molly.process_sample(awh_state_underflow)
+    uniform_weights = fill(1.0 / length(awh_state_underflow.w_last), length(awh_state_underflow.w_last))
+    @test awh_state_underflow.w_last ≈ uniform_weights
+
+    # 23b. NaN state energies should be converted to finite potentials in process_sample.
+    nan_energy_boundary = CubicBoundary(2.0u"nm")
+    nan_energy_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(0.5, 0.0, 0.0)u"nm"]
+    nan_energy_atoms_ok = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0),
+    ]
+    nan_energy_atoms_bad = [
+        Atom(index=1, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=NaN * u"kJ * mol^-1", λ=1.0),
+        Atom(index=2, mass=12.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0),
+    ]
+    nan_energy_sys_ok = System(
+        atoms=nan_energy_atoms_ok,
+        coords=nan_energy_coords,
+        boundary=nan_energy_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=false),),
+        neighbor_finder=NoNeighborFinder(),
+    )
+    nan_energy_sys_bad = System(
+        atoms=nan_energy_atoms_bad,
+        coords=nan_energy_coords,
+        boundary=nan_energy_boundary,
+        pairwise_inters=(LennardJones(use_neighbors=false),),
+        neighbor_finder=NoNeighborFinder(),
+    )
+    nan_energy_intg = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    nan_energy_states = [
+        ThermoState(nan_energy_sys_ok, nan_energy_intg),
+        ThermoState(nan_energy_sys_bad, nan_energy_intg),
+    ]
+    awh_state_nan_energy = AWHState(nan_energy_states; first_state=1, n_bias=5)
+    Molly.process_sample(awh_state_nan_energy)
+    @test !any(isnan, awh_state_nan_energy.scratch_potentials)
+
+    # 24. simulate! should execute PMF updates, and extract_awh_data must deep-copy state.
+    pmf_awh_state_loop = AWHState(pmf_states; target_state=pmf_target_state, n_bias=4)
+    pmf_awh_sim_loop = AWHSimulation(
+        pmf_awh_state_loop;
+        num_md_steps=1,
+        update_freq=1,
+        well_tempered_factor=Inf,
+        log_freq=1,
+        pmf_grid=((0.0u"nm",), (1.0u"nm",), (10,)),
+    )
+    simulate!(pmf_awh_sim_loop, 5)
+    @test pmf_awh_sim_loop.pmf_calc.sample_count > 0
+    @test sum(pmf_awh_sim_loop.pmf_calc.denominator_hist) > 0
+    pmf_loop = calc_pmf(pmf_awh_sim_loop.pmf_calc)
+    @test size(pmf_loop) == (10,)
+    finite_loop_vals = pmf_loop[isfinite.(pmf_loop)]
+    @test !isempty(finite_loop_vals)
+    @test isapprox(minimum(finite_loop_vals), 0.0; atol=1e-12, rtol=0.0)
+    @test any(isinf, pmf_loop)
+
+    awh_data = extract_awh_data(pmf_awh_sim_loop)
+    awh_data_before = (
+        f = copy(awh_data.f),
+        rho = copy(awh_data.rho),
+        log_rho = copy(awh_data.log_rho),
+        stats = deepcopy(awh_data.stats),
+    )
+    pmf_awh_sim_loop.state.f .+= 1
+    pmf_awh_sim_loop.state.rho .*= 0.5
+    pmf_awh_sim_loop.state.log_rho .= log.(pmf_awh_sim_loop.state.rho)
+    if !isempty(pmf_awh_sim_loop.state.stats.step_indices)
+        pmf_awh_sim_loop.state.stats.step_indices[1] = -999
+    end
+    if !isempty(pmf_awh_sim_loop.state.stats.f_history)
+        pmf_awh_sim_loop.state.stats.f_history[1][1] += 1
+    end
+    @test awh_data.f == awh_data_before.f
+    @test awh_data.rho == awh_data_before.rho
+    @test awh_data.log_rho == awh_data_before.log_rho
+    @test awh_data.stats.step_indices == awh_data_before.stats.step_indices
+    @test awh_data.stats.f_history == awh_data_before.stats.f_history
+
+    # 25. Convergence threshold should stop simulate! early in linear stage.
+    conv_awh_state = AWHState(rem_states; n_bias=5)
+    conv_awh_sim = AWHSimulation(
+        conv_awh_state;
+        num_md_steps=1,
+        update_freq=1,
+        well_tempered_factor=Inf,
+        log_freq=1,
+    )
+    conv_awh_sim.state.in_initial_stage = false
+    simulate!(conv_awh_sim, 8; convergence_threshold=0.0)
+    @test conv_awh_sim.state.N_eff == 1
+    @test conv_awh_sim.state.n_accum == 0
+
+    # 26. simulate! should synchronize :awh_logger.active_idx when present.
+    awh_logger = Molly.AWHEnsembleLogger(Float64, Float64, Float64, 1)
+    awh_logger.active_idx = 99
+    logger_sys = System(rem_sys; loggers=(awh_logger=awh_logger,))
+    logger_states = [ThermoState(logger_sys, rem_intg; temperature=300.0u"K")]
+    logger_awh_state = AWHState(logger_states; n_bias=5)
+    logger_awh_sim = AWHSimulation(
+        logger_awh_state;
+        num_md_steps=1,
+        update_freq=1,
+        well_tempered_factor=Inf,
+        log_freq=1,
+    )
+    simulate!(logger_awh_sim, 1)
+    @test logger_awh_sim.state.active_sys.loggers.awh_logger.active_idx == logger_awh_sim.state.active_idx
 end
