@@ -86,7 +86,7 @@ end
 """
     simulate!(system, simulator, n_steps; <keyword arguments>)
     simulate!(system, simulator; <keyword arguments>)
-    simulate!(awh_sim::AWHSimulation, n_steps::Int)
+    simulate!(awh_sim::AWHSimulation, n_steps)
 
 Run a simulation on a system according to the rules of the given simulator.
 
@@ -106,6 +106,9 @@ Constraints are applied during minimization, which can lead to issues.
     environmental variable `MOLLY_SHOW_PROGRESS`.
 - `rng=Random.default_rng()`: the random number generator used for the simulation. Setting
     this allows reproducible stochastic simulations.
+- `strictness=:warn`: determines behavior when encountering possible problems,
+    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
+    `:error` to error.
 
 Alternatively:
 
@@ -124,8 +127,10 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            run_loggers=false,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
     # @inline needed to avoid Enzyme error
+    check_strictness(strictness)
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -211,7 +216,9 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
+    check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -309,7 +316,9 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
+    check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -392,7 +401,9 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
+    check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -488,7 +499,9 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
+    check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -598,10 +611,13 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
+    check_strictness(strictness)
     if length(sys.constraints) > 0
-        @warn "LangevinSplitting is not currently compatible with constraints, " *
-              "constraints will be ignored"
+        err_str = "LangevinSplitting is not currently compatible with constraints, " *
+                  "constraints will be ignored"
+        report_issue(err_str, strictness)
     end
     M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
@@ -730,10 +746,13 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
+    check_strictness(strictness)
     if length(sys.constraints) > 0
-        @warn "OverdampedLangevin is not currently compatible with constraints, " *
-              "constraints will be ignored"
+        err_str = "OverdampedLangevin is not currently compatible with constraints, " *
+                  "constraints will be ignored"
+        report_issue(err_str, strictness)
     end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -813,10 +832,13 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
+    check_strictness(strictness)
     if length(sys.constraints) > 0
-        @warn "NoseHoover is not currently compatible with constraints, " *
-              "constraints will be ignored"
+        err_str = "NoseHoover is not currently compatible with constraints, " *
+                  "constraints will be ignored"
+        report_issue(err_str, strictness)
     end
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -913,8 +935,9 @@ function simulate!(sys::ReplicaSystem,
                    run_loggers=true,
                    shortcut=nothing,
                    show_progress=default_show_progress(),
-                   rng=Random.default_rng())
-    
+                   rng=Random.default_rng(),
+                   strictness=:warn)
+    check_strictness(strictness)
     if assign_velocities
         master_sys = sys.partition.master_sys
         k_B = master_sys.k
@@ -938,7 +961,8 @@ function simulate!(sys::ReplicaSystem,
     end
 
     return simulate_remd!(sys, sim, n_steps; n_threads=n_threads, run_loggers=run_loggers,
-                          shortcut=shortcut, show_progress=show_progress, rng=rng)
+                          shortcut=shortcut, show_progress=show_progress, rng=rng,
+                          strictness=strictness)
 end
 
 @doc raw"""
@@ -1013,6 +1037,9 @@ The simulation divides the total `n_steps` into cycles based on the time step an
 - `n_threads::Integer=Threads.nthreads()`: the total number of threads to use, which are equally partitioned among the individual replicas.
 - `run_loggers=true`: whether to run the loggers during the simulation, including the exchange logger.
 - `rng=Random.default_rng()`: the random number generator used for the exchange accept/reject criteria and any stochastic dynamics.
+- `strictness=:warn`: determines behavior when encountering possible problems,
+    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
+    `:error` to error.
 """
 function simulate_remd!(sys::ReplicaSystem,
                         remd_sim::ReplicaExchangeMD,
@@ -1021,8 +1048,9 @@ function simulate_remd!(sys::ReplicaSystem,
                         run_loggers=true,
                         shortcut=nothing, # Unused
                         show_progress=default_show_progress(),
-                        rng=Random.default_rng())
-    
+                        rng=Random.default_rng(),
+                        strictness=:warn)
+    check_strictness(strictness)
     thread_div = equal_parts(n_threads, sys.n_replicas)
 
     n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
@@ -1051,7 +1079,8 @@ function simulate_remd!(sys::ReplicaSystem,
             
             # Enforce n_threads >= 1 to prevent buffer chunk crashes
             Threads.@spawn simulate!(active_sys, integrator, cycle_length;
-                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers, rng=rng)
+                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers,
+                                     rng=rng, strictness=strictness)
         end
 
         cycle_parity = cycle % 2
@@ -1086,7 +1115,8 @@ function simulate_remd!(sys::ReplicaSystem,
             )
             
             Threads.@spawn simulate!(active_sys, integrator, remaining_steps;
-                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers, rng=rng)
+                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers,
+                                     rng=rng, strictness=strictness)
         end
     end
 
@@ -1132,7 +1162,9 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            show_progress=default_show_progress(),
-                           rng=Random.default_rng())
+                           rng=Random.default_rng(),
+                           strictness=:warn)
+    check_strictness(strictness)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
