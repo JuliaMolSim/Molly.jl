@@ -469,6 +469,8 @@ umbrella potential). It is typically not required for standard alchemical transf
     fictitious sample size and advance the initial stage.
 - `significant_weight::Real=0.1`: The fractional weight threshold (relative to an ideally uniform 
     distribution) required for a λ window to be considered "visited". This filters out sampling noise.
+- `coverage_type::Symbol=:reweighted`: Coverage accounting mode. Use `:reweighted` for coordinate-based
+    AWH and `:physical` for strictly physical (active-window-only) tracking.
 - `log_freq::Int=100`: Number of AWH iterations between logging statistics.
 - `pmf_grid=nothing`: Tuple of tuples defining the PMF grid `((min_1, ...), (max_1, ...), (bins_1, ...))`.
     Required if running with PMF deconvolution.
@@ -486,6 +488,7 @@ struct AWHSimulation{T}
     well_tempered_fac::T    
     coverage_threshold::T   
     significant_weight::T   
+    coverage_type::Symbol
     log_freq::Int           
     state::AWHState{T}
     
@@ -499,6 +502,7 @@ function AWHSimulation(
     well_tempered_factor::Real = 10.0,
     coverage_threshold::Real = 1.0,
     significant_weight::Real = 0.1,
+    coverage_type::Symbol = :reweighted,
     log_freq::Int = 100,
     pmf_grid = nothing,
     pmf_cv = nothing,
@@ -516,6 +520,9 @@ function AWHSimulation(
     ))
     (isinf(well_tempered_factor) || well_tempered_factor > 0) || throw(ArgumentError(
         "`well_tempered_factor` must be positive or `Inf`, got $well_tempered_factor."
+    ))
+    coverage_type in (:reweighted, :physical) || throw(ArgumentError(
+        "`coverage_type` must be either `:reweighted` or `:physical`, got $coverage_type."
     ))
 
     n_win = length(awh_state.partition.λ_hamiltonians)
@@ -541,6 +548,7 @@ function AWHSimulation(
                          T(well_tempered_factor),
                          T(coverage_threshold),
                          T(significant_weight),
+                         coverage_type,
                          log_freq, awh_state,
                          pmf_calc)
 end
@@ -648,7 +656,11 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
 end
 
 # Reweights coordinates along λ windows and accumulates histogram
-function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where FT
+function process_sample(
+    awh::AWHState{FT};
+    weight_relevance::Real = 0.1,
+    coverage_type::Symbol = :reweighted,
+) where FT
     n_states = length(awh.λ_β)
     coords = awh.active_sys.coords
     bound  = awh.active_sys.boundary
@@ -697,11 +709,20 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
     awh.n_accum += 1
     awh.N_eff   += 1
 
-    # Check visited windows using w_last
-    for (i, val) in enumerate(awh.w_last)
-        if val > weight_relevance * awh.rho[i]
-            push!(awh.visited_windows, i)
+    if coverage_type == :reweighted
+        # Coordinate-style AWH: one frame may validly contribute to neighboring bins.
+        for (i, val) in enumerate(awh.w_last)
+            if val > weight_relevance * awh.rho[i]
+                push!(awh.visited_windows, i)
+            end
         end
+    elseif coverage_type == :physical
+        # Alchemical-style AWH: only the physically propagated window counts as visited.
+        push!(awh.visited_windows, awh.active_idx)
+    else
+        throw(ArgumentError(
+            "`coverage_type` must be either `:reweighted` or `:physical`, got $coverage_type."
+        ))
     end
     
     return active_pe
@@ -813,7 +834,11 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshol
         simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
 
 
-        process_sample(awh_sim.state; weight_relevance=awh_sim.significant_weight)
+        process_sample(
+            awh_sim.state;
+            weight_relevance=awh_sim.significant_weight,
+            coverage_type=awh_sim.coverage_type,
+        )
 
         if !isnothing(awh_sim.pmf_calc)
             # PMF update logic

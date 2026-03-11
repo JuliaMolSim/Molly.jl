@@ -987,7 +987,13 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false)
     end
 
     awh_state = AWHState(thermo_states; reuse_neighbors=true)
-    awh_sim   = AWHSimulation(awh_state; num_md_steps = 10, log_freq=100, well_tempered_factor=Inf)
+    awh_sim   = AWHSimulation(
+        awh_state;
+        num_md_steps = 10,
+        log_freq = 100,
+        well_tempered_factor = Inf,
+        coverage_type = :physical,
+    )
     
     return awh_sim, sys_base
 end

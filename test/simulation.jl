@@ -1671,6 +1671,15 @@ end
     pe_no_nf = Molly.process_sample(awh_state_no_nf)
     @test isfinite(ustrip(pe_no_nf))
 
+    # 12b. Coverage accounting mode must support both reweighted and physical tracking.
+    awh_state_no_nf_rw = AWHState(no_nf_states; n_bias=5)
+    Molly.process_sample(awh_state_no_nf_rw; coverage_type=:reweighted)
+    @test awh_state_no_nf_rw.visited_windows == Set([1, 2])
+
+    awh_state_no_nf_phys = AWHState(no_nf_states; n_bias=5)
+    Molly.process_sample(awh_state_no_nf_phys; coverage_type=:physical)
+    @test awh_state_no_nf_phys.visited_windows == Set([awh_state_no_nf_phys.active_idx])
+
     # 13. Coverage criteria must require at least one visited window.
     awh_state_cov_min = AWHState(thermo_states; first_state=1, n_bias=10)
     awh_sim_cov_min = AWHSimulation(
@@ -1693,6 +1702,8 @@ end
     @test_throws ArgumentError AWHSimulation(awh_state; update_freq=0)
     @test_throws ArgumentError AWHSimulation(awh_state; num_md_steps=0)
     @test_throws ArgumentError AWHSimulation(awh_state; coverage_threshold=0.0)
+    @test AWHSimulation(awh_state; coverage_type=:physical).coverage_type == :physical
+    @test_throws ArgumentError AWHSimulation(awh_state; coverage_type=:invalid)
 
     # 15-17. PMF deconvolution validation and numerical safeguards.
     pmf_boundary = CubicBoundary(2.0u"nm")
