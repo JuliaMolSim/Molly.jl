@@ -58,24 +58,6 @@ function Base.:+(l1::LennardJones, l2::LennardJones)
     )
 end
 
-function inject_interaction(inter::LennardJones, params_dic)
-    key_prefix = "inter_LJ_"
-    return LennardJones(
-        inter.cutoff,
-        inter.use_neighbors,
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-    )
-end
-
-function extract_parameters!(params_dic, inter::LennardJones, ff)
-    key_prefix = "inter_LJ_"
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
-end
-
 @inline function force(inter::LennardJones,
                        dr,
                        atom_i,
@@ -212,27 +194,6 @@ function Base.:+(l1::LennardJonesSoftCoreBeutler, l2::LennardJonesSoftCoreBeutle
     )
 end
 
-function Molly.inject_interaction(inter::LennardJonesSoftCoreBeutler, params_dic)
-    key_prefix = "inter_LJ_"
-    return LennardJonesSoftCoreBeutler(
-        inter.cutoff,
-        inter.α,
-        inter.use_neighbors,
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        inter.λ_mixing,
-        inter.scheduler,
-        Molly.dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-    )
-end
-
-function Molly.extract_parameters!(params_dic, inter::LennardJonesSoftCoreBeutler, ff)
-    key_prefix = "inter_LJ_"
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
-end
-
 @inline function force(inter::LennardJonesSoftCoreBeutler,
                        dr,
                        atom_i,
@@ -265,15 +226,15 @@ end
         r = norm(dr)
         σ2 = σ^2
         params = (σ2, ϵ, nothing, nothing)
-        
+
         # Call standard LJ cutoff logic.
-        f = force_cutoff(inter.cutoff, inter, r, params) 
+        f = force_cutoff(inter.cutoff, inter, r, params)
         fdr = (f / r) * dr
-        
+
         return special ? fdr * inter.weight_special : fdr
     end
 
-    
+
     σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
     ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
@@ -285,7 +246,7 @@ end
 
     f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = (f / r) * dr
-    
+
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -338,7 +299,7 @@ end
         params = (σ2, ϵ, nothing, nothing)
 
         pe = pe_cutoff(inter.cutoff, inter, r, params)
-        
+
         if special
             return pe * inter.weight_special
         else
@@ -454,27 +415,6 @@ function Base.:+(l1::LennardJonesSoftCoreGapsys, l2::LennardJonesSoftCoreGapsys)
         l1.scheduler,
         l1.weight_special + l2.weight_special,
     )
-end
-
-function Molly.inject_interaction(inter::LennardJonesSoftCoreGapsys, params_dic)
-    key_prefix = "inter_LJ_"
-    return LennardJonesSoftCoreGapsys(
-        inter.cutoff,
-        inter.α,
-        inter.use_neighbors,
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        inter.λ_mixing,
-        inter.scheduler,
-        Molly.dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-    )
-end
-
-function Molly.extract_parameters!(params_dic, inter::LennardJonesSoftCoreGapsys, ff)
-    key_prefix = "inter_LJ_"
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
 end
 
 @inline function force(inter::LennardJonesSoftCoreGapsys,
@@ -882,3 +822,41 @@ Unitful.ustrip(lj14::LennardJones14) = LennardJones14(
     ustrip(lj14.ϵ14_mixed),
     ustrip(lj14.weight_14)
 )
+
+function inject_interaction(inter::LennardJones, params::AbstractVector, idx_weight_14::Int)
+    new_w = idx_weight_14 > 0 ? typeof(inter.weight_special)(params[idx_weight_14]) : inter.weight_special
+    return LennardJones(
+        inter.cutoff, inter.use_neighbors, inter.shortcut, inter.σ_mixing, inter.ϵ_mixing, new_w
+    )
+end
+
+function inject_interaction(inter::LennardJonesSoftCoreBeutler, params::AbstractVector, idx_weight_14::Int)
+    new_w = idx_weight_14 > 0 ? typeof(inter.weight_special)(params[idx_weight_14]) : inter.weight_special
+    return LennardJonesSoftCoreBeutler(
+        inter.cutoff, inter.α, inter.use_neighbors, inter.shortcut, inter.σ_mixing,
+        inter.ϵ_mixing, inter.λ_mixing, inter.scheduler, new_w
+    )
+end
+
+function inject_interaction(inter::LennardJonesSoftCoreGapsys, params::AbstractVector, idx_weight_14::Int)
+    new_w = idx_weight_14 > 0 ? typeof(inter.weight_special)(params[idx_weight_14]) : inter.weight_special
+    return LennardJonesSoftCoreGapsys(
+        inter.cutoff, inter.α, inter.use_neighbors, inter.shortcut, inter.σ_mixing,
+        inter.ϵ_mixing, inter.λ_mixing, inter.scheduler, new_w
+    )
+end
+
+function extract_parameter_indices!(buf::ParamBuffer, inter::LennardJones)
+    idx_weight = _push_param!(buf, "inter_LJ_weight_14", inter.weight_special)
+    return (idx_weight,)
+end
+
+function extract_parameter_indices!(buf::ParamBuffer, inter::LennardJonesSoftCoreBeutler)
+    idx_weight = _push_param!(buf, "inter_LJ_weight_14", inter.weight_special)
+    return (idx_weight,)
+end
+
+function extract_parameter_indices!(buf::ParamBuffer, inter::LennardJonesSoftCoreGapsys)
+    idx_weight = _push_param!(buf, "inter_LJ_weight_14", inter.weight_special)
+    return (idx_weight,)
+end

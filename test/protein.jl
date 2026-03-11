@@ -243,9 +243,12 @@ end
     @test maximum(norm.(coords_diff)) < 1e-10u"nm"
     @test maximum(norm.(vels_diff  )) < 1e-7u"nm * ps^-1"
 
-    params_dic = Molly.extract_parameters(sys_nounits, ff_nounits)
+    params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, param_names =
+        Molly.extract_parameters(sys_nounits, ff_nounits)
     sys_nounits_nogi = System(sys_nounits; general_inters=())
-    atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(sys_nounits_nogi, params_dic)
+    atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(
+        sys_nounits_nogi, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
+    )
     @test atoms_grad == sys_nounits.atoms
     @test pis_grad == sys_nounits.pairwise_inters
 
@@ -360,10 +363,19 @@ end
         simulate!(sys_nounits, simulator_and_nounits, n_steps)
         @test temperature(sys_nounits) > 400.0
 
-        params_dic_gpu = Molly.extract_parameters(sys_nounits, ff_nounits)
-        @test params_dic == params_dic_gpu
+        params_gpu, atom_idxs_gpu, pairwise_idxs_gpu, specific_idxs_gpu, general_idxs_gpu, param_names_gpu =
+            Molly.extract_parameters(sys_nounits, ff_nounits)
+        @test params == params_gpu
+        @test param_names == param_names_gpu
         sys_nounits_nogi = System(sys_nounits; general_inters=())
-        atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(sys_nounits_nogi, params_dic_gpu)
+        atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(
+            sys_nounits_nogi,
+            params_gpu,
+            atom_idxs_gpu,
+            pairwise_idxs_gpu,
+            specific_idxs_gpu,
+            general_idxs_gpu,
+        )
         @test atoms_grad == sys_nounits.atoms
         @test pis_grad == sys_nounits.pairwise_inters
     end

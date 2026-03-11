@@ -19,27 +19,6 @@ Base.zero(::HarmonicBond{K, D}) where {K, D} = HarmonicBond(k=zero(K), r0=zero(D
 
 Base.:+(b1::HarmonicBond, b2::HarmonicBond) = HarmonicBond(k=(b1.k + b2.k), r0=(b1.r0 + b2.r0))
 
-function inject_interaction(inter::HarmonicBond, inter_type, params_dic)
-    key_prefix = "inter_HB_$(inter_type)_"
-    return HarmonicBond(
-        dict_get(params_dic, key_prefix * "k" , inter.k ),
-        dict_get(params_dic, key_prefix * "r0", inter.r0),
-    )
-end
-
-function extract_parameters!(params_dic,
-                             inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:HarmonicBond}},
-                             ff)
-    for (bond_type, bond) in zip(inter.types, from_device(inter.inters))
-        key_prefix = "inter_HB_$(bond_type)_"
-        if !haskey(params_dic, key_prefix * "k")
-            params_dic[key_prefix * "k" ] = bond.k
-            params_dic[key_prefix * "r0"] = bond.r0
-        end
-    end
-    return params_dic
-end
-
 @inline function force(b::HarmonicBond, coord_i, coord_j, boundary, args...)
     ab = vector(coord_i, coord_j, boundary)
     c = b.k * (norm(ab) - b.r0)
@@ -57,3 +36,25 @@ Unitful.ustrip(b::HarmonicBond) = HarmonicBond(
     k = ustrip(b.k),
     r0 = ustrip(b.r0)
 )
+
+function inject_interaction(inter::HarmonicBond, params::AbstractVector, idx_k::Int, idx_r0::Int)
+    new_k  = idx_k > 0  ? typeof(inter.k)(params[idx_k])   : inter.k
+    new_r0 = idx_r0 > 0 ? typeof(inter.r0)(params[idx_r0]) : inter.r0
+    return HarmonicBond(new_k, new_r0)
+end
+
+function extract_parameter_indices!(buf::ParamBuffer,
+                                    inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:HarmonicBond}})
+    bonds = from_device(inter.inters)
+    types = from_device(inter.types)
+    idx_k = Vector{Int}(undef, length(bonds))
+    idx_r0 = Vector{Int}(undef, length(bonds))
+
+    for i in eachindex(bonds)
+        key_prefix = "inter_HB_$(types[i])_"
+        idx_k[i] = _push_param!(buf, key_prefix * "k", bonds[i].k)
+        idx_r0[i] = _push_param!(buf, key_prefix * "r0", bonds[i].r0)
+    end
+
+    return (idx_k, idx_r0)
+end

@@ -21,27 +21,6 @@ Base.zero(::HarmonicAngle{K, D}) where {K, D} = HarmonicAngle(k=zero(K), θ0=zer
 
 Base.:+(a1::HarmonicAngle, a2::HarmonicAngle) = HarmonicAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
 
-function inject_interaction(inter::HarmonicAngle, inter_type, params_dic)
-    key_prefix = "inter_HA_$(inter_type)_"
-    return HarmonicAngle(
-        dict_get(params_dic, key_prefix * "k" , inter.k ),
-        dict_get(params_dic, key_prefix * "θ0", inter.θ0),
-    )
-end
-
-function extract_parameters!(params_dic,
-                             inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:HarmonicAngle}},
-                             ff)
-    for (angle_type, ang) in zip(inter.types, from_device(inter.inters))
-        key_prefix = "inter_HA_$(angle_type)_"
-        if !haskey(params_dic, key_prefix * "k")
-            params_dic[key_prefix * "k" ] = ang.k
-            params_dic[key_prefix * "θ0"] = ang.θ0
-        end
-    end
-    return params_dic
-end
-
 @inline function force(a::HarmonicAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)
@@ -70,3 +49,25 @@ Unitful.ustrip(a::HarmonicAngle) = HarmonicAngle(
     k = ustrip(a.k),
     θ0 = ustrip(a.θ0)
 )
+
+function inject_interaction(inter::HarmonicAngle, params::AbstractVector, idx_k::Int, idx_θ0::Int)
+    new_k  = idx_k > 0  ? typeof(inter.k)(params[idx_k])   : inter.k
+    new_θ0 = idx_θ0 > 0 ? typeof(inter.θ0)(params[idx_θ0]) : inter.θ0
+    return HarmonicAngle(new_k, new_θ0)
+end
+
+function extract_parameter_indices!(buf::ParamBuffer,
+                                    inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:HarmonicAngle}})
+    angles = from_device(inter.inters)
+    types = from_device(inter.types)
+    idx_k = Vector{Int}(undef, length(angles))
+    idx_θ0 = Vector{Int}(undef, length(angles))
+
+    for i in eachindex(angles)
+        key_prefix = "inter_HA_$(types[i])_"
+        idx_k[i] = _push_param!(buf, key_prefix * "k", angles[i].k)
+        idx_θ0[i] = _push_param!(buf, key_prefix * "θ0", angles[i].θ0)
+    end
+
+    return (idx_k, idx_θ0)
+end

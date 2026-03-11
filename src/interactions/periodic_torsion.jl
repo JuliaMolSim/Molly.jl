@@ -53,39 +53,6 @@ function Base.:+(p1::PeriodicTorsion{N, T, E}, p2::PeriodicTorsion{N, T, E}) whe
     )
 end
 
-function inject_interaction(inter::PeriodicTorsion{N, T, E}, inter_type, params_dic) where {N, T, E}
-    if inter.proper
-        key_prefix = "inter_PT_$(inter_type)_"
-    else
-        key_prefix = "inter_IT_$(inter_type)_"
-    end
-    return PeriodicTorsion{N, T, E}(
-        inter.periodicities,
-        ntuple(i -> dict_get(params_dic, key_prefix * "phase_$i", inter.phases[i]), N),
-        ntuple(i -> dict_get(params_dic, key_prefix * "k_$i"    , inter.ks[i]    ), N),
-        inter.proper,
-    )
-end
-
-function extract_parameters!(params_dic,
-                             inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:PeriodicTorsion}},
-                             ff)
-    for (torsion_type, torsion) in zip(inter.types, from_device(inter.inters))
-        if torsion.proper
-            key_prefix = "inter_PT_$(torsion_type)_"
-        else
-            key_prefix = "inter_IT_$(torsion_type)_"
-        end
-        if !haskey(params_dic, key_prefix * "phase_1")
-            for i in eachindex(torsion.phases)
-                params_dic[key_prefix * "phase_$i"] = torsion.phases[i]
-                params_dic[key_prefix * "k_$i"    ] = torsion.ks[i]
-            end
-        end
-    end
-    return params_dic
-end
-
 function periodic_torsion_vectors(coords_i, coords_j, coords_k, coords_l, boundary)
     ab = vector(coords_i, coords_j, boundary)
     bc = vector(coords_j, coords_k, boundary)
@@ -160,3 +127,28 @@ Unitful.ustrip(pt::PeriodicTorsion) = PeriodicTorsion(
     ks = ustrip.(pt.ks),
     proper = pt.proper
 )
+
+function inject_interaction(inter::PeriodicTorsion{N, T, E}, params::AbstractVector, idx_phases::NTuple{N, Int}, idx_ks::NTuple{N, Int}) where {N, T, E}
+    new_phases = ntuple(i -> idx_phases[i] > 0 ? T(params[idx_phases[i]]) : inter.phases[i], Val(N))
+    new_ks     = ntuple(i -> idx_ks[i] > 0     ? E(params[idx_ks[i]])     : inter.ks[i]    , Val(N))
+    return PeriodicTorsion{N, T, E}(inter.periodicities, new_phases, new_ks, inter.proper)
+end
+
+function extract_parameter_indices!(buf::ParamBuffer,
+                                    inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:PeriodicTorsion}})
+    torsions = from_device(inter.inters)
+    types = from_device(inter.types)
+
+    idx_phases = Vector{Any}(undef, length(torsions))
+    idx_ks = Vector{Any}(undef, length(torsions))
+
+    for i in eachindex(torsions)
+        torsion = torsions[i]
+        key_prefix = torsion.proper ? "inter_PT_$(types[i])_" : "inter_IT_$(types[i])_"
+        n = length(torsion.periodicities)
+        idx_phases[i] = ntuple(j -> _push_param!(buf, key_prefix * "phase_$j", torsion.phases[j]), n)
+        idx_ks[i] = ntuple(j -> _push_param!(buf, key_prefix * "k_$j", torsion.ks[j]), n)
+    end
+
+    return (idx_phases, idx_ks)
+end

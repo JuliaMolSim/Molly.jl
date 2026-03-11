@@ -793,13 +793,16 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     return delta_f
 end
 
-function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshold=nothing) where T
+function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshold=nothing, max_lag::Int=10) where T
     n_steps >= 0 || throw(ArgumentError("`n_steps` must be non-negative, got $n_steps."))
+    max_lag > 0 || throw(ArgumentError("`max_lag` must be positive, got $max_lag."))
 
     n_iterations = fld(n_steps, awh_sim.n_md_steps)
     remaining_steps = n_steps - n_iterations * awh_sim.n_md_steps
     active_idx = awh_sim.state.active_idx
     converged = false
+
+    df_hist = T[]
 
     for iteration_n in 1:n_iterations
         # --- NEW: Sync active index to the logger ---
@@ -850,9 +853,14 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshol
             # Strict enforcement: only evaluate convergence during the linear stage
             if !awh_sim.state.in_initial_stage
                 max_change = maximum(abs.(delta_f))
-                println("ΔF = $(max_change); threshold = $(convergence_threshold)")
-                if max_change <= convergence_threshold
-                    @info "AWH converged at iteration $iteration_n (max ΔF = $max_change <= $convergence_threshold)"
+                push!(df_hist, max_change)
+                if length(df_hist) > max_lag
+                    popfirst!(df_hist)
+                end
+                nonzero_changes = filter(x -> x != zero(T), df_hist)
+                mean_change = isempty(nonzero_changes) ? zero(T) : mean(nonzero_changes)
+                if mean_change <= convergence_threshold
+                    @info "AWH converged at iteration $iteration_n (max ΔF = $mean_change <= $convergence_threshold)"
                     converged = true
                     break
                 end

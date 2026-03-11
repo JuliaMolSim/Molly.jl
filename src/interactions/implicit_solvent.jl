@@ -582,41 +582,230 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
     end
 end
 
-function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
+struct GBN2ParamIndices
+    solvent_dielectric::Int
+    solute_dielectric::Int
+    kappa::Int
+    offset::Int
+    probe_radius::Int
+    sa_factor::Int
+    neck_scale::Int
+    neck_cut::Int
+    radius_idxs::Vector{Int}
+    screen_idxs::Vector{Int}
+    α_idxs::Vector{Int}
+    β_idxs::Vector{Int}
+    γ_idxs::Vector{Int}
+end
+
+@inline function _gbn2_key_index(keys::Vector{String}, idxs::Vector{Int}, key::String)
+    pos = findfirst(==(key), keys)
+    return isnothing(pos) ? 0 : idxs[pos]
+end
+
+@inline function _gbn2_radius_key(at_data, at_bonded_to_N::Bool)
+    if at_data.res_name == "ARG" && (startswith(at_data.atom_name, "HH") || startswith(at_data.atom_name, "HE"))
+        return "H_ARG"
+    elseif is_carboxylate_O(at_data)
+        return "O_CAR"
+    elseif at_data.element in ("H", "D")
+        return at_bonded_to_N ? "H_N" : "H"
+    elseif haskey(mbondi2_element_to_radius, at_data.element)
+        return at_data.element
+    else
+        return "-"
+    end
+end
+
+function extract_parameter_indices!(buf::ParamBuffer, inter::ImplicitSolventGBN2, sys::System)
     key_prefix = "inter_GB_"
-    bond_index = findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
+    idx_solvent_dielectric = _push_param!(buf, key_prefix * "solvent_dielectric", inter.solvent_dielectric)
+    idx_solute_dielectric = _push_param!(buf, key_prefix * "solute_dielectric", inter.solute_dielectric)
+    idx_kappa = _push_param!(buf, key_prefix * "kappa", inter.kappa)
+    idx_offset = _push_param!(buf, key_prefix * "offset", inter.offset)
+    idx_probe_radius = _push_param!(buf, key_prefix * "probe_radius", inter.probe_radius)
+    idx_sa_factor = _push_param!(buf, key_prefix * "sa_factor", inter.sa_factor)
+    idx_neck_scale = _push_param!(buf, key_prefix * "neck_scale", inter.neck_scale)
+    idx_neck_cut = _push_param!(buf, key_prefix * "neck_cut", inter.neck_cut)
 
-    element_to_radius = Dict{String, DefaultFloat}()
-    for k in keys(mbondi2_element_to_radius)
-        element_to_radius[k] = dict_get(params_dic, key_prefix * "radius_" * k,
-                                        ustrip(mbondi2_element_to_radius[k]))
-    end
-    element_to_screen = empty(gbn2_element_to_screen)
-    for k in keys(gbn2_element_to_screen)
-        element_to_screen[k] = dict_get(params_dic, key_prefix * "screen_" * k, gbn2_element_to_screen[k])
-    end
-    atom_params = empty(gbn2_atom_params)
-    for k in keys(gbn2_atom_params)
-        atom_params[k] = dict_get(params_dic, key_prefix * "params_" * k, gbn2_atom_params[k])
+    radius_keys = sort!(collect(String.(keys(mbondi2_element_to_radius))))
+    radius_param_idxs = [_push_param!(buf, key_prefix * "radius_" * k, mbondi2_element_to_radius[k]) for k in radius_keys]
+
+    screen_keys = sort!(collect(String.(keys(gbn2_element_to_screen))))
+    screen_param_idxs = [_push_param!(buf, key_prefix * "screen_" * k, gbn2_element_to_screen[k]) for k in screen_keys]
+
+    atom_param_keys = sort!(collect(String.(keys(gbn2_atom_params))))
+    atom_param_idxs = [_push_param!(buf, key_prefix * "params_" * k, gbn2_atom_params[k]) for k in atom_param_keys]
+
+    n_atoms = length(sys.atoms_data)
+    radius_idxs = Vector{Int}(undef, n_atoms)
+    screen_idxs = fill(0, n_atoms)
+    α_idxs = fill(0, n_atoms)
+    β_idxs = fill(0, n_atoms)
+    γ_idxs = fill(0, n_atoms)
+
+    bond_index = findfirst(sil -> eltype(sil.inters) <: HarmonicBond, values(sys.specific_inter_lists))
+    bonded_to_N = if isnothing(bond_index)
+        falses(n_atoms)
+    else
+        bonds = values(sys.specific_inter_lists)[bond_index]
+        atoms_bonded_to_N(sys.atoms_data, bonds)
     end
 
-    ImplicitSolventGBN2(
-        sys.atoms,
-        sys.atoms_data,
-        sys.specific_inter_lists[bond_index];
-        solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
-        solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
-        kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
-        offset=dict_get(params_dic, key_prefix * "offset", ustrip(inter.offset))u"nm",
-        dist_cutoff=inter.dist_cutoff,
-        probe_radius=dict_get(params_dic, key_prefix * "probe_radius", ustrip(inter.probe_radius))u"nm",
-        sa_factor=dict_get(params_dic, key_prefix * "sa_factor", ustrip(inter.sa_factor))u"kJ * mol^-1 * nm^-2",
-        use_ACE=inter.use_ACE,
-        neck_scale=dict_get(params_dic, key_prefix * "neck_scale", inter.neck_scale),
-        neck_cut=dict_get(params_dic, key_prefix * "neck_cut", ustrip(inter.neck_cut))u"nm",
-        element_to_radius=element_to_radius,
-        element_to_screen=element_to_screen,
-        atom_params=atom_params,
+    nucleic_acid_residues = ("A", "C", "G", "U", "DA", "DC", "DG", "DT")
+    for i in 1:n_atoms
+        at_data = sys.atoms_data[i]
+        radius_key = _gbn2_radius_key(at_data, bonded_to_N[i])
+        radius_idxs[i] = _gbn2_key_index(radius_keys, radius_param_idxs, radius_key)
+
+        if !(at_data.res_name in nucleic_acid_residues)
+            screen_key = haskey(gbn2_element_to_screen, at_data.element) ? at_data.element : "-"
+            α_key = haskey(gbn2_atom_params, at_data.element * "_α") ? at_data.element * "_α" : "-_α"
+            β_key = haskey(gbn2_atom_params, at_data.element * "_β") ? at_data.element * "_β" : "-_β"
+            γ_key = haskey(gbn2_atom_params, at_data.element * "_γ") ? at_data.element * "_γ" : "-_γ"
+            screen_idxs[i] = _gbn2_key_index(screen_keys, screen_param_idxs, screen_key)
+            α_idxs[i] = _gbn2_key_index(atom_param_keys, atom_param_idxs, α_key)
+            β_idxs[i] = _gbn2_key_index(atom_param_keys, atom_param_idxs, β_key)
+            γ_idxs[i] = _gbn2_key_index(atom_param_keys, atom_param_idxs, γ_key)
+        end
+    end
+
+    idxs = GBN2ParamIndices(
+        idx_solvent_dielectric,
+        idx_solute_dielectric,
+        idx_kappa,
+        idx_offset,
+        idx_probe_radius,
+        idx_sa_factor,
+        idx_neck_scale,
+        idx_neck_cut,
+        radius_idxs,
+        screen_idxs,
+        α_idxs,
+        β_idxs,
+        γ_idxs
+    )
+    return (idxs,)
+end
+
+function inject_interaction(inter::ImplicitSolventGBN2, params::AbstractVector, idxs::GBN2ParamIndices, sys::System)
+    AT = array_type(inter.offset_radii)
+
+    offset_radii_cpu = from_device(inter.offset_radii)
+    scaled_offset_radii_cpu = from_device(inter.scaled_offset_radii)
+    αs_cpu = from_device(inter.αs)
+    βs_cpu = from_device(inter.βs)
+    γs_cpu = from_device(inter.γs)
+
+    n_atoms = length(offset_radii_cpu)
+    radii_defaults = offset_radii_cpu .+ inter.offset
+    screens_defaults = similar(offset_radii_cpu)
+    for i in eachindex(screens_defaults)
+        if iszero_value(offset_radii_cpu[i])
+            screens_defaults[i] = zero(eltype(screens_defaults))
+        else
+            screens_defaults[i] = scaled_offset_radii_cpu[i] / offset_radii_cpu[i]
+        end
+    end
+
+    solvent_dielectric = idxs.solvent_dielectric > 0 ? typeof(inter.solvent_dielectric)(params[idxs.solvent_dielectric]) : inter.solvent_dielectric
+    solute_dielectric = idxs.solute_dielectric > 0 ? typeof(inter.solute_dielectric)(params[idxs.solute_dielectric]) : inter.solute_dielectric
+    kappa = idxs.kappa > 0 ? typeof(inter.kappa)(params[idxs.kappa]) : inter.kappa
+    offset = idxs.offset > 0 ? typeof(inter.offset)(params[idxs.offset]) : inter.offset
+    probe_radius = idxs.probe_radius > 0 ? typeof(inter.probe_radius)(params[idxs.probe_radius]) : inter.probe_radius
+    sa_factor = idxs.sa_factor > 0 ? typeof(inter.sa_factor)(params[idxs.sa_factor]) : inter.sa_factor
+    neck_scale = idxs.neck_scale > 0 ? typeof(inter.neck_scale)(params[idxs.neck_scale]) : inter.neck_scale
+    neck_cut = idxs.neck_cut > 0 ? typeof(inter.neck_cut)(params[idxs.neck_cut]) : inter.neck_cut
+
+    radii_cpu = similar(radii_defaults)
+    for i in 1:n_atoms
+        idx = idxs.radius_idxs[i]
+        radii_cpu[i] = idx > 0 ? typeof(radii_defaults[i])(params[idx]) : radii_defaults[i]
+    end
+
+    new_offset_radii_cpu = similar(offset_radii_cpu)
+    for i in eachindex(new_offset_radii_cpu)
+        new_offset_radii_cpu[i] = typeof(offset_radii_cpu[i])(radii_cpu[i] - offset)
+    end
+
+    new_scaled_offset_radii_cpu = similar(scaled_offset_radii_cpu)
+    for i in eachindex(new_scaled_offset_radii_cpu)
+        idx = idxs.screen_idxs[i]
+        screen = idx > 0 ? typeof(screens_defaults[i])(params[idx]) : screens_defaults[i]
+        new_scaled_offset_radii_cpu[i] = typeof(scaled_offset_radii_cpu[i])(screen * new_offset_radii_cpu[i])
+    end
+
+    new_αs_cpu = similar(αs_cpu)
+    new_βs_cpu = similar(βs_cpu)
+    new_γs_cpu = similar(γs_cpu)
+    for i in eachindex(new_αs_cpu)
+        idx_α = idxs.α_idxs[i]
+        idx_β = idxs.β_idxs[i]
+        idx_γ = idxs.γ_idxs[i]
+        new_αs_cpu[i] = idx_α > 0 ? typeof(αs_cpu[i])(params[idx_α]) : αs_cpu[i]
+        new_βs_cpu[i] = idx_β > 0 ? typeof(βs_cpu[i])(params[idx_β]) : βs_cpu[i]
+        new_γs_cpu[i] = idx_γ > 0 ? typeof(γs_cpu[i])(params[idx_γ]) : γs_cpu[i]
+    end
+
+    table_d0_raw = lookup_table(gbn2_data_d0, radii_cpu)
+    table_m0_raw = lookup_table(gbn2_data_m0, radii_cpu)
+    if inter.offset isa Unitful.Quantity
+        table_d0_cpu = eltype(from_device(inter.d0s)).(table_d0_raw)
+        table_m0_cpu = eltype(from_device(inter.m0s)).(table_m0_raw)
+    else
+        table_d0_cpu = eltype(from_device(inter.d0s)).(ustrip.(table_d0_raw))
+        table_m0_cpu = eltype(from_device(inter.m0s)).(ustrip.(table_m0_raw))
+    end
+
+    k_const = if !iszero_value(inter.solute_dielectric)
+        -inter.factor_solute * inter.solute_dielectric
+    elseif !iszero_value(inter.solvent_dielectric)
+        inter.factor_solvent * inter.solvent_dielectric
+    else
+        zero(inter.factor_solvent)
+    end
+    factor_solute = iszero_value(solute_dielectric) ? zero(k_const) : -k_const / solute_dielectric
+    factor_solvent = iszero_value(solvent_dielectric) ? zero(k_const) : k_const / solvent_dielectric
+
+    new_offset_radii = to_device(new_offset_radii_cpu, AT)
+    new_scaled_offset_radii = to_device(new_scaled_offset_radii_cpu, AT)
+    new_αs = to_device(new_αs_cpu, AT)
+    new_βs = to_device(new_βs_cpu, AT)
+    new_γs = to_device(new_γs_cpu, AT)
+    new_d0s = to_device(table_d0_cpu, AT)
+    new_m0s = to_device(table_m0_cpu, AT)
+
+    is = inter.is
+    js = inter.js
+    oris = @view new_offset_radii[is]
+    orjs = @view new_offset_radii[js]
+    srjs = @view new_scaled_offset_radii[js]
+
+    return typeof(inter)(
+        new_offset_radii,
+        new_scaled_offset_radii,
+        solvent_dielectric,
+        solute_dielectric,
+        kappa,
+        offset,
+        inter.dist_cutoff,
+        inter.use_ACE,
+        new_αs,
+        new_βs,
+        new_γs,
+        probe_radius,
+        sa_factor,
+        factor_solute,
+        factor_solvent,
+        is,
+        js,
+        new_d0s,
+        new_m0s,
+        neck_scale,
+        neck_cut,
+        oris,
+        orjs,
+        srjs
     )
 end
 

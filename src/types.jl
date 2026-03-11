@@ -28,6 +28,10 @@ export
 # Required for interactions that may be explicitly set to `nothing` (e.g., in some implicit solvent models)
 Unitful.ustrip(::Nothing) = nothing
 Unitful.ustrip(x::Tuple) = map(ustrip, x)
+Unitful.ustrip(x::NamedTuple) = map(ustrip, x)
+
+# Typed dictionary fetch used by parameter-injection utilities.
+dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
 
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64
@@ -210,32 +214,32 @@ function Base.:+(il1::InteractionList4Atoms{I, T}, il2::InteractionList4Atoms{I,
 end
 
 function ==(a::InteractionList1Atoms, b::InteractionList1Atoms)
-    return a.is == b.is && 
-           a.inters == b.inters && 
+    return a.is == b.is &&
+           a.inters == b.inters &&
            a.types == b.types
 end
 
 function ==(a::InteractionList2Atoms, b::InteractionList2Atoms)
-    return a.is == b.is && 
-           a.js == b.js && 
-           a.inters == b.inters && 
+    return a.is == b.is &&
+           a.js == b.js &&
+           a.inters == b.inters &&
            a.types == b.types
 end
 
 function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
-    return a.is == b.is && 
-           a.js == b.js && 
-           a.ks == b.ks && 
-           a.inters == b.inters && 
+    return a.is == b.is &&
+           a.js == b.js &&
+           a.ks == b.ks &&
+           a.inters == b.inters &&
            a.types == b.types
 end
 
 function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
-    return a.is == b.is && 
-           a.js == b.js && 
-           a.ks == b.ks && 
-           a.ls == b.ls && 
-           a.inters == b.inters && 
+    return a.is == b.is &&
+           a.js == b.js &&
+           a.ks == b.ks &&
+           a.ls == b.ls &&
+           a.inters == b.inters &&
            a.types == b.types
 end
 
@@ -271,30 +275,6 @@ function hash(a::InteractionList4Atoms, h::UInt)
     inters = from_device(a.inters)
     types  = from_device(a.types)
     return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, h))))))
-end
-
-function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList1Atoms(inter.is, inters_grad, inter.types)
-end
-
-function inject_interaction_list(inter::InteractionList2Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types)
-end
-
-function inject_interaction_list(inter::InteractionList3Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types)
-end
-
-function inject_interaction_list(inter::InteractionList4Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
 end
 
 # These structures hold index arrays (is, js, ks, ls) and a generic interaction array (inters).
@@ -343,7 +323,7 @@ The types used should be bits types if the GPU is going to be used.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
-- `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
+- `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical
     transformations.
 - `alch_role::R=CoreRole`: Role of the atom in an alchemical transformation.
 """
@@ -365,23 +345,6 @@ end
 function Base.:+(a1::Atom, a2::Atom)
     return Atom(a1.index, a1.atom_type, a1.mass + a2.mass, a1.charge + a2.charge,
                 a1.σ + a2.σ, a1.ϵ + a2.ϵ, a1.λ + a2.λ, a1.alch_role)
-end
-
-# get function errors with AD
-dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
-
-function inject_atom(at, at_data, params_dic)
-    key_prefix = "atom_$(at_data.atom_type)_"
-    Atom(
-        at.index,
-        at.atom_type,
-        dict_get(params_dic, key_prefix * "mass"  , at.mass),
-        at.charge, # Residue-specific
-        dict_get(params_dic, key_prefix * "σ"     , at.σ   ),
-        dict_get(params_dic, key_prefix * "ϵ"     , at.ϵ   ),
-        at.λ, # Preserve lambda from existing atom,
-        at.alch_role
-    )
 end
 
 """
@@ -419,13 +382,13 @@ end
 
 # Atom parameters (mass, charge, σ, ϵ) typically carry units during a standard simulation.
 Unitful.ustrip(a::Atom) = Atom(
-    index = a.index, 
-    atom_type = a.atom_type, 
-    mass = ustrip(a.mass), 
-    charge = ustrip(a.charge), 
-    σ = ustrip(a.σ), 
-    ϵ = ustrip(a.ϵ), 
-    λ = a.λ, 
+    index = a.index,
+    atom_type = a.atom_type,
+    mass = ustrip(a.mass),
+    charge = ustrip(a.charge),
+    σ = ustrip(a.σ),
+    ϵ = ustrip(a.ϵ),
+    λ = a.λ,
     alch_role = a.alch_role
 )
 
@@ -937,50 +900,162 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
     )
 end
 
-# Add parameters from a dictionary to a system, allowing gradients to be tracked
-function inject_gradients(sys::System{<:Any, AT}, params_dic) where AT
-    atoms_grad = to_device(inject_atom.(from_device(sys.atoms), sys.atoms_data, (params_dic,)), AT)
-    if length(sys.pairwise_inters) > 0
-        pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
-    else
-        pis_grad = sys.pairwise_inters
+# ==============================================================================
+# ENZYME-SAFE PARAMETER INJECTION
+# ==============================================================================
+
+mutable struct ParamBuffer{T}
+    values::Vector{T}
+    names::Vector{String}
+end
+
+ParamBuffer(::Type{T}) where {T} = ParamBuffer{T}(T[], String[])
+
+@inline _strip_param(x) = ustrip(x)
+@inline _strip_param(x::Real) = x
+
+function _push_param!(buf::ParamBuffer{T}, name::AbstractString, value) where {T}
+    idx = findfirst(==(name), buf.names)
+    if isnothing(idx)
+        push!(buf.names, String(name))
+        push!(buf.values, T(_strip_param(value)))
+        return length(buf.values)
     end
-    if length(sys.specific_inter_lists) > 0
-        sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), AT)
-    else
-        sis_grad = sys.specific_inter_lists
+    return idx
+end
+
+# Generic fallbacks extended in interaction files.
+extract_parameter_indices!(::ParamBuffer, inter) = ()
+extract_parameter_indices!(buf::ParamBuffer, inter, ::System) = extract_parameter_indices!(buf, inter)
+
+@inline _collect_parameter_indices!(buf::ParamBuffer, inters::Tuple) =
+    map(inter -> extract_parameter_indices!(buf, inter), inters)
+@inline _collect_parameter_indices!(buf::ParamBuffer, inters::NamedTuple) =
+    map(inter -> extract_parameter_indices!(buf, inter), values(inters))
+
+@inline _collect_general_parameter_indices!(buf::ParamBuffer, inters::Tuple, sys::System) =
+    map(inter -> extract_parameter_indices!(buf, inter, sys), inters)
+@inline _collect_general_parameter_indices!(buf::ParamBuffer, inters::NamedTuple, sys::System) =
+    map(inter -> extract_parameter_indices!(buf, inter, sys), values(inters))
+
+function _extract_atom_parameter_indices!(buf::ParamBuffer, sys::System, ff)
+    atoms_cpu = from_device(sys.atoms)
+    n_atoms = length(atoms_cpu)
+    idx_mass = Vector{Int}(undef, n_atoms)
+    idx_σ    = Vector{Int}(undef, n_atoms)
+    idx_ϵ    = Vector{Int}(undef, n_atoms)
+
+    has_atom_data = !isempty(sys.atoms_data) && length(sys.atoms_data) == n_atoms
+    atoms_data_cpu = has_atom_data ? from_device(sys.atoms_data) : nothing
+    has_ff_types = !isnothing(ff) && hasproperty(ff, :atom_types)
+
+    for i in 1:n_atoms
+        atom = atoms_cpu[i]
+        atom_type = has_atom_data ? atoms_data_cpu[i].atom_type : string(atom.atom_type)
+
+        ref_atom = atom
+        if has_ff_types && haskey(ff.atom_types, atom_type)
+            ref_atom = ff.atom_types[atom_type]
+        end
+
+        key_prefix = "atom_$(atom_type)_"
+        idx_mass[i] = _push_param!(buf, key_prefix * "mass", ref_atom.mass)
+        idx_σ[i]    = _push_param!(buf, key_prefix * "σ", ref_atom.σ)
+        idx_ϵ[i]    = _push_param!(buf, key_prefix * "ϵ", ref_atom.ϵ)
     end
-    if length(sys.general_inters) > 0
-        gis_grad = inject_interaction.(sys.general_inters, (params_dic,), (sys,))
-    else
-        gis_grad = sys.general_inters
-    end
+
+    return (idx_mass, idx_σ, idx_ϵ)
+end
+
+# Base fallback if no indices are provided for an interaction
+inject_interaction(inter, params::AbstractVector, args...) = inter
+
+function inject_atom(at::Atom, params::AbstractVector, idx_mass::Int, idx_σ::Int, idx_ϵ::Int)
+    new_mass = idx_mass > 0 ? typeof(at.mass)(params[idx_mass]) : at.mass
+    new_σ    = idx_σ > 0    ? typeof(at.σ)(params[idx_σ])       : at.σ
+    new_ϵ    = idx_ϵ > 0    ? typeof(at.ϵ)(params[idx_ϵ])       : at.ϵ
+    return Atom(at.index, at.atom_type, new_mass, at.charge, new_σ, new_ϵ, at.λ, at.alch_role)
+end
+
+function inject_interaction_list(inter::InteractionList1Atoms, params::AbstractVector, idxs::Tuple, AT)
+    isempty(idxs) && return inter
+    # Broadcasting expands the arrays in idxs... and keeps params as a scalar reference
+    inters_grad_cpu = inject_interaction.(from_device(inter.inters), Ref(params), idxs...)
+    return InteractionList1Atoms(inter.is, to_device(inters_grad_cpu, AT), inter.types)
+end
+
+function inject_interaction_list(inter::InteractionList2Atoms, params::AbstractVector, idxs::Tuple, AT)
+    isempty(idxs) && return inter
+    inters_grad_cpu = inject_interaction.(from_device(inter.inters), Ref(params), idxs...)
+    return InteractionList2Atoms(inter.is, inter.js, to_device(inters_grad_cpu, AT), inter.types)
+end
+
+function inject_interaction_list(inter::InteractionList3Atoms, params::AbstractVector, idxs::Tuple, AT)
+    isempty(idxs) && return inter
+    inters_grad_cpu = inject_interaction.(from_device(inter.inters), Ref(params), idxs...)
+    return InteractionList3Atoms(inter.is, inter.js, inter.ks, to_device(inters_grad_cpu, AT), inter.types)
+end
+
+function inject_interaction_list(inter::InteractionList4Atoms, params::AbstractVector, idxs::Tuple, AT)
+    isempty(idxs) && return inter
+    inters_grad_cpu = inject_interaction.(from_device(inter.inters), Ref(params), idxs...)
+    return InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, to_device(inters_grad_cpu, AT), inter.types)
+end
+
+# Helper functions to statically map over Tuples or NamedTuples of interactions
+@inline function _map_interactions(f, inters::NamedTuple, idxs::Tuple)
+    return NamedTuple{keys(inters)}(map(f, values(inters), idxs))
+end
+
+@inline function _map_interactions(f, inters::Tuple, idxs::Tuple)
+    return map(f, inters, idxs)
+end
+
+"""
+    inject_gradients(sys, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs)
+
+Injects parameters from a flat `AbstractVector` into the system components.
+Each `_idxs` argument must be a `Tuple` matching the structure of the respective system field.
+"""
+function inject_gradients(sys::System{<:Any, AT}, params::AbstractVector,
+                          atom_idxs::Tuple,
+                          pairwise_idxs::Tuple,
+                          specific_idxs::Tuple,
+                          general_idxs::Tuple) where AT
+
+    # 1. Update Atoms using Enzyme-safe array broadcasting
+    idx_mass, idx_σ, idx_ϵ = atom_idxs
+    atoms_grad_cpu = inject_atom.(from_device(sys.atoms), Ref(params), idx_mass, idx_σ, idx_ϵ)
+    atoms_grad = to_device(atoms_grad_cpu, AT)
+
+    # 2. Update Pairwise Interactions (Map over tuples is unrolled statically by the compiler)
+    pis_grad = _map_interactions((inter, idxs) -> inject_interaction(inter, params, idxs...), sys.pairwise_inters, pairwise_idxs)
+
+    # 3. Update Specific Interactions (Delegates to broadcasted lists)
+    sis_grad = _map_interactions((inter_list, idxs) -> inject_interaction_list(inter_list, params, idxs, AT), sys.specific_inter_lists, specific_idxs)
+
+    # 4. Update General Interactions
+    gis_grad = _map_interactions((inter, idxs) -> inject_interaction(inter, params, idxs..., sys), sys.general_inters, general_idxs)
+
     return atoms_grad, pis_grad, sis_grad, gis_grad
 end
 
-# Form a dictionary of all parameters in a system, allowing gradients to be tracked
-function extract_parameters(sys, ff)
-    params_dic = Dict()
+"""
+    extract_parameters(sys, ff=nothing)
 
-    for at_data in sys.atoms_data
-        key_prefix = "atom_$(at_data.atom_type)_"
-        if !haskey(params_dic, key_prefix * "mass")
-            at = ff.atom_types[at_data.atom_type]
-            params_dic[key_prefix * "mass"] = at.mass
-            params_dic[key_prefix * "σ"   ] = at.σ
-            params_dic[key_prefix * "ϵ"   ] = at.ϵ
-        end
-    end
+Builds a flat parameter vector and index metadata for `inject_gradients`.
+Returns `(params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, param_names)`.
+"""
+function extract_parameters(sys::System, ff=nothing)
+    T = float_type(sys)
+    buffer = ParamBuffer(T)
 
-    for inter in values(sys.pairwise_inters)
-        extract_parameters!(params_dic, inter, ff)
-    end
+    atom_idxs = _extract_atom_parameter_indices!(buffer, sys, ff)
+    pairwise_idxs = _collect_parameter_indices!(buffer, sys.pairwise_inters)
+    specific_idxs = _collect_parameter_indices!(buffer, sys.specific_inter_lists)
+    general_idxs = _collect_general_parameter_indices!(buffer, sys.general_inters, sys)
 
-    for inter in values(sys.specific_inter_lists)
-        extract_parameters!(params_dic, inter, ff)
-    end
-
-    return params_dic
+    return buffer.values, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, buffer.names
 end
 
 # Reconstructs the core simulation state by recursively stripping the arrays and parameter fields.
@@ -1002,7 +1077,7 @@ function Unitful.ustrip(sys::System)
         velocities = unitless_vels,
         boundary = ustrip(sys.boundary),
         neighbor_finder = ustrip(sys.neighbor_finder),
-        loggers = NamedTuple(), 
+        loggers = NamedTuple(),
         force_units = NoUnits,
         energy_units = NoUnits,
         k = ustrip(sys.k)
@@ -1012,17 +1087,17 @@ end
 @doc raw"""
     ThermoState(system::System, integrator; <keyword arguments>)
 
-Thermodynamic state wrapper carrying the system, integrator, and derived thermodynamic properties 
-(inverse temperature `beta` and pressure `p`). This serves as the definitive container for a 
+Thermodynamic state wrapper carrying the system, integrator, and derived thermodynamic properties
+(inverse temperature `beta` and pressure `p`). This serves as the definitive container for a
 single thermodynamic state across all generalized ensemble methods.
 
 # Arguments
 - `system::System`: The simulation system used to evaluate energies.
 - `integrator`: The integrator used to simulate the system.
-- `temperature=nothing`: Explicit target temperature. If `nothing`, it is inferred from the integrator's 
+- `temperature=nothing`: Explicit target temperature. If `nothing`, it is inferred from the integrator's
     thermostat or implicit temperature coupling.
 - `pressure=nothing`: Explicit target pressure. If `nothing`, it is inferred from the integrator's barostat.
-- `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on 
+- `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on
     the temperature and pressure is generated.
 """
 struct ThermoState{S, I, B, P}
@@ -1033,7 +1108,7 @@ struct ThermoState{S, I, B, P}
     name::String
 end
 
-function ThermoState(sys::System{D, AT, FT}, integrator; 
+function ThermoState(sys::System{D, AT, FT}, integrator;
                      temperature=nothing, pressure=nothing,
                      name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
 
@@ -1067,7 +1142,7 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
     # Calculate beta (inverse temperature) in system-compatible units (e.g., mol/kJ)
     # Molly evaluates energy per mole by default, requiring the molar gas constant R
     kBT_raw = Unitful.R * temp_source
-    
+
     if Unitful.dimension(sys.energy_units) != Unitful.dimension(kBT_raw)
         throw(ArgumentError("Temperature provided is not compatible with system energy units. " *
                             "Expected dimension $(Unitful.dimension(sys.energy_units)), " *
@@ -1082,7 +1157,7 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
     if !isnothing(press_source)
         # Handle scalar pressure or tensor (matrix) pressure representations
         p_raw = press_source isa AbstractArray ? (1/3 * tr(press_source)) : press_source
-        
+
         l_unit = unit(sys.boundary.side_lengths[1])
         v_unit = l_unit^3
         p_unit = sys.energy_units / v_unit
@@ -1093,7 +1168,7 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
     end
 
     final_name = isnothing(name) ? "state_T$(temp_source)" * (isnothing(p_val) ? "" : "_P$(press_source)") : String(name)
-    
+
     return ThermoState{typeof(sys), typeof(integrator), typeof(beta_val), typeof(p_val)}(
         sys, integrator, beta_val, p_val, final_name
     )
@@ -1104,16 +1179,16 @@ end
 
 A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD).
 
-Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles 
-an [`AlchemicalPartition`](@ref) from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed 
-topological and interactive components (e.g., bulk solvent) from state-specific perturbations. 
-During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
+Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles
+an [`AlchemicalPartition`](@ref) from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed
+topological and interactive components (e.g., bulk solvent) from state-specific perturbations.
+During an exchange attempt, cross-energies are evaluated efficiently by querying only the
 necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
 
-Furthermore, upon a successful exchange, coordinates and velocities are no longer physically swapped in memory; 
+Furthermore, upon a successful exchange, coordinates and velocities are no longer physically swapped in memory;
 the system simply updates internal pointers mapping the physical replica to its new thermodynamic state.
 
-This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the interface described there, 
+This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the interface described there,
 routing standard atomic property queries back to the unperturbed master system.
 
 When using `ReplicaSystem` with [`CellListMapNeighborFinder`](@ref), the number of threads used for
@@ -1122,14 +1197,14 @@ This can be done by passing `nbatches=(min(n, 8), n)` to [`CellListMapNeighborFi
 construction where `n` is the number of threads to be used per replica.
 
 # Arguments
-- `thermo_states::AbstractArray{<:ThermoState}`: An array of thermodynamic states defining the 
-    replica ladder. Each state encapsulates its specific `System` interactions, integrator, 
+- `thermo_states::AbstractArray{<:ThermoState}`: An array of thermodynamic states defining the
+    replica ladder. Each state encapsulates its specific `System` interactions, integrator,
     inverse temperature (`beta`), and pressure (`p`). The number of states dictates `n_replicas`.
-- `replica_coords`: The coordinates of the atoms in each replica. The number of elements 
+- `replica_coords`: The coordinates of the atoms in each replica. The number of elements
     must equal the length of `thermo_states`.
-- `replica_velocities=nothing`: The velocities of the atoms in each replica. If not provided, 
+- `replica_velocities=nothing`: The velocities of the atoms in each replica. If not provided,
     they default to zero velocities using the system's units.
-- `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
+- `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults
     to duplicating the boundary of the reference system (the first `ThermoState`).
 - `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: The logger used to record
     the exchange of replicas.
@@ -1164,9 +1239,9 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        exchange_logger=nothing,
                        data=nothing,
                        reuse_neighbors::Bool=true)
-    
+
     n_replicas = length(thermo_states)
-    
+
     if length(replica_coords) != n_replicas
         throw(ArgumentError("Number of replica_coords ($(length(replica_coords))) " *
                             "does not match number of ThermoStates ($n_replicas)"))
@@ -1214,7 +1289,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
     end
 
     partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
-    
+
     betas = [ts.beta for ts in thermo_states]
     integrators = [ts.integrator for ts in thermo_states]
 
@@ -1225,14 +1300,14 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
 
     state_indices = collect(1:n_replicas)
 
-    return ReplicaSystem{D, AT, T, typeof(partition), typeof(betas), typeof(integrators), 
-                         typeof(replica_coords), typeof(replica_velocities), 
-                         typeof(replica_boundaries), typeof(replica_neighbor_finders), 
-                         typeof(replica_loggers), typeof(state_pairwise_inters), 
+    return ReplicaSystem{D, AT, T, typeof(partition), typeof(betas), typeof(integrators),
+                         typeof(replica_coords), typeof(replica_velocities),
+                         typeof(replica_boundaries), typeof(replica_neighbor_finders),
+                         typeof(replica_loggers), typeof(state_pairwise_inters),
                          typeof(state_specific_inter_lists), typeof(state_general_inters),
                          typeof(exchange_logger), typeof(data)}(
-        partition, n_replicas, betas, integrators, replica_coords, replica_velocities, 
-        replica_boundaries, replica_neighbor_finders, replica_loggers, 
+        partition, n_replicas, betas, integrators, replica_coords, replica_velocities,
+        replica_boundaries, replica_neighbor_finders, replica_loggers,
         state_pairwise_inters, state_specific_inter_lists, state_general_inters,
         state_indices, exchange_logger, data
     )
@@ -1284,7 +1359,7 @@ _to_device_inter_lists(x, ::Type{AT}) where {AT} = x
 # -----------------------------------------------------------------------------
 function from_device(sys::System)
     !is_on_gpu(sys) && return sys
-    
+
     nf = sys.neighbor_finder
     if nf isa GPUNeighborFinder || nf isa DistanceNeighborFinder
         cpu_nf = DistanceNeighborFinder(
@@ -1296,7 +1371,7 @@ function from_device(sys::System)
     else
         cpu_nf = nf
     end
-    
+
     return System(
         atoms = from_device(sys.atoms),
         coords = from_device(sys.coords),
@@ -1307,7 +1382,7 @@ function from_device(sys::System)
         pairwise_inters = sys.pairwise_inters,
         specific_inter_lists = _from_device_inter_lists(sys.specific_inter_lists),
         general_inters = sys.general_inters,
-        constraints = sys.constraints, 
+        constraints = sys.constraints,
         virtual_sites = from_device(sys.virtual_sites),
         neighbor_finder = cpu_nf,
         loggers = sys.loggers,
@@ -1320,7 +1395,7 @@ end
 
 function to_device(sys::System, ::Type{AT}) where {AT}
     is_on_gpu(sys) && return sys
-    
+
     nf = sys.neighbor_finder
     if nf isa DistanceNeighborFinder && uses_gpu_neighbor_finder(AT)
         gpu_nf = GPUNeighborFinder(
@@ -1339,7 +1414,7 @@ function to_device(sys::System, ::Type{AT}) where {AT}
     else
         gpu_nf = nf
     end
-    
+
     return System(
         atoms = to_device(sys.atoms, AT),
         coords = to_device(sys.coords, AT),
