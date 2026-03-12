@@ -804,7 +804,7 @@ end
 end
 
 # Specific interaction used to allow different σ/ϵ for 1-4 interactions
-# Assumes no 1-4 Lennard-Jones interaction via the pairwise forces (weight_special = 0)
+# Assumes no 1-4 Lennard-Jones interaction via the pairwise interactions (weight_special = 0)
 struct LennardJones14{S, E, W}
     σ14_mixed::S
     ϵ14_mixed::E
@@ -823,20 +823,17 @@ function Base.:+(l1::LennardJones14, l2::LennardJones14)
     )
 end
 
-@inline function force(inter::LennardJones14, coords_i, coords_j, coords_k,
-                       coords_l, boundary, args...)
+@inline function force(inter::LennardJones14, coords_i, coords_l, boundary, args...)
     σ2 = inter.σ14_mixed ^ 2
     dr = vector(coords_i, coords_l, boundary)
     r2 = sum(abs2, dr)
     six_term = (σ2 / r2) ^ 3
     fl = inter.weight_14 * (24 * inter.ϵ14_mixed / r2) * (2 * six_term ^ 2 - six_term) * dr
     fi = -fl
-    fj, fk = zero(fl), zero(fl)
-    return SpecificForce4Atoms(fi, fj, fk, fl)
+    return SpecificForce2Atoms(fi, fl)
 end
 
-@inline function potential_energy(inter::LennardJones14, coords_i, coords_j, coords_k,
-                                  coords_l, boundary, args...)
+@inline function potential_energy(inter::LennardJones14, coords_i, coords_l, boundary, args...)
     σ2 = inter.σ14_mixed ^ 2
     r2 = sum(abs2, vector(coords_i, coords_l, boundary))
     six_term = (σ2 / r2) ^ 3

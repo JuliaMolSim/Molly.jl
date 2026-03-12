@@ -1508,10 +1508,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             end
         end
         if length(inds_used) > 0
-            push!(specific_inter_array, InteractionList4Atoms(
+            push!(specific_inter_array, InteractionList2Atoms(
                 to_device(torsions.is[inds_used], AT),
-                to_device(torsions.js[inds_used], AT),
-                to_device(torsions.ks[inds_used], AT),
                 to_device(torsions.ls[inds_used], AT),
                 to_device([lj14_inters...], AT),
                 torsions.types[inds_used],

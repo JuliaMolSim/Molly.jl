@@ -75,22 +75,22 @@
 
     inter = Molly.LennardJones14(0.3u"nm", 0.2u"kJ * mol^-1", 1)
     @test isapprox(
-        force(inter, c1, c3, c4, c2, boundary).f4,
+        force(inter, c1, c2, boundary).f4,
         SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
-        force(inter, c1, c2, c4, c3, boundary).f4,
+        force(inter, c1, c3, boundary).f4,
         SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
-        potential_energy(inter, c1, c3, c4, c2, boundary),
+        potential_energy(inter, c1, c2, boundary),
         0.0u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
-        potential_energy(inter, c1, c2, c4, c3, boundary),
+        potential_energy(inter, c1, c3, boundary),
         -0.1170417309u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
