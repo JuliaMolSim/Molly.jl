@@ -14,7 +14,7 @@
     # Lennard-Jones interaction
     pairwise_inters = (LennardJones(
         cutoff=DistanceCutoff(3.0u"nm"),
-        use_neighbors=false,
+        use_neighbors=true,
     ),)
     
     # System on CPU
@@ -35,7 +35,11 @@
         velocities=CuArray(velocities),
         boundary=boundary,
         pairwise_inters=pairwise_inters,
-        neighbor_finder=nothing,
+        neighbor_finder=Molly.GPUNeighborFinder(
+            eligible=CuArray(ones(Bool, n_atoms, n_atoms)),
+            special=CuArray(zeros(Bool, n_atoms, n_atoms)),
+            dist_cutoff=3.0u"nm"
+        ),
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
     )

@@ -813,6 +813,17 @@ function force_kernel!(
         end
     end 
 
+    # Each warp adds its force_smem to global memory directly because `i` is different for each warp
+    if is_active_tile && index_i <= N
+        s_idx_i = sorted_seq[index_i]
+        @inbounds for k in a:b
+            f_i = force_smem[lane, k, warpid]
+            if f_i != zero(T)
+                CUDA.atomic_add!(pointer(fs_mat, s_idx_i * b - (b - k)), -f_i)
+            end
+        end
+    end
+
     if needs_vir
         offset = Int32(16)
         while offset > 0
@@ -841,24 +852,10 @@ function force_kernel!(
                 warp_virial[6, warpid] = vir_yz
             end
         end
-    end
-
-    # Each warp adds its force_smem to global memory directly because `i` is different for each warp
-    sync_threads()
-    
-    if is_active_tile && index_i <= N
-        s_idx_i = sorted_seq[index_i]
-        @inbounds for k in a:b
-            f_i = force_smem[lane, k, warpid]
-            if f_i != zero(T)
-                CUDA.atomic_add!(pointer(fs_mat, s_idx_i * b - (b - k)), -f_i)
-            end
-        end
-    end
-
-    if warpid == a
         
-        if needs_vir && lane == a
+        sync_threads()
+
+        if warpid == a && lane == a
             sum_xx = zero(T); sum_yy = zero(T); sum_zz = zero(T)
             sum_xy = zero(T); sum_xz = zero(T); sum_yz = zero(T)
             
@@ -1119,7 +1116,7 @@ function energy_kernel!(
     end
 
     end # is_active_tile
-    sync_threads()
+    sync_warp()
     if threadIdx().x == a && is_active_tile
         sum_E = zero(T)
         for k in a:warpsize()
