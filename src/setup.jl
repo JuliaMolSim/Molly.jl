@@ -421,7 +421,7 @@ Gromacs file reading should be considered experimental.
     residues in the structure file and add them to the topology. Uses geometric
     arguments to assign them.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
-    with Enzyme.jl and `nonbonded_method` is `:pme`.
+    with Enzyme.jl and `nonbonded_method` is `:pme` or `array_type` is `CuArray`.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
@@ -453,6 +453,9 @@ function System(coord_file::AbstractString,
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
+    end
+    if grad_safe && neighbor_finder_type == GPUNeighborFinder
+        throw(ArgumentError("GPUNeighborFinder is not compatible with grad_safe"))
     end
     if isnothing(dispersion_correction)
         disp_corr = force_field.dispersion_correction
@@ -1520,7 +1523,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
 
     if neighbor_finder_type == NoNeighborFinder
         neighbor_finder = NoNeighborFinder()
-    elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
+    elseif neighbor_finder_type in (nothing, GPUNeighborFinder) &&
+                uses_gpu_neighbor_finder(AT) && !grad_safe
         neighbor_finder = GPUNeighborFinder(
             eligible=to_device(eligible, AT),
             dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
