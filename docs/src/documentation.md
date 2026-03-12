@@ -429,8 +429,8 @@ The following tags are supported:
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
 - `<PeriodicTorsionForce>`: both `<Proper>` and `<Improper>` tags are supported
-- `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported
-- `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported
+- `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
+- `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
 - `<Include>`
 
 The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
@@ -745,6 +745,7 @@ The available specific interactions are:
 The available general interactions are:
 - [`Ewald`](@ref)
 - [`PME`](@ref)
+- [`LJDispersionCorrection`](@ref)
 - [`ImplicitSolventOBC`](@ref)
 - [`ImplicitSolventGBN2`](@ref)
 - [`MullerBrown`](@ref)

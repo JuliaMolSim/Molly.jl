@@ -403,6 +403,9 @@ Gromacs file reading should be considered experimental.
     `nonbonded_method` is `:pme` or `:ewald`.
 - `approximate_pme=true`: whether to use a fast approximation to the erfc
     function, used when `nonbonded_method` is `:pme`.
+- `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
+    dispersion correction. Defaults to the force field setting, which defaults
+    to `true`.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -437,6 +440,7 @@ function System(coord_file::AbstractString,
                 nonbonded_method=:none,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
+                dispersion_correction=nothing,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
@@ -449,6 +453,16 @@ function System(coord_file::AbstractString,
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
+    end
+    if isnothing(dispersion_correction)
+        disp_corr = force_field.dispersion_correction
+    else
+        if dispersion_correction != force_field.dispersion_correction
+            err_str = "dispersion_correction is $dispersion_correction but value in the force " *
+                      "field is $(force_field.dispersion_correction), using $dispersion_correction"
+            report_issue(err_str, strictness)
+        end
+        disp_corr = dispersion_correction
     end
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
@@ -897,7 +911,7 @@ function System(coord_file::AbstractString,
                   separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, strictness)
+                  weight_14_coulomb, disp_corr, strictness)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1218,6 +1232,7 @@ function System(T::Type,
     strictness = default_strictness()
     σs_14, ϵs_14 = [], []
     separate_lj14 = false
+    dispersion_correction = true
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
@@ -1225,7 +1240,7 @@ function System(T::Type,
                   separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, strictness)
+                  weight_14_coulomb, dispersion_correction, strictness)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1316,7 +1331,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 separate_lj14, eligible, special, units, dist_cutoff, constraints_type,
                 rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                weight_14_lj, weight_14_coulomb, strictness)
+                weight_14_lj, weight_14_coulomb, dispersion_correction, strictness)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
 
@@ -1562,7 +1577,12 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     else
         general_inters_is = ()
     end
-    general_inters = (general_inters_ewald..., general_inters_is...)
+    if dispersion_correction
+        general_inters_disp = (LJDispersionCorrection(atoms, T(dist_cutoff), σ_mix, ϵ_mix),)
+    else
+        general_inters_disp = ()
+    end
+    general_inters = (general_inters_ewald..., general_inters_is..., general_inters_disp...)
 
     k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     virtual_sites_dev = (length(virtual_sites) > 0 ? to_device(virtual_sites, AT) : virtual_sites)

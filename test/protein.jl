@@ -100,8 +100,8 @@ end
     @test sys.topology.molecule_atom_counts[1] == 1170
 
     bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
-    @test bench_result.allocs <= 6
-    @test bench_result.memory <= 192
+    @test bench_result.allocs <= 8
+    @test bench_result.memory <= 208
     forces_t = Molly.zero_forces(sys)
     buffers = Molly.init_buffers!(sys, 1)
     bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $buffers, Val(false);
@@ -159,6 +159,8 @@ end
             gis = sys_pme.general_inters
         elseif inter == "all_pme_exact"
             gis = sys_pme_exact.general_inters
+        elseif inter == "lj_only" || inter == "all_cut"
+            gis = sys.general_inters
         else
             gis = ()
         end
@@ -369,7 +371,6 @@ end
     end
 end
 
-
 @testset "Implicit solvent" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml"])...)
 
@@ -382,6 +383,7 @@ end
                 array_type=AT,
                 dist_cutoff=5.0u"nm",
                 nonbonded_method=:none,
+                dispersion_correction=false,
                 implicit_solvent=solvent_model,
                 kappa=1.0u"nm^-1",
             )

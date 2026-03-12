@@ -513,6 +513,14 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             end
 
         elseif entry_name == "NonbondedForce"
+            if haskey(entry, "useDispersionCorrection")
+                dispersion_correction = parse(Bool, lowercase(entry["useDispersionCorrection"]))
+                if !isnothing(ff_param_array[8]) && dispersion_correction != ff_param_array[8]
+                    error("multiple NonbondedForce/LennardJonesForce entries with " *
+                          "different useDispersionCorrection")
+                end
+                ff_param_array[8] = dispersion_correction
+            end
             if haskey(entry, "coulomb14scale")
                 w = parse(T, entry["coulomb14scale"])
                 if ff_param_array[3] && w != ff_param_array[2]
@@ -559,9 +567,13 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             end
 
         elseif entry_name == "LennardJonesForce"
-            if haskey(entry, "useDispersionCorrection") &&
-                                parse(Bool, lowercase(entry["useDispersionCorrection"]))
-                error("useDispersionCorrection not supported for LennardJonesForce")
+            if haskey(entry, "useDispersionCorrection")
+                dispersion_correction = parse(Bool, lowercase(entry["useDispersionCorrection"]))
+                if !isnothing(ff_param_array[8]) && dispersion_correction != ff_param_array[8]
+                    error("multiple NonbondedForce/LennardJonesForce entries with " *
+                          "different useDispersionCorrection")
+                end
+                ff_param_array[8] = dispersion_correction
             end
             if haskey(entry, "lj14scale")
                 w = parse(T, entry["lj14scale"])
@@ -652,6 +664,7 @@ struct MolecularForceField{T, NB, M, D, DA, E, K, KA, C}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
+    dispersion_correction::Bool
     nbfix_pairs::NB
     attributes_from_residue::Vector{String}
     residue_name_replacements::Dict{String,String}
@@ -673,8 +686,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     # Array to allow mutation in read_ff_xml!
     # Torsion order, weight_14_coulomb, weight_14_coulomb_set, weight_14_lj, weight_14_lj_set,
-    #   weight_14_lj_ljforce, weight_14_lj_ljforce_set
-    ff_param_array = ["", one(T), false, one(T), false, one(T), false]
+    #   weight_14_lj_ljforce, weight_14_lj_ljforce_set, dispersion_correction
+    ff_param_array = ["", one(T), false, one(T), false, one(T), false, nothing]
     attributes_from_residue = String[]
     residues = Dict{String, ResidueTemplate}()
     patches = Dict{String, ResiduePatchTemplate}()
@@ -695,6 +708,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     weight_14_coulomb = ff_param_array[2]
     # Use LennardJonesForce 1-4 weighting if present
     weight_14_lj = (ff_param_array[7] ? ff_param_array[6] : ff_param_array[4])
+    dispersion_correction = (isnothing(ff_param_array[8]) ? true : ff_param_array[8])
 
     # Apply residue patches
     for res_name in collect(keys(residues)) # Collect required since residues changes
@@ -889,9 +903,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     return MolecularForceField{T, NB, M, D, DA, E, K, KA, IC}(
         atom_types, atom_type_order, residues, torsion_order, weight_14_coulomb, weight_14_lj,
-        nbfix_pairs_conc, attributes_from_residue, resname_replacements, atomname_replacements,
-        standard_bonds, type_to_class, class_to_types, bond_resolver, angle_resolver,
-        torsion_resolver
+        dispersion_correction, nbfix_pairs_conc, attributes_from_residue, resname_replacements,
+        atomname_replacements, standard_bonds, type_to_class, class_to_types, bond_resolver,
+        angle_resolver, torsion_resolver,
     )
 end
 
