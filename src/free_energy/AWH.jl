@@ -11,6 +11,7 @@ mutable struct AWHStats{T}
     active_λ::Vector{Int}
     f_history::Vector{Vector{T}}
     n_effective_history::Vector{T}
+    ess_history::Vector{Vector{T}}
     stage_history::Vector{Symbol}
     max_delta_f_history::Vector{T}
 end
@@ -76,6 +77,7 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI, SNF, SCN, SVS, SVF, SL
    
     # Weight Accumulators
     w_seg::Vector{T}
+    w2_seg::Vector{T}
     w_last::Vector{T}
 
     scratch_energies::SE
@@ -85,11 +87,15 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI, SNF, SCN, SVS, SVF, SL
     N_eff::T
     N_bias::T          
     n_accum::Int
+    inefficiency::T
 
     in_initial_stage::Bool
     visited_windows::Set{Int}
 
     stats::AWHStats{T}
+
+    # Buffer for autocorrelation scaling
+    cv_buffer::Vector{Vector{T}}
 end
 
 function AWHState(thermo_states::AbstractArray{<:ThermoState};
@@ -167,7 +173,7 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     log_ρ = log.(rho_val)
     scratch_energies = [zero(partition.cached_master_pe) for _ in 1:n_λ]
 
-    stats = AWHStats(Int[], Int[], Vector{FT}[], FT[], Symbol[], FT[])
+    stats = AWHStats(Int[], Int[], Vector{FT}[], FT[], Vector{FT}[], Symbol[], FT[])
 
     return AWHState{FT, typeof(partition), System, Any, 
                     typeof(λ_β), typeof(λ_p), typeof(state_pairwise_inters),
@@ -201,15 +207,18 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
         log_ρ,
         zeros(FT, n_λ),
         zeros(FT, n_λ),
+        zeros(FT, n_λ),
         scratch_energies,
         zeros(FT, n_λ),
         zeros(FT, n_λ),
         zero(FT),
         FT(n_bias),
         0,
+        one(FT),
         true,
         Set{Int}(),
-        stats
+        stats,
+        Vector{FT}[]
     )
 end
 
@@ -243,6 +252,7 @@ mutable struct AWHPMFDeconvolution{N, T, F_CV, MV, BW, SH, TP}
 
     numerator_hist::Array{T, N}
     denominator_hist::Array{T, N}
+    denominator_w2_hist::Array{T, N}
     sample_count::Int
 
     target_beta::T
@@ -340,7 +350,7 @@ function AWHPMFDeconvolution(
 
     return AWHPMFDeconvolution(
         min_vals, bin_widths, n_bins, periodic_flags, final_cv_func,
-        zeros(T, n_bins), zeros(T, n_bins), 0, awh_state.target_β, awh_state.target_p
+        zeros(T, n_bins), zeros(T, n_bins), zeros(T, n_bins), 0, awh_state.target_β, awh_state.target_p
     )
 end
 
@@ -406,14 +416,22 @@ function update_pmf!(
         return nothing
     end
     
+    # Scale by statistical inefficiency to account for temporal correlations
+    ineff = awh_state.inefficiency
+    w_frame_eff = w_frame / ineff
+    count_eff = 1 / ineff
+    w2_eff = 1 / (ineff^2)
+    
     # 4. Exponential Forgetting & Accumulation
     if apply_forgetting && weight_factor < one(T)
         pmf.numerator_hist .*= weight_factor
         pmf.denominator_hist .*= weight_factor
+        pmf.denominator_w2_hist .*= weight_factor^2
     end
     
-    pmf.numerator_hist[current_linear_idx] += w_frame
-    pmf.denominator_hist[current_linear_idx] += one(T)
+    pmf.numerator_hist[current_linear_idx] += w_frame_eff
+    pmf.denominator_hist[current_linear_idx] += count_eff
+    pmf.denominator_w2_hist[current_linear_idx] += w2_eff
     pmf.sample_count += 1
 end
 
@@ -660,6 +678,7 @@ function process_sample(
     awh::AWHState{FT};
     weight_relevance::Real = 0.1,
     coverage_type::Symbol = :reweighted,
+    pmf_calc::Union{AWHPMFDeconvolution, Nothing} = nothing,
 ) where FT
     n_states = length(awh.λ_β)
     coords = awh.active_sys.coords
@@ -706,8 +725,18 @@ function process_sample(
 
     # Accumulate
     awh.w_seg .+= awh.w_last
+    awh.w2_seg .+= awh.w_last .^ 2
     awh.n_accum += 1
-    awh.N_eff   += 1
+
+    # Buffer CV for autocorrelation calculation
+    val = if !isnothing(pmf_calc)
+        pmf_calc.cv_function(coords)
+    else
+        # Fallback to active index if no CV is defined (alchemical mode)
+        awh.active_idx
+    end
+    cv_val = val isa Tuple ? [ustrip(v) for v in val] : [ustrip(val)]
+    push!(awh.cv_buffer, cv_val)
 
     if coverage_type == :reweighted
         # Coordinate-style AWH: one frame may validly contribute to neighboring bins.
@@ -737,10 +766,20 @@ end
 function log_awh_statistics!(state::AWHState, step_idx::Int, delta_f, current_N)
     stats = state.stats
     max_change = maximum(abs.(delta_f))
+    
+    # Calculate Kish ESS per window for the current segment
+    ess = zeros(eltype(state.w_seg), length(state.w_seg))
+    for i in eachindex(ess)
+        if state.w2_seg[i] > 0
+            ess[i] = (state.w_seg[i]^2) / state.w2_seg[i]
+        end
+    end
+
     push!(stats.step_indices, step_idx)
     push!(stats.active_λ, state.active_idx)
     push!(stats.f_history, copy(state.f))
     push!(stats.n_effective_history, current_N)
+    push!(stats.ess_history, ess)
     push!(stats.stage_history, state.in_initial_stage ? :initial : :linear)
     push!(stats.max_delta_f_history, max_change)
 end
@@ -753,16 +792,21 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
         return nothing 
     end
 
+    # Use the current best estimate of inefficiency to determine effective weights
+    ineff = awh_sim.state.inefficiency
+    eff_n_accum = awh_sim.state.n_accum / ineff
+    eff_w_seg = awh_sim.state.w_seg ./ ineff
+
     current_N = if awh_sim.state.in_initial_stage
         awh_sim.state.N_bias
     else
-        # In the linear stage, Eq. (4) uses the reference histogram size
+        # In the linear stage, use the accumulated effective sample size
         # before the current update block is folded in.
-        awh_sim.initial_sampl_n + (awh_sim.state.N_eff - awh_sim.state.n_accum)
+        awh_sim.initial_sampl_n + (awh_sim.state.N_eff - eff_n_accum)
     end
 
-    numerator   = current_N .* awh_sim.state.rho .+ awh_sim.state.w_seg
-    denominator = current_N .* awh_sim.state.rho .+ (awh_sim.state.n_accum .* awh_sim.state.rho)
+    numerator   = current_N .* awh_sim.state.rho .+ eff_w_seg
+    denominator = current_N .* awh_sim.state.rho .+ (eff_n_accum .* awh_sim.state.rho)
     
     # Safe log ratio to prevent 0/0 -> NaN if rho and w_seg underflow
     delta_f = zeros(eltype(numerator), length(numerator))
@@ -809,6 +853,7 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     end
 
     fill!(awh_sim.state.w_seg, 0)
+    fill!(awh_sim.state.w2_seg, 0)
     awh_sim.state.n_accum = 0
     
     return delta_f
@@ -838,15 +883,42 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshol
             awh_sim.state;
             weight_relevance=awh_sim.significant_weight,
             coverage_type=awh_sim.coverage_type,
+            pmf_calc=awh_sim.pmf_calc,
         )
+
+        # Increment N_eff based on the current best estimate of inefficiency
+        # This ensures that N_eff grows even when cv_buffer is not yet full.
+        awh_sim.state.N_eff += (1 / awh_sim.state.inefficiency)
+
+        # Periodically update the statistical inefficiency estimate using CV history
+        if length(awh_sim.state.cv_buffer) >= 50
+            # Use the max inefficiency across all CV dimensions as a conservative scaling factor
+            cv_data = awh_sim.state.cv_buffer
+            n_cv = length(cv_data[1])
+            
+            new_ineff = 1.0
+            for d in 1:n_cv
+                cv_series = [v[d] for v in cv_data]
+                d_ineff = statistical_inefficiency(cv_series).inefficiency
+                new_ineff = max(new_ineff, d_ineff)
+            end
+            
+            # Correct N_eff for the last 50 steps using the improved inefficiency estimate
+            awh_sim.state.N_eff -= (50 / awh_sim.state.inefficiency)
+            awh_sim.state.N_eff += (50 / new_ineff)
+            
+            awh_sim.state.inefficiency = new_ineff
+            empty!(awh_sim.state.cv_buffer)
+        end
 
         if !isnothing(awh_sim.pmf_calc)
             # PMF update logic
             w_fac = one(T)
             if awh_sim.state.in_initial_stage
                 current_N = awh_sim.state.N_bias
-                n_lambda  = T(awh_sim.update_freq)
-                w_fac = current_N / (current_N + n_lambda)
+                # Use effective segment length for forgetting scaling
+                eff_n_lambda  = T(awh_sim.update_freq) / awh_sim.state.inefficiency
+                w_fac = current_N / (current_N + eff_n_lambda)
             end
 
             # Extract System Info
@@ -914,6 +986,7 @@ function extract_awh_data(awh_sim::AWHSimulation)
         f = copy(awh_sim.state.f),
         rho = copy(awh_sim.state.rho),
         log_rho = copy(awh_sim.state.log_rho),
+        ess_history = copy(awh_sim.state.stats.ess_history),
         stats = deepcopy(awh_sim.state.stats)
     )
 end

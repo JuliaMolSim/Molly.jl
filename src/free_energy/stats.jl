@@ -41,7 +41,8 @@ function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,
 
     s2 = sum(abs2, x) / (N - 1) # Sample variance
     if !isfinite(s2) || iszero_value(s2)
-        return StatisticalInefficiency(1.0, 1, N, N, 0)
+        # If the series is constant (stuck), the inefficiency is effectively the length of the series
+        return StatisticalInefficiency(Float64(N), 1, N, 1, 0)
     end
 
     Lmax = (isnothing(maxlag) ? min(N - 1, fld(N, 2)) : min(maxlag, N - 1))
