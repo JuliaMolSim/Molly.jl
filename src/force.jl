@@ -162,11 +162,11 @@ function init_buffers!(sys::System{D}, n_threads) where D
     return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
 end
 
-struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R}
+struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT}
     fs_mat::F
     pe_vec_nounits::P
-    virial::V 
-    virial_nounits::VN 
+    virial::V
+    virial_nounits::VN
     kin_tensor::KT
     pres_tensor::PT
     box_mins::C
@@ -176,6 +176,10 @@ struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R}
     morton_seq_buffer_2::M
     compressed_eligible::R
     compressed_special::R
+    interacting_tiles_i::IT
+    interacting_tiles_j::IT
+    interacting_tiles_type::ITT
+    num_interacting_tiles::NIT
 end
 
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
@@ -185,7 +189,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     n_blocks = cld(N, 32)
     backend = get_backend(sys.coords)
-    
+
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
     pe_vec_noun  = KernelAbstractions.zeros(backend, T, 1)
     virial       = zeros(CT, D, D) .* sys.energy_units
@@ -199,16 +203,22 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
     compressed_eligible = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
     compressed_special = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
-    
+
+    max_interacting_blocks = min(n_blocks * n_blocks, n_blocks * 800)
+    interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
+    interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
+    interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks)
+    num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
+
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
-    
+
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
                       morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
-                      compressed_special)
+                      compressed_special, interacting_tiles_i, interacting_tiles_j,
+                      interacting_tiles_type, num_interacting_tiles)
 end
-
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
 """

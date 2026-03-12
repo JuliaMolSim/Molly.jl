@@ -130,6 +130,9 @@ if GROUP in ("All", "NotGradients")
     include("coupling.jl")
     include("constraints.jl")
     include("analysis.jl")
+    if run_cuda_tests
+        include("gpu_tile_lists.jl")
+    end
 end
 
 if GROUP in ("All", "Protein", "NotGradients")

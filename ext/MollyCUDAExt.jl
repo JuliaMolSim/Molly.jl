@@ -81,34 +81,49 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
                     sys.boundary, Val(D))
     end
 
-    # Set to 8 now that registers will be constrained
-    BLOCK_Y = 8
+    max_tiles = length(buffers.interacting_tiles_i)
+    fill!(buffers.num_interacting_tiles, 0)
     n_blocks_i = cld(N, WARPSIZE)
-    n_blocks_j = cld(n_blocks_i, BLOCK_Y)
+    
+    @cuda blocks=(cld(n_blocks_i, 16), cld(n_blocks_i, 16)) threads=(16, 16) find_interacting_blocks_kernel!(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
+        Val(n_blocks_i), Val(D), max_tiles)
+    
+    num_tiles = Array(buffers.num_interacting_tiles)[1]
+    if num_tiles > max_tiles
+        error("Maximum number of interacting tiles exceeded. Increase buffer size.")
+    end
 
-    # Compile kernel without launching, applying register constraints
-    kernel = @cuda launch=false maxregs=64 always_inline=true force_kernel!(
-        buffers.morton_seq,
-        buffers.fs_mat,
-        buffers.virial_nounits,
-        buffers.box_mins, buffers.box_maxs,
-        sys.coords, sys.velocities, sys.atoms,
-        Val(N), r_cut, Val(sys.force_units), pairwise_inters,
-        sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
-        Val(needs_vir), Val(T), Val(D), Val(BLOCK_Y))
+    if num_tiles > 0
+        # Set to 8 now that registers will be constrained
+        BLOCK_Y = 8
+        n_blocks_launch = cld(num_tiles, BLOCK_Y)
 
-    # Launch compiled kernel
-    kernel(
-        buffers.morton_seq,
-        buffers.fs_mat,
-        buffers.virial_nounits,
-        buffers.box_mins, buffers.box_maxs,
-        sys.coords, sys.velocities, sys.atoms,
-        Val(N), r_cut, Val(sys.force_units), pairwise_inters,
-        sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
-        Val(needs_vir), Val(T), Val(D), Val(BLOCK_Y);
-        threads=(32, BLOCK_Y), blocks=(n_blocks_i, n_blocks_j)
-    )
+        # Compile kernel without launching, applying register constraints
+        kernel = @cuda launch=false maxregs=64 always_inline=true force_kernel!(
+            buffers.morton_seq,
+            buffers.fs_mat,
+            buffers.virial_nounits,
+            sys.coords, sys.velocities, sys.atoms,
+            Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+            sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
+            Val(needs_vir), Val(T), Val(D), Val(BLOCK_Y),
+            buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type, buffers.num_interacting_tiles)
+
+        # Launch compiled kernel
+        kernel(
+            buffers.morton_seq,
+            buffers.fs_mat,
+            buffers.virial_nounits,
+            sys.coords, sys.velocities, sys.atoms,
+            Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+            sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
+            Val(needs_vir), Val(T), Val(D), Val(BLOCK_Y),
+            buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type, buffers.num_interacting_tiles;
+            threads=(32, BLOCK_Y), blocks=n_blocks_launch
+        )
+    end
 
     return buffers
 end
@@ -143,11 +158,25 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
                 Val(N), sys.boundary, Val(D))
     end
-    @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
-            buffers.morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
-            sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
-            sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
-            Val(T), Val(D))
+    max_tiles = length(buffers.interacting_tiles_i)
+    fill!(buffers.num_interacting_tiles, 0)
+    @cuda blocks=(cld(n_blocks, 16), cld(n_blocks, 16)) threads=(16, 16) find_interacting_blocks_kernel!(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
+        Val(n_blocks), Val(D), max_tiles)
+    
+    num_tiles = Array(buffers.num_interacting_tiles)[1]
+    if num_tiles > max_tiles
+        error("Maximum number of interacting tiles exceeded. Increase buffer size.")
+    end
+
+    if num_tiles > 0
+        @cuda blocks=cld(num_tiles, 8) threads=(32, 8) always_inline=true energy_kernel!(
+                buffers.morton_seq, pe_vec_nounits, sys.coords,
+                sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
+                sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
+                Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type, buffers.num_interacting_tiles)
+    end
     return pe_vec_nounits
 end
 
@@ -458,12 +487,39 @@ That's why the calculations are done in the following order:
 ```
 =#
 
+
+function find_interacting_blocks_kernel!(
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+    mins::AbstractArray{C}, maxs::AbstractArray{C}, boundary, r_cut, ::Val{N_blocks}, ::Val{D}, max_tiles
+) where {C, N_blocks, D}
+    i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    j = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
+
+    if i <= N_blocks && j <= N_blocks && i <= j
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+
+        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+        
+        if sum(abs2, d_block) <= r_cut * r_cut
+            idx = CUDA.atomic_add!(pointer(num_interacting_tiles, 1), Int32(1)) + Int32(1)
+            if idx <= max_tiles
+                interacting_tiles_i[idx] = Int32(i)
+                interacting_tiles_j[idx] = Int32(j)
+                # Currently only PARTIALLY_INTERACTING is supported
+                interacting_tiles_type[idx] = UInt8(0)
+            end
+        end
+    end
+    return nothing
+end
+
 function force_kernel!(
     sorted_seq,
     fs_mat,
     global_virial,
-    mins::AbstractArray{C},
-    maxs::AbstractArray{C},
     coords,
     velocities,
     atoms::AbstractArray{A},
@@ -478,24 +534,30 @@ function force_kernel!(
     ::Val{needs_vir},
     ::Val{T},
     ::Val{D},
-    ::Val{BLOCK_Y}) where {N, C, A, force_units, needs_vir, T, D, BLOCK_Y}
+    ::Val{BLOCK_Y},
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles) where {N, A, force_units, needs_vir, T, D, BLOCK_Y}
 
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
     
-    i = blockIdx().x
-    j = (blockIdx().y - a) * BLOCK_Y + threadIdx().y 
-    
+    tile_idx = (blockIdx().x - a) * BLOCK_Y + threadIdx().y 
     lane = threadIdx().x
     warpid = threadIdx().y
     
+    num_tiles = num_interacting_tiles[1]
+    is_active_tile = tile_idx <= num_tiles
+
+    i = is_active_tile ? interacting_tiles_i[tile_idx] : Int32(1)
+    j = is_active_tile ? interacting_tiles_j[tile_idx] : Int32(1)
+    # type = is_active_tile ? interacting_tiles_type[tile_idx] : UInt8(0)
+
     i_0_tile = (i - a) * warpsize()
     j_0_tile = (j - a) * warpsize()
     index_i = i_0_tile + lane
     index_j = j_0_tile + lane
 
-    is_active_j = j <= n_blocks
+    is_active_j = is_active_tile
 
     force_smem = CuStaticSharedArray(T, (32, D, BLOCK_Y))
     opposites_sum = CuStaticSharedArray(T, (32, D, BLOCK_Y))
@@ -517,20 +579,11 @@ function force_kernel!(
     if is_active_j
         # Part 1: Standard non-diagonal tiles
         if j < n_blocks && i < j
-            r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
-            r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
-            r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
-            r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
-            d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-            
-            if sum(abs2, d_block) <= r_cut * r_cut
+            if true
                 s_idx_i = sorted_seq[index_i]
                 coords_i = coords[s_idx_i]
                 vel_i = velocities[s_idx_i]
                 atoms_i = atoms[s_idx_i]
-                
-                d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
-                Bool_excl = sum(abs2, d_pb) <= r_cut * r_cut
                 
                 s_idx_j = sorted_seq[index_j]
                 coords_j = coords[s_idx_j]
@@ -595,13 +648,7 @@ function force_kernel!(
 
         # Part 2: Boundary column tiles
         if j == n_blocks && i < n_blocks
-            r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
-            r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
-            r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
-            r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
-            d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-
-            if sum(abs2, d_block) <= r_cut * r_cut
+            if true
                 s_idx_i = sorted_seq[index_i]
                 coords_i = coords[s_idx_i]
                 vel_i = velocities[s_idx_i]
@@ -796,22 +843,20 @@ function force_kernel!(
         end
     end
 
+    # Each warp adds its force_smem to global memory directly because `i` is different for each warp
     sync_threads()
-
-    if warpid == a 
-        if index_i <= N
-            s_idx_i = sorted_seq[index_i]
-            @inbounds for k in a:b
-                reduced_force_i = zero(T)
-                for w in a:BLOCK_Y
-                    reduced_force_i += force_smem[lane, k, w]
-                end
-
-                if reduced_force_i != zero(T)
-                    CUDA.atomic_add!(pointer(fs_mat, s_idx_i * b - (b - k)), -reduced_force_i)
-                end
+    
+    if is_active_tile && index_i <= N
+        s_idx_i = sorted_seq[index_i]
+        @inbounds for k in a:b
+            f_i = force_smem[lane, k, warpid]
+            if f_i != zero(T)
+                CUDA.atomic_add!(pointer(fs_mat, s_idx_i * b - (b - k)), -f_i)
             end
         end
+    end
+
+    if warpid == a
         
         if needs_vir && lane == a
             sum_xx = zero(T); sum_yy = zero(T); sum_zz = zero(T)
@@ -864,8 +909,6 @@ end
 function energy_kernel!(
     sorted_seq,
     energy_nounits,
-    mins::AbstractArray{C},
-    maxs::AbstractArray{C},
     coords,
     velocities,
     atoms::AbstractArray{A},
@@ -878,38 +921,37 @@ function energy_kernel!(
     special_compressed,
     eligible_compressed,
     ::Val{T},
-    ::Val{D}) where {N, C, A, energy_units, T, D}
+    ::Val{D},
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles) where {N, A, energy_units, T, D}
 
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
-    i = blockIdx().x
-    j = blockIdx().y
+    
+    tile_idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
+    num_tiles = num_interacting_tiles[1]
+    is_active_tile = tile_idx <= num_tiles
+
+    i = is_active_tile ? interacting_tiles_i[tile_idx] : Int32(1)
+    j = is_active_tile ? interacting_tiles_j[tile_idx] : Int32(1)
+    
     i_0_tile = (i - a) * warpsize()
     j_0_tile = (j - a) * warpsize()
     index_i = i_0_tile + laneid()
     index_j = j_0_tile + laneid()
-    E_smem = CuStaticSharedArray(T, 32)
-    E_smem[laneid()] = zero(T)
+    E_smem = CuStaticSharedArray(T, (32, 8)) # max threadIdx.y is 8 here
+    warpid = threadIdx().y
+    E_smem[laneid(), warpid] = zero(T)
     r = Int32((N - 1) % 32 + 1)
 
+    if is_active_tile
     # The code is organised in 4 mutually excluding parts
     if j < n_blocks && i < j
-        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
-        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
-        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
-        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
-        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-        dist_block = sum(abs2, d_block)
-        if dist_block <= r_cut * r_cut
+        if true
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
-            dist_pb = sum(abs2, d_pb)
-
-            Bool_excl = dist_pb <= r_cut * r_cut
             s_idx_j = sorted_seq[index_j]
             coords_j = coords[s_idx_j]
             vel_j = velocities[s_idx_j]
@@ -964,28 +1006,17 @@ function energy_kernel!(
                 #     pe = zero(SVector{1, T})
                 # end
 
-                E_smem[laneid()] += ustrip(pe[1])
+                E_smem[laneid(), warpid] += ustrip(pe[1])
             end
         end
     end
 
     if j == n_blocks && i < n_blocks
-        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
-        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
-        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
-        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
-        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-        dist_block = sum(abs2, d_block)
-
-        if dist_block <= r_cut * r_cut
+        if true
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
-            dist_pb = sum(abs2, d_pb)
-
-            Bool_excl = dist_pb <= r_cut * r_cut
             eligible_bitmask = UInt32(0)
             special_bitmask = UInt32(0)
             eligible_bitmask = eligible_compressed[laneid(), i, j]
@@ -1012,7 +1043,7 @@ function energy_kernel!(
                     vel_i, vel_j,
                     step_n) : zero(SVector{1, T})
 
-                E_smem[laneid()] += ustrip(pe[1])
+                E_smem[laneid(), warpid] += ustrip(pe[1])
             end
         end
     end
@@ -1047,7 +1078,7 @@ function energy_kernel!(
                 boundary,
                 vel_i, vel_j,
                 step_n) : zero(SVector{1, T})
-            E_smem[laneid()] += ustrip(pe[1])
+            E_smem[laneid(), warpid] += ustrip(pe[1])
         end	
     end
 
@@ -1082,16 +1113,17 @@ function energy_kernel!(
                     boundary,
                     vel_i, vel_j,
                     step_n) : zero(SVector{1, T})
-                E_smem[laneid()] += ustrip(pe[1])
+                E_smem[laneid(), warpid] += ustrip(pe[1])
             end
         end
     end
 
+    end # is_active_tile
     sync_threads()
-    if threadIdx().x == a
+    if threadIdx().x == a && is_active_tile
         sum_E = zero(T)
         for k in a:warpsize()
-            sum_E += E_smem[k]
+            sum_E += E_smem[k, warpid]
         end
         CUDA.atomic_add!(pointer(energy_nounits), sum_E)
     end
