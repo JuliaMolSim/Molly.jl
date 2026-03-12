@@ -182,6 +182,7 @@
             ff;
             array_type=AT,
             nonbonded_method=:cutoff,
+            dispersion_correction=false,
             neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
                                     DistanceNeighborFinder),
         )
