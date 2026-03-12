@@ -336,6 +336,7 @@ end
             nonbonded_method=:cutoff,
             implicit_solvent=:gbn2,
             kappa=0.7,
+            grad_safe=true,
         )
     end
 
