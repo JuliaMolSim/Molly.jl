@@ -735,8 +735,8 @@
 
     struct AlwaysShortcut end
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 1.0)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 1.0)
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0)
     for inter in (
             LennardJones(),
             Mie(m=6, n=12),
@@ -807,6 +807,9 @@
     @test Molly.ϵ_mixing(Molly.LorentzMixing(), a1_mie, a_zero) ≈ 0.1u"kJ * mol^-1"
     @test Molly.σ_mixing(Molly.GeometricMixing(), a1_mie, a_zero) ≈ 0.0u"nm"
     @test Molly.ϵ_mixing(Molly.GeometricMixing(), a1_mie, a_zero) ≈ 0.0u"kJ * mol^-1"
+
+    ljdc = LJDispersionCorrection([a1, a2], 1.0u"nm")
+    @test ljdc.factor ≈ -0.00208532857855u"kJ * nm^3 * mol^-1"
 end
 
 @testset "Cutoffs" begin
