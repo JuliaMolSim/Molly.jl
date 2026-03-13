@@ -445,11 +445,67 @@ end
 end
 
 function generalized_morton_code(indices, bits::Integer, D::Integer)
-    code = 0
-    for bit in 0:(bits-1)
+    if D == 3 && bits <= 10
+        x = UInt32(indices[1]) & 0x000003ff
+        y = UInt32(indices[2]) & 0x000003ff
+        z = UInt32(indices[3]) & 0x000003ff
+        
+        x = (x | (x << 16)) & 0x030000ff
+        x = (x | (x << 8))  & 0x0300f00f
+        x = (x | (x << 4))  & 0x030c30c3
+        x = (x | (x << 2))  & 0x09249249
+
+        y = (y | (y << 16)) & 0x030000ff
+        y = (y | (y << 8))  & 0x0300f00f
+        y = (y | (y << 4))  & 0x030c30c3
+        y = (y | (y << 2))  & 0x09249249
+
+        z = (z | (z << 16)) & 0x030000ff
+        z = (z | (z << 8))  & 0x0300f00f
+        z = (z | (z << 4))  & 0x030c30c3
+        z = (z | (z << 2))  & 0x09249249
+
+        return Int32(x | (y << 1) | (z << 2))
+    elseif D == 2 && bits <= 15
+        x = UInt32(indices[1]) & 0x00007fff
+        y = UInt32(indices[2]) & 0x00007fff
+
+        x = (x | (x << 8)) & 0x00ff00ff
+        x = (x | (x << 4)) & 0x0f0f0f0f
+        x = (x | (x << 2)) & 0x33333333
+        x = (x | (x << 1)) & 0x55555555
+
+        y = (y | (y << 8)) & 0x00ff00ff
+        y = (y | (y << 4)) & 0x0f0f0f0f
+        y = (y | (y << 2)) & 0x33333333
+        y = (y | (y << 1)) & 0x55555555
+
+        return Int32(x | (y << 1))
+    else
+        code = 0
+        for bit in 0:(bits-1)
+            for d in 1:D
+                code |= ((indices[d] >> bit) & 1) << (D * bit + (d - 1))
+            end
+        end
+        return Int32(code)
+    end
+end
+
+@kernel function reorder_kernel!(reordered, @Const(original), @Const(seq))
+    i = @index(Global, Linear)
+    @inbounds if i <= length(original)
+        reordered[i] = original[seq[i]]
+    end
+end
+
+@kernel function reverse_reorder_forces_kernel!(fs_mat, @Const(fs_reordered), @Const(seq))
+    i = @index(Global, Linear)
+    D = size(fs_mat, 1)
+    @inbounds if i <= length(seq)
+        orig_idx = seq[i]
         for d in 1:D
-            code |= ((indices[d] >> bit) & 1) << (D * bit + (d - 1))
+            fs_mat[d, orig_idx] += fs_reordered[d, i]
         end
     end
-    return Int32(code)
 end

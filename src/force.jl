@@ -162,7 +162,7 @@ function init_buffers!(sys::System{D}, n_threads) where D
     return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
 end
 
-struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT}
+struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, CR, VR, AR}
     fs_mat::F
     pe_vec_nounits::P
     virial::V
@@ -180,6 +180,10 @@ struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT}
     interacting_tiles_j::IT
     interacting_tiles_type::ITT
     num_interacting_tiles::NIT
+    coords_reordered::CR
+    velocities_reordered::VR
+    atoms_reordered::AR
+    fs_mat_reordered::F
 end
 
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
@@ -191,6 +195,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     backend = get_backend(sys.coords)
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
+    fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N)
     pe_vec_noun  = KernelAbstractions.zeros(backend, T, 1)
     virial       = zeros(CT, D, D) .* sys.energy_units
     virial_nu    = KernelAbstractions.zeros(backend, T, D, D)
@@ -210,6 +215,10 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks)
     num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
 
+    coords_reordered = similar(sys.coords)
+    velocities_reordered = similar(sys.velocities)
+    atoms_reordered = similar(sys.atoms)
+
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
@@ -217,7 +226,9 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
                       morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
                       compressed_special, interacting_tiles_i, interacting_tiles_j,
-                      interacting_tiles_type, num_interacting_tiles)
+                      interacting_tiles_type, num_interacting_tiles,
+                      coords_reordered, velocities_reordered, atoms_reordered,
+                      fs_mat_reordered)
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
@@ -549,6 +560,7 @@ function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, buffers::
     fill!(buffers.kin_tensor, zero(T) * sys.energy_units)
     fill!(buffers.pres_tensor, zero(T) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
     fill!(buffers.fs_mat, zero(T))
+    fill!(buffers.fs_mat_reordered, zero(T))
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0

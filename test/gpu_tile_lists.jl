@@ -12,7 +12,12 @@
     atoms = [Atom(index=i, mass=atom_mass, charge=0.0, σ=σ, ϵ=ϵ) for i in 1:n_atoms]
     
     # Lennard-Jones interaction
-    pairwise_inters = (LennardJones(
+    pairwise_inters_cpu = (LennardJones(
+        cutoff=DistanceCutoff(3.0u"nm"),
+        use_neighbors=false,
+    ),)
+
+    pairwise_inters_gpu = (LennardJones(
         cutoff=DistanceCutoff(3.0u"nm"),
         use_neighbors=true,
     ),)
@@ -22,8 +27,8 @@
         atoms=atoms,
         coords=coords,
         boundary=boundary,
-        pairwise_inters=pairwise_inters,
-        neighbor_finder=Molly.NoNeighborFinder(n_atoms),
+        pairwise_inters=pairwise_inters_cpu,
+        neighbor_finder=Molly.NoNeighborFinder(),
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
     )
@@ -34,7 +39,7 @@
         coords=CuArray(coords),
         velocities=CuArray(velocities),
         boundary=boundary,
-        pairwise_inters=pairwise_inters,
+        pairwise_inters=pairwise_inters_gpu,
         neighbor_finder=Molly.GPUNeighborFinder(
             eligible=CuArray(ones(Bool, n_atoms, n_atoms)),
             special=CuArray(zeros(Bool, n_atoms, n_atoms)),
@@ -49,11 +54,11 @@
     f_gpu_host = Array(f_gpu)
     
     for i in 1:n_atoms
-        @test f_cpu[i] ≈ f_gpu_host[i] atol=1e-4u"kJ * mol^-1 * nm^-1"
+        @test isapprox(f_cpu[i], f_gpu_host[i], atol=1e-10u"kJ * mol^-1 * nm^-1")
     end
 
     pe_cpu = potential_energy(sys_cpu)
     pe_gpu = potential_energy(sys_gpu, nothing)
     
-    @test pe_cpu ≈ pe_gpu atol=1e-3u"kJ * mol^-1"
+    @test isapprox(pe_cpu, pe_gpu, atol=1e-10u"kJ * mol^-1")
 end
