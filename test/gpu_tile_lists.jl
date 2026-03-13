@@ -61,4 +61,64 @@
     pe_gpu = potential_energy(sys_gpu, nothing)
     
     @test isapprox(pe_cpu, pe_gpu, atol=1e-10u"kJ * mol^-1")
+
+    pairwise_inters_gpu_overflow = (LennardJones(
+        cutoff=DistanceCutoff(20.0u"nm"),
+        use_neighbors=true,
+    ),)
+
+    sys_gpu_overflow = System(
+        atoms=CuArray(atoms),
+        coords=CuArray(coords),
+        velocities=CuArray(velocities),
+        boundary=boundary,
+        pairwise_inters=pairwise_inters_gpu_overflow,
+        neighbor_finder=Molly.GPUNeighborFinder(
+            eligible=CuArray(ones(Bool, n_atoms, n_atoms)),
+            special=CuArray(zeros(Bool, n_atoms, n_atoms)),
+            dist_cutoff=20.0u"nm"
+        ),
+        force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
+    )
+
+    function with_tiny_tile_capacity(buffers)
+        return Molly.BuffersGPU(
+            buffers.fs_mat,
+            buffers.pe_vec_nounits,
+            buffers.virial,
+            buffers.virial_nounits,
+            buffers.kin_tensor,
+            buffers.pres_tensor,
+            buffers.box_mins,
+            buffers.box_maxs,
+            buffers.morton_seq,
+            buffers.morton_seq_buffer_1,
+            buffers.morton_seq_buffer_2,
+            buffers.compressed_eligible,
+            buffers.compressed_special,
+            CUDA.zeros(Int32, 1),
+            CUDA.zeros(Int32, 1),
+            CUDA.zeros(UInt8, 1),
+            CUDA.zeros(Int32, 1),
+            CUDA.zeros(Int32, 1),
+            buffers.coords_reordered,
+            buffers.velocities_reordered,
+            buffers.atoms_reordered,
+            buffers.fs_mat_reordered,
+        )
+    end
+
+    overflow_force_buffers = with_tiny_tile_capacity(Molly.init_buffers!(sys_gpu_overflow, 1))
+    overflow_energy_buffers = with_tiny_tile_capacity(Molly.init_buffers!(sys_gpu_overflow, 1, true))
+
+    @test_throws ErrorException Molly.forces!(
+        Molly.zero_forces(sys_gpu_overflow),
+        sys_gpu_overflow,
+        nothing,
+        overflow_force_buffers,
+        Val(false),
+        0,
+    )
+    @test_throws ErrorException potential_energy(sys_gpu_overflow, nothing, overflow_energy_buffers, 0)
 end

@@ -162,7 +162,7 @@ function init_buffers!(sys::System{D}, n_threads) where D
     return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
 end
 
-struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, CR, VR, AR}
+struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR}
     fs_mat::F
     pe_vec_nounits::P
     virial::V
@@ -180,6 +180,7 @@ struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, CR, VR, AR}
     interacting_tiles_j::IT
     interacting_tiles_type::ITT
     num_interacting_tiles::NIT
+    interacting_tiles_overflow::OIT
     coords_reordered::CR
     velocities_reordered::VR
     atoms_reordered::AR
@@ -214,6 +215,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
     interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks)
     num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
+    interacting_tiles_overflow = KernelAbstractions.zeros(backend, Int32, 1)
 
     coords_reordered = similar(sys.coords)
     velocities_reordered = similar(sys.velocities)
@@ -226,7 +228,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
                       morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
                       compressed_special, interacting_tiles_i, interacting_tiles_j,
-                      interacting_tiles_type, num_interacting_tiles,
+                      interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
                       coords_reordered, velocities_reordered, atoms_reordered,
                       fs_mat_reordered)
 end
