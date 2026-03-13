@@ -32,6 +32,37 @@ using StaticArrays
         
         n_threads = 256
         buffers = init_buffers!(sys, n_threads)
+
+        @testset "CUDA Launch Config API" begin
+            Molly.reset_cuda_launch_config!()
+            cfg_auto = Molly.cuda_launch_config()
+            @test cfg_auto.force_block_y === nothing
+            @test cfg_auto.force_maxregs === nothing
+            @test cfg_auto.tile_threads === nothing
+            @test cfg_auto.energy_block_y === nothing
+
+            cfg_explicit = Molly.set_cuda_launch_config!(
+                force_block_y=T == Float64 ? 8 : 12,
+                force_maxregs=56,
+                tile_threads=(16, 8),
+                energy_block_y=4,
+            )
+            cfg_current = Molly.cuda_launch_config()
+            @test cfg_current.force_block_y == cfg_explicit.force_block_y
+            @test cfg_current.force_maxregs == cfg_explicit.force_maxregs
+            @test cfg_current.tile_threads == cfg_explicit.tile_threads
+            @test cfg_current.energy_block_y == cfg_explicit.energy_block_y
+
+            fs_api = forces(sys, find_neighbors(sys))
+            @test length(fs_api) == n_atoms
+
+            Molly.reset_cuda_launch_config!()
+            cfg_reset = Molly.cuda_launch_config()
+            @test cfg_reset.force_block_y === nothing
+            @test cfg_reset.force_maxregs === nothing
+            @test cfg_reset.tile_threads === nothing
+            @test cfg_reset.energy_block_y === nothing
+        end
         
         @testset "Morton Code Granularity (Phase 1)" begin
             # Phase 1 uses 10 bits per dimension (30 bits total)
@@ -75,11 +106,6 @@ using StaticArrays
                 @test fs_mat[2, orig_idx] ≈ 1.0
                 @test fs_mat[3, orig_idx] ≈ 1.0
             end
-        end
-        
-        @testset "Tile Classification (Phase 3)" begin
-            # Classification correctness is implicitly verified via Total Force Consistency.
-            @test true
         end
 
         @testset "Total Force Consistency" begin

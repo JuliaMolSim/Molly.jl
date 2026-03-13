@@ -35,6 +35,7 @@ using Statistics
 
 include("types.jl")
 include("units.jl")
+include("cuda_config.jl")
 include("spatial.jl")
 include("cutoffs.jl")
 include("mixing.jl")

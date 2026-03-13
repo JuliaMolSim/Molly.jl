@@ -11,10 +11,81 @@ using Atomix
 using KernelAbstractions
 
 const WARPSIZE = UInt32(32)
+const MAX_BLOCK_Y = 32
 
 Molly.uses_gpu_neighbor_finder(::Type{<:CuArray}) = true
 
 CUDA.Const(nl::Molly.NoNeighborList) = nl
+
+function env_int(name::AbstractString)
+    value = ENV[name]
+    parsed = tryparse(Int, value)
+    parsed === nothing && error("Invalid integer value for $(name): $(repr(value))")
+    return parsed
+end
+
+function env_override(name::AbstractString)
+    return haskey(ENV, name) ? env_int(name) : nothing
+end
+
+prefer_override(primary, secondary) = primary === nothing ? secondary : primary
+
+function validate_block_y(name::AbstractString, block_y::Int)
+    1 <= block_y <= MAX_BLOCK_Y || error("$(name) must be in 1:$(MAX_BLOCK_Y), got $(block_y)")
+    return block_y
+end
+
+function choose_block_y(conf_threads::Int)
+    return max(1, min(MAX_BLOCK_Y, fld(conf_threads, Int(WARPSIZE))))
+end
+
+function choose_tile_threads(conf_threads::Int)
+    threads_x = min(Int(WARPSIZE), conf_threads)
+    threads_y = max(1, min(MAX_BLOCK_Y, fld(conf_threads, threads_x)))
+    return (threads_x, threads_y)
+end
+
+function force_launch_params(kernel)
+    config = Molly.cuda_launch_config()
+    block_y_override = prefer_override(config.force_block_y, env_override("MOLLY_CUDA_FORCE_BLOCK_Y"))
+    maxregs_override = prefer_override(config.force_maxregs, env_override("MOLLY_CUDA_FORCE_MAXREGS"))
+    block_y_override === nothing || validate_block_y("MOLLY_CUDA_FORCE_BLOCK_Y", block_y_override)
+    maxregs_override === nothing || maxregs_override > 0 || error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(maxregs_override)")
+
+    conf = launch_configuration(kernel.fun)
+    block_y = something(block_y_override, choose_block_y(conf.threads))
+    return (block_y, maxregs_override)
+end
+
+function energy_launch_params(kernel)
+    config = Molly.cuda_launch_config()
+    block_y_override = prefer_override(config.energy_block_y, env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
+    block_y_override === nothing || validate_block_y("MOLLY_CUDA_ENERGY_BLOCK_Y", block_y_override)
+
+    conf = launch_configuration(kernel.fun)
+    block_y = something(block_y_override, choose_block_y(conf.threads))
+    return block_y
+end
+
+function tile_launch_params(kernel)
+    config = Molly.cuda_launch_config()
+    config_tile_threads = config.tile_threads
+    threads_x_override = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_X") : config_tile_threads[1]
+    threads_y_override = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_Y") : config_tile_threads[2]
+    if xor(threads_x_override === nothing, threads_y_override === nothing)
+        error("Set both MOLLY_CUDA_TILE_THREADS_X and MOLLY_CUDA_TILE_THREADS_Y together")
+    end
+
+    if threads_x_override !== nothing
+        threads_x_override > 0 || error("MOLLY_CUDA_TILE_THREADS_X must be positive, got $(threads_x_override)")
+        threads_y_override > 0 || error("MOLLY_CUDA_TILE_THREADS_Y must be positive, got $(threads_y_override)")
+        threads_x_override * threads_y_override <= 1024 || error("MOLLY_CUDA_TILE_THREADS_X * MOLLY_CUDA_TILE_THREADS_Y must be <= 1024")
+        return (threads_x_override, threads_y_override)
+    end
+
+    conf = launch_configuration(kernel.fun)
+    return choose_tile_threads(conf.threads)
+end
 
 macro shfl_multiple_sync(mask, target, width, vars...)
     all_lines = map(vars) do v
@@ -89,12 +160,20 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     max_tiles = length(buffers.interacting_tiles_i)
     fill!(buffers.num_interacting_tiles, 0)
     n_blocks_i = cld(N, WARPSIZE)
-    
-    @cuda blocks=(cld(n_blocks_i, 16), cld(n_blocks_i, 16)) threads=(16, 16) find_interacting_blocks_kernel!(
+    tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
         buffers.num_interacting_tiles, buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
         Val(n_blocks_i), Val(D), max_tiles,
         buffers.compressed_eligible, buffers.compressed_special)
+    tile_threads_xy = tile_launch_params(tile_kernel)
+    
+    tile_kernel(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
+        Val(n_blocks_i), Val(D), max_tiles,
+        buffers.compressed_eligible, buffers.compressed_special;
+        blocks=(cld(n_blocks_i, tile_threads_xy[1]), cld(n_blocks_i, tile_threads_xy[2])),
+        threads=tile_threads_xy)
     
     num_tiles = Array(buffers.num_interacting_tiles)[1]
     if num_tiles > max_tiles
@@ -102,22 +181,32 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     end
 
     if num_tiles > 0
-        # Set to 8 now that registers will be constrained
-        BLOCK_Y = 8
-        n_blocks_launch = cld(num_tiles, BLOCK_Y)
-
-        # Compile kernel without launching, applying register constraints
-        kernel = @cuda launch=false maxregs=64 always_inline=true force_kernel!(
+        auto_kernel = @cuda launch=false always_inline=true force_kernel!(
             buffers.morton_seq,
             buffers.fs_mat_reordered,
             buffers.virial_nounits,
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
             Val(N), r_cut, Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
-            Val(needs_vir), Val(T), Val(D), Val(BLOCK_Y),
+            Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type, buffers.num_interacting_tiles)
+        block_y, maxregs = force_launch_params(auto_kernel)
+        n_blocks_launch = cld(num_tiles, block_y)
 
-        # Launch compiled kernel
+        kernel = if maxregs === nothing
+            auto_kernel
+        else
+            @cuda launch=false maxregs=maxregs always_inline=true force_kernel!(
+                buffers.morton_seq,
+                buffers.fs_mat_reordered,
+                buffers.virial_nounits,
+                buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
+                Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+                sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
+                Val(needs_vir), Val(T), Val(D),
+                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type, buffers.num_interacting_tiles)
+        end
+
         kernel(
             buffers.morton_seq,
             buffers.fs_mat_reordered,
@@ -125,9 +214,9 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
             Val(N), r_cut, Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
-            Val(needs_vir), Val(T), Val(D), Val(BLOCK_Y),
+            Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type, buffers.num_interacting_tiles;
-            threads=(32, BLOCK_Y), blocks=n_blocks_launch
+            threads=(32, block_y), blocks=n_blocks_launch
         )
 
         reverse_reorder_forces_gpu!(buffers, sys)
@@ -173,11 +262,19 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     end
     max_tiles = length(buffers.interacting_tiles_i)
     fill!(buffers.num_interacting_tiles, 0)
-    @cuda blocks=(cld(n_blocks, 16), cld(n_blocks, 16)) threads=(16, 16) find_interacting_blocks_kernel!(
+    tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
         buffers.num_interacting_tiles, buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
         Val(n_blocks), Val(D), max_tiles,
         buffers.compressed_eligible, buffers.compressed_special)
+    tile_threads_xy = tile_launch_params(tile_kernel)
+    tile_kernel(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
+        Val(n_blocks), Val(D), max_tiles,
+        buffers.compressed_eligible, buffers.compressed_special;
+        blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
+        threads=tile_threads_xy)
     
     num_tiles = Array(buffers.num_interacting_tiles)[1]
     if num_tiles > max_tiles
@@ -185,11 +282,18 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     end
 
     if num_tiles > 0
-        @cuda blocks=cld(num_tiles, 8) threads=(32, 8) always_inline=true energy_kernel!(
+        kernel = @cuda launch=false always_inline=true energy_kernel!(
                 buffers.morton_seq, pe_vec_nounits, buffers.coords_reordered,
                 buffers.velocities_reordered, buffers.atoms_reordered, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
                 sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
                 Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type, buffers.num_interacting_tiles)
+        block_y = energy_launch_params(kernel)
+        kernel(
+                buffers.morton_seq, pe_vec_nounits, buffers.coords_reordered,
+                buffers.velocities_reordered, buffers.atoms_reordered, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
+                sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
+                Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type, buffers.num_interacting_tiles;
+                blocks=cld(num_tiles, block_y), threads=(32, block_y))
     end
     return pe_vec_nounits
 end
@@ -583,14 +687,14 @@ function force_kernel!(
     ::Val{needs_vir},
     ::Val{T},
     ::Val{D},
-    ::Val{BLOCK_Y},
-    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles) where {N, A, force_units, needs_vir, T, D, BLOCK_Y}
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles) where {N, A, force_units, needs_vir, T, D}
 
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
+    active_warps = Int32(blockDim().y)
     
-    tile_idx = (blockIdx().x - a) * BLOCK_Y + threadIdx().y 
+    tile_idx = (blockIdx().x - a) * active_warps + threadIdx().y 
     lane = threadIdx().x
     warpid = threadIdx().y
     
@@ -608,11 +712,11 @@ function force_kernel!(
 
     is_active_j = is_active_tile
 
-    force_smem = CuStaticSharedArray(T, (32, D, BLOCK_Y))
-    opposites_sum = CuStaticSharedArray(T, (32, D, BLOCK_Y))
+    force_smem = CuStaticSharedArray(T, (32, D, MAX_BLOCK_Y))
+    opposites_sum = CuStaticSharedArray(T, (32, D, MAX_BLOCK_Y))
 
     if needs_vir
-        warp_virial = CuStaticSharedArray(T, (6, BLOCK_Y))
+        warp_virial = CuStaticSharedArray(T, (6, MAX_BLOCK_Y))
     end
     
     r = Int32((N - 1) % 32 + 1)
@@ -943,7 +1047,7 @@ function force_kernel!(
             sum_xx = zero(T); sum_yy = zero(T); sum_zz = zero(T)
             sum_xy = zero(T); sum_xz = zero(T); sum_yz = zero(T)
             
-            for w in a:BLOCK_Y
+            for w in a:active_warps
                 sum_xx += warp_virial[1, w]
                 if D >= 2
                     sum_yy += warp_virial[2, w]
@@ -1008,8 +1112,9 @@ function energy_kernel!(
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
+    active_warps = Int32(blockDim().y)
     
-    tile_idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
+    tile_idx = (blockIdx().x - a) * active_warps + threadIdx().y
     num_tiles = num_interacting_tiles[1]
     is_active_tile = tile_idx <= num_tiles
 
@@ -1020,7 +1125,7 @@ function energy_kernel!(
     j_0_tile = (j - a) * warpsize()
     index_i = i_0_tile + laneid()
     index_j = j_0_tile + laneid()
-    E_smem = CuStaticSharedArray(T, (32, 8)) # max threadIdx.y is 8 here
+    E_smem = CuStaticSharedArray(T, (32, MAX_BLOCK_Y))
     warpid = threadIdx().y
     E_smem[laneid(), warpid] = zero(T)
     r = Int32((N - 1) % 32 + 1)
