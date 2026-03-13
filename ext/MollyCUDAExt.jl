@@ -54,18 +54,21 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
     r_cut = sys.neighbor_finder.dist_cutoff
+    backend = get_backend(sys.coords)
 
     if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
         morton_bits = 10
         sides = box_sides(sys.boundary)
         w = sides ./ (2^morton_bits)
         sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
-        reorder_system_gpu!(buffers, sys)
         sys.neighbor_finder.initialized = true
         @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
+
+    reorder_system_gpu!(buffers, sys)
+    KernelAbstractions.synchronize(backend)
 
     if sys.boundary isa TriclinicBoundary
         H = SMatrix{3, 3, T}(
@@ -128,6 +131,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         )
 
         reverse_reorder_forces_gpu!(buffers, sys)
+        KernelAbstractions.synchronize(backend)
     end
 
     return buffers
@@ -142,11 +146,13 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
     r_cut = sys.neighbor_finder.dist_cutoff
+    backend = get_backend(sys.coords)
     morton_bits = 10
     sides = box_sides(sys.boundary)
     w = sides ./ (2^morton_bits)
     sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
     reorder_system_gpu!(buffers, sys)
+    KernelAbstractions.synchronize(backend)
     @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))

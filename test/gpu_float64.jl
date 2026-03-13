@@ -74,3 +74,47 @@ using StaticArrays
         @test isapprox(pe_gpu, pe_cpu, rtol=1e-8, atol=1e-10)
     end
 end
+
+@testset "GPU buffers refresh reordered data between force calls" begin
+    if CUDA.functional()
+        n_atoms = 96
+        D = 3
+        T = Float64
+        coords = [SVector{D, T}(0.12 * i, 0.08 * i, 0.05 * i) for i in 1:n_atoms]
+        velocities = [SVector{D, T}(1e-3, -5e-4, 7.5e-4) for _ in 1:n_atoms]
+        boundary = CubicBoundary(T(20.0), T(20.0), T(20.0))
+        atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0)) for i in 1:n_atoms]
+        r_cut = T(5.0)
+
+        sys = System(
+            atoms=CuArray(atoms),
+            coords=CuArray(coords),
+            velocities=CuArray(velocities),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+            neighbor_finder=GPUNeighborFinder(
+                eligible=CuArray(trues(n_atoms, n_atoms)),
+                dist_cutoff=r_cut,
+                n_steps_reorder=25,
+            ),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+
+        neighbors = find_neighbors(sys)
+        buffers = init_buffers!(sys, 256)
+        fs_reused = Molly.zero_forces(sys)
+
+        Molly.forces!(fs_reused, sys, neighbors, buffers, Val(false), 0; n_threads=1)
+        sys.coords .+= sys.velocities .* T(0.5)
+        Molly.forces!(fs_reused, sys, neighbors, buffers, Val(false), 1; n_threads=1)
+
+        fs_fresh = forces(sys, neighbors, 1; n_threads=1)
+        fs_reused_host = Array(fs_reused)
+        fs_fresh_host = Array(fs_fresh)
+
+        for i in 1:n_atoms
+            @test isapprox(fs_reused_host[i], fs_fresh_host[i], rtol=1e-8, atol=1e-10)
+        end
+    end
+end
