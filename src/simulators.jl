@@ -4,7 +4,7 @@ export
     SteepestDescentMinimizer,
     simulate!,
     VelocityVerlet,
-    DPDVerlet,
+    DPDVelocityVerlet,
     Verlet,
     StormerVerlet,
     Langevin,
@@ -280,7 +280,7 @@ end
 end
 
 """
-    DPDVerlet(; <keyword arguments>)
+    DPDVelocityVerlet(; <keyword arguments>)
 
 The modified velocity Verlet integrator for dissipative particle dynamics.
 
@@ -301,19 +301,19 @@ Should be used with [`DPDInteraction`](@ref) as the pairwise interaction.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
-struct DPDVerlet{T, L, C}
+struct DPDVelocityVerlet{T, L, C}
     dt::T
     λ::L
     coupling::C
     remove_CM_motion::Int
 end
 
-function DPDVerlet(; dt, λ=0.65, coupling=nothing, remove_CM_motion=1)
-    return DPDVerlet(dt, λ, coupling, Int(remove_CM_motion))
+function DPDVelocityVerlet(; dt, λ=0.65, coupling=nothing, remove_CM_motion=1)
+    return DPDVelocityVerlet(dt, λ, coupling, Int(remove_CM_motion))
 end
 
 @inline function simulate!(sys,
-                           sim::DPDVerlet,
+                           sim::DPDVelocityVerlet,
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,

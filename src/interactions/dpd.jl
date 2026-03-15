@@ -59,7 +59,7 @@ skin distance that accounts for particle movement between neighbor list rebuilds
     σ::S = 3.0
     r_c::R = 1.0
     dt::D = 0.01
-    use_neighbors::Bool = true
+    use_neighbors::Bool = false
 end
 
 use_neighbors(inter::DPDInteraction) = inter.use_neighbors
@@ -86,14 +86,14 @@ end
                        dr,
                        atom_i,
                        atom_j,
-                       force_units=u"kJ * mol^-1 * nm^-1",
-                       special=false,
-                       coord_i=nothing,
-                       coord_j=nothing,
-                       boundary=nothing,
-                       velocity_i=nothing,
-                       velocity_j=nothing,
-                       step_n=0)
+                       force_units,
+                       special,
+                       coord_i,
+                       coord_j,
+                       boundary,
+                       velocity_i,
+                       velocity_j,
+                       step_n)
     r = norm(dr)
     r_c = inter.r_c
 

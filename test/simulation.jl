@@ -1236,10 +1236,10 @@ end
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
-        k=1.0,
+        k=1.0, # DPD uses reduced units where kB = 1; default_k(NoUnits) ≈ 0.008314
     )
 
-    simulator = DPDVerlet(dt=dt, λ=0.65)
+    simulator = DPDVelocityVerlet(dt=dt, λ=0.65)
     @time simulate!(sys, simulator, n_steps; n_threads=1)
 
     temps = values(sys.loggers.temp)
@@ -1247,7 +1247,7 @@ end
     @info "DPD mean temperature (second half): $mean_temp, target kBT: $kBT"
     @test 0.5 < mean_temp < 1.5
 
-    total_momentum = sum(sys.velocities .* [ai.mass for ai in atoms])
+    total_momentum = sum(sys.velocities .* mass.(atoms))
     @test all(abs.(total_momentum) .< 1.0)
 end
 

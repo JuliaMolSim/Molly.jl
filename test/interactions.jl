@@ -1003,8 +1003,8 @@ end
 
     inter = DPDInteraction(a=a_param, γ=γ_param, σ=σ_param, r_c=r_c, dt=dt)
 
-    @test use_neighbors(inter)
-    @test !use_neighbors(DPDInteraction(use_neighbors=false))
+    @test !use_neighbors(inter)
+    @test use_neighbors(DPDInteraction(use_neighbors=true))
 
     a1 = Atom(index=1, mass=1.0, charge=0.0, σ=0.0, ϵ=0.0)
     a2 = Atom(index=2, mass=1.0, charge=0.0, σ=0.0, ϵ=0.0)
