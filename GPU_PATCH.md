@@ -97,6 +97,241 @@
   - The benchmark harness now warms up both force and energy profiling passes so
     the reported stage timings are steady-state rather than first-use numbers.
 
+## 0.6. What has been tested after the dense-path recovery
+
+  ### Baseline used for all follow-up experiments:
+
+  - The recovered dense-force / split force-energy state was committed as:
+      - `6b3cff47`
+      - commit message: `Recover dense GPU nonbonded paths and profiling`
+  - Before trying any further optimization, the validation baseline was:
+      - `CUDA_VISIBLE_DEVICES=1 julia +1.11 -e 'include("test/gpu_optimizations.jl")'`
+      - result: `635 / 635` passing tests
+  - The main comparison runs were:
+      - `CUDA_VISIBLE_DEVICES=1 MOLLY_CUDA_BENCH_SAMPLES=2 MOLLY_CUDA_TILE_BENCH_ATOMS=1024 julia +1.11 benchmark/benchmark_gpu_tiles.jl`
+      - `CUDA_VISIBLE_DEVICES=1 MOLLY_CUDA_DEVICE=0 MOLLY_CUDA_BENCH_SAMPLES=1 MOLLY_CUDA_BENCH_MIN_STEPS=0 julia +1.11 benchmark/new_prot_bench.jl`
+  - These were chosen because they cover:
+      - one dense synthetic case where the `66ccb5`-style path should win
+      - one sparse synthetic case where the tile path should remain competitive
+      - one reduced real protein case where preprocessing costs dominate and bad
+        “optimizations” show up quickly
+
+  ### Experiment A: compute mask compression only for interacting tiles
+
+  - Why it was worth trying:
+      - The reduced protein profile shows `compress_boolean_matrices!` as a
+        major cost.
+      - The existing tile path compresses the entire upper-triangular tile space
+        before box pruning, even though many tiles are later discarded.
+      - A natural idea is to push compression into `find_interacting_blocks_kernel!`
+        so masks are produced only for tiles that already passed the box test.
+  - How it was implemented:
+      - `find_interacting_blocks_kernel!` in `ext/MollyCUDAExt.jl` was extended
+        to receive `sorted_seq`, `eligible`, and `special`.
+      - The kernel then computed per-tile compressed masks on demand and used
+        those masks immediately to classify tiles as clean or masked.
+      - The old global `compress_boolean_matrices!` launch was removed from the
+        tile-list force and energy paths only; dense paths were left unchanged.
+  - How it was tested:
+      - First by correctness:
+          - `CUDA_VISIBLE_DEVICES=1 julia +1.11 -e 'include("test/gpu_optimizations.jl")'`
+      - Then by performance on the synthetic benchmark:
+          - `CUDA_VISIBLE_DEVICES=1 MOLLY_CUDA_BENCH_SAMPLES=2 MOLLY_CUDA_TILE_BENCH_ATOMS=1024 julia +1.11 benchmark/benchmark_gpu_tiles.jl`
+      - Then by re-checking the reduced protein benchmark if the synthetic run
+        looked promising.
+  - What happened:
+      - After fixing one wiring bug around the last partial tile size, the code
+        was correct.
+      - But the tile-finding stage became much more expensive than the original
+        split `compress + tile_find` design.
+      - The sparse synthetic case regressed sharply, which means the work was
+        not actually being reduced; it was just being moved into a slower part of
+        the pipeline.
+  - Conclusion:
+      - This is the wrong granularity for the current code structure.
+      - On-demand compression inside tile finding should not be pursued further
+        without a more substantial redesign of the tile-builder kernel.
+
+  ### Experiment B: use warp votes inside the energy kernels to skip inactive work
+
+  - Why it was worth trying:
+      - The force kernels already use `CUDA.vote_any_sync` in their clean-tile
+        fast paths to avoid needless work when no lane has an active pair.
+      - The energy kernels still evaluated the branch structure more directly.
+      - Adding the same warp vote seemed like a small, local optimization with
+        limited surface area.
+  - How it was implemented:
+      - `energy_kernel!` and `dense_energy_kernel!` in `ext/MollyCUDAExt.jl`
+        were patched to introduce `any_active = CUDA.vote_any_sync(...)` around
+        the pairwise potential calculation.
+      - The initial patch touched both the uniform-loop and the diagonal /
+        partial-tile branches.
+  - How it was tested:
+      - First with the GPU correctness suite:
+          - `CUDA_VISIBLE_DEVICES=1 julia +1.11 -e 'include("test/gpu_optimizations.jl")'`
+      - After the first correctness failure, the patch was restricted to the
+        uniform-loop branches and tested again with the same command.
+  - What happened:
+      - The first version produced wrong energies because the diagonal branches
+        have lane-dependent loop bounds; a warp-wide vote is not equivalent
+        there.
+      - The restricted version avoided the obvious numerical error, but the test
+        run became unreliable enough that it was not a safe direction to keep.
+      - At that point the optimization had already failed the main criterion:
+        “small, obviously safe, and clearly heading the right way.”
+  - Conclusion:
+      - The energy kernels are more sensitive to this kind of warp-synchronous
+        change than the force kernels.
+      - Any future warp-vote use in the energy path needs a more formal
+        case-by-case proof of warp participation, not a quick transplant from
+        the force code.
+
+  ### Experiment C: make `compress_boolean_matrices!` multi-warp per block
+
+  - Why it was worth trying:
+      - `compress_boolean_matrices!` is still one of the clearest remaining
+        hotspots on the reduced protein benchmark.
+      - The kernel is embarrassingly parallel across `j` tiles for a fixed `i`
+        tile, so mapping multiple warps to a block looked like a plausible way to
+        increase throughput without changing the bit-packing logic.
+  - How it was implemented:
+      - A new launch helper selected a `block_y` for compression.
+      - `compress_boolean_matrices!` was rewritten so `threadIdx().y` selected
+        which `j` tile a warp handled inside a block.
+      - All call sites in `ext/MollyCUDAExt.jl` and the benchmark profiling code
+        were updated to launch `(32, block_y)` threads and fewer `y` blocks.
+  - How it was tested:
+      - First with the GPU correctness suite:
+          - `CUDA_VISIBLE_DEVICES=1 julia +1.11 -e 'include("test/gpu_optimizations.jl")'`
+      - Then with the synthetic benchmark:
+          - `CUDA_VISIBLE_DEVICES=1 MOLLY_CUDA_BENCH_SAMPLES=2 MOLLY_CUDA_TILE_BENCH_ATOMS=1024 julia +1.11 benchmark/benchmark_gpu_tiles.jl`
+      - Then with an explicit block-size sanity check:
+          - `CUDA_VISIBLE_DEVICES=1 MOLLY_CUDA_COMPRESS_BLOCK_Y=8 MOLLY_CUDA_BENCH_SAMPLES=1 MOLLY_CUDA_TILE_BENCH_ATOMS=1024 julia +1.11 benchmark/benchmark_gpu_tiles.jl`
+  - What happened:
+      - Correctness remained intact.
+      - Performance collapsed across the board, including the profiling stages
+        themselves, which started reporting multi-millisecond times for nearly
+        every stage on the small synthetic case.
+      - The explicit `MOLLY_CUDA_COMPRESS_BLOCK_Y=8` sanity run did not rescue
+        the result, so the issue was not just a poor automatic block-size pick.
+  - Conclusion:
+      - The naive multi-warp mapping is not compatible with the current memory
+        access pattern of this kernel.
+      - This path should not be revisited without a deeper analysis of memory
+        access, occupancy, and how the compressed arrays are laid out.
+
+  ### Overall result of the post-recovery experiments:
+
+  - All three experiments were reverted.
+  - This was intentional: none of them met the “granular change moving in the
+    right direction” bar.
+  - The repository was brought back to the committed recovery state, and the
+    baseline validation was re-run:
+      - `CUDA_VISIBLE_DEVICES=1 julia +1.11 -e 'include("test/gpu_optimizations.jl")'`
+      - result: `635 / 635` passing tests
+  - Therefore the current verified project state is still exactly the split
+    policy captured in `6b3cff47`:
+      - dense force path recovered and auto-selected for dense workloads
+      - tile force path retained for sparse workloads
+      - dense energy path exists but stays opt-in
+      - no additional post-commit optimization has yet been proven beneficial
+
+  ### What this means for the next round of work:
+
+  - The remaining cost in the retained tile path is real, but the last three
+    “local” ideas all failed for understandable reasons:
+      - moving work into tile finding destroyed sparsity wins
+      - warp-vote changes in energy kernels are easy to get wrong
+      - more warps per compression block is not automatically better
+  - The next optimization should therefore start from a more explicit
+    performance model, not from another small speculative kernel tweak.
+  - The most defensible next directions are:
+      - reduce duplicate preprocessing between force and energy evaluations
+      - redesign mask compression with memory layout in mind
+      - further specialize the tile path only after proving the access pattern
+        and synchronization model are sound
+
+## 0.7. Current iteration: triangular-mask stabilization and compression micro-optimizations
+
+  ### Why this iteration was needed:
+
+  - After switching compressed mask storage to upper-triangular indexing, the
+    dense force path failed to compile on GPU due dynamic dispatch around
+    `upper_tile_index`.
+  - In parallel, the reduced protein profile still showed mask compression as a
+    dominant preprocessing cost (`~3.9 ms` in the tile energy path), so small,
+    low-risk compression-kernel improvements were tested.
+
+  ### Change 1: fix GPU compile regression in dense force path
+
+  - File: `ext/MollyCUDAExt.jl`
+  - `dense_force_kernel!` now casts block-derived tile indices to `Int32` at
+    assignment:
+      - `i = Int32(blockIdx().x)`
+      - `j = Int32((blockIdx().y - a) * BLOCK_Y + threadIdx().y)`
+  - Result:
+      - The `InvalidIRError` (`unsupported dynamic function invocation` for
+        `upper_tile_index`) is gone.
+
+  ### Change 2: strengthen index-helper type stability
+
+  - File: `ext/MollyCUDAExt.jl`
+  - Added inline integer-wrapper methods:
+      - `upper_tile_row_start(::Integer, ::Integer)`
+      - `upper_tile_index(::Integer, ::Integer, ::Integer)`
+      - `upper_tile_ij(::Integer, ::Integer)`
+  - Also cast `dense_energy_kernel!` tile indices to `Int32` for consistency.
+  - Result:
+      - Dense force/energy kernels now use a more robust path for tile-index
+        helper calls.
+
+  ### Change 3: compression-kernel memory-traffic cleanup
+
+  - File: `ext/MollyCUDAExt.jl`
+  - `compress_boolean_matrices!` now stages tile-`j` sorted indices in shared
+    memory once per tile (`CuStaticSharedArray(Int32, 32)`), then reuses them
+    across lanes.
+  - This removes repeated warp-wide reloads of identical
+    `sorted_seq[j_0_tile + m]` values.
+
+  ### Change 4: compression-kernel tile decode cleanup
+
+  - File: `ext/MollyCUDAExt.jl`
+  - `compress_boolean_matrices!` now performs `tile_idx -> (i,j)` decode only
+    on the warp leader and broadcasts via `CUDA.shfl_sync`.
+  - This removes redundant per-lane decode work.
+
+  ### Validation commands used in this iteration:
+
+  - Correctness:
+      - `CUDA_VISIBLE_DEVICES=1 julia +1.11 -e 'include("test/gpu_optimizations.jl")'`
+      - Re-run after each granular step.
+  - Synthetic profiling:
+      - `CUDA_VISIBLE_DEVICES=1 MOLLY_CUDA_BENCH_SAMPLES=2 MOLLY_CUDA_TILE_BENCH_ATOMS=1024 julia +1.11 benchmark/benchmark_gpu_tiles.jl`
+  - Reduced protein profiling:
+      - `CUDA_VISIBLE_DEVICES=1 MOLLY_CUDA_DEVICE=0 MOLLY_CUDA_BENCH_SAMPLES=1 MOLLY_CUDA_BENCH_MIN_STEPS=0 julia +1.11 benchmark/new_prot_bench.jl`
+
+  ### Measured outcomes:
+
+  - Correctness:
+      - `test/gpu_optimizations.jl`: `635 / 635` passing after each fix set.
+  - Synthetic benchmark (1024 atoms):
+      - Compression remains low (`~0.017–0.029 ms`) and behavior remains stable.
+  - Reduced protein benchmark:
+      - Energy-path compression remains the dominant preprocessing stage at
+        roughly `3.86–4.13 ms` depending on policy/sample.
+      - Net effect of these micro-optimizations on the protein-level
+        `compress_ms` is neutral to very small (no robust macro reduction yet).
+
+  ### Interpretation from this iteration:
+
+  - The crucial compile regression from the triangular-mask transition is fixed.
+  - The remaining high `compress_ms` appears dominated by core matrix-read work
+    in mask construction, not by index decoding or repeated `sorted_seq` loads.
+  - Therefore, further gains likely require a more structural preprocessing
+    redesign (e.g., reducing the amount of pair-mask materialization), not more
+    arithmetic micro-tuning inside the current kernel.
+
 ## 1. Baseline and measurement harness
 
   ### Patch order:

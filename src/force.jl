@@ -193,6 +193,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     C = eltype(eltype(sys.coords))
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     n_blocks = cld(N, 32)
+    n_upper_tiles = n_blocks * (n_blocks + 1) ÷ 2
     backend = get_backend(sys.coords)
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
@@ -207,8 +208,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     morton_seq = KernelAbstractions.zeros(backend, Int32, N)
     morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N)
     morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
-    compressed_eligible = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
-    compressed_special = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
+    compressed_eligible = KernelAbstractions.zeros(backend, UInt32, 32, n_upper_tiles)
+    compressed_special = KernelAbstractions.zeros(backend, UInt32, 32, n_upper_tiles)
 
     max_interacting_blocks = min(n_blocks * n_blocks, n_blocks * 800)
     interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)

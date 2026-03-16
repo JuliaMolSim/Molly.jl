@@ -64,7 +64,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             sys.neighbor_finder.initialized = true
         end
         compress_ms = gpu_stage_time_ms!() do
-            @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true ext.compress_boolean_matrices!(
+            @cuda blocks=ext.upper_tile_count(n_blocks) threads=(32, 1) always_inline=true ext.compress_boolean_matrices!(
                 buffers.morton_seq,
                 sys.neighbor_finder.eligible,
                 sys.neighbor_finder.special,
@@ -277,7 +277,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
     end
 
     compress_ms = gpu_stage_time_ms!() do
-        @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true ext.compress_boolean_matrices!(
+        @cuda blocks=ext.upper_tile_count(n_blocks) threads=(32, 1) always_inline=true ext.compress_boolean_matrices!(
             buffers.morton_seq,
             sys.neighbor_finder.eligible,
             sys.neighbor_finder.special,

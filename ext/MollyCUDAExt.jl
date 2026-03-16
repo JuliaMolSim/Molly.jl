@@ -45,6 +45,44 @@ function choose_tile_threads(conf_threads::Int)
     return (threads_x, threads_y)
 end
 
+upper_tile_count(n_blocks::Integer) = (Int64(n_blocks) * (Int64(n_blocks) + 1)) ÷ 2
+
+@inline upper_tile_count_i32(n_blocks::Int32) = Int32(upper_tile_count(n_blocks))
+
+@inline function upper_tile_row_start(i::Int32, n_blocks::Int32)
+    r = Int64(i - Int32(1))
+    n = Int64(n_blocks)
+    return Int32((r * (2 * n - r + 1)) ÷ 2 + 1)
+end
+
+@inline upper_tile_row_start(i::Integer, n_blocks::Integer) = upper_tile_row_start(Int32(i), Int32(n_blocks))
+
+@inline function upper_tile_index(i::Int32, j::Int32, n_blocks::Int32)
+    r = Int64(i - Int32(1))
+    n = Int64(n_blocks)
+    return Int32((r * (2 * n - r + 1)) ÷ 2 + Int64(j - i + Int32(1)))
+end
+
+@inline upper_tile_index(i::Integer, j::Integer, n_blocks::Integer) = upper_tile_index(Int32(i), Int32(j), Int32(n_blocks))
+
+@inline function upper_tile_ij(tile_idx::Int32, n_blocks::Int32)
+    lo = Int32(1)
+    hi = n_blocks
+    while lo < hi
+        mid = Int32(fld(Int64(lo) + Int64(hi), 2))
+        if upper_tile_row_start(mid + Int32(1), n_blocks) <= tile_idx
+            lo = mid + Int32(1)
+        else
+            hi = mid
+        end
+    end
+    i = lo
+    j = i + (tile_idx - upper_tile_row_start(i, n_blocks))
+    return i, j
+end
+
+@inline upper_tile_ij(tile_idx::Integer, n_blocks::Integer) = upper_tile_ij(Int32(tile_idx), Int32(n_blocks))
+
 function force_path_mode()
     mode = get(ENV, "MOLLY_CUDA_FORCE_PATH", "auto")
     mode in ("auto", "tile", "dense") || error("MOLLY_CUDA_FORCE_PATH must be one of auto, tile, dense; got $(repr(mode))")
@@ -189,7 +227,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         w = sides ./ (2^morton_bits)
         sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
         sys.neighbor_finder.initialized = true
-        @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+        @cuda blocks=upper_tile_count(n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
@@ -293,7 +331,7 @@ function pairwise_forces_loop_gpu_dense!(buffers, sys::System{D, <:CuArray, T}, 
         w = sides ./ (2^morton_bits)
         sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
         sys.neighbor_finder.initialized = true
-        @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+        @cuda blocks=upper_tile_count(n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
             buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
             buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
@@ -363,7 +401,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
     reorder_system_gpu!(buffers, sys)
     KernelAbstractions.synchronize(backend)
-    @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+    @cuda blocks=upper_tile_count(n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     if sys.boundary isa TriclinicBoundary
@@ -426,7 +464,7 @@ function pairwise_pe_loop_gpu_dense!(pe_vec_nounits, buffers, sys::System{D, <:C
     sides = box_sides(sys.boundary)
     w = sides ./ (2^morton_bits)
     sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
-    @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+    @cuda blocks=upper_tile_count(n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
         buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
         buffers.compressed_eligible, buffers.compressed_special, Val(N))
     if sys.boundary isa TriclinicBoundary
@@ -694,26 +732,42 @@ end
 function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
                                     compressed_eligible, compressed_special, ::Val{N}) where N
     a = Int32(1)
+    lane = laneid()
     n_blocks = ceil(Int32, N / 32)
+    n_upper_tiles = upper_tile_count_i32(n_blocks)
     r = Int32((N - 1) % 32 + 1)
-    i = blockIdx().x
-    j = blockIdx().y
+    tile_idx = blockIdx().x
+    tile_idx > n_upper_tiles && return nothing
+    i = Int32(0)
+    j = Int32(0)
+    if lane == a
+        i, j = upper_tile_ij(tile_idx, n_blocks)
+    end
+    i = CUDA.shfl_sync(0xFFFFFFFF, i, a, warpsize())
+    j = CUDA.shfl_sync(0xFFFFFFFF, j, a, warpsize())
     i_0_tile = (i - a) * warpsize()
     j_0_tile = (j - a) * warpsize()
-    index_i = i_0_tile + laneid()
-    index_j = j_0_tile + laneid()
+    index_i = i_0_tile + lane
+    j_indices_smem = CuStaticSharedArray(Int32, 32)
 
-    if j < n_blocks && i <= j
+    if j < n_blocks || (j == n_blocks && lane <= r)
+        j_indices_smem[lane] = sorted_seq[j_0_tile + lane]
+    else
+        j_indices_smem[lane] = Int32(1)
+    end
+    sync_warp()
+
+    if j < n_blocks
         s_idx_i = sorted_seq[index_i]
         eligible_bitmask = UInt32(0)
         special_bitmask = UInt32(0)
         for m in a:warpsize()
-            s_idx_j = sorted_seq[j_0_tile + m]
+            s_idx_j = j_indices_smem[m]
             eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
             special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
         end
-        compressed_eligible[laneid(), i, j] = eligible_bitmask
-        compressed_special[laneid(), i, j] = special_bitmask
+        compressed_eligible[lane, tile_idx] = eligible_bitmask
+        compressed_special[lane, tile_idx] = special_bitmask
     end
 
     if j == n_blocks && i < j
@@ -721,29 +775,29 @@ function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
         eligible_bitmask = UInt32(0)
         special_bitmask = UInt32(0)
         for m in a:r
-            s_idx_j = sorted_seq[j_0_tile + m]
+            s_idx_j = j_indices_smem[m]
             eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
             special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
         end
         eligible_bitmask = (eligible_bitmask >> r) | (eligible_bitmask << (warpsize() - r))
         special_bitmask = (special_bitmask >> r) | (special_bitmask << (warpsize() - r))
-        compressed_eligible[laneid(), i, j] = eligible_bitmask
-        compressed_special[laneid(), i, j] = special_bitmask
+        compressed_eligible[lane, tile_idx] = eligible_bitmask
+        compressed_special[lane, tile_idx] = special_bitmask
     end
 
-    if j == n_blocks && i == j && laneid() <= r
+    if j == n_blocks && i == j && lane <= r
         s_idx_i = sorted_seq[index_i]
         eligible_bitmask = UInt32(0)
         special_bitmask = UInt32(0)
         for m in a:r
-            s_idx_j = sorted_seq[j_0_tile + m]
+            s_idx_j = j_indices_smem[m]
             eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
             special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
         end
         eligible_bitmask = (eligible_bitmask >> r) | (eligible_bitmask << (warpsize() - r))
         special_bitmask = (special_bitmask >> r) | (special_bitmask << (warpsize() - r))
-        compressed_eligible[laneid(), i, j] = eligible_bitmask
-        compressed_special[laneid(), i, j] = special_bitmask
+        compressed_eligible[lane, tile_idx] = eligible_bitmask
+        compressed_special[lane, tile_idx] = special_bitmask
     end
     return nothing
 end
@@ -805,8 +859,9 @@ function find_interacting_blocks_kernel!(
         if sum(abs2, d_block) <= r_cut * r_cut
             is_clean = (i < j) && (j < N_blocks)
             if is_clean
+                mask_idx = upper_tile_index(Int32(i), Int32(j), Int32(N_blocks))
                 for k in 1:32
-                    if compressed_eligible[k, i, j] != 0xFFFFFFFF || compressed_special[k, i, j] != 0
+                    if compressed_eligible[k, mask_idx] != 0xFFFFFFFF || compressed_special[k, mask_idx] != 0
                         is_clean = false
                         break
                     end
@@ -866,6 +921,7 @@ function force_kernel!(
     i = interacting_tiles_i[tile_idx]
     j = interacting_tiles_j[tile_idx]
     type = interacting_tiles_type[tile_idx]
+    mask_idx = upper_tile_index(i, j, n_blocks)
 
     i_0_tile = (i - a) * warpsize()
     j_0_tile = (j - a) * warpsize()
@@ -938,8 +994,8 @@ function force_kernel!(
                     end
                 end
             else # EXCLUDED
-                eligible_bitmask = eligible_compressed[lane, i, j]
-                special_bitmask = special_compressed[lane, i, j]
+                eligible_bitmask = eligible_compressed[lane, mask_idx]
+                special_bitmask = special_compressed[lane, mask_idx]
 
                 for m in a:warpsize()
                     sync_warp()
@@ -1000,8 +1056,8 @@ function force_kernel!(
             vel_i = velocities[index_i]
             atoms_i = atoms[index_i]
             
-            eligible_bitmask = eligible_compressed[lane, i, j]
-            special_bitmask = special_compressed[lane, i, j]
+            eligible_bitmask = eligible_compressed[lane, mask_idx]
+            special_bitmask = special_compressed[lane, mask_idx]
 
             for m in a:r
                 idx_j = j_0_tile + m
@@ -1053,8 +1109,8 @@ function force_kernel!(
         vel_i = velocities[index_i]
         atoms_i = atoms[index_i]
         
-        eligible_bitmask = eligible_compressed[lane, i, j]
-        special_bitmask = special_compressed[lane, i, j]
+        eligible_bitmask = eligible_compressed[lane, mask_idx]
+        special_bitmask = special_compressed[lane, mask_idx]
 
         for m in (lane + a) : warpsize()
             idx_j = j_0_tile + m
@@ -1106,8 +1162,8 @@ function force_kernel!(
             vel_i = velocities[index_i]
             atoms_i = atoms[index_i]
             
-            eligible_bitmask = eligible_compressed[lane, i, j]
-            special_bitmask = special_compressed[lane, i, j]
+            eligible_bitmask = eligible_compressed[lane, mask_idx]
+            special_bitmask = special_compressed[lane, mask_idx]
 
             for m in (lane + a) : r
                 idx_j = j_0_tile + m
@@ -1240,8 +1296,8 @@ function dense_force_kernel!(
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
 
-    i = blockIdx().x
-    j = (blockIdx().y - a) * BLOCK_Y + threadIdx().y
+    i = Int32(blockIdx().x)
+    j = Int32((blockIdx().y - a) * BLOCK_Y + threadIdx().y)
 
     lane = threadIdx().x
     warpid = threadIdx().y
@@ -1290,9 +1346,10 @@ function dense_force_kernel!(
                 shuffle_idx = lane
                 atoms_j = atoms[s_idx_j]
                 atom_fields = getfield.((atoms_j,), fieldnames(A))
+                mask_idx = upper_tile_index(i, j, n_blocks)
 
-                eligible_bitmask = eligible_compressed[lane, i, j]
-                special_bitmask = special_compressed[lane, i, j]
+                eligible_bitmask = eligible_compressed[lane, mask_idx]
+                special_bitmask = special_compressed[lane, mask_idx]
 
                 for m in a:warpsize()
                     sync_warp()
@@ -1357,9 +1414,10 @@ function dense_force_kernel!(
                 coords_i = coords[s_idx_i]
                 vel_i = velocities[s_idx_i]
                 atoms_i = atoms[s_idx_i]
+                mask_idx = upper_tile_index(i, j, n_blocks)
 
-                eligible_bitmask = eligible_compressed[lane, i, j]
-                special_bitmask = special_compressed[lane, i, j]
+                eligible_bitmask = eligible_compressed[lane, mask_idx]
+                special_bitmask = special_compressed[lane, mask_idx]
 
                 for m in a:r
                     s_idx_j = sorted_seq[j_0_tile + m]
@@ -1410,9 +1468,10 @@ function dense_force_kernel!(
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
+            mask_idx = upper_tile_index(i, j, n_blocks)
 
-            eligible_bitmask = eligible_compressed[lane, i, j]
-            special_bitmask = special_compressed[lane, i, j]
+            eligible_bitmask = eligible_compressed[lane, mask_idx]
+            special_bitmask = special_compressed[lane, mask_idx]
 
             for m in (lane + a):warpsize()
                 s_idx_j = sorted_seq[j_0_tile + m]
@@ -1462,9 +1521,10 @@ function dense_force_kernel!(
                 coords_i = coords[s_idx_i]
                 vel_i = velocities[s_idx_i]
                 atoms_i = atoms[s_idx_i]
+                mask_idx = upper_tile_index(i, j, n_blocks)
 
-                eligible_bitmask = eligible_compressed[lane, i, j]
-                special_bitmask = special_compressed[lane, i, j]
+                eligible_bitmask = eligible_compressed[lane, mask_idx]
+                special_bitmask = special_compressed[lane, mask_idx]
 
                 for m in (lane + a):r
                     s_idx_j = sorted_seq[j_0_tile + m]
@@ -1642,6 +1702,7 @@ function energy_kernel!(
 
     i = is_active_tile ? interacting_tiles_i[tile_idx] : Int32(1)
     j = is_active_tile ? interacting_tiles_j[tile_idx] : Int32(1)
+    mask_idx = is_active_tile ? upper_tile_index(i, j, n_blocks) : Int32(1)
     
     i_0_tile = (i - a) * warpsize()
     j_0_tile = (j - a) * warpsize()
@@ -1693,8 +1754,8 @@ function energy_kernel!(
                     E_smem[laneid(), warpid] += ustrip(pe[1])
                 end
             else # EXCLUDED
-                eligible_bitmask = eligible_compressed[laneid(), i, j]
-                special_bitmask = special_compressed[laneid(), i, j]
+                eligible_bitmask = eligible_compressed[laneid(), mask_idx]
+                special_bitmask = special_compressed[laneid(), mask_idx]
 
                 # Shuffle
                 for m in a:warpsize()
@@ -1734,8 +1795,8 @@ function energy_kernel!(
             atoms_i = atoms[index_i]
             eligible_bitmask = UInt32(0)
             special_bitmask = UInt32(0)
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
+            eligible_bitmask = eligible_compressed[laneid(), mask_idx]
+            special_bitmask = special_compressed[laneid(), mask_idx]
 
             for m in a:r
                 idx_j = j_0_tile + m
@@ -1769,8 +1830,8 @@ function energy_kernel!(
         atoms_i = atoms[index_i]
         eligible_bitmask = UInt32(0)
         special_bitmask = UInt32(0)
-        eligible_bitmask = eligible_compressed[laneid(), i, j]
-        special_bitmask = special_compressed[laneid(), i, j]
+        eligible_bitmask = eligible_compressed[laneid(), mask_idx]
+        special_bitmask = special_compressed[laneid(), mask_idx]
 
         for m in (laneid() + a) : warpsize()
             idx_j = j_0_tile + m
@@ -1803,8 +1864,8 @@ function energy_kernel!(
             atoms_i = atoms[index_i]
             eligible_bitmask = UInt32(0)
             special_bitmask = UInt32(0)
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
+            eligible_bitmask = eligible_compressed[laneid(), mask_idx]
+            special_bitmask = special_compressed[laneid(), mask_idx]
 
             for m in (laneid() + a) : r
                 idx_j = j_0_tile + m
@@ -1865,8 +1926,8 @@ function dense_energy_kernel!(
 
     a = Int32(1)
     n_blocks = ceil(Int32, N / 32)
-    i = blockIdx().x
-    j = blockIdx().y
+    i = Int32(blockIdx().x)
+    j = Int32(blockIdx().y)
     i_0_tile = (i - a) * warpsize()
     j_0_tile = (j - a) * warpsize()
     index_i = i_0_tile + laneid()
@@ -1892,8 +1953,9 @@ function dense_energy_kernel!(
             shuffle_idx = laneid()
             atoms_j = atoms[s_idx_j]
             atom_fields = getfield.((atoms_j,), fieldnames(A))
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
+            mask_idx = upper_tile_index(i, j, n_blocks)
+            eligible_bitmask = eligible_compressed[laneid(), mask_idx]
+            special_bitmask = special_compressed[laneid(), mask_idx]
 
             for m in a:warpsize()
                 sync_warp()
@@ -1936,8 +1998,9 @@ function dense_energy_kernel!(
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
+            mask_idx = upper_tile_index(i, j, n_blocks)
+            eligible_bitmask = eligible_compressed[laneid(), mask_idx]
+            special_bitmask = special_compressed[laneid(), mask_idx]
 
             for m in a:r
                 s_idx_j = sorted_seq[j_0_tile + m]
@@ -1970,8 +2033,9 @@ function dense_energy_kernel!(
         coords_i = coords[s_idx_i]
         vel_i = velocities[s_idx_i]
         atoms_i = atoms[s_idx_i]
-        eligible_bitmask = eligible_compressed[laneid(), i, j]
-        special_bitmask = special_compressed[laneid(), i, j]
+        mask_idx = upper_tile_index(i, j, n_blocks)
+        eligible_bitmask = eligible_compressed[laneid(), mask_idx]
+        special_bitmask = special_compressed[laneid(), mask_idx]
 
         for m in (laneid() + a):warpsize()
             s_idx_j = sorted_seq[j_0_tile + m]
@@ -2003,8 +2067,9 @@ function dense_energy_kernel!(
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
+            mask_idx = upper_tile_index(i, j, n_blocks)
+            eligible_bitmask = eligible_compressed[laneid(), mask_idx]
+            special_bitmask = special_compressed[laneid(), mask_idx]
 
             for m in (laneid() + a):r
                 s_idx_j = sorted_seq[j_0_tile + m]
