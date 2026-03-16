@@ -488,30 +488,56 @@ end
 
 const crf_solvent_dielectric = 78.3
 
-"""
+@doc raw"""
     CoulombReactionField(; dist_cutoff, solvent_dielectric, use_neighbors, weight_special,
                             coulomb_const)
 
 The Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
+
+The potential energy is defined as
+```math
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0} \left( \frac{1}{r_{ij}} + k_{rf} r_{ij}^2 - c_{rf} \right)
+```
+where
+```math
+k_{rf} = \frac{1}{r_c^3} \frac{\varepsilon_{rf} - 1}{2\varepsilon_{rf} + 1}, \quad
+c_{rf} = \frac{1}{r_c} \frac{3\varepsilon_{rf}}{2\varepsilon_{rf} + 1}
+```
+`solvent_dielectric` corresponds to ``\varepsilon_{rf}``.
+Setting `solvent_dielectric=Inf` gives conducting boundary conditions
+(``k_{rf} = 1/(2r_c^3)``, ``c_{rf} = 3/(2r_c)``).
 """
-@kwdef struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
+struct CoulombReactionField{D, S, K, W, T} <: PairwiseInteraction
     dist_cutoff::D
-    solvent_dielectric::S = crf_solvent_dielectric
-    use_neighbors::Bool = false
-    weight_special::W = 1
-    coulomb_const::T = coulomb_const
+    solvent_dielectric::S
+    krf::K
+    crf::K
+    use_neighbors::Bool
+    weight_special::W
+    coulomb_const::T
+end
+
+function CoulombReactionField(; dist_cutoff, solvent_dielectric=crf_solvent_dielectric,
+                              use_neighbors=false, weight_special=1, coulomb_const=coulomb_const)
+    rc = dist_cutoff
+    if isinf(solvent_dielectric)
+        krf = inv(2 * rc^3)
+        crf = 3 * inv(2 * rc)
+    else
+        krf = inv(rc^3) * (solvent_dielectric - 1) / (2 * solvent_dielectric + 1)
+        crf = inv(rc) * (3 * solvent_dielectric) / (2 * solvent_dielectric + 1)
+    end
+    return CoulombReactionField(dist_cutoff, solvent_dielectric, krf, crf,
+                                use_neighbors, weight_special, coulomb_const)
 end
 
 use_neighbors(inter::CoulombReactionField) = inter.use_neighbors
 
-function Base.zero(coul::CoulombReactionField{D, S, W, T}) where {D, S, W, T}
-    return CoulombReactionField{D, S, W, T}(
-        zero(D),
-        zero(S),
-        coul.use_neighbors,
-        zero(W),
-        zero(T),
+function Base.zero(coul::CoulombReactionField{D, S, K, W, T}) where {D, S, K, W, T}
+    return CoulombReactionField(
+        zero(D), zero(S), zero(K), zero(K),
+        coul.use_neighbors, zero(W), zero(T),
     )
 end
 
@@ -519,6 +545,8 @@ function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
     return CoulombReactionField(
         c1.dist_cutoff + c2.dist_cutoff,
         c1.solvent_dielectric + c2.solvent_dielectric,
+        c1.krf + c2.krf,
+        c1.crf + c2.crf,
         c1.use_neighbors,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
@@ -528,11 +556,11 @@ end
 function inject_interaction(inter::CoulombReactionField, params_dic)
     key_prefix = "inter_CRF_"
     return CoulombReactionField(
-        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
+        dist_cutoff=dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
+        solvent_dielectric=inter.solvent_dielectric,
+        use_neighbors=inter.use_neighbors,
+        weight_special=dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        coulomb_const=dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
     )
 end
 
@@ -556,14 +584,7 @@ end
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = sqrt(r2)
-    if special
-        # 1-4 interactions do not use the reaction field approximation
-        krf = (1 / (inter.dist_cutoff ^ 3)) * 0
-    else
-        # These values could be pre-computed but this way is easier for AD
-        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
-              (2 * inter.solvent_dielectric + 1))
-    end
+    krf = special ? zero(inter.krf) : inter.krf
 
     f = (ke * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
 
@@ -585,16 +606,8 @@ end
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = sqrt(r2)
-    if special
-        # 1-4 interactions do not use the reaction field approximation
-        krf = (1 / (inter.dist_cutoff ^ 3)) * 0
-        crf = (1 /  inter.dist_cutoff     ) * 0
-    else
-        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
-              (2 * inter.solvent_dielectric + 1))
-        crf = (1 /  inter.dist_cutoff     ) * ((3 * inter.solvent_dielectric) /
-              (2 * inter.solvent_dielectric + 1))
-    end
+    krf = special ? zero(inter.krf) : inter.krf
+    crf = special ? zero(inter.crf) : inter.crf
 
     pe = (ke * qi * qj) * (inv(r) + krf * r2 - crf)
 
