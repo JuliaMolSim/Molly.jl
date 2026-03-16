@@ -20,8 +20,8 @@
     the slowdown on the measured path.
   - The later removal of the host sync on `num_interacting_tiles` is still a good
     change, but it is not the fix for the regression versus `66ccb5`.
-  - The recent tangent / Enzyme-related code is not where this performance loss is
-    coming from. The slowdown is in the primal CUDA force-path structure.
+  - The recent profiling work confirms that the regression is structural in the
+    CUDA force path, not a small launch-parameter issue.
 
   ### Kernel-level reason to plan around:
 
@@ -32,6 +32,70 @@
     path has more preprocessing and more direct global atomic accumulation.
   - Therefore, the first performance task must be to recover `66ccb5`-class dense
     performance, not to keep refining the tile-list path in isolation.
+
+## 0.5. Current verified project state
+
+  ### Done:
+
+  - A reusable GPU profiling harness now exists in `benchmark/gpu_profile_utils.jl`.
+  - `benchmark/benchmark_gpu_tiles.jl` now reports:
+      - dense synthetic case
+      - sparse synthetic case
+      - stage timings for Morton sort, mask compression, reorder, bounds, tile
+        finding, force kernel, reverse reorder, and energy kernel
+      - tile counters: total interacting tiles, clean tiles, masked tiles,
+        overflow, interacting fraction
+  - `benchmark/new_prot_bench.jl` now reports the same stage/tile counters for
+    the protein benchmark.
+  - `test/gpu_optimizations.jl` now exercises the profiling harness and also
+    checks a recovered dense-force-path override against CPU forces and energy.
+
+  ### First dense-path recovery step done:
+
+  - A recovered `66ccb5`-style fused dense force path now exists in
+    `ext/MollyCUDAExt.jl`.
+  - It is currently behind an explicit override:
+      - `MOLLY_CUDA_FORCE_PATH=dense`
+  - The current tile-list force path remains the default.
+  - This was deliberate: the first goal was to verify correctness and direction
+    of improvement without yet changing runtime dispatch policy for all systems.
+
+  ### Verified measurements from the current tree:
+
+  - On the synthetic 1024-atom Float64 benchmark with the current default
+    selection logic:
+      - dense case selects `force=dense`, `energy=tile`
+          - forces: `0.537 ms`
+          - potential energy: `0.463 ms`
+      - sparse case selects `force=tile`, `energy=tile`
+          - forces: `0.390 ms`
+          - potential energy: `0.342 ms`
+  - On the reduced protein benchmark (`MOLLY_CUDA_BENCH_MIN_STEPS=0`,
+    one-sample sanity run), the current default selection logic chooses
+    `force=dense`, `energy=tile` for all three launch policies:
+      - legacy explicit: `forces=1.670 ms`, `pe=1.655 ms`, `total=3.325 ms`
+      - tuned explicit: `forces=1.709 ms`, `pe=1.641 ms`, `total=3.350 ms`
+      - auto: `forces=1.677 ms`, `pe=1.685 ms`, `total=3.361 ms`
+  - With an explicit `MOLLY_CUDA_FORCE_PATH=dense` override on the same reduced
+    protein benchmark, the dense energy path is correct but slower:
+      - legacy explicit: `pe=1.730 ms`
+      - tuned explicit: `pe=1.747 ms`
+      - auto: `pe=1.740 ms`
+  - Interpretation:
+      - the recovered fused force path is clearly useful on dense workloads
+      - the dense energy kernel is now implemented and correct
+      - the reduced protein case still prefers the tile-list energy path, so
+        energy should not auto-switch to dense yet
+
+  ### Important limitation of the current state:
+
+  - Automatic dispatch is now implemented for the force path only.
+  - A recovered dense energy override now exists, but the default `auto`
+    selection deliberately keeps energy on the tile path.
+  - The profiling output is now aware of this and avoids reporting misleading
+    tile-path timings when a dense override/selection is active.
+  - The benchmark harness now warms up both force and energy profiling passes so
+    the reported stage timings are steady-state rather than first-use numbers.
 
 ## 1. Baseline and measurement harness
 
@@ -68,6 +132,18 @@
   - The dense benchmark reports current / candidate / `66ccb5` side by side.
   - Existing GPU correctness tests still pass.
 
+  ### Status:
+
+  - Done.
+  - The harness is now good enough to gate the next kernel changes.
+  - The most relevant immediate use is to compare:
+      - default tile path
+      - `MOLLY_CUDA_FORCE_PATH=dense`
+      - later auto-dispatch logic
+  - The harness already exposed that `compress_boolean_matrices!` is a large
+    contributor on the protein path, but this is not the first thing to fix
+    because the primary regression still begins in the force-path redesign.
+
 ## 2. Recover the `66ccb5` dense-force path before optimizing further
 
   ### Patch order:
@@ -95,13 +171,34 @@
   - Make the first target explicit: dense-system performance must return to
     `66ccb5`-class numbers before proceeding with more tile-list work.
 
+  ### What is already done:
+
+  - The fused dense force kernel has been restored in the current tree.
+  - A matching dense energy kernel now also exists as an explicit override path.
+  - Correctness against CPU forces and energy has been checked.
+  - Runtime auto-dispatch now uses the dense force path for dense workloads and
+    keeps the tile-list force path for sparse ones.
+  - Dense synthetic and reduced protein measurements confirm that the force-path
+    recovery moved in the right direction.
+  - Reduced protein measurements also show that the dense energy path should
+    remain opt-in for now.
+
+  ### What is not done yet:
+
+  - Energy auto-dispatch is intentionally not enabled yet.
+  - The current default is now a split policy:
+      - `force=dense` for dense or near-dense systems
+      - `force=tile` for sparse systems
+      - `energy=tile` unless an explicit override requests dense
+  - Dense-system performance has improved, but we have not yet shown a full
+    return to `66ccb5`-class end-to-end behavior.
+
   ### Main edit sites:
 
-  - ext/MollyCUDAExt.jl:138
-  - ext/MollyCUDAExt.jl:243
-  - ext/MollyCUDAExt.jl:646
-  - ext/MollyCUDAExt.jl:687
-  - ext/MollyCUDAExt.jl:1075
+  - ext/MollyCUDAExt.jl: force-path mode selection and dense launch params
+  - ext/MollyCUDAExt.jl: `pairwise_forces_loop_gpu!`
+  - ext/MollyCUDAExt.jl: `pairwise_forces_loop_gpu_dense!`
+  - ext/MollyCUDAExt.jl: `dense_force_kernel!`
   - src/force.jl:165
 
   ### Verification:
@@ -110,6 +207,16 @@
   - Sparse benchmark is not catastrophically worse than the current tile-list
     path.
   - Force/energy results unchanged.
+
+  ### Revised next substep:
+
+  - Do not auto-enable the dense energy path yet.
+  - The next granular changes should focus on the retained tile-list path,
+    especially the energy-side preprocessing costs that still dominate the
+    reduced protein profile (`compress_boolean_matrices!`, reorder, and tile
+    finding).
+  - Any future energy auto-dispatch should be gated by reduced protein PE
+    measurements, not just by synthetic dense cases.
 
 ## 3. Keep the device-side tile-count consumption, but only as part of the retained tile path
 
@@ -128,6 +235,15 @@
     step 2 is done.
   - Ensure the fused dense path does not accidentally reintroduce a CPU round-trip
     if it still needs any metadata from the tile pipeline.
+
+  ### Updated state:
+
+  - This is still the right plan.
+  - The newly restored dense force path does not consume the tile list and does
+    not reintroduce the old host round-trip.
+  - The tile-count machinery remains useful for:
+      - the tile-list path
+      - profiling and later auto-dispatch heuristics
 
   ### Main edit sites:
 

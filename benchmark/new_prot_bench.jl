@@ -3,6 +3,8 @@ using CUDA
 using BenchmarkTools
 using Printf
 
+include("gpu_profile_utils.jl")
+
 const CUDA_TUNING_ENV_VARS = [
     "MOLLY_CUDA_FORCE_BLOCK_Y",
     "MOLLY_CUDA_FORCE_MAXREGS",
@@ -12,6 +14,8 @@ const CUDA_TUNING_ENV_VARS = [
 ]
 
 env_int(name::AbstractString, default::Int) = something(tryparse(Int, get(ENV, name, string(default))), default)
+selected_force_path_label(sys) = String(gpu_cuda_ext().selected_force_path(sys))
+selected_energy_path_label(sys) = String(gpu_cuda_ext().selected_energy_path(sys))
 
 function apply_policy!(policy)
     for name in CUDA_TUNING_ENV_VARS
@@ -27,10 +31,25 @@ end
 
 function bench_policy(sys, policy; samples)
     apply_policy!(policy)
+    force_path = selected_force_path_label(sys)
+    energy_path = selected_energy_path_label(sys)
 
     forces(sys)
     potential_energy(sys)
     CUDA.synchronize()
+
+    force_profile = nothing
+    if force_path != "dense"
+        profile_gpu_force_path!(sys; buffers=Molly.init_buffers!(sys, 1))
+        sys.neighbor_finder.initialized = false
+        force_profile = profile_gpu_force_path!(sys; buffers=Molly.init_buffers!(sys, 1))
+    end
+    energy_profile = if energy_path != "dense"
+        profile_gpu_energy_path!(sys; buffers=Molly.init_buffers!(sys, 1, true))
+        profile_gpu_energy_path!(sys; buffers=Molly.init_buffers!(sys, 1, true))
+    else
+        nothing
+    end
 
     t_forces = @belapsed begin
         forces($sys)
@@ -46,6 +65,10 @@ function bench_policy(sys, policy; samples)
         forces_ms = 1_000 * t_forces,
         pe_ms = 1_000 * t_pe,
         total_ms = 1_000 * (t_forces + t_pe),
+        force_path = force_path,
+        energy_path = energy_path,
+        force_profile = force_profile,
+        energy_profile = energy_profile,
     )
 end
 
@@ -57,6 +80,48 @@ function print_result(name, result)
         result.pe_ms,
         result.total_ms,
     )
+    println("  selected force path: ", result.force_path)
+    println("  selected energy path: ", result.energy_path)
+    if result.energy_profile === nothing
+        println("  energy stages: skipped (dense pairwise-path override/selection active)")
+    else
+        stats = result.energy_profile.tile_stats
+        @printf(
+            "  tiles=%d clean=%d masked=%d frac=%7.4f overflow=%d\n",
+            stats.num_tiles,
+            stats.clean_tiles,
+            stats.masked_tiles,
+            stats.interacting_fraction,
+            stats.overflow_count,
+        )
+    end
+    if result.force_profile === nothing
+        println("  force stages : skipped (dense pairwise-path override/selection active)")
+    else
+        force_times = result.force_profile.times
+        @printf(
+            "  force stages : morton=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f kernel=%7.3f reverse=%7.3f\n",
+            force_times.morton_sort_ms,
+            force_times.compress_ms,
+            force_times.reorder_ms,
+            force_times.bounds_ms,
+            force_times.tile_find_ms,
+            force_times.force_kernel_ms,
+            force_times.reverse_reorder_ms,
+        )
+    end
+    if result.energy_profile !== nothing
+        energy_times = result.energy_profile.times
+        @printf(
+            "  energy stages: morton=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f kernel=%7.3f\n",
+            energy_times.morton_sort_ms,
+            energy_times.compress_ms,
+            energy_times.reorder_ms,
+            energy_times.bounds_ms,
+            energy_times.tile_find_ms,
+            energy_times.energy_kernel_ms,
+        )
+    end
 end
 
 function prepare_system()
