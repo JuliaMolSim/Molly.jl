@@ -1202,6 +1202,55 @@ end
     end
 end
 
+@testset "DPD simulation" begin
+    n_atoms = 100
+    n_steps = 10_000
+    dt = 0.01
+    r_c = 1.0
+    box_size = 5.0
+    density = n_atoms / box_size^3
+    γ = 4.5
+    kBT = 1.0
+    σ = sqrt(2 * γ * kBT)
+    a = 25.0
+
+    boundary = CubicBoundary(box_size)
+    rng = Xoshiro(12345)
+    coords = [SVector{3}(rand(rng, 3) .* box_size) for _ in 1:n_atoms]
+    velocities = [SVector{3}(randn(rng, 3)) for _ in 1:n_atoms]
+    atoms = [Atom(index=i, mass=1.0, charge=0.0, σ=0.0, ϵ=0.0) for i in 1:n_atoms]
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(DPDInteraction(a=a, γ=γ, σ=σ, r_c=r_c, dt=dt, use_neighbors=true),),
+        neighbor_finder=DistanceNeighborFinder(
+            eligible=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=1.5 * r_c,
+        ),
+        loggers=(
+            temp=TemperatureLogger(Float64, 100),
+        ),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+        k=1.0, # DPD uses reduced units where kB = 1; default_k(NoUnits) ≈ 0.008314
+    )
+
+    simulator = DPDVelocityVerlet(dt=dt, λ=0.65)
+    @time simulate!(sys, simulator, n_steps; n_threads=1)
+
+    temps = values(sys.loggers.temp)
+    mean_temp = mean(temps[length(temps) ÷ 2 + 1:end])
+    @info "DPD mean temperature (second half): $mean_temp, target kBT: $kBT"
+    @test 0.5 < mean_temp < 1.5
+
+    total_momentum = sum(sys.velocities .* mass.(atoms))
+    @test all(abs.(total_momentum) .< 1.0)
+end
+
 @testset "Accelerated Weight Histogram (AWH)" begin
     n_atoms = 50
     n_steps = 2_000
