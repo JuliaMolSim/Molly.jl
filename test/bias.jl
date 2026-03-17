@@ -212,7 +212,7 @@
         11.51225678195222u"Å";
         atol=1e-6u"nm",
     )
-    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"), nothing)[2],
+    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"))[2],
                    calculate_cv(rg_cv, coords, atoms),
                    atol = 1e-5u"nm")
 
@@ -226,7 +226,7 @@
         radius_gyration(coords_subset,atoms_subset);
         atol=1e-6u"nm",
     )
-    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"), nothing)[2],
+    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"))[2],
                    calculate_cv(rg_cv, coords, atoms),
                    atol = 1e-5u"nm")
 
@@ -603,7 +603,7 @@ end
 
     function forces_test!(
         fs, sys, bias::BiasPotential;
-        grad_cv = cv_gradient_enz,
+        grad_cv=cv_gradient_enz,
         kwargs...
     )
         if bias.cv_type.correction == :pbc
@@ -669,16 +669,11 @@ end
         )
 
         fs = forces(sys)
-
         fs_zero_enz = zero(fs)
         fs_zero_anl = zero(fs)
 
-        forces_test!(fs_zero_enz, sys, bias_pot; grad_cv = cv_gradient_enz)
-        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv = cv_gradient)
-
+        forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=cv_gradient_enz)
+        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=cv_gradient)
         @test isapprox(ustrip.(fs_zero_anl), ustrip.(fs_zero_enz); atol = 1e-6)
-
     end
-
-
 end

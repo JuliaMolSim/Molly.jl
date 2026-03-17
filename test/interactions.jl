@@ -75,12 +75,12 @@
 
     inter = Molly.LennardJones14(0.3u"nm", 0.2u"kJ * mol^-1", 1)
     @test isapprox(
-        force(inter, c1, c2, boundary).f4,
+        force(inter, c1, c2, boundary).f2,
         SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
-        force(inter, c1, c3, boundary).f4,
+        force(inter, c1, c3, boundary).f2,
         SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
@@ -902,6 +902,7 @@ end
                     dist_cutoff=T(dist_cutoff),
                     dist_buffer=zero(T(dist_cutoff)),
                     nonbonded_method=:ewald,
+                    dispersion_correction=false,
                     center_coords=false,
                 )
                 sys = System(
@@ -972,6 +973,7 @@ end
                         dist_cutoff=T(dist_cutoff),
                         dist_buffer=zero(T(dist_cutoff)),
                         nonbonded_method=:pme,
+                        dispersion_correction=false,
                         center_coords=false,
                     )
                     sys = System(
