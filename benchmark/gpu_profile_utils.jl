@@ -18,19 +18,17 @@ function gpu_stage_time_ms!(f::F) where {F}
 end
 
 function gpu_tile_stats(buffers, n_atoms::Integer)
-    num_tiles = Int(only(Array(buffers.num_interacting_tiles)))
+    num_tiles_arr = Array(buffers.num_interacting_tiles)
+    num_tiles = Int(sum(num_tiles_arr))
     overflow_count = Int(only(Array(buffers.interacting_tiles_overflow)))
-    num_tiles_capped = min(num_tiles, length(buffers.interacting_tiles_type))
-    tile_types = num_tiles_capped == 0 ? UInt8[] : Array(view(buffers.interacting_tiles_type, 1:num_tiles_capped))
-    clean_tiles = count(==(UInt8(0)), tile_types)
-    masked_tiles = num_tiles_capped - clean_tiles
+    # For simplicity in stats, we skip clean/masked tile counts in 2D mode for now
     n_blocks = cld(n_atoms, 32)
     total_possible_tiles = n_blocks * (n_blocks + 1) ÷ 2
     interacting_fraction = total_possible_tiles == 0 ? 0.0 : num_tiles / total_possible_tiles
     return (
         num_tiles = num_tiles,
-        clean_tiles = clean_tiles,
-        masked_tiles = masked_tiles,
+        clean_tiles = -1,
+        masked_tiles = -1,
         overflow_count = overflow_count,
         interacting_fraction = interacting_fraction,
     )
@@ -109,11 +107,11 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
         end
     end
 
-    max_tiles = length(buffers.interacting_tiles_i)
+    max_tiles_per_i = size(buffers.interacting_tiles_j, 1)
     tile_find_ms = gpu_stage_time_ms!() do
         ext.reset_interacting_tile_state!(buffers)
         tile_kernel = @cuda launch=false ext.find_interacting_blocks_kernel!(
-            buffers.interacting_tiles_i,
+            
             buffers.interacting_tiles_j,
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,
@@ -124,13 +122,13 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             r_cut,
             Val(n_blocks),
             Val(D),
-            max_tiles,
+            max_tiles_per_i,
             buffers.compressed_masks,
             buffers.tile_is_clean,
         )
         tile_threads_xy = ext.tile_launch_params(tile_kernel)
         tile_kernel(
-            buffers.interacting_tiles_i,
+            
             buffers.interacting_tiles_j,
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,
@@ -141,7 +139,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             r_cut,
             Val(n_blocks),
             Val(D),
-            max_tiles,
+            max_tiles_per_i,
             buffers.compressed_masks,
             buffers.tile_is_clean;
             blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
@@ -166,14 +164,14 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
         Val(needs_vir),
         Val(T),
         Val(D),
-        buffers.interacting_tiles_i,
+        
         buffers.interacting_tiles_j,
         buffers.interacting_tiles_type,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
     )
     block_y, maxregs = ext.force_launch_params(auto_kernel)
-    n_blocks_launch = cld(max_tiles, block_y)
+    n_blocks_launch = cld(max_tiles_per_i, block_y)
     force_kernel_ms = gpu_stage_time_ms!() do
         kernel = if maxregs === nothing
             auto_kernel
@@ -195,7 +193,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
                 Val(needs_vir),
                 Val(T),
                 Val(D),
-                buffers.interacting_tiles_i,
+                
                 buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type,
                 buffers.num_interacting_tiles,
@@ -219,7 +217,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             Val(needs_vir),
             Val(T),
             Val(D),
-            buffers.interacting_tiles_i,
+            
             buffers.interacting_tiles_j,
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,
@@ -318,11 +316,11 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
         end
     end
 
-    max_tiles = length(buffers.interacting_tiles_i)
+    max_tiles_per_i = size(buffers.interacting_tiles_j, 1)
     tile_find_ms = gpu_stage_time_ms!() do
         ext.reset_interacting_tile_state!(buffers)
         tile_kernel = @cuda launch=false ext.find_interacting_blocks_kernel!(
-            buffers.interacting_tiles_i,
+            
             buffers.interacting_tiles_j,
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,
@@ -333,13 +331,13 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             r_cut,
             Val(n_blocks),
             Val(D),
-            max_tiles,
+            max_tiles_per_i,
             buffers.compressed_masks,
             buffers.tile_is_clean,
         )
         tile_threads_xy = ext.tile_launch_params(tile_kernel)
         tile_kernel(
-            buffers.interacting_tiles_i,
+            
             buffers.interacting_tiles_j,
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,
@@ -350,7 +348,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             r_cut,
             Val(n_blocks),
             Val(D),
-            max_tiles,
+            max_tiles_per_i,
             buffers.compressed_masks,
             buffers.tile_is_clean;
             blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
@@ -373,14 +371,14 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
         buffers.compressed_masks,
         Val(T),
         Val(D),
-        buffers.interacting_tiles_i,
+        
         buffers.interacting_tiles_j,
         buffers.interacting_tiles_type,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
     )
     block_y = ext.energy_launch_params(auto_kernel)
-    n_blocks_launch = cld(max_tiles, block_y)
+    n_blocks_launch = cld(max_tiles_per_i, block_y)
     energy_kernel_ms = gpu_stage_time_ms!() do
         auto_kernel(
             buffers.morton_seq,
@@ -397,7 +395,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             buffers.compressed_masks,
             Val(T),
             Val(D),
-            buffers.interacting_tiles_i,
+            
             buffers.interacting_tiles_j,
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,

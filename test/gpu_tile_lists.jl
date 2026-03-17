@@ -1,4 +1,5 @@
 @testset "GPU tile lists" begin
+    ENV["MOLLY_CUDA_FORCE_PATH"] = "tile"
     # Define a simple system
     n_atoms = 100
     atom_mass = 10.0u"g/mol"
@@ -83,6 +84,8 @@
     )
 
     function with_tiny_tile_capacity(buffers)
+        n_blocks = size(buffers.box_mins, 1)
+        n_tiles = (n_blocks * (n_blocks + 1)) ÷ 2
         return Molly.BuffersGPU(
             buffers.fs_mat,
             buffers.pe_vec_nounits,
@@ -96,12 +99,11 @@
             buffers.morton_seq_buffer_1,
             buffers.morton_seq_buffer_2,
             buffers.compressed_masks,
-            CUDA.zeros(Bool, 1),
-            CUDA.zeros(Int32, 1),
-            CUDA.zeros(Int32, 1),
-            CUDA.zeros(UInt8, 1),
-            CUDA.zeros(Int32, 1),
-            CUDA.zeros(Int32, 1),
+            CUDA.zeros(Bool, n_tiles),      # tile_is_clean
+            CUDA.zeros(Int32, 1, n_blocks), # interacting_tiles_j (1 row per i)
+            CUDA.zeros(UInt8, 1, n_blocks), # interacting_tiles_type (1 row per i)
+            CUDA.zeros(Int32, n_blocks),    # num_interacting_tiles
+            CUDA.zeros(Int32, 1),           # interacting_tiles_overflow
             buffers.coords_reordered,
             buffers.velocities_reordered,
             buffers.atoms_reordered,

@@ -41,16 +41,14 @@ end
 
 runs = [
     # run_name                             gpu      parr   f32    units
-    ("CPU 1 thread"                      , Array  , false, false, true ),
     ("CPU 1 thread f32"                  , Array  , false, true , true ),
     ("CPU 1 thread f32 nounits"          , Array  , false, true , false),
-    ("CPU $n_threads threads"            , Array  , true , false, true ),
     ("CPU $n_threads threads f32"        , Array  , true , true , true ),
     ("CPU $n_threads threads f32 nounits", Array  , true , true , false),
-    ("CUDA"                              , CuArray, false, false, true ),
     ("CUDA f32"                          , CuArray, false, true , true ),
     ("CUDA f32 nounits"                  , CuArray, false, true , false),
 ]
+
 
 for (run_name, AT, parallel, f32, units) in runs
     n_threads_used = (parallel ? n_threads : 1)

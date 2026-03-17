@@ -179,9 +179,9 @@ energy calculations.
 - `morton_seq`: Current atom ordering based on Morton curve.
 - `compressed_masks`: 32x32 bitmasks (eligibility and special) for each tile.
 - `tile_is_clean`: Boolean flag for each tile indicating if it has no exclusions.
-- `interacting_tiles_i`, `interacting_tiles_j`: Indices of tiles within cutoff.
-- `interacting_tiles_type`: Type of tile (0: CLEAN, 1: EXCLUDED).
-- `num_interacting_tiles`: Atomic counter for number of tiles found.
+- `interacting_tiles_j`: Indices of tiles within cutoff, structured as `(max_j_per_i, n_blocks)`.
+- `interacting_tiles_type`: Type of tile (0: CLEAN, 1: EXCLUDED), structured as `(max_j_per_i, n_blocks)`.
+- `num_interacting_tiles`: Atomic counter for number of tiles found per `i` tile, size `n_blocks`.
 - `coords_reordered`, `velocities_reordered`, `atoms_reordered`: Cached reordered arrays.
 - `fs_mat_reordered`: Force matrix in reordered space.
 - `step_n_preprocessed`: Last simulation step where preprocessing was done.
@@ -201,7 +201,6 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     morton_seq_buffer_2::M
     compressed_masks::R
     tile_is_clean::TIC
-    interacting_tiles_i::IT
     interacting_tiles_j::IT
     interacting_tiles_type::ITT
     num_interacting_tiles::NIT
@@ -238,11 +237,10 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     compressed_masks = KernelAbstractions.zeros(backend, UInt32, 32, 2, n_upper_tiles)
     tile_is_clean = KernelAbstractions.zeros(backend, Bool, n_upper_tiles)
 
-    max_interacting_blocks = min(n_blocks * n_blocks, n_blocks * 800)
-    interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
-    interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
-    interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks)
-    num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
+    max_interacting_blocks_per_i = min(n_blocks, 1024) # TODO: Implement dynamic resizing for this buffer
+    interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks_per_i, n_blocks)
+    interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks_per_i, n_blocks)
+    num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, n_blocks)
     interacting_tiles_overflow = KernelAbstractions.zeros(backend, Int32, 1)
 
     coords_reordered = similar(sys.coords)
@@ -255,7 +253,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
 
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
                       morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_masks,
-                      tile_is_clean, interacting_tiles_i, interacting_tiles_j,
+                      tile_is_clean, interacting_tiles_j,
                       interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
                       coords_reordered, velocities_reordered, atoms_reordered,
                       fs_mat_reordered, -1, T(-1))

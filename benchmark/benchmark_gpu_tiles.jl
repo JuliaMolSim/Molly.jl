@@ -17,19 +17,20 @@ function setup_benchmark_system(n_atoms;
                                 density=1400.0u"kg/m^3",
                                 box_multiplier=1.0,
                                 seed=42)
-    atom_mass = 39.948u"g/mol" # Argon
-    σ = 0.34u"nm"
-    ϵ = 0.997u"kJ * mol^-1"
+    T = Float32
+    atom_mass = T(39.948)u"g/mol" # Argon
+    σ = T(0.34)u"nm"
+    ϵ = T(0.997)u"kJ * mol^-1"
 
-    vol = (n_atoms * atom_mass) / (density * 6.02214076e23u"mol^-1")
+    vol = (n_atoms * atom_mass) / (T(density) * T(6.02214076e23)u"mol^-1")
     box_size = uconvert(u"nm", (vol |> upreferred)^(1/3))
-    box_size = max(box_size * box_multiplier, 2.5 * r_cut)
+    box_size = max(box_size * T(box_multiplier), T(2.5) * r_cut)
     boundary = CubicBoundary(box_size)
 
     Random.seed!(seed)
-    coords = [SVector(rand(), rand(), rand()) * box_size for _ in 1:n_atoms]
-    velocities = [zero(SVector{3, typeof(1.0u"nm/ps")}) for _ in 1:n_atoms]
-    atoms = [Atom(index=i, mass=atom_mass, charge=0.0, σ=σ, ϵ=ϵ) for i in 1:n_atoms]
+    coords = [SVector{3, T}(rand(T), rand(T), rand(T)) * box_size for _ in 1:n_atoms]
+    velocities = [zero(SVector{3, typeof(T(1.0)u"nm/ps")}) for _ in 1:n_atoms]
+    atoms = [Atom(index=i, mass=atom_mass, charge=T(0.0), σ=σ, ϵ=ϵ) for i in 1:n_atoms]
 
     pairwise_inters = (LennardJones(
         cutoff=DistanceCutoff(r_cut),
@@ -103,16 +104,17 @@ function run_benchmark()
 
     cases = [
         (
-            name = "dense_f64",
+            name = "dense_f32",
             description = "High-density cutoff regime",
             sys = setup_benchmark_system(n_atoms; density=1400.0u"kg/m^3", box_multiplier=1.0, seed=42),
         ),
         (
-            name = "sparse_f64",
+            name = "sparse_f32",
             description = "Sparse cutoff regime",
             sys = setup_benchmark_system(n_atoms; density=1400.0u"kg/m^3", box_multiplier=4.0, seed=43),
         ),
     ]
+
 
     println("Molly GPU Nonbonded Tile Benchmark")
     println("CUDA device: ", CUDA.name(CUDA.device()))
