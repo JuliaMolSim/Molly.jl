@@ -64,12 +64,12 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             sys.neighbor_finder.initialized = true
         end
         compress_ms = gpu_stage_time_ms!() do
-            @cuda blocks=ext.upper_tile_count(n_blocks) threads=(32, 1) always_inline=true ext.compress_boolean_matrices!(
+            @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true ext.compress_boolean_matrices!(
                 buffers.morton_seq,
                 sys.neighbor_finder.eligible,
                 sys.neighbor_finder.special,
-                buffers.compressed_eligible,
-                buffers.compressed_special,
+                buffers.compressed_masks,
+                buffers.tile_is_clean,
                 Val(N),
             )
         end
@@ -125,8 +125,8 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             Val(n_blocks),
             Val(D),
             max_tiles,
-            buffers.compressed_eligible,
-            buffers.compressed_special,
+            buffers.compressed_masks,
+            buffers.tile_is_clean,
         )
         tile_threads_xy = ext.tile_launch_params(tile_kernel)
         tile_kernel(
@@ -142,8 +142,8 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             Val(n_blocks),
             Val(D),
             max_tiles,
-            buffers.compressed_eligible,
-            buffers.compressed_special;
+            buffers.compressed_masks,
+            buffers.tile_is_clean;
             blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
             threads=tile_threads_xy,
         )
@@ -162,8 +162,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
         pairwise_inters,
         sys.boundary,
         step_n,
-        buffers.compressed_special,
-        buffers.compressed_eligible,
+        buffers.compressed_masks,
         Val(needs_vir),
         Val(T),
         Val(D),
@@ -192,8 +191,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
                 pairwise_inters,
                 sys.boundary,
                 step_n,
-                buffers.compressed_special,
-                buffers.compressed_eligible,
+                buffers.compressed_masks,
                 Val(needs_vir),
                 Val(T),
                 Val(D),
@@ -217,8 +215,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             pairwise_inters,
             sys.boundary,
             step_n,
-            buffers.compressed_special,
-            buffers.compressed_eligible,
+            buffers.compressed_masks,
             Val(needs_vir),
             Val(T),
             Val(D),
@@ -277,12 +274,12 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
     end
 
     compress_ms = gpu_stage_time_ms!() do
-        @cuda blocks=ext.upper_tile_count(n_blocks) threads=(32, 1) always_inline=true ext.compress_boolean_matrices!(
+        @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true ext.compress_boolean_matrices!(
             buffers.morton_seq,
             sys.neighbor_finder.eligible,
             sys.neighbor_finder.special,
-            buffers.compressed_eligible,
-            buffers.compressed_special,
+            buffers.compressed_masks,
+            buffers.tile_is_clean,
             Val(N),
         )
     end
@@ -337,8 +334,8 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             Val(n_blocks),
             Val(D),
             max_tiles,
-            buffers.compressed_eligible,
-            buffers.compressed_special,
+            buffers.compressed_masks,
+            buffers.tile_is_clean,
         )
         tile_threads_xy = ext.tile_launch_params(tile_kernel)
         tile_kernel(
@@ -354,8 +351,8 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             Val(n_blocks),
             Val(D),
             max_tiles,
-            buffers.compressed_eligible,
-            buffers.compressed_special;
+            buffers.compressed_masks,
+            buffers.tile_is_clean;
             blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
             threads=tile_threads_xy,
         )
@@ -373,8 +370,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
         pairwise_inters,
         sys.boundary,
         step_n,
-        buffers.compressed_special,
-        buffers.compressed_eligible,
+        buffers.compressed_masks,
         Val(T),
         Val(D),
         buffers.interacting_tiles_i,
@@ -398,8 +394,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             pairwise_inters,
             sys.boundary,
             step_n,
-            buffers.compressed_special,
-            buffers.compressed_eligible,
+            buffers.compressed_masks,
             Val(T),
             Val(D),
             buffers.interacting_tiles_i,
