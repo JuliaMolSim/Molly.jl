@@ -324,7 +324,11 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
-                           rng=Random.default_rng())
+                           shortcut=nothing,
+                           show_progress=default_show_progress(),
+                           rng=Random.default_rng(),
+                           strictness=default_strictness())
+    check_strictness(strictness)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -346,6 +350,7 @@ end
     dt_sq_div2 = sim.dt^2 / 2
     λ_dt = sim.λ * sim.dt
 
+    progress = setup_progress(n_steps, show_progress)
     for step_n in 1:n_steps
         if using_constraints
             cons_coord_storage .= sys.coords
@@ -391,6 +396,11 @@ end
 
         apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
+                        current_forces=forces_t)
+            break
+        end
+        next_nograd!(progress)
     end
     return sys
 end
