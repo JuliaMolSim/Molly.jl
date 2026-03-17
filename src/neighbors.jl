@@ -60,6 +60,7 @@ mutable struct GPUNeighborFinder{B, D}
     special::B
     n_steps_reorder::Int
     initialized::Bool
+    step_n_preprocessed::Int
 end
 
 function GPUNeighborFinder(;
@@ -75,7 +76,7 @@ function GPUNeighborFinder(;
         throw(ArgumentError("special must be on the GPU but has type $(typeof(special))"))
     end
     return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
-                eligible, dist_cutoff, special, n_steps_reorder, initialized)
+                eligible, dist_cutoff, special, n_steps_reorder, initialized, -1)
 end
 
 # The neighbors are calculated within the forces/potential energy kernels

@@ -162,7 +162,32 @@ function init_buffers!(sys::System{D}, n_threads) where D
     return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
 end
 
-struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR}
+upper_tile_count(n_blocks::Integer) = (Int64(n_blocks) * (Int64(n_blocks) + 1)) ÷ 2
+
+"""
+    BuffersGPU
+
+Mutable struct holding GPU-resident buffers and state for pairwise force and 
+energy calculations.
+
+# Fields
+- `fs_mat`: Force matrix of size `(D, N)`.
+- `pe_vec_nounits`: Vector of size 1 for potential energy summation.
+- `virial`: 3x3 virial tensor (with units).
+- `virial_nounits`: 3x3 virial tensor on GPU (without units).
+- `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
+- `morton_seq`: Current atom ordering based on Morton curve.
+- `compressed_masks`: 32x32 bitmasks (eligibility and special) for each tile.
+- `tile_is_clean`: Boolean flag for each tile indicating if it has no exclusions.
+- `interacting_tiles_i`, `interacting_tiles_j`: Indices of tiles within cutoff.
+- `interacting_tiles_type`: Type of tile (0: CLEAN, 1: EXCLUDED).
+- `num_interacting_tiles`: Atomic counter for number of tiles found.
+- `coords_reordered`, `velocities_reordered`, `atoms_reordered`: Cached reordered arrays.
+- `fs_mat_reordered`: Force matrix in reordered space.
+- `step_n_preprocessed`: Last simulation step where preprocessing was done.
+- `last_r_cut`: Last interaction cutoff used for preprocessing.
+"""
+mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR, fs_re, T, TIC}
     fs_mat::F
     pe_vec_nounits::P
     virial::V
@@ -174,8 +199,8 @@ struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR}
     morton_seq::M
     morton_seq_buffer_1::M
     morton_seq_buffer_2::M
-    compressed_eligible::R
-    compressed_special::R
+    compressed_masks::R
+    tile_is_clean::TIC
     interacting_tiles_i::IT
     interacting_tiles_j::IT
     interacting_tiles_type::ITT
@@ -184,7 +209,9 @@ struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR}
     coords_reordered::CR
     velocities_reordered::VR
     atoms_reordered::AR
-    fs_mat_reordered::F
+    fs_mat_reordered::fs_re
+    step_n_preprocessed::Int
+    last_r_cut::T
 end
 
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
@@ -193,7 +220,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     C = eltype(eltype(sys.coords))
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     n_blocks = cld(N, 32)
-    n_upper_tiles = n_blocks * (n_blocks + 1) ÷ 2
+    n_upper_tiles = upper_tile_count(n_blocks)
     backend = get_backend(sys.coords)
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
@@ -208,8 +235,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     morton_seq = KernelAbstractions.zeros(backend, Int32, N)
     morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N)
     morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
-    compressed_eligible = KernelAbstractions.zeros(backend, UInt32, 32, n_upper_tiles)
-    compressed_special = KernelAbstractions.zeros(backend, UInt32, 32, n_upper_tiles)
+    compressed_masks = KernelAbstractions.zeros(backend, UInt32, 32, 2, n_upper_tiles)
+    tile_is_clean = KernelAbstractions.zeros(backend, Bool, n_upper_tiles)
 
     max_interacting_blocks = min(n_blocks * n_blocks, n_blocks * 800)
     interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
@@ -227,11 +254,11 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     end
 
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
-                      morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
-                      compressed_special, interacting_tiles_i, interacting_tiles_j,
+                      morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_masks,
+                      tile_is_clean, interacting_tiles_i, interacting_tiles_j,
                       interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
                       coords_reordered, velocities_reordered, atoms_reordered,
-                      fs_mat_reordered)
+                      fs_mat_reordered, -1, T(-1))
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 

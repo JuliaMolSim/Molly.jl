@@ -95,8 +95,8 @@
             buffers.morton_seq,
             buffers.morton_seq_buffer_1,
             buffers.morton_seq_buffer_2,
-            buffers.compressed_eligible,
-            buffers.compressed_special,
+            buffers.compressed_masks,
+            CUDA.zeros(Bool, 1),
             CUDA.zeros(Int32, 1),
             CUDA.zeros(Int32, 1),
             CUDA.zeros(UInt8, 1),
@@ -106,6 +106,8 @@
             buffers.velocities_reordered,
             buffers.atoms_reordered,
             buffers.fs_mat_reordered,
+            -1,
+            ustrip(buffers.last_r_cut),
         )
     end
 

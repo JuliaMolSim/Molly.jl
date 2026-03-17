@@ -129,19 +129,19 @@ if GROUP in ("All", "NotGradients")
     include("bias.jl")
     include("coupling.jl")
     include("constraints.jl")
-    include("analysis.jl") =#
+    include("analysis.jl")
     if run_cuda_tests
         include("gpu_simple.jl")
         include("gpu_float64.jl")
         include("gpu_optimizations.jl")
         include("gpu_tile_lists.jl")
-    end
+    end =#
 end
 
-#= if GROUP in ("All", "Protein", "NotGradients")
+if GROUP in ("All", "Protein", "NotGradients")
     include("protein.jl")
 end
 
-if GROUP in ("All", "Gradients")
+#= if GROUP in ("All", "Gradients")
     include("gradients.jl")
 end =#
