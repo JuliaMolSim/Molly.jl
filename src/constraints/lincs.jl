@@ -42,6 +42,8 @@ Velocity constraints are applied implicitly through position constraint correcti
 See [Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)
 for the original LINCS paper.
 
+At the moment, this implementation is CPU only.
+
 # Arguments
 - `masses`: vector of atom masses.
 - `dist_tolerance=1e-8u"nm"`: the tolerance for checking position constraints, should
@@ -53,9 +55,6 @@ for the original LINCS paper.
     improve accuracy for coupled constraints at the cost of performance.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
-- `strictness=:warn`: determines behavior when encountering possible problems,
-    options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
-    `:error` to error.
 """
 struct LINCS{CL, LD, LW, DC, E, F}
     clusters::CL
@@ -71,11 +70,9 @@ function LINCS(masses,
                vel_tolerance=1e-8u"nm^2 * ps^-1";
                dist_constraints,
                nrec::Integer=4,
-               niter::Integer=1,
-               strictness=:warn)
+               niter::Integer=1)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero"))
-    check_strictness(strictness)
 
     dc_present = !isnothing(dist_constraints) && length(dist_constraints) > 0
     if !dc_present
@@ -100,8 +97,6 @@ function Base.show(io::IO, lincs::LINCS)
     print(io, "LINCS with ", length(lincs.dist_constraints), " constraints (nrec=",
           lincs.lincs_data.nrec, ", niter=", lincs.lincs_data.niter, ")")
 end
-
-cluster_keys(::LINCS) = (:clusters,)
 
 function constrained_atom_inds(lincs::LINCS)
     atom_inds = Int[]
@@ -153,7 +148,9 @@ function build_lincs_coupling_matrix(atom1, atom2, invmass, sdiag, ::Type{T}) wh
         dedup_neighbors = Int[]
         dedup_coefs = T[]
         for (idx, cj) in enumerate(neighbor_lists[ci])
-            if !haskey(seen, cj)
+            if haskey(seen, cj)
+                dedup_coefs[seen[cj]] += coef_lists[ci][idx]
+            else
                 seen[cj] = length(dedup_neighbors) + 1
                 push!(dedup_neighbors, cj)
                 push!(dedup_coefs, coef_lists[ci][idx])
@@ -241,6 +238,8 @@ function lincs_solve!(coords, data::LincsData{T}, ws::LincsWorkspace{T}, unit_sc
             tmp[i] = mvb
             ws.sol[i] += mvb
         end
+        # Ping-pong: swap local bindings so next iteration reads from what was just written.
+        # ws.rhs/ws.tmp fields still point to original arrays; callers reassign ws.rhs before reuse.
         rhs, tmp = tmp, rhs
     end
 
@@ -349,7 +348,7 @@ function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca::LINCS) wh
 end
 
 function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
-    if typeof(neighbor_finder) != NoNeighborFinder
+    if !(neighbor_finder isa NoNeighborFinder)
         disable_constrained_interactions!(neighbor_finder, lincs.clusters)
     end
     return lincs

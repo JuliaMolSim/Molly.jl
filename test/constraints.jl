@@ -331,7 +331,7 @@ end
             random_velocities!(sys, temp)
 
             simulate!(sys, simulator, 20)
-            @time simulate!(sys, simulator, 1000)
+            simulate!(sys, simulator, 1000)
 
             @test check_position_constraints(sys)
             @test check_velocity_constraints(sys)
@@ -792,7 +792,7 @@ end
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
     atom_masses = [atom_mass for _ in 1:n_atoms]
 
-    cons = LINCS(n_atoms, atom_masses, 1e-8u"Å", 1e-8u"Å^2 * ps^-1";
+    cons = LINCS(atom_masses, 1e-8u"Å", 1e-8u"Å^2 * ps^-1";
                  dist_constraints=dist_constraints)
 
     @test length(cons.clusters) == (n_atoms ÷ 2)
@@ -808,6 +808,7 @@ end
         VelocityVerlet(dt=0.002u"ps"),
         Verlet(dt=0.002u"ps"),
         StormerVerlet(dt=0.002u"ps"),
+        Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
     )
 
     for simulator in simulators
