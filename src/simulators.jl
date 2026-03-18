@@ -20,6 +20,17 @@ export
 
 shortcut_sim(::Nothing, args...; kwargs...) = false
 
+calc_n_steps(n_steps::Integer, dt) = n_steps
+
+function calc_n_steps(sim_time::Number, dt)
+    if dimension(sim_time) != dimension(dt)
+        throw(ArgumentError("simulation time ($sim_time) and simulator time step ($dt) " *
+                            "must have the same dimension, you may have meant to pass an " *
+                            "integer number of steps instead of a non-integer time step"))
+    end
+    return Int(cld(sim_time, dt))
+end
+
 function default_show_progress()
     if haskey(ENV, "MOLLY_SHOW_PROGRESS")
         return parse(Bool, lowercase(ENV["MOLLY_SHOW_PROGRESS"]))
@@ -85,12 +96,15 @@ Steepest descent energy minimization.
 end
 
 """
-    simulate!(system, simulator, n_steps; <keyword arguments>)
+    simulate!(system, simulator, n_steps::Integer; <keyword arguments>)
+    simulate!(system, simulator, sim_time; <keyword arguments>)
     simulate!(system, simulator; <keyword arguments>)
     simulate!(awh_sim::AWHSimulation, n_steps)
 
 Run a simulation on a system according to the rules of the given simulator.
 
+For simulators that run for a given period of time, the third argument can either be an
+`Integer` number of steps or a simulation time (e.g. `10.0u"ns"` or `10.0` if not using units).
 Custom simulators should implement this function.
 Constraints are applied during minimization, which can lead to issues.
 
@@ -212,7 +226,7 @@ end
 
 @inline function simulate!(sys,
                            sim::VelocityVerlet,
-                           n_steps::Integer;
+                           n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
@@ -220,6 +234,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -321,7 +336,7 @@ end
 
 @inline function simulate!(sys,
                            sim::DPDVelocityVerlet,
-                           n_steps::Integer;
+                           n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
@@ -329,6 +344,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -431,7 +447,7 @@ end
 
 @inline function simulate!(sys,
                            sim::Verlet,
-                           n_steps::Integer;
+                           n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
@@ -439,6 +455,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -516,7 +533,7 @@ end
 
 @inline function simulate!(sys,
                            sim::StormerVerlet,
-                           n_steps::Integer;
+                           n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
@@ -524,6 +541,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -614,7 +632,7 @@ end
 
 @inline function simulate!(sys,
                            sim::Langevin,
-                           n_steps::Integer;
+                           n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
@@ -622,6 +640,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -726,7 +745,7 @@ end
 
 @inline function simulate!(sys,
                            sim::LangevinSplitting,
-                           n_steps::Integer;
+                           n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
@@ -739,6 +758,7 @@ end
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
@@ -861,7 +881,7 @@ end
 
 @inline function simulate!(sys,
                            sim::OverdampedLangevin,
-                           n_steps::Integer;
+                           n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
@@ -874,6 +894,7 @@ end
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -947,7 +968,7 @@ end
 
 @inline function simulate!(sys,
                            sim::NoseHoover,
-                           n_steps::Integer;
+                           n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
@@ -960,6 +981,7 @@ end
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -1049,7 +1071,7 @@ end
 
 function simulate!(sys::ReplicaSystem,
                    sim::ReplicaExchangeMD,
-                   n_steps::Integer;
+                   n_steps_or_time;
                    assign_velocities::Bool=false,
                    n_threads::Integer=Threads.nthreads(),
                    run_loggers=true,
@@ -1080,7 +1102,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
-    return simulate_remd!(sys, sim, n_steps; n_threads=n_threads, run_loggers=run_loggers,
+    return simulate_remd!(sys, sim, n_steps_or_time; n_threads=n_threads, run_loggers=run_loggers,
                           shortcut=shortcut, show_progress=show_progress, rng=rng,
                           strictness=strictness)
 end
@@ -1144,7 +1166,10 @@ function remd_exchange!(sys::ReplicaSystem,
 end
 
 @doc raw"""
-    simulate_remd!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, n_steps::Integer; <keyword arguments>)
+    simulate_remd!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, n_steps::Integer;
+                   <keyword arguments>)
+    simulate_remd!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, sim_time;
+                   <keyword arguments>)
 
 Run a Replica Exchange Molecular Dynamics (REMD) simulation on a multiple-replica system.
 
@@ -1153,7 +1178,7 @@ The simulation divides the total `n_steps` into cycles based on the time step an
 # Arguments
 - `sys::ReplicaSystem`: the partitioned system containing the replicas and thermodynamic states.
 - `remd_sim::ReplicaExchangeMD`: the simulator containing the specific time step and exchange time interval.
-- `n_steps::Integer`: the total number of MD steps to simulate for each replica.
+- `n_steps::Integer` or `sim_time`: the total number of steps or time to simulate for each replica.
 - `n_threads::Integer=Threads.nthreads()`: the total number of threads to use, which are equally partitioned among the individual replicas.
 - `run_loggers=true`: whether to run the loggers during the simulation, including the exchange logger.
 - `rng=Random.default_rng()`: the random number generator used for the exchange accept/reject criteria and any stochastic dynamics.
@@ -1163,7 +1188,7 @@ The simulation divides the total `n_steps` into cycles based on the time step an
 """
 function simulate_remd!(sys::ReplicaSystem,
                         remd_sim::ReplicaExchangeMD,
-                        n_steps::Integer;
+                        n_steps_or_time;
                         n_threads::Integer=Threads.nthreads(),
                         run_loggers=true,
                         shortcut=nothing, # Unused
@@ -1171,6 +1196,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         rng=Random.default_rng(),
                         strictness=default_strictness())
     check_strictness(strictness)
+    n_steps = calc_n_steps(n_steps_or_time, remd_sim.dt)
     thread_div = equal_parts(n_threads, sys.n_replicas)
 
     n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)

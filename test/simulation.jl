@@ -329,16 +329,18 @@ end
 @testset "Lennard-Jones simulators" begin
     n_atoms = 100
     n_steps = 20_000
+    dt = 0.002u"ps"
+    sim_time = n_steps * dt
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
              for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     simulators = [
-        Verlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),)),
-        StormerVerlet(dt=0.002u"ps"),
-        Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
-        OverdampedLangevin(dt=0.002u"ps", temperature=temp, friction=10.0u"ps^-1"),
+        Verlet(dt=dt, coupling=(AndersenThermostat(temp, 10.0u"ps"),)),
+        StormerVerlet(dt=dt),
+        Langevin(dt=dt, temperature=temp, friction=1.0u"ps^-1"),
+        OverdampedLangevin(dt=dt, temperature=temp, friction=10.0u"ps^-1"),
     ]
 
     for AT in array_list
@@ -364,9 +366,14 @@ end
         )
         random_velocities!(sys, temp)
         for simulator in simulators
-            @time simulate!(sys, simulator, n_steps; n_threads=1)
+            @time simulate!(sys, simulator, sim_time; n_threads=1)
         end
     end
+
+    @test Molly.calc_n_steps(n_steps, dt) == n_steps
+    @test Molly.calc_n_steps(sim_time, dt) == n_steps
+    @test Molly.calc_n_steps(ustrip(sim_time), ustrip(dt)) == n_steps
+    @test_throws ArgumentError Molly.calc_n_steps(ustrip(sim_time), dt)
 end
 
 @testset "Verlet integrators on CPU and GPU" begin
