@@ -386,6 +386,7 @@ end
                 dispersion_correction=false,
                 implicit_solvent=solvent_model,
                 kappa=1.0u"nm^-1",
+                strictness=:nowarn,
             )
             neighbors = find_neighbors(sys)
             forces_molly = forces(sys)

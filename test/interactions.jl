@@ -904,6 +904,7 @@ end
                     nonbonded_method=:ewald,
                     dispersion_correction=false,
                     center_coords=false,
+                    strictness=:nowarn,
                 )
                 sys = System(
                     sys_init;
@@ -975,6 +976,7 @@ end
                         nonbonded_method=:pme,
                         dispersion_correction=false,
                         center_coords=false,
+                        strictness=:nowarn,
                     )
                     sys = System(
                         sys_init;

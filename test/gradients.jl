@@ -1,4 +1,4 @@
-@testset "Gradients" begin
+@testset "Energy gradients" begin
     inter = LennardJones()
     boundary = CubicBoundary(5.0)
     a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
@@ -338,6 +338,7 @@ end
             implicit_solvent=:gbn2,
             kappa=0.7,
             grad_safe=true,
+            strictness=:nowarn,
         )
     end
 

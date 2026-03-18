@@ -185,6 +185,7 @@
             dispersion_correction=false,
             neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
                                     DistanceNeighborFinder),
+            strictness=:nowarn,
         )
         mcs = Molly.molecule_centers(sys.coords, sys.boundary, sys.topology)
         @test isapprox(from_device(mcs)[1], mean(sys.coords[1:1170]); atol=0.08u"nm")
