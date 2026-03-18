@@ -255,10 +255,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             w = sides ./ (2^morton_bits)
             sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
             sys.neighbor_finder.initialized = true
-            @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
-                buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
-                buffers.compressed_masks, buffers.tile_is_clean,
-                Val(N))
+            compress_sparse!(buffers, Val(N))
         end
 
         reorder_system_gpu!(buffers, sys)
@@ -380,10 +377,7 @@ function pairwise_forces_loop_gpu_dense!(buffers, sys::System{D, <:CuArray, T}, 
             w = sides ./ (2^morton_bits)
             sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
             sys.neighbor_finder.initialized = true
-            @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
-                buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
-                buffers.compressed_masks, buffers.tile_is_clean,
-                Val(N))
+            compress_sparse!(buffers, Val(N))
         end
 
         reorder_system_gpu!(buffers, sys)
@@ -467,10 +461,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             w = sides ./ (2^morton_bits)
             sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
             sys.neighbor_finder.initialized = true
-            @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
-                        buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
-                        buffers.compressed_masks, buffers.tile_is_clean,
-                        Val(N))
+            compress_sparse!(buffers, Val(N))
         end
         reorder_system_gpu!(buffers, sys)
         KernelAbstractions.synchronize(backend)
@@ -556,10 +547,7 @@ function pairwise_pe_loop_gpu_dense!(pe_vec_nounits, buffers, sys::System{D, <:C
             w = sides ./ (2^morton_bits)
             sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
             sys.neighbor_finder.initialized = true
-            @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
-                        buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
-                        buffers.compressed_masks, buffers.tile_is_clean,
-                        Val(N))
+            compress_sparse!(buffers, Val(N))
         end
         reorder_system_gpu!(buffers, sys)
         if sys.boundary isa TriclinicBoundary
@@ -846,92 +834,155 @@ function kernel_min_max_triclinic!(
     return nothing
 end
 
-#=
-    compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix, 
-                               compressed_masks, tile_is_clean, Val(N))
+function update_inv_morton_kernel!(inv_morton_seq, morton_seq, ::Val{N}) where N
+    i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    if i <= N
+        @inbounds inv_morton_seq[morton_seq[i]] = i
+    end
+    return nothing
+end
 
-This kernel compresses the 2D interaction matrices into 32x32 bitmasks stored as UInt32.
-Each thread in a warp handles one row (32 atom pairs) of a tile.
-
-It also identifies "clean" tiles: a tile is clean if all pairs in it are eligible
-(no exclusions) and none are special. Clean tiles skip bitmask checks in the
-force/energy kernels for better performance.
-
-The kernel uses a 2D grid launch (n_blocks x n_blocks) where each block computes one tile.
-=#
-function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
-                                    compressed_masks, tile_is_clean,
-                                    ::Val{N}) where N
-    a = Int32(1)
+function init_compressed_masks_kernel!(compressed_masks, tile_is_clean, ::Val{N}, ::Val{n_upper_tiles}) where {N, n_upper_tiles}
     lane = laneid()
     n_blocks = ceil(Int32, N / 32)
-    i = blockIdx().x
-    j = blockIdx().y
+    tile_idx = blockIdx().x
 
-    if i > j || i > n_blocks || j > n_blocks
+    if tile_idx > n_upper_tiles
         return nothing
     end
 
-    tile_idx = upper_tile_index(Int32(i), Int32(j), Int32(n_blocks))
-
-    i_0_tile = (i - a) * warpsize()
-    j_0_tile = (j - a) * warpsize()
-    index_i = i_0_tile + lane
-    j_indices_smem = CuStaticSharedArray(Int32, 32)
+    # Binary search for i such that S(i) <= tile_idx < S(i+1)
+    # S(i) = ((i - 1) * (2 * n_blocks - i + 2)) / 2 + 1
+    low = Int32(1)
+    high = Int32(n_blocks)
+    i = Int32(1)
+    while low <= high
+        mid = (low + high) ÷ Int32(2)
+        start_idx_mid = ((Int64(mid) - 1) * (2 * Int64(n_blocks) - Int64(mid) + 2)) ÷ 2 + 1
+        if start_idx_mid <= tile_idx
+            i = mid
+            low = mid + Int32(1)
+        else
+            high = mid - Int32(1)
+        end
+    end
+    
+    start_idx_i = ((Int64(i) - 1) * (2 * Int64(n_blocks) - Int64(i) + 2)) ÷ 2 + 1
+    j = i + Int32(tile_idx - start_idx_i)
 
     r = Int32((N - 1) % 32 + 1)
-    if j < n_blocks || (j == n_blocks && lane <= r)
-        j_indices_smem[lane] = sorted_seq[j_0_tile + lane]
-    else
-        j_indices_smem[lane] = Int32(1)
-    end
-    sync_warp()
 
-    eligible_bitmask = UInt32(0)
-    special_bitmask = UInt32(0)
+    eligible_bitmask = UInt32(0xFFFFFFFF)
+    special_bitmask = UInt32(0x00000000)
 
-    if j < n_blocks
-        s_idx_i = sorted_seq[index_i]
-        for m in a:warpsize()
-            s_idx_j = j_indices_smem[m]
-            eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
-            special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
-        end
-        compressed_masks[lane, 1, tile_idx] = eligible_bitmask
-        compressed_masks[lane, 2, tile_idx] = special_bitmask
-    elseif j == n_blocks && i < j
-        s_idx_i = sorted_seq[index_i]
-        for m in a:r
-            s_idx_j = j_indices_smem[m]
-            eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
-            special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
-        end
-        eligible_bitmask = (eligible_bitmask >> r) | (eligible_bitmask << (warpsize() - r))
-        special_bitmask = (special_bitmask >> r) | (special_bitmask << (warpsize() - r))
-        compressed_masks[lane, 1, tile_idx] = eligible_bitmask
-        compressed_masks[lane, 2, tile_idx] = special_bitmask
-    elseif j == n_blocks && i == j && lane <= r
-        s_idx_i = sorted_seq[index_i]
-        for m in a:r
-            s_idx_j = j_indices_smem[m]
-            eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
-            special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
-        end
-        eligible_bitmask = (eligible_bitmask >> r) | (eligible_bitmask << (warpsize() - r))
-        special_bitmask = (special_bitmask >> r) | (special_bitmask << (warpsize() - r))
-        compressed_masks[lane, 1, tile_idx] = eligible_bitmask
-        compressed_masks[lane, 2, tile_idx] = special_bitmask
+    # Boundary Masking
+    if j == n_blocks
+        mask = ifelse(r == Int32(32), UInt32(0xFFFFFFFF), (UInt32(1) << r) - UInt32(1))
+        eligible_bitmask = (mask << (Int32(32) - r))
     end
 
-    # A tile is clean if it's not a diagonal tile, it's not a boundary tile,
-    # and all atom pairs in it are eligible and none are special.
-    is_row_clean = (j < n_blocks) && (i < j) && (eligible_bitmask == 0xFFFFFFFF) && (special_bitmask == 0)
-    is_tile_clean = CUDA.vote_all_sync(0xFFFFFFFF, is_row_clean)
+    # Diagonal Self-Interactions
+    if i == j
+        eligible_bitmask &= ~(UInt32(1) << (Int32(32) - lane))
+    end
+
+    @inbounds compressed_masks[lane, 1, tile_idx] = eligible_bitmask
+    @inbounds compressed_masks[lane, 2, tile_idx] = special_bitmask
+
     if lane == 1
-        tile_is_clean[tile_idx] = is_tile_clean
+        @inbounds tile_is_clean[tile_idx] = (i < j) && (j < n_blocks)
     end
 
     return nothing
+end
+
+function apply_sparse_exceptions_kernel!(
+    excluded_i, excluded_j, special_i, special_j,
+    inv_morton_seq, compressed_masks, tile_is_clean,
+    ::Val{n_blocks}, ::Val{n_excluded}, ::Val{n_special}
+) where {n_blocks, n_excluded, n_special}
+    
+    idx = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    
+    if idx <= n_excluded
+        @inbounds orig_i = excluded_i[idx]
+        @inbounds orig_j = excluded_j[idx]
+        
+        @inbounds p_i = inv_morton_seq[orig_i]
+        @inbounds p_j = inv_morton_seq[orig_j]
+        
+        if p_i > p_j
+            p_i, p_j = p_j, p_i
+        end
+        
+        t_i = (p_i - Int32(1)) ÷ Int32(32) + Int32(1)
+        t_j = (p_j - Int32(1)) ÷ Int32(32) + Int32(1)
+        tile_idx = upper_tile_index(t_i, t_j, Int32(n_blocks))
+        
+        lane_i = (p_i - Int32(1)) % Int32(32) + Int32(1)
+        lane_j = (p_j - Int32(1)) % Int32(32) + Int32(1)
+        
+        target_bit = UInt32(1) << (Int32(32) - lane_j)
+        
+        # For exclusions, mask_type = 1
+        linear_idx = Int64(lane_i) + Int64(64) * (Int64(tile_idx) - Int64(1))
+        
+        CUDA.atomic_and!(pointer(compressed_masks, linear_idx), ~target_bit)
+        @inbounds tile_is_clean[tile_idx] = false
+    end
+    
+    if idx <= n_special
+        @inbounds orig_i = special_i[idx]
+        @inbounds orig_j = special_j[idx]
+        
+        @inbounds p_i = inv_morton_seq[orig_i]
+        @inbounds p_j = inv_morton_seq[orig_j]
+        
+        if p_i > p_j
+            p_i, p_j = p_j, p_i
+        end
+        
+        t_i = (p_i - Int32(1)) ÷ Int32(32) + Int32(1)
+        t_j = (p_j - Int32(1)) ÷ Int32(32) + Int32(1)
+        tile_idx = upper_tile_index(t_i, t_j, Int32(n_blocks))
+        
+        lane_i = (p_i - Int32(1)) % Int32(32) + Int32(1)
+        lane_j = (p_j - Int32(1)) % Int32(32) + Int32(1)
+        
+        target_bit = UInt32(1) << (Int32(32) - lane_j)
+        
+        # For special, mask_type = 2
+        linear_idx = Int64(lane_i) + Int64(32) + Int64(64) * (Int64(tile_idx) - Int64(1))
+        
+        CUDA.atomic_or!(pointer(compressed_masks, linear_idx), target_bit)
+        @inbounds tile_is_clean[tile_idx] = false
+    end
+    
+    return nothing
+end
+
+function compress_sparse!(buffers, ::Val{N}) where N
+    n_blocks = ceil(Int32, N / 32)
+    n_upper_tiles = upper_tile_count(n_blocks)
+    
+    # Stage A: Inverse Morton Mapping
+    @cuda threads=256 blocks=cld(N, 256) update_inv_morton_kernel!(
+        buffers.morton_seq_inv, buffers.morton_seq, Val(N))
+    
+    # Stage B: Optimistic Initialization
+    @cuda blocks=n_upper_tiles threads=32 init_compressed_masks_kernel!(
+        buffers.compressed_masks, buffers.tile_is_clean, Val(N), Val(n_upper_tiles))
+    
+    # Stage C: Atomic Scatter
+    n_exc = buffers.n_excluded
+    n_spec = buffers.n_special
+    n_max = max(n_exc, n_spec)
+    if n_max > 0
+        @cuda threads=256 blocks=cld(Int32(n_max), Int32(256)) apply_sparse_exceptions_kernel!(
+            buffers.excluded_i, buffers.excluded_j, buffers.special_i, buffers.special_j,
+            buffers.morton_seq_inv, buffers.compressed_masks, buffers.tile_is_clean,
+            Val(n_blocks), Val(Int32(n_exc)), Val(Int32(n_spec)))
+    end
 end
 
 #=

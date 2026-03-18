@@ -54,7 +54,7 @@ Use the non-bonded forces/potential energy algorithm from
 
 This is the recommended neighbor finder on NVIDIA GPUs.
 """
-mutable struct GPUNeighborFinder{B, D}
+mutable struct GPUNeighborFinder{B, D, E}
     eligible::B
     dist_cutoff::D
     dist_neighbors::D
@@ -62,6 +62,10 @@ mutable struct GPUNeighborFinder{B, D}
     n_steps_reorder::Int
     initialized::Bool
     step_n_preprocessed::Int
+    excluded_i::E
+    excluded_j::E
+    special_i::E
+    special_j::E
 end
 
 function GPUNeighborFinder(;
@@ -77,8 +81,42 @@ function GPUNeighborFinder(;
     if !(special isa AbstractGPUArray)
         throw(ArgumentError("special must be on the GPU but has type $(typeof(special))"))
     end
-    return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
-                eligible, dist_cutoff, dist_neighbors, special, n_steps_reorder, initialized, -1)
+
+    # Extract sparse exceptions once on CPU
+    eligible_cpu = Array(eligible)
+    special_cpu = Array(special)
+    
+    all_exc = findall(.!eligible_cpu)
+    exc_i_vec = Int32[]
+    exc_j_vec = Int32[]
+    for idx in all_exc
+        if idx[1] < idx[2]
+            push!(exc_i_vec, Int32(idx[1]))
+            push!(exc_j_vec, Int32(idx[2]))
+        end
+    end
+    
+    all_spec = findall(special_cpu)
+    spec_i_vec = Int32[]
+    spec_j_vec = Int32[]
+    for idx in all_spec
+        if idx[1] <= idx[2]
+            push!(spec_i_vec, Int32(idx[1]))
+            push!(spec_j_vec, Int32(idx[2]))
+        end
+    end
+
+    # We want 1D Int32 arrays on the GPU if possible
+    ET = (eligible isa AbstractGPUArray) ? typeof(eligible).name.wrapper{Int32, 1} : Array{Int32, 1}
+    
+    excluded_i = Molly.to_device(exc_i_vec, ET)
+    excluded_j = Molly.to_device(exc_j_vec, ET)
+    special_i = Molly.to_device(spec_i_vec, ET)
+    special_j = Molly.to_device(spec_j_vec, ET)
+
+    return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff), typeof(excluded_i)}(
+                eligible, dist_cutoff, dist_neighbors, special, n_steps_reorder, initialized, -1,
+                excluded_i, excluded_j, special_i, special_j)
 end
 
 # The neighbors are calculated within the forces/potential energy kernels

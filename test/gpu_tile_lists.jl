@@ -85,7 +85,7 @@
 
     function with_tiny_tile_capacity(buffers)
         n_blocks = size(buffers.box_mins, 1)
-        n_tiles = (n_blocks * (n_blocks + 1)) ÷ 2
+        tiny_capacity = 1
         return Molly.BuffersGPU(
             buffers.fs_mat,
             buffers.pe_vec_nounits,
@@ -98,18 +98,27 @@
             buffers.morton_seq,
             buffers.morton_seq_buffer_1,
             buffers.morton_seq_buffer_2,
+            buffers.morton_seq_inv,
+            buffers.excluded_i,
+            buffers.excluded_j,
+            buffers.special_i,
+            buffers.special_j,
             buffers.compressed_masks,
-            CUDA.zeros(Bool, n_tiles),      # tile_is_clean
-            CUDA.zeros(Int32, 1, n_blocks), # interacting_tiles_j (1 row per i)
-            CUDA.zeros(UInt8, 1, n_blocks), # interacting_tiles_type (1 row per i)
-            CUDA.zeros(Int32, n_blocks),    # num_interacting_tiles
-            CUDA.zeros(Int32, 1),           # interacting_tiles_overflow
+            buffers.tile_is_clean,
+            CUDA.zeros(Int32, tiny_capacity), # interacting_tiles_i
+            CUDA.zeros(Int32, tiny_capacity), # interacting_tiles_j
+            CUDA.zeros(UInt8, tiny_capacity), # interacting_tiles_type
+            CUDA.zeros(Int32, 1),             # num_interacting_tiles (atomic counter)
+            CUDA.zeros(Int32, 1),             # interacting_tiles_overflow
             buffers.coords_reordered,
             buffers.velocities_reordered,
             buffers.atoms_reordered,
             buffers.fs_mat_reordered,
             -1,
-            ustrip(buffers.last_r_cut),
+            buffers.last_r_cut,
+            0, # num_pairs
+            buffers.n_excluded,
+            buffers.n_special,
         )
     end
 

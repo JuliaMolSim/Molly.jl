@@ -199,6 +199,11 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     morton_seq::M
     morton_seq_buffer_1::M
     morton_seq_buffer_2::M
+    morton_seq_inv::M
+    excluded_i::M
+    excluded_j::M
+    special_i::M
+    special_j::M
     compressed_masks::R
     tile_is_clean::TIC
     interacting_tiles_i::IT
@@ -213,6 +218,8 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     step_n_preprocessed::Int
     last_r_cut::T
     num_pairs::Int
+    n_excluded::Int64
+    n_special::Int64
 end
 
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
@@ -236,6 +243,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     morton_seq = KernelAbstractions.zeros(backend, Int32, N)
     morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N)
     morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
+    morton_seq_inv = KernelAbstractions.zeros(backend, Int32, N)
     compressed_masks = KernelAbstractions.zeros(backend, UInt32, 32, 2, n_upper_tiles)
     tile_is_clean = KernelAbstractions.zeros(backend, Bool, n_upper_tiles)
 
@@ -254,12 +262,31 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
         sys.neighbor_finder.initialized = false
     end
 
+    nf = sys.neighbor_finder
+    if nf isa GPUNeighborFinder
+        excluded_i = nf.excluded_i
+        excluded_j = nf.excluded_j
+        special_i = nf.special_i
+        special_j = nf.special_j
+        n_exc = length(excluded_i)
+        n_spec = length(special_i)
+    else
+        IT = typeof(morton_seq)
+        excluded_i = KernelAbstractions.zeros(backend, Int32, 0)
+        excluded_j = KernelAbstractions.zeros(backend, Int32, 0)
+        special_i = KernelAbstractions.zeros(backend, Int32, 0)
+        special_j = KernelAbstractions.zeros(backend, Int32, 0)
+        n_exc = 0
+        n_spec = 0
+    end
+
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
-                      morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_masks,
+                      morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
+                      excluded_i, excluded_j, special_i, special_j, compressed_masks,
                       tile_is_clean, interacting_tiles_i, interacting_tiles_j,
                       interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
                       coords_reordered, velocities_reordered, atoms_reordered,
-                      fs_mat_reordered, -1, T(-1), 0)
+                      fs_mat_reordered, -1, T(-1), 0, Int64(n_exc), Int64(n_spec))
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
