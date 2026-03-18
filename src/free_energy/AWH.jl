@@ -76,8 +76,8 @@ end
 function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   first_state::Int = 1,
                   n_bias::Int = 100,
-                  ρ::Union{Nothing, AbstractArray{T}} = nothing,
-                  reuse_neighbors::Bool = true) where T
+                  ρ::Union{Nothing, AbstractArray} = nothing,
+                  reuse_neighbors::Bool = true)
 
     n_λ = length(thermo_states)
     ref_sys = thermo_states[first_state].system

@@ -334,6 +334,7 @@ end
             units=false,
             array_type=AT,
             nonbonded_method=:cutoff,
+            dispersion_correction=false,
             implicit_solvent=:gbn2,
             kappa=0.7,
             grad_safe=true,
