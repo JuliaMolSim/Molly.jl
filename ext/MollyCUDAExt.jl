@@ -132,7 +132,7 @@ function force_launch_params(kernel)
     maxregs_override === nothing || maxregs_override > 0 || error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(maxregs_override)")
 
     conf = launch_configuration(kernel.fun)
-    block_y = something(block_y_override, min(Int(WARPSIZE), 8, choose_block_y(conf.threads)))
+    block_y = something(block_y_override, min(Int(WARPSIZE), 4, choose_block_y(conf.threads)))
     return (block_y, maxregs_override)
 end
 
@@ -142,7 +142,7 @@ function energy_launch_params(kernel)
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_ENERGY_BLOCK_Y", block_y_override)
 
     conf = launch_configuration(kernel.fun)
-    block_y = something(block_y_override, min(Int(WARPSIZE), 8, choose_block_y(conf.threads)))
+    block_y = something(block_y_override, min(Int(WARPSIZE), 4, choose_block_y(conf.threads)))
     return block_y
 end
 
@@ -1081,17 +1081,15 @@ function force_kernel!(
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
 
-    force_smem = CuStaticSharedArray(T, (32, D, MAX_BLOCK_Y))
     opposites_sum = CuStaticSharedArray(T, (32, D, MAX_BLOCK_Y))
-    
-    if needs_vir
-        warp_virial = CuStaticSharedArray(T, (6, MAX_BLOCK_Y))
-    end
 
     r = Int32((N - 1) % 32 + 1)
     
+    force_i_x = zero(T)
+    force_i_y = zero(T)
+    force_i_z = zero(T)
+
     @inbounds for k in a:b
-        force_smem[lane, k, warpid] = zero(T)
         opposites_sum[lane, k, warpid] = zero(T)
     end
 
@@ -1135,9 +1133,15 @@ function force_kernel!(
                         false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
 
-                    @inbounds for k in a:b
-                        force_smem[lane, k, warpid]           += ustrip(f[k])
-                        opposites_sum[shuffle_idx, k, warpid] -= ustrip(f[k])
+                    force_i_x += ustrip(f[1])
+                    opposites_sum[shuffle_idx, 1, warpid] -= ustrip(f[1])
+                    if D >= 2
+                        force_i_y += ustrip(f[2])
+                        opposites_sum[shuffle_idx, 2, warpid] -= ustrip(f[2])
+                    end
+                    if D >= 3
+                        force_i_z += ustrip(f[3])
+                        opposites_sum[shuffle_idx, 3, warpid] -= ustrip(f[3])
                     end
 
                     if needs_vir
@@ -1180,9 +1184,15 @@ function force_kernel!(
                         (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
 
-                    @inbounds for k in a:b
-                        force_smem[lane, k, warpid]           += ustrip(f[k])
-                        opposites_sum[shuffle_idx, k, warpid] -= ustrip(f[k])
+                    force_i_x += ustrip(f[1])
+                    opposites_sum[shuffle_idx, 1, warpid] -= ustrip(f[1])
+                    if D >= 2
+                        force_i_y += ustrip(f[2])
+                        opposites_sum[shuffle_idx, 2, warpid] -= ustrip(f[2])
+                    end
+                    if D >= 3
+                        force_i_z += ustrip(f[3])
+                        opposites_sum[shuffle_idx, 3, warpid] -= ustrip(f[3])
                     end
 
                     if needs_vir
@@ -1241,10 +1251,20 @@ function force_kernel!(
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                 ) : zero(SVector{D, T})
 
-                @inbounds for k in a:b
-                    force_smem[lane, k, warpid] += ustrip(f[k])
-                    if ustrip(f[k]) != zero(T)
-                        CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - k)), ustrip(f[k]))
+                force_i_x += ustrip(f[1])
+                if ustrip(f[1]) != zero(T)
+                    CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - 1)), ustrip(f[1]))
+                end
+                if D >= 2
+                    force_i_y += ustrip(f[2])
+                    if ustrip(f[2]) != zero(T)
+                        CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - 2)), ustrip(f[2]))
+                    end
+                end
+                if D >= 3
+                    force_i_z += ustrip(f[3])
+                    if ustrip(f[3]) != zero(T)
+                        CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - 3)), ustrip(f[3]))
                     end
                 end
                 
@@ -1291,9 +1311,15 @@ function force_kernel!(
                 (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
             ) : zero(SVector{D, T})
 
-            @inbounds for k in a:b
-                force_smem[lane, k, warpid] += ustrip(f[k])
-                opposites_sum[m, k, warpid] -= ustrip(f[k])
+            force_i_x += ustrip(f[1])
+            opposites_sum[m, 1, warpid] -= ustrip(f[1])
+            if D >= 2
+                force_i_y += ustrip(f[2])
+                opposites_sum[m, 2, warpid] -= ustrip(f[2])
+            end
+            if D >= 3
+                force_i_z += ustrip(f[3])
+                opposites_sum[m, 3, warpid] -= ustrip(f[3])
             end
             
             if needs_vir
@@ -1311,9 +1337,15 @@ function force_kernel!(
         end
 
         sync_warp()
-        @inbounds for k in a:b
-            force_smem[lane, k, warpid] += opposites_sum[lane, k, warpid]
-            opposites_sum[lane, k, warpid] = zero(T)
+        force_i_x += opposites_sum[lane, 1, warpid]
+        opposites_sum[lane, 1, warpid] = zero(T)
+        if D >= 2
+            force_i_y += opposites_sum[lane, 2, warpid]
+            opposites_sum[lane, 2, warpid] = zero(T)
+        end
+        if D >= 3
+            force_i_z += opposites_sum[lane, 3, warpid]
+            opposites_sum[lane, 3, warpid] = zero(T)
         end
     end
 
@@ -1345,9 +1377,15 @@ function force_kernel!(
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                 ) : zero(SVector{D, T})
 
-                @inbounds for k in a:b
-                    force_smem[lane, k, warpid] += ustrip(f[k])
-                    opposites_sum[m, k, warpid] -= ustrip(f[k])
+                force_i_x += ustrip(f[1])
+                opposites_sum[m, 1, warpid] -= ustrip(f[1])
+                if D >= 2
+                    force_i_y += ustrip(f[2])
+                    opposites_sum[m, 2, warpid] -= ustrip(f[2])
+                end
+                if D >= 3
+                    force_i_z += ustrip(f[3])
+                    opposites_sum[m, 3, warpid] -= ustrip(f[3])
                 end
                 
                 if needs_vir
@@ -1368,9 +1406,15 @@ function force_kernel!(
         sync_warp()
 
         if lane <= r
-            @inbounds for k in a:b
-                force_smem[lane, k, warpid] += opposites_sum[lane, k, warpid]
-                opposites_sum[lane, k, warpid] = zero(T)
+            force_i_x += opposites_sum[lane, 1, warpid]
+            opposites_sum[lane, 1, warpid] = zero(T)
+            if D >= 2
+                force_i_y += opposites_sum[lane, 2, warpid]
+                opposites_sum[lane, 2, warpid] = zero(T)
+            end
+            if D >= 3
+                force_i_z += opposites_sum[lane, 3, warpid]
+                opposites_sum[lane, 3, warpid] = zero(T)
             end
         end
     end
@@ -1392,15 +1436,30 @@ function force_kernel!(
         end
 
         if lane == 1
-            warp_virial[1, warpid] = vir_xx
+            if vir_xx != zero(T)
+                CUDA.atomic_add!(pointer(global_virial, 1), vir_xx)
+            end
             if D >= 2
-                warp_virial[2, warpid] = vir_yy
-                warp_virial[4, warpid] = vir_xy
+                if vir_yy != zero(T)
+                    CUDA.atomic_add!(pointer(global_virial, D + 2), vir_yy)
+                end
+                if vir_xy != zero(T)
+                    CUDA.atomic_add!(pointer(global_virial, 2), vir_xy)
+                    CUDA.atomic_add!(pointer(global_virial, D + 1), vir_xy)
+                end
             end
             if D >= 3
-                warp_virial[3, warpid] = vir_zz
-                warp_virial[5, warpid] = vir_xz
-                warp_virial[6, warpid] = vir_yz
+                if vir_zz != zero(T)
+                    CUDA.atomic_add!(pointer(global_virial, 9), vir_zz)
+                end
+                if vir_xz != zero(T)
+                    CUDA.atomic_add!(pointer(global_virial, 3), vir_xz)
+                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 1), vir_xz)
+                end
+                if vir_yz != zero(T)
+                    CUDA.atomic_add!(pointer(global_virial, 6), vir_yz)
+                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 2), vir_yz)
+                end
             end
         end
     end
@@ -1408,47 +1467,14 @@ function force_kernel!(
     sync_warp()
 
     if index_i <= N
-        @inbounds for k in a:b
-            reduced_force_i = force_smem[lane, k, warpid]
-
-            if reduced_force_i != zero(T)
-                CUDA.atomic_add!(pointer(fs_mat, Int64(index_i) * b - (b - k)), -reduced_force_i)
-            end
+        if force_i_x != zero(T)
+            CUDA.atomic_add!(pointer(fs_mat, Int64(index_i) * b - (b - 1)), -force_i_x)
         end
-    end
-
-    if needs_vir && lane == a
-        sum_xx = warp_virial[1, warpid]
-        sum_yy = D >= 2 ? warp_virial[2, warpid] : zero(T)
-        sum_zz = D >= 3 ? warp_virial[3, warpid] : zero(T)
-        sum_xy = D >= 2 ? warp_virial[4, warpid] : zero(T)
-        sum_xz = D >= 3 ? warp_virial[5, warpid] : zero(T)
-        sum_yz = D >= 3 ? warp_virial[6, warpid] : zero(T)
-
-        if sum_xx != zero(T)
-            CUDA.atomic_add!(pointer(global_virial, 1), sum_xx)
+        if D >= 2 && force_i_y != zero(T)
+            CUDA.atomic_add!(pointer(fs_mat, Int64(index_i) * b - (b - 2)), -force_i_y)
         end
-        if D >= 2
-            if sum_xy != zero(T)
-                CUDA.atomic_add!(pointer(global_virial, 2), sum_xy)
-                CUDA.atomic_add!(pointer(global_virial, D + 1), sum_xy)
-            end
-            if sum_yy != zero(T)
-                CUDA.atomic_add!(pointer(global_virial, D + 2), sum_yy)
-            end
-        end
-        if D >= 3
-            if sum_xz != zero(T)
-                CUDA.atomic_add!(pointer(global_virial, 3), sum_xz)
-                CUDA.atomic_add!(pointer(global_virial, 2 * D + 1), sum_xz)
-            end
-            if sum_yz != zero(T)
-                CUDA.atomic_add!(pointer(global_virial, 6), sum_yz)
-                CUDA.atomic_add!(pointer(global_virial, 2 * D + 2), sum_yz)
-            end
-            if sum_zz != zero(T)
-                CUDA.atomic_add!(pointer(global_virial, 9), sum_zz)
-            end
+        if D >= 3 && force_i_z != zero(T)
+            CUDA.atomic_add!(pointer(fs_mat, Int64(index_i) * b - (b - 3)), -force_i_z)
         end
     end
 
