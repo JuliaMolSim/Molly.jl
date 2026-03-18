@@ -1514,7 +1514,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
             eligible=to_device(eligible, AT),
-            dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
+            dist_cutoff=T(dist_cutoff),
+            dist_neighbors=T(dist_neighbors),
             special=to_device(special, AT),
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&

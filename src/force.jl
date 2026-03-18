@@ -201,6 +201,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     morton_seq_buffer_2::M
     compressed_masks::R
     tile_is_clean::TIC
+    interacting_tiles_i::IT
     interacting_tiles_j::IT
     interacting_tiles_type::ITT
     num_interacting_tiles::NIT
@@ -211,6 +212,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     fs_mat_reordered::fs_re
     step_n_preprocessed::Int
     last_r_cut::T
+    num_pairs::Int
 end
 
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
@@ -237,10 +239,11 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     compressed_masks = KernelAbstractions.zeros(backend, UInt32, 32, 2, n_upper_tiles)
     tile_is_clean = KernelAbstractions.zeros(backend, Bool, n_upper_tiles)
 
-    max_interacting_blocks_per_i = min(n_blocks, 1024) # TODO: Implement dynamic resizing for this buffer
-    interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks_per_i, n_blocks)
-    interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks_per_i, n_blocks)
-    num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, n_blocks)
+    max_interacting_blocks = min(n_upper_tiles, 1024 * n_blocks) # TODO: Implement dynamic resizing for this buffer
+    interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
+    interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
+    interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks)
+    num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
     interacting_tiles_overflow = KernelAbstractions.zeros(backend, Int32, 1)
 
     coords_reordered = similar(sys.coords)
@@ -253,10 +256,10 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
 
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
                       morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, compressed_masks,
-                      tile_is_clean, interacting_tiles_j,
+                      tile_is_clean, interacting_tiles_i, interacting_tiles_j,
                       interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
                       coords_reordered, velocities_reordered, atoms_reordered,
-                      fs_mat_reordered, -1, T(-1))
+                      fs_mat_reordered, -1, T(-1), 0)
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 

@@ -57,6 +57,7 @@ This is the recommended neighbor finder on NVIDIA GPUs.
 mutable struct GPUNeighborFinder{B, D}
     eligible::B
     dist_cutoff::D
+    dist_neighbors::D
     special::B
     n_steps_reorder::Int
     initialized::Bool
@@ -66,6 +67,7 @@ end
 function GPUNeighborFinder(;
                             eligible,
                             dist_cutoff,
+                            dist_neighbors=dist_cutoff,
                             special=zero(eligible),
                             n_steps_reorder=25,
                             initialized=false)
@@ -76,7 +78,7 @@ function GPUNeighborFinder(;
         throw(ArgumentError("special must be on the GPU but has type $(typeof(special))"))
     end
     return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
-                eligible, dist_cutoff, special, n_steps_reorder, initialized, -1)
+                eligible, dist_cutoff, dist_neighbors, special, n_steps_reorder, initialized, -1)
 end
 
 # The neighbors are calculated within the forces/potential energy kernels

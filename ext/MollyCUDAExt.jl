@@ -132,7 +132,7 @@ function force_launch_params(kernel)
     maxregs_override === nothing || maxregs_override > 0 || error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(maxregs_override)")
 
     conf = launch_configuration(kernel.fun)
-    block_y = something(block_y_override, choose_block_y(conf.threads))
+    block_y = something(block_y_override, min(Int(WARPSIZE), 8, choose_block_y(conf.threads)))
     return (block_y, maxregs_override)
 end
 
@@ -142,7 +142,7 @@ function energy_launch_params(kernel)
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_ENERGY_BLOCK_Y", block_y_override)
 
     conf = launch_configuration(kernel.fun)
-    block_y = something(block_y_override, choose_block_y(conf.threads))
+    block_y = something(block_y_override, min(Int(WARPSIZE), 8, choose_block_y(conf.threads)))
     return block_y
 end
 
@@ -187,8 +187,8 @@ function throw_if_interacting_tiles_overflowed(buffers)
     overflow_count = only(from_device(buffers.interacting_tiles_overflow))
     overflow_count == 0 && return nothing
 
-    max_tiles_per_i = size(buffers.interacting_tiles_j, 1)
-    error("Maximum number of interacting tiles per block exceeded (> $(max_tiles_per_i)); increase buffer size.")
+    max_tiles = length(buffers.interacting_tiles_i)
+    error("Maximum number of interacting tiles exceeded (> $(max_tiles)); increase buffer size.")
 end
 
 macro shfl_multiple_sync(mask, target, width, vars...)
@@ -243,10 +243,11 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
     r_cut = sys.neighbor_finder.dist_cutoff
+    r_neighbors = sys.neighbor_finder.dist_neighbors
     backend = get_backend(sys.coords)
 
-    # Preprocessing Cache Check: Skip if step_n and r_cut haven't changed
-    if step_n != buffers.step_n_preprocessed || ustrip(r_cut) != buffers.last_r_cut
+    # Preprocessing Cache Check: Skip if step_n hasn't changed
+    if step_n != buffers.step_n_preprocessed
         # Periodic Reordering and Bitmask Compression
         if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
             morton_bits = 10
@@ -263,51 +264,56 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         reorder_system_gpu!(buffers, sys)
         KernelAbstractions.synchronize(backend)
 
-        # Bounding Box Calculation for Tiles
-        if sys.boundary isa TriclinicBoundary
-            H = SMatrix{3, 3, T}(
-                sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
-                sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
-                sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
-            )
-            Hinv = inv(H)
-            @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
-                    buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
-                    sys.boundary, Val(D))
-        else
-            @cuda blocks=n_blocks threads=32 kernel_min_max!(
-                    buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
-                    Val(N), sys.boundary, Val(D))
-        end
-
         # Find Interacting Tiles
-        max_tiles_per_i = size(buffers.interacting_tiles_j, 1)
-        reset_interacting_tile_state!(buffers)
-        n_blocks_i = cld(N, WARPSIZE)
-        tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
-            buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-            buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
-            Val(n_blocks_i), Val(D), max_tiles_per_i,
-            buffers.compressed_masks, buffers.tile_is_clean)
-        tile_threads_xy = tile_launch_params(tile_kernel)
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || ustrip(r_neighbors) != buffers.last_r_cut
+            # Bounding Box Calculation for Tiles
+            if sys.boundary isa TriclinicBoundary
+                H = SMatrix{3, 3, T}(
+                    sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
+                    sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
+                    sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
+                )
+                Hinv = inv(H)
+                @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
+                        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
+                        sys.boundary, Val(D))
+            else
+                @cuda blocks=n_blocks threads=32 kernel_min_max!(
+                        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+                        Val(N), sys.boundary, Val(D))
+            end
 
-        tile_kernel(
-            buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-            buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
-            Val(n_blocks_i), Val(D), max_tiles_per_i,
+            max_tiles = length(buffers.interacting_tiles_i)
+            reset_interacting_tile_state!(buffers)
+            n_blocks_i = cld(N, WARPSIZE)
+            tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
+                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+                buffers.box_mins, buffers.box_maxs, sys.boundary, r_neighbors,
+                Val(n_blocks_i), Val(D), max_tiles,
+                buffers.compressed_masks, buffers.tile_is_clean)
+            tile_threads_xy = tile_launch_params(tile_kernel)
+
+            tile_kernel(
+                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+                buffers.box_mins, buffers.box_maxs, sys.boundary, r_neighbors,
+                Val(n_blocks_i), Val(D), max_tiles,
+                
+                buffers.compressed_masks, buffers.tile_is_clean;
+                blocks=(cld(n_blocks_i, tile_threads_xy[1]), cld(n_blocks_i, tile_threads_xy[2])),
+                threads=tile_threads_xy)
             
-            buffers.compressed_masks, buffers.tile_is_clean;
-            blocks=(cld(n_blocks_i, tile_threads_xy[1]), cld(n_blocks_i, tile_threads_xy[2])),
-            threads=tile_threads_xy)
-        
+            buffers.last_r_cut = ustrip(r_neighbors)
+            
+            # Sync num_pairs back to CPU only when changed
+            num_pairs_gpu = from_device(buffers.num_interacting_tiles)
+            buffers.num_pairs = only(num_pairs_gpu)
+        end
         # Update cache state
         buffers.step_n_preprocessed = step_n
-        buffers.last_r_cut = ustrip(r_cut)
     end
     
-    # Execute Force Kernel over the list of interacting tiles
     # Execute Force Kernel over the list of interacting tiles
     auto_kernel = @cuda launch=false always_inline=true force_kernel!(
         buffers.morton_seq,
@@ -317,10 +323,12 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         Val(N), r_cut, Val(sys.force_units), pairwise_inters,
         sys.boundary, step_n, buffers.compressed_masks,
         Val(needs_vir), Val(T), Val(D),
-        buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
         buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
     block_y, maxregs = force_launch_params(auto_kernel)
-    n_blocks_launch = cld(N, WARPSIZE)
+    
+    num_pairs = buffers.num_pairs
+    n_blocks_launch = num_pairs > 0 ? cld(num_pairs, block_y) : 1
 
     kernel = if maxregs === nothing
         auto_kernel
@@ -333,22 +341,24 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             Val(N), r_cut, Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
-            buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+            buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
             buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
     end
 
-    kernel(
-        buffers.morton_seq,
-        buffers.fs_mat_reordered,
-        buffers.virial_nounits,
-        buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-        Val(N), r_cut, Val(sys.force_units), pairwise_inters,
-        sys.boundary, step_n, buffers.compressed_masks,
-        Val(needs_vir), Val(T), Val(D),
-        buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
-        threads=(32, block_y), blocks=n_blocks_launch
-    )
+    if num_pairs > 0
+        kernel(
+            buffers.morton_seq,
+            buffers.fs_mat_reordered,
+            buffers.virial_nounits,
+            buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
+            Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+            sys.boundary, step_n, buffers.compressed_masks,
+            Val(needs_vir), Val(T), Val(D),
+            buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
+            threads=(32, block_y), blocks=n_blocks_launch
+        )
+    end
 
     reverse_reorder_forces_gpu!(buffers, sys)
     KernelAbstractions.synchronize(backend)
@@ -447,9 +457,10 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
     r_cut = sys.neighbor_finder.dist_cutoff
+    r_neighbors = sys.neighbor_finder.dist_neighbors
     backend = get_backend(sys.coords)
 
-    if step_n != buffers.step_n_preprocessed || ustrip(r_cut) != buffers.last_r_cut
+    if step_n != buffers.step_n_preprocessed
         if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
             morton_bits = 10
             sides = box_sides(sys.boundary)
@@ -463,57 +474,71 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         end
         reorder_system_gpu!(buffers, sys)
         KernelAbstractions.synchronize(backend)
-        if sys.boundary isa TriclinicBoundary
-            H = SMatrix{3, 3, T}(
-                sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
-                sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
-                sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
-            )
-            Hinv = inv(H)
-            @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
-                    buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
-                    sys.boundary, Val(D))
-        else
-            @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
-                    buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
-                    Val(N), sys.boundary, Val(D))
+
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || ustrip(r_neighbors) != buffers.last_r_cut
+            if sys.boundary isa TriclinicBoundary
+                H = SMatrix{3, 3, T}(
+                    sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
+                    sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
+                    sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
+                )
+                Hinv = inv(H)
+                @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
+                        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
+                        sys.boundary, Val(D))
+            else
+                @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
+                        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+                        Val(N), sys.boundary, Val(D))
+            end
+
+            max_tiles = length(buffers.interacting_tiles_i)
+            reset_interacting_tile_state!(buffers)
+            tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
+                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+                buffers.box_mins, buffers.box_maxs, sys.boundary, r_neighbors,
+                Val(n_blocks), Val(D), max_tiles,
+                buffers.compressed_masks, buffers.tile_is_clean)
+            tile_threads_xy = tile_launch_params(tile_kernel)
+            tile_kernel(
+                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+                buffers.box_mins, buffers.box_maxs, sys.boundary, r_neighbors,
+                Val(n_blocks), Val(D), max_tiles,
+                buffers.compressed_masks, buffers.tile_is_clean;
+                blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
+                threads=tile_threads_xy)
+            
+            buffers.last_r_cut = ustrip(r_neighbors)
+            
+            # Sync num_pairs back to CPU only when changed
+            num_pairs_gpu = from_device(buffers.num_interacting_tiles)
+            buffers.num_pairs = only(num_pairs_gpu)
         end
-        max_tiles_per_i = size(buffers.interacting_tiles_j, 1)
-        reset_interacting_tile_state!(buffers)
-        tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
-            buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-            buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
-            Val(n_blocks), Val(D), max_tiles_per_i,
-            buffers.compressed_masks, buffers.tile_is_clean)
-        tile_threads_xy = tile_launch_params(tile_kernel)
-        tile_kernel(
-            buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-            buffers.box_mins, buffers.box_maxs, sys.boundary, r_cut,
-            Val(n_blocks), Val(D), max_tiles_per_i,
-            buffers.compressed_masks, buffers.tile_is_clean;
-            blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
-            threads=tile_threads_xy)
-        
         buffers.step_n_preprocessed = step_n
-        buffers.last_r_cut = ustrip(r_cut)
     end
 
     kernel = @cuda launch=false always_inline=true energy_kernel!(
             buffers.morton_seq, pe_vec_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
-            Val(T), Val(D), buffers.interacting_tiles_j,
+            Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
     block_y = energy_launch_params(kernel)
-    kernel(
-            buffers.morton_seq, pe_vec_nounits, buffers.coords_reordered,
-            buffers.velocities_reordered, buffers.atoms_reordered, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
-            sys.boundary, step_n, buffers.compressed_masks,
-            Val(T), Val(D), buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
-            blocks=n_blocks, threads=(32, block_y))
+    
+    num_pairs = buffers.num_pairs
+    n_blocks_launch = num_pairs > 0 ? cld(num_pairs, block_y) : 1
+    
+    if num_pairs > 0
+        kernel(
+                buffers.morton_seq, pe_vec_nounits, buffers.coords_reordered,
+                buffers.velocities_reordered, buffers.atoms_reordered, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
+                sys.boundary, step_n, buffers.compressed_masks,
+                Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+                buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
+                blocks=n_blocks_launch, threads=(32, block_y))
+    end
     throw_if_interacting_tiles_overflowed(buffers)
     return pe_vec_nounits
 end
@@ -959,9 +984,9 @@ For each interacting tile, it:
     allowing the force/energy kernels to skip bitmask lookups.
 =#
 function find_interacting_blocks_kernel!(
-    interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
     interacting_tiles_overflow,
-    mins::AbstractArray{C}, maxs::AbstractArray{C}, boundary, r_cut, ::Val{N_blocks}, ::Val{D}, max_tiles_per_i,
+    mins::AbstractArray{C}, maxs::AbstractArray{C}, boundary, r_cut, ::Val{N_blocks}, ::Val{D}, max_total_tiles,
     compressed_masks, tile_is_clean
 ) where {C, N_blocks, D}
     i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
@@ -982,10 +1007,11 @@ function find_interacting_blocks_kernel!(
                 is_clean = tile_is_clean[mask_idx]
             end
 
-            idx = CUDA.atomic_add!(pointer(num_interacting_tiles, i), Int32(1)) + Int32(1)
-            if idx <= max_tiles_per_i
-                interacting_tiles_j[idx, i] = Int32(j)
-                interacting_tiles_type[idx, i] = is_clean ? UInt8(0) : UInt8(1)
+            idx = CUDA.atomic_add!(pointer(num_interacting_tiles, 1), Int32(1)) + Int32(1)
+            if idx <= max_total_tiles
+                interacting_tiles_i[idx] = Int32(i)
+                interacting_tiles_j[idx] = Int32(j)
+                interacting_tiles_type[idx] = is_clean ? UInt8(0) : UInt8(1)
             else
                 CUDA.atomic_add!(pointer(interacting_tiles_overflow, 1), Int32(1))
             end
@@ -1027,30 +1053,30 @@ function force_kernel!(
     ::Val{needs_vir},
     ::Val{T},
     ::Val{D},
-    interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
     interacting_tiles_overflow) where {N, A, force_units, needs_vir, T, D}
 
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
-    active_warps = Int32(blockDim().y)
+    
+    idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
 
     if interacting_tiles_overflow[1] != 0
         return nothing
     end
     
-    i = Int32(blockIdx().x)
-    if i > n_blocks
-        return nothing
-    end
-
-    num_j = num_interacting_tiles[i]
-    if num_j == 0
+    num_pairs = num_interacting_tiles[1]
+    if idx > num_pairs
         return nothing
     end
 
     lane = threadIdx().x
     warpid = threadIdx().y
+
+    i = interacting_tiles_i[idx]
+    j = interacting_tiles_j[idx]
+    type = interacting_tiles_type[idx]
 
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
@@ -1072,159 +1098,93 @@ function force_kernel!(
     vir_xx = zero(T); vir_yy = zero(T); vir_zz = zero(T)
     vir_xy = zero(T); vir_xz = zero(T); vir_yz = zero(T)
 
-    for idx in warpid : active_warps : num_j
-        j = interacting_tiles_j[idx, i]
-        type = interacting_tiles_type[idx, i]
-        mask_idx = upper_tile_index(i, j, n_blocks)
+    mask_idx = upper_tile_index(i, j, n_blocks)
 
-        j_0_tile = (j - a) * warpsize()
-        index_j = j_0_tile + lane
+    j_0_tile = (j - a) * warpsize()
+    index_j = j_0_tile + lane
 
-        # Part 1: Standard non-diagonal tiles
-        if j < n_blocks && i < j
-            coords_i = coords[index_i]
-            vel_i = velocities[index_i]
-            atoms_i = atoms[index_i]
-            
-            coords_j = coords[index_j]
-            vel_j = velocities[index_j]
-            shuffle_idx = lane
-            atoms_j = atoms[index_j]
-            atom_fields = getfield.((atoms_j,), fieldnames(A))
-            
-            if type == UInt8(0) # CLEAN
-                for m in a:warpsize()
-                    sync_warp()
-                    coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                    shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                    atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                    atoms_j_shuffle = A(atom_fields...)
+    # Part 1: Standard non-diagonal tiles
+    if j < n_blocks && i < j
+        coords_i = coords[index_i]
+        vel_i = velocities[index_i]
+        atoms_i = atoms[index_i]
+        
+        coords_j = coords[index_j]
+        vel_j = velocities[index_j]
+        shuffle_idx = lane
+        atoms_j = atoms[index_j]
+        atom_fields = getfield.((atoms_j,), fieldnames(A))
+        
+        if type == UInt8(0) # CLEAN
+            for m in a:warpsize()
+                sync_warp()
+                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
+                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
+                atoms_j_shuffle = A(atom_fields...)
 
-                    dr = vector(coords_i, coords_j, boundary)
-                    r2 = sum(abs2, dr)
-                    condition = r2 <= r_cut * r_cut
-                    any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
-                    
-                    if any_active
-                        f = condition ? sum_pairwise_forces(
-                            inters_tuple, atoms_i, atoms_j_shuffle, Val(force_units),
-                            false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                        ) : zero(SVector{D, T})
+                dr = vector(coords_i, coords_j, boundary)
+                r2 = sum(abs2, dr)
+                condition = r2 <= r_cut * r_cut
+                any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
+                
+                if any_active
+                    f = condition ? sum_pairwise_forces(
+                        inters_tuple, atoms_i, atoms_j_shuffle, Val(force_units),
+                        false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
+                    ) : zero(SVector{D, T})
 
-                        @inbounds for k in a:b
-                            force_smem[lane, k, warpid]           += ustrip(f[k])
-                            opposites_sum[shuffle_idx, k, warpid] -= ustrip(f[k])
-                        end
-
-                        if needs_vir
-                            vir_xx += ustrip(f[1]) * ustrip(dr[1])
-                            if D >= 2
-                                vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                                vir_xy += ustrip(f[1]) * ustrip(dr[2])
-                            end
-                            if D >= 3
-                                vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                                vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                                vir_yz += ustrip(f[2]) * ustrip(dr[3])
-                            end
-                        end
+                    @inbounds for k in a:b
+                        force_smem[lane, k, warpid]           += ustrip(f[k])
+                        opposites_sum[shuffle_idx, k, warpid] -= ustrip(f[k])
                     end
-                end
-            else # EXCLUDED
-                eligible_bitmask = compressed_masks[lane, 1, mask_idx]
-                special_bitmask = compressed_masks[lane, 2, mask_idx]
 
-                for m in a:warpsize()
-                    sync_warp()
-                    coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                    shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                    atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                    atoms_j_shuffle = A(atom_fields...)
-
-                    dr = vector(coords_i, coords_j, boundary)
-                    r2 = sum(abs2, dr)
-                    excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
-                    spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
-                    
-                    condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-                    any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
-                    
-                    if any_active
-                        f = condition ? sum_pairwise_forces(
-                            inters_tuple, atoms_i, atoms_j_shuffle, Val(force_units),
-                            (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                        ) : zero(SVector{D, T})
-
-                        @inbounds for k in a:b
-                            force_smem[lane, k, warpid]           += ustrip(f[k])
-                            opposites_sum[shuffle_idx, k, warpid] -= ustrip(f[k])
+                    if needs_vir
+                        vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                        if D >= 2
+                            vir_yy += ustrip(f[2]) * ustrip(dr[2])
+                            vir_xy += ustrip(f[1]) * ustrip(dr[2])
                         end
-
-                        if needs_vir
-                            vir_xx += ustrip(f[1]) * ustrip(dr[1])
-                            if D >= 2
-                                vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                                vir_xy += ustrip(f[1]) * ustrip(dr[2])
-                            end
-                            if D >= 3
-                                vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                                vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                                vir_yz += ustrip(f[2]) * ustrip(dr[3])
-                            end
+                        if D >= 3
+                            vir_zz += ustrip(f[3]) * ustrip(dr[3])
+                            vir_xz += ustrip(f[1]) * ustrip(dr[3])
+                            vir_yz += ustrip(f[2]) * ustrip(dr[3])
                         end
                     end
                 end
             end
-
-            sync_warp()
-            if index_j <= N
-                @inbounds for k in a:b
-                    if opposites_sum[lane, k, warpid] != zero(T)
-                        CUDA.atomic_add!(pointer(fs_mat, index_j * b - (b - k)), -opposites_sum[lane, k, warpid])
-                    end
-                    opposites_sum[lane, k, warpid] = zero(T)
-                end
-            end
-        end
-
-        # Part 2: Boundary column tiles
-        if j == n_blocks && i < n_blocks
-            coords_i = coords[index_i]
-            vel_i = velocities[index_i]
-            atoms_i = atoms[index_i]
-            
+        else # EXCLUDED
             eligible_bitmask = compressed_masks[lane, 1, mask_idx]
             special_bitmask = compressed_masks[lane, 2, mask_idx]
 
-            for m in a:r
-                idx_j = j_0_tile + m
-                coords_j = coords[idx_j]
-                vel_j = velocities[idx_j]
-                atoms_j = atoms[idx_j]
-                
+            for m in a:warpsize()
+                sync_warp()
+                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
+                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
+                atoms_j_shuffle = A(atom_fields...)
+
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-                spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+                excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
+                spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
                 
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
-
+                
                 if any_active
                     f = condition ? sum_pairwise_forces(
-                        inters_tuple, atoms_i, atoms_j, Val(force_units),
+                        inters_tuple, atoms_i, atoms_j_shuffle, Val(force_units),
                         (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
 
                     @inbounds for k in a:b
-                        force_smem[lane, k, warpid] += ustrip(f[k])
-                        if ustrip(f[k]) != zero(T)
-                            CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - k)), ustrip(f[k]))
-                        end
+                        force_smem[lane, k, warpid]           += ustrip(f[k])
+                        opposites_sum[shuffle_idx, k, warpid] -= ustrip(f[k])
                     end
-                    
+
                     if needs_vir
                         vir_xx += ustrip(f[1]) * ustrip(dr[1])
                         if D >= 2
@@ -1241,8 +1201,125 @@ function force_kernel!(
             end
         end
 
-        # Part 3: Diagonal tiles
-        if i == j && i < n_blocks
+        sync_warp()
+        if index_j <= N
+            @inbounds for k in a:b
+                if opposites_sum[lane, k, warpid] != zero(T)
+                    CUDA.atomic_add!(pointer(fs_mat, Int64(index_j) * b - (b - k)), -opposites_sum[lane, k, warpid])
+                end
+                opposites_sum[lane, k, warpid] = zero(T)
+            end
+        end
+    end
+
+    # Part 2: Boundary column tiles
+    if j == n_blocks && i < n_blocks
+        coords_i = coords[index_i]
+        vel_i = velocities[index_i]
+        atoms_i = atoms[index_i]
+        
+        eligible_bitmask = compressed_masks[lane, 1, mask_idx]
+        special_bitmask = compressed_masks[lane, 2, mask_idx]
+
+        for m in a:r
+            idx_j = j_0_tile + m
+            coords_j = coords[idx_j]
+            vel_j = velocities[idx_j]
+            atoms_j = atoms[idx_j]
+            
+            dr = vector(coords_i, coords_j, boundary)
+            r2 = sum(abs2, dr)
+            excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+            spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+            
+            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+            any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
+
+            if any_active
+                f = condition ? sum_pairwise_forces(
+                    inters_tuple, atoms_i, atoms_j, Val(force_units),
+                    (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
+                ) : zero(SVector{D, T})
+
+                @inbounds for k in a:b
+                    force_smem[lane, k, warpid] += ustrip(f[k])
+                    if ustrip(f[k]) != zero(T)
+                        CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - k)), ustrip(f[k]))
+                    end
+                end
+                
+                if needs_vir
+                    vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                    if D >= 2
+                        vir_yy += ustrip(f[2]) * ustrip(dr[2])
+                        vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                    end
+                    if D >= 3
+                        vir_zz += ustrip(f[3]) * ustrip(dr[3])
+                        vir_xz += ustrip(f[1]) * ustrip(dr[3])
+                        vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                    end
+                end
+            end
+        end
+    end
+
+    # Part 3: Diagonal tiles
+    if i == j && i < n_blocks
+        coords_i = coords[index_i]
+        vel_i = velocities[index_i]
+        atoms_i = atoms[index_i]
+        
+        eligible_bitmask = compressed_masks[lane, 1, mask_idx]
+        special_bitmask = compressed_masks[lane, 2, mask_idx]
+
+        for m in (lane + a) : warpsize()
+            idx_j = j_0_tile + m
+            coords_j = coords[idx_j]
+            vel_j = velocities[idx_j]
+            atoms_j = atoms[idx_j]
+            
+            dr = vector(coords_i, coords_j, boundary)
+            r2 = sum(abs2, dr)
+            excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+            spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+            
+            # Divergence-safe execution (no vote_any_sync)
+            f = condition ? sum_pairwise_forces(
+                inters_tuple, atoms_i, atoms_j, Val(force_units),
+                (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
+            ) : zero(SVector{D, T})
+
+            @inbounds for k in a:b
+                force_smem[lane, k, warpid] += ustrip(f[k])
+                opposites_sum[m, k, warpid] -= ustrip(f[k])
+            end
+            
+            if needs_vir
+                vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                if D >= 2
+                    vir_yy += ustrip(f[2]) * ustrip(dr[2])
+                    vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                end
+                if D >= 3
+                    vir_zz += ustrip(f[3]) * ustrip(dr[3])
+                    vir_xz += ustrip(f[1]) * ustrip(dr[3])
+                    vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                end
+            end
+        end
+
+        sync_warp()
+        @inbounds for k in a:b
+            force_smem[lane, k, warpid] += opposites_sum[lane, k, warpid]
+            opposites_sum[lane, k, warpid] = zero(T)
+        end
+    end
+
+    # Part 4: Terminal corner tile
+    if i == n_blocks && j == n_blocks
+        if lane <= r
             coords_i = coords[index_i]
             vel_i = velocities[index_i]
             atoms_i = atoms[index_i]
@@ -1250,7 +1327,7 @@ function force_kernel!(
             eligible_bitmask = compressed_masks[lane, 1, mask_idx]
             special_bitmask = compressed_masks[lane, 2, mask_idx]
 
-            for m in (lane + a) : warpsize()
+            for m in (lane + a) : r
                 idx_j = j_0_tile + m
                 coords_j = coords[idx_j]
                 vel_j = velocities[idx_j]
@@ -1286,72 +1363,17 @@ function force_kernel!(
                     end
                 end
             end
+        end
+        
+        sync_warp()
 
-            sync_warp()
+        if lane <= r
             @inbounds for k in a:b
                 force_smem[lane, k, warpid] += opposites_sum[lane, k, warpid]
                 opposites_sum[lane, k, warpid] = zero(T)
             end
         end
-
-        # Part 4: Terminal corner tile
-        if i == n_blocks && j == n_blocks
-            if lane <= r
-                coords_i = coords[index_i]
-                vel_i = velocities[index_i]
-                atoms_i = atoms[index_i]
-                
-                eligible_bitmask = compressed_masks[lane, 1, mask_idx]
-                special_bitmask = compressed_masks[lane, 2, mask_idx]
-
-                for m in (lane + a) : r
-                    idx_j = j_0_tile + m
-                    coords_j = coords[idx_j]
-                    vel_j = velocities[idx_j]
-                    atoms_j = atoms[idx_j]
-                    
-                    dr = vector(coords_i, coords_j, boundary)
-                    r2 = sum(abs2, dr)
-                    excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-                    spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                    condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-                    
-                    # Divergence-safe execution (no vote_any_sync)
-                    f = condition ? sum_pairwise_forces(
-                        inters_tuple, atoms_i, atoms_j, Val(force_units),
-                        (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                    ) : zero(SVector{D, T})
-
-                    @inbounds for k in a:b
-                        force_smem[lane, k, warpid] += ustrip(f[k])
-                        opposites_sum[m, k, warpid] -= ustrip(f[k])
-                    end
-                    
-                    if needs_vir
-                        vir_xx += ustrip(f[1]) * ustrip(dr[1])
-                        if D >= 2
-                            vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                            vir_xy += ustrip(f[1]) * ustrip(dr[2])
-                        end
-                        if D >= 3
-                            vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                            vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                            vir_yz += ustrip(f[2]) * ustrip(dr[3])
-                        end
-                    end
-                end
-            end
-            
-            sync_warp()
-
-            if lane <= r
-                @inbounds for k in a:b
-                    force_smem[lane, k, warpid] += opposites_sum[lane, k, warpid]
-                    opposites_sum[lane, k, warpid] = zero(T)
-                end
-            end
-        end
-    end # for idx
+    end
 
     if needs_vir
         offset_val = Int32(16)
@@ -1383,63 +1405,49 @@ function force_kernel!(
         end
     end
 
-    sync_threads()
+    sync_warp()
 
-    if warpid == a
-        if index_i <= N
-            @inbounds for k in a:b
-                reduced_force_i = zero(T)
-                for w in a:active_warps
-                    reduced_force_i += force_smem[lane, k, w]
-                end
+    if index_i <= N
+        @inbounds for k in a:b
+            reduced_force_i = force_smem[lane, k, warpid]
 
-                if reduced_force_i != zero(T)
-                    CUDA.atomic_add!(pointer(fs_mat, index_i * b - (b - k)), -reduced_force_i)
-                end
+            if reduced_force_i != zero(T)
+                CUDA.atomic_add!(pointer(fs_mat, Int64(index_i) * b - (b - k)), -reduced_force_i)
             end
         end
+    end
 
-        if needs_vir && lane == a
-            sum_xx = zero(T); sum_yy = zero(T); sum_zz = zero(T)
-            sum_xy = zero(T); sum_xz = zero(T); sum_yz = zero(T)
+    if needs_vir && lane == a
+        sum_xx = warp_virial[1, warpid]
+        sum_yy = D >= 2 ? warp_virial[2, warpid] : zero(T)
+        sum_zz = D >= 3 ? warp_virial[3, warpid] : zero(T)
+        sum_xy = D >= 2 ? warp_virial[4, warpid] : zero(T)
+        sum_xz = D >= 3 ? warp_virial[5, warpid] : zero(T)
+        sum_yz = D >= 3 ? warp_virial[6, warpid] : zero(T)
 
-            for w in a:active_warps
-                sum_xx += warp_virial[1, w]
-                if D >= 2
-                    sum_yy += warp_virial[2, w]
-                    sum_xy += warp_virial[4, w]
-                end
-                if D >= 3
-                    sum_zz += warp_virial[3, w]
-                    sum_xz += warp_virial[5, w]
-                    sum_yz += warp_virial[6, w]
-                end
+        if sum_xx != zero(T)
+            CUDA.atomic_add!(pointer(global_virial, 1), sum_xx)
+        end
+        if D >= 2
+            if sum_xy != zero(T)
+                CUDA.atomic_add!(pointer(global_virial, 2), sum_xy)
+                CUDA.atomic_add!(pointer(global_virial, D + 1), sum_xy)
             end
-
-            if sum_xx != zero(T)
-                CUDA.atomic_add!(pointer(global_virial, 1), sum_xx)
+            if sum_yy != zero(T)
+                CUDA.atomic_add!(pointer(global_virial, D + 2), sum_yy)
             end
-            if D >= 2
-                if sum_xy != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 2), sum_xy)
-                    CUDA.atomic_add!(pointer(global_virial, D + 1), sum_xy)
-                end
-                if sum_yy != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, D + 2), sum_yy)
-                end
+        end
+        if D >= 3
+            if sum_xz != zero(T)
+                CUDA.atomic_add!(pointer(global_virial, 3), sum_xz)
+                CUDA.atomic_add!(pointer(global_virial, 2 * D + 1), sum_xz)
             end
-            if D >= 3
-                if sum_xz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 3), sum_xz)
-                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 1), sum_xz)
-                end
-                if sum_yz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 6), sum_yz)
-                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 2), sum_yz)
-                end
-                if sum_zz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 9), sum_zz)
-                end
+            if sum_yz != zero(T)
+                CUDA.atomic_add!(pointer(global_virial, 6), sum_yz)
+                CUDA.atomic_add!(pointer(global_virial, 2 * D + 2), sum_yz)
+            end
+            if sum_zz != zero(T)
+                CUDA.atomic_add!(pointer(global_virial, 9), sum_zz)
             end
         end
     end
@@ -1875,30 +1883,30 @@ function energy_kernel!(
     compressed_masks,
     ::Val{T},
     ::Val{D},
-    interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
     interacting_tiles_overflow) where {N, A, energy_units, T, D}
 
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
-    active_warps = Int32(blockDim().y)
+
+    idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
 
     if interacting_tiles_overflow[1] != 0
         return nothing
     end
-    
-    i = Int32(blockIdx().x)
-    if i > n_blocks
-        return nothing
-    end
 
-    num_j = num_interacting_tiles[i]
-    if num_j == 0
+    num_pairs = num_interacting_tiles[1]
+    if idx > num_pairs
         return nothing
     end
 
     lane = threadIdx().x
     warpid = threadIdx().y
+
+    i = interacting_tiles_i[idx]
+    j = interacting_tiles_j[idx]
+    type = interacting_tiles_type[idx]
 
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
@@ -1908,88 +1916,144 @@ function energy_kernel!(
 
     r = Int32((N - 1) % 32 + 1)
 
-    for idx in warpid : active_warps : num_j
-        j = interacting_tiles_j[idx, i]
-        type = interacting_tiles_type[idx, i]
-        mask_idx = upper_tile_index(i, j, n_blocks)
-        
-        j_0_tile = (j - a) * warpsize()
-        index_j = j_0_tile + lane
+    mask_idx = upper_tile_index(i, j, n_blocks)
 
-        if j < n_blocks && i < j
-            coords_i = coords[index_i]
-            vel_i = velocities[index_i]
-            atoms_i = atoms[index_i]
-            coords_j = coords[index_j]
-            vel_j = velocities[index_j]
-            shuffle_idx = lane
-            atoms_j = atoms[index_j]
-            atom_fields = getfield.((atoms_j,), fieldnames(A))
-            
-            if type == UInt8(0) # CLEAN
-                for m in a:warpsize()
-                    sync_warp()
-                    coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                    shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                    atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                    atoms_j_shuffle = A(atom_fields...)
+    j_0_tile = (j - a) * warpsize()
+    index_j = j_0_tile + lane
 
-                    dr = vector(coords_i, coords_j, boundary)
-                    r2 = sum(abs2, dr)
-                    condition = r2 <= r_cut * r_cut
+    if j < n_blocks && i < j
+        coords_i = coords[index_i]
+        vel_i = velocities[index_i]
+        atoms_i = atoms[index_i]
+        coords_j = coords[index_j]
+        vel_j = velocities[index_j]
+        shuffle_idx = lane
+        atoms_j = atoms[index_j]
+        atom_fields = getfield.((atoms_j,), fieldnames(A))
 
-                    pe = condition ? sum_pairwise_potentials(
-                        inters_tuple,
-                        atoms_i, atoms_j_shuffle,
-                        Val(energy_units),
-                        false,
-                        coords_i, coords_j,
-                        boundary,
-                        vel_i, vel_j,
-                        step_n) : zero(SVector{1, T})
+        if type == UInt8(0) # CLEAN
+            for m in a:warpsize()
+                sync_warp()
+                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
+                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
+                atoms_j_shuffle = A(atom_fields...)
 
-                    E_smem[lane, warpid] += ustrip(pe[1])
-                end
-            else # EXCLUDED
-                eligible_bitmask = compressed_masks[lane, 1, mask_idx]
-                special_bitmask = compressed_masks[lane, 2, mask_idx]
+                dr = vector(coords_i, coords_j, boundary)
+                r2 = sum(abs2, dr)
+                condition = r2 <= r_cut * r_cut
 
-                for m in a:warpsize()
-                    sync_warp()
-                    coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                    shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                    atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                    atoms_j_shuffle = A(atom_fields...)
+                pe = condition ? sum_pairwise_potentials(
+                    inters_tuple,
+                    atoms_i, atoms_j_shuffle,
+                    Val(energy_units),
+                    false,
+                    coords_i, coords_j,
+                    boundary,
+                    vel_i, vel_j,
+                    step_n) : zero(SVector{1, T})
 
-                    dr = vector(coords_i, coords_j, boundary)
-                    r2 = sum(abs2, dr)
-                    excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
-                    spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
-                    condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-                    pe = condition ? sum_pairwise_potentials(
-                        inters_tuple,
-                        atoms_i, atoms_j_shuffle,
-                        Val(energy_units),
-                        (spec & 0x1) == true,
-                        coords_i, coords_j,
-                        boundary,
-                        vel_i, vel_j,
-                        step_n) : zero(SVector{1, T})
-
-                    E_smem[lane, warpid] += ustrip(pe[1])
-                end
+                E_smem[lane, warpid] += ustrip(pe[1])
             end
-        elseif j == n_blocks && i < n_blocks
+        else # EXCLUDED
+            eligible_bitmask = compressed_masks[lane, 1, mask_idx]
+            special_bitmask = compressed_masks[lane, 2, mask_idx]
+
+            for m in a:warpsize()
+                sync_warp()
+                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
+                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
+                atoms_j_shuffle = A(atom_fields...)
+
+                dr = vector(coords_i, coords_j, boundary)
+                r2 = sum(abs2, dr)
+                excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
+                spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
+                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+
+                pe = condition ? sum_pairwise_potentials(
+                    inters_tuple,
+                    atoms_i, atoms_j_shuffle,
+                    Val(energy_units),
+                    (spec & 0x1) == true,
+                    coords_i, coords_j,
+                    boundary,
+                    vel_i, vel_j,
+                    step_n) : zero(SVector{1, T})
+
+                E_smem[lane, warpid] += ustrip(pe[1])
+            end
+        end
+    elseif j == n_blocks && i < n_blocks
+        coords_i = coords[index_i]
+        vel_i = velocities[index_i]
+        atoms_i = atoms[index_i]
+        eligible_bitmask = compressed_masks[lane, 1, mask_idx]
+        special_bitmask = compressed_masks[lane, 2, mask_idx]
+
+        for m in a:r
+            idx_j = j_0_tile + m
+            coords_j = coords[idx_j]
+            vel_j = velocities[idx_j]
+            atoms_j = atoms[idx_j]
+            dr = vector(coords_i, coords_j, boundary)
+            r2 = sum(abs2, dr)
+            excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+            spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+
+            pe = condition ? sum_pairwise_potentials(
+                inters_tuple,
+                atoms_i, atoms_j,
+                Val(energy_units),
+                (spec & 0x1) == true,
+                coords_i, coords_j,
+                boundary,
+                vel_i, vel_j,
+                step_n) : zero(SVector{1, T})
+            E_smem[lane, warpid] += ustrip(pe[1])
+        end
+    elseif i == j && i < n_blocks
+        coords_i = coords[index_i]
+        vel_i = velocities[index_i]
+        atoms_i = atoms[index_i]
+        eligible_bitmask = compressed_masks[lane, 1, mask_idx]
+        special_bitmask = compressed_masks[lane, 2, mask_idx]
+
+        for m in (lane + a) : warpsize()
+            idx_j = j_0_tile + m
+            coords_j = coords[idx_j]
+            vel_j = velocities[idx_j]
+            atoms_j = atoms[idx_j]
+            dr = vector(coords_i, coords_j, boundary)
+            r2 = sum(abs2, dr)
+            excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+            spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+
+            pe = condition ? sum_pairwise_potentials(
+                inters_tuple,
+                atoms_i, atoms_j,
+                Val(energy_units),
+                (spec & 0x1) == true,
+                coords_i, coords_j,
+                boundary,
+                vel_i, vel_j,
+                step_n) : zero(SVector{1, T})
+            E_smem[lane, warpid] += ustrip(pe[1])
+        end
+    elseif i == n_blocks && j == n_blocks
+        if lane <= r
             coords_i = coords[index_i]
             vel_i = velocities[index_i]
             atoms_i = atoms[index_i]
             eligible_bitmask = compressed_masks[lane, 1, mask_idx]
             special_bitmask = compressed_masks[lane, 2, mask_idx]
 
-            for m in a:r
+            for m in (lane + a) : r
                 idx_j = j_0_tile + m
                 coords_j = coords[idx_j]
                 vel_j = velocities[idx_j]
@@ -2009,90 +2073,23 @@ function energy_kernel!(
                     boundary,
                     vel_i, vel_j,
                     step_n) : zero(SVector{1, T})
-
                 E_smem[lane, warpid] += ustrip(pe[1])
             end
-        elseif i == j && i < n_blocks
-            coords_i = coords[index_i]
-            vel_i = velocities[index_i]
-            atoms_i = atoms[index_i]
-            eligible_bitmask = compressed_masks[lane, 1, mask_idx]
-            special_bitmask = compressed_masks[lane, 2, mask_idx]
-
-            for m in (lane + a) : warpsize()
-                idx_j = j_0_tile + m
-                coords_j = coords[idx_j]
-                vel_j = velocities[idx_j]
-                atoms_j = atoms[idx_j]
-                dr = vector(coords_i, coords_j, boundary)
-                r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-                spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-                pe = condition ? sum_pairwise_potentials(
-                    inters_tuple,
-                    atoms_i, atoms_j,
-                    Val(energy_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
-                E_smem[lane, warpid] += ustrip(pe[1])
-            end	
-        elseif i == n_blocks && j == n_blocks
-            if lane <= r
-                coords_i = coords[index_i]
-                vel_i = velocities[index_i]
-                atoms_i = atoms[index_i]
-                eligible_bitmask = compressed_masks[lane, 1, mask_idx]
-                special_bitmask = compressed_masks[lane, 2, mask_idx]
-
-                for m in (lane + a) : r
-                    idx_j = j_0_tile + m
-                    coords_j = coords[idx_j]
-                    vel_j = velocities[idx_j]
-                    atoms_j = atoms[idx_j]
-                    dr = vector(coords_i, coords_j, boundary)
-                    r2 = sum(abs2, dr)
-                    excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-                    spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                    condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-                    pe = condition ? sum_pairwise_potentials(
-                        inters_tuple,
-                        atoms_i, atoms_j,
-                        Val(energy_units),
-                        (spec & 0x1) == true,
-                        coords_i, coords_j,
-                        boundary,
-                        vel_i, vel_j,
-                        step_n) : zero(SVector{1, T})
-                    E_smem[lane, warpid] += ustrip(pe[1])
-                end
-            end
         end
-    end # for idx
+    end
 
-    sync_threads()
+    # No sync_threads needed since we only sum within warp
+    sum_E = E_smem[lane, warpid]
 
-    if warpid == a
-        sum_E = zero(T)
-        for w in a:active_warps
-            sum_E += E_smem[lane, w]
-        end
-        # Now each lane has the sum over its thread for all warps
-        # Let's do a warp reduction
-        offset = Int32(16)
-        while offset > 0
-            sum_E += CUDA.shfl_down_sync(0xFFFFFFFF, sum_E, offset)
-            offset ÷= 2
-        end
+    # Warp reduction
+    offset = Int32(16)
+    while offset > 0
+        sum_E += CUDA.shfl_down_sync(0xFFFFFFFF, sum_E, offset)
+        offset ÷= 2
+    end
 
-        if lane == a && sum_E != zero(T)
-            CUDA.atomic_add!(pointer(energy_nounits), sum_E)
-        end
+    if lane == a && sum_E != zero(T)
+        CUDA.atomic_add!(pointer(energy_nounits), sum_E)
     end
 
     return nothing
