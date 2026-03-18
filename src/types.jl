@@ -942,6 +942,8 @@ function inject_gradients(sys::System{<:Any, AT}, params_dic) where AT
     return atoms_grad, pis_grad, sis_grad, gis_grad
 end
 
+inject_interaction(inter, args...) = inter
+
 # Form a dictionary of all parameters in a system, allowing gradients to be tracked
 function extract_parameters(sys, ff)
     params_dic = Dict()
@@ -964,8 +966,14 @@ function extract_parameters(sys, ff)
         extract_parameters!(params_dic, inter, ff)
     end
 
+    for inter in values(sys.general_inters)
+        extract_parameters!(params_dic, inter, ff)
+    end
+
     return params_dic
 end
+
+extract_parameters!(params_dic, inter, ff) = params_dic
 
 @doc raw"""
     ThermoState(system::System, integrator; <keyword arguments>)
