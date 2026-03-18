@@ -14,3 +14,4 @@ Other papers that use, contribute to or are compatible with Molly are listed bel
 - Spacek R, Monmarché P and Stoltz G. Transient Subtraction: A Control Variate Method for Computing Transport Coefficients, [Journal of Statistical Physics](https://doi.org/10.1007/s10955-025-03424-x) 192, 53 (2025)
 - Wu X, Shang X. Stochastic Norton Dynamics: An Alternative Approach for the Computation of Transport Coefficients in Dissipative Particle Dynamics, [arXiv](https://arxiv.org/abs/2504.14479) (2025)
 - Greener JG. Reversible molecular simulation for training classical and machine learning force field, [Proceedings of the National Academy of Sciences](https://doi.org/10.1073/pnas.2426058122) 122(22), e2426058122 (2025)
+- Blanco-González A, Schulze TK, Rovers E, Greener JG. Training a force field for proteins and small molecules from scratch, [arXiv](https://arxiv.org/abs/2603.16770) (2026)
