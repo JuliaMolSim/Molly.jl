@@ -29,7 +29,7 @@ end
 
 """
     LINCS(masses, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
-          dist_constraints, nrec=4, niter=1, strictness=:warn)
+          dist_constraints=nothing, angle_constraints=nothing, nrec=4, niter=1)
 
 Constrain bond distances during a simulation using the LINCS (LINear Constraint Solver)
 algorithm.
@@ -51,50 +51,104 @@ At the moment, this implementation is CPU only.
 - `vel_tolerance=1e-8u"nm^2 * ps^-1"`: the tolerance for checking velocity constraints,
     should have the same units as the velocities times the coordinates.
 - `dist_constraints`: a vector of [`DistanceConstraint`](@ref) objects.
+- `angle_constraints`: a vector of [`AngleConstraint`](@ref) objects. Each angle constraint
+    is converted into 3 distance constraints internally. LINCS requires that angle
+    constraints are isolated: none of their atoms may participate in distance constraints
+    or in other angle constraints.
 - `nrec=4`: order of the matrix expansion for coupling matrix inversion. Higher values
     improve accuracy for coupled constraints at the cost of performance.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
 """
-struct LINCS{CL, LD, LW, DC, E, F}
+struct LINCS{CL, LD, LW, DC, AC, E, F}
     clusters::CL
     lincs_data::LD
     workspace::LW
     dist_constraints::DC
+    angle_constraints::AC
     dist_tolerance::E
     vel_tolerance::F
+end
+
+function validate_angle_constraints(dist_constraints, angle_constraints)
+    dist_atoms = Set{Int}()
+    for dc in dist_constraints
+        push!(dist_atoms, dc.i, dc.j)
+    end
+
+    for (idx, ac) in enumerate(angle_constraints)
+        ac_atoms = (ac.i, ac.j, ac.k)
+        for a in ac_atoms
+            if a in dist_atoms
+                throw(ArgumentError(
+                    "angle constraint $idx (atoms $(ac.i)/$(ac.j)/$(ac.k)) shares " *
+                    "atom $a with a distance constraint; LINCS requires angle " *
+                    "constraints to be isolated"))
+            end
+        end
+
+        for (idx2, ac2) in enumerate(angle_constraints)
+            idx2 == idx && continue
+            ac2_atoms = (ac2.i, ac2.j, ac2.k)
+            for a in ac_atoms
+                if a in ac2_atoms
+                    throw(ArgumentError(
+                        "angle constraint $idx (atoms $(ac.i)/$(ac.j)/$(ac.k)) shares " *
+                        "atom $a with angle constraint $idx2 (atoms $(ac2.i)/$(ac2.j)/$(ac2.k)); " *
+                        "LINCS requires angle constraints to be isolated"))
+                end
+            end
+        end
+    end
 end
 
 function LINCS(masses,
                dist_tolerance=1e-8u"nm",
                vel_tolerance=1e-8u"nm^2 * ps^-1";
-               dist_constraints,
+               dist_constraints=nothing,
+               angle_constraints=nothing,
                nrec::Integer=4,
                niter::Integer=1)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero"))
 
     dc_present = !isnothing(dist_constraints) && length(dist_constraints) > 0
-    if !dc_present
-        throw(ArgumentError("dist_constraints must be provided and non-empty for LINCS"))
+    ac_present = !isnothing(angle_constraints) && length(angle_constraints) > 0
+
+    if !dc_present && !ac_present
+        throw(ArgumentError("at least one of dist_constraints or angle_constraints must " *
+                            "be provided and non-empty for LINCS"))
     end
 
-    if isa(dist_constraints, AbstractGPUArray)
+    all_dist_constraints = dc_present ? collect(dist_constraints) : DistanceConstraint[]
+
+    if ac_present
+        validate_angle_constraints(all_dist_constraints, angle_constraints)
+        for ac in angle_constraints
+            append!(all_dist_constraints, to_distance_constraints(ac))
+        end
+    end
+
+    if isa(all_dist_constraints, AbstractGPUArray)
         throw(ArgumentError("constraints should be passed to LINCS on CPU"))
     end
 
     clusters = StructArray([Cluster12Data(Int32(dc.i), Int32(dc.j), dc.dist)
-                            for dc in dist_constraints])
+                            for dc in all_dist_constraints])
 
-    lincs_data = build_lincs_data(dist_constraints, masses; nrec=Int(nrec), niter=Int(niter))
+    lincs_data = build_lincs_data(all_dist_constraints, masses; nrec=Int(nrec), niter=Int(niter))
     workspace = create_lincs_workspace(lincs_data)
 
-    return LINCS(clusters, lincs_data, workspace, collect(dist_constraints),
-                 dist_tolerance, vel_tolerance)
+    stored_angle_constraints = ac_present ? collect(angle_constraints) : nothing
+
+    return LINCS(clusters, lincs_data, workspace, all_dist_constraints,
+                 stored_angle_constraints, dist_tolerance, vel_tolerance)
 end
 
 function Base.show(io::IO, lincs::LINCS)
-    print(io, "LINCS with ", length(lincs.dist_constraints), " constraints (nrec=",
+    n_dc = length(lincs.dist_constraints)
+    n_ac = isnothing(lincs.angle_constraints) ? 0 : length(lincs.angle_constraints)
+    print(io, "LINCS with ", n_dc, " distance and ", n_ac, " angle constraints (nrec=",
           lincs.lincs_data.nrec, ", niter=", lincs.lincs_data.niter, ")")
 end
 
@@ -105,6 +159,8 @@ function constrained_atom_inds(lincs::LINCS)
     end
     return atom_inds
 end
+
+cluster_keys(::LINCS) = (:clusters,)
 
 # --- Setup functions ---
 

@@ -766,18 +766,6 @@ end
     end
 end
 
-@testset "LINCS update_velocities" begin
-    x_old = [SVector(0.0, 0.0, 0.0), SVector(0.15, 0.0, 0.0)]
-    xp = [SVector(0.001, 0.0, 0.0), SVector(0.149, 0.0, 0.0)]
-    v = [SVector(0.0, 0.0, 0.0), SVector(0.0, 0.0, 0.0)]
-    dt = 0.002
-    @inbounds for i in eachindex(v)
-        v[i] = (xp[i] - x_old[i]) / dt
-    end
-    @test v[1] ≈ SVector(0.5, 0.0, 0.0)
-    @test v[2] ≈ SVector(-0.5, 0.0, 0.0)
-end
-
 @testset "LINCS integration with System" begin
     r_cut = 8.5u"Å"
     temp = 300.0u"K"
@@ -831,6 +819,87 @@ end
         simulate!(sys, simulator, 10_000)
 
         @test check_position_constraints(sys, cons)
+    end
+end
+
+@testset "LINCS angle constraints" begin
+    n_molecules = 10
+    n_atoms = 3 * n_molecules
+    mass_O = 15.999u"g/mol"
+    mass_H = 1.008u"g/mol"
+
+    atoms = Atom[]
+    for _ in 1:n_molecules
+        push!(atoms, Atom(mass=mass_O, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
+        push!(atoms, Atom(mass=mass_H, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
+        push!(atoms, Atom(mass=mass_H, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
+    end
+    atom_masses = [a.mass for a in atoms]
+
+    boundary = CubicBoundary(3.0u"nm")
+    bond_length = 0.09572u"nm"
+    θ = deg2rad(104.52)
+
+    coords = place_atoms(n_molecules, boundary, min_dist=0.3u"nm")
+    full_coords = SVector{3, typeof(1.0u"nm")}[]
+    for i in 1:n_molecules
+        O_pos = coords[i]
+        H1_pos = O_pos .+ SVector(bond_length, 0.0u"nm", 0.0u"nm")
+        H2_pos = O_pos .+ SVector(bond_length * cos(θ), bond_length * sin(θ), 0.0u"nm")
+        push!(full_coords, O_pos)
+        push!(full_coords, H1_pos)
+        push!(full_coords, H2_pos)
+    end
+
+    temp = 100.0u"K"
+    velocities = [random_velocity(atoms[i].mass, temp) for i in 1:n_atoms]
+
+    angle_constraints = [AngleConstraint(3*(i-1)+2, 3*(i-1)+1, 3*(i-1)+3, θ, bond_length, bond_length)
+                         for i in 1:n_molecules]
+
+    cons = LINCS(atom_masses, 1e-6u"nm", 1e-6u"nm^2 * ps^-1";
+                 angle_constraints=angle_constraints, nrec=8, niter=2)
+
+    @test !isnothing(cons.angle_constraints)
+    @test length(cons.angle_constraints) == n_molecules
+    @test length(cons.dist_constraints) == 3 * n_molecules
+
+    neighbor_finder = DistanceNeighborFinder(
+        eligible=trues(n_atoms, n_atoms),
+        n_steps=10,
+        dist_cutoff=1.5u"nm",
+    )
+
+    sys = System(
+        atoms=atoms,
+        coords=full_coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        constraints=(cons,),
+        neighbor_finder=neighbor_finder,
+    )
+
+    simulate!(sys, VelocityVerlet(dt=0.001u"ps"), 1000)
+
+    @test check_position_constraints(sys, cons)
+
+    @testset "isolation validation" begin
+        dc = [DistanceConstraint(1, 4, 0.15u"nm")]
+        ac = [AngleConstraint(1, 2, 3, θ, bond_length, bond_length)]
+        @test_throws ArgumentError LINCS(atom_masses; dist_constraints=dc, angle_constraints=ac)
+
+        ac_overlap = [
+            AngleConstraint(1, 2, 3, θ, bond_length, bond_length),
+            AngleConstraint(3, 4, 5, θ, bond_length, bond_length),
+        ]
+        @test_throws ArgumentError LINCS(atom_masses; angle_constraints=ac_overlap)
+    end
+
+    @testset "show method" begin
+        s = sprint(show, cons)
+        @test occursin("distance", s)
+        @test occursin("angle", s)
     end
 end
 
