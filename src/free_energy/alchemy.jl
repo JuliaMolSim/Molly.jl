@@ -1,8 +1,8 @@
-const AlchemicalRole = UInt8
+const AlchemicalRole = Int
 
-const CoreRole::AlchemicalRole   = 0x00
-const InsertRole::AlchemicalRole = 0x01
-const DeleteRole::AlchemicalRole = 0x02
+const CoreRole::AlchemicalRole   = 0
+const InsertRole::AlchemicalRole = 1
+const DeleteRole::AlchemicalRole = 2
 
 #= 
 The logic found in this file is a reinterpretation of how OpenFE deals
