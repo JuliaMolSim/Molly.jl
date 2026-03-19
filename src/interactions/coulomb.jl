@@ -508,36 +508,23 @@ c_{rf} = \frac{1}{r_c} \frac{3\varepsilon_{rf}}{2\varepsilon_{rf} + 1}
 Setting `solvent_dielectric=Inf` gives conducting boundary conditions
 (``k_{rf} = 1/(2r_c^3)``, ``c_{rf} = 3/(2r_c)``).
 """
-struct CoulombReactionField{D, S, K, W, T} <: PairwiseInteraction
+@kwdef struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
     dist_cutoff::D
-    solvent_dielectric::S
-    krf::K
-    crf::K
-    use_neighbors::Bool
-    weight_special::W
-    coulomb_const::T
-end
-
-function CoulombReactionField(; dist_cutoff, solvent_dielectric=crf_solvent_dielectric,
-                              use_neighbors=false, weight_special=1, coulomb_const=coulomb_const)
-    rc = dist_cutoff
-    if isinf(solvent_dielectric)
-        krf = inv(2 * rc^3)
-        crf = 3 * inv(2 * rc)
-    else
-        krf = inv(rc^3) * (solvent_dielectric - 1) / (2 * solvent_dielectric + 1)
-        crf = inv(rc) * (3 * solvent_dielectric) / (2 * solvent_dielectric + 1)
-    end
-    return CoulombReactionField(dist_cutoff, solvent_dielectric, krf, crf,
-                                use_neighbors, weight_special, coulomb_const)
+    solvent_dielectric::S = crf_solvent_dielectric
+    use_neighbors::Bool = false
+    weight_special::W = 1
+    coulomb_const::T = coulomb_const
 end
 
 use_neighbors(inter::CoulombReactionField) = inter.use_neighbors
 
-function Base.zero(coul::CoulombReactionField{D, S, K, W, T}) where {D, S, K, W, T}
-    return CoulombReactionField(
-        zero(D), zero(S), zero(K), zero(K),
-        coul.use_neighbors, zero(W), zero(T),
+function Base.zero(coul::CoulombReactionField{D, S, W, T}) where {D, S, W, T}
+    return CoulombReactionField{D, S, W, T}(
+        zero(D),
+        zero(S),
+        coul.use_neighbors,
+        zero(W),
+        zero(T),
     )
 end
 
@@ -545,8 +532,6 @@ function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
     return CoulombReactionField(
         c1.dist_cutoff + c2.dist_cutoff,
         c1.solvent_dielectric + c2.solvent_dielectric,
-        c1.krf + c2.krf,
-        c1.crf + c2.crf,
         c1.use_neighbors,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
@@ -556,11 +541,11 @@ end
 function inject_interaction(inter::CoulombReactionField, params_dic)
     key_prefix = "inter_CRF_"
     return CoulombReactionField(
-        dist_cutoff=dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        solvent_dielectric=inter.solvent_dielectric,
-        use_neighbors=inter.use_neighbors,
-        weight_special=dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-        coulomb_const=dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
+        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
+        dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
+        inter.use_neighbors,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
     )
 end
 
@@ -584,7 +569,17 @@ end
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = sqrt(r2)
-    krf = special ? zero(inter.krf) : inter.krf
+
+    if special
+        krf = 0.0 # 1-4 interactions do not use the reaction field approximation
+    else
+        # These values could be pre-computed but this way is easier for AD
+        if isinf(solvent_dielectric) # conducting boundary conditions
+            krf = special ? 0.0 : inv(2 * rc^3)
+        else
+            krf = inv(rc^3) * (solvent_dielectric - 1) / (2 * solvent_dielectric + 1)
+        end
+    end
 
     f = (ke * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
 
@@ -606,8 +601,18 @@ end
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = sqrt(r2)
-    krf = special ? zero(inter.krf) : inter.krf
-    crf = special ? zero(inter.crf) : inter.crf
+
+    if special
+        krf = crf = 0.0 # 1-4 interactions do not use the reaction field approximation
+    else
+        if isinf(solvent_dielectric) # conducting boundary conditions
+            krf = inv(2 * rc^3)
+            crf = 3 * inv(2 * rc)
+        else
+            krf = inv(rc^3) * (solvent_dielectric - 1) / (2 * solvent_dielectric + 1)
+            crf = inv(rc) * (3 * solvent_dielectric) / (2 * solvent_dielectric + 1)
+        end
+    end
 
     pe = (ke * qi * qj) * (inv(r) + krf * r2 - crf)
 

@@ -516,6 +516,7 @@ end
         Coulomb(use_neighbors=true), Coulomb(use_neighbors=false),
         CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true),
         CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=false),
+        CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true, solvent_dielectric=Inf),
         Gravity(G=G, use_neighbors=true), Gravity(G=G, use_neighbors=false),
     )
 
