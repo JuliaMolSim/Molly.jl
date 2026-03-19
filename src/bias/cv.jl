@@ -257,7 +257,7 @@ function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args
     end
 
     d = norm(r_ij)
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if d > zero(d)
         dir = r_ij / d
@@ -308,7 +308,7 @@ function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, args...
     end
 
     d = sqrt(min_d2)
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if d > zero(d)
         dir = r_ij / d
@@ -357,7 +357,7 @@ function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, args...
     end
 
     d = sqrt(max_d2)
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if d > zero(d)
         dir = r_ij / d
@@ -393,7 +393,7 @@ function cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, args...;
     end
 
     d = norm(r_12)
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if d > zero(d)
         dir = r_12 / d
@@ -580,7 +580,7 @@ function cv_gradient(cv::CalcRg, coords, atoms, boundary, args...; kwargs...)
     rg_sq /= M_total
     rg = sqrt(rg_sq)
 
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if rg > zero(rg)
         factor = 1 / (M_total * rg)
@@ -713,7 +713,7 @@ function cv_gradient(cv::CalcRMSD, coords, args...; kwargs...)
     
     rmsd_val = sqrt(mean(sum_abs2, diffs))
 
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if rmsd_val > zero(rmsd_val)
         factor = 1 / (N * rmsd_val)
@@ -803,7 +803,7 @@ function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs..
     b2_norm = norm(b2)
     b2_sq = b2_norm^2
    
-    grad = ustrip.(zero(coords)) / oneunit(eltype(eltype(coords)))
+    grad = ustrip_vec.(zero(coords)) / oneunit(eltype(eltype(coords)))
     phi = torsion_angle(ri, rj, rk, rl, boundary)
     
     if m_sq > zero(m_sq) && n_sq > zero(n_sq) && b2_sq > zero(b2_sq)

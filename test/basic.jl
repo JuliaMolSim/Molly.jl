@@ -616,9 +616,8 @@ end
         zfs = AtomsCalculators.zero_forces(ab_sys, calc)
         @test zfs == fill(SVector(0.0, 0.0, 0.0)u"kJ/Å", length(ab_sys))
 
-        # AtomsCalculators.AtomsCalculatorsTesting functions
-        test_potential_energy(ab_sys, calc)
-        test_forces(ab_sys, calc)
+        AtomsCalculators.Testing.test_potential_energy(ab_sys, calc)
+        AtomsCalculators.Testing.test_forces(ab_sys, calc)
     end
 end
 
