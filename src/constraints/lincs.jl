@@ -102,9 +102,9 @@ function validate_angle_constraints(dist_constraints, angle_constraints)
     end
 end
 
-function LINCS(masses,
+function LINCS(;masses,
                dist_tolerance=1e-8u"nm",
-               vel_tolerance=1e-8u"nm^2 * ps^-1";
+               vel_tolerance=1e-8u"nm^2 * ps^-1",
                dist_constraints=nothing,
                angle_constraints=nothing,
                nrec::Integer=4,
