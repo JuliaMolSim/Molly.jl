@@ -780,7 +780,7 @@ end
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
     atom_masses = [atom_mass for _ in 1:n_atoms]
 
-    cons = LINCS(atom_masses, 1e-8u"Å", 1e-8u"Å^2 * ps^-1";
+    cons = LINCS(masses=atom_masses, dist_tolerance=1e-8u"Å", vel_tolerance=1e-8u"Å^2 * ps^-1",
                  dist_constraints=dist_constraints)
 
     @test length(cons.clusters) == (n_atoms ÷ 2)
@@ -819,6 +819,8 @@ end
         simulate!(sys, simulator, 10_000)
 
         @test check_position_constraints(sys, cons)
+
+        println(sys.coords)
     end
 end
 
@@ -857,7 +859,7 @@ end
     angle_constraints = [AngleConstraint(3*(i-1)+2, 3*(i-1)+1, 3*(i-1)+3, θ, bond_length, bond_length)
                          for i in 1:n_molecules]
 
-    cons = LINCS(atom_masses, 1e-6u"nm", 1e-6u"nm^2 * ps^-1";
+    cons = LINCS(masses=atom_masses, dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
                  angle_constraints=angle_constraints, nrec=8, niter=2)
 
     @test !isnothing(cons.angle_constraints)
@@ -887,13 +889,13 @@ end
     @testset "isolation validation" begin
         dc = [DistanceConstraint(1, 4, 0.15u"nm")]
         ac = [AngleConstraint(1, 2, 3, θ, bond_length, bond_length)]
-        @test_throws ArgumentError LINCS(atom_masses; dist_constraints=dc, angle_constraints=ac)
+        @test_throws ArgumentError LINCS(masses=atom_masses, dist_constraints=dc, angle_constraints=ac)
 
         ac_overlap = [
             AngleConstraint(1, 2, 3, θ, bond_length, bond_length),
             AngleConstraint(3, 4, 5, θ, bond_length, bond_length),
         ]
-        @test_throws ArgumentError LINCS(atom_masses; angle_constraints=ac_overlap)
+        @test_throws ArgumentError LINCS(masses=atom_masses, angle_constraints=ac_overlap)
     end
 
     @testset "show method" begin
