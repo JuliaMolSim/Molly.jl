@@ -1253,6 +1253,7 @@ end
 
 The dipole moment μ of a system.
 
+Calculated as the sum of the coordinates multiplied by the partial charges.
 Requires the charges on the atoms to be set.
 """
 dipole_moment(sys) = sum(sys.coords .* charges(sys))

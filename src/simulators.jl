@@ -1392,7 +1392,7 @@ in range [0, 1) scaled by `shift_size` which should have appropriate length unit
 function random_uniform_translation!(sys::System{D, <:Any, T};
                                      shift_size=oneunit(eltype(eltype(sys.coords))),
                                      rng=Random.default_rng()) where {D, T}
-    rand_idx = pick_non_virtual_site(rng, sys)
+    rand_idx = pick_non_virtual_site(sys, rng)
     direction = random_unit_vector(T, D, rng)
     magnitude = rand(rng, T) * shift_size
     sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
@@ -1412,7 +1412,7 @@ which should have appropriate length units.
 function random_normal_translation!(sys::System{D, <:Any, T};
                                     shift_size=oneunit(eltype(eltype(sys.coords))),
                                     rng=Random.default_rng()) where {D, T}
-    rand_idx = pick_non_virtual_site(rng, sys)
+    rand_idx = pick_non_virtual_site(sys, rng)
     direction = random_unit_vector(T, D, rng)
     magnitude = randn(rng, T) * shift_size
     sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)

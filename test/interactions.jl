@@ -32,6 +32,9 @@
     @test Molly.σ_mixing(lorentz_mixing_static, a1, a2) ≈ 0.5u"nm"
     @test Molly.σ_mixing(lorentz_mixing_static, a1, a3) ≈ 0.35u"nm"
     @test Molly.σ_mixing(lorentz_mixing_static, a3, a3) ≈ 0.6u"nm"
+    eld = Molly.ExceptionList(σ_exceptions_dict)
+    @test (eld.keys == SVector{2}([(2, 1), (3, 3)]) && eld.values == SVector(0.5u"nm", 0.6u"nm")) ||
+          (eld.keys == SVector{2}([(3, 3), (2, 1)]) && eld.values == SVector(0.6u"nm", 0.5u"nm"))
 
     ϵ_exceptions_dict = Dict((2, 1) => 0.5u"kJ * mol^-1", (3, 3) => 0.6u"kJ * mol^-1")
     ϵ_exceptions_static = Molly.ExceptionList(
@@ -810,6 +813,9 @@
 
     ljdc = LJDispersionCorrection([a1, a2], 1.0u"nm")
     @test ljdc.factor ≈ -0.00208532857855u"kJ * nm^3 * mol^-1"
+
+    InteractionList2Atoms([1, 2], [3, 4], [0.0, 0.0])
+    @test_throws ArgumentError InteractionList2Atoms([1, 2], [3, 4], [0.0])
 end
 
 @testset "Cutoffs" begin

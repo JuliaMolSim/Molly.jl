@@ -295,7 +295,7 @@ end
     end
 end
 
-function pick_non_virtual_site(rng, sys)
+function pick_non_virtual_site(sys, rng=Random.default_rng())
     if iszero(length(sys.virtual_sites))
         return rand(rng, eachindex(sys))
     else

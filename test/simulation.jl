@@ -368,6 +368,7 @@ end
         for simulator in simulators
             @time simulate!(sys, simulator, sim_time; n_threads=1)
         end
+        @test_throws ArgumentError simulate!(sys, simulators[1], 1; n_threads=1, strictness=:wrong)
     end
 
     @test Molly.calc_n_steps(n_steps, dt) == n_steps
@@ -645,7 +646,9 @@ end
     neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; n_threads=1)
     a1 = accelerations(s, neighbors)
     a2 = accelerations(s_nounits, neighbors_nounits)u"kJ * nm^-1 * g^-1"
+    a3 = accelerations(s)
     @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1))
+    @test all(all(a1[i] .≈ a3[i]) for i in eachindex(a1))
 
     simulate!(s, simulator, n_steps; n_threads=1)
     simulate!(s_nounits, simulator_nounits, n_steps; n_threads=1)

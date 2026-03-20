@@ -622,6 +622,9 @@ end
 end
 
 @testset "Virtual sites" begin
+    @test_throws ArgumentError TwoParticleAverageSite(3, 1, 2, 0.6, 0.5, 0.0)
+    @test_throws ArgumentError ThreeParticleAverageSite(7, 4, 5, 6, 0.3, 0.3, 0.5, 0.0)
+
     for AT in array_list
         for units in (false, true)
             if units
@@ -630,7 +633,8 @@ end
             else
                 LU, MU, EU, FU, TU, AU = NoUnits, NoUnits, NoUnits, NoUnits, NoUnits, NoUnits
             end
-            vs_flags = to_device(BitVector([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1]), AT)
+            vs_flags_cpu = BitVector([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1])
+            vs_flags = to_device(vs_flags_cpu, AT)
             atom_masses = map(x -> (x ? 0.0 : 10.0), vs_flags) .* MU
             atoms = to_device([Atom(mass=m, σ=(0.1 * LU), ϵ=(0.2 * EU))
                                for m in from_device(atom_masses)], AT)
@@ -735,6 +739,9 @@ end
 
             random_velocities!(sys, 300.0 * TU)
             @test all(map((v, f) -> (f ? iszero(v) : !iszero(v)), sys.velocities, vs_flags))
+
+            non_vss = [Molly.pick_non_virtual_site(sys) for _ in 1:10]
+            @test all(i -> !vs_flags_cpu[i] || !(i in non_vss), eachindex(sys))
         end
     end
 end

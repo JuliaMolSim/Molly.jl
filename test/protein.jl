@@ -92,6 +92,16 @@ end
     zero(sys_pme)
     neighbors = find_neighbors(sys)
 
+    cs = charges(sys)
+    @test charge(sys, 2) == cs[2] == 0.1642
+    @test cs isa Vector{Float64}
+    @test sum(cs) ≈ 0.0 atol=1e-12
+    @test dipole_moment(sys) ≈ SVector(76.9000632, 42.63952727, 58.53451893)u"nm"
+    @test Molly.interaction_type(sys.specific_inter_lists[1]) <: HarmonicBond
+    @test Molly.interaction_type(sys.specific_inter_lists[2]) <: HarmonicAngle
+    @test Molly.interaction_type(sys.specific_inter_lists[3]) <: PeriodicTorsion
+    @test Molly.interaction_type(sys.specific_inter_lists[4]) <: PeriodicTorsion
+
     @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
     @test count(i -> is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
     @test length(sys.topology.atom_molecule_inds) == length(sys) == 15954
@@ -197,6 +207,7 @@ end
     velocities_start = SVector{3}.(eachrow(readdlm(start_vels_fp)))u"nm * ps^-1"
     sys_pme_exact.velocities = copy(velocities_start)
     @test kinetic_energy(sys_pme_exact) ≈ 65521.87288132431u"kJ * mol^-1"
+    @test total_energy(sys_pme_exact) ≈ 96522.24858589929u"kJ * mol^-1"
     @test temperature(sys_pme_exact) ≈ 329.3202932884933u"K"
 
     simulate!(sys_pme_exact, simulator, n_steps; n_threads=Threads.nthreads())
@@ -261,6 +272,7 @@ end
             nonbonded_method=:cutoff,
             center_coords=false,
         )
+        show(devnull, sys.neighbor_finder)
         zero(sys)
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
