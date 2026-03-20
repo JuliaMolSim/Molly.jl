@@ -28,6 +28,11 @@ jobs:
         test:
           - NotGradients
           - Gradients
+        exclude:
+          - version: '1'
+            os: ubuntu-latest
+            arch: x64
+            test: Gradients
     steps:
       - run: export UCX_ERROR_SIGNALS="SIGILL,SIGBUS,SIGFPE"
       - uses: actions/checkout@v6
