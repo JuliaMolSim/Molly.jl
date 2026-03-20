@@ -129,22 +129,6 @@ get_res_id(res) = (
     "chainid" in Chemfiles.list_properties(res) ? Chemfiles.property(res, "chainid") : "X",
 )
 
-# Return the residue name with N or C added for terminal residues
-function residue_name(res, res_id_to_standard::Dict, rename_terminal_res::Bool=true)
-    res_id = get_res_id(res)
-    res_name = Chemfiles.name(res)
-    if rename_terminal_res && res_id_to_standard[res_id]
-        prev_res_id = (res_id[1] - 1, res_id[2])
-        next_res_id = (res_id[1] + 1, res_id[2])
-        if !haskey(res_id_to_standard, prev_res_id) || !res_id_to_standard[prev_res_id]
-            res_name = "N" * res_name
-        elseif !haskey(res_id_to_standard, next_res_id) || !res_id_to_standard[next_res_id]
-            res_name = "C" * res_name
-        end
-    end
-    return res_name
-end
-
 atom_types_to_string(atom_types...) = join(map(at -> at == "" ? "-" : at, atom_types), "/")
 
 atom_types_to_tuple(atom_types) = tuple(map(at -> at == "-" ? "" : at, split(atom_types, "/"))...)
