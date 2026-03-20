@@ -192,7 +192,7 @@ end
 
         forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=cv_gradient_enz)
         forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=cv_gradient)
-        @test isapprox(ustrip.(fs_zero_anl), ustrip.(fs_zero_enz); atol=1e-6)
+        @test isapprox(ustrip_vec.(fs_zero_anl), ustrip_vec.(fs_zero_enz); atol=1e-6)
     end
 end
 
