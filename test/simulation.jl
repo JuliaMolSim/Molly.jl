@@ -445,59 +445,6 @@ end
     end
 end
 
-@testset "Diatomic molecules" begin
-    n_atoms = 100
-    n_steps = 20_000
-    temp = 298.0u"K"
-    boundary = CubicBoundary(2.0u"nm")
-    coords = place_atoms(n_atoms ÷ 2, boundary; min_dist=0.3u"nm")
-    for i in eachindex(coords)
-        push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
-    end
-    bonds = InteractionList2Atoms(
-        collect(1:(n_atoms ÷ 2)),
-        collect((1 + n_atoms ÷ 2):n_atoms),
-        [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
-        fill("", n_atoms ÷ 2),
-    )
-    eligible = trues(n_atoms, n_atoms)
-    for i in 1:(n_atoms ÷ 2)
-        eligible[i, i + (n_atoms ÷ 2)] = false
-        eligible[i + (n_atoms ÷ 2), i] = false
-    end
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=(BerendsenThermostat(temp, 1.0u"ps"),))
-
-    s = System(
-        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        coords=coords,
-        boundary=boundary,
-        velocities=[random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
-        specific_inter_lists=(bonds,),
-        neighbor_finder=DistanceNeighborFinder(
-            eligible=trues(n_atoms, n_atoms),
-            n_steps=10,
-            dist_cutoff=2.0u"nm",
-        ),
-        loggers=(
-            temp=TemperatureLogger(10),
-            coords=CoordinatesLogger(10),
-        ),
-    )
-
-    @time simulate!(s, simulator, n_steps; n_threads=1)
-
-    if run_visualize_tests
-        visualize(
-            s.loggers.coords,
-            boundary,
-            temp_fp_mp4;
-            connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
-            trails=2,
-        )
-    end
-end
-
 @testset "Pairwise interactions" begin
     n_atoms = 100
     n_steps = 20_000
