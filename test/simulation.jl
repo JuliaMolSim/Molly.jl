@@ -656,6 +656,14 @@ end
     final_energy = last(values(s.loggers.energy))
     final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits; atol=5e-4u"kJ * mol^-1")
+
+    # Test init_step
+    s2 = deepcopy(s)
+    simulate!(s, simulator, 100; n_threads=1)
+    simulate!(s2, simulator, 40; n_threads=1)
+    simulate!(s2, simulator, 40; n_threads=1, init_step=40)
+    simulate!(s2, simulator, 20; n_threads=1, init_step=80)
+    @test maximum(norm.(s.coords .- s2.coords)) < 1e-8u"nm"
 end
 
 @testset "Position restraints" begin

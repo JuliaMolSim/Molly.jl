@@ -116,6 +116,8 @@ Constraints are applied during minimization, which can lead to issues.
     is `true` by default except for [`SteepestDescentMinimizer`](@ref), where it is `false`.
 - `shortcut=nothing`: when to stop the simulation early. A struct with the `shortcut_sim`
     method defined can be provided. Unused for REMD simulations.
+- `init_step=0`: the step number before the first step is taken, useful for time-dependent
+    potentials. Unused for REMD simulations.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
     the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
     environmental variable `MOLLY_SHOW_PROGRESS`.
@@ -141,6 +143,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=false,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -149,19 +152,21 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
-    E = potential_energy(sys, neighbors, buffers; n_threads=n_threads)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads,
+    E = potential_energy(sys, neighbors, buffers, init_step; n_threads=n_threads)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
                    current_potential_energy=E)
     using_constraints = (length(sys.constraints) > 0)
-    println(sim.log_stream, "Step 0 - potential energy ", E, " - max force N/A - N/A")
+    println(sim.log_stream, "Step ", init_step, " - potential energy ", E,
+            " - max force N/A - N/A")
     hn = sim.step_size
     coords_copy = zero(sys.coords)
     F = zero_forces(sys)
 
     progress = setup_progress_minimizer(ustrip(sim.tol), show_progress)
-    for step_n in 1:sim.max_steps
+    for step_n in (init_step + 1):(init_step + sim.max_steps)
         forces!(F, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
         max_force = maximum(norm.(F))
 
@@ -230,6 +235,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -239,13 +245,15 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), 0; n_threads=n_threads)
+    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), init_step; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
+                   current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
@@ -255,7 +263,7 @@ end
     dt_sq_div2 = sim.dt^2 / 2
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         if using_constraints
             cons_coord_storage .= sys.coords
         end
@@ -340,6 +348,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -349,13 +358,15 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), 0; n_threads=n_threads)
+    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), init_step; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
+                   current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
@@ -367,7 +378,7 @@ end
     λ_dt = sim.λ * sim.dt
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         if using_constraints
             cons_coord_storage .= sys.coords
         end
@@ -451,6 +462,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -460,10 +472,11 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -471,7 +484,7 @@ end
     end
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= calc_accels.(forces_t, masses(sys))
@@ -537,6 +550,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -545,17 +559,18 @@ end
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
     coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
     accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     dt_sq = sim.dt^2
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= calc_accels.(forces_t, masses(sys))
@@ -636,6 +651,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -645,10 +661,11 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     using_constraints = (length(sys.constraints) > 0)
@@ -659,7 +676,7 @@ end
     dt_div2 = sim.dt / 2
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= calc_accels.(forces_t, masses(sys))
@@ -739,8 +756,8 @@ struct LangevinSplitting{S, K, F, W}
 end
 
 function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_motion=1)
-    LangevinSplitting{typeof(dt), typeof(temperature), typeof(friction), typeof(splitting)}(
-        dt, temperature, friction, splitting, Int(remove_CM_motion))
+    return LangevinSplitting{typeof(dt), typeof(temperature), typeof(friction), typeof(splitting)}(
+                    dt, temperature, friction, splitting, Int(remove_CM_motion))
 end
 
 @inline function simulate!(sys,
@@ -749,6 +766,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -766,11 +784,12 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
-    forces!(forces_t, sys, neighbors, buffers, Val(false), 0; n_threads=n_threads)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    forces!(forces_t, sys, neighbors, buffers, Val(false), init_step; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
 
@@ -807,7 +826,7 @@ end
     end
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         for (step!, args) in step_arg_pairs
             step!(args..., neighbors, step_n)
         end
@@ -885,6 +904,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -898,16 +918,17 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     noise_prefac = sqrt((2 / sim.friction) * sim.dt)
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         forces!(forces_t, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
@@ -972,6 +993,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
@@ -986,19 +1008,21 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    forces!(forces_t, sys, neighbors, buffers, Val(true), 0; n_threads=n_threads)
+    forces!(forces_t, sys, neighbors, buffers, Val(true), init_step; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
+                   current_forces=forces_t)
     v_half = zero(sys.velocities)
     zeta = zero(inv(sim.dt))
     dt_div2 = sim.dt / 2
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir = (step_n % needs_vir_steps == 0)
         v_half .= sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* dt_div2
 
@@ -1076,6 +1100,7 @@ function simulate!(sys::ReplicaSystem,
                    n_threads::Integer=Threads.nthreads(),
                    run_loggers=true,
                    shortcut=nothing,
+                   init_step::Integer=0,
                    show_progress=default_show_progress(),
                    rng=Random.default_rng(),
                    strictness=default_strictness())
@@ -1103,8 +1128,8 @@ function simulate!(sys::ReplicaSystem,
     end
 
     return simulate_remd!(sys, sim, n_steps_or_time; n_threads=n_threads, run_loggers=run_loggers,
-                          shortcut=shortcut, show_progress=show_progress, rng=rng,
-                          strictness=strictness)
+                          shortcut=shortcut, init_step=init_step, show_progress=show_progress,
+                          rng=rng, strictness=strictness)
 end
 
 @doc raw"""
@@ -1181,6 +1206,9 @@ The simulation divides the total `n_steps` into cycles based on the time step an
 - `n_steps::Integer` or `sim_time`: the total number of steps or time to simulate for each replica.
 - `n_threads::Integer=Threads.nthreads()`: the total number of threads to use, which are equally partitioned among the individual replicas.
 - `run_loggers=true`: whether to run the loggers during the simulation, including the exchange logger.
+- `show_progress`: whether to show a progress bar for the simulation. `true` by default in
+    the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
+    environmental variable `MOLLY_SHOW_PROGRESS`.
 - `rng=Random.default_rng()`: the random number generator used for the exchange accept/reject criteria and any stochastic dynamics.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
@@ -1192,6 +1220,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         n_threads::Integer=Threads.nthreads(),
                         run_loggers=true,
                         shortcut=nothing, # Unused
+                        init_step::Integer=0, # Unused
                         show_progress=default_show_progress(),
                         rng=Random.default_rng(),
                         strictness=default_strictness())
@@ -1307,19 +1336,21 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            shortcut=nothing,
+                           init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
-    E_old = potential_energy(sys, neighbors, buffers; n_threads=n_threads)
+    E_old = potential_energy(sys, neighbors, buffers, init_step; n_threads=n_threads)
     coords_old = zero(sys.coords)
 
     progress = setup_progress(n_steps, show_progress)
-    for step_n in 1:n_steps
+    for step_n in (init_step + 1):(init_step + n_steps)
         coords_old .= sys.coords
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
