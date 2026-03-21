@@ -571,7 +571,8 @@ end
     r = sqrt(r2)
 
     if special
-        krf = ustrip(zero(r)) * inv(unit(r))^3 # 1-4 interactions do not use the reaction field approximation
+        # 1-4 interactions do not use the reaction field approximation
+        krf = inv(inter.dist_cutoff^3) * 0
     else
         # These values could be pre-computed but this way is easier for AD
         if isinf(inter.solvent_dielectric) # conducting boundary conditions
@@ -603,8 +604,9 @@ end
     r = sqrt(r2)
 
     if special
-        krf = ustrip(zero(r)) * inv(unit(r))^3 # 1-4 interactions do not use the reaction field approximation
-        crf = ustrip(zero(r)) * inv(unit(r))
+        # 1-4 interactions do not use the reaction field approximation
+        krf = inv(inter.dist_cutoff^3) * 0
+        crf = inv(inter.dist_cutoff) * 0
     else
         if isinf(inter.solvent_dielectric) # conducting boundary conditions
             krf = inv(2 * inter.dist_cutoff^3)
