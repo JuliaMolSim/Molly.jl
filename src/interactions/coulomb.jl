@@ -488,12 +488,25 @@ end
 
 const crf_solvent_dielectric = 78.3
 
-"""
+@doc raw"""
     CoulombReactionField(; dist_cutoff, solvent_dielectric, use_neighbors, weight_special,
                             coulomb_const)
 
 The Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
+
+The potential energy is defined as
+```math
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0} \left( \frac{1}{r_{ij}} + k_{rf} r_{ij}^2 - c_{rf} \right)
+```
+where
+```math
+k_{rf} = \frac{1}{r_c^3} \frac{\varepsilon_{rf} - 1}{2\varepsilon_{rf} + 1}, \quad
+c_{rf} = \frac{1}{r_c} \frac{3\varepsilon_{rf}}{2\varepsilon_{rf} + 1}
+```
+`solvent_dielectric` corresponds to ``\varepsilon_{rf}``.
+Setting `solvent_dielectric=Inf` gives conducting boundary conditions
+(``k_{rf} = 1/(2r_c^3)``, ``c_{rf} = 3/(2r_c)``).
 """
 @kwdef struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
     dist_cutoff::D
@@ -556,13 +569,17 @@ end
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = sqrt(r2)
+
     if special
         # 1-4 interactions do not use the reaction field approximation
-        krf = (1 / (inter.dist_cutoff ^ 3)) * 0
+        krf = inv(inter.dist_cutoff^3) * 0
     else
         # These values could be pre-computed but this way is easier for AD
-        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
-              (2 * inter.solvent_dielectric + 1))
+        if isinf(inter.solvent_dielectric) # conducting boundary conditions
+            krf = inv(2 * inter.dist_cutoff^3)
+        else
+            krf = inv(inter.dist_cutoff^3) * (inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1)
+        end
     end
 
     f = (ke * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
@@ -585,15 +602,19 @@ end
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = sqrt(r2)
+
     if special
         # 1-4 interactions do not use the reaction field approximation
-        krf = (1 / (inter.dist_cutoff ^ 3)) * 0
-        crf = (1 /  inter.dist_cutoff     ) * 0
+        krf = inv(inter.dist_cutoff^3) * 0
+        crf = inv(inter.dist_cutoff) * 0
     else
-        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
-              (2 * inter.solvent_dielectric + 1))
-        crf = (1 /  inter.dist_cutoff     ) * ((3 * inter.solvent_dielectric) /
-              (2 * inter.solvent_dielectric + 1))
+        if isinf(inter.solvent_dielectric) # conducting boundary conditions
+            krf = inv(2 * inter.dist_cutoff^3)
+            crf = 3 * inv(2 * inter.dist_cutoff)
+        else
+            krf = inv(inter.dist_cutoff^3) * (inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1)
+            crf = inv(inter.dist_cutoff) * (3 * inter.solvent_dielectric) / (2 * inter.solvent_dielectric + 1)
+        end
     end
 
     pe = (ke * qi * qj) * (inv(r) + krf * r2 - crf)
