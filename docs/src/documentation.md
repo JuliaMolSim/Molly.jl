@@ -3,7 +3,7 @@
 This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation.
 There are further examples in the [Molly examples](@ref) section.
 For more information on specific types or functions, see the [Molly API](@ref) section or call `?function_name` in Julia.
-The [Differentiable simulation with Molly](@ref) section describes taking gradients through simulations and the [Free energies with MBAR](@ref) section covers an approach to estimate free energies.
+The [Differentiable simulation with Molly](@ref) section describes taking gradients through simulations and the [Free energy calculation](@ref) section covers an approach to estimate free energies.
 
 The package takes a modular approach to molecular simulation.
 To run a simulation you create a [`System`](@ref) object and call [`simulate!`](@ref) on it.
@@ -504,54 +504,9 @@ end
 # 362.86427110336984 K
 ```
 
-The Accelerated Weight Histogram method ([`AWHState`](@ref), [`AWHSimulation`](@ref)) has also been implemented in Molly.jl, allowing to perform enhanced sampling and obtaining on-the-fly estimators of free energies along arbitrary collective variables and alchemical transformations. A more detailed overview of this can be found in the Free Energy section of the documentation.
+The accelerated weight histogram method ([`AWHState`](@ref) and [`AWHSimulation`](@ref)) has also been implemented in Molly.jl, allowing enhanced sampling and on-the-fly estimation of free energies along arbitrary collective variables and alchemical transformations. A more detailed overview of this can be found in the [Free energy calculation](@ref) section.
 
-## Monte Carlo sampling
-
-Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo sampling with Metropolis selection rates.
-For example, to perform simulated annealing on charged particles to form a crystal lattice:
-```julia
-n_atoms = 100
-atoms = [Atom(mass=10.0u"g/mol", charge=1.0) for i in 1:n_atoms]
-boundary = RectangularBoundary(4.0u"nm")
-
-coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
-pairwise_inters = (Coulomb(),)
-
-temperatures = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
-sys = System(
-    atoms=atoms,
-    coords=coords,
-    boundary=boundary,
-    pairwise_inters=pairwise_inters,
-    loggers=(
-        coords=CoordinatesLogger(n_atoms, dims=2),
-        montecarlo=MonteCarloLogger(),
-    ),
-)
-
-trial_args = Dict(:shift_size => 0.1u"nm")
-for t in temperatures
-    sim = MetropolisMonteCarlo(;
-        temperature=t,
-        trial_moves=random_uniform_translation!,
-        trial_args=trial_args,
-    )
-
-    simulate!(sys, sim, 10_000)
-end
-
-println(sys.loggers.montecarlo.n_accept)
-# 15234
-
-visualize(sys.loggers.coords, boundary, "sim_montecarlo.gif")
-```
-![Monte Carlo simulation](images/sim_montecarlo.gif)
-
-`trial_moves` should be a function that takes a [`System`](@ref) as its argument and optional keyword arguments `trial_args`.
-It should modify the coordinates as appropriate, accounting for any boundary conditions.
-[`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
-[`MonteCarloLogger`](@ref) records various properties throughout the simulation.
+As described in the next section, bias potentials can also be added to standard simulators for enhanced sampling.
 
 ## Biased simulation
 
@@ -670,6 +625,53 @@ sys = System(
 simulate!(sys, simulator, 100_000)
 ```
 See also [this example](@ref "Protein bias potential").
+
+## Monte Carlo sampling
+
+Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo sampling with Metropolis selection rates.
+For example, to perform simulated annealing on charged particles to form a crystal lattice:
+```julia
+n_atoms = 100
+atoms = [Atom(mass=10.0u"g/mol", charge=1.0) for i in 1:n_atoms]
+boundary = RectangularBoundary(4.0u"nm")
+
+coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
+pairwise_inters = (Coulomb(),)
+
+temperatures = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    pairwise_inters=pairwise_inters,
+    loggers=(
+        coords=CoordinatesLogger(n_atoms, dims=2),
+        montecarlo=MonteCarloLogger(),
+    ),
+)
+
+trial_args = Dict(:shift_size => 0.1u"nm")
+for t in temperatures
+    sim = MetropolisMonteCarlo(;
+        temperature=t,
+        trial_moves=random_uniform_translation!,
+        trial_args=trial_args,
+    )
+
+    simulate!(sys, sim, 10_000)
+end
+
+println(sys.loggers.montecarlo.n_accept)
+# 15234
+
+visualize(sys.loggers.coords, boundary, "sim_montecarlo.gif")
+```
+![Monte Carlo simulation](images/sim_montecarlo.gif)
+
+`trial_moves` should be a function that takes a [`System`](@ref) as its argument and optional keyword arguments `trial_args`.
+It should modify the coordinates as appropriate, accounting for any boundary conditions.
+[`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
+[`MonteCarloLogger`](@ref) records various properties throughout the simulation.
 
 ## Units
 
@@ -833,7 +835,7 @@ You can use `args...` to indicate unused further arguments, e.g. `Molly.force(in
 Atom properties can be accessed, e.g. `atom_i.σ`.
 `force_units` can be useful for returning a zero force under certain conditions.
 `step_n` is the step number in the simulator, allowing time-dependent interactions.
-Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called, and can also be 0 to calculate forces before the first step.
+Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called unless you give the `init_step` argument, and can also be 0 to calculate forces before the first step.
 It also doesn't work with [`simulate_remd!`](@ref).
 
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
@@ -1128,6 +1130,11 @@ The available simulators are:
 Many of these require a time step `dt` as an argument.
 Many also remove the center of mass motion every time step, which can be tuned with the `remove_CM_motion` argument (`false` or a number of steps).
 
+Common options when calling [`simulate!`](@ref) with these simulators include:
+- `show_progress` to decide whether to show a progress bar for the simulation. This is `true` by default in the REPL/IJulia/Pluto, otherwise `false`, and can be set globally with the environmental variable `MOLLY_SHOW_PROGRESS`.
+- `shortcut` to provide a struct that has a `Molly.shortcut_sim` method defined, checking at the end of each step when to stop the simulation early.
+- `init_step` to specify the step number before the first step is taken, useful for time-dependent potentials. Default `0`.
+
 The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
 
 To define your own simulator, first define a `struct`:
@@ -1259,6 +1266,7 @@ The appropriate coupling to use will depend on the situation.
 For example, the [`Langevin`](@ref) simulator controls temperature so does not require a thermostat.
 The [`MonteCarloBarostat`](@ref) for controlling pressure assumes a constant temperature but does not actively control the temperature.
 It should be used alongside a temperature coupling method such as the [`Langevin`](@ref) simulator or the [`AndersenThermostat`](@ref) coupling.
+In general, something should be implemented as a coupling method if it can be applied "on top of" a standard simulator, but should be its own simulator if it requires a change to the integration scheme or what is integrated (e.g. [`NoseHoover`](@ref)).
 
 To define your own coupling method, first define the `struct`:
 ```julia
