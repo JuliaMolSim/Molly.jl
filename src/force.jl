@@ -176,16 +176,25 @@ energy calculations.
 - `virial`: 3x3 virial tensor (with units).
 - `virial_nounits`: 3x3 virial tensor on GPU (without units).
 - `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
-- `morton_seq`: Current atom ordering based on Morton curve.
-- `compressed_masks`: 32x32 bitmasks (eligibility and special) for each tile.
-- `tile_is_clean`: Boolean flag for each tile indicating if it has no exclusions.
-- `interacting_tiles_j`: Indices of tiles within cutoff, structured as `(max_j_per_i, n_blocks)`.
-- `interacting_tiles_type`: Type of tile (0: CLEAN, 1: EXCLUDED), structured as `(max_j_per_i, n_blocks)`.
-- `num_interacting_tiles`: Atomic counter for number of tiles found per `i` tile, size `n_blocks`.
+- `morton_seq`, `morton_seq_buffer_1`, `morton_seq_buffer_2`, `morton_seq_inv`:
+  Morton-order indices and temporary buffers for reordering atoms on the GPU.
+- `compressed_masks`: 32x32 bitmasks (eligibility and special flags) for each
+  upper-triangular tile in Morton order.
+- `tile_is_clean`: Boolean flag for each tile indicating whether it contains no
+  exclusions or special pairs and can skip mask lookups.
+- `interacting_tiles_i`, `interacting_tiles_j`, `interacting_tiles_type`:
+  parallel 1D vectors describing the compact list of tiles currently inside the
+  interaction cutoff.
+- `num_interacting_tiles`: device-side atomic counter for the number of valid
+  entries in the interacting-tile vectors.
+- `interacting_tiles_overflow`: device-side overflow flag set when the compact
+  tile list exceeds the allocated capacity.
 - `coords_reordered`, `velocities_reordered`, `atoms_reordered`: Cached reordered arrays.
 - `fs_mat_reordered`: Force matrix in reordered space.
 - `step_n_preprocessed`: Last simulation step where preprocessing was done.
 - `last_r_cut`: Last interaction cutoff used for preprocessing.
+- `num_pairs`: host-side cached copy of the current interacting-tile count,
+  used to size kernel launches.
 """
 mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR, fs_re, T, TIC}
     fs_mat::F
@@ -200,10 +209,6 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     morton_seq_buffer_1::M
     morton_seq_buffer_2::M
     morton_seq_inv::M
-    excluded_i::M
-    excluded_j::M
-    special_i::M
-    special_j::M
     compressed_masks::R
     tile_is_clean::TIC
     interacting_tiles_i::IT
@@ -218,8 +223,6 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     step_n_preprocessed::Int
     last_r_cut::T
     num_pairs::Int
-    n_excluded::Int64
-    n_special::Int64
 end
 
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
@@ -262,31 +265,13 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
         sys.neighbor_finder.initialized = false
     end
 
-    nf = sys.neighbor_finder
-    if nf isa GPUNeighborFinder
-        excluded_i = nf.excluded_i
-        excluded_j = nf.excluded_j
-        special_i = nf.special_i
-        special_j = nf.special_j
-        n_exc = length(excluded_i)
-        n_spec = length(special_i)
-    else
-        IT = typeof(morton_seq)
-        excluded_i = KernelAbstractions.zeros(backend, Int32, 0)
-        excluded_j = KernelAbstractions.zeros(backend, Int32, 0)
-        special_i = KernelAbstractions.zeros(backend, Int32, 0)
-        special_j = KernelAbstractions.zeros(backend, Int32, 0)
-        n_exc = 0
-        n_spec = 0
-    end
-
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
                       morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
-                      excluded_i, excluded_j, special_i, special_j, compressed_masks,
+                      compressed_masks,
                       tile_is_clean, interacting_tiles_i, interacting_tiles_j,
                       interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
                       coords_reordered, velocities_reordered, atoms_reordered,
-                      fs_mat_reordered, -1, T(-1), 0, Int64(n_exc), Int64(n_spec))
+                      fs_mat_reordered, -1, T(-1), 0)
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 

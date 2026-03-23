@@ -25,8 +25,9 @@ include(joinpath(dirname(@__DIR__), "benchmark", "gpu_profile_utils.jl"))
             boundary=boundary,
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=GPUNeighborFinder(
-                eligible=CuArray(trues(n_atoms, n_atoms)),
+                n_atoms=n_atoms,
                 dist_cutoff=T(5.0),
+                device_vector_type=CuArray{Int32, 1},
             ),
             force_units=NoUnits,
             energy_units=NoUnits
@@ -167,126 +168,6 @@ include(joinpath(dirname(@__DIR__), "benchmark", "gpu_profile_utils.jl"))
             @test profile_energy.tile_stats.num_tiles == stats.num_tiles
         end
 
-        @testset "Dense Force Path Override" begin
-            cpu_sys = System(
-                atoms=atoms,
-                coords=coords,
-                boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(T(5.0))),),
-                neighbor_finder=DistanceNeighborFinder(
-                    eligible=trues(n_atoms, n_atoms),
-                    dist_cutoff=T(5.0),
-                ),
-                force_units=NoUnits,
-                energy_units=NoUnits
-            )
-            neighbors_cpu = find_neighbors(cpu_sys)
-            fs_cpu = forces(cpu_sys, neighbors_cpu)
-            pe_cpu = potential_energy(cpu_sys, neighbors_cpu)
-
-            prev_force_path = get(ENV, "MOLLY_CUDA_FORCE_PATH", nothing)
-            ENV["MOLLY_CUDA_FORCE_PATH"] = "dense"
-            try
-                fs_dense = forces(sys, nothing)
-                pe_dense = potential_energy(sys, nothing)
-
-                for i in 1:n_atoms
-                    @test isapprox(Array(fs_dense)[i], fs_cpu[i], rtol=1e-8, atol=1e-10)
-                end
-                @test isapprox(pe_dense, pe_cpu, rtol=1e-8, atol=1e-10)
-            finally
-                if prev_force_path === nothing
-                    delete!(ENV, "MOLLY_CUDA_FORCE_PATH")
-                else
-                    ENV["MOLLY_CUDA_FORCE_PATH"] = prev_force_path
-                end
-            end
-        end
-
-        @testset "Dense Energy Path Override" begin
-            cpu_sys = System(
-                atoms=atoms,
-                coords=coords,
-                boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(T(5.0))),),
-                neighbor_finder=DistanceNeighborFinder(
-                    eligible=trues(n_atoms, n_atoms),
-                    dist_cutoff=T(5.0),
-                ),
-                force_units=NoUnits,
-                energy_units=NoUnits
-            )
-            neighbors_cpu = find_neighbors(cpu_sys)
-            pe_cpu = potential_energy(cpu_sys, neighbors_cpu)
-
-            prev_force_path = get(ENV, "MOLLY_CUDA_FORCE_PATH", nothing)
-            ENV["MOLLY_CUDA_FORCE_PATH"] = "dense"
-            try
-                pe_dense = potential_energy(sys, nothing)
-                @test isapprox(pe_dense, pe_cpu, rtol=1e-8, atol=1e-10)
-            finally
-                if prev_force_path === nothing
-                    delete!(ENV, "MOLLY_CUDA_FORCE_PATH")
-                else
-                    ENV["MOLLY_CUDA_FORCE_PATH"] = prev_force_path
-                end
-            end
-        end
-
-        @testset "Auto Force Path Selection" begin
-            ext = gpu_cuda_ext()
-
-            dense_sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
-                boundary=CubicBoundary(T(10.0), T(10.0), T(10.0)),
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(T(5.0))),),
-                neighbor_finder=GPUNeighborFinder(
-                    eligible=CuArray(trues(n_atoms, n_atoms)),
-                    dist_cutoff=T(5.0),
-                ),
-                force_units=NoUnits,
-                energy_units=NoUnits
-            )
-
-            sparse_boundary = CubicBoundary(T(80.0), T(80.0), T(80.0))
-            sparse_coords = [SVector{D, T}(0.5 * i, 0.5 * i, 0.5 * i) for i in 1:n_atoms]
-            sparse_sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(sparse_coords),
-                boundary=sparse_boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(T(5.0))),),
-                neighbor_finder=GPUNeighborFinder(
-                    eligible=CuArray(trues(n_atoms, n_atoms)),
-                    dist_cutoff=T(5.0),
-                ),
-                force_units=NoUnits,
-                energy_units=NoUnits
-            )
-
-            prev_force_path = get(ENV, "MOLLY_CUDA_FORCE_PATH", nothing)
-            prev_threshold = get(ENV, "MOLLY_CUDA_DENSE_FORCE_THRESHOLD", nothing)
-            try
-                delete!(ENV, "MOLLY_CUDA_FORCE_PATH")
-                ENV["MOLLY_CUDA_DENSE_FORCE_THRESHOLD"] = "4.0"
-                @test ext.selected_force_path(dense_sys) == :dense
-                @test ext.selected_force_path(sparse_sys) == :tile
-                @test ext.selected_energy_path(dense_sys) == :tile
-                @test ext.selected_energy_path(sparse_sys) == :tile
-                @test ext.dense_force_metric(dense_sys) > ext.dense_force_metric(sparse_sys)
-            finally
-                if prev_force_path === nothing
-                    delete!(ENV, "MOLLY_CUDA_FORCE_PATH")
-                else
-                    ENV["MOLLY_CUDA_FORCE_PATH"] = prev_force_path
-                end
-                if prev_threshold === nothing
-                    delete!(ENV, "MOLLY_CUDA_DENSE_FORCE_THRESHOLD")
-                else
-                    ENV["MOLLY_CUDA_DENSE_FORCE_THRESHOLD"] = prev_threshold
-                end
-            end
-        end
     else
         @warn "CUDA not functional, skipping GPU optimization tests"
     end

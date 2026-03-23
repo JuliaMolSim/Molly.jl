@@ -190,13 +190,14 @@
 
         # Mark all pairs as ineligible for pairwise interactions and check that the
         #   potential energy from the specific interactions does not change on scaling
-        no_nbs = falses(length(sys), length(sys))
         if Molly.uses_gpu_neighbor_finder(AT)
             sys.neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(no_nbs, AT),
-                dist_cutoff=1.0u"nm",
+                n_atoms=length(sys),
+                dist_cutoff=0.0u"nm",
+                device_vector_type=AT{Int32, 1},
             )
         else
+            no_nbs = falses(length(sys), length(sys))
             sys.neighbor_finder = DistanceNeighborFinder(
                 eligible=to_device(no_nbs, AT),
                 dist_cutoff=1.0u"nm",
@@ -420,11 +421,31 @@ end
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
+    function dense_masks(nf::GPUNeighborFinder)
+        eligible = trues(nf.n_atoms, nf.n_atoms)
+        special = falses(nf.n_atoms, nf.n_atoms)
+        for i in 1:nf.n_atoms
+            eligible[i, i] = false
+        end
+        for (i, j) in zip(Array(nf.excluded_i), Array(nf.excluded_j))
+            eligible[i, j] = false
+            eligible[j, i] = false
+        end
+        for (i, j) in zip(Array(nf.special_i), Array(nf.special_j))
+            special[i, j] = true
+            special[j, i] = true
+        end
+        return eligible, special
+    end
+    function dense_masks(nf::Union{DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder})
+        return BitMatrix(Array(nf.eligible)), BitMatrix(Array(nf.special))
+    end
+    eligible_cpu, special_cpu = dense_masks(sys.neighbor_finder)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         nf = neighbor_finder(
-            eligible=sys.neighbor_finder.eligible,
-            special=sys.neighbor_finder.special,
+            eligible=eligible_cpu,
+            special=special_cpu,
             dist_cutoff=dist_cutoff,
         )
         for n_threads in n_threads_list
@@ -435,20 +456,27 @@ end
         end
     end
 
+    gpu_ref_sys = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff;
+                         dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm",
+                         neighbor_finder_type=DistanceNeighborFinder)
+    gpu_neighbors_ref = find_neighbors(gpu_ref_sys)
+
     for AT in array_list[2:end]
-        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; array_type=AT)
+        sys_gpu = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff;
+                         array_type=AT, dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm")
+        eligible_gpu, special_gpu = dense_masks(sys_gpu.neighbor_finder)
         for neighbor_finder in (DistanceNeighborFinder,)
             nf_gpu = neighbor_finder(
-                eligible=sys_gpu.neighbor_finder.eligible,
-                special=sys_gpu.neighbor_finder.special,
+                eligible=to_device(eligible_gpu, AT),
+                special=to_device(special_gpu, AT),
                 dist_cutoff=dist_cutoff,
             )
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
-            @test length(neighbors_gpu) == n_neighbors_ref
+            @test length(neighbors_gpu) == gpu_neighbors_ref.n
             GPUArrays.allowscalar() do
                 @test neighbors_gpu[10] isa Tuple{Int32, Int32, Bool}
             end
-            @test identical_neighbors(neighbors_gpu, neighbors_ref)
+            @test identical_neighbors(neighbors_gpu, gpu_neighbors_ref)
         end
     end
 end

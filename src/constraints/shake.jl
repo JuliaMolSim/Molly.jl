@@ -149,7 +149,6 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
         sr = SHAKE_RATTLE(sr, clusters12_gpu, clusters23_gpu, clusters34_gpu, angle_clusters_gpu)
     end
 
-    # neighbor_finder also modified
     return sr
 end
 

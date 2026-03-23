@@ -3,15 +3,25 @@
 export CUDALaunchConfig,
        cuda_launch_config,
        set_cuda_launch_config!,
-       reset_cuda_launch_config!
+       reset_cuda_launch_config!,
+       optimize_cuda_launch_config!
 
 """
     CUDALaunchConfig(; force_block_y=nothing, force_maxregs=nothing,
                        tile_threads=nothing, energy_block_y=nothing)
 
-Optional launch overrides for Molly's CUDA kernels.
+Optional launch overrides for Molly's tiled CUDA pairwise kernels.
 
 Passing `nothing` for a field leaves that choice on the automatic path.
+
+# Fields
+- `force_block_y`: number of tile rows processed per force-kernel block in the
+  tiled pairwise force path.
+- `force_maxregs`: optional `maxregs` cap for the tiled pairwise force kernel.
+- `tile_threads`: `(threads_x, threads_y)` launch shape for the tile-finding
+  kernel that scans the upper-triangular tile matrix.
+- `energy_block_y`: number of tile rows processed per energy-kernel block in
+  the tiled pairwise energy path.
 """
 struct CUDALaunchConfig
     force_block_y::Union{Nothing, Int}
@@ -45,7 +55,10 @@ const CUDA_LAUNCH_CONFIG = Ref(CUDALaunchConfig())
 """
     cuda_launch_config()
 
-Return the currently active CUDA launch overrides.
+Return the currently active global CUDA launch overrides.
+
+The returned [`CUDALaunchConfig`](@ref) is consulted by Molly's tiled CUDA
+pairwise kernels whenever they choose launch parameters.
 """
 cuda_launch_config() = CUDA_LAUNCH_CONFIG[]
 
@@ -53,7 +66,11 @@ cuda_launch_config() = CUDA_LAUNCH_CONFIG[]
     set_cuda_launch_config!(config::CUDALaunchConfig)
     set_cuda_launch_config!(; kwargs...)
 
-Set global CUDA launch overrides for Molly's CUDA kernels.
+Set global CUDA launch overrides for Molly's tiled CUDA pairwise kernels.
+
+This updates process-global state. The new configuration is used by subsequent
+CUDA force, tile-search, and energy launches until
+[`reset_cuda_launch_config!`](@ref) is called.
 """
 function set_cuda_launch_config!(config::CUDALaunchConfig)
     CUDA_LAUNCH_CONFIG[] = config
@@ -65,6 +82,20 @@ set_cuda_launch_config!(; kwargs...) = set_cuda_launch_config!(CUDALaunchConfig(
 """
     reset_cuda_launch_config!()
 
-Clear any explicit CUDA launch overrides and return to the automatic path.
+Clear any explicit CUDA launch overrides and return to automatic launch
+selection for the tiled CUDA pairwise kernels.
 """
 reset_cuda_launch_config!() = set_cuda_launch_config!(CUDALaunchConfig())
+
+"""
+    optimize_cuda_launch_config!(system)
+
+Optimize the global CUDA launch overrides for the given system.
+
+This inspects the active CUDA device and the system size to estimate and set
+optimal values for launch parameters such as `force_block_y`.
+A fallback is provided for non-GPU systems that does nothing.
+"""
+function optimize_cuda_launch_config!(sys)
+    return nothing
+end

@@ -387,8 +387,9 @@ Gromacs file reading should be considered experimental.
     use `CuArray` or `ROCArray` for GPU support.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
-    neighbors every few steps. Not relevant if [`GPUNeighborFinder`](@ref) is
-    used since the neighbors are calculated each step.
+    classical neighbor lists every few steps. Not used by
+    [`GPUNeighborFinder`](@ref); CUDA systems instead use that finder's
+    `dist_neighbors` and `n_steps_reorder` settings for tile-list refreshes.
 - `constraints=:none`: which constraints to apply during the simulation, options
     are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` and `:hangles`
     (all bonds plus H-X-H and H-O-X angles). Note that not all options may be
@@ -408,7 +409,9 @@ Gromacs file reading should be considered experimental.
 - `neighbor_finder_type`: which neighbor finder to use, default is
     [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref)
     on CUDA compatible GPUs and [`DistanceNeighborFinder`](@ref) on non-CUDA
-    compatible GPUs.
+    compatible GPUs. [`GPUNeighborFinder`](@ref) keeps sparse exception pairs
+    and lets the CUDA pairwise kernels build and cache interacting tiles
+    internally.
 - `data=nothing`: arbitrary data associated with the system.
 - `implicit_solvent=:none`: the implicit solvent model to use, options are
     `:none`, `:obc1`, `:obc2` and `:gbn2`.
@@ -1512,11 +1515,14 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     if neighbor_finder_type == NoNeighborFinder
         neighbor_finder = NoNeighborFinder()
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
+        excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
         neighbor_finder = GPUNeighborFinder(
-            eligible=to_device(eligible, AT),
+            n_atoms=size(eligible, 1),
             dist_cutoff=T(dist_cutoff),
             dist_neighbors=T(dist_neighbors),
-            special=to_device(special, AT),
+            excluded_pairs=excluded_pairs,
+            special_pairs=special_pairs,
+            device_vector_type=AT{Int32, 1},
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))

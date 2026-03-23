@@ -20,8 +20,9 @@ using StaticArrays
             boundary=boundary,
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=GPUNeighborFinder(
-                eligible=CuArray(trues(n_atoms, n_atoms)),
+                n_atoms=n_atoms,
                 dist_cutoff=T(5.0),
+                device_vector_type=CuArray{Int32, 1},
             ),
             force_units=NoUnits,
             energy_units=NoUnits

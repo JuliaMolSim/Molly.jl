@@ -33,8 +33,9 @@ using StaticArrays
             boundary=boundary,
             pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
             neighbor_finder=GPUNeighborFinder(
-                eligible=CuArray(trues(n_atoms, n_atoms)),
+                n_atoms=n_atoms,
                 dist_cutoff=r_cut,
+                device_vector_type=CuArray{Int32, 1},
             ),
             force_units=NoUnits,
             energy_units=NoUnits
@@ -93,9 +94,10 @@ end
             boundary=boundary,
             pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
             neighbor_finder=GPUNeighborFinder(
-                eligible=CuArray(trues(n_atoms, n_atoms)),
+                n_atoms=n_atoms,
                 dist_cutoff=r_cut,
                 n_steps_reorder=25,
+                device_vector_type=CuArray{Int32, 1},
             ),
             force_units=NoUnits,
             energy_units=NoUnits,

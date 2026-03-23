@@ -121,7 +121,7 @@ if GROUP in ("All", "NotGradients")
         Aqua.test_all(Molly)
     end
 
-    #= include("basic.jl")
+    include("basic.jl")
     include("interactions.jl")
     include("minimization.jl")
     include("agent.jl")
@@ -135,7 +135,7 @@ if GROUP in ("All", "NotGradients")
         include("gpu_float64.jl")
         include("gpu_optimizations.jl")
         include("gpu_tile_lists.jl")
-    end =#
+    end
 end
 
 if GROUP in ("All", "Protein", "NotGradients")

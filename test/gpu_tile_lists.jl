@@ -1,5 +1,4 @@
 @testset "GPU tile lists" begin
-    ENV["MOLLY_CUDA_FORCE_PATH"] = "tile"
     # Define a simple system
     n_atoms = 100
     atom_mass = 10.0u"g/mol"
@@ -42,9 +41,9 @@
         boundary=boundary,
         pairwise_inters=pairwise_inters_gpu,
         neighbor_finder=Molly.GPUNeighborFinder(
-            eligible=CuArray(ones(Bool, n_atoms, n_atoms)),
-            special=CuArray(zeros(Bool, n_atoms, n_atoms)),
-            dist_cutoff=3.0u"nm"
+            n_atoms=n_atoms,
+            dist_cutoff=3.0u"nm",
+            device_vector_type=CuArray{Int32, 1},
         ),
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
@@ -75,16 +74,15 @@
         boundary=boundary,
         pairwise_inters=pairwise_inters_gpu_overflow,
         neighbor_finder=Molly.GPUNeighborFinder(
-            eligible=CuArray(ones(Bool, n_atoms, n_atoms)),
-            special=CuArray(zeros(Bool, n_atoms, n_atoms)),
-            dist_cutoff=20.0u"nm"
+            n_atoms=n_atoms,
+            dist_cutoff=20.0u"nm",
+            device_vector_type=CuArray{Int32, 1},
         ),
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
     )
 
     function with_tiny_tile_capacity(buffers)
-        n_blocks = size(buffers.box_mins, 1)
         tiny_capacity = 1
         return Molly.BuffersGPU(
             buffers.fs_mat,
@@ -99,10 +97,6 @@
             buffers.morton_seq_buffer_1,
             buffers.morton_seq_buffer_2,
             buffers.morton_seq_inv,
-            buffers.excluded_i,
-            buffers.excluded_j,
-            buffers.special_i,
-            buffers.special_j,
             buffers.compressed_masks,
             buffers.tile_is_clean,
             CUDA.zeros(Int32, tiny_capacity), # interacting_tiles_i
@@ -117,8 +111,6 @@
             -1,
             buffers.last_r_cut,
             0, # num_pairs
-            buffers.n_excluded,
-            buffers.n_special,
         )
     end
 
