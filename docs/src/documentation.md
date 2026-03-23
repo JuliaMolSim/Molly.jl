@@ -1690,3 +1690,26 @@ julia> random_velocity(10.0u"g/mol", 300.0u"K"; rng=Xoshiro(10))
 ```
 This may not apply across Julia versions, though you can use [StableRNGs.jl](https://github.com/JuliaRandom/StableRNGs.jl).
 It also does not apply across different backends such as CPU and GPU.
+
+## Performance tips
+
+Here is a checklist to ensure that you are getting the optimal performance from your simulations:
+- On CPU, you should tune the `n_threads` argument to [`simulate!`](@ref). If running on a single thread, it should be `1`. Otherwise you should try various values, including larger than the number of threads available to Julia (which balances the load appropriately). Make sure to start Julia with as many threads as possible using `-t`. Generally, `Float32` is not much faster than `Float64` on CPU.
+- On GPU, using `Float32` will give vastly better performance. You can try changing the number of threads for each kernel as described in the [GPU acceleration](@ref) section, but the defaults are generally suitable for modern hardware. Multiple simulations can be run on different GPUs using `device!`. It is not currently possible to split one simulation onto multiple devices.
+- Run a short `simulate!` call once to ensure JIT compilation. You can run it on `deepcopy(sys)` if you don't want to affect `sys`, though beware of side effects like writing out trajectory files.
+- Make sure all arrays, such as coordinates and velocities, are concretely typed.
+- In general, using units doesn't slow things down as described in the [Units](@ref) section, but you could try running without units.
+
+## Troubleshooting
+
+There are many reasons that setting up and running a simulation can go wrong:
+- Errors in parameterising a system with a force field are often due to discrepancies between the residues found in the structure and those found in the force field file. See the [OpenMM FAQ](https://github.com/openmm/openmm/wiki/Frequently-Asked-Questions#template) for more.
+- `NaN`s can arise in simulations, usually due to the system "blowing up" after encountering a massive force. Reasons for a massive force include errors in assigning force field parameters, a time step that is too large, incorrectly set boundaries and a lack of energy minimisation. You can try writing out the trajectory every step or reproducing exactly the same simulation (see [Randomness](@ref)) to find the issue. See the [OpenMM FAQ](https://github.com/openmm/openmm/wiki/Frequently-Asked-Questions#nan) for more. Note that the actual error thrown could appear after the point where the problem originated. For example, errors about constraint convergence could indicate earlier problems with the coordinates.
+- GPU memory can be exceeded. In this case, make sure you are running with `Float32` and the GPU does not have other processes running. If you still run out of memory, the system may be too large. Molly does not currently support splitting a simulation over multiple GPUs.
+- Adding an interaction causes a huge slowdown. You may have introduced a type instability or be allocating memory in the inner force/potential energy calls. See the [Julia performance tips](https://docs.julialang.org/en/v1/manual/performance-tips) for more. Make sure to avoid hidden [type promotions](https://docs.julialang.org/en/v1/manual/conversion-and-promotion/#Promotion), for example `1 / 2` is a `Float64` which will promote `Float32`s it interacts with. You can use `T(1 / 2)` to avoid this, where `T` is a function type parameter.
+- All array types must be on the same device. For example, if the coordinates are a `CuArray` then the atoms also need to be a `CuArray`. This is checked during setup.
+- `Minimum box side (...) is less than 2 * dist_cutoff` indicates that the box is too small for the specified non-bonded cutoff distance. Each box side should be twice the cutoff distance, otherwise a particle would see multiple periodic versions of the same atom (though it wouldn't in Molly since we use the minimum image convention).
+- Unitful errors like `DimensionError: 1.0 and 1.0 nm are not dimensionally compatible` usually indicate that a quantity with physical dimensions has not been given an appropriate unit. Whilst frustrating, fixing these errors often prevents silent unit conversion errors later on.
+- Enzyme errors when taking gradients are common, see the [Differentiable simulation with Molly](@ref) section.
+
+Do open an issue if you run into problems.
