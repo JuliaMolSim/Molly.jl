@@ -2,34 +2,35 @@ export LINCS
 
 # Internal types for LINCS algorithm
 
-struct LincsCouplingMatrix{T}
-    range::Vector{Int}       # length K+1, row pointers (CSR format)
-    neighbors::Vector{Int}   # coupled constraint indices
-    coef::Vector{T}          # mass-weighted coupling coefficients
+struct LincsCouplingMatrix{R, N, C}
+    range::R       # length K+1, row pointers (CSR format)
+    neighbors::N   # coupled constraint indices
+    coef::C        # mass-weighted coupling coefficients
 end
 
-struct LincsData{T}
-    atom1::Vector{Int}
-    atom2::Vector{Int}
-    lengths::Vector{T}
-    invmass::Vector{T}
-    sdiag::Vector{T}
-    coupling::LincsCouplingMatrix{T}
+struct LincsData{A1, A2, L, IM, SD, CM}
+    atom1::A1
+    atom2::A2
+    lengths::L
+    invmass::IM
+    sdiag::SD
+    coupling::CM
     nrec::Int
     niter::Int
 end
 
-struct LincsWorkspace{T}
-    B::Vector{SVector{3, T}}
-    rhs::Vector{T}
-    sol::Vector{T}
-    tmp::Vector{T}
-    blcc::Vector{T}
+struct LincsWorkspace{BV, R, S, TM, BL}
+    B::BV
+    rhs::R
+    sol::S
+    tmp::TM
+    blcc::BL
 end
 
 """
     LINCS(masses, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
-          dist_constraints=nothing, angle_constraints=nothing, nrec=4, niter=1)
+          dist_constraints=nothing, angle_constraints=nothing, nrec=4, niter=1,
+          gpu_block_size=128)
 
 Constrain bond distances during a simulation using the LINCS (LINear Constraint Solver)
 algorithm.
@@ -41,8 +42,6 @@ the inverse of the constraint coupling matrix. It is typically faster than
 Velocity constraints are applied implicitly through position constraint correction.
 See [Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)
 for the original LINCS paper.
-
-At the moment, this implementation is CPU only.
 
 # Arguments
 - `masses`: vector of atom masses.
@@ -59,8 +58,9 @@ At the moment, this implementation is CPU only.
     improve accuracy for coupled constraints at the cost of performance.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
+- `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 """
-struct LINCS{CL, LD, LW, DC, AC, E, F}
+struct LINCS{CL, LD, LW, DC, AC, E, F, DB, CI}
     clusters::CL
     lincs_data::LD
     workspace::LW
@@ -68,6 +68,9 @@ struct LINCS{CL, LD, LW, DC, AC, E, F}
     angle_constraints::AC
     dist_tolerance::E
     vel_tolerance::F
+    gpu_block_size::Int
+    delta_buf::DB         # 3 × n_atoms matrix for atomic scatter (or nothing on CPU)
+    constrained_atoms::CI # sorted unique atom indices in constraints (or nothing on CPU)
 end
 
 function validate_angle_constraints(dist_constraints, angle_constraints)
@@ -108,7 +111,8 @@ function LINCS(;masses,
                dist_constraints=nothing,
                angle_constraints=nothing,
                nrec::Integer=4,
-               niter::Integer=1)
+               niter::Integer=1,
+               gpu_block_size::Integer=128)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero"))
 
@@ -142,7 +146,8 @@ function LINCS(;masses,
     stored_angle_constraints = ac_present ? collect(angle_constraints) : nothing
 
     return LINCS(clusters, lincs_data, workspace, all_dist_constraints,
-                 stored_angle_constraints, dist_tolerance, vel_tolerance)
+                 stored_angle_constraints, dist_tolerance, vel_tolerance,
+                 Int(gpu_block_size), nothing, nothing)
 end
 
 function Base.show(io::IO, lincs::LINCS)
@@ -233,7 +238,7 @@ function build_lincs_coupling_matrix(atom1, atom2, invmass, sdiag, ::Type{T}) wh
         end
     end
 
-    return LincsCouplingMatrix{T}(range, neighbors, coef)
+    return LincsCouplingMatrix(range, neighbors, coef)
 end
 
 function build_lincs_data(dist_constraints::AbstractVector{<:DistanceConstraint},
@@ -255,10 +260,11 @@ function build_lincs_data(dist_constraints::AbstractVector{<:DistanceConstraint}
     end
 
     coupling = build_lincs_coupling_matrix(atom1, atom2, invmass, sdiag, T)
-    return LincsData{T}(atom1, atom2, lengths, invmass, sdiag, coupling, nrec, niter)
+    return LincsData(atom1, atom2, lengths, invmass, sdiag, coupling, nrec, niter)
 end
 
-function create_lincs_workspace(data::LincsData{T}) where T
+function create_lincs_workspace(data::LincsData)
+    T = eltype(data.lengths)
     K = length(data.atom1)
     ncc = length(data.coupling.neighbors)
     B = Vector{SVector{3, T}}(undef, K)
@@ -266,7 +272,7 @@ function create_lincs_workspace(data::LincsData{T}) where T
     sol = zeros(T, K)
     tmp = zeros(T, K)
     blcc = zeros(T, ncc)
-    return LincsWorkspace{T}(B, rhs, sol, tmp, blcc)
+    return LincsWorkspace(B, rhs, sol, tmp, blcc)
 end
 
 # --- Core algorithm ---
@@ -279,7 +285,108 @@ end
     return ustrip.(coords[a1] - coords[a2])
 end
 
-function lincs_solve!(coords, data::LincsData{T}, ws::LincsWorkspace{T}, unit_scale) where T
+# --- GPU kernels ---
+
+@kernel inbounds=true function lincs_bond_vectors_and_rhs_kernel!(
+        B, rhs, sol,
+        @Const(coords), @Const(old_coords),
+        @Const(atom1), @Const(atom2), @Const(lengths), @Const(sdiag),
+        boundary)
+    i = @index(Global, Linear)
+    if i <= length(atom1)
+        a1, a2 = atom1[i], atom2[i]
+        diff_old = lincs_bond_vector(old_coords, a1, a2, boundary)
+        inv_len = inv(sqrt(dot(diff_old, diff_old)))
+        B_i = diff_old * inv_len
+        B[i] = B_i
+
+        diff_new = lincs_bond_vector(coords, a1, a2, boundary)
+        proj = dot(B_i, diff_new)
+        val = sdiag[i] * (proj - lengths[i])
+        rhs[i] = val
+        sol[i] = val
+    end
+end
+
+@kernel inbounds=true function lincs_blcc_kernel!(
+        blcc,
+        @Const(B),
+        @Const(csr_range), @Const(csr_neighbors), @Const(csr_coef))
+    i = @index(Global, Linear)
+    if i <= length(csr_range) - 1
+        for n in csr_range[i]:(csr_range[i+1] - 1)
+            j = csr_neighbors[n]
+            blcc[n] = csr_coef[n] * dot(B[i], B[j])
+        end
+    end
+end
+
+@kernel inbounds=true function lincs_spmv_kernel!(
+        sol, dst,
+        @Const(src), @Const(blcc),
+        @Const(csr_range), @Const(csr_neighbors))
+    i = @index(Global, Linear)
+    @uniform T = eltype(sol)
+    if i <= length(sol)
+        mvb = zero(T)
+        for n in csr_range[i]:(csr_range[i+1] - 1)
+            mvb += blcc[n] * src[csr_neighbors[n]]
+        end
+        dst[i] = mvb
+        sol[i] += mvb
+    end
+end
+
+@kernel inbounds=true function lincs_position_scatter_kernel!(
+        delta_buf,
+        @Const(B), @Const(sol), @Const(sdiag),
+        @Const(atom1), @Const(atom2), @Const(invmass))
+    i = @index(Global, Linear)
+    if i <= length(atom1)
+        a1, a2 = atom1[i], atom2[i]
+        factor = sdiag[i] * sol[i]
+        delta = B[i] * factor
+        for dim in 1:3
+            d = delta[dim]
+            Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
+            Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
+        end
+    end
+end
+
+@kernel inbounds=true function lincs_apply_deltas_kernel!(
+        coords, delta_buf,
+        @Const(constrained_atoms), unit_scale)
+    idx = @index(Global, Linear)
+    if idx <= length(constrained_atoms)
+        a = constrained_atoms[idx]
+        coords[a] += typeof(coords[a])(delta_buf[1, a], delta_buf[2, a], delta_buf[3, a]) .* unit_scale
+        delta_buf[1, a] = zero(eltype(delta_buf))
+        delta_buf[2, a] = zero(eltype(delta_buf))
+        delta_buf[3, a] = zero(eltype(delta_buf))
+    end
+end
+
+@kernel inbounds=true function lincs_correction_rhs_kernel!(
+        rhs, sol,
+        @Const(coords),
+        @Const(atom1), @Const(atom2), @Const(lengths), @Const(sdiag),
+        boundary)
+    i = @index(Global, Linear)
+    @uniform T = eltype(lengths)
+    if i <= length(atom1)
+        a1, a2 = atom1[i], atom2[i]
+        diff = lincs_bond_vector(coords, a1, a2, boundary)
+        dlen2 = 2 * lengths[i]^2 - dot(diff, diff)
+        p = sqrt(max(dlen2, zero(T)))
+        val = sdiag[i] * (lengths[i] - p)
+        rhs[i] = val
+        sol[i] = val
+    end
+end
+
+function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
+    T = eltype(data.lengths)
     coupling = data.coupling
     rhs = ws.rhs
     tmp = ws.tmp
@@ -309,8 +416,9 @@ function lincs_solve!(coords, data::LincsData{T}, ws::LincsWorkspace{T}, unit_sc
     end
 end
 
-function lincs_apply!(coords, old_coords, data::LincsData{T}, ws::LincsWorkspace{T},
-                      boundary) where T
+function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
+                      boundary)
+    T = eltype(data.lengths)
     K = length(data.atom1)
     coupling = data.coupling
 
@@ -354,12 +462,81 @@ function lincs_apply!(coords, old_coords, data::LincsData{T}, ws::LincsWorkspace
     return coords
 end
 
+# --- GPU solve path ---
+
+function lincs_gpu_solve!(coords, data, ws, delta_buf, constrained_atoms,
+                          block_size, backend, unit_scale)
+    K = length(data.atom1)
+    coupling = data.coupling
+    n_ca = length(constrained_atoms)
+
+    # Coupling coefficients
+    blcc_kern! = lincs_blcc_kernel!(backend, block_size)
+    blcc_kern!(ws.blcc, ws.B, coupling.range, coupling.neighbors, coupling.coef;
+               ndrange=K)
+
+    # SpMV iterations (ping-pong between rhs and tmp)
+    spmv_kern! = lincs_spmv_kernel!(backend, block_size)
+    src, dst = ws.rhs, ws.tmp
+    for _ in 1:data.nrec
+        spmv_kern!(ws.sol, dst, src, ws.blcc, coupling.range, coupling.neighbors;
+                   ndrange=K)
+        src, dst = dst, src
+    end
+
+    # Position scatter with atomics
+    scatter_kern! = lincs_position_scatter_kernel!(backend, block_size)
+    scatter_kern!(delta_buf, ws.B, ws.sol, data.sdiag, data.atom1, data.atom2, data.invmass;
+                  ndrange=K)
+
+    # Apply accumulated deltas
+    apply_kern! = lincs_apply_deltas_kernel!(backend, block_size)
+    apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
+                ndrange=n_ca)
+end
+
+function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
+                          delta_buf, constrained_atoms, block_size)
+    K = length(data.atom1)
+    backend = get_backend(coords)
+    unit_scale = oneunit(eltype(eltype(coords)))
+
+    # Bond vectors + initial RHS (fused)
+    bv_kern! = lincs_bond_vectors_and_rhs_kernel!(backend, block_size)
+    bv_kern!(ws.B, ws.rhs, ws.sol, coords, old_coords,
+             data.atom1, data.atom2, data.lengths, data.sdiag, boundary;
+             ndrange=K)
+
+    lincs_gpu_solve!(coords, data, ws, delta_buf, constrained_atoms,
+                     block_size, backend, unit_scale)
+
+    # Outer correction iterations (rotational lengthening)
+    corr_kern! = lincs_correction_rhs_kernel!(backend, block_size)
+    for _ in 1:data.niter
+        corr_kern!(ws.rhs, ws.sol, coords,
+                   data.atom1, data.atom2, data.lengths, data.sdiag, boundary;
+                   ndrange=K)
+
+        lincs_gpu_solve!(coords, data, ws, delta_buf, constrained_atoms,
+                         block_size, backend, unit_scale)
+    end
+
+    KernelAbstractions.synchronize(backend)
+    return coords
+end
+
 # --- Molly interface ---
 
 function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained_update;
                                      kwargs...)
-    lincs_apply!(sys.coords, r_pre_unconstrained_update,
-                 ca.lincs_data, ca.workspace, sys.boundary)
+    if !isnothing(ca.delta_buf)
+        lincs_apply_gpu!(sys.coords, r_pre_unconstrained_update,
+                         ca.lincs_data, ca.workspace, sys.boundary,
+                         ca.delta_buf, ca.constrained_atoms, ca.gpu_block_size)
+    else
+        lincs_apply!(sys.coords, r_pre_unconstrained_update,
+                     ca.lincs_data, ca.workspace, sys.boundary)
+    end
     return sys
 end
 
@@ -403,9 +580,55 @@ function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca::LINCS) wh
     return max_err < ustrip(ca.vel_tolerance)
 end
 
+function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms)
+    T = eltype(data.lengths)
+    K = length(data.atom1)
+
+    atom1_gpu = arr_type(data.atom1)
+    atom2_gpu = arr_type(data.atom2)
+    lengths_gpu = arr_type(data.lengths)
+    invmass_gpu = arr_type(data.invmass)
+    sdiag_gpu = arr_type(data.sdiag)
+    range_gpu = arr_type(data.coupling.range)
+    neighbors_gpu = arr_type(data.coupling.neighbors)
+    coef_gpu = arr_type(data.coupling.coef)
+    coupling_gpu = LincsCouplingMatrix(range_gpu, neighbors_gpu, coef_gpu)
+
+    data_gpu = LincsData(atom1_gpu, atom2_gpu, lengths_gpu, invmass_gpu,
+                         sdiag_gpu, coupling_gpu, data.nrec, data.niter)
+
+    ncc = length(data.coupling.neighbors)
+    B_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), SVector{3, T}, K)
+    rhs_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), T, K)
+    sol_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), T, K)
+    tmp_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), T, K)
+    blcc_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), T, ncc)
+    ws_gpu = LincsWorkspace(B_gpu, rhs_gpu, sol_gpu, tmp_gpu, blcc_gpu)
+
+    delta_buf = KernelAbstractions.zeros(get_backend(atom1_gpu), T, 3, n_atoms)
+
+    return data_gpu, ws_gpu, delta_buf
+end
+
 function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
     if !(neighbor_finder isa NoNeighborFinder)
         disable_constrained_interactions!(neighbor_finder, lincs.clusters)
     end
+
+    if arr_type <: AbstractGPUArray
+        n_atoms = length(lincs.lincs_data.invmass)
+        data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(
+            lincs.lincs_data, lincs.workspace, arr_type, n_atoms)
+
+        ca_indices = sort!(unique!(vcat(lincs.lincs_data.atom1, lincs.lincs_data.atom2)))
+        ca_gpu = arr_type(ca_indices)
+
+        clusters_gpu = replace_storage(arr_type, lincs.clusters)
+
+        lincs = LINCS(clusters_gpu, data_gpu, ws_gpu, lincs.dist_constraints,
+                      lincs.angle_constraints, lincs.dist_tolerance, lincs.vel_tolerance,
+                      lincs.gpu_block_size, delta_buf, ca_gpu)
+    end
+
     return lincs
 end

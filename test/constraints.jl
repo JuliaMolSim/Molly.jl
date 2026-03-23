@@ -824,6 +824,57 @@ end
     end
 end
 
+@testset "LINCS GPU integration" begin
+    T = Float32
+    n_atoms = 200
+    bond_length = T(0.74)u"Å"
+    atom_mass = T(1.00794)u"g/mol"
+    r_cut = T(8.5)u"Å"
+    temp = T(300.0)u"K"
+
+    dist_constraints = [DistanceConstraint(j, j + 1, bond_length) for j in 1:2:n_atoms]
+    atoms = [Atom(index=j, mass=atom_mass, σ=T(2.8279)u"Å", ϵ=T(0.074)u"kcal* mol^-1")
+             for j in 1:n_atoms]
+    atom_masses = [atom_mass for _ in 1:n_atoms]
+
+    cons = LINCS(masses=atom_masses, dist_tolerance=T(1e-4)u"Å", vel_tolerance=T(1e-4)u"Å^2 * ps^-1",
+                 dist_constraints=dist_constraints)
+
+    boundary = CubicBoundary(T(200.0)u"Å")
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+    neighbor_finder = DistanceNeighborFinder(
+        eligible=trues(n_atoms, n_atoms),
+        dist_cutoff=T(1.5)*r_cut,
+    )
+
+    for AT in array_list
+        AT === Array && continue
+
+        coords = [SVector{3, T}(
+            T(5.0) + T(0.74) * T((j - 1) ÷ 2) + (isodd(j) ? zero(T) : T(0.74)),
+            T(100.0) + T(0.1) * randn(T),
+            T(100.0) + T(0.1) * randn(T),
+        )u"Å" for j in 1:n_atoms]
+
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            pairwise_inters=(lj,),
+            neighbor_finder=neighbor_finder,
+            constraints=(cons,),
+            array_type=AT,
+            force_units=u"kcal * mol^-1 * Å^-1",
+            energy_units=u"kcal * mol^-1",
+        )
+        random_velocities!(sys, temp)
+
+        simulate!(sys, VelocityVerlet(dt=T(0.002)u"ps"), 500)
+
+        @test check_position_constraints(sys, cons)
+    end
+end
+
 @testset "LINCS angle constraints" begin
     n_molecules = 10
     n_atoms = 3 * n_molecules
