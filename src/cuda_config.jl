@@ -4,6 +4,7 @@ export CUDALaunchConfig,
        cuda_launch_config,
        set_cuda_launch_config!,
        reset_cuda_launch_config!,
+       reset_cuda_launch_autotune_cache!,
        optimize_cuda_launch_config!
 
 """
@@ -51,6 +52,7 @@ function CUDALaunchConfig(;
 end
 
 const CUDA_LAUNCH_CONFIG = Ref(CUDALaunchConfig())
+const CUDA_LAUNCH_AUTOTUNE_CACHE_RESET_HOOK = Ref{Any}(nothing)
 
 """
     cuda_launch_config()
@@ -90,12 +92,28 @@ reset_cuda_launch_config!() = set_cuda_launch_config!(CUDALaunchConfig())
 """
     optimize_cuda_launch_config!(system)
 
-Optimize the global CUDA launch overrides for the given system.
+Autotune and cache CUDA launch overrides for the given system.
 
-This inspects the active CUDA device and the system size to estimate and set
-optimal values for launch parameters such as `force_block_y`.
+On CUDA systems, this benchmarks a small launch-candidate set for Molly's tiled
+pairwise kernels, caches the result for the current device/system signature,
+and writes the winning values into the global launch override state.
 A fallback is provided for non-GPU systems that does nothing.
 """
 function optimize_cuda_launch_config!(sys)
     return nothing
+end
+
+"""
+    reset_cuda_launch_autotune_cache!()
+
+Clear any cached CUDA autotuning results.
+
+This does not modify the currently active [`CUDALaunchConfig`](@ref); it only
+clears the process-local cache used by [`optimize_cuda_launch_config!`](@ref).
+On non-CUDA systems this is a no-op.
+"""
+function reset_cuda_launch_autotune_cache!()
+    hook = CUDA_LAUNCH_AUTOTUNE_CACHE_RESET_HOOK[]
+    hook === nothing && return nothing
+    return hook()
 end

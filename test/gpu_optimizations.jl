@@ -66,7 +66,47 @@ include(joinpath(dirname(@__DIR__), "benchmark", "gpu_profile_utils.jl"))
             @test cfg_reset.tile_threads === nothing
             @test cfg_reset.energy_block_y === nothing
         end
-        
+
+        @testset "CUDA Launch Autotuner" begin
+            ext = Base.get_extension(Molly, :MollyCUDAExt)
+            @test ext !== nothing
+
+            Molly.reset_cuda_launch_config!()
+            Molly.reset_cuda_launch_autotune_cache!()
+            @test isempty(ext.CUDA_LAUNCH_AUTOTUNE_CACHE)
+
+            chosen_block_y = Molly.optimize_cuda_launch_config!(sys)
+            tuned_cfg = Molly.cuda_launch_config()
+            @test chosen_block_y == tuned_cfg.force_block_y
+            @test tuned_cfg.force_block_y in ext.AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES
+            @test tuned_cfg.energy_block_y in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
+            @test tuned_cfg.tile_threads in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
+            @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
+
+            Molly.reset_cuda_launch_config!()
+            cached_block_y = Molly.optimize_cuda_launch_config!(sys)
+            cached_cfg = Molly.cuda_launch_config()
+            @test cached_block_y == tuned_cfg.force_block_y
+            @test cached_cfg == tuned_cfg
+            @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
+
+            Molly.reset_cuda_launch_config!()
+            Molly.set_cuda_launch_config!(force_block_y=8)
+            Molly.optimize_cuda_launch_config!(sys)
+            merged_cfg = Molly.cuda_launch_config()
+            @test merged_cfg.force_block_y == 8
+            @test merged_cfg.energy_block_y !== nothing
+            @test merged_cfg.tile_threads !== nothing
+            @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
+
+            cfg_before_reset = Molly.cuda_launch_config()
+            Molly.reset_cuda_launch_autotune_cache!()
+            @test isempty(ext.CUDA_LAUNCH_AUTOTUNE_CACHE)
+            @test Molly.cuda_launch_config() == cfg_before_reset
+
+            Molly.reset_cuda_launch_config!()
+        end
+
         @testset "Morton Code Granularity (Phase 1)" begin
             # Phase 1 uses 10 bits per dimension (30 bits total)
             morton_bits = 10

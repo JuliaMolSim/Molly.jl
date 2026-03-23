@@ -172,8 +172,9 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
         kernel = if maxregs === nothing
             auto_kernel
         else
-            @cuda launch=false maxregs=maxregs always_inline=true ext.energy_kernel!(
-                buffers.pe_vec_nounits,
+            @cuda launch=false maxregs=maxregs always_inline=true ext.force_kernel!(
+                buffers.fs_mat_reordered,
+                buffers.virial_nounits,
                 buffers.coords_reordered,
                 buffers.velocities_reordered,
                 buffers.atoms_reordered,
