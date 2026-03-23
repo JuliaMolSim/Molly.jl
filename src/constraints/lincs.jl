@@ -316,10 +316,16 @@ function lincs_apply!(coords, old_coords, data::LincsData{T}, ws::LincsWorkspace
 
     unit_scale = oneunit(eltype(eltype(coords)))
 
-    # Compute unit bond vectors from old positions
+    # Compute unit bond vectors and initial RHS
     @inbounds for i in 1:K
-        diff = lincs_bond_vector(old_coords, data.atom1[i], data.atom2[i], boundary)
-        ws.B[i] = diff / norm(diff)
+        diff_old = lincs_bond_vector(old_coords, data.atom1[i], data.atom2[i], boundary)
+        inv_len = inv(sqrt(dot(diff_old, diff_old)))
+        B_i = diff_old * inv_len
+        ws.B[i] = B_i
+
+        diff_new = lincs_bond_vector(coords, data.atom1[i], data.atom2[i], boundary)
+        proj = dot(B_i, diff_new)
+        ws.rhs[i] = data.sdiag[i] * (proj - data.lengths[i])
     end
 
     # Compute runtime coupling coefficients: blcc = coef * dot(B[i], B[neighbor])
@@ -330,13 +336,7 @@ function lincs_apply!(coords, old_coords, data::LincsData{T}, ws::LincsWorkspace
         end
     end
 
-    # Initial constraint correction
-    @inbounds for i in 1:K
-        diff_new = lincs_bond_vector(coords, data.atom1[i], data.atom2[i], boundary)
-        proj = dot(ws.B[i], diff_new)
-        ws.rhs[i] = data.sdiag[i] * (proj - data.lengths[i])
-    end
-    ws.sol .= ws.rhs
+    copyto!(ws.sol, ws.rhs)
     lincs_solve!(coords, data, ws, unit_scale)
 
     # Outer correction iterations (rotational lengthening)
@@ -344,10 +344,10 @@ function lincs_apply!(coords, old_coords, data::LincsData{T}, ws::LincsWorkspace
         @inbounds for i in 1:K
             diff = lincs_bond_vector(coords, data.atom1[i], data.atom2[i], boundary)
             dlen2 = 2 * data.lengths[i]^2 - dot(diff, diff)
-            p = dlen2 > zero(T) ? sqrt(dlen2) : zero(T)
+            p = sqrt(max(dlen2, zero(T)))
             ws.rhs[i] = data.sdiag[i] * (data.lengths[i] - p)
         end
-        ws.sol .= ws.rhs
+        copyto!(ws.sol, ws.rhs)
         lincs_solve!(coords, data, ws, unit_scale)
     end
 
