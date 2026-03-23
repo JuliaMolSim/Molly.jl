@@ -115,7 +115,8 @@ Constraints are applied during minimization, which can lead to issues.
     or `:skipzero`, in which case the loggers are not run before the first step. `run_loggers`
     is `true` by default except for [`SteepestDescentMinimizer`](@ref), where it is `false`.
 - `shortcut=nothing`: when to stop the simulation early. A struct with the `shortcut_sim`
-    method defined can be provided. Unused for REMD simulations.
+    method defined can be provided. `shortcut_sim` is checked at the end of each step.
+    Unused for REMD simulations.
 - `init_step=0`: the step number before the first step is taken, useful for time-dependent
     potentials. Unused for REMD simulations.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
