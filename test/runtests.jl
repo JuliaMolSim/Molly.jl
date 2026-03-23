@@ -142,6 +142,6 @@ if GROUP in ("All", "Protein", "NotGradients")
     include("protein.jl")
 end
 
-#= if GROUP in ("All", "Gradients")
+if GROUP in ("All", "Gradients")
     include("gradients.jl")
-end =#
+end
