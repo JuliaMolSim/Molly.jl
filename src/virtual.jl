@@ -171,11 +171,9 @@ function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D,
         report_issue(err_str, strictness)
     end
 
-    for ca in constraints
-        for i in constrained_atom_inds(ca)
-            if virtual_site_flags[i]
-                error("atom $i is a virtual site but is also in a constraint")
-            end
+    for i in constrained_atom_inds(constraints)
+        if virtual_site_flags[i]
+            error("atom $i is a virtual site but is also in a constraint")
         end
     end
     return to_device(virtual_site_flags, AT)

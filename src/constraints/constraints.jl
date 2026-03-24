@@ -547,3 +547,11 @@ cluster_interactions(kd::AngleClusterData) = (
 )
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
+
+function constrained_atom_inds(constraints::Union{Tuple, NamedTuple})
+    inds_constrained = Int[]
+    for ca in constraints
+        append!(inds_constrained, constrained_atom_inds(ca))
+    end
+    return inds_constrained
+end
