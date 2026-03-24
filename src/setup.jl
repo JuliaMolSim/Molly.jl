@@ -390,6 +390,9 @@ Gromacs file reading should be considered experimental.
 - `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
     dispersion correction. Defaults to the force field setting, which defaults
     to `true`.
+- `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
+    then hydrogens are given the specified mass, which is transferred from the
+    atom they are bonded to. Hydrogens in a constraint are not modified.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -425,6 +428,7 @@ function System(coord_file::AbstractString,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
                 dispersion_correction=nothing,
+                hydrogen_mass::Union{Bool, Number}=false,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
@@ -437,6 +441,14 @@ function System(coord_file::AbstractString,
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
+    end
+    if isa(hydrogen_mass, Bool) && hydrogen_mass
+        throw(ArgumentError("hydrogen_mass can be false, a number or a unitful value " *
+                            "(e.g. `2` or `2u\"g/mol\"`)"))
+    end
+    if !isa(hydrogen_mass, Bool) && !(hydrogen_mass > zero(hydrogen_mass))
+        throw(ArgumentError("hydrogen_mass should be greater than zero, constrained atoms" *
+                            "are automatically given a mass of zero"))
     end
     if grad_safe && neighbor_finder_type == GPUNeighborFinder
         throw(ArgumentError("GPUNeighborFinder is not compatible with grad_safe"))
@@ -898,7 +910,7 @@ function System(coord_file::AbstractString,
                   separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, disp_corr, strictness)
+                  weight_14_coulomb, disp_corr, hydrogen_mass, strictness)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1220,6 +1232,7 @@ function System(T::Type,
     σs_14, ϵs_14 = [], []
     separate_lj14 = false
     dispersion_correction = true
+    hydrogen_mass = false
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
@@ -1227,7 +1240,7 @@ function System(T::Type,
                   separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, dispersion_correction, strictness)
+                  weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1312,13 +1325,64 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
     return constraints, bonds, angles
 end
 
+function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constraints,
+                                   hydrogen_mass, units, T)
+    inds_constrained = constrained_atom_inds(constraints)
+    atoms_cpu = from_device(atoms)
+    modified_masses = mass.(atoms_cpu)
+    if units
+        if dimension(hydrogen_mass) == NoDims
+            new_h_mass = T(hydrogen_mass * u"g/mol")
+        else
+            new_h_mass = T(uconvert(u"g/mol", hydrogen_mass))
+        end
+    else
+        if dimension(hydrogen_mass) == NoDims
+            new_h_mass = T(hydrogen_mass)
+        else
+            new_h_mass = ustrip(T, u"g/mol", hydrogen_mass)
+        end
+    end
+
+    for i in eachindex(atoms_cpu)
+        if !(i in inds_constrained) && !is_heavy_atom(atoms_cpu[i], atoms_data[i])
+            mass_change = new_h_mass - modified_masses[i]
+            modified_masses[i] = new_h_mass
+
+            matches_is = findall(isequal(i), bond_is)
+            matches_js = findall(isequal(i), bond_js)
+            n_matches = length(matches_is) + length(matches_js)
+            if iszero(n_matches)
+                error("the hydrogen atom at index $i is not bonded to any other atoms")
+            elseif n_matches > 1
+                error("the hydrogen atom at index $i is bonded to $n_matches atoms")
+            end
+            if length(matches_is) == 1
+                bonded_atom_i = bond_js[only(matches_is)]
+            else
+                bonded_atom_i = bond_is[only(matches_js)]
+            end
+
+            modified_masses[bonded_atom_i] -= mass_change
+            if modified_masses[bonded_atom_i] <= zero(new_h_mass)
+                # This will catch the H-H case
+                error("the mass of atom $bonded_atom_i went non-positive when transferring " *
+                      "mass to hydrogen, hydrogen_mass is set to $hydrogen_mass")
+            end
+        end
+    end
+    atoms_new_mass = [Atom(a.index, a.atom_type, mm, a.charge, a.σ, a.ϵ, a.λ, a.alch_role)
+                      for (a, mm) in zip(atoms_cpu, modified_masses)]
+    return to_device(atoms_new_mass, array_type(atoms))
+end
+
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                 loggers, data, bonds_all, angles_all, torsions, impropers, torsion_inters_pad,
                 improper_inters_pad, lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14,
                 separate_lj14, eligible, special, units, dist_cutoff, constraints_type,
                 rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                weight_14_lj, weight_14_coulomb, dispersion_correction, strictness)
+                weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
 
@@ -1569,6 +1633,11 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         general_inters_disp = ()
     end
     general_inters = (general_inters_ewald..., general_inters_is..., general_inters_disp...)
+
+    if hydrogen_mass != false # false, number or unitful mass
+        atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds.is, bonds.js, constraints,
+                                          hydrogen_mass, units, T)
+    end
 
     k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     virtual_sites_dev = (length(virtual_sites) > 0 ? to_device(virtual_sites, AT) : virtual_sites)

@@ -88,6 +88,8 @@ end
                      nonbonded_method=:pme, center_coords=false)
     sys_pme_exact = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
                            nonbonded_method=:pme, approximate_pme=false, center_coords=false)
+    sys_hmr = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
+                     nonbonded_method=:cutoff, center_coords=false, hydrogen_mass=2)
     zero(sys)
     zero(sys_pme)
     neighbors = find_neighbors(sys)
@@ -131,6 +133,17 @@ end
                       nonbonded_method=:cutoff, center_coords=false, force_separate_lj14=true)
     @test potential_energy(sys) ≈ potential_energy(sys_lj14)
     @test maximum(norm.(forces(sys) .- forces(sys_lj14))) < 1e-10u"kJ * nm^-1 * mol^-1"
+
+    mass_inds = [1, 2, 3, 4, 5, 6, 7, 15952, 15953, 15954]
+    @test masses(sys)[mass_inds] ≈ [14.01, 1.008, 1.008, 1.008, 12.01, 1.008, 1.008,
+                                    15.99943, 1.007947, 1.007947]u"g/mol"
+    @test masses(sys_hmr)[mass_inds] ≈ [11.034, 2.0, 2.0, 2.0, 10.026, 2.0, 2.0,
+                                        14.015324, 2.0, 2.0]u"g/mol"
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr))
+    @test potential_energy(sys) ≈ potential_energy(sys_hmr)
+    @test maximum(norm.(forces(sys) .- forces(sys_hmr))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test_throws ErrorException System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=6)
+    @test_throws ArgumentError System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=true)
 
     inters = (
         "bond_only", "angle_only", "proptor_only", "improptor_only", "lj_only", "coul_only",

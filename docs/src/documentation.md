@@ -382,6 +382,7 @@ To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the ar
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
+Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
 The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
