@@ -1,6 +1,3 @@
-# CUDA kernels that use warp-level features
-# This file is only loaded when CUDA is imported
-
 """
     MollyCUDAExt
 
@@ -48,7 +45,6 @@ struct LaunchAutotuneKey
     n_blocks::Int
     box_signature::Tuple
     r_cut::Float64
-    r_neighbors::Float64
     interaction_types::Tuple
     force_maxregs::Union{Nothing, Int}
 end
@@ -145,7 +141,6 @@ function autotune_key(sys::System{D, <:CuArray}, pairwise_inters, force_maxregs_
         cld(n_atoms, Int(WARPSIZE)),
         autotune_box_signature(sys.boundary, Val(D)),
         autotune_scalar(sys.neighbor_finder.dist_cutoff),
-        autotune_scalar(sys.neighbor_finder.dist_neighbors),
         Tuple(map(typeof, pairwise_inters)),
         force_maxregs_override,
     )
@@ -159,6 +154,19 @@ function autotune_stage_time_ms!(f::F) where {F}
     return (time_ns() - start_ns) / 1.0e6
 end
 
+"""
+    autotune_benchmark_ms!(prepare!, run!; warmup=1, repeats=3)
+
+Benchmark a given kernel execution function `run!` after setting up the state
+with `prepare!`. Returns the minimum execution time in milliseconds across the
+`repeats` (excluding `warmup` runs).
+
+# Arguments
+- `prepare!`: A callable that prepares any necessary buffers or state before each run.
+- `run!`: A callable that launches the CUDA kernel to be benchmarked.
+- `warmup`: Number of initial runs to discard.
+- `repeats`: Number of measured runs to take the minimum over.
+"""
 function autotune_benchmark_ms!(prepare!::F, run!::G;
                                 warmup::Int=AUTOTUNE_WARMUP_RUNS,
                                 repeats::Int=AUTOTUNE_MEASURE_RUNS) where {F, G}
@@ -233,7 +241,7 @@ function autotune_tile_kernel(buffers, sys::System{D, <:CuArray}, N::Int) where 
         buffers.box_mins,
         buffers.box_maxs,
         sys.boundary,
-        sys.neighbor_finder.dist_neighbors,
+        Val(sys.neighbor_finder.dist_cutoff_2),
         Val(n_blocks),
         Val(D),
         max_tiles,
@@ -255,7 +263,7 @@ function launch_autotune_tile_kernel!(kernel, buffers, sys::System{D, <:CuArray}
         buffers.box_mins,
         buffers.box_maxs,
         sys.boundary,
-        sys.neighbor_finder.dist_neighbors,
+        sys.neighbor_finder.dist_cutoff,
         Val(n_blocks),
         Val(D),
         max_tiles,
@@ -290,6 +298,18 @@ function autotune_block_y_candidates(kernel, fallback_block_y::Int, candidates)
     return valid_candidates
 end
 
+"""
+    autotune_tile_threads!(buffers, sys, N)
+
+Benchmark block thread dimensions for the tile finding kernel (`find_interacting_blocks_kernel!`).
+Tests candidates from `AUTOTUNE_TILE_THREAD_CANDIDATES` and returns the fastest `threads_xy`
+that does not cause a tile buffer overflow.
+
+# Arguments
+- `buffers`: Temporary GPU buffers to manage state.
+- `sys`: The system being benchmarked.
+- `N`: Number of atoms.
+"""
 function autotune_tile_threads!(buffers, sys::System{D, <:CuArray}, N::Int) where D
     kernel = autotune_tile_kernel(buffers, sys, N)
     candidates = autotune_tile_thread_candidates(kernel)
@@ -322,7 +342,6 @@ function autotune_tile_threads!(buffers, sys::System{D, <:CuArray}, N::Int) wher
     launch_autotune_tile_kernel!(kernel, buffers, sys, N, best_threads)
     CUDA.synchronize()
     throw_if_interacting_tiles_overflowed(buffers)
-    buffers.last_r_cut = ustrip(sys.neighbor_finder.dist_neighbors)
     buffers.num_pairs = Int(only(from_device(buffers.num_interacting_tiles)))
     return best_threads
 end
@@ -337,7 +356,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
             buffers.velocities_reordered,
             buffers.atoms_reordered,
             Val(N),
-            sys.neighbor_finder.dist_cutoff,
+            Val(sys.neighbor_finder.dist_cutoff_2),
             Val(sys.force_units),
             pairwise_inters,
             sys.boundary,
@@ -361,7 +380,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
         buffers.velocities_reordered,
         buffers.atoms_reordered,
         Val(N),
-        sys.neighbor_finder.dist_cutoff,
+        Val(sys.neighbor_finder.dist_cutoff_2),
         Val(sys.force_units),
         pairwise_inters,
         sys.boundary,
@@ -378,6 +397,19 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
     )
 end
 
+"""
+    autotune_force_block_y!(buffers, sys, pairwise_inters, N, force_maxregs_override)
+
+Benchmark `block_y` sizes for the pairwise `force_kernel!`.
+Returns the `block_y` configuration that achieves the minimum execution time.
+
+# Arguments
+- `buffers`: Temporary GPU buffers with the active interacting tile list.
+- `sys`: The system being benchmarked.
+- `pairwise_inters`: Pairwise interactions to calculate.
+- `N`: Number of atoms.
+- `force_maxregs_override`: Maximum number of registers per thread (or `nothing`).
+"""
 function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                                  N::Int, force_maxregs_override) where {D, T}
     kernel = autotune_force_kernel(buffers, sys, pairwise_inters, N, force_maxregs_override)
@@ -427,6 +459,18 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise
     return best_block_y
 end
 
+"""
+    autotune_energy_block_y!(buffers, sys, pairwise_inters, N)
+
+Benchmark `block_y` sizes for the pairwise `energy_kernel!`.
+Returns the `block_y` configuration that achieves the minimum execution time.
+
+# Arguments
+- `buffers`: Temporary GPU buffers with the active interacting tile list.
+- `sys`: The system being benchmarked.
+- `pairwise_inters`: Pairwise interactions to calculate.
+- `N`: Number of atoms.
+"""
 function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                                   N::Int) where {D, T}
     kernel = @cuda launch=false always_inline=true energy_kernel!(
@@ -435,7 +479,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
         buffers.velocities_reordered,
         buffers.atoms_reordered,
         Val(N),
-        sys.neighbor_finder.dist_cutoff,
+        Val(sys.neighbor_finder.dist_cutoff_2),
         Val(sys.energy_units),
         pairwise_inters,
         sys.boundary,
@@ -490,6 +534,18 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
     return best_block_y
 end
 
+"""
+    autotune_cuda_launch_config(sys, pairwise_inters, force_maxregs_override)
+
+Perform a full autotuning run for the CUDA pairwise kernels.
+Sets up temporary GPU buffers and Morton/mask states, then individually tunes the tile search
+threads, force `block_y`, and energy `block_y`. Returns a populated `CUDALaunchConfig`.
+
+# Arguments
+- `sys`: The system being benchmarked.
+- `pairwise_inters`: Tuple of pairwise interaction types.
+- `force_maxregs_override`: Maximum registers to use for the force kernel, or `nothing`.
+"""
 function autotune_cuda_launch_config(sys::System{D, <:CuArray, T}, pairwise_inters,
                                      force_maxregs_override) where {D, T}
     N = length(sys.coords)
@@ -696,37 +752,34 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray}, pai
     return buffers
 end
 
-#=
-    pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters, nbs, needs_vir, step_n)
+"""
+    pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters, nbs::Nothing, needs_vir, step_n)
 
 Maintainer entry point for the CUDA tiled pairwise force path.
 
 Pipeline:
 1. Rebuild the Morton ordering and compressed tile masks when the
-   `GPUNeighborFinder` reorder cadence invalidates them.
+   [`GPUNeighborFinder`](@ref) reorder cadence invalidates them.
 2. Reorder coordinates, velocities, and atoms into Morton order.
 3. Recompute the compact list of interacting 32x32 tiles when the cached tile
-   list is stale for the current `dist_neighbors`.
+   list is stale for the current `dist_cutoff`.
 4. Launch `force_kernel!` over that compact tile list, reverse the reorder, and
    surface overflow errors.
 
 Cache contract:
 - `buffers.step_n_preprocessed` gates reuse of reordered coordinates and tile
   search work within a simulation step.
-- `buffers.last_r_cut` stores the neighbor cutoff used to build the current
-  interacting-tile list.
 - `buffers.num_pairs` is the host-side cached interacting-tile count used to
   size the force-kernel launch.
 - `sys.neighbor_finder.initialized` only indicates whether the sparse exception
   masks are current. The interacting-tile list still depends on
-  `n_steps_reorder` and `dist_neighbors`.
-=#
+  `n_steps_reorder` and `dist_cutoff`.
+"""
 function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                          nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, needs_vir}
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
-    r_cut = sys.neighbor_finder.dist_cutoff
-    r_neighbors = sys.neighbor_finder.dist_neighbors
+    r_cut2 = sys.neighbor_finder.dist_cutoff_2
     backend = get_backend(sys.coords)
 
     # Preprocessing Cache Check: Skip if step_n hasn't changed
@@ -745,7 +798,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         KernelAbstractions.synchronize(backend)
 
         # Find Interacting Tiles
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || ustrip(r_neighbors) != buffers.last_r_cut
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
             # Bounding Box Calculation for Tiles
             if sys.boundary isa TriclinicBoundary
                 H = SMatrix{3, 3, T}(
@@ -769,7 +822,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
                 buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
                 buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-                buffers.box_mins, buffers.box_maxs, sys.boundary, r_neighbors,
+                buffers.box_mins, buffers.box_maxs, sys.boundary, Val(r_cut2),
                 Val(n_blocks_i), Val(D), max_tiles,
                 buffers.compressed_masks, buffers.tile_is_clean)
             tile_threads_xy = tile_launch_params(tile_kernel)
@@ -777,14 +830,12 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             tile_kernel(
                 buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
                 buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-                buffers.box_mins, buffers.box_maxs, sys.boundary, r_neighbors,
+                buffers.box_mins, buffers.box_maxs, sys.boundary, Val(r_cut2),
                 Val(n_blocks_i), Val(D), max_tiles,
                 
                 buffers.compressed_masks, buffers.tile_is_clean;
                 blocks=(cld(n_blocks_i, tile_threads_xy[1]), cld(n_blocks_i, tile_threads_xy[2])),
                 threads=tile_threads_xy)
-            
-            buffers.last_r_cut = ustrip(r_neighbors)
             
             # Sync num_pairs back to CPU only when changed
             num_pairs_gpu = from_device(buffers.num_interacting_tiles)
@@ -799,7 +850,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         buffers.fs_mat_reordered,
         buffers.virial_nounits,
         buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-        Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+        Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
         sys.boundary, step_n, buffers.compressed_masks,
         Val(needs_vir), Val(T), Val(D),
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
@@ -816,7 +867,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             buffers.fs_mat_reordered,
             buffers.virial_nounits,
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-            Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+            Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
@@ -828,7 +879,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             buffers.fs_mat_reordered,
             buffers.virial_nounits,
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-            Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+            Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
@@ -844,8 +895,8 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     return buffers
 end
 
-#=
-    pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters, nbs, step_n)
+"""
+    pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters, nbs::Nothing, step_n)
 
 Maintainer entry point for the CUDA tiled pairwise energy path.
 
@@ -854,7 +905,7 @@ pipeline as `pairwise_forces_loop_gpu!`, but launches `energy_kernel!` instead
 of the force kernel. The key difference is that energy evaluation reuses any
 preprocessing already performed for the current step so forces and energies can
 share the same cached tile metadata.
-=#
+"""
 function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T},
                                       pairwise_inters, nbs::Nothing,
                                       step_n) where {D, T}
@@ -862,8 +913,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     #   if it was already computed for this step
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
-    r_cut = sys.neighbor_finder.dist_cutoff
-    r_neighbors = sys.neighbor_finder.dist_neighbors
+    r_cut2 = sys.neighbor_finder.dist_cutoff_2
     backend = get_backend(sys.coords)
 
     if step_n != buffers.step_n_preprocessed
@@ -878,7 +928,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         reorder_system_gpu!(buffers, sys)
         KernelAbstractions.synchronize(backend)
 
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || ustrip(r_neighbors) != buffers.last_r_cut
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
             if sys.boundary isa TriclinicBoundary
                 H = SMatrix{3, 3, T}(
                     sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
@@ -900,20 +950,18 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
                 buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
                 buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-                buffers.box_mins, buffers.box_maxs, sys.boundary, r_neighbors,
+                buffers.box_mins, buffers.box_maxs, sys.boundary, Val(r_cut2),
                 Val(n_blocks), Val(D), max_tiles,
                 buffers.compressed_masks, buffers.tile_is_clean)
             tile_threads_xy = tile_launch_params(tile_kernel)
             tile_kernel(
                 buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
                 buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-                buffers.box_mins, buffers.box_maxs, sys.boundary, r_neighbors,
+                buffers.box_mins, buffers.box_maxs, sys.boundary, Val(r_cut2),
                 Val(n_blocks), Val(D), max_tiles,
                 buffers.compressed_masks, buffers.tile_is_clean;
                 blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
                 threads=tile_threads_xy)
-            
-            buffers.last_r_cut = ustrip(r_neighbors)
             
             # Sync num_pairs back to CPU only when changed
             num_pairs_gpu = from_device(buffers.num_interacting_tiles)
@@ -924,7 +972,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
 
     kernel = @cuda launch=false always_inline=true energy_kernel!(
             pe_vec_nounits, buffers.coords_reordered,
-            buffers.velocities_reordered, buffers.atoms_reordered, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
+            buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
             Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
@@ -936,7 +984,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     if num_pairs > 0
         kernel(
                 pe_vec_nounits, buffers.coords_reordered,
-                buffers.velocities_reordered, buffers.atoms_reordered, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
+                buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
                 sys.boundary, step_n, buffers.compressed_masks,
                 Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
@@ -1012,12 +1060,13 @@ function reverse_reorder_forces_gpu!(buffers, sys::System{D, <:CuArray, T}) wher
     return nothing
 end
 
-#=
-    kernel_min_max!(...)
+"""
+    kernel_min_max!(sorted_seq, mins, maxs, coords, n_atoms, boundary, D)
 
-Computes the minimum and maximum coordinates for each 32-atom block.
-Used for tile-level bounding box intersection tests during tile finding.
-=#
+Compute the minimum and maximum coordinates for each 32-atom block.
+These bounds are used for fast bounding-box intersection tests during tile finding
+to skip non-interacting tile pairs.
+"""
 function kernel_min_max!(
     sorted_seq,
     mins::AbstractArray{C},
@@ -1109,6 +1158,13 @@ function kernel_min_max!(
     return nothing
 end
 
+"""
+    kernel_min_max_triclinic!(sorted_seq, mins, maxs, coords, Hinv, n_atoms, boundary, D)
+
+Compute the minimum and maximum coordinates for each 32-atom block in a system
+with a triclinic boundary. Converts to fractional coordinates using `Hinv` for
+bounds calculations.
+"""
 function kernel_min_max_triclinic!(
     sorted_seq,
     mins::AbstractArray{C},
@@ -1210,6 +1266,13 @@ function kernel_min_max_triclinic!(
     return nothing
 end
 
+"""
+    update_inv_morton_kernel!(inv_morton_seq, morton_seq, N)
+
+Generate the inverse Morton mapping.
+Scatters the dense `1:N` original atom indices into their new Morton-ordered
+positions in `inv_morton_seq`.
+"""
 function update_inv_morton_kernel!(inv_morton_seq, morton_seq, ::Val{N}) where N
     i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     morton_seq_ro = CUDA.Const(morton_seq)
@@ -1219,6 +1282,15 @@ function update_inv_morton_kernel!(inv_morton_seq, morton_seq, ::Val{N}) where N
     return nothing
 end
 
+"""
+    init_compressed_masks_kernel!(compressed_masks, tile_is_clean, N, n_upper_tiles)
+
+Optimistically initialize the compressed mask array for each 32x32 tile in the
+upper-triangular space.
+All interactions within a tile are initially marked as eligible (`0xFFFFFFFF`),
+except for diagonal self-interactions and out-of-bounds boundary masking.
+Tiles are also initially tagged as clean.
+"""
 function init_compressed_masks_kernel!(compressed_masks, tile_is_clean, ::Val{N}, ::Val{n_upper_tiles}) where {N, n_upper_tiles}
     lane = laneid()
     n_blocks = ceil(Int32, N / 32)
@@ -1273,6 +1345,16 @@ function init_compressed_masks_kernel!(compressed_masks, tile_is_clean, ::Val{N}
     return nothing
 end
 
+"""
+    apply_sparse_exceptions_kernel!(excluded_i, excluded_j, special_i, special_j,
+                                    inv_morton_seq, compressed_masks, tile_is_clean,
+                                    n_blocks, n_excluded, n_special)
+
+Process sparse exception pairs (exclusions and specials) by atomically clearing
+or setting the appropriate bits in the `compressed_masks` array. Uses the inverse
+Morton mapping to translate original atom indices into their new tiled layout, and
+marks any tile modified in this way as no longer clean.
+"""
 function apply_sparse_exceptions_kernel!(
     excluded_i, excluded_j, special_i, special_j,
     inv_morton_seq, compressed_masks, tile_is_clean,
@@ -1343,23 +1425,12 @@ function apply_sparse_exceptions_kernel!(
     return nothing
 end
 
-#=
-    compress_sparse!(buffers, nf, ::Val{N})
+"""
+    compress_sparse!(buffers, nf, N)
 
-Convert the sparse exception pairs stored on `GPUNeighborFinder` into the
+Convert the sparse exception pairs stored on [`GPUNeighborFinder`](@ref) into the
 Morton-ordered tile masks consumed by the tiled CUDA pairwise kernels.
-
-Stages:
-1. Build an inverse Morton map from original atom indices into reordered atom
-   indices.
-2. Optimistically initialize every upper-triangular tile as fully eligible and
-   CLEAN.
-3. Scatter excluded and special pairs into `buffers.compressed_masks`, clearing
-   `tile_is_clean` for any tile that requires per-pair mask lookups.
-
-The sparse exception vectors remain in original atom indexing; this routine is
-what realigns them with the current reordered system state.
-=#
+"""
 function compress_sparse!(buffers, nf::GPUNeighborFinder, ::Val{N}) where N
     n_blocks = ceil(Int32, N / 32)
     n_upper_tiles = upper_tile_count(n_blocks)
@@ -1421,28 +1492,22 @@ That's why the calculations are done in the following order:
 =#
 
 
-#=
-    find_interacting_blocks_kernel!(...)
+"""
+    find_interacting_blocks_kernel!(interacting_tiles_i, interacting_tiles_j,
+                                    interacting_tiles_type, num_interacting_tiles,
+                                    interacting_tiles_overflow, mins, maxs, boundary,
+                                    r_cut2, N_blocks, D, max_total_tiles,
+                                    compressed_masks, tile_is_clean)
 
 Scan the upper-triangular matrix of 32x32 Morton-ordered atom tiles and append
 only those whose bounding boxes fall within `r_cut`.
-
-For each interacting tile this kernel:
-1. Appends the tile coordinates `(i, j)` to the compact 1D tile list.
-2. Tags the tile as CLEAN (`0`) or mask-backed (`1`) using `tile_is_clean`.
-3. Sets `interacting_tiles_overflow` if the compact list would exceed the
-   preallocated capacity.
-
-The downstream force and energy kernels consume this compact list directly, so
-this kernel defines both the tile-processing order and the launch size for the
-pairwise work on the current step.
-=#
+"""
 function find_interacting_blocks_kernel!(
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
     interacting_tiles_overflow,
-    mins::AbstractArray{C}, maxs::AbstractArray{C}, boundary, r_cut, ::Val{N_blocks}, ::Val{D}, max_total_tiles,
+    mins::AbstractArray{C}, maxs::AbstractArray{C}, boundary, ::Val{r_cut2}, ::Val{N_blocks}, ::Val{D}, max_total_tiles,
     compressed_masks, tile_is_clean
-) where {C, N_blocks, D}
+) where {C, r_cut2, N_blocks, D}
     mins_ro = CUDA.Const(mins)
     maxs_ro = CUDA.Const(maxs)
     tile_is_clean_ro = CUDA.Const(tile_is_clean)
@@ -1457,7 +1522,7 @@ function find_interacting_blocks_kernel!(
 
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
         
-        if sum(d_block .* d_block) <= r_cut * r_cut
+        if sum(d_block .* d_block) <= r_cut2
             is_clean = (i < j) && (j < N_blocks)
             if is_clean
                 mask_idx = upper_tile_index(Int32(i), Int32(j), Int32(N_blocks))
@@ -1477,8 +1542,11 @@ function find_interacting_blocks_kernel!(
     return nothing
 end
 
-#=
-    force_kernel!(...)
+"""
+    force_kernel!(fs_mat, global_virial, coords, velocities, atoms, N, r_cut2, force_units,
+                  inters_tuple, boundary, step_n, compressed_masks, needs_vir, T, D,
+                  interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
+                  num_interacting_tiles, interacting_tiles_overflow)
 
 Compute pairwise forces for the compact list of interacting 32x32 tiles produced
 by `find_interacting_blocks_kernel!`.
@@ -1498,7 +1566,7 @@ Tile cases:
 
 CLEAN tiles skip bitmask loads entirely; mask-backed tiles consult
 `compressed_masks` to apply exclusions and special-pair handling.
-=#
+"""
 function force_kernel!(
     fs_mat,
     global_virial,
@@ -1506,7 +1574,7 @@ function force_kernel!(
     velocities_var,
     atoms_var::AbstractArray{A},
     ::Val{N},
-    r_cut,
+    ::Val{r_cut2},
     ::Val{force_units},
     inters_tuple,
     boundary,
@@ -1516,7 +1584,7 @@ function force_kernel!(
     ::Val{T},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, A, force_units, needs_vir, T, D}
+    interacting_tiles_overflow) where {N, r_cut2, A, force_units, needs_vir, T, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -1595,7 +1663,7 @@ function force_kernel!(
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
-                condition = r2 <= r_cut * r_cut
+                condition = r2 <= r_cut2
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
                 
                 if any_active
@@ -1646,7 +1714,7 @@ function force_kernel!(
                 excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
                 
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+                condition = (excl & 0x1) == true && r2 <= r_cut2
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
                 
                 if any_active
@@ -1713,7 +1781,7 @@ function force_kernel!(
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             
-            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+            condition = (excl & 0x1) == true && r2 <= r_cut2
             any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
 
             if any_active
@@ -1774,7 +1842,7 @@ function force_kernel!(
             r2 = @fastmath sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+            condition = (excl & 0x1) == true && r2 <= r_cut2
             
             # Divergence-safe execution (no vote_any_sync)
             f = condition ? sum_pairwise_forces(
@@ -1840,7 +1908,7 @@ function force_kernel!(
                 r2 = @fastmath sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+                condition = (excl & 0x1) == true && r2 <= r_cut2
                 
                 # Divergence-safe execution (no vote_any_sync)
                 f = condition ? sum_pairwise_forces(
@@ -1952,8 +2020,11 @@ function force_kernel!(
     return nothing
 end
 
-#=
-    energy_kernel!(...)
+"""
+    energy_kernel!(energy_nounits, coords, velocities, atoms, N, r_cut2, energy_units,
+                   inters_tuple, boundary, step_n, compressed_masks, T, D,
+                   interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
+                   num_interacting_tiles, interacting_tiles_overflow)
 
 Compute pairwise potential energies for the compact list of interacting 32x32
 tiles produced by `find_interacting_blocks_kernel!`.
@@ -1963,14 +2034,14 @@ four tile-shape cases, and the same CLEAN-vs-mask-backed fast path. The main
 difference is the reduction target: each warp accumulates energy into shared
 memory and performs a warp reduction before the final atomic add to
 `energy_nounits`.
-=#
+"""
 function energy_kernel!(
     energy_nounits,
     coords_var,
     velocities_var,
     atoms_var::AbstractArray{A},
     ::Val{N},
-    r_cut,
+    ::Val{r_cut2},
     ::Val{energy_units},
     inters_tuple,
     boundary,
@@ -1979,7 +2050,7 @@ function energy_kernel!(
     ::Val{T},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, A, energy_units, T, D}
+    interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -2046,7 +2117,7 @@ function energy_kernel!(
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
-                condition = r2 <= r_cut * r_cut
+                condition = r2 <= r_cut2
 
                 pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
@@ -2076,7 +2147,7 @@ function energy_kernel!(
                 r2 = @fastmath sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+                condition = (excl & 0x1) == true && r2 <= r_cut2
 
                 pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
@@ -2107,7 +2178,7 @@ function energy_kernel!(
             r2 = @fastmath sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+            condition = (excl & 0x1) == true && r2 <= r_cut2
 
             pe = condition ? sum_pairwise_potentials(
                 inters_tuple,
@@ -2136,7 +2207,7 @@ function energy_kernel!(
             r2 = @fastmath sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+            condition = (excl & 0x1) == true && r2 <= r_cut2
 
             pe = condition ? sum_pairwise_potentials(
                 inters_tuple,
@@ -2166,7 +2237,7 @@ function energy_kernel!(
                 r2 = @fastmath sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
+                condition = (excl & 0x1) == true && r2 <= r_cut2
 
                 pe = condition ? sum_pairwise_potentials(
                     inters_tuple,

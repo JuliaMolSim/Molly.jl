@@ -388,8 +388,7 @@ Gromacs file reading should be considered experimental.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
     classical neighbor lists every few steps. Not used by
-    [`GPUNeighborFinder`](@ref); CUDA systems instead use that finder's
-    `dist_neighbors` and `n_steps_reorder` settings for tile-list refreshes.
+    [`GPUNeighborFinder`](@ref).
 - `constraints=:none`: which constraints to apply during the simulation, options
     are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` and `:hangles`
     (all bonds plus H-X-H and H-O-X angles). Note that not all options may be
@@ -1519,7 +1518,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         neighbor_finder = GPUNeighborFinder(
             n_atoms=size(eligible, 1),
             dist_cutoff=T(dist_cutoff),
-            dist_neighbors=T(dist_neighbors),
             excluded_pairs=excluded_pairs,
             special_pairs=special_pairs,
             device_vector_type=AT{Int32, 1},

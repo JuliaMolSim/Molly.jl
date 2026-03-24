@@ -47,14 +47,21 @@ find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder
 
 find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 
-# Indicates whether an array type is compatible with GPUNeighborFinder
+"""
+    uses_gpu_neighbor_finder(AT)
+
+Indicate whether an array type `AT` is compatible with [`GPUNeighborFinder`](@ref).
+
+Custom GPU array types should define a method for this function that returns `true`
+if they are supported. By default, this returns `false`.
+"""
 uses_gpu_neighbor_finder(AT) = false
 
 """
-    GPUNeighborFinder(; n_atoms, dist_cutoff, dist_neighbors=dist_cutoff,
+    GPUNeighborFinder(; n_atoms, dist_cutoff,
                       excluded_pairs=(), special_pairs=(), n_steps_reorder=25,
                       initialized=false, device_vector_type)
-    GPUNeighborFinder(; eligible, dist_cutoff, dist_neighbors=dist_cutoff,
+    GPUNeighborFinder(; eligible, dist_cutoff,
                       special=nothing, n_steps_reorder=25,
                       initialized=false, device_vector_type=nothing)
 
@@ -76,8 +83,6 @@ This is the recommended neighbor finder for `CuArray` systems.
   are converted once at construction into sparse exception lists; the dense
   masks are not retained.
 - `dist_cutoff`: interaction cutoff used by the pairwise kernels.
-- `dist_neighbors`: cutoff used during tile search. Defaults to
-  `dist_cutoff`.
 - `excluded_pairs`: iterable of `(i, j)` pairs that should be excluded from the
   normal nonbonded interaction path.
 - `special_pairs`: iterable of `(i, j)` pairs that should use the "special"
@@ -99,7 +104,7 @@ This is the recommended neighbor finder for `CuArray` systems.
 mutable struct GPUNeighborFinder{B, D, E}
     n_atoms::B
     dist_cutoff::D
-    dist_neighbors::D
+    dist_cutoff_2::D
     n_steps_reorder::Int
     initialized::Bool
     excluded_i::E
@@ -108,9 +113,29 @@ mutable struct GPUNeighborFinder{B, D, E}
     special_j::E
 end
 
+"""
+    copy_to_bitmatrix(x)
+
+Convert a given matrix `x` to a `BitMatrix`, copying if it is already one.
+
+This is an internal utility used to ensure dense masks are efficiently handled
+on the CPU before converting to sparse exceptions.
+"""
 copy_to_bitmatrix(x::BitMatrix) = copy(x)
 copy_to_bitmatrix(x) = BitMatrix(Array(x))
 
+"""
+    gpu_exception_vector_type(eligible, device_vector_type)
+
+Determine or validate the 1D `Int32` array type for storing sparse GPU exceptions.
+
+This function ensures that the selected `device_vector_type` is compatible with the
+provided `eligible` matrix (if on the GPU) or explicitly supplied.
+
+# Arguments
+- `eligible`: the dense boolean mask of eligible interactions.
+- `device_vector_type`: an explicitly requested vector type or `nothing` to infer it.
+"""
 function gpu_exception_vector_type(eligible, device_vector_type)
     if eligible isa AbstractGPUArray
         return typeof(eligible).name.wrapper{Int32, 1}
@@ -124,6 +149,19 @@ function gpu_exception_vector_type(eligible, device_vector_type)
     return device_vector_type
 end
 
+"""
+    normalize_pairs(pairs; allow_diagonal=false)
+
+Normalize an iterable of pairs into a sorted, unique list of `(Int32, Int32)` tuples.
+
+Each pair `(i, j)` is sorted such that `i < j` (unless `i == j`). If `allow_diagonal`
+is `false`, any pairs where `i == j` are excluded. The resulting sequence contains
+no duplicate pairs.
+
+# Arguments
+- `pairs`: an iterable of tuple pairs or 2-element arrays representing atom index pairs.
+- `allow_diagonal::Bool=false`: whether to include `(i, i)` self-interactions.
+"""
 function normalize_pairs(pairs; allow_diagonal::Bool=false)
     normalized = Tuple{Int32, Int32}[]
     seen = Set{Tuple{Int32, Int32}}()
@@ -146,12 +184,37 @@ function normalize_pairs(pairs; allow_diagonal::Bool=false)
     return normalized
 end
 
+"""
+    pair_list_vectors(pairs, ET)
+
+Convert an iterable of pairs into two separate GPU device vectors of type `ET`.
+
+Extracts the first and second elements of each pair into distinct arrays
+and transfers them to the device using `Molly.to_device`.
+
+# Arguments
+- `pairs`: an iterable of `(i, j)` tuple pairs.
+- `ET`: the target 1D `Int32` device vector type.
+"""
 function pair_list_vectors(pairs, ET)
     is = Int32[first(pair) for pair in pairs]
     js = Int32[last(pair) for pair in pairs]
     return Molly.to_device(is, ET), Molly.to_device(js, ET)
 end
 
+"""
+    dense_masks_to_pair_lists(eligible_cpu, special_cpu)
+
+Convert dense boolean matrices into sparse lists of `(i, j)` exclusion and special pairs.
+
+This function identifies the entries where `eligible_cpu` is `false` to form excluded
+pairs, and where `special_cpu` is `true` to form special interaction pairs. It only
+retains the upper triangle indices (`i < j`).
+
+# Arguments
+- `eligible_cpu`: a dense boolean mask matrix indicating allowed standard interactions.
+- `special_cpu`: a dense boolean mask matrix indicating special interactions.
+"""
 function dense_masks_to_pair_lists(eligible_cpu, special_cpu)
     all_exc = findall(.!eligible_cpu)
     excluded_pairs = Tuple{Int32, Int32}[]
@@ -171,6 +234,20 @@ function dense_masks_to_pair_lists(eligible_cpu, special_cpu)
     return excluded_pairs, special_pairs
 end
 
+"""
+    update_sparse_pairs!(nf, excluded_pairs, special_pairs)
+
+Replace the existing exception lists in a [`GPUNeighborFinder`](@ref) with new ones.
+
+This normalizes the `excluded_pairs` and `special_pairs`, uploads them to the
+device, and resets the neighbor finder's `initialized` flag so that internal
+GPU interaction masks are rebuilt.
+
+# Arguments
+- `nf::GPUNeighborFinder`: the neighbor finder instance to update.
+- `excluded_pairs`: an iterable of `(i, j)` pairs that should be excluded.
+- `special_pairs`: an iterable of `(i, j)` pairs that should use the special interaction path.
+"""
 function update_sparse_pairs!(nf::GPUNeighborFinder, excluded_pairs, special_pairs)
     ET = typeof(nf.excluded_i)
     excluded_pairs = normalize_pairs(excluded_pairs)
@@ -181,6 +258,19 @@ function update_sparse_pairs!(nf::GPUNeighborFinder, excluded_pairs, special_pai
     return nf
 end
 
+"""
+    append_excluded_pairs!(nf, pairs)
+
+Append new excluded pairs to the existing exclusions in a [`GPUNeighborFinder`](@ref).
+
+This downloads the current sparse lists from the device, concatenates them with
+the new `pairs`, and then calls `update_sparse_pairs!` to normalize and upload
+everything back to the GPU. The `initialized` state will be reset.
+
+# Arguments
+- `nf::GPUNeighborFinder`: the neighbor finder instance to update.
+- `pairs`: an iterable of `(i, j)` pairs to add to the exclusions list.
+"""
 function append_excluded_pairs!(nf::GPUNeighborFinder, pairs)
     existing_pairs = collect(zip(from_device(nf.excluded_i), from_device(nf.excluded_j)))
     update_sparse_pairs!(nf, vcat(existing_pairs, collect(pairs)),
@@ -192,7 +282,6 @@ function GPUNeighborFinder(;
                             n_atoms=nothing,
                             eligible=nothing,
                             dist_cutoff,
-                            dist_neighbors=dist_cutoff,
                             excluded_pairs=(),
                             special_pairs=(),
                             special=nothing,
@@ -208,7 +297,7 @@ function GPUNeighborFinder(;
         excluded_i, excluded_j = pair_list_vectors(excluded_pairs_norm, device_vector_type)
         special_i, special_j = pair_list_vectors(special_pairs_norm, device_vector_type)
         return GPUNeighborFinder{Int, typeof(dist_cutoff), typeof(excluded_i)}(
-                    Int(n_atoms), dist_cutoff, dist_neighbors, n_steps_reorder, initialized,
+                    Int(n_atoms), dist_cutoff, dist_cutoff^2, n_steps_reorder, initialized,
                     excluded_i, excluded_j, special_i, special_j)
     end
 
@@ -225,7 +314,6 @@ function GPUNeighborFinder(;
         n_atoms=size(eligible_cpu, 1),
         eligible=nothing,
         dist_cutoff=dist_cutoff,
-        dist_neighbors=dist_neighbors,
         excluded_pairs=excluded_pairs_cpu,
         special_pairs=special_pairs_cpu,
         n_steps_reorder=n_steps_reorder,

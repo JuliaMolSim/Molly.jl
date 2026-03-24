@@ -200,6 +200,8 @@ There are two GPU code paths currently: a fast path specific to CUDA and a slowe
 The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF` and `MOLLY_GPUNTHREADS_IMPLICIT`.
 In general these should only be changed if GPU memory errors occur on smaller GPUs.
 
+For the CUDA fast path, users can explicitly call `Molly.optimize_cuda_launch_config!(sys)` prior to a simulation. This will benchmark various launch configurations and cache the optimal parameters, which are then used to accelerate subsequent pairwise force and energy kernels globally. Users can also manually override the kernel parameters by setting the environment variables `MOLLY_CUDA_FORCE_BLOCK_Y`, `MOLLY_CUDA_ENERGY_BLOCK_Y`, `MOLLY_CUDA_TILE_THREADS_X`, `MOLLY_CUDA_TILE_THREADS_Y`, and `MOLLY_CUDA_FORCE_MAXREGS`, or directly via the `set_cuda_launch_config!` function.
+
 ## Simulating diatomic molecules
 
 If we want to define specific interactions between atoms, for example bonds, we can do this as well.
@@ -1640,7 +1642,7 @@ The difference between the two should be larger than an atom can move in the tim
 [`GPUNeighborFinder`](@ref) follows a different CUDA-specific path based on the tiled GPU strategy of [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms, build per-tile masks and cache a compact list of interacting `32x32` tiles internally.
 Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
-When using it, set `dist_cutoff` to the interaction cutoff distance, `dist_neighbors` to the tile-search cutoff, and `n_steps_reorder` to the number of steps between reorder and tile-list refresh passes.
+When using it, set `dist_cutoff` to the interaction cutoff distance and `n_steps_reorder` to the number of steps between reorder and tile-list refresh passes.
 
 ## Analysis
 

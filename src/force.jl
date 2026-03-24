@@ -175,6 +175,8 @@ energy calculations.
 - `pe_vec_nounits`: Vector of size 1 for potential energy summation.
 - `virial`: 3x3 virial tensor (with units).
 - `virial_nounits`: 3x3 virial tensor on GPU (without units).
+- `kin_tensor`: 3x3 kinetic energy tensor (with units).
+- `pres_tensor`: 3x3 pressure tensor (with units).
 - `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
 - `morton_seq`, `morton_seq_buffer_1`, `morton_seq_buffer_2`, `morton_seq_inv`:
   Morton-order indices and temporary buffers for reordering atoms on the GPU.
@@ -192,11 +194,10 @@ energy calculations.
 - `coords_reordered`, `velocities_reordered`, `atoms_reordered`: Cached reordered arrays.
 - `fs_mat_reordered`: Force matrix in reordered space.
 - `step_n_preprocessed`: Last simulation step where preprocessing was done.
-- `last_r_cut`: Last interaction cutoff used for preprocessing.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
 """
-mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR, fs_re, T, TIC}
+mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR, fs_re, TIC}
     fs_mat::F
     pe_vec_nounits::P
     virial::V
@@ -221,10 +222,18 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     atoms_reordered::AR
     fs_mat_reordered::fs_re
     step_n_preprocessed::Int
-    last_r_cut::T
     num_pairs::Int
 end
 
+"""
+    init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads, for_pe=false)
+
+Initialize and return a [`BuffersGPU`](@ref) struct for a GPU-based system.
+
+Allocates the necessary arrays on the GPU using the system's backend. If `for_pe`
+is `true`, the neighbor finder initialization state is preserved; otherwise, it
+is reset if it is a [`GPUNeighborFinder`](@ref).
+"""
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
                    for_pe::Bool=false) where {D, T}
     N = length(sys)
@@ -271,7 +280,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
                       tile_is_clean, interacting_tiles_i, interacting_tiles_j,
                       interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
                       coords_reordered, velocities_reordered, atoms_reordered,
-                      fs_mat_reordered, -1, T(-1), 0)
+                      fs_mat_reordered, -1, 0)
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 

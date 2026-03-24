@@ -45,8 +45,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
 
     N = length(sys.coords)
     n_blocks = cld(N, 32)
-    r_cut = sys.neighbor_finder.dist_cutoff
-    r_neighbors = sys.neighbor_finder.dist_neighbors
+    r_cut2 = sys.neighbor_finder.dist_cutoff_2
 
     fill!(buffers.fs_mat, zero(T))
     fill!(buffers.fs_mat_reordered, zero(T))
@@ -114,7 +113,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             buffers.box_mins,
             buffers.box_maxs,
             sys.boundary,
-            r_neighbors,
+            Val(r_cut2),
             Val(n_blocks),
             Val(D),
             max_tiles,
@@ -131,7 +130,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             buffers.box_mins,
             buffers.box_maxs,
             sys.boundary,
-            r_neighbors,
+            Val(r_cut2),
             Val(n_blocks),
             Val(D),
             max_tiles,
@@ -151,7 +150,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
         buffers.velocities_reordered,
         buffers.atoms_reordered,
         Val(N),
-        r_cut,
+        Val(r_cut2),
         Val(sys.force_units),
         pairwise_inters,
         sys.boundary,
@@ -179,7 +178,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
                 buffers.velocities_reordered,
                 buffers.atoms_reordered,
                 Val(N),
-                r_cut,
+                Val(r_cut2),
                 Val(sys.force_units),
                 pairwise_inters,
                 sys.boundary,
@@ -202,7 +201,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             buffers.velocities_reordered,
             buffers.atoms_reordered,
             Val(N),
-            r_cut,
+            Val(r_cut2),
             Val(sys.force_units),
             pairwise_inters,
             sys.boundary,
@@ -254,8 +253,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
 
     N = length(sys.coords)
     n_blocks = cld(N, 32)
-    r_cut = sys.neighbor_finder.dist_cutoff
-    r_neighbors = sys.neighbor_finder.dist_neighbors
+    r_cut2 = sys.neighbor_finder.dist_cutoff_2
 
     fill!(buffers.pe_vec_nounits, zero(T))
 
@@ -321,7 +319,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             buffers.box_mins,
             buffers.box_maxs,
             sys.boundary,
-            r_neighbors,
+            Val(r_cut2),
             Val(n_blocks),
             Val(D),
             max_tiles,
@@ -338,7 +336,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             buffers.box_mins,
             buffers.box_maxs,
             sys.boundary,
-            r_neighbors,
+            Val(r_cut2),
             Val(n_blocks),
             Val(D),
             max_tiles,
@@ -357,7 +355,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
         buffers.velocities_reordered,
         buffers.atoms_reordered,
         Val(N),
-        r_cut,
+        Val(r_cut2),
         Val(sys.energy_units),
         pairwise_inters,
         sys.boundary,
@@ -380,7 +378,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             buffers.velocities_reordered,
             buffers.atoms_reordered,
             Val(N),
-            r_cut,
+            Val(r_cut2),
             Val(sys.energy_units),
             pairwise_inters,
             sys.boundary,
