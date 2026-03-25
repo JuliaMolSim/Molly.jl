@@ -131,10 +131,8 @@ if GROUP in ("All", "NotGradients")
     include("constraints.jl")
     include("analysis.jl")
     if run_cuda_tests
-        include("gpu_simple.jl")
-        include("gpu_float64.jl")
+        include("gpu_consistency.jl")
         include("gpu_optimizations.jl")
-        include("gpu_tile_lists.jl")
     end
 end
 

@@ -785,7 +785,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     # Preprocessing Cache Check: Skip if step_n hasn't changed
     if step_n != buffers.step_n_preprocessed
         # Periodic Reordering and Bitmask Compression
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || buffers.step_n_preprocessed == -1
             morton_bits = 10
             sides = box_sides(sys.boundary)
             w = sides ./ (2^morton_bits)
@@ -798,13 +798,13 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         KernelAbstractions.synchronize(backend)
 
         # Find Interacting Tiles
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || buffers.step_n_preprocessed == -1
             # Bounding Box Calculation for Tiles
             if sys.boundary isa TriclinicBoundary
                 H = SMatrix{3, 3, T}(
-                    sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
-                    sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
-                    sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
+                    ustrip(sys.boundary.basis_vectors[1][1]), ustrip(sys.boundary.basis_vectors[2][1]), ustrip(sys.boundary.basis_vectors[3][1]),
+                    ustrip(sys.boundary.basis_vectors[1][2]), ustrip(sys.boundary.basis_vectors[2][2]), ustrip(sys.boundary.basis_vectors[3][2]),
+                    ustrip(sys.boundary.basis_vectors[1][3]), ustrip(sys.boundary.basis_vectors[2][3]), ustrip(sys.boundary.basis_vectors[3][3])
                 )
                 Hinv = inv(H)
                 @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
@@ -917,7 +917,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     backend = get_backend(sys.coords)
 
     if step_n != buffers.step_n_preprocessed
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || buffers.step_n_preprocessed == -1
             morton_bits = 10
             sides = box_sides(sys.boundary)
             w = sides ./ (2^morton_bits)
@@ -928,12 +928,12 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         reorder_system_gpu!(buffers, sys)
         KernelAbstractions.synchronize(backend)
 
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || buffers.step_n_preprocessed == -1
             if sys.boundary isa TriclinicBoundary
                 H = SMatrix{3, 3, T}(
-                    sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
-                    sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
-                    sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
+                    ustrip(sys.boundary.basis_vectors[1][1]), ustrip(sys.boundary.basis_vectors[2][1]), ustrip(sys.boundary.basis_vectors[3][1]),
+                    ustrip(sys.boundary.basis_vectors[1][2]), ustrip(sys.boundary.basis_vectors[2][2]), ustrip(sys.boundary.basis_vectors[3][2]),
+                    ustrip(sys.boundary.basis_vectors[1][3]), ustrip(sys.boundary.basis_vectors[2][3]), ustrip(sys.boundary.basis_vectors[3][3])
                 )
                 Hinv = inv(H)
                 @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(

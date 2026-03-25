@@ -101,10 +101,10 @@ This is the recommended neighbor finder for `CuArray` systems.
 - Updating the exception pairs should reset `initialized` so the tile masks are
   rebuilt on the next GPU force or energy evaluation.
 """
-mutable struct GPUNeighborFinder{B, D, E}
+mutable struct GPUNeighborFinder{B, D, D2, E}
     n_atoms::B
     dist_cutoff::D
-    dist_cutoff_2::D
+    dist_cutoff_2::D2
     n_steps_reorder::Int
     initialized::Bool
     excluded_i::E
@@ -296,8 +296,9 @@ function GPUNeighborFinder(;
         special_pairs_norm = normalize_pairs(special_pairs)
         excluded_i, excluded_j = pair_list_vectors(excluded_pairs_norm, device_vector_type)
         special_i, special_j = pair_list_vectors(special_pairs_norm, device_vector_type)
-        return GPUNeighborFinder{Int, typeof(dist_cutoff), typeof(excluded_i)}(
-                    Int(n_atoms), dist_cutoff, dist_cutoff^2, n_steps_reorder, initialized,
+        dist_cutoff_2 = dist_cutoff^2
+        return GPUNeighborFinder{Int, typeof(dist_cutoff), typeof(dist_cutoff_2), typeof(excluded_i)}(
+                    Int(n_atoms), dist_cutoff, dist_cutoff_2, n_steps_reorder, initialized,
                     excluded_i, excluded_j, special_i, special_j)
     end
 
