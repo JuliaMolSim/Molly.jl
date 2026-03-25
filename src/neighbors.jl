@@ -47,14 +47,14 @@ find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder
 
 find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 
-"""
+#=
     uses_gpu_neighbor_finder(AT)
 
 Indicate whether an array type `AT` is compatible with [`GPUNeighborFinder`](@ref).
 
 Custom GPU array types should define a method for this function that returns `true`
 if they are supported. By default, this returns `false`.
-"""
+=#
 uses_gpu_neighbor_finder(AT) = false
 
 """
@@ -113,18 +113,18 @@ mutable struct GPUNeighborFinder{B, D, E}
     special_j::E
 end
 
-"""
+#=
     copy_to_bitmatrix(x)
 
 Convert a given matrix `x` to a `BitMatrix`, copying if it is already one.
 
 This is an internal utility used to ensure dense masks are efficiently handled
 on the CPU before converting to sparse exceptions.
-"""
+=#
 copy_to_bitmatrix(x::BitMatrix) = copy(x)
 copy_to_bitmatrix(x) = BitMatrix(Array(x))
 
-"""
+#=
     gpu_exception_vector_type(eligible, device_vector_type)
 
 Determine or validate the 1D `Int32` array type for storing sparse GPU exceptions.
@@ -135,7 +135,7 @@ provided `eligible` matrix (if on the GPU) or explicitly supplied.
 # Arguments
 - `eligible`: the dense boolean mask of eligible interactions.
 - `device_vector_type`: an explicitly requested vector type or `nothing` to infer it.
-"""
+=#
 function gpu_exception_vector_type(eligible, device_vector_type)
     if eligible isa AbstractGPUArray
         return typeof(eligible).name.wrapper{Int32, 1}
@@ -149,7 +149,7 @@ function gpu_exception_vector_type(eligible, device_vector_type)
     return device_vector_type
 end
 
-"""
+#=
     normalize_pairs(pairs; allow_diagonal=false)
 
 Normalize an iterable of pairs into a sorted, unique list of `(Int32, Int32)` tuples.
@@ -161,7 +161,7 @@ no duplicate pairs.
 # Arguments
 - `pairs`: an iterable of tuple pairs or 2-element arrays representing atom index pairs.
 - `allow_diagonal::Bool=false`: whether to include `(i, i)` self-interactions.
-"""
+=#
 function normalize_pairs(pairs; allow_diagonal::Bool=false)
     normalized = Tuple{Int32, Int32}[]
     seen = Set{Tuple{Int32, Int32}}()
@@ -184,7 +184,7 @@ function normalize_pairs(pairs; allow_diagonal::Bool=false)
     return normalized
 end
 
-"""
+#= 
     pair_list_vectors(pairs, ET)
 
 Convert an iterable of pairs into two separate GPU device vectors of type `ET`.
@@ -195,14 +195,14 @@ and transfers them to the device using `Molly.to_device`.
 # Arguments
 - `pairs`: an iterable of `(i, j)` tuple pairs.
 - `ET`: the target 1D `Int32` device vector type.
-"""
+=#
 function pair_list_vectors(pairs, ET)
     is = Int32[first(pair) for pair in pairs]
     js = Int32[last(pair) for pair in pairs]
     return Molly.to_device(is, ET), Molly.to_device(js, ET)
 end
 
-"""
+#=
     dense_masks_to_pair_lists(eligible_cpu, special_cpu)
 
 Convert dense boolean matrices into sparse lists of `(i, j)` exclusion and special pairs.
@@ -214,7 +214,7 @@ retains the upper triangle indices (`i < j`).
 # Arguments
 - `eligible_cpu`: a dense boolean mask matrix indicating allowed standard interactions.
 - `special_cpu`: a dense boolean mask matrix indicating special interactions.
-"""
+=#
 function dense_masks_to_pair_lists(eligible_cpu, special_cpu)
     all_exc = findall(.!eligible_cpu)
     excluded_pairs = Tuple{Int32, Int32}[]
@@ -234,7 +234,7 @@ function dense_masks_to_pair_lists(eligible_cpu, special_cpu)
     return excluded_pairs, special_pairs
 end
 
-"""
+#=
     update_sparse_pairs!(nf, excluded_pairs, special_pairs)
 
 Replace the existing exception lists in a [`GPUNeighborFinder`](@ref) with new ones.
@@ -247,7 +247,7 @@ GPU interaction masks are rebuilt.
 - `nf::GPUNeighborFinder`: the neighbor finder instance to update.
 - `excluded_pairs`: an iterable of `(i, j)` pairs that should be excluded.
 - `special_pairs`: an iterable of `(i, j)` pairs that should use the special interaction path.
-"""
+=#
 function update_sparse_pairs!(nf::GPUNeighborFinder, excluded_pairs, special_pairs)
     ET = typeof(nf.excluded_i)
     excluded_pairs = normalize_pairs(excluded_pairs)
@@ -258,7 +258,7 @@ function update_sparse_pairs!(nf::GPUNeighborFinder, excluded_pairs, special_pai
     return nf
 end
 
-"""
+#=
     append_excluded_pairs!(nf, pairs)
 
 Append new excluded pairs to the existing exclusions in a [`GPUNeighborFinder`](@ref).
@@ -270,7 +270,7 @@ everything back to the GPU. The `initialized` state will be reset.
 # Arguments
 - `nf::GPUNeighborFinder`: the neighbor finder instance to update.
 - `pairs`: an iterable of `(i, j)` pairs to add to the exclusions list.
-"""
+=#
 function append_excluded_pairs!(nf::GPUNeighborFinder, pairs)
     existing_pairs = collect(zip(from_device(nf.excluded_i), from_device(nf.excluded_j)))
     update_sparse_pairs!(nf, vcat(existing_pairs, collect(pairs)),

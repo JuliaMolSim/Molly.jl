@@ -164,7 +164,7 @@ end
 
 upper_tile_count(n_blocks::Integer) = (Int64(n_blocks) * (Int64(n_blocks) + 1)) ÷ 2
 
-"""
+#=
     BuffersGPU
 
 Mutable struct holding GPU-resident buffers and state for pairwise force and 
@@ -196,7 +196,7 @@ energy calculations.
 - `step_n_preprocessed`: Last simulation step where preprocessing was done.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
-"""
+=#
 mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR, fs_re, TIC}
     fs_mat::F
     pe_vec_nounits::P
@@ -225,7 +225,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     num_pairs::Int
 end
 
-"""
+#=
     init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads, for_pe=false)
 
 Initialize and return a [`BuffersGPU`](@ref) struct for a GPU-based system.
@@ -233,7 +233,7 @@ Initialize and return a [`BuffersGPU`](@ref) struct for a GPU-based system.
 Allocates the necessary arrays on the GPU using the system's backend. If `for_pe`
 is `true`, the neighbor finder initialization state is preserved; otherwise, it
 is reset if it is a [`GPUNeighborFinder`](@ref).
-"""
+=#
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
                    for_pe::Bool=false) where {D, T}
     N = length(sys)

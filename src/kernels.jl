@@ -423,12 +423,12 @@ end
     end
 end
 
-"""
+#=
     sorted_morton_seq!(buffers, coords, w, morton_bits)
 
 Compute a Morton (Z-order) sequence for a set of coordinates.
 The indices are stored in `buffers.morton_seq`.
-"""
+=#
 function sorted_morton_seq!(buffers, coords, w, morton_bits)
     backend = get_backend(buffers.morton_seq)
     n_threads_gpu = 32
