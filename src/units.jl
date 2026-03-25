@@ -45,7 +45,7 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
             "allowed but kcal/mol and kg is not. Units were $([energy_units, mass_units, force_units])"))
     end
 
-    no_dim_arr = [dim == NoDims for dim in [length_dim, vel_dim, energy_dim, force_dim, mass_dim]]
+    no_dim_arr = [dim == NoDims for dim in (length_dim, vel_dim, energy_dim, force_dim, mass_dim)]
 
     # If something has NoDims, all other data must have NoDims
     if any(no_dim_arr) && !all(no_dim_arr)

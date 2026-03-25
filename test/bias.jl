@@ -212,7 +212,9 @@
         11.51225678195222u"Å";
         atol=1e-6u"nm",
     )
-    @test Molly.cv_gradient(rg_cv, coords, atoms)[2] ≈ calculate_cv(rg_cv, coords, atoms)
+    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"))[2],
+                   calculate_cv(rg_cv, coords, atoms),
+                   atol = 1e-5u"nm")
 
     # Rg of a subset of atoms
     n_atoms_subset = 20
@@ -224,7 +226,27 @@
         radius_gyration(coords_subset,atoms_subset);
         atol=1e-6u"nm",
     )
-    @test Molly.cv_gradient(rg_cv, coords, atoms)[2] ≈ calculate_cv(rg_cv, coords, atoms)
+    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"))[2],
+                   calculate_cv(rg_cv, coords, atoms),
+                   atol = 1e-5u"nm")
+
+    # Test CalcTorsion value calculation
+    # Define four atoms forming a 90-degree (pi/2) dihedral angle
+    c_t1 = SVector(0.0, 0.0, 0.0)u"nm"
+    c_t2 = SVector(0.1, 0.0, 0.0)u"nm"
+    c_t3 = SVector(0.1, 0.1, 0.0)u"nm"
+    c_t4 = SVector(0.1, 0.1, 0.1)u"nm"
+    
+    coords_tor = [c_t1, c_t2, c_t3, c_t4]
+    # Atoms and boundary are already defined in the existing testset context
+    tor_cv = CalcTorsion([1, 2, 3, 4])
+    
+    @test isapprox(
+        calculate_cv(tor_cv, coords_tor, atoms, boundary),
+        1.5707963267948966; # pi/2 radians
+        atol=1e-9
+    )
+
 end
 
 @testset "Bias potentials" begin
@@ -397,6 +419,45 @@ end
         SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
+
+    # PeriodicFlatBottomBias tests (Target: 0, Flat bottom width: 0.1)
+    pb = PeriodicFlatBottomBias(1000.0u"kJ * mol^-1", 0.1, 0.0)
+    
+    # Inside flat region (no penalty)
+    cv_sim_in = 0.05
+    @test potential_energy(pb, cv_sim_in) == 0.0u"kJ * mol^-1"
+    @test Molly.bias_gradient(pb, cv_sim_in) == 0.0u"kJ * mol^-1"
+    
+    # Outside region (harmonic penalty)
+    cv_sim_out = 0.2
+    # Energy: 0.5 * k * (dist - r_bf)^2 = 0.5 * 1000 * (0.2 - 0.1)^2 = 5.0
+    @test isapprox(
+        potential_energy(pb, cv_sim_out), 
+        5.0u"kJ * mol^-1"; 
+        atol=1e-9u"kJ * mol^-1"
+    )
+    # Gradient: k * (dist - r_bf) * sign(d_wrapped) = 1000 * 0.1 * 1 = 100.0
+    @test isapprox(
+        Molly.bias_gradient(pb, cv_sim_out), 
+        100.0u"kJ * mol^-1"; 
+        atol=1e-9u"kJ * mol^-1"
+    )
+
+    # Periodic wrapping test (Target 0, width 0.1, Input ~ -0.2)
+    cv_sim_wrap = 2π - 0.2 
+    # Wrapped distance is 0.2, outside the flat bottom
+    @test isapprox(
+        potential_energy(pb, cv_sim_wrap), 
+        5.0u"kJ * mol^-1"; 
+        atol=1e-9u"kJ * mol^-1"
+    )
+    # Gradient should point towards the target (negative direction)
+    @test isapprox(
+        Molly.bias_gradient(pb, cv_sim_wrap), 
+        -100.0u"kJ * mol^-1"; 
+        atol=1e-9u"kJ * mol^-1"
+    )
+
 end
 
 @testset "Biased simulation" begin

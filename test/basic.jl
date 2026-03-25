@@ -182,8 +182,10 @@
             ff;
             array_type=AT,
             nonbonded_method=:cutoff,
+            dispersion_correction=false,
             neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
                                     DistanceNeighborFinder),
+            strictness=:nowarn,
         )
         mcs = Molly.molecule_centers(sys.coords, sys.boundary, sys.topology)
         @test isapprox(from_device(mcs)[1], mean(sys.coords[1:1170]); atol=0.08u"nm")
@@ -489,7 +491,6 @@ end
 
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    replica_velocities = nothing
     pairwise_inters = (LennardJones(use_neighbors=true),)
     n_replicas = 4
 
@@ -505,42 +506,42 @@ end
         dist_cutoff=1.5u"nm",
     )
 
-    repsys = ReplicaSystem(
-        atoms=atoms,
-        replica_coords=[copy(coords) for _ in 1:n_replicas],
-        boundary=boundary,
-        n_replicas=n_replicas,
-        replica_velocities=replica_velocities,
-        pairwise_inters=pairwise_inters,
-        neighbor_finder=neighbor_finder,
-    )
-
+    # 1. Define the baseline system
     sys = System(
         atoms=atoms,
         coords=coords,
         boundary=boundary,
-        velocities=nothing,
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
     )
 
-    sys_fields = [getfield(sys, f) for f in fieldnames(System) if f != :neighbor_finder]
+    # 2. Build the array of ThermoStates required by the new ReplicaSystem constructor
+    # We use a dummy integrator since it's required by ThermoState
+    intg = VelocityVerlet(dt=0.002u"ps")
+    thermo_states = [ThermoState(sys, intg; temperature=temp) for _ in 1:n_replicas]
+
+    # Initialize repsys via the generalized constructor
+    repsys = ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas]
+    )
+
+    # Since ReplicaSystem no longer stores full `System` objects in a `replicas` tuple,
+    # we test that the core unperturbed components were correctly absorbed by the AlchemicalPartition
+    # and the state interaction arrays.
+    @test repsys.partition.master_sys.atoms == sys.atoms
     for i in 1:n_replicas
-        repsys_fields = [getfield(repsys.replicas[i], f)
-                         for f in fieldnames(System) if f != :neighbor_finder]
-        @test all(repsys_fields .== sys_fields)
+        @test repsys.replica_boundaries[i] == sys.boundary
+        @test repsys.state_pairwise_inters[i] == sys.pairwise_inters
     end
 
+    # Test initialization with loggers and extra data
+    replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)) for i in 1:n_replicas]
+
     repsys2 = ReplicaSystem(
-        atoms=atoms,
-        replica_coords=[copy(coords) for _ in 1:n_replicas],
-        boundary=boundary,
-        n_replicas=n_replicas,
-        replica_velocities=replica_velocities,
-        pairwise_inters=pairwise_inters,
-        neighbor_finder=neighbor_finder,
-        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinatesLogger(10))
-                         for i in 1:n_replicas],
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        replica_loggers=replica_loggers,
         data="test_data_repsys",
     )
 
@@ -548,7 +549,6 @@ end
         atoms=atoms,
         coords=coords,
         boundary=boundary,
-        velocities=nothing,
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
         loggers=(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)),
@@ -560,12 +560,15 @@ end
 
     l2 = sys2.loggers
     nf2 = [getproperty(sys2.neighbor_finder, p) for p in propertynames(sys2.neighbor_finder)]
+    
+    # Loop over the isolated component arrays instead of repsys.replicas[i]
     for i in 1:n_replicas
-        l1 = repsys2.replicas[i].loggers
+        l1 = repsys2.replica_loggers[i]
         @test typeof(l1) == typeof(l2)
         @test propertynames(l1) == propertynames(l2)
-        nf1 = [getproperty(repsys2.replicas[i].neighbor_finder, p)
-               for p in propertynames(repsys2.replicas[i].neighbor_finder)]
+        
+        nf1 = [getproperty(repsys2.replica_neighbor_finders[i], p)
+               for p in propertynames(repsys2.replica_neighbor_finders[i])]
         @test all(nf1 .== nf2)
     end
 end
@@ -641,13 +644,15 @@ end
         zfs = AtomsCalculators.zero_forces(ab_sys, calc)
         @test zfs == fill(SVector(0.0, 0.0, 0.0)u"kJ/Å", length(ab_sys))
 
-        # AtomsCalculators.AtomsCalculatorsTesting functions
-        test_potential_energy(ab_sys, calc)
-        test_forces(ab_sys, calc)
+        AtomsCalculators.Testing.test_potential_energy(ab_sys, calc)
+        AtomsCalculators.Testing.test_forces(ab_sys, calc)
     end
 end
 
 @testset "Virtual sites" begin
+    @test_throws ArgumentError TwoParticleAverageSite(3, 1, 2, 0.6, 0.5, 0.0)
+    @test_throws ArgumentError ThreeParticleAverageSite(7, 4, 5, 6, 0.3, 0.3, 0.5, 0.0)
+
     for AT in array_list
         for units in (false, true)
             if units
@@ -656,7 +661,8 @@ end
             else
                 LU, MU, EU, FU, TU, AU = NoUnits, NoUnits, NoUnits, NoUnits, NoUnits, NoUnits
             end
-            vs_flags = to_device(BitVector([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1]), AT)
+            vs_flags_cpu = BitVector([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1])
+            vs_flags = to_device(vs_flags_cpu, AT)
             atom_masses = map(x -> (x ? 0.0 : 10.0), vs_flags) .* MU
             atoms = to_device([Atom(mass=m, σ=(0.1 * LU), ϵ=(0.2 * EU))
                                for m in from_device(atom_masses)], AT)
@@ -761,6 +767,9 @@ end
 
             random_velocities!(sys, 300.0 * TU)
             @test all(map((v, f) -> (f ? iszero(v) : !iszero(v)), sys.velocities, vs_flags))
+
+            non_vss = [Molly.pick_non_virtual_site(sys) for _ in 1:10]
+            @test all(i -> !vs_flags_cpu[i] || !(i in non_vss), eachindex(sys))
         end
     end
 end

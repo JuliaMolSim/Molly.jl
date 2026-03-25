@@ -138,31 +138,31 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct CoulombSoftCoreBeutler{C, A, L, S, E, W, T, R} <: PairwiseInteraction
+@kwdef struct CoulombSoftCoreBeutler{C, A, S, E, LM, SCH, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 1
-    λ::L = 0
+    α::A = 1.0
     use_neighbors::Bool = false
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
     weight_special::W = 1
     coulomb_const::T = coulomb_const
-    σ6_fac::R = (α * (1-λ))
 end
 
 use_neighbors(inter::CoulombSoftCoreBeutler) = inter.use_neighbors
 
-function Base.zero(coul::CoulombSoftCoreBeutler{C, A, L, S, E, W, T, R}) where {C, A, L, S, E, W, T, R}
+function Base.zero(coul::CoulombSoftCoreBeutler{C, A, S, E, LM, SCH, W, T}) where {C, A, S, E, LM, SCH, W, T}
     return CoulombSoftCoreBeutler(
         coul.cutoff,
         zero(A),
-        zero(L),
         coul.use_neighbors,
         coul.σ_mixing,
         coul.ϵ_mixing,
+        coul.λ_mixing,
+        coul.scheduler,
         zero(W),
         zero(T),
-        zero(R),
     )
 end
 
@@ -170,13 +170,13 @@ function Base.:+(c1::CoulombSoftCoreBeutler, c2::CoulombSoftCoreBeutler)
     return CoulombSoftCoreBeutler(
         c1.cutoff,
         c1.α + c2.α,
-        c1.λ + c2.λ,
         c1.use_neighbors,
         c1.σ_mixing,
         c1.ϵ_mixing,
+        c1.λ_mixing,
+        c1.scheduler,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
-        c1.σ6_fac + c2.σ6_fac,
     )
 end
 
@@ -187,28 +187,58 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    r = norm(dr)
-    cutoff = inter.cutoff
+    # 1. Type stability
     ke = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
-    C6 = 4 * ϵ * σ6
-    params = (ke, qi, qj, C6 * σ6, C6, inter.σ6_fac, inter.λ)
+    T = typeof(ustrip(ke))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+
+    if λ <= 0
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    r = norm(dr)
+    qi, qj = atom_i.charge, atom_j.charge
+    cutoff = inter.cutoff
+
+    # 2. Fast Path: Standard Coulomb (λ >= 1.0)
+    # Use tuple padding (Nothing) to match length 5 of the alchemical path
+    if λ >= 1
+        params = (ke, qi, qj, nothing, nothing)
+        f = force_cutoff(cutoff, inter, r, params)
+        fdr = (f / r) * dr
+        return special ? fdr * inter.weight_special : fdr
+    end
+
+    # 3. Alchemical Path
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    σ6_fac = inter.α * (1 - λ) * σ6
+
+    params = (ke, qi, qj, σ6_fac, λ)
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
-    if special
-        return fdr * inter.weight_special
-    else
-        return fdr
-    end
+    return special ? fdr * inter.weight_special : fdr
 end
 
-function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac, λ))
+# Dispatch 1: Standard Coulomb Logic (Matches Tuple length 5 with Nothings)
+@inline function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, _, _)::Tuple{Any, Any, Any, Nothing, Nothing})
+    return (ke * qi * qj) / r^2
+end
+
+# Dispatch 2: Soft Core Logic (Matches Tuple length 5 with Real/Quantities)
+@inline function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, σ6_fac, λ)::Tuple{Any, Any, Any, Any, Any})
     r3 = r^3
-    R = ((σ6_fac*(C12/C6))+(r3*r3))*sqrt(cbrt(((σ6_fac*(C12/C6))+(r3*r3))))
-    return λ * ke * ((qi*qj)/R) * (r3*r*r)
+    term = σ6_fac + (r3 * r3)
+    R = term * sqrt(cbrt(term))
+    return λ * ke * ((qi * qj) / R) * (r3 * r * r)
 end
 
 @inline function potential_energy(inter::CoulombSoftCoreBeutler,
@@ -218,26 +248,53 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    r = norm(dr)
-    cutoff = inter.cutoff
+    # 1. Type stability
     ke = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
-    C6 = 4 * ϵ * σ6
-    params = (ke, qi, qj, C6 *σ6, C6, inter.σ6_fac, inter.λ)
+    T = typeof(ustrip(ke))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    pe = pe_cutoff(cutoff, inter, r, params)
-    if special
-        return pe * inter.weight_special
-    else
-        return pe
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+
+    if λ <= 0
+        return ustrip(zero(dr[1])) * energy_units
     end
+
+    r = norm(dr)
+    qi, qj = atom_i.charge, atom_j.charge
+    cutoff = inter.cutoff
+
+    # 2. Fast Path: Standard Coulomb (λ >= 1.0)
+    if λ >= 1
+        params = (ke, qi, qj, nothing, nothing)
+        pe = pe_cutoff(cutoff, inter, r, params)
+        return special ? pe * inter.weight_special : pe
+    end
+
+    # 3. Alchemical Path
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    σ6_fac = inter.α * (1 - λ) * σ6
+
+    params = (ke, qi, qj, σ6_fac, λ)
+    pe = pe_cutoff(cutoff, inter, r, params)
+    return special ? pe * inter.weight_special : pe
 end
 
-function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac, λ))
-    R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
-    return λ * ke * ((qi * qj)/R)
+# Dispatch 1: Standard Coulomb PE
+@inline function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, _, _)::Tuple{Any, Any, Any, Nothing, Nothing})
+    return (ke * qi * qj) * inv(r)
+end
+
+# Dispatch 2: Soft Core PE
+@inline function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, σ6_fac, λ)::Tuple{Any, Any, Any, Any, Any})
+    R = sqrt(cbrt(σ6_fac + r^6))
+    return λ * ke * ((qi * qj) / R)
 end
 
 @doc raw"""
@@ -271,29 +328,29 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct CoulombSoftCoreGapsys{C, A, L, S, W, T, R} <: PairwiseInteraction
+@kwdef struct CoulombSoftCoreGapsys{C, A, S, LM, SCH, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 1
-    λ::L = 0
-    σQ::S = 1.0
+    α::A = 0.3
+    σQ::S = 1.0u"nm"
     use_neighbors::Bool = false
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
     weight_special::W = 1
     coulomb_const::T = coulomb_const
-    σ6_fac::R = (α * sqrt(cbrt(1-λ)))
 end
 
 use_neighbors(inter::CoulombSoftCoreGapsys) = inter.use_neighbors
 
-function Base.zero(coul::CoulombSoftCoreGapsys{C, A, L, S, W, T, R}) where {C, A, L, S, W, T, R}
+function Base.zero(coul::CoulombSoftCoreGapsys{C, A, S, LM, SCH, W, T}) where {C, A, S, LM, SCH, W, T}
     return CoulombSoftCoreGapsys(
         coul.cutoff,
         zero(A),
-        zero(L),
-        zero(Q),
+        coul.σQ,
         coul.use_neighbors,
+        coul.λ_mixing,
+        coul.scheduler,
         zero(W),
         zero(T),
-        zero(R),
     )
 end
 
@@ -301,44 +358,74 @@ function Base.:+(c1::CoulombSoftCoreGapsys, c2::CoulombSoftCoreGapsys)
     return CoulombSoftCoreGapsys(
         c1.cutoff,
         c1.α + c2.α,
-        c1.λ + c2.λ,
         c1.σQ + c2.σQ,
         c1.use_neighbors,
+        c1.λ_mixing,
+        c1.scheduler,
+        c1.roles,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
-        c1.σ6_fac + c2.σ6_fac,
     )
 end
 
-@inline function force(inter::CoulombSoftCoreGapsys,
+@inline function force(inter::CoulombSoftCoreGapsys, 
                        dr,
                        atom_i,
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    r = norm(dr)
-    cutoff = inter.cutoff
+
     ke = inter.coulomb_const
+    T = typeof(ustrip(ke))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+
+    if λ <= 0
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    r = norm(dr)
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, qi, qj, inter.σQ, inter.σ6_fac, inter.λ)
+    qij = qi * qj 
+    cutoff = inter.cutoff
+
+    # Fast Path: Standard Coulomb (Length 4)
+    if λ >= 1
+        params = (ke, qij, nothing, nothing)
+        f = force_cutoff(cutoff, inter, r, params)
+        fdr = (f / r) * dr
+        return special ? fdr * inter.weight_special : fdr
+    end
+
+    # Alchemical Path
+    # R is precomputed here, saving absolute value and unit math inside the inner loop
+    σ6_fac = inter.α * sqrt(cbrt(1 - λ))
+    R = σ6_fac * (oneunit(r) + (inter.σQ * abs(qij)))
+    params = (ke, qij, λ, R)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
-    if special
-        return fdr * inter.weight_special
-    else
-        return fdr
-    end
+    return special ? fdr * inter.weight_special : fdr
 end
 
-function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ))
-    qij = qi * qj
-    R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
+@inline function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qij, _, _)::Tuple{Any, Any, Nothing, Nothing})
+    return (ke * qij) / r^2
+end
+
+@inline function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qij, λ, R)::Tuple{Any, Any, Any, Any})
     if r >= R
-        return λ * ke * (qij/(r^2))
-    elseif r < R
-        return λ * ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2)))
+        return λ * ke * (qij / (r^2))
+    else
+        return λ * ke * (-(((2 * qij) / (R^3)) * r) + ((3 * qij) / (R^2)))
     end
 end
 
@@ -349,38 +436,77 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    r = norm(dr)
-    cutoff = inter.cutoff
+
     ke = inter.coulomb_const
+    T = typeof(ustrip(ke))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
+    λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
+
+    if λ <= 0
+        return ustrip(zero(dr[1])) * energy_units
+    end
+
+    r = norm(dr)
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, qi, qj, inter.σQ, inter.σ6_fac, inter.λ)
+    qij = qi * qj
+    cutoff = inter.cutoff
+
+    if λ >= 1
+        params = (ke, qij, nothing, nothing)
+        pe = pe_cutoff(cutoff, inter, r, params)
+        return special ? pe * inter.weight_special : pe
+    end
+
+    # Precompute R
+    σ6_fac = inter.α * sqrt(cbrt(1 - λ))
+    R = σ6_fac * (oneunit(r) + (inter.σQ * abs(qij)))
+    params = (ke, qij, λ, R)
 
     pe = pe_cutoff(cutoff, inter, r, params)
-    if special
-        return pe * inter.weight_special
-    else
-        return pe
-    end
+    return special ? pe * inter.weight_special : pe
 end
 
-function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac, λ))
-    qij = qi * qj
-    R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
+@inline function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qij, _, _)::Tuple{Any, Any, Nothing, Nothing})
+    return (ke * qij) * inv(r)
+end
+
+@inline function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qij, λ, R)::Tuple{Any, Any, Any, Any})
     if r >= R
-        return λ * ke * (qij/r)
-    elseif r < R
-        return λ * ke * (((qij/(R^3))*(r^2))-(((3*qij)/(R^2))*r)+((3*qij)/R))
+        return λ * (ke * (qij/r))
+    else
+        return λ * (ke * (((qij/(R^3))*(r^2))-(((3*qij)/(R^2))*r)+((3*qij)/R)))
     end
 end
 
 const crf_solvent_dielectric = 78.3
 
-"""
+@doc raw"""
     CoulombReactionField(; dist_cutoff, solvent_dielectric, use_neighbors, weight_special,
                             coulomb_const)
 
 The Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
+
+The potential energy is defined as
+```math
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0} \left( \frac{1}{r_{ij}} + k_\mathrm{rf} r_{ij}^2 - c_\mathrm{rf} \right)
+```
+where
+```math
+k_\mathrm{rf} = \frac{1}{r_\mathrm{c}^3} \frac{\varepsilon_\mathrm{rf} - 1}{2\varepsilon_\mathrm{rf} + 1}, \quad
+c_\mathrm{rf} = \frac{1}{r_\mathrm{c}} \frac{3\varepsilon_\mathrm{rf}}{2\varepsilon_\mathrm{rf} + 1}
+```
+`solvent_dielectric` corresponds to ``\varepsilon_\mathrm{rf}``.
+Setting `solvent_dielectric=Inf` gives conducting boundary conditions
+(``k_\mathrm{rf} = 1/(2r_\mathrm{c}^3)``, ``c_\mathrm{rf} = 3/(2r_\mathrm{c})``).
 """
 @kwdef struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
     dist_cutoff::D
@@ -443,13 +569,17 @@ end
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = sqrt(r2)
+
     if special
         # 1-4 interactions do not use the reaction field approximation
-        krf = (1 / (inter.dist_cutoff ^ 3)) * 0
+        krf = inv(inter.dist_cutoff^3) * 0
     else
         # These values could be pre-computed but this way is easier for AD
-        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
-              (2 * inter.solvent_dielectric + 1))
+        if isinf(inter.solvent_dielectric) # Conducting boundary conditions
+            krf = inv(2 * inter.dist_cutoff^3)
+        else
+            krf = inv(inter.dist_cutoff^3) * (inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1)
+        end
     end
 
     f = (ke * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
@@ -472,15 +602,19 @@ end
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = sqrt(r2)
+
     if special
         # 1-4 interactions do not use the reaction field approximation
-        krf = (1 / (inter.dist_cutoff ^ 3)) * 0
-        crf = (1 /  inter.dist_cutoff     ) * 0
+        krf = inv(inter.dist_cutoff^3) * 0
+        crf = inv(inter.dist_cutoff) * 0
     else
-        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
-              (2 * inter.solvent_dielectric + 1))
-        crf = (1 /  inter.dist_cutoff     ) * ((3 * inter.solvent_dielectric) /
-              (2 * inter.solvent_dielectric + 1))
+        if isinf(inter.solvent_dielectric) # conducting boundary conditions
+            krf = inv(2 * inter.dist_cutoff^3)
+            crf = 3 * inv(2 * inter.dist_cutoff)
+        else
+            krf = inv(inter.dist_cutoff^3) * (inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1)
+            crf = inv(inter.dist_cutoff) * (3 * inter.solvent_dielectric) / (2 * inter.solvent_dielectric + 1)
+        end
     end
 
     pe = (ke * qi * qj) * (inv(r) + krf * r2 - crf)

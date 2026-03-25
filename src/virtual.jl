@@ -117,7 +117,8 @@ function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, ato
                        zero(T), weight_12, weight_13, weight_cross)
 end
 
-function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D, strictness=:warn)
+function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D,
+                             strictness=default_strictness())
     n_atoms = length(atom_masses)
     virtual_site_flags = falses(n_atoms)
     virtual_sites_cpu = from_device(virtual_sites)
@@ -170,11 +171,9 @@ function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D, str
         report_issue(err_str, strictness)
     end
 
-    for ca in constraints
-        for i in constrained_atom_inds(ca)
-            if virtual_site_flags[i]
-                error("atom $i is a virtual site but is also in a constraint")
-            end
+    for i in constrained_atom_inds(constraints)
+        if virtual_site_flags[i]
+            error("atom $i is a virtual site but is also in a constraint")
         end
     end
     return to_device(virtual_site_flags, AT)
@@ -294,7 +293,7 @@ end
     end
 end
 
-function pick_non_virtual_site(rng, sys)
+function pick_non_virtual_site(sys, rng=Random.default_rng())
     if iszero(length(sys.virtual_sites))
         return rand(rng, eachindex(sys))
     else

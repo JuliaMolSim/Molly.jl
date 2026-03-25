@@ -22,6 +22,7 @@ using Graphs
 using KernelAbstractions
 using NearestNeighbors
 import PeriodicTable
+using ProgressMeter
 using SimpleCrystals
 using SpecialFunctions
 using Unitful
@@ -32,6 +33,7 @@ using LinearAlgebra
 using Random
 using SparseArrays
 using Statistics
+using StatsBase
 
 include("types.jl")
 include("units.jl")
@@ -43,6 +45,7 @@ include("virtual.jl")
 include("kernels.jl")
 include("force.jl")
 include("energy.jl")
+include("free_energy/alchemy.jl")
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
 include("interactions/mie.jl")
@@ -61,6 +64,7 @@ include("interactions/rb_torsion.jl")
 include("interactions/ewald.jl")
 include("interactions/implicit_solvent.jl")
 include("interactions/muller_brown.jl")
+include("interactions/dpd.jl")
 include("constraints/constraints.jl")
 include("constraints/shake.jl")
 include("simulators.jl")
@@ -72,8 +76,10 @@ include("residues.jl")
 include("force_field.jl")
 include("setup.jl")
 include("trajectory.jl")
+include("free_energy/thermo.jl")
 include("free_energy/stats.jl")
 include("free_energy/mbar.jl")
+include("free_energy/AWH.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
 

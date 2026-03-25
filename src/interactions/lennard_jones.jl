@@ -1,5 +1,6 @@
 export
     LennardJones,
+    LJDispersionCorrection,
     LennardJonesSoftCoreBeutler,
     LennardJonesSoftCoreGapsys,
     AshbaughHatch
@@ -21,9 +22,8 @@ and the force on each atom by
 \end{aligned}
 ```
 
-The potential energy does not include the long range dispersion correction present
-in some other implementations that approximately represents contributions from
-beyond the cutoff distance.
+Should be used alongside the [`LJDispersionCorrection`](@ref) general interaction
+when the long-range correction to the potential energy is required.
 """
 @kwdef struct LennardJones{C, H, S, E, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
@@ -140,6 +140,71 @@ function pairwise_pe(::LennardJones, r, (σ2, ϵ))
 end
 
 @doc raw"""
+    LJDispersionCorrection(atoms, dist_cutoff, σ_mixing=LorentzMixing(),
+                           ϵ_mixing=GeometricMixing())
+
+The long-range dispersion correction for the [`LennardJones`](@ref) interaction.
+
+Approximately represents contributions from beyond the cutoff distance.
+Should be used alongside the [`LennardJones`](@ref) pairwise interaction when the long-range
+correction to the potential energy is required.
+The potential energy is defined as
+```math
+E = \frac{8 \pi N^2}{V} \left( \frac{\left< \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
+```
+The forces are zero.
+
+The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
+volume can change).
+Only compatible with 3D systems.
+Not compatible with cutoffs other than [`DistanceCutoff`](@ref).
+"""
+struct LJDispersionCorrection{F}
+    factor::F
+end
+
+function LJDispersionCorrection(atoms, dist_cutoff, σ_mix=LorentzMixing(),
+                                ϵ_mix=GeometricMixing())
+    T = typeof(ustrip(dist_cutoff))
+    n_atoms = length(atoms)
+    atoms_cpu = from_device(atoms)
+    at = atoms_cpu[1]
+    ϵσ12_sum, ϵσ6_sum = zero(at.ϵ * at.σ^12), zero(at.ϵ * at.σ^6)
+    for i in 1:n_atoms
+        atom_i = atoms_cpu[i]
+        for j in 1:i
+            atom_j = atoms_cpu[j]
+            σ = σ_mixing(σ_mix, atom_i, atom_j, false)
+            ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j, false)
+            ϵσ12_sum += ϵ * σ^12
+            ϵσ6_sum  += ϵ * σ^6
+        end
+    end
+    n_pairs = (n_atoms * (n_atoms + 1)) ÷ 2
+    ϵσ12_mean = ϵσ12_sum / n_pairs
+    ϵσ6_mean  = ϵσ6_sum  / n_pairs
+    inner_term = (ϵσ12_mean / (9 * dist_cutoff^9) - ϵσ6_mean / (3 * dist_cutoff^3))
+    factor = 8 * T(π) * n_atoms^2 * inner_term
+    return LJDispersionCorrection(factor)
+end
+
+Base.zero(dc::LJDispersionCorrection) = LJDispersionCorrection(zero(dc.factor))
+
+function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
+    return LJDispersionCorrection(dc1.factor + dc2.factor)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                                        inter::LJDispersionCorrection; kwargs...)
+    return inter.factor / volume(sys)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
+                                                        inter::LJDispersionCorrection; kwargs...)
+    return fs
+end
+
+@doc raw"""
     LennardJonesSoftCoreBeutler(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing,
                                 ϵ_mixing, weight_special)
 
@@ -170,31 +235,31 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct LennardJonesSoftCoreBeutler{C, A, L, H, S, E, W, R} <: PairwiseInteraction
+@kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 1
-    λ::L = 0
+    α::A = 1.0
     use_neighbors::Bool = false
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
     weight_special::W = 1
-    σ6_fac::R = (α * (1-λ))
 end
 
 use_neighbors(inter::LennardJonesSoftCoreBeutler) = inter.use_neighbors
 
-function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, L, H, S, E, W, R}) where {C, A, L, H, S, E, W, R}
+function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W}) where {C, A, H, S, E, LM, SCH, W}
     return LennardJonesSoftCoreBeutler(
         lj.cutoff,
         zero(A),
-        zero(L),
         lj.use_neighbors,
         lj.shortcut,
         lj.σ_mixing,
         lj.ϵ_mixing,
+        lj.λ_mixing,
+        lj.scheduler,
         zero(W),
-        zero(R),
     )
 end
 
@@ -202,13 +267,13 @@ function Base.:+(l1::LennardJonesSoftCoreBeutler, l2::LennardJonesSoftCoreBeutle
     return LennardJonesSoftCoreBeutler(
         l1.cutoff,
         l1.α + l2.α,
-        l1.λ + l2.λ,
         l1.use_neighbors,
         l1.shortcut,
         l1.σ_mixing,
         l1.ϵ_mixing,
-        l1.weight_special + l2.weight_special,
-        l1.σ6_fac + l2.σ6_fac,
+        l1.λ_mixing,
+        l1.scheduler,
+        l1.weight_special + l2.weight_special
     )
 end
 
@@ -219,27 +284,63 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+    # Mix Lambda
+    T = typeof(ustrip(atom_i.σ))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+
+    if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
-    cutoff = inter.cutoff
+    # If lambda is 1, the soft core formula reduces to standard LJ
+    # We explicity branch to save compute.
+    if λ >= 1
+
+        σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+        ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+        r = norm(dr)
+        σ2 = σ^2
+        params = (σ2, ϵ, nothing, nothing)
+        
+        # Call standard LJ cutoff logic.
+        f = force_cutoff(inter.cutoff, inter, r, params) 
+        fdr = (f / r) * dr
+        
+        return special ? fdr * inter.weight_special : fdr
+    end
+
+    
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.σ6_fac, inter.λ)
+    C12 = C6 * σ6
+    σ6_fac = inter.α * (1 - λ)
+    params = (C12, C6, λ, σ6_fac)
 
-    f = force_cutoff(cutoff, inter, r, params)
+    f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = (f / r) * dr
-    if special
-        return fdr * inter.weight_special
-    else
-        return fdr
-    end
+    
+    return special ? fdr * inter.weight_special : fdr
 end
 
-function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
+# Dispatch 1: Standard LJ Logic
+@inline function pairwise_force(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+    six_term = (σ2 / r^2)^3
+    return (24 * ϵ / r) * (2 * six_term^2 - six_term)
+end
+
+# Dispatch 2: Soft Core Logic
+function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_fac)::Tuple{<:Quantity, <:Quantity, <:Real, <:Real})
     R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
     R6 = R^6
     return λ*(((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
@@ -252,16 +353,52 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+    # Mix Lambda
+    T = typeof(ustrip(atom_i.σ))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+
+    if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
+
+
+    # If lambda is 1, the soft core formula reduces to standard LJ
+    # We explicity branch to save compute.
+    if λ >= 1
+
+        σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+        ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+
+        r = norm(dr)
+        σ2 = σ^2
+        params = (σ2, ϵ, nothing, nothing)
+
+        pe = pe_cutoff(inter.cutoff, inter, r, params)
+        
+        if special
+            return pe * inter.weight_special
+        else
+            return pe
+        end
+    end
+
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
     r = norm(dr)
     C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.σ6_fac, inter.λ)
+    C12 = C6 * σ6
+    σ6_fac = inter.α * (1 - λ)
+    params = (C12, C6, σ6_fac, λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -271,9 +408,17 @@ end
     end
 end
 
-function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ))
-    R6 = (σ6_fac*(C12/C6))+r^6
-    return λ*((C12/(R6*R6)) - (C6/(R6)))
+# Dispatch 1: Standard LJ Logic
+@inline function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{Any, Any, Nothing, Nothing})
+    inv_r2 = inv(r^2)
+    six_term = (σ2 * inv_r2)^3
+    return 4 * ϵ * (six_term^2 - six_term)
+end
+
+# Dispatch 2: Soft Core Logic (Matches Tuple length 4)
+function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ)::Tuple{Any, Any, Any, Any})
+    R6 = (σ6_fac * (C12 / C6)) + r^6
+    return λ * ((C12 / (R6 * R6)) - (C6 / R6))
 end
 
 @doc raw"""
@@ -313,28 +458,30 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
-@kwdef struct LennardJonesSoftCoreGapsys{C, A, L, H, S, E, W} <: PairwiseInteraction
+@kwdef struct LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    α::A = 1
-    λ::L = 0
+    α::A = 0.85
     use_neighbors::Bool = false
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
     weight_special::W = 1
 end
 
 use_neighbors(inter::LennardJonesSoftCoreGapsys) = inter.use_neighbors
 
-function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, L, H, S, E, W}) where {C, A, L, H, S, E, W}
+function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, W}) where {C, A, H, S, E, LM, SCH, W}
     return LennardJonesSoftCoreGapsys(
         lj.cutoff,
         zero(A),
-        zero(L),
         lj.use_neighbors,
         lj.shortcut,
         lj.σ_mixing,
         lj.ϵ_mixing,
+        lj.λ_mixing,
+        lj.scheduler,
         zero(W),
     )
 end
@@ -343,11 +490,12 @@ function Base.:+(l1::LennardJonesSoftCoreGapsys, l2::LennardJonesSoftCoreGapsys)
     return LennardJonesSoftCoreGapsys(
         l1.cutoff,
         l1.α + l2.α,
-        l1.λ + l2.λ,
         l1.use_neighbors,
         l1.shortcut,
         l1.σ_mixing,
         l1.ϵ_mixing,
+        l1.λ_mixing,
+        l1.scheduler,
         l1.weight_special + l2.weight_special,
     )
 end
@@ -359,35 +507,66 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+
+    T = typeof(ustrip(atom_i.σ))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
+    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+
+    if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = norm(dr)
-    C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.λ)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+    σ6 = σ^6
 
+    # 3. Fast Path: Standard Lennard Jones
+    if λ >= 1
+        # Pass standard LJ params tuple (Length 2)
+        params = (σ^2, ϵ, nothing, nothing)
+        f = force_cutoff(cutoff, inter, r, params)
+        fdr = (f / r) * dr
+        return special ? fdr * inter.weight_special : fdr
+    end
+
+    # 4. Alchemical Path: Soft Core Gapsys
+    C6 = 4 * ϵ * σ6
+    C12 = C6 * σ6
+    val = (26 * σ6 * (1 - λ)) / 7
+    R = inter.α * sqrt(cbrt(val))
+
+    # Pass SoftCore params tuple (Length 4)
+    params = (C12, C6, λ, R)
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
-    if special
-        return fdr * inter.weight_special
-    else
-        return fdr
-    end
+    return special ? fdr * inter.weight_special : fdr
 end
 
-function pairwise_force(inter::LennardJonesSoftCoreGapsys, r, (C12, C6, λ))
-    R = inter.α*sqrt(cbrt((26*(C12/C6)*(1-inter.λ)/7)))
+# Dispatch 1: Standard LJ Logic (Matches Tuple length 2)
+@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (σ2, ϵ, _, _)::Tuple{Any, Any, Nothing, Nothing})
+    six_term = (σ2 / r^2)^3
+    return (24 * ϵ / r) * (2 * six_term^2 - six_term)
+end
+
+# Dispatch 2: Soft Core Logic (Matches Tuple length 4)
+@inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{Any, Any, Any, Any})
     r6 = r^6
-    invR = inv(R)
-    invR2 = invR^2
-    invR6 = invR^6
     if r >= R
-        return λ * (((12*C12)/(r6*r6*r))-((6*C6)/(r6*r)))
-    elseif r < R
+        return λ * (((12*C12)/(r6*r6*r)) - ((6*C6)/(r6*r)))
+    else
+        invR = inv(R)
+        invR2 = invR^2
+        invR6 = invR^6
         return λ * (((-156*C12*(invR6*invR6*invR2)) + (42*C6*(invR2*invR6)))*r +
                     (168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))
     end
@@ -400,37 +579,67 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+    T = typeof(ustrip(atom_i.σ))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+
+    # 1. Fetch alchemical roles from the contiguous array
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    pair_role = mix_roles(inter.scheduler, role_i, role_j)
+
+    # 2. Dispatch to the scheduler for the effective sterics lambda
+    # Changed scale_elec to scale_sterics
+    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+
+    if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)^6
-    ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = norm(dr)
-    C6 = 4 * ϵ * σ6
-    params = (C6 * σ6, C6, inter.λ)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+    σ6 = σ^6
 
-    pe = pe_cutoff(cutoff, inter, r, params)
-    if special
-        return pe * inter.weight_special
-    else
-        return pe
+    # 3. Fast Path: Standard Lennard Jones
+    if λ >= 1
+        # Pass standard LJ params tuple (Length 2)
+        params = (σ^2, ϵ, nothing, nothing)
+        pe = pe_cutoff(cutoff, inter, r, params)
+        return special ? pe * inter.weight_special : pe
     end
+
+    # 4. Alchemical Path: Soft Core Gapsys
+    C6 = 4 * ϵ * σ6
+    C12 = C6 * σ6
+    val = (26 * σ6 * (1 - λ)) / 7
+    R = inter.α * sqrt(cbrt(val))
+
+    # Pass SoftCore params tuple (Length 4)
+    params = (C12, C6, λ, R)
+    pe = pe_cutoff(cutoff, inter, r, params)
+    return special ? pe * inter.weight_special : pe
 end
 
-function pairwise_pe(inter::LennardJonesSoftCoreGapsys, r, (C12, C6, λ))
-    R = inter.α*sqrt(cbrt((26*(C12/C6)*(1-inter.λ)/7)))
+# Dispatch 1: Standard LJ Logic (Matches Tuple length 2)
+@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (σ2, ϵ, _, _)::Tuple{Any, Any, Nothing, Nothing})
+    inv_r2 = inv(r^2)
+    six_term = (σ2 * inv_r2)^3
+    return 4 * ϵ * (six_term^2 - six_term)
+end
+
+# Dispatch 2: Soft Core Logic (Matches Tuple length 4)
+@inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{Any, Any, Any, Any})
     r6 = r^6
-    invR = inv(R)
-    invR2 = invR^2
-    invR6 = invR^6
     if r >= R
-        return λ * (C12/(r6*r6))-(C6/(r6))
-    elseif r < R
+        return λ * ((C12/(r6*r6)) - (C6/(r6)))
+    else
+        invR = inv(R)
+        invR2 = invR^2
+        invR6 = invR^6
         return λ * ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
-                    ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
-                    (91*C12*(invR6*invR6)) - (28*C6*(invR6))
+                   ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
+                   (91*C12*(invR6*invR6)) - (28*C6*(invR6))
     end
 end
 
@@ -595,7 +804,7 @@ end
 end
 
 # Specific interaction used to allow different σ/ϵ for 1-4 interactions
-# Assumes no 1-4 Lennard-Jones interaction via the pairwise forces (weight_special = 0)
+# Assumes no 1-4 Lennard-Jones interaction via the pairwise interactions (weight_special = 0)
 struct LennardJones14{S, E, W}
     σ14_mixed::S
     ϵ14_mixed::E
@@ -614,20 +823,17 @@ function Base.:+(l1::LennardJones14, l2::LennardJones14)
     )
 end
 
-@inline function force(inter::LennardJones14, coords_i, coords_j, coords_k,
-                       coords_l, boundary, args...)
+@inline function force(inter::LennardJones14, coords_i, coords_l, boundary, args...)
     σ2 = inter.σ14_mixed ^ 2
     dr = vector(coords_i, coords_l, boundary)
     r2 = sum(abs2, dr)
     six_term = (σ2 / r2) ^ 3
     fl = inter.weight_14 * (24 * inter.ϵ14_mixed / r2) * (2 * six_term ^ 2 - six_term) * dr
     fi = -fl
-    fj, fk = zero(fl), zero(fl)
-    return SpecificForce4Atoms(fi, fj, fk, fl)
+    return SpecificForce2Atoms(fi, fl)
 end
 
-@inline function potential_energy(inter::LennardJones14, coords_i, coords_j, coords_k,
-                                  coords_l, boundary, args...)
+@inline function potential_energy(inter::LennardJones14, coords_i, coords_l, boundary, args...)
     σ2 = inter.σ14_mixed ^ 2
     r2 = sum(abs2, vector(coords_i, coords_l, boundary))
     six_term = (σ2 / r2) ^ 3

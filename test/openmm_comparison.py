@@ -54,7 +54,6 @@ for inter in inters:
         constraints=None,
         rigidWater=False,
         switchDistance=None,
-        useDispersionCorrection=False,
     )
     integrator = VelocityVerletIntegrator(time_step)
     simulation = Simulation(pdb.topology, system, integrator, platform)

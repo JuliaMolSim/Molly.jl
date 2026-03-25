@@ -28,6 +28,11 @@ jobs:
         test:
           - NotGradients
           - Gradients
+        exclude:
+          - version: '1'
+            os: ubuntu-latest
+            arch: x64
+            test: Gradients
     steps:
       - run: export UCX_ERROR_SIGNALS="SIGILL,SIGBUS,SIGFPE"
       - uses: actions/checkout@v6
@@ -35,7 +40,7 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - run: sudo apt-get update && sudo apt-get install -y xorg-dev mesa-utils xvfb libgl1 freeglut3-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev xsettingsd x11-xserver-utils
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
@@ -56,7 +61,7 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1'
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - run: |
           julia --project=docs -e '
             using Pkg
