@@ -334,13 +334,13 @@ end
 end
 
 # Dispatch 1: Standard LJ Logic
-@inline function pairwise_force(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+@inline function pairwise_force(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{Any, Any, Nothing, Nothing})
     six_term = (σ2 / r^2)^3
     return (24 * ϵ / r) * (2 * six_term^2 - six_term)
 end
 
 # Dispatch 2: Soft Core Logic
-function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_fac)::Tuple{<:Quantity, <:Quantity, <:Real, <:Real})
+function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_fac)::Tuple{Any, Any, Any, Any})
     R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
     R6 = R^6
     return λ*(((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
