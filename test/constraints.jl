@@ -819,8 +819,6 @@ end
         simulate!(sys, simulator, 10_000)
 
         @test check_position_constraints(sys, cons)
-
-        println(sys.coords)
     end
 end
 
@@ -842,28 +840,32 @@ end
 
     boundary = CubicBoundary(T(200.0)u"Å")
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
-    neighbor_finder = DistanceNeighborFinder(
-        eligible=trues(n_atoms, n_atoms),
-        dist_cutoff=T(1.5)*r_cut,
-    )
 
     for AT in array_list
         AT === Array && continue
 
+        neighbor_finder = GPUNeighborFinder(
+            eligible=to_device(trues(n_atoms, n_atoms), AT),
+            dist_cutoff=T(1.5)*r_cut,
+        )
+
+        # Place molecules on a 2D grid with 5 Å spacing so adjacent molecules
+        # are ~4.26 Å apart (well above σ=2.83 Å to avoid LJ blowup)
+        n_mol = n_atoms ÷ 2
+        n_grid = isqrt(n_mol)
         coords = [SVector{3, T}(
-            T(5.0) + T(0.74) * T((j - 1) ÷ 2) + (isodd(j) ? zero(T) : T(0.74)),
-            T(100.0) + T(0.1) * randn(T),
-            T(100.0) + T(0.1) * randn(T),
+            T(5.0) + T(5.0) * T(((j - 1) ÷ 2) % n_grid) + (isodd(j) ? T(-0.37) : T(0.37)),
+            T(5.0) + T(5.0) * T(((j - 1) ÷ 2) ÷ n_grid),
+            T(5.0),
         )u"Å" for j in 1:n_atoms]
 
         sys = System(
-            atoms=atoms,
-            coords=coords,
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords, AT),
             boundary=boundary,
             pairwise_inters=(lj,),
             neighbor_finder=neighbor_finder,
             constraints=(cons,),
-            array_type=AT,
             force_units=u"kcal * mol^-1 * Å^-1",
             energy_units=u"kcal * mol^-1",
         )

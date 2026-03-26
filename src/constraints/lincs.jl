@@ -360,7 +360,7 @@ end
     idx = @index(Global, Linear)
     if idx <= length(constrained_atoms)
         a = constrained_atoms[idx]
-        coords[a] += typeof(coords[a])(delta_buf[1, a], delta_buf[2, a], delta_buf[3, a]) .* unit_scale
+        coords[a] += SVector(delta_buf[1, a], delta_buf[2, a], delta_buf[3, a]) .* unit_scale
         delta_buf[1, a] = zero(eltype(delta_buf))
         delta_buf[2, a] = zero(eltype(delta_buf))
         delta_buf[3, a] = zero(eltype(delta_buf))
@@ -560,6 +560,27 @@ function check_position_constraints(sys::System{<:Any, <:Any, FT}, ca::LINCS) wh
         err = ustrip(abs(norm(dr) - dc.dist))
         max_err = max(err, max_err)
     end
+    return max_err < ustrip(ca.dist_tolerance)
+end
+
+function check_position_constraints(sys::System{<:Any, <:AbstractGPUArray, FT}, ca::LINCS) where FT
+    err_unit = unit(eltype(eltype(sys.coords)))
+    if err_unit != unit(ca.dist_tolerance)
+        throw(ArgumentError("distance tolerance units in LINCS ($(unit(ca.dist_tolerance))) " *
+                            "are inconsistent with system coordinate units ($err_unit)"))
+    end
+
+    # Use GPU lincs_data from the system to avoid scalar GPU array indexing
+    gpu_ca = only(c for c in sys.constraints if c isa LINCS)
+    data = gpu_ca.lincs_data
+    unit_len = oneunit(eltype(eltype(sys.coords)))
+
+    coords_a1 = sys.coords[data.atom1]
+    coords_a2 = sys.coords[data.atom2]
+    target_lengths = data.lengths .* unit_len
+    dr_norms = norm.(vector.(coords_a1, coords_a2, (sys.boundary,)))
+    max_err = maximum(ustrip.(abs.(dr_norms .- target_lengths)))
+
     return max_err < ustrip(ca.dist_tolerance)
 end
 
