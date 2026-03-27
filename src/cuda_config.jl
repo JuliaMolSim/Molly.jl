@@ -1,12 +1,4 @@
 # CUDA launch configuration
-
-export CUDALaunchConfig,
-       cuda_launch_config,
-       set_cuda_launch_config!,
-       reset_cuda_launch_config!,
-       reset_cuda_launch_autotune_cache!,
-       optimize_cuda_launch_config!
-
 """
     CUDALaunchConfig(; force_block_y=nothing, force_maxregs=nothing,
                        tile_threads=nothing, energy_block_y=nothing)
@@ -97,10 +89,17 @@ Autotune and cache CUDA launch overrides for the given system.
 On CUDA systems, this benchmarks a small launch-candidate set for Molly's tiled
 pairwise kernels, caches the result for the current device/system signature,
 and writes the winning values into the global launch override state.
+A GPU [`simulate!`](@ref) call will invoke this automatically unless
+`autotune_cuda_launch=false` is passed.
 A fallback is provided for non-GPU systems that does nothing.
 """
 function optimize_cuda_launch_config!(sys)
     return nothing
+end
+
+@inline function maybe_optimize_cuda_launch_config!(sys; enabled::Bool=true)
+    enabled || return nothing
+    return optimize_cuda_launch_config!(sys)
 end
 
 """

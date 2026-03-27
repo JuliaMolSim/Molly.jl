@@ -450,6 +450,9 @@ end
     end
 end
 
+# See https://en.wikipedia.org/wiki/Z-order_curve for Morton/Z-order indexing,
+# and https://graphics.stanford.edu/~seander/bithacks.html#InterleaveBMN for
+# the bit-interleaving pattern used in the specialized 2D/3D fast paths.
 function generalized_morton_code(indices, bits::Integer, D::Integer)
     if D == 3 && bits <= 10
         x = UInt32(indices[1]) & 0x000003ff

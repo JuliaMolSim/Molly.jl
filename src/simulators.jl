@@ -122,6 +122,9 @@ Constraints are applied during minimization, which can lead to issues.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
     the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
     environmental variable `MOLLY_SHOW_PROGRESS`.
+- `autotune_cuda_launch=true`: whether to automatically call
+    [`optimize_cuda_launch_config!`](@ref) before GPU simulations. Explicit launch
+    overrides and cached autotuning results are still respected.
 - `rng=Random.default_rng()`: the random number generator used for the simulation. Setting
     this allows reproducible stochastic simulations.
 - `strictness=:warn`: determines behavior when encountering possible problems,
@@ -146,10 +149,12 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     # @inline needed to avoid Enzyme error
     check_strictness(strictness)
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -238,9 +243,11 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -351,9 +358,11 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -465,9 +474,11 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -553,9 +564,11 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -654,9 +667,11 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -769,6 +784,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
@@ -777,6 +793,7 @@ end
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
@@ -907,6 +924,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
@@ -915,6 +933,7 @@ end
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -996,6 +1015,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
@@ -1004,6 +1024,7 @@ end
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -1103,6 +1124,7 @@ function simulate!(sys::ReplicaSystem,
                    shortcut=nothing,
                    init_step::Integer=0,
                    show_progress=default_show_progress(),
+                   autotune_cuda_launch::Bool=true,
                    rng=Random.default_rng(),
                    strictness=default_strictness())
     check_strictness(strictness)
@@ -1130,6 +1152,7 @@ function simulate!(sys::ReplicaSystem,
 
     return simulate_remd!(sys, sim, n_steps_or_time; n_threads=n_threads, run_loggers=run_loggers,
                           shortcut=shortcut, init_step=init_step, show_progress=show_progress,
+                          autotune_cuda_launch=autotune_cuda_launch,
                           rng=rng, strictness=strictness)
 end
 
@@ -1210,6 +1233,8 @@ The simulation divides the total `n_steps` into cycles based on the time step an
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
     the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
     environmental variable `MOLLY_SHOW_PROGRESS`.
+- `autotune_cuda_launch=true`: whether to automatically call
+    [`optimize_cuda_launch_config!`](@ref) before each GPU propagation segment.
 - `rng=Random.default_rng()`: the random number generator used for the exchange accept/reject criteria and any stochastic dynamics.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
@@ -1223,6 +1248,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         shortcut=nothing, # Unused
                         init_step::Integer=0, # Unused
                         show_progress=default_show_progress(),
+                        autotune_cuda_launch::Bool=true,
                         rng=Random.default_rng(),
                         strictness=default_strictness())
     check_strictness(strictness)
@@ -1256,6 +1282,7 @@ function simulate_remd!(sys::ReplicaSystem,
             # Enforce n_threads >= 1 to prevent buffer chunk crashes
             Threads.@spawn simulate!(active_sys, integrator, cycle_length;
                                      n_threads=max(1, thread_div[i]), run_loggers=run_loggers,
+                                     autotune_cuda_launch=autotune_cuda_launch,
                                      rng=rng, strictness=strictness)
         end
 
@@ -1292,6 +1319,7 @@ function simulate_remd!(sys::ReplicaSystem,
             
             Threads.@spawn simulate!(active_sys, integrator, remaining_steps;
                                      n_threads=max(1, thread_div[i]), run_loggers=run_loggers,
+                                     autotune_cuda_launch=autotune_cuda_launch,
                                      rng=rng, strictness=strictness)
         end
     end
@@ -1339,9 +1367,11 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           autotune_cuda_launch::Bool=true,
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_cuda_launch)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;

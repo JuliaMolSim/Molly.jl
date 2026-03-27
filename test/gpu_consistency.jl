@@ -1,11 +1,3 @@
-using Molly
-using Molly: from_device, to_device, sorted_morton_seq!, init_buffers!, box_sides, GPUNeighborFinder, get_backend
-using CUDA
-using Test
-using LinearAlgebra
-using StaticArrays
-using Random
-
 @testset "GPU Consistency" begin
     if CUDA.functional()
         @testset "33-atom (No Cancellation)" begin

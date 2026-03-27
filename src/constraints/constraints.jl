@@ -149,7 +149,7 @@ end
 
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
     atom_interactions = cluster_interactions.(constraint_clusters)
-    if isdefined(@__MODULE__, :GPUNeighborFinder) && neighbor_finder isa GPUNeighborFinder
+    if neighbor_finder isa GPUNeighborFinder
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end

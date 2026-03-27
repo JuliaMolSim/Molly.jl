@@ -1,10 +1,3 @@
-using Molly
-using Molly: from_device, to_device, sorted_morton_seq!, init_buffers!, box_sides, GPUNeighborFinder
-using CUDA
-using Test
-using LinearAlgebra
-using StaticArrays
-
 include(joinpath(dirname(@__DIR__), "benchmark", "gpu_profile_utils.jl"))
 
 @testset "GPU Optimizations" begin
@@ -124,9 +117,48 @@ include(joinpath(dirname(@__DIR__), "benchmark", "gpu_profile_utils.jl"))
             Molly.reset_cuda_launch_config!()
         end
 
+        @testset "Automatic simulate! CUDA Launch Autotune" begin
+            ext = Base.get_extension(Molly, :MollyCUDAExt)
+            @test ext !== nothing
+
+            simulator = VelocityVerlet(dt=T(0.001))
+            simulate_sys() = System(sys; coords=copy(sys.coords), velocities=copy(sys.velocities))
+
+            Molly.reset_cuda_launch_config!()
+            Molly.reset_cuda_launch_autotune_cache!()
+            simulate!(simulate_sys(), simulator, 1)
+            auto_cfg = Molly.cuda_launch_config()
+            @test auto_cfg.force_block_y in ext.AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES
+            @test auto_cfg.energy_block_y in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
+            @test auto_cfg.tile_threads in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
+            @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
+
+            Molly.reset_cuda_launch_config!()
+            Molly.reset_cuda_launch_autotune_cache!()
+            simulate!(simulate_sys(), simulator, 1; autotune_cuda_launch=false)
+            opt_out_cfg = Molly.cuda_launch_config()
+            @test opt_out_cfg.force_block_y === nothing
+            @test opt_out_cfg.force_maxregs === nothing
+            @test opt_out_cfg.tile_threads === nothing
+            @test opt_out_cfg.energy_block_y === nothing
+            @test isempty(ext.CUDA_LAUNCH_AUTOTUNE_CACHE)
+
+            Molly.reset_cuda_launch_config!()
+            Molly.reset_cuda_launch_autotune_cache!()
+            Molly.set_cuda_launch_config!(force_block_y=8)
+            simulate!(simulate_sys(), simulator, 1)
+            merged_cfg = Molly.cuda_launch_config()
+            @test merged_cfg.force_block_y == 8
+            @test merged_cfg.energy_block_y in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
+            @test merged_cfg.tile_threads in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
+            @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
+
+            Molly.reset_cuda_launch_config!()
+        end
+
         @testset "Morton Code Granularity (Phase 1)" begin
             morton_bits = 10
-            sides = box_sides(sys.boundary)
+            sides = Molly.box_sides(sys.boundary)
             w = sides ./ (2^morton_bits)
             sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
             
@@ -136,7 +168,7 @@ include(joinpath(dirname(@__DIR__), "benchmark", "gpu_profile_utils.jl"))
         
         @testset "Physical Data Reordering (Phase 2)" begin
             morton_bits = 10
-            sides = box_sides(sys.boundary)
+            sides = Molly.box_sides(sys.boundary)
             w = sides ./ (2^morton_bits)
             sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
             

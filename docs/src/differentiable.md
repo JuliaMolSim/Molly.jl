@@ -158,7 +158,7 @@ The RDF looks as follows, with the purple line corresponding to the desired dist
 ![LJ RDF](images/rdf_lj.png)
 
 To make this run on the GPU the appropriate objects should be transferred to the GPU with `CuArray`: `coords`, `velocities`, `atoms` and any state owned by the chosen neighbor finder.
-For [`DistanceNeighborFinder`](@ref) this includes the `eligible` matrix; for [`GPUNeighborFinder`](@ref) it is the sparse exclusion and special-pair metadata.
+For [`DistanceNeighborFinder`](@ref) this includes the `eligible` matrix;
 If using custom interactions or some built-in interactions you may need to define methods of `zero` and `+` for your interaction type.
 
 It is common to require a loss function formed from values throughout a simulation.
