@@ -245,12 +245,10 @@ end
     ff = MolecularForceField(
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "gaff.xml", "imatinib.xml",
                            "imatinib_frcmod.xml"])...;
-        units=true,
     )
     ff_custom = MolecularForceField(
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "gaff.xml", "imatinib.xml",
                            "imatinib_frcmod.xml"])...;
-        units=true,
         custom_residue_templates=joinpath(data_dir, "imatinib_topo.xml"),
     )
     boundary = CubicBoundary(Inf*u"nm")
@@ -265,6 +263,13 @@ end
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
         @test_throws ArgumentError System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
     end
+
+    water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff)
+    water_cif  = System(joinpath(data_dir, "water_formats", "water.cif" ), ff)
+    water_mol2 = System(joinpath(data_dir, "water_formats", "water.mol2"), ff)
+    water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff) # Residue inferred
+    @test potential_energy(water_pdb ) ≈ potential_energy(water_cif) ≈
+          potential_energy(water_mol2) ≈ potential_energy(water_sdf) ≈ 11.90186520388919u"kJ/mol"
 end
 
 @testset "System setup" begin

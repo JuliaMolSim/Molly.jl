@@ -159,13 +159,30 @@ end
 # It also ensures that the correct names are used for downstream template matching
 function canonicalize_system(top, resname_replacements, atomname_replacements)
     canon_system = Dict{String, Dict{Int, ResidueGraph}}()
+    if iszero(Chemfiles.count_residues(top))
+        # Chemfiles does not assign residues for file types like SDF
+        # If no residues are assigned, assume the whole system is one residue
+        assume_one_res = true
+        res_range = 1:1
+    else
+        assume_one_res = false
+        res_range = 1:Chemfiles.count_residues(top)
+    end
 
-    for ri in 1:Chemfiles.count_residues(top)
-        res = chemfiles_residue(top, ri-1)
-        res_id = get_res_id(res)
-        res_name = Chemfiles.name(res)
-        res_name = (haskey(resname_replacements, res_name) ? resname_replacements[res_name] : res_name)
-        atom_inds_zero = Int.(Chemfiles.atoms(res))
+    for ri in res_range
+        if assume_one_res
+            res_id = (1, "X")
+            res_name = "UNK"
+            atom_inds_zero = collect(0:(size(top)-1))
+        else
+            res = chemfiles_residue(top, ri-1)
+            res_id = get_res_id(res)
+            res_name = Chemfiles.name(res)
+            if haskey(resname_replacements, res_name)
+                res_name = resname_replacements[res_name]
+            end
+            atom_inds_zero = Int.(Chemfiles.atoms(res))
+        end
         atom_inds = atom_inds_zero .+ 1
         atom_names = Molly.chemfiles_name.((top,), atom_inds_zero)
         atom_elements = Symbol[]
@@ -206,7 +223,7 @@ function canonicalize_system(top, resname_replacements, atomname_replacements)
             canon_system[res_id[2]][res_id[1]] = rgraph
         end
     end
-    return canon_system
+    return canon_system, assume_one_res
 end
 
 function resolve_bond(ff::MolecularForceField, t1::AbstractString, t2::AbstractString)
@@ -504,7 +521,8 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    canonical_system = canonicalize_system(top, resname_replacements, atomname_replacements)
+    canonical_system, assume_one_res = canonicalize_system(top, resname_replacements,
+                                                                    atomname_replacements)
 
     top_bonds = create_bonds!(canonical_system, standard_bonds)
     if disulfide_bonds
@@ -636,11 +654,15 @@ function System(coord_file::AbstractString,
         end
 
         res = residue_from_atom_idx(ai, canonical_system)
-        res_cfl = chemfiles_residue_for_atom(top, ai - 1)
-        if "is_standard_pdb" in Chemfiles.list_properties(res_cfl)
-            hetero = !Chemfiles.property(res_cfl, "is_standard_pdb")
+        if assume_one_res
+            hetero = true
         else
-            hetero = false
+            res_cfl = chemfiles_residue_for_atom(top, ai - 1)
+            if "is_standard_pdb" in Chemfiles.list_properties(res_cfl)
+                hetero = !Chemfiles.property(res_cfl, "is_standard_pdb")
+            else
+                hetero = false
+            end
         end
         push!(atoms_data, AtomData(atom_type=atype, atom_name=atom_name_from_index(ai, canonical_system),
                                    res_number=resnum_from_atom_idx(ai, canonical_system), res_name=res.res_name,
