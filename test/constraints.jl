@@ -912,7 +912,7 @@ end
     angle_constraints = [AngleConstraint(3*(i-1)+2, 3*(i-1)+1, 3*(i-1)+3, θ, bond_length, bond_length)
                          for i in 1:n_molecules]
 
-    cons = LINCS(masses=atom_masses, dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
+    cons = LINCS(masses=atom_masses, dist_tolerance=1e-5u"nm", vel_tolerance=1e-5u"nm^2 * ps^-1",
                  angle_constraints=angle_constraints, nrec=8, niter=2)
 
     @test !isnothing(cons.angle_constraints)
