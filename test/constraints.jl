@@ -109,6 +109,153 @@ end
     @test check_velocity_constraints(sys, cons)
 end
 
+@testset "Constraint virial contribution" begin
+    atom_mass = 10.0u"g/mol"
+    dt = 0.002u"ps"
+    boundary = CubicBoundary(2.0u"nm")
+
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:3]
+    coords = [
+        SVector(0.40, 0.40, 0.40)u"nm",
+        SVector(0.53, 0.40, 0.40)u"nm",
+        SVector(0.40, 0.54, 0.40)u"nm",
+    ]
+    velocities = zero(coords) .* u"nm/ps"
+    cons = SHAKE_RATTLE(
+        3,
+        1e-8u"nm",
+        1e-8u"nm^2/ps";
+        dist_constraints=[
+            DistanceConstraint(1, 2, 0.12u"nm"),
+            DistanceConstraint(1, 3, 0.12u"nm"),
+        ],
+    )
+
+    sys = System(
+        atoms=atoms,
+        coords=copy(coords),
+        boundary=boundary,
+        velocities=velocities,
+        constraints=(cons,),
+    )
+
+    coords_pre = copy(sys.coords)
+    sys.coords[2] += SVector(0.01, 0.00, 0.00)u"nm"
+    sys.coords[3] += SVector(0.00, 0.01, 0.00)u"nm"
+    coords_unconstrained = copy(sys.coords)
+
+    buffers = Molly.init_buffers!(sys, 1)
+    apply_position_constraints!(
+        sys,
+        coords_pre,
+        zero(sys.velocities),
+        dt;
+        constraint_virial=buffers.constraint_virial,
+    )
+
+    fs = zero_forces(sys)
+    Molly.forces!(fs, sys, nothing, buffers, Val(true), 0; n_threads=1)
+
+    G2 = mass(sys, 2) .* ((sys.coords[2] .- coords_unconstrained[2]) ./ (dt^2))
+    G3 = mass(sys, 3) .* ((sys.coords[3] .- coords_unconstrained[3]) ./ (dt^2))
+    r12 = vector(sys.coords[1], sys.coords[2], sys.boundary)
+    r13 = vector(sys.coords[1], sys.coords[3], sys.boundary)
+    expected = uconvert.(sys.energy_units, r12 * transpose(G2) + r13 * transpose(G3))
+
+    @test buffers.constraint_virial ≈ expected
+    @test buffers.virial ≈ expected
+end
+
+@testset "Constraint virial across periodic boundary" begin
+    atom_mass = 10.0u"g/mol"
+    dt = 0.002u"ps"
+    boundary = CubicBoundary(1.0u"nm")
+
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:2]
+    coords = [
+        SVector(0.98, 0.50, 0.50)u"nm",
+        SVector(0.06, 0.50, 0.50)u"nm",
+    ]
+    cons = SHAKE_RATTLE(
+        2,
+        1e-8u"nm",
+        1e-8u"nm^2/ps";
+        dist_constraints=[DistanceConstraint(1, 2, 0.10u"nm")],
+    )
+
+    sys = System(
+        atoms=atoms,
+        coords=copy(coords),
+        boundary=boundary,
+        velocities=zero(coords) .* u"nm/ps",
+        constraints=(cons,),
+    )
+
+    coords_pre = copy(sys.coords)
+    sys.coords[2] = SVector(0.11, 0.50, 0.50)u"nm"
+    coords_unconstrained = copy(sys.coords)
+
+    buffers = Molly.init_buffers!(sys, 1)
+    apply_position_constraints!(
+        sys,
+        coords_pre,
+        zero(sys.velocities),
+        dt;
+        constraint_virial=buffers.constraint_virial,
+    )
+
+    G2 = mass(sys, 2) .* ((sys.coords[2] .- coords_unconstrained[2]) ./ (dt^2))
+    r12 = vector(sys.coords[1], sys.coords[2], sys.boundary)
+    expected = uconvert.(sys.energy_units, r12 * transpose(G2))
+
+    @test buffers.constraint_virial ≈ expected
+    @test abs(buffers.constraint_virial[1, 1]) < 1.0u"kJ * mol^-1"
+end
+
+@testset "Constraint virial with position-only constraint path" begin
+    atom_mass = 10.0u"g/mol"
+    dt = 0.002u"ps"
+    boundary = CubicBoundary(2.0u"nm")
+
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:2]
+    coords = [
+        SVector(0.40, 0.40, 0.40)u"nm",
+        SVector(0.53, 0.40, 0.40)u"nm",
+    ]
+    cons = SHAKE_RATTLE(
+        2,
+        1e-8u"nm",
+        1e-8u"nm^2/ps";
+        dist_constraints=[DistanceConstraint(1, 2, 0.12u"nm")],
+    )
+
+    sys = System(
+        atoms=atoms,
+        coords=copy(coords),
+        boundary=boundary,
+        velocities=zero(coords) .* u"nm/ps",
+        constraints=(cons,),
+    )
+
+    coords_pre = copy(sys.coords)
+    sys.coords[2] += SVector(0.02, 0.00, 0.00)u"nm"
+    coords_unconstrained = copy(sys.coords)
+
+    buffers = Molly.init_buffers!(sys, 1)
+    apply_position_constraints!(
+        sys,
+        coords_pre;
+        constraint_virial=buffers.constraint_virial,
+        dt=dt,
+    )
+
+    G2 = mass(sys, 2) .* ((sys.coords[2] .- coords_unconstrained[2]) ./ (dt^2))
+    r12 = vector(sys.coords[1], sys.coords[2], sys.boundary)
+    expected = uconvert.(sys.energy_units, r12 * transpose(G2))
+
+    @test buffers.constraint_virial ≈ expected
+end
+
 @testset "Constraints 4-atom" begin
     n_atoms = 40
     atom_mass = 10.0u"g/mol"

@@ -134,10 +134,11 @@ Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.
 Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
-struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
+struct BuffersCPU{F, A, V, CV, VN, VC, KT, PT, FM}
     fs_nounits::F
     fs_chunks::A
     virial::V
+    constraint_virial::CV
     vir_nounits::VN
     vir_chunks::VC
     kin_tensor::KT
@@ -150,6 +151,7 @@ function init_buffers!(sys::System{D}, n_threads) where D
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     fs_nounits  = ustrip_vec.(zero(sys.coords))
     vir         = zeros(CT, D, D) .* sys.energy_units
+    cons_vir    = zero(vir)
     vir_nounits = ustrip_vec.(zero(vir))
     kin         = zero(vir)
     pres        = zero(vir_nounits) .* (sys.energy_units == NoUnits ? NoUnits : u"bar")
@@ -159,13 +161,15 @@ function init_buffers!(sys::System{D}, n_threads) where D
     vir_chunks = [similar(vir_nounits) for _ in 1:n_copies]
     # fs_mat is only used for virtual sites to do atomic addition
     fs_mat = (length(sys.virtual_sites) > 0 ? zeros(CT, D, length(sys)) : nothing)
-    return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
+    return BuffersCPU(fs_nounits, fs_chunks, vir, cons_vir, vir_nounits, vir_chunks, kin, pres,
+                      fs_mat)
 end
 
-struct BuffersGPU{F, P, V, VN, VR, KT, PT, C, M, R}
+struct BuffersGPU{F, P, V, CV, VN, VR, KT, PT, C, M, R}
     fs_mat::F
     pe_vec_nounits::P
     virial::V # Main virial buffer
+    constraint_virial::CV # Constraint contribution computed during the integrator step
     virial_nounits::VN # For KernelAbstractions
     virial_row_1::VR # For pairwise GPU CUDA kernel
     virial_row_2::VR
@@ -191,6 +195,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
     pe_vec_noun  = KernelAbstractions.zeros(backend, T, 1)
     virial       = zeros(CT, D, D) .* sys.energy_units
+    cons_virial  = zero(virial)
     virial_nu    = KernelAbstractions.zeros(backend, T, D, D)
     virial_row_1 = KernelAbstractions.zeros(backend, T, D, N)
     virial_row_2 = KernelAbstractions.zeros(backend, T, D, N)
@@ -207,8 +212,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
-    return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, virial_row_1, virial_row_2,
-                      virial_row_3, kin, pres, box_mins, box_maxs, morton_seq,
+    return BuffersGPU(fs_mat, pe_vec_noun, virial, cons_virial, virial_nu, virial_row_1,
+                      virial_row_2, virial_row_3, kin, pres, box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
                       compressed_special)
 end
@@ -257,9 +262,7 @@ end
 function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, buffers::BuffersCPU,
                  ::Val{needs_vir}, step_n::Integer=0;
                  n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
-    if needs_vir
-        fill!(buffers.virial, zero(T) * sys.energy_units)
-    end
+    fill!(buffers.virial, zero(T) * sys.energy_units)
     fill!(buffers.kin_tensor,  zero(T) * sys.energy_units)
     fill!(buffers.pres_tensor, zero(T) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
 
@@ -286,7 +289,8 @@ function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, buffers::BuffersCP
 
     fs .= buffers.fs_nounits .* sys.force_units
     if needs_vir
-        buffers.virial .= buffers.vir_nounits .* sys.energy_units
+        buffers.virial .= buffers.constraint_virial
+        buffers.virial .+= buffers.vir_nounits .* sys.energy_units
     end
 
     for inter in values(sys.general_inters)
@@ -536,8 +540,8 @@ end
 function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, buffers::BuffersGPU,
                  ::Val{needs_vir}, step_n::Integer=0;
                  n_threads::Integer=Threads.nthreads()) where {D, T, needs_vir}
+    fill!(buffers.virial, zero(T) * sys.energy_units)
     if needs_vir
-        fill!(buffers.virial, zero(T) * sys.energy_units)
         fill!(buffers.virial_row_1, zero(T))
         fill!(buffers.virial_row_2, zero(T))
         fill!(buffers.virial_row_3, zero(T))
@@ -568,6 +572,7 @@ function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, buffers::
     fs .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
 
     if needs_vir
+        buffers.virial .= buffers.constraint_virial
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
 

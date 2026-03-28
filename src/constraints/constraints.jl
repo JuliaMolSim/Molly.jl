@@ -302,25 +302,67 @@ Apply the coordinate constraints to the system.
 
 If `vel_storage` and `dt` are provided then velocity constraints are applied as well.
 """
-function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys,
+                                     coord_storage;
+                                     n_threads::Integer=Threads.nthreads(),
+                                     constraint_virial=nothing,
+                                     dt=nothing)
+    if !isnothing(constraint_virial)
+        isnothing(dt) && throw(ArgumentError("dt must be provided to calculate constraint virial"))
+        fill!(constraint_virial, zero(eltype(constraint_virial)))
+    end
+    coords_unconstrained = (isnothing(constraint_virial) ? nothing : copy(sys.coords))
     for ca in sys.constraints
         apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+    end
+    if !isnothing(constraint_virial) && length(sys.constraints) > 0
+        constraint_virial!(constraint_virial, sys, coords_unconstrained, dt)
     end
     return sys
 end
 
 function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
-                                     n_threads::Integer=Threads.nthreads())
+                                     n_threads::Integer=Threads.nthreads(),
+                                     constraint_virial=nothing)
+    if !isnothing(constraint_virial)
+        fill!(constraint_virial, zero(eltype(constraint_virial)))
+    end
     if length(sys.constraints) > 0
+        coords_unconstrained = (isnothing(constraint_virial) ? nothing : copy(sys.coords))
         vel_storage .= -sys.coords ./ dt
         for ca in sys.constraints
             apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
         end
         vel_storage .+= sys.coords ./ dt
         sys.velocities .+= vel_storage
+        if !isnothing(constraint_virial)
+            constraint_virial!(constraint_virial, sys, coords_unconstrained, dt)
+        end
     end
     return sys
 end
+
+@inline function add_constraint_virial_term!(virial, term, energy_units)
+    if energy_units == NoUnits
+        virial .+= term
+    else
+        virial .+= uconvert.(energy_units, term)
+    end
+    return virial
+end
+
+@inline constraint_force(coords_post, coords_pre, atom_masses, idx, dt_sq) =
+    atom_masses[idx] .* ((coords_post[idx] .- coords_pre[idx]) ./ dt_sq)
+
+function constraint_virial!(virial, sys, coords_unconstrained, dt)
+    fill!(virial, zero(eltype(virial)))
+    for ca in sys.constraints
+        constraint_virial!(virial, sys, ca, coords_unconstrained, dt)
+    end
+    return virial
+end
+
+constraint_virial!(virial, sys, ca, coords_unconstrained, dt) = virial
 
 """
     apply_velocity_constraints!(sys)

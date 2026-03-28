@@ -90,7 +90,9 @@ The [virial definition from LAMMPS](https://docs.lammps.org/compute_stress_atom.
 is used, taking into account pairwise interactions, specific interactions, and the
 [`Ewald`](@ref) and [`PME`](@ref) methods computed as indicated in
 [Essmann et al. 1995](https://doi.org/10.1063/1.470117).
-Contributions from constraints, implicit solvent methods and bias potentials are ignored.
+Constraint contributions are included when they have been computed during a constrained
+integration step and stored in the buffers; standalone virial recomputation still ignores them.
+Contributions from implicit solvent methods and bias potentials are ignored.
 Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 
 To calculate the scalar virial, see [`scalar_virial`](@ref).

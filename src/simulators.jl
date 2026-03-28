@@ -271,8 +271,14 @@ end
         needs_vir = (step_n % needs_vir_steps == 0)
 
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
-                                                         sim.dt; n_threads=n_threads)
+        using_constraints && apply_position_constraints!(
+            sys,
+            cons_coord_storage,
+            cons_vel_storage,
+            sim.dt;
+            n_threads=n_threads,
+            constraint_virial=buffers.constraint_virial,
+        )
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
@@ -287,6 +293,9 @@ end
         end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
+        if using_constraints && recompute_forces
+            fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+        end
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -389,8 +398,14 @@ end
 
         # Position update: r(t+dt) = r(t) + v(t)*dt + a(t)*dt²/2
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
-                                                         sim.dt; n_threads=n_threads)
+        using_constraints && apply_position_constraints!(
+            sys,
+            cons_coord_storage,
+            cons_vel_storage,
+            sim.dt;
+            n_threads=n_threads,
+            constraint_virial=buffers.constraint_virial,
+        )
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
@@ -410,6 +425,9 @@ end
         end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
+        if using_constraints && recompute_forces
+            fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+        end
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -496,8 +514,13 @@ end
             cons_coord_storage .= sys.coords
         end
         sys.coords .+= sys.velocities .* sim.dt
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage;
-                                                         n_threads=n_threads)
+        using_constraints && apply_position_constraints!(
+            sys,
+            cons_coord_storage;
+            n_threads=n_threads,
+            constraint_virial=buffers.constraint_virial,
+            dt=sim.dt,
+        )
 
         if using_constraints
             sys.velocities .= (sys.coords .- cons_coord_storage) ./ sim.dt
@@ -511,6 +534,9 @@ end
         end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
+        if using_constraints && recompute_forces
+            fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+        end
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -584,7 +610,13 @@ end
             sys.coords .+= vector.(coords_last, sys.coords, (sys.boundary,)) .+ accels_t .* dt_sq
         end
 
-        using_constraints && apply_position_constraints!(sys, coords_copy; n_threads=n_threads)
+        using_constraints && apply_position_constraints!(
+            sys,
+            coords_copy;
+            n_threads=n_threads,
+            constraint_virial=buffers.constraint_virial,
+            dt=sim.dt,
+        )
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
@@ -596,6 +628,9 @@ end
 
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
+        if using_constraints && recompute_forces
+            fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+        end
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -695,8 +730,14 @@ end
 
         sys.coords .+= sys.velocities .* dt_div2
 
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
-                                                         sim.dt; n_threads=n_threads)
+        using_constraints && apply_position_constraints!(
+            sys,
+            cons_coord_storage,
+            cons_vel_storage,
+            sim.dt;
+            n_threads=n_threads,
+            constraint_virial=buffers.constraint_virial,
+        )
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
@@ -706,6 +747,9 @@ end
 
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
+        if using_constraints && recompute_forces
+            fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+        end
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)

@@ -900,3 +900,90 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
 
     KernelAbstractions.synchronize(backend)
 end
+
+function constraint_virial!(virial,
+                            sys::System,
+                            ca::SHAKE_RATTLE,
+                            coords_unconstrained,
+                            dt)
+    # SHAKE updates coordinates directly, so recover the equivalent constraint
+    # force from the displacement over the timestep rather than from stored forces.
+    coords_constrained = from_device(sys.coords)
+    coords_unconstr = from_device(coords_unconstrained)
+    atom_masses = from_device(masses(sys))
+    boundary = sys.boundary
+    dt_sq = dt^2
+    energy_units = sys.energy_units
+
+    if length(ca.clusters12) > 0
+        k1s = from_device(ca.clusters12.k1)
+        k2s = from_device(ca.clusters12.k2)
+        @inbounds for idx in eachindex(k1s, k2s)
+            k1 = k1s[idx]
+            k2 = k2s[idx]
+            r12 = vector(coords_constrained[k1], coords_constrained[k2], boundary)
+            G2 = constraint_force(coords_constrained, coords_unconstr, atom_masses, k2, dt_sq)
+            add_constraint_virial_term!(virial, r12 * transpose(G2), energy_units)
+        end
+    end
+
+    if length(ca.clusters23) > 0
+        k1s = from_device(ca.clusters23.k1)
+        k2s = from_device(ca.clusters23.k2)
+        k3s = from_device(ca.clusters23.k3)
+        @inbounds for idx in eachindex(k1s, k2s, k3s)
+            k1 = k1s[idx]
+            k2 = k2s[idx]
+            k3 = k3s[idx]
+            r12 = vector(coords_constrained[k1], coords_constrained[k2], boundary)
+            r13 = vector(coords_constrained[k1], coords_constrained[k3], boundary)
+            G2 = constraint_force(coords_constrained, coords_unconstr, atom_masses, k2, dt_sq)
+            G3 = constraint_force(coords_constrained, coords_unconstr, atom_masses, k3, dt_sq)
+            add_constraint_virial_term!(virial, r12 * transpose(G2) + r13 * transpose(G3),
+                                        energy_units)
+        end
+    end
+
+    if length(ca.clusters34) > 0
+        k1s = from_device(ca.clusters34.k1)
+        k2s = from_device(ca.clusters34.k2)
+        k3s = from_device(ca.clusters34.k3)
+        k4s = from_device(ca.clusters34.k4)
+        @inbounds for idx in eachindex(k1s, k2s, k3s, k4s)
+            k1 = k1s[idx]
+            k2 = k2s[idx]
+            k3 = k3s[idx]
+            k4 = k4s[idx]
+            r12 = vector(coords_constrained[k1], coords_constrained[k2], boundary)
+            r13 = vector(coords_constrained[k1], coords_constrained[k3], boundary)
+            r14 = vector(coords_constrained[k1], coords_constrained[k4], boundary)
+            G2 = constraint_force(coords_constrained, coords_unconstr, atom_masses, k2, dt_sq)
+            G3 = constraint_force(coords_constrained, coords_unconstr, atom_masses, k3, dt_sq)
+            G4 = constraint_force(coords_constrained, coords_unconstr, atom_masses, k4, dt_sq)
+            add_constraint_virial_term!(
+                virial,
+                r12 * transpose(G2) + r13 * transpose(G3) + r14 * transpose(G4),
+                energy_units,
+            )
+        end
+    end
+
+    if length(ca.angle_clusters) > 0
+        k1s = from_device(ca.angle_clusters.k1)
+        k2s = from_device(ca.angle_clusters.k2)
+        k3s = from_device(ca.angle_clusters.k3)
+        @inbounds for idx in eachindex(k1s, k2s, k3s)
+            k1 = k1s[idx]
+            k2 = k2s[idx]
+            k3 = k3s[idx]
+            r12 = vector(coords_constrained[k1], coords_constrained[k2], boundary)
+            r13 = vector(coords_constrained[k1], coords_constrained[k3], boundary)
+            G2 = constraint_force(coords_constrained, coords_unconstr, atom_masses, k2, dt_sq)
+            G3 = constraint_force(coords_constrained, coords_unconstr, atom_masses, k3, dt_sq)
+            add_constraint_virial_term!(virial, r12 * transpose(G2) + r13 * transpose(G3),
+                                        energy_units)
+        end
+    end
+
+    return virial
+end

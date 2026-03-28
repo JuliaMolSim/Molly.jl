@@ -328,7 +328,11 @@ end
 
 function virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
     if all(iszero_value, buffers.virial)
-        return virial(sys, neighbors, step_n; n_threads=n_threads)
+        v = virial(sys, neighbors, step_n; n_threads=n_threads)
+        if !all(iszero_value, buffers.constraint_virial)
+            v .+= buffers.constraint_virial
+        end
+        return v
     else
         return copy(buffers.virial)
     end
@@ -350,7 +354,7 @@ end
 
 function scalar_virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
     if all(iszero_value, buffers.virial)
-        return scalar_virial(sys, neighbors, step_n; n_threads=n_threads)
+        return tr(virial_wrapper(sys, buffers, neighbors, step_n; n_threads=n_threads))
     else
         return tr(buffers.virial)
     end
