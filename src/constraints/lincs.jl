@@ -385,6 +385,25 @@ end
     end
 end
 
+@kernel inbounds=true function lincs_vel_rhs_kernel!(
+        B, rhs, sol,
+        @Const(coords), @Const(velocities),
+        @Const(atom1), @Const(atom2), @Const(sdiag),
+        boundary)
+    i = @index(Global, Linear)
+    if i <= length(atom1)
+        a1, a2 = atom1[i], atom2[i]
+        diff = lincs_bond_vector(coords, a1, a2, boundary)
+        inv_len = inv(sqrt(dot(diff, diff)))
+        B_i = diff * inv_len
+        B[i] = B_i
+        dv = ustrip.(velocities[a2] - velocities[a1])
+        val = -sdiag[i] * dot(B_i, dv)
+        rhs[i] = val
+        sol[i] = val
+    end
+end
+
 function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
     T = eltype(data.lengths)
     coupling = data.coupling
@@ -525,6 +544,49 @@ function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
     return coords
 end
 
+function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace, boundary)
+    K = length(data.atom1)
+    coupling = data.coupling
+    unit_vel_scale = oneunit(eltype(eltype(velocities)))
+
+    # Bond vectors from current (constrained) coords + velocity RHS
+    @inbounds for i in 1:K
+        a1, a2 = data.atom1[i], data.atom2[i]
+        diff = lincs_bond_vector(coords, a1, a2, boundary)
+        inv_len = inv(sqrt(dot(diff, diff)))
+        ws.B[i] = diff * inv_len
+        dv = ustrip.(velocities[a2] - velocities[a1])
+        ws.rhs[i] = -data.sdiag[i] * dot(ws.B[i], dv)
+    end
+
+    # Recompute coupling coefficients using current B vectors
+    @inbounds for i in 1:K
+        for n in coupling.range[i]:(coupling.range[i+1] - 1)
+            ws.blcc[n] = coupling.coef[n] * dot(ws.B[i], ws.B[coupling.neighbors[n]])
+        end
+    end
+
+    copyto!(ws.sol, ws.rhs)
+    lincs_solve!(velocities, data, ws, unit_vel_scale)
+end
+
+function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
+                               delta_buf, constrained_atoms, block_size)
+    K = length(data.atom1)
+    backend = get_backend(velocities)
+    unit_vel_scale = oneunit(eltype(eltype(velocities)))
+
+    vel_rhs_kern! = lincs_vel_rhs_kernel!(backend, block_size)
+    vel_rhs_kern!(ws.B, ws.rhs, ws.sol, coords, velocities,
+                  data.atom1, data.atom2, data.sdiag, boundary; ndrange=K)
+
+    lincs_gpu_solve!(velocities, data, ws, delta_buf, constrained_atoms,
+                     block_size, backend, unit_vel_scale)
+
+    KernelAbstractions.synchronize(backend)
+    return velocities
+end
+
 # --- Molly interface ---
 
 function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained_update;
@@ -541,9 +603,14 @@ function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained
 end
 
 function apply_velocity_constraints!(sys::System, ca::LINCS; kwargs...)
-    # LINCS handles velocities implicitly through position constraint correction
-    # via the vel_storage mechanism in the combined apply_position_constraints! method.
-    # No separate velocity projection (RATTLE) step is needed.
+    if !isnothing(ca.delta_buf)
+        lincs_vel_apply_gpu!(sys.velocities, sys.coords,
+                             ca.lincs_data, ca.workspace, sys.boundary,
+                             ca.delta_buf, ca.constrained_atoms, ca.gpu_block_size)
+    else
+        lincs_vel_apply!(sys.velocities, sys.coords,
+                         ca.lincs_data, ca.workspace, sys.boundary)
+    end
     return sys
 end
 
@@ -598,6 +665,27 @@ function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca::LINCS) wh
         err = ustrip(abs(dot(dr, v_diff)))
         max_err = max(err, max_err)
     end
+    return max_err < ustrip(ca.vel_tolerance)
+end
+
+function check_velocity_constraints(sys::System{<:Any, <:AbstractGPUArray, FT}, ca::LINCS) where FT
+    err_unit = unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
+    if err_unit != unit(ca.vel_tolerance)
+        throw(ArgumentError("velocity tolerance units in LINCS ($(unit(ca.vel_tolerance))) " *
+                            "are inconsistent with system velocity and coordinate units ($err_unit)"))
+    end
+
+    gpu_ca = only(c for c in sys.constraints if c isa LINCS)
+    data = gpu_ca.lincs_data
+
+    coords_a1 = sys.coords[data.atom1]
+    coords_a2 = sys.coords[data.atom2]
+    vels_a1 = sys.velocities[data.atom1]
+    vels_a2 = sys.velocities[data.atom2]
+    dr_vecs = vector.(coords_a1, coords_a2, (sys.boundary,))
+    v_diffs = vels_a2 .- vels_a1
+    max_err = maximum(ustrip.(abs.(dot.(dr_vecs, v_diffs))))
+
     return max_err < ustrip(ca.vel_tolerance)
 end
 

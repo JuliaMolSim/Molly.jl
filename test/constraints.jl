@@ -819,6 +819,9 @@ end
         simulate!(sys, simulator, 10_000)
 
         @test check_position_constraints(sys, cons)
+        if simulator isa VelocityVerlet
+            @test check_velocity_constraints(sys, cons)
+        end
     end
 end
 
@@ -859,6 +862,8 @@ end
             T(5.0),
         )u"Å" for j in 1:n_atoms]
 
+        simulator = VelocityVerlet(dt=T(0.002)u"ps")
+
         sys = System(
             atoms=to_device(atoms, AT),
             coords=to_device(coords, AT),
@@ -871,9 +876,12 @@ end
         )
         random_velocities!(sys, temp)
 
-        simulate!(sys, VelocityVerlet(dt=T(0.002)u"ps"), 500)
+        simulate!(sys, simulator, 500)
 
         @test check_position_constraints(sys, cons)
+        if simulator isa VelocityVerlet
+            @test check_velocity_constraints(sys, cons)
+        end
     end
 end
 
