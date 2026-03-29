@@ -8,6 +8,13 @@ struct LincsCouplingMatrix{R, N, C}
     coef::C        # mass-weighted coupling coefficients
 end
 
+struct LincsCouplingDense{CI, CC, NC}
+    coupled_indices::CI   # Int[max_coupled, K_padded]
+    coupled_coef::CC      # T[max_coupled, K_padded]
+    n_coupled::NC         # Int[K_padded]
+    max_coupled::Int
+end
+
 struct LincsData{A1, A2, L, IM, SD, CM}
     atom1::A1
     atom2::A2
@@ -275,6 +282,103 @@ function create_lincs_workspace(data::LincsData)
     return LincsWorkspace(B, rhs, sol, tmp, blcc)
 end
 
+# --- GPU grouping and dense coupling layout ---
+
+function group_constraints_for_gpu(atom1, atom2, block_size)
+    K = length(atom1)
+    K == 0 && return Int[]
+
+    # Build constraint adjacency via shared atoms
+    atom_to_constraints = Dict{Int, Vector{Int}}()
+    for (ci, (a1, a2)) in enumerate(zip(atom1, atom2))
+        for a in (a1, a2)
+            push!(get!(Vector{Int}, atom_to_constraints, a), ci)
+        end
+    end
+
+    # BFS to find connected components
+    visited = falses(K)
+    components = Vector{Vector{Int}}()
+    for ci in 1:K
+        visited[ci] && continue
+        comp = Int[]
+        queue = [ci]
+        visited[ci] = true
+        while !isempty(queue)
+            c = popfirst!(queue)
+            push!(comp, c)
+            for a in (atom1[c], atom2[c])
+                for cj in get(atom_to_constraints, a, Int[])
+                    if !visited[cj]
+                        visited[cj] = true
+                        push!(queue, cj)
+                    end
+                end
+            end
+        end
+        push!(components, comp)
+    end
+
+    sort!(components, by=length, rev=true)
+
+    # Pack components into blocks, padding with 0 (dummy)
+    perm = Int[]
+    pos_in_block = 0
+    for comp in components
+        nc = length(comp)
+        if nc > block_size - pos_in_block && pos_in_block > 0
+            append!(perm, zeros(Int, block_size - pos_in_block))
+            pos_in_block = 0
+        end
+        append!(perm, comp)
+        pos_in_block = (pos_in_block + nc) % block_size
+    end
+    if pos_in_block > 0
+        append!(perm, zeros(Int, block_size - pos_in_block))
+    end
+
+    return perm
+end
+
+function build_dense_coupling(perm, coupling_csr::LincsCouplingMatrix, ::Type{T}) where T
+    K_padded = length(perm)
+
+    # Build inverse permutation (original constraint index → new position)
+    inv_perm = Dict{Int, Int}()
+    for (new_i, old_c) in enumerate(perm)
+        if old_c != 0
+            inv_perm[old_c] = new_i
+        end
+    end
+
+    max_coupled = 0
+    for old_c in perm
+        old_c == 0 && continue
+        nc = coupling_csr.range[old_c + 1] - coupling_csr.range[old_c]
+        max_coupled = max(max_coupled, nc)
+    end
+    max_coupled = max(max_coupled, 1)
+
+    # Build dense arrays (column-major: [max_coupled, K_padded])
+    coupled_indices = ones(Int, max_coupled, K_padded)
+    coupled_coef_arr = zeros(T, max_coupled, K_padded)
+    n_coupled_arr = zeros(Int, K_padded)
+
+    for (new_i, old_c) in enumerate(perm)
+        old_c == 0 && continue
+        start = coupling_csr.range[old_c]
+        stop = coupling_csr.range[old_c + 1] - 1
+        nc = stop - start + 1
+        n_coupled_arr[new_i] = nc
+        for (j, n) in enumerate(start:stop)
+            coupled_indices[j, new_i] = inv_perm[coupling_csr.neighbors[n]]
+            coupled_coef_arr[j, new_i] = coupling_csr.coef[n]
+        end
+    end
+
+    return LincsCouplingDense(coupled_indices, coupled_coef_arr, n_coupled_arr, max_coupled)
+end
+
 # --- Core algorithm ---
 
 @inline function lincs_bond_vector(coords, a1, a2, boundary)
@@ -287,70 +391,164 @@ end
 
 # --- GPU kernels ---
 
-@kernel inbounds=true function lincs_bond_vectors_and_rhs_kernel!(
-        B, rhs, sol,
-        @Const(coords), @Const(old_coords),
-        @Const(atom1), @Const(atom2), @Const(lengths), @Const(sdiag),
-        boundary)
-    i = @index(Global, Linear)
-    if i <= length(atom1)
-        a1, a2 = atom1[i], atom2[i]
-        diff_old = lincs_bond_vector(old_coords, a1, a2, boundary)
-        inv_len = inv(sqrt(dot(diff_old, diff_old)))
-        B_i = diff_old * inv_len
-        B[i] = B_i
-
-        diff_new = lincs_bond_vector(coords, a1, a2, boundary)
-        proj = dot(B_i, diff_new)
-        val = sdiag[i] * (proj - lengths[i])
-        rhs[i] = val
-        sol[i] = val
-    end
-end
-
-@kernel inbounds=true function lincs_blcc_kernel!(
-        blcc,
-        @Const(B),
-        @Const(csr_range), @Const(csr_neighbors), @Const(csr_coef))
-    i = @index(Global, Linear)
-    if i <= length(csr_range) - 1
-        for n in csr_range[i]:(csr_range[i+1] - 1)
-            j = csr_neighbors[n]
-            blcc[n] = csr_coef[n] * dot(B[i], B[j])
-        end
-    end
-end
-
-@kernel inbounds=true function lincs_spmv_kernel!(
-        sol, dst,
-        @Const(src), @Const(blcc),
-        @Const(csr_range), @Const(csr_neighbors))
-    i = @index(Global, Linear)
-    @uniform T = eltype(sol)
-    if i <= length(sol)
-        mvb = zero(T)
-        for n in csr_range[i]:(csr_range[i+1] - 1)
-            mvb += blcc[n] * src[csr_neighbors[n]]
-        end
-        dst[i] = mvb
-        sol[i] += mvb
-    end
-end
-
-@kernel inbounds=true function lincs_position_scatter_kernel!(
+@kernel inbounds=true function lincs_fused_position_kernel!(
         delta_buf,
-        @Const(B), @Const(sol), @Const(sdiag),
-        @Const(atom1), @Const(atom2), @Const(invmass))
+        B, rhs, sol, tmp,
+        @Const(coords), @Const(old_coords),
+        @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
+        @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
+        max_coupled, nrec, boundary)
     i = @index(Global, Linear)
-    if i <= length(atom1)
-        a1, a2 = atom1[i], atom2[i]
-        factor = sdiag[i] * sol[i]
-        delta = B[i] * factor
-        for dim in 1:3
-            d = delta[dim]
-            Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
-            Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
+    @uniform T = eltype(lengths)
+
+    a1, a2 = atom1[i], atom2[i]
+
+    diff_old = lincs_bond_vector(old_coords, a1, a2, boundary)
+    inv_len = inv(sqrt(dot(diff_old, diff_old)))
+    B_i = diff_old * inv_len
+    B[i] = B_i
+
+    diff_new = lincs_bond_vector(coords, a1, a2, boundary)
+    proj = dot(B_i, diff_new)
+    val = sdiag[i] * (proj - lengths[i])
+    rhs[i] = val
+    sol[i] = val
+
+    @synchronize
+
+    nc = n_coupled_arr[i]
+    for rec in 1:nrec
+        mvb = zero(T)
+        for j in 1:max_coupled
+            if j <= nc
+                cj = coupled_indices[j, i]
+                blcc_val = coupled_coef[j, i] * dot(B_i, B[cj])
+                src_val = isodd(rec) ? rhs[cj] : tmp[cj]
+                mvb += blcc_val * src_val
+            end
         end
+        if isodd(rec)
+            tmp[i] = mvb
+        else
+            rhs[i] = mvb
+        end
+        sol[i] += mvb
+        @synchronize
+    end
+
+    factor = sdiag[i] * sol[i]
+    delta = B_i * factor
+    for dim in 1:3
+        d = delta[dim]
+        Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
+        Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
+    end
+end
+
+@kernel inbounds=true function lincs_fused_correction_kernel!(
+        delta_buf,
+        B, rhs, sol, tmp,
+        @Const(coords),
+        @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
+        @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
+        max_coupled, nrec, boundary)
+    i = @index(Global, Linear)
+    @uniform T = eltype(lengths)
+
+    a1, a2 = atom1[i], atom2[i]
+
+    # Correction RHS (rotational lengthening) + recompute B from current coords
+    diff = lincs_bond_vector(coords, a1, a2, boundary)
+    dlen2 = 2 * lengths[i]^2 - dot(diff, diff)
+    p = sqrt(max(dlen2, zero(T)))
+    val = sdiag[i] * (lengths[i] - p)
+    rhs[i] = val
+    sol[i] = val
+
+    inv_len = inv(sqrt(dot(diff, diff)))
+    B_i = diff * inv_len
+    B[i] = B_i
+
+    @synchronize
+
+    nc = n_coupled_arr[i]
+    for rec in 1:nrec
+        mvb = zero(T)
+        for j in 1:max_coupled
+            if j <= nc
+                cj = coupled_indices[j, i]
+                blcc_val = coupled_coef[j, i] * dot(B_i, B[cj])
+                src_val = isodd(rec) ? rhs[cj] : tmp[cj]
+                mvb += blcc_val * src_val
+            end
+        end
+        if isodd(rec)
+            tmp[i] = mvb
+        else
+            rhs[i] = mvb
+        end
+        sol[i] += mvb
+        @synchronize
+    end
+
+    factor = sdiag[i] * sol[i]
+    delta = B_i * factor
+    for dim in 1:3
+        d = delta[dim]
+        Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
+        Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
+    end
+end
+
+@kernel inbounds=true function lincs_fused_velocity_kernel!(
+        delta_buf,
+        B, rhs, sol, tmp,
+        @Const(coords), @Const(velocities),
+        @Const(atom1), @Const(atom2), @Const(invmass), @Const(sdiag),
+        @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
+        max_coupled, nrec, boundary)
+    i = @index(Global, Linear)
+    @uniform T = eltype(sdiag)
+
+    a1, a2 = atom1[i], atom2[i]
+
+    diff = lincs_bond_vector(coords, a1, a2, boundary)
+    inv_len = inv(sqrt(dot(diff, diff)))
+    B_i = diff * inv_len
+    B[i] = B_i
+    dv = ustrip.(velocities[a2] - velocities[a1])
+    val = -sdiag[i] * dot(B_i, dv)
+    rhs[i] = val
+    sol[i] = val
+
+    @synchronize
+
+    nc = n_coupled_arr[i]
+    for rec in 1:nrec
+        mvb = zero(T)
+        for j in 1:max_coupled
+            if j <= nc
+                cj = coupled_indices[j, i]
+                blcc_val = coupled_coef[j, i] * dot(B_i, B[cj])
+                src_val = isodd(rec) ? rhs[cj] : tmp[cj]
+                mvb += blcc_val * src_val
+            end
+        end
+        if isodd(rec)
+            tmp[i] = mvb
+        else
+            rhs[i] = mvb
+        end
+        sol[i] += mvb
+        @synchronize
+    end
+
+    factor = sdiag[i] * sol[i]
+    delta = B_i * factor
+    for dim in 1:3
+        d = delta[dim]
+        Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
+        Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
     end
 end
 
@@ -367,42 +565,7 @@ end
     end
 end
 
-@kernel inbounds=true function lincs_correction_rhs_kernel!(
-        rhs, sol,
-        @Const(coords),
-        @Const(atom1), @Const(atom2), @Const(lengths), @Const(sdiag),
-        boundary)
-    i = @index(Global, Linear)
-    @uniform T = eltype(lengths)
-    if i <= length(atom1)
-        a1, a2 = atom1[i], atom2[i]
-        diff = lincs_bond_vector(coords, a1, a2, boundary)
-        dlen2 = 2 * lengths[i]^2 - dot(diff, diff)
-        p = sqrt(max(dlen2, zero(T)))
-        val = sdiag[i] * (lengths[i] - p)
-        rhs[i] = val
-        sol[i] = val
-    end
-end
-
-@kernel inbounds=true function lincs_vel_rhs_kernel!(
-        B, rhs, sol,
-        @Const(coords), @Const(velocities),
-        @Const(atom1), @Const(atom2), @Const(sdiag),
-        boundary)
-    i = @index(Global, Linear)
-    if i <= length(atom1)
-        a1, a2 = atom1[i], atom2[i]
-        diff = lincs_bond_vector(coords, a1, a2, boundary)
-        inv_len = inv(sqrt(dot(diff, diff)))
-        B_i = diff * inv_len
-        B[i] = B_i
-        dv = ustrip.(velocities[a2] - velocities[a1])
-        val = -sdiag[i] * dot(B_i, dv)
-        rhs[i] = val
-        sol[i] = val
-    end
-end
+# --- CPU solve path ---
 
 function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
     T = eltype(data.lengths)
@@ -481,69 +644,6 @@ function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
     return coords
 end
 
-# --- GPU solve path ---
-
-function lincs_gpu_solve!(coords, data, ws, delta_buf, constrained_atoms,
-                          block_size, backend, unit_scale)
-    K = length(data.atom1)
-    coupling = data.coupling
-    n_ca = length(constrained_atoms)
-
-    # Coupling coefficients
-    blcc_kern! = lincs_blcc_kernel!(backend, block_size)
-    blcc_kern!(ws.blcc, ws.B, coupling.range, coupling.neighbors, coupling.coef;
-               ndrange=K)
-
-    # SpMV iterations (ping-pong between rhs and tmp)
-    spmv_kern! = lincs_spmv_kernel!(backend, block_size)
-    src, dst = ws.rhs, ws.tmp
-    for _ in 1:data.nrec
-        spmv_kern!(ws.sol, dst, src, ws.blcc, coupling.range, coupling.neighbors;
-                   ndrange=K)
-        src, dst = dst, src
-    end
-
-    # Position scatter with atomics
-    scatter_kern! = lincs_position_scatter_kernel!(backend, block_size)
-    scatter_kern!(delta_buf, ws.B, ws.sol, data.sdiag, data.atom1, data.atom2, data.invmass;
-                  ndrange=K)
-
-    # Apply accumulated deltas
-    apply_kern! = lincs_apply_deltas_kernel!(backend, block_size)
-    apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
-                ndrange=n_ca)
-end
-
-function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
-                          delta_buf, constrained_atoms, block_size)
-    K = length(data.atom1)
-    backend = get_backend(coords)
-    unit_scale = oneunit(eltype(eltype(coords)))
-
-    # Bond vectors + initial RHS (fused)
-    bv_kern! = lincs_bond_vectors_and_rhs_kernel!(backend, block_size)
-    bv_kern!(ws.B, ws.rhs, ws.sol, coords, old_coords,
-             data.atom1, data.atom2, data.lengths, data.sdiag, boundary;
-             ndrange=K)
-
-    lincs_gpu_solve!(coords, data, ws, delta_buf, constrained_atoms,
-                     block_size, backend, unit_scale)
-
-    # Outer correction iterations (rotational lengthening)
-    corr_kern! = lincs_correction_rhs_kernel!(backend, block_size)
-    for _ in 1:data.niter
-        corr_kern!(ws.rhs, ws.sol, coords,
-                   data.atom1, data.atom2, data.lengths, data.sdiag, boundary;
-                   ndrange=K)
-
-        lincs_gpu_solve!(coords, data, ws, delta_buf, constrained_atoms,
-                         block_size, backend, unit_scale)
-    end
-
-    KernelAbstractions.synchronize(backend)
-    return coords
-end
-
 function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace, boundary)
     K = length(data.atom1)
     coupling = data.coupling
@@ -570,18 +670,65 @@ function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspac
     lincs_solve!(velocities, data, ws, unit_vel_scale)
 end
 
+# --- GPU solve path ---
+
+function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
+                          delta_buf, constrained_atoms, block_size)
+    K_padded = length(data.atom1)
+    backend = get_backend(coords)
+    unit_scale = oneunit(eltype(eltype(coords)))
+    n_ca = length(constrained_atoms)
+    coupling = data.coupling
+
+    # Fused solve: bond vectors + blcc + SpMV iterations + scatter
+    fused_kern! = lincs_fused_position_kernel!(backend, block_size)
+    fused_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+                coords, old_coords,
+                data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
+                coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
+                coupling.max_coupled, data.nrec, boundary;
+                ndrange=K_padded)
+
+    apply_kern! = lincs_apply_deltas_kernel!(backend, block_size)
+    apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
+                ndrange=n_ca)
+
+    # Correction iterations (rotational lengthening)
+    for _ in 1:data.niter
+        corr_kern! = lincs_fused_correction_kernel!(backend, block_size)
+        corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+                   coords,
+                   data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
+                   coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
+                   coupling.max_coupled, data.nrec, boundary;
+                   ndrange=K_padded)
+        apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
+                    ndrange=n_ca)
+    end
+
+    KernelAbstractions.synchronize(backend)
+    return coords
+end
+
 function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
                                delta_buf, constrained_atoms, block_size)
-    K = length(data.atom1)
+    K_padded = length(data.atom1)
     backend = get_backend(velocities)
     unit_vel_scale = oneunit(eltype(eltype(velocities)))
+    n_ca = length(constrained_atoms)
+    coupling = data.coupling
 
-    vel_rhs_kern! = lincs_vel_rhs_kernel!(backend, block_size)
-    vel_rhs_kern!(ws.B, ws.rhs, ws.sol, coords, velocities,
-                  data.atom1, data.atom2, data.sdiag, boundary; ndrange=K)
+    fused_kern! = lincs_fused_velocity_kernel!(backend, block_size)
+    fused_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+                coords, velocities,
+                data.atom1, data.atom2, data.invmass, data.sdiag,
+                coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
+                coupling.max_coupled, data.nrec, boundary;
+                ndrange=K_padded)
 
-    lincs_gpu_solve!(velocities, data, ws, delta_buf, constrained_atoms,
-                     block_size, backend, unit_vel_scale)
+    apply_kern! = lincs_apply_deltas_kernel!(backend, block_size)
+    apply_kern!(velocities, delta_buf, constrained_atoms, unit_vel_scale;
+                ndrange=n_ca)
 
     KernelAbstractions.synchronize(backend)
     return velocities
@@ -637,17 +784,15 @@ function check_position_constraints(sys::System{<:Any, <:AbstractGPUArray, FT}, 
                             "are inconsistent with system coordinate units ($err_unit)"))
     end
 
-    # Use GPU lincs_data from the system to avoid scalar GPU array indexing
-    gpu_ca = only(c for c in sys.constraints if c isa LINCS)
-    data = gpu_ca.lincs_data
+    # Use CPU dist_constraints to avoid issues with padded GPU arrays
     unit_len = oneunit(eltype(eltype(sys.coords)))
-
-    coords_a1 = sys.coords[data.atom1]
-    coords_a2 = sys.coords[data.atom2]
-    target_lengths = data.lengths .* unit_len
-    dr_norms = norm.(vector.(coords_a1, coords_a2, (sys.boundary,)))
-    max_err = maximum(ustrip.(abs.(dr_norms .- target_lengths)))
-
+    coords_cpu = Array(sys.coords)
+    max_err = typemin(FT)
+    for dc in ca.dist_constraints
+        dr = vector(coords_cpu[dc.i], coords_cpu[dc.j], sys.boundary)
+        err = ustrip(abs(norm(dr) - dc.dist))
+        max_err = max(err, max_err)
+    end
     return max_err < ustrip(ca.dist_tolerance)
 end
 
@@ -675,46 +820,79 @@ function check_velocity_constraints(sys::System{<:Any, <:AbstractGPUArray, FT}, 
                             "are inconsistent with system velocity and coordinate units ($err_unit)"))
     end
 
-    gpu_ca = only(c for c in sys.constraints if c isa LINCS)
-    data = gpu_ca.lincs_data
-
-    coords_a1 = sys.coords[data.atom1]
-    coords_a2 = sys.coords[data.atom2]
-    vels_a1 = sys.velocities[data.atom1]
-    vels_a2 = sys.velocities[data.atom2]
-    dr_vecs = vector.(coords_a1, coords_a2, (sys.boundary,))
-    v_diffs = vels_a2 .- vels_a1
-    max_err = maximum(ustrip.(abs.(dot.(dr_vecs, v_diffs))))
-
+    # Use CPU dist_constraints to avoid issues with padded GPU arrays
+    coords_cpu = Array(sys.coords)
+    vels_cpu = Array(sys.velocities)
+    max_err = typemin(FT)
+    for dc in ca.dist_constraints
+        dr = vector(coords_cpu[dc.i], coords_cpu[dc.j], sys.boundary)
+        v_diff = vels_cpu[dc.j] .- vels_cpu[dc.i]
+        err = ustrip(abs(dot(dr, v_diff)))
+        max_err = max(err, max_err)
+    end
     return max_err < ustrip(ca.vel_tolerance)
 end
 
-function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms)
+# --- GPU data transfer ---
+
+function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms, block_size)
     T = eltype(data.lengths)
     K = length(data.atom1)
 
-    atom1_gpu = arr_type(data.atom1)
-    atom2_gpu = arr_type(data.atom2)
-    lengths_gpu = arr_type(data.lengths)
+    # Group coupled constraints into thread blocks for cache-friendly atomics
+    perm = group_constraints_for_gpu(data.atom1, data.atom2, block_size)
+    K_padded = length(perm)
+
+    # Reorder + pad constraint arrays according to grouping
+    atom1_padded = Vector{Int}(undef, K_padded)
+    atom2_padded = Vector{Int}(undef, K_padded)
+    lengths_padded = Vector{T}(undef, K_padded)
+    sdiag_padded = Vector{T}(undef, K_padded)
+
+    for (new_i, old_c) in enumerate(perm)
+        if old_c != 0
+            atom1_padded[new_i] = data.atom1[old_c]
+            atom2_padded[new_i] = data.atom2[old_c]
+            lengths_padded[new_i] = data.lengths[old_c]
+            sdiag_padded[new_i] = data.sdiag[old_c]
+        else
+            # Dummy: valid atom indices, zero sdiag ensures no effect
+            atom1_padded[new_i] = 1
+            atom2_padded[new_i] = min(2, n_atoms)
+            lengths_padded[new_i] = zero(T)
+            sdiag_padded[new_i] = zero(T)
+        end
+    end
+
+    # Build dense coupling layout
+    dense_coupling = build_dense_coupling(perm, data.coupling, T)
+
+    # Transfer to GPU
+    atom1_gpu = arr_type(atom1_padded)
+    atom2_gpu = arr_type(atom2_padded)
+    lengths_gpu = arr_type(lengths_padded)
     invmass_gpu = arr_type(data.invmass)
-    sdiag_gpu = arr_type(data.sdiag)
-    range_gpu = arr_type(data.coupling.range)
-    neighbors_gpu = arr_type(data.coupling.neighbors)
-    coef_gpu = arr_type(data.coupling.coef)
-    coupling_gpu = LincsCouplingMatrix(range_gpu, neighbors_gpu, coef_gpu)
+    sdiag_gpu = arr_type(sdiag_padded)
+
+    coupled_indices_gpu = arr_type(dense_coupling.coupled_indices)
+    coupled_coef_gpu = arr_type(dense_coupling.coupled_coef)
+    n_coupled_gpu = arr_type(dense_coupling.n_coupled)
+    coupling_gpu = LincsCouplingDense(coupled_indices_gpu, coupled_coef_gpu,
+                                      n_coupled_gpu, dense_coupling.max_coupled)
 
     data_gpu = LincsData(atom1_gpu, atom2_gpu, lengths_gpu, invmass_gpu,
                          sdiag_gpu, coupling_gpu, data.nrec, data.niter)
 
-    ncc = length(data.coupling.neighbors)
-    B_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), SVector{3, T}, K)
-    rhs_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), T, K)
-    sol_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), T, K)
-    tmp_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), T, K)
-    blcc_gpu = KernelAbstractions.zeros(get_backend(atom1_gpu), T, ncc)
+    # Workspace sized for padded constraint count
+    backend = get_backend(atom1_gpu)
+    B_gpu = KernelAbstractions.zeros(backend, SVector{3, T}, K_padded)
+    rhs_gpu = KernelAbstractions.zeros(backend, T, K_padded)
+    sol_gpu = KernelAbstractions.zeros(backend, T, K_padded)
+    tmp_gpu = KernelAbstractions.zeros(backend, T, K_padded)
+    blcc_gpu = KernelAbstractions.zeros(backend, T, 1)  # unused in fused kernels
     ws_gpu = LincsWorkspace(B_gpu, rhs_gpu, sol_gpu, tmp_gpu, blcc_gpu)
 
-    delta_buf = KernelAbstractions.zeros(get_backend(atom1_gpu), T, 3, n_atoms)
+    delta_buf = KernelAbstractions.zeros(backend, T, 3, n_atoms)
 
     return data_gpu, ws_gpu, delta_buf
 end
@@ -727,7 +905,7 @@ function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
     if arr_type <: AbstractGPUArray
         n_atoms = length(lincs.lincs_data.invmass)
         data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(
-            lincs.lincs_data, lincs.workspace, arr_type, n_atoms)
+            lincs.lincs_data, lincs.workspace, arr_type, n_atoms, lincs.gpu_block_size)
 
         ca_indices = sort!(unique!(vcat(lincs.lincs_data.atom1, lincs.lincs_data.atom2)))
         ca_gpu = arr_type(ca_indices)
