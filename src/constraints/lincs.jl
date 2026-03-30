@@ -552,6 +552,55 @@ end
     end
 end
 
+@kernel inbounds=true function lincs_fused_velocity_correction_kernel!(
+        delta_buf,
+        @Const(B), rhs, sol, tmp,
+        @Const(velocities),
+        @Const(atom1), @Const(atom2), @Const(invmass), @Const(sdiag),
+        @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
+        max_coupled, nrec)
+    i = @index(Global, Linear)
+    @uniform T = eltype(sdiag)
+
+    a1, a2 = atom1[i], atom2[i]
+
+    B_i = B[i]
+    dv = ustrip.(velocities[a2] - velocities[a1])
+    val = -sdiag[i] * dot(B_i, dv)
+    rhs[i] = val
+    sol[i] = val
+
+    @synchronize
+
+    nc = n_coupled_arr[i]
+    for rec in 1:nrec
+        mvb = zero(T)
+        for j in 1:max_coupled
+            if j <= nc
+                cj = coupled_indices[j, i]
+                blcc_val = coupled_coef[j, i] * dot(B_i, B[cj])
+                src_val = isodd(rec) ? rhs[cj] : tmp[cj]
+                mvb += blcc_val * src_val
+            end
+        end
+        if isodd(rec)
+            tmp[i] = mvb
+        else
+            rhs[i] = mvb
+        end
+        sol[i] += mvb
+        @synchronize
+    end
+
+    factor = sdiag[i] * sol[i]
+    delta = B_i * factor
+    for dim in 1:3
+        d = delta[dim]
+        Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
+        Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
+    end
+end
+
 @kernel inbounds=true function lincs_apply_deltas_kernel!(
         coords, delta_buf,
         @Const(constrained_atoms), unit_scale)
@@ -668,6 +717,17 @@ function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspac
 
     copyto!(ws.sol, ws.rhs)
     lincs_solve!(velocities, data, ws, unit_vel_scale)
+
+    # Iterative correction: re-evaluate velocity residual and solve again
+    for _ in 1:data.niter
+        @inbounds for i in 1:K
+            a1, a2 = data.atom1[i], data.atom2[i]
+            dv = ustrip.(velocities[a2] - velocities[a1])
+            ws.rhs[i] = -data.sdiag[i] * dot(ws.B[i], dv)
+        end
+        copyto!(ws.sol, ws.rhs)
+        lincs_solve!(velocities, data, ws, unit_vel_scale)
+    end
 end
 
 # --- GPU solve path ---
@@ -729,6 +789,19 @@ function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
     apply_kern! = lincs_apply_deltas_kernel!(backend, block_size)
     apply_kern!(velocities, delta_buf, constrained_atoms, unit_vel_scale;
                 ndrange=n_ca)
+
+    # Iterative correction: re-evaluate velocity residual and solve again
+    for _ in 1:data.niter
+        corr_kern! = lincs_fused_velocity_correction_kernel!(backend, block_size)
+        corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+                   velocities,
+                   data.atom1, data.atom2, data.invmass, data.sdiag,
+                   coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
+                   coupling.max_coupled, data.nrec;
+                   ndrange=K_padded)
+        apply_kern!(velocities, delta_buf, constrained_atoms, unit_vel_scale;
+                    ndrange=n_ca)
+    end
 
     KernelAbstractions.synchronize(backend)
     return velocities
