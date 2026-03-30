@@ -17,9 +17,11 @@
     bond_length = 0.74u"Å"
     constraints = [DistanceConstraint(j, j + 1, bond_length) for j in 1:2:n_atoms]
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1"; dist_constraints=constraints)
+    cons_shake = SHAKE_RATTLE(n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1"; dist_constraints=constraints)
+    cons_lincs = LINCS(masses=repeat([atom_mass], n_atoms), dist_tolerance=1e-8u"Å",
+                       vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints)
 
-    @test length(cons.clusters12) == (n_atoms ÷ 2)
+    @test length(cons_shake.clusters12) == (n_atoms ÷ 2)
 
     boundary = CubicBoundary(200.0u"Å")
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
@@ -27,29 +29,32 @@
         eligible=trues(n_atoms, n_atoms),
         dist_cutoff=1.5*r_cut,
     )
+    constraints = [cons_shake, cons_lincs]
 
     for simulator in simulators
-        coords = [SVector(coords_matrix[j, 1]u"Å", coords_matrix[j, 2]u"Å", coords_matrix[j, 3]u"Å")
-                  for j in 1:n_atoms]
-        velocities = [1000 * SVector(vel_matrix[j, :]u"Å/ps"...) for j in 1:n_atoms]
+        for cons in constraints
+            coords = [SVector(coords_matrix[j, 1]u"Å", coords_matrix[j, 2]u"Å", coords_matrix[j, 3]u"Å")
+                    for j in 1:n_atoms]
+            velocities = [1000 * SVector(vel_matrix[j, :]u"Å/ps"...) for j in 1:n_atoms]
 
-        sys = System(
-            atoms=atoms,
-            coords=coords,
-            boundary=boundary,
-            velocities=velocities,
-            pairwise_inters=(lj,),
-            neighbor_finder=neighbor_finder,
-            constraints=(cons,),
-            force_units=u"kcal * mol^-1 * Å^-1",
-            energy_units=u"kcal * mol^-1",
-        )
+            sys = System(
+                atoms=atoms,
+                coords=coords,
+                boundary=boundary,
+                velocities=velocities,
+                pairwise_inters=(lj,),
+                neighbor_finder=neighbor_finder,
+                constraints=(cons,),
+                force_units=u"kcal * mol^-1 * Å^-1",
+                energy_units=u"kcal * mol^-1",
+            )
 
-        simulate!(sys, simulator, 10_000)
+            simulate!(sys, simulator, 10_000)
 
-        @test check_position_constraints(sys, cons)
-        if simulator isa VelocityVerlet
-            @test check_velocity_constraints(sys, cons)
+            @test check_position_constraints(sys, cons)
+            if simulator isa VelocityVerlet
+                @test check_velocity_constraints(sys, cons)
+            end
         end
     end
 end
@@ -507,7 +512,8 @@ end
 # --- LINCS tests ---
 
 @testset "LINCS setup" begin
-    @testset "single constraint - empty coupling" begin
+    # single constraint - empty coupling
+    @testset begin
         dc = [DistanceConstraint(1, 2, 0.15)]
         masses_val = [12.0, 12.0]
         data = Molly.build_lincs_data(dc, masses_val)
@@ -517,7 +523,8 @@ end
         @test data.sdiag[1] ≈ 1.0 / sqrt(1/12.0 + 1/12.0)
     end
 
-    @testset "chain A-B-C - one coupling pair" begin
+    # chain A-B-C - one coupling pair
+    @testset begin
         dc = [DistanceConstraint(1, 2, 0.15), DistanceConstraint(2, 3, 0.15)]
         masses_val = [12.0, 12.0, 12.0]
         data = Molly.build_lincs_data(dc, masses_val)
@@ -533,7 +540,8 @@ end
         @test data.coupling.coef[2] ≈ expected_coef
     end
 
-    @testset "star topology (methane-like)" begin
+    # star topology (methane-like)
+    @testset begin
         dc = [
             DistanceConstraint(1, 2, 0.109),
             DistanceConstraint(1, 3, 0.109),
@@ -553,14 +561,16 @@ end
         end
     end
 
-    @testset "sdiag values" begin
+    # sdiag values
+    @testset begin
         dc = [DistanceConstraint(1, 2, 0.15)]
         masses_val = [1.0, 4.0]
         data = Molly.build_lincs_data(dc, masses_val)
         @test data.sdiag[1] ≈ 1.0 / sqrt(1.0 + 0.25)
     end
 
-    @testset "nrec and niter defaults" begin
+    # nrec and niter defaults
+    @testset begin
         dc = [DistanceConstraint(1, 2, 0.15)]
         masses_val = [12.0, 12.0]
         data = Molly.build_lincs_data(dc, masses_val)
@@ -572,7 +582,8 @@ end
         @test data2.niter == 2
     end
 
-    @testset "workspace allocation" begin
+    # workspace allocation
+    @testset begin
         dc = [DistanceConstraint(1, 2, 0.15)]
         masses_val = [12.0, 12.0]
         data = Molly.build_lincs_data(dc, masses_val)
@@ -586,7 +597,8 @@ end
 end
 
 @testset "LINCS solver" begin
-    @testset "nrec=0 - sol equals rhs, direct position update" begin
+    # nrec=0 - sol equals rhs, direct position update
+    @testset begin
         x, v, _, _ = make_lincs_diatomic(; v1=SVector(0.1, 0.0, 0.0), v2=SVector(-0.1, 0.0, 0.0))
         dc = [DistanceConstraint(1, 2, 0.15)]
         masses_val = [12.0, 12.0]
@@ -614,7 +626,8 @@ end
         @test xp[2] ≈ xp_before[2] + expected_delta atol=1e-16
     end
 
-    @testset "increasing nrec improves constraint satisfaction" begin
+    # increasing nrec improves constraint satisfaction
+    @testset begin
         x, v, _, _ = make_lincs_triatomic(;
             v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.01, 0.0), SVector(0.01, -0.02, 0.0)]
         )
@@ -641,7 +654,8 @@ end
 end
 
 @testset "LINCS algorithm" begin
-    @testset "diatomic equal mass" begin
+    # diatomic equal mass
+    @testset begin
         x, v, data, ws = make_lincs_diatomic(;
             v1=SVector(0.1, 0.05, 0.0), v2=SVector(-0.1, -0.05, 0.0)
         )
@@ -653,7 +667,8 @@ end
         @test d ≈ 0.15 atol=1e-10
     end
 
-    @testset "diatomic unequal mass - constraint + CoM conservation" begin
+    # diatomic unequal mass - constraint + CoM conservation
+    @testset begin
         x, v, data, ws = make_lincs_diatomic(;
             mass1=1.0, mass2=16.0,
             v1=SVector(0.2, 0.1, 0.0), v2=SVector(-0.05, 0.02, 0.0)
@@ -671,7 +686,8 @@ end
         @test com_after ≈ com_before atol=1e-12
     end
 
-    @testset "triatomic chain" begin
+    # triatomic chain
+    @testset begin
         x, v, data, ws = make_lincs_triatomic(;
             v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.01, 0.0), SVector(0.01, -0.02, 0.0)]
         )
@@ -682,7 +698,8 @@ end
         @test lincs_check_constraints(xp, data; atol=1e-6)
     end
 
-    @testset "methane star" begin
+    # methane star
+    @testset begin
         x, v, data, ws = make_lincs_methane()
         v = [
             SVector(0.0, 0.0, 0.0),
@@ -698,7 +715,8 @@ end
         @test lincs_check_constraints(xp, data; atol=1e-6)
     end
 
-    @testset "zero displacement is no-op" begin
+    # zero displacement is no-op
+    @testset begin
         x, v, data, ws = make_lincs_diatomic()
         xp = copy(x)
         x_orig = copy(x)
@@ -707,7 +725,8 @@ end
         @test xp ≈ x_orig atol=1e-14
     end
 
-    @testset "niter > 1 improves accuracy" begin
+    # niter > 1 improves accuracy
+    @testset begin
         x, _, _, _ = make_lincs_methane()
         v = [
             SVector(0.0, 0.0, 0.0),
@@ -732,7 +751,8 @@ end
         @test deviations[3] <= deviations[2] + 1e-15
     end
 
-    @testset "triangle ring" begin
+    # triangle ring
+    @testset begin
         x, v, data, ws = make_lincs_triangle(;
             v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.04, 0.0), SVector(0.01, -0.03, 0.0)]
         )
@@ -748,7 +768,8 @@ end
         @test com_after ≈ com_before atol=1e-12
     end
 
-    @testset "square ring" begin
+    # square ring
+    @testset begin
         x, v, data, ws = make_lincs_square(;
             v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.04, 0.0),
                SVector(0.01, -0.03, 0.0), SVector(-0.02, 0.01, 0.0)]
@@ -844,13 +865,19 @@ end
     boundary = CubicBoundary(T(200.0)u"Å")
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
 
-    for AT in array_list
-        AT === Array && continue
+    for AT in array_list[2:end]
 
-        neighbor_finder = GPUNeighborFinder(
-            eligible=to_device(trues(n_atoms, n_atoms), AT),
-            dist_cutoff=T(1.5)*r_cut,
-        )
+        if Molly.uses_gpu_neighbor_finder(AT)
+            neighbor_finder = GPUNeighborFinder(
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                dist_cutoff=T(1.5)*r_cut,
+            )
+        else
+            neighbor_finder = DistanceNeighborFinder(
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                dist_cutoff=T(1.5)*r_cut,
+            )
+        end
 
         # Place molecules on a 2D grid with 5 Å spacing so adjacent molecules
         # are ~4.26 Å apart (well above σ=2.83 Å to avoid LJ blowup)
@@ -947,7 +974,8 @@ end
 
     @test check_position_constraints(sys, cons)
 
-    @testset "isolation validation" begin
+    # isolation validation
+    @testset begin
         dc = [DistanceConstraint(1, 4, 0.15u"nm")]
         ac = [AngleConstraint(1, 2, 3, θ, bond_length, bond_length)]
         @test_throws ArgumentError LINCS(masses=atom_masses, dist_constraints=dc, angle_constraints=ac)
@@ -959,7 +987,8 @@ end
         @test_throws ArgumentError LINCS(masses=atom_masses, angle_constraints=ac_overlap)
     end
 
-    @testset "show method" begin
+    # show method
+    @testset begin
         s = sprint(show, cons)
         @test occursin("distance", s)
         @test occursin("angle", s)
@@ -974,7 +1003,8 @@ end
     xp_w = x_w .+ v_w .* 0.002
     Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, nothing)
 
-    @testset "apply_lincs! zero allocations" begin
+    # apply_lincs! zero allocations
+    @testset begin
         for (label, nbackbone, nbranch) in [
             ("small (7 constraints)", 2, 3),
             ("medium (399 constraints)", 100, 3),
@@ -993,7 +1023,8 @@ end
         end
     end
 
-    @testset "solve! zero allocations" begin
+    # solve! zero allocations
+    @testset begin
         x, v, c, m = make_lincs_branched(100; nbranch=3)
         data = Molly.build_lincs_data(c, m)
         ws = Molly.create_lincs_workspace(data)

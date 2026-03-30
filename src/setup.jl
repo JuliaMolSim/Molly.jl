@@ -462,7 +462,8 @@ function System(coord_file::AbstractString,
                 disulfide_bonds=true,
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                force_separate_lj14=false) where {AT <: AbstractArray}
+                force_separate_lj14=false,
+                constraint_algorithm=LINCS) where {AT <: AbstractArray}
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
@@ -978,7 +979,8 @@ function System(T::Type,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
-                grad_safe::Bool=false) where AT <: AbstractArray
+                grad_safe::Bool=false,
+                constraint_algorithm=LINCS) where AT <: AbstractArray
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
@@ -1299,7 +1301,7 @@ function find_bond_r0(bonds_all, i, j)
 end
 
 function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
-                              rigid_water, units, strictness)
+                              rigid_water, units, strictness, masses, ::Type{SHAKE_RATTLE})
     if (constraints_type == :none && !rigid_water) || iszero(length(bonds_all.is))
         return (), bonds_all, angles_all
     end
@@ -1353,6 +1355,68 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
             strictness=strictness,
         )
         constraints = (shake,)
+    else
+        constraints = ()
+    end
+    return constraints, bonds, angles
+end
+
+function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
+                              rigid_water, units, strictness, masses, ::Type{LINCS})
+    if (constraints_type == :none && !rigid_water) || iszero(length(bonds_all.is))
+        return (), bonds_all, angles_all
+    end
+
+    bonds = InteractionList2Atoms(HarmonicBond)
+    angles = InteractionList3Atoms(HarmonicAngle)
+    dist_constraints, angle_constraints = [], []
+    angle_dist_pairs = Set{Tuple{Int, Int}}()
+
+    for (i, j, k, inter, type) in zip(angles_all.is, angles_all.js, angles_all.ks,
+                                      angles_all.inters, angles_all.types)
+        if (constraints_type == :hangles && is_h_angle(atoms_data, i, j, k)) ||
+                (rigid_water && atoms_data[i].res_name in water_residue_names)
+            r0_ij = find_bond_r0(bonds_all, i, j)
+            r0_jk = find_bond_r0(bonds_all, j, k)
+            push!(angle_constraints, AngleConstraint(i, j, k, inter.θ0, r0_ij, r0_jk))
+            push!(angle_dist_pairs, (min(i, j), max(i, j)))
+            push!(angle_dist_pairs, (min(j, k), max(j, k)))
+        else
+            push!(angles.is, i)
+            push!(angles.js, j)
+            push!(angles.ks, k)
+            push!(angles.inters, inter)
+            push!(angles.types, type)
+        end
+    end
+
+    for (i, j, inter, type) in zip(bonds_all.is, bonds_all.js, bonds_all.inters, bonds_all.types)
+        if constraints_type in (:allbonds, :hangles) ||
+                (constraints_type == :hbonds && (atoms_data[i].element == "H" || atoms_data[j].element == "H")) ||
+                (rigid_water && atoms_data[i].res_name in water_residue_names)
+            if !((min(i, j), max(i, j)) in angle_dist_pairs)
+                # Only add distance constraints that are not part of an angle constraint
+                push!(dist_constraints, DistanceConstraint(i, j, inter.r0))
+            end
+        else
+            push!(bonds.is, i)
+            push!(bonds.js, j)
+            push!(bonds.inters, inter)
+            push!(bonds.types, type)
+        end
+    end
+
+    if length(dist_constraints) > 0 || length(angle_constraints) > 0
+        lincs = LINCS(
+            masses=masses,
+            dist_tolerance=add_units(T(1e-6), u"nm", units),
+            vel_tolerance=add_units(T(1e-6), u"nm^2 * ps^-1", units),
+            dist_constraints=[dist_constraints...],
+            angle_constraints=[angle_constraints...],
+            nrec=6,
+            niter=6,
+        )
+        constraints = (lincs,)
     else
         constraints = ()
     end
@@ -1509,8 +1573,10 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         topology = nothing
     end
 
+    masses = mass.(from_device(atoms))
     constraints, bonds, angles = exchange_constraints(T, bonds_all, angles_all, atoms_data,
-                                            constraints_type, rigid_water, units, strictness)
+                                            constraints_type, rigid_water, units, strictness,
+                                            masses, constraint_algorithm)
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
