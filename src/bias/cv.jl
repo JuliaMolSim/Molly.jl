@@ -236,14 +236,17 @@ system coordinates.
 
 Returns a tuple containing the gradient (as an array of vectors) and the current 
 value of the CV.
+When Enzyme is imported this defaults to using AD, but an explicit method
+can be provided for a given CV type and is defined for built-in CVs.
+The AD approach should work with and without units.
 
-# Supported CV Types
+Supported CV Types:
 - `CalcDist`: Distance between two atoms or groups (Min, Max, Center of Mass, or Single).
 - `CalcRg`: Radius of gyration of a group of atoms.
 - `CalcRMSD`: Root-mean-square deviation from a reference structure using Kabsch alignment.
 - `CalcTorsion`: Torsion (dihedral) angle defined by four atoms.
 """
-function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, velocities; kwargs...)
+function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args...; kwargs...)
     i, j = cv.atom_inds_1[1], cv.atom_inds_2[1]
     c1, c2 = coords[i], coords[j]
 
@@ -254,7 +257,7 @@ function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, velo
     end
 
     d = norm(r_ij)
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if d > zero(d)
         dir = r_ij / d
@@ -274,7 +277,7 @@ end
 # The gradient evaluates to zero for all atoms except i* and j*, for which it reduces 
 # to the single distance gradient:
 # ∇_{r_{i*}} d = -r_{i*j*}/d,    ∇_{r_{j*}} d = r_{i*j*}/d
-function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, velocities; kwargs...)
+function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, args...; kwargs...)
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
 
@@ -305,7 +308,7 @@ function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, velocit
     end
 
     d = sqrt(min_d2)
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if d > zero(d)
         dir = r_ij / d
@@ -324,7 +327,7 @@ end
 # maximizes d_{i,j} = |r_{i,j}|.
 # The gradient is equivalent to the single distance gradient applied exclusively 
 # to this maximizing pair.
-function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, velocities; kwargs...)
+function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, args...; kwargs...)
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
 
@@ -354,7 +357,7 @@ function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, velocit
     end
 
     d = sqrt(max_d2)
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if d > zero(d)
         dir = r_ij / d
@@ -374,7 +377,7 @@ end
 # for individual atoms are proportional to their fractional mass:
 # ∇_{r_i} D = -(m_i/M_A) * (R_{AB}/D)    ∀ i ∈ A
 # ∇_{r_j} D =  (m_j/M_B) * (R_{AB}/D)    ∀ j ∈ B
-function cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, velocities; kwargs...)
+function cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, args...; kwargs...)
     c1 = @view coords[cv.atom_inds_1]
     c2 = @view coords[cv.atom_inds_2]
     a1 = @view atoms[cv.atom_inds_1]
@@ -390,7 +393,7 @@ function cv_gradient(cv::CalcDist{CalcCMDist}, coords, atoms, boundary, velociti
     end
 
     d = norm(r_12)
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if d > zero(d)
         dir = r_12 / d
@@ -557,7 +560,7 @@ end
 #
 # Note: The derivative of the center of mass R_COM with respect to r_k cancels out
 # in the summation due to the definition of the center of mass.
-function cv_gradient(cv::CalcRg, coords, atoms, boundary, velocities; kwargs...)
+function cv_gradient(cv::CalcRg, coords, atoms, boundary, args...; kwargs...)
     atom_inds_used = iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds
     c_used = @view coords[atom_inds_used]
     a_used = @view atoms[atom_inds_used]
@@ -577,7 +580,7 @@ function cv_gradient(cv::CalcRg, coords, atoms, boundary, velocities; kwargs...)
     rg_sq /= M_total
     rg = sqrt(rg_sq)
 
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if rg > zero(rg)
         factor = 1 / (M_total * rg)
@@ -695,7 +698,7 @@ end
 # with respect to coordinates vanishes.
 # The exact analytical gradient for an evaluated atom k simplifies to:
 # ∇_{r_k} d_{RMSD} = [1 / (N * d_{RMSD})] * ((r_k^{sys} - R_COM^{sys}) - Q r_k^{ref})
-function cv_gradient(cv::CalcRMSD, coords, atoms, boundary, velocities; kwargs...)
+function cv_gradient(cv::CalcRMSD, coords, args...; kwargs...)
     atom_inds_used = iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds
     ref_atom_inds_used = iszero(length(cv.ref_atom_inds)) ? eachindex(cv.ref_coords) : cv.ref_atom_inds
 
@@ -710,7 +713,7 @@ function cv_gradient(cv::CalcRMSD, coords, atoms, boundary, velocities; kwargs..
     
     rmsd_val = sqrt(mean(sum_abs2, diffs))
 
-    grad = ustrip.(zero(coords))
+    grad = ustrip_vec.(zero(coords))
 
     if rmsd_val > zero(rmsd_val)
         factor = 1 / (N * rmsd_val)
@@ -721,7 +724,6 @@ function cv_gradient(cv::CalcRMSD, coords, atoms, boundary, velocities; kwargs..
 
     return grad, rmsd_val
 end
-
 
 function calculate_virial!(virial_buff, cv::CalcRMSD, coords, forces, atoms, boundary)
     # Select the relevant atoms/coordinates
@@ -785,7 +787,7 @@ end
 # ∇_{r_l} ϕ = - (|b_2| / |n|^2) * n
 # ∇_{r_j} ϕ = - (1 + (b_1 · b_2)/|b_2|^2) * ∇_{r_i} ϕ + ((b_2 · b_3)/|b_2|^2) * ∇_{r_l} ϕ
 # ∇_{r_k} ϕ =   ((b_1 · b_2)/|b_2|^2) * ∇_{r_i} ϕ - (1 + (b_2 · b_3)/|b_2|^2) * ∇_{r_l} ϕ
-function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, velocities; kwargs...)
+function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs...)
     i, j, k, l = cv.atom_inds
     ri, rj, rk, rl = coords[i], coords[j], coords[k], coords[l]
     
@@ -801,7 +803,7 @@ function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, velocities; kwarg
     b2_norm = norm(b2)
     b2_sq = b2_norm^2
    
-    grad = ustrip.(zero(coords)) / oneunit(eltype(eltype(coords)))
+    grad = ustrip_vec.(zero(coords)) / oneunit(eltype(eltype(coords)))
     phi = torsion_angle(ri, rj, rk, rl, boundary)
     
     if m_sq > zero(m_sq) && n_sq > zero(n_sq) && b2_sq > zero(b2_sq)
@@ -835,10 +837,3 @@ function calculate_virial!(virial_buff, cv::CalcTorsion, coords, forces, atoms, 
                     r_jk * transpose(f[3]) +
                     r_jl * transpose(f[4])
 end
-
-# Calculate the gradient of a CV with respect to the input coordinates
-# When Enzyme is imported this defaults to using AD, but an explicit method
-#   can be provided for a given CV type
-# The AD approach should work with and without units
-# Returns gradient and CV value
-function cv_gradient end

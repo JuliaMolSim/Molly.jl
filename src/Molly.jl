@@ -22,6 +22,7 @@ using Graphs
 using KernelAbstractions
 using NearestNeighbors
 import PeriodicTable
+using ProgressMeter
 using SimpleCrystals
 using SpecialFunctions
 using Unitful
@@ -38,6 +39,7 @@ import Unitful: ustrip
 
 include("types.jl")
 include("units.jl")
+include("cuda_config.jl")
 include("spatial.jl")
 include("cutoffs.jl")
 include("mixing.jl")
@@ -64,6 +66,7 @@ include("interactions/rb_torsion.jl")
 include("interactions/ewald.jl")
 include("interactions/implicit_solvent.jl")
 include("interactions/muller_brown.jl")
+include("interactions/dpd.jl")
 include("constraints/constraints.jl")
 include("constraints/shake.jl")
 include("simulators.jl")

@@ -1,5 +1,6 @@
 export
     LennardJones,
+    LJDispersionCorrection,
     LennardJonesSoftCoreBeutler,
     LennardJonesSoftCoreGapsys,
     AshbaughHatch
@@ -21,9 +22,8 @@ and the force on each atom by
 \end{aligned}
 ```
 
-The potential energy does not include the long range dispersion correction present
-in some other implementations that approximately represents contributions from
-beyond the cutoff distance.
+Should be used alongside the [`LJDispersionCorrection`](@ref) general interaction
+when the long-range correction to the potential energy is required.
 """
 @kwdef struct LennardJones{C, H, S, E, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
@@ -119,6 +119,71 @@ end
 function pairwise_pe(::LennardJones, r, (σ2, ϵ))
     six_term = (σ2 / r^2) ^ 3
     return 4ϵ * (six_term ^ 2 - six_term)
+end
+
+@doc raw"""
+    LJDispersionCorrection(atoms, dist_cutoff, σ_mixing=LorentzMixing(),
+                           ϵ_mixing=GeometricMixing())
+
+The long-range dispersion correction for the [`LennardJones`](@ref) interaction.
+
+Approximately represents contributions from beyond the cutoff distance.
+Should be used alongside the [`LennardJones`](@ref) pairwise interaction when the long-range
+correction to the potential energy is required.
+The potential energy is defined as
+```math
+E = \frac{8 \pi N^2}{V} \left( \frac{\left< \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
+```
+The forces are zero.
+
+The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
+volume can change).
+Only compatible with 3D systems.
+Not compatible with cutoffs other than [`DistanceCutoff`](@ref).
+"""
+struct LJDispersionCorrection{F}
+    factor::F
+end
+
+function LJDispersionCorrection(atoms, dist_cutoff, σ_mix=LorentzMixing(),
+                                ϵ_mix=GeometricMixing())
+    T = typeof(ustrip(dist_cutoff))
+    n_atoms = length(atoms)
+    atoms_cpu = from_device(atoms)
+    at = atoms_cpu[1]
+    ϵσ12_sum, ϵσ6_sum = zero(at.ϵ * at.σ^12), zero(at.ϵ * at.σ^6)
+    for i in 1:n_atoms
+        atom_i = atoms_cpu[i]
+        for j in 1:i
+            atom_j = atoms_cpu[j]
+            σ = σ_mixing(σ_mix, atom_i, atom_j, false)
+            ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j, false)
+            ϵσ12_sum += ϵ * σ^12
+            ϵσ6_sum  += ϵ * σ^6
+        end
+    end
+    n_pairs = (n_atoms * (n_atoms + 1)) ÷ 2
+    ϵσ12_mean = ϵσ12_sum / n_pairs
+    ϵσ6_mean  = ϵσ6_sum  / n_pairs
+    inner_term = (ϵσ12_mean / (9 * dist_cutoff^9) - ϵσ6_mean / (3 * dist_cutoff^3))
+    factor = 8 * T(π) * n_atoms^2 * inner_term
+    return LJDispersionCorrection(factor)
+end
+
+Base.zero(dc::LJDispersionCorrection) = LJDispersionCorrection(zero(dc.factor))
+
+function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
+    return LJDispersionCorrection(dc1.factor + dc2.factor)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                                        inter::LJDispersionCorrection; kwargs...)
+    return inter.factor / volume(sys)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
+                                                        inter::LJDispersionCorrection; kwargs...)
+    return fs
 end
 
 @doc raw"""
@@ -251,13 +316,13 @@ end
 end
 
 # Dispatch 1: Standard LJ Logic
-@inline function pairwise_force(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{<:Quantity, <:Quantity, Nothing, Nothing})
+@inline function pairwise_force(::LennardJonesSoftCoreBeutler, r, (σ2, ϵ, _, _)::Tuple{Any, Any, Nothing, Nothing})
     six_term = (σ2 / r^2)^3
     return (24 * ϵ / r) * (2 * six_term^2 - six_term)
 end
 
 # Dispatch 2: Soft Core Logic
-function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_fac)::Tuple{<:Quantity, <:Quantity, <:Real, <:Real})
+function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_fac)::Tuple{Any, Any, Any, Any})
     R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
     R6 = R^6
     return λ*(((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
@@ -721,7 +786,7 @@ end
 end
 
 # Specific interaction used to allow different σ/ϵ for 1-4 interactions
-# Assumes no 1-4 Lennard-Jones interaction via the pairwise forces (weight_special = 0)
+# Assumes no 1-4 Lennard-Jones interaction via the pairwise interactions (weight_special = 0)
 struct LennardJones14{S, E, W}
     σ14_mixed::S
     ϵ14_mixed::E
@@ -740,20 +805,17 @@ function Base.:+(l1::LennardJones14, l2::LennardJones14)
     )
 end
 
-@inline function force(inter::LennardJones14, coords_i, coords_j, coords_k,
-                       coords_l, boundary, args...)
+@inline function force(inter::LennardJones14, coords_i, coords_l, boundary, args...)
     σ2 = inter.σ14_mixed ^ 2
     dr = vector(coords_i, coords_l, boundary)
     r2 = sum(abs2, dr)
     six_term = (σ2 / r2) ^ 3
     fl = inter.weight_14 * (24 * inter.ϵ14_mixed / r2) * (2 * six_term ^ 2 - six_term) * dr
     fi = -fl
-    fj, fk = zero(fl), zero(fl)
-    return SpecificForce4Atoms(fi, fj, fk, fl)
+    return SpecificForce2Atoms(fi, fl)
 end
 
-@inline function potential_energy(inter::LennardJones14, coords_i, coords_j, coords_k,
-                                  coords_l, boundary, args...)
+@inline function potential_energy(inter::LennardJones14, coords_i, coords_l, boundary, args...)
     σ2 = inter.σ14_mixed ^ 2
     r2 = sum(abs2, vector(coords_i, coords_l, boundary))
     six_term = (σ2 / r2) ^ 3

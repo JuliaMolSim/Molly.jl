@@ -24,11 +24,12 @@ export
     MollyCalculator,
     ASECalculator
 
-
-# Required for interactions that may be explicitly set to `nothing` (e.g., in some implicit solvent models)
-Unitful.ustrip(::Nothing) = nothing
-Unitful.ustrip(x::Tuple) = map(ustrip, x)
-Unitful.ustrip(x::NamedTuple) = map(ustrip, x)
+# Recursively strip units from Molly-owned composite fields without extending
+# Unitful on foreign container types.
+@inline _strip_units(x) = ustrip(x)
+@inline _strip_units(::Nothing) = nothing
+@inline _strip_units(x::Tuple) = map(_strip_units, x)
+@inline _strip_units(x::NamedTuple) = map(_strip_units, x)
 
 # Typed dictionary fetch used by parameter-injection utilities.
 dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
@@ -66,6 +67,13 @@ struct InteractionList1Atoms{I, T} <: SpecificInteractionList{1}
     is::I
     inters::T
     types::Vector{String}
+
+    function InteractionList1Atoms(is, inters, types)
+        if !(length(is) == length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList1Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters)}(is, inters, types)
+    end
 end
 
 """
@@ -80,6 +88,13 @@ struct InteractionList2Atoms{I, T} <: SpecificInteractionList{2}
     js::I
     inters::T
     types::Vector{String}
+
+    function InteractionList2Atoms(is, js, inters, types)
+        if !(length(is) == length(js) == length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList2Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters)}(is, js, inters, types)
+    end
 end
 
 """
@@ -95,6 +110,13 @@ struct InteractionList3Atoms{I, T} <: SpecificInteractionList{3}
     ks::I
     inters::T
     types::Vector{String}
+
+    function InteractionList3Atoms(is, js, ks, inters, types)
+        if !(length(is) == length(js) == length(ks) == length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList3Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters)}(is, js, ks, inters, types)
+    end
 end
 
 """
@@ -111,6 +133,13 @@ struct InteractionList4Atoms{I, T} <: SpecificInteractionList{4}
     ls::I
     inters::T
     types::Vector{String}
+
+    function InteractionList4Atoms(is, js, ks, ls, inters, types)
+        if !(length(is) == length(js) == length(ks) == length(ls) == length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList4Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters)}(is, js, ks, ls, inters, types)
+    end
 end
 
 InteractionList1Atoms(is, inters) = InteractionList1Atoms(is, inters, fill("", length(is)))
@@ -120,71 +149,70 @@ InteractionList3Atoms(is, js, ks, inters) = InteractionList3Atoms(is, js, ks, in
 InteractionList4Atoms(is, js, ks, ls, inters) = InteractionList4Atoms(is, js, ks, ls, inters,
                                                                       fill("", length(is)))
 
-InteractionList1Atoms(T) = InteractionList1Atoms{Vector{Int32}, Vector{T}}([], T[], [])
-InteractionList2Atoms(T) = InteractionList2Atoms{Vector{Int32}, Vector{T}}([], [], T[], [])
-InteractionList3Atoms(T) = InteractionList3Atoms{Vector{Int32}, Vector{T}}([], [], [], T[], [])
-InteractionList4Atoms(T) = InteractionList4Atoms{Vector{Int32}, Vector{T}}([], [], [], [], T[], [])
+InteractionList1Atoms(T) = InteractionList1Atoms(Int32[], T[], [])
+InteractionList2Atoms(T) = InteractionList2Atoms(Int32[], Int32[], T[], [])
+InteractionList3Atoms(T) = InteractionList3Atoms(Int32[], Int32[], Int32[], T[], [])
+InteractionList4Atoms(T) = InteractionList4Atoms(Int32[], Int32[], Int32[], Int32[], T[], [])
 
-interaction_type(::InteractionList1Atoms{I, T}) where {I, T} = eltype(T)
-interaction_type(::InteractionList2Atoms{I, T}) where {I, T} = eltype(T)
-interaction_type(::InteractionList3Atoms{I, T}) where {I, T} = eltype(T)
-interaction_type(::InteractionList4Atoms{I, T}) where {I, T} = eltype(T)
+interaction_type(::InteractionList1Atoms{<:Any, T}) where {T} = eltype(T)
+interaction_type(::InteractionList2Atoms{<:Any, T}) where {T} = eltype(T)
+interaction_type(::InteractionList3Atoms{<:Any, T}) where {T} = eltype(T)
+interaction_type(::InteractionList4Atoms{<:Any, T}) where {T} = eltype(T)
 
-Base.length(inter_list::Union{InteractionList1Atoms, InteractionList2Atoms,
-                              InteractionList3Atoms, InteractionList4Atoms}) = length(inter_list.is)
+Base.length(inter_list::SpecificInteractionList) = length(inter_list.is)
 
-function Base.zero(inter_list::InteractionList1Atoms{I, T}) where {I, T}
+function Base.zero(inter_list::InteractionList1Atoms)
     n_inters = length(inter_list)
-    return InteractionList1Atoms{I, T}(
-        fill(0, n_inters),
+    return InteractionList1Atoms(
+        zero(inter_list.is),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
 end
 
-function Base.zero(inter_list::InteractionList2Atoms{I, T}) where {I, T}
+function Base.zero(inter_list::InteractionList2Atoms)
     n_inters = length(inter_list)
-    return InteractionList2Atoms{I, T}(
-        fill(0, n_inters),
-        fill(0, n_inters),
+    return InteractionList2Atoms(
+        zero(inter_list.is),
+        zero(inter_list.js),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
 end
 
-function Base.zero(inter_list::InteractionList3Atoms{I, T}) where {I, T}
+function Base.zero(inter_list::InteractionList3Atoms)
     n_inters = length(inter_list)
-    return InteractionList3Atoms{I, T}(
-        fill(0, n_inters),
-        fill(0, n_inters),
-        fill(0, n_inters),
+    return InteractionList3Atoms(
+        zero(inter_list.is),
+        zero(inter_list.js),
+        zero(inter_list.ks),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
 end
 
-function Base.zero(inter_list::InteractionList4Atoms{I, T}) where {I, T}
+function Base.zero(inter_list::InteractionList4Atoms)
     n_inters = length(inter_list)
-    return InteractionList4Atoms{I, T}(
-        fill(0, n_inters),
-        fill(0, n_inters),
-        fill(0, n_inters),
-        fill(0, n_inters),
+    return InteractionList4Atoms(
+        zero(inter_list.is),
+        zero(inter_list.js),
+        zero(inter_list.ks),
+        zero(inter_list.ls),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
 end
 
-function Base.:+(il1::InteractionList1Atoms{I, T}, il2::InteractionList1Atoms{I, T}) where {I, T}
-    return InteractionList1Atoms{I, T}(
+function Base.:+(il1::InteractionList1Atoms, il2::InteractionList1Atoms)
+    return InteractionList1Atoms(
         il1.is,
         il1.inters .+ il2.inters,
         il1.types,
     )
 end
 
-function Base.:+(il1::InteractionList2Atoms{I, T}, il2::InteractionList2Atoms{I, T}) where {I, T}
-    return InteractionList2Atoms{I, T}(
+function Base.:+(il1::InteractionList2Atoms, il2::InteractionList2Atoms)
+    return InteractionList2Atoms(
         il1.is,
         il1.js,
         il1.inters .+ il2.inters,
@@ -192,8 +220,8 @@ function Base.:+(il1::InteractionList2Atoms{I, T}, il2::InteractionList2Atoms{I,
     )
 end
 
-function Base.:+(il1::InteractionList3Atoms{I, T}, il2::InteractionList3Atoms{I, T}) where {I, T}
-    return InteractionList3Atoms{I, T}(
+function Base.:+(il1::InteractionList3Atoms, il2::InteractionList3Atoms)
+    return InteractionList3Atoms(
         il1.is,
         il1.js,
         il1.ks,
@@ -202,8 +230,8 @@ function Base.:+(il1::InteractionList3Atoms{I, T}, il2::InteractionList3Atoms{I,
     )
 end
 
-function Base.:+(il1::InteractionList4Atoms{I, T}, il2::InteractionList4Atoms{I, T}) where {I, T}
-    return InteractionList4Atoms{I, T}(
+function Base.:+(il1::InteractionList4Atoms, il2::InteractionList4Atoms)
+    return InteractionList4Atoms(
         il1.is,
         il1.js,
         il1.ks,
@@ -325,7 +353,7 @@ The types used should be bits types if the GPU is going to be used.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 - `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical
     transformations.
-- `alch_role::R=CoreRole`: Role of the atom in an alchemical transformation.
+- `alch_role::Int=CoreRole`: Role of the atom in an alchemical transformation.
 """
 @kwdef struct Atom{T, M, C, S, E, L}
     index::Int = 1
@@ -335,7 +363,7 @@ The types used should be bits types if the GPU is going to be used.
     σ::S = 0.0u"nm"
     ϵ::E = 0.0u"kJ * mol^-1"
     λ::L = 1.0
-    alch_role::UInt8 = CoreRole
+    alch_role::Int = CoreRole
 end
 
 function Base.zero(::Atom{T, M, C, S, E, L}) where {T, M, C, S, E, L}
@@ -573,6 +601,34 @@ interface described there.
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
 """
+# CUDA launch configuration
+struct CUDALaunchConfig
+    force_block_y::Union{Nothing, Int}
+    force_maxregs::Union{Nothing, Int}
+    tile_threads::Union{Nothing, NTuple{2, Int}}
+    energy_block_y::Union{Nothing, Int}
+end
+
+function CUDALaunchConfig(;
+                          force_block_y=nothing,
+                          force_maxregs=nothing,
+                          tile_threads=nothing,
+                          energy_block_y=nothing)
+    force_block_y === nothing || force_block_y > 0 ||
+        throw(ArgumentError("force_block_y must be positive or nothing"))
+    force_maxregs === nothing || force_maxregs > 0 ||
+        throw(ArgumentError("force_maxregs must be positive or nothing"))
+    energy_block_y === nothing || energy_block_y > 0 ||
+        throw(ArgumentError("energy_block_y must be positive or nothing"))
+
+    if tile_threads !== nothing
+        length(tile_threads) == 2 || throw(ArgumentError("tile_threads must have length 2"))
+        all(>(0), tile_threads) || throw(ArgumentError("tile_threads entries must be positive"))
+    end
+
+    return CUDALaunchConfig(force_block_y, force_maxregs, tile_threads, energy_block_y)
+end
+
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
                       L, F, E, K, M, TM, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
@@ -596,6 +652,7 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
     masses::M
     total_mass::TM
     data::DA
+    launch_config::CUDALaunchConfig
 end
 
 function System(;
@@ -616,7 +673,8 @@ function System(;
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
                 data=nothing,
-                strictness=:warn)
+                launch_config=CUDALaunchConfig(),
+                strictness=default_strictness())
     check_strictness(strictness)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
@@ -754,7 +812,7 @@ function System(;
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, virtual_sites,
                     virtual_site_flags, neighbor_finder, loggers, df, force_units, energy_units,
-                    k_converted, atom_masses, total_mass, data)
+                    k_converted, atom_masses, total_mass, data, launch_config)
 end
 
 """
@@ -783,7 +841,8 @@ function System(sys::System;
                 energy_units=sys.energy_units,
                 k=sys.k,
                 data=sys.data,
-                strictness=:warn)
+                launch_config=sys.launch_config,
+                strictness=default_strictness())
     return System(
         atoms=atoms,
         coords=coords,
@@ -802,6 +861,7 @@ function System(sys::System;
         energy_units=energy_units,
         k=k,
         data=data,
+        launch_config=launch_config,
         strictness=strictness,
     )
 end
@@ -830,7 +890,8 @@ function System(crystal::Crystal{D};
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
-                data=nothing) where D
+                data=nothing,
+                launch_config=CUDALaunchConfig()) where D
     atoms = [Atom(index=i, charge=ustrip(uconvert(u"C", charge(a)) / Unitful.q), mass=AtomsBase.mass(a))
              for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
@@ -869,6 +930,7 @@ function System(crystal::Crystal{D};
         energy_units=energy_units,
         k=k,
         data=data,
+        launch_config=launch_config,
     )
 end
 
@@ -897,6 +959,7 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
         zero(sys.masses),
         zero(sys.total_mass),
         sys.data,
+        sys.launch_config,
     )
 end
 
@@ -1070,17 +1133,17 @@ function Unitful.ustrip(sys::System)
     return System(
         atoms = unitless_atoms,
         atoms_data = sys.atoms_data,
-        pairwise_inters = ustrip(sys.pairwise_inters),
-        specific_inter_lists = ustrip(sys.specific_inter_lists),
-        general_inters = ustrip(sys.general_inters),
+        pairwise_inters = _strip_units(sys.pairwise_inters),
+        specific_inter_lists = _strip_units(sys.specific_inter_lists),
+        general_inters = _strip_units(sys.general_inters),
         coords = unitless_coords,
         velocities = unitless_vels,
         boundary = ustrip(sys.boundary),
-        neighbor_finder = ustrip(sys.neighbor_finder),
+        neighbor_finder = _strip_units(sys.neighbor_finder),
         loggers = NamedTuple(),
         force_units = NoUnits,
         energy_units = NoUnits,
-        k = ustrip(sys.k)
+        k = _strip_units(sys.k)
     )
 end
 
@@ -1116,7 +1179,7 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
     press_source = pressure
 
     # Infer thermodynamic targets from the integrator if not explicitly overridden
-    if hasproperty(integrator, :coupling) && !(integrator.coupling isa NoCoupling)
+    if hasproperty(integrator, :coupling) && !isnothing(integrator.coupling)
         couplers = integrator.coupling isa Tuple ? integrator.coupling : (integrator.coupling,)
         for coupler in couplers
             if isnothing(temp_source) && coupler isa AbstractThermostat
@@ -1654,7 +1717,8 @@ function System(sys::AtomsBase.AbstractSystem{D};
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
-                data=nothing) where D
+                data=nothing,
+                launch_config=CUDALaunchConfig()) where D
     bb = AtomsBase.cell_vectors(sys)
     is_cubic = true
     for (i, bv) in enumerate(bb)
@@ -1739,6 +1803,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
         energy_units=energy_units,
         k=k,
         data=data,
+        launch_config=launch_config,
     )
 end
 
@@ -1908,6 +1973,14 @@ macro maybe_threads(flag, expr)
             $expr
         end
     end |> esc
+end
+
+function default_strictness()
+    if haskey(ENV, "MOLLY_STRICTNESS")
+        return Symbol(lowercase(ENV["MOLLY_STRICTNESS"]))
+    else
+        return :warn
+    end
 end
 
 function check_strictness(strictness)

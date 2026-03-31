@@ -105,39 +105,36 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         end
     end
 
-    local master_nf
-    local λ_nf
-    if ref_nfinder isa NoNeighborFinder
-        master_nf = NoNeighborFinder()
-        λ_nf = NoNeighborFinder()
-    else
-        base_eligible_cpu = copy(from_device(ref_nfinder.eligible))
-        n_atoms_eligible = size(base_eligible_cpu, 1)
-        size(base_eligible_cpu, 2) == n_atoms_eligible || throw(ArgumentError(
-            "NeighborFinder eligible matrix must be square, found size $(size(base_eligible_cpu))."
-        ))
-        n_atoms_eligible == n_ref_atoms || throw(ArgumentError(
-            "NeighborFinder eligible matrix has size $n_atoms_eligible, " *
-            "but systems contain $n_ref_atoms atoms."
-        ))
+    base_eligible_cpu, base_special_cpu = neighbor_finder_masks(ref_nfinder, length(ref_sys))
+    n_atoms = size(base_eligible_cpu, 1)
 
-        master_eligible_cpu = copy(base_eligible_cpu)
-        for idx in solute_indices
-            master_eligible_cpu[idx, :] .= false
-            master_eligible_cpu[:, idx] .= false
-        end
+    size(base_eligible_cpu, 2) == n_atoms || throw(ArgumentError(
+        "NeighborFinder eligible matrix must be square, found size $(size(base_eligible_cpu))."
+    ))
+    n_atoms == n_ref_atoms || throw(ArgumentError(
+        "NeighborFinder eligible matrix has size $n_atoms, " *
+        "but systems contain $n_ref_atoms atoms."
+    ))
 
-        λ_eligible_cpu = copy(base_eligible_cpu)
-        if split_pairwise_by_atoms && !isempty(solvent_indices)
-            λ_eligible_cpu[solvent_indices, solvent_indices] .= false
-        end
-
-        AT = array_type(ref_sys)
-        master_eligible = to_device(master_eligible_cpu, AT)
-        λ_eligible = to_device(λ_eligible_cpu, AT)
-        master_nf = build_neighbor_finder(ref_nfinder, master_eligible; reuse_neighbors=reuse_neighbors)
-        λ_nf = build_neighbor_finder(ref_nfinder, λ_eligible; reuse_neighbors=reuse_neighbors)
+    master_eligible_cpu = copy(base_eligible_cpu)
+    for idx in solute_indices
+        master_eligible_cpu[idx, :] .= false
+        master_eligible_cpu[:, idx] .= false
     end
+
+    λ_eligible_cpu = copy(base_eligible_cpu)
+    if split_pairwise_by_atoms && !isempty(solvent_indices)
+        λ_eligible_cpu[solvent_indices, solvent_indices] .= false
+    end
+
+    AT = array_type(ref_sys)
+    master_eligible = to_device(master_eligible_cpu, AT)
+    λ_eligible = to_device(λ_eligible_cpu, AT)
+    special_mask    = to_device(base_special_cpu, AT)
+    master_nf = build_neighbor_finder(ref_nfinder, master_eligible, special_mask;
+                                      reuse_neighbors=reuse_neighbors)
+    λ_nf = build_neighbor_finder(ref_nfinder, λ_eligible, special_mask;
+                                 reuse_neighbors=reuse_neighbors)
 
     state_master_neighbor_finders = Any[master_nf for _ in 1:n_λ]
     state_λ_neighbor_finders = Any[λ_nf for _ in 1:n_λ]
@@ -250,19 +247,19 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
-function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = true)
+function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::Bool = true)
     if ref_nfinder isa DistanceNeighborFinder
         return DistanceNeighborFinder(
             eligible = eligible, 
             dist_cutoff = ref_nfinder.dist_cutoff,
-            special   = ref_nfinder.special,
+            special   = special,
             n_steps = 1
         )
     elseif ref_nfinder isa CellListMapNeighborFinder
         return CellListMapNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
-            special = ref_nfinder.special,
+            special = special,
             n_steps = 1
         )
     elseif ref_nfinder isa GPUNeighborFinder
@@ -270,7 +267,7 @@ function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = tr
             return GPUNeighborFinder(
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
-                special = ref_nfinder.special,
+                special = special,
                 n_steps_reorder = 1,
                 initialized = ref_nfinder.initialized
             )
@@ -278,7 +275,7 @@ function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = tr
             return DistanceNeighborFinder(
                 eligible = eligible, 
                 dist_cutoff = ref_nfinder.dist_cutoff,
-                special   = ref_nfinder.special,
+                special   = special,
                 n_steps = 1
             )
         end
@@ -286,7 +283,7 @@ function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = tr
         return TreeNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
-            special = ref_nfinder.special,
+            special = special,
             n_steps = 1
         )
     elseif ref_nfinder isa NoNeighborFinder

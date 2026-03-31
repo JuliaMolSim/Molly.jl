@@ -130,8 +130,29 @@ end
     end
 end
 
+function constrained_pairs(constraint_clusters)
+    pairs = Tuple{Int32, Int32}[]
+    for interaction_list in cluster_interactions.(constraint_clusters)
+        for (i, j, _) in interaction_list
+            i32 = Int32(i)
+            j32 = Int32(j)
+            if j32 < i32
+                i32, j32 = j32, i32
+            end
+            if i32 != j32
+                push!(pairs, (i32, j32))
+            end
+        end
+    end
+    return pairs
+end
+
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
     atom_interactions = cluster_interactions.(constraint_clusters)
+    if neighbor_finder isa GPUNeighborFinder
+        append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
+        return neighbor_finder
+    end
     if isa(neighbor_finder.eligible, AbstractGPUArray)
         i_idx, j_idx = Int[], Int[]
 
@@ -547,3 +568,11 @@ cluster_interactions(kd::AngleClusterData) = (
 )
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
+
+function constrained_atom_inds(constraints::Union{Tuple, NamedTuple})
+    inds_constrained = Int[]
+    for ca in constraints
+        append!(inds_constrained, constrained_atom_inds(ca))
+    end
+    return inds_constrained
+end

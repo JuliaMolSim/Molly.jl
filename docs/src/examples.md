@@ -916,8 +916,9 @@ function check_sim(n_atoms)
     coords = AT(rand(SVector{3, Float32}, n_atoms) .* box_side)
     velocities = zero(coords) * u"ps^-1"
     neighbor_finder = GPUNeighborFinder(
-        eligible=AT(trues(n_atoms, n_atoms)),
+        n_atoms=n_atoms,
         dist_cutoff=1.0f0u"nm",
+        device_vector_type=CuArray{Int32, 1},
     )
     pis = (LennardJones(cutoff=DistanceCutoff(1.0f0u"nm"), use_neighbors=true),)
     sys = System(
@@ -943,6 +944,9 @@ end
 
 test_natoms()
 ```
+This constructor is the preferred way to use [`GPUNeighborFinder`](@ref) when all pairs are eligible.
+If you need exclusions or special-pair handling, pass them with `excluded_pairs` and `special_pairs`.
+
 The results before running out of memory on different GPUs are:
 - 60,000 on NVIDIA GeForce RTX 2080 Ti (11 GB).
 - 140,000 on NVIDIA RTX A6000 (48 GB).

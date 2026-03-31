@@ -1,6 +1,8 @@
-# Free energies with MBAR
+# Free energy calculation
 
-## A brief introduction
+## Free energies with MBAR
+
+### A brief introduction
 
 One of the most relevant uses of molecular dynamics (MD) is the estimation of free energy (FE) changes along a given reaction coordinate. One may be interested in, for example, how favorable the binding of a ligand to a target protein is; or which conformer of a molecule is the most stable. These are the kind of questions that can be addressed with FE techniques.
 
@@ -631,9 +633,9 @@ Now one can put this into a graph, for example using a scatter for the free ener
 ![PMF along the dipeptide torsion in kBT units](images/dihedral_pmf_kbt.png)
 ![PMF along the dipeptide torsion in energy units](images/dihedral_pmf_enr.png)
 
-# Free energies with AWH
+## Free energies with AWH
 
-## An overview
+### An overview
 
 One of the major challenges in MD is the timescale limitation when exploring complex free energy (FE) landscapes. While methods like MBAR excel at extracting free energies from a set of equilibrium simulations, obtaining that equilibrium sampling is often hindered by high free energy barriers. When a system gets trapped in a local minimum, standard MD, and even parallel equilibrium simulations, might fail to sample the transition regions adequately.
 

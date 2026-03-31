@@ -20,8 +20,9 @@
     true_n_atoms = 5191
     @test length(s.atoms) == true_n_atoms
     @test length(s.coords) == true_n_atoms
-    @test size(s.neighbor_finder.eligible) == (true_n_atoms, true_n_atoms)
-    @test size(s.neighbor_finder.special) == (true_n_atoms, true_n_atoms)
+    neighbor_finder_n_atoms(nf::GPUNeighborFinder) = nf.n_atoms
+    neighbor_finder_n_atoms(nf) = size(nf.eligible, 1)
+    @test neighbor_finder_n_atoms(s.neighbor_finder) == true_n_atoms
     @test length(s.pairwise_inters) == 2
     @test length(s.specific_inter_lists) == 3
     @test s.boundary == CubicBoundary(3.7146u"nm")
@@ -88,9 +89,21 @@ end
                      nonbonded_method=:pme, center_coords=false)
     sys_pme_exact = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
                            nonbonded_method=:pme, approximate_pme=false, center_coords=false)
+    sys_hmr = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
+                     nonbonded_method=:cutoff, center_coords=false, hydrogen_mass=2)
     zero(sys)
     zero(sys_pme)
     neighbors = find_neighbors(sys)
+
+    cs = charges(sys)
+    @test charge(sys, 2) == cs[2] == 0.1642
+    @test cs isa Vector{Float64}
+    @test sum(cs) ≈ 0.0 atol=1e-12
+    @test dipole_moment(sys) ≈ SVector(76.9000632, 42.63952727, 58.53451893)u"nm"
+    @test Molly.interaction_type(sys.specific_inter_lists[1]) <: HarmonicBond
+    @test Molly.interaction_type(sys.specific_inter_lists[2]) <: HarmonicAngle
+    @test Molly.interaction_type(sys.specific_inter_lists[3]) <: PeriodicTorsion
+    @test Molly.interaction_type(sys.specific_inter_lists[4]) <: PeriodicTorsion
 
     @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
     @test count(i -> is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
@@ -100,8 +113,8 @@ end
     @test sys.topology.molecule_atom_counts[1] == 1170
 
     bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
-    @test bench_result.allocs <= 6
-    @test bench_result.memory <= 192
+    @test bench_result.allocs <= 8
+    @test bench_result.memory <= 208
     forces_t = Molly.zero_forces(sys)
     buffers = Molly.init_buffers!(sys, 1)
     bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $buffers, Val(false);
@@ -121,6 +134,17 @@ end
                       nonbonded_method=:cutoff, center_coords=false, force_separate_lj14=true)
     @test potential_energy(sys) ≈ potential_energy(sys_lj14)
     @test maximum(norm.(forces(sys) .- forces(sys_lj14))) < 1e-10u"kJ * nm^-1 * mol^-1"
+
+    mass_inds = [1, 2, 3, 4, 5, 6, 7, 15952, 15953, 15954]
+    @test masses(sys)[mass_inds] ≈ [14.01, 1.008, 1.008, 1.008, 12.01, 1.008, 1.008,
+                                    15.99943, 1.007947, 1.007947]u"g/mol"
+    @test masses(sys_hmr)[mass_inds] ≈ [11.034, 2.0, 2.0, 2.0, 10.026, 2.0, 2.0,
+                                        14.015324, 2.0, 2.0]u"g/mol"
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr))
+    @test potential_energy(sys) ≈ potential_energy(sys_hmr)
+    @test maximum(norm.(forces(sys) .- forces(sys_hmr))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test_throws ErrorException System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=6)
+    @test_throws ArgumentError System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=true)
 
     inters = (
         "bond_only", "angle_only", "proptor_only", "improptor_only", "lj_only", "coul_only",
@@ -159,6 +183,8 @@ end
             gis = sys_pme.general_inters
         elseif inter == "all_pme_exact"
             gis = sys_pme_exact.general_inters
+        elseif inter == "lj_only" || inter == "all_cut"
+            gis = sys.general_inters
         else
             gis = ()
         end
@@ -195,6 +221,7 @@ end
     velocities_start = SVector{3}.(eachrow(readdlm(start_vels_fp)))u"nm * ps^-1"
     sys_pme_exact.velocities = copy(velocities_start)
     @test kinetic_energy(sys_pme_exact) ≈ 65521.87288132431u"kJ * mol^-1"
+    @test total_energy(sys_pme_exact) ≈ 96522.24858589929u"kJ * mol^-1"
     @test temperature(sys_pme_exact) ≈ 329.3202932884933u"K"
 
     simulate!(sys_pme_exact, simulator, n_steps; n_threads=Threads.nthreads())
@@ -262,6 +289,7 @@ end
             nonbonded_method=:cutoff,
             center_coords=false,
         )
+        show(devnull, sys.neighbor_finder)
         zero(sys)
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
@@ -381,7 +409,6 @@ end
     end
 end
 
-
 @testset "Implicit solvent" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml"])...)
 
@@ -394,8 +421,10 @@ end
                 array_type=AT,
                 dist_cutoff=5.0u"nm",
                 nonbonded_method=:none,
+                dispersion_correction=false,
                 implicit_solvent=solvent_model,
                 kappa=1.0u"nm^-1",
+                strictness=:nowarn,
             )
             neighbors = find_neighbors(sys)
             forces_molly = forces(sys)

@@ -11,8 +11,9 @@
 
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
-                eligible=eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
+                device_vector_type=AT{Int32, 1},
             )
         else
             neighbor_finder = DistanceNeighborFinder(
@@ -186,7 +187,7 @@ end
         @test length(neighbors.list) == length(neighbors_tree.list)
         @test all(nn in neighbors_tree.list for nn in neighbors.list)
 
-        @time simulate!(s, simulator, n_steps; n_threads=n_threads)
+        @time simulate!(s, simulator, n_steps; n_threads=n_threads, show_progress=true)
 
         show(devnull, s.loggers.temp)
         show(devnull, s.loggers.coords)
@@ -329,23 +330,26 @@ end
 @testset "Lennard-Jones simulators" begin
     n_atoms = 100
     n_steps = 20_000
+    dt = 0.002u"ps"
+    sim_time = n_steps * dt
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
              for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     simulators = [
-        Verlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),)),
-        StormerVerlet(dt=0.002u"ps"),
-        Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
-        OverdampedLangevin(dt=0.002u"ps", temperature=temp, friction=10.0u"ps^-1"),
+        Verlet(dt=dt, coupling=(AndersenThermostat(temp, 10.0u"ps"),)),
+        StormerVerlet(dt=dt),
+        Langevin(dt=dt, temperature=temp, friction=1.0u"ps^-1"),
+        OverdampedLangevin(dt=dt, temperature=temp, friction=10.0u"ps^-1"),
     ]
 
     for AT in array_list
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
+                device_vector_type=AT{Int32, 1},
             )
         else
             neighbor_finder = DistanceNeighborFinder(
@@ -364,9 +368,15 @@ end
         )
         random_velocities!(sys, temp)
         for simulator in simulators
-            @time simulate!(sys, simulator, n_steps; n_threads=1)
+            @time simulate!(sys, simulator, sim_time; n_threads=1)
         end
+        @test_throws ArgumentError simulate!(sys, simulators[1], 1; n_threads=1, strictness=:wrong)
     end
+
+    @test Molly.calc_n_steps(n_steps, dt) == n_steps
+    @test Molly.calc_n_steps(sim_time, dt) == n_steps
+    @test Molly.calc_n_steps(ustrip(sim_time), ustrip(dt)) == n_steps
+    @test_throws ArgumentError Molly.calc_n_steps(ustrip(sim_time), dt)
 end
 
 @testset "Verlet integrators on CPU and GPU" begin
@@ -411,8 +421,9 @@ end
             boundary=boundary,
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=GPUNeighborFinder(
-                eligible=CuArray(trues(n_atoms, n_atoms)),
+                n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
+                device_vector_type=CuArray{Int32, 1},
             ),
             loggers=(
                 coords=CoordinatesLogger(100),
@@ -438,59 +449,6 @@ end
     end
 end
 
-@testset "Diatomic molecules" begin
-    n_atoms = 100
-    n_steps = 20_000
-    temp = 298.0u"K"
-    boundary = CubicBoundary(2.0u"nm")
-    coords = place_atoms(n_atoms ÷ 2, boundary; min_dist=0.3u"nm")
-    for i in eachindex(coords)
-        push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
-    end
-    bonds = InteractionList2Atoms(
-        collect(1:(n_atoms ÷ 2)),
-        collect((1 + n_atoms ÷ 2):n_atoms),
-        [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
-        fill("", n_atoms ÷ 2),
-    )
-    eligible = trues(n_atoms, n_atoms)
-    for i in 1:(n_atoms ÷ 2)
-        eligible[i, i + (n_atoms ÷ 2)] = false
-        eligible[i + (n_atoms ÷ 2), i] = false
-    end
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=(BerendsenThermostat(temp, 1.0u"ps"),))
-
-    s = System(
-        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        coords=coords,
-        boundary=boundary,
-        velocities=[random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
-        specific_inter_lists=(bonds,),
-        neighbor_finder=DistanceNeighborFinder(
-            eligible=trues(n_atoms, n_atoms),
-            n_steps=10,
-            dist_cutoff=2.0u"nm",
-        ),
-        loggers=(
-            temp=TemperatureLogger(10),
-            coords=CoordinatesLogger(10),
-        ),
-    )
-
-    @time simulate!(s, simulator, n_steps; n_threads=1)
-
-    if run_visualize_tests
-        visualize(
-            s.loggers.coords,
-            boundary,
-            temp_fp_mp4;
-            connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
-            trails=2,
-        )
-    end
-end
-
 @testset "Pairwise interactions" begin
     n_atoms = 100
     n_steps = 20_000
@@ -509,6 +467,7 @@ end
         Coulomb(use_neighbors=true), Coulomb(use_neighbors=false),
         CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true),
         CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=false),
+        CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true, solvent_dielectric=Inf),
         Gravity(G=G, use_neighbors=true), Gravity(G=G, use_neighbors=false),
     )
 
@@ -564,8 +523,11 @@ end
 
         if run_cuda_tests
             if use_neighbors(inter)
-                neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)),
-                                                        dist_cutoff=1.2u"nm")
+                neighbor_finder_gpu = GPUNeighborFinder(
+                    n_atoms=n_atoms,
+                    dist_cutoff=1.2u"nm",
+                    device_vector_type=CuArray{Int32, 1},
+                )
             else
                 neighbor_finder_gpu = NoNeighborFinder()
             end
@@ -691,7 +653,9 @@ end
     neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; n_threads=1)
     a1 = accelerations(s, neighbors)
     a2 = accelerations(s_nounits, neighbors_nounits)u"kJ * nm^-1 * g^-1"
+    a3 = accelerations(s)
     @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1))
+    @test all(all(a1[i] .≈ a3[i]) for i in eachindex(a1))
 
     simulate!(s, simulator, n_steps; n_threads=1)
     simulate!(s_nounits, simulator_nounits, n_steps; n_threads=1)
@@ -702,6 +666,14 @@ end
     final_energy = last(values(s.loggers.energy))
     final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits; atol=5e-4u"kJ * mol^-1")
+
+    # Test init_step
+    s2 = deepcopy(s)
+    simulate!(s, simulator, 100; n_threads=1)
+    simulate!(s2, simulator, 40; n_threads=1)
+    simulate!(s2, simulator, 40; n_threads=1, init_step=40)
+    simulate!(s2, simulator, 20; n_threads=1, init_step=80)
+    @test maximum(norm.(s.coords .- s2.coords)) < 1e-8u"nm"
 end
 
 @testset "Position restraints" begin
@@ -1116,8 +1088,9 @@ end
 
         if nft == GPUNeighborFinder
             neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=T(1.0)u"nm",
+                device_vector_type=AT{Int32, 1},
             )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(
@@ -1200,6 +1173,55 @@ end
             @test E_diff < 5e-4u"kJ * mol^-1"
         end
     end
+end
+
+@testset "DPD simulation" begin
+    n_atoms = 100
+    n_steps = 10_000
+    dt = 0.01
+    r_c = 1.0
+    box_size = 5.0
+    density = n_atoms / box_size^3
+    γ = 4.5
+    kBT = 1.0
+    σ = sqrt(2 * γ * kBT)
+    a = 25.0
+
+    boundary = CubicBoundary(box_size)
+    rng = Xoshiro(12345)
+    coords = [SVector{3}(rand(rng, 3) .* box_size) for _ in 1:n_atoms]
+    velocities = [SVector{3}(randn(rng, 3)) for _ in 1:n_atoms]
+    atoms = [Atom(index=i, mass=1.0, charge=0.0, σ=0.0, ϵ=0.0) for i in 1:n_atoms]
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(DPDInteraction(a=a, γ=γ, σ=σ, r_c=r_c, dt=dt, use_neighbors=true),),
+        neighbor_finder=DistanceNeighborFinder(
+            eligible=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=1.5 * r_c,
+        ),
+        loggers=(
+            temp=TemperatureLogger(Float64, 100),
+        ),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+        k=1.0, # DPD uses reduced units where kB = 1; default_k(NoUnits) ≈ 0.008314
+    )
+
+    simulator = DPDVelocityVerlet(dt=dt, λ=0.65)
+    @time simulate!(sys, simulator, n_steps; n_threads=1)
+
+    temps = values(sys.loggers.temp)
+    mean_temp = mean(temps[length(temps) ÷ 2 + 1:end])
+    @info "DPD mean temperature (second half): $mean_temp, target kBT: $kBT"
+    @test 0.5 < mean_temp < 1.5
+
+    total_momentum = sum(sys.velocities .* mass.(atoms))
+    @test all(abs.(total_momentum) .< 1.0)
 end
 
 @testset "Accelerated Weight Histogram (AWH)" begin

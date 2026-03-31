@@ -2,7 +2,7 @@
 
 ## Running tests
 
-The tests will automatically include multithreading and/or GPU tests if multiple threads and/or a CUDA-enabled GPU are available.
+The tests will automatically include multithreading and/or GPU tests if multiple threads and/or a GPU are available.
 Errors appearing at the start of the test run due to unavailable backends is expected.
 `test/runtests.jl` does not include all the tests, see the test directory for more, though these extra tests do not need to be run for every change.
 Various environmental variables can be set to modify the tests:
@@ -10,7 +10,8 @@ Various environmental variables can be set to modify the tests:
 - `GPUTESTS` determines whether to run the GPU tests, default `GPUTESTS=1`.
 - `DEVICE` determines which GPU to run the GPU tests on, default `DEVICE=0`.
 - `GROUP` can be used to run a subset of the tests, options `All`/`Protein`/`Gradients`/`NotGradients`, default `GROUP=All`.
-The CI run does not carry out all tests - for example the GPU tests are not run - and this is reflected in the code coverage.
+The CI run does not carry out all tests - for example the GPU and parallel CPU tests are not run - and this is reflected in the code coverage.
+Running the test file locally gives higher coverage.
 
 ## Periodic boundary conditions
 
