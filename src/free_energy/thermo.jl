@@ -326,10 +326,13 @@ function neighbor_finders_equivalent(a::CellListMapNeighborFinder, b::CellListMa
 end
 
 function neighbor_finders_equivalent(a::GPUNeighborFinder, b::GPUNeighborFinder)
-    return a.dist_cutoff == b.dist_cutoff &&
+    return a.n_atoms == b.n_atoms &&
+           a.dist_cutoff == b.dist_cutoff &&
            a.n_steps_reorder == b.n_steps_reorder &&
-           masks_equivalent(a.eligible, b.eligible) &&
-           masks_equivalent(a.special, b.special)
+           masks_equivalent(a.excluded_i, b.excluded_i) &&
+           masks_equivalent(a.excluded_j, b.excluded_j) &&
+           masks_equivalent(a.special_i, b.special_i) &&
+           masks_equivalent(a.special_j, b.special_j)
 end
 
 neighbor_finders_equivalent(a, b) = false

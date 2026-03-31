@@ -263,6 +263,11 @@ end
 
 neighbor_finder_masks(nf, ::Integer) = neighbor_finder_masks(nf)
 
+gpu_sparse_pairs(nf::GPUNeighborFinder) = (
+    collect(zip(from_device(nf.excluded_i), from_device(nf.excluded_j))),
+    collect(zip(from_device(nf.special_i), from_device(nf.special_j))),
+)
+
 function neighbor_finder_masks(::NoNeighborFinder, n_atoms::Integer)
     eligible = trues(n_atoms, n_atoms)
     special = falses(n_atoms, n_atoms)
@@ -311,9 +316,8 @@ everything back to the GPU. The `initialized` state will be reset.
 - `pairs`: an iterable of `(i, j)` pairs to add to the exclusions list.
 =#
 function append_excluded_pairs!(nf::GPUNeighborFinder, pairs)
-    existing_pairs = collect(zip(from_device(nf.excluded_i), from_device(nf.excluded_j)))
-    update_sparse_pairs!(nf, vcat(existing_pairs, collect(pairs)),
-                         collect(zip(from_device(nf.special_i), from_device(nf.special_j))))
+    existing_pairs, special_pairs = gpu_sparse_pairs(nf)
+    update_sparse_pairs!(nf, vcat(existing_pairs, collect(pairs)), special_pairs)
     return nf
 end
 
@@ -708,13 +712,18 @@ end
 
 Unitful.ustrip(nf::NoNeighborFinder) = nf
 
-Unitful.ustrip(nf::GPUNeighborFinder) = GPUNeighborFinder(
-    eligible = nf.eligible,
-    dist_cutoff = ustrip(nf.dist_cutoff),
-    special = nf.special,
-    n_steps_reorder = nf.n_steps_reorder,
-    initialized = nf.initialized
-)
+function Unitful.ustrip(nf::GPUNeighborFinder)
+    excluded_pairs, special_pairs = gpu_sparse_pairs(nf)
+    return GPUNeighborFinder(
+        n_atoms = nf.n_atoms,
+        dist_cutoff = ustrip(nf.dist_cutoff),
+        excluded_pairs = excluded_pairs,
+        special_pairs = special_pairs,
+        n_steps_reorder = nf.n_steps_reorder,
+        initialized = nf.initialized,
+        device_vector_type = typeof(nf.excluded_i),
+    )
+end
 
 Unitful.ustrip(nf::DistanceNeighborFinder) = DistanceNeighborFinder(
     eligible = nf.eligible,

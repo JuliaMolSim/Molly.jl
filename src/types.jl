@@ -1425,10 +1425,11 @@ function from_device(sys::System)
 
     nf = sys.neighbor_finder
     if nf isa GPUNeighborFinder || nf isa DistanceNeighborFinder
+        eligible_cpu, special_cpu = neighbor_finder_masks(nf, length(sys))
         cpu_nf = DistanceNeighborFinder(
-            eligible = from_device(nf.eligible),
+            eligible = eligible_cpu,
             dist_cutoff = nf.dist_cutoff,
-            special = from_device(nf.special),
+            special = special_cpu,
             n_steps = nf isa GPUNeighborFinder ? nf.n_steps_reorder : nf.n_steps
         )
     else

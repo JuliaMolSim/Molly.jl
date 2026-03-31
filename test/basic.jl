@@ -507,6 +507,35 @@ end
     @test special[1, 4] && special[4, 1]
     @test eligible[1, 2]
 
+    nf_same = GPUNeighborFinder(
+        n_atoms=4,
+        dist_cutoff=1.0,
+        excluded_pairs=((4, 2), (1, 3)),
+        special_pairs=((4, 1),),
+        device_vector_type=Vector{Int32},
+    )
+    nf_diff = GPUNeighborFinder(
+        n_atoms=4,
+        dist_cutoff=1.0,
+        excluded_pairs=((1, 2),),
+        special_pairs=((1, 4),),
+        device_vector_type=Vector{Int32},
+    )
+    @test Molly.neighbor_finders_equivalent(nf, nf_same)
+    @test !Molly.neighbor_finders_equivalent(nf, nf_diff)
+
+    nf_units = GPUNeighborFinder(
+        n_atoms=4,
+        dist_cutoff=1.0u"nm",
+        excluded_pairs=((1, 3), (4, 2)),
+        special_pairs=((1, 4),),
+        device_vector_type=Vector{Int32},
+    )
+    nf_units_ustrip = ustrip(nf_units)
+    @test nf_units_ustrip isa GPUNeighborFinder
+    @test nf_units_ustrip.dist_cutoff == 1.0
+    @test Molly.neighbor_finders_equivalent(nf, nf_units_ustrip)
+
     @test_throws ArgumentError GPUNeighborFinder(
         n_atoms=4,
         dist_cutoff=1.0,
