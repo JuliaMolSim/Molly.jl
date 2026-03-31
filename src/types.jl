@@ -594,6 +594,34 @@ interface described there.
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
 """
+# CUDA launch configuration
+struct CUDALaunchConfig
+    force_block_y::Union{Nothing, Int}
+    force_maxregs::Union{Nothing, Int}
+    tile_threads::Union{Nothing, NTuple{2, Int}}
+    energy_block_y::Union{Nothing, Int}
+end
+
+function CUDALaunchConfig(;
+                          force_block_y=nothing,
+                          force_maxregs=nothing,
+                          tile_threads=nothing,
+                          energy_block_y=nothing)
+    force_block_y === nothing || force_block_y > 0 ||
+        throw(ArgumentError("force_block_y must be positive or nothing"))
+    force_maxregs === nothing || force_maxregs > 0 ||
+        throw(ArgumentError("force_maxregs must be positive or nothing"))
+    energy_block_y === nothing || energy_block_y > 0 ||
+        throw(ArgumentError("energy_block_y must be positive or nothing"))
+
+    if tile_threads !== nothing
+        length(tile_threads) == 2 || throw(ArgumentError("tile_threads must have length 2"))
+        all(>(0), tile_threads) || throw(ArgumentError("tile_threads entries must be positive"))
+    end
+
+    return CUDALaunchConfig(force_block_y, force_maxregs, tile_threads, energy_block_y)
+end
+
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
                       L, F, E, K, M, TM, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
@@ -617,6 +645,7 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
     masses::M
     total_mass::TM
     data::DA
+    launch_config::CUDALaunchConfig
 end
 
 function System(;
@@ -637,6 +666,7 @@ function System(;
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
                 data=nothing,
+                launch_config=CUDALaunchConfig(),
                 strictness=default_strictness())
     check_strictness(strictness)
     D = AtomsBase.n_dimensions(boundary)
@@ -775,7 +805,7 @@ function System(;
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, virtual_sites,
                     virtual_site_flags, neighbor_finder, loggers, df, force_units, energy_units,
-                    k_converted, atom_masses, total_mass, data)
+                    k_converted, atom_masses, total_mass, data, launch_config)
 end
 
 """
@@ -804,6 +834,7 @@ function System(sys::System;
                 energy_units=sys.energy_units,
                 k=sys.k,
                 data=sys.data,
+                launch_config=sys.launch_config,
                 strictness=default_strictness())
     return System(
         atoms=atoms,
@@ -823,6 +854,7 @@ function System(sys::System;
         energy_units=energy_units,
         k=k,
         data=data,
+        launch_config=launch_config,
         strictness=strictness,
     )
 end
@@ -851,7 +883,8 @@ function System(crystal::Crystal{D};
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
-                data=nothing) where D
+                data=nothing,
+                launch_config=CUDALaunchConfig()) where D
     atoms = [Atom(index=i, charge=ustrip(uconvert(u"C", charge(a)) / Unitful.q), mass=AtomsBase.mass(a))
              for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
@@ -890,6 +923,7 @@ function System(crystal::Crystal{D};
         energy_units=energy_units,
         k=k,
         data=data,
+        launch_config=launch_config,
     )
 end
 
@@ -918,6 +952,7 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
         zero(sys.masses),
         zero(sys.total_mass),
         sys.data,
+        sys.launch_config,
     )
 end
 
@@ -1441,7 +1476,8 @@ function System(sys::AtomsBase.AbstractSystem{D};
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
-                data=nothing) where D
+                data=nothing,
+                launch_config=CUDALaunchConfig()) where D
     bb = AtomsBase.cell_vectors(sys)
     is_cubic = true
     for (i, bv) in enumerate(bb)
@@ -1526,6 +1562,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
         energy_units=energy_units,
         k=k,
         data=data,
+        launch_config=launch_config,
     )
 end
 

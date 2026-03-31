@@ -661,7 +661,8 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     return delta_f
 end
 
-function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int) where T
+function simulate!(awh_sim::AWHSimulation{T},
+                   n_steps::Int) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
     active_idx = 1

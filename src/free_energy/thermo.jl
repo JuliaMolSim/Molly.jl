@@ -62,7 +62,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
 
     # 2. Partition Neighbor Lists
     ref_nfinder = ref_sys.neighbor_finder
-    base_eligible_cpu = copy(from_device(ref_nfinder.eligible))
+    base_eligible_cpu, base_special_cpu = neighbor_finder_masks(ref_nfinder, length(ref_sys))
     n_atoms = size(base_eligible_cpu, 1)
     
     master_eligible_cpu = copy(base_eligible_cpu)
@@ -81,6 +81,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     AT = array_type(ref_sys)
     master_eligible = to_device(master_eligible_cpu, AT)
     λ_eligible      = to_device(specific_eligible_cpu, AT)
+    special_mask    = to_device(base_special_cpu, AT)
     
     # 3. Extract and Partition Interaction Lists
     list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_λ]
@@ -132,8 +133,10 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     end
 
     # 4. Construct Partitioned Systems
-    master_nf = build_neighbor_finder(ref_nfinder, master_eligible; reuse_neighbors=reuse_neighbors)
-    λ_nf      = build_neighbor_finder(ref_nfinder, λ_eligible; reuse_neighbors=reuse_neighbors)
+    master_nf = build_neighbor_finder(ref_nfinder, master_eligible, special_mask;
+                                      reuse_neighbors=reuse_neighbors)
+    λ_nf      = build_neighbor_finder(ref_nfinder, λ_eligible, special_mask;
+                                      reuse_neighbors=reuse_neighbors)
 
     master_sys = System(deepcopy(ref_sys); 
         pairwise_inters      = (master_pils...,),
@@ -171,19 +174,19 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
-function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = true)
+function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::Bool = true)
     if ref_nfinder isa DistanceNeighborFinder
         return DistanceNeighborFinder(
             eligible = eligible, 
             dist_cutoff = ref_nfinder.dist_cutoff,
-            special   = ref_nfinder.special,
+            special   = special,
             n_steps = 1
         )
     elseif ref_nfinder isa CellListMapNeighborFinder
         return CellListMapNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
-            special = ref_nfinder.special,
+            special = special,
             n_steps = 1
         )
     elseif ref_nfinder isa GPUNeighborFinder
@@ -191,7 +194,7 @@ function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = tr
             return GPUNeighborFinder(
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
-                special = ref_nfinder.special,
+                special = special,
                 n_steps_reorder = 1,
                 initialized = ref_nfinder.initialized
             )
@@ -199,7 +202,7 @@ function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = tr
             return DistanceNeighborFinder(
                 eligible = eligible, 
                 dist_cutoff = ref_nfinder.dist_cutoff,
-                special   = ref_nfinder.special,
+                special   = special,
                 n_steps = 1
             )
         end
@@ -207,7 +210,7 @@ function build_neighbor_finder(ref_nfinder, eligible; reuse_neighbors::Bool = tr
         return TreeNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
-            special = ref_nfinder.special,
+            special = special,
             n_steps = 1
         )
     elseif ref_nfinder isa NoNeighborFinder

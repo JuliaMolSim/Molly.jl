@@ -371,8 +371,8 @@ Gromacs file reading should be considered experimental.
     use `CuArray` or `ROCArray` for GPU support.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
-    neighbors every few steps. Not relevant if [`GPUNeighborFinder`](@ref) is
-    used since the neighbors are calculated each step.
+    classical neighbor lists every few steps. Not used by
+    [`GPUNeighborFinder`](@ref).
 - `constraints=:none`: which constraints to apply during the simulation, options
     are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` and `:hangles`
     (all bonds plus H-X-H and H-O-X angles). Note that not all options may be
@@ -398,7 +398,13 @@ Gromacs file reading should be considered experimental.
 - `neighbor_finder_type`: which neighbor finder to use, default is
     [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref)
     on CUDA compatible GPUs and [`DistanceNeighborFinder`](@ref) on non-CUDA
-    compatible GPUs.
+    compatible GPUs. [`GPUNeighborFinder`](@ref) keeps sparse exception pairs
+    and lets the CUDA pairwise kernels build and cache interacting tiles
+    internally.
+- `launch_config=CUDALaunchConfig()`: stored CUDA launch overrides for this
+    system. Ignored on CPU and non-CUDA GPU backends.
+- `autotune_launch=true`: whether to autotune CUDA launch parameters at the end
+    of setup. This is a no-op on CPU and non-CUDA GPU backends.
 - `data=nothing`: arbitrary data associated with the system.
 - `implicit_solvent=:none`: the implicit solvent model to use, options are
     `:none`, `:obc1`, `:obc2` and `:gbn2`.
@@ -431,6 +437,8 @@ function System(coord_file::AbstractString,
                 hydrogen_mass::Union{Bool, Number}=false,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
+                launch_config=CUDALaunchConfig(),
+                autotune_launch::Bool=true,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
@@ -910,7 +918,8 @@ function System(coord_file::AbstractString,
                   separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, disp_corr, hydrogen_mass, strictness)
+                  weight_14_coulomb, disp_corr, hydrogen_mass, strictness,
+                  launch_config, autotune_launch)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -942,6 +951,8 @@ function System(T::Type,
                 approximate_pme=true,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
+                launch_config=CUDALaunchConfig(),
+                autotune_launch::Bool=true,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
@@ -1240,7 +1251,8 @@ function System(T::Type,
                   separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness)
+                  weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
+                  launch_config, autotune_launch)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1382,7 +1394,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 separate_lj14, eligible, special, units, dist_cutoff, constraints_type,
                 rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness)
+                weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
+                launch_config, autotune_launch)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
 
@@ -1571,12 +1584,17 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
 
     if neighbor_finder_type == NoNeighborFinder
         neighbor_finder = NoNeighborFinder()
-    elseif neighbor_finder_type in (nothing, GPUNeighborFinder) &&
-                uses_gpu_neighbor_finder(AT) && !grad_safe
+    elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT) && !grad_safe
+        excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
         neighbor_finder = GPUNeighborFinder(
-            eligible=to_device(eligible, AT),
-            dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
-            special=to_device(special, AT),
+            n_atoms=size(eligible, 1),
+            # GPUNeighborFinder reuses Morton ordering and tile metadata across
+            # `n_steps_reorder`, so its search radius needs the same buffer as
+            # the dense neighbor-list paths.
+            dist_cutoff=T(dist_neighbors),
+            excluded_pairs=excluded_pairs,
+            special_pairs=special_pairs,
+            device_vector_type=AT{Int32, 1},
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
@@ -1642,7 +1660,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     virtual_sites_dev = (length(virtual_sites) > 0 ? to_device(virtual_sites, AT) : virtual_sites)
 
-    return System(
+    sys = System(
         atoms=atoms,
         coords=coords_dev,
         boundary=boundary_used,
@@ -1660,8 +1678,11 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
         data=data,
+        launch_config=launch_config,
         strictness=strictness,
     )
+    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_launch)
+    return sys
 end
 
 """

@@ -11,8 +11,9 @@
 
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
-                eligible=eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
+                device_vector_type=AT{Int32, 1},
             )
         else
             neighbor_finder = DistanceNeighborFinder(
@@ -346,8 +347,9 @@ end
     for AT in array_list
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
+                device_vector_type=AT{Int32, 1},
             )
         else
             neighbor_finder = DistanceNeighborFinder(
@@ -419,8 +421,9 @@ end
             boundary=boundary,
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=GPUNeighborFinder(
-                eligible=CuArray(trues(n_atoms, n_atoms)),
+                n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
+                device_vector_type=CuArray{Int32, 1},
             ),
             loggers=(
                 coords=CoordinatesLogger(100),
@@ -520,8 +523,11 @@ end
 
         if run_cuda_tests
             if use_neighbors(inter)
-                neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)),
-                                                        dist_cutoff=1.2u"nm")
+                neighbor_finder_gpu = GPUNeighborFinder(
+                    n_atoms=n_atoms,
+                    dist_cutoff=1.2u"nm",
+                    device_vector_type=CuArray{Int32, 1},
+                )
             else
                 neighbor_finder_gpu = NoNeighborFinder()
             end
@@ -1082,8 +1088,9 @@ end
 
         if nft == GPUNeighborFinder
             neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=T(1.0)u"nm",
+                device_vector_type=AT{Int32, 1},
             )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(

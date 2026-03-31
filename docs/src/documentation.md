@@ -200,6 +200,8 @@ There are two GPU code paths currently: a fast path specific to CUDA and a slowe
 The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF` and `MOLLY_GPUNTHREADS_IMPLICIT`.
 In general these should only be changed if GPU memory errors occur on smaller GPUs.
 
+For the CUDA fast path, users can explicitly call `Molly.optimize_cuda_launch_config!(sys)` prior to a simulation. This will benchmark various launch configurations and cache the optimal parameters, which are then used to accelerate subsequent pairwise force and energy kernels globally. Users can also manually override the kernel parameters by setting the environment variables `MOLLY_CUDA_FORCE_BLOCK_Y`, `MOLLY_CUDA_ENERGY_BLOCK_Y`, `MOLLY_CUDA_TILE_THREADS_X`, `MOLLY_CUDA_TILE_THREADS_Y`, and `MOLLY_CUDA_FORCE_MAXREGS`, or directly via the `set_cuda_launch_config!` function.
+
 ## Simulating diatomic molecules
 
 If we want to define specific interactions between atoms, for example bonds, we can do this as well.
@@ -278,7 +280,7 @@ visualize(
 )
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
-The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref).
+The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref) for the classical neighbor finders and `nothing` for [`GPUNeighborFinder`](@ref), whose CUDA kernels manage their tile list internally.
 
 ## Simulating gravity
 
@@ -1643,9 +1645,13 @@ The available neighbor finders are:
 - [`TreeNeighborFinder`](@ref)
 
 The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`DistanceNeighborFinder`](@ref) on other GPUs.
-When using a neighbor finder you should in general also use an interaction cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor finder distance.
+When using a classical neighbor finder you should in general also use an interaction cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor finder distance.
 The difference between the two should be larger than an atom can move in the time of the `n_steps` defined by the neighbor finder.
-The exception is [`GPUNeighborFinder`](@ref), which uses the algorithm from [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413) to avoid calculating a neighbor list and should have `dist_cutoff` set to the interaction cutoff distance.
+
+[`GPUNeighborFinder`](@ref) follows a different CUDA-specific path based on the tiled GPU strategy of [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
+Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms, build per-tile masks and cache a compact list of interacting `32x32` tiles internally.
+Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
+When using it, set `dist_cutoff` to the interaction cutoff distance and `n_steps_reorder` to the number of steps between reorder and tile-list refresh passes.
 
 ## Analysis
 
@@ -1697,6 +1703,7 @@ It also does not apply across different backends such as CPU and GPU.
 Here is a checklist to ensure that you are getting the optimal performance from your simulations:
 - On CPU, you should tune the `n_threads` argument to [`simulate!`](@ref). If running on a single thread, it should be `1`. Otherwise you should try various values, including larger than the number of threads available to Julia (which balances the load appropriately). Make sure to start Julia with as many threads as possible using `-t`. Generally, `Float32` is not much faster than `Float64` on CPU.
 - On GPU, using `Float32` will give vastly better performance. You can try changing the number of threads for each kernel as described in the [GPU acceleration](@ref) section, but the defaults are generally suitable for modern hardware. Multiple simulations can be run on different GPUs using `device!`. It is not currently possible to split one simulation onto multiple devices.
+- If you run a simulation using CUDA GPUs, Molly has available a `Molly.optimize_cuda_launch_config!(sys)` function. This will atomatically test several launch parameters for the CUDA kernels and select the most performant ones.
 - Run a short `simulate!` call once to ensure JIT compilation. You can run it on `deepcopy(sys)` if you don't want to affect `sys`, though beware of side effects like writing out trajectory files.
 - Make sure all arrays, such as coordinates and velocities, are concretely typed.
 - In general, using units doesn't slow things down as described in the [Units](@ref) section, but you could try running without units.

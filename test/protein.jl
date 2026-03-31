@@ -20,8 +20,9 @@
     true_n_atoms = 5191
     @test length(s.atoms) == true_n_atoms
     @test length(s.coords) == true_n_atoms
-    @test size(s.neighbor_finder.eligible) == (true_n_atoms, true_n_atoms)
-    @test size(s.neighbor_finder.special) == (true_n_atoms, true_n_atoms)
+    neighbor_finder_n_atoms(nf::GPUNeighborFinder) = nf.n_atoms
+    neighbor_finder_n_atoms(nf) = size(nf.eligible, 1)
+    @test neighbor_finder_n_atoms(s.neighbor_finder) == true_n_atoms
     @test length(s.pairwise_inters) == 2
     @test length(s.specific_inter_lists) == 3
     @test s.boundary == CubicBoundary(3.7146u"nm")

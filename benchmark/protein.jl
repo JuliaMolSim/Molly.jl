@@ -52,6 +52,7 @@ runs = [
     ("CUDA f32 nounits"                  , CuArray, false, true , false),
 ]
 
+
 for (run_name, AT, parallel, f32, units) in runs
     n_threads_used = (parallel ? n_threads : 1)
     sys, sim = setup_system(AT, f32, units)
