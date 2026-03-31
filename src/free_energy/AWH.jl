@@ -662,15 +662,13 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
 end
 
 function simulate!(awh_sim::AWHSimulation{T},
-                   n_steps::Int;
-                   autotune_cuda_launch::Bool=true) where T
+                   n_steps::Int) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
     active_idx = 1
 
     for iteration_n in 1:n_iterations
-        simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps;
-                  autotune_cuda_launch=autotune_cuda_launch)
+        simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
 
 
         active_pe_units = process_sample(awh_sim.state)

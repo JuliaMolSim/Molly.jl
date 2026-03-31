@@ -221,6 +221,7 @@
                     buffers.atoms_reordered,
                     buffers.fs_mat_reordered,
                     -1,
+                    UInt64(0),
                     0,
                 )
             end
@@ -430,7 +431,7 @@
             )
 
             neighbors = find_neighbors(sys)
-            buffers = init_buffers!(sys, 256)
+            buffers = Molly.init_buffers!(sys, 256)
             fs_reused = Molly.zero_forces(sys)
 
             Molly.forces!(fs_reused, sys, neighbors, buffers, Val(false), 0; n_threads=1)
@@ -443,6 +444,95 @@
 
             for i in 1:n_atoms
                 @test isapprox(fs_reused_host[i], fs_fresh_host[i], rtol=1e-8, atol=1e-10)
+            end
+        end
+
+        @testset "Sparse-pair updates refresh cached GPU tiles" begin
+            n_atoms = 2
+            D = 3
+            T = Float64
+            coords = [SVector{D, T}(0.0, 0.0, 0.0), SVector{D, T}(0.45, 0.0, 0.0)]
+            boundary = CubicBoundary(T(5.0), T(5.0), T(5.0))
+            atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0)) for i in 1:n_atoms]
+            r_cut = T(2.0)
+
+            sys = System(
+                atoms=CuArray(atoms),
+                coords=CuArray(coords),
+                boundary=boundary,
+                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                neighbor_finder=GPUNeighborFinder(
+                    n_atoms=n_atoms,
+                    dist_cutoff=r_cut,
+                    device_vector_type=CuArray{Int32, 1},
+                ),
+                force_units=NoUnits,
+                energy_units=NoUnits,
+            )
+
+            buffers = Molly.init_buffers!(sys, 1, true)
+            pe_before = potential_energy(sys, nothing, buffers, 0)
+
+            Molly.append_excluded_pairs!(sys.neighbor_finder, ((1, 2),))
+
+            pe_reused = potential_energy(sys, nothing, buffers, 0)
+            pe_fresh = potential_energy(sys, nothing, Molly.init_buffers!(sys, 1, true), 0)
+
+            @test pe_before != pe_reused
+            @test isapprox(pe_reused, pe_fresh, rtol=1e-8, atol=1e-10)
+        end
+
+        @testset "AlchemicalPartition supports GPUNeighborFinder" begin
+            n_atoms = 4
+            atom_mass = 10.0u"g/mol"
+            σ = 0.3u"nm"
+            ϵ = 0.5u"kJ * mol^-1"
+            temp = 298.0u"K"
+            dt = 0.001u"ps"
+            boundary = CubicBoundary(4.0u"nm")
+            coords = [
+                SVector(0.2, 0.2, 0.2),
+                SVector(0.7, 0.2, 0.2),
+                SVector(0.2, 0.8, 0.2),
+                SVector(0.8, 0.8, 0.2),
+            ] .* u"nm"
+            atoms_ref = [Atom(index=i, mass=atom_mass, charge=0.0, σ=σ, ϵ=ϵ, λ=1.0) for i in 1:n_atoms]
+            atoms_pert = copy(atoms_ref)
+            atoms_pert[1] = Atom(index=1, mass=atom_mass, charge=0.0, σ=σ, ϵ=ϵ, λ=0.5)
+
+            function gpu_state(atoms_state)
+                sys = System(
+                    atoms=CuArray(atoms_state),
+                    coords=CuArray(coords),
+                    boundary=boundary,
+                    pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(1.2u"nm")),),
+                    neighbor_finder=GPUNeighborFinder(
+                        n_atoms=n_atoms,
+                        dist_cutoff=1.2u"nm",
+                        device_vector_type=CuArray{Int32, 1},
+                    ),
+                    force_units=u"kJ * mol^-1 * nm^-1",
+                    energy_units=u"kJ * mol^-1",
+                )
+                return ThermoState(sys, VelocityVerlet(dt=dt); temperature=temp)
+            end
+
+            thermo_states = [gpu_state(atoms_ref), gpu_state(atoms_pert)]
+
+            for reuse_neighbors in (true, false)
+                partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
+                energies = evaluate_energy_all!(partition, thermo_states[1].system.coords, boundary)
+                direct = [potential_energy(ts.system) for ts in thermo_states]
+
+                @test length(energies) == length(thermo_states)
+                if reuse_neighbors
+                    @test partition.λ_sys.neighbor_finder isa DistanceNeighborFinder
+                else
+                    @test partition.λ_sys.neighbor_finder isa GPUNeighborFinder
+                end
+                @test isfinite(ustrip(energies[1])) && isfinite(ustrip(energies[2]))
+                @test isapprox(energies[1], direct[1], rtol=1e-8, atol=1e-10u"kJ * mol^-1")
+                @test isapprox(energies[2], direct[2], rtol=1e-8, atol=1e-10u"kJ * mol^-1")
             end
         end
     else

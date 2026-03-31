@@ -45,7 +45,7 @@ struct LaunchAutotuneKey
     n_blocks::Int
     box_signature::Tuple
     r_cut::Float64
-    interaction_types::Tuple
+    interaction_signature::Tuple
     force_maxregs::Union{Nothing, Int}
 end
 
@@ -96,6 +96,7 @@ function choose_tile_threads(conf_threads::Int)
 end
 
 @inline autotune_scalar(x) = round(Float64(ustrip(x)); sigdigits=12)
+@inline autotune_interaction_signature(inter) = hash(repr(inter))
 
 function autotune_box_signature(boundary, ::Val{D}) where D
     sides = box_sides(boundary)
@@ -141,7 +142,7 @@ function autotune_key(sys::System{D, <:CuArray}, pairwise_inters, force_maxregs_
         cld(n_atoms, Int(WARPSIZE)),
         autotune_box_signature(sys.boundary, Val(D)),
         autotune_scalar(sys.neighbor_finder.dist_cutoff),
-        Tuple(map(typeof, pairwise_inters)),
+        Tuple(map(autotune_interaction_signature, pairwise_inters)),
         force_maxregs_override,
     )
 end
@@ -184,14 +185,18 @@ function autotune_benchmark_ms!(prepare!::F, run!::G;
     return best_ms
 end
 
+@inline function triclinic_boundary_matrix(boundary::TriclinicBoundary, ::Type{T}) where T
+    return SMatrix{3, 3, T}(
+        ustrip(boundary.basis_vectors[1][1]), ustrip(boundary.basis_vectors[2][1]), ustrip(boundary.basis_vectors[3][1]),
+        ustrip(boundary.basis_vectors[1][2]), ustrip(boundary.basis_vectors[2][2]), ustrip(boundary.basis_vectors[3][2]),
+        ustrip(boundary.basis_vectors[1][3]), ustrip(boundary.basis_vectors[2][3]), ustrip(boundary.basis_vectors[3][3]),
+    )
+end
+
 function autotune_prepare_block_bounds!(buffers, sys::System{D, <:CuArray, T}, N::Int) where {D, T}
     n_blocks = cld(N, Int(WARPSIZE))
     if sys.boundary isa TriclinicBoundary
-        H = SMatrix{3, 3, T}(
-            sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
-            sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
-            sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val,
-        )
+        H = triclinic_boundary_matrix(sys.boundary, T)
         @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
             buffers.morton_seq,
             buffers.box_mins,
@@ -223,6 +228,7 @@ function autotune_prepare_common_state!(buffers, sys::System{D, <:CuArray}, N::I
     cell_width = sides ./ (2^morton_bits)
     sorted_morton_seq!(buffers, sys.coords, cell_width, morton_bits)
     compress_sparse!(buffers, sys.neighbor_finder, Val(N))
+    buffers.sparse_pair_generation = sys.neighbor_finder.cache_generation
     reorder_system_gpu!(buffers, sys)
     KernelAbstractions.synchronize(get_backend(sys.coords))
     autotune_prepare_block_bounds!(buffers, sys, N)
@@ -263,7 +269,7 @@ function launch_autotune_tile_kernel!(kernel, buffers, sys::System{D, <:CuArray}
         buffers.box_mins,
         buffers.box_maxs,
         sys.boundary,
-        sys.neighbor_finder.dist_cutoff,
+        Val(sys.neighbor_finder.dist_cutoff_2),
         Val(n_blocks),
         Val(D),
         max_tiles,
@@ -284,7 +290,10 @@ function autotune_tile_thread_candidates(kernel)
             push!(candidates, threads_xy)
         end
     end
-    isempty(candidates) && push!(candidates, tile_launch_params(kernel))
+    if isempty(candidates)
+        conf = launch_configuration(kernel.fun)
+        push!(candidates, choose_tile_threads(min(conf.threads, max_threads)))
+    end
     return candidates
 end
 
@@ -433,7 +442,7 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise
                 buffers.velocities_reordered,
                 buffers.atoms_reordered,
                 Val(N),
-                sys.neighbor_finder.dist_cutoff,
+                Val(sys.neighbor_finder.dist_cutoff_2),
                 Val(sys.force_units),
                 pairwise_inters,
                 sys.boundary,
@@ -509,7 +518,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
                 buffers.velocities_reordered,
                 buffers.atoms_reordered,
                 Val(N),
-                sys.neighbor_finder.dist_cutoff,
+                Val(sys.neighbor_finder.dist_cutoff_2),
                 Val(sys.energy_units),
                 pairwise_inters,
                 sys.boundary,
@@ -579,7 +588,7 @@ function Molly.optimize_cuda_launch_config!(sys::System{D, <:CuArray, T}) where 
     pairwise_inters = gpu_neighbor_pairwise_inters(sys)
     isempty(pairwise_inters) && return nothing
 
-    current_config = Molly.cuda_launch_config()
+    current_config = Molly.cuda_launch_config(sys)
     force_block_y_override = effective_force_block_y_override(current_config)
     energy_block_y_override = effective_energy_block_y_override(current_config)
     tile_threads_override = effective_tile_threads_override(current_config)
@@ -611,7 +620,7 @@ function Molly.optimize_cuda_launch_config!(sys::System{D, <:CuArray, T}) where 
         tile_threads = needs_tile ? tuned_config.tile_threads : current_config.tile_threads,
         energy_block_y = needs_energy ? tuned_config.energy_block_y : current_config.energy_block_y,
     )
-    Molly.set_cuda_launch_config!(merged_config)
+    Molly.set_cuda_launch_config!(sys, merged_config)
 
     return something(
         effective_force_block_y_override(merged_config),
@@ -644,8 +653,8 @@ end
 
 @inline upper_tile_index(i::Integer, j::Integer, n_blocks::Integer) = upper_tile_index(Int32(i), Int32(j), Int32(n_blocks))
 
-function force_launch_params(kernel)
-    config = Molly.cuda_launch_config()
+function force_launch_params(sys, kernel)
+    config = Molly.cuda_launch_config(sys)
     block_y_override = prefer_override(config.force_block_y, env_override("MOLLY_CUDA_FORCE_BLOCK_Y"))
     maxregs_override = prefer_override(config.force_maxregs, env_override("MOLLY_CUDA_FORCE_MAXREGS"))
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_FORCE_BLOCK_Y", block_y_override)
@@ -662,8 +671,8 @@ function force_launch_params(kernel)
     return (block_y, maxregs_override)
 end
 
-function energy_launch_params(kernel)
-    config = Molly.cuda_launch_config()
+function energy_launch_params(sys, kernel)
+    config = Molly.cuda_launch_config(sys)
     block_y_override = prefer_override(config.energy_block_y, env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_ENERGY_BLOCK_Y", block_y_override)
 
@@ -678,8 +687,8 @@ function energy_launch_params(kernel)
     return block_y
 end
 
-function tile_launch_params(kernel)
-    config = Molly.cuda_launch_config()
+function tile_launch_params(sys, kernel)
+    config = Molly.cuda_launch_config(sys)
     config_tile_threads = config.tile_threads
     threads_x_override = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_X") : config_tile_threads[1]
     threads_y_override = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_Y") : config_tile_threads[2]
@@ -752,6 +761,53 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray}, pai
     return buffers
 end
 
+@inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder, step_n)
+    first_preprocess = buffers.step_n_preprocessed == -1
+    step_changed = step_n != buffers.step_n_preprocessed
+    needs_morton_refresh = first_preprocess || (step_changed && step_n % nf.n_steps_reorder == 0)
+    sparse_changed = buffers.sparse_pair_generation != nf.cache_generation
+    needs_reorder = first_preprocess || step_changed
+    needs_sparse_refresh = needs_morton_refresh || !nf.initialized || sparse_changed
+    needs_tile_refresh = needs_morton_refresh || !nf.initialized || sparse_changed
+    return needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh
+end
+
+function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray, T}, N::Int) where {D, T}
+    n_blocks = cld(N, WARPSIZE)
+    if sys.boundary isa TriclinicBoundary
+        Hinv = inv(triclinic_boundary_matrix(sys.boundary, T))
+        @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
+            buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
+            sys.boundary, Val(D))
+    else
+        @cuda blocks=n_blocks threads=32 kernel_min_max!(
+            buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+            Val(N), sys.boundary, Val(D))
+    end
+
+    max_tiles = length(buffers.interacting_tiles_i)
+    reset_interacting_tile_state!(buffers)
+    tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+        buffers.box_mins, buffers.box_maxs, sys.boundary, Val(sys.neighbor_finder.dist_cutoff_2),
+        Val(n_blocks), Val(D), max_tiles,
+        buffers.compressed_masks, buffers.tile_is_clean)
+    tile_threads_xy = tile_launch_params(sys, tile_kernel)
+
+    tile_kernel(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+        buffers.box_mins, buffers.box_maxs, sys.boundary, Val(sys.neighbor_finder.dist_cutoff_2),
+        Val(n_blocks), Val(D), max_tiles,
+        buffers.compressed_masks, buffers.tile_is_clean;
+        blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
+        threads=tile_threads_xy)
+
+    buffers.num_pairs = only(from_device(buffers.num_interacting_tiles))
+    return nothing
+end
+
 """
     pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters, nbs::Nothing, needs_vir, step_n)
 
@@ -778,70 +834,34 @@ Cache contract:
 function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                          nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, needs_vir}
     N = length(sys.coords)
-    n_blocks = cld(N, WARPSIZE)
     r_cut2 = sys.neighbor_finder.dist_cutoff_2
     backend = get_backend(sys.coords)
+    nf = sys.neighbor_finder
 
-    # Preprocessing Cache Check: Skip if step_n hasn't changed
-    if step_n != buffers.step_n_preprocessed
-        # Periodic Reordering and Bitmask Compression
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || buffers.step_n_preprocessed == -1
+    needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh =
+        gpu_neighbor_refresh_flags(buffers, nf, step_n)
+    if needs_reorder || needs_sparse_refresh || needs_tile_refresh
+        if needs_morton_refresh
             morton_bits = 10
             sides = box_sides(sys.boundary)
             w = sides ./ (2^morton_bits)
             sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
-            sys.neighbor_finder.initialized = true
-            compress_sparse!(buffers, sys.neighbor_finder, Val(N))
         end
 
-        reorder_system_gpu!(buffers, sys)
-        KernelAbstractions.synchronize(backend)
-
-        # Find Interacting Tiles
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || buffers.step_n_preprocessed == -1
-            # Bounding Box Calculation for Tiles
-            if sys.boundary isa TriclinicBoundary
-                H = SMatrix{3, 3, T}(
-                    ustrip(sys.boundary.basis_vectors[1][1]), ustrip(sys.boundary.basis_vectors[2][1]), ustrip(sys.boundary.basis_vectors[3][1]),
-                    ustrip(sys.boundary.basis_vectors[1][2]), ustrip(sys.boundary.basis_vectors[2][2]), ustrip(sys.boundary.basis_vectors[3][2]),
-                    ustrip(sys.boundary.basis_vectors[1][3]), ustrip(sys.boundary.basis_vectors[2][3]), ustrip(sys.boundary.basis_vectors[3][3])
-                )
-                Hinv = inv(H)
-                @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
-                        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
-                        sys.boundary, Val(D))
-            else
-                @cuda blocks=n_blocks threads=32 kernel_min_max!(
-                        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
-                        Val(N), sys.boundary, Val(D))
-            end
-
-            max_tiles = length(buffers.interacting_tiles_i)
-            reset_interacting_tile_state!(buffers)
-            n_blocks_i = cld(N, WARPSIZE)
-            tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
-                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-                buffers.box_mins, buffers.box_maxs, sys.boundary, Val(r_cut2),
-                Val(n_blocks_i), Val(D), max_tiles,
-                buffers.compressed_masks, buffers.tile_is_clean)
-            tile_threads_xy = tile_launch_params(tile_kernel)
-
-            tile_kernel(
-                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-                buffers.box_mins, buffers.box_maxs, sys.boundary, Val(r_cut2),
-                Val(n_blocks_i), Val(D), max_tiles,
-                
-                buffers.compressed_masks, buffers.tile_is_clean;
-                blocks=(cld(n_blocks_i, tile_threads_xy[1]), cld(n_blocks_i, tile_threads_xy[2])),
-                threads=tile_threads_xy)
-            
-            # Sync num_pairs back to CPU only when changed
-            num_pairs_gpu = from_device(buffers.num_interacting_tiles)
-            buffers.num_pairs = only(num_pairs_gpu)
+        if needs_sparse_refresh
+            compress_sparse!(buffers, nf, Val(N))
+            nf.initialized = true
+            buffers.sparse_pair_generation = nf.cache_generation
         end
-        # Update cache state
+
+        if needs_reorder
+            reorder_system_gpu!(buffers, sys)
+            KernelAbstractions.synchronize(backend)
+        end
+
+        if needs_tile_refresh
+            refresh_interacting_tiles!(buffers, sys, N)
+        end
         buffers.step_n_preprocessed = step_n
     end
     
@@ -855,7 +875,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         Val(needs_vir), Val(T), Val(D),
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
         buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
-    block_y, maxregs = force_launch_params(auto_kernel)
+    block_y, maxregs = force_launch_params(sys, auto_kernel)
     
     num_pairs = buffers.num_pairs
     n_blocks_launch = num_pairs > 0 ? cld(num_pairs, block_y) : 1
@@ -912,60 +932,33 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     # The ordering is usually recomputed for potential energy, but we can reuse it
     #   if it was already computed for this step
     N = length(sys.coords)
-    n_blocks = cld(N, WARPSIZE)
     r_cut2 = sys.neighbor_finder.dist_cutoff_2
     backend = get_backend(sys.coords)
+    nf = sys.neighbor_finder
 
-    if step_n != buffers.step_n_preprocessed
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || buffers.step_n_preprocessed == -1
+    needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh =
+        gpu_neighbor_refresh_flags(buffers, nf, step_n)
+    if needs_reorder || needs_sparse_refresh || needs_tile_refresh
+        if needs_morton_refresh
             morton_bits = 10
             sides = box_sides(sys.boundary)
             w = sides ./ (2^morton_bits)
             sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
-            sys.neighbor_finder.initialized = true
-            compress_sparse!(buffers, sys.neighbor_finder, Val(N))
         end
-        reorder_system_gpu!(buffers, sys)
-        KernelAbstractions.synchronize(backend)
 
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized || buffers.step_n_preprocessed == -1
-            if sys.boundary isa TriclinicBoundary
-                H = SMatrix{3, 3, T}(
-                    ustrip(sys.boundary.basis_vectors[1][1]), ustrip(sys.boundary.basis_vectors[2][1]), ustrip(sys.boundary.basis_vectors[3][1]),
-                    ustrip(sys.boundary.basis_vectors[1][2]), ustrip(sys.boundary.basis_vectors[2][2]), ustrip(sys.boundary.basis_vectors[3][2]),
-                    ustrip(sys.boundary.basis_vectors[1][3]), ustrip(sys.boundary.basis_vectors[2][3]), ustrip(sys.boundary.basis_vectors[3][3])
-                )
-                Hinv = inv(H)
-                @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
-                        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
-                        sys.boundary, Val(D))
-            else
-                @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
-                        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
-                        Val(N), sys.boundary, Val(D))
-            end
+        if needs_sparse_refresh
+            compress_sparse!(buffers, nf, Val(N))
+            nf.initialized = true
+            buffers.sparse_pair_generation = nf.cache_generation
+        end
 
-            max_tiles = length(buffers.interacting_tiles_i)
-            reset_interacting_tile_state!(buffers)
-            tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
-                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-                buffers.box_mins, buffers.box_maxs, sys.boundary, Val(r_cut2),
-                Val(n_blocks), Val(D), max_tiles,
-                buffers.compressed_masks, buffers.tile_is_clean)
-            tile_threads_xy = tile_launch_params(tile_kernel)
-            tile_kernel(
-                buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-                buffers.box_mins, buffers.box_maxs, sys.boundary, Val(r_cut2),
-                Val(n_blocks), Val(D), max_tiles,
-                buffers.compressed_masks, buffers.tile_is_clean;
-                blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
-                threads=tile_threads_xy)
-            
-            # Sync num_pairs back to CPU only when changed
-            num_pairs_gpu = from_device(buffers.num_interacting_tiles)
-            buffers.num_pairs = only(num_pairs_gpu)
+        if needs_reorder
+            reorder_system_gpu!(buffers, sys)
+            KernelAbstractions.synchronize(backend)
+        end
+
+        if needs_tile_refresh
+            refresh_interacting_tiles!(buffers, sys, N)
         end
         buffers.step_n_preprocessed = step_n
     end
@@ -976,7 +969,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             sys.boundary, step_n, buffers.compressed_masks,
             Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
-    block_y = energy_launch_params(kernel)
+    block_y = energy_launch_params(sys, kernel)
     
     num_pairs = buffers.num_pairs
     n_blocks_launch = num_pairs > 0 ? cld(num_pairs, block_y) : 1

@@ -418,6 +418,13 @@ end
     dist_cutoff = 1.2u"nm"
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
                  dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm")
+    cpu_launch_config = Molly.CUDALaunchConfig(force_block_y=8)
+    sys_launch_cpu = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff;
+                            dist_cutoff=0.5u"nm", dist_buffer=0.0u"nm",
+                            launch_config=cpu_launch_config, autotune_launch=false)
+    @test Molly.cuda_launch_config(sys_launch_cpu) == cpu_launch_config
+    Molly.optimize_cuda_launch_config!(sys_launch_cpu)
+    @test Molly.cuda_launch_config(sys_launch_cpu) == cpu_launch_config
     neighbors_ref = find_neighbors(sys)
     n_neighbors_ref = 4602420
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
@@ -481,6 +488,44 @@ end
             @test identical_neighbors(neighbors_gpu, gpu_neighbors_ref)
         end
     end
+end
+
+@testset "GPUNeighborFinder sparse metadata" begin
+    nf = GPUNeighborFinder(
+        n_atoms=4,
+        dist_cutoff=1.0,
+        excluded_pairs=((1, 3), (4, 2)),
+        special_pairs=((1, 4),),
+        device_vector_type=Vector{Int32},
+    )
+    eligible, special = Molly.neighbor_finder_masks(nf)
+    @test size(eligible) == (4, 4)
+    @test size(special) == (4, 4)
+    @test all(i -> !eligible[i, i], 1:4)
+    @test !eligible[1, 3] && !eligible[3, 1]
+    @test !eligible[2, 4] && !eligible[4, 2]
+    @test special[1, 4] && special[4, 1]
+    @test eligible[1, 2]
+
+    @test_throws ArgumentError GPUNeighborFinder(
+        n_atoms=4,
+        dist_cutoff=1.0,
+        excluded_pairs=((0, 2),),
+        device_vector_type=Vector{Int32},
+    )
+    @test_throws ArgumentError GPUNeighborFinder(
+        n_atoms=4,
+        dist_cutoff=1.0,
+        special_pairs=((1, 5),),
+        device_vector_type=Vector{Int32},
+    )
+    @test_throws ArgumentError GPUNeighborFinder(
+        n_atoms=4,
+        dist_cutoff=1.0,
+    )
+
+    @test_throws ArgumentError Molly.update_sparse_pairs!(nf, ((1, 2),), ((2, 5),))
+    @test_throws ArgumentError Molly.append_excluded_pairs!(nf, ((3, 6),))
 end
 
 @testset "Replica System" begin

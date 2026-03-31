@@ -107,6 +107,7 @@ mutable struct GPUNeighborFinder{B, D, D2, E}
     dist_cutoff_2::D2
     n_steps_reorder::Int
     initialized::Bool
+    cache_generation::UInt64
     excluded_i::E
     excluded_j::E
     special_i::E
@@ -140,10 +141,15 @@ function gpu_exception_vector_type(eligible, device_vector_type)
     if eligible isa AbstractGPUArray
         return typeof(eligible).name.wrapper{Int32, 1}
     end
+    return validate_device_vector_type(device_vector_type;
+                                       missing_message="eligible must be on the GPU or device_vector_type must be provided")
+end
+
+function validate_device_vector_type(device_vector_type; missing_message::AbstractString="device_vector_type must be provided")
     if isnothing(device_vector_type)
-        throw(ArgumentError("eligible must be on the GPU or device_vector_type must be provided"))
+        throw(ArgumentError(missing_message))
     end
-    if !(device_vector_type <: AbstractVector{Int32})
+    if !(device_vector_type isa Type && device_vector_type <: AbstractVector{Int32})
         throw(ArgumentError("device_vector_type must be a 1D Int32 array type, got $device_vector_type"))
     end
     return device_vector_type
@@ -162,12 +168,16 @@ no duplicate pairs.
 - `pairs`: an iterable of tuple pairs or 2-element arrays representing atom index pairs.
 - `allow_diagonal::Bool=false`: whether to include `(i, i)` self-interactions.
 =#
-function normalize_pairs(pairs; allow_diagonal::Bool=false)
+function normalize_pairs(pairs; allow_diagonal::Bool=false, n_atoms=nothing)
     normalized = Tuple{Int32, Int32}[]
     seen = Set{Tuple{Int32, Int32}}()
+    n_atoms_32 = isnothing(n_atoms) ? nothing : Int32(n_atoms)
     for (i, j) in pairs
         i32 = Int32(i)
         j32 = Int32(j)
+        if !isnothing(n_atoms_32) && !(Int32(1) <= i32 <= n_atoms_32 && Int32(1) <= j32 <= n_atoms_32)
+            throw(ArgumentError("pair ($(Int(i32)), $(Int(j32))) is out of bounds for $n_atoms atoms"))
+        end
         if j32 < i32
             i32, j32 = j32, i32
         end
@@ -234,6 +244,34 @@ function dense_masks_to_pair_lists(eligible_cpu, special_cpu)
     return excluded_pairs, special_pairs
 end
 
+function neighbor_finder_masks(nf::GPUNeighborFinder)
+    eligible = trues(nf.n_atoms, nf.n_atoms)
+    special = falses(nf.n_atoms, nf.n_atoms)
+    for i in 1:nf.n_atoms
+        eligible[i, i] = false
+    end
+    for (i, j) in zip(from_device(nf.excluded_i), from_device(nf.excluded_j))
+        eligible[i, j] = false
+        eligible[j, i] = false
+    end
+    for (i, j) in zip(from_device(nf.special_i), from_device(nf.special_j))
+        special[i, j] = true
+        special[j, i] = true
+    end
+    return eligible, special
+end
+
+neighbor_finder_masks(nf, ::Integer) = neighbor_finder_masks(nf)
+
+function neighbor_finder_masks(::NoNeighborFinder, n_atoms::Integer)
+    eligible = trues(n_atoms, n_atoms)
+    special = falses(n_atoms, n_atoms)
+    for i in 1:n_atoms
+        eligible[i, i] = false
+    end
+    return eligible, special
+end
+
 #=
     update_sparse_pairs!(nf, excluded_pairs, special_pairs)
 
@@ -250,11 +288,12 @@ GPU interaction masks are rebuilt.
 =#
 function update_sparse_pairs!(nf::GPUNeighborFinder, excluded_pairs, special_pairs)
     ET = typeof(nf.excluded_i)
-    excluded_pairs = normalize_pairs(excluded_pairs)
-    special_pairs = normalize_pairs(special_pairs)
+    excluded_pairs = normalize_pairs(excluded_pairs; n_atoms=nf.n_atoms)
+    special_pairs = normalize_pairs(special_pairs; n_atoms=nf.n_atoms)
     nf.excluded_i, nf.excluded_j = pair_list_vectors(excluded_pairs, ET)
     nf.special_i, nf.special_j = pair_list_vectors(special_pairs, ET)
     nf.initialized = false
+    nf.cache_generation += 0x0000000000000001
     return nf
 end
 
@@ -289,16 +328,14 @@ function GPUNeighborFinder(;
                             initialized=false,
                             device_vector_type=nothing)
     if !isnothing(n_atoms)
-        if !(device_vector_type <: AbstractVector{Int32})
-            throw(ArgumentError("device_vector_type must be a 1D Int32 array type, got $device_vector_type"))
-        end
-        excluded_pairs_norm = normalize_pairs(excluded_pairs)
-        special_pairs_norm = normalize_pairs(special_pairs)
-        excluded_i, excluded_j = pair_list_vectors(excluded_pairs_norm, device_vector_type)
-        special_i, special_j = pair_list_vectors(special_pairs_norm, device_vector_type)
+        ET = validate_device_vector_type(device_vector_type)
+        excluded_pairs_norm = normalize_pairs(excluded_pairs; n_atoms=n_atoms)
+        special_pairs_norm = normalize_pairs(special_pairs; n_atoms=n_atoms)
+        excluded_i, excluded_j = pair_list_vectors(excluded_pairs_norm, ET)
+        special_i, special_j = pair_list_vectors(special_pairs_norm, ET)
         dist_cutoff_2 = dist_cutoff^2
         return GPUNeighborFinder{Int, typeof(dist_cutoff), typeof(dist_cutoff_2), typeof(excluded_i)}(
-                    Int(n_atoms), dist_cutoff, dist_cutoff_2, n_steps_reorder, initialized,
+                    Int(n_atoms), dist_cutoff, dist_cutoff_2, n_steps_reorder, initialized, 0,
                     excluded_i, excluded_j, special_i, special_j)
     end
 
@@ -646,6 +683,10 @@ function find_neighbors(sys::System{D, AT},
     else
         return neighbors
     end
+end
+
+function neighbor_finder_masks(nf::Union{DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder})
+    return copy_to_bitmatrix(from_device(nf.eligible)), copy_to_bitmatrix(from_device(nf.special))
 end
 
 function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder,

@@ -194,6 +194,8 @@ energy calculations.
 - `coords_reordered`, `velocities_reordered`, `atoms_reordered`: Cached reordered arrays.
 - `fs_mat_reordered`: Force matrix in reordered space.
 - `step_n_preprocessed`: Last simulation step where preprocessing was done.
+- `sparse_pair_generation`: sparse-pair generation reflected in the cached masks
+  and tile metadata.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
 =#
@@ -222,6 +224,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     atoms_reordered::AR
     fs_mat_reordered::fs_re
     step_n_preprocessed::Int
+    sparse_pair_generation::UInt64
     num_pairs::Int
 end
 
@@ -280,7 +283,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
                       tile_is_clean, interacting_tiles_i, interacting_tiles_j,
                       interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
                       coords_reordered, velocities_reordered, atoms_reordered,
-                      fs_mat_reordered, -1, 0)
+                      fs_mat_reordered, -1, UInt64(0), 0)
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
