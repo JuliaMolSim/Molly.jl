@@ -73,7 +73,8 @@ end
     return charge(atom) * electrostatic_lambda(scheduler, atom, Val(T))
 end
 
-function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, scheduler, i, j,
+function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, scheduler,
+                            i, j,
                             ::Val{T}, ::Val{calculate_forces}, ::Val{atomic},
                             ::Val{needs_vir}) where {T, calculate_forces, atomic, needs_vir}
     sqrt_π = sqrt(T(π))
@@ -121,8 +122,8 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
         E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr,
-                            scheduler,
-                            i, j, Val(T), Val(calculate_forces), Val(false), Val(needs_vir))
+                            scheduler, i, j, Val(T), Val(calculate_forces), Val(false),
+                            Val(needs_vir))
         exclusion_E += E
     end
     return exclusion_E
@@ -130,8 +131,7 @@ end
 
 function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
                                 coords::AbstractVector{SVector{D, C}}, boundary, α, f_div_ϵr,
-                                scheduler,
-                                force_units, energy_units, calculate_forces, ::Val{T},
+                                scheduler, force_units, energy_units, calculate_forces, ::Val{T},
                                 ::Val{needs_vir}) where {D, C, T, needs_vir}
     if calculate_forces
         buffer_Fs .= zero(T)
@@ -156,16 +156,15 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
 end
 
 @kernel function excluded_interactions_kernel!(Fs_mat, vir, exclusion_Es, @Const(excluded_pairs),
-                            @Const(atoms), @Const(coords), boundary, α, f_div_ϵr, scheduler,
-                            energy_units,
+                            @Const(atoms), @Const(coords), boundary, α, f_div_ϵr, scheduler, energy_units,
                             ::Val{T}, ::Val{calculate_forces},
                             ::Val{needs_vir}) where {T, calculate_forces, needs_vir}
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
         E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f_div_ϵr,
-                                scheduler,
-                                i, j, Val(T), Val(calculate_forces), Val(true), Val(needs_vir))
+                                scheduler, i, j, Val(T), Val(calculate_forces), Val(true),
+                                Val(needs_vir))
         exclusion_Es[ei] = ustrip(energy_units, E)
     end
 end
@@ -270,8 +269,8 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
 
     exclusion_E = excluded_interactions!(Fs_cpu, vir, nothing, nothing, nothing,
                         inter.excluded_pairs, atoms_cpu, coords_cpu, boundary, α, f,
-                        inter.scheduler, force_units,
-                        energy_units, calculate_forces, Val(T), Val(needs_vir))
+                        inter.scheduler, force_units, energy_units, calculate_forces, Val(T),
+                        Val(needs_vir))
 
     recip_box_size = (2 * T(π)) ./ boundary.side_lengths
     eir = zeros(Complex{T}, kmax * n_atoms * 3)
@@ -387,8 +386,8 @@ end
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
-        scheduler=DefaultLambdaScheduler(),
-        grad_safe=false, n_threads=Threads.nthreads())
+        scheduler=DefaultLambdaScheduler(), grad_safe=false,
+        n_threads=Threads.nthreads())
 
 Particle mesh Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -979,7 +978,7 @@ function interpolate_force!(Fs, charge_grid::Array{Complex{T}, 3}, grid_indices,
     return Fs
 end
 
-function interpolate_force!(Fs, charge_grid::AbstractArray{T, 3}, grid_indices, bsplines_θ,
+function interpolate_force!(Fs, charge_grid::AbstractArray{Complex{T}, 3}, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
                             scheduler, n_threads) where T
     backend = get_backend(Fs)
@@ -1033,12 +1032,12 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     if calculate_forces
         interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
                            inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                           inter.scheduler,
-                           n_thr)
+                           inter.scheduler, n_thr)
     end
 
     if isnothing(inter.pc_sum) || inter.grad_safe
-        partial_charges = [effective_charge(inter.scheduler, atom, Val(T)) for atom in from_device(atoms)]
+        partial_charges = [effective_charge(inter.scheduler, atom, Val(T))
+                           for atom in from_device(atoms)]
         pc_sum = sum(partial_charges)
         pc_abs2_sum = sum(abs2, partial_charges)
     else
@@ -1049,43 +1048,3 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     total_E = reciprocal_space_E + self_E + exclusion_E
     return total_E
 end
-
-# --- Ewald ---
-
-Unitful.ustrip(e::Ewald) = Ewald(
-    ustrip(e.dist_cutoff),
-    ustrip(e.error_tol),
-    e.excluded_pairs,
-    e.scheduler
-)
-
-# --- PME (Particle Mesh Ewald) ---
-
-Unitful.ustrip(pme::PME) = PME(
-    ustrip(pme.dist_cutoff),
-    ustrip(pme.error_tol),
-    pme.order,
-    ustrip(pme.ϵr),
-    pme.excluded_pairs,
-    ustrip(pme.α),
-    pme.mesh_dims,
-    pme.grid_indices,
-    pme.grid_fractions,
-    pme.bsplines_θ,
-    pme.bsplines_dθ,
-    pme.bsplines_moduli_x,
-    pme.bsplines_moduli_y,
-    pme.bsplines_moduli_z,
-    pme.charge_grid,
-    pme.charge_grid_buffer,
-    pme.excluded_buffer_Fs, # Already dimensionless (allocated via T)
-    pme.excluded_buffer_Es, # Already dimensionless (allocated via T)
-    pme.recip_conv_buffer,
-    pme.virial_buffer,
-    ustrip(pme.pc_sum),
-    ustrip(pme.pc_abs2_sum),
-    pme.fft_plan,           # Pass-through to prevent re-allocation
-    pme.bfft_plan,          # Pass-through to prevent re-allocation
-    pme.scheduler,
-    pme.grad_safe
-)
