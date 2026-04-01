@@ -451,6 +451,26 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<Script>`
 In general, custom forces should be implemented as described in [Forces and energies](@ref).
 
+### Structure file formats
+
+Coordinate files can be in any format where [Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html) can read the positions, atoms and bonds.
+Where Chemfiles.jl cannot read the residues, it is assumed that the whole file represents one residue.
+For example, water can be loaded from various formats:
+```julia
+using Molly, Test
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff = MolecularForceField(joinpath(data_dir, "force_fields", "tip3p_standard.xml"))
+
+water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff)
+water_cif  = System(joinpath(data_dir, "water_formats", "water.cif" ), ff)
+water_mol2 = System(joinpath(data_dir, "water_formats", "water.mol2"), ff)
+water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff) # Residue inferred for SDF
+
+@test potential_energy(water_pdb ) ≈ potential_energy(water_cif) ≈
+      potential_energy(water_mol2) ≈ potential_energy(water_sdf)
+```
+
 ## Enhanced sampling
 
 Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`ReplicaExchangeMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
@@ -845,6 +865,7 @@ Typically the force function is where most computation time is spent during the 
 One nice feature of Molly is that this function will work on both the CPU and the GPU.
 If you need a different version of the function on GPU, you can define `Molly.force_gpu` (and `Molly.potential_energy_gpu`).
 Virial computation is done automatically when required using the force function.
+The force function should not have side effects like updating atom properties to avoid race conditions; use a general interaction if you need this.
 
 The argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
 This is specified during neighbor finder construction.
@@ -1704,7 +1725,7 @@ Here is a checklist to ensure that you are getting the optimal performance from 
 - On CPU, you should tune the `n_threads` argument to [`simulate!`](@ref). If running on a single thread, it should be `1`. Otherwise you should try various values, including larger than the number of threads available to Julia (which balances the load appropriately). Make sure to start Julia with as many threads as possible using `-t`. Generally, `Float32` is not much faster than `Float64` on CPU.
 - On GPU, using `Float32` will give vastly better performance. You can try changing the number of threads for each kernel as described in the [GPU acceleration](@ref) section, but the defaults are generally suitable for modern hardware. Multiple simulations can be run on different GPUs using `device!`. It is not currently possible to split one simulation onto multiple devices.
 - If you run a simulation using CUDA GPUs, Molly has available a `Molly.optimize_cuda_launch_config!(sys)` function. This will atomatically test several launch parameters for the CUDA kernels and select the most performant ones.
-- Run a short `simulate!` call once to ensure JIT compilation. You can run it on `deepcopy(sys)` if you don't want to affect `sys`, though beware of side effects like writing out trajectory files.
+- Run a short `simulate!` call once to ensure JIT compilation. You can run it on `deepcopy(sys)` if you don't want to affect `sys`, though beware of side effects like writing out trajectory files and consider using `run_loggers=false`.
 - Make sure all arrays, such as coordinates and velocities, are concretely typed.
 - In general, using units doesn't slow things down as described in the [Units](@ref) section, but you could try running without units.
 

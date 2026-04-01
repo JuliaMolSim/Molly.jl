@@ -1,0 +1,28 @@
+data_water.pdb
+#
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_entity_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.occupancy
+_atom_site.B_iso_or_equiv
+_atom_site.pdbx_formal_charge
+_atom_site.auth_seq_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_atom_id
+_atom_site.pdbx_PDB_model_num
+HETATM 1 O O  . HOH ? ? 1 ? -0.0110  0.9628 0.0073 1.00 0.00 ? 1 HOH A O  1 
+HETATM 2 H H1 . HOH ? ? 1 ?  0.0021 -0.0041 0.0020 1.00 0.00 ? 1 HOH A H1 1 
+HETATM 3 H H2 . HOH ? ? 1 ?  0.8669  1.3681 0.0011 1.00 0.00 ? 1 HOH A H2 1 
+#
