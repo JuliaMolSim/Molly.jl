@@ -36,3 +36,9 @@ end
     ralp = exp(-b.a * (r - b.r0))
     return b.D * (1 - ralp)^2
 end
+
+Unitful.ustrip(b::MorseBond) = MorseBond(
+    D = ustrip(b.D),
+    a = ustrip(b.a),
+    r0 = ustrip(b.r0),
+)

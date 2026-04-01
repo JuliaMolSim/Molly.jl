@@ -21,6 +21,20 @@ struct VirtualSite{T, IC}
     weight_cross::IC # Units are 1/L
 end
 
+Unitful.ustrip(vs::VirtualSite) = VirtualSite(
+    vs.type,
+    vs.atom_ind,
+    vs.atom_1,
+    vs.atom_2,
+    vs.atom_3,
+    _strip_units(vs.weight_1),
+    _strip_units(vs.weight_2),
+    _strip_units(vs.weight_3),
+    _strip_units(vs.weight_12),
+    _strip_units(vs.weight_13),
+    _strip_units(vs.weight_cross),
+)
+
 struct VirtualSiteTemplate{T, IC}
     type::Int
     name::String

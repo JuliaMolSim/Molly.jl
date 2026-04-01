@@ -94,6 +94,17 @@ function SHAKE_RATTLE(sr::SHAKE_RATTLE, clusters12, clusters23, clusters34, angl
                         sr.vel_tolerance, sr.gpu_block_size, sr.max_iters)
 end
 
+Unitful.ustrip(sr::SHAKE_RATTLE) = SHAKE_RATTLE(
+    _strip_units_array(sr.clusters12),
+    _strip_units_array(sr.clusters23),
+    _strip_units_array(sr.clusters34),
+    _strip_units_array(sr.angle_clusters),
+    ustrip(sr.dist_tolerance),
+    ustrip(sr.vel_tolerance),
+    sr.gpu_block_size,
+    sr.max_iters,
+)
+
 function Base.show(io::IO, sr::SHAKE_RATTLE)
     print(io, "SHAKE_RATTLE with ", length(sr.clusters12), " 2-atom clusters, ",
           length(sr.clusters23), " 3-atom clusters, ", length(sr.clusters34),

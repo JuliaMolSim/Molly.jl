@@ -582,6 +582,73 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
     end
 end
 
+function Unitful.ustrip(inter::ImplicitSolventOBC)
+    offset_radii = _strip_units_array(inter.offset_radii)
+    scaled_offset_radii = _strip_units_array(inter.scaled_offset_radii)
+    is = inter.is
+    js = inter.js
+    return ImplicitSolventOBC(
+        offset_radii,
+        scaled_offset_radii,
+        inter.solvent_dielectric,
+        inter.solute_dielectric,
+        ustrip(inter.kappa),
+        ustrip(inter.offset),
+        ustrip(inter.dist_cutoff),
+        inter.use_ACE,
+        inter.α,
+        inter.β,
+        inter.γ,
+        ustrip(inter.probe_radius),
+        ustrip(inter.sa_factor),
+        ustrip(inter.factor_solute),
+        ustrip(inter.factor_solvent),
+        is,
+        js,
+        @view(offset_radii[is]),
+        @view(offset_radii[js]),
+        @view(scaled_offset_radii[js]),
+    )
+end
+
+function Unitful.ustrip(inter::ImplicitSolventGBN2)
+    offset_radii = _strip_units_array(inter.offset_radii)
+    scaled_offset_radii = _strip_units_array(inter.scaled_offset_radii)
+    αs = _strip_units_array(inter.αs)
+    βs = _strip_units_array(inter.βs)
+    γs = _strip_units_array(inter.γs)
+    d0s = _strip_units_array(inter.d0s)
+    m0s = _strip_units_array(inter.m0s)
+    is = inter.is
+    js = inter.js
+    return ImplicitSolventGBN2(
+        offset_radii,
+        scaled_offset_radii,
+        inter.solvent_dielectric,
+        inter.solute_dielectric,
+        ustrip(inter.kappa),
+        ustrip(inter.offset),
+        ustrip(inter.dist_cutoff),
+        inter.use_ACE,
+        αs,
+        βs,
+        γs,
+        ustrip(inter.probe_radius),
+        ustrip(inter.sa_factor),
+        ustrip(inter.factor_solute),
+        ustrip(inter.factor_solvent),
+        is,
+        js,
+        d0s,
+        m0s,
+        inter.neck_scale,
+        ustrip(inter.neck_cut),
+        @view(offset_radii[is]),
+        @view(offset_radii[js]),
+        @view(scaled_offset_radii[js]),
+    )
+end
+
 struct GBN2ParamIndices
     solvent_dielectric::Int
     solute_dielectric::Int

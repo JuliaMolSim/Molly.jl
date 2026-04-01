@@ -485,6 +485,8 @@ n_atoms_cluster(::ConstraintKernelData{<:Any, <:Any, M}) where {M} = M
 
 struct NoClusterData <: ConstraintKernelData{Nothing, 0, 0} end
 
+Unitful.ustrip(::NoClusterData) = NoClusterData()
+
 # This is effectivelly just a distance constraint
 struct Cluster12Data{D} <: ConstraintKernelData{D, 1, 2}
     k1::Int32
@@ -497,6 +499,8 @@ function ConstraintKernelData(k1::Int32, k2::Int32, dist12::D) where D
 end
 
 cluster_interactions(kd::Cluster12Data) = ((kd.k1, kd.k2, kd.dist12),)
+
+Unitful.ustrip(kd::Cluster12Data) = ConstraintKernelData(kd.k1, kd.k2, ustrip(kd.dist12))
 
 struct Cluster23Data{D} <: ConstraintKernelData{D, 2, 3}
     k1::Int32
@@ -516,6 +520,14 @@ cluster_interactions(kd::Cluster23Data) = (
 )
 idx_keys(::Type{<:Cluster23Data}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:Cluster23Data}) = (:dist12, :dist13)
+
+Unitful.ustrip(kd::Cluster23Data) = ConstraintKernelData(
+    kd.k1,
+    kd.k2,
+    kd.k3,
+    ustrip(kd.dist12),
+    ustrip(kd.dist13),
+)
 
 struct Cluster34Data{D} <: ConstraintKernelData{D, 3, 4}
     k1::Int32
@@ -539,6 +551,16 @@ cluster_interactions(kd::Cluster34Data) = (
 )
 idx_keys(::Type{<:Cluster34Data}) = (:k1, :k2, :k3, :k4)
 dist_keys(::Type{<:Cluster34Data}) = (:dist12, :dist13, :dist14)
+
+Unitful.ustrip(kd::Cluster34Data) = ConstraintKernelData(
+    kd.k1,
+    kd.k2,
+    kd.k3,
+    kd.k4,
+    ustrip(kd.dist12),
+    ustrip(kd.dist13),
+    ustrip(kd.dist14),
+)
 
 struct AngleClusterData{D} <: ConstraintKernelData{D, 3, 3}
     k1::Int32 # Central atom, different to AngleConstraint
@@ -568,6 +590,15 @@ cluster_interactions(kd::AngleClusterData) = (
 )
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
+
+Unitful.ustrip(kd::AngleClusterData) = ConstraintKernelData(
+    kd.k1,
+    kd.k2,
+    kd.k3,
+    ustrip(kd.dist12),
+    ustrip(kd.dist13),
+    ustrip(kd.dist23),
+)
 
 function constrained_atom_inds(constraints::Union{Tuple, NamedTuple})
     inds_constrained = Int[]

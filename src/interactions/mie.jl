@@ -128,3 +128,14 @@ function pairwise_pe(::Mie, r, (m, n, σ, const_mn))
     σ_r = σ / r
     return const_mn * (σ_r ^ n - σ_r ^ m)
 end
+
+Unitful.ustrip(inter::Mie) = Mie(
+    m = inter.m,
+    n = inter.n,
+    cutoff = ustrip(inter.cutoff),
+    use_neighbors = inter.use_neighbors,
+    shortcut = inter.shortcut,
+    σ_mixing = inter.σ_mixing,
+    ϵ_mixing = inter.ϵ_mixing,
+    weight_special = ustrip(inter.weight_special),
+)

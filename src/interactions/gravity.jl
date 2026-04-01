@@ -54,3 +54,9 @@ end
 function pairwise_pe(::Gravity, r, (G, mi, mj))
     return (-G * mi * mj) * inv(r)
 end
+
+Unitful.ustrip(inter::Gravity) = Gravity(
+    cutoff = ustrip(inter.cutoff),
+    G = ustrip(inter.G),
+    use_neighbors = inter.use_neighbors,
+)

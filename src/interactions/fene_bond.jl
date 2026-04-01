@@ -62,3 +62,10 @@ end
     end
     return -(b.k / 2) * r02 * log(1 - r2 / r02) + uwca
 end
+
+Unitful.ustrip(b::FENEBond) = FENEBond(
+    k = ustrip(b.k),
+    r0 = ustrip(b.r0),
+    σ = ustrip(b.σ),
+    ϵ = ustrip(b.ϵ),
+)

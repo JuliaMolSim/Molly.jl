@@ -59,3 +59,10 @@ end
     rik = norm(vector(coords_i, coords_k, boundary))
     return (a.kangle / 2) * (θ - a.θ0) ^ 2 + (a.kbond / 2) * (rik - a.r0) ^ 2
 end
+
+Unitful.ustrip(a::UreyBradley) = UreyBradley(
+    kangle = ustrip(a.kangle),
+    θ0 = ustrip(a.θ0),
+    kbond = ustrip(a.kbond),
+    r0 = ustrip(a.r0),
+)

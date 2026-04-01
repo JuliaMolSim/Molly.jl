@@ -6,6 +6,8 @@ export
     CoulombSoftCoreGapsysReactionField,
     CoulombReactionField,
     CoulombEwald,
+    CoulombSoftCoreBeutlerEwald,
+    CoulombSoftCoreGapsysEwald,
     Yukawa
 
 const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
@@ -1138,6 +1140,311 @@ end
     end
 end
 
+@inline function softcore_pair_elec_lambda(inter, atom_i, atom_j)
+    T = typeof(ustrip(inter.coulomb_const))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    pair_role = mix_roles(inter.scheduler, atom_i.alch_role, atom_j.alch_role)
+    return T(scale_elec(inter.scheduler, λ_glob, pair_role))
+end
+
+@inline function softcore_ewald_screen(inter, r)
+    T = typeof(ustrip(inter.coulomb_const))
+    αr = inter.α_ewald * r
+    exp_mαr2 = exp(-αr^2)
+    erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
+    force_screen = 2 * inter.α_ewald * exp_mαr2 / sqrt(T(π))
+    return erfc_αr, force_screen
+end
+
+@doc raw"""
+    CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=1.0,
+                                use_neighbors=false, σ_mixing=LorentzMixing(),
+                                ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
+                                scheduler=DefaultLambdaScheduler(), weight_special=1,
+                                coulomb_const=coulomb_const, approximate_erfc=true)
+
+The short-range Ewald electrostatic interaction between two atoms with the
+Beutler soft-core distance modification.
+
+Should be used alongside [`Ewald`](@ref) or [`PME`](@ref) configured with the same
+electrostatic scheduler. Special pairs are excluded from the reciprocal-space
+calculation, so their interaction uses the undamped soft-core form.
+"""
+struct CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA} <: PairwiseInteraction
+    dist_cutoff::D
+    error_tol::ET
+    α::A
+    use_neighbors::Bool
+    σ_mixing::SM
+    ϵ_mixing::EM
+    λ_mixing::LM
+    scheduler::SCH
+    weight_special::W
+    coulomb_const::C
+    α_ewald::EA
+    approximate_erfc::Bool
+end
+
+function CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=1.0,
+                                     use_neighbors=false, σ_mixing=LorentzMixing(),
+                                     ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
+                                     scheduler=DefaultLambdaScheduler(), weight_special=1,
+                                     coulomb_const=coulomb_const, approximate_erfc=true)
+    α_ewald = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
+    return CoulombSoftCoreBeutlerEwald(
+        dist_cutoff,
+        error_tol,
+        α,
+        use_neighbors,
+        σ_mixing,
+        ϵ_mixing,
+        λ_mixing,
+        scheduler,
+        weight_special,
+        coulomb_const,
+        α_ewald,
+        approximate_erfc,
+    )
+end
+
+use_neighbors(inter::CoulombSoftCoreBeutlerEwald) = inter.use_neighbors
+
+function Base.zero(coul::CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA}) where {ET, D, A, SM, EM, LM, SCH, W, C, EA}
+    return CoulombSoftCoreBeutlerEwald(
+        zero(D),
+        zero(ET),
+        zero(A),
+        coul.use_neighbors,
+        coul.σ_mixing,
+        coul.ϵ_mixing,
+        coul.λ_mixing,
+        coul.scheduler,
+        zero(W),
+        zero(C),
+        zero(EA),
+        coul.approximate_erfc,
+    )
+end
+
+function Base.:+(c1::CoulombSoftCoreBeutlerEwald, c2::CoulombSoftCoreBeutlerEwald)
+    return CoulombSoftCoreBeutlerEwald(
+        c1.dist_cutoff + c2.dist_cutoff,
+        c1.error_tol + c2.error_tol,
+        c1.α + c2.α,
+        c1.use_neighbors,
+        c1.σ_mixing,
+        c1.ϵ_mixing,
+        c1.λ_mixing,
+        c1.scheduler,
+        c1.weight_special + c2.weight_special,
+        c1.coulomb_const + c2.coulomb_const,
+        c1.α_ewald + c2.α_ewald,
+        c1.approximate_erfc,
+    )
+end
+
+@inline function force(inter::CoulombSoftCoreBeutlerEwald,
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...)
+    λ = softcore_pair_elec_lambda(inter, atom_i, atom_j)
+    if λ <= 0
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    r = norm(dr)
+    qi, qj = atom_i.charge, atom_j.charge
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    term = inter.α * (1 - λ) * σ6 + r^6
+    r3 = r^3
+    pe_soft = λ * inter.coulomb_const * ((qi * qj) / sqrt(cbrt(term)))
+    f_soft = λ * inter.coulomb_const * ((qi * qj) / (term * sqrt(cbrt(term)))) * (r3 * r * r)
+
+    if special
+        fdr = (f_soft / r) * dr
+        return fdr * inter.weight_special * (r <= inter.dist_cutoff)
+    end
+
+    erfc_αr, force_screen = softcore_ewald_screen(inter, r)
+    f = (f_soft * erfc_αr) + (pe_soft * force_screen)
+    return (f / r) * dr * (r <= inter.dist_cutoff)
+end
+
+@inline function potential_energy(inter::CoulombSoftCoreBeutlerEwald,
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...)
+    λ = softcore_pair_elec_lambda(inter, atom_i, atom_j)
+    if λ <= 0
+        return ustrip(zero(dr[1])) * energy_units
+    end
+
+    r = norm(dr)
+    qi, qj = atom_i.charge, atom_j.charge
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    pe_soft = λ * inter.coulomb_const * ((qi * qj) / sqrt(cbrt(inter.α * (1 - λ) * σ6 + r^6)))
+
+    if special
+        return pe_soft * inter.weight_special * (r <= inter.dist_cutoff)
+    end
+
+    erfc_αr, _ = softcore_ewald_screen(inter, r)
+    return pe_soft * erfc_αr * (r <= inter.dist_cutoff)
+end
+
+@doc raw"""
+    CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3, σQ=1.0u"nm",
+                               use_neighbors=false, λ_mixing=MinimumMixing(),
+                               scheduler=DefaultLambdaScheduler(), weight_special=1,
+                               coulomb_const=coulomb_const, approximate_erfc=true)
+
+The short-range Ewald electrostatic interaction between two atoms with the
+Gapsys soft-core polynomial near the origin.
+
+Should be used alongside [`Ewald`](@ref) or [`PME`](@ref) configured with the same
+electrostatic scheduler. Special pairs are excluded from the reciprocal-space
+calculation, so their interaction uses the undamped soft-core form.
+"""
+struct CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA} <: PairwiseInteraction
+    dist_cutoff::D
+    error_tol::ET
+    α::A
+    σQ::SQ
+    use_neighbors::Bool
+    λ_mixing::LM
+    scheduler::SCH
+    weight_special::W
+    coulomb_const::C
+    α_ewald::EA
+    approximate_erfc::Bool
+end
+
+function CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
+                                    σQ=1.0u"nm", use_neighbors=false,
+                                    λ_mixing=MinimumMixing(),
+                                    scheduler=DefaultLambdaScheduler(),
+                                    weight_special=1, coulomb_const=coulomb_const,
+                                    approximate_erfc=true)
+    α_ewald = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
+    return CoulombSoftCoreGapsysEwald(
+        dist_cutoff,
+        error_tol,
+        α,
+        σQ,
+        use_neighbors,
+        λ_mixing,
+        scheduler,
+        weight_special,
+        coulomb_const,
+        α_ewald,
+        approximate_erfc,
+    )
+end
+
+use_neighbors(inter::CoulombSoftCoreGapsysEwald) = inter.use_neighbors
+
+function Base.zero(coul::CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA}) where {ET, D, A, SQ, LM, SCH, W, C, EA}
+    return CoulombSoftCoreGapsysEwald(
+        zero(D),
+        zero(ET),
+        zero(A),
+        coul.σQ,
+        coul.use_neighbors,
+        coul.λ_mixing,
+        coul.scheduler,
+        zero(W),
+        zero(C),
+        zero(EA),
+        coul.approximate_erfc,
+    )
+end
+
+function Base.:+(c1::CoulombSoftCoreGapsysEwald, c2::CoulombSoftCoreGapsysEwald)
+    return CoulombSoftCoreGapsysEwald(
+        c1.dist_cutoff + c2.dist_cutoff,
+        c1.error_tol + c2.error_tol,
+        c1.α + c2.α,
+        c1.σQ + c2.σQ,
+        c1.use_neighbors,
+        c1.λ_mixing,
+        c1.scheduler,
+        c1.weight_special + c2.weight_special,
+        c1.coulomb_const + c2.coulomb_const,
+        c1.α_ewald + c2.α_ewald,
+        c1.approximate_erfc,
+    )
+end
+
+@inline function force(inter::CoulombSoftCoreGapsysEwald,
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...)
+    λ = softcore_pair_elec_lambda(inter, atom_i, atom_j)
+    if λ <= 0
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    r = norm(dr)
+    qij = atom_i.charge * atom_j.charge
+    R = inter.α * sqrt(cbrt(1 - λ)) * (oneunit(r) + (inter.σQ * abs(qij)))
+
+    if r >= R
+        pe_soft = λ * inter.coulomb_const * (qij / r)
+        f_soft = λ * inter.coulomb_const * (qij / r^2)
+    else
+        pe_soft = λ * inter.coulomb_const * (((qij / (R^3)) * (r^2)) - (((3 * qij) / (R^2)) * r) + ((3 * qij) / R))
+        f_soft = λ * inter.coulomb_const * (-(((2 * qij) / (R^3)) * r) + ((3 * qij) / (R^2)))
+    end
+
+    if special
+        fdr = (f_soft / r) * dr
+        return fdr * inter.weight_special * (r <= inter.dist_cutoff)
+    end
+
+    erfc_αr, force_screen = softcore_ewald_screen(inter, r)
+    f = (f_soft * erfc_αr) + (pe_soft * force_screen)
+    return (f / r) * dr * (r <= inter.dist_cutoff)
+end
+
+@inline function potential_energy(inter::CoulombSoftCoreGapsysEwald,
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...)
+    λ = softcore_pair_elec_lambda(inter, atom_i, atom_j)
+    if λ <= 0
+        return ustrip(zero(dr[1])) * energy_units
+    end
+
+    r = norm(dr)
+    qij = atom_i.charge * atom_j.charge
+    R = inter.α * sqrt(cbrt(1 - λ)) * (oneunit(r) + (inter.σQ * abs(qij)))
+
+    if r >= R
+        pe_soft = λ * inter.coulomb_const * (qij / r)
+    else
+        pe_soft = λ * inter.coulomb_const * (((qij / (R^3)) * (r^2)) - (((3 * qij) / (R^2)) * r) + ((3 * qij) / R))
+    end
+
+    if special
+        return pe_soft * inter.weight_special * (r <= inter.dist_cutoff)
+    end
+
+    erfc_αr, _ = softcore_ewald_screen(inter, r)
+    return pe_soft * erfc_αr * (r <= inter.dist_cutoff)
+end
+
 @doc raw"""
     Yukawa(; cutoff, use_neighbors, weight_special, coulomb_const, kappa)
 
@@ -1297,6 +1604,35 @@ Unitful.ustrip(c::CoulombSoftCoreGapsysReactionField) = CoulombSoftCoreGapsysRea
     coulomb_const = ustrip(c.coulomb_const),
 )
 
+Unitful.ustrip(c::CoulombSoftCoreBeutlerEwald) = CoulombSoftCoreBeutlerEwald(
+    ustrip(c.dist_cutoff),
+    ustrip(c.error_tol),
+    ustrip(c.α),
+    c.use_neighbors,
+    c.σ_mixing,
+    c.ϵ_mixing,
+    c.λ_mixing,
+    c.scheduler,
+    ustrip(c.weight_special),
+    ustrip(c.coulomb_const),
+    ustrip(c.α_ewald),
+    c.approximate_erfc,
+)
+
+Unitful.ustrip(c::CoulombSoftCoreGapsysEwald) = CoulombSoftCoreGapsysEwald(
+    ustrip(c.dist_cutoff),
+    ustrip(c.error_tol),
+    ustrip(c.α),
+    ustrip(c.σQ),
+    c.use_neighbors,
+    c.λ_mixing,
+    c.scheduler,
+    ustrip(c.weight_special),
+    ustrip(c.coulomb_const),
+    ustrip(c.α_ewald),
+    c.approximate_erfc,
+)
+
 # CoulombEwald does not use @kwdef; it builds α internally or accepts it positionally
 Unitful.ustrip(c::CoulombEwald) = CoulombEwald(
     ustrip(c.dist_cutoff),
@@ -1363,6 +1699,47 @@ function inject_interaction(inter::CoulombEwald, params::AbstractVector, idx_dis
     )
 end
 
+function inject_interaction(inter::CoulombSoftCoreBeutlerEwald, params::AbstractVector,
+                            idx_dist_cutoff::Int, idx_weight_14::Int, idx_coulomb_const::Int)
+    new_d = idx_dist_cutoff > 0 ? typeof(inter.dist_cutoff)(params[idx_dist_cutoff]) : inter.dist_cutoff
+    new_w = idx_weight_14 > 0 ? typeof(inter.weight_special)(params[idx_weight_14]) : inter.weight_special
+    new_c = idx_coulomb_const > 0 ? typeof(inter.coulomb_const)(params[idx_coulomb_const]) : inter.coulomb_const
+
+    return CoulombSoftCoreBeutlerEwald(;
+        dist_cutoff = new_d,
+        error_tol = inter.error_tol,
+        α = inter.α,
+        use_neighbors = inter.use_neighbors,
+        σ_mixing = inter.σ_mixing,
+        ϵ_mixing = inter.ϵ_mixing,
+        λ_mixing = inter.λ_mixing,
+        scheduler = inter.scheduler,
+        weight_special = new_w,
+        coulomb_const = new_c,
+        approximate_erfc = inter.approximate_erfc,
+    )
+end
+
+function inject_interaction(inter::CoulombSoftCoreGapsysEwald, params::AbstractVector,
+                            idx_dist_cutoff::Int, idx_weight_14::Int, idx_coulomb_const::Int)
+    new_d = idx_dist_cutoff > 0 ? typeof(inter.dist_cutoff)(params[idx_dist_cutoff]) : inter.dist_cutoff
+    new_w = idx_weight_14 > 0 ? typeof(inter.weight_special)(params[idx_weight_14]) : inter.weight_special
+    new_c = idx_coulomb_const > 0 ? typeof(inter.coulomb_const)(params[idx_coulomb_const]) : inter.coulomb_const
+
+    return CoulombSoftCoreGapsysEwald(;
+        dist_cutoff = new_d,
+        error_tol = inter.error_tol,
+        α = inter.α,
+        σQ = inter.σQ,
+        use_neighbors = inter.use_neighbors,
+        λ_mixing = inter.λ_mixing,
+        scheduler = inter.scheduler,
+        weight_special = new_w,
+        coulomb_const = new_c,
+        approximate_erfc = inter.approximate_erfc,
+    )
+end
+
 function inject_interaction(inter::CoulombSoftCoreBeutlerReactionField, params::AbstractVector,
                             idx_dist_cutoff::Int, idx_solvent_dielectric::Int,
                             idx_weight_14::Int, idx_coulomb_const::Int)
@@ -1421,6 +1798,22 @@ end
 
 function extract_parameter_indices!(buf::ParamBuffer, inter::CoulombEwald)
     key_prefix = "inter_CE_"
+    idx_cutoff = _push_param!(buf, key_prefix * "dist_cutoff", inter.dist_cutoff)
+    idx_weight = _push_param!(buf, key_prefix * "weight_14", inter.weight_special)
+    idx_coulomb = _push_param!(buf, key_prefix * "coulomb_const", inter.coulomb_const)
+    return (idx_cutoff, idx_weight, idx_coulomb)
+end
+
+function extract_parameter_indices!(buf::ParamBuffer, inter::CoulombSoftCoreBeutlerEwald)
+    key_prefix = "inter_CSCBEW_"
+    idx_cutoff = _push_param!(buf, key_prefix * "dist_cutoff", inter.dist_cutoff)
+    idx_weight = _push_param!(buf, key_prefix * "weight_14", inter.weight_special)
+    idx_coulomb = _push_param!(buf, key_prefix * "coulomb_const", inter.coulomb_const)
+    return (idx_cutoff, idx_weight, idx_coulomb)
+end
+
+function extract_parameter_indices!(buf::ParamBuffer, inter::CoulombSoftCoreGapsysEwald)
+    key_prefix = "inter_CSCGEW_"
     idx_cutoff = _push_param!(buf, key_prefix * "dist_cutoff", inter.dist_cutoff)
     idx_weight = _push_param!(buf, key_prefix * "weight_14", inter.weight_special)
     idx_coulomb = _push_param!(buf, key_prefix * "coulomb_const", inter.coulomb_const)

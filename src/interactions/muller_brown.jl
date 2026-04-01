@@ -85,3 +85,14 @@ end
     end
     return SVector(-res_x, -res_y)
 end
+
+Unitful.ustrip(inter::MullerBrown) = MullerBrown(
+    A = ustrip.(inter.A),
+    a = ustrip.(inter.a),
+    b = ustrip.(inter.b),
+    c = ustrip.(inter.c),
+    x0 = ustrip.(inter.x0),
+    y0 = ustrip.(inter.y0),
+    force_units = NoUnits,
+    energy_units = NoUnits,
+)

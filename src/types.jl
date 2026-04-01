@@ -30,6 +30,10 @@ export
 @inline _strip_units(::Nothing) = nothing
 @inline _strip_units(x::Tuple) = map(_strip_units, x)
 @inline _strip_units(x::NamedTuple) = map(_strip_units, x)
+@inline function _strip_units_array(x)
+    AT = array_type(x)
+    return to_device(_strip_units.(from_device(x)), AT)
+end
 
 # Typed dictionary fetch used by parameter-injection utilities.
 dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
@@ -1133,17 +1137,22 @@ function Unitful.ustrip(sys::System)
     return System(
         atoms = unitless_atoms,
         atoms_data = sys.atoms_data,
+        topology = sys.topology,
         pairwise_inters = _strip_units(sys.pairwise_inters),
         specific_inter_lists = _strip_units(sys.specific_inter_lists),
         general_inters = _strip_units(sys.general_inters),
+        constraints = _strip_units(sys.constraints),
         coords = unitless_coords,
         velocities = unitless_vels,
         boundary = ustrip(sys.boundary),
+        virtual_sites = _strip_units_array(sys.virtual_sites),
         neighbor_finder = _strip_units(sys.neighbor_finder),
         loggers = NamedTuple(),
         force_units = NoUnits,
         energy_units = NoUnits,
-        k = _strip_units(sys.k)
+        k = _strip_units(sys.k),
+        data = sys.data,
+        launch_config = sys.launch_config,
     )
 end
 

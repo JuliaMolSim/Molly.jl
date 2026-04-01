@@ -137,3 +137,12 @@ end
     w = 1 - r / r_c
     return (inter.a / 2) * r_c * w * w
 end
+
+Unitful.ustrip(inter::DPDInteraction) = DPDInteraction(
+    a = ustrip(inter.a),
+    γ = ustrip(inter.γ),
+    σ = ustrip(inter.σ),
+    r_c = ustrip(inter.r_c),
+    dt = ustrip(inter.dt),
+    use_neighbors = inter.use_neighbors,
+)

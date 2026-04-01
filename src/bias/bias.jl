@@ -30,6 +30,8 @@ struct LinearBias{K, C}
     cv_target::C
 end
 
+Unitful.ustrip(lb::LinearBias) = LinearBias(ustrip(lb.k), ustrip(lb.cv_target))
+
 function potential_energy(lb::LinearBias, cv_sim; kwargs...)
     return lb.k * abs(cv_sim - lb.cv_target)
 end
@@ -69,6 +71,8 @@ struct SquareBias{K, C}
     k::K
     cv_target::C
 end
+
+Unitful.ustrip(sb::SquareBias) = SquareBias(ustrip(sb.k), ustrip(sb.cv_target))
 
 function potential_energy(sb::SquareBias, cv_sim; kwargs...)
     return (sb.k / 2) * (cv_sim - sb.cv_target)^2
@@ -110,6 +114,12 @@ struct FlatBottomSquareBias{K, R, C}
     r_fb::R
     cv_target::C
 end
+
+Unitful.ustrip(fb::FlatBottomSquareBias) = FlatBottomSquareBias(
+    ustrip(fb.k),
+    ustrip(fb.r_fb),
+    ustrip(fb.cv_target),
+)
 
 function potential_energy(fb::FlatBottomSquareBias, cv_sim; kwargs...)
     d_abs = abs(cv_sim - fb.cv_target)
@@ -158,6 +168,12 @@ struct PeriodicFlatBottomBias{K, R, T}
     r_bf::R
     cv_target::T
 end
+
+Unitful.ustrip(pb::PeriodicFlatBottomBias) = PeriodicFlatBottomBias(
+    ustrip(pb.k),
+    ustrip(pb.r_bf),
+    ustrip(pb.cv_target),
+)
 
 function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     # Calculate signed distance in periodic bounds [-π, π] with inferred units
@@ -214,6 +230,8 @@ struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
 end
+
+Unitful.ustrip(bp::BiasPotential) = BiasPotential(_strip_units(bp.cv_type), _strip_units(bp.bias_type))
 
 function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
     if bias.cv_type.correction == :pbc

@@ -78,3 +78,11 @@ function pairwise_pe(::SoftSphere, r, (σ2, ϵ))
     six_term = (σ2 / r^2) ^ 3
     return 4ϵ * (six_term ^ 2)
 end
+
+Unitful.ustrip(inter::SoftSphere) = SoftSphere(
+    cutoff = ustrip(inter.cutoff),
+    use_neighbors = inter.use_neighbors,
+    shortcut = inter.shortcut,
+    σ_mixing = inter.σ_mixing,
+    ϵ_mixing = inter.ϵ_mixing,
+)

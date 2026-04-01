@@ -40,3 +40,8 @@ end
     θ = bond_angle(coords_i, coords_j, coords_k, boundary)
     return a.k * (1 + cos(θ - a.θ0))
 end
+
+Unitful.ustrip(a::CosineAngle) = CosineAngle(
+    k = ustrip(a.k),
+    θ0 = ustrip(a.θ0),
+)

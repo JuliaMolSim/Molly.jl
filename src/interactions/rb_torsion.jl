@@ -41,3 +41,10 @@ end
     θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
     return (d.f1 * (1 + cos(θ)) + d.f2 * (1 - cos(2θ)) + d.f3 * (1 + cos(3θ)) + d.f4) / 2
 end
+
+Unitful.ustrip(d::RBTorsion) = RBTorsion(
+    ustrip(d.f1),
+    ustrip(d.f2),
+    ustrip(d.f3),
+    ustrip(d.f4),
+)

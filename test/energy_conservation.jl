@@ -36,7 +36,7 @@ using Test
                     )
                 else
                     neighbor_finder=DistanceNeighborFinder(
-                        eligible=to_device(trues(n_atoms, n_atoms), AT),
+                        eligible=Molly.to_device(trues(n_atoms, n_atoms), AT),
                         n_steps=10,
                         dist_cutoff=dist_cutoff,
                     )
@@ -46,8 +46,8 @@ using Test
             end
 
             sys = System(
-                atoms=to_device(atoms, AT),
-                coords=to_device(coords, AT),
+                atoms=Molly.to_device(atoms, AT),
+                coords=Molly.to_device(coords, AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=ifelse(nl, true, false)),),
                 neighbor_finder=neighbor_finder,

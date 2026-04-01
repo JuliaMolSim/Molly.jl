@@ -176,6 +176,8 @@ function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
     return LJDispersionCorrection(dc1.factor + dc2.factor)
 end
 
+Unitful.ustrip(dc::LJDispersionCorrection) = LJDispersionCorrection(ustrip(dc.factor))
+
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)
     return inter.factor / volume(sys)

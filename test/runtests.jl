@@ -121,7 +121,9 @@ if GROUP in ("All", "NotGradients")
     end
 
     include("basic.jl")
+    include("ustrip.jl")
     include("interactions.jl")
+    include("softcore_ewald.jl")
     include("minimization.jl")
     include("agent.jl")
     include("simulation.jl")

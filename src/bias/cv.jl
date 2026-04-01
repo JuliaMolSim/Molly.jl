@@ -66,6 +66,8 @@ struct CalcMinDist
     end
 end
 
+Unitful.ustrip(cv::CalcMinDist) = cv
+
 function dist_between_groups(md::CalcMinDist, coords_1, coords_2, boundary, args...; kwargs...)
     dist_matrix = pairwise_distance_matrix(coords_1, coords_2, md.calc_type, boundary)
     return minimum(dist_matrix)
@@ -92,6 +94,8 @@ struct CalcMaxDist
         new(calc_type)
     end
 end
+
+Unitful.ustrip(cv::CalcMaxDist) = cv
 
 function dist_between_groups(md::CalcMaxDist, coords_1, coords_2, boundary, args...; kwargs...)
     dist_matrix = pairwise_distance_matrix(coords_1, coords_2, md.calc_type, boundary)
@@ -121,6 +125,8 @@ struct CalcCMDist
         new(calc_type)
     end
 end
+
+Unitful.ustrip(cv::CalcCMDist) = cv
 
 function dist_between_groups(cd::CalcCMDist, coords_1, coords_2, boundary,
                              atoms_1, atoms_2, args...; kwargs...)
@@ -155,6 +161,8 @@ struct CalcSingleDist
         new(calc_type)
     end
 end
+
+Unitful.ustrip(cv::CalcSingleDist) = cv
 
 function dist_between_groups(sd::CalcSingleDist, coords_1, coords_2, boundary, args...; kwargs...)
     if length(coords_1) > 1 || length(coords_2) > 1
@@ -197,6 +205,14 @@ struct CalcDist{DT}
         return new{DT}(atom_inds_1, atom_inds_2, dist_type, correction, has_virial)
     end
 end
+
+Unitful.ustrip(cv::CalcDist) = CalcDist(
+    cv.atom_inds_1,
+    cv.atom_inds_2,
+    _strip_units(cv.dist_type),
+    cv.correction,
+    cv.has_virial,
+)
 
 """
     calculate_cv(cv, coords, atoms, boundary, velocities; kwargs...)
@@ -541,6 +557,8 @@ struct CalcRg
     end
 end
 
+Unitful.ustrip(cv::CalcRg) = CalcRg(cv.atom_inds, cv.correction, cv.has_virial)
+
 function calculate_cv(cv::CalcRg, coords, atoms, args...; kwargs...)
     atom_inds_used = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
     coords_used = @view coords[atom_inds_used]
@@ -661,6 +679,14 @@ struct CalcRMSD{RC}
     end
 end
 
+Unitful.ustrip(cv::CalcRMSD) = CalcRMSD(
+    ustrip.(from_device(cv.ref_coords)),
+    cv.atom_inds,
+    cv.ref_atom_inds,
+    cv.correction,
+    cv.has_virial,
+)
+
 function calculate_cv(cv::CalcRMSD, coords, args...; kwargs...)
     atom_inds_used = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
     coords_used = coords[atom_inds_used]
@@ -765,6 +791,8 @@ struct CalcTorsion
         return new(atom_inds, correction, has_virial)
     end
 end
+
+Unitful.ustrip(cv::CalcTorsion) = CalcTorsion(cv.atom_inds, cv.correction, cv.has_virial)
 
 function calculate_cv(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs...)
     c = @view coords[collect(cv.atom_inds)]

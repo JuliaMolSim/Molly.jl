@@ -106,3 +106,13 @@ end
 function pairwise_pe(::Buckingham, r, (A, B, C))
     return A * exp(-B * r) - C * inv(r)^6
 end
+
+Unitful.ustrip(inter::Buckingham) = Buckingham(
+    cutoff = ustrip(inter.cutoff),
+    use_neighbors = inter.use_neighbors,
+    shortcut = inter.shortcut,
+    A_mixing = inter.A_mixing,
+    B_mixing = inter.B_mixing,
+    C_mixing = inter.C_mixing,
+    weight_special = ustrip(inter.weight_special),
+)
