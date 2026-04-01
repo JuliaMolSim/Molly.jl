@@ -63,11 +63,23 @@ function find_excluded_pairs(eligible, special)
     return excluded_pairs
 end
 
-function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, i, j,
+@inline electrostatic_lambda(::Any, atom, ::Val{T}) where T = one(T)
+
+@inline function electrostatic_lambda(scheduler, atom::Atom, ::Val{T}) where T
+    return T(scale_elec(scheduler, T(atom.λ), atom.alch_role))
+end
+
+@inline function effective_charge(scheduler, atom, ::Val{T}) where T
+    return charge(atom) * electrostatic_lambda(scheduler, atom, Val(T))
+end
+
+function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, scheduler,
+                            i, j,
                             ::Val{T}, ::Val{calculate_forces}, ::Val{atomic},
                             ::Val{needs_vir}) where {T, calculate_forces, atomic, needs_vir}
     sqrt_π = sqrt(T(π))
-    charge_ij = charge(atoms[i]) * charge(atoms[j])
+    charge_ij = effective_charge(scheduler, atoms[i], Val(T)) *
+                effective_charge(scheduler, atoms[j], Val(T))
     vec_ij = vector(coords[i], coords[j], boundary)
     r = norm(vec_ij)
     αr = α * r
@@ -104,13 +116,14 @@ function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_di
 end
 
 function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
-                                coords::Vector, boundary, α, f_div_ϵr, force_units, energy_units,
+                                coords::Vector, boundary, α, f_div_ϵr, scheduler, force_units, energy_units,
                                 calculate_forces, ::Val{T},
                                 ::Val{needs_vir}) where {T, needs_vir}
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
         E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr,
-                            i, j, Val(T), Val(calculate_forces), Val(false), Val(needs_vir))
+                            scheduler, i, j, Val(T), Val(calculate_forces), Val(false),
+                            Val(needs_vir))
         exclusion_E += E
     end
     return exclusion_E
@@ -118,7 +131,7 @@ end
 
 function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
                                 coords::AbstractVector{SVector{D, C}}, boundary, α, f_div_ϵr,
-                                force_units, energy_units, calculate_forces, ::Val{T},
+                                scheduler, force_units, energy_units, calculate_forces, ::Val{T},
                                 ::Val{needs_vir}) where {D, C, T, needs_vir}
     if calculate_forces
         buffer_Fs .= zero(T)
@@ -130,7 +143,7 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
     n_threads_gpu = 128
     kernel! = excluded_interactions_kernel!(backend, n_threads_gpu)
     kernel!(buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms, coords, boundary, α,
-            f_div_ϵr, energy_units, Val(T), Val(calculate_forces), Val(needs_vir);
+            f_div_ϵr, scheduler, energy_units, Val(T), Val(calculate_forces), Val(needs_vir);
             ndrange=length(excluded_pairs))
 
     if calculate_forces
@@ -143,20 +156,22 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
 end
 
 @kernel function excluded_interactions_kernel!(Fs_mat, vir, exclusion_Es, @Const(excluded_pairs),
-                            @Const(atoms), @Const(coords), boundary, α, f_div_ϵr, energy_units,
+                            @Const(atoms), @Const(coords), boundary, α, f_div_ϵr, scheduler, energy_units,
                             ::Val{T}, ::Val{calculate_forces},
                             ::Val{needs_vir}) where {T, calculate_forces, needs_vir}
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
         E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f_div_ϵr,
-                                i, j, Val(T), Val(calculate_forces), Val(true), Val(needs_vir))
+                                scheduler, i, j, Val(T), Val(calculate_forces), Val(true),
+                                Val(needs_vir))
         exclusion_Es[ei] = ustrip(energy_units, E)
     end
 end
 
 """
-    Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing)
+    Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing,
+          scheduler=DefaultLambdaScheduler())
 
 Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -177,16 +192,18 @@ Only compatible with 3D systems and [`CubicBoundary`](@ref).
 Not compatible with infinite boundaries.
 Runs on the CPU, even for GPU systems.
 """
-struct Ewald{T, D} <: AbstractEwald
+struct Ewald{T, D, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     excluded_pairs::Vector{Tuple{Int32, Int32}}
+    scheduler::SCH
 end
 
-function Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing)
+function Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing,
+               scheduler=DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
     excluded_pairs = find_excluded_pairs(eligible, special)
-    return Ewald(dist_cutoff, T(error_tol), excluded_pairs)
+    return Ewald(dist_cutoff, T(error_tol), excluded_pairs, scheduler)
 end
 
 function ewald_error(αr::T, target, guess) where T
@@ -241,7 +258,7 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
     if kmax < 1
         error("kmax for Ewald summation is $kmax, should be at least 1")
     end
-    partial_charges_cpu = charge.(atoms_cpu)
+    partial_charges_cpu = [effective_charge(inter.scheduler, atom, Val(T)) for atom in atoms_cpu]
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
     if AT <: AbstractGPUArray && calculate_forces
@@ -251,8 +268,9 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
     end
 
     exclusion_E = excluded_interactions!(Fs_cpu, vir, nothing, nothing, nothing,
-                        inter.excluded_pairs, atoms_cpu, coords_cpu, boundary, α, f, force_units,
-                        energy_units, calculate_forces, Val(T), Val(needs_vir))
+                        inter.excluded_pairs, atoms_cpu, coords_cpu, boundary, α, f,
+                        inter.scheduler, force_units, energy_units, calculate_forces, Val(T),
+                        Val(needs_vir))
 
     recip_box_size = (2 * T(π)) ./ boundary.side_lengths
     eir = zeros(Complex{T}, kmax * n_atoms * 3)
@@ -354,19 +372,22 @@ end
 function ==(a::Ewald, b::Ewald)
     return a.dist_cutoff == b.dist_cutoff &&
            a.error_tol   == b.error_tol   &&
-           a.excluded_pairs == b.excluded_pairs
+           a.excluded_pairs == b.excluded_pairs &&
+           a.scheduler == b.scheduler
 end
 
 function hash(a::Ewald, h::UInt)
     v = hash(a.dist_cutoff, h)
     v = hash(a.error_tol, v)
-    return hash(a.excluded_pairs, v)
+    v = hash(a.excluded_pairs, v)
+    return hash(a.scheduler, v)
 end
 
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
-        grad_safe=false, n_threads=Threads.nthreads())
+        scheduler=DefaultLambdaScheduler(), grad_safe=false,
+        n_threads=Threads.nthreads())
 
 Particle mesh Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -394,7 +415,7 @@ is based on the smooth PME algorithm from
 Only compatible with 3D systems.
 Not compatible with infinite boundaries.
 """
-struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B} <: AbstractEwald
+struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     order::Int
@@ -419,11 +440,13 @@ struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B} <: AbstractEwal
     pc_abs2_sum::P
     fft_plan::F
     bfft_plan::B
+    scheduler::SCH
     grad_safe::Bool
 end
 
 function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing, grad_safe=false,
+             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
+             scheduler=DefaultLambdaScheduler(), grad_safe=false,
              n_threads::Integer=Threads.nthreads())
     T = typeof(ustrip(dist_cutoff))
     AT = array_type(atoms)
@@ -505,7 +528,8 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     end
 
     if fixed_charges && !grad_safe
-        partial_charges = charge.(atoms)
+        atoms_cpu = from_device(atoms)
+        partial_charges = [effective_charge(scheduler, atom, Val(T)) for atom in atoms_cpu]
         pc_sum = sum(partial_charges)
         pc_abs2_sum = sum(abs2, partial_charges)
     else
@@ -522,7 +546,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
                grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z,
                charge_grid, charge_grid_buffer, excluded_buffer_Fs, excluded_buffer_Es,
                recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, fft_plan,
-               bfft_plan, grad_safe)
+               bfft_plan, scheduler, grad_safe)
 end
 
 zero_or_nothing(x) = zero(x)
@@ -560,6 +584,7 @@ function Base.zero(pme::PME)
         zero_or_nothing(pme.pc_abs2_sum),
         pme.fft_plan,
         pme.bfft_plan,
+        pme.scheduler,
         pme.grad_safe,
     )
 end
@@ -571,6 +596,7 @@ function ==(a::PME, b::PME)
            a.ϵr          == b.ϵr          &&
            a.α           == b.α           &&
            a.mesh_dims   == b.mesh_dims   &&
+           a.scheduler   == b.scheduler   &&
            a.grad_safe   == b.grad_safe
 end
 
@@ -581,6 +607,7 @@ function hash(a::PME, h::UInt)
     v = hash(a.ϵr, v)
     v = hash(a.α, v)
     v = hash(a.mesh_dims, v)
+    v = hash(a.scheduler, v)
     v = hash(a.grad_safe, v)
     return v
 end
@@ -694,8 +721,9 @@ end
 end
 
 @inline function spread_charge_inner!(charge_grid, grid_indices, bsplines_θ,
-                              mesh_dims, order, atoms, i, ::Val{atomic}) where atomic
-    q = charge(atoms[i])
+                              mesh_dims, order, atoms, scheduler, i, ::Val{T},
+                              ::Val{atomic}) where {T, atomic}
+    q = effective_charge(scheduler, atoms[i], Val(T))
     @inbounds x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
     @inbounds for ix in 0:(order-1)
         xindex = (x0index + ix) % mesh_dims[1]
@@ -718,22 +746,22 @@ end
 end
 
 function spread_charge!(charge_grid::Array{Complex{T}, 3}, buffer, grid_indices,
-                        bsplines_θ, mesh_dims, order, atoms, ::Val{1}) where T
+                        bsplines_θ, mesh_dims, order, atoms, scheduler, ::Val{1}) where T
     charge_grid .= zero(Complex{T})
     for i in eachindex(atoms)
         spread_charge_inner!(charge_grid, grid_indices, bsplines_θ, mesh_dims,
-                             order, atoms, i, Val(false))
+                             order, atoms, scheduler, i, Val(T), Val(false))
     end
     return charge_grid, buffer
 end
 
 function spread_charge!(charge_grid::Array{Complex{T}, 3}, buffer, grid_indices, bsplines_θ,
-                        mesh_dims, order, atoms, ::Val{n_threads}) where {T, n_threads}
+                        mesh_dims, order, atoms, scheduler, ::Val{n_threads}) where {T, n_threads}
     Threads.@threads for chunk_i in 1:n_threads
         buffer[chunk_i] .= zero(Complex{T})
         for i in chunk_i:n_threads:length(atoms)
             spread_charge_inner!(buffer[chunk_i], grid_indices, bsplines_θ,
-                                 mesh_dims, order, atoms, i, Val(false))
+                                 mesh_dims, order, atoms, scheduler, i, Val(T), Val(false))
         end
     end
     charge_grid .= buffer[1]
@@ -744,22 +772,23 @@ function spread_charge!(charge_grid::Array{Complex{T}, 3}, buffer, grid_indices,
 end
 
 function spread_charge!(charge_grid::AbstractArray{Complex{T}, 3}, buffer, grid_indices,
-                        bsplines_θ, mesh_dims, order, atoms, n_threads_val) where T
+                        bsplines_θ, mesh_dims, order, atoms, scheduler, n_threads_val) where T
     backend = get_backend(charge_grid)
     n_threads_gpu = 128
     kernel! = spread_charge_kernel!(backend, n_threads_gpu)
     buffer .= zero(T)
-    kernel!(buffer, grid_indices, bsplines_θ, mesh_dims, order, atoms; ndrange=length(atoms))
+    kernel!(buffer, grid_indices, bsplines_θ, mesh_dims, order, atoms, scheduler, Val(T);
+            ndrange=length(atoms))
     charge_grid .= Complex.(buffer, zero(T))
     return charge_grid, buffer
 end
 
 @kernel function spread_charge_kernel!(charge_grid_real, @Const(grid_indices), @Const(bsplines_θ),
-                                       mesh_dims, order, atoms)
+                                       mesh_dims, order, atoms, scheduler, ::Val{T}) where T
     i = @index(Global, Linear)
     if i <= length(atoms)
         spread_charge_inner!(charge_grid_real, grid_indices, bsplines_θ, mesh_dims, order, atoms,
-                             i, Val(true))
+                             scheduler, i, Val(T), Val(true))
     end
 end
 
@@ -904,11 +933,11 @@ end
 
 function interpolate_force_inner!(Fs, charge_grid, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                            ::Val{T}, i) where T
+                            scheduler, ::Val{T}, i) where T
     nx, ny, nz = mesh_dims
     fx, fy, fz = zero(T), zero(T), zero(T)
     @inbounds begin
-        q = charge(atoms[i])
+        q = effective_charge(scheduler, atoms[i], Val(T))
         x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
         for ix in 0:(order-1)
             xindex = (x0index + ix) % mesh_dims[1]
@@ -938,11 +967,11 @@ end
 
 function interpolate_force!(Fs, charge_grid::Array{Complex{T}, 3}, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                            n_threads) where T
+                            scheduler, n_threads) where T
     @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
         for i in chunk_i:n_threads:length(atoms)
             interpolate_force_inner!(Fs, charge_grid, grid_indices, bsplines_θ,
-                        bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
+                        bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms, scheduler,
                         Val(T), i)
         end
     end
@@ -951,22 +980,23 @@ end
 
 function interpolate_force!(Fs, charge_grid::AbstractArray{T, 3}, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                            n_threads) where T
+                            scheduler, n_threads) where T
     backend = get_backend(Fs)
     n_threads_gpu = 128
     kernel! = interpolate_force_kernel!(backend, n_threads_gpu)
     kernel!(Fs, charge_grid, grid_indices, bsplines_θ, bsplines_dθ, recip_box,
-            mesh_dims, order, energy_units, atoms, Val(T); ndrange=length(atoms))
+            mesh_dims, order, energy_units, atoms, scheduler, Val(T); ndrange=length(atoms))
     return Fs
 end
 
 @kernel function interpolate_force_kernel!(Fs, @Const(charge_grid), @Const(grid_indices),
                         @Const(bsplines_θ), @Const(bsplines_dθ), recip_box, mesh_dims, order,
-                        energy_units, @Const(atoms), ::Val{T}) where T
+                        energy_units, @Const(atoms), scheduler, ::Val{T}) where T
     i = @index(Global, Linear)
     if i <= length(atoms)
         interpolate_force_inner!(Fs, charge_grid, grid_indices, bsplines_θ,
-                    bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms, Val(T), i)
+                    bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms, scheduler,
+                    Val(T), i)
     end
 end
 
@@ -985,13 +1015,14 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
 
     exclusion_E = excluded_interactions!(Fs, vir, inter.excluded_buffer_Fs, inter.virial_buffer,
                     inter.excluded_buffer_Es, inter.excluded_pairs, atoms, coords, boundary, α,
-                    f_div_ϵr, force_units, energy_units, calculate_forces, Val(T), Val(needs_vir))
+                    f_div_ϵr, inter.scheduler, force_units, energy_units, calculate_forces,
+                    Val(T), Val(needs_vir))
 
     recip_box = invert_box_vectors(boundary)
     grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
     update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order, n_thr)
     spread_charge!(inter.charge_grid, inter.charge_grid_buffer, inter.grid_indices,
-                   inter.bsplines_θ, mesh_dims, order, atoms, Val(n_thr))
+                   inter.bsplines_θ, mesh_dims, order, atoms, inter.scheduler, Val(n_thr))
     grad_safe_fft!(inter.charge_grid, inter.fft_plan)
     reciprocal_space_E = recip_conv!(vir, inter.virial_buffer, inter.charge_grid,
                     inter.recip_conv_buffer, inter.bsplines_moduli_x, inter.bsplines_moduli_y,
@@ -1001,11 +1032,12 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     if calculate_forces
         interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
                            inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                           n_thr)
+                           inter.scheduler, n_thr)
     end
 
     if isnothing(inter.pc_sum) || inter.grad_safe
-        partial_charges = charge.(atoms)
+        partial_charges = [effective_charge(inter.scheduler, atom, Val(T))
+                           for atom in from_device(atoms)]
         pc_sum = sum(partial_charges)
         pc_abs2_sum = sum(abs2, partial_charges)
     else
