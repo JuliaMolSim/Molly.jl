@@ -978,7 +978,7 @@ function interpolate_force!(Fs, charge_grid::Array{Complex{T}, 3}, grid_indices,
     return Fs
 end
 
-function interpolate_force!(Fs, charge_grid::AbstractArray{T, 3}, grid_indices, bsplines_θ,
+function interpolate_force!(Fs, charge_grid::AbstractArray{Complex{T}, 3}, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
                             scheduler, n_threads) where T
     backend = get_backend(Fs)
