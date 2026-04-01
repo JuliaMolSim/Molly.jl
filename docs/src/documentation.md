@@ -732,7 +732,11 @@ The available pairwise interactions are:
 - [`CoulombSoftCoreBeutler`](@ref)
 - [`CoulombSoftCoreGapsys`](@ref)
 - [`CoulombReactionField`](@ref)
+- [`CoulombSoftCoreBeutlerReactionField`](@ref)
+- [`CoulombSoftCoreGapsysReactionField`](@ref)
 - [`CoulombEwald`](@ref)
+- [`CoulombSoftCoreBeutlerEwald`](@ref)
+- [`CoulombSoftCoreGapsysEwald`](@ref)
 - [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 

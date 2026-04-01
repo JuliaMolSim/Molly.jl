@@ -296,8 +296,17 @@ end
     # 2. Dispatch to the scheduler for the effective sterics lambda
     λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
 
+    if λ <= 0
+        return zero_pairwise_force(dr, force_units)
+    end
+
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    r = norm(dr)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
     end
 
     # If lambda is 1, the soft core formula reduces to standard LJ
@@ -306,13 +315,12 @@ end
 
         σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
         ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
-        r = norm(dr)
         σ2 = σ^2
         params = (σ2, ϵ, nothing, nothing)
         
         # Call standard LJ cutoff logic.
         f = force_cutoff(inter.cutoff, inter, r, params) 
-        fdr = (f / r) * dr
+        fdr = radial_force_vector(f, r, dr, force_units)
         
         return special ? fdr * inter.weight_special : fdr
     end
@@ -321,14 +329,13 @@ end
     σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
     ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
-    r = norm(dr)
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
     σ6_fac = inter.α * (1 - λ)
     params = (C12, C6, λ, σ6_fac)
 
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = radial_force_vector(f, r, dr, force_units)
     
     return special ? fdr * inter.weight_special : fdr
 end
@@ -364,6 +371,10 @@ end
 
     # 2. Dispatch to the scheduler for the effective sterics lambda
     λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+
+    if λ <= 0
+        return ustrip(zero(dr[1])) * energy_units
+    end
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
@@ -520,12 +531,20 @@ end
     # Changed scale_elec to scale_sterics
     λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
 
+    if λ <= 0
+        return zero_pairwise_force(dr, force_units)
+    end
+
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     cutoff = inter.cutoff
     r = norm(dr)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     σ6 = σ^6
@@ -535,7 +554,7 @@ end
         # Pass standard LJ params tuple (Length 2)
         params = (σ^2, ϵ, nothing, nothing)
         f = force_cutoff(cutoff, inter, r, params)
-        fdr = (f / r) * dr
+        fdr = radial_force_vector(f, r, dr, force_units)
         return special ? fdr * inter.weight_special : fdr
     end
 
@@ -548,7 +567,7 @@ end
     # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = radial_force_vector(f, r, dr, force_units)
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -590,6 +609,10 @@ end
     # 2. Dispatch to the scheduler for the effective sterics lambda
     # Changed scale_elec to scale_sterics
     λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+
+    if λ <= 0
+        return ustrip(zero(dr[1])) * energy_units
+    end
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units

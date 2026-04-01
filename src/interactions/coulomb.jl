@@ -206,10 +206,14 @@ end
     λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     r = norm(dr)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
     qi, qj = atom_i.charge, atom_j.charge
     cutoff = inter.cutoff
 
@@ -218,7 +222,7 @@ end
     if λ >= 1
         params = (ke, qi, qj, nothing, nothing)
         f = force_cutoff(cutoff, inter, r, params)
-        fdr = (f / r) * dr
+        fdr = radial_force_vector(f, r, dr, force_units)
         return special ? fdr * inter.weight_special : fdr
     end
 
@@ -228,7 +232,7 @@ end
 
     params = (ke, qi, qj, σ6_fac, λ)
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = radial_force_vector(f, r, dr, force_units)
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -394,10 +398,14 @@ end
     λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     r = norm(dr)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
     qi, qj = atom_i.charge, atom_j.charge
     qij = qi * qj 
     cutoff = inter.cutoff
@@ -406,7 +414,7 @@ end
     if λ >= 1
         params = (ke, qij, nothing, nothing)
         f = force_cutoff(cutoff, inter, r, params)
-        fdr = (f / r) * dr
+        fdr = radial_force_vector(f, r, dr, force_units)
         return special ? fdr * inter.weight_special : fdr
     end
 
@@ -417,7 +425,7 @@ end
     params = (ke, qij, λ, R)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = radial_force_vector(f, r, dr, force_units)
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -702,11 +710,15 @@ end
     λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     r2 = sum(abs2, dr)
     r = sqrt(r2)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
     qi, qj = atom_i.charge, atom_j.charge
     rc = inter.dist_cutoff
 
@@ -858,11 +870,15 @@ end
     λ = T(scale_elec(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     r2 = sum(abs2, dr)
     r = sqrt(r2)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
     qij = atom_i.charge * atom_j.charge
     rc = inter.dist_cutoff
 
@@ -1199,22 +1215,26 @@ end
                        args...)
     λ = softcore_pair_elec_lambda(inter, atom_i, atom_j)
     if λ <= 0
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     r = norm(dr)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
     qi, qj = atom_i.charge, atom_j.charge
     term = inter.α * (1 - λ) * σ_mixing(inter.σ_mixing, atom_i, atom_j)^6 + r^6
     pe_soft = λ * inter.coulomb_const * ((qi * qj) / sqrt(cbrt(term)))
     f_soft = λ * inter.coulomb_const * ((qi * qj) / (term * sqrt(cbrt(term)))) * r^5
 
     if special
-        return (f_soft / r) * dr * inter.weight_special * (r <= inter.dist_cutoff)
+        return radial_force_vector(f_soft, r, dr, force_units) * inter.weight_special * (r <= inter.dist_cutoff)
     end
 
     erfc_αr, force_screen = softcore_ewald_screen(inter, r)
     f = (f_soft * erfc_αr) + (pe_soft * force_screen)
-    return (f / r) * dr * (r <= inter.dist_cutoff)
+    return radial_force_vector(f, r, dr, force_units) * (r <= inter.dist_cutoff)
 end
 
 @inline function potential_energy(inter::CoulombSoftCoreBeutlerEwald,
@@ -1334,10 +1354,14 @@ end
                        args...)
     λ = softcore_pair_elec_lambda(inter, atom_i, atom_j)
     if λ <= 0
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     r = norm(dr)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
     qij = atom_i.charge * atom_j.charge
     R = inter.α * sqrt(cbrt(1 - λ)) * (oneunit(r) + inter.σQ * abs(qij))
 
@@ -1351,12 +1375,12 @@ end
     end
 
     if special
-        return (f_soft / r) * dr * inter.weight_special * (r <= inter.dist_cutoff)
+        return radial_force_vector(f_soft, r, dr, force_units) * inter.weight_special * (r <= inter.dist_cutoff)
     end
 
     erfc_αr, force_screen = softcore_ewald_screen(inter, r)
     f = (f_soft * erfc_αr) + (pe_soft * force_screen)
-    return (f / r) * dr * (r <= inter.dist_cutoff)
+    return radial_force_vector(f, r, dr, force_units) * (r <= inter.dist_cutoff)
 end
 
 @inline function potential_energy(inter::CoulombSoftCoreGapsysEwald,

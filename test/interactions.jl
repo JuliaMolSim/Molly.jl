@@ -539,6 +539,42 @@
         end
     end
 
+    @testset "Soft-core Exact Overlap Safeguards" begin
+        dr_zero = zero(dr12)
+        overlap_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
+        overlap_inters = (
+            LennardJonesSoftCoreBeutler(α=0.3),
+            LennardJonesSoftCoreGapsys(α=0.85),
+            CoulombSoftCoreBeutler(α=0.3),
+            CoulombSoftCoreGapsys(α=0.3, σQ=1.0u"nm"),
+            CoulombSoftCoreBeutlerReactionField(dist_cutoff=1.0u"nm", α=0.3),
+            CoulombSoftCoreGapsysReactionField(dist_cutoff=1.0u"nm", α=0.3, σQ=1.0u"nm"),
+            CoulombSoftCoreBeutlerEwald(dist_cutoff=1.0u"nm", α=0.3),
+            CoulombSoftCoreGapsysEwald(dist_cutoff=1.0u"nm", α=0.3, σQ=1.0u"nm"),
+        )
+
+        for inter in overlap_inters
+            f_val = force(inter, dr_zero, overlap_atom, overlap_atom)
+            pe_val = potential_energy(inter, dr_zero, overlap_atom, overlap_atom)
+            @test all(isfinite, f_val)
+            @test all(iszero, f_val)
+            @test isfinite(pe_val)
+        end
+
+        λ_zero_atom = Atom(
+            charge=1.0,
+            σ=0.3u"nm",
+            ϵ=0.2u"kJ * mol^-1",
+            λ=0.25,
+            alch_role=Molly.DeleteRole,
+        )
+
+        for inter in (LennardJonesSoftCoreBeutler(α=0.3), LennardJonesSoftCoreGapsys(α=0.85))
+            @test all(iszero, force(inter, dr12, λ_zero_atom, λ_zero_atom))
+            @test iszero(potential_energy(inter, dr12, λ_zero_atom, λ_zero_atom))
+        end
+    end
+
     @testset "PME Scheduler Charge Scaling" begin
         boundary_pme = CubicBoundary(2.5u"nm")
         coords_pme = [
