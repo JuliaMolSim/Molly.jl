@@ -549,10 +549,6 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
                bfft_plan, scheduler, grad_safe)
 end
 
-zero_or_nothing(x) = zero(x)
-zero_or_nothing(x::Nothing) = nothing
-zero_or_nothing(x::Vector{Matrix{T}}) where {T} = zero.(x) # Required for Julia 1.10
-
 function Base.zero(pme::PME)
     if pme.charge_grid_buffer isa Vector
         charge_grid_buffer = zero.(pme.charge_grid_buffer)

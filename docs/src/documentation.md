@@ -760,7 +760,7 @@ The available pairwise interactions are:
 - [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 
-The available specific interactions are:
+The available specific interactions (1-5 atoms) are:
 - [`HarmonicPositionRestraint`](@ref) - 1 atom
 - [`HarmonicBond`](@ref) - 2 atoms
 - [`MorseBond`](@ref) - 2 atoms
@@ -923,7 +923,7 @@ struct MySpecificInter
 end
 ```
 Next, you need to define a method for the [`force`](@ref) function.
-The form of this will depend on whether the interaction involves 1, 2, 3 or 4 atoms.
+The form of this will depend on whether the interaction involves 1, 2, 3, 4 or 5 atoms.
 For example in the 2 atom case:
 ```julia
 function Molly.force(inter::MySpecificInter,
@@ -1146,6 +1146,7 @@ This could be anything from a simple energy minimization to complicated replica 
 The available simulators are:
 - [`SteepestDescentMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
+- [`DPDVelocityVerlet`](@ref)
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
