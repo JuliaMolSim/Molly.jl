@@ -37,7 +37,7 @@ end
 """
     LINCS(masses, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
           dist_constraints=nothing, angle_constraints=nothing, nrec=4, niter=1,
-          gpu_block_size=128)
+          iter_vel_correction=false, gpu_block_size=128)
 
 Constrain bond distances during a simulation using the LINCS (LINear Constraint Solver)
 algorithm.
@@ -65,6 +65,11 @@ for the original LINCS paper.
     improve accuracy for coupled constraints at the cost of performance.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
+- `iter_vel_correction=false`: whether to use iterative velocity constraint solving.
+    When `false` (the default), velocity correction uses the simple one-step approach
+    `v += Δx/dt` as in GROMACS (for the Verlet simulator only, otherwise velocities are
+    not constrained). When `true`, a full iterative velocity constraint projection
+    is performed.
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 """
 struct LINCS{CL, LD, LW, DC, AC, E, F, DB, CI}
@@ -75,6 +80,7 @@ struct LINCS{CL, LD, LW, DC, AC, E, F, DB, CI}
     angle_constraints::AC
     dist_tolerance::E
     vel_tolerance::F
+    iter_vel_correction::Bool
     gpu_block_size::Int
     delta_buf::DB         # 3 × n_atoms matrix for atomic scatter (or nothing on CPU)
     constrained_atoms::CI # sorted unique atom indices in constraints (or nothing on CPU)
@@ -119,6 +125,7 @@ function LINCS(;masses,
                angle_constraints=nothing,
                nrec::Integer=4,
                niter::Integer=1,
+               iter_vel_correction::Bool=false,
                gpu_block_size::Integer=128)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero"))
@@ -154,14 +161,15 @@ function LINCS(;masses,
 
     return LINCS(clusters, lincs_data, workspace, all_dist_constraints,
                  stored_angle_constraints, dist_tolerance, vel_tolerance,
-                 Int(gpu_block_size), nothing, nothing)
+                 iter_vel_correction, Int(gpu_block_size), nothing, nothing)
 end
 
 function Base.show(io::IO, lincs::LINCS)
-    n_dc = length(lincs.dist_constraints)
     n_ac = isnothing(lincs.angle_constraints) ? 0 : length(lincs.angle_constraints)
+    n_dc = length(lincs.dist_constraints) - 3 * n_ac # avoid counting angle constraints as distance constraints
     print(io, "LINCS with ", n_dc, " distance and ", n_ac, " angle constraints (nrec=",
-          lincs.lincs_data.nrec, ", niter=", lincs.lincs_data.niter, ")")
+          lincs.lincs_data.nrec, ", niter=", lincs.lincs_data.niter,
+          ", iter_vel_correction=", lincs.iter_vel_correction, ")")
 end
 
 function constrained_atom_inds(lincs::LINCS)
@@ -319,6 +327,16 @@ function group_constraints_for_gpu(atom1, atom2, block_size)
         push!(components, comp)
     end
 
+    for comp in components
+        if length(comp) > block_size
+            error(
+                "LINCS: connected component of $(length(comp)) coupled constraints exceeds " *
+                "gpu_block_size=$block_size. Increase gpu_block_size in the LINCS constructor " *
+                "to at least $(length(comp)), or use CPU constraints for this system.",
+            )
+        end
+    end
+
     sort!(components, by=length, rev=true)
 
     # Pack components into blocks, padding with 0 (dummy)
@@ -385,11 +403,12 @@ end
     return ustrip.(vector(coords[a2], coords[a1], boundary))
 end
 
-@inline function lincs_bond_vector(coords, a1, a2, ::Nothing)
-    return ustrip.(coords[a1] - coords[a2])
-end
-
 # --- GPU kernels ---
+# These fused kernels rely on @synchronize (workgroup barrier) between matrix expansion
+# iterations. Correctness requires that all coupled constraints within a connected
+# component reside in the same workgroup. This is ensured by group_constraints_for_gpu,
+# which packs connected components into blocks, and by passing gpu_block_size as the
+# workgroup size to the KernelAbstractions kernel constructor.
 
 @kernel inbounds=true function lincs_fused_position_kernel!(
         delta_buf,
@@ -447,7 +466,7 @@ end
 
 @kernel inbounds=true function lincs_fused_correction_kernel!(
         delta_buf,
-        B, rhs, sol, tmp,
+        @Const(B), rhs, sol, tmp,
         @Const(coords),
         @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
@@ -465,9 +484,7 @@ end
     rhs[i] = val
     sol[i] = val
 
-    inv_len = inv(sqrt(dot(diff, diff)))
-    B_i = diff * inv_len
-    B[i] = B_i
+    B_i = B[i]
 
     @synchronize
 
@@ -683,6 +700,10 @@ function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
         @inbounds for i in 1:K
             diff = lincs_bond_vector(coords, data.atom1[i], data.atom2[i], boundary)
             dlen2 = 2 * data.lengths[i]^2 - dot(diff, diff)
+            if dlen2 < zero(T)
+                @warn "LINCS correction: bond $(data.atom1[i])-$(data.atom2[i]) stretched " *
+                      "beyond sqrt(2) * target length, constraint may be unreliable" maxlog=1
+            end
             p = sqrt(max(dlen2, zero(T)))
             ws.rhs[i] = data.sdiag[i] * (data.lengths[i] - p)
         end
@@ -823,6 +844,7 @@ function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained
 end
 
 function apply_velocity_constraints!(sys::System, ca::LINCS; kwargs...)
+    ca.iter_vel_correction || return sys
     if !isnothing(ca.delta_buf)
         lincs_vel_apply_gpu!(sys.velocities, sys.coords,
                              ca.lincs_data, ca.workspace, sys.boundary,
@@ -987,7 +1009,7 @@ function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
 
         lincs = LINCS(clusters_gpu, data_gpu, ws_gpu, lincs.dist_constraints,
                       lincs.angle_constraints, lincs.dist_tolerance, lincs.vel_tolerance,
-                      lincs.gpu_block_size, delta_buf, ca_gpu)
+                      lincs.iter_vel_correction, lincs.gpu_block_size, delta_buf, ca_gpu)
     end
 
     return lincs

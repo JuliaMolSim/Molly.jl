@@ -19,7 +19,8 @@
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
     cons_shake = SHAKE_RATTLE(n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1"; dist_constraints=constraints)
     cons_lincs = LINCS(masses=repeat([atom_mass], n_atoms), dist_tolerance=1e-8u"Å",
-                       vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints)
+                       vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints,
+                       iter_vel_correction=true)
 
     @test length(cons_shake.clusters12) == (n_atoms ÷ 2)
 
@@ -321,41 +322,60 @@ end
     minimizer = SteepestDescentMinimizer()
     simulator = VelocityVerlet(dt=T(0.001)u"ps")
 
+    constraint_algorithms = [SHAKE_RATTLE, LINCS]
+
     for AT in array_list
-        for rigid_water in (false, true)
-            sys = System(
-                pdb_fp,
-                ff;
-                boundary=boundary,
-                array_type=AT,
-                constraints=:hbonds,
-                rigid_water=rigid_water, # No water present
-            )
+        for constraint_algorithm in constraint_algorithms
+            for rigid_water in (false, true)
+                sys = System(
+                    pdb_fp,
+                    ff;
+                    boundary=boundary,
+                    array_type=AT,
+                    constraints=:hbonds,
+                    rigid_water=rigid_water, # No water present
+                    constraint_algorithm=constraint_algorithm,    
+                )
+                if constraint_algorithm === LINCS
+                    # increase tolerances from default
+                    lincs = LINCS(
+                        masses=Array(masses(sys)),
+                        dist_constraints=sys.constraints[1].dist_constraints,
+                        angle_constraints=sys.constraints[1].angle_constraints,
+                        dist_tolerance=sys.constraints[1].dist_tolerance,
+                        vel_tolerance=sys.constraints[1].vel_tolerance,
+                        nrec=6,
+                        niter=6,
+                        iter_vel_correction=true,
+                    )
+                    sys.constraints = (Molly.setup_constraints!(lincs, sys.neighbor_finder, AT),)
+                end
 
-            simulate!(sys, minimizer)
-            random_velocities!(sys, temp)
+                simulate!(sys, minimizer)
+                random_velocities!(sys, temp)
 
-            simulate!(sys, simulator, 20)
-            simulate!(sys, simulator, 1000)
+                simulate!(sys, simulator, 20)
+                simulate!(sys, simulator, 1000)
 
-            @test check_position_constraints(sys)
-            @test check_velocity_constraints(sys)
-            @test check_constraints(sys)
+                @test check_position_constraints(sys)
+                @test check_velocity_constraints(sys)
+                @test check_constraints(sys)
 
-            coords_copy = copy(sys.coords)
-            coords_bump     = randn(SVector{3, T}, length(sys))u"nm"         ./ 100
-            velocities_bump = randn(SVector{3, T}, length(sys))u"nm * ps^-1" ./ 100
-            sys.coords     .+= to_device(coords_bump, AT)
-            sys.velocities .+= to_device(velocities_bump, AT)
-            @test !check_position_constraints(sys)
-            @test !check_velocity_constraints(sys)
-            @test !check_constraints(sys)
+                coords_copy = copy(sys.coords)
+                coords_bump     = randn(SVector{3, T}, length(sys))u"nm"         ./ 100
+                velocities_bump = randn(SVector{3, T}, length(sys))u"nm * ps^-1" ./ 100
+                sys.coords     .+= to_device(coords_bump, AT)
+                sys.velocities .+= to_device(velocities_bump, AT)
+                @test !check_position_constraints(sys)
+                @test !check_velocity_constraints(sys)
+                @test !check_constraints(sys)
 
-            apply_position_constraints!(sys, coords_copy)
-            apply_velocity_constraints!(sys)
-            @test check_position_constraints(sys)
-            @test check_velocity_constraints(sys)
-            @test check_constraints(sys)
+                apply_position_constraints!(sys, coords_copy)
+                apply_velocity_constraints!(sys)
+                @test check_position_constraints(sys)
+                @test check_velocity_constraints(sys)
+                @test check_constraints(sys)
+            end
         end
     end
 end
@@ -640,7 +660,7 @@ end
             data = Molly.build_lincs_data(dc, masses_val; nrec, niter=1)
             ws = Molly.create_lincs_workspace(data)
             xp = x .+ v .* dt
-            Molly.lincs_apply!(xp, x, data, ws, nothing)
+            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
 
             max_dev = maximum(abs(norm(xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
                               for i in eachindex(data.atom1))
@@ -661,7 +681,7 @@ end
         )
         dt = 0.002
         xp = x .+ v .* dt
-        Molly.lincs_apply!(xp, x, data, ws, nothing)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
 
         d = norm(xp[1] - xp[2])
         @test d ≈ 0.15 atol=1e-10
@@ -678,7 +698,7 @@ end
         xp = x .+ v .* dt
 
         com_before = lincs_center_of_mass(xp, masses_val)
-        Molly.lincs_apply!(xp, x, data, ws, nothing)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
         com_after = lincs_center_of_mass(xp, masses_val)
 
         d = norm(xp[1] - xp[2])
@@ -693,7 +713,7 @@ end
         )
         dt = 0.002
         xp = x .+ v .* dt
-        Molly.lincs_apply!(xp, x, data, ws, nothing)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
 
         @test lincs_check_constraints(xp, data; atol=1e-6)
     end
@@ -710,7 +730,7 @@ end
         ]
         dt = 0.002
         xp = x .+ v .* dt
-        Molly.lincs_apply!(xp, x, data, ws, nothing)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
 
         @test lincs_check_constraints(xp, data; atol=1e-6)
     end
@@ -720,7 +740,7 @@ end
         x, v, data, ws = make_lincs_diatomic()
         xp = copy(x)
         x_orig = copy(x)
-        Molly.lincs_apply!(xp, x, data, ws, nothing)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
 
         @test xp ≈ x_orig atol=1e-14
     end
@@ -741,7 +761,7 @@ end
         for niter in [1, 2, 4]
             x_copy, _, data, ws = make_lincs_methane(; niter)
             xp = x .+ v .* dt
-            Molly.lincs_apply!(xp, x_copy, data, ws, nothing)
+            Molly.lincs_apply!(xp, x_copy, data, ws, CubicBoundary(5.0))
             max_dev = maximum(abs(norm(xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
                               for i in eachindex(data.atom1))
             push!(deviations, max_dev)
@@ -761,7 +781,7 @@ end
         xp = x .+ v .* dt
 
         com_before = lincs_center_of_mass(xp, masses_val)
-        Molly.lincs_apply!(xp, x, data, ws, nothing)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
         com_after = lincs_center_of_mass(xp, masses_val)
 
         @test lincs_check_constraints(xp, data; atol=1e-4)
@@ -779,7 +799,7 @@ end
         xp = x .+ v .* dt
 
         com_before = lincs_center_of_mass(xp, masses_val)
-        Molly.lincs_apply!(xp, x, data, ws, nothing)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
         com_after = lincs_center_of_mass(xp, masses_val)
 
         @test lincs_check_constraints(xp, data; atol=1e-4)
@@ -802,7 +822,7 @@ end
     atom_masses = [atom_mass for _ in 1:n_atoms]
 
     cons = LINCS(masses=atom_masses, dist_tolerance=1e-8u"Å", vel_tolerance=1e-8u"Å^2 * ps^-1",
-                 dist_constraints=dist_constraints)
+                 dist_constraints=dist_constraints, iter_vel_correction=true)
 
     @test length(cons.clusters) == (n_atoms ÷ 2)
 
@@ -860,7 +880,7 @@ end
     atom_masses = [atom_mass for _ in 1:n_atoms]
 
     cons = LINCS(masses=atom_masses, dist_tolerance=T(1e-4)u"Å", vel_tolerance=T(1e-4)u"Å^2 * ps^-1",
-                 dist_constraints=dist_constraints)
+                 dist_constraints=dist_constraints, iter_vel_correction=true)
 
     boundary = CubicBoundary(T(200.0)u"Å")
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
@@ -910,6 +930,19 @@ end
             @test check_velocity_constraints(sys, cons)
         end
     end
+end
+
+@testset "LINCS GPU block size validation" begin
+    # Chain of 130 constraints sharing atoms: 1-2, 2-3, ..., 130-131
+    # Forms a single connected component of 130 constraints
+    block_size = 128
+    atom1 = collect(1:130)
+    atom2 = collect(2:131)
+    @test_throws ErrorException Molly.group_constraints_for_gpu(atom1, atom2, block_size)
+
+    # Same chain should succeed with a large enough block size
+    perm = Molly.group_constraints_for_gpu(atom1, atom2, 256)
+    @test length(perm) % 256 == 0
 end
 
 @testset "LINCS angle constraints" begin
@@ -1001,7 +1034,7 @@ end
     d_w = Molly.build_lincs_data(c_w, m_w)
     ws_w = Molly.create_lincs_workspace(d_w)
     xp_w = x_w .+ v_w .* 0.002
-    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, nothing)
+    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0))
 
     # apply_lincs! zero allocations
     @testset begin
@@ -1015,10 +1048,10 @@ end
             xp = x .+ v .* 0.002
 
             # Warmup
-            Molly.lincs_apply!(xp, x, data, ws, nothing)
+            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
             xp .= x .+ v .* 0.002
 
-            allocs = @allocated Molly.lincs_apply!(xp, x, data, ws, nothing)
+            allocs = @allocated Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
             @test allocs == 0
         end
     end

@@ -435,6 +435,8 @@ Gromacs file reading should be considered experimental.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
+- `constraint_algorithm`: Constraint algorithm to use for enforcing the
+    constraints. Can be [`LINCS`](@ref) or [`SHAKE_RATTLE`](@ref), defaults to LINCS.
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
@@ -942,7 +944,7 @@ function System(coord_file::AbstractString,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
                   weight_14_coulomb, disp_corr, hydrogen_mass, strictness,
-                  launch_config, autotune_launch)
+                  launch_config, autotune_launch, constraint_algorithm)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1276,7 +1278,7 @@ function System(T::Type,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
                   weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
-                  launch_config, autotune_launch)
+                  launch_config, autotune_launch, constraint_algorithm)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1300,69 +1302,31 @@ function find_bond_r0(bonds_all, i, j)
     error("atoms $i and $j are in an angle constraint but the bond cannot be found")
 end
 
-function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
-                              rigid_water, units, strictness, masses, ::Type{SHAKE_RATTLE})
-    if (constraints_type == :none && !rigid_water) || iszero(length(bonds_all.is))
-        return (), bonds_all, angles_all
-    end
+function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
+                                    units, strictness, masses, ::Type{SHAKE_RATTLE})
+    return SHAKE_RATTLE(
+        length(atoms_data),
+        add_units(T(1e-6), u"nm", units),
+        add_units(T(1e-6), u"nm^2 * ps^-1", units);
+        dist_constraints=[dist_constraints...],
+        angle_constraints=[angle_constraints...],
+        strictness=strictness,
+    )
+end
 
-    bonds = InteractionList2Atoms(HarmonicBond)
-    angles = InteractionList3Atoms(HarmonicAngle)
-    dist_constraints, angle_constraints = [], []
-    angle_dist_pairs = Set{Tuple{Int, Int}}()
-
-    for (i, j, k, inter, type) in zip(angles_all.is, angles_all.js, angles_all.ks,
-                                      angles_all.inters, angles_all.types)
-        if (constraints_type == :hangles && is_h_angle(atoms_data, i, j, k)) ||
-                (rigid_water && atoms_data[i].res_name in water_residue_names)
-            r0_ij = find_bond_r0(bonds_all, i, j)
-            r0_jk = find_bond_r0(bonds_all, j, k)
-            push!(angle_constraints, AngleConstraint(i, j, k, inter.θ0, r0_ij, r0_jk))
-            push!(angle_dist_pairs, (min(i, j), max(i, j)))
-            push!(angle_dist_pairs, (min(j, k), max(j, k)))
-        else
-            push!(angles.is, i)
-            push!(angles.js, j)
-            push!(angles.ks, k)
-            push!(angles.inters, inter)
-            push!(angles.types, type)
-        end
-    end
-
-    for (i, j, inter, type) in zip(bonds_all.is, bonds_all.js, bonds_all.inters, bonds_all.types)
-        if constraints_type in (:allbonds, :hangles) ||
-                (constraints_type == :hbonds && (atoms_data[i].element == "H" || atoms_data[j].element == "H")) ||
-                (rigid_water && atoms_data[i].res_name in water_residue_names)
-            if !((min(i, j), max(i, j)) in angle_dist_pairs)
-                # Only add distance constraints that are not part of an angle constraint
-                push!(dist_constraints, DistanceConstraint(i, j, inter.r0))
-            end
-        else
-            push!(bonds.is, i)
-            push!(bonds.js, j)
-            push!(bonds.inters, inter)
-            push!(bonds.types, type)
-        end
-    end
-
-    if length(dist_constraints) > 0 || length(angle_constraints) > 0
-        shake = SHAKE_RATTLE(
-            length(atoms_data),
-            add_units(T(1e-6), u"nm", units),
-            add_units(T(1e-6), u"nm^2 * ps^-1", units);
-            dist_constraints=[dist_constraints...],
-            angle_constraints=[angle_constraints...],
-            strictness=strictness,
-        )
-        constraints = (shake,)
-    else
-        constraints = ()
-    end
-    return constraints, bonds, angles
+function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
+                                    units, strictness, masses, ::Type{LINCS})
+    return LINCS(
+        masses=masses,
+        dist_tolerance=add_units(T(1e-6), u"nm", units),
+        vel_tolerance=add_units(T(1e-6), u"nm^2 * ps^-1", units),
+        dist_constraints=[dist_constraints...],
+        angle_constraints=[angle_constraints...],
+    )
 end
 
 function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
-                              rigid_water, units, strictness, masses, ::Type{LINCS})
+                              rigid_water, units, strictness, masses, constraint_algorithm)
     if (constraints_type == :none && !rigid_water) || iszero(length(bonds_all.is))
         return (), bonds_all, angles_all
     end
@@ -1407,16 +1371,9 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
     end
 
     if length(dist_constraints) > 0 || length(angle_constraints) > 0
-        lincs = LINCS(
-            masses=masses,
-            dist_tolerance=add_units(T(1e-6), u"nm", units),
-            vel_tolerance=add_units(T(1e-6), u"nm^2 * ps^-1", units),
-            dist_constraints=[dist_constraints...],
-            angle_constraints=[angle_constraints...],
-            nrec=6,
-            niter=6,
-        )
-        constraints = (lincs,)
+        algo = build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
+                                          units, strictness, masses, constraint_algorithm)
+        constraints = (algo,)
     else
         constraints = ()
     end
@@ -1481,7 +1438,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
                 weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
-                launch_config, autotune_launch)
+                launch_config, autotune_launch, constraint_algorithm)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
 

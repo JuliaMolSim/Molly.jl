@@ -1608,7 +1608,7 @@ lincs = LINCS(
     dist_constraints=dist_constraints,
     angle_constraints=angle_constraints,
 )
-# LINCS with 2 distance and 1 angle constraints (nrec=4, niter=1) (imlpicitly 5 distance constraints)
+# LINCS with 2 distance and 1 angle constraints (nrec=4, niter=1) (implicitly 5 distance constraints)
 ```
 `constraints=(lincs,)` can then be given when setting up a [`System`](@ref).
 
