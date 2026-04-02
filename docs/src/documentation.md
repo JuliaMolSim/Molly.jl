@@ -1538,8 +1538,11 @@ The oscillatory behavior is due to the harmonic bond interactions.
 
 ## Constraints
 
-Molly implements SHAKE and its extension, RATTLE, to perform constrained molecular dynamics (see [`SHAKE_RATTLE`](@ref)).
+Molly implements SHAKE/RATTLE (see [`SHAKE_RATTLE`](@ref)) and LINCS (see [`LINCS`](@ref)) to perform constrained molecular dynamics.
 These methods are useful for maintaining bond lengths and angles during a simulation, often allowing the use of longer time steps and therefore more efficient use of computing resources.
+
+### SHAKE/RATTLE
+
 The constraints satisfied by SHAKE are solely on the atomic coordinates:
 ```math
 \begin{aligned}
@@ -1554,6 +1557,17 @@ whereas RATTLE also constrains the velocities:
 ```
 Here $\vec{r}_{ij}$ is the vector between atoms i and j in a constraint, $d_{ij}$ is the bond length to be maintained and $\vec{v}_{ij}$ is the difference in the velocity vectors for atoms i and j.
 SHAKE was originally derived for the Verlet integration scheme ([Ryckaert et al. 1977](https://doi.org/10.1016/0021-9991(77)90098-5)) with RATTLE extending SHAKE to work for velocity Verlet where the velocities are also integrated ([Andersen 1983](https://doi.org/10.1016/0021-9991(83)90014-1)).
+
+### LINCS
+
+LINCS (LINear Constraint Solver) is a non-iterative constraint algorithm that uses matrix expansion to approximate the inverse of the constraint coupling matrix ([Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)).
+It is typically faster than SHAKE/RATTLE for large systems.
+The implementation in Molly includes explicit velocity constraints.
+The key parameters controlling accuracy are `nrec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `niter`, the number of outer correction iterations for rotational lengthening (default 1).
+Higher values of either improve accuracy at the cost of performance.
+
+!!! note
+    LINCS requires that angle constraints are isolated: none of their atoms may participate in distance constraints or in other angle constraints. This is because internally angle constraints are treated as a triangle of distance constraints, so interactions with other constraints may violate the constrained angle.
 
 Currently, constraints are supported by the following simulators:
 - [`SteepestDescentMinimizer`](@ref)
@@ -1584,6 +1598,20 @@ shake = SHAKE_RATTLE(
 # SHAKE_RATTLE with 0 2-atom clusters, 1 3-atom clusters, 0 4-atom clusters and 1 angle clusters
 ```
 `constraints=(shake,)` can then be given when setting up a [`System`](@ref).
+
+Alternatively, using LINCS:
+```julia
+masses = [1.0u"g/mol", 1.0u"g/mol", 1.0u"g/mol", 1.0u"g/mol", 1.0u"g/mol", 1.0u"g/mol"]
+
+lincs = LINCS(
+    masses=masses,
+    dist_constraints=dist_constraints,
+    angle_constraints=angle_constraints,
+)
+# LINCS with 2 distance and 1 angle constraints (nrec=4, niter=1) (implicitly 5 distance constraints)
+```
+`constraints=(lincs,)` can then be given when setting up a [`System`](@ref).
+
 See [this example](@ref "Constrained dynamics") for more.
 
 This diagram demonstrates the four allowed constraint types:
@@ -1594,13 +1622,14 @@ This diagram demonstrates the four allowed constraint types:
 - 3 atoms around 1 central atom, 3 [`DistanceConstraint`](@ref)s (e.g. an ammonia molecule).
 
 !!! note
-    You can't constrain a linear chain of four atoms or an angle of 180°. Constraints beyond the four valid classes can't be used. For example, you can't constrain all the hydrogen bonds and the double bond in ethylene simultaneously. This would create a cluster of 5 constraints which is not supported.
+    For SHAKE/RATTLE, you can't constrain a linear chain of four atoms or an angle of 180°. Constraints beyond the four valid classes can't be used. For example, you can't constrain all the hydrogen bonds and the double bond in ethylene simultaneously. This would create a cluster of 5 constraints which is not supported. LINCS does not have these cluster size limitations but does require that angle constraints are isolated (no shared atoms with distance constraints or other angle constraints).
 
 These constraints provide enough flexibility to constrain all hydrogen atoms in organic molecules as well as water molecules.
 
-All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse.
+For SHAKE/RATTLE, all velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse.
 The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented.
 Other methods can be used to solve larger constraint clusters, these are not yet supported by Molly.
+LINCS uses a matrix expansion approach that scales better with system size and does not have the same cluster size limitations.
 
 ## Virtual sites
 

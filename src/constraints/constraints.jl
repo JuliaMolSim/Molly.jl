@@ -397,30 +397,6 @@ Check whether the coordinates of a system satisfy the position constraints.
 """
 check_position_constraints(sys) = all(ca -> check_position_constraints(sys, ca), sys.constraints)
 
-function check_position_constraints(sys::System{<:Any, <:Any, FT}, ca) where FT
-    err_unit = unit(eltype(eltype(sys.coords)))
-    if err_unit != unit(ca.dist_tolerance)
-        throw(ArgumentError("distance tolerance units in SHAKE ($(unit(ca.dist_tolerance))) " *
-                            "are inconsistent with system coordinate units ($err_unit)"))
-    end
-
-    cluster_maxes = FT[]
-    backend = get_backend(sys.coords)
-    err_kernel = max_dist_error(backend, 128)
-
-    for cluster_type in cluster_keys(ca)
-        clusters = getproperty(ca, cluster_type)
-        if length(clusters) > 0
-            max_storage = allocate(backend, FT, length(clusters))
-            err_kernel(clusters, sys.coords, sys.boundary, max_storage; ndrange=length(clusters))
-            push!(cluster_maxes, reduce(max, Array(max_storage)))
-        end
-    end
-
-    KernelAbstractions.synchronize(backend)
-    return maximum(cluster_maxes) < ustrip(ca.dist_tolerance)
-end
-
 """
     check_velocity_constraints(sys)
     check_velocity_constraints(sys, constraints)
@@ -428,31 +404,6 @@ end
 Check whether the velocities of a system satisfy the velocity constraints.
 """
 check_velocity_constraints(sys) = all(ca -> check_velocity_constraints(sys, ca), sys.constraints)
-
-function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca) where FT
-    err_unit = unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
-    if err_unit != unit(ca.vel_tolerance)
-        throw(ArgumentError("velocity tolerance units in RATTLE ($(unit(ca.vel_tolerance))) " *
-                    "are inconsistent with system velocity and coordinate units ($err_unit)"))
-    end
-
-    cluster_maxes = FT[]
-    backend = get_backend(sys.coords)
-    err_kernel = max_vel_error(backend, 128)
-
-    for cluster_type in cluster_keys(ca)
-        clusters = getproperty(ca, cluster_type)
-        if length(clusters) > 0
-            max_storage = allocate(backend, FT, length(clusters))
-            err_kernel(clusters, sys.coords, sys.velocities, sys.boundary, max_storage;
-                       ndrange=length(clusters))
-            push!(cluster_maxes, reduce(max, Array(max_storage)))
-        end
-    end
-
-    KernelAbstractions.synchronize(backend)
-    return maximum(cluster_maxes) < ustrip(ca.vel_tolerance)
-end
 
 """
     check_constraints(sys)
