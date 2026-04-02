@@ -774,7 +774,7 @@ end
 
 @testset "Temperature REMD" begin
     n_atoms = 100
-    n_steps = 10_000
+    n_steps = 20_000
     atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm")
@@ -852,7 +852,7 @@ end
 
 @testset "Hamiltonian REMD" begin
     n_atoms = 100
-    n_steps = 10_000
+    n_steps = 20_000
     atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
