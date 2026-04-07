@@ -666,6 +666,24 @@ function build_torsions(adj::Vector{Vector{Int}}, angles::Vector{NTuple{3, Int}}
     return sort!(unique!(tors))
 end
 
+# Builds CMAP torsions (i, j, k, l, m) from adjacency and torsions
+function build_cmaps(adj::Vector{Vector{Int}}, tors::Vector{NTuple{4, Int}})
+    cmap = Vector{NTuple{5, Int}}()
+    for tor in tors
+        for atom in adj[tor[1]]
+            if !(atom in tor)
+                push!(cmap, (atom, tor[1], tor[2], tor[3], tor[4]))
+            end
+        end
+        for atom in adj[tor[3]]
+            if !(atom in tor)
+                push!(cmap, (tor[1], tor[2], tor[3], tor[4], atom))
+            end
+        end
+    end
+    return sort!(unique!(cmap))
+end
+
 # Helper to make combinations, needed for impropers
 function combinations_of(vec::Vector, n::Integer)
     if n < 0 || n > length(vec)

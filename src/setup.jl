@@ -243,13 +243,13 @@ function resolve_bond(ff::MolecularForceField, t1::AbstractString, t2::AbstractS
     append!(cand, get(ff.bond_resolver.idx, (:wild,  "", ""), Int[]))
 
     best = nothing
-    bestspec = Int8(-1)
+    best_spec = Int8(-1)
     for i in cand
         r = ff.bond_resolver.rules[i]
         if (matches(r.p1, t1, ff.type_to_class) && matches(r.p2, t2, ff.type_to_class)) ||
            (matches(r.p1, t2, ff.type_to_class) && matches(r.p2, t1, ff.type_to_class))
-            if r.specificity > bestspec
-                bestspec = r.specificity
+            if r.specificity > best_spec
+                best_spec = r.specificity
                 best = r.params
             end
         end
@@ -273,21 +273,21 @@ function resolve_angle(ff::MolecularForceField, t1::AbstractString, t2::Abstract
     append!(cand, get(ff.angle_resolver.idx, (:wild,  ""), Int[]))
 
     best = nothing
-    bestspec = Int8(-1)
+    best_spec = Int8(-1)
     for i in cand
         r = ff.angle_resolver.rules[i]
         if matches(r.p1,t1,ff.type_to_class) && matches(r.p2,t2,ff.type_to_class) &&
                                                     matches(r.p3,t3,ff.type_to_class)
-            if r.specificity > bestspec
-                bestspec = r.specificity
+            if r.specificity > best_spec
+                best_spec = r.specificity
                 best = r.params
             end
         end
         # Neighbor-reversed
         if matches(r.p1,t3,ff.type_to_class) && matches(r.p2,t2,ff.type_to_class) &&
                                                     matches(r.p3,t1,ff.type_to_class)
-            if r.specificity > bestspec
-                bestspec = r.specificity
+            if r.specificity > best_spec
+                best_spec = r.specificity
                 best = r.params
             end
         end
@@ -337,6 +337,47 @@ function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t
         src = (t1, t2, t3, t4)
         key = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         return (p, key)
+    end
+end
+
+function resolve_cmap(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
+                      t3::AbstractString, t4::AbstractString, t5::AbstractString)
+    key = (t1,t2,t3,t4,t5)
+    if haskey(ff.cmap_resolver.cache, key)
+        return ff.cmap_resolver.cache[key], true, false
+    end
+    best = first(ff.cmap_resolver.rules).params
+    best_spec = Int8(-1)
+    best_rev = false
+    for r in ff.cmap_resolver.rules
+        match_forward = matches(r.p1, t1, ff.type_to_class) &&
+                            matches(r.p2, t2, ff.type_to_class) &&
+                            matches(r.p3, t3, ff.type_to_class) &&
+                            matches(r.p4, t4, ff.type_to_class) &&
+                            matches(r.p5, t5, ff.type_to_class)
+        if match_forward && r.specificity > best_spec
+            best_spec = r.specificity
+            best = r.params
+            best_rev = false
+        end
+        match_reverse = matches(r.p1, t5, ff.type_to_class) &&
+                            matches(r.p2, t4, ff.type_to_class) &&
+                            matches(r.p3, t3, ff.type_to_class) &&
+                            matches(r.p4, t2, ff.type_to_class) &&
+                            matches(r.p5, t1, ff.type_to_class)
+        if match_reverse && r.specificity > best_spec
+            best_spec = r.specificity
+            best = r.params
+            best_rev = true
+        end
+    end
+    if best_spec == Int8(-1)
+        return best, false, false
+    else
+        if !best_rev
+            ff.cmap_resolver.cache[(t1,t2,t3,t4,t5)] = best
+        end
+        return best, true, best_rev
     end
 end
 
@@ -613,14 +654,20 @@ function System(coord_file::AbstractString,
     top_angles    = build_angles(adj, top_bonds)
     top_torsions  = build_torsions(adj, top_angles)
     top_impropers = build_impropers(adj)
+    if length(force_field.cmap_resolver.rules) > 0
+        top_cmap = build_cmaps(adj, top_torsions)
+    else
+        top_cmap = []
+    end
 
     # Allocate interaction lists and particles
     atoms_abst = Atom[]
     atoms_data = AtomData[]
-    bonds_il   = InteractionList2Atoms(HarmonicBond)
-    angles_il  = InteractionList3Atoms(HarmonicAngle)
-    tors_il    = InteractionList4Atoms(PeriodicTorsion)
-    imps_il    = InteractionList4Atoms(PeriodicTorsion)
+    bonds_il  = InteractionList2Atoms(HarmonicBond)
+    angles_il = InteractionList3Atoms(HarmonicAngle)
+    tors_il   = InteractionList4Atoms(PeriodicTorsion)
+    imps_il   = InteractionList4Atoms(PeriodicTorsion)
+    cmaps_il  = InteractionList5Atoms(CMAPTorsion)
     eligible = trues(n_atoms, n_atoms)
     special  = falses(n_atoms, n_atoms)
     torsion_n_terms = 6
@@ -903,6 +950,34 @@ function System(coord_file::AbstractString,
                                               phases=tt.phases, ks=tt.ks, proper=false))
     end
 
+    # CMAP corrections
+    cmaps_maps_vec = []
+    index = 0
+    for (i,j,k,l,m) in top_cmap
+        t1,t2,t3,t4,t5 = atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l], atom_type_of[m]
+        cmap, found_cmap, matched_rev = resolve_cmap(force_field, t1,t2,t3,t4,t5)
+        found_cmap || continue
+        if matched_rev
+            push!(cmaps_il.is, m)
+            push!(cmaps_il.js, l)
+            push!(cmaps_il.ks, k)
+            push!(cmaps_il.ls, j)
+            push!(cmaps_il.ms, i)
+            push!(cmaps_il.types, atom_types_to_string(t5, t4, t3, t2, t1))
+        else
+            push!(cmaps_il.is, i)
+            push!(cmaps_il.js, j)
+            push!(cmaps_il.ks, k)
+            push!(cmaps_il.ls, l)
+            push!(cmaps_il.ms, m)
+            push!(cmaps_il.types, atom_types_to_string(t1, t2, t3, t4, t5))
+        end
+        push!(cmaps_il.inters, CMAPTorsion(index, cmap.size))
+        index += 4*cmap.size*cmap.size
+        push!(cmaps_maps_vec, cmap_coefficients(cmap.size, cmap.energy))
+    end
+    cmaps_maps = vcat(cmaps_maps_vec...)
+
     tors_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
                                 proper=t.proper, n_terms=torsion_n_terms) for t in tors_il.inters]
     imps_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
@@ -939,12 +1014,12 @@ function System(coord_file::AbstractString,
 
     return System(T, AT, atoms, coords, boundary_used, velocities,
                   atoms_data, virtual_sites_type, loggers, data, bonds_il, angles_il, tors_il,
-                  imps_il, tors_pad, imps_pad, lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14,
-                  separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
-                  nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
-                  implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, disp_corr, hydrogen_mass, strictness,
-                  launch_config, autotune_launch, constraint_algorithm)
+                  imps_il, tors_pad, imps_pad, cmaps_il, cmaps_maps, lj_exceptions_σ,
+                  lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special, units,
+                  dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
+                  approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
+                  dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr, hydrogen_mass,
+                  strictness, launch_config, autotune_launch, constraint_algorithm)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1264,6 +1339,8 @@ function System(T::Type,
     torsion_inters_pad = torsions.inters
     improper_inters_pad = impropers.inters
     virtual_sites = []
+    cmaps_il = InteractionList5Atoms(CMAPTorsion)
+    cmaps_maps = nothing
     lj_exceptions_σ, lj_exceptions_ϵ = Dict(), Dict()
     strictness = default_strictness()
     σs_14, ϵs_14 = [], []
@@ -1273,12 +1350,12 @@ function System(T::Type,
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
-                  improper_inters_pad, lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14,
-                  separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
-                  nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
-                  implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
-                  launch_config, autotune_launch, constraint_algorithm)
+                  improper_inters_pad, cmaps_il, cmaps_maps, lj_exceptions_σ, lj_exceptions_ϵ,
+                  σs_14, ϵs_14, separate_lj14, eligible, special, units, dist_cutoff, constraints,
+                  rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
+                  neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
+                  weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass,
+                  strictness, launch_config, autotune_launch, constraint_algorithm)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1433,8 +1510,8 @@ end
 
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                 loggers, data, bonds_all, angles_all, torsions, impropers, torsion_inters_pad,
-                improper_inters_pad, lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14,
-                separate_lj14, eligible, special, units, dist_cutoff, constraints_type,
+                improper_inters_pad, cmaps_il, cmaps_maps, lj_exceptions_σ, lj_exceptions_ϵ, σs_14,
+                ϵs_14, separate_lj14, eligible, special, units, dist_cutoff, constraints_type,
                 rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
                 weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
@@ -1537,7 +1614,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
-    if length(bonds.is) > 0
+    if length(bonds) > 0
         push!(specific_inter_array, InteractionList2Atoms(
             to_device(bonds.is, AT),
             to_device(bonds.js, AT),
@@ -1545,7 +1622,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             bonds.types,
         ))
     end
-    if length(angles.is) > 0
+    if length(angles) > 0
         push!(specific_inter_array, InteractionList3Atoms(
             to_device(angles.is, AT),
             to_device(angles.js, AT),
@@ -1554,7 +1631,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             angles.types,
         ))
     end
-    if length(torsions.is) > 0
+    if length(torsions) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             to_device(torsions.is, AT),
             to_device(torsions.js, AT),
@@ -1564,7 +1641,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             torsions.types,
         ))
     end
-    if length(impropers.is) > 0
+    if length(impropers) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             to_device(impropers.is, AT),
             to_device(impropers.js, AT),
@@ -1572,6 +1649,18 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             to_device(impropers.ls, AT),
             to_device(improper_inters_pad, AT),
             impropers.types,
+        ))
+    end
+    if length(cmaps_il) > 0
+        push!(specific_inter_array, InteractionList5Atoms(
+            to_device(cmaps_il.is, AT),
+            to_device(cmaps_il.js, AT),
+            to_device(cmaps_il.ks, AT),
+            to_device(cmaps_il.ls, AT),
+            to_device(cmaps_il.ms, AT),
+            to_device(cmaps_il.inters, AT),
+            cmaps_il.types,
+            to_device(cmaps_maps, AT),
         ))
     end
 
@@ -1802,5 +1891,6 @@ function add_position_restraints(sys::System{<:Any, AT},
         energy_units=sys.energy_units,
         k=sys.k,
         data=sys.data,
+        launch_config=sys.launch_config,
     )
 end

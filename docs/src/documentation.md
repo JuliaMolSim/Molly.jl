@@ -432,6 +432,7 @@ The following tags are supported:
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
 - `<PeriodicTorsionForce>`: both `<Proper>` and `<Improper>` tags are supported
+- `<CMAPTorsionForce>`
 - `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
 - `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
 - `<Include>`
@@ -439,7 +440,6 @@ The following tags are supported:
 The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
 - `<AmoebaUreyBradleyForce>`
 - `<RBTorsionForce>`
-- `<CMAPTorsionForce>`
 - `<GBSAOBCForce>`
 - `<CustomBondForce>`
 - `<CustomAngleForce>`
