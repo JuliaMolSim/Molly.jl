@@ -254,6 +254,7 @@ function resolve_bond(ff::MolecularForceField, t1::AbstractString, t2::AbstractS
             end
         end
     end
+
     # Symmetric caching
     ff.bond_resolver.cache[(t1, t2)] = best
     ff.bond_resolver.cache[(t2, t1)] = best
@@ -263,39 +264,57 @@ end
 function resolve_angle(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
                        t3::AbstractString)
     key = (t1, t2, t3)
-    if haskey(ff.angle_resolver.cache, key)
-        return ff.angle_resolver.cache[key]
+    ares = ff.angle_resolver
+    if haskey(ares.angle_cache, key)
+        return ares.angle_cache[key], ares.urey_cache[key]
     end
 
     cand = Int[]
-    append!(cand, get(ff.angle_resolver.idx, (:type,  t2), Int[]))
-    append!(cand, get(ff.angle_resolver.idx, (:class, get(ff.type_to_class, t2, "")), Int[]))
-    append!(cand, get(ff.angle_resolver.idx, (:wild,  ""), Int[]))
+    append!(cand, get(ares.idx, (:type,  t2), Int[]))
+    append!(cand, get(ares.idx, (:class, get(ff.type_to_class, t2, "")), Int[]))
+    append!(cand, get(ares.idx, (:wild,  ""), Int[]))
 
-    best = nothing
-    best_spec = Int8(-1)
+    best_angle, best_urey = nothing, nothing
+    best_spec_angle, best_spec_urey = Int8(-1), Int8(-1)
     for i in cand
-        r = ff.angle_resolver.rules[i]
-        if matches(r.p1,t1,ff.type_to_class) && matches(r.p2,t2,ff.type_to_class) &&
-                                                    matches(r.p3,t3,ff.type_to_class)
-            if r.specificity > best_spec
-                best_spec = r.specificity
-                best = r.params
+        r = ares.rules[i]
+        if matches(r.p1, t1, ff.type_to_class) && matches(r.p2, t2, ff.type_to_class) &&
+                                                    matches(r.p3, t3, ff.type_to_class)
+            if r isa AngleRule
+                if r.specificity > best_spec_angle
+                    best_spec_angle = r.specificity
+                    best_angle = r.params
+                end
+            elseif r isa UreyBradleyRule
+                if r.specificity > best_spec_urey
+                    best_spec_urey = r.specificity
+                    best_urey = r.params
+                end
             end
         end
         # Neighbor-reversed
-        if matches(r.p1,t3,ff.type_to_class) && matches(r.p2,t2,ff.type_to_class) &&
-                                                    matches(r.p3,t1,ff.type_to_class)
-            if r.specificity > best_spec
-                best_spec = r.specificity
-                best = r.params
+        if matches(r.p1, t3, ff.type_to_class) && matches(r.p2, t2, ff.type_to_class) &&
+                                                    matches(r.p3, t1, ff.type_to_class)
+            if r isa AngleRule
+                if r.specificity > best_spec_angle
+                    best_spec_angle = r.specificity
+                    best_angle = r.params
+                end
+            elseif r isa UreyBradleyRule
+                if r.specificity > best_spec_urey
+                    best_spec_urey = r.specificity
+                    best_urey = r.params
+                end
             end
         end
     end
+
     # Symmetric caching
-    ff.angle_resolver.cache[(t1, t2, t3)] = best
-    ff.angle_resolver.cache[(t3, t2, t1)] = best
-    return best
+    ares.angle_cache[(t1, t2, t3)] = best_angle
+    ares.angle_cache[(t3, t2, t1)] = best_angle
+    ares.urey_cache[ (t1, t2, t3)] = best_urey
+    ares.urey_cache[ (t3, t2, t1)] = best_urey
+    return best_angle, best_urey
 end
 
 function resolve_proper_torsion(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
@@ -647,9 +666,9 @@ function System(coord_file::AbstractString,
                 end
             end
             if !matched
-                throw(ArgumentError("could not match residue $(rgraph.res_name) to any of " *
-                                    "the provided templates, make sure that the atoms match " *
-                                    "and have elements assigned"))
+                error("could not match residue $(rgraph.res_name) to any of " *
+                      "the provided templates, make sure that the atoms match " *
+                      "and have elements assigned")
             end
         end
     end
@@ -740,7 +759,7 @@ function System(coord_file::AbstractString,
         t1, t2 = atom_type_of[i], atom_type_of[j]
         hb = resolve_bond(force_field, t1, t2)
         if isnothing(hb)
-            throw(ArgumentError("no bond parameters found for ($t1, $t2)"))
+            error("no bond parameters found for ($t1, $t2)")
         end
         push!(bonds_il.is, i)
         push!(bonds_il.js, j)
@@ -752,18 +771,28 @@ function System(coord_file::AbstractString,
 
     # Angles
     for (i, j, k) in top_angles
-        t1,t2,t3 = atom_type_of[i], atom_type_of[j], atom_type_of[k]
-        ha = resolve_angle(force_field, t1,t2,t3)
-        if isnothing(ha)
-            throw(ArgumentError("no angle parameters found for ($t1, $t2, $t3)"))
+        t1, t2, t3 = atom_type_of[i], atom_type_of[j], atom_type_of[k]
+        ha, hb = resolve_angle(force_field, t1, t2, t3)
+        if isnothing(ha) && isnothing(hb)
+            error("no angle parameters found for ($t1, $t2, $t3)")
         end
-        push!(angles_il.is,i)
-        push!(angles_il.js,j)
-        push!(angles_il.ks,k)
-        push!(angles_il.types, atom_types_to_string(t1,t2,t3))
-        push!(angles_il.inters, ha)
-        eligible[i, k] = false
-        eligible[k, i] = false
+        if !isnothing(ha)
+            push!(angles_il.is, i)
+            push!(angles_il.js, j)
+            push!(angles_il.ks, k)
+            push!(angles_il.types, atom_types_to_string(t1, t2, t3))
+            push!(angles_il.inters, ha)
+            eligible[i, k] = false
+            eligible[k, i] = false
+        end
+        if !isnothing(hb)
+            push!(bonds_il.is, i)
+            push!(bonds_il.js, k)
+            push!(bonds_il.types, atom_types_to_string(t1, t3))
+            push!(bonds_il.inters, hb)
+            eligible[i, k] = false
+            eligible[k, i] = false
+        end
     end
 
     # Virtual sites share all the non-bonded exclusions of, and are excluded from,
@@ -786,7 +815,7 @@ function System(coord_file::AbstractString,
 
     # Proper torsions
     for (i,j,k,l) in top_torsions
-        t1,t2,t3,t4 = atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l]
+        t1, t2, t3, t4 = atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l]
         tt, key = resolve_proper_torsion(force_field, t1, t2, t3, t4)
         isnothing(tt) && continue
 
@@ -810,7 +839,7 @@ function System(coord_file::AbstractString,
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
         # Resolve improper params and oriented key (central first)
-        tt, key = resolve_improper_torsion(force_field, t1,t2,t3,t4)
+        tt, key = resolve_improper_torsion(force_field, t1, t2, t3, t4)
         isnothing(tt) && continue
         tt isa HarmonicTorsionType && continue
 
@@ -963,7 +992,7 @@ function System(coord_file::AbstractString,
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
         # Resolve improper params and oriented key (central first)
-        tt, key = resolve_improper_torsion(force_field, t1,t2,t3,t4)
+        tt, key = resolve_improper_torsion(force_field, t1, t2, t3, t4)
         isnothing(tt) && continue
         tt isa PeriodicTorsionType && continue
 

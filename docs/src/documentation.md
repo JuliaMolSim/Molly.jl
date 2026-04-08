@@ -435,10 +435,10 @@ The following tags are supported:
 - `<CMAPTorsionForce>`
 - `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
 - `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
+- `<AmoebaUreyBradleyForce>`: note that this defines the bond-like part of a general Urey-Bradley interaction and is not specific to the AMOEBA force field
 - `<Include>`
 
 The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
-- `<AmoebaUreyBradleyForce>`
 - `<RBTorsionForce>`
 - `<GBSAOBCForce>`
 - `<CustomBondForce>`
@@ -449,6 +449,7 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
 - `<Script>`
+- Any of the other polarisable force field tags, i.e. `<DrudeForce>`, `<HippoNonbondedForce>` and those starting with `Amoeba` other than `<AmoebaUreyBradleyForce>`.
 In general, custom forces should be implemented as described in [Forces and energies](@ref).
 
 ### Structure file formats
