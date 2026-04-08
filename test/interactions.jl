@@ -1112,6 +1112,20 @@
     pe_improper = potential_energy(pt_improper, c1t, c2t, c3t, c4t, boundary_rb)
     @test isapprox(pe_improper, 20.0u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
 
+    htor = HarmonicTorsion(1000.0u"kJ/mol", -1.8)
+    c1ht = SVector(27.151, 33.362, 10.650)u"Å"
+    c2ht = SVector(28.260, 33.943, 11.096)u"Å"
+    c3ht = SVector(28.605, 33.965, 12.503)u"Å"
+    c4ht = SVector(28.638, 35.461, 12.900)u"Å"
+    boundary_htor = CubicBoundary(Inf * u"Å")
+    pe_htor = potential_energy(htor, c1ht, c2ht, c3ht, c4ht, boundary_htor)
+    @test pe_htor ≈ 67.60869243622506u"kJ/mol"
+    fs_htor = force(htor, c1ht, c2ht, c3ht, c4ht, boundary_htor)
+    @test fs_htor.f1 ≈ SVector(-228.63867893470425,  398.16345029859656,  49.837063486781354)u"kJ * mol^-1 * Å^-1"
+    @test fs_htor.f2 ≈ SVector( 242.87672193557964, -596.3836043695466 , -50.228876881052855)u"kJ * mol^-1 * Å^-1"
+    @test fs_htor.f3 ≈ SVector( 324.1211893467139 ,  212.83417983707614, -82.80324255936942 )u"kJ * mol^-1 * Å^-1"
+    @test fs_htor.f4 ≈ SVector(-338.3592323475893 , -14.614025766126122,  83.19505595364092 )u"kJ * mol^-1 * Å^-1"
+
     struct AlwaysShortcut end
 
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)

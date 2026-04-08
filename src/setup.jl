@@ -534,7 +534,12 @@ function System(coord_file::AbstractString,
     end
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
-    IC = (units ? typeof(zero(T) * u"nm^-1") : T)
+    if units
+        E  = typeof(zero(T) * u"kJ * mol^-1")
+        IC = typeof(zero(T) * u"nm^-1")
+    else
+        E, IC = T, T
+    end
 
     resname_replacements  = force_field.residue_name_replacements
     atomname_replacements = force_field.atom_name_replacements
@@ -667,6 +672,7 @@ function System(coord_file::AbstractString,
     angles_il = InteractionList3Atoms(HarmonicAngle)
     tors_il   = InteractionList4Atoms(PeriodicTorsion)
     imps_il   = InteractionList4Atoms(PeriodicTorsion)
+    htors_il  = InteractionList4Atoms(HarmonicTorsion{E, T})
     cmaps_il  = InteractionList5Atoms(CMAPTorsion)
     eligible = trues(n_atoms, n_atoms)
     special  = falses(n_atoms, n_atoms)
@@ -806,13 +812,14 @@ function System(coord_file::AbstractString,
         # Resolve improper params and oriented key (central first)
         tt, key = resolve_improper_torsion(force_field, t1,t2,t3,t4)
         isnothing(tt) && continue
+        tt isa HarmonicTorsionType && continue
 
         # Recover metadata from resolver cache
         ic = force_field.torsion_resolver.improper_cache
         hit = get(ic, (t1, t2, t3, t4), :miss)
-        ordering::String = "default"
-        has_wild::Bool = false
-        if hit !== :miss
+        ordering = "default"
+        has_wild = false
+        if hit != :miss
             perm, ridx = hit
             r = force_field.torsion_resolver.rules[ridx]
             ordering = r.ordering
@@ -949,6 +956,92 @@ function System(coord_file::AbstractString,
         push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
                                               phases=tt.phases, ks=tt.ks, proper=false))
     end
+    empty!(force_field.torsion_resolver.improper_cache)
+
+    # Custom impropers
+    for (c, j, k, l) in top_impropers
+        t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
+
+        # Resolve improper params and oriented key (central first)
+        tt, key = resolve_improper_torsion(force_field, t1,t2,t3,t4)
+        isnothing(tt) && continue
+        tt isa PeriodicTorsionType && continue
+
+        # Recover metadata from resolver cache
+        ic = force_field.torsion_resolver.improper_cache
+        hit = get(ic, (t1, t2, t3, t4), :miss)
+        ordering = "default"
+        has_wild = false
+        if hit != :miss
+            perm, ridx = hit
+            r = force_field.torsion_resolver.rules[ridx]
+            has_wild = r.has_wildcard
+
+            # Reorder indices based on how atoms were permuted
+            src_atoms = (c, j, k, l)
+            j = src_atoms[perm[2]]
+            k = src_atoms[perm[3]]
+            l = src_atoms[perm[4]]
+
+            # refresh types after remapping
+            t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
+        end
+
+        # topology indices for current j,k,l
+        r2 = resnum_from_atom_idx(j, canonical_system)
+        r3 = resnum_from_atom_idx(k, canonical_system)
+        r4 = resnum_from_atom_idx(l, canonical_system)
+
+        res2 = residue_from_atom_idx(j, canonical_system)
+        res3 = residue_from_atom_idx(k, canonical_system)
+        res4 = residue_from_atom_idx(l, canonical_system)
+
+        ta2 = findfirst(isequal(j), res2.atom_inds)
+        ta3 = findfirst(isequal(k), res3.atom_inds)
+        ta4 = findfirst(isequal(l), res4.atom_inds)
+
+        e2 = Symbol(element_of[j])
+        e3 = Symbol(element_of[k])
+        e4 = Symbol(element_of[l])
+
+        if has_wild
+            # Mirror the permutation on the current topology atoms (c,j,k,l)
+            src_atoms = (c, j, k, l)
+
+            # We need the two peripheral atoms in positions 2 and 3, and the remaining
+            #   peripheral in 4
+            a1 = src_atoms[perm[2]]
+            a2 = src_atoms[perm[3]]
+            a4 = src_atoms[perm[4]]
+
+            # Elements and masses for tie-break
+            e_a1 = Symbol(element_of[a1])
+            e_a2 = Symbol(element_of[a2])
+            m_a1 = force_field.atom_types[atom_type_of[a1]].mass
+            m_a2 = force_field.atom_types[atom_type_of[a2]].mass
+
+            # 1) If same element, lower atom index first
+            # 2) Else, prefer carbon; else heavier mass first
+            if e_a1 == e_a2
+                if a1 > a2
+                    (a1, a2) = (a2, a1)
+                end
+            elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
+                (a1, a2) = (a2, a1)
+            end
+
+            # Reassign current triplet to ordered pair and remaining peripheral.
+            j, k, l = a1, a2, a4
+        end
+        # If no wildcard leave j, k, l as-is
+
+        push!(htors_il.is, c)
+        push!(htors_il.js, j)
+        push!(htors_il.ks, k)
+        push!(htors_il.ls, l)
+        push!(htors_il.types, atom_types_to_string(key...))
+        push!(htors_il.inters, HarmonicTorsion(k=tt.k, θ0=tt.θ0))
+    end
 
     # CMAP corrections
     cmaps_maps_vec = []
@@ -1014,7 +1107,7 @@ function System(coord_file::AbstractString,
 
     return System(T, AT, atoms, coords, boundary_used, velocities,
                   atoms_data, virtual_sites_type, loggers, data, bonds_il, angles_il, tors_il,
-                  imps_il, tors_pad, imps_pad, cmaps_il, cmaps_maps, lj_exceptions_σ,
+                  imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps, lj_exceptions_σ,
                   lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special, units,
                   dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
@@ -1339,6 +1432,7 @@ function System(T::Type,
     torsion_inters_pad = torsions.inters
     improper_inters_pad = impropers.inters
     virtual_sites = []
+    htors_il = InteractionList4Atoms(HarmonicTorsion)
     cmaps_il = InteractionList5Atoms(CMAPTorsion)
     cmaps_maps = nothing
     lj_exceptions_σ, lj_exceptions_ϵ = Dict(), Dict()
@@ -1350,12 +1444,12 @@ function System(T::Type,
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
-                  improper_inters_pad, cmaps_il, cmaps_maps, lj_exceptions_σ, lj_exceptions_ϵ,
-                  σs_14, ϵs_14, separate_lj14, eligible, special, units, dist_cutoff, constraints,
-                  rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
-                  neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                  weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass,
-                  strictness, launch_config, autotune_launch, constraint_algorithm)
+                  improper_inters_pad, htors_il, cmaps_il, cmaps_maps, lj_exceptions_σ,
+                  lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special, units,
+                  dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
+                  approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
+                  dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
+                  hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1510,9 +1604,9 @@ end
 
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                 loggers, data, bonds_all, angles_all, torsions, impropers, torsion_inters_pad,
-                improper_inters_pad, cmaps_il, cmaps_maps, lj_exceptions_σ, lj_exceptions_ϵ, σs_14,
-                ϵs_14, separate_lj14, eligible, special, units, dist_cutoff, constraints_type,
-                rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
+                improper_inters_pad, htors_il, cmaps_il, cmaps_maps, lj_exceptions_σ,
+                lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special, units, dist_cutoff,
+                constraints_type, rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
                 weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
                 launch_config, autotune_launch, constraint_algorithm)
@@ -1649,6 +1743,16 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             to_device(impropers.ls, AT),
             to_device(improper_inters_pad, AT),
             impropers.types,
+        ))
+    end
+    if length(htors_il) > 0
+        push!(specific_inter_array, InteractionList4Atoms(
+            to_device(htors_il.is, AT),
+            to_device(htors_il.js, AT),
+            to_device(htors_il.ks, AT),
+            to_device(htors_il.ls, AT),
+            to_device(htors_il.inters, AT),
+            htors_il.types,
         ))
     end
     if length(cmaps_il) > 0

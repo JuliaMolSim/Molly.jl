@@ -443,7 +443,7 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<GBSAOBCForce>`
 - `<CustomBondForce>`
 - `<CustomAngleForce>`
-- `<CustomTorsionForce>`
+- `<CustomTorsionForce>`: the special case where `energy="k*(theta-theta0)^2"` is supported as it is used to define improper torsions in some force fields
 - `<CustomNonbondedForce>`
 - `<CustomGBForce>`
 - `<CustomHbondForce>`

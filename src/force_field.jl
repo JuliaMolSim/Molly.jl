@@ -54,6 +54,11 @@ struct PeriodicTorsionType{T, E}
     proper::Bool
 end
 
+struct HarmonicTorsionType{T, E}
+    k::E
+    θ0::T
+end
+
 struct CMAPTorsionType{T}
     size::Int
     energy::Vector{T}
@@ -111,13 +116,24 @@ struct TorsionRule{T,E}
     p4::AtomPattern
     proper::Bool
     ordering::String   # "default" | "charmm" | "amber" | "smirnoff"
-    has_wildcard::Bool # any position is WILD
+    has_wildcard::Bool # Any position is WILD
     params::PeriodicTorsionType{T,E}
     specificity::UInt8 # TYPE=2, CLASS=1, WILD=0, used to bias towards specific definitions
 end
 
+struct HarmonicTorsionRule{T,E}
+    p1::AtomPattern
+    p2::AtomPattern
+    p3::AtomPattern
+    p4::AtomPattern
+    proper::Bool
+    has_wildcard::Bool # Any position is WILD
+    params::HarmonicTorsionType{T,E}
+    specificity::UInt8 # TYPE=2, CLASS=1, WILD=0, used to bias towards specific definitions
+end
+
 struct TorsionResolver{T,E}
-    rules::Vector{TorsionRule{T, E}}
+    rules::Vector{Union{TorsionRule{T, E}, HarmonicTorsionRule{T, E}}}
 
     # Candidate lists keyed by type1 or class1 for impropers, and by type2 or class2 for propers
     impropers_by_type1::Dict{String, Vector{Int}}
@@ -269,9 +285,9 @@ get_ezxml(collection, key, default) = (haskey(collection, key) ? collection[key]
 # Having this as a function allows recursion to support <Include> tags
 # Modifies most arguments
 function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attributes_from_residue,
-                      residues, patches, bond_rule_specs, angle_rule_specs, torsion_rule_spec,
-                      cmap_rules, nb_atom_classes, ljforce_atom_classes, nbfix_pairs, units,
-                      strictness, T, IC)
+                      residues, patches, bond_rule_specs, angle_rule_specs, torsion_rule_specs,
+                      cmap_rules, custor_rule_specs, nb_atom_classes, ljforce_atom_classes,
+                      nbfix_pairs, units, strictness, T, IC)
     ff_xml = parsexml(read(ff_file))
     ff = root(ff_xml)
     if ff.name != "ForceField"
@@ -284,8 +300,9 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
         if entry_name == "Include"
             read_ff_xml!(entry["file"], ff_param_array, atom_types, atom_type_order,
                          attributes_from_residue, residues, patches, bond_rule_specs,
-                         angle_rule_specs, torsion_rule_spec, cmap_rules, nb_atom_classes,
-                         ljforce_atom_classes, nbfix_pairs, units, strictness, T, IC)
+                         angle_rule_specs, torsion_rule_specs, cmap_rules, custor_rule_specs,
+                         nb_atom_classes, ljforce_atom_classes, nbfix_pairs, units, strictness,
+                         T, IC)
 
         elseif entry_name == "AtomTypes"
             for atom_type in eachelement(entry)
@@ -529,8 +546,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 has_wildcard = (p1.kind == WILD || p2.kind == WILD || p3.kind == WILD || p4.kind == WILD)
                 spec = UInt8(spec_score(p1) + spec_score(p2) + spec_score(p3) + spec_score(p4))
                 params_any = (:params, periodicities, phases, ks, proper)
-                push!(torsion_rule_spec, (:torsion_rule, p1, p2, p3, p4, spec, params_any,
-                                            local_ordering, has_wildcard))
+                push!(torsion_rule_specs, (:torsion_rule, p1, p2, p3, p4, spec, params_any,
+                                           local_ordering, has_wildcard))
             end
 
         elseif entry_name == "CMAPTorsionForce"
@@ -556,6 +573,39 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         cmap_rules,
                         CMAPRule(p1, p2, p3, p4, p5, has_wildcard, cmap_tt, cmap_spec),
                     )
+                end
+            end
+
+        elseif entry_name == "CustomTorsionForce"
+            if entry["energy"] != "k*(theta-theta0)^2"
+                err_str = "CustomTorsionForce without energy=\"k*(theta-theta0)^2\" not " *
+                          "currently supported, ignoring"
+                report_issue(err_str, strictness)
+                continue
+            end
+            for torsion in eachelement(entry)
+                # Assume PerTorsionParameter entries are k and theta0
+                if torsion.name == "Improper"
+                    k = add_units(parse(T, torsion["k"]), u"kJ * mol^-1", units)
+                    θ0 = parse(T, torsion["theta0"])
+
+                    p1 = pattern_from_attrs(torsion, "type1","class1")
+                    p2 = pattern_from_attrs(torsion, "type2","class2")
+                    p3 = pattern_from_attrs(torsion, "type3","class3")
+                    p4 = pattern_from_attrs(torsion, "type4","class4")
+
+                    has_wildcard = (p1.kind==WILD || p2.kind==WILD || p3.kind==WILD || p4.kind==WILD)
+                    spec = UInt8(spec_score(p1)+spec_score(p2)+spec_score(p3)+spec_score(p4))
+                    params_any = (:params, k, θ0)
+                    push!(
+                        custor_rule_specs,
+                        (:custom_rule, p1, p2, p3, p4, spec, params_any, has_wildcard),
+                    )
+                elseif torsion.name == "Proper"
+                    err_str = "CustomTorsionForce with Proper entries not " *
+                              "currently supported, ignoring"
+                    report_issue(err_str, strictness)
+                    continue
                 end
             end
 
@@ -671,9 +721,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             end
 
         elseif entry_name in ("AmoebaUreyBradleyForce", "RBTorsionForce", "GBSAOBCForce",
-                              "CustomBondForce", "CustomAngleForce", "CustomTorsionForce",
-                              "CustomNonbondedForce", "CustomGBForce", "CustomHbondForce",
-                              "CustomManyParticleForce")
+                              "CustomBondForce", "CustomAngleForce", "CustomNonbondedForce",
+                              "CustomGBForce", "CustomHbondForce", "CustomManyParticleForce")
             report_issue("$entry_name not currently supported, ignoring", strictness)
         end
     end
@@ -751,18 +800,19 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     patches = Dict{String, ResiduePatchTemplate}()
 
     atom_type_order = String[]
-    bond_rule_specs   = [] # Accumulators for pattern rules
-    angle_rule_specs  = []
-    torsion_rule_spec = []
+    bond_rule_specs    = [] # Accumulators for pattern rules
+    angle_rule_specs   = []
+    torsion_rule_specs = []
+    custor_rule_specs  = []
     cmap_rules = CMAPRule{E}[]
     nb_atom_classes, ljforce_atom_classes = AtomType[], AtomType[]
     nbfix_pairs = NBFixPair[]
 
     for ff_file in ff_files
         read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attributes_from_residue,
-                     residues, patches, bond_rule_specs, angle_rule_specs, torsion_rule_spec,
-                     cmap_rules, nb_atom_classes, ljforce_atom_classes, nbfix_pairs, units,
-                     strictness, T, IC)
+                     residues, patches, bond_rule_specs, angle_rule_specs, torsion_rule_specs,
+                     cmap_rules, custor_rule_specs, nb_atom_classes, ljforce_atom_classes,
+                     nbfix_pairs, units, strictness, T, IC)
     end
     torsion_order = ff_param_array[1]
     weight_14_coulomb = ff_param_array[2]
@@ -897,7 +947,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     )
 
     # Torsions resolver
-    torsion_rules = TorsionRule{T, E}[]
+    torsion_rules = Union{TorsionRule{T, E}, HarmonicTorsionRule{T, E}}[]
 
     # Candidate lists
     propers_by_type2   = Dict{String, Vector{Int}}()
@@ -907,34 +957,55 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     wild_propers   = Int[]
     wild_impropers = Int[]
 
-    for (idx_spec, item) in enumerate(torsion_rule_spec)
-        if item[1] == :torsion_rule
-            _, p1, p2, p3, p4, spec, params_any, ordering, wildcard = item
-            _, periodicities, phases, ks, proper = params_any
-            params = PeriodicTorsionType{T, E}(periodicities, phases, ks, proper)
+    for (idx_spec, item) in enumerate(torsion_rule_specs)
+        _, p1, p2, p3, p4, spec, params_any, ordering, wildcard = item
+        _, periodicities, phases, ks, proper = params_any
+        params = PeriodicTorsionType{T, E}(periodicities, phases, ks, proper)
 
-            push!(torsion_rules, TorsionRule{T, E}(p1, p2, p3, p4, proper, ordering,
-                                                   wildcard, params, spec))
-            ridx = length(torsion_rules)
+        push!(
+            torsion_rules,
+            TorsionRule{T, E}(p1, p2, p3, p4, proper, ordering, wildcard, params, spec),
+        )
+        ridx = length(torsion_rules)
 
-            # OpenMM-style candidate lists
-            if proper
-                if p2.kind == TYPE
-                    push!(get!(propers_by_type2, p2.val, Int[]), ridx)
-                elseif p2.kind == CLASS
-                    push!(get!(propers_by_class2, p2.val, Int[]), ridx)
-                else
-                    push!(wild_propers, ridx)
-                end
+        # OpenMM-style candidate lists
+        if proper
+            if p2.kind == TYPE
+                push!(get!(propers_by_type2, p2.val, Int[]), ridx)
+            elseif p2.kind == CLASS
+                push!(get!(propers_by_class2, p2.val, Int[]), ridx)
             else
-                if p1.kind == TYPE
-                    push!(get!(impropers_by_type1, p1.val, Int[]), ridx)
-                elseif p1.kind == CLASS
-                    push!(get!(impropers_by_class1, p1.val, Int[]), ridx)
-                else
-                    push!(wild_impropers, ridx)
-                end
+                push!(wild_propers, ridx)
             end
+        else
+            if p1.kind == TYPE
+                push!(get!(impropers_by_type1, p1.val, Int[]), ridx)
+            elseif p1.kind == CLASS
+                push!(get!(impropers_by_class1, p1.val, Int[]), ridx)
+            else
+                push!(wild_impropers, ridx)
+            end
+        end
+    end
+
+    for (idx_spec, item) in enumerate(custor_rule_specs)
+        _, p1, p2, p3, p4, spec, params_any, wildcard = item
+        _, k, θ0 = params_any
+        params = HarmonicTorsionType{T, E}(k, θ0)
+
+        push!(
+            torsion_rules,
+            HarmonicTorsionRule{T, E}(p1, p2, p3, p4, false, wildcard, params, spec),
+        )
+        ridx = length(torsion_rules)
+
+        # OpenMM-style candidate lists
+        if p1.kind==TYPE
+            push!(get!(impropers_by_type1,  p1.val, Int[]), ridx)
+        elseif p1.kind==CLASS
+            push!(get!(impropers_by_class1, p1.val, Int[]), ridx)
+        else
+            push!(wild_impropers, ridx)
         end
     end
 
