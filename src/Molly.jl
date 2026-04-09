@@ -84,5 +84,7 @@ include("free_energy/mbar.jl")
 include("free_energy/AWH.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
+include("device_transfer.jl")
+include("ustrip.jl")
 
 end

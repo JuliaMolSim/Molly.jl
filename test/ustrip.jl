@@ -65,6 +65,20 @@
     ljdc = LJDispersionCorrection(atoms[1:2], 1.0u"nm")
     @test ustrip(ljdc).factor ≈ ustrip(ljdc.factor)
 
+    ewald = Ewald(1.0u"nm")
+    ewald_nounits = ustrip(ewald)
+    @test ewald_nounits.dist_cutoff == 1.0
+    @test ewald_nounits.error_tol == ewald.error_tol
+    @test ewald_nounits.excluded_pairs == ewald.excluded_pairs
+
+    cubic = CubicBoundary(2.0u"nm")
+    pme = PME(1.0u"nm", atoms, cubic)
+    pme_nounits = ustrip(pme)
+    @test pme_nounits.dist_cutoff == 1.0
+    @test pme_nounits.α == ustrip(pme.α)
+    @test pme_nounits.mesh_dims == pme.mesh_dims
+    @test size(pme_nounits.charge_grid) == size(pme.charge_grid)
+
     mb = MullerBrown()
     mb_nounits = ustrip(mb)
     @test mb_nounits.energy_units == NoUnits
@@ -146,6 +160,38 @@ end
     end
 end
 
+@testset "ustrip system with PME electrostatics" begin
+    atoms = [
+        Atom(mass=12.0u"g/mol", charge=0.3, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"),
+        Atom(mass=14.0u"g/mol", charge=-0.2, σ=0.32u"nm", ϵ=0.25u"kJ * mol^-1"),
+        Atom(mass=16.0u"g/mol", charge=-0.1, σ=0.34u"nm", ϵ=0.3u"kJ * mol^-1"),
+    ]
+    boundary = CubicBoundary(2.5u"nm")
+    coords = [
+        SVector(0.2, 0.2, 0.2)u"nm",
+        SVector(0.8, 0.3, 0.4)u"nm",
+        SVector(1.1, 0.9, 0.7)u"nm",
+    ]
+    velocities = fill(SVector(0.0, 0.0, 0.0)u"nm/ps", 3)
+    rc = 1.0u"nm"
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(CoulombEwald(dist_cutoff=rc),),
+        general_inters=(PME(rc, atoms, boundary),),
+    )
+
+    sys_nounits = ustrip(sys)
+    @test sys_nounits.force_units == NoUnits
+    @test sys_nounits.energy_units == NoUnits
+    @test sys_nounits.general_inters[1] isa PME
+    @test sys_nounits.general_inters[1].dist_cutoff == 1.0
+    @test isfinite(potential_energy(sys_nounits))
+end
+
 @testset "ustrip composite system coverage" begin
     atoms = [Atom(mass=12.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:3]
     coords = [
@@ -197,4 +243,113 @@ end
     @test sys_nounits.specific_inter_lists[1].inters[1] isa CosineAngle
     @test sys_nounits.general_inters[1] isa BiasPotential
     @test isfinite(potential_energy(sys_nounits, neighbors))
+end
+
+@testset "ustrip logger coverage" begin
+    temp_logger = TemperatureLogger(typeof(1.0u"K"), 5)
+    push!(temp_logger.history, 300.0u"K")
+    temp_logger_nounits = ustrip(temp_logger)
+    @test temp_logger_nounits.history == [300.0]
+
+    temp_logger_empty_nounits = ustrip(TemperatureLogger(typeof(1.0u"K"), 5))
+    @test isempty(temp_logger_empty_nounits.history)
+    @test eltype(temp_logger_empty_nounits.history) == Float64
+
+    tcl = TimeCorrelationLogger(
+        (args...; kwargs...) -> 1.0u"nm",
+        (args...; kwargs...) -> 2.0u"nm",
+        typeof(1.0u"nm"),
+        typeof(2.0u"nm"),
+        1,
+        3,
+    )
+    push!(tcl.history_A, 1.0u"nm")
+    push!(tcl.history_B, 2.0u"nm")
+    tcl.sum_offset_products[1] = 2.0u"nm^2"
+    tcl.n_timesteps = 1
+    tcl.sum_A += 1.0u"nm"
+    tcl.sum_B += 2.0u"nm"
+    tcl.sum_sq_A += 1.0u"nm^2"
+    tcl.sum_sq_B += 4.0u"nm^2"
+    tcl_nounits = ustrip(tcl)
+    @test collect(tcl_nounits.history_A) == [1.0]
+    @test collect(tcl_nounits.history_B) == [2.0]
+    @test tcl_nounits.sum_offset_products[1] == 2.0
+
+    aol = AverageObservableLogger(
+        (args...; kwargs...) -> 1.0u"kJ * mol^-1",
+        typeof(1.0u"kJ * mol^-1"),
+        5,
+    )
+    push!(aol.block_averages, 1.0u"kJ * mol^-1")
+    push!(aol.current_block, 2.0u"kJ * mol^-1")
+    aol_nounits = ustrip(aol)
+    @test aol_nounits.block_averages == [1.0]
+    @test aol_nounits.current_block == [2.0]
+
+    awh_empty_nounits = ustrip(AWHEnsembleLogger(
+        typeof(1.0u"nm"),
+        typeof(1.0u"nm^3"),
+        typeof(1.0u"kJ * mol^-1"),
+        10,
+    ))
+    @test isempty(awh_empty_nounits.coords_history)
+    @test eltype(awh_empty_nounits.coords_history) == Vector{SVector{3, Float64}}
+    @test eltype(awh_empty_nounits.volume_history) == Float64
+    @test eltype(awh_empty_nounits.potential_energy_history) == Float64
+end
+
+@testset "ustrip system preserves loggers" begin
+    atoms = [Atom(mass=12.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:3]
+    coords = [
+        SVector(0.15, 0.15, 0.15)u"nm",
+        SVector(0.45, 0.20, 0.18)u"nm",
+        SVector(0.28, 0.52, 0.22)u"nm",
+    ]
+    boundary = CubicBoundary(1.5u"nm")
+    velocities = fill(SVector(0.0, 0.0, 0.0)u"nm/ps", 3)
+
+    temp_logger = TemperatureLogger(typeof(1.0u"K"), 5)
+    push!(temp_logger.history, 300.0u"K")
+
+    disp_logger = DisplacementsLogger(10, coords)
+
+    mc_logger = MonteCarloLogger()
+    mc_logger.n_trials = 1
+    mc_logger.n_accept = 1
+    push!(mc_logger.energy_rates, 0.5)
+    push!(mc_logger.state_changed, true)
+
+    awh_logger = AWHEnsembleLogger(
+        typeof(1.0u"nm"),
+        typeof(1.0u"nm^3"),
+        typeof(1.0u"kJ * mol^-1"),
+        10,
+    )
+    push!(awh_logger.active_idx_history, 1)
+    push!(awh_logger.coords_history, [
+        SVector(0.15, 0.15, 0.15)u"nm",
+        SVector(0.45, 0.20, 0.18)u"nm",
+        SVector(0.28, 0.52, 0.22)u"nm",
+    ])
+    push!(awh_logger.volume_history, 1.5u"nm^3")
+    push!(awh_logger.potential_energy_history, 2.0u"kJ * mol^-1")
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+        loggers=(temp=temp_logger, disp=disp_logger, mc=mc_logger, awh=awh_logger),
+    )
+
+    sys_nounits = ustrip(sys)
+    @test keys(sys_nounits.loggers) == (:temp, :disp, :mc, :awh)
+    @test sys_nounits.loggers.temp.history == [300.0]
+    @test eltype(sys_nounits.loggers.disp.coords_ref) <: SVector{3, Float64}
+    @test sys_nounits.loggers.mc.energy_rates == [0.5]
+    @test eltype(sys_nounits.loggers.awh.coords_history[1]) <: SVector{3, Float64}
+    @test sys_nounits.loggers.awh.volume_history == [1.5]
+    @test sys_nounits.loggers.awh.potential_energy_history == [2.0]
 end

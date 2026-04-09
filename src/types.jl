@@ -24,17 +24,6 @@ export
     MollyCalculator,
     ASECalculator
 
-# Recursively strip units from Molly-owned composite fields without extending
-# Unitful on foreign container types.
-@inline _strip_units(x) = ustrip(x)
-@inline _strip_units(::Nothing) = nothing
-@inline _strip_units(x::Tuple) = map(_strip_units, x)
-@inline _strip_units(x::NamedTuple) = map(_strip_units, x)
-@inline function _strip_units_array(x)
-    AT = array_type(x)
-    return to_device(_strip_units.(from_device(x)), AT)
-end
-
 # Typed dictionary fetch used by parameter-injection utilities.
 dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
 
@@ -309,32 +298,6 @@ function hash(a::InteractionList4Atoms, h::UInt)
     return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, h))))))
 end
 
-# These structures hold index arrays (is, js, ks, ls) and a generic interaction array (inters).
-# The indices are purely integer types, so we only broadcast ustrip over the interaction parameters.
-function Unitful.ustrip(il::InteractionList1Atoms)
-    AT = array_type(il.inters)
-    unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
-    return InteractionList1Atoms(il.is, unitless_inters, il.types)
-end
-
-function Unitful.ustrip(il::InteractionList2Atoms)
-    AT = array_type(il.inters)
-    unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
-    return InteractionList2Atoms(il.is, il.js, unitless_inters, il.types)
-end
-
-function Unitful.ustrip(il::InteractionList3Atoms)
-    AT = array_type(il.inters)
-    unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
-    return InteractionList3Atoms(il.is, il.js, il.ks, unitless_inters, il.types)
-end
-
-function Unitful.ustrip(il::InteractionList4Atoms)
-    AT = array_type(il.inters)
-    unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
-    return InteractionList4Atoms(il.is, il.js, il.ks, il.ls, unitless_inters, il.types)
-end
-
 """
     Atom(; <keyword arguments>)
 
@@ -411,18 +374,6 @@ function Base.show(io::IO, a::Atom)
     print(io, "Atom with index=", a.index, ", atom_type=", a.atom_type, ", mass=", mass(a),
           ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ, ", λ=", a.λ, ", role=", a.alch_role)
 end
-
-# Atom parameters (mass, charge, σ, ϵ) typically carry units during a standard simulation.
-Unitful.ustrip(a::Atom) = Atom(
-    index = a.index,
-    atom_type = a.atom_type,
-    mass = ustrip(a.mass),
-    charge = ustrip(a.charge),
-    σ = ustrip(a.σ),
-    ϵ = ustrip(a.ϵ),
-    λ = a.λ,
-    alch_role = a.alch_role
-)
 
 """
     AtomData(; atom_type="?", atom_name="?", res_number=1, res_name="???",
@@ -1125,37 +1076,6 @@ function extract_parameters(sys::System, ff=nothing)
     return buffer.values, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, buffer.names
 end
 
-# Reconstructs the core simulation state by recursively stripping the arrays and parameter fields.
-function Unitful.ustrip(sys::System)
-    AT = array_type(sys.coords)
-
-    # Safely strip units on the CPU for all arrays to prevent GPU kernel crashes
-    unitless_atoms  = to_device(ustrip.(from_device(sys.atoms)), AT)
-    unitless_coords = to_device(ustrip.(from_device(sys.coords)), AT)
-    unitless_vels   = to_device(ustrip.(from_device(sys.velocities)), AT)
-
-    return System(
-        atoms = unitless_atoms,
-        atoms_data = sys.atoms_data,
-        topology = sys.topology,
-        pairwise_inters = _strip_units(sys.pairwise_inters),
-        specific_inter_lists = _strip_units(sys.specific_inter_lists),
-        general_inters = _strip_units(sys.general_inters),
-        constraints = _strip_units(sys.constraints),
-        coords = unitless_coords,
-        velocities = unitless_vels,
-        boundary = ustrip(sys.boundary),
-        virtual_sites = _strip_units_array(sys.virtual_sites),
-        neighbor_finder = _strip_units(sys.neighbor_finder),
-        loggers = NamedTuple(),
-        force_units = NoUnits,
-        energy_units = NoUnits,
-        k = _strip_units(sys.k),
-        data = sys.data,
-        launch_config = sys.launch_config,
-    )
-end
-
 @doc raw"""
     ThermoState(system::System, integrator; <keyword arguments>)
 
@@ -1400,118 +1320,6 @@ function AtomsBase.atomic_number(s::ReplicaSystem)
     end
 end
 
-
-# Avoid unnecessary Array calls on CPU
-from_device(x::Array) = x
-from_device(x) = Array(x)
-
-# -----------------------------------------------------------------------------
-# Device transfer for Interaction Lists
-# -----------------------------------------------------------------------------
-from_device(il::InteractionList1Atoms) = InteractionList1Atoms(from_device(il.is), from_device(il.inters), il.types)
-from_device(il::InteractionList2Atoms) = InteractionList2Atoms(from_device(il.is), from_device(il.js), from_device(il.inters), il.types)
-from_device(il::InteractionList3Atoms) = InteractionList3Atoms(from_device(il.is), from_device(il.js), from_device(il.ks), from_device(il.inters), il.types)
-from_device(il::InteractionList4Atoms) = InteractionList4Atoms(from_device(il.is), from_device(il.js), from_device(il.ks), from_device(il.ls), from_device(il.inters), il.types)
-
-to_device(il::InteractionList1Atoms, ::Type{AT}) where {AT} = InteractionList1Atoms(to_device(il.is, AT), to_device(il.inters, AT), il.types)
-to_device(il::InteractionList2Atoms, ::Type{AT}) where {AT} = InteractionList2Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.inters, AT), il.types)
-to_device(il::InteractionList3Atoms, ::Type{AT}) where {AT} = InteractionList3Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.ks, AT), to_device(il.inters, AT), il.types)
-to_device(il::InteractionList4Atoms, ::Type{AT}) where {AT} = InteractionList4Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.ks, AT), to_device(il.ls, AT), to_device(il.inters, AT), il.types)
-
-_from_device_inter_lists(x::Tuple) = map(from_device, x)
-_from_device_inter_lists(x::NamedTuple) = map(from_device, x)
-_from_device_inter_lists(x) = x
-
-_to_device_inter_lists(x::Tuple, ::Type{AT}) where {AT} = map(i -> to_device(i, AT), x)
-_to_device_inter_lists(x::NamedTuple, ::Type{AT}) where {AT} = map(i -> to_device(i, AT), x)
-_to_device_inter_lists(x, ::Type{AT}) where {AT} = x
-
-# -----------------------------------------------------------------------------
-# Device transfer for System
-# -----------------------------------------------------------------------------
-function from_device(sys::System)
-    !is_on_gpu(sys) && return sys
-
-    nf = sys.neighbor_finder
-    if nf isa GPUNeighborFinder || nf isa DistanceNeighborFinder
-        eligible_cpu, special_cpu = neighbor_finder_masks(nf, length(sys))
-        cpu_nf = DistanceNeighborFinder(
-            eligible = eligible_cpu,
-            dist_cutoff = nf.dist_cutoff,
-            special = special_cpu,
-            n_steps = nf isa GPUNeighborFinder ? nf.n_steps_reorder : nf.n_steps
-        )
-    else
-        cpu_nf = nf
-    end
-
-    return System(
-        atoms = from_device(sys.atoms),
-        coords = from_device(sys.coords),
-        boundary = sys.boundary,
-        velocities = from_device(sys.velocities),
-        atoms_data = sys.atoms_data,
-        topology = sys.topology,
-        pairwise_inters = sys.pairwise_inters,
-        specific_inter_lists = _from_device_inter_lists(sys.specific_inter_lists),
-        general_inters = sys.general_inters,
-        constraints = sys.constraints,
-        virtual_sites = from_device(sys.virtual_sites),
-        neighbor_finder = cpu_nf,
-        loggers = sys.loggers,
-        force_units = sys.force_units,
-        energy_units = sys.energy_units,
-        k = sys.k,
-        data = sys.data
-    )
-end
-
-function to_device(sys::System, ::Type{AT}) where {AT}
-    is_on_gpu(sys) && return sys
-
-    nf = sys.neighbor_finder
-    if nf isa DistanceNeighborFinder && uses_gpu_neighbor_finder(AT)
-        gpu_nf = GPUNeighborFinder(
-            eligible = to_device(nf.eligible, AT),
-            dist_cutoff = nf.dist_cutoff,
-            special = to_device(nf.special, AT),
-            n_steps_reorder = nf.n_steps
-        )
-    elseif nf isa DistanceNeighborFinder
-         gpu_nf = DistanceNeighborFinder(
-            eligible = to_device(nf.eligible, AT),
-            dist_cutoff = nf.dist_cutoff,
-            special = to_device(nf.special, AT),
-            n_steps = nf.n_steps
-        )
-    else
-        gpu_nf = nf
-    end
-
-    return System(
-        atoms = to_device(sys.atoms, AT),
-        coords = to_device(sys.coords, AT),
-        boundary = sys.boundary,
-        velocities = to_device(sys.velocities, AT),
-        atoms_data = sys.atoms_data,
-        topology = sys.topology,
-        pairwise_inters = sys.pairwise_inters,
-        specific_inter_lists = _to_device_inter_lists(sys.specific_inter_lists, AT),
-        general_inters = sys.general_inters,
-        constraints = sys.constraints,
-        virtual_sites = to_device(sys.virtual_sites, AT),
-        neighbor_finder = gpu_nf,
-        loggers = sys.loggers,
-        force_units = sys.force_units,
-        energy_units = sys.energy_units,
-        k = sys.k,
-        data = sys.data
-    )
-end
-
-
-to_device(x::Array, ::Type{<:Array}) = x
-to_device(x, ::Type{AT}) where AT = AT(x)
 
 """
     array_type(sys)
