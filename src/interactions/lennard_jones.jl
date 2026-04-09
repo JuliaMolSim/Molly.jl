@@ -194,6 +194,8 @@ function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
     return LJDispersionCorrection(dc1.factor + dc2.factor)
 end
 
+Unitful.ustrip(dc::LJDispersionCorrection) = LJDispersionCorrection(ustrip(dc.factor))
+
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)
     return inter.factor / volume(sys)
@@ -235,6 +237,22 @@ the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
+@inline function overlap_pe_lj_softcore_beutler(dr, energy_units, C12, C6, λ, σ6_shift)
+    if iszero_value(σ6_shift)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    return λ * ((C12 / (σ6_shift * σ6_shift)) - (C6 / σ6_shift))
+end
+
+@inline function overlap_pe_lj_softcore_gapsys(dr, energy_units, C12, C6, λ, R)
+    if iszero_value(R)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    invR = inv(R)
+    invR6 = invR^6
+    return λ * ((91 * C12 * (invR6 * invR6)) - (28 * C6 * invR6))
+end
+
 @kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1.0
@@ -331,12 +349,12 @@ end
 
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
-    σ6_fac = inter.α * (1 - λ)
-    params = (C12, C6, λ, σ6_fac)
+    σ6_shift = inter.α * (1 - λ) * σ6
+    params = (C12, C6, λ, σ6_shift)
 
     f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = radial_force_vector(f, r, dr, force_units)
-    
+
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -347,8 +365,8 @@ end
 end
 
 # Dispatch 2: Soft Core Logic
-function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_fac)::Tuple{Any, Any, Any, Any})
-    R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
+function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_shift)::Tuple{Any, Any, Any, Any})
+    R = sqrt(cbrt(σ6_shift + r^6))
     R6 = R^6
     return λ*(((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
 end
@@ -373,27 +391,29 @@ end
     λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
-
+    r = norm(dr)
     # If lambda is 1, the soft core formula reduces to standard LJ
     # We explicity branch to save compute.
     if λ >= 1
+        if iszero_value(r)
+            return zero_pairwise_energy(dr, energy_units)
+        end
 
         σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
         ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
-        r = norm(dr)
         σ2 = σ^2
         params = (σ2, ϵ, nothing, nothing)
 
         pe = pe_cutoff(inter.cutoff, inter, r, params)
-        
+
         if special
             return pe * inter.weight_special
         else
@@ -405,11 +425,16 @@ end
     ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = norm(dr)
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
-    σ6_fac = inter.α * (1 - λ)
-    params = (C12, C6, σ6_fac, λ)
+    σ6_shift = inter.α * (1 - λ) * σ6
+
+    if iszero_value(r)
+        pe = overlap_pe_lj_softcore_beutler(dr, energy_units, C12, C6, λ, σ6_shift)
+        return special ? pe * inter.weight_special : pe
+    end
+
+    params = (C12, C6, σ6_shift, λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -427,8 +452,8 @@ end
 end
 
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
-function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ)::Tuple{Any, Any, Any, Any})
-    R6 = (σ6_fac * (C12 / C6)) + r^6
+function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_shift, λ)::Tuple{Any, Any, Any, Any})
+    R6 = σ6_shift + r^6
     return λ * ((C12 / (R6 * R6)) - (C6 / R6))
 end
 
@@ -580,7 +605,7 @@ end
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
 @inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{Any, Any, Any, Any})
     r6 = r^6
-    if r >= R
+    if !(r < R)
         return λ * (((12*C12)/(r6*r6*r)) - ((6*C6)/(r6*r)))
     else
         invR = inv(R)
@@ -611,21 +636,25 @@ end
     λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
 
     if λ <= 0
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
     cutoff = inter.cutoff
     r = norm(dr)
+
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     σ6 = σ^6
 
     # 3. Fast Path: Standard Lennard Jones
     if λ >= 1
+        if iszero_value(r)
+            return zero_pairwise_energy(dr, energy_units)
+        end
         # Pass standard LJ params tuple (Length 2)
         params = (σ^2, ϵ, nothing, nothing)
         pe = pe_cutoff(cutoff, inter, r, params)
@@ -637,6 +666,11 @@ end
     C12 = C6 * σ6
     val = (26 * σ6 * (1 - λ)) / 7
     R = inter.α * sqrt(cbrt(val))
+
+    if iszero_value(r)
+        pe = overlap_pe_lj_softcore_gapsys(dr, energy_units, C12, C6, λ, R)
+        return special ? pe * inter.weight_special : pe
+    end
 
     # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
@@ -654,15 +688,17 @@ end
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
 @inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{Any, Any, Any, Any})
     r6 = r^6
-    if r >= R
+    if !(r < R)
         return λ * ((C12/(r6*r6)) - (C6/(r6)))
     else
         invR = inv(R)
         invR2 = invR^2
         invR6 = invR^6
-        return λ * ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
-                   ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
-                   (91*C12*(invR6*invR6)) - (28*C6*(invR6))
+        return λ * (
+            ((78 * C12 * (invR6 * invR6 * invR2)) - (21 * C6 * (invR2 * invR6))) * (r^2) -
+            ((168 * C12 * (invR6 * invR6 * invR)) - (48 * C6 * (invR6 * invR))) * r +
+            (91 * C12 * (invR6 * invR6)) - (28 * C6 * invR6)
+        )
     end
 end
 

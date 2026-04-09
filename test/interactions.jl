@@ -135,7 +135,7 @@
     )
     @test isapprox(
         potential_energy(inter, dr14, a1, a1),
-        45.35853723577515u"kJ * mol^-1";
+        25.90746475905439u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
@@ -444,6 +444,80 @@
         end
     end
 
+    function softcore_short_range_elec_scale(scheduler, atom_i, atom_j)
+        λ_i = Molly.scale_elec(scheduler, atom_i.λ, atom_i.alch_role)
+        λ_j = Molly.scale_elec(scheduler, atom_j.λ, atom_j.alch_role)
+        return λ_i * λ_j
+    end
+
+    function softcore_short_range_lambda(inter, atom_i, atom_j)
+        λ_glob = Molly.λ_mixing(inter.λ_mixing, atom_i, atom_j)
+        pair_role = Molly.mix_roles(inter.scheduler, atom_i.alch_role, atom_j.alch_role)
+        return Molly.scale_elec(inter.scheduler, λ_glob, pair_role)
+    end
+
+    function expected_short_range(inter::CoulombSoftCoreBeutlerEwald, dr, atom_i, atom_j;
+                                  special=false)
+        λ_soft = softcore_short_range_lambda(inter, atom_i, atom_j)
+        λ_elec = softcore_short_range_elec_scale(inter.scheduler, atom_i, atom_j)
+        r = norm(dr)
+        if λ_soft <= 0 || λ_elec <= 0 || iszero(r) || r > inter.dist_cutoff
+            return (energy=zero(inter.coulomb_const) * u"nm^-1", force=zero(dr))
+        end
+
+        qij = atom_i.charge * atom_j.charge
+        if λ_soft >= 1
+            pe_soft = λ_elec * inter.coulomb_const * (qij / r)
+            f_soft = λ_elec * inter.coulomb_const * (qij / r^2)
+        else
+            term = inter.α * (1 - λ_soft) * Molly.σ_mixing(inter.σ_mixing, atom_i, atom_j)^6 + r^6
+            pe_soft = λ_elec * inter.coulomb_const * (qij / sqrt(cbrt(term)))
+            f_soft = λ_elec * inter.coulomb_const * (qij / (term * sqrt(cbrt(term)))) * r^5
+        end
+
+        if special
+            return (energy=pe_soft * inter.weight_special, force=(f_soft / r) * dr * inter.weight_special)
+        end
+
+        erfc_αr, force_screen = Molly.softcore_ewald_screen(inter, r)
+        f = (f_soft * erfc_αr) + (pe_soft * force_screen)
+        return (energy=pe_soft * erfc_αr, force=(f / r) * dr)
+    end
+
+    function expected_short_range(inter::CoulombSoftCoreGapsysEwald, dr, atom_i, atom_j;
+                                  special=false)
+        λ_soft = softcore_short_range_lambda(inter, atom_i, atom_j)
+        λ_elec = softcore_short_range_elec_scale(inter.scheduler, atom_i, atom_j)
+        r = norm(dr)
+        if λ_soft <= 0 || λ_elec <= 0 || iszero(r) || r > inter.dist_cutoff
+            return (energy=zero(inter.coulomb_const) * u"nm^-1", force=zero(dr))
+        end
+
+        qij = atom_i.charge * atom_j.charge
+        if λ_soft >= 1
+            pe_soft = λ_elec * inter.coulomb_const * (qij / r)
+            f_soft = λ_elec * inter.coulomb_const * (qij / r^2)
+        else
+            R = inter.α * sqrt(cbrt(1 - λ_soft)) * (oneunit(r) + inter.σQ * abs(qij))
+            if !(r < R)
+                pe_soft = λ_elec * inter.coulomb_const * (qij / r)
+                f_soft = λ_elec * inter.coulomb_const * (qij / r^2)
+            else
+                pe_soft = λ_elec * inter.coulomb_const * (((qij / R^3) * r^2) - (((3 * qij) / R^2) * r) +
+                          ((3 * qij) / R))
+                f_soft = λ_elec * inter.coulomb_const * (-(((2 * qij) / R^3) * r) + ((3 * qij) / R^2))
+            end
+        end
+
+        if special
+            return (energy=pe_soft * inter.weight_special, force=(f_soft / r) * dr * inter.weight_special)
+        end
+
+        erfc_αr, force_screen = Molly.softcore_ewald_screen(inter, r)
+        f = (f_soft * erfc_αr) + (pe_soft * force_screen)
+        return (energy=pe_soft * erfc_αr, force=(f / r) * dr)
+    end
+
     @testset "Soft-core Ewald" begin
         c4_ewald = SVector(1.05, 1.0, 1.0)u"nm"
         dr14_ewald = vector(c1, c4_ewald, boundary)
@@ -541,6 +615,7 @@
 
     @testset "Soft-core Exact Overlap Safeguards" begin
         dr_zero = zero(dr12)
+        dr_eps = SVector(1e-12, 0.0, 0.0)u"nm"
         overlap_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
         overlap_inters = (
             LennardJonesSoftCoreBeutler(α=0.3),
@@ -553,12 +628,86 @@
             CoulombSoftCoreGapsysEwald(dist_cutoff=1.0u"nm", α=0.3, σQ=1.0u"nm"),
         )
 
-        for inter in overlap_inters
+        λ_half = overlap_atom.λ
+        qij = overlap_atom.charge * overlap_atom.charge
+        σ6 = overlap_atom.σ^6
+        C6 = 4 * overlap_atom.ϵ * σ6
+        C12 = C6 * σ6
+        rc = 1.0u"nm"
+        ε_rf = 78.3
+        krf = inv(rc^3) * ((ε_rf - 1) / (2 * ε_rf + 1))
+        crf = inv(rc) * ((3 * ε_rf) / (2 * ε_rf + 1))
+        σ6_shift = 0.3 * (1 - λ_half) * σ6
+        R_beutler = sqrt(cbrt(σ6_shift))
+        R_gapsys_coul = 0.3 * sqrt(cbrt(1 - λ_half)) * (1.0u"nm" + 1.0u"nm" * abs(qij))
+        R_gapsys_lj = 0.85 * sqrt(cbrt((26 * σ6 * (1 - λ_half)) / 7))
+        crf_λ = inv(sqrt(cbrt(σ6_shift + rc^6))) + krf * rc^2
+        ewald_screen_beutler = Molly.softcore_ewald_screen(overlap_inters[7], zero(dr_zero[1]))[1]
+        ewald_screen_gapsys = Molly.softcore_ewald_screen(overlap_inters[8], zero(dr_zero[1]))[1]
+        ewald_charge_scale = Molly.scale_elec(Molly.DefaultLambdaScheduler(), λ_half, Molly.CoreRole)^2
+        overlap_pe_beutler = λ_half * Molly.coulomb_const * (qij / R_beutler)
+        overlap_pe_gapsys = λ_half * Molly.coulomb_const * ((3 * qij) / R_gapsys_coul)
+        overlap_expectations = (
+            λ_half * ((C12 / (σ6_shift * σ6_shift)) - (C6 / σ6_shift)),
+            λ_half * ((91 * C12 / R_gapsys_lj^12) - (28 * C6 / R_gapsys_lj^6)),
+            overlap_pe_beutler,
+            overlap_pe_gapsys,
+            λ_half * Molly.coulomb_const * qij * (inv(R_beutler) - crf_λ),
+            λ_half * Molly.coulomb_const * qij * (3 * inv(R_gapsys_coul) - crf),
+            ewald_charge_scale * Molly.coulomb_const * (qij / R_beutler) * ewald_screen_beutler,
+            ewald_charge_scale * Molly.coulomb_const * ((3 * qij) / R_gapsys_coul) * ewald_screen_gapsys,
+        )
+
+        for (inter, expected_pe) in zip(overlap_inters, overlap_expectations)
+            f_val = force(inter, dr_zero, overlap_atom, overlap_atom)
+            pe_val = potential_energy(inter, dr_zero, overlap_atom, overlap_atom)
+            pe_eps = potential_energy(inter, dr_eps, overlap_atom, overlap_atom)
+            @test all(isfinite, f_val)
+            @test all(iszero, f_val)
+            @test isfinite(pe_val)
+            @test isapprox(pe_val, expected_pe; rtol=1e-8, atol=1e-8u"kJ * mol^-1")
+            @test isapprox(pe_val, pe_eps; rtol=1e-8, atol=1e-8u"kJ * mol^-1")
+        end
+
+        endpoint_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
+        endpoint_inters = (
+            LennardJonesSoftCoreBeutler(α=0.3),
+            LennardJonesSoftCoreGapsys(α=0.85),
+            CoulombSoftCoreBeutler(α=0.3),
+            CoulombSoftCoreGapsys(α=0.3, σQ=1.0u"nm"),
+            CoulombSoftCoreBeutlerReactionField(dist_cutoff=1.0u"nm", α=0.3),
+            CoulombSoftCoreGapsysReactionField(dist_cutoff=1.0u"nm", α=0.3, σQ=1.0u"nm"),
+            CoulombSoftCoreBeutlerEwald(dist_cutoff=1.0u"nm", α=0.3),
+            CoulombSoftCoreGapsysEwald(dist_cutoff=1.0u"nm", α=0.3, σQ=1.0u"nm"),
+        )
+
+        for inter in endpoint_inters
+            f_val = force(inter, dr_zero, endpoint_atom, endpoint_atom)
+            pe_val = potential_energy(inter, dr_zero, endpoint_atom, endpoint_atom)
+            @test all(isfinite, f_val)
+            @test all(iszero, f_val)
+            @test isfinite(pe_val)
+            @test iszero(pe_val)
+        end
+
+        degenerate_inters = (
+            LennardJonesSoftCoreBeutler(α=0.0),
+            LennardJonesSoftCoreGapsys(α=0.0),
+            CoulombSoftCoreBeutler(α=0.0),
+            CoulombSoftCoreGapsys(α=0.0, σQ=1.0u"nm"),
+            CoulombSoftCoreBeutlerReactionField(dist_cutoff=1.0u"nm", α=0.0),
+            CoulombSoftCoreGapsysReactionField(dist_cutoff=1.0u"nm", α=0.0, σQ=1.0u"nm"),
+            CoulombSoftCoreBeutlerEwald(dist_cutoff=1.0u"nm", α=0.0),
+            CoulombSoftCoreGapsysEwald(dist_cutoff=1.0u"nm", α=0.0, σQ=1.0u"nm"),
+        )
+
+        for inter in degenerate_inters
             f_val = force(inter, dr_zero, overlap_atom, overlap_atom)
             pe_val = potential_energy(inter, dr_zero, overlap_atom, overlap_atom)
             @test all(isfinite, f_val)
             @test all(iszero, f_val)
             @test isfinite(pe_val)
+            @test iszero(pe_val)
         end
 
         λ_zero_atom = Atom(
@@ -706,6 +855,72 @@
             fs_soft = forces(sys_soft)
             @test isfinite(pe_soft)
             @test all(fi -> all(isfinite, fi), fs_soft)
+        end
+
+        @testset "soft-core short range stays aligned with Ewald and PME long range" begin
+            λ_state = 0.75
+            atoms_raw = [
+                Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=λ_state, alch_role=Molly.InsertRole),
+                Atom(charge=-1.0, σ=0.25u"nm", ϵ=0.15u"kJ * mol^-1", λ=λ_state, alch_role=Molly.InsertRole),
+            ]
+
+            for scheduler in (Molly.DefaultLambdaScheduler(), Molly.EleScaledLambdaScheduler())
+                λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+                atoms_ref = [
+                    Atom(charge=atoms_raw[1].charge * λ_elec),
+                    Atom(charge=atoms_raw[2].charge * λ_elec),
+                ]
+
+                general_refs = (
+                    (
+                        Ewald(rc; scheduler=scheduler),
+                        Ewald(rc),
+                    ),
+                    (
+                        PME(rc, atoms_raw, boundary_pme; scheduler=scheduler),
+                        PME(rc, atoms_ref, boundary_pme),
+                    ),
+                )
+
+                for pair_inter in (
+                    CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3, scheduler=scheduler),
+                    CoulombSoftCoreGapsysEwald(dist_cutoff=rc, α=0.3, σQ=1.0u"nm", scheduler=scheduler),
+                )
+                    pair_expected = expected_short_range(
+                        pair_inter,
+                        vector(coords_pme[1], coords_pme[2], boundary_pme),
+                        atoms_raw...,
+                    )
+                    for (general_raw, general_ref) in general_refs
+                        sys_raw = System(
+                            atoms=atoms_raw,
+                            coords=coords_pme,
+                            boundary=boundary_pme,
+                            pairwise_inters=(pair_inter,),
+                            general_inters=(general_raw,),
+                        )
+                        sys_ref = System(
+                            atoms=atoms_ref,
+                            coords=coords_pme,
+                            boundary=boundary_pme,
+                            pairwise_inters=(),
+                            general_inters=(general_ref,),
+                        )
+
+                        force_expected = forces(sys_ref)
+                        force_expected[1] -= pair_expected.force
+                        force_expected[2] += pair_expected.force
+
+                        @test isapprox(
+                            potential_energy(sys_raw),
+                            potential_energy(sys_ref) + pair_expected.energy;
+                            atol=1e-8u"kJ * mol^-1",
+                        )
+                        @test maximum(norm.(forces(sys_raw) .- force_expected)) <
+                              1e-8u"kJ * mol^-1 * nm^-1"
+                    end
+                end
+            end
         end
     end
 

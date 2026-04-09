@@ -206,6 +206,13 @@ function Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing,
     return Ewald(dist_cutoff, T(error_tol), excluded_pairs, scheduler)
 end
 
+Unitful.ustrip(inter::Ewald) = Ewald(
+    ustrip(inter.dist_cutoff),
+    inter.error_tol,
+    inter.excluded_pairs,
+    inter.scheduler,
+)
+
 function ewald_error(αr::T, target, guess) where T
     t = guess * T(π) / αr
     return target - T(0.05) * sqrt(αr) * guess * exp(-t^2)
