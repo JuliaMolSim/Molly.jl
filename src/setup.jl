@@ -410,8 +410,16 @@ function add_virtual_sites!(virtual_sites, template, rgraph, matches)
     for vst in template.virtual_sites
         atom_ind = atom_name_to_global_i(vst.name       , template.atoms, rgraph.atom_inds, matches)
         atom_1   = atom_name_to_global_i(vst.atom_name_1, template.atoms, rgraph.atom_inds, matches)
-        atom_2   = atom_name_to_global_i(vst.atom_name_2, template.atoms, rgraph.atom_inds, matches)
-        atom_3   = atom_name_to_global_i(vst.atom_name_3, template.atoms, rgraph.atom_inds, matches)
+        if vst.type == 1
+            atom_2 = 0
+        else
+            atom_2 = atom_name_to_global_i(vst.atom_name_2, template.atoms, rgraph.atom_inds, matches)
+        end
+        if vst.type in (1, 2)
+            atom_3 = 0
+        else
+            atom_3 = atom_name_to_global_i(vst.atom_name_3, template.atoms, rgraph.atom_inds, matches)
+        end
         vs = VirtualSite(vst.type, atom_ind, atom_1, atom_2, atom_3, vst.weight_1, vst.weight_2,
                          vst.weight_3, vst.weight_12, vst.weight_13, vst.weight_cross)
         push!(virtual_sites, vs)
@@ -576,6 +584,11 @@ function System(coord_file::AbstractString,
                                                             (units ? u"nm" : NoUnits))
     else
         boundary_used = boundary
+    end
+    if has_infinite_boundary(boundary_used) && nonbonded_method in (:ewald, :pme)
+        throw(ArgumentError("nonbonded_method $nonbonded_method cannot be used with " *
+                            "infinite boundaries, boundary can be set in structure file or " *
+                            "with boundary argument"))
     end
     min_box_side = minimum(box_sides(boundary_used))
     if min_box_side < (2 * dist_cutoff)
@@ -1108,9 +1121,14 @@ function System(coord_file::AbstractString,
     lj_exceptions_σ = Dict{Tuple{Int, Int}, typeof(first(atoms_abst).σ)}()
     lj_exceptions_ϵ = Dict{Tuple{Int, Int}, typeof(first(atoms_abst).ϵ)}()
     atis_present = Set(a.atom_type for a in atoms_abst)
+    atclasses_present = Set(force_field.type_to_class[force_field.atom_type_order[i]]
+                            for i in atis_present)
     # Loop over classes first as types are more specific than classes
     for nbfix_pair in force_field.nbfix_pairs
-        if nbfix_pair.class1 != ""
+        if nbfix_pair.class1 != "" && haskey(force_field.class_to_types, nbfix_pair.class1) &&
+                                haskey(force_field.class_to_types, nbfix_pair.class2) &&
+                                nbfix_pair.class1 in atclasses_present &&
+                                nbfix_pair.class2 in atclasses_present
             for type1 in force_field.class_to_types[nbfix_pair.class1]
                 for type2 in force_field.class_to_types[nbfix_pair.class2]
                     ati1 = findfirst(isequal(type1), force_field.atom_type_order)
@@ -1912,7 +1930,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     else
         general_inters_is = ()
     end
-    if dispersion_correction
+    # Infinite boundaries give infinite volume, hence no dispersion correction
+    if dispersion_correction && !has_infinite_boundary(boundary_used)
         general_inters_disp = (LJDispersionCorrection(atoms, T(dist_cutoff), σ_mix, ϵ_mix),)
     else
         general_inters_disp = ()

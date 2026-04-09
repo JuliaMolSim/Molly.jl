@@ -308,7 +308,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
     for entry in eachelement(ff)
         entry_name = entry.name
         if entry_name == "Include"
-            read_ff_xml!(entry["file"], ff_param_array, atom_types, atom_type_order,
+            xml_fp = joinpath(dirname(ff_file), entry["file"])
+            read_ff_xml!(xml_fp, ff_param_array, atom_types, atom_type_order,
                          attributes_from_residue, residues, patches, bond_rule_specs,
                          angle_rule_specs, torsion_rule_specs, cmap_rules, custor_rule_specs,
                          nb_atom_classes, ljforce_atom_classes, nbfix_pairs, urey_rule_specs,
@@ -706,7 +707,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     ϵ = add_units(parse(T, atom_or_nbfix["epsilon"]), u"kJ * mol^-1", units)
                     if haskey(atom_or_nbfix, "class")
                         push!(ljforce_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
-                                "", atom_or_attr["class"], "", zero(T), zero(T), σ, ϵ, σ14, ϵ14))
+                                "", atom_or_nbfix["class"], "", zero(T), zero(T), σ, ϵ, σ14, ϵ14))
                     else
                         atom_type = atom_or_nbfix["type"]
                         if haskey(atom_types, atom_type)
@@ -890,7 +891,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     if !isnothing(custom_renaming_scheme)
         resname_replacements, atomname_replacements = load_replacements(
-            xmlpath=custom_residue_templates,
+            xmlpath=custom_renaming_scheme,
             resname_replacements=resname_replacements,
             atomname_replacements=atomname_replacements,
         )
@@ -914,19 +915,23 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     # Assign parameters to atom types from classes
     for ac in nb_atom_classes
-        for t in class_to_types[ac.class]
-            at = atom_types[t]
-            atom_types[t] = AtomType{T, typeof(at.mass), typeof(ac.σ), typeof(ac.ϵ)}(
-                at.type, at.class, at.element, ac.charge, at.mass, ac.σ, ac.ϵ, ac.σ14, ac.ϵ14)
+        if haskey(class_to_types, ac.class)
+            for t in class_to_types[ac.class]
+                at = atom_types[t]
+                atom_types[t] = AtomType{T, typeof(at.mass), typeof(ac.σ), typeof(ac.ϵ)}(
+                    at.type, at.class, at.element, ac.charge, at.mass, ac.σ, ac.ϵ, ac.σ14, ac.ϵ14)
+            end
         end
     end
 
     for ac in ljforce_atom_classes
-        for t in class_to_types[ac.class]
-            at = atom_types[t]
-            # Re-use charge from NonbondedForce entry if present
-            atom_types[t] = AtomType{T, typeof(at.mass), typeof(ac.σ), typeof(ac.ϵ)}(
-                at.type, at.class, at.element, at.charge, at.mass, ac.σ, ac.ϵ, ac.σ14, ac.ϵ14)
+        if haskey(class_to_types, ac.class)
+            for t in class_to_types[ac.class]
+                at = atom_types[t]
+                # Re-use charge from NonbondedForce entry if present
+                atom_types[t] = AtomType{T, typeof(at.mass), typeof(ac.σ), typeof(ac.ϵ)}(
+                    at.type, at.class, at.element, at.charge, at.mass, ac.σ, ac.ϵ, ac.σ14, ac.ϵ14)
+            end
         end
     end
 
@@ -958,9 +963,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     angle_rules = Union{AngleRule{KA, DA}, UreyBradleyRule{K, D}}[]
     aidx = Dict{Tuple{Symbol, String}, Vector{Int}}()
     for spec in angle_rule_specs
-        _, p1, p3, ha = spec
-        spec_score = UInt8(spec_score(p1) + spec_score(p2) + spec_score(p3))
-        push!(angle_rules, AngleRule{KA, DA}(p1, p2, p3, ha, spec_score))
+        _, p1, p2, p3, ha = spec
+        sscore = UInt8(spec_score(p1) + spec_score(p2) + spec_score(p3))
+        push!(angle_rules, AngleRule{KA, DA}(p1, p2, p3, ha, sscore))
         i = length(angle_rules)
         # Central indexing, use p2 as key
         if p2.kind == TYPE
@@ -974,8 +979,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     for spec in urey_rule_specs
         _, p1, p2, p3, hb = spec
-        spec_score = UInt8(spec_score(p1) + spec_score(p2) + spec_score(p3))
-        push!(angle_rules, UreyBradleyRule{K, D}(p1, p2, p3, hb, spec_score))
+        sscore = UInt8(spec_score(p1) + spec_score(p2) + spec_score(p3))
+        push!(angle_rules, UreyBradleyRule{K, D}(p1, p2, p3, hb, sscore))
         i = length(angle_rules)
         # Central indexing: use p2 as key
         if p2.kind==TYPE
@@ -1006,13 +1011,13 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     wild_impropers = Int[]
 
     for (idx_spec, item) in enumerate(torsion_rule_specs)
-        _, p1, p2, p3, p4, spec_score, params_any, ordering, wildcard = item
+        _, p1, p2, p3, p4, sscore, params_any, ordering, wildcard = item
         _, periodicities, phases, ks, proper = params_any
         params = PeriodicTorsionType{T, E}(periodicities, phases, ks, proper)
 
         push!(
             torsion_rules,
-            TorsionRule{T, E}(p1, p2, p3, p4, proper, ordering, wildcard, params, spec_score),
+            TorsionRule{T, E}(p1, p2, p3, p4, proper, ordering, wildcard, params, sscore),
         )
         ridx = length(torsion_rules)
 
@@ -1037,13 +1042,13 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     end
 
     for (idx_spec, item) in enumerate(custor_rule_specs)
-        _, p1, p2, p3, p4, spec_score, params_any, wildcard = item
+        _, p1, p2, p3, p4, sscore, params_any, wildcard = item
         _, k, θ0 = params_any
         params = HarmonicTorsionType{T, E}(k, θ0)
 
         push!(
             torsion_rules,
-            HarmonicTorsionRule{T, E}(p1, p2, p3, p4, false, wildcard, params, spec_score),
+            HarmonicTorsionRule{T, E}(p1, p2, p3, p4, false, wildcard, params, sscore),
         )
         ridx = length(torsion_rules)
 

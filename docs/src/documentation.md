@@ -366,7 +366,7 @@ The above 5 ps simulation looks something like this when you view it in PyMOL:
 
 The system setup procedure is tested against OpenMM, following their template matching procedure to assign force field parameters to the structures read from the structure file.
 Some margin in residue and atom naming is allowed, as the naming present in the structure files is queried against a renaming dictionary that contains common alternative names present in PDB files, which you can consult in [pdbNames.xml](https://github.com/JuliaMolSim/Molly.jl/blob/master/data/force_fields/pdbNames.xml).
-You can extend this dictionary yourself, if you really want to use your own naming; or you can build a standalone renaming dictionary following the same structure as the one mentioned above, and pass it as a keyword argument `custom_renaming_scheme` when you build your [`MolecularForceField`](@ref).
+You can extend this dictionary yourself, if you really want to use your own naming; or you can build an additional renaming dictionary following the same structure as the one mentioned above, and pass it as a keyword argument `custom_renaming_scheme` when you build your [`MolecularForceField`](@ref).
 The bonding topology of the system is automatically inferred for standard residues (protein and nucleic acids, plus water).
 If your simulation contains other types of molecules, you must provide the topology for them. You can do this either by using a structure file format with explicit bond definitions, such as Mol2 or mmCIF, by defining the appropriate `CONECT` records in a PDB file, or by providing a custom topology template in a format equivalent to the one found in [residues.xml](https://github.com/JuliaMolSim/Molly.jl/blob/master/data/force_fields/residues.xml).
 

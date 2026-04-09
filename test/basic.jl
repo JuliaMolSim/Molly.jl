@@ -262,7 +262,7 @@ end
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
-        @test_throws ArgumentError System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
+        @test_throws ErrorException System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
     end
 
     water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff)
@@ -313,7 +313,7 @@ end
 
         if struc_name == "sgpb_omtky3"
             # Catch if disulfide bonds are not added properly
-            @test_throws ArgumentError System(
+            @test_throws ErrorException System(
                 pdb_file,
                 ff;
                 array_type = AT,
