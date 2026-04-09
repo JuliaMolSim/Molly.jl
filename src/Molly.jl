@@ -35,6 +35,10 @@ using SparseArrays
 using Statistics
 using StatsBase
 
+using SIMD
+using ChunkSplitters
+using OhMyThreads
+
 include("types.jl")
 include("units.jl")
 include("cuda_config.jl")

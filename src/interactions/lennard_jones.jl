@@ -3,7 +3,9 @@ export
     LJDispersionCorrection,
     LennardJonesSoftCoreBeutler,
     LennardJonesSoftCoreGapsys,
-    AshbaughHatch
+    AshbaughHatch,
+    FastLennardJones,
+    SIMDNeighborFinder
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
@@ -861,4 +863,604 @@ end
     r2 = sum(abs2, vector(coords_i, coords_l, boundary))
     six_term = (σ2 / r2) ^ 3
     return inter.weight_14 * 4 * inter.ϵ14_mixed * (six_term ^ 2 - six_term)
+end
+
+##################
+##################
+##################
+
+struct PackedFlatSoA{T}
+    offsets::Vector{Int}
+    adj_list::Vector{Int}
+    sigmas::Vector{T}
+    eps::Vector{T}
+    weights::Vector{T}
+end
+
+# Holds both the standard Molly list and your SIMD-friendly packed arrays
+struct PackedNeighborList{L, P ,S}
+    standard_list::L
+    packed_data::P
+    soa_params::S
+end
+
+# --- DUCK TYPING MAGIC ---
+# If Molly's loggers ask for `.n` or `.list`, secretly route it to the standard_list
+function Base.getproperty(nl::PackedNeighborList, sym::Symbol)
+    if sym === :standard_list
+        return getfield(nl, :standard_list)
+    elseif sym === :packed_data
+        return getfield(nl, :packed_data)
+    elseif sym === :soa_params
+        return getfield(nl, :soa_params)
+    else
+        return getproperty(getfield(nl, :standard_list), sym)
+    end
+end
+
+Base.iterate(nl::PackedNeighborList, args...) = iterate(nl.standard_list, args...)
+Base.length(nl::PackedNeighborList) = length(nl.standard_list)
+# -------------------------
+
+# The interceptor that wraps Molly's default finder
+struct SIMDNeighborFinder{N, I}
+    base_finder::N
+    inter::I
+end
+
+@kwdef struct FastLennardJones{C, SC, S, E, W} <: PairwiseInteraction
+    cutoff::C = DistanceCutoff(1.0u"nm")
+    shortcut::SC = LJZeroShortcut()
+    σ_mixing::S = LorentzMixing()
+    ϵ_mixing::E = GeometricMixing()
+    weight_special::W = 1
+
+    # # The permanent locker for packed arrays
+    # cache::Ref{PackedFlatSoA{Float64}} = Ref(PackedFlatSoA{Float64}(Int[], Int[], Float64[], Float64[], Float64[]))
+    # # The permanent locker for immutable atom properties
+    # static_soa_params::Ref{NamedTuple{(:σ, :ϵ), Tuple{Vector{Float64}, Vector{Float64}}}} = Ref{NamedTuple{(:σ, :ϵ), Tuple{Vector{Float64}, Vector{Float64}}}}()
+end
+
+@inline Base.:*(c::SIMD.Vec, v::SVector{3}) = SVector(c * v[1], c * v[2], c * v[3])
+@inline Base.:*(v::SVector{3}, c::SIMD.Vec) = SVector(c * v[1], c * v[2], c * v[3])
+
+use_neighbors(::FastLennardJones) = true  
+
+
+
+function build_packed_adj_list(atoms, molly_neighbors, N_SIMD, soa_params, my_inter)
+    
+    n_atoms = length(atoms)
+
+    # Temporary ragged arrays to catch the unsorted data
+    temp_adj = [Int[] for _ in 1:n_atoms]
+    temp_sig = [Float64[] for _ in 1:n_atoms]
+    temp_eps = [Float64[] for _ in 1:n_atoms]
+    temp_w = [Float64[] for _ in 1:n_atoms]
+
+    #for (i, j, is_special) in molly_neighbors.list
+    for idx in 1:molly_neighbors.n
+        (i, j, is_special) = molly_neighbors.list[idx]
+
+        is_skipped = shortcut_pair(my_inter.shortcut, atoms[i], atoms[j], is_special)
+
+        if is_skipped
+            w = 0.0 
+        else
+            w = is_special ? my_inter.weight_special : 1.0
+        end
+
+        # A --> B interaction
+        push!(temp_adj[i], j)
+        push!(temp_sig[i], soa_params.σ[j])
+        push!(temp_eps[i], soa_params.ϵ[j])
+        push!(temp_w[i], w)
+
+        # B --> A interaction
+        push!(temp_adj[j], i)
+        push!(temp_sig[j], soa_params.σ[i])
+        push!(temp_eps[j], soa_params.ϵ[i])
+        push!(temp_w[j], w)
+    end
+    
+    # The final FLAT arrays
+    offsets = zeros(Int, n_atoms + 1)
+    flat_adj = Int[]
+    flat_sigmas = Float64[]
+    flat_eps = Float64[]
+    flat_weights = Float64[]
+    
+    chunk_size = 2 * N_SIMD 
+    current_offset = 1
+    
+    # Squash and pad each flat array with dummy atoms to make the width right
+    for i in 1:n_atoms
+        offsets[i] = current_offset # Record where Atom i starts
+        
+        len = length(temp_adj[i])
+        append!(flat_adj, temp_adj[i])
+        append!(flat_sigmas, temp_sig[i])
+        append!(flat_eps, temp_eps[i])
+        append!(flat_weights, temp_w[i])
+        
+        # pad each array with dummy atoms
+        rem = len % chunk_size
+        if rem != 0
+            pad_count = chunk_size - rem
+            for _ in 1:pad_count
+                push!(flat_adj, i) # triggers dist_2 = 0.0 mask
+                push!(flat_sigmas, 1.0)
+                push!(flat_eps, 1.0)
+                push!(flat_weights, 1.0)
+            end
+        end
+        
+        current_offset += len + (rem != 0 ? chunk_size - rem : 0) # move offset forward by the true padded length
+    end
+    offsets[n_atoms + 1] = current_offset # cap the end
+    
+    return PackedFlatSoA{Float64}(offsets, flat_adj, flat_sigmas, flat_eps, flat_weights)
+end
+
+@inline function pairwise_force_div_r(inter::FastLennardJones, dist_2, sigma_ij, eps_ij)
+
+    inv_dist_2 = 1.0 / dist_2
+    base_ratio_2 = (sigma_ij * sigma_ij) * inv_dist_2
+    br2_sq = base_ratio_2 * base_ratio_2
+    base_ratio_6 = br2_sq * base_ratio_2
+
+    #term = base_ratio_6 * muladd(48.0, base_ratio_6, -24.0)
+    term = base_ratio_6 * (48.0 * base_ratio_6 - 24.0)
+    
+    return eps_ij * inv_dist_2 * term
+end
+
+@inline function force_apply_cutoff(cutoff::DistanceCutoff, inter, dist_2, sigma_ij, eps_ij, cutoff_2)
+    return pairwise_force_div_r(inter, dist_2, sigma_ij, eps_ij)
+end
+
+@inline function force_apply_cutoff(cutoff::ShiftedForceCutoff, inter, dist_2, sigma_ij, eps_ij, cutoff_2)
+    fdr_real = pairwise_force_div_r(inter, dist_2, sigma_ij, eps_ij)
+    fdr_cut = pairwise_force_div_r(inter, cutoff_2, sigma_ij, eps_ij)
+    return fdr_real - fdr_cut
+end
+
+@inline function custom_force(inter, dr, safe_dist_2, atom_i, atom_j, neigh_weights, cutoff_2)
+    
+    # Mixing rules
+    sigma_ij = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    eps_ij = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+
+    # Cutoff
+    f_div_r = force_apply_cutoff(inter.cutoff, inter, safe_dist_2, sigma_ij, eps_ij, cutoff_2)
+
+    # Shortcut AND Special all in one
+    f_div_r_weighted = f_div_r * neigh_weights
+
+    return f_div_r_weighted * dr
+end
+
+@inline function lj_kernel_simd_molly(x_i, y_i, z_i, neigh_x::V, neigh_y::V, neigh_z::V, 
+    sim_params, atom_i, atom_j, inter, neigh_weights) where {V <: Vec}
+
+    # NOTE: every variable in this function except the central atom i and the box dimensions, is a vector of 8 numbers
+
+    # Boundary math - neigh_x is a vector of 8 numbers 
+    dx = x_i - neigh_x
+    dy = y_i - neigh_y
+    dz = z_i - neigh_z
+
+    # Calculate how many box lengths apart and wrap the neighbour to the closest image 
+    dx = muladd(-sim_params.box_x, round(dx * sim_params.inv_box_x), dx)
+    dy = muladd(-sim_params.box_y, round(dy * sim_params.inv_box_y), dy)
+    dz = muladd(-sim_params.box_z, round(dz * sim_params.inv_box_z), dz)
+
+    # Calculate the square of the distance 
+    dist_2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
+
+    # dx = dx - sim_params.box_x * round(dx * sim_params.inv_box_x)
+    # dy = dy - sim_params.box_y * round(dy * sim_params.inv_box_y)
+    # dz = dz - sim_params.box_z * round(dz * sim_params.inv_box_z)
+
+    # # Calculate the square of the distance (Standard IEEE 754 addition)
+    # dist_2 = (dx * dx) + (dy * dy) + (dz * dz)
+
+    # Create 8 true or false values 
+    mask = (dist_2 < sim_params.cutoff_2) & (dist_2 > 0.0)
+    
+   # Swap any NaN distances to be one(V) so there is no divide-by-zero 
+   # After the function, use the mask values to check if the force should be zero
+   safe_dist_2 = vifelse(mask, dist_2, one(V)) 
+
+   # Package as an svector to allow dr * force syntax 
+   dr = SVector(dx, dy, dz)
+
+   # Pass to the user defined force function which will calculate garbage forces for any dummy atoms 
+   fdr_raw = custom_force(inter, dr, safe_dist_2, atom_i, atom_j, neigh_weights, sim_params.cutoff_2)
+   
+   # Zero out forces for atoms outside the cutoff (or padded dummy atoms)
+   f_x = vifelse(mask, fdr_raw[1], zero(V))
+   f_y = vifelse(mask, fdr_raw[2], zero(V))
+   f_z = vifelse(mask, fdr_raw[3], zero(V))
+
+    return f_x, f_y, f_z
+end
+
+@inline function indiv_task_kernel(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, inter, ::Val{N_SIMD}, ::Val{VFloat}, ::Val{VInt}) where {N_SIMD, VFloat, VInt}
+
+    # Use the offsets to find where Atom i's data lives in the flat 1d arrays
+    start_idx = packed_data.offsets[i]
+    end_idx   = packed_data.offsets[i+1] - 1
+
+    # For some reason quicker than indexing from flat_coords
+    xi = ustrip(coords[i][1])
+    yi = ustrip(coords[i][2])
+    zi = ustrip(coords[i][3])
+
+    # Central atom proxy
+    atom_i_proxy = (σ = soa_params.σ[i], ϵ = soa_params.ϵ[i])
+
+    # Two sets of accumulators for 2x ILP
+    f_ix_vec_1 = zero(VFloat); f_iy_vec_1 = zero(VFloat); f_iz_vec_1 = zero(VFloat)
+    f_ix_vec_2 = zero(VFloat); f_iy_vec_2 = zero(VFloat); f_iz_vec_2 = zero(VFloat)
+    
+    # Loop through from 1 until length of offsets which is length of atoms minus the 1 difference added at the start - no pointer chasing
+    @inbounds for j in start_idx:(2 * N_SIMD):end_idx
+        
+        # Load the 8 atom IDs of the different neighbors for both chunks 
+        neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
+        neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
+
+        # Load the sigmas and epsilons of the 8 neighbours into the vector registers for both chunks 
+        neigh_sigmas_1 = vload(VFloat, packed_data.sigmas, j)
+        neigh_eps_1    = vload(VFloat, packed_data.eps, j)
+        neigh_sigmas_2 = vload(VFloat, packed_data.sigmas, j + N_SIMD)
+        neigh_eps_2    = vload(VFloat, packed_data.eps, j + N_SIMD)
+
+        neigh_weights_1 = vload(VFloat, packed_data.weights, j)
+        neigh_weights_2 = vload(VFloat, packed_data.weights, j + N_SIMD)
+
+        # Build Proxies
+        atom_j_proxy_1 = (σ = neigh_sigmas_1, ϵ = neigh_eps_1)
+        atom_j_proxy_2 = (σ = neigh_sigmas_2, ϵ = neigh_eps_2)
+
+        # Calculate the x y and z indices using each of the atoms indexes (neigh_idx) from the SIMD chunk of the list
+        idx_x_1 = neigh_idxs_1 * 3 - 2
+        idx_y_1 = neigh_idxs_1 * 3 - 1
+        idx_z_1 = neigh_idxs_1 * 3
+        idx_x_2 = neigh_idxs_2 * 3 - 2
+        idx_y_2 = neigh_idxs_2 * 3 - 1
+        idx_z_2 = neigh_idxs_2 * 3
+        
+        # Gather the x y and z coordinates of the 8 neighboours using the generated x/y/z idxs - this gathers 8 of each coordinate
+        neigh_x_1 = vgather(flat_coords, idx_x_1)
+        neigh_y_1 = vgather(flat_coords, idx_y_1)
+        neigh_z_1 = vgather(flat_coords, idx_z_1)
+        neigh_x_2 = vgather(flat_coords, idx_x_2)
+        neigh_y_2 = vgather(flat_coords, idx_y_2)
+        neigh_z_2 = vgather(flat_coords, idx_z_2)
+        
+        # Pass the scalar values for atom i and then the vectors of 8 values for the neighbours, alongside the box params
+        f_x_chunk_1, f_y_chunk_1, f_z_chunk_1 = lj_kernel_simd_molly(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, 
+            sim_params, atom_i_proxy, atom_j_proxy_1, inter, neigh_weights_1)
+        
+        # Do the same for the second chunk
+        f_x_chunk_2, f_y_chunk_2, f_z_chunk_2 = lj_kernel_simd_molly(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, 
+            sim_params, atom_i_proxy, atom_j_proxy_2, inter, neigh_weights_2)
+        
+        # Adds the 8 force values into running totals 
+        f_ix_vec_1 += f_x_chunk_1; f_iy_vec_1 += f_y_chunk_1; f_iz_vec_1 += f_z_chunk_1
+        f_ix_vec_2 += f_x_chunk_2; f_iy_vec_2 += f_y_chunk_2; f_iz_vec_2 += f_z_chunk_2
+    end
+    
+    # Horizontal sum across both chunks to get a single scalar force for the central atom
+    f_ix = sum(f_ix_vec_1 + f_ix_vec_2)
+    f_iy = sum(f_iy_vec_1 + f_iy_vec_2)
+    f_iz = sum(f_iz_vec_1 + f_iz_vec_2)
+
+    #@inbounds fs_nounits[i] = SVector(f_ix, f_iy, f_iz) * u"kJ * mol^-1 * nm^-1"
+    @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
+end
+
+function calculate_forces_simd_molly_tasks!(fs_nounits, coords, boundary, packed_data, inter, soa_params, ::Val{N_SIMD}, ::Val{VFloat}, ::Val{VInt}) where {N_SIMD, VFloat, VInt}
+
+    FT = eltype(eltype(fs_nounits))
+
+    flat_coords = reinterpret(FT, coords) # zero allocation flattening of the coords as flat float64 array for vgather
+
+    # Calculate box metrics for distances
+    box_x = ustrip(boundary.side_lengths[1])
+    box_y = ustrip(boundary.side_lengths[2])
+    box_z = ustrip(boundary.side_lengths[3])
+    inv_box_x = 1.0 / box_x
+    inv_box_y = 1.0 / box_y
+    inv_box_z = 1.0 / box_z
+
+    if hasfield(typeof(inter.cutoff), :dist_cutoff)
+        cutoff_2 = ustrip(inter.cutoff.dist_cutoff)^2
+    else
+        cutoff_2 = Inf
+    end
+
+    # Package box metrics 
+    sim_params = (
+        box_x = box_x, box_y = box_y, box_z = box_z,
+        inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z,
+        cutoff_2 = cutoff_2
+    )
+
+    # Multithreading 
+    n_t = Threads.nthreads()
+    num_chunks = 8 * n_t
+
+    # Allocate chunks
+    chunk_list = collect(chunks(1:length(coords); n=num_chunks))
+
+    # Hardware counter 
+    counter = Threads.Atomic{Int}(1)
+
+    # Spawn the right number of tasks per cores
+    @sync for _ in 1:n_t
+        Threads.@spawn begin
+            
+            while true
+                # Get chunk then add 1 
+                chunk_id = Threads.atomic_add!(counter, 1)
+                
+                # Break if it exceeds
+                if chunk_id > num_chunks
+                    break
+                end
+                
+                # Extract the specific chunk assigned to loop iteration
+                i_range = chunk_list[chunk_id]
+                
+                # Run the math for the chunk
+                for i in i_range
+                    indiv_task_kernel(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, inter, Val(N_SIMD), Val(VFloat), Val(VInt))
+                end
+            end
+        end
+    end
+    
+    return fs_nounits
+end
+
+# WORKING AND NOT USING OVERLOADED NEIGHBOURS
+# WORKING AND NOT USING OVERLOADED NEIGHBOURS
+# WORKING AND NOT USING OVERLOADED NEIGHBOURS
+# WORKING AND NOT USING OVERLOADED NEIGHBOURS
+# WORKING AND NOT USING OVERLOADED NEIGHBOURS
+# WORKING AND NOT USING OVERLOADED NEIGHBOURS
+# WORKING AND NOT USING OVERLOADED NEIGHBOURS
+
+function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+    velocities, boundary, neighbors, force_units, n_atoms,
+    pairwise_inters_nonl, 
+    pairwise_inters_nl::Tuple{FastLennardJones}, 
+    ::Val{n_threads}, ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
+
+    fill!(fs_nounits, zero(eltype(fs_nounits)))
+
+    inter = pairwise_inters_nl[1]
+
+    #Retrieve the data (whether freshly built or saved from a previous step)
+    if !isassigned(inter.static_soa_params)
+        inter.static_soa_params[] = (
+            σ = [ustrip(a.σ) for a in atoms], 
+            ϵ = [ustrip(a.ϵ) for a in atoms]
+        )
+    end
+
+    soa_params = inter.static_soa_params[]
+
+    # Hardcoded cache logic
+    if step_n == 0 || step_n % 10 == 0 || length(inter.cache[].offsets) == 0
+        inter.cache[] = build_packed_adj_list(atoms, neighbors, 8, soa_params, inter) 
+    end
+
+    packed_data = inter.cache[]
+
+    calculate_forces_simd_molly_tasks!(fs_nounits, coords, boundary, packed_data, inter, soa_params, Val(8), Val(Vec{8, Float64}), Val(Vec{8, Int}))
+
+    return fs_nounits
+end
+
+# the Val{1} edge case
+function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+    velocities, boundary, neighbors, force_units, n_atoms,
+    pairwise_inters_nonl, 
+    pairwise_inters_nl::Tuple{FastLennardJones}, 
+    ::Val{1}, ::Val{needs_vir}, step_n=0) where {needs_vir} # <--- Notice Val{1} here
+
+    # Exact same body as your other hijack
+    fill!(fs_nounits, zero(eltype(fs_nounits)))
+
+    inter = pairwise_inters_nl[1]
+
+    #Retrieve the data (whether freshly built or saved from a previous step)
+    if !isassigned(inter.static_soa_params)
+        inter.static_soa_params[] = (
+            σ = [ustrip(a.σ) for a in atoms], 
+            ϵ = [ustrip(a.ϵ) for a in atoms]
+        )
+    end
+
+    soa_params = inter.static_soa_params[]
+
+    # Hardcoded cache logic
+    if step_n == 0 || step_n % 10 == 0 || length(inter.cache[].offsets) == 0
+        inter.cache[] = build_packed_adj_list(atoms, neighbors, 8, soa_params, inter) 
+    end
+
+    packed_data = inter.cache[]
+
+    calculate_forces_simd_molly_tasks!(fs_nounits, coords, boundary, packed_data, inter, soa_params, Val(8), Val(Vec{8, Float64}), Val(Vec{8, Int}))
+
+    return fs_nounits
+end
+
+
+# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
+# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
+# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
+# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
+# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
+
+# function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step_n::Integer, force_tracking::Bool=false; kwargs...)
+    
+#     # If the old standard is nothing, set it to nothing, else set it to the old neighbors_list
+#     old_standard = isnothing(old_neighbors) ? nothing : old_neighbors.standard_list
+
+#     # Calculate new neighbor list normally 
+#     new_standard = find_neighbors(sys, nf.base_finder, old_standard, step_n, force_tracking; kwargs...)
+    
+#     # # If Molly didnt trigger a neighbors rebuild, i.e., old_standard = new_standard, and old_standard isnt empty, return old_standard
+#     # if !isnothing(old_neighbors) && new_standard == old_standard
+#     #     return old_neighbors
+#     # end
+
+#     # # If it did and old_standard isnt equal to new_standard, perform a rebuild!
+#     # soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms])
+#     # new_packed = build_packed_adj_list(sys.atoms, new_standard, 8, soa_params, nf.inter)
+
+#     # Instead of checking object identity, we check the clock exactly like your old code did!
+#     needs_rebuild = isnothing(old_neighbors) || 
+#                     force_tracking || 
+#                     iszero(step_n % nf.base_finder.n_steps)
+
+#     if !needs_rebuild
+#         return old_neighbors
+#     end
+
+#     # A rebuild happened! Generate the params and pack the SIMD arrays
+#     soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms])
+#     new_packed = build_packed_adj_list(sys.atoms, new_standard, 8, soa_params, nf.inter)
+
+#     # Return the wrapped which is duck typed
+#     return PackedNeighborList(new_standard, new_packed, soa_params)
+# end
+
+# Notice the '!' - this mutates the existing packed_data
+function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbors, N_SIMD, soa_params, my_inter)
+    n_atoms = length(atoms)
+    
+    # Pass 1: Count neighbors (1 single flat allocation, virtually instant)
+    counts = zeros(Int, n_atoms)
+    for idx in 1:molly_neighbors.n
+        (i, j, is_special) = molly_neighbors.list[idx]
+        if !shortcut_pair(my_inter.shortcut, atoms[i], atoms[j], is_special)
+            counts[i] += 1
+            counts[j] += 1
+        end
+    end
+    
+    # Pass 2: Calculate padded offsets
+    resize!(packed_data.offsets, n_atoms + 1)
+    current_offset = 1
+    chunk_size = 2 * N_SIMD
+    
+    @inbounds for i in 1:n_atoms
+        packed_data.offsets[i] = current_offset
+        c = counts[i]
+        rem = c % chunk_size
+        pad = rem != 0 ? chunk_size - rem : 0
+        current_offset += c + pad
+    end
+    packed_data.offsets[n_atoms + 1] = current_offset
+    total_len = current_offset - 1
+    
+    # Pass 3: Resize flat arrays to exactly the needed length
+    resize!(packed_data.adj_list, total_len)
+    resize!(packed_data.sigmas, total_len)
+    resize!(packed_data.eps, total_len)
+    resize!(packed_data.weights, total_len)
+    
+    insert_idx = copy(packed_data.offsets)
+    
+    # Pass 4: Fill the arrays directly
+    for idx in 1:molly_neighbors.n
+        (i, j, is_special) = molly_neighbors.list[idx]
+        if shortcut_pair(my_inter.shortcut, atoms[i], atoms[j], is_special)
+            continue
+        end
+        w = is_special ? my_inter.weight_special : 1.0
+        
+        pos_i = insert_idx[i]
+        packed_data.adj_list[pos_i] = j
+        packed_data.sigmas[pos_i] = soa_params.σ[j]
+        packed_data.eps[pos_i] = soa_params.ϵ[j]
+        packed_data.weights[pos_i] = w
+        insert_idx[i] += 1
+        
+        pos_j = insert_idx[j]
+        packed_data.adj_list[pos_j] = i
+        packed_data.sigmas[pos_j] = soa_params.σ[i]
+        packed_data.eps[pos_j] = soa_params.ϵ[i]
+        packed_data.weights[pos_j] = w
+        insert_idx[j] += 1
+    end
+    
+    # Pass 5: Fill padding with dummy atoms (dist = 0 masks them out)
+    @inbounds for i in 1:n_atoms
+        start_pad = insert_idx[i]
+        end_pad = packed_data.offsets[i+1] - 1
+        for pos in start_pad:end_pad
+            packed_data.adj_list[pos] = i 
+            packed_data.sigmas[pos] = 1.0
+            packed_data.eps[pos] = 1.0
+            packed_data.weights[pos] = 1.0
+        end
+    end
+    
+    return packed_data
+end
+
+function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step_n::Integer, force_tracking::Bool=false; kwargs...)
+    
+    old_standard = isnothing(old_neighbors) ? nothing : old_neighbors.standard_list
+    new_standard = Molly.find_neighbors(sys, nf.base_finder, old_standard, step_n, force_tracking; kwargs...)
+    
+    # The correct clock check!
+    needs_rebuild = isnothing(old_neighbors) || force_tracking || iszero(step_n % nf.base_finder.n_steps)
+
+    if !needs_rebuild
+        return old_neighbors
+    end
+
+    # --- THE ZERO-ALLOCATION CACHE LOGIC ---
+    if isnothing(old_neighbors)
+        # STEP 0: Allocate everything ONCE
+        soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms])
+        packed_data = PackedFlatSoA{Float64}(Int[], Int[], Float64[], Float64[], Float64[])
+    else
+        # STEP 10, 20, 30: Reuse the params and the memory from the previous step!
+        soa_params = old_neighbors.soa_params
+        packed_data = old_neighbors.packed_data
+    end
+
+    # Mutate the arrays in-place!
+    build_packed_adj_list!(packed_data, sys.atoms, new_standard, 8, soa_params, nf.inter)
+
+    # Wrap it back up and send it to the next step
+    return PackedNeighborList(new_standard, packed_data, soa_params)
+end
+
+
+function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+    velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
+    pairwise_inters_nonl, 
+    pairwise_inters_nl::Tuple{FastLennardJones}, 
+    ::Val{n_threads}, ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
+
+    fill!(fs_nounits, zero(eltype(fs_nounits)))
+
+    inter = pairwise_inters_nl[1]
+
+    packed_data = neighbors.packed_data
+    soa_params = neighbors.soa_params
+
+    calculate_forces_simd_molly_tasks!(fs_nounits, coords, boundary, packed_data, inter, soa_params, Val(8), Val(Vec{8, Float64}), Val(Vec{8, Int}))
+
+    return fs_nounits
 end
