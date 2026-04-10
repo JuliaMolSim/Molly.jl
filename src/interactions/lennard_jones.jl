@@ -1195,9 +1195,11 @@ function calculate_forces_simd_molly_tasks!(fs_nounits, coords, boundary, packed
     # Multithreading 
     n_t = Threads.nthreads()
     num_chunks = 8 * n_t
+    n_atoms = length(coords)
 
     # Allocate chunks
-    chunk_list = collect(chunks(1:length(coords); n=num_chunks))
+    #chunk_list = collect(chunks(1:length(coords); n=num_chunks))
+    chunk_size = cld(n_atoms, num_chunks)
 
     # Hardware counter 
     counter = Threads.Atomic{Int}(1)
@@ -1215,11 +1217,17 @@ function calculate_forces_simd_molly_tasks!(fs_nounits, coords, boundary, packed
                     break
                 end
                 
-                # Extract the specific chunk assigned to loop iteration
-                i_range = chunk_list[chunk_id]
+                # # Extract the specific chunk assigned to loop iteration
+                # i_range = chunk_list[chunk_id]
                 
-                # Run the math for the chunk
-                for i in i_range
+                # # Run the math for the chunk
+                # for i in i_range
+                #     indiv_task_kernel(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, inter, Val(N_SIMD), Val(VFloat), Val(VInt))
+                # end
+
+                start_idx = (chunk_id - 1) * chunk_size + 1
+                end_idx   = min(chunk_id * chunk_size, n_atoms)
+                for i in start_idx:end_idx
                     indiv_task_kernel(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, inter, Val(N_SIMD), Val(VFloat), Val(VInt))
                 end
             end
