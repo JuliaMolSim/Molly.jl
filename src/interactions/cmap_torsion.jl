@@ -142,7 +142,7 @@ function create_periodic_spline(x::AbstractVector{X}, y, deriv::AbstractVector{D
     rhs = zeros(D, n-1)
     a[1] = x[n]-x[n-1]
     b[1] = 2*(x[2]-x[1]+x[n]-x[n-1])
-    c0 = x[2]-x[1]
+    c[1] = x[2]-x[1]
     rhs[1] =  6*((y[2]-y[1])/(x[2]-x[1]) - (y[n]-y[n-1])/(x[n]-x[n-1]))
     for i in 2:n-1
         a[i] = x[i]-x[i-1]
@@ -280,7 +280,7 @@ end
                        velocities_k, velocities_l, velocities_m, step_n, data)
     v0a, v1a, v2a, cp0a, cp1a, v0b, v1b, v2b, cp0b, cp1b, delta, idx, da, db = cmap_angles(
                         inter, coords_i, coords_j, coords_k, coords_l, coords_m, boundary)
-    
+
     # Evaluate the spline to determine the energy and gradients
     dEdA = (3*data[idx+3,4]*da + 2*data[idx+2,4])*da + data[idx+1,4]
     dEdB = (3*data[idx+3,4]*db + 2*data[idx+3,3])*db + data[idx+3,2]
@@ -336,9 +336,9 @@ end
                         inter, coords_i, coords_j, coords_k, coords_l, coords_m, boundary)
 
     # Spline with coefficients
-    energy = ((data[idx+3,4]*db + data[idx+3,3])*db + data[idx+3,2])*db + data[idx+3,1]
-    energy = da*energy + ((data[idx+2,4]*db + data[idx+2,3])*db + data[idx+2,2])*db + data[idx+2,1]
-    energy = da*energy + ((data[idx+1,4]*db + data[idx+1,3])*db + data[idx+1,2])*db + data[idx+1,1]
-    energy = da*energy + ((data[idx,4]*db + data[idx,3])*db + data[idx,2])*db + data[idx,1]
-    return energy
+    pe = ((data[idx+3,4]*db + data[idx+3,3])*db + data[idx+3,2])*db + data[idx+3,1]
+    pe = da*pe + ((data[idx+2,4]*db + data[idx+2,3])*db + data[idx+2,2])*db + data[idx+2,1]
+    pe = da*pe + ((data[idx+1,4]*db + data[idx+1,3])*db + data[idx+1,2])*db + data[idx+1,1]
+    pe = da*pe + ((data[idx,4]*db + data[idx,3])*db + data[idx,2])*db + data[idx,1]
+    return pe
 end

@@ -448,7 +448,7 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<CustomGBForce>`
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
-- `<Script>`
+- `<Script>`: since this is not supported, XML files that do further setup with Python code in `<Script>` may not behave as expected
 - Any of the other polarisable force field tags, i.e. `<DrudeForce>`, `<HippoNonbondedForce>` and those starting with `Amoeba` other than `<AmoebaUreyBradleyForce>`.
 In general, custom forces should be implemented as described in [Forces and energies](@ref).
 

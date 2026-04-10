@@ -459,9 +459,10 @@ Gromacs file reading should be considered experimental.
     classical neighbor lists every few steps. Not used by
     [`GPUNeighborFinder`](@ref).
 - `constraints=:none`: which constraints to apply during the simulation, options
-    are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` and `:hangles`
-    (all bonds plus H-X-H and H-O-X angles). Note that not all options may be
-    supported depending on the bonding topology.
+    are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` (all bonds)
+    and `:hangles` (all bonds plus H-X-H and H-O-X angles). Note that not all options
+    may be supported depending on the bonding topology. Urey-Bradley bond terms are
+    not treated as bonds when adding constraints.
 - `rigid_water=false`: whether to constrain the bonds and angle in water
     molecules. Applied on top of `constraints`, so `constraints=:hangles` and
     `rigid_water=false` gives rigid water.
@@ -706,6 +707,7 @@ function System(coord_file::AbstractString,
     imps_il   = InteractionList4Atoms(PeriodicTorsion)
     htors_il  = InteractionList4Atoms(HarmonicTorsion{E, T})
     cmaps_il  = InteractionList5Atoms(CMAPTorsion)
+    bonds_ub_flags = Bool[] # Whether a bond is a Urey-Bradley bond
     eligible = trues(n_atoms, n_atoms)
     special  = falses(n_atoms, n_atoms)
     torsion_n_terms = 6
@@ -778,6 +780,7 @@ function System(coord_file::AbstractString,
         push!(bonds_il.js, j)
         push!(bonds_il.types, atom_types_to_string(t1,t2))
         push!(bonds_il.inters, hb)
+        push!(bonds_ub_flags, false)
         eligible[i, j] = false
         eligible[j, i] = false
     end
@@ -803,6 +806,7 @@ function System(coord_file::AbstractString,
             push!(bonds_il.js, k)
             push!(bonds_il.types, atom_types_to_string(t1, t3))
             push!(bonds_il.inters, hb)
+            push!(bonds_ub_flags, true)
             eligible[i, k] = false
             eligible[k, i] = false
         end
@@ -1153,10 +1157,10 @@ function System(coord_file::AbstractString,
     end
 
     return System(T, AT, atoms, coords, boundary_used, velocities,
-                  atoms_data, virtual_sites_type, loggers, data, bonds_il, angles_il, tors_il,
-                  imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps, lj_exceptions_σ,
-                  lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special, units,
-                  dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
+                  atoms_data, virtual_sites_type, loggers, data, bonds_il, bonds_ub_flags,
+                  angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
+                  lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
+                  units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
                   dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr, hydrogen_mass,
                   strictness, launch_config, autotune_launch, constraint_algorithm)
@@ -1476,6 +1480,7 @@ function System(T::Type,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
+    bonds_ub_flags = falses(length(bonds))
     torsion_inters_pad = torsions.inters
     improper_inters_pad = impropers.inters
     virtual_sites = []
@@ -1490,10 +1495,10 @@ function System(T::Type,
     hydrogen_mass = false
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
-                  loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
-                  improper_inters_pad, htors_il, cmaps_il, cmaps_maps, lj_exceptions_σ,
-                  lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special, units,
-                  dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
+                  loggers, data, bonds, bonds_ub_flags, angles, torsions, impropers,
+                  torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
+                  lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
+                  units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
                   dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
                   hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
@@ -1543,8 +1548,9 @@ function build_constraint_algorithm(T, dist_constraints, angle_constraints, atom
     )
 end
 
-function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
-                              rigid_water, units, strictness, masses, constraint_algorithm)
+function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_data,
+                              constraints_type, rigid_water, units, strictness, masses,
+                              constraint_algorithm)
     if (constraints_type == :none && !rigid_water) || iszero(length(bonds_all.is))
         return (), bonds_all, angles_all
     end
@@ -1572,10 +1578,12 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
         end
     end
 
-    for (i, j, inter, type) in zip(bonds_all.is, bonds_all.js, bonds_all.inters, bonds_all.types)
-        if constraints_type in (:allbonds, :hangles) ||
-                (constraints_type == :hbonds && (atoms_data[i].element == "H" || atoms_data[j].element == "H")) ||
-                (rigid_water && atoms_data[i].res_name in water_residue_names)
+    for (i, j, inter, type, ub_bond) in zip(bonds_all.is, bonds_all.js, bonds_all.inters,
+                                            bonds_all.types, bonds_ub_flags)
+        if !ub_bond && (
+                    constraints_type in (:allbonds, :hangles) ||
+                    (constraints_type == :hbonds && (atoms_data[i].element == "H" || atoms_data[j].element == "H")) ||
+                    (rigid_water && atoms_data[i].res_name in water_residue_names))
             if !((min(i, j), max(i, j)) in angle_dist_pairs)
                 # Only add distance constraints that are not part of an angle constraint
                 push!(dist_constraints, DistanceConstraint(i, j, inter.r0))
@@ -1650,13 +1658,13 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constrai
 end
 
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
-                loggers, data, bonds_all, angles_all, torsions, impropers, torsion_inters_pad,
-                improper_inters_pad, htors_il, cmaps_il, cmaps_maps, lj_exceptions_σ,
-                lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special, units, dist_cutoff,
-                constraints_type, rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
-                neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
-                launch_config, autotune_launch, constraint_algorithm)
+                loggers, data, bonds_all, bonds_ub_flags, angles_all, torsions, impropers,
+                torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
+                lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
+                units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
+                ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent, kappa,
+                grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
+                hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
 
@@ -1749,9 +1757,9 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     end
 
     masses = mass.(from_device(atoms))
-    constraints, bonds, angles = exchange_constraints(T, bonds_all, angles_all, atoms_data,
-                                            constraints_type, rigid_water, units, strictness,
-                                            masses, constraint_algorithm)
+    constraints, bonds, angles = exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags,
+                                    atoms_data, constraints_type, rigid_water, units, strictness,
+                                    masses, constraint_algorithm)
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
