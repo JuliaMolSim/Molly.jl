@@ -1176,11 +1176,14 @@ function calculate_forces_simd_molly_tasks!(fs_nounits, coords, boundary, packed
     inv_box_y = 1.0 / box_y
     inv_box_z = 1.0 / box_z
 
-    if hasfield(typeof(inter.cutoff), :dist_cutoff)
-        cutoff_2 = ustrip(inter.cutoff.dist_cutoff)^2
-    else
-        cutoff_2 = Inf
-    end
+    # if hasfield(typeof(inter.cutoff), :dist_cutoff)
+    #     cutoff_2 = ustrip(inter.cutoff.dist_cutoff)^2
+    # else
+    #     cutoff_2 = Inf
+    # end
+
+    cutoff_2 = ustrip(inter.cutoff.dist_cutoff)^2
+
 
     # Package box metrics 
     sim_params = (
@@ -1301,45 +1304,12 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 end
 
 
-# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
-# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
-# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
-# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
-# VERSION USING OVERLOADED NEIGHBOURS NOT WORKING
+# VERSION USING OVERLOADED NEIGHBOURS WORKING
+# VERSION USING OVERLOADED NEIGHBOURS WORKING
+# VERSION USING OVERLOADED NEIGHBOURS WORKING
+# VERSION USING OVERLOADED NEIGHBOURS WORKING
+# VERSION USING OVERLOADED NEIGHBOURS WORKING
 
-# function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step_n::Integer, force_tracking::Bool=false; kwargs...)
-    
-#     # If the old standard is nothing, set it to nothing, else set it to the old neighbors_list
-#     old_standard = isnothing(old_neighbors) ? nothing : old_neighbors.standard_list
-
-#     # Calculate new neighbor list normally 
-#     new_standard = find_neighbors(sys, nf.base_finder, old_standard, step_n, force_tracking; kwargs...)
-    
-#     # # If Molly didnt trigger a neighbors rebuild, i.e., old_standard = new_standard, and old_standard isnt empty, return old_standard
-#     # if !isnothing(old_neighbors) && new_standard == old_standard
-#     #     return old_neighbors
-#     # end
-
-#     # # If it did and old_standard isnt equal to new_standard, perform a rebuild!
-#     # soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms])
-#     # new_packed = build_packed_adj_list(sys.atoms, new_standard, 8, soa_params, nf.inter)
-
-#     # Instead of checking object identity, we check the clock exactly like your old code did!
-#     needs_rebuild = isnothing(old_neighbors) || 
-#                     force_tracking || 
-#                     iszero(step_n % nf.base_finder.n_steps)
-
-#     if !needs_rebuild
-#         return old_neighbors
-#     end
-
-#     # A rebuild happened! Generate the params and pack the SIMD arrays
-#     soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms])
-#     new_packed = build_packed_adj_list(sys.atoms, new_standard, 8, soa_params, nf.inter)
-
-#     # Return the wrapped which is duck typed
-#     return PackedNeighborList(new_standard, new_packed, soa_params)
-# end
 
 # Notice the '!' - this mutates the existing packed_data
 function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbors, N_SIMD, soa_params, my_inter)
