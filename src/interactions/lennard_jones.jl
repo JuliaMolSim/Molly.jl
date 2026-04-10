@@ -869,6 +869,13 @@ end
 ##################
 ##################
 
+# const NATIVE_SIMD_WIDTH = if HostCPUFeatures.has_avx512f()
+#     8  # Enterprise Servers (AVX-512)
+# elseif HostCPUFeatures.has_avx2() || HostCPUFeatures.has_avx()
+#     4  # Standard Intel/AMD (AVX/AVX2)
+# else
+#     2  # Apple Silicon (NEON) or legacy chips
+# end
 struct PackedFlatSoA{T}
     offsets::Vector{Int}
     adj_list::Vector{Int}
@@ -1009,8 +1016,8 @@ end
     br2_sq = base_ratio_2 * base_ratio_2
     base_ratio_6 = br2_sq * base_ratio_2
 
-    #term = base_ratio_6 * muladd(48.0, base_ratio_6, -24.0)
-    term = base_ratio_6 * (48.0 * base_ratio_6 - 24.0)
+    term = base_ratio_6 * muladd(48.0, base_ratio_6, -24.0)
+    #term = base_ratio_6 * (48.0 * base_ratio_6 - 24.0)
     
     return eps_ij * inv_dist_2 * term
 end

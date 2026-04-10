@@ -38,6 +38,7 @@ using StatsBase
 using SIMD
 using ChunkSplitters
 using OhMyThreads
+#using HostCPUFeatures
 
 include("types.jl")
 include("units.jl")
