@@ -1,7 +1,7 @@
 name = "Molly"
 uuid = "aa0f7f06-fcc0-5ec4-a7f3-a573f33f9c4c"
-authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
 version = "0.23.3"
+authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
 
 [deps]
 AcceleratedKernels = "6a4ca0a5-0e36-4168-a932-d9be78d558f1"
@@ -57,7 +57,7 @@ Atomix = "0.1, 1.0"
 AtomsBase = "0.5"
 AtomsCalculators = "0.2"
 BioStructures = "4"
-CUDA = "4.2, 5"
+CUDA = "4.2, 5, 6"
 CellListMap = "0.8.11, 0.9"
 Chemfiles = "0.10.3"
 Colors = "0.11, 0.12, 0.13"
