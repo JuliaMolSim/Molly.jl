@@ -533,8 +533,8 @@ function System(coord_file::AbstractString,
                 disulfide_bonds=true,
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                force_separate_lj14=false,
-                constraint_algorithm=LINCS) where {AT <: AbstractArray}
+                constraint_algorithm=LINCS,
+                force_separate_lj14=false) where {AT <: AbstractArray}
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
