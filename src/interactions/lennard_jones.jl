@@ -4,7 +4,7 @@ export
     LennardJonesSoftCoreBeutler,
     LennardJonesSoftCoreGapsys,
     AshbaughHatch,
-    FastLennardJones,
+    SIMDLennardJones,
     SIMDNeighborFinder
 
 @doc raw"""
@@ -885,6 +885,7 @@ struct PackedFlatSoA{T}
     adj_list::Vector{Int}
     sigmas::Vector{T}
     eps::Vector{T}
+    charges::Vector{T}
     weights::Vector{T}
 end
 
@@ -900,7 +901,7 @@ struct SIMDNeighborFinder{N, I}
     inter::I
 end
 
-@kwdef struct FastLennardJones{C, SC, S, E, W} <: PairwiseInteraction
+@kwdef struct SIMDLennardJones{C, SC, S, E, W} <: PairwiseInteraction
     cutoff::C = DistanceCutoff(1.0u"nm")
     shortcut::SC = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
@@ -930,10 +931,10 @@ Base.length(nl::PackedNeighborList) = length(nl.standard_list)
 @inline Base.:*(c::SIMD.Vec, v::SVector{3}) = SVector(c * v[1], c * v[2], c * v[3])
 @inline Base.:*(v::SVector{3}, c::SIMD.Vec) = SVector(c * v[1], c * v[2], c * v[3])
 
-use_neighbors(::FastLennardJones) = true  
+use_neighbors(::SIMDLennardJones) = true  
 
 
-@inline function pairwise_force_div_r(inter::FastLennardJones, dist_2, sigma_ij, eps_ij)
+@inline function pairwise_force_div_r(inter::SIMDLennardJones, dist_2, sigma_ij, eps_ij)
 
     inv_dist_2 = 1.0 / dist_2
     base_ratio_2 = (sigma_ij * sigma_ij) * inv_dist_2
@@ -1025,7 +1026,7 @@ end
     zi = ustrip(coords[i][3])
 
     # Central atom proxy
-    atom_i_proxy = (σ = soa_params.σ[i], ϵ = soa_params.ϵ[i])
+    atom_i_proxy = (σ = soa_params.σ[i], ϵ = soa_params.ϵ[i], q = soa_params.q[i])
 
     # Two sets of accumulators for 2x ILP
     f_ix_vec_1 = zero(VFloat); f_iy_vec_1 = zero(VFloat); f_iz_vec_1 = zero(VFloat)
@@ -1041,8 +1042,10 @@ end
         # Load the sigmas and epsilons of the 8 neighbours into the vector registers for both chunks 
         neigh_sigmas_1 = vload(VFloat, packed_data.sigmas, j)
         neigh_eps_1    = vload(VFloat, packed_data.eps, j)
+        neigh_charges_1 = vload(VFloat, packed_data.charges, j)
         neigh_sigmas_2 = vload(VFloat, packed_data.sigmas, j + N_SIMD)
         neigh_eps_2    = vload(VFloat, packed_data.eps, j + N_SIMD)
+        neigh_charges_2 = vload(VFloat, packed_data.charges, j + N_SIMD)
 
         neigh_weights_1 = vload(VFloat, packed_data.weights, j)
         neigh_weights_2 = vload(VFloat, packed_data.weights, j + N_SIMD)
@@ -1050,8 +1053,8 @@ end
         #neigh_tupl = ntuple(i -> vload(...), 5)
 
         # Build Proxies
-        atom_j_proxy_1 = (σ = neigh_sigmas_1, ϵ = neigh_eps_1)
-        atom_j_proxy_2 = (σ = neigh_sigmas_2, ϵ = neigh_eps_2)
+        atom_j_proxy_1 = (σ = neigh_sigmas_1, ϵ = neigh_eps_1, q = neigh_charges_1)
+        atom_j_proxy_2 = (σ = neigh_sigmas_2, ϵ = neigh_eps_2, q = neigh_charges_2)
 
         # Calculate the x y and z indices using each of the atoms indexes (neigh_idx) from the SIMD chunk of the list
         idx_x_1 = neigh_idxs_1 * 3 - 2
@@ -1087,7 +1090,6 @@ end
     f_iy = sum(f_iy_vec_1 + f_iy_vec_2)
     f_iz = sum(f_iz_vec_1 + f_iz_vec_2)
 
-    #@inbounds fs_nounits[i] = SVector(f_ix, f_iy, f_iz) * u"kJ * mol^-1 * nm^-1"
     @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
 end
 
@@ -1104,7 +1106,7 @@ end
 # function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
 #     velocities, boundary, neighbors, force_units, n_atoms,
 #     pairwise_inters_nonl, 
-#     pairwise_inters_nl::Tuple{FastLennardJones}, 
+#     pairwise_inters_nl::Tuple{SIMDLennardJones}, 
 #     ::Val{1}, ::Val{needs_vir}, step_n=0) where {needs_vir} # <--- Notice Val{1} here
 
 #     # Exact same body as your other hijack
@@ -1175,6 +1177,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
     resize!(packed_data.adj_list, total_len)
     resize!(packed_data.sigmas, total_len)
     resize!(packed_data.eps, total_len)
+    resize!(packed_data.charges, total_len)
     resize!(packed_data.weights, total_len)
     
     insert_idx = copy(packed_data.offsets)
@@ -1191,6 +1194,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
         packed_data.adj_list[pos_i] = j
         packed_data.sigmas[pos_i] = soa_params.σ[j]
         packed_data.eps[pos_i] = soa_params.ϵ[j]
+        packed_data.charges[pos_i] = soa_params.q[j]
         packed_data.weights[pos_i] = w
         insert_idx[i] += 1
         
@@ -1198,6 +1202,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
         packed_data.adj_list[pos_j] = i
         packed_data.sigmas[pos_j] = soa_params.σ[i]
         packed_data.eps[pos_j] = soa_params.ϵ[i]
+        packed_data.charges[pos_j] = soa_params.q[i]
         packed_data.weights[pos_j] = w
         insert_idx[j] += 1
     end
@@ -1210,6 +1215,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
             packed_data.adj_list[pos] = i 
             packed_data.sigmas[pos] = 1.0
             packed_data.eps[pos] = 1.0
+            packed_data.charges[pos] = 0.0
             packed_data.weights[pos] = 1.0
         end
     end
@@ -1232,8 +1238,8 @@ function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step
     # --- THE ZERO-ALLOCATION CACHE LOGIC ---
     if isnothing(old_neighbors)
         # STEP 0: Allocate everything ONCE
-        soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms])
-        packed_data = PackedFlatSoA{Float64}(Int[], Int[], Float64[], Float64[], Float64[])
+        soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms], q = [ustrip(a.charge) for a in sys.atoms])
+        packed_data = PackedFlatSoA{Float64}(Int[], Int[], Float64[], Float64[], Float64[], Float64[])
     else
         # STEP 10, 20, 30: Reuse the params and the memory from the previous step!
         soa_params = old_neighbors.soa_params
@@ -1251,7 +1257,7 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
     velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
     pairwise_inters_nonl, 
-    pairwise_inters_nl::Tuple{FastLennardJones}, 
+    pairwise_inters_nl::Tuple{SIMDLennardJones}, 
     ::Val{n_threads}, ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
 
     fill!(fs_nounits, zero(eltype(fs_nounits)))
