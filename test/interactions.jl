@@ -1126,24 +1126,27 @@
     @test fs_htor.f3 ≈ SVector( 324.1211893467139 ,  212.83417983707614, -82.80324255936942 )u"kJ * mol^-1 * Å^-1"
     @test fs_htor.f4 ≈ SVector(-338.3592323475893 , -14.614025766126122,  83.19505595364092 )u"kJ * mol^-1 * Å^-1"
 
-    ff_cmap = MolecularForceField(joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...)
-    sys_cmap = System(joinpath(data_dir, "6mrr_equil.pdb"), ff)
+    ff_cmap = MolecularForceField(
+        joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+        strictness=:nowarn,
+    )
+    sys_cmap = System(joinpath(data_dir, "6mrr_equil.pdb"), ff_cmap)
     cmap = CMAPTorsion(48384, 24)
     cmap_data = sys_cmap.specific_inter_lists[5].data
     pe_cmap = potential_energy(cmap, sys_cmap.coords[379], sys_cmap.coords[381],
-                               sys_cmap.coords[383], sys_cmap.coords[393], sys_cmap.coords[395],
-                               sys.boundary, nothing, nothing, nothing, nothing, nothing, nothing,
-                               nothing, nothing, nothing, nothing, nothing, nothing, cmap_data)
-    @test pe_cmap ≈ -10.895680919069061u"kJ * mol^-1"
+                        sys_cmap.coords[383], sys_cmap.coords[393], sys_cmap.coords[395],
+                        sys_cmap.boundary, nothing, nothing, nothing, nothing, nothing, nothing,
+                        nothing, nothing, nothing, nothing, nothing, nothing, cmap_data)
+    @test pe_cmap ≈ -10.833264876u"kJ * mol^-1"
     fs_cmap = force(cmap, sys_cmap.coords[379], sys_cmap.coords[381], sys_cmap.coords[383],
-                    sys_cmap.coords[393], sys_cmap.coords[395], sys.boundary,
+                    sys_cmap.coords[393], sys_cmap.coords[395], sys_cmap.boundary,
                     nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing,
                     nothing, nothing, nothing, nothing, cmap_data)
-    @test fs_cmap.f1 ≈ SVector(-0.6428439494, -0.7381143457,  0.5291713295)u"kJ * mol^-1 * nm^-1"
-    @test fs_cmap.f2 ≈ SVector(-11.340921780,  15.693909442, -34.339408770)u"kJ * mol^-1 * nm^-1"
-    @test fs_cmap.f3 ≈ SVector( 22.952940847, -25.098674241,  66.155493305)u"kJ * mol^-1 * nm^-1"
-    @test fs_cmap.f4 ≈ SVector(-24.922919384,  20.536550684, -75.503489261)u"kJ * mol^-1 * nm^-1"
-    @test fs_cmap.f5 ≈ SVector( 13.953744267, -10.393671540,  43.158233397)u"kJ * mol^-1 * nm^-1"
+    @test fs_cmap.f1 ≈ SVector(-1.033477158 , -1.186639956 ,  0.850729764 )u"kJ * mol^-1 * nm^-1"
+    @test fs_cmap.f2 ≈ SVector(-12.152133492,  17.987633158, -38.576945178)u"kJ * mol^-1 * nm^-1"
+    @test fs_cmap.f3 ≈ SVector( 25.299640846, -27.965252121,  73.477215636)u"kJ * mol^-1 * nm^-1"
+    @test fs_cmap.f4 ≈ SVector(-27.701832125,  22.775084670, -83.963292267)u"kJ * mol^-1 * nm^-1"
+    @test fs_cmap.f5 ≈ SVector( 15.587801928, -11.610825751,  48.212292045)u"kJ * mol^-1 * nm^-1"
 
     struct AlwaysShortcut end
 
