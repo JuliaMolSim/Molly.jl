@@ -19,6 +19,7 @@ export
     array_type,
     is_on_gpu,
     float_type,
+    nonbonded_energy_type,
     masses,
     charges,
     MollyCalculator,
@@ -577,6 +578,9 @@ interface described there.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
+- `nonbonded_energy_type::Union{Nothing, Type}=nothing`: optional float type
+    used for pairwise nonbonded energy evaluation. When `nothing`, the system
+    float type is used. This affects energy evaluation only, not forces.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the system.
@@ -585,7 +589,7 @@ interface described there.
     `:error` to error.
 """
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
-                      L, F, E, K, M, TM, DA} <: AtomsBase.AbstractSystem{D}
+                      L, F, E, K, M, TM, DA, NET} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -607,7 +611,25 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
     masses::M
     total_mass::TM
     data::DA
+    nonbonded_energy_type::NET
     launch_config::CUDALaunchConfig
+end
+
+@inline function check_nonbonded_energy_type(nonbonded_energy_type)
+    isnothing(nonbonded_energy_type) && return nothing
+    nonbonded_energy_type isa Type || throw(ArgumentError(
+        "nonbonded_energy_type must be `nothing` or a floating-point type, got " *
+        "$(repr(nonbonded_energy_type))",
+    ))
+    nonbonded_energy_type <: AbstractFloat || throw(ArgumentError(
+        "nonbonded_energy_type must be a subtype of AbstractFloat, got " *
+        "$(repr(nonbonded_energy_type))",
+    ))
+    isconcretetype(nonbonded_energy_type) || throw(ArgumentError(
+        "nonbonded_energy_type must be a concrete floating-point type, got " *
+        "$(repr(nonbonded_energy_type))",
+    ))
+    return nothing
 end
 
 function System(;
@@ -626,11 +648,13 @@ function System(;
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
+                nonbonded_energy_type=nothing,
                 k=default_k(energy_units),
                 data=nothing,
                 launch_config=CUDALaunchConfig(),
                 strictness=default_strictness())
     check_strictness(strictness)
+    check_nonbonded_energy_type(nonbonded_energy_type)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)
@@ -648,6 +672,7 @@ function System(;
     F = typeof(force_units)
     E = typeof(energy_units)
     DA = typeof(data)
+    NET = (isnothing(nonbonded_energy_type) ? Nothing : Type{nonbonded_energy_type})
     n_atoms = length(atoms)
 
     if isnothing(velocities)
@@ -763,11 +788,11 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}(
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA, NET}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, virtual_sites,
                     virtual_site_flags, neighbor_finder, loggers, df, force_units, energy_units,
-                    k_converted, atom_masses, total_mass, data, launch_config)
+                    k_converted, atom_masses, total_mass, data, nonbonded_energy_type, launch_config)
 end
 
 """
@@ -794,6 +819,7 @@ function System(sys::System;
                 loggers=sys.loggers,
                 force_units=sys.force_units,
                 energy_units=sys.energy_units,
+                nonbonded_energy_type=sys.nonbonded_energy_type,
                 k=sys.k,
                 data=sys.data,
                 launch_config=sys.launch_config,
@@ -814,6 +840,7 @@ function System(sys::System;
         loggers=loggers,
         force_units=force_units,
         energy_units=energy_units,
+        nonbonded_energy_type=nonbonded_energy_type,
         k=k,
         data=data,
         launch_config=launch_config,
@@ -844,6 +871,7 @@ function System(crystal::Crystal{D};
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
+                nonbonded_energy_type=nothing,
                 k=default_k(energy_units),
                 data=nothing,
                 launch_config=CUDALaunchConfig()) where D
@@ -883,6 +911,7 @@ function System(crystal::Crystal{D};
         loggers=loggers,
         force_units=force_units,
         energy_units=energy_units,
+        nonbonded_energy_type=nonbonded_energy_type,
         k=k,
         data=data,
         launch_config=launch_config,
@@ -890,9 +919,9 @@ function System(crystal::Crystal{D};
 end
 
 function Base.zero(sys::System{D, AT, T, A, C, B, V,
-                   AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}) where {D, AT, T,
-                            A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}(
+                   AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA, NET}) where {D, AT, T,
+                            A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA, NET}
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA, NET}(
         zero.(sys.atoms),
         zero(sys.coords),
         zero(sys.boundary),
@@ -914,6 +943,7 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
         zero(sys.masses),
         zero(sys.total_mass),
         sys.data,
+        sys.nonbonded_energy_type,
         sys.launch_config,
     )
 end
@@ -1348,6 +1378,55 @@ end
 The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
 """
 float_type(::Union{System{<:Any, <:Any, T}, ReplicaSystem{<:Any, <:Any, T}}) where {T} = T
+
+"""
+    nonbonded_energy_type(sys)
+
+The float type used for pairwise nonbonded energy evaluation.
+"""
+@inline nonbonded_energy_type(sys::System) =
+    isnothing(sys.nonbonded_energy_type) ? float_type(sys) : sys.nonbonded_energy_type
+
+@inline _float_precision_convert(x::Nothing, ::Type{T}) where {T <: AbstractFloat} = nothing
+@inline _float_precision_convert(x::Bool, ::Type{T}) where {T <: AbstractFloat} = x
+@inline _float_precision_convert(x::Integer, ::Type{T}) where {T <: AbstractFloat} = x
+@inline _float_precision_convert(x::AbstractFloat, ::Type{T}) where {T <: AbstractFloat} = T(x)
+@inline _float_precision_convert(x::Quantity, ::Type{T}) where {T <: AbstractFloat} =
+    T(ustrip(x)) * unit(x)
+@inline _float_precision_convert(x::Tuple, ::Type{T}) where {T <: AbstractFloat} =
+    map(i -> _float_precision_convert(i, T), x)
+@inline _float_precision_convert(x::NamedTuple, ::Type{T}) where {T <: AbstractFloat} =
+    map(i -> _float_precision_convert(i, T), x)
+@inline _float_precision_convert(x::AbstractArray, ::Type{T}) where {T <: AbstractFloat} =
+    map(i -> _float_precision_convert(i, T), x)
+@inline _float_precision_convert(x::StaticArray, ::Type{T}) where {T <: AbstractFloat} =
+    map(i -> _float_precision_convert(i, T), x)
+@inline _float_precision_convert(x::Type, ::Type{T}) where {T <: AbstractFloat} = x
+@inline _float_precision_convert(x::AbstractString, ::Type{T}) where {T <: AbstractFloat} = x
+@inline _float_precision_convert(x::Symbol, ::Type{T}) where {T <: AbstractFloat} = x
+@inline function _float_precision_convert(atom::Atom, ::Type{T}) where {T <: AbstractFloat}
+    return Atom(
+        atom.index,
+        _float_precision_convert(atom.atom_type, T),
+        _float_precision_convert(atom.mass, T),
+        _float_precision_convert(atom.charge, T),
+        _float_precision_convert(atom.σ, T),
+        _float_precision_convert(atom.ϵ, T),
+        _float_precision_convert(atom.λ, T),
+        atom.alch_role,
+    )
+end
+
+@inline function _float_precision_convert(x, ::Type{T}) where {T <: AbstractFloat}
+    n_fields = fieldcount(typeof(x))
+    n_fields == 0 && return x
+    wrapper = Base.typename(typeof(x)).wrapper
+    return wrapper(ntuple(i -> _float_precision_convert(getfield(x, i), T), n_fields)...)
+end
+
+@inline _maybe_float_precision_convert(x, ::Type{T}, ::Type{T}) where {T <: AbstractFloat} = x
+@inline _maybe_float_precision_convert(x, ::Type{T}, ::Type{S}) where {T <: AbstractFloat, S <: AbstractFloat} =
+    _float_precision_convert(x, T)
 
 """
     masses(sys)

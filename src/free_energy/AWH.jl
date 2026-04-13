@@ -110,7 +110,8 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     1 <= first_state <= n_λ || throw(ArgumentError("`first_state`=$first_state is out of bounds for $n_λ states."))
     n_bias > 0 || throw(ArgumentError("`n_bias` must be positive, got $n_bias."))
     ref_sys = thermo_states[first_state].system
-    FT = typeof(ustrip(ref_sys.total_mass))
+    FT_base = typeof(ustrip(ref_sys.total_mass))
+    FT = isnothing(ref_sys.nonbonded_energy_type) ? FT_base : ref_sys.nonbonded_energy_type
 
     partition = AlchemicalPartition(thermo_states; 
                                     target_state=target_state, 
@@ -119,7 +120,7 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     # Extract integrators and parameters
     # Keep as Vector{Any} so mixed integrator types can be switched safely.
     λ_integrators = Any[ts.integrator for ts in thermo_states]
-    λ_β = [ts.beta for ts in thermo_states]
+    λ_β = [FT(ts.beta) for ts in thermo_states]
     λ_p = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states]
 
     # Extract Target Thermodynamics for PMF

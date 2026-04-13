@@ -1,5 +1,8 @@
 # KernelAbstractions.jl kernels, CUDA kernels are in an extension
 
+@inline _sum_tuple(x::Tuple{T}) where T = first(x)
+@inline _sum_tuple(x::Tuple) = first(x) + _sum_tuple(Base.tail(x))
+
 @inline function sum_pairwise_forces(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
                                      boundary, vel_i, vel_j, step_n) where F
     dr = vector(coord_i, coord_j, boundary)
@@ -7,29 +10,25 @@
         force_gpu(inters[inter_type_i], dr, atom_i, atom_j, F, special, coord_i, coord_j, boundary,
                   vel_i, vel_j, step_n)
     end
-    f = sum(f_tuple)
-    if unit(f[1]) != F
-        # This triggers an error but it isn't printed
-        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
-        #   for how to throw a more meaningful error
-        error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
-    end
-    return f
+    return _sum_tuple(f_tuple)
 end
 
-@inline function sum_pairwise_potentials(inters, atom_i, atom_j, ::Val{E}, special, coord_i, coord_j,
-                                         boundary, vel_i, vel_j, step_n) where E
-    dr = vector(coord_i, coord_j, boundary)
+@inline function sum_pairwise_potentials(inters, atom_i, atom_j, ::Val{E}, ::Val{PT}, special,
+                                         coord_i, coord_j, boundary, vel_i, vel_j, step_n) where {E, PT}
+    native_T = typeof(ustrip(oneunit(coord_i[1])))
+    atom_i_use = _maybe_float_precision_convert(atom_i, PT, native_T)
+    atom_j_use = _maybe_float_precision_convert(atom_j, PT, native_T)
+    coord_i_use = _maybe_float_precision_convert(coord_i, PT, native_T)
+    coord_j_use = _maybe_float_precision_convert(coord_j, PT, native_T)
+    vel_i_use = _maybe_float_precision_convert(vel_i, PT, native_T)
+    vel_j_use = _maybe_float_precision_convert(vel_j, PT, native_T)
+    dr = vector(coord_i_use, coord_j_use, boundary)
     pe_tuple = ntuple(length(inters)) do inter_type_i
         # SVector was required to avoid a GPU error occurring with scalars
-        SVector(potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special,
-                            coord_i, coord_j, boundary, vel_i, vel_j, step_n))
+        SVector(potential_energy_gpu(inters[inter_type_i], dr, atom_i_use, atom_j_use, E, special,
+                            coord_i_use, coord_j_use, boundary, vel_i_use, vel_j_use, step_n))
     end
-    pe = sum(pe_tuple)
-    if unit(pe[1]) != E
-        error("wrong force unit returned, was expecting $E but got $(unit(pe[1]))")
-    end
-    return pe
+    return _sum_tuple(pe_tuple)
 end
 
 function gpu_threads_pairwise(n_neighbors)
@@ -279,7 +278,15 @@ end
 end
 
 function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:AbstractGPUArray},
-                               pairwise_inters, neighbors, step_n)
+                               pairwise_inters, boundary, neighbors, ::Val{PT}, step_n) where PT
+    return pairwise_pe_loop_gpu!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms,
+                                 buffers, sys, pairwise_inters, boundary, neighbors,
+                                 Val(PT), step_n)
+end
+
+function pairwise_pe_loop_gpu!(pe_vec_nounits, coords, velocities, atoms, buffers,
+                               sys::System{<:Any, <:AbstractGPUArray}, pairwise_inters,
+                               boundary, neighbors, ::Val{PT}, step_n) where PT
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
               "should use DistanceNeighborFinder instead")
@@ -290,27 +297,24 @@ function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:Abs
         nbs = @view neighbors.list[1:neighbors.n]
     end
     if length(neighbors) > 0
-        backend = get_backend(sys.coords)
+        backend = get_backend(coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
-        kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                pairwise_inters, nbs, step_n, Val(sys.energy_units); ndrange=length(nbs))
+        kernel!(pe_vec_nounits, coords, velocities, atoms, boundary,
+                pairwise_inters, nbs, step_n, Val(sys.energy_units), Val(PT); ndrange=length(nbs))
     end
     return pe_vec_nounits
 end
 
 @kernel inbounds=true function pairwise_pe_kernel!(energy, @Const(coords), @Const(velocities),
                                      @Const(atoms), boundary, inters,
-                                     @Const(neighbors), step_n, ::Val{E}) where E
+                                     @Const(neighbors), step_n, ::Val{E}, ::Val{PT}) where {E, PT}
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        pe = sum_pairwise_potentials(inters, atoms[i], atoms[j], Val(E), special, coords[i],
+        pe = sum_pairwise_potentials(inters, atoms[i], atoms[j], Val(E), Val(PT), special, coords[i],
                                      coords[j], boundary, velocities[i], velocities[j], step_n)[1]
-        if unit(pe) != E
-            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
-        end
         Atomix.@atomic energy[1] += ustrip(pe)
     end
 end

@@ -6,6 +6,8 @@ from_device(x::Array) = x
 from_device(x) = Array(x)
 
 to_device(x::Array, ::Type{<:Array}) = x
+to_device(x::Array, ::Type{AT}) where {AT <: AbstractGPUArray} =
+    (isbitstype(eltype(x)) ? AT(x) : x)
 to_device(x, ::Type{AT}) where AT = AT(x)
 
 @inline _transfer_storage(x, ::Type{AT}) where {AT} = to_device(from_device(x), AT)
@@ -243,7 +245,7 @@ function _transfer_obc(inter::ImplicitSolventOBC, ::Type{AT}) where {AT}
     oris = @view offset_radii[is]
     orjs = @view offset_radii[js]
     srjs = @view scaled_offset_radii[js]
-    return typeof(inter)(
+    return ImplicitSolventOBC(
         offset_radii,
         scaled_offset_radii,
         inter.solvent_dielectric,
@@ -283,7 +285,7 @@ function _transfer_gbn2(inter::ImplicitSolventGBN2, ::Type{AT}) where {AT}
     oris = @view offset_radii[is]
     orjs = @view offset_radii[js]
     srjs = @view scaled_offset_radii[js]
-    return typeof(inter)(
+    return ImplicitSolventGBN2(
         offset_radii,
         scaled_offset_radii,
         inter.solvent_dielectric,

@@ -40,6 +40,7 @@ struct LaunchAutotuneKey
     boundary_type::DataType
     force_units_type::DataType
     energy_units_type::DataType
+    nonbonded_energy_type::DataType
     dim::Int
     n_atoms::Int
     n_blocks::Int
@@ -129,6 +130,7 @@ function autotune_key(sys::System{D, <:CuArray}, pairwise_inters, force_maxregs_
     dev = CUDA.device()
     sm_count = CUDA.attribute(dev, CUDA.CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)
     n_atoms = length(sys.coords)
+    pairwise_energy_type = Molly.nonbonded_energy_type(sys)
     return LaunchAutotuneKey(
         CUDA.name(dev),
         string(CUDA.capability(dev)),
@@ -137,6 +139,7 @@ function autotune_key(sys::System{D, <:CuArray}, pairwise_inters, force_maxregs_
         typeof(sys.boundary),
         typeof(sys.force_units),
         typeof(sys.energy_units),
+        pairwise_energy_type,
         D,
         n_atoms,
         cld(n_atoms, Int(WARPSIZE)),
@@ -482,6 +485,9 @@ Returns the `block_y` configuration that achieves the minimum execution time.
 """
 function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                                   N::Int) where {D, T}
+    ET = Molly.nonbonded_energy_type(sys)
+    pairwise_boundary = (ET === T ? sys.boundary : Molly._pairwise_energy_boundary(sys.boundary, Val(ET)))
+    pairwise_inters_energy = (ET === T ? pairwise_inters : Molly._pairwise_energy_inters(pairwise_inters, Val(ET)))
     kernel = @cuda launch=false always_inline=true energy_kernel!(
         buffers.pe_vec_nounits,
         buffers.coords_reordered,
@@ -490,11 +496,12 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
         Val(N),
         Val(sys.neighbor_finder.dist_cutoff_2),
         Val(sys.energy_units),
-        pairwise_inters,
+        pairwise_inters_energy,
+        pairwise_boundary,
         sys.boundary,
         0,
         buffers.compressed_masks,
-        Val(T),
+        Val(ET),
         Val(D),
         buffers.interacting_tiles_i,
         buffers.interacting_tiles_j,
@@ -511,7 +518,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
     for block_y in candidates
         n_blocks_launch = cld(num_pairs, block_y)
         ms = autotune_benchmark_ms!(
-            () -> fill!(buffers.pe_vec_nounits, zero(T)),
+            () -> fill!(buffers.pe_vec_nounits, zero(ET)),
             () -> kernel(
                 buffers.pe_vec_nounits,
                 buffers.coords_reordered,
@@ -520,11 +527,12 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
                 Val(N),
                 Val(sys.neighbor_finder.dist_cutoff_2),
                 Val(sys.energy_units),
-                pairwise_inters,
+                pairwise_inters_energy,
+                pairwise_boundary,
                 sys.boundary,
                 0,
                 buffers.compressed_masks,
-                Val(T),
+                Val(ET),
                 Val(D),
                 buffers.interacting_tiles_i,
                 buffers.interacting_tiles_j,
@@ -916,7 +924,8 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
 end
 
 """
-    pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters, nbs::Nothing, step_n)
+    pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters, boundary,
+                          nbs::Nothing, ::Val{PT}, step_n)
 
 Maintainer entry point for the CUDA tiled pairwise energy path.
 
@@ -927,8 +936,8 @@ preprocessing already performed for the current step so forces and energies can
 share the same cached tile metadata.
 """
 function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T},
-                                      pairwise_inters, nbs::Nothing,
-                                      step_n) where {D, T}
+                                      pairwise_inters, boundary, nbs::Nothing,
+                                      ::Val{PT}, step_n) where {D, T, PT}
     # The ordering is usually recomputed for potential energy, but we can reuse it
     #   if it was already computed for this step
     N = length(sys.coords)
@@ -966,8 +975,8 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     kernel = @cuda launch=false always_inline=true energy_kernel!(
             pe_vec_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
-            sys.boundary, step_n, buffers.compressed_masks,
-            Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+            boundary, sys.boundary, step_n, buffers.compressed_masks,
+            Val(PT), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
     block_y = energy_launch_params(sys, kernel)
     
@@ -978,8 +987,8 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         kernel(
                 pe_vec_nounits, buffers.coords_reordered,
                 buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
-                sys.boundary, step_n, buffers.compressed_masks,
-                Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+                boundary, sys.boundary, step_n, buffers.compressed_masks,
+                Val(PT), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
                 blocks=n_blocks_launch, threads=(32, block_y))
     end
@@ -2037,13 +2046,14 @@ function energy_kernel!(
     ::Val{r_cut2},
     ::Val{energy_units},
     inters_tuple,
-    boundary,
+    boundary_energy,
+    boundary_native,
     step_n,
     compressed_masks,
-    ::Val{T},
+    ::Val{ET},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, D}
+    interacting_tiles_overflow) where {N, r_cut2, A, energy_units, ET, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -2079,8 +2089,8 @@ function energy_kernel!(
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
 
-    E_smem = CuStaticSharedArray(T, (32, MAX_BLOCK_Y))
-    @inbounds E_smem[lane, warpid] = zero(T)
+    E_smem = CuStaticSharedArray(ET, (32, MAX_BLOCK_Y))
+    @inbounds E_smem[lane, warpid] = zero(ET)
 
     r = Int32((N - 1) % 32 + 1)
 
@@ -2108,7 +2118,7 @@ function energy_kernel!(
                 atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
                 atoms_j_shuffle = A(atom_fields...)
 
-                dr = vector(coords_i, coords_j, boundary)
+                dr = vector(coords_i, coords_j, boundary_native)
                 r2 = @fastmath sum(abs2, dr)
                 condition = r2 <= r_cut2
 
@@ -2116,11 +2126,12 @@ function energy_kernel!(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(energy_units),
+                    Val(ET),
                     false,
                     coords_i, coords_j,
-                    boundary,
+                    boundary_energy,
                     vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
+                    step_n) : zero(SVector{1, ET})
 
                 @fastmath E_smem[lane, warpid] += ustrip(pe[1])
             end
@@ -2136,7 +2147,7 @@ function energy_kernel!(
                 atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
                 atoms_j_shuffle = A(atom_fields...)
 
-                dr = vector(coords_i, coords_j, boundary)
+                dr = vector(coords_i, coords_j, boundary_native)
                 r2 = @fastmath sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
@@ -2146,11 +2157,12 @@ function energy_kernel!(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(energy_units),
+                    Val(ET),
                     (spec & 0x1) == true,
                     coords_i, coords_j,
-                    boundary,
+                    boundary_energy,
                     vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
+                    step_n) : zero(SVector{1, ET})
 
                 @fastmath E_smem[lane, warpid] += ustrip(pe[1])
             end
@@ -2167,7 +2179,7 @@ function energy_kernel!(
             @inbounds coords_j = coords[idx_j]
             @inbounds vel_j = velocities[idx_j]
             @inbounds atoms_j = atoms[idx_j]
-            dr = vector(coords_i, coords_j, boundary)
+            dr = vector(coords_i, coords_j, boundary_native)
             r2 = @fastmath sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
@@ -2177,11 +2189,12 @@ function energy_kernel!(
                 inters_tuple,
                 atoms_i, atoms_j,
                 Val(energy_units),
+                Val(ET),
                 (spec & 0x1) == true,
                 coords_i, coords_j,
-                boundary,
+                boundary_energy,
                 vel_i, vel_j,
-                step_n) : zero(SVector{1, T})
+                step_n) : zero(SVector{1, ET})
             @fastmath E_smem[lane, warpid] += ustrip(pe[1])
         end
     elseif i == j && i < n_blocks
@@ -2196,7 +2209,7 @@ function energy_kernel!(
             @inbounds coords_j = coords[idx_j]
             @inbounds vel_j = velocities[idx_j]
             @inbounds atoms_j = atoms[idx_j]
-            dr = vector(coords_i, coords_j, boundary)
+            dr = vector(coords_i, coords_j, boundary_native)
             r2 = @fastmath sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
@@ -2206,11 +2219,12 @@ function energy_kernel!(
                 inters_tuple,
                 atoms_i, atoms_j,
                 Val(energy_units),
+                Val(ET),
                 (spec & 0x1) == true,
                 coords_i, coords_j,
-                boundary,
+                boundary_energy,
                 vel_i, vel_j,
-                step_n) : zero(SVector{1, T})
+                step_n) : zero(SVector{1, ET})
             @fastmath E_smem[lane, warpid] += ustrip(pe[1])
         end
     elseif i == n_blocks && j == n_blocks
@@ -2226,7 +2240,7 @@ function energy_kernel!(
                 @inbounds coords_j = coords[idx_j]
                 @inbounds vel_j = velocities[idx_j]
                 @inbounds atoms_j = atoms[idx_j]
-                dr = vector(coords_i, coords_j, boundary)
+                dr = vector(coords_i, coords_j, boundary_native)
                 r2 = @fastmath sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
@@ -2236,11 +2250,12 @@ function energy_kernel!(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
+                    Val(ET),
                     (spec & 0x1) == true,
                     coords_i, coords_j,
-                    boundary,
+                    boundary_energy,
                     vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
+                    step_n) : zero(SVector{1, ET})
                 @fastmath E_smem[lane, warpid] += ustrip(pe[1])
             end
         end
@@ -2256,7 +2271,7 @@ function energy_kernel!(
         offset ÷= 2
     end
 
-    if lane == a && sum_E != zero(T)
+    if lane == a && sum_E != zero(ET)
         CUDA.atomic_add!(pointer(energy_nounits), sum_E)
     end
 
@@ -2340,4 +2355,6 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
     return nothing
 end
 
+@inline Molly._float_precision_convert(x::CUDA.CuContext, ::Type{T}) where {T <: AbstractFloat} = x
+@inline Molly._float_precision_convert(x::CUDA.CUFFT.CuFFTPlan, ::Type{T}) where {T <: AbstractFloat} = x
 end

@@ -98,3 +98,87 @@
         @test sys_host.loggers.mc isa MonteCarloLogger
     end
 end
+
+function assert_roundtrip_realistic_system(sys; host_energy_atol, device_energy_atol, force_atol=nothing)
+    energy_ref = potential_energy(sys; n_threads=1)
+    forces_ref = isnothing(force_atol) ? nothing : from_device(forces(sys; n_threads=1))
+
+    for AT in array_list
+        sys_dev = Molly.to_device(sys, AT)
+        sys_host = Molly.from_device(sys_dev)
+
+        @test array_type(sys_dev) == AT
+        @test sys_host.coords isa Array
+        @test potential_energy(sys_host; n_threads=1) ≈ energy_ref atol=host_energy_atol
+
+        if !isnothing(forces_ref)
+            forces_host = from_device(forces(sys_host; n_threads=1))
+            @test maximum(norm.(forces_host .- forces_ref)) < force_atol
+        end
+
+        if AT <: GPUArrays.AbstractGPUArray
+            @test potential_energy(sys_dev; n_threads=1) ≈ energy_ref atol=device_energy_atol
+
+            if !isnothing(forces_ref)
+                forces_dev = from_device(forces(sys_dev; n_threads=1))
+                @test maximum(norm.(forces_dev .- forces_ref)) < force_atol
+            end
+        end
+    end
+end
+
+@testset "realistic system device transfer roundtrips" begin
+    @testset "PME water constructor path" begin
+        ff = MolecularForceField(Float32, joinpath(ff_dir, "tip3p_standard.xml"))
+        sys = System(
+            joinpath(data_dir, "water_3mol_cubic.pdb"),
+            ff;
+            array_type=Array,
+            dist_cutoff=0.9f0u"nm",
+            dist_buffer=0.0f0u"nm",
+            nonbonded_method=:pme,
+            dispersion_correction=false,
+            center_coords=false,
+            strictness=:nowarn,
+        )
+        sys = System(sys; loggers=(disp=DisplacementsLogger(10, sys.coords),))
+
+        @test sys.general_inters[1] isa PME
+        @test !isempty(sys.specific_inter_lists)
+        @test sys.loggers.disp isa DisplacementsLogger
+
+        assert_roundtrip_realistic_system(
+            sys;
+            host_energy_atol=1e-6u"kJ/mol",
+            device_energy_atol=3e-4u"kJ/mol",
+            force_atol=5e-4u"kJ * mol^-1 * nm^-1",
+        )
+    end
+
+    @testset "Implicit solvent protein constructor path" begin
+        ff = MolecularForceField(Float32, joinpath(ff_dir, "ff99SBildn.xml"); units=false)
+        sys = System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            ff;
+            units=false,
+            array_type=Array,
+            boundary=CubicBoundary(Float32(100.0)),
+            dist_cutoff=Float32(5.0),
+            nonbonded_method=:cutoff,
+            implicit_solvent=:gbn2,
+            kappa=Float32(0.7),
+            dispersion_correction=false,
+            strictness=:nowarn,
+        )
+
+        @test !isempty(sys.specific_inter_lists)
+        @test sys.general_inters[1] isa ImplicitSolventGBN2
+        @test sys.neighbor_finder isa Union{DistanceNeighborFinder, CellListMapNeighborFinder}
+
+        assert_roundtrip_realistic_system(
+            sys;
+            host_energy_atol=1e-6,
+            device_energy_atol=1e-2,
+        )
+    end
+end

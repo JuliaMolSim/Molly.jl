@@ -58,6 +58,7 @@ force_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn) = force(inter,
 force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn) = force(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn)
 
 @inline zero_pairwise_force(dr, force_units) = ustrip.(zero(dr)) * force_units
+@inline zero_pairwise_energy(dr, energy_units) = ustrip(zero(dr[1])) * energy_units
 
 @inline function radial_force_vector(f, r, dr, force_units)
     return iszero_value(r) ? zero_pairwise_force(dr, force_units) : (f / r) * dr
@@ -248,13 +249,14 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     N = length(sys)
     C = eltype(eltype(sys.coords))
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
+    ET = nonbonded_energy_type(sys)
     n_blocks = cld(N, 32)
     n_upper_tiles = upper_tile_count(n_blocks)
     backend = get_backend(sys.coords)
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
     fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N)
-    pe_vec_noun  = KernelAbstractions.zeros(backend, T, 1)
+    pe_vec_noun  = KernelAbstractions.zeros(backend, ET, 1)
     virial       = zeros(CT, D, D) .* sys.energy_units
     virial_nu    = KernelAbstractions.zeros(backend, T, D, D)
     kin          = zero(virial)

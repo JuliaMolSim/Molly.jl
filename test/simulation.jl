@@ -2118,4 +2118,28 @@ end
     )
     simulate!(logger_awh_sim, 1)
     @test logger_awh_sim.state.active_sys.loggers.awh_logger.active_idx == logger_awh_sim.state.active_idx
+
+    # 27. AWHEnsembleLogger should use current_potential_energy when provided.
+    logger_neighbors = find_neighbors(rem_sys, rem_sys.neighbor_finder; n_threads=1)
+    logger_buffers = init_buffers!(rem_sys, 1)
+    fallback_energy = potential_energy(rem_sys, logger_neighbors)
+    coord_type = typeof(rem_sys.coords[1][1])
+    volume_type = typeof(volume(rem_sys.boundary))
+    energy_type = typeof(fallback_energy)
+    provided_energy = fallback_energy + 2 * oneunit(fallback_energy)
+    @test provided_energy != fallback_energy
+
+    kw_logger = Molly.AWHEnsembleLogger(coord_type, volume_type, energy_type, 1)
+    kw_logger.should_log = true
+    kw_logger.active_idx = 3
+    Molly.log_property!(kw_logger, rem_sys, logger_buffers, logger_neighbors, 1;
+                        current_potential_energy=provided_energy)
+    @test kw_logger.potential_energy_history == [provided_energy]
+    @test kw_logger.active_idx_history == [3]
+    @test kw_logger.volume_history == [volume(rem_sys.boundary)]
+
+    fallback_logger = Molly.AWHEnsembleLogger(coord_type, volume_type, energy_type, 1)
+    fallback_logger.should_log = true
+    Molly.log_property!(fallback_logger, rem_sys, logger_buffers, logger_neighbors, 1)
+    @test fallback_logger.potential_energy_history == [fallback_energy]
 end

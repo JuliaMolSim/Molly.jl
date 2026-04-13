@@ -1106,7 +1106,8 @@ function AWHEnsembleLogger(T_coord::DataType, T_vol::DataType, T_en::DataType, n
     )
 end
 
-function Molly.log_property!(logger::AWHEnsembleLogger, sys, buffers, neighbors, step_n::Integer=0; kwargs...)
+function Molly.log_property!(logger::AWHEnsembleLogger, sys, buffers, neighbors, step_n::Integer=0;
+                             current_potential_energy=nothing, kwargs...)
     if logger.should_log
         logger.global_step += 1
         if logger.global_step % logger.n_steps == 0
@@ -1117,7 +1118,11 @@ function Molly.log_property!(logger::AWHEnsembleLogger, sys, buffers, neighbors,
             
             # Record directly with units
             push!(logger.volume_history, volume(sys.boundary))
-            push!(logger.potential_energy_history, potential_energy(sys, neighbors))
+            if isnothing(current_potential_energy)
+                push!(logger.potential_energy_history, potential_energy(sys, neighbors))
+            else
+                push!(logger.potential_energy_history, current_potential_energy)
+            end
         end
     end
 end

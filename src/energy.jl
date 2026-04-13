@@ -178,6 +178,36 @@ end
 @inline has_nl_inters(inters::Tuple{}) = false
 @inline has_nl_inters(inters::Tuple) = use_neighbors(first(inters)) || has_nl_inters(Base.tail(inters))
 
+@inline function _cpu_pairwise_energy_inputs(sys::System, ::Val{T}) where T
+    if T === float_type(sys)
+        return sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.pairwise_inters
+    end
+
+    return (
+        map(atom -> _float_precision_convert(atom, T), sys.atoms),
+        map(coord -> _float_precision_convert(coord, T), sys.coords),
+        map(velocity -> _float_precision_convert(velocity, T), sys.velocities),
+        _float_precision_convert(sys.boundary, T),
+        _float_precision_convert(sys.pairwise_inters, T),
+    )
+end
+
+@inline function _gpu_pairwise_energy_inputs(sys::System{<:Any, <:AbstractGPUArray, T}, ::Val{PT}) where {T, PT}
+    if PT === T
+        return sys.atoms, sys.coords, sys.velocities
+    end
+
+    AT = array_type(sys)
+    return (
+        to_device(_float_precision_convert(from_device(sys.atoms), PT), AT),
+        to_device(_float_precision_convert(from_device(sys.coords), PT), AT),
+        to_device(_float_precision_convert(from_device(sys.velocities), PT), AT),
+    )
+end
+
+@inline _pairwise_energy_boundary(boundary, ::Val{T}) where T = _float_precision_convert(boundary, T)
+@inline _pairwise_energy_inters(inters, ::Val{T}) where T = _float_precision_convert(inters, T)
+
 @inline eval_pe_nonl(inters::Tuple{}, dr, atom_i, atom_j, eu, ci, cj, bnd, vi, vj, step_n, ::Val{T}) where T = zero(T) * eu
 @inline function eval_pe_nonl(inters::Tuple, dr, atom_i, atom_j, eu, ci, cj, bnd, vi, vj, step_n, ::Val{T}) where T
     pe_current = if !use_neighbors(first(inters))
@@ -211,15 +241,49 @@ end
 
 function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads())
-    T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
+    system_T = float_type(sys)
+    pairwise_T = nonbonded_energy_type(sys)
+    pairwise_atoms, pairwise_coords, pairwise_velocities, pairwise_boundary, pairwise_inters =
+        _cpu_pairwise_energy_inputs(sys, Val(pairwise_T))
+    pairwise_inters = values(pairwise_inters)
+    pairwise_specific_inters = (pairwise_T === system_T ? sys.specific_inter_lists : _float_precision_convert(sys.specific_inter_lists, pairwise_T))
+    pairwise_general_inters = (pairwise_T === system_T ? sys.general_inters : _float_precision_convert(sys.general_inters, pairwise_T))
 
-    pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                          neighbors, sys.energy_units, length(sys.coords), sys.pairwise_inters,
-                          Val(T), Int(n_threads), step_n)
+    pe = pairwise_pe_loop(
+        pairwise_atoms,
+        pairwise_coords,
+        pairwise_velocities,
+        pairwise_boundary,
+        neighbors,
+        sys.energy_units,
+        length(pairwise_coords),
+        pairwise_inters,
+        Val(pairwise_T),
+        Int(n_threads),
+        step_n,
+    )
 
-    pe += eval_specific(sys.specific_inter_lists, sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units, step_n, Val(T))
+    pe += eval_specific(
+        pairwise_specific_inters,
+        pairwise_atoms,
+        pairwise_coords,
+        pairwise_velocities,
+        pairwise_boundary,
+        sys.energy_units,
+        step_n,
+        Val(pairwise_T),
+    )
 
-    pe += eval_general(sys.general_inters, sys, neighbors, step_n, Int(n_threads), Val(T))
+    sys_use = (pairwise_T === system_T ? sys : System(sys;
+        atoms=pairwise_atoms,
+        coords=pairwise_coords,
+        velocities=pairwise_velocities,
+        boundary=pairwise_boundary,
+        pairwise_inters=pairwise_inters,
+        specific_inter_lists=pairwise_specific_inters,
+        general_inters=pairwise_general_inters,
+    ))
+    pe += eval_general(pairwise_general_inters, sys_use, neighbors, step_n, Int(n_threads), Val(pairwise_T))
 
     return pe
 end
@@ -354,30 +418,56 @@ end
 function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T}, neighbors,
                           buffers::BuffersGPU, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where T
-    fill!(buffers.pe_vec_nounits, zero(T))
+    pairwise_T = nonbonded_energy_type(sys)
+    pairwise_atoms, pairwise_coords, pairwise_velocities =
+        _gpu_pairwise_energy_inputs(sys, Val(pairwise_T))
+    pairwise_boundary = (pairwise_T === T ? sys.boundary : _pairwise_energy_boundary(sys.boundary, Val(pairwise_T)))
+    pairwise_inters = (pairwise_T === T ? values(sys.pairwise_inters) : values(_pairwise_energy_inters(sys.pairwise_inters, Val(pairwise_T))))
+    pairwise_specific_inters = (pairwise_T === T ? sys.specific_inter_lists : _float_precision_convert(sys.specific_inter_lists, pairwise_T))
+    pairwise_general_inters = (pairwise_T === T ? sys.general_inters : _float_precision_convert(sys.general_inters, pairwise_T))
 
-    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+    fill!(buffers.pe_vec_nounits, zero(pairwise_T))
+
+    pairwise_inters_nonl = filter(!use_neighbors, pairwise_inters)
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(length(sys))
-        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
+        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, pairwise_coords, pairwise_velocities,
+                              pairwise_atoms, buffers, sys, pairwise_inters_nonl,
+                              pairwise_boundary, nbs, Val(pairwise_T), step_n)
     end
 
-    pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nl = filter(use_neighbors, pairwise_inters)
     if length(pairwise_inters_nl) > 0
-        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)
+        if isnothing(neighbors)
+            pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nl,
+                                  pairwise_boundary, neighbors, Val(pairwise_T), step_n)
+        else
+            pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, pairwise_coords, pairwise_velocities,
+                                  pairwise_atoms, buffers, sys, pairwise_inters_nl,
+                                  pairwise_boundary, neighbors, Val(pairwise_T), step_n)
+        end
     end
 
-    for inter_list in values(sys.specific_inter_lists)
-        specific_pe_gpu!(buffers.pe_vec_nounits, inter_list, sys.coords, sys.velocities, sys.atoms,
-                         sys.boundary, step_n, sys.energy_units, Val(T))
+    for inter_list in values(pairwise_specific_inters)
+        specific_pe_gpu!(buffers.pe_vec_nounits, inter_list, pairwise_coords, pairwise_velocities, pairwise_atoms,
+                         pairwise_boundary, step_n, sys.energy_units, Val(pairwise_T))
     end
 
     pe = only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
 
-    for inter in values(sys.general_inters)
+    sys_use = (pairwise_T === T ? sys : System(sys;
+        atoms=pairwise_atoms,
+        coords=pairwise_coords,
+        velocities=pairwise_velocities,
+        boundary=pairwise_boundary,
+        pairwise_inters=pairwise_inters,
+        specific_inter_lists=pairwise_specific_inters,
+        general_inters=pairwise_general_inters,
+    ))
+    for inter in values(pairwise_general_inters)
         pe += uconvert(
             sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
+            AtomsCalculators.potential_energy(sys_use, inter; neighbors=neighbors,
                                               step_n=step_n, n_threads=n_threads),
         )
     end

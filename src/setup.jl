@@ -422,6 +422,9 @@ Gromacs file reading should be considered experimental.
     system. Ignored on CPU and non-CUDA GPU backends.
 - `autotune_launch=true`: whether to autotune CUDA launch parameters at the end
     of setup. This is a no-op on CPU and non-CUDA GPU backends.
+- `nonbonded_energy_type=nothing`: optional float type used for pairwise
+    nonbonded energy evaluation. When `nothing`, Molly uses the system float
+    type. This affects energy evaluation only, not forces.
 - `data=nothing`: arbitrary data associated with the system.
 - `implicit_solvent=:none`: the implicit solvent model to use, options are
     `:none`, `:obc1`, `:obc2` and `:gbn2`.
@@ -456,6 +459,7 @@ function System(coord_file::AbstractString,
                 neighbor_finder_type=nothing,
                 launch_config=CUDALaunchConfig(),
                 autotune_launch::Bool=true,
+                nonbonded_energy_type=nothing,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
@@ -940,7 +944,7 @@ function System(coord_file::AbstractString,
                   separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, disp_corr, hydrogen_mass, strictness,
+                  weight_14_coulomb, disp_corr, hydrogen_mass, strictness, nonbonded_energy_type,
                   launch_config, autotune_launch)
 end
 
@@ -975,6 +979,7 @@ function System(T::Type,
                 neighbor_finder_type=nothing,
                 launch_config=CUDALaunchConfig(),
                 autotune_launch::Bool=true,
+                nonbonded_energy_type=nothing,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
@@ -1273,7 +1278,7 @@ function System(T::Type,
                   separate_lj14, eligible, special, units, dist_cutoff, constraints, rigid_water,
                   nonbonded_method, ewald_error_tol, approximate_pme, neighbor_finder_type,
                   implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
-                  weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
+                  weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness, nonbonded_energy_type,
                   launch_config, autotune_launch)
 end
 
@@ -1417,6 +1422,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
                 neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
                 weight_14_lj, weight_14_coulomb, dispersion_correction, hydrogen_mass, strictness,
+                nonbonded_energy_type,
                 launch_config, autotune_launch)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
@@ -1698,6 +1704,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         loggers=loggers,
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
         energy_units=(units ? u"kJ * mol^-1" : NoUnits),
+        nonbonded_energy_type=nonbonded_energy_type,
         k=k,
         data=data,
         launch_config=launch_config,

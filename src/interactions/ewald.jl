@@ -451,24 +451,7 @@ struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B, SCH} <: Abstrac
     grad_safe::Bool
 end
 
-function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
-             scheduler=DefaultLambdaScheduler(), grad_safe=false,
-             n_threads::Integer=Threads.nthreads())
-    T = typeof(ustrip(dist_cutoff))
-    AT = array_type(atoms)
-    n_atoms = length(atoms)
-    error_tol_T = T(error_tol)
-    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
-    mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
-    grid_indices = to_device(zeros(Int, 3, n_atoms), AT)
-    grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
-    bsplines_θ = to_device(zeros(T, order * n_atoms, 3), AT)
-    bsplines_dθ = zero(bsplines_θ)
-    # Ordered z/y/x for better memory access
-    charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
-    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
-
+function _pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
     bsplines_moduli = (zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3]))
     nmax = maximum(mesh_dims)
     data, ddata = zeros(T, order), zeros(T, order)
@@ -517,6 +500,29 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         end
     end
 
+    return bsplines_moduli
+end
+
+function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
+             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
+             scheduler=DefaultLambdaScheduler(), grad_safe=false,
+             n_threads::Integer=Threads.nthreads())
+    T = typeof(ustrip(dist_cutoff))
+    AT = array_type(atoms)
+    n_atoms = length(atoms)
+    error_tol_T = T(error_tol)
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
+    mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
+    grid_indices = to_device(zeros(Int, 3, n_atoms), AT)
+    grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
+    bsplines_θ = to_device(zeros(T, order * n_atoms, 3), AT)
+    bsplines_dθ = zero(bsplines_θ)
+    # Ordered z/y/x for better memory access
+    charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
+    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
+
+    bsplines_moduli = _pme_bspline_moduli(T, order, mesh_dims)
+
     if AT <: AbstractGPUArray
         charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)
         recip_conv_buffer  = to_device(zeros(T, mesh_dims...), AT)
@@ -555,6 +561,35 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
                recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, fft_plan,
                bfft_plan, scheduler, grad_safe)
 end
+
+Unitful.ustrip(inter::PME) = PME(
+    ustrip(inter.dist_cutoff),
+    inter.error_tol,
+    inter.order,
+    inter.ϵr,
+    inter.excluded_pairs,
+    ustrip(inter.α),
+    inter.mesh_dims,
+    inter.grid_indices,
+    inter.grid_fractions,
+    inter.bsplines_θ,
+    inter.bsplines_dθ,
+    inter.bsplines_moduli_x,
+    inter.bsplines_moduli_y,
+    inter.bsplines_moduli_z,
+    inter.charge_grid,
+    inter.charge_grid_buffer,
+    inter.excluded_buffer_Fs,
+    inter.excluded_buffer_Es,
+    inter.recip_conv_buffer,
+    inter.virial_buffer,
+    inter.pc_sum,
+    inter.pc_abs2_sum,
+    inter.fft_plan,
+    inter.bfft_plan,
+    inter.scheduler,
+    inter.grad_safe,
+)
 
 zero_or_nothing(x) = zero(x)
 zero_or_nothing(x::Nothing) = nothing

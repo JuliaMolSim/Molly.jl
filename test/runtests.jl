@@ -122,6 +122,8 @@ if GROUP in ("All", "NotGradients")
 
     include("basic.jl")
     include("from_device_system.jl")
+    include("mixed_precision.jl")
+    include("test_awh_ess.jl")
     include("ustrip.jl")
     include("interactions.jl")
     include("minimization.jl")
