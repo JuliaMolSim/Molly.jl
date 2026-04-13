@@ -262,7 +262,7 @@ end
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
-        @test_throws ArgumentError System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
+        @test_throws ErrorException System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
     end
 
     water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff)
@@ -313,7 +313,7 @@ end
 
         if struc_name == "sgpb_omtky3"
             # Catch if disulfide bonds are not added properly
-            @test_throws ArgumentError System(
+            @test_throws ErrorException System(
                 pdb_file,
                 ff;
                 array_type = AT,
@@ -435,6 +435,7 @@ end
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
+
     function dense_masks(nf::GPUNeighborFinder)
         eligible = trues(nf.n_atoms, nf.n_atoms)
         special = falses(nf.n_atoms, nf.n_atoms)
@@ -451,9 +452,11 @@ end
         end
         return eligible, special
     end
+
     function dense_masks(nf::Union{DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder})
         return BitMatrix(Array(nf.eligible)), BitMatrix(Array(nf.special))
     end
+
     eligible_cpu, special_cpu = dense_masks(sys.neighbor_finder)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
@@ -470,14 +473,25 @@ end
         end
     end
 
-    gpu_ref_sys = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff;
-                         dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm",
-                         neighbor_finder_type=DistanceNeighborFinder)
+    gpu_ref_sys = System(
+        joinpath(data_dir, "water_3mol_cubic.pdb"),
+        ff;
+        dist_cutoff=dist_cutoff,
+        dist_buffer=0.0u"nm",
+        neighbor_finder_type=DistanceNeighborFinder,
+        strictness=:nowarn,
+    )
     gpu_neighbors_ref = find_neighbors(gpu_ref_sys)
 
     for AT in array_list[2:end]
-        sys_gpu = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff;
-                         array_type=AT, dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm")
+        sys_gpu = System(
+            joinpath(data_dir, "water_3mol_cubic.pdb"),
+            ff;
+            array_type=AT,
+            dist_cutoff=dist_cutoff,
+            dist_buffer=0.0u"nm",
+            strictness=:nowarn,
+        )
         eligible_gpu, special_gpu = dense_masks(sys_gpu.neighbor_finder)
         for neighbor_finder in (DistanceNeighborFinder,)
             nf_gpu = neighbor_finder(

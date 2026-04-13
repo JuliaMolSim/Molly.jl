@@ -99,7 +99,7 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList1Atoms,
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_1_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.inters, Val(needs_vir), Val(D), Val(force_units);
+            inter_list.inters, inter_list.data, Val(needs_vir), Val(D), Val(force_units);
             ndrange=length(inter_list))
     return fs_mat
 end
@@ -112,8 +112,8 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList2Atoms,
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.inters, Val(needs_vir), Val(D), Val(force_units);
-            ndrange=length(inter_list))
+            inter_list.js, inter_list.inters, inter_list.data, Val(needs_vir), Val(D),
+            Val(force_units); ndrange=length(inter_list))
     return fs_mat
 end
 
@@ -125,7 +125,7 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList3Atoms,
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.ks, inter_list.inters, Val(needs_vir),
+            inter_list.js, inter_list.ks, inter_list.inters, inter_list.data, Val(needs_vir),
             Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
 end
@@ -138,22 +138,34 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList4Atoms,
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_4_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters,
+            inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters, inter_list.data,
             Val(needs_vir), Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
 end
 
+function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList5Atoms,
+                              coords::AbstractArray{SVector{D, C}}, velocities, atoms, boundary,
+                              ::Val{needs_vir}, step_n, force_units,
+                              ::Val{T}) where {D, C, needs_vir, T}
+    backend = get_backend(coords)
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
+    kernel! = specific_force_5_atoms_kernel!(backend, n_threads_gpu)
+    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.js, inter_list.ks, inter_list.ls, inter_list.ms, inter_list.inters,
+            inter_list.data, Val(needs_vir), Val(D), Val(force_units); ndrange=length(inter_list))
+    return fs_mat
+end
+
 @kernel inbounds=true function specific_force_1_atoms_kernel!(fs_mat, vir, @Const(coords),
-                                                @Const(velocities),
-                                                @Const(atoms), boundary,
-                                                step_n, @Const(is),
-                                                @Const(inters), ::Val{needs_vir}, ::Val{D},
-                                                ::Val{F}) where {needs_vir, D, F}
+                                        @Const(velocities), @Const(atoms), boundary, step_n,
+                                        @Const(is), @Const(inters), @Const(data), ::Val{needs_vir},
+                                        ::Val{D}, ::Val{F}) where {needs_vir, D, F}
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
         i = is[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], boundary, atoms[i], F, velocities[i], step_n)
+        fs = force_gpu(inters[inter_i], coords[i], boundary, atoms[i], F, velocities[i],
+                       step_n, data)
         if unit(fs.f1[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
@@ -171,16 +183,15 @@ end
 end
 
 @kernel inbounds=true function specific_force_2_atoms_kernel!(fs_mat, vir, @Const(coords),
-                                                @Const(velocities),
-                                                @Const(atoms), boundary,
-                                                step_n, @Const(is), @Const(js),
-                                                @Const(inters), ::Val{needs_vir}, ::Val{D},
-                                                ::Val{F}) where {needs_vir, D, F}
+                                        @Const(velocities), @Const(atoms), boundary, step_n,
+                                        @Const(is), @Const(js), @Const(inters), @Const(data),
+                                        ::Val{needs_vir}, ::Val{D},
+                                        ::Val{F}) where {needs_vir, D, F}
     inter_i = @index(Global, Linear)
     if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i], atoms[j], F,
-                       velocities[i], velocities[j], step_n)
+                       velocities[i], velocities[j], step_n, data)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
@@ -200,19 +211,18 @@ end
 end
 
 @kernel inbounds=true function specific_force_3_atoms_kernel!(fs_mat, vir, @Const(coords),
-                                                @Const(velocities),
-                                                @Const(atoms), boundary,
-                                                step_n, @Const(is),
-                                                @Const(js), @Const(ks),
-                                                @Const(inters), ::Val{needs_vir}, ::Val{D},
-                                                ::Val{F}) where {needs_vir, D, F}
+                                        @Const(velocities), @Const(atoms), boundary, step_n,
+                                        @Const(is), @Const(js), @Const(ks), @Const(inters),
+                                        @Const(data), ::Val{needs_vir}, ::Val{D},
+                                        ::Val{F}) where {needs_vir, D, F}
     inter_i = @index(Global, Linear)
     FT = eltype(fs_mat)
 
     if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary, atoms[i],
-                       atoms[j], atoms[k], F, velocities[i], velocities[j], velocities[k], step_n)
+                       atoms[j], atoms[k], F, velocities[i], velocities[j], velocities[k],
+                       step_n, data)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
@@ -236,13 +246,10 @@ end
 end
 
 @kernel inbounds=true function specific_force_4_atoms_kernel!(fs_mat, vir, @Const(coords),
-                                                @Const(velocities),
-                                                @Const(atoms), boundary,
-                                                step_n, @Const(is),
-                                                @Const(js), @Const(ks),
-                                                @Const(ls),
-                                                @Const(inters), ::Val{needs_vir}, ::Val{D},
-                                                ::Val{F}) where {needs_vir, D, F}
+                                        @Const(velocities), @Const(atoms), boundary, step_n,
+                                        @Const(is), @Const(js), @Const(ks), @Const(ls),
+                                        @Const(inters), @Const(data), ::Val{needs_vir}, ::Val{D},
+                                        ::Val{F}) where {needs_vir, D, F}
     inter_i = @index(Global, Linear)
     FT = eltype(fs_mat)
 
@@ -251,7 +258,7 @@ end
 
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary,
                        atoms[i], atoms[j], atoms[k], atoms[l], F, velocities[i], velocities[j],
-                       velocities[k], velocities[l], step_n)
+                       velocities[k], velocities[l], step_n, data)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
@@ -272,6 +279,51 @@ end
                     Atomix.@atomic vir[alpha, dim] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
                                                        ustrip(r_jk[alpha]) * ustrip(fs.f3[dim]) +
                                                        ustrip(r_jl[alpha]) * ustrip(fs.f4[dim]))
+                end
+            end
+        end
+    end
+end
+
+@kernel inbounds=true function specific_force_5_atoms_kernel!(fs_mat, vir, @Const(coords),
+                                        @Const(velocities), @Const(atoms), boundary, step_n,
+                                        @Const(is), @Const(js), @Const(ks), @Const(ls), @Const(ms),
+                                        @Const(inters), @Const(data), ::Val{needs_vir}, ::Val{D},
+                                        ::Val{F}) where {needs_vir, D, F}
+    inter_i = @index(Global, Linear)
+    FT = eltype(fs_mat)
+
+    if inter_i <= length(is)
+        i, j, k, l, m = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i], ms[inter_i]
+
+        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], coords[m],
+                       boundary, atoms[i], atoms[j], atoms[k], atoms[l], atoms[m], F, velocities[i],
+                       velocities[j], velocities[k], velocities[l], velocities[m], step_n, data)
+        if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F ||
+                        unit(fs.f4[1]) != F || unit(fs.f5[1]) != F
+            error("wrong force unit returned, was expecting $F")
+        end
+        for dim in 1:D
+            f1val = ustrip(fs.f1[dim])
+            f2val = ustrip(fs.f2[dim])
+            f3val = ustrip(fs.f3[dim])
+            f4val = ustrip(fs.f4[dim])
+            f5val = ustrip(fs.f5[dim])
+            Atomix.@atomic fs_mat[dim, i] += f1val
+            Atomix.@atomic fs_mat[dim, j] += f2val
+            Atomix.@atomic fs_mat[dim, k] += f3val
+            Atomix.@atomic fs_mat[dim, l] += f4val
+            Atomix.@atomic fs_mat[dim, m] += f5val
+            if needs_vir
+                r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
+                r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
+                r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j
+                r_jm = vector(coords[j], coords[m], boundary) # r_m - r_j
+                @inbounds for alpha in 1:D
+                    Atomix.@atomic vir[alpha, dim] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
+                                                       ustrip(r_jk[alpha]) * ustrip(fs.f3[dim]) +
+                                                       ustrip(r_jl[alpha]) * ustrip(fs.f4[dim]) +
+                                                       ustrip(r_jm[alpha]) * ustrip(fs.f5[dim]))
                 end
             end
         end
@@ -321,7 +373,7 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList1Atoms, coo
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_1_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.inters, Val(energy_units); ndrange=length(inter_list))
+            inter_list.inters, inter_list.data, Val(energy_units); ndrange=length(inter_list))
     return pe_vec_nounits
 end
 
@@ -331,7 +383,8 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList2Atoms, coo
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_2_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.inters, Val(energy_units); ndrange=length(inter_list))
+            inter_list.js, inter_list.inters, inter_list.data, Val(energy_units);
+            ndrange=length(inter_list))
     return pe_vec_nounits
 end
 
@@ -341,7 +394,7 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList3Atoms, coo
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_3_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.ks, inter_list.inters, Val(energy_units);
+            inter_list.js, inter_list.ks, inter_list.inters, inter_list.data, Val(energy_units);
             ndrange=length(inter_list))
     return pe_vec_nounits
 end
@@ -352,19 +405,31 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList4Atoms, coo
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_4_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters, Val(energy_units);
-            ndrange=length(inter_list))
+            inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters, inter_list.data,
+            Val(energy_units); ndrange=length(inter_list))
+    return pe_vec_nounits
+end
+
+function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList5Atoms, coords::AbstractArray{SVector{D, C}},
+                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
+    backend = get_backend(coords)
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
+    kernel! = specific_pe_5_atoms_kernel!(backend, n_threads_gpu)
+    kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.js, inter_list.ks, inter_list.ls, inter_list.ms, inter_list.inters,
+            inter_list.data, Val(energy_units); ndrange=length(inter_list))
     return pe_vec_nounits
 end
 
 @kernel inbounds=true function specific_pe_1_atoms_kernel!(energy, @Const(coords), @Const(velocities),
-                    @Const(atoms), boundary, step_n, @Const(is), @Const(inters), ::Val{E}) where E
+                    @Const(atoms), boundary, step_n, @Const(is), @Const(inters), @Const(data),
+                    ::Val{E}) where E
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
         i = is[inter_i]
         pe = potential_energy_gpu(inters[inter_i], coords[i], boundary, atoms[i], E,
-                                  velocities[i], step_n)
+                                  velocities[i], step_n, data)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
@@ -374,13 +439,13 @@ end
 
 @kernel inbounds=true function specific_pe_2_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(inters),
-                    ::Val{E}) where E
+                    @Const(data), ::Val{E}) where E
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
         pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i],
-                                  atoms[j], E, velocities[i], velocities[j], step_n)
+                                  atoms[j], E, velocities[i], velocities[j], step_n, data)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
@@ -390,14 +455,14 @@ end
 
 @kernel inbounds=true function specific_pe_3_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
-                    @Const(inters), ::Val{E}) where E
+                    @Const(inters), @Const(data), ::Val{E}) where E
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary,
                                   atoms[i], atoms[j], atoms[k], E, velocities[i], velocities[j],
-                                  velocities[k], step_n)
+                                  velocities[k], step_n, data)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
@@ -407,7 +472,7 @@ end
 
 @kernel inbounds=true function specific_pe_4_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
-                    @Const(ls), @Const(inters), ::Val{E}) where E
+                    @Const(ls), @Const(inters), @Const(data), ::Val{E}) where E
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -415,7 +480,25 @@ end
         pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l],
                                   boundary, atoms[i], atoms[j], atoms[k], atoms[l], E,
                                   velocities[i], velocities[j], velocities[k], velocities[l],
-                                  step_n)
+                                  step_n, data)
+        if unit(pe) != E
+            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
+        end
+        Atomix.@atomic energy[1] += ustrip(pe)
+    end
+end
+
+@kernel inbounds=true function specific_pe_5_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+                    @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
+                    @Const(ls), @Const(ms), @Const(inters), @Const(data), ::Val{E}) where E
+    inter_i = @index(Global, Linear)
+
+    if inter_i <= length(is)
+        i, j, k, l, m = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i], ms[inter_i]
+        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l],
+                                  coords[m], boundary, atoms[i], atoms[j], atoms[k], atoms[l],
+                                  atoms[m], E, velocities[i], velocities[j], velocities[k],
+                                  velocities[l], velocities[m], step_n, data)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
