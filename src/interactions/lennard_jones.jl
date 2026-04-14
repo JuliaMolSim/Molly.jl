@@ -5,7 +5,9 @@ export
     LennardJonesSoftCoreGapsys,
     AshbaughHatch,
     SIMDLennardJones,
-    SIMDNeighborFinder
+    SIMDNeighborFinder,
+    SIMDCoulomb,
+    PackedFlatSoA
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
@@ -909,6 +911,19 @@ end
     weight_special::W = 1
 end
 
+use_neighbors(::SIMDLennardJones) = true  
+
+
+@kwdef struct SIMDCoulomb{C, W, T} <: PairwiseInteraction
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    weight_special::W = 1 
+    coulomb_const:: T = 138.93545764
+end
+
+use_neighbors(::SIMDCoulomb) = true
+
+
 # --- DUCK TYPING MAGIC ---
 # If Molly's loggers ask for `.n` or `.list`, secretly route it to the standard_list
 function Base.getproperty(nl::PackedNeighborList, sym::Symbol)
@@ -931,10 +946,25 @@ Base.length(nl::PackedNeighborList) = length(nl.standard_list)
 @inline Base.:*(c::SIMD.Vec, v::SVector{3}) = SVector(c * v[1], c * v[2], c * v[3])
 @inline Base.:*(v::SVector{3}, c::SIMD.Vec) = SVector(c * v[1], c * v[2], c * v[3])
 
-use_neighbors(::SIMDLennardJones) = true  
 
+@inline function custom_force(inter, dr, safe_dist2, atom_i, atom_j, neigh_weights, cutoff_2)
+    f_div_r = force_apply_cutoff(inter.cutoff, inter, safe_dist2, atom_i, atom_j, cutoff_2)
+    f_div_r_weighted = f_div_r * neigh_weights
+    return f_div_r_weighted * dr
+end
 
-@inline function pairwise_force_div_r(inter::SIMDLennardJones, dist_2, sigma_ij, eps_ij)
+@inline function force_apply_cutoff(cutoff::DistanceCutoff, inter, dist_2, atom_i, atom_j, cutoff_2)
+    return core_force_div_r(inter, dist_2, atom_i, atom_j)
+end
+
+@inline function force_apply_cutoff(cutoff::NoCutoff, inter, dist_2, atom_i, atom_j, cutoff_2)
+    return core_force_div_r(inter, dist_2, atom_i, atom_j)
+end
+
+@inline function core_force_div_r(inter::SIMDLennardJones, dist_2, atom_i, atom_j)
+    # LJ specific mixing
+    sigma_ij = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    eps_ij = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     inv_dist_2 = 1.0 / dist_2
     base_ratio_2 = (sigma_ij * sigma_ij) * inv_dist_2
@@ -942,38 +972,25 @@ use_neighbors(::SIMDLennardJones) = true
     base_ratio_6 = br2_sq * base_ratio_2
 
     term = base_ratio_6 * muladd(48.0, base_ratio_6, -24.0)
-    #term = base_ratio_6 * (48.0 * base_ratio_6 - 24.0)
-    
     return eps_ij * inv_dist_2 * term
 end
 
-@inline function force_apply_cutoff(cutoff::DistanceCutoff, inter, dist_2, sigma_ij, eps_ij, cutoff_2)
-    return pairwise_force_div_r(inter, dist_2, sigma_ij, eps_ij)
-end
-
-@inline function force_apply_cutoff(cutoff::ShiftedForceCutoff, inter, dist_2, sigma_ij, eps_ij, cutoff_2)
-    fdr_real = pairwise_force_div_r(inter, dist_2, sigma_ij, eps_ij)
-    fdr_cut = pairwise_force_div_r(inter, cutoff_2, sigma_ij, eps_ij)
-    return fdr_real - fdr_cut
-end
-
-@inline function custom_force(inter, dr, safe_dist_2, atom_i, atom_j, neigh_weights, cutoff_2)
+@inline function core_force_div_r(inter::SIMDCoulomb, dist_2, atom_i, atom_j)
+    inv_dist_2 = 1.0 / dist_2
+    inv_dist = SIMD.sqrt(inv_dist_2)
+    inv_dist_3 = inv_dist_2 * inv_dist # 1.0 / r^3
     
-    # Mixing rules
-    sigma_ij = σ_mixing(inter.σ_mixing, atom_i, atom_j)
-    eps_ij = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+    return inter.coulomb_const * atom_i.q * atom_j.q * inv_dist_3
+    #return inter.coulomb_const * atom_i.q * atom_j.q * inv_dist_2
 
-    # Cutoff
-    f_div_r = force_apply_cutoff(inter.cutoff, inter, safe_dist_2, sigma_ij, eps_ij, cutoff_2)
-
-    # Shortcut AND Special all in one
-    f_div_r_weighted = f_div_r * neigh_weights
-
-    return f_div_r_weighted * dr
 end
 
+# SIMD is agnostic to the specific interaction because interaction gets passed down 
 @inline function simd_force(x_i, y_i, z_i, neigh_x::V, neigh_y::V, neigh_z::V, 
-    sim_params, atom_i, atom_j, inter, neigh_weights) where {V <: Vec}
+    sim_params, atom_i, atom_j, inter, neigh_weights, cutoff_2) where {V <: Vec}
+
+
+    #cutoff_2 = hasfield(typeof(inter.cutoff), :dist_cutoff) ? ustrip(inter.cutoff.dist_cutoff)^2 : Inf
 
     # NOTE: every variable in this function except the central atom i and the box dimensions, is a vector of 8 numbers
 
@@ -991,8 +1008,9 @@ end
     dist_2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
 
     # Create 8 true or false values 
-    mask = (dist_2 < sim_params.cutoff_2) & (dist_2 > 0.0)
-    
+    mask = (dist_2 < cutoff_2) & (dist_2 > 0.0)
+    #mask = dist_2 > 0.0
+
    # Swap any NaN distances to be one(V) so there is no divide-by-zero 
    # After the function, use the mask values to check if the force should be zero
    safe_dist_2 = vifelse(mask, dist_2, one(V)) 
@@ -1001,7 +1019,7 @@ end
    dr = SVector(dx, dy, dz)
 
    # Pass to the user defined force function which will calculate garbage forces for any dummy atoms 
-   fdr_raw = custom_force(inter, dr, safe_dist_2, atom_i, atom_j, neigh_weights, sim_params.cutoff_2)
+   fdr_raw = custom_force(inter, dr, safe_dist_2, atom_i, atom_j, neigh_weights, cutoff_2)
    
    # Zero out forces for atoms outside the cutoff (or padded dummy atoms)
    f_x = vifelse(mask, fdr_raw[1], zero(V))
@@ -1011,7 +1029,10 @@ end
     return f_x, f_y, f_z
 end
 
-@inline function simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, inter, ::Val{N_SIMD}) where {N_SIMD}
+
+
+
+@inline function simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, pairwise_inters_nl, ::Val{N_SIMD}) where {N_SIMD}
 
     VFloat = Vec{N_SIMD, Float64}
     VInt   = Vec{N_SIMD, Int}
@@ -1072,17 +1093,50 @@ end
         neigh_y_2 = vgather(flat_coords, idx_y_2)
         neigh_z_2 = vgather(flat_coords, idx_z_2)
         
-        # Pass the scalar values for atom i and then the vectors of 8 values for the neighbours, alongside the box params
-        f_x_chunk_1, f_y_chunk_1, f_z_chunk_1 = simd_force(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, 
-            sim_params, atom_i_proxy, atom_j_proxy_1, inter, neigh_weights_1)
+        # REPLACE THE FOR LOOP WITH THIS:
+        f_x_1, f_y_1, f_z_1, f_x_2, f_y_2, f_z_2 = compute_all_forces(
+            pairwise_inters_nl, xi, yi, zi, 
+            neigh_x_1, neigh_y_1, neigh_z_1, 
+            neigh_x_2, neigh_y_2, neigh_z_2, 
+            sim_params, atom_i_proxy, 
+            atom_j_proxy_1, atom_j_proxy_2, 
+            neigh_weights_1, neigh_weights_2
+        )
         
-        # Do the same for the second chunk
-        f_x_chunk_2, f_y_chunk_2, f_z_chunk_2 = simd_force(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, 
-            sim_params, atom_i_proxy, atom_j_proxy_2, inter, neigh_weights_2)
+        # Add to accumulators
+        f_ix_vec_1 += f_x_1; f_iy_vec_1 += f_y_1; f_iz_vec_1 += f_z_1
+        f_ix_vec_2 += f_x_2; f_iy_vec_2 += f_y_2; f_iz_vec_2 += f_z_2
+
+        # for inter in pairwise_inters_nl
+        #     # Pass the scalar values for atom i and then the vectors of 8 values for the neighbours, alongside the box params
+
+        #     cutoff_2 = ustrip(inter.cutoff.dist_cutoff)^2
+
+        #     f_x_chunk_1, f_y_chunk_1, f_z_chunk_1 = simd_force(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, 
+        #         sim_params, atom_i_proxy, atom_j_proxy_1, inter, neigh_weights_1, cutoff_2)
+            
+        #     # Do the same for the second chunk
+        #     f_x_chunk_2, f_y_chunk_2, f_z_chunk_2 = simd_force(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, 
+        #         sim_params, atom_i_proxy, atom_j_proxy_2, inter, neigh_weights_2, cutoff_2)
+            
+        #     # Adds the 8 force values into running totals 
+        #     f_ix_vec_1 += f_x_chunk_1; f_iy_vec_1 += f_y_chunk_1; f_iz_vec_1 += f_z_chunk_1
+        #     f_ix_vec_2 += f_x_chunk_2; f_iy_vec_2 += f_y_chunk_2; f_iz_vec_2 += f_z_chunk_2
+        # end
+
+        # # USE THE GENERATED UNROLLER:
+        # f_x_1, f_y_1, f_z_1, f_x_2, f_y_2, f_z_2 = apply_all_interactions(
+        #     pairwise_inters_nl, xi, yi, zi, 
+        #     neigh_x_1, neigh_y_1, neigh_z_1, 
+        #     neigh_x_2, neigh_y_2, neigh_z_2, 
+        #     sim_params, atom_i_proxy, 
+        #     atom_j_proxy_1, atom_j_proxy_2, 
+        #     neigh_weights_1, neigh_weights_2
+        # )
         
-        # Adds the 8 force values into running totals 
-        f_ix_vec_1 += f_x_chunk_1; f_iy_vec_1 += f_y_chunk_1; f_iz_vec_1 += f_z_chunk_1
-        f_ix_vec_2 += f_x_chunk_2; f_iy_vec_2 += f_y_chunk_2; f_iz_vec_2 += f_z_chunk_2
+        # # Add to accumulators
+        # f_ix_vec_1 += f_x_1; f_iy_vec_1 += f_y_1; f_iz_vec_1 += f_z_1
+        # f_ix_vec_2 += f_x_2; f_iy_vec_2 += f_y_2; f_iz_vec_2 += f_z_2
     end
     
     # Horizontal sum across both chunks to get a single scalar force for the central atom
@@ -1093,49 +1147,32 @@ end
     @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
 end
 
-# WORKING AND NOT USING OVERLOADED NEIGHBOURS
-# WORKING AND NOT USING OVERLOADED NEIGHBOURS
-# WORKING AND NOT USING OVERLOADED NEIGHBOURS
-# WORKING AND NOT USING OVERLOADED NEIGHBOURS
-# WORKING AND NOT USING OVERLOADED NEIGHBOURS
-# WORKING AND NOT USING OVERLOADED NEIGHBOURS
-# WORKING AND NOT USING OVERLOADED NEIGHBOURS
+# Recursive Step: Calculate one interaction, add it to the rest
+@inline function compute_all_forces(inters::Tuple, xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, neigh_x_2, neigh_y_2, neigh_z_2, sim_params, atom_i_proxy, atom_j_proxy_1, atom_j_proxy_2, neigh_weights_1, neigh_weights_2)
+    
+    # Grab the exact, strictly typed interaction
+    inter = first(inters)
+    cutoff_2 = extract_cutoff_sq(inter.cutoff)
 
+    # Calculate both chunks for THIS interaction
+    f1x, f1y, f1z = simd_force(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params, atom_i_proxy, atom_j_proxy_1, inter, neigh_weights_1, cutoff_2)
+    f2x, f2y, f2z = simd_force(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params, atom_i_proxy, atom_j_proxy_2, inter, neigh_weights_2, cutoff_2)
 
-# # the Val{1} edge case
-# function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
-#     velocities, boundary, neighbors, force_units, n_atoms,
-#     pairwise_inters_nonl, 
-#     pairwise_inters_nl::Tuple{SIMDLennardJones}, 
-#     ::Val{1}, ::Val{needs_vir}, step_n=0) where {needs_vir} # <--- Notice Val{1} here
+    # Recurse to get the forces for the remaining interactions in the tuple
+    rest_f1x, rest_f1y, rest_f1z, rest_f2x, rest_f2y, rest_f2z = compute_all_forces(Base.tail(inters), xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, neigh_x_2, neigh_y_2, neigh_z_2, sim_params, atom_i_proxy, atom_j_proxy_1, atom_j_proxy_2, neigh_weights_1, neigh_weights_2)
 
-#     # Exact same body as your other hijack
-#     fill!(fs_nounits, zero(eltype(fs_nounits)))
+    # Add them all together at compile time
+    return f1x + rest_f1x, f1y + rest_f1y, f1z + rest_f1z, f2x + rest_f2x, f2y + rest_f2y, f2z + rest_f2z
+end
 
-#     inter = pairwise_inters_nl[1]
+# Base Case: When the tuple is empty, return zero vectors to close out the recursion!
+@inline function compute_all_forces(::Tuple{}, xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, neigh_x_2, neigh_y_2, neigh_z_2, sim_params, atom_i_proxy, atom_j_proxy_1, atom_j_proxy_2, neigh_weights_1, neigh_weights_2)
+    V = typeof(neigh_x_1)
+    return zero(V), zero(V), zero(V), zero(V), zero(V), zero(V)
+end
 
-#     #Retrieve the data (whether freshly built or saved from a previous step)
-#     if !isassigned(inter.static_soa_params)
-#         inter.static_soa_params[] = (
-#             σ = [ustrip(a.σ) for a in atoms], 
-#             ϵ = [ustrip(a.ϵ) for a in atoms]
-#         )
-#     end
-
-#     soa_params = inter.static_soa_params[]
-
-#     # Hardcoded cache logic
-#     if step_n == 0 || step_n % 10 == 0 || length(inter.cache[].offsets) == 0
-#         inter.cache[] = build_packed_adj_list(atoms, neighbors, 8, soa_params, inter) 
-#     end
-
-#     packed_data = inter.cache[]
-
-#     calculate_forces_simd_molly_tasks!(fs_nounits, coords, boundary, packed_data, inter, soa_params, Val(8), Val(Vec{8, Float64}), Val(Vec{8, Int}))
-
-#     return fs_nounits
-# end
-
+@inline extract_cutoff_sq(cutoff::DistanceCutoff) = ustrip(cutoff.dist_cutoff)^2
+@inline extract_cutoff_sq(cutoff::NoCutoff) = Inf
 
 # VERSION USING OVERLOADED NEIGHBOURS WORKING
 # VERSION USING OVERLOADED NEIGHBOURS WORKING
@@ -1186,7 +1223,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
     for idx in 1:molly_neighbors.n
         (i, j, is_special) = molly_neighbors.list[idx]
         if shortcut_pair(my_inter.shortcut, atoms[i], atoms[j], is_special)
-            continue
+           continue
         end
         w = is_special ? my_inter.weight_special : 1.0
         
@@ -1230,6 +1267,9 @@ function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step
     
     # The correct clock check!
     needs_rebuild = isnothing(old_neighbors) || force_tracking || iszero(step_n % nf.base_finder.n_steps)
+    #needs_rebuild = isnothing(old_neighbors) || (new_standard != old_standard)
+    #needs_rebuild = isnothing(old_neighbors) || iszero(step_n % nf.base_finder.n_steps)
+
 
     if !needs_rebuild
         return old_neighbors
@@ -1253,15 +1293,20 @@ function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step
     return PackedNeighborList(new_standard, packed_data, soa_params)
 end
 
+# Fallback for when forces() is called manually outside of the simulate loop!
+function find_neighbors(sys::System, nf::SIMDNeighborFinder; kwargs...)
+    # Route it to your main function, passing the cached neighbors and step 0
+    return find_neighbors(sys, nf, nothing, 0, false; kwargs...)
+end
 
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
     velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
     pairwise_inters_nonl, 
-    pairwise_inters_nl::Tuple{SIMDLennardJones}, 
+    pairwise_inters_nl::Tuple, 
     ::Val{n_threads}, ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
 
     fill!(fs_nounits, zero(eltype(fs_nounits)))
-    inter = pairwise_inters_nl[1]
+    #inter = pairwise_inters_nl[1]
     
     # Unpack data 
     packed_data = neighbors.packed_data
@@ -1279,14 +1324,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     inv_box_y = 1.0 / box_y
     inv_box_z = 1.0 / box_z
 
-    cutoff_2 = ustrip(inter.cutoff.dist_cutoff)^2
 
-    # Package box metrics 
-    sim_params = (
-        box_x = box_x, box_y = box_y, box_z = box_z,
-        inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z,
-        cutoff_2 = cutoff_2
-    )
 
     # Multithreading part 
     n_t = Threads.nthreads()
@@ -1313,7 +1351,17 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 start_idx = (chunk_id - 1) * chunk_size + 1
                 end_idx   = min(chunk_id * chunk_size, n_atoms)
                 for i in start_idx:end_idx
-                    simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, inter, Val(SIMD_WIDTH))
+
+                    #cutoff_2 = ustrip(inter.cutoff.dist_cutoff)^2
+                    #cutoff_2 = hasfield(typeof(inter.cutoff), :dist_cutoff) ? ustrip(inter.cutoff.dist_cutoff)^2 : Inf
+
+                    # Package box metrics 
+                    sim_params = (
+                        box_x = box_x, box_y = box_y, box_z = box_z,
+                        inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z
+                    )
+
+                    simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, pairwise_inters_nl, Val(SIMD_WIDTH))
                 end
             end
         end
@@ -1321,4 +1369,44 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
     return fs_nounits
 end
+
+
+#####
+
+# @inline extract_cutoff_sq(cutoff::DistanceCutoff) = ustrip(cutoff.dist_cutoff)^2
+# @inline extract_cutoff_sq(cutoff::NoCutoff) = Inf
+
+# # Notice the @generated macro!
+# @generated function apply_all_interactions(inters::Tuple, xi, yi, zi, nx1, ny1, nz1, nx2, ny2, nz2, sim_params, ai, aj1, aj2, w1, w2)
+
+#     # fieldcount looks at the Tuple TYPE at compile time (e.g., 2 for LJ and Coulomb)
+#     N = fieldcount(inters) 
+    
+#     # 1. Initialize the accumulators inside a 'quote' block (an Abstract Syntax Tree)
+#     ex = quote
+#         V = typeof(nx1)
+#         f1x = zero(V); f1y = zero(V); f1z = zero(V)
+#         f2x = zero(V); f2y = zero(V); f2z = zero(V)
+#     end
+    
+#     # 2. Iterate through the interactions and write hardcoded math for each one
+#     for i in 1:N
+#         push!(ex.args, quote
+#             # NO LOCAL VARIABLES FOR INTER! Pass it directly to guarantee strict types.
+            
+#             # Chunk 1 Math
+#             fx1, fy1, fz1 = simd_force(xi, yi, zi, nx1, ny1, nz1, sim_params, ai, aj1, inters[$i], w1, extract_cutoff_sq(inters[$i].cutoff))
+#             f1x += fx1; f1y += fy1; f1z += fz1
+            
+#             # Chunk 2 Math
+#             fx2, fy2, fz2 = simd_force(xi, yi, zi, nx2, ny2, nz2, sim_params, ai, aj2, inters[$i], w2, extract_cutoff_sq(inters[$i].cutoff))
+#             f2x += fx2; f2y += fy2; f2z += fz2
+#         end)
+#     end
+    
+#     # 3. Return the final vectors
+#     push!(ex.args, :(return f1x, f1y, f1z, f2x, f2y, f2z))
+    
+#     return ex
+# end
 
