@@ -73,15 +73,13 @@ end
     return charge(atom) * electrostatic_lambda(scheduler, atom, Val(T))
 end
 
+# Passing vec_ij and r, and not having calculate_forces as a Val, was required to avoid allocations
 function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, scheduler,
-                            i, j,
-                            ::Val{T}, ::Val{calculate_forces}, ::Val{atomic},
-                            ::Val{needs_vir}) where {T, calculate_forces, atomic, needs_vir}
+                            i, j, vec_ij, r, calculate_forces, ::Val{T}, ::Val{atomic},
+                            ::Val{needs_vir}) where {T, atomic, needs_vir}
     sqrt_π = sqrt(T(π))
     charge_ij = effective_charge(scheduler, atoms[i], Val(T)) *
                 effective_charge(scheduler, atoms[j], Val(T))
-    vec_ij = vector(coords[i], coords[j], boundary)
-    r = norm(vec_ij)
     αr = α * r
     erf_αr = erf(αr)
     if erf_αr > T(1e-6)
@@ -121,8 +119,10 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
                                 ::Val{needs_vir}) where {T, needs_vir}
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
+        vec_ij = vector(coords[i], coords[j], boundary)
+        r = norm(vec_ij)
         E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr,
-                            scheduler, i, j, Val(T), Val(calculate_forces), Val(false),
+                            scheduler, i, j, vec_ij, r, calculate_forces, Val(T), Val(false),
                             Val(needs_vir))
         exclusion_E += E
     end
@@ -162,9 +162,11 @@ end
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
+        vec_ij = vector(coords[i], coords[j], boundary)
+        r = norm(vec_ij)
         E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f_div_ϵr,
-                                scheduler, i, j, Val(T), Val(calculate_forces), Val(true),
-                                Val(needs_vir))
+                                scheduler, i, j, vec_ij, r, calculate_forces, Val(T),
+                                Val(true), Val(needs_vir))
         exclusion_Es[ei] = ustrip(energy_units, E)
     end
 end
@@ -548,10 +550,6 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
                recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, fft_plan,
                bfft_plan, scheduler, grad_safe)
 end
-
-zero_or_nothing(x) = zero(x)
-zero_or_nothing(x::Nothing) = nothing
-zero_or_nothing(x::Vector{Matrix{T}}) where {T} = zero.(x) # Required for Julia 1.10
 
 function Base.zero(pme::PME)
     if pme.charge_grid_buffer isa Vector

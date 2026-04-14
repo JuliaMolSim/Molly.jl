@@ -230,7 +230,7 @@ unless `force_recompute` is true.
 function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int; 
                           force_recompute::Bool=false)
     # Check if the master system needs re-evaluation
-    if force_recompute || partition.cached_coords !== coords
+    if force_recompute || partition.cached_coords != coords
         partition.master_sys.coords = coords
         partition.master_sys.boundary = boundary
         partition.cached_master_pe = potential_energy(partition.master_sys)

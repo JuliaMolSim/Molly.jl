@@ -366,7 +366,7 @@ The above 5 ps simulation looks something like this when you view it in PyMOL:
 
 The system setup procedure is tested against OpenMM, following their template matching procedure to assign force field parameters to the structures read from the structure file.
 Some margin in residue and atom naming is allowed, as the naming present in the structure files is queried against a renaming dictionary that contains common alternative names present in PDB files, which you can consult in [pdbNames.xml](https://github.com/JuliaMolSim/Molly.jl/blob/master/data/force_fields/pdbNames.xml).
-You can extend this dictionary yourself, if you really want to use your own naming; or you can build a standalone renaming dictionary following the same structure as the one mentioned above, and pass it as a keyword argument `custom_renaming_scheme` when you build your [`MolecularForceField`](@ref).
+You can extend this dictionary yourself, if you really want to use your own naming; or you can build an additional renaming dictionary following the same structure as the one mentioned above, and pass it as a keyword argument `custom_renaming_scheme` when you build your [`MolecularForceField`](@ref).
 The bonding topology of the system is automatically inferred for standard residues (protein and nucleic acids, plus water).
 If your simulation contains other types of molecules, you must provide the topology for them. You can do this either by using a structure file format with explicit bond definitions, such as Mol2 or mmCIF, by defining the appropriate `CONECT` records in a PDB file, or by providing a custom topology template in a format equivalent to the one found in [residues.xml](https://github.com/JuliaMolSim/Molly.jl/blob/master/data/force_fields/residues.xml).
 
@@ -432,23 +432,24 @@ The following tags are supported:
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
 - `<PeriodicTorsionForce>`: both `<Proper>` and `<Improper>` tags are supported
+- `<CMAPTorsionForce>`
 - `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
 - `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
+- `<AmoebaUreyBradleyForce>`: note that this defines the bond-like part of a general Urey-Bradley interaction and is not specific to the AMOEBA force field
 - `<Include>`
 
 The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
-- `<AmoebaUreyBradleyForce>`
 - `<RBTorsionForce>`
-- `<CMAPTorsionForce>`
 - `<GBSAOBCForce>`
 - `<CustomBondForce>`
 - `<CustomAngleForce>`
-- `<CustomTorsionForce>`
+- `<CustomTorsionForce>`: the special case where `energy="k*(theta-theta0)^2"` is supported as it is used to define improper torsions in some force fields
 - `<CustomNonbondedForce>`
 - `<CustomGBForce>`
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
-- `<Script>`
+- `<Script>`: since this is not supported, XML files that do further setup with Python code in `<Script>` may not behave as expected
+- Any of the other polarisable force field tags, i.e. `<DrudeForce>`, `<HippoNonbondedForce>` and those starting with `Amoeba` other than `<AmoebaUreyBradleyForce>`.
 In general, custom forces should be implemented as described in [Forces and energies](@ref).
 
 ### Structure file formats
@@ -760,7 +761,7 @@ The available pairwise interactions are:
 - [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 
-The available specific interactions are:
+The available specific interactions (1-5 atoms) are:
 - [`HarmonicPositionRestraint`](@ref) - 1 atom
 - [`HarmonicBond`](@ref) - 2 atoms
 - [`MorseBond`](@ref) - 2 atoms
@@ -923,7 +924,7 @@ struct MySpecificInter
 end
 ```
 Next, you need to define a method for the [`force`](@ref) function.
-The form of this will depend on whether the interaction involves 1, 2, 3 or 4 atoms.
+The form of this will depend on whether the interaction involves 1, 2, 3, 4 or 5 atoms.
 For example in the 2 atom case:
 ```julia
 function Molly.force(inter::MySpecificInter,
@@ -1146,6 +1147,7 @@ This could be anything from a simple energy minimization to complicated replica 
 The available simulators are:
 - [`SteepestDescentMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
+- [`DPDVelocityVerlet`](@ref)
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)

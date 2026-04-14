@@ -7,6 +7,7 @@ export
     InteractionList2Atoms,
     InteractionList3Atoms,
     InteractionList4Atoms,
+    InteractionList5Atoms,
     Atom,
     mass,
     charge,
@@ -48,108 +49,147 @@ const PairwiseInteraction = NBodyInteraction{2}
 
 """
     InteractionList1Atoms(is, inters)
-    InteractionList1Atoms(is, inters, types)
+    InteractionList1Atoms(is, inters, types, data=nothing)
     InteractionList1Atoms(inter_type)
 
 A list of specific interactions that involve one atom such as position restraints.
 """
-struct InteractionList1Atoms{I, T} <: SpecificInteractionList{1}
+struct InteractionList1Atoms{I, T, D} <: SpecificInteractionList{1}
     is::I
     inters::T
     types::Vector{String}
+    data::D
 
-    function InteractionList1Atoms(is, inters, types)
+    function InteractionList1Atoms(is, inters, types, data=nothing)
         if !(length(is) == length(inters) == length(types))
             throw(ArgumentError("all arguments to InteractionList1Atoms should be the same length"))
         end
-        return new{typeof(is), typeof(inters)}(is, inters, types)
+        return new{typeof(is), typeof(inters), typeof(data)}(is, inters, types, data)
     end
 end
 
 """
     InteractionList2Atoms(is, js, inters)
-    InteractionList2Atoms(is, js, inters, types)
+    InteractionList2Atoms(is, js, inters, types, data=nothing)
     InteractionList2Atoms(inter_type)
 
 A list of specific interactions that involve two atoms such as bond potentials.
 """
-struct InteractionList2Atoms{I, T} <: SpecificInteractionList{2}
+struct InteractionList2Atoms{I, T, D} <: SpecificInteractionList{2}
     is::I
     js::I
     inters::T
     types::Vector{String}
+    data::D
 
-    function InteractionList2Atoms(is, js, inters, types)
+    function InteractionList2Atoms(is, js, inters, types, data=nothing)
         if !(length(is) == length(js) == length(inters) == length(types))
             throw(ArgumentError("all arguments to InteractionList2Atoms should be the same length"))
         end
-        return new{typeof(is), typeof(inters)}(is, js, inters, types)
+        return new{typeof(is), typeof(inters), typeof(data)}(is, js, inters, types, data)
     end
 end
 
 """
     InteractionList3Atoms(is, js, ks, inters)
-    InteractionList3Atoms(is, js, ks, inters, types)
+    InteractionList3Atoms(is, js, ks, inters, types, data=nothing)
     InteractionList3Atoms(inter_type)
 
 A list of specific interactions that involve three atoms such as bond angle potentials.
 """
-struct InteractionList3Atoms{I, T} <: SpecificInteractionList{3}
+struct InteractionList3Atoms{I, T, D} <: SpecificInteractionList{3}
     is::I
     js::I
     ks::I
     inters::T
     types::Vector{String}
+    data::D
 
-    function InteractionList3Atoms(is, js, ks, inters, types)
+    function InteractionList3Atoms(is, js, ks, inters, types, data=nothing)
         if !(length(is) == length(js) == length(ks) == length(inters) == length(types))
             throw(ArgumentError("all arguments to InteractionList3Atoms should be the same length"))
         end
-        return new{typeof(is), typeof(inters)}(is, js, ks, inters, types)
+        return new{typeof(is), typeof(inters), typeof(data)}(is, js, ks, inters, types, data)
     end
 end
 
 """
     InteractionList4Atoms(is, js, ks, ls, inters)
-    InteractionList4Atoms(is, js, ks, ls, inters, types)
+    InteractionList4Atoms(is, js, ks, ls, inters, types, data=nothing)
     InteractionList4Atoms(inter_type)
 
 A list of specific interactions that involve four atoms such as torsion potentials.
 """
-struct InteractionList4Atoms{I, T} <: SpecificInteractionList{4}
+struct InteractionList4Atoms{I, T, D} <: SpecificInteractionList{4}
     is::I
     js::I
     ks::I
     ls::I
     inters::T
     types::Vector{String}
+    data::D
 
-    function InteractionList4Atoms(is, js, ks, ls, inters, types)
+    function InteractionList4Atoms(is, js, ks, ls, inters, types, data=nothing)
         if !(length(is) == length(js) == length(ks) == length(ls) == length(inters) == length(types))
             throw(ArgumentError("all arguments to InteractionList4Atoms should be the same length"))
         end
-        return new{typeof(is), typeof(inters)}(is, js, ks, ls, inters, types)
+        return new{typeof(is), typeof(inters), typeof(data)}(is, js, ks, ls, inters, types, data)
     end
 end
 
-InteractionList1Atoms(is, inters) = InteractionList1Atoms(is, inters, fill("", length(is)))
-InteractionList2Atoms(is, js, inters) = InteractionList2Atoms(is, js, inters, fill("", length(is)))
-InteractionList3Atoms(is, js, ks, inters) = InteractionList3Atoms(is, js, ks, inters,
-                                                                  fill("", length(is)))
-InteractionList4Atoms(is, js, ks, ls, inters) = InteractionList4Atoms(is, js, ks, ls, inters,
-                                                                      fill("", length(is)))
+"""
+    InteractionList5Atoms(is, js, ks, ls, ms, inters)
+    InteractionList5Atoms(is, js, ks, ls, ms, inters, types, data=nothing)
+    InteractionList5Atoms(inter_type)
 
-InteractionList1Atoms(T) = InteractionList1Atoms(Int32[], T[], [])
-InteractionList2Atoms(T) = InteractionList2Atoms(Int32[], Int32[], T[], [])
-InteractionList3Atoms(T) = InteractionList3Atoms(Int32[], Int32[], Int32[], T[], [])
-InteractionList4Atoms(T) = InteractionList4Atoms(Int32[], Int32[], Int32[], Int32[], T[], [])
+A list of specific interactions that involve five atoms such as CMAP torsion potentials.
+"""
+struct InteractionList5Atoms{I, T, D} <: SpecificInteractionList{5}
+    is::I
+    js::I
+    ks::I
+    ls::I
+    ms::I
+    inters::T
+    types::Vector{String}
+    data::D
+
+    function InteractionList5Atoms(is, js, ks, ls, ms, inters, types, data=nothing)
+        if !(length(is) == length(js) == length(ks) == length(ls) == length(ms) ==
+             length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList5Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters), typeof(data)}(is, js, ks, ls, ms, inters, types, data)
+    end
+end
+
+InteractionList1Atoms(is, inters) = InteractionList1Atoms(is, inters, fill("", length(is)), nothing)
+InteractionList2Atoms(is, js, inters) = InteractionList2Atoms(is, js, inters,
+                                                        fill("", length(is)), nothing)
+InteractionList3Atoms(is, js, ks, inters) = InteractionList3Atoms(is, js, ks, inters,
+                                                        fill("", length(is)), nothing)
+InteractionList4Atoms(is, js, ks, ls, inters) = InteractionList4Atoms(is, js, ks, ls, inters,
+                                                        fill("", length(is)), nothing)
+InteractionList5Atoms(is, js, ks, ls, ms, inters) = InteractionList5Atoms(is, js, ks, ls, ms,
+                                                        inters, fill("", length(is)), nothing)
+
+InteractionList1Atoms(T) = InteractionList1Atoms(Int32[], T[], [], nothing)
+InteractionList2Atoms(T) = InteractionList2Atoms(Int32[], Int32[], T[], [], nothing)
+InteractionList3Atoms(T) = InteractionList3Atoms(Int32[], Int32[], Int32[], T[], [], nothing)
+InteractionList4Atoms(T) = InteractionList4Atoms(Int32[], Int32[], Int32[], Int32[], T[], [], nothing)
+InteractionList5Atoms(T) = InteractionList5Atoms(Int32[], Int32[], Int32[], Int32[], Int32[], T[], [], nothing)
 
 interaction_type(::InteractionList1Atoms{<:Any, T}) where {T} = eltype(T)
 interaction_type(::InteractionList2Atoms{<:Any, T}) where {T} = eltype(T)
 interaction_type(::InteractionList3Atoms{<:Any, T}) where {T} = eltype(T)
 interaction_type(::InteractionList4Atoms{<:Any, T}) where {T} = eltype(T)
+interaction_type(::InteractionList5Atoms{<:Any, T}) where {T} = eltype(T)
 
 Base.length(inter_list::SpecificInteractionList) = length(inter_list.is)
+
+zero_or_nothing(x) = zero(x)
+zero_or_nothing(x::Nothing) = nothing
+zero_or_nothing(x::Vector{Matrix{T}}) where {T} = zero.(x) # Required for Julia 1.10
 
 function Base.zero(inter_list::InteractionList1Atoms)
     n_inters = length(inter_list)
@@ -157,6 +197,7 @@ function Base.zero(inter_list::InteractionList1Atoms)
         zero(inter_list.is),
         zero.(inter_list.inters),
         fill("", n_inters),
+        zero_or_nothing(inter_list.data),
     )
 end
 
@@ -167,6 +208,7 @@ function Base.zero(inter_list::InteractionList2Atoms)
         zero(inter_list.js),
         zero.(inter_list.inters),
         fill("", n_inters),
+        zero_or_nothing(inter_list.data),
     )
 end
 
@@ -178,6 +220,7 @@ function Base.zero(inter_list::InteractionList3Atoms)
         zero(inter_list.ks),
         zero.(inter_list.inters),
         fill("", n_inters),
+        zero_or_nothing(inter_list.data),
     )
 end
 
@@ -190,6 +233,21 @@ function Base.zero(inter_list::InteractionList4Atoms)
         zero(inter_list.ls),
         zero.(inter_list.inters),
         fill("", n_inters),
+        zero_or_nothing(inter_list.data),
+    )
+end
+
+function Base.zero(inter_list::InteractionList5Atoms)
+    n_inters = length(inter_list)
+    return InteractionList5Atoms(
+        zero(inter_list.is),
+        zero(inter_list.js),
+        zero(inter_list.ks),
+        zero(inter_list.ls),
+        zero(inter_list.ms),
+        zero.(inter_list.inters),
+        fill("", n_inters),
+        zero_or_nothing(inter_list.data),
     )
 end
 
@@ -198,6 +256,7 @@ function Base.:+(il1::InteractionList1Atoms, il2::InteractionList1Atoms)
         il1.is,
         il1.inters .+ il2.inters,
         il1.types,
+        il1.data,
     )
 end
 
@@ -207,6 +266,7 @@ function Base.:+(il1::InteractionList2Atoms, il2::InteractionList2Atoms)
         il1.js,
         il1.inters .+ il2.inters,
         il1.types,
+        il1.data,
     )
 end
 
@@ -217,6 +277,7 @@ function Base.:+(il1::InteractionList3Atoms, il2::InteractionList3Atoms)
         il1.ks,
         il1.inters .+ il2.inters,
         il1.types,
+        il1.data,
     )
 end
 
@@ -228,20 +289,36 @@ function Base.:+(il1::InteractionList4Atoms, il2::InteractionList4Atoms)
         il1.ls,
         il1.inters .+ il2.inters,
         il1.types,
+        il1.data,
+    )
+end
+
+function Base.:+(il1::InteractionList5Atoms, il2::InteractionList5Atoms)
+    return InteractionList5Atoms(
+        il1.is,
+        il1.js,
+        il1.ks,
+        il1.ls,
+        il1.ms,
+        il1.inters .+ il2.inters,
+        il1.types,
+        il1.data,
     )
 end
 
 function ==(a::InteractionList1Atoms, b::InteractionList1Atoms)
     return a.is == b.is && 
            a.inters == b.inters && 
-           a.types == b.types
+           a.types == b.types && 
+           a.data == b.data
 end
 
 function ==(a::InteractionList2Atoms, b::InteractionList2Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.inters == b.inters && 
-           a.types == b.types
+           a.types == b.types && 
+           a.data == b.data
 end
 
 function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
@@ -249,7 +326,8 @@ function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
            a.js == b.js && 
            a.ks == b.ks && 
            a.inters == b.inters && 
-           a.types == b.types
+           a.types == b.types && 
+           a.data == b.data
 end
 
 function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
@@ -258,14 +336,26 @@ function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
            a.ks == b.ks && 
            a.ls == b.ls && 
            a.inters == b.inters && 
-           a.types == b.types
+           a.types == b.types && 
+           a.data == b.data
+end
+
+function ==(a::InteractionList5Atoms, b::InteractionList5Atoms)
+    return a.is == b.is && 
+           a.js == b.js && 
+           a.ks == b.ks && 
+           a.ls == b.ls && 
+           a.ms == b.ms && 
+           a.inters == b.inters && 
+           a.types == b.types && 
+           a.data == b.data
 end
 
 function hash(a::InteractionList1Atoms, h::UInt)
     is     = from_device(a.is)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(inters, hash(types, h)))
+    return hash(is, hash(inters, hash(types, hash(a.data, h))))
 end
 
 function hash(a::InteractionList2Atoms, h::UInt)
@@ -273,7 +363,7 @@ function hash(a::InteractionList2Atoms, h::UInt)
     js     = from_device(a.js)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(js, hash(inters, hash(types, h))))
+    return hash(is, hash(js, hash(inters, hash(types, hash(a.data, h)))))
 end
 
 function hash(a::InteractionList3Atoms, h::UInt)
@@ -282,7 +372,7 @@ function hash(a::InteractionList3Atoms, h::UInt)
     ks     = from_device(a.ks)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(js, hash(ks, hash(inters, hash(types, h)))))
+    return hash(is, hash(js, hash(ks, hash(inters, hash(types, hash(a.data, h))))))
 end
 
 function hash(a::InteractionList4Atoms, h::UInt)
@@ -292,31 +382,50 @@ function hash(a::InteractionList4Atoms, h::UInt)
     ls     = from_device(a.ls)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, h))))))
+    return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, hash(a.data, h)))))))
+end
+
+function hash(a::InteractionList5Atoms, h::UInt)
+    is     = from_device(a.is)
+    js     = from_device(a.js)
+    ks     = from_device(a.ks)
+    ls     = from_device(a.ls)
+    ms     = from_device(a.ms)
+    inters = from_device(a.inters)
+    types  = from_device(a.types)
+    return hash(is, hash(js, hash(ks, hash(ls, hash(ms, hash(inters, hash(types, hash(a.data, h))))))))
 end
 
 function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
     inters_grad = to_device(inject_interaction.(from_device(inter.inters),
                                 inter.types, (params_dic,)), AT)
-    InteractionList1Atoms(inter.is, inters_grad, inter.types)
+    InteractionList1Atoms(inter.is, inters_grad, inter.types, inter.data)
 end
 
 function inject_interaction_list(inter::InteractionList2Atoms, params_dic, AT)
     inters_grad = to_device(inject_interaction.(from_device(inter.inters),
                                 inter.types, (params_dic,)), AT)
-    InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types)
+    InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types, inter.data)
 end
 
 function inject_interaction_list(inter::InteractionList3Atoms, params_dic, AT)
     inters_grad = to_device(inject_interaction.(from_device(inter.inters),
                                 inter.types, (params_dic,)), AT)
-    InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types)
+    InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types, inter.data)
 end
 
 function inject_interaction_list(inter::InteractionList4Atoms, params_dic, AT)
     inters_grad = to_device(inject_interaction.(from_device(inter.inters),
                                 inter.types, (params_dic,)), AT)
-    InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
+    InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types,
+                          inter.data)
+end
+
+function inject_interaction_list(inter::InteractionList5Atoms, params_dic, AT)
+    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
+                                inter.types, (params_dic,)), AT)
+    InteractionList5Atoms(inter.is, inter.js, inter.ks, inter.ls, inter.ms, inters_grad,
+                          inter.types, inter.data)
 end
 
 """

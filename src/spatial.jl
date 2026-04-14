@@ -909,6 +909,20 @@ function torsion_angle(vec_ij, vec_jk, vec_kl)
     return θ
 end
 
+function torsion_vectors(coords_i, coords_j, coords_k, coords_l, boundary)
+    ab = vector(coords_i, coords_j, boundary)
+    bc = vector(coords_j, coords_k, boundary)
+    cd = vector(coords_k, coords_l, boundary)
+    cross_ab_bc = ab × bc
+    cross_bc_cd = bc × cd
+    bc_norm = norm(bc)
+    θ = atan(
+        ustrip(dot(cross_ab_bc × cross_bc_cd, bc / bc_norm)),
+        ustrip(dot(cross_ab_bc, cross_bc_cd)),
+    )
+    return ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ
+end
+
 """
     remove_CM_motion!(system)
 
