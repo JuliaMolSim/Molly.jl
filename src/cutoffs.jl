@@ -5,7 +5,8 @@ export
     DistanceCutoff,
     ShiftedPotentialCutoff,
     ShiftedForceCutoff,
-    CubicSplineCutoff
+    CubicSplineCutoff,
+    PolynomialCutoff
 
 abstract type AbstractCutoff{P} end
 
@@ -197,4 +198,56 @@ function force_apply_cutoff(cutoff::CubicSplineCutoff, inter, r, params)
     dpe_dr_act = -pairwise_force(inter, cutoff.dist_activation, params)
     return -(6t^2 - 6t) * pe_act / (cutoff.dist_cutoff - cutoff.dist_activation) -
                     (3t^2 - 4t + 1) * dpe_dr_act
+end
+
+@doc raw"""
+    PolynomialCutoff(dist_activation, dist_cutoff)
+
+Cutoff that multiplies the potential by a 5th-degree polynomial switching function
+between an activation distance and a cutoff distance, smoothly reducing it to zero
+at the cutoff distance.
+Equivalent to the switching function used in OpenMM.
+
+```math
+\begin{aligned}
+V_c(r) &= \begin{cases}
+V(r), r \le r_a \\
+S(r) V(r), r_a < r \le r_c \\
+0, r > r_c
+\end{cases} \\
+F_c(r) &= \begin{cases}
+F(r), r \le r_a \\
+S(r) F(r) - S'(r) V(r), r_a < r \le r_c \\
+0, r > r_c
+\end{cases} \\
+S(r) &= 1 - 6t^5 + 15t^4 - 10t^3 \\
+S'(r) &= \frac{-30t^4 + 60t^3 - 30t^2}{r_c - r_a} \\
+t &= \frac{r - r_a}{r_c - r_a}
+\end{aligned}
+```
+"""
+struct PolynomialCutoff{P, D} <: AbstractCutoff{2}
+    dist_activation::D
+    dist_cutoff::D
+end
+
+function PolynomialCutoff(dist_activation::D, dist_cutoff) where D
+    if dist_cutoff <= dist_activation
+        throw(ArgumentError("the cutoff radius $dist_cutoff must be larger " *
+                            "than the activation radius $dist_activation"))
+    end
+    return PolynomialCutoff{2, D}(dist_activation, dist_cutoff)
+end
+
+function pe_apply_cutoff(cutoff::PolynomialCutoff, inter, r, params)
+    t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff - cutoff.dist_activation)
+    S = 1 - 6t^5 + 15t^4 - 10t^3
+    return S * pairwise_pe(inter, r, params)
+end
+
+function force_apply_cutoff(cutoff::PolynomialCutoff, inter, r, params)
+    t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff - cutoff.dist_activation)
+    S = 1 - 6t^5 + 15t^4 - 10t^3
+    dS_dr = (-30t^4 + 60t^3 - 30t^2) / (cutoff.dist_cutoff - cutoff.dist_activation)
+    return S * pairwise_force(inter, r, params) - dS_dr * pairwise_pe(inter, r, params)
 end

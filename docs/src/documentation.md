@@ -1049,6 +1049,7 @@ The available cutoffs are:
 - [`ShiftedPotentialCutoff`](@ref)
 - [`ShiftedForceCutoff`](@ref)
 - [`CubicSplineCutoff`](@ref)
+- [`PolynomialCutoff`](@ref)
 
 The following built-in interactions can use a cutoff:
 - [`LennardJones`](@ref)
