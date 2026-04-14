@@ -126,8 +126,8 @@ function run_benchmark()
         buffers_e = Molly.init_buffers!(sys, n_threads, true)
         
         fs = Molly.zero_forces(sys)
-        Molly.forces!(fs, sys, nothing, buffers_f, Val(false), 0)
-        potential_energy(sys, nothing, buffers_e, 0)
+        Molly.forces!(fs, sys, nothing, 0, buffers_f, Val(false))
+        potential_energy(sys, nothing, 0, buffers_e)
         CUDA.synchronize()
 
         profile_gpu_force_path!(sys; buffers=buffers_f)
@@ -139,14 +139,14 @@ function run_benchmark()
         # Use a local counter to increment step_n and trigger reordering as in a real simulation
         step_counter = 0
         forces_ms = 1_000 * @belapsed begin
-            Molly.forces!($fs, $sys, nothing, $buffers_f, Val(false), $step_counter)
+            Molly.forces!($fs, $sys, nothing, $step_counter, $buffers_f, Val(false))
             CUDA.synchronize()
             $step_counter += 1
         end samples=samples evals=1
 
         step_counter = 0
         pe_ms = 1_000 * @belapsed begin
-            potential_energy($sys, nothing, $buffers_e, $step_counter)
+            potential_energy($sys, nothing, $step_counter, $buffers_e)
             CUDA.synchronize()
             $step_counter += 1
         end samples=samples evals=1

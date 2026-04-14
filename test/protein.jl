@@ -135,7 +135,7 @@ end
     @test bench_result.memory <= 208
     forces_t = Molly.zero_forces(sys)
     buffers = Molly.init_buffers!(sys, 1)
-    bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $buffers, Val(false);
+    bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
                                             n_threads=1)
     @test bench_result.allocs <= 3
     @test bench_result.memory <= 144
@@ -444,7 +444,7 @@ end
         @test bench_result.memory <= 640
         forces_t = Molly.zero_forces(sys)
         buffers = Molly.init_buffers!(sys, 1)
-        bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $buffers, Val(false);
+        bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
                                                 n_threads=1)
         @test bench_result.allocs <= 12
         @test bench_result.memory <= 850

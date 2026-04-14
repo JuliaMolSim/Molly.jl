@@ -329,7 +329,7 @@ end
 function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads)
     return fs
 end
 
@@ -350,12 +350,12 @@ end
 function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
     return fs, buffers.virial
 end
 
-function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, buffers::BuffersCPU,
-                 ::Val{needs_vir}, step_n::Integer=0;
+function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, step_n::Integer,
+                 buffers::BuffersCPU, ::Val{needs_vir};
                  n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
@@ -667,8 +667,8 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
     return fs_nounits
 end
 
-function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, buffers::BuffersGPU,
-                 ::Val{needs_vir}, step_n::Integer=0;
+function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, step_n::Integer,
+                 buffers::BuffersGPU, ::Val{needs_vir};
                  n_threads::Integer=Threads.nthreads()) where {D, T, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)

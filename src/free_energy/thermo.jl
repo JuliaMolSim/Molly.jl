@@ -248,7 +248,7 @@ function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, stat
     partition.λ_sys.specific_inter_lists = partition.λ_hamiltonians[state_index].specific_inter_lists
     partition.λ_sys.general_inters = partition.λ_hamiltonians[state_index].general_inters
     
-    pe_specific = potential_energy(partition.λ_sys, nbrs, 0)
+    pe_specific = potential_energy(partition.λ_sys, nbrs)
     
     return partition.cached_master_pe + pe_specific
 end
@@ -277,7 +277,7 @@ function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
         partition.λ_sys.specific_inter_lists = partition.λ_hamiltonians[state_index].specific_inter_lists
         partition.λ_sys.general_inters = partition.λ_hamiltonians[state_index].general_inters
         
-        pe_specific = potential_energy(partition.λ_sys, nbrs, 0)
+        pe_specific = potential_energy(partition.λ_sys, nbrs)
         energies[state_index] = partition.cached_master_pe + pe_specific
     end
     

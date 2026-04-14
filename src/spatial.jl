@@ -983,7 +983,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
         buffers = buffers_in
     end
     if recompute
-        forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
+        forces!(zero_forces(sys), sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
     end
 
     # Always evaluate K in case velocities were rescaled by a thermostat
