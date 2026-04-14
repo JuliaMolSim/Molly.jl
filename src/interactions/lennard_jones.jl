@@ -882,25 +882,6 @@ end
 # Structs 
 
 const SIMD_WIDTH = 8
-# struct PackedFlatSoA{T}
-#     offsets::Vector{Int}
-#     adj_list::Vector{Int}
-#     sigmas::Vector{T}
-#     eps::Vector{T}
-#     charges::Vector{T}
-#     weights::Vector{T}
-# end
-
-# struct PackedFlatSoA{T}
-#     offsets::Vector{Int}
-#     split_idxs::Vector{Int} # shared block ends and coulomb only begins 
-#     adj_list::Vector{Int}
-#     sigmas::Vector{T}
-#     eps::Vector{T}
-#     charges::Vector{T}
-#     lj_weights::Vector{T}
-#     coul_weights::Vector{T}
-# end
 
 struct PackedFlatSoA{T}
     offsets::Vector{Int}
@@ -1049,51 +1030,6 @@ end
 
     return f_x, f_y, f_z
 end
-
-# SIMD is agnostic to the specific interaction because interaction gets passed down 
-# @inline function simd_force(x_i, y_i, z_i, neigh_x::V, neigh_y::V, neigh_z::V, 
-#     sim_params, atom_i, atom_j, inter, neigh_weights, cutoff_2) where {V <: Vec}
-
-
-#     #cutoff_2 = hasfield(typeof(inter.cutoff), :dist_cutoff) ? ustrip(inter.cutoff.dist_cutoff)^2 : Inf
-
-#     # NOTE: every variable in this function except the central atom i and the box dimensions, is a vector of 8 numbers
-
-#     # Boundary math - neigh_x is a vector of 8 numbers 
-#     dx = x_i - neigh_x
-#     dy = y_i - neigh_y
-#     dz = z_i - neigh_z
-
-#     # Calculate how many box lengths apart and wrap the neighbour to the closest image 
-#     dx = muladd(-sim_params.box_x, round(dx * sim_params.inv_box_x), dx)
-#     dy = muladd(-sim_params.box_y, round(dy * sim_params.inv_box_y), dy)
-#     dz = muladd(-sim_params.box_z, round(dz * sim_params.inv_box_z), dz)
-
-#     # Calculate the square of the distance 
-#     dist_2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
-
-#     # Create 8 true or false values 
-#     mask = (dist_2 < cutoff_2) & (dist_2 > 0.0)
-#     #mask = dist_2 > 0.0
-
-#    # Swap any NaN distances to be one(V) so there is no divide-by-zero 
-#    # After the function, use the mask values to check if the force should be zero
-#    safe_dist_2 = vifelse(mask, dist_2, one(V)) 
-
-#    # Package as an svector to allow dr * force syntax 
-#    dr = SVector(dx, dy, dz)
-
-#    # Pass to the user defined force function which will calculate garbage forces for any dummy atoms 
-#    fdr_raw = custom_force(inter, dr, safe_dist_2, atom_i, atom_j, neigh_weights, cutoff_2)
-   
-#    # Zero out forces for atoms outside the cutoff (or padded dummy atoms)
-#    f_x = vifelse(mask, fdr_raw[1], zero(V))
-#    f_y = vifelse(mask, fdr_raw[2], zero(V))
-#    f_z = vifelse(mask, fdr_raw[3], zero(V))
-
-#     return f_x, f_y, f_z
-# end
-
 
 
 
@@ -1461,22 +1397,6 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 if chunk_id > num_chunks
                     break
                 end
-                
-                # start_idx = (chunk_id - 1) * chunk_size + 1
-                # end_idx   = min(chunk_id * chunk_size, n_atoms)
-                # for i in start_idx:end_idx
-
-                #     #cutoff_2 = ustrip(inter.cutoff.dist_cutoff)^2
-                #     #cutoff_2 = hasfield(typeof(inter.cutoff), :dist_cutoff) ? ustrip(inter.cutoff.dist_cutoff)^2 : Inf
-
-                #     # Package box metrics 
-                #     sim_params = (
-                #         box_x = box_x, box_y = box_y, box_z = box_z,
-                #         inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z
-                #     )
-
-                #     simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, pairwise_inters_nl, Val(SIMD_WIDTH))
-                # end
 
                 start_idx = (chunk_id - 1) * chunk_size + 1
                 end_idx   = min(chunk_id * chunk_size, n_atoms)
@@ -1500,47 +1420,6 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
     return fs_nounits
 end
-
-
-#####
-
-# @inline extract_cutoff_sq(cutoff::DistanceCutoff) = ustrip(cutoff.dist_cutoff)^2
-# @inline extract_cutoff_sq(cutoff::NoCutoff) = Inf
-
-# # Notice the @generated macro!
-# @generated function apply_all_interactions(inters::Tuple, xi, yi, zi, nx1, ny1, nz1, nx2, ny2, nz2, sim_params, ai, aj1, aj2, w1, w2)
-
-#     # fieldcount looks at the Tuple TYPE at compile time (e.g., 2 for LJ and Coulomb)
-#     N = fieldcount(inters) 
-    
-#     # 1. Initialize the accumulators inside a 'quote' block (an Abstract Syntax Tree)
-#     ex = quote
-#         V = typeof(nx1)
-#         f1x = zero(V); f1y = zero(V); f1z = zero(V)
-#         f2x = zero(V); f2y = zero(V); f2z = zero(V)
-#     end
-    
-#     # 2. Iterate through the interactions and write hardcoded math for each one
-#     for i in 1:N
-#         push!(ex.args, quote
-#             # NO LOCAL VARIABLES FOR INTER! Pass it directly to guarantee strict types.
-            
-#             # Chunk 1 Math
-#             fx1, fy1, fz1 = simd_force(xi, yi, zi, nx1, ny1, nz1, sim_params, ai, aj1, inters[$i], w1, extract_cutoff_sq(inters[$i].cutoff))
-#             f1x += fx1; f1y += fy1; f1z += fz1
-            
-#             # Chunk 2 Math
-#             fx2, fy2, fz2 = simd_force(xi, yi, zi, nx2, ny2, nz2, sim_params, ai, aj2, inters[$i], w2, extract_cutoff_sq(inters[$i].cutoff))
-#             f2x += fx2; f2y += fy2; f2z += fz2
-#         end)
-#     end
-    
-#     # 3. Return the final vectors
-#     push!(ex.args, :(return f1x, f1y, f1z, f2x, f2y, f2z))
-    
-#     return ex
-# end
-
 
 @inline function gather_xyz(flat_coords, neigh_idxs)
     idx_x = neigh_idxs * 3 - 2
@@ -1717,9 +1596,6 @@ end
     both_start = packed_data.offsets[i]
     both_end   = packed_data.split_idxs[i] - 1
 
-    # lj_cutoff_2 = extract_cutoff_sq(lj_inter.cutoff)
-    # coul_cutoff_2 = extract_cutoff_sq(coul_inter.cutoff)
-
     @inbounds for j in both_start:(2 * N_SIMD):both_end
         neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
         neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
@@ -1756,14 +1632,6 @@ end
         coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
         coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
 
-        # # Apply LJ
-        # lj_x_1, lj_y_1, lj_z_1 = simd_force(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params, atom_i_proxy, atom_j_proxy_1, lj_inter, lj_weights_1, lj_cutoff_2)
-        # lj_x_2, lj_y_2, lj_z_2 = simd_force(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params, atom_i_proxy, atom_j_proxy_2, lj_inter, lj_weights_2, lj_cutoff_2)
-
-        # # Apply Coulomb
-        # coul_x_1, coul_y_1, coul_z_1 = simd_force(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
-        # coul_x_2, coul_y_2, coul_z_2 = simd_force(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
-
         f_ix_vec_1 += lj_x_1 + coul_x_1; f_iy_vec_1 += lj_y_1 + coul_y_1; f_iz_vec_1 += lj_z_1 + coul_z_1
         f_ix_vec_2 += lj_x_2 + coul_x_2; f_iy_vec_2 += lj_y_2 + coul_y_2; f_iz_vec_2 += lj_z_2 + coul_z_2
     end
@@ -1792,10 +1660,6 @@ end
         # Apply Coulomb ONLY
         coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
         coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
-
-        # # Apply Coulomb ONLY
-        # coul_x_1, coul_y_1, coul_z_1 = simd_force(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
-        # coul_x_2, coul_y_2, coul_z_2 = simd_force(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
 
         f_ix_vec_1 += coul_x_1; f_iy_vec_1 += coul_y_1; f_iz_vec_1 += coul_z_1
         f_ix_vec_2 += coul_x_2; f_iy_vec_2 += coul_y_2; f_iz_vec_2 += coul_z_2
