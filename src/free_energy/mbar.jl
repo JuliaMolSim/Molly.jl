@@ -11,7 +11,7 @@ const LOG_FLOATMAX   = log(floatmax(Float64)) # ≈ 709
 @inline function calc_energy!(sys::System, buffers, coords, boundary)
     sys.coords .= coords
     sys.boundary = boundary
-    return potential_energy(sys, find_neighbors(sys), buffers; n_threads=1)
+    return potential_energy(sys, find_neighbors(sys), 0, buffers; n_threads=1)
 end
 
 struct MBARInput{U, UT, N, W, S}

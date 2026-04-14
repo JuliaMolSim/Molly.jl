@@ -11,7 +11,8 @@ export
     pairwise_pe
 
 """
-    total_energy(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
+    total_energy(system, neighbors=find_neighbors(sys), step_n=0, buffers=nothing;
+                 n_threads=Threads.nthreads())
 
 Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
@@ -20,8 +21,11 @@ function total_energy(sys; n_threads::Integer=Threads.nthreads())
     return total_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function total_energy(sys, neighbors; n_threads::Integer=Threads.nthreads())
-    return kinetic_energy(sys) + potential_energy(sys, neighbors; n_threads=n_threads)
+function total_energy(sys, neighbors, step_n::Integer=0, buffers=nothing;
+                      n_threads::Integer=Threads.nthreads())
+    ke = kinetic_energy(sys)
+    pe = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
+    return ke + pe
 end
 
 @doc raw"""
@@ -146,7 +150,7 @@ function temperature(sys::System{D}; kin_tensor=nothing, recompute=true) where D
 end
 
 """
-    potential_energy(system, neighbors=find_neighbors(system), step_n=0;
+    potential_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                      n_threads=Threads.nthreads())
 
 Calculate the potential energy of a system using the pairwise, specific and
@@ -172,7 +176,7 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads())
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integer=0;
+function potential_energy(sys::System, neighbors, step_n::Integer=0, buffers=nothing;
                           n_threads::Integer=Threads.nthreads())
     # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
@@ -363,14 +367,14 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
 end
 
 function potential_energy(sys::System{<:Any, <:AbstractGPUArray}, neighbors,
-                          buffers=nothing, step_n::Integer=0;
+                          step_n::Integer=0, buffers=nothing;
                           n_threads::Integer=Threads.nthreads())
     buffers = init_buffers!(sys, 1, true)
-    return potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads)
+    return potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
 end
 
 function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T}, neighbors,
-                          buffers::BuffersGPU, step_n::Integer=0;
+                          step_n::Integer, buffers::BuffersGPU;
                           n_threads::Integer=Threads.nthreads()) where T
     fill!(buffers.pe_vec_nounits, zero(T))
 
