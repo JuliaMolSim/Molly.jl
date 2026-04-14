@@ -1250,6 +1250,7 @@ end
         (ShiftedPotentialCutoff(dist_cut)     , -0.04196301990 * fu, -0.00270785727 * eu),
         (ShiftedForceCutoff(dist_cut)         , -0.02537033587 * fu, -0.00104858887 * eu),
         (CubicSplineCutoff(dist_act, dist_cut), -0.06201171875 * fu, -0.00312500000 * eu),
+        (PolynomialCutoff(dist_act, dist_cut) , -0.06716652806 * fu, -0.00246320097 * eu),
     ]
 
     for (cutoff, force_ref, pe_ref) in cutoffs
