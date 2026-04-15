@@ -955,7 +955,10 @@ end
 
 @doc raw"""
     pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
-             recompute=true, n_threads=Threads.nthreads())
+             recompute=true, n_threads=Threads.nthreads(),
+             pairwise_inters=system.pairwise_inters,
+             specific_inter_lists=system.specific_inter_lists,
+             general_inters=system.general_inters)
 
 Calculate the pressure tensor of the system.
 
@@ -970,20 +973,22 @@ To calculate the scalar pressure, see [`scalar_pressure`](@ref).
 
 Not compatible with infinite boundaries.
 """
-function pressure(sys; n_threads::Integer=Threads.nthreads())
+function pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;
-                    recompute=true, n_threads=n_threads)
+                    n_threads=n_threads, kwargs...)
 end
 
 function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothing;
-                  recompute::Bool=true, n_threads::Integer=Threads.nthreads()) where D
+                  recompute::Bool=true, n_threads::Integer=Threads.nthreads(),
+                  kwargs...) where D
     if isnothing(buffers_in)
         buffers = init_buffers!(sys, n_threads)
     else
         buffers = buffers_in
     end
     if recompute
-        forces!(zero_forces(sys), sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
+        forces!(zero_forces(sys), sys, neighbors, step_n, buffers, Val(true);
+                n_threads=n_threads, kwargs...)
     end
 
     # Always evaluate K in case velocities were rescaled by a thermostat
@@ -1011,20 +1016,23 @@ end
 
 """
     scalar_pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
-                    recompute=true, n_threads=Threads.nthreads())
+                    recompute=true, n_threads=Threads.nthreads(),
+                    pairwise_inters=system.pairwise_inters,
+                    specific_inter_lists=system.specific_inter_lists,
+                    general_inters=system.general_inters)
 
 Calculate the pressure of the system as a scalar.
 
 This is the trace of the [`pressure`](@ref) tensor.
 """
-function scalar_pressure(sys; n_threads::Integer=Threads.nthreads())
+function scalar_pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return scalar_pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;
-                           recompute=true, n_threads=n_threads)
+                           n_threads=n_threads, kwargs...)
 end
 
 function scalar_pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers=nothing;
-                         recompute::Bool=true, n_threads::Integer=Threads.nthreads()) where D
-    P = pressure(sys, neighbors, step_n, buffers; recompute=recompute, n_threads=n_threads)
+                         kwargs...) where D
+    P = pressure(sys, neighbors, step_n, buffers; kwargs...)
     return tr(P) / D
 end
 

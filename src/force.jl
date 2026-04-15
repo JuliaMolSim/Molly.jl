@@ -18,17 +18,20 @@ calc_accels(f, m) = (iszero(m) ? zero(f / oneunit(m)) : (f / m))
 
 """
     accelerations(system, neighbors=find_neighbors(system), step_n=0;
-                  n_threads=Threads.nthreads())
+                  n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
+                  specific_inter_lists=system.specific_inter_lists,
+                  general_inters=system.general_inters)
 
 Calculate the accelerations of all atoms in a system using the pairwise,
 specific and general interactions and Newton's second law of motion.
 """
-function accelerations(sys; n_threads::Integer=Threads.nthreads())
-    return accelerations(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function accelerations(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
+    return accelerations(sys, find_neighbors(sys; n_threads=n_threads);
+                         n_threads=n_threads, kwargs...)
 end
 
-function accelerations(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
-    fs = forces(sys, neighbors, step_n; n_threads=n_threads)
+function accelerations(sys, neighbors, step_n::Integer=0; kwargs...)
+    fs = forces(sys, neighbors, step_n; kwargs...)
     return calc_accels.(fs, masses(sys))
 end
 
@@ -317,25 +320,29 @@ zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
 """
     forces(system, neighbors=find_neighbors(system), step_n=0;
-           n_threads=Threads.nthreads())
+           n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
+           specific_inter_lists=system.specific_inter_lists,
+           general_inters=system.general_inters)
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.
 """
-function forces(sys; n_threads::Integer=Threads.nthreads())
-    return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function forces(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
+    return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads, kwargs...)
 end
 
-function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads, kwargs...)
     return fs
 end
 
 """
     forces_virial(system, neighbors=find_neighbors(system), step_n=0;
-                  n_threads=Threads.nthreads())
+                  n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
+                  specific_inter_lists=system.specific_inter_lists,
+                  general_inters=system.general_inters)
 
 Calculate the forces on all atoms in a system and the virial using the pairwise,
 specific and general interactions.
@@ -343,29 +350,38 @@ specific and general interactions.
 Returns a tuple of the forces and the virial.
 This is faster than calling [`forces`](@ref) and [`virial`](@ref) separately.
 """
-function forces_virial(sys; n_threads::Integer=Threads.nthreads())
-    return forces_virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function forces_virial(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
+    return forces_virial(sys, find_neighbors(sys; n_threads=n_threads);
+                         n_threads=n_threads, kwargs...)
 end
 
-function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
+                       kwargs...)
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
     return fs, buffers.virial
 end
 
-function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, step_n::Integer,
-                 buffers::BuffersCPU, ::Val{needs_vir};
-                 n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
+function forces!(fs,
+                 sys::System{<:Any, <:Any, T},
+                 neighbors,
+                 step_n::Integer,
+                 buffers::BuffersCPU,
+                 ::Val{needs_vir};
+                 n_threads::Integer=Threads.nthreads(),
+                 pairwise_inters=sys.pairwise_inters,
+                 specific_inter_lists=sys.specific_inter_lists,
+                 general_inters=sys.general_inters) where {T, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
     end
     fill!(buffers.kin_tensor,  zero(T) * sys.energy_units)
     fill!(buffers.pres_tensor, zero(T) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
 
-    if length(sys.pairwise_inters) > 0
-        pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
-        pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+    if length(pairwise_inters) > 0
+        pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
+        pairwise_inters_nl   = filter( use_neighbors, values(pairwise_inters))
         pairwise_forces_loop!(buffers.fs_nounits, buffers.fs_chunks, buffers.vir_nounits,
                 buffers.vir_chunks, sys.atoms, sys.coords, sys.velocities, sys.boundary, neighbors,
                 sys.force_units, length(sys), pairwise_inters_nonl, pairwise_inters_nl,
@@ -374,12 +390,12 @@ function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, step_n::Integer,
         fill!(buffers.fs_nounits, zero(eltype(buffers.fs_nounits)))
     end
 
-    if length(sys.specific_inter_lists) > 0
-        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
-        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
-        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
-        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
-        sils_5_atoms = filter(il -> il isa InteractionList5Atoms, values(sys.specific_inter_lists))
+    if length(specific_inter_lists) > 0
+        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(specific_inter_lists))
+        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(specific_inter_lists))
+        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(specific_inter_lists))
+        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(specific_inter_lists))
+        sils_5_atoms = filter(il -> il isa InteractionList5Atoms, values(specific_inter_lists))
         specific_forces!(buffers.fs_nounits, buffers.vir_nounits, sys.atoms, sys.coords,
                          sys.velocities, sys.boundary, sys.force_units, sils_1_atoms, sils_2_atoms,
                          sils_3_atoms, sils_4_atoms, sils_5_atoms, Val(needs_vir), step_n)
@@ -390,7 +406,7 @@ function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, step_n::Integer,
         buffers.virial .= buffers.vir_nounits .* sys.energy_units
     end
 
-    for inter in values(sys.general_inters)
+    for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
     end
@@ -667,9 +683,16 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
     return fs_nounits
 end
 
-function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, step_n::Integer,
-                 buffers::BuffersGPU, ::Val{needs_vir};
-                 n_threads::Integer=Threads.nthreads()) where {D, T, needs_vir}
+function forces!(fs,
+                 sys::System{D, <:AbstractGPUArray, T},
+                 neighbors,
+                 step_n::Integer,
+                 buffers::BuffersGPU,
+                 ::Val{needs_vir};
+                 n_threads::Integer=Threads.nthreads(),
+                 pairwise_inters=sys.pairwise_inters,
+                 specific_inter_lists=sys.specific_inter_lists,
+                 general_inters=sys.general_inters) where {D, T, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
         fill!(buffers.virial_nounits, zero(T))
@@ -679,19 +702,19 @@ function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, step_n::I
     fill!(buffers.fs_mat, zero(T))
     fill!(buffers.fs_mat_reordered, zero(T))
 
-    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         n = length(sys)
         nbs = NoNeighborList(n)
         pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters_nonl, nbs, Val(needs_vir), step_n)
     end
 
-    pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nl = filter(use_neighbors, values(pairwise_inters))
     if length(pairwise_inters_nl) > 0
         pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters_nl, neighbors, Val(needs_vir), step_n)
     end
 
-    for inter_list in values(sys.specific_inter_lists)
+    for inter_list in values(specific_inter_lists)
         specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
                             inter_list, sys.coords, sys.velocities, sys.atoms,
                             sys.boundary, Val(needs_vir), step_n, sys.force_units, Val(T))
@@ -703,7 +726,7 @@ function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, step_n::I
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
 
-    for inter in values(sys.general_inters)
+    for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
     end
