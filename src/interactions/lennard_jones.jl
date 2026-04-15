@@ -1491,41 +1491,50 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
         end
     end
 
-    # Pass 2: Reduce counts and build padded offsets.
-    # This is the standard offsets and split idxs that we will use in the end  
-    resize!(packed_data.offsets, n_atoms + 1) 
+    resize!(packed_data.offsets, n_atoms + 1)
     resize!(packed_data.split_idxs, n_atoms)
 
     current_offset = 1
     @inbounds for i in 1:n_atoms
+        # --- Shared (LJ+Coulomb) Block ---
         packed_data.offsets[i] = current_offset
-
+        both_pos = current_offset
         both_total = 0
-        coul_total = 0
 
         for part in 1:n_parts
-            both_total += packed_data._both_part_counts[_part_index(i, part, n_atoms)]
-            coul_total += packed_data._coul_part_counts[_part_index(i, part, n_atoms)]
+            k = _part_index(i, part, n_atoms)
+            packed_data._both_part_pos[k] = both_pos
+            both_count = packed_data._both_part_counts[k]
+            both_pos += both_count
+            both_total += both_count
         end
 
         packed_data._both_counts[i] = both_total
-        packed_data._coul_counts[i] = coul_total
-
         both_pad = both_total % chunk_size == 0 ? 0 : chunk_size - both_total % chunk_size
         current_offset += both_total + both_pad
 
+        # --- Coulomb-Only Block ---
         packed_data.split_idxs[i] = current_offset
+        coul_pos = current_offset
+        coul_total = 0
 
+        for part in 1:n_parts
+            k = _part_index(i, part, n_atoms)
+            packed_data._coul_part_pos[k] = coul_pos
+            coul_count = packed_data._coul_part_counts[k]
+            coul_pos += coul_count
+            coul_total += coul_count
+        end
+
+        packed_data._coul_counts[i] = coul_total
         coul_pad = coul_total % chunk_size == 0 ? 0 : chunk_size - coul_total % chunk_size
         current_offset += coul_total + coul_pad
     end
 
-    # By the end of part 2 we have the packed_data.offsets and packed_data.split_idxs sorted and know the total length
-
+    # Finalize sizes based on the math above
     packed_data.offsets[n_atoms + 1] = current_offset
-    total_len = current_offset - 1 # what the total length of the final padded list will be 
+    total_len = current_offset - 1
 
-    # Resize the arrays so that they are the length of the total, padded, adjacent list 
     resize!(packed_data.adj_list, total_len)
     resize!(packed_data.sigmas, total_len)
     resize!(packed_data.eps, total_len)
@@ -1533,26 +1542,68 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
     resize!(packed_data.lj_weights, total_len)
     resize!(packed_data.coul_weights, total_len)
 
-    # Pass 3: Convert per-thread counts into per-thread write cursors.
-    @inbounds for i in 1:n_atoms
-        both_pos = packed_data.offsets[i] # initially, offset i is the first slot of atom i's both block
-        coul_pos = packed_data.split_idxs[i] # split idx i is the first slow of atom i's coulomb block 
-        # these positions will increase 
+    # # Pass 2: Reduce counts and build padded offsets.
+    # # This is the standard offsets and split idxs that we will use in the end  
+    # resize!(packed_data.offsets, n_atoms + 1) 
+    # resize!(packed_data.split_idxs, n_atoms)
 
-        for part in 1:n_parts # loop over threads, so for atom i we want to assign where thread 1/2/3 starts writing
-            k = _part_index(i, part, n_atoms) # index for atom i in a global array 
-            # k is the storage location for thread x's data for atom i 
+    # current_offset = 1
+    # @inbounds for i in 1:n_atoms
+    #     packed_data.offsets[i] = current_offset
+
+    #     both_total = 0
+    #     coul_total = 0
+
+    #     for part in 1:n_parts
+    #         both_total += packed_data._both_part_counts[_part_index(i, part, n_atoms)]
+    #         coul_total += packed_data._coul_part_counts[_part_index(i, part, n_atoms)]
+    #     end
+
+    #     packed_data._both_counts[i] = both_total
+    #     packed_data._coul_counts[i] = coul_total
+
+    #     both_pad = both_total % chunk_size == 0 ? 0 : chunk_size - both_total % chunk_size
+    #     current_offset += both_total + both_pad
+
+    #     packed_data.split_idxs[i] = current_offset
+
+    #     coul_pad = coul_total % chunk_size == 0 ? 0 : chunk_size - coul_total % chunk_size
+    #     current_offset += coul_total + coul_pad
+    # end
+
+    # # By the end of part 2 we have the packed_data.offsets and packed_data.split_idxs sorted and know the total length
+
+    # packed_data.offsets[n_atoms + 1] = current_offset
+    # total_len = current_offset - 1 # what the total length of the final padded list will be 
+
+    # # Resize the arrays so that they are the length of the total, padded, adjacent list 
+    # resize!(packed_data.adj_list, total_len)
+    # resize!(packed_data.sigmas, total_len)
+    # resize!(packed_data.eps, total_len)
+    # resize!(packed_data.charges, total_len)
+    # resize!(packed_data.lj_weights, total_len)
+    # resize!(packed_data.coul_weights, total_len)
+
+    # # Pass 3: Convert per-thread counts into per-thread write cursors.
+    # @inbounds for i in 1:n_atoms
+    #     both_pos = packed_data.offsets[i] # initially, offset i is the first slot of atom i's both block
+    #     coul_pos = packed_data.split_idxs[i] # split idx i is the first slow of atom i's coulomb block 
+    #     # these positions will increase 
+
+    #     for part in 1:n_parts # loop over threads, so for atom i we want to assign where thread 1/2/3 starts writing
+    #         k = _part_index(i, part, n_atoms) # index for atom i in a global array 
+    #         # k is the storage location for thread x's data for atom i 
             
-            # both_part_pos is a global 1d array of n_atoms * n_threads
-            packed_data._both_part_pos[k] = both_pos 
-            # for atom i in the global array, thread x needs to start writing at both_pos 
-            both_pos += packed_data._both_part_counts[k] # now advance the counter by how many neighbours that thread has for that atom
+    #         # both_part_pos is a global 1d array of n_atoms * n_threads
+    #         packed_data._both_part_pos[k] = both_pos 
+    #         # for atom i in the global array, thread x needs to start writing at both_pos 
+    #         both_pos += packed_data._both_part_counts[k] # now advance the counter by how many neighbours that thread has for that atom
 
-            # do the same for the coulomb count 
-            packed_data._coul_part_pos[k] = coul_pos
-            coul_pos += packed_data._coul_part_counts[k]
-        end
-    end
+    #         # do the same for the coulomb count 
+    #         packed_data._coul_part_pos[k] = coul_pos
+    #         coul_pos += packed_data._coul_part_counts[k]
+    #     end
+    # end
 
     # After pass 3 we end with a n_atoms * n_threads array that for each atom within each thread has the starting position
 
