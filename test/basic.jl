@@ -482,6 +482,14 @@ end
         strictness=:nowarn,
     )
     gpu_neighbors_ref = find_neighbors(gpu_ref_sys)
+    @test_throws ErrorException System(
+        joinpath(data_dir, "water_3mol_cubic.pdb"),
+        ff;
+        dist_cutoff=dist_cutoff,
+        dist_buffer=0.0u"nm",
+        neighbor_finder_type=DistanceNeighborFinder,
+        strictness=:error,
+    )
 
     for AT in array_list[2:end]
         sys_gpu = System(
