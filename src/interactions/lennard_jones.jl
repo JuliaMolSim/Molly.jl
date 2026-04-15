@@ -1089,9 +1089,6 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                         inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z
                     )
 
- 
-
-
     # Spawn the right number of tasks per cores
     @sync for _ in 1:n_t
         Threads.@spawn begin
@@ -1468,3 +1465,223 @@ function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step
 
     return PackedNeighborList(new_standard, packed_data, soa_params)
 end
+
+# Alternative packed list 
+
+# @inline _simd_pad(count::Int, chunk_size::Int) = (-count) & (chunk_size - 1)
+
+# function build_packed_adj_list!(
+#     packed_data::PackedFlatSoA{T},
+#     atoms,
+#     molly_neighbours,
+#     N_SIMD,
+#     soa_params,
+#     lj_inter,
+#     coul_inter,
+# ) where {T}
+#     n_atoms = length(atoms)
+#     n_pairs = molly_neighbours.n
+#     n_parts = Threads.nthreads()
+#     chunk_size = 2 * N_SIMD
+#     part_len = n_atoms * n_parts
+
+#     @assert ispow2(chunk_size)
+
+#     resize!(packed_data._both_part_counts, part_len)
+#     resize!(packed_data._coul_part_counts, part_len)
+#     resize!(packed_data._both_part_pos, part_len)
+#     resize!(packed_data._coul_part_pos, part_len)
+#     resize!(packed_data._is_both, n_pairs)
+
+#     both_part_counts = packed_data._both_part_counts
+#     coul_part_counts = packed_data._coul_part_counts
+#     both_part_pos = packed_data._both_part_pos
+#     coul_part_pos = packed_data._coul_part_pos
+#     is_both_vec = packed_data._is_both
+#     neighbour_list = molly_neighbours.list
+
+#     fill!(both_part_counts, 0)
+#     fill!(coul_part_counts, 0)
+
+#     # Pass 1:
+#     # Split the Molly neighbour pairs between thread-parts.
+#     # Each part writes only to its own n_atoms-sized slab, so no atomics are needed.
+#     Threads.@threads :static for part in 1:n_parts
+#         first_idx, last_idx = _part_bounds(n_pairs, part, n_parts)
+#         base = (part - 1) * n_atoms
+
+#         @inbounds for idx in first_idx:last_idx
+#             i, j, is_special = neighbour_list[idx]
+
+#             is_both = lj_applies(lj_inter, atoms[i], atoms[j], is_special)
+#             is_both_vec[idx] = is_both
+
+#             ki = base + i
+#             kj = base + j
+
+#             if is_both
+#                 both_part_counts[ki] += 1
+#                 both_part_counts[kj] += 1
+#             else
+#                 coul_part_counts[ki] += 1
+#                 coul_part_counts[kj] += 1
+#             end
+#         end
+#     end
+
+#     resize!(packed_data.offsets, n_atoms + 1)
+#     resize!(packed_data.split_idxs, n_atoms)
+
+#     offsets = packed_data.offsets
+#     split_idxs = packed_data.split_idxs
+
+#     # Pass 2:
+#     # Build final offsets and also convert per-part counts into per-part write cursors.
+#     # This replaces your old separate Pass 2 and Pass 3.
+#     current_offset = 1
+
+#     @inbounds for i in 1:n_atoms
+#         offsets[i] = current_offset
+
+#         both_pos = current_offset
+#         both_total = 0
+
+#         k = i
+#         for _ in 1:n_parts
+#             count = both_part_counts[k]
+#             both_part_pos[k] = both_pos
+#             both_pos += count
+#             both_total += count
+#             k += n_atoms
+#         end
+
+#         current_offset += both_total + _simd_pad(both_total, chunk_size)
+#         split_idxs[i] = current_offset
+
+#         coul_pos = current_offset
+#         coul_total = 0
+
+#         k = i
+#         for _ in 1:n_parts
+#             count = coul_part_counts[k]
+#             coul_part_pos[k] = coul_pos
+#             coul_pos += count
+#             coul_total += count
+#             k += n_atoms
+#         end
+
+#         current_offset += coul_total + _simd_pad(coul_total, chunk_size)
+#     end
+
+#     offsets[n_atoms + 1] = current_offset
+#     total_len = current_offset - 1
+
+#     resize!(packed_data.adj_list, total_len)
+#     resize!(packed_data.sigmas, total_len)
+#     resize!(packed_data.eps, total_len)
+#     resize!(packed_data.charges, total_len)
+#     resize!(packed_data.lj_weights, total_len)
+#     resize!(packed_data.coul_weights, total_len)
+
+#     adj_list = packed_data.adj_list
+#     sigmas = packed_data.sigmas
+#     eps = packed_data.eps
+#     charges = packed_data.charges
+#     lj_weights = packed_data.lj_weights
+#     coul_weights = packed_data.coul_weights
+
+#     atom_sigmas = soa_params.σ
+#     atom_eps = soa_params.ϵ
+#     atom_charges = soa_params.q
+
+#     one_T = one(T)
+#     zero_T = zero(T)
+
+#     # Pass 3:
+#     # Fill arrays in parallel. The cursors are thread-part specific, so these writes
+#     # are race-free without atomics.
+#     Threads.@threads :static for part in 1:n_parts
+#         first_idx, last_idx = _part_bounds(n_pairs, part, n_parts)
+#         base = (part - 1) * n_atoms
+
+#         @inbounds for idx in first_idx:last_idx
+#             i, j, is_special = neighbour_list[idx]
+
+#             coul_w = is_special ? coul_inter.weight_special : one_T
+
+#             if is_both_vec[idx]
+#                 lj_w = is_special ? lj_inter.weight_special : one_T
+
+#                 ki = base + i
+#                 pos_i = both_part_pos[ki]
+#                 both_part_pos[ki] = pos_i + 1
+
+#                 adj_list[pos_i] = j
+#                 sigmas[pos_i] = atom_sigmas[j]
+#                 eps[pos_i] = atom_eps[j]
+#                 charges[pos_i] = atom_charges[j]
+#                 lj_weights[pos_i] = lj_w
+#                 coul_weights[pos_i] = coul_w
+
+#                 kj = base + j
+#                 pos_j = both_part_pos[kj]
+#                 both_part_pos[kj] = pos_j + 1
+
+#                 adj_list[pos_j] = i
+#                 sigmas[pos_j] = atom_sigmas[i]
+#                 eps[pos_j] = atom_eps[i]
+#                 charges[pos_j] = atom_charges[i]
+#                 lj_weights[pos_j] = lj_w
+#                 coul_weights[pos_j] = coul_w
+#             else
+#                 ki = base + i
+#                 pos_i = coul_part_pos[ki]
+#                 coul_part_pos[ki] = pos_i + 1
+
+#                 adj_list[pos_i] = j
+#                 charges[pos_i] = atom_charges[j]
+#                 coul_weights[pos_i] = coul_w
+
+#                 kj = base + j
+#                 pos_j = coul_part_pos[kj]
+#                 coul_part_pos[kj] = pos_j + 1
+
+#                 adj_list[pos_j] = i
+#                 charges[pos_j] = atom_charges[i]
+#                 coul_weights[pos_j] = coul_w
+#             end
+#         end
+#     end
+
+#     # Pass 4:
+#     # Padding. After Pass 3, the final part cursor is exactly the first padding slot.
+#     # So we no longer need _both_counts or _coul_counts.
+#     last_part_base = (n_parts - 1) * n_atoms
+
+#     Threads.@threads :static for i in 1:n_atoms
+#         @inbounds begin
+#             both_pad_start = both_part_pos[last_part_base + i]
+#             both_pad_stop = split_idxs[i] - 1
+
+#             for pos in both_pad_start:both_pad_stop
+#                 adj_list[pos] = i
+#                 sigmas[pos] = one_T
+#                 eps[pos] = one_T
+#                 charges[pos] = zero_T
+#                 lj_weights[pos] = zero_T
+#                 coul_weights[pos] = zero_T
+#             end
+
+#             coul_pad_start = coul_part_pos[last_part_base + i]
+#             coul_pad_stop = offsets[i + 1] - 1
+
+#             for pos in coul_pad_start:coul_pad_stop
+#                 adj_list[pos] = i
+#                 charges[pos] = zero_T
+#                 coul_weights[pos] = zero_T
+#             end
+#         end
+#     end
+
+#     return packed_data
+# end
