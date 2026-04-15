@@ -784,6 +784,22 @@ The available general interactions are:
 Some interactions combine instances of the above.
 For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
 
+By default, functions like [`potential_energy`](@ref) and [`forces`](@ref) use the interactions in the system.
+However, different interactions can be passed as keyword arguments.
+This can be useful for isolating the contribution of individual interactions:
+```julia
+# Evaluate the potential energy of the system using the interactions in the system
+potential_energy(sys)
+
+# Evaluate the potential energy of the system using only the Lennard-Jones potential
+potential_energy(
+    sys;
+    pairwise_inters=(LennardJones(),),
+    specific_inter_lists=(),
+    general_inters=(),
+)
+```
+
 ### Pairwise interactions
 
 Some pairwise interactions define mixing functions which determine how the parameters from each atom are combined.
