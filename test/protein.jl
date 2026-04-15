@@ -425,6 +425,10 @@ end
             strictness=:nowarn,
         )
         show(devnull, ff)
+        @test_throws ErrorException MolecularForceField(
+            joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+            strictness=:error,
+        )
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
