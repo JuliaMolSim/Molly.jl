@@ -11,6 +11,7 @@ export
     LangevinSplitting,
     OverdampedLangevin,
     NoseHoover,
+    MTSIntegrator,
     ReplicaExchangeMD,
     simulate_remd!,
     remd_exchange!,
@@ -1072,6 +1073,72 @@ end
         next_nograd!(progress)
     end
     return sys
+end
+
+"""
+    MTSIntegrator()
+
+
+"""
+struct MTSIntegrator{T, NF, NP, NS, NG, C}
+    dt::T
+    ordered_fractions::NTuple{NF, Int}
+    pi_fractions::NTuple{NP, Int}
+    si_fractions::NTuple{NS, Int}
+    gi_fractions::NTuple{NG, Int}
+    coupling::C
+    remove_CM_motion::Int
+end
+
+function MTSIntegrator(; dt, pi_fractions=(), si_fractions=(), gi_fractions=(),
+                       coupling=nothing, remove_CM_motion=1)
+    if iszero(length(pi_fractions)) && iszero(length(si_fractions)) && iszero(length(gi_fractions))
+        throw(ArgumentError("MTSIntegrator requires one of pi_fractions, si_fractions " *
+                            "or gi_fractions to be provided"))
+    end
+    fractions_set = Set((pi_fractions..., si_fractions..., gi_fractions...))
+    ordered_fractions = Tuple(sort(collect(fractions_set)))
+    if first(ordered_fractions) < 1
+        throw(ArgumentError("MTSIntegrator fraction $(first(ordered_fractions)) cannot " *
+                            "be less than 1"))
+    elseif first(ordered_fractions) > 1
+        throw(ArgumentError("MTSIntegrator fractions must include 1, lowest fraction " *
+                            "is $(first(ordered_fractions))"))
+    end
+    for i in eachindex(ordered_fractions)
+        if i > 1 && !iszero(ordered_fractions[i] % ordered_fractions[i - 1])
+            throw(ArgumentError("MTSIntegrator fraction $(ordered_fractions[i]) not a " *
+                                "multiple of fraction $(ordered_fractions[i - 1])"))
+        end
+    end
+    return MTSIntegrator(dt, ordered_fractions, pi_fractions, si_fractions, gi_fractions,
+                         coupling, Int(remove_CM_motion))
+end
+
+function mts_interaction_groups(sys, sim::MTSIntegrator{<:Any, <:Any, NP, NS, NG}) where {NP, NS, NG}
+    if length(sys.pairwise_inters) != NP
+        throw(ArgumentError("the system has $(length(sys.pairwise_inters)) pairwise " *
+                            "interactions but there are $NP in the MTSIntegrator"))
+    elseif length(sys.specific_inter_lists) != NS
+        throw(ArgumentError("the system has $(length(sys.specific_inter_lists)) specific " *
+                            "interactions but there are $NS in the MTSIntegrator"))
+    elseif length(sys.general_inters) != NG
+        throw(ArgumentError("the system has $(length(sys.general_inters)) general " *
+                            "interactions but there are $NG in the MTSIntegrator"))
+    end
+    fraction_inters = map(sim.ordered_fractions) do f
+        pi_inds = filter(i -> sim.pi_fractions[i] >= f, 1:NP)
+        si_inds = filter(i -> sim.si_fractions[i] >= f, 1:NS)
+        gi_inds = filter(i -> sim.gi_fractions[i] >= f, 1:NG)
+        # Iteration with Tuple works for named tuples, getindex with array doesn't
+        return (
+            dt=(sim.dt / f),
+            pairwise_inters=Tuple(sys.pairwise_inters[i] for i in pi_inds),
+            specific_inter_lists=Tuple(sys.specific_inter_lists[i] for i in si_inds),
+            general_inters=Tuple(sys.general_inters[i] for i in gi_inds),
+        )
+    end
+    return fraction_inters
 end
 
 @doc raw"""
