@@ -1134,7 +1134,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
     # Multithreading part 
     n_t = Threads.nthreads()
-    num_chunks = 8 * n_t
+    num_chunks = 2 * n_t #T8 = 8xn_t, #T16 = 4xn_t, #T32 = 4xn_t, #T64 = 2/1xn_t
     n_atoms = length(coords)
 
     # Allocate chunks
