@@ -883,7 +883,32 @@ end
 
 const SIMD_WIDTH = 8
 
-struct PackedFlatSoA{T}
+# struct PackedFlatSoA{T}
+#     offsets::Vector{Int}
+#     split_idxs::Vector{Int}
+#     adj_list::Vector{Int}
+#     sigmas::Vector{T}
+#     eps::Vector{T}
+#     charges::Vector{T}
+#     lj_weights::Vector{T}
+#     coul_weights::Vector{T}
+
+#     # Thread-local scratchpads (Flattened 1D arrays to prevent false sharing)
+#     _both_counts::Vector{Int}
+#     _coul_counts::Vector{Int}
+#     _both_part_counts::Vector{Int}
+#     _coul_part_counts::Vector{Int}
+#     _both_part_pos::Vector{Int}
+#     _coul_part_pos::Vector{Int}
+#     _is_both::Vector{Bool}
+# end
+
+abstract type PackedLayout end
+struct LJOnlyLayout <: PackedLayout end
+struct CoulOnlyLayout <: PackedLayout end
+struct LJCoulSplitLayout <: PackedLayout end
+
+struct PackedFlatSoA{T, L<:PackedLayout}
     offsets::Vector{Int}
     split_idxs::Vector{Int}
     adj_list::Vector{Int}
@@ -893,7 +918,6 @@ struct PackedFlatSoA{T}
     lj_weights::Vector{T}
     coul_weights::Vector{T}
 
-    # Thread-local scratchpads (Flattened 1D arrays to prevent false sharing)
     _both_counts::Vector{Int}
     _coul_counts::Vector{Int}
     _both_part_counts::Vector{Int}
@@ -949,6 +973,18 @@ function Base.getproperty(nl::PackedNeighborList, sym::Symbol)
         return getproperty(getfield(nl, :standard_list), sym)
     end
 end
+
+canonical_inters(inters::Tuple{<:SIMDLennardJones}) = inters
+canonical_inters(inters::Tuple{<:SIMDCoulomb}) = inters
+
+canonical_inters(inters::Tuple{<:SIMDLennardJones, <:SIMDCoulomb}) = inters
+canonical_inters(inters::Tuple{<:SIMDCoulomb, <:SIMDLennardJones}) = (inters[2], inters[1])
+
+layout_type(::Tuple{<:SIMDLennardJones}) = LJOnlyLayout
+layout_type(::Tuple{<:SIMDCoulomb}) = CoulOnlyLayout
+layout_type(::Tuple{<:SIMDLennardJones, <:SIMDCoulomb}) = LJCoulSplitLayout
+
+
 
 Base.iterate(nl::PackedNeighborList, args...) = iterate(nl.standard_list, args...)
 Base.length(nl::PackedNeighborList) = length(nl.standard_list)
@@ -1048,82 +1084,82 @@ end
 
 
 
-function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
-    velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
-    pairwise_inters_nonl, 
-    pairwise_inters_nl::Tuple, 
-    ::Val{n_threads}, ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
+# function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+#     velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
+#     pairwise_inters_nonl, 
+#     pairwise_inters_nl::Tuple, 
+#     ::Val{n_threads}, ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
 
-    fill!(fs_nounits, zero(eltype(fs_nounits)))
-    #inter = pairwise_inters_nl[1]
+#     fill!(fs_nounits, zero(eltype(fs_nounits)))
+#     #inter = pairwise_inters_nl[1]
     
-    # Unpack data 
-    packed_data = neighbors.packed_data
-    soa_params = neighbors.soa_params
+#     # Unpack data 
+#     packed_data = neighbors.packed_data
+#     soa_params = neighbors.soa_params
 
-    # Setup box and types 
-    FT = eltype(eltype(fs_nounits))
-    flat_coords = reinterpret(FT, coords) # zero allocation flattening of the coords as flat float64 array for vgather
+#     # Setup box and types 
+#     FT = eltype(eltype(fs_nounits))
+#     flat_coords = reinterpret(FT, coords) # zero allocation flattening of the coords as flat float64 array for vgather
 
-    # Calculate box metrics for distances
-    box_x = ustrip(boundary.side_lengths[1])
-    box_y = ustrip(boundary.side_lengths[2])
-    box_z = ustrip(boundary.side_lengths[3])
-    inv_box_x = 1.0 / box_x
-    inv_box_y = 1.0 / box_y
-    inv_box_z = 1.0 / box_z
+#     # Calculate box metrics for distances
+#     box_x = ustrip(boundary.side_lengths[1])
+#     box_y = ustrip(boundary.side_lengths[2])
+#     box_z = ustrip(boundary.side_lengths[3])
+#     inv_box_x = 1.0 / box_x
+#     inv_box_y = 1.0 / box_y
+#     inv_box_z = 1.0 / box_z
 
 
 
-    # Multithreading part 
-    n_t = Threads.nthreads()
-    num_chunks = 2 * n_t #T8 = 8xn_t, #T16 = 4xn_t, #T32 = 4xn_t, #T64 = 2/1xn_t
-    n_atoms = length(coords)
+#     # Multithreading part 
+#     n_t = Threads.nthreads()
+#     num_chunks = 2 * n_t #T8 = 8xn_t, #T16 = 4xn_t, #T32 = 4xn_t, #T64 = 2/1xn_t
+#     n_atoms = length(coords)
 
-    # Allocate chunks
-    chunk_size = cld(n_atoms, num_chunks)
-    counter = Threads.Atomic{Int}(1) # hardware counter
+#     # Allocate chunks
+#     chunk_size = cld(n_atoms, num_chunks)
+#     counter = Threads.Atomic{Int}(1) # hardware counter
     
-    sim_params = (
-                        box_x = box_x, box_y = box_y, box_z = box_z,
-                        inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z
-                    )
+#     sim_params = (
+#                         box_x = box_x, box_y = box_y, box_z = box_z,
+#                         inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z
+#                     )
 
-    # Spawn the right number of tasks per cores
-    @sync for _ in 1:n_t
-        Threads.@spawn begin
+#     # Spawn the right number of tasks per cores
+#     @sync for _ in 1:n_t
+#         Threads.@spawn begin
             
-            while true
-                # Get chunk then add 1 
-                chunk_id = Threads.atomic_add!(counter, 1)
+#             while true
+#                 # Get chunk then add 1 
+#                 chunk_id = Threads.atomic_add!(counter, 1)
                 
-                # Break if it exceeds
-                if chunk_id > num_chunks
-                    break
-                end
+#                 # Break if it exceeds
+#                 if chunk_id > num_chunks
+#                     break
+#                 end
 
-                start_idx = (chunk_id - 1) * chunk_size + 1
-                end_idx   = min(chunk_id * chunk_size, n_atoms)
+#                 start_idx = (chunk_id - 1) * chunk_size + 1
+#                 end_idx   = min(chunk_id * chunk_size, n_atoms)
                 
-                   # Unpack the tuple here so simd_chunk_forces! gets strict types
-                coul_inter = pairwise_inters_nl[1]
-                lj_inter = pairwise_inters_nl[2]
+#                 # Unpack the tuple here so simd_chunk_forces! gets strict types
+#                 coul_inter = pairwise_inters_nl[1]
+#                 lj_inter = pairwise_inters_nl[2]
 
-                lj_cutoff_2 = extract_cutoff_sq(lj_inter.cutoff)
-                coul_cutoff_2 = extract_cutoff_sq(coul_inter.cutoff)
+#                 lj_cutoff_2 = extract_cutoff_sq(lj_inter.cutoff)
+#                 coul_cutoff_2 = extract_cutoff_sq(coul_inter.cutoff)
 
-                for i in start_idx:end_idx
+#                 for i in start_idx:end_idx
                     
 
-                    # Pass lj_inter and coul_inter explicitly!
-                    simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, lj_inter, coul_inter, lj_cutoff_2, coul_cutoff_2, Val(SIMD_WIDTH))
-                end
-            end
-        end
-    end
+#                     # Pass lj_inter and coul_inter explicitly!
+#                     simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, lj_inter, coul_inter, lj_cutoff_2, coul_cutoff_2, Val(SIMD_WIDTH))
+#                 end
+#             end
+#         end
+#     end
 
-    return fs_nounits
-end
+#     return fs_nounits
+# end
 
 @inline function gather_xyz(flat_coords, neigh_idxs)
     idx_x = neigh_idxs * 3 - 2
@@ -1148,101 +1184,101 @@ end
     end
 end
     
-@inline function simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, lj_inter, coul_inter, lj_cutoff_2, coul_cutoff_2,
-    ::Val{N_SIMD}) where {N_SIMD}
+# @inline function simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, lj_inter, coul_inter, lj_cutoff_2, coul_cutoff_2,
+#     ::Val{N_SIMD}) where {N_SIMD}
 
-    VFloat = Vec{N_SIMD, Float64}
-    VInt = Vec{N_SIMD, Int}
+#     VFloat = Vec{N_SIMD, Float64}
+#     VInt = Vec{N_SIMD, Int}
 
-    xi = ustrip(coords[i][1])
-    yi = ustrip(coords[i][2])
-    zi = ustrip(coords[i][3])
+#     xi = ustrip(coords[i][1])
+#     yi = ustrip(coords[i][2])
+#     zi = ustrip(coords[i][3])
 
-    atom_i_proxy = (σ = soa_params.σ[i], ϵ = soa_params.ϵ[i], q = soa_params.q[i])
+#     atom_i_proxy = (σ = soa_params.σ[i], ϵ = soa_params.ϵ[i], q = soa_params.q[i])
 
-    f_ix_vec_1 = zero(VFloat); f_iy_vec_1 = zero(VFloat); f_iz_vec_1 = zero(VFloat)
-    f_ix_vec_2 = zero(VFloat); f_iy_vec_2 = zero(VFloat); f_iz_vec_2 = zero(VFloat)
+#     f_ix_vec_1 = zero(VFloat); f_iy_vec_1 = zero(VFloat); f_iz_vec_1 = zero(VFloat)
+#     f_ix_vec_2 = zero(VFloat); f_iy_vec_2 = zero(VFloat); f_iz_vec_2 = zero(VFloat)
 
-    both_start = packed_data.offsets[i]
-    both_end   = packed_data.split_idxs[i] - 1
+#     both_start = packed_data.offsets[i]
+#     both_end   = packed_data.split_idxs[i] - 1
 
-    @inbounds for j in both_start:(2 * N_SIMD):both_end
-        neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
-        neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
+#     @inbounds for j in both_start:(2 * N_SIMD):both_end
+#         neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
+#         neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
 
-        # Full Memory Load
-        atom_j_proxy_1 = (
-            σ = vload(VFloat, packed_data.sigmas, j),
-            ϵ = vload(VFloat, packed_data.eps, j),
-            q = vload(VFloat, packed_data.charges, j)
-        )
-        atom_j_proxy_2 = (
-            σ = vload(VFloat, packed_data.sigmas, j + N_SIMD),
-            ϵ = vload(VFloat, packed_data.eps, j + N_SIMD),
-            q = vload(VFloat, packed_data.charges, j + N_SIMD)
-        )
+#         # Full Memory Load
+#         atom_j_proxy_1 = (
+#             σ = vload(VFloat, packed_data.sigmas, j),
+#             ϵ = vload(VFloat, packed_data.eps, j),
+#             q = vload(VFloat, packed_data.charges, j)
+#         )
+#         atom_j_proxy_2 = (
+#             σ = vload(VFloat, packed_data.sigmas, j + N_SIMD),
+#             ϵ = vload(VFloat, packed_data.eps, j + N_SIMD),
+#             q = vload(VFloat, packed_data.charges, j + N_SIMD)
+#         )
 
-        lj_weights_1 = vload(VFloat, packed_data.lj_weights, j)
-        lj_weights_2 = vload(VFloat, packed_data.lj_weights, j + N_SIMD)
-        coul_weights_1 = vload(VFloat, packed_data.coul_weights, j)
-        coul_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
+#         lj_weights_1 = vload(VFloat, packed_data.lj_weights, j)
+#         lj_weights_2 = vload(VFloat, packed_data.lj_weights, j + N_SIMD)
+#         coul_weights_1 = vload(VFloat, packed_data.coul_weights, j)
+#         coul_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
 
-        neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
-        neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
+#         neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
+#         neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
 
-        # 🚨 HOISTED GEOMETRY: Calculated strictly ONCE per pair!
-        dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
-        dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
+#         # 🚨 HOISTED GEOMETRY: Calculated strictly ONCE per pair!
+#         dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
+#         dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
 
-        # Apply LJ
-        lj_x_1, lj_y_1, lj_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, lj_inter, lj_weights_1, lj_cutoff_2)
-        lj_x_2, lj_y_2, lj_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, lj_inter, lj_weights_2, lj_cutoff_2)
+#         # Apply LJ
+#         lj_x_1, lj_y_1, lj_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, lj_inter, lj_weights_1, lj_cutoff_2)
+#         lj_x_2, lj_y_2, lj_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, lj_inter, lj_weights_2, lj_cutoff_2)
 
-        # Apply Coulomb (REUSING THE SAME GEOMETRY!)
-        coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
-        coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
+#         # Apply Coulomb (REUSING THE SAME GEOMETRY!)
+#         coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
+#         coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
 
-        f_ix_vec_1 += lj_x_1 + coul_x_1; f_iy_vec_1 += lj_y_1 + coul_y_1; f_iz_vec_1 += lj_z_1 + coul_z_1
-        f_ix_vec_2 += lj_x_2 + coul_x_2; f_iy_vec_2 += lj_y_2 + coul_y_2; f_iz_vec_2 += lj_z_2 + coul_z_2
-    end
+#         f_ix_vec_1 += lj_x_1 + coul_x_1; f_iy_vec_1 += lj_y_1 + coul_y_1; f_iz_vec_1 += lj_z_1 + coul_z_1
+#         f_ix_vec_2 += lj_x_2 + coul_x_2; f_iy_vec_2 += lj_y_2 + coul_y_2; f_iz_vec_2 += lj_z_2 + coul_z_2
+#     end
 
-    coul_start = packed_data.split_idxs[i]
-    coul_end   = packed_data.offsets[i + 1] - 1
+#     coul_start = packed_data.split_idxs[i]
+#     coul_end   = packed_data.offsets[i + 1] - 1
 
-    @inbounds for j in coul_start:(2 * N_SIMD):coul_end
-        neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
-        neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
+#     @inbounds for j in coul_start:(2 * N_SIMD):coul_end
+#         neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
+#         neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
 
-        # ONLY Load Charges
-        atom_j_proxy_1 = (σ = zero(VFloat), ϵ = zero(VFloat), q = vload(VFloat, packed_data.charges, j))
-        atom_j_proxy_2 = (σ = zero(VFloat), ϵ = zero(VFloat), q = vload(VFloat, packed_data.charges, j + N_SIMD))
+#         # ONLY Load Charges
+#         atom_j_proxy_1 = (σ = zero(VFloat), ϵ = zero(VFloat), q = vload(VFloat, packed_data.charges, j))
+#         atom_j_proxy_2 = (σ = zero(VFloat), ϵ = zero(VFloat), q = vload(VFloat, packed_data.charges, j + N_SIMD))
 
-        coul_weights_1 = vload(VFloat, packed_data.coul_weights, j)
-        coul_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
+#         coul_weights_1 = vload(VFloat, packed_data.coul_weights, j)
+#         coul_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
 
-        neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
-        neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
+#         neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
+#         neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
 
-        # Hoisted Geometry
-        dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
-        dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
+#         # Hoisted Geometry
+#         dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
+#         dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
 
-        # Apply Coulomb ONLY
-        coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
-        coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
+#         # Apply Coulomb ONLY
+#         coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
+#         coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
 
-        f_ix_vec_1 += coul_x_1; f_iy_vec_1 += coul_y_1; f_iz_vec_1 += coul_z_1
-        f_ix_vec_2 += coul_x_2; f_iy_vec_2 += coul_y_2; f_iz_vec_2 += coul_z_2
-    end
+#         f_ix_vec_1 += coul_x_1; f_iy_vec_1 += coul_y_1; f_iz_vec_1 += coul_z_1
+#         f_ix_vec_2 += coul_x_2; f_iy_vec_2 += coul_y_2; f_iz_vec_2 += coul_z_2
+#     end
 
-    f_ix = sum(f_ix_vec_1 + f_ix_vec_2)
-    f_iy = sum(f_iy_vec_1 + f_iy_vec_2)
-    f_iz = sum(f_iz_vec_1 + f_iz_vec_2)
+#     f_ix = sum(f_ix_vec_1 + f_ix_vec_2)
+#     f_iy = sum(f_iy_vec_1 + f_iy_vec_2)
+#     f_iz = sum(f_iz_vec_1 + f_iz_vec_2)
 
-    @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
+#     @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
 
     
-end
+# end
 
 
 @inline _part_index(i, part, n_atoms) = i + (part - 1) * n_atoms # index for atom i in the global 1D array
@@ -1257,7 +1293,252 @@ end
 @inline lj_applies(lj_inter, atom_i, atom_j, is_special) =
     !Molly.shortcut_pair(lj_inter.shortcut, atom_i, atom_j, is_special)
 
-function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbours, N_SIMD, soa_params, lj_inter, coul_inter)
+# function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbours, N_SIMD, soa_params, lj_inter, coul_inter)
+#     n_atoms = length(atoms)
+#     n_pairs = molly_neighbours.n # total number of neighbour list pairs
+#     n_parts = Threads.nthreads() # number of threads - the neighbour list gets split into this many parts 
+#     chunk_size = 2 * N_SIMD # how large a chunk is since its unrolled 2x 
+#     part_len = n_atoms * n_parts # each thread gets n_atom slots so total length 
+
+#     resize!(packed_data._both_counts, n_atoms) # vector of ints of size n_atoms - stores no. both counts for each atom
+#     resize!(packed_data._coul_counts, n_atoms) # vector of ints of size n_atoms - stores no. coul counts for each atom
+#     resize!(packed_data._both_part_counts, part_len) # vector of ints of size n_atoms * n_threads - each thread writes to its own n_atoms section?
+#     resize!(packed_data._coul_part_counts, part_len) # same as above except coul count rather than both count 
+#     resize!(packed_data._both_part_pos, part_len) # ? 
+#     resize!(packed_data._coul_part_pos, part_len) # ? 
+#     resize!(packed_data._is_both, n_pairs) # ? 
+
+#     # initialise everythin with 0's 
+#     fill!(packed_data._both_counts, 0)
+#     fill!(packed_data._coul_counts, 0)
+#     fill!(packed_data._both_part_counts, 0)
+#     fill!(packed_data._coul_part_counts, 0)
+
+#     # Pass 1: Classify and count, thread-locally by atom.
+#     Threads.@threads for part in 1:n_parts
+#         first_idx, last_idx = _part_bounds(n_pairs, part, n_parts) # get the first and last index of the thread 
+
+#         @inbounds for idx in first_idx:last_idx
+#             i, j, is_special = molly_neighbours.list[idx]
+#             is_both = lj_applies(lj_inter, atoms[i], atoms[j], is_special)
+#             packed_data._is_both[idx] = is_both
+
+#             if is_both
+#                 packed_data._both_part_counts[_part_index(i, part, n_atoms)] += 1
+#                 packed_data._both_part_counts[_part_index(j, part, n_atoms)] += 1
+#             else
+#                 packed_data._coul_part_counts[_part_index(i, part, n_atoms)] += 1
+#                 packed_data._coul_part_counts[_part_index(j, part, n_atoms)] += 1
+#             end
+#         end
+#     end
+
+#     # This is the standard offsets and split idxs that we will use in the end  
+#     resize!(packed_data.offsets, n_atoms + 1)
+#     resize!(packed_data.split_idxs, n_atoms)
+
+#     # Pass 2 and pass 3: Reduce counts, build padded offsets, and convert per-thread counts into per-thread write cursors.
+#     current_offset = 1
+#     @inbounds for i in 1:n_atoms
+#         # Shared (LJ+Coulomb) Block 
+#         packed_data.offsets[i] = current_offset # initially, offset i is the first slot of atom i's both block
+#         both_pos = current_offset # the both_pos will increase 
+#         both_total = 0
+
+#         for part in 1:n_parts # loop over threads, so for atom i we want to assign where thread 1/2/3 starts writing
+#             k = _part_index(i, part, n_atoms) # index for atom i in a global array 
+#             # k is the storage location for thread 'parts' data for atom i 
+#             # both_part_pos is a global 1d array of n_atoms * n_threads
+#             packed_data._both_part_pos[k] = both_pos     # for atom i in the global array, thread x needs to start writing at both_pos 
+#             both_count = packed_data._both_part_counts[k]
+#             both_pos += both_count # now advance the counter by how many neighbours that thread has for that atom
+#             both_total += both_count
+#         end
+
+#         packed_data._both_counts[i] = both_total
+#         both_pad = both_total % chunk_size == 0 ? 0 : chunk_size - both_total % chunk_size
+#         current_offset += both_total + both_pad
+
+#         # --- Coulomb-Only Block ---
+#         packed_data.split_idxs[i] = current_offset
+#         coul_pos = current_offset # split idx i is the first slot of atom i's coulomb block 
+#         coul_total = 0
+
+#         for part in 1:n_parts
+#             k = _part_index(i, part, n_atoms)
+#             packed_data._coul_part_pos[k] = coul_pos
+#             coul_count = packed_data._coul_part_counts[k]
+#             coul_pos += coul_count
+#             coul_total += coul_count
+#         end
+
+#         packed_data._coul_counts[i] = coul_total
+#         coul_pad = coul_total % chunk_size == 0 ? 0 : chunk_size - coul_total % chunk_size
+#         current_offset += coul_total + coul_pad
+#     end
+
+#     # By the end of part 2 we have the packed_data.offsets and packed_data.split_idxs sorted and know the total length
+#     # After pass 3 we end with a n_atoms * n_threads array that for each atom within each thread has the starting position
+
+#     # Finalize sizes based on the math above
+#     packed_data.offsets[n_atoms + 1] = current_offset
+#     total_len = current_offset - 1 # what the total length of the final padded list will be 
+
+#     # # Resize the arrays so that they are the length of the total, padded, adjacent list 
+#     resize!(packed_data.adj_list, total_len)
+#     resize!(packed_data.sigmas, total_len)
+#     resize!(packed_data.eps, total_len)
+#     resize!(packed_data.charges, total_len)
+#     resize!(packed_data.lj_weights, total_len)
+#     resize!(packed_data.coul_weights, total_len)
+
+#     # Pass 4: Fill arrays in parallel --> this is like pass 1 but we actually fill final array 
+#     Threads.@threads for part in 1:n_parts
+#         first_idx, last_idx = _part_bounds(n_pairs, part, n_parts) # split the pairs by parts and bound each thread
+
+#         @inbounds for idx in first_idx:last_idx # same as pass one 
+#             i, j, is_special = molly_neighbours.list[idx]
+#             coul_w = is_special ? coul_inter.weight_special : 1.0 # standard 
+
+#             if packed_data._is_both[idx]
+#                 # remember part index ensures you get the write global index 
+#                 lj_w = is_special ? lj_inter.weight_special : 1.0
+
+#                 pos_i = packed_data._both_part_pos[_part_index(i, part, n_atoms)] # retrieve the index of atom i to write to 
+#                 packed_data._both_part_pos[_part_index(i, part, n_atoms)] = pos_i + 1 # add one for atom i since we are writing to the original index
+
+#                 # Write the atom data of the neighbour j to atom i in the packed list 
+#                 packed_data.adj_list[pos_i] = j
+#                 packed_data.sigmas[pos_i] = soa_params.σ[j]
+#                 packed_data.eps[pos_i] = soa_params.ϵ[j]
+#                 packed_data.charges[pos_i] = soa_params.q[j]
+#                 packed_data.lj_weights[pos_i] = lj_w
+#                 packed_data.coul_weights[pos_i] = coul_w
+
+#                 # Do the same thing for atom j, the other half of the neighbour pair 
+#                 pos_j = packed_data._both_part_pos[_part_index(j, part, n_atoms)]
+#                 packed_data._both_part_pos[_part_index(j, part, n_atoms)] = pos_j + 1 # remember to add 1 to the position in the global 1D array 
+
+#                 # Fill the details of the atom i at the position j 
+#                 packed_data.adj_list[pos_j] = i
+#                 packed_data.sigmas[pos_j] = soa_params.σ[i]
+#                 packed_data.eps[pos_j] = soa_params.ϵ[i]
+#                 packed_data.charges[pos_j] = soa_params.q[i]
+#                 packed_data.lj_weights[pos_j] = lj_w
+#                 packed_data.coul_weights[pos_j] = coul_w
+#             else
+#                 # if its not both then write to coulomb 
+#                 # _is_both did one check at the start and was the length of the neighbour pairs
+#                 pos_i = packed_data._coul_part_pos[_part_index(i, part, n_atoms)]
+#                 packed_data._coul_part_pos[_part_index(i, part, n_atoms)] = pos_i + 1
+
+#                 packed_data.adj_list[pos_i] = j
+#                 packed_data.charges[pos_i] = soa_params.q[j]
+#                 packed_data.coul_weights[pos_i] = coul_w
+
+#                 pos_j = packed_data._coul_part_pos[_part_index(j, part, n_atoms)]
+#                 packed_data._coul_part_pos[_part_index(j, part, n_atoms)] = pos_j + 1
+
+#                 packed_data.adj_list[pos_j] = i
+#                 packed_data.charges[pos_j] = soa_params.q[i]
+#                 packed_data.coul_weights[pos_j] = coul_w
+#             end
+#         end
+#     end
+
+#     # Pass 5: Pad rows in parallel, per atom 
+#     Threads.@threads for i in 1:n_atoms
+#         @inbounds begin
+#             for pos in (packed_data.offsets[i] + packed_data._both_counts[i]):(packed_data.split_idxs[i] - 1)
+#                 # look at where the offset was + the total counts was until where the split index begins 
+#                 # pad with empty atoms
+#                 packed_data.adj_list[pos] = i
+#                 packed_data.sigmas[pos] = 1.0
+#                 packed_data.eps[pos] = 1.0
+#                 packed_data.charges[pos] = 0.0
+#                 packed_data.lj_weights[pos] = 0.0
+#                 packed_data.coul_weights[pos] = 0.0
+#             end
+
+#             # look at where the split index + coulomb counts ends until where the next index begins and pad 
+#             for pos in (packed_data.split_idxs[i] + packed_data._coul_counts[i]):(packed_data.offsets[i + 1] - 1)
+#                 packed_data.adj_list[pos] = i
+#                 packed_data.charges[pos] = 0.0
+#                 packed_data.coul_weights[pos] = 0.0
+#             end
+#         end
+#     end
+
+#     return packed_data
+# end
+
+# function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step_n::Integer, force_tracking::Bool=false; kwargs...)
+#     old_standard = isnothing(old_neighbors) ? nothing : old_neighbors.standard_list
+#     new_standard = Molly.find_neighbors(sys, nf.base_finder, old_standard, step_n, force_tracking; kwargs...)
+#     needs_rebuild = isnothing(old_neighbors) || force_tracking || iszero(step_n % nf.base_finder.n_steps)
+
+#     if !needs_rebuild
+#         return old_neighbors
+#     end
+
+#     if isnothing(old_neighbors)
+#         soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms], q = [ustrip(a.charge) for a in sys.atoms])
+        
+#         # Initialize empty arrays; the builder handles all resizing
+#         packed_data = PackedFlatSoA{Float64}(
+#             Int[], Int[], Int[], Float64[], Float64[], Float64[], Float64[], Float64[],
+#             Int[], Int[], Int[], Int[], Int[], Int[], Bool[]
+#         )
+#     else
+#         soa_params = old_neighbors.soa_params
+#         packed_data = old_neighbors.packed_data
+#     end
+
+#     coul_inter = nf.inter[1]
+#     lj_inter = nf.inter[2] 
+    
+#     build_packed_adj_list!(packed_data, sys.atoms, new_standard, 8, soa_params, lj_inter, coul_inter)
+
+#     return PackedNeighborList(new_standard, packed_data, soa_params)
+# end
+
+function empty_packed_data(::Type{L}, ::Type{T}=Float64) where {L<:PackedLayout, T}
+    return PackedFlatSoA{T, L}(
+        Int[], Int[], Int[],
+        T[], T[], T[], T[], T[],
+        Int[], Int[], Int[], Int[], Int[], Int[], Bool[],
+    )
+end
+
+function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step_n::Integer, force_tracking::Bool=false; kwargs...)
+    old_standard = isnothing(old_neighbors) ? nothing : old_neighbors.standard_list
+    new_standard = Molly.find_neighbors(sys, nf.base_finder, old_standard, step_n, force_tracking; kwargs...)
+    needs_rebuild = isnothing(old_neighbors) || force_tracking || iszero(step_n % nf.base_finder.n_steps)
+
+    if !needs_rebuild
+        return old_neighbors
+    end
+
+    canonical = canonical_inters(nf.inter)
+
+    if isnothing(old_neighbors)
+        soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms], q = [ustrip(a.charge) for a in sys.atoms])
+        
+        # Initialize empty arrays; the builder handles all resizing
+        packed_data = empty_packed_data(layout_type(canonical), Float64)
+    else
+        soa_params = old_neighbors.soa_params
+        packed_data = old_neighbors.packed_data
+    end
+    
+    build_packed_adj_list!(packed_data, sys.atoms, new_standard, SIMD_WIDTH, soa_params, canonical...,)
+
+    return PackedNeighborList(new_standard, packed_data, soa_params)
+end
+
+function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, atoms, molly_neighbours, N_SIMD, soa_params,
+    lj_inter::SIMDLennardJones, coul_inter::SIMDCoulomb,) where {T}
+
     n_atoms = length(atoms)
     n_pairs = molly_neighbours.n # total number of neighbour list pairs
     n_parts = Threads.nthreads() # number of threads - the neighbour list gets split into this many parts 
@@ -1436,37 +1717,473 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
     return packed_data
 end
 
-function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step_n::Integer, force_tracking::Bool=false; kwargs...)
-    old_standard = isnothing(old_neighbors) ? nothing : old_neighbors.standard_list
-    new_standard = Molly.find_neighbors(sys, nf.base_finder, old_standard, step_n, force_tracking; kwargs...)
-    needs_rebuild = isnothing(old_neighbors) || force_tracking || iszero(step_n % nf.base_finder.n_steps)
+@inline _keep_pair(::SIMDCoulomb, atoms, i, j, is_special) = true
 
-    if !needs_rebuild
-        return old_neighbors
-    end
+@inline _keep_pair(lj_inter::SIMDLennardJones, atoms, i, j, is_special) =
+    !Molly.shortcut_pair(lj_inter.shortcut, atoms[i], atoms[j], is_special)
 
-    if isnothing(old_neighbors)
-        soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms], q = [ustrip(a.charge) for a in sys.atoms])
-        
-        # Initialize empty arrays; the builder handles all resizing
-        packed_data = PackedFlatSoA{Float64}(
-            Int[], Int[], Int[], Float64[], Float64[], Float64[], Float64[], Float64[],
-            Int[], Int[], Int[], Int[], Int[], Int[], Bool[]
-        )
-    else
-        soa_params = old_neighbors.soa_params
-        packed_data = old_neighbors.packed_data
-    end
+@inline _simd_pad(count::Int, chunk_size::Int) =
+    count % chunk_size == 0 ? 0 : chunk_size - count % chunk_size
 
-    coul_inter = nf.inter[1]
-    lj_inter = nf.inter[2] 
-    
-    build_packed_adj_list!(packed_data, sys.atoms, new_standard, 8, soa_params, lj_inter, coul_inter)
-
-    return PackedNeighborList(new_standard, packed_data, soa_params)
+@inline function _fill_single_entry!(
+    packed_data::PackedFlatSoA{T, LJOnlyLayout},
+    pos,
+    neigh,
+    soa_params,
+    inter::SIMDLennardJones,
+    weight,
+) where {T}
+    packed_data.adj_list[pos] = neigh
+    packed_data.sigmas[pos] = soa_params.σ[neigh]
+    packed_data.eps[pos] = soa_params.ϵ[neigh]
+    packed_data.lj_weights[pos] = weight
 end
 
+@inline function _fill_single_entry!(
+    packed_data::PackedFlatSoA{T, CoulOnlyLayout},
+    pos,
+    neigh,
+    soa_params,
+    inter::SIMDCoulomb,
+    weight,
+) where {T}
+    packed_data.adj_list[pos] = neigh
+    packed_data.charges[pos] = soa_params.q[neigh]
+    packed_data.coul_weights[pos] = weight
+end
+
+@inline function _pad_single_entry!(
+    packed_data::PackedFlatSoA{T, LJOnlyLayout},
+    pos,
+    i,
+) where {T}
+    packed_data.adj_list[pos] = i
+    packed_data.sigmas[pos] = one(T)
+    packed_data.eps[pos] = one(T)
+    packed_data.lj_weights[pos] = zero(T)
+end
+
+@inline function _pad_single_entry!(
+    packed_data::PackedFlatSoA{T, CoulOnlyLayout},
+    pos,
+    i,
+) where {T}
+    packed_data.adj_list[pos] = i
+    packed_data.charges[pos] = zero(T)
+    packed_data.coul_weights[pos] = zero(T)
+end
+
+function build_packed_adj_list!(
+    packed_data::PackedFlatSoA{T, L},
+    atoms,
+    molly_neighbours,
+    N_SIMD,
+    soa_params,
+    inter,
+) where {T, L<:Union{LJOnlyLayout, CoulOnlyLayout}}
+
+    n_atoms = length(atoms)
+    n_pairs = molly_neighbours.n
+    n_parts = Threads.nthreads()
+    chunk_size = 2 * N_SIMD
+    part_len = n_atoms * n_parts
+
+    resize!(packed_data._both_part_counts, part_len)
+    resize!(packed_data._both_part_pos, part_len)
+    resize!(packed_data._is_both, n_pairs)
+
+    counts = packed_data._both_part_counts
+    pos = packed_data._both_part_pos
+    keep = packed_data._is_both
+    list = molly_neighbours.list
+
+    fill!(counts, 0)
+
+    #Threads.@threads :static for part in 1:n_parts
+    Threads.@threads for part in 1:n_parts
+        first_idx, last_idx = _part_bounds(n_pairs, part, n_parts)
+        base = (part - 1) * n_atoms
+
+        @inbounds for idx in first_idx:last_idx
+            i, j, is_special = list[idx]
+            keep_pair = _keep_pair(inter, atoms, i, j, is_special)
+            keep[idx] = keep_pair
+
+            if keep_pair
+                counts[base + i] += 1
+                counts[base + j] += 1
+            end
+        end
+    end
+
+    resize!(packed_data.offsets, n_atoms + 1)
+    resize!(packed_data.split_idxs, n_atoms)
+
+    current_offset = 1
+
+    @inbounds for i in 1:n_atoms
+        packed_data.offsets[i] = current_offset
+
+        write_pos = current_offset
+        total = 0
+
+        k = i
+        for _ in 1:n_parts
+            c = counts[k]
+            pos[k] = write_pos
+            write_pos += c
+            total += c
+            k += n_atoms
+        end
+
+        current_offset += total + _simd_pad(total, chunk_size)
+        packed_data.split_idxs[i] = current_offset
+    end
+
+    packed_data.offsets[n_atoms + 1] = current_offset
+    total_len = current_offset - 1
+
+    resize!(packed_data.adj_list, total_len)
+
+    if L === LJOnlyLayout
+        resize!(packed_data.sigmas, total_len)
+        resize!(packed_data.eps, total_len)
+        resize!(packed_data.lj_weights, total_len)
+    else
+        resize!(packed_data.charges, total_len)
+        resize!(packed_data.coul_weights, total_len)
+    end
+
+    #Threads.@threads :static for part in 1:n_parts
+    Threads.@threads for part in 1:n_parts
+        first_idx, last_idx = _part_bounds(n_pairs, part, n_parts)
+        base = (part - 1) * n_atoms
+
+        @inbounds for idx in first_idx:last_idx
+            keep[idx] || continue
+
+            i, j, is_special = list[idx]
+            weight = is_special ? inter.weight_special : one(T)
+
+            ki = base + i
+            pos_i = pos[ki]
+            pos[ki] = pos_i + 1
+            _fill_single_entry!(packed_data, pos_i, j, soa_params, inter, weight)
+
+            kj = base + j
+            pos_j = pos[kj]
+            pos[kj] = pos_j + 1
+            _fill_single_entry!(packed_data, pos_j, i, soa_params, inter, weight)
+        end
+    end
+
+    last_part_base = (n_parts - 1) * n_atoms
+
+    #Threads.@threads :static for i in 1:n_atoms
+    Threads.@threads for i in 1:n_atoms
+        @inbounds for p in pos[last_part_base + i]:(packed_data.offsets[i + 1] - 1)
+            _pad_single_entry!(packed_data, p, i)
+        end
+    end
+
+    return packed_data
+end
+
+function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+    velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
+    pairwise_inters_nonl, 
+    pairwise_inters_nl::Tuple, 
+    ::Val{n_threads}, ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
+
+    fill!(fs_nounits, zero(eltype(fs_nounits)))
+    #inter = pairwise_inters_nl[1]
+    
+    # Unpack data 
+    packed_data = neighbors.packed_data
+    soa_params = neighbors.soa_params
+
+    # Setup box and types 
+    FT = eltype(eltype(fs_nounits))
+    flat_coords = reinterpret(FT, coords) # zero allocation flattening of the coords as flat float64 array for vgather
+
+    # Calculate box metrics for distances
+    box_x = ustrip(boundary.side_lengths[1])
+    box_y = ustrip(boundary.side_lengths[2])
+    box_z = ustrip(boundary.side_lengths[3])
+    inv_box_x = 1.0 / box_x
+    inv_box_y = 1.0 / box_y
+    inv_box_z = 1.0 / box_z
+
+
+
+    # Multithreading part 
+    n_t = Threads.nthreads()
+    num_chunks = 2 * n_t #T8 = 8xn_t, #T16 = 4xn_t, #T32 = 4xn_t, #T64 = 2/1xn_t
+    n_atoms = length(coords)
+
+    # Allocate chunks
+    chunk_size = cld(n_atoms, num_chunks)
+    counter = Threads.Atomic{Int}(1) # hardware counter
+    
+    sim_params = (
+                        box_x = box_x, box_y = box_y, box_z = box_z,
+                        inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z
+                    )
+
+    # Spawn the right number of tasks per cores
+    @sync for _ in 1:n_t
+        Threads.@spawn begin
+            
+            while true
+                # Get chunk then add 1 
+                chunk_id = Threads.atomic_add!(counter, 1)
+                
+                # Break if it exceeds
+                if chunk_id > num_chunks
+                    break
+                end
+
+                start_idx = (chunk_id - 1) * chunk_size + 1
+                end_idx   = min(chunk_id * chunk_size, n_atoms)
+                
+                canonical = canonical_inters(pairwise_inters_nl)
+                cutoffs = ntuple(k -> extract_cutoff_sq(canonical[k].cutoff), length(canonical))
+
+
+                for i in start_idx:end_idx
+                    
+
+                    # Pass lj_inter and coul_inter explicitly!
+                    simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH),)
+
+                end
+            end
+        end
+    end
+
+    return fs_nounits
+end
+
+@inline function simd_chunk_forces!(fs_nounits, i, packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, soa_params, sim_params, coords, flat_coords, inters::Tuple{<:SIMDLennardJones, <:SIMDCoulomb}, cutoffs,
+    ::Val{N_SIMD}) where {T, N_SIMD}
+
+    lj_inter = inters[1]
+    coul_inter = inters[2]
+    lj_cutoff_2 = cutoffs[1]
+    coul_cutoff_2 = cutoffs[2]
+
+    VFloat = Vec{N_SIMD, Float64}
+    VInt = Vec{N_SIMD, Int}
+
+    xi = ustrip(coords[i][1])
+    yi = ustrip(coords[i][2])
+    zi = ustrip(coords[i][3])
+
+    atom_i_proxy = (σ = soa_params.σ[i], ϵ = soa_params.ϵ[i], q = soa_params.q[i])
+
+    f_ix_vec_1 = zero(VFloat); f_iy_vec_1 = zero(VFloat); f_iz_vec_1 = zero(VFloat)
+    f_ix_vec_2 = zero(VFloat); f_iy_vec_2 = zero(VFloat); f_iz_vec_2 = zero(VFloat)
+
+    both_start = packed_data.offsets[i]
+    both_end   = packed_data.split_idxs[i] - 1
+
+    @inbounds for j in both_start:(2 * N_SIMD):both_end
+        neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
+        neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
+
+        # Full Memory Load
+        atom_j_proxy_1 = (
+            σ = vload(VFloat, packed_data.sigmas, j),
+            ϵ = vload(VFloat, packed_data.eps, j),
+            q = vload(VFloat, packed_data.charges, j)
+        )
+        atom_j_proxy_2 = (
+            σ = vload(VFloat, packed_data.sigmas, j + N_SIMD),
+            ϵ = vload(VFloat, packed_data.eps, j + N_SIMD),
+            q = vload(VFloat, packed_data.charges, j + N_SIMD)
+        )
+
+        lj_weights_1 = vload(VFloat, packed_data.lj_weights, j)
+        lj_weights_2 = vload(VFloat, packed_data.lj_weights, j + N_SIMD)
+        coul_weights_1 = vload(VFloat, packed_data.coul_weights, j)
+        coul_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
+
+        neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
+        neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
+
+        # 🚨 HOISTED GEOMETRY: Calculated strictly ONCE per pair!
+        dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
+        dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
+
+        # Apply LJ
+        lj_x_1, lj_y_1, lj_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, lj_inter, lj_weights_1, lj_cutoff_2)
+        lj_x_2, lj_y_2, lj_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, lj_inter, lj_weights_2, lj_cutoff_2)
+
+        # Apply Coulomb (REUSING THE SAME GEOMETRY!)
+        coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
+        coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
+
+        f_ix_vec_1 += lj_x_1 + coul_x_1; f_iy_vec_1 += lj_y_1 + coul_y_1; f_iz_vec_1 += lj_z_1 + coul_z_1
+        f_ix_vec_2 += lj_x_2 + coul_x_2; f_iy_vec_2 += lj_y_2 + coul_y_2; f_iz_vec_2 += lj_z_2 + coul_z_2
+    end
+
+    coul_start = packed_data.split_idxs[i]
+    coul_end   = packed_data.offsets[i + 1] - 1
+
+    @inbounds for j in coul_start:(2 * N_SIMD):coul_end
+        neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
+        neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
+
+        # ONLY Load Charges
+        atom_j_proxy_1 = (σ = zero(VFloat), ϵ = zero(VFloat), q = vload(VFloat, packed_data.charges, j))
+        atom_j_proxy_2 = (σ = zero(VFloat), ϵ = zero(VFloat), q = vload(VFloat, packed_data.charges, j + N_SIMD))
+
+        coul_weights_1 = vload(VFloat, packed_data.coul_weights, j)
+        coul_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
+
+        neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
+        neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
+
+        # Hoisted Geometry
+        dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
+        dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
+
+        # Apply Coulomb ONLY
+        coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
+        coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
+
+        f_ix_vec_1 += coul_x_1; f_iy_vec_1 += coul_y_1; f_iz_vec_1 += coul_z_1
+        f_ix_vec_2 += coul_x_2; f_iy_vec_2 += coul_y_2; f_iz_vec_2 += coul_z_2
+    end
+
+    f_ix = sum(f_ix_vec_1 + f_ix_vec_2)
+    f_iy = sum(f_iy_vec_1 + f_iy_vec_2)
+    f_iz = sum(f_iz_vec_1 + f_iz_vec_2)
+
+    @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
+end
+
+@inline function _load_atom_j_proxy(
+    packed_data::PackedFlatSoA{T, LJOnlyLayout},
+    j,
+    ::Type{V},
+) where {T, V}
+    return (
+        σ = vload(V, packed_data.sigmas, j),
+        ϵ = vload(V, packed_data.eps, j),
+        q = zero(V),
+    )
+end
+
+@inline function _load_atom_j_proxy(
+    packed_data::PackedFlatSoA{T, CoulOnlyLayout},
+    j,
+    ::Type{V},
+) where {T, V}
+    return (
+        σ = zero(V),
+        ϵ = zero(V),
+        q = vload(V, packed_data.charges, j),
+    )
+end
+
+@inline _load_weights(packed_data::PackedFlatSoA{T, LJOnlyLayout}, j, ::Type{V}) where {T, V} =
+    vload(V, packed_data.lj_weights, j)
+
+@inline _load_weights(packed_data::PackedFlatSoA{T, CoulOnlyLayout}, j, ::Type{V}) where {T, V} =
+    vload(V, packed_data.coul_weights, j)
+
+
+    @inline function simd_chunk_forces!(
+        fs_nounits,
+        i,
+        packed_data::PackedFlatSoA{T, L},
+        soa_params,
+        sim_params,
+        coords,
+        flat_coords,
+        inters::Tuple{I},
+        cutoffs,
+        ::Val{N_SIMD},
+    ) where {T, L<:Union{LJOnlyLayout, CoulOnlyLayout}, I, N_SIMD}
+    
+        VFloat = Vec{N_SIMD, Float64}
+        VInt = Vec{N_SIMD, Int}
+    
+        inter = inters[1]
+        cutoff_2 = cutoffs[1]
+    
+        xi = ustrip(coords[i][1])
+        yi = ustrip(coords[i][2])
+        zi = ustrip(coords[i][3])
+    
+        atom_i_proxy = (
+            σ = soa_params.σ[i],
+            ϵ = soa_params.ϵ[i],
+            q = soa_params.q[i],
+        )
+    
+        f_ix_vec_1 = zero(VFloat); f_iy_vec_1 = zero(VFloat); f_iz_vec_1 = zero(VFloat)
+        f_ix_vec_2 = zero(VFloat); f_iy_vec_2 = zero(VFloat); f_iz_vec_2 = zero(VFloat)
+    
+        start_idx = packed_data.offsets[i]
+        end_idx = packed_data.offsets[i + 1] - 1
+    
+        @inbounds for j in start_idx:(2 * N_SIMD):end_idx
+            neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
+            neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
+    
+            atom_j_proxy_1 = _load_atom_j_proxy(packed_data, j, VFloat)
+            atom_j_proxy_2 = _load_atom_j_proxy(packed_data, j + N_SIMD, VFloat)
+    
+            weights_1 = _load_weights(packed_data, j, VFloat)
+            weights_2 = _load_weights(packed_data, j + N_SIMD, VFloat)
+    
+            neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
+            neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
+    
+            dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
+            dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
+    
+            f_x_1, f_y_1, f_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, inter, weights_1, cutoff_2)
+            f_x_2, f_y_2, f_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, inter, weights_2, cutoff_2)
+    
+            f_ix_vec_1 += f_x_1; f_iy_vec_1 += f_y_1; f_iz_vec_1 += f_z_1
+            f_ix_vec_2 += f_x_2; f_iy_vec_2 += f_y_2; f_iz_vec_2 += f_z_2
+        end
+    
+        f_ix = sum(f_ix_vec_1 + f_ix_vec_2)
+        f_iy = sum(f_iy_vec_1 + f_iy_vec_2)
+        f_iz = sum(f_iz_vec_1 + f_iz_vec_2)
+    
+        @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
+    
+        return nothing
+    end
+    
+
+
+
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
+#############################################################################################################################################################################################
 # Alternative packed list 
+
+
+
+
+
+
+
 
 # @inline _simd_pad(count::Int, chunk_size::Int) = (-count) & (chunk_size - 1)
 
