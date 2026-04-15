@@ -1439,12 +1439,13 @@ end
 end
 
 
-@inline _part_index(i, part, n_atoms) = i + (part - 1) * n_atoms
+@inline _part_index(i, part, n_atoms) = i + (part - 1) * n_atoms # index for atom i in the global 1D array
 
-@inline function _part_bounds(n_items, part, n_parts)
+# Get the first and last index of each 
+@inline function _part_bounds(n_items, part, n_parts) # n_items = total neighbour pairs, parts = thread chunk, n_parts = total thread chunks
     first_idx = ((part - 1) * n_items) ÷ n_parts + 1
-    last_idx = (part * n_items) ÷ n_parts
-    return first_idx, last_idx
+    last_idx = (part * n_items) ÷ n_parts 
+    return first_idx, last_idx # return the bounds as a tuple 
 end
 
 @inline lj_applies(lj_inter, atom_i, atom_j, is_special) =
@@ -1452,19 +1453,20 @@ end
 
 function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbours, N_SIMD, soa_params, lj_inter, coul_inter)
     n_atoms = length(atoms)
-    n_pairs = molly_neighbours.n
-    n_parts = Threads.nthreads()
-    chunk_size = 2 * N_SIMD
-    part_len = n_atoms * n_parts
+    n_pairs = molly_neighbours.n # total number of neighbour list pairs
+    n_parts = Threads.nthreads() # number of threads - the neighbour list gets split into this many parts 
+    chunk_size = 2 * N_SIMD # how large a chunk is since its unrolled 2x 
+    part_len = n_atoms * n_parts # each thread gets n_atom slots so total length 
 
-    resize!(packed_data._both_counts, n_atoms)
-    resize!(packed_data._coul_counts, n_atoms)
-    resize!(packed_data._both_part_counts, part_len)
-    resize!(packed_data._coul_part_counts, part_len)
-    resize!(packed_data._both_part_pos, part_len)
-    resize!(packed_data._coul_part_pos, part_len)
-    resize!(packed_data._is_both, n_pairs)
+    resize!(packed_data._both_counts, n_atoms) # vector of ints of size n_atoms - stores no. both counts for each atom
+    resize!(packed_data._coul_counts, n_atoms) # vector of ints of size n_atoms - stores no. coul counts for each atom
+    resize!(packed_data._both_part_counts, part_len) # vector of ints of size n_atoms * n_threads - each thread writes to its own n_atoms section?
+    resize!(packed_data._coul_part_counts, part_len) # same as above except coul count rather than both count 
+    resize!(packed_data._both_part_pos, part_len) # ? 
+    resize!(packed_data._coul_part_pos, part_len) # ? 
+    resize!(packed_data._is_both, n_pairs) # ? 
 
+    # initialise everythin with 0's 
     fill!(packed_data._both_counts, 0)
     fill!(packed_data._coul_counts, 0)
     fill!(packed_data._both_part_counts, 0)
@@ -1472,7 +1474,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
 
     # Pass 1: Classify and count, thread-locally by atom.
     Threads.@threads for part in 1:n_parts
-        first_idx, last_idx = _part_bounds(n_pairs, part, n_parts)
+        first_idx, last_idx = _part_bounds(n_pairs, part, n_parts) # get the first and last index of the thread 
 
         @inbounds for idx in first_idx:last_idx
             i, j, is_special = molly_neighbours.list[idx]
@@ -1490,7 +1492,8 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
     end
 
     # Pass 2: Reduce counts and build padded offsets.
-    resize!(packed_data.offsets, n_atoms + 1)
+    # This is the standard offsets and split idxs that we will use in the end  
+    resize!(packed_data.offsets, n_atoms + 1) 
     resize!(packed_data.split_idxs, n_atoms)
 
     current_offset = 1
@@ -1517,9 +1520,12 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
         current_offset += coul_total + coul_pad
     end
 
-    packed_data.offsets[n_atoms + 1] = current_offset
-    total_len = current_offset - 1
+    # By the end of part 2 we have the packed_data.offsets and packed_data.split_idxs sorted and know the total length
 
+    packed_data.offsets[n_atoms + 1] = current_offset
+    total_len = current_offset - 1 # what the total length of the final padded list will be 
+
+    # Resize the arrays so that they are the length of the total, padded, adjacent list 
     resize!(packed_data.adj_list, total_len)
     resize!(packed_data.sigmas, total_len)
     resize!(packed_data.eps, total_len)
@@ -1529,34 +1535,43 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
 
     # Pass 3: Convert per-thread counts into per-thread write cursors.
     @inbounds for i in 1:n_atoms
-        both_pos = packed_data.offsets[i]
-        coul_pos = packed_data.split_idxs[i]
+        both_pos = packed_data.offsets[i] # initially, offset i is the first slot of atom i's both block
+        coul_pos = packed_data.split_idxs[i] # split idx i is the first slow of atom i's coulomb block 
+        # these positions will increase 
 
-        for part in 1:n_parts
-            k = _part_index(i, part, n_atoms)
+        for part in 1:n_parts # loop over threads, so for atom i we want to assign where thread 1/2/3 starts writing
+            k = _part_index(i, part, n_atoms) # index for atom i in a global array 
+            # k is the storage location for thread x's data for atom i 
+            
+            # both_part_pos is a global 1d array of n_atoms * n_threads
+            packed_data._both_part_pos[k] = both_pos 
+            # for atom i in the global array, thread x needs to start writing at both_pos 
+            both_pos += packed_data._both_part_counts[k] # now advance the counter by how many neighbours that thread has for that atom
 
-            packed_data._both_part_pos[k] = both_pos
-            both_pos += packed_data._both_part_counts[k]
-
+            # do the same for the coulomb count 
             packed_data._coul_part_pos[k] = coul_pos
             coul_pos += packed_data._coul_part_counts[k]
         end
     end
 
-    # Pass 4: Fill arrays in parallel.
-    Threads.@threads for part in 1:n_parts
-        first_idx, last_idx = _part_bounds(n_pairs, part, n_parts)
+    # After pass 3 we end with a n_atoms * n_threads array that for each atom within each thread has the starting position
 
-        @inbounds for idx in first_idx:last_idx
+    # Pass 4: Fill arrays in parallel --> this is like pass 1 but we actually fill final array 
+    Threads.@threads for part in 1:n_parts
+        first_idx, last_idx = _part_bounds(n_pairs, part, n_parts) # split the pairs by parts and bound each thread
+
+        @inbounds for idx in first_idx:last_idx # same as pass one 
             i, j, is_special = molly_neighbours.list[idx]
-            coul_w = is_special ? coul_inter.weight_special : 1.0
+            coul_w = is_special ? coul_inter.weight_special : 1.0 # standard 
 
             if packed_data._is_both[idx]
+                # remember part index ensures you get the write global index 
                 lj_w = is_special ? lj_inter.weight_special : 1.0
 
-                pos_i = packed_data._both_part_pos[_part_index(i, part, n_atoms)]
-                packed_data._both_part_pos[_part_index(i, part, n_atoms)] = pos_i + 1
+                pos_i = packed_data._both_part_pos[_part_index(i, part, n_atoms)] # retrieve the index of atom i to write to 
+                packed_data._both_part_pos[_part_index(i, part, n_atoms)] = pos_i + 1 # add one for atom i since we are writing to the original index
 
+                # Write the atom data of the neighbour j to atom i in the packed list 
                 packed_data.adj_list[pos_i] = j
                 packed_data.sigmas[pos_i] = soa_params.σ[j]
                 packed_data.eps[pos_i] = soa_params.ϵ[j]
@@ -1564,9 +1579,11 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
                 packed_data.lj_weights[pos_i] = lj_w
                 packed_data.coul_weights[pos_i] = coul_w
 
+                # Do the same thing for atom j, the other half of the neighbour pair 
                 pos_j = packed_data._both_part_pos[_part_index(j, part, n_atoms)]
-                packed_data._both_part_pos[_part_index(j, part, n_atoms)] = pos_j + 1
+                packed_data._both_part_pos[_part_index(j, part, n_atoms)] = pos_j + 1 # remember to add 1 to the position in the global 1D array 
 
+                # Fill the details of the atom i at the position j 
                 packed_data.adj_list[pos_j] = i
                 packed_data.sigmas[pos_j] = soa_params.σ[i]
                 packed_data.eps[pos_j] = soa_params.ϵ[i]
@@ -1574,6 +1591,8 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
                 packed_data.lj_weights[pos_j] = lj_w
                 packed_data.coul_weights[pos_j] = coul_w
             else
+                # if its not both then write to coulomb 
+                # _is_both did one check at the start and was the length of the neighbour pairs
                 pos_i = packed_data._coul_part_pos[_part_index(i, part, n_atoms)]
                 packed_data._coul_part_pos[_part_index(i, part, n_atoms)] = pos_i + 1
 
@@ -1591,10 +1610,12 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
         end
     end
 
-    # Pass 5: Pad rows in parallel.
+    # Pass 5: Pad rows in parallel, per atom 
     Threads.@threads for i in 1:n_atoms
         @inbounds begin
             for pos in (packed_data.offsets[i] + packed_data._both_counts[i]):(packed_data.split_idxs[i] - 1)
+                # look at where the offset was + the total counts was until where the split index begins 
+                # pad with empty atoms
                 packed_data.adj_list[pos] = i
                 packed_data.sigmas[pos] = 1.0
                 packed_data.eps[pos] = 1.0
@@ -1603,6 +1624,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA, atoms, molly_neighbo
                 packed_data.coul_weights[pos] = 0.0
             end
 
+            # look at where the split index + coulomb counts ends until where the next index begins and pad 
             for pos in (packed_data.split_idxs[i] + packed_data._coul_counts[i]):(packed_data.offsets[i + 1] - 1)
                 packed_data.adj_list[pos] = i
                 packed_data.charges[pos] = 0.0
