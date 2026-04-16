@@ -972,6 +972,12 @@ function _push_param!(buf::ParamBuffer{T}, name::AbstractString, value) where {T
     return idx
 end
 
+@inline function _push_unique_param!(buf::ParamBuffer{T}, name::AbstractString, value) where {T}
+    push!(buf.names, String(name))
+    push!(buf.values, T(_strip_param(value)))
+    return length(buf.values)
+end
+
 # Generic fallbacks extended in interaction files.
 extract_parameter_indices!(::ParamBuffer, inter) = ()
 extract_parameter_indices!(buf::ParamBuffer, inter, ::System) = extract_parameter_indices!(buf, inter)
@@ -990,6 +996,7 @@ function _extract_atom_parameter_indices!(buf::ParamBuffer, sys::System, ff)
     atoms_cpu = from_device(sys.atoms)
     n_atoms = length(atoms_cpu)
     idx_mass = Vector{Int}(undef, n_atoms)
+    idx_charge = Vector{Int}(undef, n_atoms)
     idx_σ    = Vector{Int}(undef, n_atoms)
     idx_ϵ    = Vector{Int}(undef, n_atoms)
 
@@ -1008,21 +1015,64 @@ function _extract_atom_parameter_indices!(buf::ParamBuffer, sys::System, ff)
 
         key_prefix = "atom_$(atom_type)_"
         idx_mass[i] = _push_param!(buf, key_prefix * "mass", ref_atom.mass)
+        idx_charge[i] = _push_unique_param!(buf, key_prefix * "charge_" * string(i), atom.charge)
         idx_σ[i]    = _push_param!(buf, key_prefix * "σ", ref_atom.σ)
         idx_ϵ[i]    = _push_param!(buf, key_prefix * "ϵ", ref_atom.ϵ)
     end
 
-    return (idx_mass, idx_σ, idx_ϵ)
+    return (idx_mass, idx_charge, idx_σ, idx_ϵ)
 end
 
 # Base fallback if no indices are provided for an interaction
 inject_interaction(inter, params::AbstractVector, args...) = inter
+_requires_updated_system_context(inter) = false
 
-function inject_atom(at::Atom, params::AbstractVector, idx_mass::Int, idx_σ::Int, idx_ϵ::Int)
+"""
+    extract_atom_parameters(sys, ff=nothing)
+
+Builds a flat atom-parameter vector and index metadata for atom injection.
+Returns `(params, atom_idxs, param_names)`, where `atom_idxs` is
+`(idx_mass, idx_charge, idx_σ, idx_ϵ)`.
+"""
+function extract_atom_parameters(sys::System, ff=nothing)
+    buffer = ParamBuffer(float_type(sys))
+    atom_idxs = _extract_atom_parameter_indices!(buffer, sys, ff)
+    return buffer.values, atom_idxs, buffer.names
+end
+
+"""
+    extract_atom_parameter_indices(sys, ff=nothing)
+
+Returns the atom parameter index metadata `(idx_mass, idx_charge, idx_σ, idx_ϵ)`
+for the atom-only parameter vector returned by [`extract_atom_parameters`](@ref).
+"""
+function extract_atom_parameter_indices(sys::System, ff=nothing)
+    _, atom_idxs, _ = extract_atom_parameters(sys, ff)
+    return atom_idxs
+end
+
+function inject_atom(at::Atom, params::AbstractVector,
+                     idx_mass::Int, idx_charge::Int, idx_σ::Int, idx_ϵ::Int)
     new_mass = idx_mass > 0 ? typeof(at.mass)(params[idx_mass]) : at.mass
+    new_charge = idx_charge > 0 ? typeof(at.charge)(params[idx_charge]) : at.charge
     new_σ    = idx_σ > 0    ? typeof(at.σ)(params[idx_σ])       : at.σ
     new_ϵ    = idx_ϵ > 0    ? typeof(at.ϵ)(params[idx_ϵ])       : at.ϵ
-    return Atom(at.index, at.atom_type, new_mass, at.charge, new_σ, new_ϵ, at.λ, at.alch_role)
+    return Atom(at.index, at.atom_type, new_mass, new_charge, new_σ, new_ϵ, at.λ, at.alch_role)
+end
+
+inject_atom(at::Atom, params::AbstractVector, idx_mass::Int, idx_σ::Int, idx_ϵ::Int) =
+    inject_atom(at, params, idx_mass, 0, idx_σ, idx_ϵ)
+
+function _normalize_atom_parameter_indices(atom_idxs::Tuple, n_atoms::Integer)
+    if length(atom_idxs) == 4
+        return atom_idxs
+    elseif length(atom_idxs) == 3
+        idx_mass, idx_σ, idx_ϵ = atom_idxs
+        return (idx_mass, fill(0, n_atoms), idx_σ, idx_ϵ)
+    else
+        throw(ArgumentError("atom_idxs should contain either 3 entries (mass, σ, ϵ) " *
+                            "or 4 entries (mass, charge, σ, ϵ), got $(length(atom_idxs))"))
+    end
 end
 
 function inject_interaction_list(inter::InteractionList1Atoms, params::AbstractVector, idxs::Tuple, AT)
@@ -1064,6 +1114,8 @@ end
 
 Injects parameters from a flat `AbstractVector` into the system components.
 Each `_idxs` argument must be a `Tuple` matching the structure of the respective system field.
+`atom_idxs` can be either the legacy `(idx_mass, idx_σ, idx_ϵ)` tuple or the
+charge-aware `(idx_mass, idx_charge, idx_σ, idx_ϵ)` tuple.
 """
 function inject_gradients(sys::System{<:Any, AT}, params::AbstractVector,
                           atom_idxs::Tuple,
@@ -1072,8 +1124,8 @@ function inject_gradients(sys::System{<:Any, AT}, params::AbstractVector,
                           general_idxs::Tuple) where AT
 
     # 1. Update Atoms using Enzyme-safe array broadcasting
-    idx_mass, idx_σ, idx_ϵ = atom_idxs
-    atoms_grad_cpu = inject_atom.(from_device(sys.atoms), Ref(params), idx_mass, idx_σ, idx_ϵ)
+    idx_mass, idx_charge, idx_σ, idx_ϵ = _normalize_atom_parameter_indices(atom_idxs, length(sys.atoms))
+    atoms_grad_cpu = inject_atom.(from_device(sys.atoms), Ref(params), idx_mass, idx_charge, idx_σ, idx_ϵ)
     atoms_grad = to_device(atoms_grad_cpu, AT)
 
     # 2. Update Pairwise Interactions (Map over tuples is unrolled statically by the compiler)
@@ -1083,7 +1135,17 @@ function inject_gradients(sys::System{<:Any, AT}, params::AbstractVector,
     sis_grad = _map_interactions((inter_list, idxs) -> inject_interaction_list(inter_list, params, idxs, AT), sys.specific_inter_lists, specific_idxs)
 
     # 4. Update General Interactions
-    gis_grad = _map_interactions((inter, idxs) -> inject_interaction(inter, params, idxs..., sys), sys.general_inters, general_idxs)
+    general_ctx = if any(_requires_updated_system_context, values(sys.general_inters))
+        System(
+            sys;
+            atoms=atoms_grad,
+            pairwise_inters=pis_grad,
+            specific_inter_lists=sis_grad,
+        )
+    else
+        sys
+    end
+    gis_grad = _map_interactions((inter, idxs) -> inject_interaction(inter, params, idxs..., general_ctx), sys.general_inters, general_idxs)
 
     return atoms_grad, pis_grad, sis_grad, gis_grad
 end

@@ -100,6 +100,280 @@ end
     @test charge(d_sys.atoms[1]) ≈ charge_grad atol=1e-6
 end
 
+function injected_charge_energy(params, sys_ref, idx_bundle, coords, neighbor_finder, n_threads)
+    atom_idxs, pairwise_idxs, specific_idxs, general_idxs = idx_bundle
+    atoms, pis, sis, gis = Molly.inject_gradients(
+        sys_ref, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
+    )
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=sys_ref.boundary,
+        pairwise_inters=pis,
+        specific_inter_lists=sis,
+        general_inters=gis,
+        neighbor_finder=neighbor_finder,
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+    return potential_energy(sys; n_threads=n_threads)
+end
+
+@testset "Charge-aware parameter injection" begin
+    boundary = CubicBoundary(2.5)
+    coords_rf = [
+        SVector(0.2, 0.2, 0.2),
+        SVector(0.8, 0.5, 0.4),
+    ]
+    coords_pme = [
+        SVector(0.2, 0.2, 0.2),
+        SVector(0.9, 0.7, 0.4),
+        SVector(1.6, 1.2, 1.1),
+    ]
+    rc = 1.0
+
+    function charge_updated_atom(atom, new_charge)
+        return Atom(atom.index, atom.atom_type, atom.mass, new_charge, atom.σ, atom.ϵ, atom.λ, atom.alch_role)
+    end
+
+    function reaction_field_system(AT)
+        atoms = [
+            Atom(index=1, atom_type=1, mass=10.0, charge=0.4, σ=0.31, ϵ=0.2),
+            Atom(index=2, atom_type=2, mass=12.0, charge=-0.3, σ=0.28, ϵ=0.15),
+        ]
+        atoms_dev = to_device(atoms, AT)
+        return System(
+            atoms=atoms_dev,
+            coords=to_device(coords_rf, AT),
+            boundary=boundary,
+            pairwise_inters=(CoulombReactionField(
+                dist_cutoff=rc,
+                solvent_dielectric=78.5,
+                coulomb_const=ustrip(Molly.coulomb_const),
+            ),),
+            general_inters=(),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+    end
+
+    function pme_system(AT; scheduler=Molly.DefaultLambdaScheduler(), pairwise=true)
+        λ_state = 0.75
+        atoms = [
+            Atom(index=1, atom_type=1, mass=10.0, charge=1.0, σ=0.3, ϵ=0.2,
+                 λ=λ_state, alch_role=Molly.InsertRole),
+            Atom(index=2, atom_type=2, mass=12.0, charge=-0.8, σ=0.28, ϵ=0.15,
+                 λ=λ_state, alch_role=Molly.InsertRole),
+            Atom(index=3, atom_type=3, mass=14.0, charge=0.25, σ=0.26, ϵ=0.12),
+        ]
+        atoms_dev = to_device(atoms, AT)
+        pairwise_inters = pairwise ? (CoulombEwald(
+            dist_cutoff=rc,
+            coulomb_const=ustrip(Molly.coulomb_const),
+        ),) : ()
+        return System(
+            atoms=atoms_dev,
+            coords=to_device(coords_pme, AT),
+            boundary=boundary,
+            pairwise_inters=pairwise_inters,
+            general_inters=(PME(rc, atoms_dev, boundary; scheduler=scheduler),),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+    end
+
+    @testset "atom parameter helpers" begin
+        sys = reaction_field_system(Array)
+        atom_params, atom_idxs, atom_names = Molly.extract_atom_parameters(sys)
+        idx_mass, idx_charge, idx_σ, idx_ϵ = atom_idxs
+
+        @test length(atom_idxs) == 4
+        @test all(>(0), idx_charge)
+        @test atom_params[idx_charge[1]] == charge(from_device(sys.atoms)[1])
+        @test occursin("_charge_", atom_names[idx_charge[1]])
+
+        atom = from_device(sys.atoms)[1]
+        atom_injected = Molly.inject_atom(atom, [11.0, 0.6, 0.4, 0.3], 1, 2, 3, 4)
+        @test mass(atom_injected) == 11.0
+        @test charge(atom_injected) == 0.6
+        @test atom_injected.σ == 0.4
+        @test atom_injected.ϵ == 0.3
+    end
+
+    @testset "reaction field charge replay and legacy tuples" begin
+        for AT in array_list
+            sys = reaction_field_system(AT)
+            params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
+                Molly.extract_parameters(sys)
+            idx_charge = atom_idxs[2]
+            new_charge = charge(from_device(sys.atoms)[1]) + 0.35
+            params_mod = copy(params)
+            params_mod[idx_charge[1]] = new_charge
+
+            atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(
+                sys, params_mod, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
+            )
+            sys_mod = System(
+                sys;
+                atoms=atoms_mod,
+                pairwise_inters=pis_mod,
+                specific_inter_lists=sis_mod,
+                general_inters=gis_mod,
+            )
+
+            atoms_direct = copy(from_device(sys.atoms))
+            atoms_direct[1] = charge_updated_atom(atoms_direct[1], new_charge)
+            sys_direct = System(sys; atoms=to_device(atoms_direct, AT))
+
+            atom_pair = from_device(atoms_mod)
+            expected_energy = potential_energy(
+                only(sys_mod.pairwise_inters),
+                vector(coords_rf[1], coords_rf[2], boundary),
+                atom_pair[1],
+                atom_pair[2],
+                NoUnits,
+            )
+
+            energy_tol = (AT <: GPUArrays.AbstractGPUArray ? 1e-5 : 1e-10)
+            @test potential_energy(sys_mod) ≈ expected_energy atol=energy_tol
+            @test potential_energy(sys_mod) ≈ potential_energy(sys_direct) atol=energy_tol
+
+            legacy_atom_idxs = (atom_idxs[1], atom_idxs[3], atom_idxs[4])
+            atoms_legacy, _, _, _ = Molly.inject_gradients(
+                sys, params_mod, legacy_atom_idxs, pairwise_idxs, specific_idxs, general_idxs
+            )
+            @test charge(from_device(atoms_legacy)[1]) == charge(from_device(sys.atoms)[1])
+        end
+    end
+
+    @testset "PME charge replay refreshes cached sums" begin
+        for AT in array_list
+            sys = pme_system(AT)
+            params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
+                Molly.extract_parameters(sys)
+            idx_charge = atom_idxs[2]
+            new_charge = charge(from_device(sys.atoms)[1]) + 0.4
+            params_mod = copy(params)
+            params_mod[idx_charge[1]] = new_charge
+
+            atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(
+                sys, params_mod, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
+            )
+            sys_mod = System(
+                sys;
+                atoms=atoms_mod,
+                pairwise_inters=pis_mod,
+                specific_inter_lists=sis_mod,
+                general_inters=gis_mod,
+            )
+
+            atoms_direct = copy(from_device(sys.atoms))
+            atoms_direct[1] = charge_updated_atom(atoms_direct[1], new_charge)
+            atoms_direct_dev = to_device(atoms_direct, AT)
+            sys_direct = System(
+                sys;
+                atoms=atoms_direct_dev,
+                general_inters=(PME(rc, atoms_direct_dev, boundary),),
+            )
+
+            pme_mod = only(sys_mod.general_inters)
+            expected_partial_charges = [
+                Molly.effective_charge(pme_mod.scheduler, atom, Val(Float64))
+                for atom in from_device(sys_mod.atoms)
+            ]
+            @test pme_mod.pc_sum ≈ sum(expected_partial_charges) atol=1e-10
+            @test pme_mod.pc_abs2_sum ≈ sum(abs2, expected_partial_charges) atol=1e-10
+            @test pme_mod.pc_sum != only(sys.general_inters).pc_sum
+
+            energy_tol = (AT <: GPUArrays.AbstractGPUArray ? 2e-4 : 1e-10)
+            force_tol = (AT <: GPUArrays.AbstractGPUArray ? 5e-4 : 1e-10)
+            @test potential_energy(sys_mod) ≈ potential_energy(sys_direct) atol=energy_tol
+            forces_diff = from_device(forces(sys_mod)) .- from_device(forces(sys_direct))
+            @test maximum(norm.(forces_diff)) < force_tol
+        end
+    end
+
+    @testset "PME cached sums respect effective charges" begin
+        sys = pme_system(Array; scheduler=Molly.EleScaledLambdaScheduler(), pairwise=false)
+        params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
+            Molly.extract_parameters(sys)
+        idx_charge = atom_idxs[2]
+        params_mod = copy(params)
+        params_mod[idx_charge[1]] += 0.2
+
+        atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(
+            sys, params_mod, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
+        )
+        sys_mod = System(
+            sys;
+            atoms=atoms_mod,
+            pairwise_inters=pis_mod,
+            specific_inter_lists=sis_mod,
+            general_inters=gis_mod,
+        )
+
+        pme_mod = only(sys_mod.general_inters)
+        expected_partial_charges = [
+            Molly.effective_charge(pme_mod.scheduler, atom, Val(Float64))
+            for atom in from_device(sys_mod.atoms)
+        ]
+        @test pme_mod.pc_sum ≈ sum(expected_partial_charges) atol=1e-10
+        @test pme_mod.pc_abs2_sum ≈ sum(abs2, expected_partial_charges) atol=1e-10
+    end
+end
+
+@testset "Differentiable charge parameters" begin
+    boundary = CubicBoundary(2.5)
+    coords = [
+        SVector(0.2, 0.2, 0.2),
+        SVector(0.75, 0.45, 0.4),
+    ]
+    sys_ref = System(
+        atoms=[
+            Atom(index=1, atom_type=1, mass=10.0, charge=0.35, σ=0.31, ϵ=0.2),
+            Atom(index=2, atom_type=2, mass=12.0, charge=-0.28, σ=0.29, ϵ=0.16),
+        ],
+        coords=coords,
+        boundary=boundary,
+        pairwise_inters=(
+            LennardJones(cutoff=DistanceCutoff(1.0)),
+            CoulombReactionField(
+                dist_cutoff=1.0,
+                solvent_dielectric=78.5,
+                coulomb_const=ustrip(Molly.coulomb_const),
+            ),
+        ),
+        general_inters=(),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+
+    params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
+        Molly.extract_parameters(sys_ref)
+    idx_bundle = (atom_idxs, pairwise_idxs, specific_idxs, general_idxs)
+    charge_idx = atom_idxs[2][1]
+    sigma_idx = atom_idxs[3][1]
+    coords_ref = copy(sys_ref.coords)
+    neighbor_finder_ref = sys_ref.neighbor_finder
+
+    base_energy = injected_charge_energy(params, sys_ref, idx_bundle, coords_ref, neighbor_finder_ref, 1)
+    @test isfinite(base_energy)
+
+    charge_grad_fdm = central_fdm(5, 1)(params[charge_idx]) do value
+        params_mod = copy(params)
+        params_mod[charge_idx] = value
+        injected_charge_energy(params_mod, sys_ref, idx_bundle, coords_ref, neighbor_finder_ref, 1)
+    end
+    sigma_grad_fdm = central_fdm(5, 1)(params[sigma_idx]) do value
+        params_mod = copy(params)
+        params_mod[sigma_idx] = value
+        injected_charge_energy(params_mod, sys_ref, idx_bundle, coords_ref, neighbor_finder_ref, 1)
+    end
+
+    @test isfinite(charge_grad_fdm)
+    @test isfinite(sigma_grad_fdm)
+end
+
 if get(ENV, "RUN_DIFFERENTIABLE_SIM_TESTS", "0") == "1"
 @testset "CV gradients" begin
     function cv_gradient_enz(cv_type, coords, atoms=nothing, boundary=nothing, velocities=nothing)

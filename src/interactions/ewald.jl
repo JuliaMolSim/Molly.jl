@@ -631,6 +631,47 @@ function Base.zero(pme::PME)
     )
 end
 
+_requires_updated_system_context(::PME) = true
+
+function inject_interaction(inter::PME{T}, params::AbstractVector, sys::System) where T
+    pc_sum, pc_abs2_sum = if isnothing(inter.pc_sum)
+        nothing, nothing
+    else
+        partial_charges = [effective_charge(inter.scheduler, atom, Val(T))
+                           for atom in from_device(sys.atoms)]
+        sum(partial_charges), sum(abs2, partial_charges)
+    end
+
+    return PME(
+        inter.dist_cutoff,
+        inter.error_tol,
+        inter.order,
+        inter.ϵr,
+        inter.excluded_pairs,
+        inter.α,
+        inter.mesh_dims,
+        inter.grid_indices,
+        inter.grid_fractions,
+        inter.bsplines_θ,
+        inter.bsplines_dθ,
+        inter.bsplines_moduli_x,
+        inter.bsplines_moduli_y,
+        inter.bsplines_moduli_z,
+        inter.charge_grid,
+        inter.charge_grid_buffer,
+        inter.excluded_buffer_Fs,
+        inter.excluded_buffer_Es,
+        inter.recip_conv_buffer,
+        inter.virial_buffer,
+        pc_sum,
+        pc_abs2_sum,
+        inter.fft_plan,
+        inter.bfft_plan,
+        inter.scheduler,
+        inter.grad_safe,
+    )
+end
+
 function ==(a::PME, b::PME)
     return a.dist_cutoff == b.dist_cutoff &&
            a.error_tol   == b.error_tol   &&
