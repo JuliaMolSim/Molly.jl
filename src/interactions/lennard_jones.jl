@@ -931,43 +931,48 @@ end
     weight_special::W = 1
 end
 
-use_neighbors(::SIMDLennardJones) = true  
+abstract type AbstractSIMDCoulomb <: PairwiseInteraction end
 
-
-@kwdef struct SIMDCoulomb{C, W, T} <: PairwiseInteraction
+@kwdef struct SIMDCoulomb{C, W, T} <: AbstractSIMDCoulomb
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = true
     weight_special::W = 1 
     coulomb_const:: T = 138.93545764
 end
 
 # REACTION FIELD INTERACTION 
-struct SIMDCoulombReactionField{D, S, W, T, K} <: PairwiseInteraction
+struct SIMDCoulombReactionField{D, S, W, T, K} <: AbstractSIMDCoulomb
     dist_cutoff::D
     solvent_dielectric::S
-    use_neighbors::Bool
     weight_special::W
     coulomb_const::T
     two_krf::K
 end
 
-function SIMDCoulombReactionField(; dist_cutoff, solvent_dielectric = 78.3, 
-    use_neighbors = true, weight_special = 1, coulomb_const = 138.93545764,)
+function SIMDCoulombReactionField(;
+    dist_cutoff,
+    solvent_dielectric = 78.3,
+    weight_special = 1,
+    coulomb_const = 138.93545764,
+)
+    F = typeof(ustrip(dist_cutoff))
 
-    weight_special < 0 &&
+    sd = F(solvent_dielectric)
+    ws = F(weight_special)
+    cc = F(ustrip(coulomb_const))
+
+    ws < zero(F) &&
         throw(ArgumentError("signed Coulomb weights require nonnegative weight_special"))
 
-    rc = ustrip(dist_cutoff)
-    krf = inv(rc^3) * ((solvent_dielectric - 1) / (2 * solvent_dielectric + 1))
-    two_krf = 2 * krf
+    rc = F(ustrip(dist_cutoff))
+    krf = inv(rc^3) * ((sd - one(F)) / (F(2) * sd + one(F)))
+    two_krf = F(2) * krf
 
-    return SIMDCoulombReactionField(dist_cutoff, solvent_dielectric, use_neighbors, 
-    weight_special, coulomb_const, two_krf,)
+    return SIMDCoulombReactionField(dist_cutoff, sd, ws, cc, two_krf)
 end
 
-const SIMDCoulombLike = Union{SIMDCoulomb, SIMDCoulombReactionField,}
 
-use_neighbors(inter::SIMDCoulombLike) = true
+use_neighbors(::SIMDLennardJones) = true  
+use_neighbors(::AbstractSIMDCoulomb) = true
 
 # Duck typing
 # If Molly's loggers ask for `.n` or `.list`, route it to the standard_list
@@ -984,14 +989,14 @@ function Base.getproperty(nl::PackedNeighborList, sym::Symbol)
 end
 
 canonical_inters(inters::Tuple{<:SIMDLennardJones}) = inters
-canonical_inters(inters::Tuple{<:SIMDCoulombLike}) = inters
+canonical_inters(inters::Tuple{<:AbstractSIMDCoulomb}) = inters
 
-canonical_inters(inters::Tuple{<:SIMDLennardJones, <:SIMDCoulombLike}) = inters
-canonical_inters(inters::Tuple{<:SIMDCoulombLike, <:SIMDLennardJones}) = (inters[2], inters[1])
+canonical_inters(inters::Tuple{<:SIMDLennardJones, <:AbstractSIMDCoulomb}) = inters
+canonical_inters(inters::Tuple{<:AbstractSIMDCoulomb, <:SIMDLennardJones}) = (inters[2], inters[1])
 
 layout_type(::Tuple{<:SIMDLennardJones}) = LJOnlyLayout
-layout_type(::Tuple{<:SIMDCoulombLike}) = CoulOnlyLayout
-layout_type(::Tuple{<:SIMDLennardJones, <:SIMDCoulombLike}) = LJCoulSplitLayout
+layout_type(::Tuple{<:AbstractSIMDCoulomb}) = CoulOnlyLayout
+layout_type(::Tuple{<:SIMDLennardJones, <:AbstractSIMDCoulomb}) = LJCoulSplitLayout
 
 
 
@@ -1007,9 +1012,10 @@ Base.length(nl::PackedNeighborList) = length(nl.standard_list)
 end
 
 # Coulomb-like weights encode specialness in the sign.
-# This assumes weight_special >= 0, which is true for normal force fields.
-@inline function _coul_signed_weight(inter::SIMDCoulombLike, is_special, ::Type{T}) where {T}
+@inline function _coul_signed_weight(inter::AbstractSIMDCoulomb, is_special, ::Type{T}) where {T}
     w = is_special ? T(inter.weight_special) : one(T)
+    w < zero(T) &&
+        throw(ArgumentError("signed Coulomb weights require nonnegative weight_special"))
     return is_special ? -w : w
 end
 
@@ -1027,11 +1033,6 @@ end
     return f_div_r_weighted * dr
 end
 
-# @inline function custom_force(inter, dr, safe_dist2, atom_i, atom_j, neigh_weights, cutoff_2)
-#     f_div_r = force_apply_cutoff(inter.cutoff, inter, safe_dist2, atom_i, atom_j, cutoff_2)
-#     f_div_r_weighted = f_div_r * neigh_weights
-#     return f_div_r_weighted * dr
-# end
 
 # RF has dist_cutoff not AbstractCutOff so uses own formula 
 @inline function custom_force(inter::SIMDCoulombReactionField, dr, safe_dist2, atom_i, atom_j, signed_weights, cutoff_2)
@@ -1051,18 +1052,22 @@ end
     sigma_ij = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     eps_ij = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
-    inv_dist_2 = 1.0 / dist_2
+    V = typeof(dist_2)
+    ElT = eltype(V)
+
+    inv_dist_2 = one(V) / dist_2
     base_ratio_2 = (sigma_ij * sigma_ij) * inv_dist_2
     br2_sq = base_ratio_2 * base_ratio_2
     base_ratio_6 = br2_sq * base_ratio_2
 
-    term = base_ratio_6 * muladd(48.0, base_ratio_6, -24.0)
+    term = base_ratio_6 * muladd(ElT(48.0), base_ratio_6, ElT(-24.0))
     return eps_ij * inv_dist_2 * term
 end
 
 # Old plain coulomb force for old cutoff path 
 @inline function core_force_div_r(inter::SIMDCoulomb, dist_2, atom_i, atom_j)
-    inv_dist_2 = 1.0 / dist_2
+    V = typeof(dist_2)
+    inv_dist_2 = one(V) / dist_2
     inv_dist = SIMD.sqrt(inv_dist_2)
     inv_dist_3 = inv_dist_2 * inv_dist # 1.0 / r^3
     
@@ -1194,10 +1199,11 @@ function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step
     canonical = canonical_inters(nf.inter)
 
     if isnothing(old_neighbors)
-        soa_params = (σ = [ustrip(a.σ) for a in sys.atoms], ϵ = [ustrip(a.ϵ) for a in sys.atoms], q = [ustrip(a.charge) for a in sys.atoms])
+        T_float = typeof(ustrip(sys.atoms[1].σ))
+        soa_params = (σ = T_float[ustrip(a.σ) for a in sys.atoms], ϵ = T_float[ustrip(a.ϵ) for a in sys.atoms], q = T_float[ustrip(a.charge) for a in sys.atoms])
         
         # Initialize empty arrays; the builder handles all resizing
-        packed_data = empty_packed_data(layout_type(canonical), Float64)
+        packed_data = empty_packed_data(layout_type(canonical), T_float)
     else
         soa_params = old_neighbors.soa_params
         packed_data = old_neighbors.packed_data
@@ -1209,11 +1215,12 @@ function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step
 end
 
 function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, atoms, molly_neighbours, N_SIMD, soa_params,
-    lj_inter::SIMDLennardJones, coul_inter::SIMDCoulombLike,) where {T}
+    lj_inter::SIMDLennardJones, coul_inter::AbstractSIMDCoulomb,) where {T}
 
     n_atoms = length(atoms)
     n_pairs = molly_neighbours.n # total number of neighbour list pairs
-    n_parts = Threads.nthreads() # number of threads - the neighbour list gets split into this many parts 
+    #n_parts = Threads.nthreads() # number of threads - the neighbour list gets split into this many parts 
+    n_parts = min(Threads.nthreads(), 8)
     chunk_size = 2 * N_SIMD # how large a chunk is since its unrolled 2x 
     part_len = n_atoms * n_parts # each thread gets n_atom slots so total length 
 
@@ -1389,7 +1396,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}
     return packed_data
 end
 
-@inline _keep_pair(::SIMDCoulombLike, atoms, i, j, is_special) = true
+@inline _keep_pair(::AbstractSIMDCoulomb, atoms, i, j, is_special) = true
 
 @inline _keep_pair(lj_inter::SIMDLennardJones, atoms, i, j, is_special) =
     !Molly.shortcut_pair(lj_inter.shortcut, atoms[i], atoms[j], is_special)
@@ -1416,7 +1423,7 @@ end
     pos,
     neigh,
     soa_params,
-    inter::SIMDCoulombLike,
+    inter::AbstractSIMDCoulomb,
     weight,
 ) where {T}
     packed_data.adj_list[pos] = neigh
@@ -1456,7 +1463,8 @@ function build_packed_adj_list!(
 
     n_atoms = length(atoms)
     n_pairs = molly_neighbours.n
-    n_parts = Threads.nthreads()
+    #n_parts = Threads.nthreads()
+    n_parts = min(Threads.nthreads(), 8)
     chunk_size = 2 * N_SIMD
     part_len = n_atoms * n_parts
 
@@ -1583,14 +1591,12 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     flat_coords = reinterpret(FT, coords) # zero allocation flattening of the coords as flat float64 array for vgather
 
     # Calculate box metrics for distances
-    box_x = ustrip(boundary.side_lengths[1])
-    box_y = ustrip(boundary.side_lengths[2])
-    box_z = ustrip(boundary.side_lengths[3])
-    inv_box_x = 1.0 / box_x
-    inv_box_y = 1.0 / box_y
-    inv_box_z = 1.0 / box_z
-
-
+    box_x = FT(ustrip(boundary.side_lengths[1]))
+    box_y = FT(ustrip(boundary.side_lengths[2]))
+    box_z = FT(ustrip(boundary.side_lengths[3]))
+    inv_box_x = one(FT) / box_x
+    inv_box_y = one(FT) / box_y
+    inv_box_z = one(FT) / box_z
 
     # Multithreading part 
     n_t = n_threads
@@ -1623,16 +1629,8 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 start_idx = (chunk_id - 1) * chunk_size + 1
                 end_idx   = min(chunk_id * chunk_size, n_atoms)
                 
-                # canonical = canonical_inters(pairwise_inters_nl)
-                # cutoffs = ntuple(k -> extract_cutoff_sq(canonical[k].cutoff), length(canonical))
-
-
                 for i in start_idx:end_idx
-                    
-
-                    # Pass lj_inter and coul_inter explicitly!
                     simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH),)
-
                 end
             end
         end
@@ -1641,7 +1639,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     return fs_nounits
 end
 
-@inline function simd_chunk_forces!(fs_nounits, i, packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, soa_params, sim_params, coords, flat_coords, inters::Tuple{<:SIMDLennardJones, <:SIMDCoulombLike}, cutoffs,
+@inline function simd_chunk_forces!(fs_nounits, i, packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, soa_params, sim_params, coords, flat_coords, inters::Tuple{<:SIMDLennardJones, <:AbstractSIMDCoulomb}, cutoffs,
     ::Val{N_SIMD}) where {T, N_SIMD}
 
     lj_inter = inters[1]
@@ -1649,12 +1647,12 @@ end
     lj_cutoff_2 = cutoffs[1]
     coul_cutoff_2 = cutoffs[2]
 
-    VFloat = Vec{N_SIMD, Float64}
+    VFloat = Vec{N_SIMD, T}
     VInt = Vec{N_SIMD, Int}
 
-    xi = ustrip(coords[i][1])
-    yi = ustrip(coords[i][2])
-    zi = ustrip(coords[i][3])
+    xi = T(ustrip(coords[i][1]))
+    yi = T(ustrip(coords[i][2]))
+    zi = T(ustrip(coords[i][3]))
 
     atom_i_proxy = (σ = soa_params.σ[i], ϵ = soa_params.ϵ[i], q = soa_params.q[i])
 
@@ -1783,15 +1781,15 @@ end
     ::Val{N_SIMD},
 ) where {T, L<:Union{LJOnlyLayout, CoulOnlyLayout}, I, N_SIMD}
 
-    VFloat = Vec{N_SIMD, Float64}
+    VFloat = Vec{N_SIMD, T}
     VInt = Vec{N_SIMD, Int}
 
     inter = inters[1]
     cutoff_2 = cutoffs[1]
 
-    xi = ustrip(coords[i][1])
-    yi = ustrip(coords[i][2])
-    zi = ustrip(coords[i][3])
+    xi = T(ustrip(coords[i][1]))
+    yi = T(ustrip(coords[i][2]))
+    zi = T(ustrip(coords[i][3]))
 
     atom_i_proxy = (
         σ = soa_params.σ[i],
@@ -1836,10 +1834,77 @@ end
 
     return nothing
 end
+
+##### Ewald 
+
+# struct SIMDCoulombEwald{D, E, W, C, A} <: AbstractSIMDCoulomb
+#     dist_cutoff::D
+#     error_tol::E
+#     weight_special::W
+#     coulomb_const::C
+#     α::A
+# end
+
+# function SIMDCoulombEwald(;
+#     dist_cutoff,
+#     error_tol = 1e-5,
+#     weight_special = 1,
+#     coulomb_const = 138.93545764,
+#     α = nothing
+# )
+#     F = typeof(ustrip(dist_cutoff))
+#     rc = F(ustrip(dist_cutoff))
+#     tol = F(error_tol)
+#     ws = F(weight_special)
+#     cc = F(ustrip(coulomb_const))
     
+#     alpha_val = isnothing(α) ? sqrt(-log(tol)) / rc : F(α)
 
+#     return SIMDCoulombEwald(dist_cutoff, tol, ws, cc, alpha_val)
+# end
+    
+# === ADDED: SIMD erfc approximation for Ewald ===
+# @inline function simd_erfc(x::V) where {V <: SIMD.Vec}
+#     ElT = eltype(V)
+#     p = ElT(0.3275911)
+#     a1 = ElT(0.254829592); a2 = ElT(-0.284496736); a3 = ElT(1.421413741)
+#     a4 = ElT(-1.453152027); a5 = ElT(1.061405429)
+    
+#     t = one(V) / (one(V) + p * x)
+#     t2 = t * t
+#     t3 = t2 * t
+#     t4 = t3 * t
+#     t5 = t4 * t
+    
+#     poly = muladd(a5, t5, muladd(a4, t4, muladd(a3, t3, muladd(a2, t2, a1 * t))))
+#     return poly * SIMD.exp(-x * x)
+# end
 
+# # === ADDED: Ewald Real-Space Kernel ===
+# @inline function core_force_div_r(inter::SIMDCoulombEwald, dist_2, atom_i, atom_j, signed_weights)
+#     V = typeof(dist_2)
+#     ElT = eltype(V)
 
+#     inv_dist_2 = one(V) / dist_2
+#     inv_dist = SIMD.sqrt(inv_dist_2)
+#     r = dist_2 * inv_dist # Fastest way to calculate r
+#     inv_dist_3 = inv_dist_2 * inv_dist
+
+#     weight = abs(signed_weights)
+#     is_normal_mask = vifelse(signed_weights < zero(V), zero(V), one(V))
+
+#     αr = inter.α * r
+#     exp_mαr2 = SIMD.exp(-αr * αr)
+#     erfc_αr = simd_erfc(αr)
+    
+#     normal_term = erfc_αr + (ElT(2.0) * inter.α / ElT(1.7724538509055159)) * r * exp_mαr2
+#     effective_term = is_normal_mask * normal_term + (one(V) - is_normal_mask)
+
+#     keqq = inter.coulomb_const * atom_i.q * atom_j.q
+#     return weight * keqq * inv_dist_3 * effective_term
+# end
+
+# @inline extract_cutoff_sq(inter::SIMDCoulombEwald) = ustrip(inter.dist_cutoff)^2
 
 
 
