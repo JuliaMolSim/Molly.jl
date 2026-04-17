@@ -443,6 +443,13 @@ end
         @test length(sys.specific_inter_lists[1]) == 1691
         @test length(sys.specific_inter_lists[2]) == 2137
 
+        constrained_inds = Molly.constrained_atom_inds(sys)
+        @test length(constrained_inds) == 15747
+        @test count(i -> i <= 1170, constrained_inds) == 963
+        constrained_pairs = Molly.constrained_atom_pairs(sys)
+        @test length(constrained_pairs) == 15380
+        @test count(p -> (p[1] <= 1170 && p[2] <= 1170), constrained_pairs) == 596
+
         bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
         @test bench_result.allocs <= 14
         @test bench_result.memory <= 640

@@ -177,7 +177,16 @@ function constrained_atom_inds(lincs::LINCS)
     for dc in lincs.dist_constraints
         push!(atom_inds, dc.i, dc.j)
     end
-    return atom_inds
+    return unique_ind_list(atom_inds)
+end
+
+function constrained_atom_pairs(lincs::LINCS)
+    D = typeof(first(lincs.dist_constraints).dist)
+    atom_pairs = Tuple{Int, Int, D}[]
+    for dc in lincs.dist_constraints
+        push!(atom_pairs, sort_pair(dc.i, dc.j, dc.dist))
+    end
+    return unique_pair_list(atom_pairs)
 end
 
 cluster_keys(::LINCS) = (:clusters,)
