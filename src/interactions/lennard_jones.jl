@@ -1613,28 +1613,35 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     canonical = canonical_inters(pairwise_inters_nl)
     cutoffs = ntuple(k -> extract_cutoff_sq(canonical[k]), length(canonical))
 
-    # Spawn the right number of tasks per cores
-    @sync for _ in 1:n_t
-        Threads.@spawn begin
-            
-            while true
-                # Get chunk then add 1 
-                chunk_id = Threads.atomic_add!(counter, 1)
-                
-                # Break if it exceeds
-                if chunk_id > num_chunks
-                    break
-                end
-
-                start_idx = (chunk_id - 1) * chunk_size + 1
-                end_idx   = min(chunk_id * chunk_size, n_atoms)
-                
-                for i in start_idx:end_idx
-                    simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH),)
-                end
-            end
-        end
+    n_atoms_total = length(coords)
+    # Static scheduling bypasses atomic locks entirely.
+    # The CPU distributes n_atoms across the threads once, instantly.
+    Threads.@threads :static for i in 1:n_atoms_total
+        simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH))
     end
+    
+    # # Spawn the right number of tasks per cores
+    # @sync for _ in 1:n_t
+    #     Threads.@spawn begin
+            
+    #         while true
+    #             # Get chunk then add 1 
+    #             chunk_id = Threads.atomic_add!(counter, 1)
+                
+    #             # Break if it exceeds
+    #             if chunk_id > num_chunks
+    #                 break
+    #             end
+
+    #             start_idx = (chunk_id - 1) * chunk_size + 1
+    #             end_idx   = min(chunk_id * chunk_size, n_atoms)
+                
+    #             for i in start_idx:end_idx
+    #                 simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH),)
+    #             end
+    #         end
+    #     end
+    # end
 
     return fs_nounits
 end
