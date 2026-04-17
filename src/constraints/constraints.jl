@@ -520,10 +520,35 @@ cluster_interactions(kd::AngleClusterData) = (
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
 
+unique_ind_list(l) = sort(collect(Set(l)))
+
+constrained_atom_inds(sys::System) = constrained_atom_inds(sys.constraints)
+
 function constrained_atom_inds(constraints::Union{Tuple, NamedTuple})
     inds_constrained = Int[]
     for ca in constraints
         append!(inds_constrained, constrained_atom_inds(ca))
     end
-    return inds_constrained
+    return unique_ind_list(inds_constrained)
+end
+
+sort_pair(i, j, d) = (min(i, j), max(i, j), d)
+
+unique_pair_list(l) = sort(
+    collect(Set(l));
+    lt=((p1, p2) -> p1[1] < p2[1] || (p1[1] == p2[1] && p1[2] < p2[2])),
+)
+
+constrained_atom_pairs(sys::System) = constrained_atom_pairs(sys.constraints)
+
+function constrained_atom_pairs(constraints::Union{Tuple, NamedTuple})
+    if iszero(length(constraints))
+        return []
+    else
+        pairs_constrained = constrained_atom_pairs(first(constraints))
+        for ca in constraints[2:end]
+            append!(pairs_constrained, constrained_atom_pairs(ca))
+        end
+        return unique_pair_list(pairs_constrained)
+    end
 end
