@@ -7,7 +7,8 @@ export
     SIMDLennardJones,
     SIMDNeighborFinder,
     SIMDCoulomb,
-    PackedFlatSoA
+    PackedFlatSoA,
+    SIMDCoulombReactionField
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
@@ -899,7 +900,7 @@ struct PackedFlatSoA{T, L<:PackedLayout}
     eps::Vector{T}
     charges::Vector{T}
     lj_weights::Vector{T}
-    coul_weights::Vector{T}
+    coul_weights::Vector{T} # positive = normal pair, negative = special pair, abs(weight) = actual scaling 
 
     _both_counts::Vector{Int}
     _coul_counts::Vector{Int}
@@ -935,13 +936,38 @@ use_neighbors(::SIMDLennardJones) = true
 
 @kwdef struct SIMDCoulomb{C, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     weight_special::W = 1 
     coulomb_const:: T = 138.93545764
 end
 
-use_neighbors(::SIMDCoulomb) = true
+# REACTION FIELD INTERACTION 
+struct SIMDCoulombReactionField{D, S, W, T, K} <: PairwiseInteraction
+    dist_cutoff::D
+    solvent_dielectric::S
+    use_neighbors::Bool
+    weight_special::W
+    coulomb_const::T
+    two_krf::K
+end
 
+function SIMDCoulombReactionField(; dist_cutoff, solvent_dielectric = 78.3, 
+    use_neighbors = true, weight_special = 1, coulomb_const = 138.93545764,)
+
+    weight_special < 0 &&
+        throw(ArgumentError("signed Coulomb weights require nonnegative weight_special"))
+
+    rc = ustrip(dist_cutoff)
+    krf = inv(rc^3) * ((solvent_dielectric - 1) / (2 * solvent_dielectric + 1))
+    two_krf = 2 * krf
+
+    return SIMDCoulombReactionField(dist_cutoff, solvent_dielectric, use_neighbors, 
+    weight_special, coulomb_const, two_krf,)
+end
+
+const SIMDCoulombLike = Union{SIMDCoulomb, SIMDCoulombReactionField,}
+
+use_neighbors(inter::SIMDCoulombLike) = true
 
 # Duck typing
 # If Molly's loggers ask for `.n` or `.list`, route it to the standard_list
@@ -958,14 +984,14 @@ function Base.getproperty(nl::PackedNeighborList, sym::Symbol)
 end
 
 canonical_inters(inters::Tuple{<:SIMDLennardJones}) = inters
-canonical_inters(inters::Tuple{<:SIMDCoulomb}) = inters
+canonical_inters(inters::Tuple{<:SIMDCoulombLike}) = inters
 
-canonical_inters(inters::Tuple{<:SIMDLennardJones, <:SIMDCoulomb}) = inters
-canonical_inters(inters::Tuple{<:SIMDCoulomb, <:SIMDLennardJones}) = (inters[2], inters[1])
+canonical_inters(inters::Tuple{<:SIMDLennardJones, <:SIMDCoulombLike}) = inters
+canonical_inters(inters::Tuple{<:SIMDCoulombLike, <:SIMDLennardJones}) = (inters[2], inters[1])
 
 layout_type(::Tuple{<:SIMDLennardJones}) = LJOnlyLayout
-layout_type(::Tuple{<:SIMDCoulomb}) = CoulOnlyLayout
-layout_type(::Tuple{<:SIMDLennardJones, <:SIMDCoulomb}) = LJCoulSplitLayout
+layout_type(::Tuple{<:SIMDCoulombLike}) = CoulOnlyLayout
+layout_type(::Tuple{<:SIMDLennardJones, <:SIMDCoulombLike}) = LJCoulSplitLayout
 
 
 
@@ -975,11 +1001,42 @@ Base.length(nl::PackedNeighborList) = length(nl.standard_list)
 @inline Base.:*(c::SIMD.Vec, v::SVector{3}) = SVector(c * v[1], c * v[2], c * v[3])
 @inline Base.:*(v::SVector{3}, c::SIMD.Vec) = SVector(c * v[1], c * v[2], c * v[3])
 
+# LJ weights remain ordinary positive scale factors.
+@inline function _lj_weight(inter::SIMDLennardJones, is_special, ::Type{T}) where {T}
+    return is_special ? T(inter.weight_special) : one(T)
+end
 
-@inline function custom_force(inter, dr, safe_dist2, atom_i, atom_j, neigh_weights, cutoff_2)
+# Coulomb-like weights encode specialness in the sign.
+# This assumes weight_special >= 0, which is true for normal force fields.
+@inline function _coul_signed_weight(inter::SIMDCoulombLike, is_special, ::Type{T}) where {T}
+    w = is_special ? T(inter.weight_special) : one(T)
+    return is_special ? -w : w
+end
+
+# LJ uses normal weights 
+@inline function custom_force(inter::SIMDLennardJones, dr, safe_dist2, atom_i,
+    atom_j, neigh_weights, cutoff_2)
     f_div_r = force_apply_cutoff(inter.cutoff, inter, safe_dist2, atom_i, atom_j, cutoff_2)
     f_div_r_weighted = f_div_r * neigh_weights
     return f_div_r_weighted * dr
+end
+
+@inline function custom_force(inter::SIMDCoulomb, dr, safe_dist2, atom_i, atom_j, signed_weights, cutoff_2)
+    f_div_r = force_apply_cutoff(inter.cutoff, inter, safe_dist2, atom_i, atom_j, cutoff_2)
+    f_div_r_weighted = f_div_r * abs(signed_weights)
+    return f_div_r_weighted * dr
+end
+
+# @inline function custom_force(inter, dr, safe_dist2, atom_i, atom_j, neigh_weights, cutoff_2)
+#     f_div_r = force_apply_cutoff(inter.cutoff, inter, safe_dist2, atom_i, atom_j, cutoff_2)
+#     f_div_r_weighted = f_div_r * neigh_weights
+#     return f_div_r_weighted * dr
+# end
+
+# RF has dist_cutoff not AbstractCutOff so uses own formula 
+@inline function custom_force(inter::SIMDCoulombReactionField, dr, safe_dist2, atom_i, atom_j, signed_weights, cutoff_2)
+    f_div_r = core_force_div_r(inter, safe_dist2, atom_i, atom_j, signed_weights) 
+    return f_div_r * dr 
 end
 
 @inline function force_apply_cutoff(cutoff::DistanceCutoff, inter, dist_2, atom_i, atom_j, cutoff_2)
@@ -991,7 +1048,6 @@ end
 end
 
 @inline function core_force_div_r(inter::SIMDLennardJones, dist_2, atom_i, atom_j)
-    # LJ specific mixing
     sigma_ij = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     eps_ij = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
@@ -1004,6 +1060,7 @@ end
     return eps_ij * inv_dist_2 * term
 end
 
+# Old plain coulomb force for old cutoff path 
 @inline function core_force_div_r(inter::SIMDCoulomb, dist_2, atom_i, atom_j)
     inv_dist_2 = 1.0 / dist_2
     inv_dist = SIMD.sqrt(inv_dist_2)
@@ -1011,6 +1068,22 @@ end
     
     return inter.coulomb_const * atom_i.q * atom_j.q * inv_dist_3
 end
+
+@inline function core_force_div_r(inter::SIMDCoulombReactionField, dist_2, atom_i, atom_j, signed_weights)
+    V = typeof(dist_2)
+
+    inv_dist_2 = one(V) / dist_2
+    inv_dist = SIMD.sqrt(inv_dist_2)
+    inv_dist_3 = inv_dist_2 * inv_dist
+
+    weight = abs(signed_weights)
+    rf_scale = vifelse(signed_weights < zero(V), zero(V), one(V))
+
+    keqq = inter.coulomb_const * atom_i.q * atom_j.q
+    rf_term = muladd(-rf_scale, inter.two_krf, inv_dist_3)
+    return weight * keqq * rf_term
+end
+
 
 @inline function simd_geometry(x_i, y_i, z_i, neigh_x::V, neigh_y::V, neigh_z::V, sim_params) where {V <: SIMD.Vec}
     dx = x_i - neigh_x
@@ -1033,7 +1106,7 @@ end
     V = typeof(dist_2) 
 
     # Create the interaction-specific mask
-    mask = (dist_2 < cutoff_2) & (dist_2 > 0.0)
+    mask = (dist_2 <= cutoff_2) & (dist_2 > zero(V))
 
     # Prevent divide-by-zero for padded dummies
     safe_dist_2 = vifelse(mask, dist_2, one(V)) 
@@ -1053,6 +1126,12 @@ end
 @inline extract_cutoff_sq(cutoff::DistanceCutoff) = ustrip(cutoff.dist_cutoff)^2
 @inline extract_cutoff_sq(cutoff::NoCutoff) = Inf
 
+# Interaction level cutoff extraction 
+# To combat RF and Ewald having direct distance cutoff 
+@inline extract_cutoff_sq(inter::SIMDLennardJones) = extract_cutoff_sq(inter.cutoff)
+@inline extract_cutoff_sq(inter::SIMDCoulomb) = extract_cutoff_sq(inter.cutoff)
+@inline extract_cutoff_sq(inter::SIMDCoulombReactionField) = ustrip(inter.dist_cutoff)^2
+
 # VERSION USING OVERLOADED NEIGHBOURS WORKING
 # VERSION USING OVERLOADED NEIGHBOURS WORKING
 # VERSION USING OVERLOADED NEIGHBOURS WORKING
@@ -1071,7 +1150,6 @@ end
     
     return x, y, z
 end
-
 
 
 # Returns either both or coulomb only depending on whether lj_shortcut is true
@@ -1131,7 +1209,7 @@ function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step
 end
 
 function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, atoms, molly_neighbours, N_SIMD, soa_params,
-    lj_inter::SIMDLennardJones, coul_inter::SIMDCoulomb,) where {T}
+    lj_inter::SIMDLennardJones, coul_inter::SIMDCoulombLike,) where {T}
 
     n_atoms = length(atoms)
     n_pairs = molly_neighbours.n # total number of neighbour list pairs
@@ -1237,11 +1315,11 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}
 
         @inbounds for idx in first_idx:last_idx # same as pass one 
             i, j, is_special = molly_neighbours.list[idx]
-            coul_w = is_special ? coul_inter.weight_special : 1.0 # standard 
+            coul_w = _coul_signed_weight(coul_inter, is_special, T)
+            lj_w = _lj_weight(lj_inter, is_special, T)
 
             if packed_data._is_both[idx]
                 # remember part index ensures you get the write global index 
-                lj_w = is_special ? lj_inter.weight_special : 1.0
 
                 pos_i = packed_data._both_part_pos[_part_index(i, part, n_atoms)] # retrieve the index of atom i to write to 
                 packed_data._both_part_pos[_part_index(i, part, n_atoms)] = pos_i + 1 # add one for atom i since we are writing to the original index
@@ -1292,18 +1370,18 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}
                 # look at where the offset was + the total counts was until where the split index begins 
                 # pad with empty atoms
                 packed_data.adj_list[pos] = i
-                packed_data.sigmas[pos] = 1.0
-                packed_data.eps[pos] = 1.0
-                packed_data.charges[pos] = 0.0
-                packed_data.lj_weights[pos] = 0.0
-                packed_data.coul_weights[pos] = 0.0
+                packed_data.sigmas[pos] = one(T)
+                packed_data.eps[pos] = one(T)
+                packed_data.charges[pos] = zero(T)
+                packed_data.lj_weights[pos] = zero(T)
+                packed_data.coul_weights[pos] = zero(T)
             end
 
             # look at where the split index + coulomb counts ends until where the next index begins and pad 
             for pos in (packed_data.split_idxs[i] + packed_data._coul_counts[i]):(packed_data.offsets[i + 1] - 1)
                 packed_data.adj_list[pos] = i
-                packed_data.charges[pos] = 0.0
-                packed_data.coul_weights[pos] = 0.0
+                packed_data.charges[pos] = zero(T)
+                packed_data.coul_weights[pos] = zero(T)
             end
         end
     end
@@ -1311,7 +1389,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}
     return packed_data
 end
 
-@inline _keep_pair(::SIMDCoulomb, atoms, i, j, is_special) = true
+@inline _keep_pair(::SIMDCoulombLike, atoms, i, j, is_special) = true
 
 @inline _keep_pair(lj_inter::SIMDLennardJones, atoms, i, j, is_special) =
     !Molly.shortcut_pair(lj_inter.shortcut, atoms[i], atoms[j], is_special)
@@ -1338,7 +1416,7 @@ end
     pos,
     neigh,
     soa_params,
-    inter::SIMDCoulomb,
+    inter::SIMDCoulombLike,
     weight,
 ) where {T}
     packed_data.adj_list[pos] = neigh
@@ -1457,7 +1535,11 @@ function build_packed_adj_list!(
             keep[idx] || continue
 
             i, j, is_special = list[idx]
-            weight = is_special ? inter.weight_special : one(T)
+            weight = if L === LJOnlyLayout
+                _lj_weight(inter, is_special, T)
+            else
+                _coul_signed_weight(inter, is_special, T)
+            end
 
             ki = base + i
             pos_i = pos[ki]
@@ -1511,7 +1593,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
 
     # Multithreading part 
-    n_t = Threads.nthreads()
+    n_t = n_threads
     num_chunks = 4 * n_t #T8 = 8xn_t, #T16 = 4xn_t, #T32 = 4xn_t, #T64 = 2/1xn_t
     n_atoms = length(coords)
 
@@ -1523,7 +1605,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         inv_box_x = inv_box_x, inv_box_y = inv_box_y, inv_box_z = inv_box_z)
                     
     canonical = canonical_inters(pairwise_inters_nl)
-    cutoffs = ntuple(k -> extract_cutoff_sq(canonical[k].cutoff), length(canonical))
+    cutoffs = ntuple(k -> extract_cutoff_sq(canonical[k]), length(canonical))
 
     # Spawn the right number of tasks per cores
     @sync for _ in 1:n_t
@@ -1559,7 +1641,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     return fs_nounits
 end
 
-@inline function simd_chunk_forces!(fs_nounits, i, packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, soa_params, sim_params, coords, flat_coords, inters::Tuple{<:SIMDLennardJones, <:SIMDCoulomb}, cutoffs,
+@inline function simd_chunk_forces!(fs_nounits, i, packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, soa_params, sim_params, coords, flat_coords, inters::Tuple{<:SIMDLennardJones, <:SIMDCoulombLike}, cutoffs,
     ::Val{N_SIMD}) where {T, N_SIMD}
 
     lj_inter = inters[1]
@@ -1600,13 +1682,12 @@ end
 
         lj_weights_1 = vload(VFloat, packed_data.lj_weights, j)
         lj_weights_2 = vload(VFloat, packed_data.lj_weights, j + N_SIMD)
-        coul_weights_1 = vload(VFloat, packed_data.coul_weights, j)
-        coul_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
+        coul_signed_weights_1 = vload(VFloat, packed_data.coul_weights, j)
+        coul_signed_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
 
         neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
         neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
 
-        # 🚨 HOISTED GEOMETRY: Calculated strictly ONCE per pair!
         dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
         dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
 
@@ -1615,8 +1696,8 @@ end
         lj_x_2, lj_y_2, lj_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, lj_inter, lj_weights_2, lj_cutoff_2)
 
         # Apply Coulomb (REUSING THE SAME GEOMETRY!)
-        coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
-        coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
+        coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_signed_weights_1, coul_cutoff_2)
+        coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_signed_weights_2, coul_cutoff_2)
 
         f_ix_vec_1 += lj_x_1 + coul_x_1; f_iy_vec_1 += lj_y_1 + coul_y_1; f_iz_vec_1 += lj_z_1 + coul_z_1
         f_ix_vec_2 += lj_x_2 + coul_x_2; f_iy_vec_2 += lj_y_2 + coul_y_2; f_iz_vec_2 += lj_z_2 + coul_z_2
@@ -1633,8 +1714,8 @@ end
         atom_j_proxy_1 = (σ = zero(VFloat), ϵ = zero(VFloat), q = vload(VFloat, packed_data.charges, j))
         atom_j_proxy_2 = (σ = zero(VFloat), ϵ = zero(VFloat), q = vload(VFloat, packed_data.charges, j + N_SIMD))
 
-        coul_weights_1 = vload(VFloat, packed_data.coul_weights, j)
-        coul_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
+        coul_signed_weights_1 = vload(VFloat, packed_data.coul_weights, j)
+        coul_signed_weights_2 = vload(VFloat, packed_data.coul_weights, j + N_SIMD)
 
         neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
         neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
@@ -1644,8 +1725,8 @@ end
         dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
 
         # Apply Coulomb ONLY
-        coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_weights_1, coul_cutoff_2)
-        coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_weights_2, coul_cutoff_2)
+        coul_x_1, coul_y_1, coul_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, coul_inter, coul_signed_weights_1, coul_cutoff_2)
+        coul_x_2, coul_y_2, coul_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, coul_inter, coul_signed_weights_2, coul_cutoff_2)
 
         f_ix_vec_1 += coul_x_1; f_iy_vec_1 += coul_y_1; f_iz_vec_1 += coul_z_1
         f_ix_vec_2 += coul_x_2; f_iy_vec_2 += coul_y_2; f_iz_vec_2 += coul_z_2
@@ -1689,72 +1770,72 @@ end
     vload(V, packed_data.coul_weights, j)
 
 
-    @inline function simd_chunk_forces!(
-        fs_nounits,
-        i,
-        packed_data::PackedFlatSoA{T, L},
-        soa_params,
-        sim_params,
-        coords,
-        flat_coords,
-        inters::Tuple{I},
-        cutoffs,
-        ::Val{N_SIMD},
-    ) where {T, L<:Union{LJOnlyLayout, CoulOnlyLayout}, I, N_SIMD}
-    
-        VFloat = Vec{N_SIMD, Float64}
-        VInt = Vec{N_SIMD, Int}
-    
-        inter = inters[1]
-        cutoff_2 = cutoffs[1]
-    
-        xi = ustrip(coords[i][1])
-        yi = ustrip(coords[i][2])
-        zi = ustrip(coords[i][3])
-    
-        atom_i_proxy = (
-            σ = soa_params.σ[i],
-            ϵ = soa_params.ϵ[i],
-            q = soa_params.q[i],
-        )
-    
-        f_ix_vec_1 = zero(VFloat); f_iy_vec_1 = zero(VFloat); f_iz_vec_1 = zero(VFloat)
-        f_ix_vec_2 = zero(VFloat); f_iy_vec_2 = zero(VFloat); f_iz_vec_2 = zero(VFloat)
-    
-        start_idx = packed_data.offsets[i]
-        end_idx = packed_data.offsets[i + 1] - 1
-    
-        @inbounds for j in start_idx:(2 * N_SIMD):end_idx
-            neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
-            neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
-    
-            atom_j_proxy_1 = _load_atom_j_proxy(packed_data, j, VFloat)
-            atom_j_proxy_2 = _load_atom_j_proxy(packed_data, j + N_SIMD, VFloat)
-    
-            weights_1 = _load_weights(packed_data, j, VFloat)
-            weights_2 = _load_weights(packed_data, j + N_SIMD, VFloat)
-    
-            neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
-            neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
-    
-            dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
-            dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
-    
-            f_x_1, f_y_1, f_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, inter, weights_1, cutoff_2)
-            f_x_2, f_y_2, f_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, inter, weights_2, cutoff_2)
-    
-            f_ix_vec_1 += f_x_1; f_iy_vec_1 += f_y_1; f_iz_vec_1 += f_z_1
-            f_ix_vec_2 += f_x_2; f_iy_vec_2 += f_y_2; f_iz_vec_2 += f_z_2
-        end
-    
-        f_ix = sum(f_ix_vec_1 + f_ix_vec_2)
-        f_iy = sum(f_iy_vec_1 + f_iy_vec_2)
-        f_iz = sum(f_iz_vec_1 + f_iz_vec_2)
-    
-        @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
-    
-        return nothing
+@inline function simd_chunk_forces!(
+    fs_nounits,
+    i,
+    packed_data::PackedFlatSoA{T, L},
+    soa_params,
+    sim_params,
+    coords,
+    flat_coords,
+    inters::Tuple{I},
+    cutoffs,
+    ::Val{N_SIMD},
+) where {T, L<:Union{LJOnlyLayout, CoulOnlyLayout}, I, N_SIMD}
+
+    VFloat = Vec{N_SIMD, Float64}
+    VInt = Vec{N_SIMD, Int}
+
+    inter = inters[1]
+    cutoff_2 = cutoffs[1]
+
+    xi = ustrip(coords[i][1])
+    yi = ustrip(coords[i][2])
+    zi = ustrip(coords[i][3])
+
+    atom_i_proxy = (
+        σ = soa_params.σ[i],
+        ϵ = soa_params.ϵ[i],
+        q = soa_params.q[i],
+    )
+
+    f_ix_vec_1 = zero(VFloat); f_iy_vec_1 = zero(VFloat); f_iz_vec_1 = zero(VFloat)
+    f_ix_vec_2 = zero(VFloat); f_iy_vec_2 = zero(VFloat); f_iz_vec_2 = zero(VFloat)
+
+    start_idx = packed_data.offsets[i]
+    end_idx = packed_data.offsets[i + 1] - 1
+
+    @inbounds for j in start_idx:(2 * N_SIMD):end_idx
+        neigh_idxs_1 = vload(VInt, packed_data.adj_list, j)
+        neigh_idxs_2 = vload(VInt, packed_data.adj_list, j + N_SIMD)
+
+        atom_j_proxy_1 = _load_atom_j_proxy(packed_data, j, VFloat)
+        atom_j_proxy_2 = _load_atom_j_proxy(packed_data, j + N_SIMD, VFloat)
+
+        weights_1 = _load_weights(packed_data, j, VFloat)
+        weights_2 = _load_weights(packed_data, j + N_SIMD, VFloat)
+
+        neigh_x_1, neigh_y_1, neigh_z_1 = gather_xyz(flat_coords, neigh_idxs_1)
+        neigh_x_2, neigh_y_2, neigh_z_2 = gather_xyz(flat_coords, neigh_idxs_2)
+
+        dr_1, dist_2_1 = simd_geometry(xi, yi, zi, neigh_x_1, neigh_y_1, neigh_z_1, sim_params)
+        dr_2, dist_2_2 = simd_geometry(xi, yi, zi, neigh_x_2, neigh_y_2, neigh_z_2, sim_params)
+
+        f_x_1, f_y_1, f_z_1 = simd_force_eval(dr_1, dist_2_1, atom_i_proxy, atom_j_proxy_1, inter, weights_1, cutoff_2)
+        f_x_2, f_y_2, f_z_2 = simd_force_eval(dr_2, dist_2_2, atom_i_proxy, atom_j_proxy_2, inter, weights_2, cutoff_2)
+
+        f_ix_vec_1 += f_x_1; f_iy_vec_1 += f_y_1; f_iz_vec_1 += f_z_1
+        f_ix_vec_2 += f_x_2; f_iy_vec_2 += f_y_2; f_iz_vec_2 += f_z_2
     end
+
+    f_ix = sum(f_ix_vec_1 + f_ix_vec_2)
+    f_iy = sum(f_iy_vec_1 + f_iy_vec_2)
+    f_iz = sum(f_iz_vec_1 + f_iz_vec_2)
+
+    @inbounds fs_nounits[i] += SVector(f_ix, f_iy, f_iz)
+
+    return nothing
+end
     
 
 
