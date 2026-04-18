@@ -8,7 +8,8 @@ export
     SIMDNeighborFinder,
     SIMDCoulomb,
     PackedFlatSoA,
-    SIMDCoulombReactionField
+    SIMDCoulombReactionField,
+    SIMDCoulombEwald
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
@@ -970,6 +971,42 @@ function SIMDCoulombReactionField(;
     return SIMDCoulombReactionField(dist_cutoff, sd, ws, cc, two_krf)
 end
 
+struct SIMDCoulombEwald{D, E, W, C, A, B} <: AbstractSIMDCoulomb
+    dist_cutoff::D
+    error_tol::E
+    weight_special::W
+    coulomb_const::C
+    α::A
+    two_α_inv_sqrtπ::B
+end
+
+function SIMDCoulombEwald(;
+    dist_cutoff,
+    error_tol = 0.0005,
+    weight_special = 1,
+    coulomb_const = 138.93545764,
+    α = nothing,
+)
+    F = typeof(ustrip(dist_cutoff))
+    rc = F(ustrip(dist_cutoff))
+    tol = F(error_tol)
+    ws = F(weight_special)
+    cc = F(ustrip(coulomb_const))
+
+    ws < zero(F) && 
+        throw(ArgumentError("signed Coulomb weights require nonnegative weight_special"))
+    
+    alpha_val = isnothing(α) ? sqrt(-log(F(2) * tol)) / rc : F(ustrip(α))
+
+    # 2 / sqrt(pi)
+    two_inv_sqrtπ = F(1.1283791670955126)
+    two_α_inv_sqrtπ = two_inv_sqrtπ * alpha_val
+
+    return SIMDCoulombEwald(dist_cutoff, tol, ws, cc, alpha_val, two_α_inv_sqrtπ)
+end
+
+
+
 
 use_neighbors(::SIMDLennardJones) = true  
 use_neighbors(::AbstractSIMDCoulomb) = true
@@ -1019,6 +1056,29 @@ end
     return is_special ? -w : w
 end
 
+@inline function simd_erfc_from_exp(x::V, exp_mx2::V) where {V <: SIMD.Vec}
+    F = eltype(V)
+
+    p  = F(0.3275911)
+    a1 = F(0.254829592)
+    a2 = F(-0.284496736)
+    a3 = F(1.421413741)
+    a4 = F(-1.453152027)
+    a5 = F(1.061405429)
+
+    t = one(V) / (one(V) + p * x)
+
+    # Equivalent to:
+    # (a1*t + a2*t^2 + a3*t^3 + a4*t^4 + a5*t^5) * exp(-x^2)
+    # but with fewer temporaries.
+    poly = muladd(a5, t, a4)
+    poly = muladd(poly, t, a3)
+    poly = muladd(poly, t, a2)
+    poly = muladd(poly, t, a1)
+
+    return (poly * t) * exp_mx2
+end
+
 # LJ uses normal weights 
 @inline function custom_force(inter::SIMDLennardJones, dr, safe_dist2, atom_i,
     atom_j, neigh_weights, cutoff_2)
@@ -1039,6 +1099,20 @@ end
     f_div_r = core_force_div_r(inter, safe_dist2, atom_i, atom_j, signed_weights) 
     return f_div_r * dr 
 end
+
+@inline function custom_force(
+    inter::SIMDCoulombEwald,
+    dr,
+    safe_dist2,
+    atom_i,
+    atom_j,
+    signed_weights,
+    cutoff_2,
+)
+    f_div_r = core_force_div_r(inter, safe_dist2, atom_i, atom_j, signed_weights)
+    return f_div_r * dr
+end
+
 
 @inline function force_apply_cutoff(cutoff::DistanceCutoff, inter, dist_2, atom_i, atom_j, cutoff_2)
     return core_force_div_r(inter, dist_2, atom_i, atom_j)
@@ -1089,6 +1163,88 @@ end
     return weight * keqq * rf_term
 end
 
+@inline function core_force_div_r(
+    inter::SIMDCoulombEwald,
+    dist_2,
+    atom_i,
+    atom_j,
+    signed_weights,
+)
+    V = typeof(dist_2)
+    F = eltype(V)
+
+    alpha = F(inter.α)
+    two_α_inv_sqrtπ = F(inter.two_α_inv_sqrtπ)
+    coulomb_const = F(inter.coulomb_const)
+
+    inv_dist_2 = one(V) / dist_2
+    inv_dist = SIMD.sqrt(inv_dist_2)
+    inv_dist_3 = inv_dist_2 * inv_dist
+
+    # r = sqrt(dist_2), but this reuses inv_dist.
+    r = dist_2 * inv_dist
+
+    αr = alpha * r
+    αr2 = αr * αr
+    exp_mαr2 = SIMD.exp(-αr2)
+
+    erfc_αr = simd_erfc_from_exp(αr, exp_mαr2)
+
+    normal_term = muladd(two_α_inv_sqrtπ * r, exp_mαr2, erfc_αr)
+
+    # Negative signed weight means special electrostatics:
+    # special Ewald real-space force becomes ordinary Coulomb.
+    special_mask = signed_weights < zero(V)
+    ewald_factor = vifelse(special_mask, one(V), normal_term)
+
+    weight = abs(signed_weights)
+    keqq = coulomb_const * atom_i.q * atom_j.q
+
+    return weight * keqq * inv_dist_3 * ewald_factor
+end
+
+# @inline function core_force_div_r(
+#     inter::SIMDCoulombEwald,
+#     dist_2,
+#     atom_i,
+#     atom_j,
+#     signed_weights,
+# )
+#     V = typeof(dist_2)
+#     F = eltype(V)
+
+#     alpha = F(inter.α)
+#     two_α_inv_sqrtπ = F(inter.two_α_inv_sqrtπ)
+#     coulomb_const = F(inter.coulomb_const)
+
+#     inv_dist_2 = one(V) / dist_2
+#     inv_dist = SIMD.sqrt(inv_dist_2)
+#     inv_dist_3 = inv_dist_2 * inv_dist
+
+#     r = dist_2 * inv_dist
+
+#     αr = alpha * r
+#     αr2 = αr * αr
+#     exp_mαr2 = SIMD.exp(-αr2)
+
+#     erfc_αr = simd_erfc_from_exp(αr, exp_mαr2)
+
+#     # Standard Ewald Real-Space factor
+#     normal_term = muladd(two_α_inv_sqrtπ * r, exp_mαr2, erfc_αr)
+
+#     # === FIXED: The Artifact Subtraction ===
+#     weight = abs(signed_weights)
+    
+#     # Ewald real space must subtract the k-space artifact for special pairs.
+#     # For normal pairs (weight=1), this neatly resolves to normal_term - 0.
+#     ewald_factor = normal_term - (one(V) - weight)
+
+#     keqq = coulomb_const * atom_i.q * atom_j.q
+
+#     # Notice we removed `weight * keqq` here, because the weight is 
+#     # mathematically baked into the ewald_factor now!
+#     return keqq * inv_dist_3 * ewald_factor
+# end
 
 @inline function simd_geometry(x_i, y_i, z_i, neigh_x::V, neigh_y::V, neigh_z::V, sim_params) where {V <: SIMD.Vec}
     dx = x_i - neigh_x
@@ -1136,6 +1292,7 @@ end
 @inline extract_cutoff_sq(inter::SIMDLennardJones) = extract_cutoff_sq(inter.cutoff)
 @inline extract_cutoff_sq(inter::SIMDCoulomb) = extract_cutoff_sq(inter.cutoff)
 @inline extract_cutoff_sq(inter::SIMDCoulombReactionField) = ustrip(inter.dist_cutoff)^2
+@inline extract_cutoff_sq(inter::SIMDCoulombEwald) = ustrip(inter.dist_cutoff)^2
 
 # VERSION USING OVERLOADED NEIGHBOURS WORKING
 # VERSION USING OVERLOADED NEIGHBOURS WORKING
@@ -1616,10 +1773,11 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     n_atoms_total = length(coords)
     # Static scheduling bypasses atomic locks entirely.
     # The CPU distributes n_atoms across the threads once, instantly.
+    #Threads.@threads :static for i in 1:n_atoms_total
     Threads.@threads :static for i in 1:n_atoms_total
         simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH))
     end
-    
+
     # # Spawn the right number of tasks per cores
     # @sync for _ in 1:n_t
     #     Threads.@spawn begin
@@ -1841,77 +1999,17 @@ end
 
     return nothing
 end
+ 
 
-##### Ewald 
 
-# struct SIMDCoulombEwald{D, E, W, C, A} <: AbstractSIMDCoulomb
-#     dist_cutoff::D
-#     error_tol::E
-#     weight_special::W
-#     coulomb_const::C
-#     α::A
-# end
 
-# function SIMDCoulombEwald(;
-#     dist_cutoff,
-#     error_tol = 1e-5,
-#     weight_special = 1,
-#     coulomb_const = 138.93545764,
-#     α = nothing
-# )
-#     F = typeof(ustrip(dist_cutoff))
-#     rc = F(ustrip(dist_cutoff))
-#     tol = F(error_tol)
-#     ws = F(weight_special)
-#     cc = F(ustrip(coulomb_const))
     
-#     alpha_val = isnothing(α) ? sqrt(-log(tol)) / rc : F(α)
 
-#     return SIMDCoulombEwald(dist_cutoff, tol, ws, cc, alpha_val)
-# end
-    
-# === ADDED: SIMD erfc approximation for Ewald ===
-# @inline function simd_erfc(x::V) where {V <: SIMD.Vec}
-#     ElT = eltype(V)
-#     p = ElT(0.3275911)
-#     a1 = ElT(0.254829592); a2 = ElT(-0.284496736); a3 = ElT(1.421413741)
-#     a4 = ElT(-1.453152027); a5 = ElT(1.061405429)
-    
-#     t = one(V) / (one(V) + p * x)
-#     t2 = t * t
-#     t3 = t2 * t
-#     t4 = t3 * t
-#     t5 = t4 * t
-    
-#     poly = muladd(a5, t5, muladd(a4, t4, muladd(a3, t3, muladd(a2, t2, a1 * t))))
-#     return poly * SIMD.exp(-x * x)
-# end
 
-# # === ADDED: Ewald Real-Space Kernel ===
-# @inline function core_force_div_r(inter::SIMDCoulombEwald, dist_2, atom_i, atom_j, signed_weights)
-#     V = typeof(dist_2)
-#     ElT = eltype(V)
 
-#     inv_dist_2 = one(V) / dist_2
-#     inv_dist = SIMD.sqrt(inv_dist_2)
-#     r = dist_2 * inv_dist # Fastest way to calculate r
-#     inv_dist_3 = inv_dist_2 * inv_dist
 
-#     weight = abs(signed_weights)
-#     is_normal_mask = vifelse(signed_weights < zero(V), zero(V), one(V))
 
-#     αr = inter.α * r
-#     exp_mαr2 = SIMD.exp(-αr * αr)
-#     erfc_αr = simd_erfc(αr)
-    
-#     normal_term = erfc_αr + (ElT(2.0) * inter.α / ElT(1.7724538509055159)) * r * exp_mαr2
-#     effective_term = is_normal_mask * normal_term + (one(V) - is_normal_mask)
 
-#     keqq = inter.coulomb_const * atom_i.q * atom_j.q
-#     return weight * keqq * inv_dist_3 * effective_term
-# end
-
-# @inline extract_cutoff_sq(inter::SIMDCoulombEwald) = ustrip(inter.dist_cutoff)^2
 
 
 
