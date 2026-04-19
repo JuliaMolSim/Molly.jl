@@ -2034,14 +2034,24 @@ end
 
 const CLUSTER_WIDTH = SIMD_WIDTH
 
-struct ClusteredSIMDNeighborFinder{N, I, CW, R}
+struct ClusteredSIMDNeighborFinder{N, I, CW, R, B}
     base_finder::N
     inter::I
     prune_inner_fraction::R
     build_standard_list::Bool
+    dynamic_prune_every::Int
+    dynamic_prune_buffer::B
 end
 
-function ClusteredSIMDNeighborFinder(base_finder, inter; cluster_width::Integer=CLUSTER_WIDTH, prune_inner_fraction=0.0, build_standard_list::Bool=true)
+function ClusteredSIMDNeighborFinder(
+    base_finder,
+    inter;
+    cluster_width::Integer=CLUSTER_WIDTH,
+    prune_inner_fraction=0.0,
+    build_standard_list::Bool=true,
+    dynamic_prune_every::Integer=0,
+    dynamic_prune_buffer=0.0,
+)
     
     1 <= cluster_width <= 8 ||
         throw(ArgumentError("cluster_width must be in 1:8 because UInt64 stores CW x CW masks"))
@@ -2049,16 +2059,26 @@ function ClusteredSIMDNeighborFinder(base_finder, inter; cluster_width::Integer=
     0 <= prune_inner_fraction <= 1 ||
         throw(ArgumentError("prune_inner_fraction must be between 0 and 1"))
 
+    dynamic_prune_every >= 0 ||
+        throw(ArgumentError("dynamic_prune_every must be nonnegative"))
     
-        return ClusteredSIMDNeighborFinder{typeof(base_finder), typeof(inter), cluster_width, typeof(prune_inner_fraction),}(
+        return ClusteredSIMDNeighborFinder{
+            typeof(base_finder),
+            typeof(inter),
+            cluster_width,
+            typeof(prune_inner_fraction),
+            typeof(dynamic_prune_buffer),
+        }(
         base_finder,
         inter,
         prune_inner_fraction,
         build_standard_list,
+        Int(dynamic_prune_every),
+        dynamic_prune_buffer,
     )
 end
 
-cluster_width(::ClusteredSIMDNeighborFinder{N, I, CW, R}) where {N, I, CW, R} = CW
+cluster_width(::ClusteredSIMDNeighborFinder{N, I, CW, R, B}) where {N, I, CW, R, B} = CW
 
 mutable struct ClusterPairSoA{T}
     n_atoms::Int # num atoms in system
@@ -2066,6 +2086,18 @@ mutable struct ClusterPairSoA{T}
     n_clusters::Int # so we can loop over n_clusters and to index bounding boxes / masks / pair_list entries
     nx::Int # num spatial bins in x direction during cluster construction
     ny::Int # num spatial bins in y direction
+    force_cutoff::T
+    pairlist_cutoff::T
+    last_order_ms::Float64
+    last_bounds_ms::Float64
+    last_pairs_ms::Float64
+    last_csr_ms::Float64
+    last_refresh_ms::Float64
+    last_prune_bounds_ms::Float64
+    last_prune_pairs_ms::Float64
+    last_prune_csr_ms::Float64
+    last_full_rebuild::Bool
+    last_dynamic_prune::Bool
     cluster_col::Vector{Int32}
     col_first_cluster::Vector{Int32}
     col_last_cluster::Vector{Int32}
@@ -2169,7 +2201,12 @@ Base.eachindex(nl::ClusteredNeighborList) = eachindex(nl.standard_list)
 
 function empty_cluster_data(::Type{T}=Float64) where {T}
     return ClusterPairSoA{T}(
-        0, 0, 0, 0, 0, Int32[], Int32[], Int32[],
+        0, 0, 0, 0, 0,
+        zero(T), zero(T),
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+        false, false,
+        Int32[], Int32[], Int32[],
         Int32[], Int32[],
         T[], T[], T[],
         T[], T[],
@@ -2195,6 +2232,10 @@ end
 @inline function _lane_pair_bit(lane_i::Integer, lane_j::Integer, ::Val{CW}) where {CW}
     return UInt64(1) << ((lane_i - 1) * CW + (lane_j - 1))
 end
+
+@inline _cluster_length_value(x::Real, dist_unit, ::Type{T}) where {T} = T(x)
+@inline _cluster_length_value(x, dist_unit, ::Type{T}) where {T} =
+    T(ustrip(dist_unit, x))
 
 @inline function _has_lane_pair(mask::UInt64, lane_i::Integer, lane_j::Integer, ::Val{CW}) where {CW}
     return (mask & _lane_pair_bit(lane_i, lane_j, Val(CW))) != 0
@@ -2398,6 +2439,86 @@ end
     else
         return zero(T)
     end
+end
+
+function _bbox_distance2_shift(data::ClusterPairSoA{T}, ci, cj, box_x, box_y, box_z) where {T}
+    best_dist2 = T(Inf)
+    best_sx = zero(T)
+    best_sy = zero(T)
+    best_sz = zero(T)
+
+    for ix in -1:1
+        sx = T(ix) * box_x
+        dx = _interval_sep(
+            data.xmin[ci],
+            data.xmax[ci],
+            data.xmin[cj] + sx,
+            data.xmax[cj] + sx,
+        )
+
+        for iy in -1:1
+            sy = T(iy) * box_y
+            dy = _interval_sep(
+                data.ymin[ci],
+                data.ymax[ci],
+                data.ymin[cj] + sy,
+                data.ymax[cj] + sy,
+            )
+
+            for iz in -1:1
+                sz = T(iz) * box_z
+                dz = _interval_sep(
+                    data.zmin[ci],
+                    data.zmax[ci],
+                    data.zmin[cj] + sz,
+                    data.zmax[cj] + sz,
+                )
+
+                dist2 = dx * dx + dy * dy + dz * dz
+
+                if dist2 < best_dist2
+                    best_dist2 = dist2
+                    best_sx = sx
+                    best_sy = sy
+                    best_sz = sz
+                end
+            end
+        end
+    end
+
+    return best_dist2, best_sx, best_sy, best_sz
+end
+
+@inline function _bbox_distance2_given_shift(
+    data::ClusterPairSoA{T},
+    ci,
+    cj,
+    sx::T,
+    sy::T,
+    sz::T,
+) where {T}
+    dx = _interval_sep(
+        data.xmin[ci],
+        data.xmax[ci],
+        data.xmin[cj] + sx,
+        data.xmax[cj] + sx,
+    )
+
+    dy = _interval_sep(
+        data.ymin[ci],
+        data.ymax[ci],
+        data.ymin[cj] + sy,
+        data.ymax[cj] + sy,
+    )
+
+    dz = _interval_sep(
+        data.zmin[ci],
+        data.zmax[ci],
+        data.zmin[cj] + sz,
+        data.zmax[cj] + sz,
+    )
+
+    return dx * dx + dy * dy + dz * dz
 end
 
 
@@ -2826,6 +2947,95 @@ function _refresh_cluster_coordinates!(
     return data
 end
 
+function _prune_cluster_pairs!(
+    data::ClusterPairSoA{T},
+    atoms,
+    boundary,
+    lj::SIMDLennardJones,
+    eligible,
+    special,
+    prune_cutoff::T,
+    ::Val{CW},
+) where {T, CW}
+    dist_unit = unit(boundary.side_lengths[1])
+    box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
+    prune_cutoff2 = prune_cutoff * prune_cutoff
+
+    write_idx = 1
+
+    @inbounds for pair_idx in eachindex(data.pair_i)
+        ci = Int(data.pair_i[pair_idx])
+        cj = Int(data.pair_j[pair_idx])
+
+        sx = data.shift_x[pair_idx]
+        sy = data.shift_y[pair_idx]
+        sz = data.shift_z[pair_idx]
+
+        bbox_dist2 = _bbox_distance2_given_shift(
+            data,
+            ci,
+            cj,
+            sx,
+            sy,
+            sz,
+        )
+
+        if bbox_dist2 > prune_cutoff2
+            bbox_dist2, sx, sy, sz = _bbox_distance2_shift(
+                data,
+                ci,
+                cj,
+                box_x,
+                box_y,
+                box_z,
+            )
+        end
+
+        bbox_dist2 <= prune_cutoff2 || continue
+
+        pair_mask, special_mask = _cluster_pruned_pair_masks(
+            data,
+            atoms,
+            lj,
+            eligible,
+            special,
+            ci,
+            cj,
+            prune_cutoff2,
+            sx,
+            sy,
+            sz,
+            Val(CW),
+        )
+
+        pair_mask == 0 && continue
+
+        data.pair_i[write_idx] = Int32(ci)
+        data.pair_j[write_idx] = Int32(cj)
+        data.shift_x[write_idx] = sx
+        data.shift_y[write_idx] = sy
+        data.shift_z[write_idx] = sz
+        data.bbox_dist2[write_idx] = bbox_dist2
+        data.pair_masks[write_idx] = pair_mask
+        data.special_masks[write_idx] = special_mask
+
+        write_idx += 1
+    end
+
+    new_len = write_idx - 1
+
+    resize!(data.pair_i, new_len)
+    resize!(data.pair_j, new_len)
+    resize!(data.shift_x, new_len)
+    resize!(data.shift_y, new_len)
+    resize!(data.shift_z, new_len)
+    resize!(data.bbox_dist2, new_len)
+    resize!(data.pair_masks, new_len)
+    resize!(data.special_masks, new_len)
+
+    return data
+end
+
 
 function build_cluster_pair_list!(
     data::ClusterPairSoA{T},
@@ -2840,23 +3050,31 @@ function build_cluster_pair_list!(
     n_threads::Integer,
     ::Val{CW},
 ) where {T, CW}
-    #t0 = time_ns()
+    dist_unit = unit(pairlist_cutoff)
+    data.pairlist_cutoff = T(ustrip(dist_unit, pairlist_cutoff))
+    data.force_cutoff = T(sqrt(extract_cutoff_sq(lj)))
+
+    t0 = time_ns()
     _build_cluster_order!(data, atoms, coords, boundary, Val(CW))
-    #t1 = time_ns()
+    t1 = time_ns()
     _build_cluster_bounds!(data, Val(CW))
-    #t2 = time_ns()
+    t2 = time_ns()
     _build_cluster_pairs!(data, atoms, boundary, pairlist_cutoff, lj, eligible, special, prune_inner_fraction, n_threads, Val(CW))
-    #t3 = time_ns()
+    t3 = time_ns()
     _build_cluster_csr_from_flat!(data)
+    t4 = time_ns()
 
+    data.last_order_ms = (t1 - t0) / 1e6
+    data.last_bounds_ms = (t2 - t1) / 1e6
+    data.last_pairs_ms = (t3 - t2) / 1e6
+    data.last_csr_ms = (t4 - t3) / 1e6
+    data.last_refresh_ms = 0.0
+    data.last_prune_bounds_ms = 0.0
+    data.last_prune_pairs_ms = 0.0
+    data.last_prune_csr_ms = 0.0
+    data.last_full_rebuild = true
+    data.last_dynamic_prune = false
 
-
-    # println(
-    # "cluster rebuild timings: ",
-    # "order_ms=", (t1 - t0) / 1e6,
-    # " bounds_ms=", (t2 - t1) / 1e6,
-    # " pairs_ms=", (t3 - t2) / 1e6,
-    # )
     return data
 end
 
@@ -2898,11 +3116,68 @@ function find_neighbors(
                 iszero(step_n % _cluster_base_n_steps(nf.base_finder))
 
     if !needs_rebuild
+        data = old_neighbors.cluster_data
+
+        tr0 = time_ns()
         _refresh_cluster_coordinates!(
-            old_neighbors.cluster_data,
+            data,
             sys.coords,
             sys.boundary,
         )
+        tr1 = time_ns()
+
+        data.last_refresh_ms = (tr1 - tr0) / 1e6
+        data.last_order_ms = 0.0
+        data.last_bounds_ms = 0.0
+        data.last_pairs_ms = 0.0
+        data.last_csr_ms = 0.0
+        data.last_prune_bounds_ms = 0.0
+        data.last_prune_pairs_ms = 0.0
+        data.last_prune_csr_ms = 0.0
+        data.last_full_rebuild = false
+        data.last_dynamic_prune = false
+
+        if nf.dynamic_prune_every > 0 &&
+                step_n > 0 &&
+                iszero(step_n % nf.dynamic_prune_every)
+            tb0 = time_ns()
+            _build_cluster_bounds!(data, Val(cluster_width(nf)))
+            tb1 = time_ns()
+
+            dist_unit = unit(first(first(sys.coords)))
+            T_float = eltype(data.x)
+            prune_buffer = _cluster_length_value(
+                nf.dynamic_prune_buffer,
+                dist_unit,
+                T_float,
+            )
+            prune_cutoff = min(
+                data.pairlist_cutoff,
+                data.force_cutoff + prune_buffer,
+            )
+
+            tp0 = time_ns()
+            _prune_cluster_pairs!(
+                data,
+                sys.atoms,
+                sys.boundary,
+                lj,
+                _cluster_base_eligible(nf.base_finder),
+                _cluster_base_special(nf.base_finder),
+                prune_cutoff,
+                Val(cluster_width(nf)),
+            )
+            tp1 = time_ns()
+
+            _build_cluster_csr_from_flat!(data)
+            tc1 = time_ns()
+
+            data.last_prune_bounds_ms = (tb1 - tb0) / 1e6
+            data.last_prune_pairs_ms = (tp1 - tp0) / 1e6
+            data.last_prune_csr_ms = (tc1 - tp1) / 1e6
+            data.last_dynamic_prune = true
+        end
+
         return old_neighbors
     end
 
@@ -3375,6 +3650,19 @@ function cluster_diagnostics(data::ClusterPairSoA)
         cluster_width = data.n_clusters == 0 ? 0 : data.n_slots ÷ data.n_clusters,
         nx = data.nx,
         ny = data.ny,
+        force_cutoff = data.force_cutoff,
+        pairlist_cutoff = data.pairlist_cutoff,
+        buffer = data.pairlist_cutoff - data.force_cutoff,
+        last_full_rebuild = data.last_full_rebuild,
+        last_dynamic_prune = data.last_dynamic_prune,
+        last_order_ms = data.last_order_ms,
+        last_bounds_ms = data.last_bounds_ms,
+        last_pairs_ms = data.last_pairs_ms,
+        last_csr_ms = data.last_csr_ms,
+        last_refresh_ms = data.last_refresh_ms,
+        last_prune_bounds_ms = data.last_prune_bounds_ms,
+        last_prune_pairs_ms = data.last_prune_pairs_ms,
+        last_prune_csr_ms = data.last_prune_csr_ms,
         dummy_fraction = cluster_dummy_fraction(data),
         cluster_pairs = cluster_pair_count(data),
         candidate_particle_pairs = cluster_candidate_pair_count(data),
