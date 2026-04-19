@@ -2108,6 +2108,16 @@ mutable struct ClusterPairSoA{T}
 
     pair_masks::Vector{UInt64}
     special_masks::Vector{UInt64}
+
+    pair_i_chunks::Vector{Vector{Int32}}
+    pair_j_chunks::Vector{Vector{Int32}}
+    shift_x_chunks::Vector{Vector{T}}
+    shift_y_chunks::Vector{Vector{T}}
+    shift_z_chunks::Vector{Vector{T}}
+    bbox_dist2_chunks::Vector{Vector{T}}
+    pair_masks_chunks::Vector{Vector{UInt64}}
+    special_masks_chunks::Vector{Vector{UInt64}}
+
 end
 
 mutable struct ClusterOnlyStandardList
@@ -2156,6 +2166,9 @@ function empty_cluster_data(::Type{T}=Float64) where {T}
         Int32[], Int32[],
         T[], T[], T[], T[],
         UInt64[], UInt64[],
+        Vector{Int32}[], Vector{Int32}[],
+        Vector{T}[], Vector{T}[], Vector{T}[], Vector{T}[],
+        Vector{UInt64}[], Vector{UInt64}[],
     )
 end
 
@@ -2550,6 +2563,213 @@ function _cluster_pruned_pair_masks(
     return pair_mask, special_mask
 end
 
+function _ensure_cluster_pair_chunks!(data::ClusterPairSoA{T}, n_parts::Integer) where {T}
+    resize!(data.pair_i_chunks, n_parts)
+    resize!(data.pair_j_chunks, n_parts)
+    resize!(data.shift_x_chunks, n_parts)
+    resize!(data.shift_y_chunks, n_parts)
+    resize!(data.shift_z_chunks, n_parts)
+    resize!(data.bbox_dist2_chunks, n_parts)
+    resize!(data.pair_masks_chunks, n_parts)
+    resize!(data.special_masks_chunks, n_parts)
+
+    @inbounds for part in 1:n_parts
+        if !isassigned(data.pair_i_chunks, part)
+            data.pair_i_chunks[part] = Int32[]
+            data.pair_j_chunks[part] = Int32[]
+            data.shift_x_chunks[part] = T[]
+            data.shift_y_chunks[part] = T[]
+            data.shift_z_chunks[part] = T[]
+            data.bbox_dist2_chunks[part] = T[]
+            data.pair_masks_chunks[part] = UInt64[]
+            data.special_masks_chunks[part] = UInt64[]
+        end
+    end
+
+    return data
+end
+
+
+# function _build_cluster_pairs!(
+#     data::ClusterPairSoA{T},
+#     atoms,
+#     boundary,
+#     pairlist_cutoff,
+#     lj::SIMDLennardJones,
+#     eligible,
+#     special,
+#     prune_inner_fraction,
+#     n_threads::Integer,
+#     ::Val{CW},
+# ) where {T, CW}
+#     dist_unit = unit(pairlist_cutoff)
+#     box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
+#     cutoff = T(ustrip(dist_unit, pairlist_cutoff))
+#     cutoff2 = cutoff * cutoff
+
+#     # rB controls the paper's "only prune near the list boundary" shortcut.
+#     # Larger values reduce rebuild work but create more false-positive lane pairs.
+#     # Smaller values prune more aggressively but spend more time rebuilding.
+#     rB = T(prune_inner_fraction) * cutoff
+#     rB2 = rB * rB
+
+#     empty!(data.pair_i)
+#     empty!(data.pair_j)
+#     empty!(data.shift_x)
+#     empty!(data.shift_y)
+#     empty!(data.shift_z)
+#     empty!(data.bbox_dist2)
+#     empty!(data.pair_masks)
+#     empty!(data.special_masks)
+
+#     grid_dx = box_x / T(data.nx)
+#     grid_dy = box_y / T(data.ny)
+
+#     # n_xy_column_visits = 0
+#     # n_cluster_candidates = 0
+#     # n_z_rejects = 0
+#     # n_aabb_tests = 0
+#     # n_aabb_rejects = 0
+#     # n_full_mask_builds = 0
+#     # n_pruned_mask_builds = 0
+#     # n_empty_masks = 0
+#     # n_kept_pairs = 0
+
+#     @inbounds for ci in 1:data.n_clusters
+#         mask_i = data.cluster_active_masks[ci]
+#         mask_i == 0 && continue
+
+#         ix_min = floor(Int, (data.xmin[ci] - cutoff) / grid_dx)
+#         ix_max = floor(Int, (data.xmax[ci] + cutoff) / grid_dx)
+#         iy_min = floor(Int, (data.ymin[ci] - cutoff) / grid_dy)
+#         iy_max = floor(Int, (data.ymax[ci] + cutoff) / grid_dy)
+
+#         zlo = data.zmin[ci] - cutoff
+#         zhi = data.zmax[ci] + cutoff
+
+#         # Conservative: only use z-ordered early skips when the expanded z range
+#         # does not cross the periodic boundary. Boundary cases fall back to AABB.
+#         use_direct_z_window = zlo >= zero(T) && zhi <= box_z
+
+#         for raw_iy in iy_min:iy_max
+#             jy = mod(raw_iy, data.ny) + 1
+#             sy_xy = T(fld(raw_iy, data.ny)) * box_y
+
+#             for raw_ix in ix_min:ix_max
+#                 jx = mod(raw_ix, data.nx) + 1
+#                 sx_xy = T(fld(raw_ix, data.nx)) * box_x
+
+#                 col_j = jx + (jy - 1) * data.nx
+
+#                 first_cj = Int(data.col_first_cluster[col_j])
+#                 last_cj = Int(data.col_last_cluster[col_j])
+#                 first_cj == 0 && continue
+
+#                 #n_xy_column_visits += 1
+
+#                 for cj in first_cj:last_cj
+#                     cj < ci && continue
+
+#                     #n_cluster_candidates += 1
+
+#                     if use_direct_z_window
+#                         if data.zmin[cj] > zhi
+#                             #n_z_rejects += last_cj - cj + 1
+#                             break
+#                         end
+
+#                         if data.zmax[cj] < zlo
+#                             #n_z_rejects += 1
+#                             continue
+#                         end
+#                     end
+
+#                     mask_j = data.cluster_active_masks[cj]
+#                     mask_j == 0 && continue
+
+#                     #n_aabb_tests += 1
+
+#                     bbox_dist2, sx, sy, sz = _bbox_distance2_known_xy_shift(
+#                         data,
+#                         ci,
+#                         cj,
+#                         sx_xy,
+#                         sy_xy,
+#                         box_z,
+#                     )
+
+#                     if bbox_dist2 > cutoff2
+#                         #n_aabb_rejects += 1
+#                         continue
+#                     end
+
+#                     pair_mask, special_mask = if bbox_dist2 <= rB2
+#                         #n_full_mask_builds += 1
+
+#                         _cluster_full_pair_masks(
+#                             data,
+#                             atoms,
+#                             lj,
+#                             eligible,
+#                             special,
+#                             ci,
+#                             cj,
+#                             Val(CW),
+#                         )
+#                     else
+#                         #n_pruned_mask_builds += 1
+
+#                         _cluster_pruned_pair_masks(
+#                             data,
+#                             atoms,
+#                             lj,
+#                             eligible,
+#                             special,
+#                             ci,
+#                             cj,
+#                             cutoff2,
+#                             sx,
+#                             sy,
+#                             sz,
+#                             Val(CW),
+#                         )
+#                     end
+
+#                     if pair_mask != 0
+#                         #n_kept_pairs += 1
+
+#                         push!(data.pair_i, Int32(ci))
+#                         push!(data.pair_j, Int32(cj))
+#                         push!(data.shift_x, sx)
+#                         push!(data.shift_y, sy)
+#                         push!(data.shift_z, sz)
+#                         push!(data.bbox_dist2, bbox_dist2)
+#                         push!(data.pair_masks, pair_mask)
+#                         push!(data.special_masks, special_mask)
+#                     else
+#                         #n_empty_masks += 1
+#                     end
+#                 end
+#             end
+#         end
+#     end
+
+#     # println(
+#     #     "cluster pair diagnostics: ",
+#     #     "xy_column_visits=", n_xy_column_visits,
+#     #     " cluster_candidates=", n_cluster_candidates,
+#     #     " z_rejects=", n_z_rejects,
+#     #     " aabb_tests=", n_aabb_tests,
+#     #     " aabb_rejects=", n_aabb_rejects,
+#     #     " full_mask_builds=", n_full_mask_builds,
+#     #     " pruned_mask_builds=", n_pruned_mask_builds,
+#     #     " empty_masks=", n_empty_masks,
+#     #     " kept_pairs=", n_kept_pairs,
+#     # )
+
+#     return data
+# end
+
 function _build_cluster_pairs!(
     data::ClusterPairSoA{T},
     atoms,
@@ -2559,6 +2779,7 @@ function _build_cluster_pairs!(
     eligible,
     special,
     prune_inner_fraction,
+    n_threads::Integer,
     ::Val{CW},
 ) where {T, CW}
     dist_unit = unit(pairlist_cutoff)
@@ -2566,9 +2787,6 @@ function _build_cluster_pairs!(
     cutoff = T(ustrip(dist_unit, pairlist_cutoff))
     cutoff2 = cutoff * cutoff
 
-    # rB controls the paper's "only prune near the list boundary" shortcut.
-    # Larger values reduce rebuild work but create more false-positive lane pairs.
-    # Smaller values prune more aggressively but spend more time rebuilding.
     rB = T(prune_inner_fraction) * cutoff
     rB2 = rB * rB
 
@@ -2584,147 +2802,133 @@ function _build_cluster_pairs!(
     grid_dx = box_x / T(data.nx)
     grid_dy = box_y / T(data.ny)
 
-    # n_xy_column_visits = 0
-    # n_cluster_candidates = 0
-    # n_z_rejects = 0
-    # n_aabb_tests = 0
-    # n_aabb_rejects = 0
-    # n_full_mask_builds = 0
-    # n_pruned_mask_builds = 0
-    # n_empty_masks = 0
-    # n_kept_pairs = 0
+    n_parts = max(1, min(Int(n_threads), max(data.n_clusters, 1)))
+    _ensure_cluster_pair_chunks!(data, n_parts)
 
-    @inbounds for ci in 1:data.n_clusters
-        mask_i = data.cluster_active_masks[ci]
-        mask_i == 0 && continue
+    @inbounds for part in 1:n_parts
+        empty!(data.pair_i_chunks[part])
+        empty!(data.pair_j_chunks[part])
+        empty!(data.shift_x_chunks[part])
+        empty!(data.shift_y_chunks[part])
+        empty!(data.shift_z_chunks[part])
+        empty!(data.bbox_dist2_chunks[part])
+        empty!(data.pair_masks_chunks[part])
+        empty!(data.special_masks_chunks[part])
+    end
 
-        ix_min = floor(Int, (data.xmin[ci] - cutoff) / grid_dx)
-        ix_max = floor(Int, (data.xmax[ci] + cutoff) / grid_dx)
-        iy_min = floor(Int, (data.ymin[ci] - cutoff) / grid_dy)
-        iy_max = floor(Int, (data.ymax[ci] + cutoff) / grid_dy)
+    Threads.@threads for part in 1:n_parts
+        pair_i_local = data.pair_i_chunks[part]
+        pair_j_local = data.pair_j_chunks[part]
+        shift_x_local = data.shift_x_chunks[part]
+        shift_y_local = data.shift_y_chunks[part]
+        shift_z_local = data.shift_z_chunks[part]
+        bbox_dist2_local = data.bbox_dist2_chunks[part]
+        pair_masks_local = data.pair_masks_chunks[part]
+        special_masks_local = data.special_masks_chunks[part]
 
-        zlo = data.zmin[ci] - cutoff
-        zhi = data.zmax[ci] + cutoff
+        @inbounds for ci in part:n_parts:data.n_clusters
+            mask_i = data.cluster_active_masks[ci]
+            mask_i == 0 && continue
 
-        # Conservative: only use z-ordered early skips when the expanded z range
-        # does not cross the periodic boundary. Boundary cases fall back to AABB.
-        use_direct_z_window = zlo >= zero(T) && zhi <= box_z
+            ix_min = floor(Int, (data.xmin[ci] - cutoff) / grid_dx)
+            ix_max = floor(Int, (data.xmax[ci] + cutoff) / grid_dx)
+            iy_min = floor(Int, (data.ymin[ci] - cutoff) / grid_dy)
+            iy_max = floor(Int, (data.ymax[ci] + cutoff) / grid_dy)
 
-        for raw_iy in iy_min:iy_max
-            jy = mod(raw_iy, data.ny) + 1
-            sy_xy = T(fld(raw_iy, data.ny)) * box_y
+            zlo = data.zmin[ci] - cutoff
+            zhi = data.zmax[ci] + cutoff
+            use_direct_z_window = zlo >= zero(T) && zhi <= box_z
 
-            for raw_ix in ix_min:ix_max
-                jx = mod(raw_ix, data.nx) + 1
-                sx_xy = T(fld(raw_ix, data.nx)) * box_x
+            for raw_iy in iy_min:iy_max
+                jy = mod(raw_iy, data.ny) + 1
+                sy_xy = T(fld(raw_iy, data.ny)) * box_y
 
-                col_j = jx + (jy - 1) * data.nx
+                for raw_ix in ix_min:ix_max
+                    jx = mod(raw_ix, data.nx) + 1
+                    sx_xy = T(fld(raw_ix, data.nx)) * box_x
 
-                first_cj = Int(data.col_first_cluster[col_j])
-                last_cj = Int(data.col_last_cluster[col_j])
-                first_cj == 0 && continue
+                    col_j = jx + (jy - 1) * data.nx
 
-                #n_xy_column_visits += 1
+                    first_cj = Int(data.col_first_cluster[col_j])
+                    last_cj = Int(data.col_last_cluster[col_j])
+                    first_cj == 0 && continue
 
-                for cj in first_cj:last_cj
-                    cj < ci && continue
+                    for cj in first_cj:last_cj
+                        cj < ci && continue
 
-                    #n_cluster_candidates += 1
-
-                    if use_direct_z_window
-                        if data.zmin[cj] > zhi
-                            #n_z_rejects += last_cj - cj + 1
-                            break
+                        if use_direct_z_window
+                            data.zmin[cj] > zhi && break
+                            data.zmax[cj] < zlo && continue
                         end
 
-                        if data.zmax[cj] < zlo
-                            #n_z_rejects += 1
-                            continue
+                        mask_j = data.cluster_active_masks[cj]
+                        mask_j == 0 && continue
+
+                        bbox_dist2, sx, sy, sz = _bbox_distance2_known_xy_shift(
+                            data,
+                            ci,
+                            cj,
+                            sx_xy,
+                            sy_xy,
+                            box_z,
+                        )
+
+                        bbox_dist2 <= cutoff2 || continue
+
+                        pair_mask, special_mask = if bbox_dist2 <= rB2
+                            _cluster_full_pair_masks(
+                                data,
+                                atoms,
+                                lj,
+                                eligible,
+                                special,
+                                ci,
+                                cj,
+                                Val(CW),
+                            )
+                        else
+                            _cluster_pruned_pair_masks(
+                                data,
+                                atoms,
+                                lj,
+                                eligible,
+                                special,
+                                ci,
+                                cj,
+                                cutoff2,
+                                sx,
+                                sy,
+                                sz,
+                                Val(CW),
+                            )
                         end
-                    end
 
-                    mask_j = data.cluster_active_masks[cj]
-                    mask_j == 0 && continue
+                        pair_mask == 0 && continue
 
-                    #n_aabb_tests += 1
-
-                    bbox_dist2, sx, sy, sz = _bbox_distance2_known_xy_shift(
-                        data,
-                        ci,
-                        cj,
-                        sx_xy,
-                        sy_xy,
-                        box_z,
-                    )
-
-                    if bbox_dist2 > cutoff2
-                        #n_aabb_rejects += 1
-                        continue
-                    end
-
-                    pair_mask, special_mask = if bbox_dist2 <= rB2
-                        #n_full_mask_builds += 1
-
-                        _cluster_full_pair_masks(
-                            data,
-                            atoms,
-                            lj,
-                            eligible,
-                            special,
-                            ci,
-                            cj,
-                            Val(CW),
-                        )
-                    else
-                        #n_pruned_mask_builds += 1
-
-                        _cluster_pruned_pair_masks(
-                            data,
-                            atoms,
-                            lj,
-                            eligible,
-                            special,
-                            ci,
-                            cj,
-                            cutoff2,
-                            sx,
-                            sy,
-                            sz,
-                            Val(CW),
-                        )
-                    end
-
-                    if pair_mask != 0
-                        #n_kept_pairs += 1
-
-                        push!(data.pair_i, Int32(ci))
-                        push!(data.pair_j, Int32(cj))
-                        push!(data.shift_x, sx)
-                        push!(data.shift_y, sy)
-                        push!(data.shift_z, sz)
-                        push!(data.bbox_dist2, bbox_dist2)
-                        push!(data.pair_masks, pair_mask)
-                        push!(data.special_masks, special_mask)
-                    else
-                        #n_empty_masks += 1
+                        push!(pair_i_local, Int32(ci))
+                        push!(pair_j_local, Int32(cj))
+                        push!(shift_x_local, sx)
+                        push!(shift_y_local, sy)
+                        push!(shift_z_local, sz)
+                        push!(bbox_dist2_local, bbox_dist2)
+                        push!(pair_masks_local, pair_mask)
+                        push!(special_masks_local, special_mask)
                     end
                 end
             end
         end
     end
 
-    # println(
-    #     "cluster pair diagnostics: ",
-    #     "xy_column_visits=", n_xy_column_visits,
-    #     " cluster_candidates=", n_cluster_candidates,
-    #     " z_rejects=", n_z_rejects,
-    #     " aabb_tests=", n_aabb_tests,
-    #     " aabb_rejects=", n_aabb_rejects,
-    #     " full_mask_builds=", n_full_mask_builds,
-    #     " pruned_mask_builds=", n_pruned_mask_builds,
-    #     " empty_masks=", n_empty_masks,
-    #     " kept_pairs=", n_kept_pairs,
-    # )
+    @inbounds for part in 1:n_parts
+        append!(data.pair_i, data.pair_i_chunks[part])
+        append!(data.pair_j, data.pair_j_chunks[part])
+        append!(data.shift_x, data.shift_x_chunks[part])
+        append!(data.shift_y, data.shift_y_chunks[part])
+        append!(data.shift_z, data.shift_z_chunks[part])
+        append!(data.bbox_dist2, data.bbox_dist2_chunks[part])
+        append!(data.pair_masks, data.pair_masks_chunks[part])
+        append!(data.special_masks, data.special_masks_chunks[part])
+    end
 
     return data
 end
@@ -2766,6 +2970,7 @@ function build_cluster_pair_list!(
     eligible,
     special,
     prune_inner_fraction,
+    n_threads::Integer,
     ::Val{CW},
 ) where {T, CW}
     #t0 = time_ns()
@@ -2773,7 +2978,7 @@ function build_cluster_pair_list!(
     #t1 = time_ns()
     _build_cluster_bounds!(data, Val(CW))
     #t2 = time_ns()
-    _build_cluster_pairs!(data, atoms, boundary, pairlist_cutoff, lj, eligible, special, prune_inner_fraction, Val(CW))
+    _build_cluster_pairs!(data, atoms, boundary, pairlist_cutoff, lj, eligible, special, prune_inner_fraction, n_threads, Val(CW))
     #t3 = time_ns()
 
     # println(
@@ -2845,6 +3050,7 @@ function find_neighbors(
         _cluster_base_eligible(nf.base_finder),
         _cluster_base_special(nf.base_finder),
         nf.prune_inner_fraction,
+        Int(get(kwargs, :n_threads, Threads.nthreads())),
         Val(cluster_width(nf)),
     )
 
