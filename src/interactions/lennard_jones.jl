@@ -2095,9 +2095,23 @@ mutable struct ClusterPairSoA{T}
     last_refresh_ms::Float64
     last_prune_bounds_ms::Float64
     last_prune_pairs_ms::Float64
+    # last_prune_csr_ms::Float64
+    # last_full_rebuild::Bool
+    # last_dynamic_prune::Bool
     last_prune_csr_ms::Float64
+
+    last_force_total_ms::Float64
+    last_force_fs_zero_ms::Float64
+    last_force_slot_zero_ms::Float64
+    last_force_chunk_ensure_ms::Float64
+    last_force_chunk_zero_ms::Float64
+    last_force_kernel_ms::Float64
+    last_force_scatter_ms::Float64
+    last_force_reduce_ms::Float64
+
     last_full_rebuild::Bool
     last_dynamic_prune::Bool
+
     cluster_col::Vector{Int32}
     col_first_cluster::Vector{Int32}
     col_last_cluster::Vector{Int32}
@@ -2112,6 +2126,8 @@ mutable struct ClusterPairSoA{T}
     z::Vector{T}
     sigma::Vector{T}
     epsilon::Vector{T}
+    sqrt_epsilon::Vector{T}
+
 
     # Store force accumulated per packed slot - same order as x/y/Z
     # Would be mapped back to original atom ordering using slot_to_atom
@@ -2203,13 +2219,18 @@ function empty_cluster_data(::Type{T}=Float64) where {T}
     return ClusterPairSoA{T}(
         0, 0, 0, 0, 0,
         zero(T), zero(T),
+        # 0.0, 0.0, 0.0, 0.0,
+        # 0.0, 0.0, 0.0, 0.0,
+        # false, false,
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0,
         false, false,
         Int32[], Int32[], Int32[],
         Int32[], Int32[],
         T[], T[], T[],
-        T[], T[],
+        T[], T[], T[],
         T[], T[], T[],
         Vector{T}[], Vector{T}[], Vector{T}[],
         UInt64[],
@@ -2256,6 +2277,23 @@ end
     return :(Vec{$CW, Bool}(($(lanes...),)))
 end
 
+@generated function _cluster_shift_mask(::Val{Shift}, ::Val{CW}) where {Shift, CW}
+    mask = zero(UInt64)
+
+    for lane_i in 1:CW
+        lane_j = ((lane_i - 1 + Shift) % CW) + 1
+        bit = UInt64(1) << ((lane_i - 1) * CW + (lane_j - 1))
+        mask |= bit
+    end
+
+    return :($(mask))
+end
+
+@inline function _cluster_shift_has_pairs(mask::UInt64, ::Val{Shift}, ::Val{CW}) where {Shift, CW}
+    return (mask & _cluster_shift_mask(Val(Shift), Val(CW))) != 0
+end
+
+
 @inline function _cluster_wrap_coord(x::T, box_length::T) where {T}
     xw = x - box_length * floor(x / box_length)
     return xw >= box_length ? zero(T) : xw
@@ -2291,6 +2329,7 @@ function _resize_cluster_storage!(data::ClusterPairSoA{T}, n_atoms, n_slots) whe
     resize!(data.z, n_slots)
     resize!(data.sigma, n_slots)
     resize!(data.epsilon, n_slots)
+    resize!(data.sqrt_epsilon, n_slots)
     resize!(data.fx, n_slots)
     resize!(data.fy, n_slots)
     resize!(data.fz, n_slots)
@@ -2381,6 +2420,7 @@ function _build_cluster_order!(
             data.z[slot] = z_by_atom[atom_i]
             data.sigma[slot] = T(ustrip(atoms[atom_i].σ))
             data.epsilon[slot] = T(ustrip(atoms[atom_i].ϵ))
+            data.sqrt_epsilon[slot] = sqrt(data.epsilon[slot])
             slot += 1
         end
 
@@ -2391,6 +2431,7 @@ function _build_cluster_order!(
             data.z[slot] = zero(T)
             data.sigma[slot] = one(T)
             data.epsilon[slot] = zero(T)
+            data.sqrt_epsilon[slot] = zero(T)
             slot += 1
         end
     end
@@ -3352,7 +3393,7 @@ function _clustered_lj_forces_simd8_csr_chunk!(
         yi = vload(VFloat, data.y, first_i)
         zi = vload(VFloat, data.z, first_i)
         sigma_i = vload(VFloat, data.sigma, first_i)
-        epsilon_i = vload(VFloat, data.epsilon, first_i)
+        sqrt_epsilon_i = vload(VFloat, data.sqrt_epsilon, first_i)
 
         for pair_idx in first:last
             cj = Int(data.cj_list[pair_idx])
@@ -3365,7 +3406,7 @@ function _clustered_lj_forces_simd8_csr_chunk!(
             yj = vload(VFloat, data.y, first_j)
             zj = vload(VFloat, data.z, first_j)
             sigma_j = vload(VFloat, data.sigma, first_j)
-            epsilon_j = vload(VFloat, data.epsilon, first_j)
+            sqrt_epsilon_j = vload(VFloat, data.sqrt_epsilon, first_j)
 
             fix = zero(VFloat); fiy = zero(VFloat); fiz = zero(VFloat)
             fjx = zero(VFloat); fjy = zero(VFloat); fjz = zero(VFloat)
@@ -3374,49 +3415,53 @@ function _clustered_lj_forces_simd8_csr_chunk!(
             img_sy = data.csr_shift_y[pair_idx]
             img_sz = data.csr_shift_z[pair_idx]
 
-            Base.Cartesian.@nexprs 8 shift -> begin
-                s = shift - 1
+            Base.Cartesian.@nexprs 8 simddiagidx -> begin
+            s = simddiagidx - 1
+        
+            if _cluster_shift_has_pairs(pair_mask, Val(s), Val(SIMD_WIDTH))
                 inv_s = (SIMD_WIDTH - s) % SIMD_WIDTH
-
+        
                 active = _cluster_pairmask_vec(pair_mask, Val(s), Val(SIMD_WIDTH))
                 special = _cluster_pairmask_vec(special_mask, Val(s), Val(SIMD_WIDTH))
-
+        
                 xj_s = _cluster_rotate_register(xj, Val(s))
                 yj_s = _cluster_rotate_register(yj, Val(s))
                 zj_s = _cluster_rotate_register(zj, Val(s))
                 sigma_j_s = _cluster_rotate_register(sigma_j, Val(s))
-                epsilon_j_s = _cluster_rotate_register(epsilon_j, Val(s))
-
+                sqrt_epsilon_j_s = _cluster_rotate_register(sqrt_epsilon_j, Val(s))
+        
                 dx = xi - (xj_s + img_sx)
                 dy = yi - (yj_s + img_sy)
                 dz = zi - (zj_s + img_sz)
-
+        
                 r2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
                 valid = active & (r2 <= lj_cutoff2)
                 safe_r2 = vifelse(valid, r2, one(VFloat))
-
+        
                 inv_r2 = one(VFloat) / safe_r2
                 sigma = (sigma_i + sigma_j_s) / T(2)
-                epsilon = SIMD.sqrt(epsilon_i * epsilon_j_s)
+                epsilon = sqrt_epsilon_i * sqrt_epsilon_j_s
                 weight = vifelse(special, special_weight, one(VFloat))
-
+        
                 sr2 = (sigma * sigma) * inv_r2
                 sr6 = sr2 * sr2 * sr2
                 f_div_r = weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
                 f_div_r = vifelse(valid, f_div_r, zero(VFloat))
-
+        
                 fx_ij = f_div_r * dx
                 fy_ij = f_div_r * dy
                 fz_ij = f_div_r * dz
-
+        
                 fix += fx_ij
                 fiy += fy_ij
                 fiz += fz_ij
-
+        
                 fjx += _cluster_rotate_register(-fx_ij, Val(inv_s))
                 fjy += _cluster_rotate_register(-fy_ij, Val(inv_s))
                 fjz += _cluster_rotate_register(-fz_ij, Val(inv_s))
             end
+        end
+        
 
             if ci == cj
                 vstore(vload(VFloat, fx, first_i) + fix + fjx, fx, first_i)
@@ -3593,6 +3638,19 @@ function _reduce_scatter_cluster_forces!(fs, data::ClusterPairSoA{T}, n_threads:
     return fs
 end
 
+function _reset_cluster_force_timings!(data)
+    data.last_force_total_ms = 0.0
+    data.last_force_fs_zero_ms = 0.0
+    data.last_force_slot_zero_ms = 0.0
+    data.last_force_chunk_ensure_ms = 0.0
+    data.last_force_chunk_zero_ms = 0.0
+    data.last_force_kernel_ms = 0.0
+    data.last_force_scatter_ms = 0.0
+    data.last_force_reduce_ms = 0.0
+    return data
+end
+
+
 function pairwise_forces_loop!(
     fs_nounits,
     fs_chunks,
@@ -3619,13 +3677,71 @@ function pairwise_forces_loop!(
     lj = pairwise_inters_nl[1]
     data = neighbors.cluster_data
 
+    # fill!(fs_nounits, zero(eltype(fs_nounits)))
+
+    # if n_threads == 1
+    #     fill!(data.fx, zero(eltype(data.fx)))
+    #     fill!(data.fy, zero(eltype(data.fy)))
+    #     fill!(data.fz, zero(eltype(data.fz)))
+
+    #     _clustered_lj_forces_packed_csr_chunk!(
+    #         data.fx,
+    #         data.fy,
+    #         data.fz,
+    #         atoms,
+    #         data,
+    #         boundary,
+    #         lj,
+    #         1,
+    #         1,
+    #     )
+
+    #     _scatter_cluster_forces!(fs_nounits, data)
+    # else
+    #     _ensure_cluster_force_chunks!(data, n_threads)
+
+    #     @inbounds for thread_i in 1:n_threads
+    #         fill!(data.fx_chunks[thread_i], zero(eltype(data.fx)))
+    #         fill!(data.fy_chunks[thread_i], zero(eltype(data.fy)))
+    #         fill!(data.fz_chunks[thread_i], zero(eltype(data.fz)))
+    #     end
+
+    #     Threads.@threads for thread_i in 1:n_threads
+    #         _clustered_lj_forces_packed_csr_chunk!(
+    #             data.fx_chunks[thread_i],
+    #             data.fy_chunks[thread_i],
+    #             data.fz_chunks[thread_i],
+    #             atoms,
+    #             data,
+    #             boundary,
+    #             lj,
+    #             thread_i,
+    #             n_threads,
+    #         )
+    #     end
+
+    #     _reduce_scatter_cluster_forces!(fs_nounits, data, n_threads)
+    # end
+
+    # return fs_nounits
+
+    _reset_cluster_force_timings!(data)
+    t_total0 = time_ns()
+
+    t0 = time_ns()
     fill!(fs_nounits, zero(eltype(fs_nounits)))
+    t1 = time_ns()
+    data.last_force_fs_zero_ms = (t1 - t0) / 1e6
 
     if n_threads == 1
+        t0 = time_ns()
         fill!(data.fx, zero(eltype(data.fx)))
         fill!(data.fy, zero(eltype(data.fy)))
         fill!(data.fz, zero(eltype(data.fz)))
+        t1 = time_ns()
+        data.last_force_slot_zero_ms = (t1 - t0) / 1e6
 
+        t0 = time_ns()
         _clustered_lj_forces_packed_csr_chunk!(
             data.fx,
             data.fy,
@@ -3637,17 +3753,29 @@ function pairwise_forces_loop!(
             1,
             1,
         )
+        t1 = time_ns()
+        data.last_force_kernel_ms = (t1 - t0) / 1e6
 
+        t0 = time_ns()
         _scatter_cluster_forces!(fs_nounits, data)
+        t1 = time_ns()
+        data.last_force_scatter_ms = (t1 - t0) / 1e6
     else
+        t0 = time_ns()
         _ensure_cluster_force_chunks!(data, n_threads)
+        t1 = time_ns()
+        data.last_force_chunk_ensure_ms = (t1 - t0) / 1e6
 
+        t0 = time_ns()
         @inbounds for thread_i in 1:n_threads
             fill!(data.fx_chunks[thread_i], zero(eltype(data.fx)))
             fill!(data.fy_chunks[thread_i], zero(eltype(data.fy)))
             fill!(data.fz_chunks[thread_i], zero(eltype(data.fz)))
         end
+        t1 = time_ns()
+        data.last_force_chunk_zero_ms = (t1 - t0) / 1e6
 
+        t0 = time_ns()
         Threads.@threads for thread_i in 1:n_threads
             _clustered_lj_forces_packed_csr_chunk!(
                 data.fx_chunks[thread_i],
@@ -3661,11 +3789,19 @@ function pairwise_forces_loop!(
                 n_threads,
             )
         end
+        t1 = time_ns()
+        data.last_force_kernel_ms = (t1 - t0) / 1e6
 
+        t0 = time_ns()
         _reduce_scatter_cluster_forces!(fs_nounits, data, n_threads)
+        t1 = time_ns()
+        data.last_force_reduce_ms = (t1 - t0) / 1e6
     end
 
+    data.last_force_total_ms = (time_ns() - t_total0) / 1e6
+
     return fs_nounits
+
 end
 
 cluster_pair_count(data::ClusterPairSoA) = length(data.pair_i)
@@ -3688,6 +3824,7 @@ function cluster_diagnostics(data::ClusterPairSoA)
         force_cutoff = data.force_cutoff,
         pairlist_cutoff = data.pairlist_cutoff,
         buffer = data.pairlist_cutoff - data.force_cutoff,
+
         last_full_rebuild = data.last_full_rebuild,
         last_dynamic_prune = data.last_dynamic_prune,
         last_order_ms = data.last_order_ms,
@@ -3698,13 +3835,51 @@ function cluster_diagnostics(data::ClusterPairSoA)
         last_prune_bounds_ms = data.last_prune_bounds_ms,
         last_prune_pairs_ms = data.last_prune_pairs_ms,
         last_prune_csr_ms = data.last_prune_csr_ms,
+
         dummy_fraction = cluster_dummy_fraction(data),
         cluster_pairs = cluster_pair_count(data),
         candidate_particle_pairs = cluster_candidate_pair_count(data),
         csr_cluster_pairs = cluster_csr_pair_count(data),
+        nonempty_shift_count = cluster_nonempty_shift_count(data),
+        avg_nonempty_shifts_per_cluster_pair = cluster_csr_pair_count(data) == 0 ?
+            0.0 :
+            cluster_nonempty_shift_count(data) / cluster_csr_pair_count(data),
 
+        last_force_total_ms = data.last_force_total_ms,
+        last_force_fs_zero_ms = data.last_force_fs_zero_ms,
+        last_force_slot_zero_ms = data.last_force_slot_zero_ms,
+        last_force_chunk_ensure_ms = data.last_force_chunk_ensure_ms,
+        last_force_chunk_zero_ms = data.last_force_chunk_zero_ms,
+        last_force_kernel_ms = data.last_force_kernel_ms,
+        last_force_scatter_ms = data.last_force_scatter_ms,
+        last_force_reduce_ms = data.last_force_reduce_ms,
     )
 end
+
+@inline function _cluster_nonempty_shift_count(mask::UInt64, ::Val{CW}) where {CW}
+    n = 0
+
+    Base.Cartesian.@nexprs 8 simddiagidx -> begin
+        s = simddiagidx - 1
+        n += _cluster_shift_has_pairs(mask, Val(s), Val(CW)) ? 1 : 0
+    end
+
+    return n
+end
+
+function cluster_nonempty_shift_count(data::ClusterPairSoA)
+    CW = data.n_clusters == 0 ? 0 : data.n_slots ÷ data.n_clusters
+    CW == SIMD_WIDTH || return 0
+
+    total = 0
+    @inbounds for mask in data.csr_pair_masks
+        total += _cluster_nonempty_shift_count(mask, Val(SIMD_WIDTH))
+    end
+
+    return total
+end
+
+    
 
 function check_cluster_csr_consistency(data::ClusterPairSoA)
     flat_n = length(data.pair_i)
@@ -3774,13 +3949,45 @@ function pairwise_forces_loop!(
     lj = pairwise_inters_nl[1]
     data = neighbors.cluster_data
 
-    fill!(fs_nounits, zero(eltype(fs_nounits)))
-    fill!(data.fx, zero(eltype(data.fx)))
-    fill!(data.fy, zero(eltype(data.fy)))
-    fill!(data.fz, zero(eltype(data.fz)))
+    # fill!(fs_nounits, zero(eltype(fs_nounits)))
+    # fill!(data.fx, zero(eltype(data.fx)))
+    # fill!(data.fy, zero(eltype(data.fy)))
+    # fill!(data.fz, zero(eltype(data.fz)))
 
  
 
+    # _clustered_lj_forces_packed_csr_chunk!(
+    #     data.fx,
+    #     data.fy,
+    #     data.fz,
+    #     atoms,
+    #     data,
+    #     boundary,
+    #     lj,
+    #     1,
+    #     1,
+    # )
+    
+    # _scatter_cluster_forces!(fs_nounits, data)
+
+    # return fs_nounits
+
+    _reset_cluster_force_timings!(data)
+    t_total0 = time_ns()
+
+    t0 = time_ns()
+    fill!(fs_nounits, zero(eltype(fs_nounits)))
+    t1 = time_ns()
+    data.last_force_fs_zero_ms = (t1 - t0) / 1e6
+
+    t0 = time_ns()
+    fill!(data.fx, zero(eltype(data.fx)))
+    fill!(data.fy, zero(eltype(data.fy)))
+    fill!(data.fz, zero(eltype(data.fz)))
+    t1 = time_ns()
+    data.last_force_slot_zero_ms = (t1 - t0) / 1e6
+
+    t0 = time_ns()
     _clustered_lj_forces_packed_csr_chunk!(
         data.fx,
         data.fy,
@@ -3792,8 +3999,16 @@ function pairwise_forces_loop!(
         1,
         1,
     )
-    
+    t1 = time_ns()
+    data.last_force_kernel_ms = (t1 - t0) / 1e6
+
+    t0 = time_ns()
     _scatter_cluster_forces!(fs_nounits, data)
+    t1 = time_ns()
+    data.last_force_scatter_ms = (t1 - t0) / 1e6
+
+    data.last_force_total_ms = (time_ns() - t_total0) / 1e6
 
     return fs_nounits
+
 end
