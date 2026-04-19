@@ -13,7 +13,9 @@ export
     ClusteredSIMDNeighborFinder,
     ClusteredNeighborList,
     ClusterPairSoA,
-    cluster_diagnostics
+    cluster_diagnostics,
+    cluster_csr_pair_count,
+    check_cluster_csr_consistency
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
@@ -2118,6 +2120,15 @@ mutable struct ClusterPairSoA{T}
     pair_masks_chunks::Vector{Vector{UInt64}}
     special_masks_chunks::Vector{Vector{UInt64}}
 
+    ci_offsets::Vector{Int32}
+    cj_list::Vector{Int32}
+    csr_shift_x::Vector{T}
+    csr_shift_y::Vector{T}
+    csr_shift_z::Vector{T}
+    csr_bbox_dist2::Vector{T}
+    csr_pair_masks::Vector{UInt64}
+    csr_special_masks::Vector{UInt64}
+
 end
 
 mutable struct ClusterOnlyStandardList
@@ -2169,6 +2180,10 @@ function empty_cluster_data(::Type{T}=Float64) where {T}
         Vector{Int32}[], Vector{Int32}[],
         Vector{T}[], Vector{T}[], Vector{T}[], Vector{T}[],
         Vector{UInt64}[], Vector{UInt64}[],
+        Int32[], Int32[],
+        T[], T[], T[], T[],
+        UInt64[], UInt64[],
+
     )
 end
 
@@ -2590,186 +2605,6 @@ function _ensure_cluster_pair_chunks!(data::ClusterPairSoA{T}, n_parts::Integer)
 end
 
 
-# function _build_cluster_pairs!(
-#     data::ClusterPairSoA{T},
-#     atoms,
-#     boundary,
-#     pairlist_cutoff,
-#     lj::SIMDLennardJones,
-#     eligible,
-#     special,
-#     prune_inner_fraction,
-#     n_threads::Integer,
-#     ::Val{CW},
-# ) where {T, CW}
-#     dist_unit = unit(pairlist_cutoff)
-#     box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
-#     cutoff = T(ustrip(dist_unit, pairlist_cutoff))
-#     cutoff2 = cutoff * cutoff
-
-#     # rB controls the paper's "only prune near the list boundary" shortcut.
-#     # Larger values reduce rebuild work but create more false-positive lane pairs.
-#     # Smaller values prune more aggressively but spend more time rebuilding.
-#     rB = T(prune_inner_fraction) * cutoff
-#     rB2 = rB * rB
-
-#     empty!(data.pair_i)
-#     empty!(data.pair_j)
-#     empty!(data.shift_x)
-#     empty!(data.shift_y)
-#     empty!(data.shift_z)
-#     empty!(data.bbox_dist2)
-#     empty!(data.pair_masks)
-#     empty!(data.special_masks)
-
-#     grid_dx = box_x / T(data.nx)
-#     grid_dy = box_y / T(data.ny)
-
-#     # n_xy_column_visits = 0
-#     # n_cluster_candidates = 0
-#     # n_z_rejects = 0
-#     # n_aabb_tests = 0
-#     # n_aabb_rejects = 0
-#     # n_full_mask_builds = 0
-#     # n_pruned_mask_builds = 0
-#     # n_empty_masks = 0
-#     # n_kept_pairs = 0
-
-#     @inbounds for ci in 1:data.n_clusters
-#         mask_i = data.cluster_active_masks[ci]
-#         mask_i == 0 && continue
-
-#         ix_min = floor(Int, (data.xmin[ci] - cutoff) / grid_dx)
-#         ix_max = floor(Int, (data.xmax[ci] + cutoff) / grid_dx)
-#         iy_min = floor(Int, (data.ymin[ci] - cutoff) / grid_dy)
-#         iy_max = floor(Int, (data.ymax[ci] + cutoff) / grid_dy)
-
-#         zlo = data.zmin[ci] - cutoff
-#         zhi = data.zmax[ci] + cutoff
-
-#         # Conservative: only use z-ordered early skips when the expanded z range
-#         # does not cross the periodic boundary. Boundary cases fall back to AABB.
-#         use_direct_z_window = zlo >= zero(T) && zhi <= box_z
-
-#         for raw_iy in iy_min:iy_max
-#             jy = mod(raw_iy, data.ny) + 1
-#             sy_xy = T(fld(raw_iy, data.ny)) * box_y
-
-#             for raw_ix in ix_min:ix_max
-#                 jx = mod(raw_ix, data.nx) + 1
-#                 sx_xy = T(fld(raw_ix, data.nx)) * box_x
-
-#                 col_j = jx + (jy - 1) * data.nx
-
-#                 first_cj = Int(data.col_first_cluster[col_j])
-#                 last_cj = Int(data.col_last_cluster[col_j])
-#                 first_cj == 0 && continue
-
-#                 #n_xy_column_visits += 1
-
-#                 for cj in first_cj:last_cj
-#                     cj < ci && continue
-
-#                     #n_cluster_candidates += 1
-
-#                     if use_direct_z_window
-#                         if data.zmin[cj] > zhi
-#                             #n_z_rejects += last_cj - cj + 1
-#                             break
-#                         end
-
-#                         if data.zmax[cj] < zlo
-#                             #n_z_rejects += 1
-#                             continue
-#                         end
-#                     end
-
-#                     mask_j = data.cluster_active_masks[cj]
-#                     mask_j == 0 && continue
-
-#                     #n_aabb_tests += 1
-
-#                     bbox_dist2, sx, sy, sz = _bbox_distance2_known_xy_shift(
-#                         data,
-#                         ci,
-#                         cj,
-#                         sx_xy,
-#                         sy_xy,
-#                         box_z,
-#                     )
-
-#                     if bbox_dist2 > cutoff2
-#                         #n_aabb_rejects += 1
-#                         continue
-#                     end
-
-#                     pair_mask, special_mask = if bbox_dist2 <= rB2
-#                         #n_full_mask_builds += 1
-
-#                         _cluster_full_pair_masks(
-#                             data,
-#                             atoms,
-#                             lj,
-#                             eligible,
-#                             special,
-#                             ci,
-#                             cj,
-#                             Val(CW),
-#                         )
-#                     else
-#                         #n_pruned_mask_builds += 1
-
-#                         _cluster_pruned_pair_masks(
-#                             data,
-#                             atoms,
-#                             lj,
-#                             eligible,
-#                             special,
-#                             ci,
-#                             cj,
-#                             cutoff2,
-#                             sx,
-#                             sy,
-#                             sz,
-#                             Val(CW),
-#                         )
-#                     end
-
-#                     if pair_mask != 0
-#                         #n_kept_pairs += 1
-
-#                         push!(data.pair_i, Int32(ci))
-#                         push!(data.pair_j, Int32(cj))
-#                         push!(data.shift_x, sx)
-#                         push!(data.shift_y, sy)
-#                         push!(data.shift_z, sz)
-#                         push!(data.bbox_dist2, bbox_dist2)
-#                         push!(data.pair_masks, pair_mask)
-#                         push!(data.special_masks, special_mask)
-#                     else
-#                         #n_empty_masks += 1
-#                     end
-#                 end
-#             end
-#         end
-#     end
-
-#     # println(
-#     #     "cluster pair diagnostics: ",
-#     #     "xy_column_visits=", n_xy_column_visits,
-#     #     " cluster_candidates=", n_cluster_candidates,
-#     #     " z_rejects=", n_z_rejects,
-#     #     " aabb_tests=", n_aabb_tests,
-#     #     " aabb_rejects=", n_aabb_rejects,
-#     #     " full_mask_builds=", n_full_mask_builds,
-#     #     " pruned_mask_builds=", n_pruned_mask_builds,
-#     #     " empty_masks=", n_empty_masks,
-#     #     " kept_pairs=", n_kept_pairs,
-#     # )
-
-#     return data
-# end
-
 function _build_cluster_pairs!(
     data::ClusterPairSoA{T},
     atoms,
@@ -2933,6 +2768,59 @@ function _build_cluster_pairs!(
     return data
 end
 
+function _build_cluster_csr_from_flat!(data::ClusterPairSoA{T}) where {T}
+    n_clusters = data.n_clusters
+    n_pairs = length(data.pair_i)
+
+    resize!(data.ci_offsets, n_clusters + 1)
+    fill!(data.ci_offsets, Int32(0))
+
+    # First store counts in ci_offsets[ci + 1].
+    @inbounds for p in 1:n_pairs
+        ci = Int(data.pair_i[p])
+        data.ci_offsets[ci + 1] += Int32(1)
+    end
+
+    # Convert counts to 1-based CSR offsets.
+    data.ci_offsets[1] = Int32(1)
+
+    @inbounds for ci in 1:n_clusters
+        data.ci_offsets[ci + 1] += data.ci_offsets[ci]
+    end
+
+    resize!(data.cj_list, n_pairs)
+    resize!(data.csr_shift_x, n_pairs)
+    resize!(data.csr_shift_y, n_pairs)
+    resize!(data.csr_shift_z, n_pairs)
+    resize!(data.csr_bbox_dist2, n_pairs)
+    resize!(data.csr_pair_masks, n_pairs)
+    resize!(data.csr_special_masks, n_pairs)
+
+    write_pos = Vector{Int32}(undef, n_clusters)
+
+    @inbounds for ci in 1:n_clusters
+        write_pos[ci] = data.ci_offsets[ci]
+    end
+
+    @inbounds for p in 1:n_pairs
+        ci = Int(data.pair_i[p])
+        dst = Int(write_pos[ci])
+        write_pos[ci] += Int32(1)
+
+        data.cj_list[dst] = data.pair_j[p]
+        data.csr_shift_x[dst] = data.shift_x[p]
+        data.csr_shift_y[dst] = data.shift_y[p]
+        data.csr_shift_z[dst] = data.shift_z[p]
+        data.csr_bbox_dist2[dst] = data.bbox_dist2[p]
+        data.csr_pair_masks[dst] = data.pair_masks[p]
+        data.csr_special_masks[dst] = data.special_masks[p]
+    end
+
+    return data
+end
+
+
+
 
 function _refresh_cluster_coordinates!(
     data::ClusterPairSoA{T},
@@ -2980,6 +2868,8 @@ function build_cluster_pair_list!(
     #t2 = time_ns()
     _build_cluster_pairs!(data, atoms, boundary, pairlist_cutoff, lj, eligible, special, prune_inner_fraction, n_threads, Val(CW))
     #t3 = time_ns()
+    _build_cluster_csr_from_flat!(data)
+
 
     # println(
     # "cluster rebuild timings: ",
@@ -3394,6 +3284,222 @@ function _clustered_lj_forces_packed_chunk!(
     return nothing
 end
 
+function _clustered_lj_forces_simd8_csr_chunk!(
+    fx,
+    fy,
+    fz,
+    data::ClusterPairSoA{T},
+    boundary,
+    lj::SIMDLennardJones,
+    first_ci::Integer,
+    step_ci::Integer,
+) where {T}
+    VFloat = Vec{SIMD_WIDTH, T}
+
+    lj_cutoff2 = T(extract_cutoff_sq(lj))
+    special_weight = T(lj.weight_special)
+
+    @inbounds for ci in first_ci:step_ci:data.n_clusters
+        first = Int(data.ci_offsets[ci])
+        last = Int(data.ci_offsets[ci + 1]) - 1
+        first > last && continue
+
+        first_i = (ci - 1) * SIMD_WIDTH + 1
+
+        xi = vload(VFloat, data.x, first_i)
+        yi = vload(VFloat, data.y, first_i)
+        zi = vload(VFloat, data.z, first_i)
+        sigma_i = vload(VFloat, data.sigma, first_i)
+        epsilon_i = vload(VFloat, data.epsilon, first_i)
+
+        for pair_idx in first:last
+            cj = Int(data.cj_list[pair_idx])
+            pair_mask = data.csr_pair_masks[pair_idx]
+            special_mask = data.csr_special_masks[pair_idx]
+
+            first_j = (cj - 1) * SIMD_WIDTH + 1
+
+            xj = vload(VFloat, data.x, first_j)
+            yj = vload(VFloat, data.y, first_j)
+            zj = vload(VFloat, data.z, first_j)
+            sigma_j = vload(VFloat, data.sigma, first_j)
+            epsilon_j = vload(VFloat, data.epsilon, first_j)
+
+            fix = zero(VFloat); fiy = zero(VFloat); fiz = zero(VFloat)
+            fjx = zero(VFloat); fjy = zero(VFloat); fjz = zero(VFloat)
+
+            img_sx = data.csr_shift_x[pair_idx]
+            img_sy = data.csr_shift_y[pair_idx]
+            img_sz = data.csr_shift_z[pair_idx]
+
+            Base.Cartesian.@nexprs 8 shift -> begin
+                s = shift - 1
+                inv_s = (SIMD_WIDTH - s) % SIMD_WIDTH
+
+                active = _cluster_pairmask_vec(pair_mask, Val(s), Val(SIMD_WIDTH))
+                special = _cluster_pairmask_vec(special_mask, Val(s), Val(SIMD_WIDTH))
+
+                xj_s = _cluster_rotate_register(xj, Val(s))
+                yj_s = _cluster_rotate_register(yj, Val(s))
+                zj_s = _cluster_rotate_register(zj, Val(s))
+                sigma_j_s = _cluster_rotate_register(sigma_j, Val(s))
+                epsilon_j_s = _cluster_rotate_register(epsilon_j, Val(s))
+
+                dx = xi - (xj_s + img_sx)
+                dy = yi - (yj_s + img_sy)
+                dz = zi - (zj_s + img_sz)
+
+                r2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
+                valid = active & (r2 <= lj_cutoff2)
+                safe_r2 = vifelse(valid, r2, one(VFloat))
+
+                inv_r2 = one(VFloat) / safe_r2
+                sigma = (sigma_i + sigma_j_s) / T(2)
+                epsilon = SIMD.sqrt(epsilon_i * epsilon_j_s)
+                weight = vifelse(special, special_weight, one(VFloat))
+
+                sr2 = (sigma * sigma) * inv_r2
+                sr6 = sr2 * sr2 * sr2
+                f_div_r = weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
+                f_div_r = vifelse(valid, f_div_r, zero(VFloat))
+
+                fx_ij = f_div_r * dx
+                fy_ij = f_div_r * dy
+                fz_ij = f_div_r * dz
+
+                fix += fx_ij
+                fiy += fy_ij
+                fiz += fz_ij
+
+                fjx += _cluster_rotate_register(-fx_ij, Val(inv_s))
+                fjy += _cluster_rotate_register(-fy_ij, Val(inv_s))
+                fjz += _cluster_rotate_register(-fz_ij, Val(inv_s))
+            end
+
+            if ci == cj
+                vstore(vload(VFloat, fx, first_i) + fix + fjx, fx, first_i)
+                vstore(vload(VFloat, fy, first_i) + fiy + fjy, fy, first_i)
+                vstore(vload(VFloat, fz, first_i) + fiz + fjz, fz, first_i)
+            else
+                vstore(vload(VFloat, fx, first_i) + fix, fx, first_i)
+                vstore(vload(VFloat, fy, first_i) + fiy, fy, first_i)
+                vstore(vload(VFloat, fz, first_i) + fiz, fz, first_i)
+
+                vstore(vload(VFloat, fx, first_j) + fjx, fx, first_j)
+                vstore(vload(VFloat, fy, first_j) + fjy, fy, first_j)
+                vstore(vload(VFloat, fz, first_j) + fjz, fz, first_j)
+            end
+        end
+    end
+
+    return nothing
+end
+
+function _clustered_lj_forces_packed_csr_chunk!(
+    fx,
+    fy,
+    fz,
+    atoms,
+    data::ClusterPairSoA{T},
+    boundary,
+    lj::SIMDLennardJones,
+    first_ci::Integer,
+    step_ci::Integer,
+) where {T}
+    CW = data.n_clusters == 0 ? 0 : data.n_slots ÷ data.n_clusters
+
+    if CW == SIMD_WIDTH && lj.σ_mixing isa LorentzMixing && lj.ϵ_mixing isa GeometricMixing
+        _clustered_lj_forces_simd8_csr_chunk!(
+            fx,
+            fy,
+            fz,
+            data,
+            boundary,
+            lj,
+            first_ci,
+            step_ci,
+        )
+        return nothing
+    end
+
+    lj_cutoff2 = T(extract_cutoff_sq(lj))
+
+    @inbounds for ci in first_ci:step_ci:data.n_clusters
+        first = Int(data.ci_offsets[ci])
+        last = Int(data.ci_offsets[ci + 1]) - 1
+        first > last && continue
+
+        first_i = (ci - 1) * CW + 1
+
+        for pair_idx in first:last
+            cj = Int(data.cj_list[pair_idx])
+            mask = data.csr_pair_masks[pair_idx]
+            special_mask = data.csr_special_masks[pair_idx]
+
+            sx = data.csr_shift_x[pair_idx]
+            sy = data.csr_shift_y[pair_idx]
+            sz = data.csr_shift_z[pair_idx]
+
+            first_j = (cj - 1) * CW + 1
+
+            for lane_i in 1:CW
+                slot_i = first_i + lane_i - 1
+                atom_i = Int(data.slot_to_atom[slot_i])
+                atom_i == 0 && continue
+
+                xi = data.x[slot_i]
+                yi = data.y[slot_i]
+                zi = data.z[slot_i]
+                sigma_i = data.sigma[slot_i]
+                epsilon_i = data.epsilon[slot_i]
+
+                for lane_j in 1:CW
+                    _has_lane_pair(mask, lane_i, lane_j, Val(CW)) || continue
+
+                    slot_j = first_j + lane_j - 1
+                    atom_j = Int(data.slot_to_atom[slot_j])
+                    atom_j == 0 && continue
+
+                    dx = xi - (data.x[slot_j] + sx)
+                    dy = yi - (data.y[slot_j] + sy)
+                    dz = zi - (data.z[slot_j] + sz)
+
+                    r2 = dx * dx + dy * dy + dz * dz
+                    r2 <= lj_cutoff2 || continue
+
+                    special = _has_lane_pair(special_mask, lane_i, lane_j, Val(CW))
+
+                    fij_x, fij_y, fij_z = _cluster_lj_force_components_packed(
+                        lj,
+                        atoms,
+                        atom_i,
+                        atom_j,
+                        special,
+                        sigma_i,
+                        epsilon_i,
+                        data.sigma[slot_j],
+                        data.epsilon[slot_j],
+                        dx,
+                        dy,
+                        dz,
+                    )
+
+                    fx[slot_i] += fij_x
+                    fy[slot_i] += fij_y
+                    fz[slot_i] += fij_z
+
+                    fx[slot_j] -= fij_x
+                    fy[slot_j] -= fij_y
+                    fz[slot_j] -= fij_z
+                end
+            end
+        end
+    end
+
+    return nothing
+end
+
+
 function _ensure_cluster_force_chunks!(data::ClusterPairSoA{T}, n_threads::Integer) where {T}
     resize!(data.fx_chunks, n_threads)
     resize!(data.fy_chunks, n_threads)
@@ -3477,7 +3583,19 @@ function pairwise_forces_loop!(
         fill!(data.fy, zero(eltype(data.fy)))
         fill!(data.fz, zero(eltype(data.fz)))
 
-        _clustered_lj_forces_packed_chunk!(
+        # _clustered_lj_forces_packed_chunk!(
+        #     data.fx,
+        #     data.fy,
+        #     data.fz,
+        #     atoms,
+        #     data,
+        #     boundary,
+        #     lj,
+        #     1,
+        #     1,
+        # )
+
+        _clustered_lj_forces_packed_csr_chunk!(
             data.fx,
             data.fy,
             data.fz,
@@ -3501,7 +3619,19 @@ function pairwise_forces_loop!(
         end
 
         Threads.@threads for thread_i in 1:n_threads
-            _clustered_lj_forces_packed_chunk!(
+            # _clustered_lj_forces_packed_chunk!(
+            #     data.fx_chunks[thread_i],
+            #     data.fy_chunks[thread_i],
+            #     data.fz_chunks[thread_i],
+            #     atoms,
+            #     data,
+            #     boundary,
+            #     lj,
+            #     thread_i,
+            #     n_threads,
+            # )
+
+            _clustered_lj_forces_packed_csr_chunk!(
                 data.fx_chunks[thread_i],
                 data.fy_chunks[thread_i],
                 data.fz_chunks[thread_i],
@@ -3525,6 +3655,10 @@ cluster_candidate_pair_count(data::ClusterPairSoA) = sum(count_ones, data.pair_m
 cluster_dummy_fraction(data::ClusterPairSoA) =
     data.n_slots == 0 ? 0.0 : (data.n_slots - data.n_atoms) / data.n_slots
 
+cluster_csr_pair_count(data::ClusterPairSoA) =
+    isempty(data.ci_offsets) ? 0 : Int(data.ci_offsets[end] - 1)
+
+
 function cluster_diagnostics(data::ClusterPairSoA)
     return (
         n_atoms = data.n_atoms,
@@ -3535,8 +3669,52 @@ function cluster_diagnostics(data::ClusterPairSoA)
         dummy_fraction = cluster_dummy_fraction(data),
         cluster_pairs = cluster_pair_count(data),
         candidate_particle_pairs = cluster_candidate_pair_count(data),
+        csr_cluster_pairs = cluster_csr_pair_count(data),
+
     )
 end
+
+function check_cluster_csr_consistency(data::ClusterPairSoA)
+    flat_n = length(data.pair_i)
+    csr_n = isempty(data.ci_offsets) ? 0 : Int(data.ci_offsets[end] - 1)
+
+    flat_n == csr_n || return false
+    length(data.cj_list) == flat_n || return false
+    length(data.csr_shift_x) == flat_n || return false
+    length(data.csr_shift_y) == flat_n || return false
+    length(data.csr_shift_z) == flat_n || return false
+    length(data.csr_bbox_dist2) == flat_n || return false
+    length(data.csr_pair_masks) == flat_n || return false
+    length(data.csr_special_masks) == flat_n || return false
+    length(data.ci_offsets) == data.n_clusters + 1 || return false
+
+    cursor = copy(data.ci_offsets[1:end - 1])
+
+    @inbounds for p in 1:flat_n
+        ci = Int(data.pair_i[p])
+        1 <= ci <= data.n_clusters || return false
+
+        dst = Int(cursor[ci])
+        dst < Int(data.ci_offsets[ci + 1]) || return false
+        cursor[ci] += Int32(1)
+
+        data.cj_list[dst] == data.pair_j[p] || return false
+        data.csr_shift_x[dst] == data.shift_x[p] || return false
+        data.csr_shift_y[dst] == data.shift_y[p] || return false
+        data.csr_shift_z[dst] == data.shift_z[p] || return false
+        data.csr_bbox_dist2[dst] == data.bbox_dist2[p] || return false
+        data.csr_pair_masks[dst] == data.pair_masks[p] || return false
+        data.csr_special_masks[dst] == data.special_masks[p] || return false
+    end
+
+    @inbounds for ci in 1:data.n_clusters
+        cursor[ci] == data.ci_offsets[ci + 1] || return false
+    end
+
+    return true
+end
+
+
 
 function pairwise_forces_loop!(
     fs_nounits,
@@ -3569,7 +3747,19 @@ function pairwise_forces_loop!(
     fill!(data.fy, zero(eltype(data.fy)))
     fill!(data.fz, zero(eltype(data.fz)))
 
-    _clustered_lj_forces_packed_chunk!(
+    # _clustered_lj_forces_packed_chunk!(
+    #     data.fx,
+    #     data.fy,
+    #     data.fz,
+    #     atoms,
+    #     data,
+    #     boundary,
+    #     lj,
+    #     1,
+    #     1,
+    # )
+
+    _clustered_lj_forces_packed_csr_chunk!(
         data.fx,
         data.fy,
         data.fz,
