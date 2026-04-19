@@ -2039,9 +2039,10 @@ struct ClusteredSIMDNeighborFinder{N, I, CW, R}
     inter::I
     prune_inner_fraction::R
     build_standard_list::Bool
+    force_mode::Symbol
 end
 
-function ClusteredSIMDNeighborFinder(base_finder, inter; cluster_width::Integer=CLUSTER_WIDTH, prune_inner_fraction=0.0, build_standard_list::Bool=true,)
+function ClusteredSIMDNeighborFinder(base_finder, inter; cluster_width::Integer=CLUSTER_WIDTH, prune_inner_fraction=0.0, build_standard_list::Bool=true, force_mode::Symbol=:newton)
     
     1 <= cluster_width <= 8 ||
         throw(ArgumentError("cluster_width must be in 1:8 because UInt64 stores CW x CW masks"))
@@ -2049,11 +2050,16 @@ function ClusteredSIMDNeighborFinder(base_finder, inter; cluster_width::Integer=
     0 <= prune_inner_fraction <= 1 ||
         throw(ArgumentError("prune_inner_fraction must be between 0 and 1"))
     
+    force_mode in (:newton, :owned) ||
+        throw(ArgumentError("force_mode must be :newton or :owned"))
+
+    
         return ClusteredSIMDNeighborFinder{typeof(base_finder), typeof(inter), cluster_width, typeof(prune_inner_fraction),}(
         base_finder,
         inter,
         prune_inner_fraction,
         build_standard_list,
+        force_mode,
     )
 end
 
@@ -2129,6 +2135,15 @@ mutable struct ClusterPairSoA{T}
     csr_pair_masks::Vector{UInt64}
     csr_special_masks::Vector{UInt64}
 
+    owned_ci_offsets::Vector{Int32}
+    owned_cj_list::Vector{Int32}
+    owned_shift_x::Vector{T}
+    owned_shift_y::Vector{T}
+    owned_shift_z::Vector{T}
+    owned_pair_masks::Vector{UInt64}
+    owned_special_masks::Vector{UInt64}
+
+
 end
 
 mutable struct ClusterOnlyStandardList
@@ -2145,6 +2160,7 @@ Base.iterate(nl::ClusterOnlyStandardList, state=1) =
 struct ClusteredNeighborList{L, P}
     standard_list::L
     cluster_data::P
+    force_mode::Symbol
 end
 
 function Base.getproperty(nl::ClusteredNeighborList, sym::Symbol)
@@ -2152,9 +2168,12 @@ function Base.getproperty(nl::ClusteredNeighborList, sym::Symbol)
         return getfield(nl, :standard_list)
     elseif sym === :cluster_data
         return getfield(nl, :cluster_data)
+    elseif sym == :force_mode
+        return getfield(nl, :force_mode)
     else
         return getproperty(getfield(nl, :standard_list), sym)
     end
+    
 end
 
 Base.iterate(nl::ClusteredNeighborList, args...) = iterate(nl.standard_list, args...)
@@ -2183,7 +2202,9 @@ function empty_cluster_data(::Type{T}=Float64) where {T}
         Int32[], Int32[],
         T[], T[], T[], T[],
         UInt64[], UInt64[],
-
+        Int32[], Int32[],
+        T[], T[], T[],
+        UInt64[], UInt64[],
     )
 end
 
@@ -2192,6 +2213,20 @@ end
 
 @inline function _lane_pair_bit(lane_i::Integer, lane_j::Integer, ::Val{CW}) where {CW}
     return UInt64(1) << ((lane_i - 1) * CW + (lane_j - 1))
+end
+
+@inline function _transpose_cluster_pair_mask(mask::UInt64, ::Val{CW}) where {CW}
+    out = UInt64(0)
+
+    @inbounds for lane_i in 1:CW
+        for lane_j in 1:CW
+            if _has_lane_pair(mask, lane_i, lane_j, Val(CW))
+                out |= _lane_pair_bit(lane_j, lane_i, Val(CW))
+            end
+        end
+    end
+
+    return out
 end
 
 @inline function _has_lane_pair(mask::UInt64, lane_i::Integer, lane_j::Integer, ::Val{CW}) where {CW}
@@ -2819,6 +2854,78 @@ function _build_cluster_csr_from_flat!(data::ClusterPairSoA{T}) where {T}
     return data
 end
 
+function _build_cluster_owned_csr_from_flat!(data::ClusterPairSoA{T}, ::Val{CW}) where {T, CW}
+    n_clusters = data.n_clusters
+    n_pairs = length(data.pair_i)
+
+    resize!(data.owned_ci_offsets, n_clusters + 1)
+    fill!(data.owned_ci_offsets, Int32(0))
+
+    n_owned_pairs = 0
+
+    @inbounds for p in 1:n_pairs
+        ci = Int(data.pair_i[p])
+        cj = Int(data.pair_j[p])
+
+        data.owned_ci_offsets[ci + 1] += Int32(1)
+        n_owned_pairs += 1
+
+        if ci != cj
+            data.owned_ci_offsets[cj + 1] += Int32(1)
+            n_owned_pairs += 1
+        end
+    end
+
+    data.owned_ci_offsets[1] = Int32(1)
+
+    @inbounds for ci in 1:n_clusters
+        data.owned_ci_offsets[ci + 1] += data.owned_ci_offsets[ci]
+    end
+
+    resize!(data.owned_cj_list, n_owned_pairs)
+    resize!(data.owned_shift_x, n_owned_pairs)
+    resize!(data.owned_shift_y, n_owned_pairs)
+    resize!(data.owned_shift_z, n_owned_pairs)
+    resize!(data.owned_pair_masks, n_owned_pairs)
+    resize!(data.owned_special_masks, n_owned_pairs)
+
+    write_pos = Vector{Int32}(undef, n_clusters)
+
+    @inbounds for ci in 1:n_clusters
+        write_pos[ci] = data.owned_ci_offsets[ci]
+    end
+
+    @inbounds for p in 1:n_pairs
+        ci = Int(data.pair_i[p])
+        cj = Int(data.pair_j[p])
+
+        dst = Int(write_pos[ci])
+        write_pos[ci] += Int32(1)
+
+        data.owned_cj_list[dst] = data.pair_j[p]
+        data.owned_shift_x[dst] = data.shift_x[p]
+        data.owned_shift_y[dst] = data.shift_y[p]
+        data.owned_shift_z[dst] = data.shift_z[p]
+        data.owned_pair_masks[dst] = data.pair_masks[p]
+        data.owned_special_masks[dst] = data.special_masks[p]
+
+        if ci != cj
+            dst_rev = Int(write_pos[cj])
+            write_pos[cj] += Int32(1)
+
+            data.owned_cj_list[dst_rev] = data.pair_i[p]
+            data.owned_shift_x[dst_rev] = -data.shift_x[p]
+            data.owned_shift_y[dst_rev] = -data.shift_y[p]
+            data.owned_shift_z[dst_rev] = -data.shift_z[p]
+            data.owned_pair_masks[dst_rev] =
+                _transpose_cluster_pair_mask(data.pair_masks[p], Val(CW))
+            data.owned_special_masks[dst_rev] =
+                _transpose_cluster_pair_mask(data.special_masks[p], Val(CW))
+        end
+    end
+
+    return data
+end
 
 
 
@@ -2869,6 +2976,8 @@ function build_cluster_pair_list!(
     _build_cluster_pairs!(data, atoms, boundary, pairlist_cutoff, lj, eligible, special, prune_inner_fraction, n_threads, Val(CW))
     #t3 = time_ns()
     _build_cluster_csr_from_flat!(data)
+    _build_cluster_owned_csr_from_flat!(data, Val(CW))
+
 
 
     # println(
@@ -2944,7 +3053,7 @@ function find_neighbors(
         Val(cluster_width(nf)),
     )
 
-    return ClusteredNeighborList(new_standard, cluster_data)
+    return ClusteredNeighborList(new_standard, cluster_data, nf.force_mode)
 end
 
 @inline function _cluster_lj_force_dr(
@@ -3499,6 +3608,163 @@ function _clustered_lj_forces_packed_csr_chunk!(
     return nothing
 end
 
+function _clustered_lj_forces_simd8_owned_csr_chunk!(
+    fx,
+    fy,
+    fz,
+    data::ClusterPairSoA{T},
+    boundary,
+    lj::SIMDLennardJones,
+    first_ci::Integer,
+    step_ci::Integer,
+) where {T}
+    VFloat = Vec{SIMD_WIDTH, T}
+
+    lj_cutoff2 = T(extract_cutoff_sq(lj))
+    special_weight = T(lj.weight_special)
+
+    @inbounds for ci in first_ci:step_ci:data.n_clusters
+        first_i = (ci - 1) * SIMD_WIDTH + 1
+
+        xi = vload(VFloat, data.x, first_i)
+        yi = vload(VFloat, data.y, first_i)
+        zi = vload(VFloat, data.z, first_i)
+        sigma_i = vload(VFloat, data.sigma, first_i)
+        epsilon_i = vload(VFloat, data.epsilon, first_i)
+
+        fix_total = zero(VFloat)
+        fiy_total = zero(VFloat)
+        fiz_total = zero(VFloat)
+
+        first = Int(data.owned_ci_offsets[ci])
+        last = Int(data.owned_ci_offsets[ci + 1]) - 1
+
+        for pair_idx in first:last
+            cj = Int(data.owned_cj_list[pair_idx])
+            pair_mask = data.owned_pair_masks[pair_idx]
+            special_mask = data.owned_special_masks[pair_idx]
+
+            first_j = (cj - 1) * SIMD_WIDTH + 1
+
+            xj = vload(VFloat, data.x, first_j)
+            yj = vload(VFloat, data.y, first_j)
+            zj = vload(VFloat, data.z, first_j)
+            sigma_j = vload(VFloat, data.sigma, first_j)
+            epsilon_j = vload(VFloat, data.epsilon, first_j)
+
+            fix = zero(VFloat)
+            fiy = zero(VFloat)
+            fiz = zero(VFloat)
+
+            fjx = zero(VFloat)
+            fjy = zero(VFloat)
+            fjz = zero(VFloat)
+
+            img_sx = data.owned_shift_x[pair_idx]
+            img_sy = data.owned_shift_y[pair_idx]
+            img_sz = data.owned_shift_z[pair_idx]
+
+            Base.Cartesian.@nexprs 8 shift -> begin
+                s = shift - 1
+                inv_s = (SIMD_WIDTH - s) % SIMD_WIDTH
+
+                active = _cluster_pairmask_vec(pair_mask, Val(s), Val(SIMD_WIDTH))
+                special = _cluster_pairmask_vec(special_mask, Val(s), Val(SIMD_WIDTH))
+
+                xj_s = _cluster_rotate_register(xj, Val(s))
+                yj_s = _cluster_rotate_register(yj, Val(s))
+                zj_s = _cluster_rotate_register(zj, Val(s))
+                sigma_j_s = _cluster_rotate_register(sigma_j, Val(s))
+                epsilon_j_s = _cluster_rotate_register(epsilon_j, Val(s))
+
+                dx = xi - (xj_s + img_sx)
+                dy = yi - (yj_s + img_sy)
+                dz = zi - (zj_s + img_sz)
+
+                r2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
+                valid = active & (r2 <= lj_cutoff2)
+                safe_r2 = vifelse(valid, r2, one(VFloat))
+
+                inv_r2 = one(VFloat) / safe_r2
+                sigma = (sigma_i + sigma_j_s) / T(2)
+                epsilon = SIMD.sqrt(epsilon_i * epsilon_j_s)
+                weight = vifelse(special, special_weight, one(VFloat))
+
+                sr2 = (sigma * sigma) * inv_r2
+                sr6 = sr2 * sr2 * sr2
+                f_div_r = weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
+                f_div_r = vifelse(valid, f_div_r, zero(VFloat))
+
+                fx_ij = f_div_r * dx
+                fy_ij = f_div_r * dy
+                fz_ij = f_div_r * dz
+
+                fix += fx_ij
+                fiy += fy_ij
+                fiz += fz_ij
+
+                if ci == cj
+                    fjx += _cluster_rotate_register(-fx_ij, Val(inv_s))
+                    fjy += _cluster_rotate_register(-fy_ij, Val(inv_s))
+                    fjz += _cluster_rotate_register(-fz_ij, Val(inv_s))
+                end
+            end
+
+            if ci == cj
+                fix_total += fix + fjx
+                fiy_total += fiy + fjy
+                fiz_total += fiz + fjz
+            else
+                fix_total += fix
+                fiy_total += fiy
+                fiz_total += fiz
+            end
+        end
+
+        vstore(fix_total, fx, first_i)
+        vstore(fiy_total, fy, first_i)
+        vstore(fiz_total, fz, first_i)
+    end
+
+    return nothing
+end
+
+function _clustered_lj_forces_packed_owned_csr_chunk!(
+    fx,
+    fy,
+    fz,
+    atoms,
+    data::ClusterPairSoA{T},
+    boundary,
+    lj::SIMDLennardJones,
+    first_ci::Integer,
+    step_ci::Integer,
+) where {T}
+    CW = data.n_clusters == 0 ? 0 : data.n_slots ÷ data.n_clusters
+
+    CW == SIMD_WIDTH ||
+        throw(ArgumentError("owned CSR prototype currently supports cluster_width == SIMD_WIDTH"))
+
+    lj.σ_mixing isa LorentzMixing ||
+        throw(ArgumentError("owned CSR prototype currently requires Lorentz σ mixing"))
+
+    lj.ϵ_mixing isa GeometricMixing ||
+        throw(ArgumentError("owned CSR prototype currently requires Geometric ϵ mixing"))
+
+    _clustered_lj_forces_simd8_owned_csr_chunk!(
+        fx,
+        fy,
+        fz,
+        data,
+        boundary,
+        lj,
+        first_ci,
+        step_ci,
+    )
+
+    return nothing
+end
+
 
 function _ensure_cluster_force_chunks!(data::ClusterPairSoA{T}, n_threads::Integer) where {T}
     resize!(data.fx_chunks, n_threads)
@@ -3577,23 +3843,33 @@ function pairwise_forces_loop!(
     lj = pairwise_inters_nl[1]
     data = neighbors.cluster_data
 
+    fill!(fs_nounits, zero(eltype(fs_nounits)))
+
+if neighbors.force_mode === :owned
+    fill!(data.fx, zero(eltype(data.fx)))
+    fill!(data.fy, zero(eltype(data.fy)))
+    fill!(data.fz, zero(eltype(data.fz)))
+
+    Threads.@threads for thread_i in 1:n_threads
+        _clustered_lj_forces_packed_owned_csr_chunk!(
+            data.fx,
+            data.fy,
+            data.fz,
+            atoms,
+            data,
+            boundary,
+            lj,
+            thread_i,
+            n_threads,
+        )
+    end
+
+    _scatter_cluster_forces!(fs_nounits, data)
+else
     if n_threads == 1
-        fill!(fs_nounits, zero(eltype(fs_nounits)))
         fill!(data.fx, zero(eltype(data.fx)))
         fill!(data.fy, zero(eltype(data.fy)))
         fill!(data.fz, zero(eltype(data.fz)))
-
-        # _clustered_lj_forces_packed_chunk!(
-        #     data.fx,
-        #     data.fy,
-        #     data.fz,
-        #     atoms,
-        #     data,
-        #     boundary,
-        #     lj,
-        #     1,
-        #     1,
-        # )
 
         _clustered_lj_forces_packed_csr_chunk!(
             data.fx,
@@ -3609,7 +3885,6 @@ function pairwise_forces_loop!(
 
         _scatter_cluster_forces!(fs_nounits, data)
     else
-        fill!(fs_nounits, zero(eltype(fs_nounits)))
         _ensure_cluster_force_chunks!(data, n_threads)
 
         @inbounds for thread_i in 1:n_threads
@@ -3619,18 +3894,6 @@ function pairwise_forces_loop!(
         end
 
         Threads.@threads for thread_i in 1:n_threads
-            # _clustered_lj_forces_packed_chunk!(
-            #     data.fx_chunks[thread_i],
-            #     data.fy_chunks[thread_i],
-            #     data.fz_chunks[thread_i],
-            #     atoms,
-            #     data,
-            #     boundary,
-            #     lj,
-            #     thread_i,
-            #     n_threads,
-            # )
-
             _clustered_lj_forces_packed_csr_chunk!(
                 data.fx_chunks[thread_i],
                 data.fy_chunks[thread_i],
@@ -3646,6 +3909,8 @@ function pairwise_forces_loop!(
 
         _reduce_scatter_cluster_forces!(fs_nounits, data, n_threads)
     end
+end
+
 
     return fs_nounits
 end
@@ -3657,6 +3922,9 @@ cluster_dummy_fraction(data::ClusterPairSoA) =
 
 cluster_csr_pair_count(data::ClusterPairSoA) =
     isempty(data.ci_offsets) ? 0 : Int(data.ci_offsets[end] - 1)
+
+cluster_owned_csr_pair_count(data::ClusterPairSoA) =
+    isempty(data.owned_ci_offsets) ? 0 : Int(data.owned_ci_offsets[end] - 1)
 
 
 function cluster_diagnostics(data::ClusterPairSoA)
@@ -3670,6 +3938,7 @@ function cluster_diagnostics(data::ClusterPairSoA)
         cluster_pairs = cluster_pair_count(data),
         candidate_particle_pairs = cluster_candidate_pair_count(data),
         csr_cluster_pairs = cluster_csr_pair_count(data),
+        owned_csr_cluster_pairs = cluster_owned_csr_pair_count(data),
 
     )
 end
@@ -3747,30 +4016,33 @@ function pairwise_forces_loop!(
     fill!(data.fy, zero(eltype(data.fy)))
     fill!(data.fz, zero(eltype(data.fz)))
 
-    # _clustered_lj_forces_packed_chunk!(
-    #     data.fx,
-    #     data.fy,
-    #     data.fz,
-    #     atoms,
-    #     data,
-    #     boundary,
-    #     lj,
-    #     1,
-    #     1,
-    # )
+    if neighbors.force_mode === :owned
+        _clustered_lj_forces_packed_owned_csr_chunk!(
+            data.fx,
+            data.fy,
+            data.fz,
+            atoms,
+            data,
+            boundary,
+            lj,
+            1,
+            1,
+        )
+    else
 
-    _clustered_lj_forces_packed_csr_chunk!(
-        data.fx,
-        data.fy,
-        data.fz,
-        atoms,
-        data,
-        boundary,
-        lj,
-        1,
-        1,
-    )
-
+        _clustered_lj_forces_packed_csr_chunk!(
+            data.fx,
+            data.fy,
+            data.fz,
+            atoms,
+            data,
+            boundary,
+            lj,
+            1,
+            1,
+        )
+    end
+    
     _scatter_cluster_forces!(fs_nounits, data)
 
     return fs_nounits
