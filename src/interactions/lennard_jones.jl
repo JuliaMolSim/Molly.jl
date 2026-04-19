@@ -2955,83 +2955,117 @@ function _prune_cluster_pairs!(
     eligible,
     special,
     prune_cutoff::T,
+    n_threads::Integer,
     ::Val{CW},
 ) where {T, CW}
     dist_unit = unit(boundary.side_lengths[1])
     box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
     prune_cutoff2 = prune_cutoff * prune_cutoff
+    n_pairs = length(data.pair_i)
+    n_parts = max(1, min(Int(n_threads), max(n_pairs, 1)))
 
-    write_idx = 1
+    _ensure_cluster_pair_chunks!(data, n_parts)
 
-    @inbounds for pair_idx in eachindex(data.pair_i)
-        ci = Int(data.pair_i[pair_idx])
-        cj = Int(data.pair_j[pair_idx])
+    @inbounds for part in 1:n_parts
+        empty!(data.pair_i_chunks[part])
+        empty!(data.pair_j_chunks[part])
+        empty!(data.shift_x_chunks[part])
+        empty!(data.shift_y_chunks[part])
+        empty!(data.shift_z_chunks[part])
+        empty!(data.bbox_dist2_chunks[part])
+        empty!(data.pair_masks_chunks[part])
+        empty!(data.special_masks_chunks[part])
+    end
 
-        sx = data.shift_x[pair_idx]
-        sy = data.shift_y[pair_idx]
-        sz = data.shift_z[pair_idx]
+    Threads.@threads for part in 1:n_parts
+        first_idx, last_idx = _part_bounds(n_pairs, part, n_parts)
 
-        bbox_dist2 = _bbox_distance2_given_shift(
-            data,
-            ci,
-            cj,
-            sx,
-            sy,
-            sz,
-        )
+        pair_i_local = data.pair_i_chunks[part]
+        pair_j_local = data.pair_j_chunks[part]
+        shift_x_local = data.shift_x_chunks[part]
+        shift_y_local = data.shift_y_chunks[part]
+        shift_z_local = data.shift_z_chunks[part]
+        bbox_dist2_local = data.bbox_dist2_chunks[part]
+        pair_masks_local = data.pair_masks_chunks[part]
+        special_masks_local = data.special_masks_chunks[part]
 
-        if bbox_dist2 > prune_cutoff2
-            bbox_dist2, sx, sy, sz = _bbox_distance2_shift(
+        @inbounds for pair_idx in first_idx:last_idx
+            ci = Int(data.pair_i[pair_idx])
+            cj = Int(data.pair_j[pair_idx])
+
+            sx = data.shift_x[pair_idx]
+            sy = data.shift_y[pair_idx]
+            sz = data.shift_z[pair_idx]
+
+            bbox_dist2 = _bbox_distance2_given_shift(
                 data,
                 ci,
                 cj,
-                box_x,
-                box_y,
-                box_z,
+                sx,
+                sy,
+                sz,
             )
+
+            if bbox_dist2 > prune_cutoff2
+                bbox_dist2, sx, sy, sz = _bbox_distance2_shift(
+                    data,
+                    ci,
+                    cj,
+                    box_x,
+                    box_y,
+                    box_z,
+                )
+            end
+
+            bbox_dist2 <= prune_cutoff2 || continue
+
+            pair_mask, special_mask = _cluster_pruned_pair_masks(
+                data,
+                atoms,
+                lj,
+                eligible,
+                special,
+                ci,
+                cj,
+                prune_cutoff2,
+                sx,
+                sy,
+                sz,
+                Val(CW),
+            )
+
+            pair_mask == 0 && continue
+
+            push!(pair_i_local, Int32(ci))
+            push!(pair_j_local, Int32(cj))
+            push!(shift_x_local, sx)
+            push!(shift_y_local, sy)
+            push!(shift_z_local, sz)
+            push!(bbox_dist2_local, bbox_dist2)
+            push!(pair_masks_local, pair_mask)
+            push!(special_masks_local, special_mask)
         end
-
-        bbox_dist2 <= prune_cutoff2 || continue
-
-        pair_mask, special_mask = _cluster_pruned_pair_masks(
-            data,
-            atoms,
-            lj,
-            eligible,
-            special,
-            ci,
-            cj,
-            prune_cutoff2,
-            sx,
-            sy,
-            sz,
-            Val(CW),
-        )
-
-        pair_mask == 0 && continue
-
-        data.pair_i[write_idx] = Int32(ci)
-        data.pair_j[write_idx] = Int32(cj)
-        data.shift_x[write_idx] = sx
-        data.shift_y[write_idx] = sy
-        data.shift_z[write_idx] = sz
-        data.bbox_dist2[write_idx] = bbox_dist2
-        data.pair_masks[write_idx] = pair_mask
-        data.special_masks[write_idx] = special_mask
-
-        write_idx += 1
     end
 
-    new_len = write_idx - 1
+    empty!(data.pair_i)
+    empty!(data.pair_j)
+    empty!(data.shift_x)
+    empty!(data.shift_y)
+    empty!(data.shift_z)
+    empty!(data.bbox_dist2)
+    empty!(data.pair_masks)
+    empty!(data.special_masks)
 
-    resize!(data.pair_i, new_len)
-    resize!(data.pair_j, new_len)
-    resize!(data.shift_x, new_len)
-    resize!(data.shift_y, new_len)
-    resize!(data.shift_z, new_len)
-    resize!(data.bbox_dist2, new_len)
-    resize!(data.pair_masks, new_len)
-    resize!(data.special_masks, new_len)
+    @inbounds for part in 1:n_parts
+        append!(data.pair_i, data.pair_i_chunks[part])
+        append!(data.pair_j, data.pair_j_chunks[part])
+        append!(data.shift_x, data.shift_x_chunks[part])
+        append!(data.shift_y, data.shift_y_chunks[part])
+        append!(data.shift_z, data.shift_z_chunks[part])
+        append!(data.bbox_dist2, data.bbox_dist2_chunks[part])
+        append!(data.pair_masks, data.pair_masks_chunks[part])
+        append!(data.special_masks, data.special_masks_chunks[part])
+    end
 
     return data
 end
@@ -3165,6 +3199,7 @@ function find_neighbors(
                 _cluster_base_eligible(nf.base_finder),
                 _cluster_base_special(nf.base_finder),
                 prune_cutoff,
+                Int(get(kwargs, :n_threads, Threads.nthreads())),
                 Val(cluster_width(nf)),
             )
             tp1 = time_ns()
