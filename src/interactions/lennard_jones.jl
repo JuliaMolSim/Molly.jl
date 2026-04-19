@@ -9,7 +9,11 @@ export
     SIMDCoulomb,
     PackedFlatSoA,
     SIMDCoulombReactionField,
-    SIMDCoulombEwald
+    SIMDCoulombEwald,
+    ClusteredSIMDNeighborFinder,
+    ClusteredNeighborList,
+    ClusterPairSoA,
+    cluster_diagnostics
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
@@ -1999,17 +2003,1379 @@ end
 
     return nothing
 end
- 
 
 
+########################################################################
+# Cluster-based SIMD nonbonded path
+########################################################################
 
+# Spatial sorter on step 0 and on rebuilds
+
+# 8x8 SIMD kernel - to replace simd_chunk_forces! Loop over cluster list, loading two vectors and using shufflevector()
+
+########################################################################
+# Clustered SIMD prototype: GROMACS/Pall-Hess style neighbor rebuild
+#
+# Prototype scope:
+#   - CubicBoundary only
+#   - SIMDLennardJones only
+#   - scalar force loop first, no SIMD yet
+#   - exclusions/special pairs are read from the base neighbor finder masks
+#
+# Revisit:
+#   - SIMD inner loop over j lanes
+#   - Coulomb / reaction-field / PME direct-space path
+#   - dynamic pruning between full neighbor rebuilds
+#   - cluster-cell pair search instead of O(n_clusters^2) AABB scan
+#   - compact storage of image shifts and masks
+########################################################################
+
+const CLUSTER_WIDTH = SIMD_WIDTH
+
+struct ClusteredSIMDNeighborFinder{N, I, CW, R}
+    base_finder::N
+    inter::I
+    prune_inner_fraction::R
+    build_standard_list::Bool
+end
+
+function ClusteredSIMDNeighborFinder(base_finder, inter; cluster_width::Integer=CLUSTER_WIDTH, prune_inner_fraction=0.0, build_standard_list::Bool=true,)
     
+    1 <= cluster_width <= 8 ||
+        throw(ArgumentError("cluster_width must be in 1:8 because UInt64 stores CW x CW masks"))
+    
+    0 <= prune_inner_fraction <= 1 ||
+        throw(ArgumentError("prune_inner_fraction must be between 0 and 1"))
+    
+        return ClusteredSIMDNeighborFinder{typeof(base_finder), typeof(inter), cluster_width, typeof(prune_inner_fraction),}(
+        base_finder,
+        inter,
+        prune_inner_fraction,
+        build_standard_list,
+    )
+end
+
+cluster_width(::ClusteredSIMDNeighborFinder{N, I, CW, R}) where {N, I, CW, R} = CW
+
+mutable struct ClusterPairSoA{T}
+    n_atoms::Int # num atoms in system
+    n_slots::Int # total packed storage slots = n_clusters * cluster_size (inc. padded dummy slots)
+    n_clusters::Int # so we can loop over n_clusters and to index bounding boxes / masks / pair_list entries
+    nx::Int # num spatial bins in x direction during cluster construction
+    ny::Int # num spatial bins in y direction
+    cluster_col::Vector{Int32}
+    col_first_cluster::Vector{Int32}
+    col_last_cluster::Vector{Int32}
+
+    # Atom and slot mapping - a slot is an individual entry within a block of slots (a cluster)
+    atom_to_slot::Vector{Int32} # atom 17 --> slot 21
+    slot_to_atom::Vector{Int32} # writing forces back from clustered storage into original Molly order
+
+    # Packed particle data - for contiguous loads - avoids vgathers
+    x::Vector{T}
+    y::Vector{T}
+    z::Vector{T}
+    sigma::Vector{T}
+    epsilon::Vector{T}
+
+    # Store force accumulated per packed slot - same order as x/y/Z
+    # Would be mapped back to original atom ordering using slot_to_atom
+    fx::Vector{T}
+    fy::Vector{T}
+    fz::Vector{T}
+
+    # Thread local force buffers to avoid writes and enable 3rd law
+    fx_chunks::Vector{Vector{T}}
+    fy_chunks::Vector{Vector{T}}
+    fz_chunks::Vector{Vector{T}}
+
+    cluster_active_masks::Vector{UInt64} # bit mask saying which lanes correspond to real atoms
+    # Axis-aligned bounding box of each cluster
+    xmin::Vector{T}
+    xmax::Vector{T}
+    ymin::Vector{T}
+    ymax::Vector{T}
+    zmin::Vector{T}
+    zmax::Vector{T}
+
+    # Actual cluster-pair list
+    pair_i::Vector{Int32}
+    pair_j::Vector{Int32}
+    shift_x::Vector{T}
+    shift_y::Vector{T}
+    shift_z::Vector{T}
+    bbox_dist2::Vector{T}
+
+    pair_masks::Vector{UInt64}
+    special_masks::Vector{UInt64}
+end
+
+mutable struct ClusterOnlyStandardList
+    n::Int
+    list::Vector{Tuple{Int32, Int32, Bool}}
+end
+
+ClusterOnlyStandardList() = ClusterOnlyStandardList(0, Tuple{Int32, Int32, Bool}[])
+
+Base.length(nl::ClusterOnlyStandardList) = nl.n
+Base.iterate(nl::ClusterOnlyStandardList, state=1) =
+    state > nl.n ? nothing : (nl.list[state], state + 1)
+
+struct ClusteredNeighborList{L, P}
+    standard_list::L
+    cluster_data::P
+end
+
+function Base.getproperty(nl::ClusteredNeighborList, sym::Symbol)
+    if sym === :standard_list
+        return getfield(nl, :standard_list)
+    elseif sym === :cluster_data
+        return getfield(nl, :cluster_data)
+    else
+        return getproperty(getfield(nl, :standard_list), sym)
+    end
+end
+
+Base.iterate(nl::ClusteredNeighborList, args...) = iterate(nl.standard_list, args...)
+Base.length(nl::ClusteredNeighborList) = length(nl.standard_list)
+Base.getindex(nl::ClusteredNeighborList, i::Integer) = nl.standard_list[i]
+Base.firstindex(::ClusteredNeighborList) = 1
+Base.lastindex(nl::ClusteredNeighborList) = length(nl)
+Base.eachindex(nl::ClusteredNeighborList) = eachindex(nl.standard_list)
+
+function empty_cluster_data(::Type{T}=Float64) where {T}
+    return ClusterPairSoA{T}(
+        0, 0, 0, 0, 0, Int32[], Int32[], Int32[],
+        Int32[], Int32[],
+        T[], T[], T[],
+        T[], T[],
+        T[], T[], T[],
+        Vector{T}[], Vector{T}[], Vector{T}[],
+        UInt64[],
+        T[], T[], T[], T[], T[], T[],
+        Int32[], Int32[],
+        T[], T[], T[], T[],
+        UInt64[], UInt64[],
+    )
+end
+
+@inline _cluster_index(slot::Integer, ::Val{CW}) where {CW} = (slot - 1) ÷ CW + 1
+@inline _lane_bit(lane::Integer) = UInt64(1) << (lane - 1)
+
+@inline function _lane_pair_bit(lane_i::Integer, lane_j::Integer, ::Val{CW}) where {CW}
+    return UInt64(1) << ((lane_i - 1) * CW + (lane_j - 1))
+end
+
+@inline function _has_lane_pair(mask::UInt64, lane_i::Integer, lane_j::Integer, ::Val{CW}) where {CW}
+    return (mask & _lane_pair_bit(lane_i, lane_j, Val(CW))) != 0
+end
+
+@generated function _cluster_rotate_register(v::Vec{N, T}, ::Val{Shift}) where {N, T, Shift}
+    indices = Tuple((i - 1 + Shift) % N for i in 1:N)
+    return :(shufflevector(v, Val($indices)))
+end
+
+@generated function _cluster_pairmask_vec(mask::UInt64, ::Val{Shift}, ::Val{CW}) where {Shift, CW}
+    lanes = map(1:CW) do lane_i
+        lane_j = ((lane_i - 1 + Shift) % CW) + 1
+        bit = UInt64(1) << ((lane_i - 1) * CW + (lane_j - 1))
+        :((mask & $(bit)) != 0)
+    end
+
+    return :(Vec{$CW, Bool}(($(lanes...),)))
+end
+
+@inline function _cluster_wrap_coord(x::T, box_length::T) where {T}
+    xw = x - box_length * floor(x / box_length)
+    return xw >= box_length ? zero(T) : xw
+end
+
+@inline function _cluster_min_image_delta(a::T, b::T, box_length::T) where {T}
+    d = b - a
+    return d - box_length * round(d / box_length)
+end
+
+@inline function _cluster_column_index(x, y, box_x, box_y, nx::Integer, ny::Integer)
+    ix = clamp(floor(Int, x * nx / box_x) + 1, 1, nx)
+    iy = clamp(floor(Int, y * ny / box_y) + 1, 1, ny)
+    return ix + (iy - 1) * nx
+end
+
+function _cluster_box_lengths(boundary::CubicBoundary, dist_unit, ::Type{T}) where {T}
+    return (
+        T(ustrip(dist_unit, boundary.side_lengths[1])),
+        T(ustrip(dist_unit, boundary.side_lengths[2])),
+        T(ustrip(dist_unit, boundary.side_lengths[3])),
+    )
+end
+
+_cluster_box_lengths(boundary, dist_unit, ::Type{T}) where {T} =
+    throw(ArgumentError("ClusteredSIMDNeighborFinder prototype currently supports CubicBoundary only"))
+
+function _resize_cluster_storage!(data::ClusterPairSoA{T}, n_atoms, n_slots) where {T}
+    resize!(data.atom_to_slot, n_atoms)
+    resize!(data.slot_to_atom, n_slots)
+    resize!(data.x, n_slots)
+    resize!(data.y, n_slots)
+    resize!(data.z, n_slots)
+    resize!(data.sigma, n_slots)
+    resize!(data.epsilon, n_slots)
+    resize!(data.fx, n_slots)
+    resize!(data.fy, n_slots)
+    resize!(data.fz, n_slots)
+    return data
+end
+
+function _build_cluster_order!(
+    data::ClusterPairSoA{T},
+    atoms,
+    coords,
+    boundary,
+    ::Val{CW},
+) where {T, CW}
+    n_atoms = length(coords)
+    dist_unit = unit(first(first(coords)))
+    box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
+
+    density = T(n_atoms) / (box_x * box_y * box_z)
+    grid_spacing = cbrt(T(CW) / density)
+    nx = max(1, floor(Int, box_x / grid_spacing))
+    ny = max(1, floor(Int, box_y / grid_spacing))
+
+    x_by_atom = Vector{T}(undef, n_atoms)
+    y_by_atom = Vector{T}(undef, n_atoms)
+    z_by_atom = Vector{T}(undef, n_atoms)
+    columns = [Int32[] for _ in 1:(nx * ny)]
+
+    @inbounds for atom_i in 1:n_atoms
+        x = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][1])), box_x)
+        y = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][2])), box_y)
+        z = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][3])), box_z)
+
+        x_by_atom[atom_i] = x
+        y_by_atom[atom_i] = y
+        z_by_atom[atom_i] = z
+
+        col = _cluster_column_index(x, y, box_x, box_y, nx, ny)
+        push!(columns[col], Int32(atom_i))
+    end
+
+    n_slots = 0
+    @inbounds for col in columns
+        isempty(col) && continue
+        n_slots += cld(length(col), CW) * CW
+    end
+    n_clusters = n_slots ÷ CW
+
+    data.n_atoms = n_atoms
+    data.n_slots = n_slots
+    data.n_clusters = n_clusters
+    data.nx = nx
+    data.ny = ny
+
+    resize!(data.cluster_col, n_clusters)
+    resize!(data.col_first_cluster, nx * ny)
+    resize!(data.col_last_cluster, nx * ny)
+    fill!(data.col_first_cluster, Int32(0))
+    fill!(data.col_last_cluster, Int32(0))
+
+    _resize_cluster_storage!(data, n_atoms, n_slots)
+    fill!(data.slot_to_atom, Int32(0))
+
+    slot = 1
+    @inbounds for col_idx in eachindex(columns)
+        col = columns[col_idx]
+        isempty(col) && continue
+
+        sort!(col; by = atom_i -> z_by_atom[Int(atom_i)])
+
+        col_slots = cld(length(col), CW) * CW
+        first_cluster = _cluster_index(slot, Val(CW))
+        last_slot = slot + col_slots - 1
+        last_cluster = _cluster_index(last_slot, Val(CW))
+
+        data.col_first_cluster[col_idx] = Int32(first_cluster)
+        data.col_last_cluster[col_idx] = Int32(last_cluster)
+
+        for cluster_i in first_cluster:last_cluster
+            data.cluster_col[cluster_i] = Int32(col_idx)
+        end
+
+        for atom_i32 in col
+            atom_i = Int(atom_i32)
+            data.atom_to_slot[atom_i] = Int32(slot)
+            data.slot_to_atom[slot] = atom_i32
+            data.x[slot] = x_by_atom[atom_i]
+            data.y[slot] = y_by_atom[atom_i]
+            data.z[slot] = z_by_atom[atom_i]
+            data.sigma[slot] = T(ustrip(atoms[atom_i].σ))
+            data.epsilon[slot] = T(ustrip(atoms[atom_i].ϵ))
+            slot += 1
+        end
+
+        while slot <= last_slot
+            data.slot_to_atom[slot] = Int32(0)
+            data.x[slot] = zero(T)
+            data.y[slot] = zero(T)
+            data.z[slot] = zero(T)
+            data.sigma[slot] = one(T)
+            data.epsilon[slot] = zero(T)
+            slot += 1
+        end
+    end
+
+    return data
+end
+
+function _build_cluster_bounds!(data::ClusterPairSoA{T}, ::Val{CW}) where {T, CW}
+    resize!(data.cluster_active_masks, data.n_clusters)
+    resize!(data.xmin, data.n_clusters); resize!(data.xmax, data.n_clusters)
+    resize!(data.ymin, data.n_clusters); resize!(data.ymax, data.n_clusters)
+    resize!(data.zmin, data.n_clusters); resize!(data.zmax, data.n_clusters)
+
+    @inbounds for ci in 1:data.n_clusters
+        xmin = T(Inf); xmax = T(-Inf)
+        ymin = T(Inf); ymax = T(-Inf)
+        zmin = T(Inf); zmax = T(-Inf)
+        active_mask = UInt64(0)
+        first_slot = (ci - 1) * CW + 1
+
+        for lane in 1:CW
+            slot = first_slot + lane - 1
+            if data.slot_to_atom[slot] != 0
+                active_mask |= _lane_bit(lane)
+                x = data.x[slot]; y = data.y[slot]; z = data.z[slot]
+                xmin = min(xmin, x); xmax = max(xmax, x)
+                ymin = min(ymin, y); ymax = max(ymax, y)
+                zmin = min(zmin, z); zmax = max(zmax, z)
+            end
+        end
+
+        data.cluster_active_masks[ci] = active_mask
+        data.xmin[ci] = xmin; data.xmax[ci] = xmax
+        data.ymin[ci] = ymin; data.ymax[ci] = ymax
+        data.zmin[ci] = zmin; data.zmax[ci] = zmax
+    end
+
+    return data
+end
+
+@inline function _interval_sep(amin::T, amax::T, bmin::T, bmax::T) where {T}
+    if amax < bmin
+        return bmin - amax
+    elseif bmax < amin
+        return amin - bmax
+    else
+        return zero(T)
+    end
+end
+
+function _bbox_distance2_shift(data::ClusterPairSoA{T}, ci, cj, box_x, box_y, box_z) where {T}
+    best_dist2 = T(Inf)
+    best_sx = zero(T); best_sy = zero(T); best_sz = zero(T)
+
+    for ix in -1:1, iy in -1:1, iz in -1:1
+        sx = T(ix) * box_x
+        sy = T(iy) * box_y
+        sz = T(iz) * box_z
+
+        dx = _interval_sep(data.xmin[ci], data.xmax[ci], data.xmin[cj] + sx, data.xmax[cj] + sx)
+        dy = _interval_sep(data.ymin[ci], data.ymax[ci], data.ymin[cj] + sy, data.ymax[cj] + sy)
+        dz = _interval_sep(data.zmin[ci], data.zmax[ci], data.zmin[cj] + sz, data.zmax[cj] + sz)
+
+        dist2 = dx * dx + dy * dy + dz * dz
+        if dist2 < best_dist2
+            best_dist2 = dist2
+            best_sx = sx; best_sy = sy; best_sz = sz
+        end
+    end
+
+    return best_dist2, best_sx, best_sy, best_sz
+end
+
+function _bbox_distance2_known_xy_shift(
+    data::ClusterPairSoA{T},
+    ci,
+    cj,
+    sx::T,
+    sy::T,
+    box_z::T,
+) where {T}
+    dx = _interval_sep(
+        data.xmin[ci],
+        data.xmax[ci],
+        data.xmin[cj] + sx,
+        data.xmax[cj] + sx,
+    )
+
+    dy = _interval_sep(
+        data.ymin[ci],
+        data.ymax[ci],
+        data.ymin[cj] + sy,
+        data.ymax[cj] + sy,
+    )
+
+    best_dist2 = T(Inf)
+    best_sz = zero(T)
+
+    for iz in -1:1
+        sz = T(iz) * box_z
+
+        dz = _interval_sep(
+            data.zmin[ci],
+            data.zmax[ci],
+            data.zmin[cj] + sz,
+            data.zmax[cj] + sz,
+        )
+
+        dist2 = dx * dx + dy * dy + dz * dz
+
+        if dist2 < best_dist2
+            best_dist2 = dist2
+            best_sz = sz
+        end
+    end
+
+    return best_dist2, sx, sy, best_sz
+end
 
 
+@inline function _cluster_eligible(eligible, i::Integer, j::Integer)
+    eligible === nothing && return true
+    return eligible[i, j] || eligible[j, i]
+end
+
+@inline function _cluster_special(special, i::Integer, j::Integer)
+    special === nothing && return false
+    return special[i, j] || special[j, i]
+end
+
+@inline function _cluster_lj_pair_ok(lj::SIMDLennardJones, atoms, eligible, i, j, is_special)
+    _cluster_eligible(eligible, i, j) || return false
+    return !shortcut_pair(lj.shortcut, atoms[i], atoms[j], is_special)
+end
+
+function _cluster_full_pair_masks(
+    data::ClusterPairSoA,
+    atoms,
+    lj::SIMDLennardJones,
+    eligible,
+    special,
+    ci::Integer,
+    cj::Integer,
+    ::Val{CW},
+) where {CW}
+    pair_mask = UInt64(0)
+    special_mask = UInt64(0)
+
+    first_i = (ci - 1) * CW + 1
+    first_j = (cj - 1) * CW + 1
+
+    @inbounds for lane_i in 1:CW
+        slot_i = first_i + lane_i - 1
+        atom_i = Int(data.slot_to_atom[slot_i])
+        atom_i == 0 && continue
+
+        for lane_j in 1:CW
+            ci == cj && lane_j <= lane_i && continue
+
+            slot_j = first_j + lane_j - 1
+            atom_j = Int(data.slot_to_atom[slot_j])
+            atom_j == 0 && continue
+
+            is_special = _cluster_special(special, atom_i, atom_j)
+            _cluster_lj_pair_ok(lj, atoms, eligible, atom_i, atom_j, is_special) || continue
+
+            bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
+            pair_mask |= bit
+            is_special && (special_mask |= bit)
+        end
+    end
+
+    return pair_mask, special_mask
+end
+
+function _cluster_pruned_pair_masks(
+    data::ClusterPairSoA{T},
+    atoms,
+    lj::SIMDLennardJones,
+    eligible,
+    special,
+    ci::Integer,
+    cj::Integer,
+    cutoff2::T,
+    sx::T,
+    sy::T,
+    sz::T,
+    ::Val{CW},
+) where {T, CW}
+    pair_mask = UInt64(0)
+    special_mask = UInt64(0)
+
+    first_i = (ci - 1) * CW + 1
+    first_j = (cj - 1) * CW + 1
+
+    @inbounds for lane_i in 1:CW
+        slot_i = first_i + lane_i - 1
+        atom_i = Int(data.slot_to_atom[slot_i])
+        atom_i == 0 && continue
+
+        xi = data.x[slot_i]
+        yi = data.y[slot_i]
+        zi = data.z[slot_i]
+
+        for lane_j in 1:CW
+            ci == cj && lane_j <= lane_i && continue
+
+            slot_j = first_j + lane_j - 1
+            atom_j = Int(data.slot_to_atom[slot_j])
+            atom_j == 0 && continue
+
+            is_special = _cluster_special(special, atom_i, atom_j)
+            _cluster_lj_pair_ok(lj, atoms, eligible, atom_i, atom_j, is_special) || continue
+
+            dx = xi - (data.x[slot_j] + sx)
+            dy = yi - (data.y[slot_j] + sy)
+            dz = zi - (data.z[slot_j] + sz)
+            r2 = dx * dx + dy * dy + dz * dz
+
+            if r2 <= cutoff2
+                bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
+                pair_mask |= bit
+                is_special && (special_mask |= bit)
+            end
+        end
+    end
+
+    return pair_mask, special_mask
+end
+
+function _build_cluster_pairs!(
+    data::ClusterPairSoA{T},
+    atoms,
+    boundary,
+    pairlist_cutoff,
+    lj::SIMDLennardJones,
+    eligible,
+    special,
+    prune_inner_fraction,
+    ::Val{CW},
+) where {T, CW}
+    dist_unit = unit(pairlist_cutoff)
+    box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
+    cutoff = T(ustrip(dist_unit, pairlist_cutoff))
+    cutoff2 = cutoff * cutoff
+
+    # rB controls the paper's "only prune near the list boundary" shortcut.
+    # Larger values reduce rebuild work but create more false-positive lane pairs.
+    # Smaller values prune more aggressively but spend more time rebuilding.
+    rB = T(prune_inner_fraction) * cutoff
+    rB2 = rB * rB
+
+    empty!(data.pair_i)
+    empty!(data.pair_j)
+    empty!(data.shift_x)
+    empty!(data.shift_y)
+    empty!(data.shift_z)
+    empty!(data.bbox_dist2)
+    empty!(data.pair_masks)
+    empty!(data.special_masks)
+
+    grid_dx = box_x / T(data.nx)
+    grid_dy = box_y / T(data.ny)
+
+    n_xy_column_visits = 0
+    n_cluster_candidates = 0
+    n_z_rejects = 0
+    n_aabb_tests = 0
+    n_aabb_rejects = 0
+    n_full_mask_builds = 0
+    n_pruned_mask_builds = 0
+    n_empty_masks = 0
+    n_kept_pairs = 0
+
+    @inbounds for ci in 1:data.n_clusters
+        mask_i = data.cluster_active_masks[ci]
+        mask_i == 0 && continue
+
+        ix_min = floor(Int, (data.xmin[ci] - cutoff) / grid_dx)
+        ix_max = floor(Int, (data.xmax[ci] + cutoff) / grid_dx)
+        iy_min = floor(Int, (data.ymin[ci] - cutoff) / grid_dy)
+        iy_max = floor(Int, (data.ymax[ci] + cutoff) / grid_dy)
+
+        zlo = data.zmin[ci] - cutoff
+        zhi = data.zmax[ci] + cutoff
+
+        # Conservative: only use z-ordered early skips when the expanded z range
+        # does not cross the periodic boundary. Boundary cases fall back to AABB.
+        use_direct_z_window = zlo >= zero(T) && zhi <= box_z
+
+        for raw_iy in iy_min:iy_max
+            jy = mod(raw_iy, data.ny) + 1
+            sy_xy = T(fld(raw_iy, data.ny)) * box_y
+
+            for raw_ix in ix_min:ix_max
+                jx = mod(raw_ix, data.nx) + 1
+                sx_xy = T(fld(raw_ix, data.nx)) * box_x
+
+                col_j = jx + (jy - 1) * data.nx
+
+                first_cj = Int(data.col_first_cluster[col_j])
+                last_cj = Int(data.col_last_cluster[col_j])
+                first_cj == 0 && continue
+
+                n_xy_column_visits += 1
+
+                for cj in first_cj:last_cj
+                    cj < ci && continue
+
+                    n_cluster_candidates += 1
+
+                    if use_direct_z_window
+                        if data.zmin[cj] > zhi
+                            n_z_rejects += last_cj - cj + 1
+                            break
+                        end
+
+                        if data.zmax[cj] < zlo
+                            n_z_rejects += 1
+                            continue
+                        end
+                    end
+
+                    mask_j = data.cluster_active_masks[cj]
+                    mask_j == 0 && continue
+
+                    n_aabb_tests += 1
+
+                    bbox_dist2, sx, sy, sz = _bbox_distance2_known_xy_shift(
+                        data,
+                        ci,
+                        cj,
+                        sx_xy,
+                        sy_xy,
+                        box_z,
+                    )
+
+                    if bbox_dist2 > cutoff2
+                        n_aabb_rejects += 1
+                        continue
+                    end
+
+                    pair_mask, special_mask = if bbox_dist2 <= rB2
+                        n_full_mask_builds += 1
+
+                        _cluster_full_pair_masks(
+                            data,
+                            atoms,
+                            lj,
+                            eligible,
+                            special,
+                            ci,
+                            cj,
+                            Val(CW),
+                        )
+                    else
+                        n_pruned_mask_builds += 1
+
+                        _cluster_pruned_pair_masks(
+                            data,
+                            atoms,
+                            lj,
+                            eligible,
+                            special,
+                            ci,
+                            cj,
+                            cutoff2,
+                            sx,
+                            sy,
+                            sz,
+                            Val(CW),
+                        )
+                    end
+
+                    if pair_mask != 0
+                        n_kept_pairs += 1
+
+                        push!(data.pair_i, Int32(ci))
+                        push!(data.pair_j, Int32(cj))
+                        push!(data.shift_x, sx)
+                        push!(data.shift_y, sy)
+                        push!(data.shift_z, sz)
+                        push!(data.bbox_dist2, bbox_dist2)
+                        push!(data.pair_masks, pair_mask)
+                        push!(data.special_masks, special_mask)
+                    else
+                        n_empty_masks += 1
+                    end
+                end
+            end
+        end
+    end
+
+    println(
+        "cluster pair diagnostics: ",
+        "xy_column_visits=", n_xy_column_visits,
+        " cluster_candidates=", n_cluster_candidates,
+        " z_rejects=", n_z_rejects,
+        " aabb_tests=", n_aabb_tests,
+        " aabb_rejects=", n_aabb_rejects,
+        " full_mask_builds=", n_full_mask_builds,
+        " pruned_mask_builds=", n_pruned_mask_builds,
+        " empty_masks=", n_empty_masks,
+        " kept_pairs=", n_kept_pairs,
+    )
+
+    return data
+end
 
 
+function _refresh_cluster_coordinates!(
+    data::ClusterPairSoA{T},
+    coords,
+    boundary,
+) where {T}
+    dist_unit = unit(first(first(coords)))
+    box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
+
+    @inbounds for slot in 1:data.n_slots
+        atom_i = Int(data.slot_to_atom[slot])
+
+        if atom_i == 0
+            data.x[slot] = zero(T)
+            data.y[slot] = zero(T)
+            data.z[slot] = zero(T)
+        else
+            data.x[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][1])), box_x)
+            data.y[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][2])), box_y)
+            data.z[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][3])), box_z)
+        end
+    end
+
+    return data
+end
 
 
+function build_cluster_pair_list!(
+    data::ClusterPairSoA{T},
+    atoms,
+    coords,
+    boundary,
+    pairlist_cutoff,
+    lj::SIMDLennardJones,
+    eligible,
+    special,
+    prune_inner_fraction,
+    ::Val{CW},
+) where {T, CW}
+    t0 = time_ns()
+    _build_cluster_order!(data, atoms, coords, boundary, Val(CW))
+    t1 = time_ns()
+    _build_cluster_bounds!(data, Val(CW))
+    t2 = time_ns()
+    _build_cluster_pairs!(data, atoms, boundary, pairlist_cutoff, lj, eligible, special, prune_inner_fraction, Val(CW))
+    t3 = time_ns()
 
+    # println(
+    # "cluster rebuild timings: ",
+    # "order_ms=", (t1 - t0) / 1e6,
+    # " bounds_ms=", (t2 - t1) / 1e6,
+    # " pairs_ms=", (t3 - t2) / 1e6,
+    # )
+    return data
+end
 
+_cluster_base_n_steps(nf) = hasproperty(nf, :n_steps) ? nf.n_steps : 1
+_cluster_base_eligible(nf) = hasproperty(nf, :eligible) ? nf.eligible : nothing
+_cluster_base_special(nf) = hasproperty(nf, :special) ? nf.special : nothing
 
+function find_neighbors(
+    sys::System,
+    nf::ClusteredSIMDNeighborFinder,
+    old_neighbors=nothing,
+    step_n::Integer=0,
+    force_recompute::Bool=false;
+    kwargs...,
+)
+    lj = only(canonical_inters(nf.inter))
+
+    old_standard = if isnothing(old_neighbors)
+        nothing
+    else
+        old_neighbors.standard_list
+    end
+
+    new_standard = if nf.build_standard_list
+        Molly.find_neighbors(
+            sys,
+            nf.base_finder,
+            old_standard,
+            step_n,
+            force_recompute;
+            kwargs...,
+        )
+    else
+        isnothing(old_standard) ? ClusterOnlyStandardList() : old_standard
+    end
+
+    needs_rebuild = isnothing(old_neighbors) ||
+                force_recompute ||
+                iszero(step_n % _cluster_base_n_steps(nf.base_finder))
+
+    if !needs_rebuild
+        _refresh_cluster_coordinates!(
+            old_neighbors.cluster_data,
+            sys.coords,
+            sys.boundary,
+        )
+        return old_neighbors
+    end
+
+    dist_unit = unit(first(first(sys.coords)))
+    T_float = typeof(ustrip(dist_unit, sys.coords[1][1]))
+    cluster_data = isnothing(old_neighbors) ? empty_cluster_data(T_float) : old_neighbors.cluster_data
+
+    build_cluster_pair_list!(
+        cluster_data,
+        sys.atoms,
+        sys.coords,
+        sys.boundary,
+        nf.base_finder.dist_cutoff,
+        lj,
+        _cluster_base_eligible(nf.base_finder),
+        _cluster_base_special(nf.base_finder),
+        nf.prune_inner_fraction,
+        Val(cluster_width(nf)),
+    )
+
+    return ClusteredNeighborList(new_standard, cluster_data)
+end
+
+@inline function _cluster_lj_force_dr(
+    lj::SIMDLennardJones,
+    atoms,
+    atom_i::Integer,
+    atom_j::Integer,
+    special::Bool,
+    dx::T,
+    dy::T,
+    dz::T,
+) where {T}
+    atom_i_data = atoms[atom_i]
+    atom_j_data = atoms[atom_j]
+
+    σ = T(ustrip(σ_mixing(lj.σ_mixing, atom_i_data, atom_j_data, special)))
+    ϵ = T(ustrip(ϵ_mixing(lj.ϵ_mixing, atom_i_data, atom_j_data, special)))
+    weight = special ? T(lj.weight_special) : one(T)
+
+    r2 = dx * dx + dy * dy + dz * dz
+    inv_r2 = inv(r2)
+    sr2 = (σ * σ) * inv_r2
+    sr6 = sr2 * sr2 * sr2
+    f_div_r = weight * ϵ * inv_r2 * sr6 * (T(48) * sr6 - T(24))
+
+    return SVector(f_div_r * dx, f_div_r * dy, f_div_r * dz)
+end
+
+@inline _cluster_pair_sigma(
+    ::LorentzMixing,
+    atoms,
+    atom_i,
+    atom_j,
+    special,
+    sigma_i::T,
+    sigma_j::T,
+) where {T} = (sigma_i + sigma_j) / T(2)
+
+@inline function _cluster_pair_sigma(
+    mixing,
+    atoms,
+    atom_i,
+    atom_j,
+    special,
+    sigma_i::T,
+    sigma_j::T,
+) where {T}
+    return T(ustrip(σ_mixing(mixing, atoms[atom_i], atoms[atom_j], special)))
+end
+
+@inline _cluster_pair_epsilon(
+    ::GeometricMixing,
+    atoms,
+    atom_i,
+    atom_j,
+    special,
+    epsilon_i::T,
+    epsilon_j::T,
+) where {T} = sqrt(epsilon_i * epsilon_j)
+
+@inline function _cluster_pair_epsilon(
+    mixing,
+    atoms,
+    atom_i,
+    atom_j,
+    special,
+    epsilon_i::T,
+    epsilon_j::T,
+) where {T}
+    return T(ustrip(ϵ_mixing(mixing, atoms[atom_i], atoms[atom_j], special)))
+end
+
+@inline function _cluster_lj_force_components_packed(
+    lj::SIMDLennardJones,
+    atoms,
+    atom_i::Integer,
+    atom_j::Integer,
+    special::Bool,
+    sigma_i::T,
+    epsilon_i::T,
+    sigma_j::T,
+    epsilon_j::T,
+    dx::T,
+    dy::T,
+    dz::T,
+) where {T}
+    sigma = _cluster_pair_sigma(
+        lj.σ_mixing,
+        atoms,
+        atom_i,
+        atom_j,
+        special,
+        sigma_i,
+        sigma_j,
+    )
+
+    epsilon = _cluster_pair_epsilon(
+        lj.ϵ_mixing,
+        atoms,
+        atom_i,
+        atom_j,
+        special,
+        epsilon_i,
+        epsilon_j,
+    )
+
+    weight = special ? T(lj.weight_special) : one(T)
+
+    r2 = dx * dx + dy * dy + dz * dz
+    inv_r2 = inv(r2)
+    sr2 = (sigma * sigma) * inv_r2
+    sr6 = sr2 * sr2 * sr2
+    f_div_r = weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
+
+    return f_div_r * dx, f_div_r * dy, f_div_r * dz
+end
+
+function _clustered_lj_forces_simd8_chunk!(
+    fx,
+    fy,
+    fz,
+    data::ClusterPairSoA{T},
+    boundary,
+    lj::SIMDLennardJones,
+    first_pair::Integer,
+    step_pair::Integer,
+) where {T}
+    VFloat = Vec{SIMD_WIDTH, T}
+
+    box_x = T(ustrip(boundary.side_lengths[1]))
+    box_y = T(ustrip(boundary.side_lengths[2]))
+    box_z = T(ustrip(boundary.side_lengths[3]))
+    lj_cutoff2 = T(extract_cutoff_sq(lj))
+    special_weight = T(lj.weight_special)
+
+    @inbounds for pair_idx in first_pair:step_pair:length(data.pair_i)
+        ci = Int(data.pair_i[pair_idx])
+        cj = Int(data.pair_j[pair_idx])
+        pair_mask = data.pair_masks[pair_idx]
+        special_mask = data.special_masks[pair_idx]
+
+        first_i = (ci - 1) * SIMD_WIDTH + 1
+        first_j = (cj - 1) * SIMD_WIDTH + 1
+
+        xi = vload(VFloat, data.x, first_i)
+        yi = vload(VFloat, data.y, first_i)
+        zi = vload(VFloat, data.z, first_i)
+        sigma_i = vload(VFloat, data.sigma, first_i)
+        epsilon_i = vload(VFloat, data.epsilon, first_i)
+
+        xj = vload(VFloat, data.x, first_j)
+        yj = vload(VFloat, data.y, first_j)
+        zj = vload(VFloat, data.z, first_j)
+        sigma_j = vload(VFloat, data.sigma, first_j)
+        epsilon_j = vload(VFloat, data.epsilon, first_j)
+
+        fix = zero(VFloat); fiy = zero(VFloat); fiz = zero(VFloat)
+        fjx = zero(VFloat); fjy = zero(VFloat); fjz = zero(VFloat)
+
+        img_sx = data.shift_x[pair_idx]
+        img_sy = data.shift_y[pair_idx]
+        img_sz = data.shift_z[pair_idx]
+
+        Base.Cartesian.@nexprs 8 shift -> begin
+            s = shift - 1
+            inv_s = (SIMD_WIDTH - s) % SIMD_WIDTH
+
+            active = _cluster_pairmask_vec(pair_mask, Val(s), Val(SIMD_WIDTH))
+            special = _cluster_pairmask_vec(special_mask, Val(s), Val(SIMD_WIDTH))
+
+            xj_s = _cluster_rotate_register(xj, Val(s))
+            yj_s = _cluster_rotate_register(yj, Val(s))
+            zj_s = _cluster_rotate_register(zj, Val(s))
+            sigma_j_s = _cluster_rotate_register(sigma_j, Val(s))
+            epsilon_j_s = _cluster_rotate_register(epsilon_j, Val(s))
+
+            # dx = xi - xj_s
+            # dy = yi - yj_s
+            # dz = zi - zj_s
+
+            # dx = muladd(-box_x, round(dx / box_x), dx)
+            # dy = muladd(-box_y, round(dy / box_y), dy)
+            # dz = muladd(-box_z, round(dz / box_z), dz)
+
+            dx = xi - (xj_s + img_sx)
+            dy = yi - (yj_s + img_sy)
+            dz = zi - (zj_s + img_sz)
+
+            r2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
+            valid = active & (r2 <= lj_cutoff2)
+            safe_r2 = vifelse(valid, r2, one(VFloat))
+
+            inv_r2 = one(VFloat) / safe_r2
+            sigma = (sigma_i + sigma_j_s) / T(2)
+            epsilon = SIMD.sqrt(epsilon_i * epsilon_j_s)
+            weight = vifelse(special, special_weight, one(VFloat))
+
+            sr2 = (sigma * sigma) * inv_r2
+            sr6 = sr2 * sr2 * sr2
+            f_div_r = weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
+            f_div_r = vifelse(valid, f_div_r, zero(VFloat))
+
+            fx_ij = f_div_r * dx
+            fy_ij = f_div_r * dy
+            fz_ij = f_div_r * dz
+
+            fix += fx_ij
+            fiy += fy_ij
+            fiz += fz_ij
+
+            fjx += _cluster_rotate_register(-fx_ij, Val(inv_s))
+            fjy += _cluster_rotate_register(-fy_ij, Val(inv_s))
+            fjz += _cluster_rotate_register(-fz_ij, Val(inv_s))
+        end
+
+        if ci == cj
+            vstore(vload(VFloat, fx, first_i) + fix + fjx, fx, first_i)
+            vstore(vload(VFloat, fy, first_i) + fiy + fjy, fy, first_i)
+            vstore(vload(VFloat, fz, first_i) + fiz + fjz, fz, first_i)
+        else
+            vstore(vload(VFloat, fx, first_i) + fix, fx, first_i)
+            vstore(vload(VFloat, fy, first_i) + fiy, fy, first_i)
+            vstore(vload(VFloat, fz, first_i) + fiz, fz, first_i)
+
+            vstore(vload(VFloat, fx, first_j) + fjx, fx, first_j)
+            vstore(vload(VFloat, fy, first_j) + fjy, fy, first_j)
+            vstore(vload(VFloat, fz, first_j) + fjz, fz, first_j)
+        end
+    end
+
+    return nothing
+end
+
+function _clustered_lj_forces_packed_chunk!(
+    fx,
+    fy,
+    fz,
+    atoms,
+    data::ClusterPairSoA{T},
+    boundary,
+    lj::SIMDLennardJones,
+    first_pair::Integer,
+    step_pair::Integer,
+) where {T}
+    CW = data.n_clusters == 0 ? 0 : data.n_slots ÷ data.n_clusters
+
+    if CW == SIMD_WIDTH && lj.σ_mixing isa LorentzMixing && lj.ϵ_mixing isa GeometricMixing
+        _clustered_lj_forces_simd8_chunk!(
+            fx,
+            fy,
+            fz,
+            data,
+            boundary,
+            lj,
+            first_pair,
+            step_pair,
+        )
+        return nothing
+    end
+
+    box_x = T(ustrip(boundary.side_lengths[1]))
+    box_y = T(ustrip(boundary.side_lengths[2]))
+    box_z = T(ustrip(boundary.side_lengths[3]))
+    lj_cutoff2 = T(extract_cutoff_sq(lj))
+
+    @inbounds for pair_idx in first_pair:step_pair:length(data.pair_i)
+        ci = Int(data.pair_i[pair_idx])
+        cj = Int(data.pair_j[pair_idx])
+        mask = data.pair_masks[pair_idx]
+        special_mask = data.special_masks[pair_idx]
+
+        first_i = (ci - 1) * CW + 1
+        first_j = (cj - 1) * CW + 1
+
+        for lane_i in 1:CW
+            slot_i = first_i + lane_i - 1
+            atom_i = Int(data.slot_to_atom[slot_i])
+            atom_i == 0 && continue
+
+            xi = data.x[slot_i]; yi = data.y[slot_i]; zi = data.z[slot_i]
+            sigma_i = data.sigma[slot_i]
+            epsilon_i = data.epsilon[slot_i]
+
+            for lane_j in 1:CW
+                _has_lane_pair(mask, lane_i, lane_j, Val(CW)) || continue
+
+                slot_j = first_j + lane_j - 1
+                atom_j = Int(data.slot_to_atom[slot_j])
+                atom_j == 0 && continue
+
+                # dx = xi - data.x[slot_j]
+                # dy = yi - data.y[slot_j]
+                # dz = zi - data.z[slot_j]
+
+                # dx = muladd(-box_x, round(dx / box_x), dx)
+                # dy = muladd(-box_y, round(dy / box_y), dy)
+                # dz = muladd(-box_z, round(dz / box_z), dz)
+
+                sx = data.shift_x[pair_idx]
+                sy = data.shift_y[pair_idx]
+                sz = data.shift_z[pair_idx]
+
+                dx = xi - (data.x[slot_j] + sx)
+                dy = yi - (data.y[slot_j] + sy)
+                dz = zi - (data.z[slot_j] + sz)
+
+                r2 = dx * dx + dy * dy + dz * dz
+                r2 <= lj_cutoff2 || continue
+
+                special = _has_lane_pair(special_mask, lane_i, lane_j, Val(CW))
+                fij_x, fij_y, fij_z = _cluster_lj_force_components_packed(
+                    lj,
+                    atoms,
+                    atom_i,
+                    atom_j,
+                    special,
+                    sigma_i,
+                    epsilon_i,
+                    data.sigma[slot_j],
+                    data.epsilon[slot_j],
+                    dx,
+                    dy,
+                    dz,
+                )
+
+                fx[slot_i] += fij_x
+                fy[slot_i] += fij_y
+                fz[slot_i] += fij_z
+
+                fx[slot_j] -= fij_x
+                fy[slot_j] -= fij_y
+                fz[slot_j] -= fij_z
+            end
+        end
+    end
+
+    return nothing
+end
+
+function _ensure_cluster_force_chunks!(data::ClusterPairSoA{T}, n_threads::Integer) where {T}
+    resize!(data.fx_chunks, n_threads)
+    resize!(data.fy_chunks, n_threads)
+    resize!(data.fz_chunks, n_threads)
+
+    @inbounds for thread_i in 1:n_threads
+        if !isassigned(data.fx_chunks, thread_i)
+            data.fx_chunks[thread_i] = Vector{T}(undef, data.n_slots)
+            data.fy_chunks[thread_i] = Vector{T}(undef, data.n_slots)
+            data.fz_chunks[thread_i] = Vector{T}(undef, data.n_slots)
+        else
+            resize!(data.fx_chunks[thread_i], data.n_slots)
+            resize!(data.fy_chunks[thread_i], data.n_slots)
+            resize!(data.fz_chunks[thread_i], data.n_slots)
+        end
+    end
+
+    return data
+end
+
+function _scatter_cluster_forces!(fs, data::ClusterPairSoA{T}) where {T}
+    @inbounds for slot in 1:data.n_slots
+        atom_i = Int(data.slot_to_atom[slot])
+        atom_i == 0 && continue
+        fs[atom_i] += SVector(data.fx[slot], data.fy[slot], data.fz[slot])
+    end
+
+    return fs
+end
+
+function _reduce_scatter_cluster_forces!(fs, data::ClusterPairSoA{T}, n_threads::Integer) where {T}
+    @inbounds for slot in 1:data.n_slots
+        atom_i = Int(data.slot_to_atom[slot])
+        atom_i == 0 && continue
+
+        fx = zero(T)
+        fy = zero(T)
+        fz = zero(T)
+
+        for thread_i in 1:n_threads
+            fx += data.fx_chunks[thread_i][slot]
+            fy += data.fy_chunks[thread_i][slot]
+            fz += data.fz_chunks[thread_i][slot]
+        end
+
+        fs[atom_i] += SVector(fx, fy, fz)
+    end
+
+    return fs
+end
+
+function pairwise_forces_loop!(
+    fs_nounits,
+    fs_chunks,
+    vir_nounits,
+    vir_chunks,
+    atoms,
+    coords,
+    velocities,
+    boundary,
+    neighbors::ClusteredNeighborList,
+    force_units,
+    n_atoms,
+    pairwise_inters_nonl,
+    pairwise_inters_nl::Tuple{<:SIMDLennardJones},
+    ::Val{n_threads},
+    ::Val{needs_vir},
+    step_n=0,
+) where {n_threads, needs_vir}
+    isempty(pairwise_inters_nonl) ||
+        throw(ArgumentError("ClusteredSIMDNeighborFinder prototype only supports neighbor-list LJ interactions"))
+    needs_vir &&
+        throw(ArgumentError("ClusteredSIMDNeighborFinder prototype does not implement virial yet"))
+
+    lj = pairwise_inters_nl[1]
+    data = neighbors.cluster_data
+
+    if n_threads == 1
+        fill!(fs_nounits, zero(eltype(fs_nounits)))
+        fill!(data.fx, zero(eltype(data.fx)))
+        fill!(data.fy, zero(eltype(data.fy)))
+        fill!(data.fz, zero(eltype(data.fz)))
+
+        _clustered_lj_forces_packed_chunk!(
+            data.fx,
+            data.fy,
+            data.fz,
+            atoms,
+            data,
+            boundary,
+            lj,
+            1,
+            1,
+        )
+
+        _scatter_cluster_forces!(fs_nounits, data)
+    else
+        fill!(fs_nounits, zero(eltype(fs_nounits)))
+        _ensure_cluster_force_chunks!(data, n_threads)
+
+        @inbounds for thread_i in 1:n_threads
+            fill!(data.fx_chunks[thread_i], zero(eltype(data.fx)))
+            fill!(data.fy_chunks[thread_i], zero(eltype(data.fy)))
+            fill!(data.fz_chunks[thread_i], zero(eltype(data.fz)))
+        end
+
+        Threads.@threads for thread_i in 1:n_threads
+            _clustered_lj_forces_packed_chunk!(
+                data.fx_chunks[thread_i],
+                data.fy_chunks[thread_i],
+                data.fz_chunks[thread_i],
+                atoms,
+                data,
+                boundary,
+                lj,
+                thread_i,
+                n_threads,
+            )
+        end
+
+        _reduce_scatter_cluster_forces!(fs_nounits, data, n_threads)
+    end
+
+    return fs_nounits
+end
+
+cluster_pair_count(data::ClusterPairSoA) = length(data.pair_i)
+cluster_candidate_pair_count(data::ClusterPairSoA) = sum(count_ones, data.pair_masks; init=0)
+cluster_dummy_fraction(data::ClusterPairSoA) =
+    data.n_slots == 0 ? 0.0 : (data.n_slots - data.n_atoms) / data.n_slots
+
+function cluster_diagnostics(data::ClusterPairSoA)
+    return (
+        n_atoms = data.n_atoms,
+        n_clusters = data.n_clusters,
+        cluster_width = data.n_clusters == 0 ? 0 : data.n_slots ÷ data.n_clusters,
+        nx = data.nx,
+        ny = data.ny,
+        dummy_fraction = cluster_dummy_fraction(data),
+        cluster_pairs = cluster_pair_count(data),
+        candidate_particle_pairs = cluster_candidate_pair_count(data),
+    )
+end
+
+function pairwise_forces_loop!(
+    fs_nounits,
+    fs_chunks,
+    vir_nounits,
+    vir_chunks,
+    atoms,
+    coords,
+    velocities,
+    boundary,
+    neighbors::ClusteredNeighborList,
+    force_units,
+    n_atoms,
+    pairwise_inters_nonl,
+    pairwise_inters_nl::Tuple{<:SIMDLennardJones},
+    ::Val{1},
+    ::Val{needs_vir},
+    step_n=0,
+) where {needs_vir}
+    isempty(pairwise_inters_nonl) ||
+        throw(ArgumentError("ClusteredSIMDNeighborFinder prototype only supports neighbor-list LJ interactions"))
+    needs_vir &&
+        throw(ArgumentError("ClusteredSIMDNeighborFinder prototype does not implement virial yet"))
+
+    lj = pairwise_inters_nl[1]
+    data = neighbors.cluster_data
+
+    fill!(fs_nounits, zero(eltype(fs_nounits)))
+    fill!(data.fx, zero(eltype(data.fx)))
+    fill!(data.fy, zero(eltype(data.fy)))
+    fill!(data.fz, zero(eltype(data.fz)))
+
+    _clustered_lj_forces_packed_chunk!(
+        data.fx,
+        data.fy,
+        data.fz,
+        atoms,
+        data,
+        boundary,
+        lj,
+        1,
+        1,
+    )
+
+    _scatter_cluster_forces!(fs_nounits, data)
+
+    return fs_nounits
+end
