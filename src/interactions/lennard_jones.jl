@@ -2530,20 +2530,20 @@ function _cluster_pruned_pair_masks(
             slot_j = first_j + lane_j - 1
             atom_j = Int(data.slot_to_atom[slot_j])
             atom_j == 0 && continue
-
-            is_special = _cluster_special(special, atom_i, atom_j)
-            _cluster_lj_pair_ok(lj, atoms, eligible, atom_i, atom_j, is_special) || continue
-
+            
             dx = xi - (data.x[slot_j] + sx)
             dy = yi - (data.y[slot_j] + sy)
             dz = zi - (data.z[slot_j] + sz)
             r2 = dx * dx + dy * dy + dz * dz
-
-            if r2 <= cutoff2
-                bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
-                pair_mask |= bit
-                is_special && (special_mask |= bit)
-            end
+            
+            r2 <= cutoff2 || continue
+            
+            is_special = _cluster_special(special, atom_i, atom_j)
+            _cluster_lj_pair_ok(lj, atoms, eligible, atom_i, atom_j, is_special) || continue
+            
+            bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
+            pair_mask |= bit
+            is_special && (special_mask |= bit)
         end
     end
 
@@ -2584,15 +2584,15 @@ function _build_cluster_pairs!(
     grid_dx = box_x / T(data.nx)
     grid_dy = box_y / T(data.ny)
 
-    n_xy_column_visits = 0
-    n_cluster_candidates = 0
-    n_z_rejects = 0
-    n_aabb_tests = 0
-    n_aabb_rejects = 0
-    n_full_mask_builds = 0
-    n_pruned_mask_builds = 0
-    n_empty_masks = 0
-    n_kept_pairs = 0
+    # n_xy_column_visits = 0
+    # n_cluster_candidates = 0
+    # n_z_rejects = 0
+    # n_aabb_tests = 0
+    # n_aabb_rejects = 0
+    # n_full_mask_builds = 0
+    # n_pruned_mask_builds = 0
+    # n_empty_masks = 0
+    # n_kept_pairs = 0
 
     @inbounds for ci in 1:data.n_clusters
         mask_i = data.cluster_active_masks[ci]
@@ -2624,21 +2624,21 @@ function _build_cluster_pairs!(
                 last_cj = Int(data.col_last_cluster[col_j])
                 first_cj == 0 && continue
 
-                n_xy_column_visits += 1
+                #n_xy_column_visits += 1
 
                 for cj in first_cj:last_cj
                     cj < ci && continue
 
-                    n_cluster_candidates += 1
+                    #n_cluster_candidates += 1
 
                     if use_direct_z_window
                         if data.zmin[cj] > zhi
-                            n_z_rejects += last_cj - cj + 1
+                            #n_z_rejects += last_cj - cj + 1
                             break
                         end
 
                         if data.zmax[cj] < zlo
-                            n_z_rejects += 1
+                            #n_z_rejects += 1
                             continue
                         end
                     end
@@ -2646,7 +2646,7 @@ function _build_cluster_pairs!(
                     mask_j = data.cluster_active_masks[cj]
                     mask_j == 0 && continue
 
-                    n_aabb_tests += 1
+                    #n_aabb_tests += 1
 
                     bbox_dist2, sx, sy, sz = _bbox_distance2_known_xy_shift(
                         data,
@@ -2658,12 +2658,12 @@ function _build_cluster_pairs!(
                     )
 
                     if bbox_dist2 > cutoff2
-                        n_aabb_rejects += 1
+                        #n_aabb_rejects += 1
                         continue
                     end
 
                     pair_mask, special_mask = if bbox_dist2 <= rB2
-                        n_full_mask_builds += 1
+                        #n_full_mask_builds += 1
 
                         _cluster_full_pair_masks(
                             data,
@@ -2676,7 +2676,7 @@ function _build_cluster_pairs!(
                             Val(CW),
                         )
                     else
-                        n_pruned_mask_builds += 1
+                        #n_pruned_mask_builds += 1
 
                         _cluster_pruned_pair_masks(
                             data,
@@ -2695,7 +2695,7 @@ function _build_cluster_pairs!(
                     end
 
                     if pair_mask != 0
-                        n_kept_pairs += 1
+                        #n_kept_pairs += 1
 
                         push!(data.pair_i, Int32(ci))
                         push!(data.pair_j, Int32(cj))
@@ -2706,25 +2706,25 @@ function _build_cluster_pairs!(
                         push!(data.pair_masks, pair_mask)
                         push!(data.special_masks, special_mask)
                     else
-                        n_empty_masks += 1
+                        #n_empty_masks += 1
                     end
                 end
             end
         end
     end
 
-    println(
-        "cluster pair diagnostics: ",
-        "xy_column_visits=", n_xy_column_visits,
-        " cluster_candidates=", n_cluster_candidates,
-        " z_rejects=", n_z_rejects,
-        " aabb_tests=", n_aabb_tests,
-        " aabb_rejects=", n_aabb_rejects,
-        " full_mask_builds=", n_full_mask_builds,
-        " pruned_mask_builds=", n_pruned_mask_builds,
-        " empty_masks=", n_empty_masks,
-        " kept_pairs=", n_kept_pairs,
-    )
+    # println(
+    #     "cluster pair diagnostics: ",
+    #     "xy_column_visits=", n_xy_column_visits,
+    #     " cluster_candidates=", n_cluster_candidates,
+    #     " z_rejects=", n_z_rejects,
+    #     " aabb_tests=", n_aabb_tests,
+    #     " aabb_rejects=", n_aabb_rejects,
+    #     " full_mask_builds=", n_full_mask_builds,
+    #     " pruned_mask_builds=", n_pruned_mask_builds,
+    #     " empty_masks=", n_empty_masks,
+    #     " kept_pairs=", n_kept_pairs,
+    # )
 
     return data
 end
@@ -2768,13 +2768,13 @@ function build_cluster_pair_list!(
     prune_inner_fraction,
     ::Val{CW},
 ) where {T, CW}
-    t0 = time_ns()
+    #t0 = time_ns()
     _build_cluster_order!(data, atoms, coords, boundary, Val(CW))
-    t1 = time_ns()
+    #t1 = time_ns()
     _build_cluster_bounds!(data, Val(CW))
-    t2 = time_ns()
+    #t2 = time_ns()
     _build_cluster_pairs!(data, atoms, boundary, pairlist_cutoff, lj, eligible, special, prune_inner_fraction, Val(CW))
-    t3 = time_ns()
+    #t3 = time_ns()
 
     # println(
     # "cluster rebuild timings: ",
