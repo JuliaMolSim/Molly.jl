@@ -2184,6 +2184,7 @@ mutable struct ClusterPairSoA{T}
 
 
     ci_offsets::Vector{Int32}
+    ci_half_lj_coul_masked_end::Vector{Int32}
     ci_half_lj_coul_end::Vector{Int32}
     ci_lj_coul_end::Vector{Int32}
     ci_coul_only_end::Vector{Int32}
@@ -2262,7 +2263,7 @@ function empty_cluster_data(::Type{T}=Float64) where {T}
         Vector{T}[], Vector{T}[], Vector{T}[], Vector{T}[],
         Vector{UInt64}[], Vector{UInt64}[], Vector{UInt64}[],
         Vector{UInt64}[], Vector{UInt64}[], Vector{UInt64}[],
-        Int32[], Int32[], Int32[], Int32[], Int32[],
+        Int32[], Int32[], Int32[], Int32[], Int32[], Int32[],
         T[], T[], T[], T[],
         UInt64[], UInt64[], UInt64[], UInt64[], UInt64[], UInt64[],
         UInt8[],
@@ -2279,11 +2280,18 @@ const CLUSTER_HALF_LJ_WIDTH = 4
 const CLUSTER_HALF_LJ_LANE_MASK = UInt64(0x0f)
 const CLUSTER_USE_HALF_LJ4_KERNEL = false
 const CLUSTER_USE_4XM_LJ_COUL_KERNEL = true
+const CLUSTER_USE_PLAIN_HALF_LJ_COUL_KERNEL = true
+const CLUSTER_USE_DEDICATED_HALF_LJ_COUL_KERNEL = false
 const CLUSTER_LOWER4_PAIR_ROWS_MASK = UInt64(0x00000000ffffffff)
 const CLUSTER_UPPER4_PAIR_ROWS_MASK = UInt64(0xffffffff00000000)
 
 @inline function _cluster_lj_is_lower4_only(lj_mask::UInt64)
     return lj_mask != 0 && (lj_mask & CLUSTER_UPPER4_PAIR_ROWS_MASK) == 0
+end
+
+@inline function _cluster_pair_needs_special_masks(flags::UInt8)
+    special_bits = CLUSTER_WORK_EXCLUSION | CLUSTER_WORK_LJ14 | CLUSTER_WORK_COUL14
+    return (flags & special_bits) != 0
 end
 
 
@@ -3222,13 +3230,15 @@ function _build_cluster_csr_from_flat!(data::ClusterPairSoA{T}) where {T}
     n_pairs = length(data.pair_i)
 
     resize!(data.ci_offsets, n_clusters + 1)
+    resize!(data.ci_half_lj_coul_masked_end, n_clusters)
     resize!(data.ci_half_lj_coul_end, n_clusters)
     resize!(data.ci_lj_coul_end, n_clusters)
     resize!(data.ci_coul_only_end, n_clusters)
 
     fill!(data.ci_offsets, Int32(0))
 
-    half_lj_coul_counts = zeros(Int32, n_clusters)
+    half_lj_coul_masked_counts = zeros(Int32, n_clusters)
+    half_lj_coul_plain_counts = zeros(Int32, n_clusters)
     full_lj_coul_counts = zeros(Int32, n_clusters)
     coul_counts = zeros(Int32, n_clusters)
     lj_counts = zeros(Int32, n_clusters)
@@ -3249,7 +3259,11 @@ function _build_cluster_csr_from_flat!(data::ClusterPairSoA{T}) where {T}
 
         if has_lj && has_coul
             if _cluster_lj_is_lower4_only(data.lj_masks[p])
-                half_lj_coul_counts[ci] += Int32(1)
+                if _cluster_pair_needs_special_masks(flags)
+                    half_lj_coul_masked_counts[ci] += Int32(1)
+                else
+                    half_lj_coul_plain_counts[ci] += Int32(1)
+                end
             else
                 full_lj_coul_counts[ci] += Int32(1)
             end
@@ -3271,8 +3285,10 @@ function _build_cluster_csr_from_flat!(data::ClusterPairSoA{T}) where {T}
 
     @inbounds for ci in 1:n_clusters
         row_start = data.ci_offsets[ci]
-        half_end = row_start + half_lj_coul_counts[ci]
+        half_masked_end = row_start + half_lj_coul_masked_counts[ci]
+        half_end = half_masked_end + half_lj_coul_plain_counts[ci]
         both_end = half_end + full_lj_coul_counts[ci]
+        data.ci_half_lj_coul_masked_end[ci] = half_masked_end
         data.ci_half_lj_coul_end[ci] = half_end
         data.ci_lj_coul_end[ci] = both_end
         data.ci_coul_only_end[ci] = both_end + coul_counts[ci]
@@ -3293,7 +3309,8 @@ function _build_cluster_csr_from_flat!(data::ClusterPairSoA{T}) where {T}
     resize!(data.csr_coul_masks, n_csr_pairs)
     resize!(data.csr_work_flags, n_csr_pairs)
 
-    write_half_lj_coul = copy(data.ci_offsets[1:end - 1])
+    write_half_lj_coul_masked = copy(data.ci_offsets[1:end - 1])
+    write_half_lj_coul_plain = copy(data.ci_half_lj_coul_masked_end)
     write_full_lj_coul = copy(data.ci_half_lj_coul_end)
     write_coul = copy(data.ci_lj_coul_end)
     write_lj = copy(data.ci_coul_only_end)
@@ -3314,8 +3331,13 @@ function _build_cluster_csr_from_flat!(data::ClusterPairSoA{T}) where {T}
 
         if has_lj && has_coul
             if _cluster_lj_is_lower4_only(data.lj_masks[p])
-                dst = Int(write_half_lj_coul[ci])
-                write_half_lj_coul[ci] += Int32(1)
+                if _cluster_pair_needs_special_masks(flags)
+                    dst = Int(write_half_lj_coul_masked[ci])
+                    write_half_lj_coul_masked[ci] += Int32(1)
+                else
+                    dst = Int(write_half_lj_coul_plain[ci])
+                    write_half_lj_coul_plain[ci] += Int32(1)
+                end
             else
                 dst = Int(write_full_lj_coul[ci])
                 write_full_lj_coul[ci] += Int32(1)
@@ -4856,6 +4878,421 @@ end
 end
 
 
+@inline function _clustered_lj_coul_plain_irow_1x8!(
+    data::ClusterPairSoA{T},
+    first_i::Int,
+    xj,
+    yj,
+    zj,
+    sigma_j,
+    sqrt_epsilon_j,
+    charge_j,
+    lj_mask::UInt64,
+    coul_mask::UInt64,
+    img_sx::T,
+    img_sy::T,
+    img_sz::T,
+    lj_cutoff2::T,
+    coul_cutoff2::T,
+    coulomb_const::T,
+    ::Val{LaneI},
+    ::Val{DoLJ},
+    ::Val{DoCoul},
+) where {T, LaneI, DoLJ, DoCoul}
+    VFloat = Vec{SIMD_WIDTH, T}
+
+    slot_i = first_i + LaneI - 1
+
+    dx = data.x[slot_i] - (xj + img_sx)
+    dy = data.y[slot_i] - (yj + img_sy)
+    dz = data.z[slot_i] - (zj + img_sz)
+    r2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
+
+    f_div_r = zero(VFloat)
+
+    if DoCoul
+        coul_active = _cluster_pairmask_row_vec(
+            coul_mask,
+            Val(LaneI),
+            Val(SIMD_WIDTH),
+            Val(SIMD_WIDTH),
+        )
+        coul_valid = coul_active & (r2 <= coul_cutoff2)
+        coul_safe_r2 = vifelse(coul_valid, r2, one(VFloat))
+
+        qi = data.charge[slot_i]
+        f_coul = _cluster_coul_force_div_r(
+            coul_safe_r2,
+            qi,
+            charge_j,
+            coulomb_const,
+            one(VFloat),
+        )
+
+        f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
+    end
+
+    has_lj_row = DoLJ && _cluster_row_has_pairs(
+        lj_mask,
+        Val(LaneI),
+        Val(SIMD_WIDTH),
+        Val(SIMD_WIDTH),
+    )
+
+    if has_lj_row
+        lj_active = _cluster_pairmask_row_vec(
+            lj_mask,
+            Val(LaneI),
+            Val(SIMD_WIDTH),
+            Val(SIMD_WIDTH),
+        )
+        lj_valid = lj_active & (r2 <= lj_cutoff2)
+        lj_safe_r2 = vifelse(lj_valid, r2, one(VFloat))
+
+        sigma_i = data.sigma[slot_i]
+        sqrt_epsilon_i = data.sqrt_epsilon[slot_i]
+        f_lj = _cluster_lj_force_div_r_lorentz_geometric(
+            lj_safe_r2,
+            sigma_i,
+            sigma_j,
+            sqrt_epsilon_i,
+            sqrt_epsilon_j,
+            one(VFloat),
+            T,
+        )
+
+        f_div_r += vifelse(lj_valid, f_lj, zero(VFloat))
+    end
+
+    fx_ij = f_div_r * dx
+    fy_ij = f_div_r * dy
+    fz_ij = f_div_r * dz
+
+    return _cluster_sum8(fx_ij), _cluster_sum8(fy_ij), _cluster_sum8(fz_ij), -fx_ij, -fy_ij, -fz_ij
+end
+
+@inline function _clustered_half_lj_coul_plain_pair_8x8_accum_j!(
+    fx,
+    fy,
+    fz,
+    data::ClusterPairSoA{T},
+    ci::Int,
+    first_i::Int,
+    pair_idx::Int,
+    lj_cutoff2::T,
+    coul_cutoff2::T,
+    coulomb_const::T,
+) where {T}
+    VFloat = Vec{SIMD_WIDTH, T}
+
+    cj = Int(data.cj_list[pair_idx])
+    first_j = (cj - 1) * SIMD_WIDTH + 1
+
+    xj = vload(VFloat, data.x, first_j)
+    yj = vload(VFloat, data.y, first_j)
+    zj = vload(VFloat, data.z, first_j)
+    sigma_j = vload(VFloat, data.sigma, first_j)
+    sqrt_epsilon_j = vload(VFloat, data.sqrt_epsilon, first_j)
+    charge_j = vload(VFloat, data.charge, first_j)
+
+    lj_mask = data.csr_lj_masks[pair_idx]
+    coul_mask = data.csr_coul_masks[pair_idx]
+
+    img_sx = data.csr_shift_x[pair_idx]
+    img_sy = data.csr_shift_y[pair_idx]
+    img_sz = data.csr_shift_z[pair_idx]
+
+    f1x, f1y, f1z, fj1x, fj1y, fj1z = _clustered_lj_coul_plain_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, coul_mask, img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, coulomb_const, Val(1), Val(true), Val(true),
+    )
+    f2x, f2y, f2z, fj2x, fj2y, fj2z = _clustered_lj_coul_plain_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, coul_mask, img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, coulomb_const, Val(2), Val(true), Val(true),
+    )
+    f3x, f3y, f3z, fj3x, fj3y, fj3z = _clustered_lj_coul_plain_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, coul_mask, img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, coulomb_const, Val(3), Val(true), Val(true),
+    )
+    f4x, f4y, f4z, fj4x, fj4y, fj4z = _clustered_lj_coul_plain_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, coul_mask, img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, coulomb_const, Val(4), Val(true), Val(true),
+    )
+
+    f5x, f5y, f5z, fj5x, fj5y, fj5z = _clustered_lj_coul_plain_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, coul_mask, img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, coulomb_const, Val(5), Val(false), Val(true),
+    )
+    f6x, f6y, f6z, fj6x, fj6y, fj6z = _clustered_lj_coul_plain_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, coul_mask, img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, coulomb_const, Val(6), Val(false), Val(true),
+    )
+    f7x, f7y, f7z, fj7x, fj7y, fj7z = _clustered_lj_coul_plain_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, coul_mask, img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, coulomb_const, Val(7), Val(false), Val(true),
+    )
+    f8x, f8y, f8z, fj8x, fj8y, fj8z = _clustered_lj_coul_plain_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, coul_mask, img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, coulomb_const, Val(8), Val(false), Val(true),
+    )
+
+    fix = Vec{SIMD_WIDTH, T}((f1x, f2x, f3x, f4x, f5x, f6x, f7x, f8x))
+    fiy = Vec{SIMD_WIDTH, T}((f1y, f2y, f3y, f4y, f5y, f6y, f7y, f8y))
+    fiz = Vec{SIMD_WIDTH, T}((f1z, f2z, f3z, f4z, f5z, f6z, f7z, f8z))
+
+    fjx = fj1x + fj2x + fj3x + fj4x + fj5x + fj6x + fj7x + fj8x
+    fjy = fj1y + fj2y + fj3y + fj4y + fj5y + fj6y + fj7y + fj8y
+    fjz = fj1z + fj2z + fj3z + fj4z + fj5z + fj6z + fj7z + fj8z
+
+    if ci == cj
+        return fix + fjx, fiy + fjy, fiz + fjz
+    else
+        vstore(vload(VFloat, fx, first_j) + fjx, fx, first_j)
+        vstore(vload(VFloat, fy, first_j) + fjy, fy, first_j)
+        vstore(vload(VFloat, fz, first_j) + fjz, fz, first_j)
+        return fix, fiy, fiz
+    end
+end
+
+@inline function _clustered_half_lj_coul_lower_irow_1x8!(
+    data::ClusterPairSoA{T},
+    first_i::Int,
+    xj,
+    yj,
+    zj,
+    sigma_j,
+    sqrt_epsilon_j,
+    charge_j,
+    lj_mask::UInt64,
+    lj_special_mask::UInt64,
+    coul_mask::UInt64,
+    coul_special_mask::UInt64,
+    img_sx::T,
+    img_sy::T,
+    img_sz::T,
+    lj_cutoff2::T,
+    coul_cutoff2::T,
+    lj_special_weight::T,
+    coul_special_weight::T,
+    coulomb_const::T,
+    ::Val{LaneI},
+) where {T, LaneI}
+    VFloat = Vec{SIMD_WIDTH, T}
+
+    slot_i = first_i + LaneI - 1
+
+    dx = data.x[slot_i] - (xj + img_sx)
+    dy = data.y[slot_i] - (yj + img_sy)
+    dz = data.z[slot_i] - (zj + img_sz)
+    r2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
+
+    coul_active = _cluster_pairmask_row_vec(coul_mask, Val(LaneI), Val(SIMD_WIDTH), Val(SIMD_WIDTH))
+    coul_special = _cluster_pairmask_row_vec(coul_special_mask, Val(LaneI), Val(SIMD_WIDTH), Val(SIMD_WIDTH))
+    coul_valid = coul_active & (r2 <= coul_cutoff2)
+    coul_safe_r2 = vifelse(coul_valid, r2, one(VFloat))
+    coul_weight = vifelse(coul_special, coul_special_weight, one(VFloat))
+
+    qi = data.charge[slot_i]
+    f_coul = _cluster_coul_force_div_r(
+        coul_safe_r2,
+        qi,
+        charge_j,
+        coulomb_const,
+        coul_weight,
+    )
+
+    lj_active = _cluster_pairmask_row_vec(lj_mask, Val(LaneI), Val(SIMD_WIDTH), Val(SIMD_WIDTH))
+    lj_special = _cluster_pairmask_row_vec(lj_special_mask, Val(LaneI), Val(SIMD_WIDTH), Val(SIMD_WIDTH))
+    lj_valid = lj_active & (r2 <= lj_cutoff2)
+    lj_safe_r2 = vifelse(lj_valid, r2, one(VFloat))
+    lj_weight = vifelse(lj_special, lj_special_weight, one(VFloat))
+
+    sigma_i = data.sigma[slot_i]
+    sqrt_epsilon_i = data.sqrt_epsilon[slot_i]
+    f_lj = _cluster_lj_force_div_r_lorentz_geometric(
+        lj_safe_r2,
+        sigma_i,
+        sigma_j,
+        sqrt_epsilon_i,
+        sqrt_epsilon_j,
+        lj_weight,
+        T,
+    )
+
+    f_div_r = vifelse(coul_valid, f_coul, zero(VFloat)) +
+        vifelse(lj_valid, f_lj, zero(VFloat))
+
+    fx_ij = f_div_r * dx
+    fy_ij = f_div_r * dy
+    fz_ij = f_div_r * dz
+
+    return _cluster_sum8(fx_ij), _cluster_sum8(fy_ij), _cluster_sum8(fz_ij), -fx_ij, -fy_ij, -fz_ij
+end
+
+@inline function _clustered_half_lj_coul_upper_irow_1x8!(
+    data::ClusterPairSoA{T},
+    first_i::Int,
+    xj,
+    yj,
+    zj,
+    charge_j,
+    coul_mask::UInt64,
+    coul_special_mask::UInt64,
+    img_sx::T,
+    img_sy::T,
+    img_sz::T,
+    coul_cutoff2::T,
+    coul_special_weight::T,
+    coulomb_const::T,
+    ::Val{LaneI},
+) where {T, LaneI}
+    VFloat = Vec{SIMD_WIDTH, T}
+
+    slot_i = first_i + LaneI - 1
+
+    dx = data.x[slot_i] - (xj + img_sx)
+    dy = data.y[slot_i] - (yj + img_sy)
+    dz = data.z[slot_i] - (zj + img_sz)
+    r2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
+
+    active = _cluster_pairmask_row_vec(coul_mask, Val(LaneI), Val(SIMD_WIDTH), Val(SIMD_WIDTH))
+    special = _cluster_pairmask_row_vec(coul_special_mask, Val(LaneI), Val(SIMD_WIDTH), Val(SIMD_WIDTH))
+    valid = active & (r2 <= coul_cutoff2)
+
+    safe_r2 = vifelse(valid, r2, one(VFloat))
+    weight = vifelse(special, coul_special_weight, one(VFloat))
+
+    qi = data.charge[slot_i]
+    f_div_r = _cluster_coul_force_div_r(safe_r2, qi, charge_j, coulomb_const, weight)
+    f_div_r = vifelse(valid, f_div_r, zero(VFloat))
+
+    fx_ij = f_div_r * dx
+    fy_ij = f_div_r * dy
+    fz_ij = f_div_r * dz
+
+    return _cluster_sum8(fx_ij), _cluster_sum8(fy_ij), _cluster_sum8(fz_ij), -fx_ij, -fy_ij, -fz_ij
+end
+
+@inline function _clustered_half_lj_coul_pair_8x8_accum_j!(
+    fx,
+    fy,
+    fz,
+    data::ClusterPairSoA{T},
+    ci::Int,
+    first_i::Int,
+    pair_idx::Int,
+    lj_cutoff2::T,
+    coul_cutoff2::T,
+    lj_special_weight::T,
+    coul_special_weight::T,
+    coulomb_const::T,
+) where {T}
+    VFloat = Vec{SIMD_WIDTH, T}
+
+    cj = Int(data.cj_list[pair_idx])
+    first_j = (cj - 1) * SIMD_WIDTH + 1
+
+    xj = vload(VFloat, data.x, first_j)
+    yj = vload(VFloat, data.y, first_j)
+    zj = vload(VFloat, data.z, first_j)
+    sigma_j = vload(VFloat, data.sigma, first_j)
+    sqrt_epsilon_j = vload(VFloat, data.sqrt_epsilon, first_j)
+    charge_j = vload(VFloat, data.charge, first_j)
+
+    lj_mask = data.csr_lj_masks[pair_idx]
+    lj_special_mask = data.csr_lj_14_masks[pair_idx]
+    coul_mask = data.csr_coul_masks[pair_idx]
+    coul_special_mask = data.csr_coul_14_masks[pair_idx]
+
+    img_sx = data.csr_shift_x[pair_idx]
+    img_sy = data.csr_shift_y[pair_idx]
+    img_sz = data.csr_shift_z[pair_idx]
+
+    f1x, f1y, f1z, fj1x, fj1y, fj1z = _clustered_half_lj_coul_lower_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, lj_special_mask, coul_mask, coul_special_mask,
+        img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+        Val(1),
+    )
+    f2x, f2y, f2z, fj2x, fj2y, fj2z = _clustered_half_lj_coul_lower_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, lj_special_mask, coul_mask, coul_special_mask,
+        img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+        Val(2),
+    )
+    f3x, f3y, f3z, fj3x, fj3y, fj3z = _clustered_half_lj_coul_lower_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, lj_special_mask, coul_mask, coul_special_mask,
+        img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+        Val(3),
+    )
+    f4x, f4y, f4z, fj4x, fj4y, fj4z = _clustered_half_lj_coul_lower_irow_1x8!(
+        data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
+        lj_mask, lj_special_mask, coul_mask, coul_special_mask,
+        img_sx, img_sy, img_sz,
+        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+        Val(4),
+    )
+
+    f5x, f5y, f5z, fj5x, fj5y, fj5z = _clustered_half_lj_coul_upper_irow_1x8!(
+        data, first_i, xj, yj, zj, charge_j,
+        coul_mask, coul_special_mask,
+        img_sx, img_sy, img_sz,
+        coul_cutoff2, coul_special_weight, coulomb_const,
+        Val(5),
+    )
+    f6x, f6y, f6z, fj6x, fj6y, fj6z = _clustered_half_lj_coul_upper_irow_1x8!(
+        data, first_i, xj, yj, zj, charge_j,
+        coul_mask, coul_special_mask,
+        img_sx, img_sy, img_sz,
+        coul_cutoff2, coul_special_weight, coulomb_const,
+        Val(6),
+    )
+    f7x, f7y, f7z, fj7x, fj7y, fj7z = _clustered_half_lj_coul_upper_irow_1x8!(
+        data, first_i, xj, yj, zj, charge_j,
+        coul_mask, coul_special_mask,
+        img_sx, img_sy, img_sz,
+        coul_cutoff2, coul_special_weight, coulomb_const,
+        Val(7),
+    )
+    f8x, f8y, f8z, fj8x, fj8y, fj8z = _clustered_half_lj_coul_upper_irow_1x8!(
+        data, first_i, xj, yj, zj, charge_j,
+        coul_mask, coul_special_mask,
+        img_sx, img_sy, img_sz,
+        coul_cutoff2, coul_special_weight, coulomb_const,
+        Val(8),
+    )
+
+    fix = Vec{SIMD_WIDTH, T}((f1x, f2x, f3x, f4x, f5x, f6x, f7x, f8x))
+    fiy = Vec{SIMD_WIDTH, T}((f1y, f2y, f3y, f4y, f5y, f6y, f7y, f8y))
+    fiz = Vec{SIMD_WIDTH, T}((f1z, f2z, f3z, f4z, f5z, f6z, f7z, f8z))
+
+    fjx = fj1x + fj2x + fj3x + fj4x + fj5x + fj6x + fj7x + fj8x
+    fjy = fj1y + fj2y + fj3y + fj4y + fj5y + fj6y + fj7y + fj8y
+    fjz = fj1z + fj2z + fj3z + fj4z + fj5z + fj6z + fj7z + fj8z
+
+    if ci == cj
+        return fix + fjx, fiy + fjy, fiz + fjz
+    else
+        vstore(vload(VFloat, fx, first_j) + fjx, fx, first_j)
+        vstore(vload(VFloat, fy, first_j) + fjy, fy, first_j)
+        vstore(vload(VFloat, fz, first_j) + fjz, fz, first_j)
+        return fix, fiy, fiz
+    end
+end
+
+
 @inline function _clustered_lj_coul_pair_8x8_accum_j!(
     fx,
     fy,
@@ -5186,22 +5623,45 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
         sqrt_epsilon_i = vload(VFloat, data.sqrt_epsilon, first_i)
         charge_i = vload(VFloat, data.charge, first_i)
 
+        half_masked_end = Int(data.ci_half_lj_coul_masked_end[ci])
         half_end = Int(data.ci_half_lj_coul_end[ci])
         both_end = Int(data.ci_lj_coul_end[ci])
         coul_end = Int(data.ci_coul_only_end[ci])
 
-        i_lj_half = _cluster_lj_fits_half(data.cluster_lj_masks[ci])
-
         if CLUSTER_USE_4XM_LJ_COUL_KERNEL
-            if first < half_end
+            if first < half_masked_end
                 t_region = time_ns()
-                for pair_idx in first:(half_end - 1)
+                for pair_idx in first:(half_masked_end - 1)
                     dfx, dfy, dfz = _clustered_lj_coul_pair_8x8_accum_j!(
                         fx, fy, fz, data, ci, first_i, pair_idx,
                         lj_cutoff2, coul_cutoff2,
                         lj_special_weight, coul_special_weight, coulomb_const,
                         Val(true),
                     )
+
+                    fix_row += dfx
+                    fiy_row += dfy
+                    fiz_row += dfz
+                end
+                half_lj_coul_ns += time_ns() - t_region
+            end
+
+            if half_masked_end < half_end
+                t_region = time_ns()
+                for pair_idx in half_masked_end:(half_end - 1)
+                    if CLUSTER_USE_PLAIN_HALF_LJ_COUL_KERNEL
+                        dfx, dfy, dfz = _clustered_half_lj_coul_plain_pair_8x8_accum_j!(
+                            fx, fy, fz, data, ci, first_i, pair_idx,
+                            lj_cutoff2, coul_cutoff2, coulomb_const,
+                        )
+                    else
+                        dfx, dfy, dfz = _clustered_lj_coul_pair_8x8_accum_j!(
+                            fx, fy, fz, data, ci, first_i, pair_idx,
+                            lj_cutoff2, coul_cutoff2,
+                            lj_special_weight, coul_special_weight, coulomb_const,
+                            Val(true),
+                        )
+                    end
 
                     fix_row += dfx
                     fiy_row += dfy
@@ -5667,11 +6127,7 @@ function pairwise_forces_loop!(
             1,
         )
         t1 = time_ns()
-        # data.last_force_kernel_ms = (t1 - t0) / 1e6
-        # data.last_force_half_lj_coul_ms = section_times[1] / 1e6
-        # data.last_force_full_lj_coul_ms = section_times[2] / 1e6
-        # data.last_force_coul_only_ms = section_times[3] / 1e6
-        # data.last_force_lj_only_ms = section_times[4] / 1e6
+        data.last_force_kernel_ms = (t1 - t0) / 1e6
 
         t0 = time_ns()
         _scatter_cluster_forces!(fs_nounits, data)
@@ -5707,11 +6163,7 @@ function pairwise_forces_loop!(
             )
         end
         t1 = time_ns()
-        # data.last_force_kernel_ms = (t1 - t0) / 1e6
-        # data.last_force_half_lj_coul_ms = section_times[1] / 1e6
-        # data.last_force_full_lj_coul_ms = section_times[2] / 1e6
-        # data.last_force_coul_only_ms = section_times[3] / 1e6
-        # data.last_force_lj_only_ms = section_times[4] / 1e6
+        data.last_force_kernel_ms = (t1 - t0) / 1e6
 
         t0 = time_ns()
         _reduce_scatter_cluster_forces!(fs_nounits, data, n_threads)
@@ -5785,6 +6237,10 @@ function pairwise_forces_loop!(
         
         t1 = time_ns()
         data.last_force_kernel_ms = (t1 - t0) / 1e6
+        data.last_force_half_lj_coul_ms = section_times[1] / 1e6
+        data.last_force_full_lj_coul_ms = section_times[2] / 1e6
+        data.last_force_coul_only_ms = section_times[3] / 1e6
+        data.last_force_lj_only_ms = section_times[4] / 1e6
 
         t0 = time_ns()
         _scatter_cluster_forces!(fs_nounits, data)
@@ -5805,9 +6261,14 @@ function pairwise_forces_loop!(
         t1 = time_ns()
         data.last_force_chunk_zero_ms = (t1 - t0) / 1e6
 
+        half_lj_coul_ns = zeros(UInt64, n_threads)
+        full_lj_coul_ns = zeros(UInt64, n_threads)
+        coul_only_ns = zeros(UInt64, n_threads)
+        lj_only_ns = zeros(UInt64, n_threads)
+
         t0 = time_ns()
         Threads.@threads for thread_i in 1:n_threads
-            _clustered_lj_coul_forces_packed_csr_chunk!(
+            section_times = _clustered_lj_coul_forces_packed_csr_chunk!(
                 data.fx_chunks[thread_i],
                 data.fy_chunks[thread_i],
                 data.fz_chunks[thread_i],
@@ -5819,10 +6280,18 @@ function pairwise_forces_loop!(
                 thread_i,
                 n_threads,
             )
+            half_lj_coul_ns[thread_i] = section_times[1]
+            full_lj_coul_ns[thread_i] = section_times[2]
+            coul_only_ns[thread_i] = section_times[3]
+            lj_only_ns[thread_i] = section_times[4]
             
         end
         t1 = time_ns()
         data.last_force_kernel_ms = (t1 - t0) / 1e6
+        data.last_force_half_lj_coul_ms = sum(half_lj_coul_ns) / 1e6
+        data.last_force_full_lj_coul_ms = sum(full_lj_coul_ns) / 1e6
+        data.last_force_coul_only_ms = sum(coul_only_ns) / 1e6
+        data.last_force_lj_only_ms = sum(lj_only_ns) / 1e6
 
         t0 = time_ns()
         _reduce_scatter_cluster_forces!(fs_nounits, data, n_threads)
@@ -5917,6 +6386,8 @@ end
 function cluster_lj_coul_kernel_shape_counts(data::ClusterPairSoA)
     both_pairs = 0
     half_lj_pairs = 0
+    half_lj_masked_pairs = 0
+    half_lj_plain_pairs = 0
     full_lj_pairs = 0
     no_lj_pairs = 0
     lj_only_pairs = 0
@@ -5924,6 +6395,8 @@ function cluster_lj_coul_kernel_shape_counts(data::ClusterPairSoA)
 
     both_lj_lane_pairs = 0
     half_lj_lane_pairs = 0
+    half_lj_masked_lane_pairs = 0
+    half_lj_plain_lane_pairs = 0
     full_lj_lane_pairs = 0
     no_lj_lane_pairs = 0
     lj_only_lane_pairs = 0
@@ -5932,17 +6405,31 @@ function cluster_lj_coul_kernel_shape_counts(data::ClusterPairSoA)
     @inbounds for ci in 1:data.n_clusters
         first = Int(data.ci_offsets[ci])
         last_plus_one = Int(data.ci_offsets[ci + 1])
+        half_masked_end = Int(data.ci_half_lj_coul_masked_end[ci])
         half_end = Int(data.ci_half_lj_coul_end[ci])
         both_end = Int(data.ci_lj_coul_end[ci])
         coul_end = Int(data.ci_coul_only_end[ci])
 
-        for pair_idx in first:(half_end - 1)
+        for pair_idx in first:(half_masked_end - 1)
             n_lj = count_ones(data.csr_lj_masks[pair_idx])
 
             both_pairs += 1
             half_lj_pairs += 1
+            half_lj_masked_pairs += 1
             both_lj_lane_pairs += n_lj
             half_lj_lane_pairs += n_lj
+            half_lj_masked_lane_pairs += n_lj
+        end
+
+        for pair_idx in half_masked_end:(half_end - 1)
+            n_lj = count_ones(data.csr_lj_masks[pair_idx])
+
+            both_pairs += 1
+            half_lj_pairs += 1
+            half_lj_plain_pairs += 1
+            both_lj_lane_pairs += n_lj
+            half_lj_lane_pairs += n_lj
+            half_lj_plain_lane_pairs += n_lj
         end
 
         for pair_idx in half_end:(both_end - 1)
@@ -5968,12 +6455,16 @@ function cluster_lj_coul_kernel_shape_counts(data::ClusterPairSoA)
     return (
         both_pairs = both_pairs,
         half_lj_pairs = half_lj_pairs,
+        half_lj_masked_pairs = half_lj_masked_pairs,
+        half_lj_plain_pairs = half_lj_plain_pairs,
         full_lj_pairs = full_lj_pairs,
         no_lj_pairs = no_lj_pairs,
         lj_only_pairs = lj_only_pairs,
         coul_only_pairs = coul_only_pairs,
         both_lj_lane_pairs = both_lj_lane_pairs,
         half_lj_lane_pairs = half_lj_lane_pairs,
+        half_lj_masked_lane_pairs = half_lj_masked_lane_pairs,
+        half_lj_plain_lane_pairs = half_lj_plain_lane_pairs,
         full_lj_lane_pairs = full_lj_lane_pairs,
         no_lj_lane_pairs = no_lj_lane_pairs,
         lj_only_lane_pairs = lj_only_lane_pairs,
@@ -6074,6 +6565,7 @@ function check_cluster_csr_consistency(data::ClusterPairSoA)
     csr_n = isempty(data.ci_offsets) ? 0 : Int(data.ci_offsets[end] - 1)
 
     length(data.ci_offsets) == data.n_clusters + 1 || return false
+    length(data.ci_half_lj_coul_masked_end) == data.n_clusters || return false
     length(data.ci_half_lj_coul_end) == data.n_clusters || return false
     length(data.ci_lj_coul_end) == data.n_clusters || return false
     length(data.ci_coul_only_end) == data.n_clusters || return false
@@ -6105,17 +6597,26 @@ function check_cluster_csr_consistency(data::ClusterPairSoA)
 
     @inbounds for ci in 1:data.n_clusters
         first = Int(data.ci_offsets[ci])
+        half_masked_end = Int(data.ci_half_lj_coul_masked_end[ci])
         half_end = Int(data.ci_half_lj_coul_end[ci])
         both_end = Int(data.ci_lj_coul_end[ci])
         coul_end = Int(data.ci_coul_only_end[ci])
         last_plus_one = Int(data.ci_offsets[ci + 1])
     
-        first <= half_end <= both_end <= coul_end <= last_plus_one || return false
+        first <= half_masked_end <= half_end <= both_end <= coul_end <= last_plus_one || return false
     
-        for pair_idx in first:(half_end - 1)
+        for pair_idx in first:(half_masked_end - 1)
             flags = data.csr_work_flags[pair_idx]
             ((flags & CLUSTER_WORK_LJ) != 0 && (flags & CLUSTER_WORK_COUL) != 0) || return false
             _cluster_lj_is_lower4_only(data.csr_lj_masks[pair_idx]) || return false
+            _cluster_pair_needs_special_masks(flags) || return false
+        end
+
+        for pair_idx in half_masked_end:(half_end - 1)
+            flags = data.csr_work_flags[pair_idx]
+            ((flags & CLUSTER_WORK_LJ) != 0 && (flags & CLUSTER_WORK_COUL) != 0) || return false
+            _cluster_lj_is_lower4_only(data.csr_lj_masks[pair_idx]) || return false
+            !_cluster_pair_needs_special_masks(flags) || return false
         end
 
         for pair_idx in half_end:(both_end - 1)
