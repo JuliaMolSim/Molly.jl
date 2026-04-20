@@ -3367,6 +3367,21 @@ end
     return f_div_r * dx, f_div_r * dy, f_div_r * dz
 end
 
+@inline function _cluster_lj_force_div_r_lorentz_geometric(safe_r2, sigma_i, sigma_j,
+    sqrt_epsilon_i, sqrt_epsilon_j, weight, ::Type{T},) where {T}
+    
+    inv_r2 = one(typeof(safe_r2)) / safe_r2
+
+    sigma = (sigma_i + sigma_j) / T(2)
+    epsilon = sqrt_epsilon_i * sqrt_epsilon_j
+
+    sr2 = (sigma * sigma) * inv_r2
+    sr6 = sr2 * sr2 * sr2
+
+    return weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
+end
+
+
 function _clustered_lj_forces_simd8_csr_chunk!(
     fx,
     fy,
@@ -3437,17 +3452,21 @@ function _clustered_lj_forces_simd8_csr_chunk!(
                 r2 = muladd(dx, dx, muladd(dy, dy, dz * dz))
                 valid = active & (r2 <= lj_cutoff2)
                 safe_r2 = vifelse(valid, r2, one(VFloat))
-        
-                inv_r2 = one(VFloat) / safe_r2
-                sigma = (sigma_i + sigma_j_s) / T(2)
-                epsilon = sqrt_epsilon_i * sqrt_epsilon_j_s
                 weight = vifelse(special, special_weight, one(VFloat))
         
-                sr2 = (sigma * sigma) * inv_r2
-                sr6 = sr2 * sr2 * sr2
-                f_div_r = weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
+                # LJ maths starts 
+                # inv_r2 = one(VFloat) / safe_r2
+                # sigma = (sigma_i + sigma_j_s) / T(2)
+                # epsilon = sqrt_epsilon_i * sqrt_epsilon_j_s
+                # sr2 = (sigma * sigma) * inv_r2
+                # sr6 = sr2 * sr2 * sr2
+                # f_div_r = weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
+                # LJ maths ends
+
+                f_div_r = _cluster_lj_force_div_r_lorentz_geometric(safe_r2, sigma_i, sigma_j_s, sqrt_epsilon_i, sqrt_epsilon_j_s, weight, T,)
+
                 f_div_r = vifelse(valid, f_div_r, zero(VFloat))
-        
+                
                 fx_ij = f_div_r * dx
                 fy_ij = f_div_r * dy
                 fz_ij = f_div_r * dz
@@ -3677,54 +3696,6 @@ function pairwise_forces_loop!(
     lj = pairwise_inters_nl[1]
     data = neighbors.cluster_data
 
-    # fill!(fs_nounits, zero(eltype(fs_nounits)))
-
-    # if n_threads == 1
-    #     fill!(data.fx, zero(eltype(data.fx)))
-    #     fill!(data.fy, zero(eltype(data.fy)))
-    #     fill!(data.fz, zero(eltype(data.fz)))
-
-    #     _clustered_lj_forces_packed_csr_chunk!(
-    #         data.fx,
-    #         data.fy,
-    #         data.fz,
-    #         atoms,
-    #         data,
-    #         boundary,
-    #         lj,
-    #         1,
-    #         1,
-    #     )
-
-    #     _scatter_cluster_forces!(fs_nounits, data)
-    # else
-    #     _ensure_cluster_force_chunks!(data, n_threads)
-
-    #     @inbounds for thread_i in 1:n_threads
-    #         fill!(data.fx_chunks[thread_i], zero(eltype(data.fx)))
-    #         fill!(data.fy_chunks[thread_i], zero(eltype(data.fy)))
-    #         fill!(data.fz_chunks[thread_i], zero(eltype(data.fz)))
-    #     end
-
-    #     Threads.@threads for thread_i in 1:n_threads
-    #         _clustered_lj_forces_packed_csr_chunk!(
-    #             data.fx_chunks[thread_i],
-    #             data.fy_chunks[thread_i],
-    #             data.fz_chunks[thread_i],
-    #             atoms,
-    #             data,
-    #             boundary,
-    #             lj,
-    #             thread_i,
-    #             n_threads,
-    #         )
-    #     end
-
-    #     _reduce_scatter_cluster_forces!(fs_nounits, data, n_threads)
-    # end
-
-    # return fs_nounits
-
     _reset_cluster_force_timings!(data)
     t_total0 = time_ns()
 
@@ -3948,29 +3919,6 @@ function pairwise_forces_loop!(
 
     lj = pairwise_inters_nl[1]
     data = neighbors.cluster_data
-
-    # fill!(fs_nounits, zero(eltype(fs_nounits)))
-    # fill!(data.fx, zero(eltype(data.fx)))
-    # fill!(data.fy, zero(eltype(data.fy)))
-    # fill!(data.fz, zero(eltype(data.fz)))
-
- 
-
-    # _clustered_lj_forces_packed_csr_chunk!(
-    #     data.fx,
-    #     data.fy,
-    #     data.fz,
-    #     atoms,
-    #     data,
-    #     boundary,
-    #     lj,
-    #     1,
-    #     1,
-    # )
-    
-    # _scatter_cluster_forces!(fs_nounits, data)
-
-    # return fs_nounits
 
     _reset_cluster_force_timings!(data)
     t_total0 = time_ns()
