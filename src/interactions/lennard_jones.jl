@@ -2299,8 +2299,6 @@ end
     return (flags & special_bits) != 0
 end
 
-
-
 @inline function _cluster_lj_fits_half(mask::UInt64)
     return (mask & ~CLUSTER_HALF_LJ_LANE_MASK) == 0
 end
