@@ -1780,7 +1780,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     # Static scheduling bypasses atomic locks entirely.
     # The CPU distributes n_atoms across the threads once, instantly.
     #Threads.@threads :static for i in 1:n_atoms_total
-    Threads.@threads :static for i in 1:n_atoms_total
+    Threads.@threads for i in 1:n_atoms_total
         simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH))
     end
 
@@ -2008,31 +2008,22 @@ end
 
 
 ########################################################################
-# Cluster-based SIMD nonbonded path
-########################################################################
-
-# Spatial sorter on step 0 and on rebuilds
-
-# 8x8 SIMD kernel - to replace simd_chunk_forces! Loop over cluster list, loading two vectors and using shufflevector()
-
-########################################################################
-# Clustered SIMD prototype: GROMACS/Pall-Hess style neighbor rebuild
+# Clustered SIMD nonbonded path
 #
-# Prototype scope:
-#   - CubicBoundary only
-#   - SIMDLennardJones only
-#   - scalar force loop first, no SIMD yet
-#   - exclusions/special pairs are read from the base neighbor finder masks
+# The clustered implementation has three phases:
+#   1. rebuild or refresh the clustered neighbor representation
+#   2. pack accepted cluster pairs into CSR rows grouped by work type
+#   3. run the LJ or LJ+Coulomb force kernels over those CSR rows
 #
-# Revisit:
-#   - SIMD inner loop over j lanes
-#   - Coulomb / reaction-field / PME direct-space path
-#   - dynamic pruning between full neighbor rebuilds
-#   - cluster-cell pair search instead of O(n_clusters^2) AABB scan
-#   - compact storage of image shifts and masks
+# This section is organised in that same order so the control flow is easier
+# to follow from `find_neighbors` into `pairwise_forces_loop!`.
 ########################################################################
 
 const CLUSTER_WIDTH = SIMD_WIDTH
+
+########################################################################
+# Clustered neighbor-finder API and storage
+########################################################################
 
 struct ClusteredSIMDNeighborFinder{N, I, CW, R, B}
     base_finder::N
@@ -2217,16 +2208,34 @@ Base.length(nl::ClusterOnlyStandardList) = nl.n
 Base.iterate(nl::ClusterOnlyStandardList, state=1) =
     state > nl.n ? nothing : (nl.list[state], state + 1)
 
-struct ClusteredNeighborList{L, P}
+struct ClusteredNeighborList{L, P, E, S, R}
     standard_list::L
     cluster_data::P
+    eligible::E
+    special::S
+    prune_inner_fraction::R
+    include_coulomb::Bool
+    retain_flat_pairs::Bool
 end
+
+ClusteredNeighborList(standard_list, cluster_data) =
+    ClusteredNeighborList(standard_list, cluster_data, nothing, nothing, 0.0, false, false)
 
 function Base.getproperty(nl::ClusteredNeighborList, sym::Symbol)
     if sym === :standard_list
         return getfield(nl, :standard_list)
     elseif sym === :cluster_data
         return getfield(nl, :cluster_data)
+    elseif sym === :eligible
+        return getfield(nl, :eligible)
+    elseif sym === :special
+        return getfield(nl, :special)
+    elseif sym === :prune_inner_fraction
+        return getfield(nl, :prune_inner_fraction)
+    elseif sym === :include_coulomb
+        return getfield(nl, :include_coulomb)
+    elseif sym === :retain_flat_pairs
+        return getfield(nl, :retain_flat_pairs)
     else
         return getproperty(getfield(nl, :standard_list), sym)
     end
@@ -2280,7 +2289,9 @@ const CLUSTER_WORK_COUL14 = UInt8(0x10)
 const CLUSTER_HALF_LJ_WIDTH = 4
 const CLUSTER_HALF_LJ_LANE_MASK = UInt64(0x0f)
 
-# Direct CSR rebuild is the current prodution rebuild path with flat pair storage retained only for dynamic pruning 
+# Direct CSR rebuild is the current production rebuild path.
+# Flat pair storage is retained only when later stages still need it,
+# which is currently the dynamic-pruning path.
 const CLUSTER_USE_DIRECT_CSR_REBUILD = true
 
 const CLUSTER_USE_HALF_SIGMA_LJ_COUL_KERNEL = false
@@ -2456,7 +2467,11 @@ end
 end
 
 @inline function _cluster_sum8(v)
-    return v[1] + v[2] + v[3] + v[4] + v[5] + v[6] + v[7] + v[8]
+    s12 = v[1] + v[2]
+    s34 = v[3] + v[4]
+    s56 = v[5] + v[6]
+    s78 = v[7] + v[8]
+    return (s12 + s34) + (s56 + s78)
 end
 
 @generated function _cluster_i4_to_vec(
@@ -2505,6 +2520,10 @@ end
 
 _cluster_box_lengths(boundary, dist_unit, ::Type{T}) where {T} =
     throw(ArgumentError("ClusteredSIMDNeighborFinder prototype currently supports CubicBoundary only"))
+
+########################################################################
+# Cluster ordering and cluster bounds
+########################################################################
 
 function _resize_cluster_storage!(data::ClusterPairSoA{T}, n_atoms, n_slots) where {T}
     resize!(data.atom_to_slot, n_atoms)
@@ -2865,6 +2884,68 @@ end
     )
 end
 
+########################################################################
+# Pair-mask construction
+########################################################################
+
+# function _cluster_full_pair_masks(
+#     data::ClusterPairSoA,
+#     atoms,
+#     lj::SIMDLennardJones,
+#     eligible,
+#     special,
+#     ci::Integer,
+#     cj::Integer,
+#     ::Val{CW},
+# ) where {CW}
+#     pair_mask = UInt64(0)
+#     exclusion_mask = UInt64(0)
+#     special_mask = UInt64(0)
+#     lj_shortcut_mask = UInt64(0)
+
+
+#     first_i = (ci - 1) * CW + 1
+#     first_j = (cj - 1) * CW + 1
+
+#     @inbounds for lane_i in 1:CW
+#         slot_i = first_i + lane_i - 1
+#         atom_i = Int(data.slot_to_atom[slot_i])
+#         atom_i == 0 && continue
+
+#         for lane_j in 1:CW
+#             ci == cj && lane_j <= lane_i && continue
+
+#             slot_j = first_j + lane_j - 1
+#             atom_j = Int(data.slot_to_atom[slot_j])
+#             atom_j == 0 && continue
+
+#             bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
+#             pair_mask |= bit
+
+#             is_eligible = _cluster_eligible(eligible, atom_i, atom_j)
+#             is_special = _cluster_special(special, atom_i, atom_j)
+
+#             is_eligible || (exclusion_mask |= bit)
+#             is_special && (special_mask |= bit)
+
+#             if is_eligible && shortcut_pair(lj.shortcut, atoms[atom_i], atoms[atom_j], is_special)
+#                 lj_shortcut_mask |= bit
+#             end
+
+#         end
+#     end
+#     masks = _cluster_pair_interaction_masks(pair_mask, exclusion_mask, special_mask)
+#     lj_mask = masks.lj_mask & ~lj_shortcut_mask
+
+#     return (
+#         pair_mask = masks.pair_mask,
+#         exclusion_mask = masks.exclusion_mask,
+#         lj_14_mask = masks.lj_14_mask,
+#         coul_14_mask = masks.coul_14_mask,
+#         lj_mask = lj_mask,
+#         coul_mask = masks.coul_mask,
+#     )
+# end
 
 function _cluster_full_pair_masks(
     data::ClusterPairSoA,
@@ -2880,7 +2961,6 @@ function _cluster_full_pair_masks(
     exclusion_mask = UInt64(0)
     special_mask = UInt64(0)
     lj_shortcut_mask = UInt64(0)
-
 
     first_i = (ci - 1) * CW + 1
     first_j = (cj - 1) * CW + 1
@@ -2902,16 +2982,15 @@ function _cluster_full_pair_masks(
 
             is_eligible = _cluster_eligible(eligible, atom_i, atom_j)
             is_special = _cluster_special(special, atom_i, atom_j)
-
             is_eligible || (exclusion_mask |= bit)
             is_special && (special_mask |= bit)
 
             if is_eligible && shortcut_pair(lj.shortcut, atoms[atom_i], atoms[atom_j], is_special)
                 lj_shortcut_mask |= bit
             end
-
         end
     end
+
     masks = _cluster_pair_interaction_masks(pair_mask, exclusion_mask, special_mask)
     lj_mask = masks.lj_mask & ~lj_shortcut_mask
 
@@ -2924,6 +3003,81 @@ function _cluster_full_pair_masks(
         coul_mask = masks.coul_mask,
     )
 end
+
+
+# function _cluster_pruned_pair_masks(
+#     data::ClusterPairSoA{T},
+#     atoms,
+#     lj::SIMDLennardJones,
+#     eligible,
+#     special,
+#     ci::Integer,
+#     cj::Integer,
+#     cutoff2::T,
+#     sx::T,
+#     sy::T,
+#     sz::T,
+#     ::Val{CW},
+# ) where {T, CW}
+#     pair_mask = UInt64(0)
+#     exclusion_mask = UInt64(0)
+#     special_mask = UInt64(0)
+#     lj_shortcut_mask = UInt64(0)
+
+
+#     first_i = (ci - 1) * CW + 1
+#     first_j = (cj - 1) * CW + 1
+
+#     @inbounds for lane_i in 1:CW
+#         slot_i = first_i + lane_i - 1
+#         atom_i = Int(data.slot_to_atom[slot_i])
+#         atom_i == 0 && continue
+
+#         xi = data.x[slot_i]
+#         yi = data.y[slot_i]
+#         zi = data.z[slot_i]
+
+#         for lane_j in 1:CW
+#             ci == cj && lane_j <= lane_i && continue
+
+#             slot_j = first_j + lane_j - 1
+#             atom_j = Int(data.slot_to_atom[slot_j])
+#             atom_j == 0 && continue
+            
+#             dx = xi - (data.x[slot_j] + sx)
+#             dy = yi - (data.y[slot_j] + sy)
+#             dz = zi - (data.z[slot_j] + sz)
+#             r2 = dx * dx + dy * dy + dz * dz
+            
+#             r2 <= cutoff2 || continue
+
+#             bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
+#             pair_mask |= bit
+
+#             is_eligible = _cluster_eligible(eligible, atom_i, atom_j)
+#             is_special = _cluster_special(special, atom_i, atom_j)
+
+#             is_eligible || (exclusion_mask |= bit)
+#             is_special && (special_mask |= bit)
+
+#             if is_eligible && shortcut_pair(lj.shortcut, atoms[atom_i], atoms[atom_j], is_special)
+#                 lj_shortcut_mask |= bit
+#             end
+#         end
+#     end
+
+#     masks = _cluster_pair_interaction_masks(pair_mask, exclusion_mask, special_mask)
+#     lj_mask = masks.lj_mask & ~lj_shortcut_mask
+    
+#     return (
+#         pair_mask = masks.pair_mask,
+#         exclusion_mask = masks.exclusion_mask,
+#         lj_14_mask = masks.lj_14_mask,
+#         coul_14_mask = masks.coul_14_mask,
+#         lj_mask = lj_mask,
+#         coul_mask = masks.coul_mask,
+#     )
+# end
 
 function _cluster_pruned_pair_masks(
     data::ClusterPairSoA{T},
@@ -2944,7 +3098,6 @@ function _cluster_pruned_pair_masks(
     special_mask = UInt64(0)
     lj_shortcut_mask = UInt64(0)
 
-
     first_i = (ci - 1) * CW + 1
     first_j = (cj - 1) * CW + 1
 
@@ -2963,12 +3116,12 @@ function _cluster_pruned_pair_masks(
             slot_j = first_j + lane_j - 1
             atom_j = Int(data.slot_to_atom[slot_j])
             atom_j == 0 && continue
-            
+
             dx = xi - (data.x[slot_j] + sx)
             dy = yi - (data.y[slot_j] + sy)
             dz = zi - (data.z[slot_j] + sz)
             r2 = dx * dx + dy * dy + dz * dz
-            
+
             r2 <= cutoff2 || continue
 
             bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
@@ -2976,7 +3129,6 @@ function _cluster_pruned_pair_masks(
 
             is_eligible = _cluster_eligible(eligible, atom_i, atom_j)
             is_special = _cluster_special(special, atom_i, atom_j)
-
             is_eligible || (exclusion_mask |= bit)
             is_special && (special_mask |= bit)
 
@@ -2988,7 +3140,7 @@ function _cluster_pruned_pair_masks(
 
     masks = _cluster_pair_interaction_masks(pair_mask, exclusion_mask, special_mask)
     lj_mask = masks.lj_mask & ~lj_shortcut_mask
-    
+
     return (
         pair_mask = masks.pair_mask,
         exclusion_mask = masks.exclusion_mask,
@@ -2998,6 +3150,7 @@ function _cluster_pruned_pair_masks(
         coul_mask = masks.coul_mask,
     )
 end
+
 
 function _ensure_cluster_pair_chunks!(data::ClusterPairSoA{T}, n_parts::Integer) where {T}
     resize!(data.pair_i_chunks, n_parts)
@@ -3035,6 +3188,9 @@ function _ensure_cluster_pair_chunks!(data::ClusterPairSoA{T}, n_parts::Integer)
     return data
 end
 
+########################################################################
+# Cluster-pair collection
+########################################################################
 
 function _build_cluster_pairs!(
     data::ClusterPairSoA{T},
@@ -3400,6 +3556,9 @@ function _build_cluster_csr_from_chunks!(data::ClusterPairSoA{T}) where {T}
     return data
 end
 
+########################################################################
+# CSR packing
+########################################################################
 
 function _build_cluster_csr_from_flat!(data::ClusterPairSoA{T}) where {T}
     n_clusters = data.n_clusters
@@ -3548,6 +3707,42 @@ end
 
 
 
+########################################################################
+# Neighbor refresh, pruning, and rebuild orchestration
+########################################################################
+
+function _refresh_cluster_csr_shifts!(data::ClusterPairSoA{T}, boundary) where {T}
+    dist_unit = unit(boundary.side_lengths[1])
+    box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
+
+    @inbounds for ci in 1:data.n_clusters
+        first = Int(data.ci_offsets[ci])
+        last = Int(data.ci_offsets[ci + 1] - 1)
+
+        for pair_idx in first:last
+            cj = Int(data.cj_list[pair_idx])
+
+            bbox_dist2, sx, sy, sz = _bbox_distance2_shift(
+                data,
+                ci,
+                cj,
+                box_x,
+                box_y,
+                box_z,
+            )
+
+            data.csr_shift_x[pair_idx] = sx
+            data.csr_shift_y[pair_idx] = sy
+            data.csr_shift_z[pair_idx] = sz
+            data.csr_bbox_dist2[pair_idx] = bbox_dist2
+        end
+    end
+
+    return data
+end
+
+
+# Function called every step to update coords in the cluster list
 function _refresh_cluster_coordinates!(
     data::ClusterPairSoA{T},
     coords,
@@ -3773,13 +3968,55 @@ function build_cluster_pair_list!(
     return data
 end
 
+function _prepare_cluster_force_data!(
+    neighbors::ClusteredNeighborList,
+    atoms,
+    coords,
+    boundary,
+    lj::SIMDLennardJones,
+    n_threads::Integer,
+    ::Val{CW},
+) where {CW}
+    data = neighbors.cluster_data
+
+    _refresh_cluster_coordinates!(data, coords, boundary)
+
+    if _cluster_reuse_is_valid(data, boundary, Val(CW))
+        _build_cluster_bounds!(data, Val(CW))
+        _refresh_cluster_csr_shifts!(data, boundary)
+    else
+        dist_unit = unit(first(first(coords)))
+        pairlist_cutoff = data.pairlist_cutoff * dist_unit
+        build_cluster_pair_list!(
+            data,
+            atoms,
+            coords,
+            boundary,
+            pairlist_cutoff,
+            data.force_cutoff,
+            lj,
+            neighbors.eligible,
+            neighbors.special,
+            neighbors.prune_inner_fraction,
+            neighbors.include_coulomb,
+            n_threads,
+            neighbors.retain_flat_pairs,
+            Val(CW),
+        )
+    end
+
+    return data
+end
+
 _cluster_base_n_steps(nf) = hasproperty(nf, :n_steps) ? nf.n_steps : 1
 _cluster_base_eligible(nf) = hasproperty(nf, :eligible) ? nf.eligible : nothing
 _cluster_base_special(nf) = hasproperty(nf, :special) ? nf.special : nothing
 
+# Extract the LJ interaction from the pairwise interactions tuple 
 _cluster_lj_inter(inters::Tuple{<:SIMDLennardJones}) = inters[1]
 _cluster_lj_inter(inters::Tuple{<:SIMDLennardJones, <:AbstractSIMDCoulomb}) = inters[1]
 
+# Check if there is a coulomb interaction
 _cluster_has_coulomb(inters::Tuple{<:SIMDLennardJones}) = false
 _cluster_has_coulomb(inters::Tuple{<:SIMDLennardJones, <:AbstractSIMDCoulomb}) = true
 
@@ -3801,7 +4038,9 @@ function _cluster_force_cutoff_length(
 end
 
 
-
+# Main clustered neighbor-builder entry point.
+# Full rebuilds reorder atoms into clusters, rebuild pair metadata, and repack
+# the CSR rows. Reuse steps only refresh coordinates and optionally prune.
 function find_neighbors(
     sys::System,
     nf::ClusteredSIMDNeighborFinder,
@@ -3810,18 +4049,19 @@ function find_neighbors(
     force_recompute::Bool=false;
     kwargs...,
 )
-    canonical = canonical_inters(nf.inter)
-    lj = _cluster_lj_inter(canonical)
-    include_coulomb = _cluster_has_coulomb(canonical)
+    # Canonicalise the interactions --> extract the two interaction objects (LJ + Coulomb)
+    canonical = canonical_inters(nf.inter) 
+    lj = _cluster_lj_inter(canonical) # assign LJ
+    include_coulomb = _cluster_has_coulomb(canonical) # check if coulomb or not 
 
-
+    # Build or reuse the standard Molly neighbour list --> coexist with Molly neighbour, or as a ClusterOnlyList
     old_standard = if isnothing(old_neighbors)
         nothing
     else
         old_neighbors.standard_list
     end
 
-    new_standard = if nf.build_standard_list
+    new_standard = if nf.build_standard_list # set whether or not to call the standard molly neighbour list 
         Molly.find_neighbors(
             sys,
             nf.base_finder,
@@ -3831,80 +4071,82 @@ function find_neighbors(
             kwargs...,
         )
     else
-        isnothing(old_standard) ? ClusterOnlyStandardList() : old_standard
+        isnothing(old_standard) ? ClusterOnlyStandardList() : old_standard # else reuse old standard or create empty ClusterOnlyList
     end
 
+    # Decide if full rebuild is needed
     needs_rebuild = isnothing(old_neighbors) ||
                 force_recompute ||
-                iszero(step_n % _cluster_base_n_steps(nf.base_finder))
+                iszero(step_n % _cluster_base_n_steps(nf.base_finder)) # helper function to extract steps  
 
+    # If no rebuild needed --> mutate existing clustered data in place 
+    # Because coordinates need to be updated every step (!)
     if !needs_rebuild
         data = old_neighbors.cluster_data
-
+    
         tr0 = time_ns()
-        _refresh_cluster_coordinates!(
-            data,
-            sys.coords,
-            sys.boundary,
-        )
+        _refresh_cluster_coordinates!(data, sys.coords, sys.boundary)
         tr1 = time_ns()
-
-        data.last_refresh_ms = (tr1 - tr0) / 1e6
-        data.last_order_ms = 0.0
-        data.last_bounds_ms = 0.0
-        data.last_pairs_ms = 0.0
-        data.last_csr_ms = 0.0
-        data.last_prune_bounds_ms = 0.0
-        data.last_prune_pairs_ms = 0.0
-        data.last_prune_csr_ms = 0.0
-        data.last_full_rebuild = false
-        data.last_dynamic_prune = false
-
-        if nf.dynamic_prune_every > 0 &&
-                step_n > 0 &&
-                iszero(step_n % nf.dynamic_prune_every)
-            tb0 = time_ns()
-            _build_cluster_bounds!(data, Val(cluster_width(nf)))
-            tb1 = time_ns()
-
-            dist_unit = unit(first(first(sys.coords)))
-            T_float = eltype(data.x)
-            prune_buffer = _cluster_length_value(
-                nf.dynamic_prune_buffer,
-                dist_unit,
-                T_float,
-            )
-            prune_cutoff = min(
-                data.pairlist_cutoff,
-                data.force_cutoff + prune_buffer,
-            )
-
-            tp0 = time_ns()
-            _prune_cluster_pairs!(
-                data,
-                sys.atoms,
-                sys.boundary,
-                lj,
-                _cluster_base_eligible(nf.base_finder),
-                _cluster_base_special(nf.base_finder),
-                prune_cutoff,
-                include_coulomb,
-                Int(get(kwargs, :n_threads, Threads.nthreads())),
-                Val(cluster_width(nf)),
-            )
-            tp1 = time_ns()
-
-            _build_cluster_csr_from_flat!(data)
-            tc1 = time_ns()
-
-            data.last_prune_bounds_ms = (tb1 - tb0) / 1e6
-            data.last_prune_pairs_ms = (tp1 - tp0) / 1e6
-            data.last_prune_csr_ms = (tc1 - tp1) / 1e6
-            data.last_dynamic_prune = true
+    
+        if _cluster_reuse_is_valid(data, sys.boundary, Val(cluster_width(nf)))
+            data.last_refresh_ms = (tr1 - tr0) / 1e6
+            data.last_order_ms = 0.0
+            data.last_bounds_ms = 0.0
+            data.last_pairs_ms = 0.0
+            data.last_csr_ms = 0.0
+            data.last_prune_bounds_ms = 0.0
+            data.last_prune_pairs_ms = 0.0
+            data.last_prune_csr_ms = 0.0
+            data.last_full_rebuild = false
+            data.last_dynamic_prune = false
+    
+            if nf.dynamic_prune_every > 0 &&
+                    step_n > 0 &&
+                    iszero(step_n % nf.dynamic_prune_every)
+                tb0 = time_ns()
+                _build_cluster_bounds!(data, Val(cluster_width(nf)))
+                tb1 = time_ns()
+    
+                dist_unit = unit(first(first(sys.coords)))
+                T_float = eltype(data.x)
+                prune_buffer = _cluster_length_value(
+                    nf.dynamic_prune_buffer,
+                    dist_unit,
+                    T_float,
+                )
+                prune_cutoff = min(
+                    data.pairlist_cutoff,
+                    data.force_cutoff + prune_buffer,
+                )
+    
+                tp0 = time_ns()
+                _prune_cluster_pairs!(
+                    data,
+                    sys.atoms,
+                    sys.boundary,
+                    lj,
+                    _cluster_base_eligible(nf.base_finder),
+                    _cluster_base_special(nf.base_finder),
+                    prune_cutoff,
+                    include_coulomb,
+                    Int(get(kwargs, :n_threads, Threads.nthreads())),
+                    Val(cluster_width(nf)),
+                )
+                tp1 = time_ns()
+    
+                _build_cluster_csr_from_flat!(data)
+                tc1 = time_ns()
+    
+                data.last_prune_bounds_ms = (tb1 - tb0) / 1e6
+                data.last_prune_pairs_ms = (tp1 - tp0) / 1e6
+                data.last_prune_csr_ms = (tc1 - tp1) / 1e6
+                data.last_dynamic_prune = true
+            end
+    
+            return old_neighbors
         end
-
-        return old_neighbors
     end
+    
 
     dist_unit = unit(first(first(sys.coords)))
     T_float = typeof(ustrip(dist_unit, sys.coords[1][1]))
@@ -3931,7 +4173,15 @@ function find_neighbors(
         Val(cluster_width(nf)),
     )
 
-    return ClusteredNeighborList(new_standard, cluster_data)
+    return ClusteredNeighborList(
+        new_standard,
+        cluster_data,
+        _cluster_base_eligible(nf.base_finder),
+        _cluster_base_special(nf.base_finder),
+        nf.prune_inner_fraction,
+        include_coulomb,
+        retain_flat_pairs,
+    )
 end
 
 @inline _cluster_pair_sigma(
@@ -6338,6 +6588,10 @@ end
     return nothing
 end
 
+########################################################################
+# Clustered LJ+Coulomb CSR kernels
+########################################################################
+
 function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPairSoA{T}, boundary,
     lj::SIMDLennardJones, coul::SIMDCoulomb, first_ci::Integer, step_ci::Integer,) where {T}
 
@@ -6613,6 +6867,9 @@ function _clustered_lj_forces_packed_csr_chunk!(
     return nothing
 end
 
+########################################################################
+# Force execution, scatter, and reduction
+########################################################################
 
 function _ensure_cluster_force_chunks!(data::ClusterPairSoA{T}, n_threads::Integer) where {T}
     resize!(data.fx_chunks, n_threads)
@@ -6708,6 +6965,8 @@ function pairwise_forces_loop!(
     lj = pairwise_inters_nl[1]
     coul = pairwise_inters_nl[2]
     data = neighbors.cluster_data
+    cw = data.n_clusters == 0 ? 1 : Int(data.n_slots ÷ data.n_clusters)
+    data = _prepare_cluster_force_data!(neighbors, atoms, coords, boundary, lj, 1, Val(cw))
 
     _reset_cluster_force_timings!(data)
     t_total0 = time_ns()
@@ -6779,6 +7038,8 @@ function pairwise_forces_loop!(
 
     lj = pairwise_inters_nl[1]
     data = neighbors.cluster_data
+    cw = data.n_clusters == 0 ? 1 : Int(data.n_slots ÷ data.n_clusters)
+    data = _prepare_cluster_force_data!(neighbors, atoms, coords, boundary, lj, n_threads, Val(cw))
 
     _reset_cluster_force_timings!(data)
     t_total0 = time_ns()
@@ -6859,6 +7120,74 @@ function pairwise_forces_loop!(
 
 end
 
+function pairwise_forces_loop!(
+    fs_nounits,
+    fs_chunks,
+    vir_nounits,
+    vir_chunks,
+    atoms,
+    coords,
+    velocities,
+    boundary,
+    neighbors::ClusteredNeighborList,
+    force_units,
+    n_atoms,
+    pairwise_inters_nonl,
+    pairwise_inters_nl::Tuple{<:SIMDLennardJones},
+    ::Val{1},
+    ::Val{needs_vir},
+    step_n=0,
+) where {needs_vir}
+    isempty(pairwise_inters_nonl) ||
+        throw(ArgumentError("ClusteredSIMDNeighborFinder prototype only supports neighbor-list LJ interactions"))
+    needs_vir &&
+        throw(ArgumentError("ClusteredSIMDNeighborFinder prototype does not implement virial yet"))
+
+    lj = pairwise_inters_nl[1]
+    data = neighbors.cluster_data
+    cw = data.n_clusters == 0 ? 1 : Int(data.n_slots ÷ data.n_clusters)
+    data = _prepare_cluster_force_data!(neighbors, atoms, coords, boundary, lj, 1, Val(cw))
+
+    _reset_cluster_force_timings!(data)
+    t_total0 = time_ns()
+
+    t0 = time_ns()
+    fill!(fs_nounits, zero(eltype(fs_nounits)))
+    t1 = time_ns()
+    data.last_force_fs_zero_ms = (t1 - t0) / 1e6
+
+    t0 = time_ns()
+    fill!(data.fx, zero(eltype(data.fx)))
+    fill!(data.fy, zero(eltype(data.fy)))
+    fill!(data.fz, zero(eltype(data.fz)))
+    t1 = time_ns()
+    data.last_force_slot_zero_ms = (t1 - t0) / 1e6
+
+    t0 = time_ns()
+    _clustered_lj_forces_packed_csr_chunk!(
+        data.fx,
+        data.fy,
+        data.fz,
+        atoms,
+        data,
+        boundary,
+        lj,
+        1,
+        1,
+    )
+    t1 = time_ns()
+    data.last_force_kernel_ms = (t1 - t0) / 1e6
+
+    t0 = time_ns()
+    _scatter_cluster_forces!(fs_nounits, data)
+    t1 = time_ns()
+    data.last_force_scatter_ms = (t1 - t0) / 1e6
+
+    data.last_force_total_ms = (time_ns() - t_total0) / 1e6
+
+    return fs_nounits
+end
+
 
 function pairwise_forces_loop!(
     fs_nounits,
@@ -6886,6 +7215,8 @@ function pairwise_forces_loop!(
     lj = pairwise_inters_nl[1]
     coul = pairwise_inters_nl[2]
     data = neighbors.cluster_data
+    cw = data.n_clusters == 0 ? 1 : Int(data.n_slots ÷ data.n_clusters)
+    data = _prepare_cluster_force_data!(neighbors, atoms, coords, boundary, lj, n_threads, Val(cw))
 
     _reset_cluster_force_timings!(data)
     t_total0 = time_ns()
@@ -6987,6 +7318,10 @@ function pairwise_forces_loop!(
 
 end
 
+########################################################################
+# Diagnostics and consistency checks
+########################################################################
+
 @inline function _cluster_has_flat_pair_storage(data::ClusterPairSoA)
     return !isempty(data.pair_i)
 end
@@ -7015,6 +7350,44 @@ function cluster_candidate_pair_count(data::ClusterPairSoA)
 
     return total
 end
+
+function _cluster_reuse_is_valid(
+    data::ClusterPairSoA{T},
+    boundary,
+    ::Val{CW},
+) where {T, CW}
+    dist_unit = unit(boundary.side_lengths[1])
+    box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
+
+    @inbounds for ci in 1:data.n_clusters
+        expected_col = Int(data.cluster_col[ci])
+        first_slot = (ci - 1) * CW + 1
+        prev_z = -T(Inf)
+
+        for lane in 1:CW
+            slot = first_slot + lane - 1
+            data.slot_to_atom[slot] == 0 && continue
+
+            current_col = _cluster_column_index(
+                data.x[slot],
+                data.y[slot],
+                box_x,
+                box_y,
+                data.nx,
+                data.ny,
+            )
+
+            current_col == expected_col || return false
+
+            z = data.z[slot]
+            z >= prev_z || return false
+            prev_z = z
+        end
+    end
+
+    return true
+end
+
 
 function cluster_geometric_candidate_pair_count(data::ClusterPairSoA)
     if _cluster_has_flat_pair_storage(data)
@@ -7106,7 +7479,7 @@ cluster_dummy_fraction(data::ClusterPairSoA) =
 cluster_csr_pair_count(data::ClusterPairSoA) =
     isempty(data.ci_offsets) ? 0 : Int(data.ci_offsets[end] - 1)
 
-    cluster_lj_lane_count(data::ClusterPairSoA) =
+cluster_lj_lane_count(data::ClusterPairSoA) =
     sum(count_ones, data.cluster_lj_masks; init = 0)
 
 cluster_coul_lane_count(data::ClusterPairSoA) =
@@ -7403,73 +7776,4 @@ function check_cluster_csr_consistency(data::ClusterPairSoA)
     
 
     return true
-end
-
-
-
-function pairwise_forces_loop!(
-    fs_nounits,
-    fs_chunks,
-    vir_nounits,
-    vir_chunks,
-    atoms,
-    coords,
-    velocities,
-    boundary,
-    neighbors::ClusteredNeighborList,
-    force_units,
-    n_atoms,
-    pairwise_inters_nonl,
-    pairwise_inters_nl::Tuple{<:SIMDLennardJones},
-    ::Val{1},
-    ::Val{needs_vir},
-    step_n=0,
-) where {needs_vir}
-    isempty(pairwise_inters_nonl) ||
-        throw(ArgumentError("ClusteredSIMDNeighborFinder prototype only supports neighbor-list LJ interactions"))
-    needs_vir &&
-        throw(ArgumentError("ClusteredSIMDNeighborFinder prototype does not implement virial yet"))
-
-    lj = pairwise_inters_nl[1]
-    data = neighbors.cluster_data
-
-    _reset_cluster_force_timings!(data)
-    t_total0 = time_ns()
-
-    t0 = time_ns()
-    fill!(fs_nounits, zero(eltype(fs_nounits)))
-    t1 = time_ns()
-    data.last_force_fs_zero_ms = (t1 - t0) / 1e6
-
-    t0 = time_ns()
-    fill!(data.fx, zero(eltype(data.fx)))
-    fill!(data.fy, zero(eltype(data.fy)))
-    fill!(data.fz, zero(eltype(data.fz)))
-    t1 = time_ns()
-    data.last_force_slot_zero_ms = (t1 - t0) / 1e6
-
-    t0 = time_ns()
-    _clustered_lj_forces_packed_csr_chunk!(
-        data.fx,
-        data.fy,
-        data.fz,
-        atoms,
-        data,
-        boundary,
-        lj,
-        1,
-        1,
-    )
-    t1 = time_ns()
-    data.last_force_kernel_ms = (t1 - t0) / 1e6
-
-    t0 = time_ns()
-    _scatter_cluster_forces!(fs_nounits, data)
-    t1 = time_ns()
-    data.last_force_scatter_ms = (t1 - t0) / 1e6
-
-    data.last_force_total_ms = (time_ns() - t_total0) / 1e6
-
-    return fs_nounits
-
 end
