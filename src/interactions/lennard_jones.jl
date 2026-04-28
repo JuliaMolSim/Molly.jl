@@ -2116,6 +2116,9 @@ mutable struct ClusterPairSoA{T}
     x::Vector{T}
     y::Vector{T}
     z::Vector{T}
+    x0::Vector{T}
+    y0::Vector{T}
+    z0::Vector{T}
     sigma::Vector{T}
     half_sigma::Vector{T}
     epsilon::Vector{T}
@@ -2194,7 +2197,6 @@ mutable struct ClusterPairSoA{T}
     csr_work_flags::Vector{UInt8}
 
 
-
 end
 
 mutable struct ClusterOnlyStandardList
@@ -2262,7 +2264,7 @@ function empty_cluster_data(::Type{T}=Float64) where {T}
         Int32[], Int32[], Int32[],
         Int32[], Int32[],
         T[], T[], T[], T[], T[], T[], T[], T[],
-        T[], T[], T[],
+        T[], T[], T[], T[], T[], T[],
         Vector{T}[], Vector{T}[], Vector{T}[],
         UInt64[], UInt64[], UInt64[],
         T[], T[], T[], T[], T[], T[],
@@ -2277,6 +2279,7 @@ function empty_cluster_data(::Type{T}=Float64) where {T}
         T[], T[], T[], T[],
         UInt64[], UInt64[], UInt64[], UInt64[], UInt64[], UInt64[],
         UInt8[],
+
     )
 end
 
@@ -2531,6 +2534,9 @@ function _resize_cluster_storage!(data::ClusterPairSoA{T}, n_atoms, n_slots) whe
     resize!(data.x, n_slots)
     resize!(data.y, n_slots)
     resize!(data.z, n_slots)
+    resize!(data.x0, n_slots)
+    resize!(data.y0, n_slots)
+    resize!(data.z0, n_slots)
     resize!(data.sigma, n_slots)
     resize!(data.half_sigma, n_slots)
     resize!(data.epsilon, n_slots)
@@ -2638,6 +2644,9 @@ function _build_cluster_order!(
             data.x[slot] = x_by_atom[atom_i]
             data.y[slot] = y_by_atom[atom_i]
             data.z[slot] = z_by_atom[atom_i]
+            data.x0[slot] = data.x[slot]
+            data.y0[slot] = data.y[slot]
+            data.z0[slot] = data.z[slot]
             data.sigma[slot] = T(ustrip(atoms[atom_i].σ))
             data.half_sigma[slot] = data.sigma[slot] * T(0.5)
             data.epsilon[slot] = T(ustrip(atoms[atom_i].ϵ))
@@ -2651,6 +2660,9 @@ function _build_cluster_order!(
             data.x[slot] = zero(T)
             data.y[slot] = zero(T)
             data.z[slot] = zero(T)
+            data.x0[slot] = zero(T)
+            data.y0[slot] = zero(T)
+            data.z0[slot] = zero(T)
             data.sigma[slot] = one(T)
             data.half_sigma[slot] = T(0.5)
             data.epsilon[slot] = zero(T)
@@ -3741,7 +3753,6 @@ function _refresh_cluster_csr_shifts!(data::ClusterPairSoA{T}, boundary) where {
     return data
 end
 
-
 # Function called every step to update coords in the cluster list
 function _refresh_cluster_coordinates!(
     data::ClusterPairSoA{T},
@@ -3759,9 +3770,17 @@ function _refresh_cluster_coordinates!(
             data.y[slot] = zero(T)
             data.z[slot] = zero(T)
         else
-            data.x[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][1])), box_x)
-            data.y[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][2])), box_y)
-            data.z[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][3])), box_z)
+            # data.x[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][1])), box_x)
+            # data.y[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][2])), box_y)
+            # data.z[slot] = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][3])), box_z)
+            wx = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][1])), box_x)
+            wy = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][2])), box_y)
+            wz = _cluster_wrap_coord(T(ustrip(dist_unit, coords[atom_i][3])), box_z)
+            
+            data.x[slot] = data.x0[slot] + _cluster_min_image_delta(data.x0[slot], wx, box_x)
+            data.y[slot] = data.y0[slot] + _cluster_min_image_delta(data.y0[slot], wy, box_y)
+            data.z[slot] = data.z0[slot] + _cluster_min_image_delta(data.z0[slot], wz, box_z)
+            
         end
     end
 
@@ -3918,8 +3937,6 @@ function _prune_cluster_pairs!(
     return data
 end
 
-
-
 function build_cluster_pair_list!(
     data::ClusterPairSoA{T},
     atoms,
@@ -3979,12 +3996,34 @@ function _prepare_cluster_force_data!(
 ) where {CW}
     data = neighbors.cluster_data
 
+    # _refresh_cluster_coordinates!(data, coords, boundary)
+
+    # if _cluster_reuse_is_valid(data, boundary, Val(CW))
+    #     _build_cluster_bounds!(data, Val(CW))
+    #     _refresh_cluster_csr_shifts!(data, boundary)
+    # else
+    #     dist_unit = unit(first(first(coords)))
+    #     pairlist_cutoff = data.pairlist_cutoff * dist_unit
+    #     build_cluster_pair_list!(
+    #         data,
+    #         atoms,
+    #         coords,
+    #         boundary,
+    #         pairlist_cutoff,
+    #         data.force_cutoff,
+    #         lj,
+    #         neighbors.eligible,
+    #         neighbors.special,
+    #         neighbors.prune_inner_fraction,
+    #         neighbors.include_coulomb,
+    #         n_threads,
+    #         neighbors.retain_flat_pairs,
+    #         Val(CW),
+    #     )
+    # end
     _refresh_cluster_coordinates!(data, coords, boundary)
 
-    if _cluster_reuse_is_valid(data, boundary, Val(CW))
-        _build_cluster_bounds!(data, Val(CW))
-        _refresh_cluster_csr_shifts!(data, boundary)
-    else
+    if !_cluster_reuse_is_valid(data, boundary, Val(CW))
         dist_unit = unit(first(first(coords)))
         pairlist_cutoff = data.pairlist_cutoff * dist_unit
         build_cluster_pair_list!(
@@ -4004,6 +4043,7 @@ function _prepare_cluster_force_data!(
             Val(CW),
         )
     end
+    
 
     return data
 end
@@ -4084,10 +4124,27 @@ function find_neighbors(
     if !needs_rebuild
         data = old_neighbors.cluster_data
     
+        # tr0 = time_ns()
+        # _refresh_cluster_coordinates!(data, sys.coords, sys.boundary)
+        # tr1 = time_ns()
+        if nf.dynamic_prune_every == 0
+            data.last_refresh_ms = 0.0
+            data.last_order_ms = 0.0
+            data.last_bounds_ms = 0.0
+            data.last_pairs_ms = 0.0
+            data.last_csr_ms = 0.0
+            data.last_prune_bounds_ms = 0.0
+            data.last_prune_pairs_ms = 0.0
+            data.last_prune_csr_ms = 0.0
+            data.last_full_rebuild = false
+            data.last_dynamic_prune = false
+            return old_neighbors
+        end
+    
         tr0 = time_ns()
         _refresh_cluster_coordinates!(data, sys.coords, sys.boundary)
         tr1 = time_ns()
-    
+
         if _cluster_reuse_is_valid(data, sys.boundary, Val(cluster_width(nf)))
             data.last_refresh_ms = (tr1 - tr0) / 1e6
             data.last_order_ms = 0.0
@@ -4099,14 +4156,14 @@ function find_neighbors(
             data.last_prune_csr_ms = 0.0
             data.last_full_rebuild = false
             data.last_dynamic_prune = false
-    
+
             if nf.dynamic_prune_every > 0 &&
                     step_n > 0 &&
                     iszero(step_n % nf.dynamic_prune_every)
                 tb0 = time_ns()
                 _build_cluster_bounds!(data, Val(cluster_width(nf)))
                 tb1 = time_ns()
-    
+
                 dist_unit = unit(first(first(sys.coords)))
                 T_float = eltype(data.x)
                 prune_buffer = _cluster_length_value(
@@ -4118,7 +4175,7 @@ function find_neighbors(
                     data.pairlist_cutoff,
                     data.force_cutoff + prune_buffer,
                 )
-    
+
                 tp0 = time_ns()
                 _prune_cluster_pairs!(
                     data,
@@ -4133,16 +4190,16 @@ function find_neighbors(
                     Val(cluster_width(nf)),
                 )
                 tp1 = time_ns()
-    
+
                 _build_cluster_csr_from_flat!(data)
                 tc1 = time_ns()
-    
+
                 data.last_prune_bounds_ms = (tb1 - tb0) / 1e6
                 data.last_prune_pairs_ms = (tp1 - tp0) / 1e6
                 data.last_prune_csr_ms = (tc1 - tp1) / 1e6
                 data.last_dynamic_prune = true
             end
-    
+
             return old_neighbors
         end
     end
@@ -7351,42 +7408,60 @@ function cluster_candidate_pair_count(data::ClusterPairSoA)
     return total
 end
 
-function _cluster_reuse_is_valid(
-    data::ClusterPairSoA{T},
-    boundary,
-    ::Val{CW},
-) where {T, CW}
-    dist_unit = unit(boundary.side_lengths[1])
-    box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
+# function _cluster_reuse_is_valid(
+#     data::ClusterPairSoA{T},
+#     boundary,
+#     ::Val{CW},
+# ) where {T, CW}
+#     dist_unit = unit(boundary.side_lengths[1])
+#     box_x, box_y, box_z = _cluster_box_lengths(boundary, dist_unit, T)
 
-    @inbounds for ci in 1:data.n_clusters
-        expected_col = Int(data.cluster_col[ci])
-        first_slot = (ci - 1) * CW + 1
-        prev_z = -T(Inf)
+#     @inbounds for ci in 1:data.n_clusters
+#         expected_col = Int(data.cluster_col[ci])
+#         first_slot = (ci - 1) * CW + 1
+#         prev_z = -T(Inf)
 
-        for lane in 1:CW
-            slot = first_slot + lane - 1
-            data.slot_to_atom[slot] == 0 && continue
+#         for lane in 1:CW
+#             slot = first_slot + lane - 1
+#             data.slot_to_atom[slot] == 0 && continue
 
-            current_col = _cluster_column_index(
-                data.x[slot],
-                data.y[slot],
-                box_x,
-                box_y,
-                data.nx,
-                data.ny,
-            )
+#             current_col = _cluster_column_index(
+#                 data.x[slot],
+#                 data.y[slot],
+#                 box_x,
+#                 box_y,
+#                 data.nx,
+#                 data.ny,
+#             )
 
-            current_col == expected_col || return false
+#             current_col == expected_col || return false
 
-            z = data.z[slot]
-            z >= prev_z || return false
-            prev_z = z
-        end
+#             z = data.z[slot]
+#             z >= prev_z || return false
+#             prev_z = z
+#         end
+#     end
+
+#     return true
+# end
+
+function _cluster_reuse_is_valid(data::ClusterPairSoA{T}, boundary, ::Val{CW}) where {T, CW}
+    buffer = data.pairlist_cutoff - data.force_cutoff
+    buffer > zero(T) || return false
+
+    max_disp2 = zero(T)
+
+    @inbounds for slot in 1:data.n_slots
+        data.slot_to_atom[slot] == 0 && continue
+        dx = data.x[slot] - data.x0[slot]
+        dy = data.y[slot] - data.y0[slot]
+        dz = data.z[slot] - data.z0[slot]
+        max_disp2 = max(max_disp2, dx*dx + dy*dy + dz*dz)
     end
 
-    return true
+    return T(2) * sqrt(max_disp2) <= buffer
 end
+
 
 
 function cluster_geometric_candidate_pair_count(data::ClusterPairSoA)
