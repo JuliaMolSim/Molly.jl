@@ -2176,6 +2176,8 @@ mutable struct ClusterPairSoA{T}
     coul_14_masks_chunks::Vector{Vector{UInt64}}
     lj_masks_chunks::Vector{Vector{UInt64}}
     coul_masks_chunks::Vector{Vector{UInt64}}
+    work_flags_chunks::Vector{Vector{UInt8}}
+
 
 
     ci_offsets::Vector{Int32}
@@ -2275,6 +2277,7 @@ function empty_cluster_data(::Type{T}=Float64) where {T}
         Vector{T}[], Vector{T}[], Vector{T}[], Vector{T}[],
         Vector{UInt64}[], Vector{UInt64}[], Vector{UInt64}[],
         Vector{UInt64}[], Vector{UInt64}[], Vector{UInt64}[],
+        Vector{UInt8}[],
         Int32[], Int32[], Int32[], Int32[], Int32[], Int32[],
         T[], T[], T[], T[],
         UInt64[], UInt64[], UInt64[], UInt64[], UInt64[], UInt64[],
@@ -3003,12 +3006,12 @@ function _cluster_full_pair_masks(
 ) where {CW}
     same_cluster = ci == cj
 
-    pair_mask = _cluster_lane_pair_mask(
-        data.cluster_active_masks[ci],
-        data.cluster_active_masks[cj],
-        same_cluster,
-        Val(CW),
-    )
+    # pair_mask = _cluster_lane_pair_mask(
+    #     data.cluster_active_masks[ci],
+    #     data.cluster_active_masks[cj],
+    #     same_cluster,
+    #     Val(CW),
+    # )
 
     lj_possible_mask = _cluster_lane_pair_mask(
         data.cluster_lj_masks[ci],
@@ -3026,6 +3029,11 @@ function _cluster_full_pair_masks(
 
     work_mask = lj_possible_mask | coul_possible_mask
     work_mask == 0 && return _cluster_empty_pair_masks()
+    pair_mask = work_mask
+
+
+    # work_mask = lj_possible_mask | coul_possible_mask
+    # work_mask == 0 && return _cluster_empty_pair_masks()
 
     exclusion_mask = UInt64(0)
     lj_14_mask = UInt64(0)
@@ -3270,6 +3278,8 @@ function _ensure_cluster_pair_chunks!(data::ClusterPairSoA{T}, n_parts::Integer)
     resize!(data.coul_14_masks_chunks, n_parts)
     resize!(data.lj_masks_chunks, n_parts)
     resize!(data.coul_masks_chunks, n_parts)
+    resize!(data.work_flags_chunks, n_parts)
+
 
 
     @inbounds for part in 1:n_parts
@@ -3286,6 +3296,8 @@ function _ensure_cluster_pair_chunks!(data::ClusterPairSoA{T}, n_parts::Integer)
             data.coul_14_masks_chunks[part] = UInt64[]
             data.lj_masks_chunks[part] = UInt64[]
             data.coul_masks_chunks[part] = UInt64[]
+            data.work_flags_chunks[part] = UInt8[]
+
             
         end
     end
@@ -3332,6 +3344,7 @@ function _build_cluster_pairs!(
     empty!(data.lj_masks)
     empty!(data.coul_masks)
     
+    
 
     grid_dx = box_x / T(data.nx)
     grid_dy = box_y / T(data.ny)
@@ -3352,6 +3365,8 @@ function _build_cluster_pairs!(
         empty!(data.coul_14_masks_chunks[part])
         empty!(data.lj_masks_chunks[part])
         empty!(data.coul_masks_chunks[part])
+        empty!(data.work_flags_chunks[part])
+
         
     end
 
@@ -3368,6 +3383,8 @@ function _build_cluster_pairs!(
         coul_14_masks_local = data.coul_14_masks_chunks[part]
         lj_masks_local = data.lj_masks_chunks[part]
         coul_masks_local = data.coul_masks_chunks[part]
+        work_flags_local = data.work_flags_chunks[part]
+
         
 
         @inbounds for ci in part:n_parts:data.n_clusters
@@ -3381,7 +3398,9 @@ function _build_cluster_pairs!(
 
             zlo = data.zmin[ci] - cutoff
             zhi = data.zmax[ci] + cutoff
-            use_direct_z_window = zlo >= zero(T) && zhi <= box_z
+            #use_direct_z_window = zlo >= zero(T) && zhi <= box_z
+            use_direct_z_window = zlo > zero(T) && zhi < box_z
+
 
             for raw_iy in iy_min:iy_max
                 jy = mod(raw_iy, data.ny) + 1
@@ -3408,14 +3427,25 @@ function _build_cluster_pairs!(
                         mask_j = data.cluster_active_masks[cj]
                         mask_j == 0 && continue
 
-                        bbox_dist2, sx, sy, sz = _bbox_distance2_known_xy_shift(
-                            data,
-                            ci,
-                            cj,
-                            sx_xy,
-                            sy_xy,
-                            box_z,
-                        )
+                        # bbox_dist2, sx, sy, sz = _bbox_distance2_known_xy_shift(
+                        #     data,
+                        #     ci,
+                        #     cj,
+                        #     sx_xy,
+                        #     sy_xy,
+                        #     box_z,
+                        # )
+
+                        bbox_dist2, sx, sy, sz = if use_direct_z_window
+                            (
+                                _bbox_distance2_given_shift(data, ci, cj, sx_xy, sy_xy, zero(T)),
+                                sx_xy,
+                                sy_xy,
+                                zero(T),
+                            )
+                        else
+                            _bbox_distance2_known_xy_shift(data, ci, cj, sx_xy, sy_xy, box_z)
+                        end
 
                         bbox_dist2 <= cutoff2 || continue
 
@@ -3479,7 +3509,8 @@ function _build_cluster_pairs!(
                         keep_mask == 0 && continue
                         
 
-                        
+                        coul_mask = include_coulomb ? masks.coul_mask : UInt64(0)
+                        coul_14_mask = include_coulomb ? masks.coul_14_mask : UInt64(0)
 
                         push!(pair_i_local, Int32(ci))
                         push!(pair_j_local, Int32(cj))
@@ -3490,9 +3521,24 @@ function _build_cluster_pairs!(
                         push!(pair_masks_local, masks.pair_mask)
                         push!(exclusion_masks_local, masks.exclusion_mask)
                         push!(lj_14_masks_local, masks.lj_14_mask)
-                        push!(coul_14_masks_local, include_coulomb ? masks.coul_14_mask : UInt64(0))
+                        #push!(coul_14_masks_local, include_coulomb ? masks.coul_14_mask : UInt64(0))
+                        push!(coul_14_masks_local, coul_14_mask)
                         push!(lj_masks_local, masks.lj_mask)
-                        push!(coul_masks_local, include_coulomb ? masks.coul_mask : UInt64(0))
+                        #push!(coul_masks_local, include_coulomb ? masks.coul_mask : UInt64(0))
+                        push!(coul_masks_local, coul_mask)
+
+
+                        
+                        flags = _cluster_work_flags(
+                            masks.lj_mask,
+                            coul_mask,
+                            masks.exclusion_mask,
+                            masks.lj_14_mask,
+                            coul_14_mask,
+                        )
+                        
+                        push!(work_flags_local, flags)
+                        
                         
                     end
                 end
@@ -3545,17 +3591,22 @@ function _build_cluster_csr_from_chunks!(data::ClusterPairSoA{T}) where {T}
         exclusion_masks_local = data.exclusion_masks_chunks[part]
         lj_14_masks_local = data.lj_14_masks_chunks[part]
         coul_14_masks_local = data.coul_14_masks_chunks[part]
+        work_flags_local = data.work_flags_chunks[part]
+
 
         @inbounds for p in eachindex(pair_i_local)
             ci = Int(pair_i_local[p])
 
-            flags = _cluster_work_flags(
-                lj_masks_local[p],
-                coul_masks_local[p],
-                exclusion_masks_local[p],
-                lj_14_masks_local[p],
-                coul_14_masks_local[p],
-            )
+            # flags = _cluster_work_flags(
+            #     lj_masks_local[p],
+            #     coul_masks_local[p],
+            #     exclusion_masks_local[p],
+            #     lj_14_masks_local[p],
+            #     coul_14_masks_local[p],
+            # )
+
+            flags = work_flags_local[p]
+
 
             has_lj = (flags & CLUSTER_WORK_LJ) != 0
             has_coul = (flags & CLUSTER_WORK_COUL) != 0
@@ -3632,17 +3683,22 @@ function _build_cluster_csr_from_chunks!(data::ClusterPairSoA{T}) where {T}
         coul_14_masks_local = data.coul_14_masks_chunks[part]
         lj_masks_local = data.lj_masks_chunks[part]
         coul_masks_local = data.coul_masks_chunks[part]
+        work_flags_local = data.work_flags_chunks[part]
+
 
         @inbounds for p in eachindex(pair_i_local)
             ci = Int(pair_i_local[p])
 
-            flags = _cluster_work_flags(
-                lj_masks_local[p],
-                coul_masks_local[p],
-                exclusion_masks_local[p],
-                lj_14_masks_local[p],
-                coul_14_masks_local[p],
-            )
+            # flags = _cluster_work_flags(
+            #     lj_masks_local[p],
+            #     coul_masks_local[p],
+            #     exclusion_masks_local[p],
+            #     lj_14_masks_local[p],
+            #     coul_14_masks_local[p],
+            # )
+
+            flags = work_flags_local[p]
+
 
             has_lj = (flags & CLUSTER_WORK_LJ) != 0
             has_coul = (flags & CLUSTER_WORK_COUL) != 0
@@ -3941,6 +3997,8 @@ function _prune_cluster_pairs!(
         empty!(data.coul_14_masks_chunks[part])
         empty!(data.lj_masks_chunks[part])
         empty!(data.coul_masks_chunks[part])
+        empty!(data.work_flags_chunks[part])
+
     end
 
     Threads.@threads for part in 1:n_parts
@@ -3958,6 +4016,8 @@ function _prune_cluster_pairs!(
         coul_14_masks_local = data.coul_14_masks_chunks[part]
         lj_masks_local = data.lj_masks_chunks[part]
         coul_masks_local = data.coul_masks_chunks[part]
+        work_flags_local = data.work_flags_chunks[part]
+
         
 
         @inbounds for pair_idx in first_idx:last_idx
@@ -4023,6 +4083,17 @@ function _prune_cluster_pairs!(
 
             keep_mask = include_coulomb ? (masks.lj_mask | masks.coul_mask) : masks.lj_mask
             keep_mask == 0 && continue
+
+            coul_mask = include_coulomb ? masks.coul_mask : UInt64(0)
+            coul_14_mask = include_coulomb ? masks.coul_14_mask : UInt64(0)
+            
+            flags = _cluster_work_flags(
+                masks.lj_mask,
+                coul_mask,
+                masks.exclusion_mask,
+                masks.lj_14_mask,
+                coul_14_mask,
+            )
             
 
             push!(pair_i_local, Int32(ci))
@@ -4034,9 +4105,12 @@ function _prune_cluster_pairs!(
             push!(pair_masks_local, masks.pair_mask)
             push!(exclusion_masks_local, masks.exclusion_mask)
             push!(lj_14_masks_local, masks.lj_14_mask)
-            push!(coul_14_masks_local, include_coulomb ? masks.coul_14_mask : UInt64(0))
+            #push!(coul_14_masks_local, include_coulomb ? masks.coul_14_mask : UInt64(0))
+            push!(coul_14_masks_local, coul_14_mask)
             push!(lj_masks_local, masks.lj_mask)
-            push!(coul_masks_local, include_coulomb ? masks.coul_mask : UInt64(0))
+            #push!(coul_masks_local, include_coulomb ? masks.coul_mask : UInt64(0))
+            push!(coul_masks_local, coul_mask)
+
 
 
         end
@@ -7096,22 +7170,41 @@ function _scatter_cluster_forces!(fs, data::ClusterPairSoA{T}) where {T}
 end
 
 function _reduce_scatter_cluster_forces!(fs, data::ClusterPairSoA{T}, n_threads::Integer) where {T}
-    @inbounds for slot in 1:data.n_slots
-        atom_i = Int(data.slot_to_atom[slot])
-        atom_i == 0 && continue
+    # @inbounds for slot in 1:data.n_slots
+    #     atom_i = Int(data.slot_to_atom[slot])
+    #     atom_i == 0 && continue
 
-        fx = zero(T)
-        fy = zero(T)
-        fz = zero(T)
+    #     fx = zero(T)
+    #     fy = zero(T)
+    #     fz = zero(T)
 
-        for thread_i in 1:n_threads
-            fx += data.fx_chunks[thread_i][slot]
-            fy += data.fy_chunks[thread_i][slot]
-            fz += data.fz_chunks[thread_i][slot]
+    #     for thread_i in 1:n_threads
+    #         fx += data.fx_chunks[thread_i][slot]
+    #         fy += data.fy_chunks[thread_i][slot]
+    #         fz += data.fz_chunks[thread_i][slot]
+    #     end
+
+    #     fs[atom_i] += SVector(fx, fy, fz)
+    # end
+    Threads.@threads for slot in 1:data.n_slots
+        @inbounds begin
+            atom_i = Int(data.slot_to_atom[slot])
+            atom_i == 0 && continue
+    
+            fx = zero(T)
+            fy = zero(T)
+            fz = zero(T)
+    
+            for thread_i in 1:n_threads
+                fx += data.fx_chunks[thread_i][slot]
+                fy += data.fy_chunks[thread_i][slot]
+                fz += data.fz_chunks[thread_i][slot]
+            end
+    
+            fs[atom_i] += SVector(fx, fy, fz)
         end
-
-        fs[atom_i] += SVector(fx, fy, fz)
     end
+    
 
     return fs
 end
