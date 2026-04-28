@@ -2375,8 +2375,6 @@ end
     return :(Vec{$CW, Bool}(($(lanes...),)))
 end
 
-
-
 @generated function _cluster_shift_mask(::Val{Shift}, ::Val{CW}) where {Shift, CW}
     mask = zero(UInt64)
 
