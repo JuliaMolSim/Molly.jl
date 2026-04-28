@@ -2900,6 +2900,39 @@ end
 # Pair-mask construction
 ########################################################################
 
+
+@inline function _cluster_lane_pair_mask(
+    mask_i::UInt64,
+    mask_j::UInt64,
+    same_cluster::Bool,
+    ::Val{CW},
+) where {CW}
+    pair_mask = UInt64(0)
+
+    @inbounds for lane_i in 1:CW
+        (mask_i & _lane_bit(lane_i)) == 0 && continue
+
+        for lane_j in 1:CW
+            same_cluster && lane_j <= lane_i && continue
+            (mask_j & _lane_bit(lane_j)) == 0 && continue
+
+            pair_mask |= _lane_pair_bit(lane_i, lane_j, Val(CW))
+        end
+    end
+
+    return pair_mask
+end
+
+@inline _cluster_empty_pair_masks() = (
+    pair_mask = UInt64(0),
+    exclusion_mask = UInt64(0),
+    lj_14_mask = UInt64(0),
+    coul_14_mask = UInt64(0),
+    lj_mask = UInt64(0),
+    coul_mask = UInt64(0),
+)
+
+
 # function _cluster_full_pair_masks(
 #     data::ClusterPairSoA,
 #     atoms,
@@ -2914,7 +2947,6 @@ end
 #     exclusion_mask = UInt64(0)
 #     special_mask = UInt64(0)
 #     lj_shortcut_mask = UInt64(0)
-
 
 #     first_i = (ci - 1) * CW + 1
 #     first_j = (cj - 1) * CW + 1
@@ -2936,16 +2968,15 @@ end
 
 #             is_eligible = _cluster_eligible(eligible, atom_i, atom_j)
 #             is_special = _cluster_special(special, atom_i, atom_j)
-
 #             is_eligible || (exclusion_mask |= bit)
 #             is_special && (special_mask |= bit)
 
 #             if is_eligible && shortcut_pair(lj.shortcut, atoms[atom_i], atoms[atom_j], is_special)
 #                 lj_shortcut_mask |= bit
 #             end
-
 #         end
 #     end
+
 #     masks = _cluster_pair_interaction_masks(pair_mask, exclusion_mask, special_mask)
 #     lj_mask = masks.lj_mask & ~lj_shortcut_mask
 
@@ -2967,11 +2998,38 @@ function _cluster_full_pair_masks(
     special,
     ci::Integer,
     cj::Integer,
+    include_coulomb::Bool,
     ::Val{CW},
 ) where {CW}
-    pair_mask = UInt64(0)
+    same_cluster = ci == cj
+
+    pair_mask = _cluster_lane_pair_mask(
+        data.cluster_active_masks[ci],
+        data.cluster_active_masks[cj],
+        same_cluster,
+        Val(CW),
+    )
+
+    lj_possible_mask = _cluster_lane_pair_mask(
+        data.cluster_lj_masks[ci],
+        data.cluster_lj_masks[cj],
+        same_cluster,
+        Val(CW),
+    )
+
+    coul_possible_mask = include_coulomb ? _cluster_lane_pair_mask(
+        data.cluster_coul_masks[ci],
+        data.cluster_coul_masks[cj],
+        same_cluster,
+        Val(CW),
+    ) : UInt64(0)
+
+    work_mask = lj_possible_mask | coul_possible_mask
+    work_mask == 0 && return _cluster_empty_pair_masks()
+
     exclusion_mask = UInt64(0)
-    special_mask = UInt64(0)
+    lj_14_mask = UInt64(0)
+    coul_14_mask = UInt64(0)
     lj_shortcut_mask = UInt64(0)
 
     first_i = (ci - 1) * CW + 1
@@ -2983,36 +3041,43 @@ function _cluster_full_pair_masks(
         atom_i == 0 && continue
 
         for lane_j in 1:CW
-            ci == cj && lane_j <= lane_i && continue
+            same_cluster && lane_j <= lane_i && continue
+
+            bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
+            (work_mask & bit) == 0 && continue
 
             slot_j = first_j + lane_j - 1
             atom_j = Int(data.slot_to_atom[slot_j])
             atom_j == 0 && continue
 
-            bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
-            pair_mask |= bit
-
             is_eligible = _cluster_eligible(eligible, atom_i, atom_j)
-            is_special = _cluster_special(special, atom_i, atom_j)
-            is_eligible || (exclusion_mask |= bit)
-            is_special && (special_mask |= bit)
 
-            if is_eligible && shortcut_pair(lj.shortcut, atoms[atom_i], atoms[atom_j], is_special)
+            if !is_eligible
+                exclusion_mask |= bit
+                continue
+            end
+
+            is_special = _cluster_special(special, atom_i, atom_j)
+
+            if is_special
+                (lj_possible_mask & bit) != 0 && (lj_14_mask |= bit)
+                (coul_possible_mask & bit) != 0 && (coul_14_mask |= bit)
+            end
+
+            if (lj_possible_mask & bit) != 0 &&
+                    shortcut_pair(lj.shortcut, atoms[atom_i], atoms[atom_j], is_special)
                 lj_shortcut_mask |= bit
             end
         end
     end
 
-    masks = _cluster_pair_interaction_masks(pair_mask, exclusion_mask, special_mask)
-    lj_mask = masks.lj_mask & ~lj_shortcut_mask
-
     return (
-        pair_mask = masks.pair_mask,
-        exclusion_mask = masks.exclusion_mask,
-        lj_14_mask = masks.lj_14_mask,
-        coul_14_mask = masks.coul_14_mask,
-        lj_mask = lj_mask,
-        coul_mask = masks.coul_mask,
+        pair_mask = pair_mask,
+        exclusion_mask = exclusion_mask,
+        lj_14_mask = lj_14_mask,
+        coul_14_mask = coul_14_mask,
+        lj_mask = (lj_possible_mask & ~exclusion_mask) & ~lj_shortcut_mask,
+        coul_mask = coul_possible_mask & ~exclusion_mask,
     )
 end
 
@@ -3036,7 +3101,6 @@ end
 #     special_mask = UInt64(0)
 #     lj_shortcut_mask = UInt64(0)
 
-
 #     first_i = (ci - 1) * CW + 1
 #     first_j = (cj - 1) * CW + 1
 
@@ -3055,12 +3119,12 @@ end
 #             slot_j = first_j + lane_j - 1
 #             atom_j = Int(data.slot_to_atom[slot_j])
 #             atom_j == 0 && continue
-            
+
 #             dx = xi - (data.x[slot_j] + sx)
 #             dy = yi - (data.y[slot_j] + sy)
 #             dz = zi - (data.z[slot_j] + sz)
 #             r2 = dx * dx + dy * dy + dz * dz
-            
+
 #             r2 <= cutoff2 || continue
 
 #             bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
@@ -3068,7 +3132,6 @@ end
 
 #             is_eligible = _cluster_eligible(eligible, atom_i, atom_j)
 #             is_special = _cluster_special(special, atom_i, atom_j)
-
 #             is_eligible || (exclusion_mask |= bit)
 #             is_special && (special_mask |= bit)
 
@@ -3080,7 +3143,7 @@ end
 
 #     masks = _cluster_pair_interaction_masks(pair_mask, exclusion_mask, special_mask)
 #     lj_mask = masks.lj_mask & ~lj_shortcut_mask
-    
+
 #     return (
 #         pair_mask = masks.pair_mask,
 #         exclusion_mask = masks.exclusion_mask,
@@ -3103,11 +3166,32 @@ function _cluster_pruned_pair_masks(
     sx::T,
     sy::T,
     sz::T,
+    include_coulomb::Bool,
     ::Val{CW},
 ) where {T, CW}
+    same_cluster = ci == cj
+
+    lj_possible_cluster_mask = _cluster_lane_pair_mask(
+        data.cluster_lj_masks[ci],
+        data.cluster_lj_masks[cj],
+        same_cluster,
+        Val(CW),
+    )
+
+    coul_possible_cluster_mask = include_coulomb ? _cluster_lane_pair_mask(
+        data.cluster_coul_masks[ci],
+        data.cluster_coul_masks[cj],
+        same_cluster,
+        Val(CW),
+    ) : UInt64(0)
+
+    work_cluster_mask = lj_possible_cluster_mask | coul_possible_cluster_mask
+    work_cluster_mask == 0 && return _cluster_empty_pair_masks()
+
     pair_mask = UInt64(0)
     exclusion_mask = UInt64(0)
-    special_mask = UInt64(0)
+    lj_14_mask = UInt64(0)
+    coul_14_mask = UInt64(0)
     lj_shortcut_mask = UInt64(0)
 
     first_i = (ci - 1) * CW + 1
@@ -3123,7 +3207,10 @@ function _cluster_pruned_pair_masks(
         zi = data.z[slot_i]
 
         for lane_j in 1:CW
-            ci == cj && lane_j <= lane_i && continue
+            same_cluster && lane_j <= lane_i && continue
+
+            bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
+            (work_cluster_mask & bit) == 0 && continue
 
             slot_j = first_j + lane_j - 1
             atom_j = Int(data.slot_to_atom[slot_j])
@@ -3133,35 +3220,41 @@ function _cluster_pruned_pair_masks(
             dy = yi - (data.y[slot_j] + sy)
             dz = zi - (data.z[slot_j] + sz)
             r2 = dx * dx + dy * dy + dz * dz
-
             r2 <= cutoff2 || continue
 
-            bit = _lane_pair_bit(lane_i, lane_j, Val(CW))
             pair_mask |= bit
 
             is_eligible = _cluster_eligible(eligible, atom_i, atom_j)
-            is_special = _cluster_special(special, atom_i, atom_j)
-            is_eligible || (exclusion_mask |= bit)
-            is_special && (special_mask |= bit)
 
-            if is_eligible && shortcut_pair(lj.shortcut, atoms[atom_i], atoms[atom_j], is_special)
+            if !is_eligible
+                exclusion_mask |= bit
+                continue
+            end
+
+            is_special = _cluster_special(special, atom_i, atom_j)
+
+            if is_special
+                (lj_possible_cluster_mask & bit) != 0 && (lj_14_mask |= bit)
+                (coul_possible_cluster_mask & bit) != 0 && (coul_14_mask |= bit)
+            end
+
+            if (lj_possible_cluster_mask & bit) != 0 &&
+                    shortcut_pair(lj.shortcut, atoms[atom_i], atoms[atom_j], is_special)
                 lj_shortcut_mask |= bit
             end
         end
     end
 
-    masks = _cluster_pair_interaction_masks(pair_mask, exclusion_mask, special_mask)
-    lj_mask = masks.lj_mask & ~lj_shortcut_mask
-
     return (
-        pair_mask = masks.pair_mask,
-        exclusion_mask = masks.exclusion_mask,
-        lj_14_mask = masks.lj_14_mask,
-        coul_14_mask = masks.coul_14_mask,
-        lj_mask = lj_mask,
-        coul_mask = masks.coul_mask,
+        pair_mask = pair_mask,
+        exclusion_mask = exclusion_mask,
+        lj_14_mask = lj_14_mask,
+        coul_14_mask = coul_14_mask,
+        lj_mask = (pair_mask & lj_possible_cluster_mask & ~exclusion_mask) & ~lj_shortcut_mask,
+        coul_mask = pair_mask & coul_possible_cluster_mask & ~exclusion_mask,
     )
 end
+
 
 
 function _ensure_cluster_pair_chunks!(data::ClusterPairSoA{T}, n_parts::Integer) where {T}
@@ -3327,6 +3420,16 @@ function _build_cluster_pairs!(
                         bbox_dist2 <= cutoff2 || continue
 
                         masks = if bbox_dist2 <= rB2
+                            # _cluster_full_pair_masks(
+                            #     data,
+                            #     atoms,
+                            #     lj,
+                            #     eligible,
+                            #     special,
+                            #     ci,
+                            #     cj,
+                            #     Val(CW),
+                            # )
                             _cluster_full_pair_masks(
                                 data,
                                 atoms,
@@ -3335,9 +3438,25 @@ function _build_cluster_pairs!(
                                 special,
                                 ci,
                                 cj,
+                                include_coulomb,
                                 Val(CW),
                             )
+                            
                         else
+                            # _cluster_pruned_pair_masks(
+                            #     data,
+                            #     atoms,
+                            #     lj,
+                            #     eligible,
+                            #     special,
+                            #     ci,
+                            #     cj,
+                            #     cutoff2,
+                            #     sx,
+                            #     sy,
+                            #     sz,
+                            #     Val(CW),
+                            # )
                             _cluster_pruned_pair_masks(
                                 data,
                                 atoms,
@@ -3350,8 +3469,10 @@ function _build_cluster_pairs!(
                                 sx,
                                 sy,
                                 sz,
+                                include_coulomb,
                                 Val(CW),
                             )
+                            
                         end
                         
                         keep_mask = include_coulomb ? (masks.lj_mask | masks.coul_mask) : masks.lj_mask
@@ -3869,7 +3990,21 @@ function _prune_cluster_pairs!(
 
             bbox_dist2 <= prune_cutoff2 || continue
             
-            masks =  _cluster_pruned_pair_masks(
+            # masks =  _cluster_pruned_pair_masks(
+            #     data,
+            #     atoms,
+            #     lj,
+            #     eligible,
+            #     special,
+            #     ci,
+            #     cj,
+            #     prune_cutoff2,
+            #     sx,
+            #     sy,
+            #     sz,
+            #     Val(CW),
+            # )
+            masks = _cluster_pruned_pair_masks(
                 data,
                 atoms,
                 lj,
@@ -3881,8 +4016,10 @@ function _prune_cluster_pairs!(
                 sx,
                 sy,
                 sz,
+                include_coulomb,
                 Val(CW),
             )
+            
 
             keep_mask = include_coulomb ? (masks.lj_mask | masks.coul_mask) : masks.lj_mask
             keep_mask == 0 && continue
