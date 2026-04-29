@@ -2427,7 +2427,6 @@ end
     return (mask & _cluster_shift_mask_subwidth(Val(Shift), Val(W), Val(FullW))) != 0
 end
 
-
 @inline function _cluster_shift_has_pairs(mask::UInt64, ::Val{Shift}, ::Val{CW}) where {Shift, CW}
     return (mask & _cluster_shift_mask(Val(Shift), Val(CW))) != 0
 end
