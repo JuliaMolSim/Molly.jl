@@ -552,3 +552,20 @@ function constrained_atom_pairs(constraints::Union{Tuple, NamedTuple})
         return unique_pair_list(pairs_constrained)
     end
 end
+
+function constraints_to_bonds(sys, k::K) where K
+    cons_pairs = constrained_atom_pairs(sys)
+    if length(cons_pairs) > 0
+        bond_is, bond_js = Int32[], Int32[]
+        D = typeof(first(cons_pairs)[3])
+        bond_inters = HarmonicBond{K, D}[]
+        for (i, j, d) in cons_pairs
+            push!(bond_is, i)
+            push!(bond_js, j)
+            push!(bond_inters, HarmonicBond(k, d))
+        end
+        return InteractionList2Atoms(bond_is, bond_js, bond_inters)
+    else
+        return InteractionList2Atoms(Any)
+    end
+end
