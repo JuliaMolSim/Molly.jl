@@ -87,12 +87,17 @@ Steepest descent energy minimization.
 - `max_steps::Int=1000`: the maximum number of steps.
 - `tol::F=1000.0u"kJ * mol^-1 * nm^-1"`: the maximum force below which to
     finish minimization.
+- `constraint_bond_constant::K=10000.0u"kJ * mol^-1 * nm^-2"`: the force constant
+    for the harmonic bonds that are used instead of constraints during
+    minimisation. Set to `nothing` to not use harmonic bonds and ignore
+    constraints. Unused if the system does not have constraints.
 - `log_stream::L=devnull`: stream to print minimization progress to.
 """
-@kwdef struct SteepestDescentMinimizer{D, F, L}
+@kwdef struct SteepestDescentMinimizer{D, F, K, L}
     step_size::D = 0.01u"nm"
     max_steps::Int = 1_000
     tol::F = 1000.0u"kJ * mol^-1 * nm^-1"
+    constraint_bond_constant::K = 10000.0u"kJ * mol^-1 * nm^-2"
     log_stream::L = devnull
 end
 
@@ -151,16 +156,28 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            strictness=default_strictness())
     # @inline needed to avoid Enzyme error
     check_strictness(strictness)
+    using_constraints = (length(sys.constraints) > 0)
+    if using_constraints && !isnothing(sim.constraint_bond_constant)
+        constraint_bonds = constraints_to_bonds(sys, sim.constraint_bond_constant)
+        if length(constraint_bonds) > 0
+            sis = (sys.specific_inter_lists..., constraint_bonds)
+        else
+            sis = sys.specific_inter_lists
+        end
+    else
+        sis = sys.specific_inter_lists
+    end
+
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
-    E = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads)
+    E = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads,
+                         specific_inter_lists=sis)
     apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
                    current_potential_energy=E)
-    using_constraints = (length(sys.constraints) > 0)
     println(sim.log_stream, "Step ", init_step, " - potential energy ", E,
             " - max force N/A - N/A")
     hn = sim.step_size
@@ -169,7 +186,8 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
 
     progress = setup_progress_minimizer(ustrip(sim.tol), show_progress)
     for step_n in (init_step + 1):(init_step + sim.max_steps)
-        forces!(F, sys, neighbors, step_n, buffers, Val(needs_vir); n_threads=n_threads)
+        forces!(F, sys, neighbors, step_n, buffers, Val(needs_vir); n_threads=n_threads,
+                                                    specific_inter_lists=sis)
         max_force = maximum(norm.(F))
 
         coords_copy .= sys.coords
@@ -181,7 +199,8 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                     n_threads=n_threads)
-        E_trial = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
+                                                            specific_inter_lists=sis)
         if E_trial < E
             hn = 6 * hn / 5
             E = E_trial
