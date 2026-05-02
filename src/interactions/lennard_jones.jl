@@ -4572,11 +4572,48 @@ end
     return weight * epsilon * inv_r2 * sr6 * (T(48) * sr6 - T(24))
 end
 
-@inline function _cluster_coul_force_div_r(safe_r2, qi, qj, coulomb_const, weight)
-    inv_r2 = one(typeof(safe_r2)) / safe_r2
+# @inline function _cluster_coul_force_div_r(safe_r2, qi, qj, coulomb_const, weight)
+#     inv_r2 = one(typeof(safe_r2)) / safe_r2
+#     inv_r = SIMD.sqrt(inv_r2)
+#     inv_r3 = inv_r2 * inv_r
+#     return weight * coulomb_const * qi * qj * inv_r3
+# end
+
+@inline function _cluster_coul_force_div_r(
+    coul::SIMDCoulomb,
+    safe_r2,
+    qi,
+    qj,
+    signed_weight
+)
+    V = typeof(safe_r2)
+    T = eltype(V)
+    inv_r2 = one(V) / safe_r2
     inv_r = SIMD.sqrt(inv_r2)
     inv_r3 = inv_r2 * inv_r
-    return weight * coulomb_const * qi * qj * inv_r3
+    return abs(signed_weight) * T(coul.coulomb_const) * qi * qj * inv_r3
+end
+
+@inline function _cluster_coul_force_div_r(
+    coul::SIMDCoulombReactionField,
+    safe_r2,
+    qi,
+    qj,
+    signed_weight
+)
+    V = typeof(safe_r2)
+    T = eltype(V)
+
+    inv_r2 = one(V) / safe_r2
+    inv_r = SIMD.sqrt(inv_r2)
+    inv_r3 = inv_r2 * inv_r
+
+    # Negative signed weight means special 1-4 Coulomb:
+    # Molly's RF special pairs use plain Coulomb, not RF correction.
+    rf_scale = vifelse(signed_weight < zero(V), zero(V), one(V))
+    rf_term = muladd(-rf_scale, T(coul.two_krf), inv_r3)
+
+    return abs(signed_weight) * T(coul.coulomb_const) * qi * qj * rf_term
 end
 
 
@@ -4707,7 +4744,8 @@ end
     coul_cutoff2::T,
     lj_special_weight::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    #coulomb_const::T,
+    coul,
 ) where {T}
     V8 = Vec{SIMD_WIDTH, T}
     V4 = Vec{CLUSTER_HALF_LJ_WIDTH, T}
@@ -4753,15 +4791,15 @@ end
             valid = active & (r2 <= coul_cutoff2)
             safe_r2 = vifelse(valid, r2, one(V8))
 
-            weight = vifelse(special, coul_special_weight, one(V8))
+            weight = vifelse(special, -coul_special_weight, one(V8))
 
             f_div_r = _cluster_coul_force_div_r(
-                safe_r2,
-                charge_i,
-                charge_j_s,
-                coulomb_const,
-                weight,
-            )
+        coul,
+        safe_r2,
+        charge_i,
+        charge_j_s,
+        weight,
+    )
 
             f_div_r = vifelse(valid, f_div_r, zero(V8))
 
@@ -4911,7 +4949,8 @@ end
     coul_cutoff2::T,
     lj_special_weight::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    #coulomb_const::T,
+    coul,
     ::Val{DoLJ},
     ::Val{DoCoul},
 ) where {T, DoLJ, DoCoul}
@@ -5004,14 +5043,14 @@ end
 
                 charge_j_s = _cluster_rotate_register(charge_j, Val(s))
 
-                coul_weight = vifelse(coul_special, coul_special_weight, one(VFloat))
+                coul_weight = vifelse(coul_special, -coul_special_weight, one(VFloat))
                 f_coul = _cluster_coul_force_div_r(
-                    coul_safe_r2,
-                    charge_i,
-                    charge_j_s,
-                    coulomb_const,
-                    coul_weight,
-                )
+        coul,
+        coul_safe_r2,
+        charge_i,
+        charge_j_s,
+        coul_weight,
+    )
 
                 f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
             end
@@ -5067,7 +5106,8 @@ end
     coul_cutoff2::T,
     lj_special_weight::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    #coulomb_const::T,
+    coul,
     ::Val{LaneI},
     ::Val{DoLJ},
     ::Val{DoCoul},
@@ -5122,17 +5162,17 @@ end
 
         coul_valid = coul_active & (r2 <= coul_cutoff2)
         coul_safe_r2 = vifelse(coul_valid, r2, one(VFloat))
-        coul_weight = vifelse(coul_special, coul_special_weight, one(VFloat))
+        coul_weight = vifelse(coul_special, -coul_special_weight, one(VFloat))
 
         qi = data.charge[slot_i]
 
         f_coul = _cluster_coul_force_div_r(
-            coul_safe_r2,
-            qi,
-            charge_j,
-            coulomb_const,
-            coul_weight,
-        )
+        coul,
+        coul_safe_r2,
+        qi,
+        charge_j,
+        coul_weight,
+    )
 
         f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
     end
@@ -5196,7 +5236,8 @@ end
     img_sz::T,
     coul_cutoff2::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    #coulomb_const::T,
+    coul,
     ::Val{LaneI},
 ) where {T, LaneI}
     VFloat = Vec{SIMD_WIDTH, T}
@@ -5220,10 +5261,16 @@ end
     valid = active & (r2 <= coul_cutoff2)
 
     safe_r2 = vifelse(valid, r2, one(VFloat))
-    weight = vifelse(special, coul_special_weight, one(VFloat))
+    weight = vifelse(special, -coul_special_weight, one(VFloat))
 
     qi = data.charge[slot_i]
-    f_div_r = _cluster_coul_force_div_r(safe_r2, qi, charge_j, coulomb_const, weight)
+    f_div_r = _cluster_coul_force_div_r(
+        coul,
+        safe_r2,
+        qi,
+        charge_j,
+        weight,
+    )
     f_div_r = vifelse(valid, f_div_r, zero(VFloat))
 
     fx_ij = f_div_r * dx
@@ -5243,7 +5290,8 @@ end
     pair_idx::Int,
     coul_cutoff2::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    #coulomb_const::T,
+    coul,
     ::Val{IStart},
 ) where {T, IStart}
     VFloat = Vec{SIMD_WIDTH, T}
@@ -5268,7 +5316,8 @@ end
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, 
+        coul,
         Val(IStart),
     )
 
@@ -5276,7 +5325,8 @@ end
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, 
+        coul,
         Val(IStart + 1),
     )
 
@@ -5284,7 +5334,8 @@ end
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, 
+        coul,
         Val(IStart + 2),
     )
 
@@ -5292,7 +5343,8 @@ end
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, 
+        coul,
         Val(IStart + 3),
     )
 
@@ -5329,7 +5381,8 @@ end
     coul_cutoff2::T,
     lj_special_weight::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    #coulomb_const::T,
+    coul,
     ::Val{IStart},
     ::Val{DoLJ},
     ::Val{DoCoul},
@@ -5389,7 +5442,7 @@ end
         coul_cutoff2,
         lj_special_weight,
         coul_special_weight,
-        coulomb_const,
+        coul,
         Val(IStart),
         Val(DoLJ),
         Val(DoCoul),
@@ -5415,7 +5468,7 @@ end
         coul_cutoff2,
         lj_special_weight,
         coul_special_weight,
-        coulomb_const,
+        coul,
         Val(IStart + 1),
         Val(DoLJ),
         Val(DoCoul),
@@ -5441,7 +5494,7 @@ end
         coul_cutoff2,
         lj_special_weight,
         coul_special_weight,
-        coulomb_const,
+        coul,
         Val(IStart + 2),
         Val(DoLJ),
         Val(DoCoul),
@@ -5467,7 +5520,7 @@ end
         coul_cutoff2,
         lj_special_weight,
         coul_special_weight,
-        coulomb_const,
+        coul,
         Val(IStart + 3),
         Val(DoLJ),
         Val(DoCoul),
@@ -5503,7 +5556,7 @@ end
     pair_idx::Int,
     coul_cutoff2::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    coul,
 ) where {T}
     VFloat = Vec{SIMD_WIDTH, T}
 
@@ -5526,56 +5579,56 @@ end
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(1),
     )
     f2x, f2y, f2z, fj2x, fj2y, fj2z = _clustered_coul_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(2),
     )
     f3x, f3y, f3z, fj3x, fj3y, fj3z = _clustered_coul_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(3),
     )
     f4x, f4y, f4z, fj4x, fj4y, fj4z = _clustered_coul_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(4),
     )
     f5x, f5y, f5z, fj5x, fj5y, fj5z = _clustered_coul_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(5),
     )
     f6x, f6y, f6z, fj6x, fj6y, fj6z = _clustered_coul_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(6),
     )
     f7x, f7y, f7z, fj7x, fj7y, fj7z = _clustered_coul_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(7),
     )
     f8x, f8y, f8z, fj8x, fj8y, fj8z = _clustered_coul_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(8),
     )
 
@@ -5614,7 +5667,7 @@ end
     img_sz::T,
     lj_cutoff2::T,
     coul_cutoff2::T,
-    coulomb_const::T,
+    coul,
     ::Val{LaneI},
 ) where {T, LaneI}
     VFloat = Vec{SIMD_WIDTH, T}
@@ -5639,10 +5692,10 @@ end
 
     qi = data.charge[slot_i]
     f_coul = _cluster_coul_force_div_r(
+        coul,
         coul_safe_r2,
         qi,
         charge_j,
-        coulomb_const,
         one(VFloat),
     )
 
@@ -5712,7 +5765,7 @@ end
     img_sy::T,
     img_sz::T,
     coul_cutoff2::T,
-    coulomb_const::T,
+    coul,
     ::Val{LaneI},
 ) where {T, LaneI}
     VFloat = Vec{SIMD_WIDTH, T}
@@ -5729,7 +5782,13 @@ end
     safe_r2 = vifelse(valid, r2, one(VFloat))
 
     qi = data.charge[slot_i]
-    f_div_r = _cluster_coul_force_div_r(safe_r2, qi, charge_j, coulomb_const, one(VFloat))
+    f_div_r = _cluster_coul_force_div_r(
+        coul,
+        safe_r2,
+        qi,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r = vifelse(valid, f_div_r, zero(VFloat))
 
     fx_ij = f_div_r * dx
@@ -5756,7 +5815,7 @@ end
     img_sz::T,
     lj_cutoff2::T,
     coul_cutoff2::T,
-    coulomb_const::T,
+    coul,
     ::Val{LaneI},
     ::Val{DoLJ},
     ::Val{DoCoul},
@@ -5778,12 +5837,12 @@ end
 
         qi = data.charge[slot_i]
         f_coul = _cluster_coul_force_div_r(
-            coul_safe_r2,
-            qi,
-            charge_j,
-            coulomb_const,
-            one(VFloat),
-        )
+        coul,
+        coul_safe_r2,
+        qi,
+        charge_j,
+        one(VFloat),
+    )
 
         f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
     end
@@ -5843,7 +5902,7 @@ end
     img_sz::T,
     lj_cutoff2::T,
     coul_cutoff2::T,
-    coulomb_const::T,
+    coul,
 ) where {T}
     VMask = Vec{SIMD_WIDTH, Bool}
     false_mask = VMask((false, false, false, false, false, false, false, false))
@@ -5867,28 +5926,28 @@ end
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         coul_active1, lj_active1, has_lj_row1,
         img_sx, img_sy, img_sz,
-        lj_cutoff2, coul_cutoff2, coulomb_const,
+        lj_cutoff2, coul_cutoff2, coul,
         Val(1), Val(true), Val(true),
     )
     r2 = _clustered_lj_coul_plain_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         coul_active2, lj_active2, has_lj_row2,
         img_sx, img_sy, img_sz,
-        lj_cutoff2, coul_cutoff2, coulomb_const,
+        lj_cutoff2, coul_cutoff2, coul,
         Val(2), Val(true), Val(true),
     )
     r3 = _clustered_lj_coul_plain_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         coul_active3, lj_active3, has_lj_row3,
         img_sx, img_sy, img_sz,
-        lj_cutoff2, coul_cutoff2, coulomb_const,
+        lj_cutoff2, coul_cutoff2, coul,
         Val(3), Val(true), Val(true),
     )
     r4 = _clustered_lj_coul_plain_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         coul_active4, lj_active4, has_lj_row4,
         img_sx, img_sy, img_sz,
-        lj_cutoff2, coul_cutoff2, coulomb_const,
+        lj_cutoff2, coul_cutoff2, coul,
         Val(4), Val(true), Val(true),
     )
 
@@ -5908,7 +5967,7 @@ end
     img_sy::T,
     img_sz::T,
     coul_cutoff2::T,
-    coulomb_const::T,
+    coul,
 ) where {T}
     VMask = Vec{SIMD_WIDTH, Bool}
     false_mask = VMask((false, false, false, false, false, false, false, false))
@@ -5922,28 +5981,28 @@ end
         data, first_i, xj, yj, zj, zero(xj), zero(xj), charge_j,
         coul_active5, false_mask, false,
         img_sx, img_sy, img_sz,
-        zero(T), coul_cutoff2, coulomb_const,
+        zero(T), coul_cutoff2, coul,
         Val(5), Val(false), Val(true),
     )
     r6 = _clustered_lj_coul_plain_irow_1x8!(
         data, first_i, xj, yj, zj, zero(xj), zero(xj), charge_j,
         coul_active6, false_mask, false,
         img_sx, img_sy, img_sz,
-        zero(T), coul_cutoff2, coulomb_const,
+        zero(T), coul_cutoff2, coul,
         Val(6), Val(false), Val(true),
     )
     r7 = _clustered_lj_coul_plain_irow_1x8!(
         data, first_i, xj, yj, zj, zero(xj), zero(xj), charge_j,
         coul_active7, false_mask, false,
         img_sx, img_sy, img_sz,
-        zero(T), coul_cutoff2, coulomb_const,
+        zero(T), coul_cutoff2, coul,
         Val(7), Val(false), Val(true),
     )
     r8 = _clustered_lj_coul_plain_irow_1x8!(
         data, first_i, xj, yj, zj, zero(xj), zero(xj), charge_j,
         coul_active8, false_mask, false,
         img_sx, img_sy, img_sz,
-        zero(T), coul_cutoff2, coulomb_const,
+        zero(T), coul_cutoff2, coul,
         Val(8), Val(false), Val(true),
     )
 
@@ -5960,7 +6019,7 @@ end
     pair_idx::Int,
     lj_cutoff2::T,
     coul_cutoff2::T,
-    coulomb_const::T,
+    coul,
 ) where {T}
     VFloat = Vec{SIMD_WIDTH, T}
     VMask = Vec{SIMD_WIDTH, Bool}
@@ -6022,7 +6081,13 @@ end
     coul_valid1 = coul_active1 & (r21 <= coul_cutoff2)
     coul_safe_r21 = vifelse(coul_valid1, r21, one(VFloat))
     qi1 = data.charge[slot_i]
-    f_coul1 = _cluster_coul_force_div_r(coul_safe_r21, qi1, charge_j, coulomb_const, one(VFloat))
+    f_coul1 = _cluster_coul_force_div_r(
+        coul,
+        coul_safe_r21,
+        qi1,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r1 += vifelse(coul_valid1, f_coul1, zero(VFloat))
 
     if has_lj_row1
@@ -6076,7 +6141,13 @@ end
     coul_valid2 = coul_active2 & (r22 <= coul_cutoff2)
     coul_safe_r22 = vifelse(coul_valid2, r22, one(VFloat))
     qi2 = data.charge[slot_i]
-    f_coul2 = _cluster_coul_force_div_r(coul_safe_r22, qi2, charge_j, coulomb_const, one(VFloat))
+    f_coul2 = _cluster_coul_force_div_r(
+        coul,
+        coul_safe_r22,
+        qi2,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r2 += vifelse(coul_valid2, f_coul2, zero(VFloat))
 
     if has_lj_row2
@@ -6130,7 +6201,13 @@ end
     coul_valid3 = coul_active3 & (r23 <= coul_cutoff2)
     coul_safe_r23 = vifelse(coul_valid3, r23, one(VFloat))
     qi3 = data.charge[slot_i]
-    f_coul3 = _cluster_coul_force_div_r(coul_safe_r23, qi3, charge_j, coulomb_const, one(VFloat))
+    f_coul3 = _cluster_coul_force_div_r(
+        coul,
+        coul_safe_r23,
+        qi3,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r3 += vifelse(coul_valid3, f_coul3, zero(VFloat))
 
     if has_lj_row3
@@ -6184,7 +6261,13 @@ end
     coul_valid4 = coul_active4 & (r24 <= coul_cutoff2)
     coul_safe_r24 = vifelse(coul_valid4, r24, one(VFloat))
     qi4 = data.charge[slot_i]
-    f_coul4 = _cluster_coul_force_div_r(coul_safe_r24, qi4, charge_j, coulomb_const, one(VFloat))
+    f_coul4 = _cluster_coul_force_div_r(
+        coul,
+        coul_safe_r24,
+        qi4,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r4 += vifelse(coul_valid4, f_coul4, zero(VFloat))
 
     if has_lj_row4
@@ -6236,7 +6319,13 @@ end
     coul_valid5 = coul_active5 & (r25 <= coul_cutoff2)
     coul_safe_r25 = vifelse(coul_valid5, r25, one(VFloat))
     qi5 = data.charge[slot_i]
-    f_div_r5 = _cluster_coul_force_div_r(coul_safe_r25, qi5, charge_j, coulomb_const, one(VFloat))
+    f_div_r5 = _cluster_coul_force_div_r(
+        coul,
+        coul_safe_r25,
+        qi5,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r5 = vifelse(coul_valid5, f_div_r5, zero(VFloat))
     fx_ij5 = f_div_r5 * dx5
     fy_ij5 = f_div_r5 * dy5
@@ -6257,7 +6346,13 @@ end
     coul_valid6 = coul_active6 & (r26 <= coul_cutoff2)
     coul_safe_r26 = vifelse(coul_valid6, r26, one(VFloat))
     qi6 = data.charge[slot_i]
-    f_div_r6 = _cluster_coul_force_div_r(coul_safe_r26, qi6, charge_j, coulomb_const, one(VFloat))
+    f_div_r6 = _cluster_coul_force_div_r(
+        coul,
+        coul_safe_r26,
+        qi6,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r6 = vifelse(coul_valid6, f_div_r6, zero(VFloat))
     fx_ij6 = f_div_r6 * dx6
     fy_ij6 = f_div_r6 * dy6
@@ -6278,7 +6373,13 @@ end
     coul_valid7 = coul_active7 & (r27 <= coul_cutoff2)
     coul_safe_r27 = vifelse(coul_valid7, r27, one(VFloat))
     qi7 = data.charge[slot_i]
-    f_div_r7 = _cluster_coul_force_div_r(coul_safe_r27, qi7, charge_j, coulomb_const, one(VFloat))
+    f_div_r7 = _cluster_coul_force_div_r(
+        coul,
+        coul_safe_r27,
+        qi7,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r7 = vifelse(coul_valid7, f_div_r7, zero(VFloat))
     fx_ij7 = f_div_r7 * dx7
     fy_ij7 = f_div_r7 * dy7
@@ -6299,7 +6400,13 @@ end
     coul_valid8 = coul_active8 & (r28 <= coul_cutoff2)
     coul_safe_r28 = vifelse(coul_valid8, r28, one(VFloat))
     qi8 = data.charge[slot_i]
-    f_div_r8 = _cluster_coul_force_div_r(coul_safe_r28, qi8, charge_j, coulomb_const, one(VFloat))
+    f_div_r8 = _cluster_coul_force_div_r(
+        coul,
+        coul_safe_r28,
+        qi8,
+        charge_j,
+        one(VFloat),
+    )
     f_div_r8 = vifelse(coul_valid8, f_div_r8, zero(VFloat))
     fx_ij8 = f_div_r8 * dx8
     fy_ij8 = f_div_r8 * dy8
@@ -6346,7 +6453,7 @@ end
     coul_cutoff2::T,
     lj_special_weight::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    coul,
     ::Val{LaneI},
 ) where {T, LaneI}
     VFloat = Vec{SIMD_WIDTH, T}
@@ -6362,14 +6469,14 @@ end
     coul_special = _cluster_pairmask_row_vec(coul_special_mask, Val(LaneI), Val(SIMD_WIDTH), Val(SIMD_WIDTH))
     coul_valid = coul_active & (r2 <= coul_cutoff2)
     coul_safe_r2 = vifelse(coul_valid, r2, one(VFloat))
-    coul_weight = vifelse(coul_special, coul_special_weight, one(VFloat))
+    coul_weight = vifelse(coul_special, -coul_special_weight, one(VFloat))
 
     qi = data.charge[slot_i]
     f_coul = _cluster_coul_force_div_r(
+        coul,
         coul_safe_r2,
         qi,
         charge_j,
-        coulomb_const,
         coul_weight,
     )
 
@@ -6415,7 +6522,7 @@ end
     img_sz::T,
     coul_cutoff2::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    coul,
     ::Val{LaneI},
 ) where {T, LaneI}
     VFloat = Vec{SIMD_WIDTH, T}
@@ -6432,10 +6539,16 @@ end
     valid = active & (r2 <= coul_cutoff2)
 
     safe_r2 = vifelse(valid, r2, one(VFloat))
-    weight = vifelse(special, coul_special_weight, one(VFloat))
+    weight = vifelse(special, -coul_special_weight, one(VFloat))
 
     qi = data.charge[slot_i]
-    f_div_r = _cluster_coul_force_div_r(safe_r2, qi, charge_j, coulomb_const, weight)
+    f_div_r = _cluster_coul_force_div_r(
+        coul,
+        safe_r2,
+        qi,
+        charge_j,
+        weight,
+    )
     f_div_r = vifelse(valid, f_div_r, zero(VFloat))
 
     fx_ij = f_div_r * dx
@@ -6457,7 +6570,7 @@ end
     coul_cutoff2::T,
     lj_special_weight::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    coul,
 ) where {T}
     VFloat = Vec{SIMD_WIDTH, T}
 
@@ -6484,28 +6597,28 @@ end
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         lj_mask, lj_special_mask, coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coul,
         Val(1),
     )
     f2x, f2y, f2z, fj2x, fj2y, fj2z = _clustered_half_lj_coul_lower_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         lj_mask, lj_special_mask, coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coul,
         Val(2),
     )
     f3x, f3y, f3z, fj3x, fj3y, fj3z = _clustered_half_lj_coul_lower_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         lj_mask, lj_special_mask, coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coul,
         Val(3),
     )
     f4x, f4y, f4z, fj4x, fj4y, fj4z = _clustered_half_lj_coul_lower_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         lj_mask, lj_special_mask, coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+        lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coul,
         Val(4),
     )
 
@@ -6513,28 +6626,28 @@ end
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(5),
     )
     f6x, f6y, f6z, fj6x, fj6y, fj6z = _clustered_half_lj_coul_upper_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(6),
     )
     f7x, f7y, f7z, fj7x, fj7y, fj7z = _clustered_half_lj_coul_upper_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(7),
     )
     f8x, f8y, f8z, fj8x, fj8y, fj8z = _clustered_half_lj_coul_upper_irow_1x8!(
         data, first_i, xj, yj, zj, charge_j,
         coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz,
-        coul_cutoff2, coul_special_weight, coulomb_const,
+        coul_cutoff2, coul_special_weight, coul,
         Val(8),
     )
 
@@ -6569,7 +6682,7 @@ end
     coul_cutoff2::T,
     lj_special_weight::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    coul,
     ::Val{HalfLJ},
 ) where {T, HalfLJ}
     VFloat = Vec{SIMD_WIDTH, T}
@@ -6597,28 +6710,28 @@ end
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         lj_mask, lj_special_mask, coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz, lj_cutoff2, coul_cutoff2,
-        lj_special_weight, coul_special_weight, coulomb_const,
+        lj_special_weight, coul_special_weight, coul,
         Val(1), Val(true), Val(true),
     )
     f2x, f2y, f2z, fj2x, fj2y, fj2z = _clustered_lj_coul_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         lj_mask, lj_special_mask, coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz, lj_cutoff2, coul_cutoff2,
-        lj_special_weight, coul_special_weight, coulomb_const,
+        lj_special_weight, coul_special_weight, coul,
         Val(2), Val(true), Val(true),
     )
     f3x, f3y, f3z, fj3x, fj3y, fj3z = _clustered_lj_coul_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         lj_mask, lj_special_mask, coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz, lj_cutoff2, coul_cutoff2,
-        lj_special_weight, coul_special_weight, coulomb_const,
+        lj_special_weight, coul_special_weight, coul,
         Val(3), Val(true), Val(true),
     )
     f4x, f4y, f4z, fj4x, fj4y, fj4z = _clustered_lj_coul_irow_1x8!(
         data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
         lj_mask, lj_special_mask, coul_mask, coul_special_mask,
         img_sx, img_sy, img_sz, lj_cutoff2, coul_cutoff2,
-        lj_special_weight, coul_special_weight, coulomb_const,
+        lj_special_weight, coul_special_weight, coul,
         Val(4), Val(true), Val(true),
     )
 
@@ -6627,28 +6740,28 @@ end
             data, first_i, xj, yj, zj, charge_j,
             coul_mask, coul_special_mask,
             img_sx, img_sy, img_sz,
-            coul_cutoff2, coul_special_weight, coulomb_const,
+            coul_cutoff2, coul_special_weight, coul,
             Val(5),
         )
         f6x, f6y, f6z, fj6x, fj6y, fj6z = _clustered_coul_irow_1x8!(
             data, first_i, xj, yj, zj, charge_j,
             coul_mask, coul_special_mask,
             img_sx, img_sy, img_sz,
-            coul_cutoff2, coul_special_weight, coulomb_const,
+            coul_cutoff2, coul_special_weight, coul,
             Val(6),
         )
         f7x, f7y, f7z, fj7x, fj7y, fj7z = _clustered_coul_irow_1x8!(
             data, first_i, xj, yj, zj, charge_j,
             coul_mask, coul_special_mask,
             img_sx, img_sy, img_sz,
-            coul_cutoff2, coul_special_weight, coulomb_const,
+            coul_cutoff2, coul_special_weight, coul,
             Val(7),
         )
         f8x, f8y, f8z, fj8x, fj8y, fj8z = _clustered_coul_irow_1x8!(
             data, first_i, xj, yj, zj, charge_j,
             coul_mask, coul_special_mask,
             img_sx, img_sy, img_sz,
-            coul_cutoff2, coul_special_weight, coulomb_const,
+            coul_cutoff2, coul_special_weight, coul,
             Val(8),
         )
     else
@@ -6656,28 +6769,28 @@ end
             data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
             lj_mask, lj_special_mask, coul_mask, coul_special_mask,
             img_sx, img_sy, img_sz, lj_cutoff2, coul_cutoff2,
-            lj_special_weight, coul_special_weight, coulomb_const,
+            lj_special_weight, coul_special_weight, coul,
             Val(5), Val(true), Val(true),
         )
         f6x, f6y, f6z, fj6x, fj6y, fj6z = _clustered_lj_coul_irow_1x8!(
             data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
             lj_mask, lj_special_mask, coul_mask, coul_special_mask,
             img_sx, img_sy, img_sz, lj_cutoff2, coul_cutoff2,
-            lj_special_weight, coul_special_weight, coulomb_const,
+            lj_special_weight, coul_special_weight, coul,
             Val(6), Val(true), Val(true),
         )
         f7x, f7y, f7z, fj7x, fj7y, fj7z = _clustered_lj_coul_irow_1x8!(
             data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
             lj_mask, lj_special_mask, coul_mask, coul_special_mask,
             img_sx, img_sy, img_sz, lj_cutoff2, coul_cutoff2,
-            lj_special_weight, coul_special_weight, coulomb_const,
+            lj_special_weight, coul_special_weight, coul,
             Val(7), Val(true), Val(true),
         )
         f8x, f8y, f8z, fj8x, fj8y, fj8z = _clustered_lj_coul_irow_1x8!(
             data, first_i, xj, yj, zj, sigma_j, sqrt_epsilon_j, charge_j,
             lj_mask, lj_special_mask, coul_mask, coul_special_mask,
             img_sx, img_sy, img_sz, lj_cutoff2, coul_cutoff2,
-            lj_special_weight, coul_special_weight, coulomb_const,
+            lj_special_weight, coul_special_weight, coul,
             Val(8), Val(true), Val(true),
         )
     end
@@ -6720,7 +6833,7 @@ end
     coul_cutoff2::T,
     lj_special_weight::T,
     coul_special_weight::T,
-    coulomb_const::T,
+    coul,
     ::Val{DoLJ},
     ::Val{DoCoul},
 ) where {T, DoLJ, DoCoul}
@@ -6813,14 +6926,14 @@ end
 
                 charge_j_s = _cluster_rotate_register(charge_j, Val(s))
 
-                coul_weight = vifelse(coul_special, coul_special_weight, one(VFloat))
+                coul_weight = vifelse(coul_special, -coul_special_weight, one(VFloat))
                 f_coul = _cluster_coul_force_div_r(
-                    coul_safe_r2,
-                    charge_i,
-                    charge_j_s,
-                    coulomb_const,
-                    coul_weight,
-                )
+        coul,
+        coul_safe_r2,
+        charge_i,
+        charge_j_s,
+        coul_weight,
+    )
 
                 f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
             end
@@ -6858,7 +6971,7 @@ end
 ########################################################################
 
 function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPairSoA{T}, boundary,
-    lj::SIMDLennardJones, coul::SIMDCoulomb, first_ci::Integer, step_ci::Integer,) where {T}
+    lj::SIMDLennardJones, coul::AbstractSIMDCoulomb, first_ci::Integer, step_ci::Integer,) where {T}
 
     VFloat = Vec{SIMD_WIDTH, T}
 
@@ -6866,7 +6979,7 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
     coul_cutoff2 = T(extract_cutoff_sq(coul))
     lj_special_weight = T(lj.weight_special)
     coul_special_weight = T(coul.weight_special)
-    coulomb_const = T(coul.coulomb_const)
+    #coulomb_const = T(coul.coulomb_const)
     
     half_lj_coul_ns = UInt64(0)
     full_lj_coul_ns = UInt64(0)
@@ -6908,7 +7021,7 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
                 dfx, dfy, dfz = _clustered_lj_coul_pair_8x8_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
                     lj_cutoff2, coul_cutoff2,
-                    lj_special_weight, coul_special_weight, coulomb_const,
+                    lj_special_weight, coul_special_weight, coul,
                     Val(true),
                 )
 
@@ -6924,7 +7037,7 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
             for pair_idx in half_masked_end:(half_end - 1)
                 dfx, dfy, dfz = _clustered_half_lj_coul_plain_pair_8x8_dedicated_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
-                    lj_cutoff2, coul_cutoff2, coulomb_const,
+                    lj_cutoff2, coul_cutoff2, coul,
                 )
 
                 fix_row += dfx
@@ -6940,7 +7053,7 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
                 dfx, dfy, dfz = _clustered_lj_coul_pair_8x8_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
                     lj_cutoff2, coul_cutoff2,
-                    lj_special_weight, coul_special_weight, coulomb_const,
+                    lj_special_weight, coul_special_weight, coul,
                     Val(false),
                 )
 
@@ -6958,7 +7071,7 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
             for pair_idx in both_end:(coul_end - 1)
                 dfx, dfy, dfz = _clustered_coul_pair_8x8_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
-                    coul_cutoff2, coul_special_weight, coulomb_const,
+                    coul_cutoff2, coul_special_weight, coul,
                 )
 
                 fix_row += dfx
@@ -6975,7 +7088,7 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
                 dfx, dfy, dfz = _clustered_lj_coul_pair_simd8_csr_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
                     xi, yi, zi, sigma_i, sqrt_epsilon_i, charge_i,
-                    lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coulomb_const,
+                    lj_cutoff2, coul_cutoff2, lj_special_weight, coul_special_weight, coul,
                     Val(true), Val(false),
                 )
                 
@@ -7003,7 +7116,7 @@ function _clustered_lj_coul_forces_packed_csr_chunk!(
     data::ClusterPairSoA{T},
     boundary,
     lj::SIMDLennardJones,
-    coul::SIMDCoulomb,
+    coul::AbstractSIMDCoulomb,
     first_ci::Integer,
     step_ci::Integer,
 ) where {T}
@@ -7236,7 +7349,7 @@ function pairwise_forces_loop!(
     force_units,
     n_atoms,
     pairwise_inters_nonl,
-    pairwise_inters_nl::Tuple{<:SIMDLennardJones, <:SIMDCoulomb},
+    pairwise_inters_nl::Tuple{<:SIMDLennardJones, <:AbstractSIMDCoulomb},
     ::Val{1},
     ::Val{needs_vir},
     step_n=0,
@@ -7486,7 +7599,7 @@ function pairwise_forces_loop!(
     force_units,
     n_atoms,
     pairwise_inters_nonl,
-    pairwise_inters_nl::Tuple{<:SIMDLennardJones, <:SIMDCoulomb},
+    pairwise_inters_nl::Tuple{<:SIMDLennardJones, <:AbstractSIMDCoulomb},
     ::Val{n_threads},
     ::Val{needs_vir},
     step_n=0,
