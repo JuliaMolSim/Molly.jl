@@ -4616,6 +4616,39 @@ end
     return abs(signed_weight) * T(coul.coulomb_const) * qi * qj * rf_term
 end
 
+@inline function _cluster_coul_force_div_r(
+    coul::SIMDCoulombEwald,
+    safe_r2,
+    qi,
+    qj,
+    signed_weight,
+)
+    V = typeof(safe_r2)
+    T = eltype(V)
+
+    alpha = T(coul.α)
+    two_α_inv_sqrtπ = T(coul.two_α_inv_sqrtπ)
+    coulomb_const = T(coul.coulomb_const)
+
+    inv_r2 = one(V) / safe_r2
+    inv_r = SIMD.sqrt(inv_r2)
+    inv_r3 = inv_r2 * inv_r
+
+    r = safe_r2 * inv_r
+    αr = alpha * r
+    αr2 = αr * αr
+    exp_mαr2 = SIMD.exp(-αr2)
+    erfc_αr = simd_erfc_from_exp(αr, exp_mαr2)
+
+    normal_term = muladd(two_α_inv_sqrtπ * r, exp_mαr2, erfc_αr)
+
+    # Special pairs are excluded from reciprocal-space Ewald,
+    # so their real-space contribution is ordinary weighted Coulomb.
+    ewald_factor = vifelse(signed_weight < zero(V), one(V), normal_term)
+
+    return abs(signed_weight) * coulomb_const * qi * qj * inv_r3 * ewald_factor
+end
+
 
 function _clustered_lj_forces_simd8_csr_chunk!(
     fx,
