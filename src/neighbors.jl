@@ -601,7 +601,7 @@ function CellListMapNeighborFinder(;
     end
 
     if isnothing(x0)
-        x = [(sides / oneunit(T)) .* rand(SVector{D, T}) for _ in 1:n_atoms]
+        x = [ ustrip.(sides) .* rand(SVector{D, T}) for _ in 1:n_atoms]
     else
         x = x0
     end
