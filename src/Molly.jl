@@ -9,7 +9,7 @@ using Atomix
 import AtomsBase
 import AtomsCalculators
 import BioStructures
-using CellListMap
+using CellListMap: CellListMap
 import Chemfiles
 using Combinatorics
 using DataStructures

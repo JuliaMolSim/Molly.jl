@@ -548,15 +548,13 @@ to be 3 otherwise.
 
 Can not be used if one or more dimensions has infinite boundaries.
 """
-mutable struct CellListMapNeighborFinder{N, T}
+mutable struct CellListMapNeighborFinder{N, T, S}
     eligible::BitArray{2}
     dist_cutoff::T
     special::BitArray{2}
     n_steps::Int
     # Auxiliary arrays for multi-threaded in-place updating of the lists
-    cl::CellListMap.CellList{N, T}
-    aux::CellListMap.AuxThreaded{N, T}
-    neighbors_threaded::Vector{NeighborList}
+    cm_particlesystem::S
 end
 
 clm_box_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
@@ -596,88 +594,78 @@ function CellListMapNeighborFinder(;
             )
         end
         sides = SVector(fill(side, D)...)
-        box = CellListMap.Box(sides, dist_cutoff)
+        uc = sides
     else
-        box = CellListMap.Box(clm_box_arg(unit_cell), dist_cutoff)
+        sides = diag(unit_cell)
+        uc = unit_cell
     end
+
     if isnothing(x0)
-        x = [ustrip.(diag(box.input_unit_cell.matrix)) .* rand(SVector{D, T}) for _ in 1:n_atoms]
+        x = [(sides / oneunit(T)) .* rand(SVector{D, T}) for _ in 1:n_atoms]
     else
         x = x0
     end
 
-    # Construct the cell list for the first time, to allocate
-    cl = CellList(x, box; parallel=true, nbatches=number_of_batches)
-    return CellListMapNeighborFinder{D, T}(
-        eligible, dist_cutoff, special, n_steps,
-        cl, CellListMap.AuxThreaded(cl),
-        [NeighborList(0, [(Int32(0), Int32(0), false)]) for _ in 1:CellListMap.nbatches(cl)],
+    cm_system = CellListMap.ParticleSystem(;
+        positions=x,
+        cutoff=dist_cutoff,
+        unitcell=uc,
+        nbatches=number_of_batches,
+        parallel=true,
+        output=NeighborList(),
+        output_name=:neighbors,
     )
+
+    return CellListMapNeighborFinder{D, T, typeof(cm_system)}(eligible, dist_cutoff, special, n_steps, cm_system)
 end
 
 # Add a pair to the pair list
 # If the buffer size is large enough update the element, otherwise push a new element
 #   to `neighbor.list`
-function push_pair!(neighbors::NeighborList, i::Integer, j::Integer, eligible, special)
+function push_pair!(pair, neighbors::NeighborList, eligible, special)
+    (; i, j) = pair
     if eligible[i, j]
         push!(neighbors, (Int32(i), Int32(j), special[i, j]))
     end
     return neighbors
 end
 
-# This is only called in the parallel case
-function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{NeighborList})
-    neighbors.n = 0
-    for i in eachindex(neighbors_threaded)
-        append!(neighbors, neighbors_threaded[i])
-    end
-    return neighbors
+# Parallelization interface for custom output of CellListMap
+CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list)) 
+CellListMap.reset_output!(nl::NeighborList) = begin
+    empty!(nl)
+end
+function CellListMap.reducer(nl1::NeighborList, nl2::NeighborList)
+    append!(nl1, nl2.list)
+    return nl1
 end
 
 function find_neighbors(sys::System{D, AT},
                         nf::CellListMapNeighborFinder,
-                        current_neighbors=nothing,
+                        current_neighbors=nf.cm_particlesystem.neighbors,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where {D, AT}
+
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
 
-    if isnothing(current_neighbors)
-        neighbors = NeighborList()
-    elseif AT <: AbstractGPUArray
+    if AT <: AbstractGPUArray
         neighbors = NeighborList(current_neighbors.n, from_device(current_neighbors.list))
     else
         neighbors = current_neighbors
     end
-    aux = nf.aux
-    cl = nf.cl
-    neighbors.n = 0
-    neighbors_threaded = nf.neighbors_threaded
-    if n_threads > 1
-        for i in eachindex(neighbors_threaded)
-            neighbors_threaded[i].n = 0
-        end
-    else
-        neighbors_threaded[1].n = 0
-    end
 
-    box = CellListMap.Box(clm_box_arg(sys.boundary), nf.dist_cutoff; lcell=1)
-    parallel = n_threads > 1
-    cl = UpdateCellList!(from_device(sys.coords), box, cl, aux; parallel=parallel)
+    # Update unitcell and parallel flag
+    CellListMap.update!(nf.cm_particlesystem; unitcell=clm_box_arg(sys.boundary), parallel=n_threads > 1)
 
-    map_pairwise!(
-        (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.eligible, nf.special),
-        neighbors,
-        box,
-        cl;
-        reduce=reduce_pairs,
-        output_threaded=neighbors_threaded,
-        parallel=parallel,
-    )
+    # Update CellListMap ParticleSystem coordinates
+    nf.cm_particlesystem.positions .= from_device(sys.coords)
 
-    nf.cl = cl
+    # Update the neighborlist
+    CellListMap.pairwise!((p, neighbors) -> push_pair!(p, neighbors, nf.eligible, nf.special), nf.cm_particlesystem)
+
     if AT <: AbstractGPUArray
         return NeighborList(neighbors.n, to_device(neighbors.list, AT))
     else
