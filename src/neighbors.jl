@@ -553,7 +553,7 @@ mutable struct CellListMapNeighborFinder{N, T, S}
     dist_cutoff::T
     special::BitArray{2}
     n_steps::Int
-    # Auxiliary arrays for multi-threaded in-place updating of the lists
+    # The CellListMap.ParticleSystem object
     cm_particlesystem::S
 end
 
