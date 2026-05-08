@@ -510,6 +510,16 @@ end
             @test identical_neighbors(neighbors_gpu, gpu_neighbors_ref)
         end
     end
+
+    # Tests specific for the interface of CellListMapNeighborFinder
+    #   Provide dims and do not provide the unit_cell or x0
+    nf = CellListMapNeighborFinder(eligible=trues(100, 100), 
+                                   dist_cutoff=0.6u"nm",
+                                   dims=3,
+                                  )
+    @test size(first(nf.cm_particlesystem.positions)) == (3,)
+    @test first(nf.cm_particlesystem.unitcell) ≈ 1.2u"nm"
+
 end
 
 @testset "GPUNeighborFinder sparse metadata" begin
