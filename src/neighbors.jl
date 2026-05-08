@@ -633,7 +633,7 @@ end
 # Parallelization interface for custom output of CellListMap
 CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list)) 
 CellListMap.reset_output!(nl::NeighborList) = empty!(nl)
-CellListMap.reducer(nl1::NeighborList, nl2::NeighborList) = append!(nl1, nl2.list)
+CellListMap.reducer(nl1::NeighborList, nl2::NeighborList) = append!(nl1, nl2)
 
 function find_neighbors(sys::System{D, AT},
                         nf::CellListMapNeighborFinder,
