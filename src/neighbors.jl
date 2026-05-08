@@ -563,6 +563,10 @@ clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
 # This function sets up the box structure for CellListMap. It uses the unit cell
 # if it is given, or guesses a box size from the number of particles, assuming
 # that the atomic density is similar to that of liquid water at ambient conditions.
+#
+# If the unit cell is not given, the system is assumed to have Cubic or RectangularBoundary
+# boundaries, and this cannot change afterwards. Thus, TriclinicBoundary systems require
+# the initialization of the unit_cell in the first call to CellListMapNeighborFinder.
 function CellListMapNeighborFinder(;
                                    eligible,
                                    dist_cutoff::T,
@@ -593,14 +597,13 @@ function CellListMapNeighborFinder(;
                 uconvert(unit(dist_cutoff), T((n_atoms * 0.01u"nm^3") ^ (1 / 3))),
             )
         end
-        sides = SVector(fill(side, D)...)
-        uc = sides
+        uc = SVector(fill(side, D)...)
     else
-        sides = diag(unit_cell)
-        uc = unit_cell
+        uc = clm_box_arg(unit_cell)
     end
 
     if isnothing(x0)
+        sides = unit_cell isa TriclinicBoundary ? SVector(ntuple(i -> uc[i,i], D)) : uc
         x = [ ustrip.(sides) .* rand(SVector{D, T}) for _ in 1:n_atoms]
     else
         x = x0

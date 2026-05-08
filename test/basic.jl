@@ -396,7 +396,10 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=0.01u"nm")
     atoms = fill(Atom(), n_atoms)
     dist_cutoff = 0.6u"nm"
-    nf = CellListMapNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=dist_cutoff)
+    nf = CellListMapNeighborFinder(eligible=trues(n_atoms, n_atoms), 
+                                   dist_cutoff=dist_cutoff,
+                                   unit_cell=boundary,
+                                  )
     sys = System(atoms=atoms, coords=coords, boundary=boundary, neighbor_finder=nf)
     neighbors = find_neighbors(sys)
 
