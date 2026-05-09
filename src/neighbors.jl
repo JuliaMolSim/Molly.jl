@@ -575,19 +575,23 @@ function CellListMapNeighborFinder(;
                                    x0=nothing,
                                    dims=nothing,
                                    number_of_batches=(0, 0)) where T
-
-    # CelllistMap infers the dimension from the input coordinates or unitcell,
-    # if possible. We need to deal only with the case where this is not possible.
-    if isnothing(dims) && isnothing(unit_cell) && isnothing(x0) 
-        D = 3
-    elseif !isnothing(dims) 
+                            
+    # Infer dimension from input if possible
+    uc = clm_unitcell_arg(unit_cell)
+    if !isnothing(x0)
+        D = length(first(x0))
+    elseif !isnothing(unit_cell)
+        D = size(uc, 1)   
+    elseif !isnothing(dims)
         D = dims
+    else
+        D = 3
     end
 
     cm_system = CellListMap.ParticleSystem(;
         positions=isnothing(x0) ? SVector{D,T}[] : x0,
         cutoff=dist_cutoff,
-        unitcell=clm_unitcell_arg(unit_cell),
+        unitcell=uc,
         nbatches=number_of_batches,
         parallel=true,
         output=NeighborList(),
@@ -633,7 +637,7 @@ function find_neighbors(sys::System{D, AT},
     # Update the CellListMap.ParticleSystem
     CellListMap.update!(nf.cm_particlesystem; 
         positions=from_device(sys.coords),
-        unitcell=clm_box_arg(sys.boundary), 
+        unitcell=clm_unitcell_arg(sys.boundary), 
         parallel=n_threads > 1,
     )
 

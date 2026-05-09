@@ -342,7 +342,12 @@ end
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
-        nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
+        boundary=CubicBoundary(10.0u"nm")
+        if neighbor_finder == CellListMapNeighborFinder
+            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm",unit_cell=boundary)
+        else
+            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
+        end
         s = System(
             atoms=[Atom(), Atom(), Atom()],
             coords=[
@@ -350,7 +355,7 @@ end
                 SVector(2.0, 2.0, 2.0)u"nm",
                 SVector(5.0, 5.0, 5.0)u"nm",
             ],
-            boundary=CubicBoundary(10.0u"nm"),
+            boundary=boundary,
             neighbor_finder=nf,
         )
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
