@@ -557,7 +557,7 @@ mutable struct CellListMapNeighborFinder{N, T, S}
     cm_particlesystem::S
 end
 
-clm_box_arg(b::nothing) = nothing
+clm_box_arg(b::Nothing) = nothing
 clm_box_arg(b::AbstractVector) = b
 clm_box_arg(b::AbstractMatrix) = b
 clm_box_arg(b::AbstractVector{<:AbstractVector}) = hcat(b...) 
