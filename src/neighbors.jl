@@ -557,6 +557,7 @@ mutable struct CellListMapNeighborFinder{N, T, S}
     cm_particlesystem::S
 end
 
+clm_box_arg(b::nothing) = nothing
 clm_box_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
 
@@ -587,21 +588,6 @@ function CellListMapNeighborFinder(;
         D = 3
     end
 
-    if isnothing(unit_cell)
-        twice_cutoff = nextfloat(2 * dist_cutoff)
-        if unit(dist_cutoff) == NoUnits
-            side = max(twice_cutoff, T((n_atoms * 0.01) ^ (1 / 3)))
-        else
-            side = max(
-                twice_cutoff,
-                uconvert(unit(dist_cutoff), T((n_atoms * 0.01u"nm^3") ^ (1 / 3))),
-            )
-        end
-        uc = SVector(fill(side, D)...)
-    else
-        uc = clm_box_arg(unit_cell)
-    end
-
     if isnothing(x0)
         sides = unit_cell isa TriclinicBoundary ? SVector(ntuple(i -> uc[i,i], D)) : uc
         x = [ ustrip.(sides) .* rand(SVector{D, T}) for _ in 1:n_atoms]
@@ -612,7 +598,7 @@ function CellListMapNeighborFinder(;
     cm_system = CellListMap.ParticleSystem(;
         positions=x,
         cutoff=dist_cutoff,
-        unitcell=uc,
+        unitcell=clm_box_arg(unit_cell),
         nbatches=number_of_batches,
         parallel=true,
         output=NeighborList(),
@@ -655,11 +641,12 @@ function find_neighbors(sys::System{D, AT},
         neighbors = current_neighbors
     end
 
-    # Update unitcell and parallel flag
-    CellListMap.update!(nf.cm_particlesystem; unitcell=clm_box_arg(sys.boundary), parallel=n_threads > 1)
-
-    # Update CellListMap ParticleSystem coordinates
-    nf.cm_particlesystem.positions .= from_device(sys.coords)
+    # Update the CellListMap.ParticleSystem
+    CellListMap.update!(nf.cm_particlesystem; 
+        positions=from_device(sys.coords),
+        unitcell=clm_box_arg(sys.boundary), 
+        parallel=n_threads > 1,
+    )
 
     # Update the neighborlist
     CellListMap.pairwise!((p, neighbors) -> push_pair!(p, neighbors, nf.eligible, nf.special), nf.cm_particlesystem)
