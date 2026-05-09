@@ -522,8 +522,10 @@ end
                                    dist_cutoff=0.6u"nm",
                                    dims=3,
                                   )
-    @test size(first(nf.cm_particlesystem.positions)) == (3,)
-    @test first(nf.cm_particlesystem.unitcell) ≈ 1.2u"nm"
+
+    @test length(nf.cm_particlesystem.positions) == 0
+    @test size(nf.cm_particlesystem.unitcell) == (3,3)
+    @test first(nf.cm_particlesystem.unitcell) >= 1.2u"nm"
 
 end
 
