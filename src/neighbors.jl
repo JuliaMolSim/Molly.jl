@@ -546,7 +546,9 @@ first approximation of the cell list structure.
 The number of dimensions `dims` is inferred from `unit_cell` or `x0`, or assumed
 to be 3 otherwise.
 
-The definition of `unit_cell` is mandatory, and might be `nothing` or an `AbstractBoundary`.
+If `unit_cell == nothing` the system is considered with infinite boundaries. 
+The type of boundary (infinite, `CubicBoundary/RectangularBoundary`, or `TriclinicBoundary`)  
+cannot be changed. 
 
 Can not be used if one or more dimensions has infinite boundaries.
 """
@@ -567,7 +569,7 @@ clm_unitcell_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
 function CellListMapNeighborFinder(;
                                    eligible,
                                    dist_cutoff::T,
-                                   unit_cell::Union{Nothing,AbstractBoundary}, # required
+                                   unit_cell::Union{Nothing,AbstractBoundary}=nothing,
                                    special=zero(eligible),
                                    n_steps=10,
                                    x0=nothing,
