@@ -558,6 +558,9 @@ mutable struct CellListMapNeighborFinder{N, T, S}
 end
 
 clm_box_arg(b::nothing) = nothing
+clm_box_arg(b::AbstractVector) = b
+clm_box_arg(b::AbstractMatrix) = b
+clm_box_arg(b::AbstractVector{<:AbstractVector}) = hcat(b...) 
 clm_box_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
 
@@ -571,10 +574,10 @@ clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
 function CellListMapNeighborFinder(;
                                    eligible,
                                    dist_cutoff::T,
+                                   unit_cell, # required
                                    special=zero(eligible),
                                    n_steps=10,
                                    x0=nothing,
-                                   unit_cell=nothing,
                                    dims=nothing,
                                    number_of_batches=(0, 0)) where T
     n_atoms = size(eligible, 1)
