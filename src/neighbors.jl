@@ -535,16 +535,18 @@ function find_neighbors(sys::System{<:Any, AT},
 end
 
 """
-    CellListMapNeighborFinder(; eligible, dist_cutoff, special, n_steps, x0,
-                              unit_cell, dims)
+    CellListMapNeighborFinder(; eligible, dist_cutoff, unit_cell,
+                                special, n_steps, x0, unit_cell, dims)
 
 Find close atoms by distance using a cell list algorithm from CellListMap.jl.
 
 This is the recommended neighbor finder on CPU.
-`x0` and `unit_cell` are optional initial coordinates and system unit cell that improve the
+`x0` are optional initial coordinates that improve the
 first approximation of the cell list structure.
 The number of dimensions `dims` is inferred from `unit_cell` or `x0`, or assumed
 to be 3 otherwise.
+
+The definition of `unit_cell` is mandatory, and might be `nothing` or an `AbstractBoundary`.
 
 Can not be used if one or more dimensions has infinite boundaries.
 """
@@ -557,51 +559,33 @@ mutable struct CellListMapNeighborFinder{N, T, S}
     cm_particlesystem::S
 end
 
-clm_box_arg(::Nothing) = nothing
-clm_box_arg(b::AbstractVector) = b
-clm_box_arg(b::AbstractMatrix) = b
-clm_box_arg(b::AbstractVector{<:AbstractVector}) = hcat(b...) 
-clm_box_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
-clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
+clm_unitcell_arg(::Nothing) = nothing
+clm_unitcell_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
+clm_unitcell_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
 
-# This function sets up the box structure for CellListMap. It uses the unit cell
-# if it is given, or guesses a box size from the number of particles, assuming
-# that the atomic density is similar to that of liquid water at ambient conditions.
-#
-# If the unit cell is not given, the system is assumed to have Cubic or RectangularBoundary
-# boundaries, and this cannot change afterwards. Thus, TriclinicBoundary systems require
-# the initialization of the unit_cell in the first call to CellListMapNeighborFinder.
+# This function sets up the ParticleSystem structure for CellListMap. 
 function CellListMapNeighborFinder(;
                                    eligible,
                                    dist_cutoff::T,
-                                   unit_cell, # required
+                                   unit_cell::Union{Nothing,AbstractBoundary}, # required
                                    special=zero(eligible),
                                    n_steps=10,
                                    x0=nothing,
                                    dims=nothing,
                                    number_of_batches=(0, 0)) where T
-    n_atoms = size(eligible, 1)
-    if !isnothing(dims)
-        D = dims
-    elseif !isnothing(unit_cell)
-        D = n_dimensions(unit_cell)
-    elseif !isnothing(x0)
-        D = size(eltype(x0))[1]
-    else
-        D = 3
-    end
 
-    if isnothing(x0)
-        sides = unit_cell isa TriclinicBoundary ? SVector(ntuple(i -> uc[i,i], D)) : uc
-        x = [ ustrip.(sides) .* rand(SVector{D, T}) for _ in 1:n_atoms]
-    else
-        x = x0
+    # CelllistMap infers the dimension from the input coordinates or unitcell,
+    # if possible. We need to deal only with the case where this is not possible.
+    if isnothing(dims) && isnothing(unit_cell) && isnothing(x0) 
+        D = 3
+    elseif !isnothing(dims) 
+        D = dims
     end
 
     cm_system = CellListMap.ParticleSystem(;
-        positions=x,
+        positions=isnothing(x0) ? SVector{D,T}[] : x0,
         cutoff=dist_cutoff,
-        unitcell=clm_box_arg(unit_cell),
+        unitcell=clm_unitcell_arg(unit_cell),
         nbatches=number_of_batches,
         parallel=true,
         output=NeighborList(),
