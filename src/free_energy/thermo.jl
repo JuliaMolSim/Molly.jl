@@ -134,9 +134,9 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
 
     # 4. Construct Partitioned Systems
     master_nf = build_neighbor_finder(ref_nfinder, master_eligible, special_mask;
-                                      reuse_neighbors=reuse_neighbors)
+                                      reuse_neighbors=reuse_neighbors, boundary=ref_sys.boundary)
     λ_nf      = build_neighbor_finder(ref_nfinder, λ_eligible, special_mask;
-                                      reuse_neighbors=reuse_neighbors)
+                                      reuse_neighbors=reuse_neighbors, boundary=ref_sys.boundary)
 
     master_sys = System(deepcopy(ref_sys); 
         pairwise_inters      = (master_pils...,),
@@ -174,7 +174,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
-function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::Bool = true)
+function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::Bool = true, boundary = nothing)
     if ref_nfinder isa DistanceNeighborFinder
         return DistanceNeighborFinder(
             eligible = eligible, 
@@ -187,7 +187,8 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = special,
-            n_steps = 1
+            n_steps = 1,
+            boundary = boundary,
         )
     elseif ref_nfinder isa GPUNeighborFinder
         if !reuse_neighbors

@@ -535,149 +535,114 @@ function find_neighbors(sys::System{<:Any, AT},
 end
 
 """
-    CellListMapNeighborFinder(; eligible, dist_cutoff, special, n_steps, x0,
-                              unit_cell, dims)
+    CellListMapNeighborFinder(; eligible, dist_cutoff, boundary,
+                                special, n_steps, x0)
 
 Find close atoms by distance using a cell list algorithm from CellListMap.jl.
 
 This is the recommended neighbor finder on CPU.
-`x0` and `unit_cell` are optional initial coordinates and system unit cell that improve the
+`x0` are optional initial coordinates that improve the
 first approximation of the cell list structure.
-The number of dimensions `dims` is inferred from `unit_cell` or `x0`, or assumed
+The number of dimensions `dims` is inferred from the boundary or `x0`, or assumed
 to be 3 otherwise.
 
-Can not be used if one or more dimensions has infinite boundaries.
+The `boundary` parameter is required, and must be an `AbstractBoundary`. 
+Infinite boundaries are only accepted in all dimensions.
 """
-mutable struct CellListMapNeighborFinder{N, T}
+mutable struct CellListMapNeighborFinder{N, T, S}
     eligible::BitArray{2}
     dist_cutoff::T
     special::BitArray{2}
     n_steps::Int
-    # Auxiliary arrays for multi-threaded in-place updating of the lists
-    cl::CellListMap.CellList{N, T}
-    aux::CellListMap.AuxThreaded{N, T}
-    neighbors_threaded::Vector{NeighborList}
+    # The CellListMap.ParticleSystem object
+    clm_particlesystem::S
 end
 
-clm_box_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
-clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
+function clm_unitcell_arg(b::Union{CubicBoundary, RectangularBoundary}) 
+    uc = b.side_lengths
+    D = size(uc, 1)
+    if any(isinf.(uc))
+        if all(isinf.(uc))
+            return nothing, D
+        else
+            throw(ArgumentError("Cannot use infinite boundaries in some, but not all, dimension."))
+        end
+    end
+    return uc, D
+end
+function clm_unitcell_arg(b::TriclinicBoundary) 
+    uc = hcat(b.basis_vectors...)
+    D = size(uc, 1)
+    return uc, D
+end
 
-# This function sets up the box structure for CellListMap. It uses the unit cell
-# if it is given, or guesses a box size from the number of particles, assuming
-# that the atomic density is similar to that of liquid water at ambient conditions.
+# This function sets up the ParticleSystem structure for CellListMap. 
 function CellListMapNeighborFinder(;
                                    eligible,
                                    dist_cutoff::T,
+                                   boundary::AbstractBoundary,
                                    special=zero(eligible),
                                    n_steps=10,
                                    x0=nothing,
-                                   unit_cell=nothing,
-                                   dims=nothing,
                                    number_of_batches=(0, 0)) where T
-    n_atoms = size(eligible, 1)
-    if !isnothing(dims)
-        D = dims
-    elseif !isnothing(unit_cell)
-        D = n_dimensions(unit_cell)
-    elseif !isnothing(x0)
-        D = size(eltype(x0))[1]
-    else
-        D = 3
-    end
+                            
+                                   
+    # Obtain unit cell from boundary: If all boundaries are infinite, use `nothing`
+    uc, D = clm_unitcell_arg(boundary)
 
-    if isnothing(unit_cell)
-        twice_cutoff = nextfloat(2 * dist_cutoff)
-        if unit(dist_cutoff) == NoUnits
-            side = max(twice_cutoff, T((n_atoms * 0.01) ^ (1 / 3)))
-        else
-            side = max(
-                twice_cutoff,
-                uconvert(unit(dist_cutoff), T((n_atoms * 0.01u"nm^3") ^ (1 / 3))),
-            )
-        end
-        sides = SVector(fill(side, D)...)
-        box = CellListMap.Box(sides, dist_cutoff)
-    else
-        box = CellListMap.Box(clm_box_arg(unit_cell), dist_cutoff)
-    end
-    if isnothing(x0)
-        x = [ustrip.(diag(box.input_unit_cell.matrix)) .* rand(SVector{D, T}) for _ in 1:n_atoms]
-    else
-        x = x0
-    end
-
-    # Construct the cell list for the first time, to allocate
-    cl = CellList(x, box; parallel=true, nbatches=number_of_batches)
-    return CellListMapNeighborFinder{D, T}(
-        eligible, dist_cutoff, special, n_steps,
-        cl, CellListMap.AuxThreaded(cl),
-        [NeighborList(0, [(Int32(0), Int32(0), false)]) for _ in 1:CellListMap.nbatches(cl)],
+    clm_system = CellListMap.ParticleSystem(;
+        positions=isnothing(x0) ? SVector{D,T}[] : x0,
+        cutoff=dist_cutoff,
+        unitcell=uc,
+        nbatches=number_of_batches,
+        parallel=true,
+        output=NeighborList(),
+        output_name=:neighbors,
     )
+
+    return CellListMapNeighborFinder{D, T, typeof(clm_system)}(eligible, dist_cutoff, special, n_steps, clm_system)
 end
 
 # Add a pair to the pair list
 # If the buffer size is large enough update the element, otherwise push a new element
 #   to `neighbor.list`
-function push_pair!(neighbors::NeighborList, i::Integer, j::Integer, eligible, special)
+function push_pair!(pair, neighbors::NeighborList, eligible, special)
+    (; i, j) = pair
     if eligible[i, j]
         push!(neighbors, (Int32(i), Int32(j), special[i, j]))
     end
     return neighbors
 end
 
-# This is only called in the parallel case
-function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{NeighborList})
-    neighbors.n = 0
-    for i in eachindex(neighbors_threaded)
-        append!(neighbors, neighbors_threaded[i])
-    end
-    return neighbors
-end
+# Parallelization interface for custom output of CellListMap
+CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list)) 
+CellListMap.reset_output!(nl::NeighborList) = empty!(nl)
+CellListMap.reducer(nl1::NeighborList, nl2::NeighborList) = append!(nl1, nl2)
 
 function find_neighbors(sys::System{D, AT},
                         nf::CellListMapNeighborFinder,
-                        current_neighbors=nothing,
+                        current_neighbors=sys.neighbor_finder.clm_particlesystem.neighbors, 
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where {D, AT}
+
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
 
-    if isnothing(current_neighbors)
-        neighbors = NeighborList()
-    elseif AT <: AbstractGPUArray
-        neighbors = NeighborList(current_neighbors.n, from_device(current_neighbors.list))
-    else
-        neighbors = current_neighbors
-    end
-    aux = nf.aux
-    cl = nf.cl
-    neighbors.n = 0
-    neighbors_threaded = nf.neighbors_threaded
-    if n_threads > 1
-        for i in eachindex(neighbors_threaded)
-            neighbors_threaded[i].n = 0
-        end
-    else
-        neighbors_threaded[1].n = 0
-    end
-
-    box = CellListMap.Box(clm_box_arg(sys.boundary), nf.dist_cutoff; lcell=1)
-    parallel = n_threads > 1
-    cl = UpdateCellList!(from_device(sys.coords), box, cl, aux; parallel=parallel)
-
-    map_pairwise!(
-        (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.eligible, nf.special),
-        neighbors,
-        box,
-        cl;
-        reduce=reduce_pairs,
-        output_threaded=neighbors_threaded,
-        parallel=parallel,
+    # Update the CellListMap.ParticleSystem
+    CellListMap.update!(nf.clm_particlesystem; 
+        positions=from_device(sys.coords),
+        unitcell=first(clm_unitcell_arg(sys.boundary)), 
+        parallel=n_threads > 1,
     )
 
-    nf.cl = cl
+    # Update the neighborlist
+    neighbors = CellListMap.pairwise!(
+        (p, neighbors) -> push_pair!(p, neighbors, nf.eligible, nf.special), 
+        nf.clm_particlesystem
+    )
+
     if AT <: AbstractGPUArray
         return NeighborList(neighbors.n, to_device(neighbors.list, AT))
     else
