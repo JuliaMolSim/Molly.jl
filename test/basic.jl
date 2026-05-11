@@ -344,7 +344,7 @@ end
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         boundary=CubicBoundary(10.0u"nm")
         if neighbor_finder == CellListMapNeighborFinder
-            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm",unit_cell=boundary)
+            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm", boundary=boundary)
         else
             nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         end
@@ -376,7 +376,7 @@ end
     boundary = CubicBoundary(10.0u"nm")
     neighbor_finder=CellListMapNeighborFinder(
         eligible=trues(3, 3), n_steps=10, x0=coords,
-        unit_cell=boundary, dist_cutoff=2.0u"nm",
+        boundary=boundary, dist_cutoff=2.0u"nm",
     )
     sys = System(
         atoms=[Atom(), Atom(), Atom()],
@@ -403,7 +403,7 @@ end
     dist_cutoff = 0.6u"nm"
     nf = CellListMapNeighborFinder(eligible=trues(n_atoms, n_atoms), 
                                    dist_cutoff=dist_cutoff,
-                                   unit_cell=boundary,
+                                   boundary=boundary,
                                   )
     sys = System(atoms=atoms, coords=coords, boundary=boundary, neighbor_finder=nf)
     neighbors = find_neighbors(sys)
@@ -468,11 +468,20 @@ end
     eligible_cpu, special_cpu = dense_masks(sys.neighbor_finder)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
-        nf = neighbor_finder(
-            eligible=eligible_cpu,
-            special=special_cpu,
-            dist_cutoff=dist_cutoff,
-        )
+        if neighbor_finder == CellListMapNeighborFinder
+            nf = neighbor_finder(
+                eligible=eligible_cpu,
+                special=special_cpu,
+                dist_cutoff=dist_cutoff,
+                boundary=sys.boundary,
+            )
+        else
+            nf = neighbor_finder(
+                eligible=eligible_cpu,
+                special=special_cpu,
+                dist_cutoff=dist_cutoff,
+            )
+        end
         for n_threads in n_threads_list
             neighbors = find_neighbors(sys, nf; n_threads=n_threads)
             @test length(neighbors) == n_neighbors_ref
@@ -516,16 +525,18 @@ end
         end
     end
 
-    # Tests specific for the interface of CellListMapNeighborFinder
-    #   Provide dims and do not provide the unit_cell or x0
+    # Tests specific for the interface of CellListMapNeighborFinder, when
+    # infinite boundaries are provided.
     nf = CellListMapNeighborFinder(eligible=trues(100, 100), 
                                    dist_cutoff=0.6u"nm",
-                                   dims=3,
+                                   boundary=CubicBoundary(SVector(Inf, Inf, Inf) .* u"nm"),
                                   )
-
-    @test length(nf.cm_particlesystem.positions) == 0
-    @test size(nf.cm_particlesystem.unitcell) == (3,3)
-    @test first(nf.cm_particlesystem.unitcell) >= 1.2u"nm"
+    @test length(nf.clm_particlesystem.positions) == 0
+    @test size(nf.clm_particlesystem.unitcell) == (3,3)
+    @test first(nf.clm_particlesystem.unitcell) > 2 * 0.6u"nm"
+    @test_throws "Cannot use infinite boundaries" CellListMapNeighborFinder(eligible=trues(100,100), 
+                                                                            dist_cutoff=1.0u"nm",
+                                                                            boundary=CubicBoundary(SVector(Inf, 100.0, 100.0)))
 
 end
 

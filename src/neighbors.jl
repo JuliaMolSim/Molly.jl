@@ -535,22 +535,19 @@ function find_neighbors(sys::System{<:Any, AT},
 end
 
 """
-    CellListMapNeighborFinder(; eligible, dist_cutoff, unit_cell,
-                                special, n_steps, x0, unit_cell, dims)
+    CellListMapNeighborFinder(; eligible, dist_cutoff, boundary,
+                                special, n_steps, x0)
 
 Find close atoms by distance using a cell list algorithm from CellListMap.jl.
 
 This is the recommended neighbor finder on CPU.
 `x0` are optional initial coordinates that improve the
 first approximation of the cell list structure.
-The number of dimensions `dims` is inferred from `unit_cell` or `x0`, or assumed
+The number of dimensions `dims` is inferred from the boundary or `x0`, or assumed
 to be 3 otherwise.
 
-If `unit_cell == nothing` the system is considered with infinite boundaries. 
-The type of boundary (infinite, `CubicBoundary/RectangularBoundary`, or `TriclinicBoundary`)  
-cannot be changed. 
-
-Can not be used if one or more dimensions has infinite boundaries.
+The `boundary` parameter is required, and must be an `AbstractBoundary`. 
+Infinite boundaries are only accepted in all dimensions.
 """
 mutable struct CellListMapNeighborFinder{N, T, S}
     eligible::BitArray{2}
@@ -558,37 +555,42 @@ mutable struct CellListMapNeighborFinder{N, T, S}
     special::BitArray{2}
     n_steps::Int
     # The CellListMap.ParticleSystem object
-    cm_particlesystem::S
+    clm_particlesystem::S
 end
 
-clm_unitcell_arg(::Nothing) = nothing
-clm_unitcell_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
-clm_unitcell_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
+function clm_unitcell_arg(b::Union{CubicBoundary, RectangularBoundary}) 
+    uc = b.side_lengths
+    D = size(uc, 1)
+    if any(isinf.(uc))
+        if all(isinf.(uc))
+            return nothing, D
+        else
+            throw(ArgumentError("Cannot use infinite boundaries in some, but not all, dimension."))
+        end
+    end
+    return uc, D
+end
+function clm_unitcell_arg(b::TriclinicBoundary) 
+    uc = hcat(b.basis_vectors...)
+    D = size(uc, 1)
+    return uc, D
+end
 
 # This function sets up the ParticleSystem structure for CellListMap. 
 function CellListMapNeighborFinder(;
                                    eligible,
                                    dist_cutoff::T,
-                                   unit_cell::Union{Nothing,AbstractBoundary}=nothing,
+                                   boundary::AbstractBoundary,
                                    special=zero(eligible),
                                    n_steps=10,
                                    x0=nothing,
-                                   dims=nothing,
                                    number_of_batches=(0, 0)) where T
                             
-    # Infer dimension from input if possible
-    uc = clm_unitcell_arg(unit_cell)
-    if !isnothing(x0)
-        D = length(first(x0))
-    elseif !isnothing(unit_cell)
-        D = size(uc, 1)   
-    elseif !isnothing(dims)
-        D = dims
-    else
-        D = 3
-    end
+                                   
+    # Obtain unit cell from boundary: If all boundaries are infinite, use `nothing`
+    uc, D = clm_unitcell_arg(boundary)
 
-    cm_system = CellListMap.ParticleSystem(;
+    clm_system = CellListMap.ParticleSystem(;
         positions=isnothing(x0) ? SVector{D,T}[] : x0,
         cutoff=dist_cutoff,
         unitcell=uc,
@@ -598,7 +600,7 @@ function CellListMapNeighborFinder(;
         output_name=:neighbors,
     )
 
-    return CellListMapNeighborFinder{D, T, typeof(cm_system)}(eligible, dist_cutoff, special, n_steps, cm_system)
+    return CellListMapNeighborFinder{D, T, typeof(clm_system)}(eligible, dist_cutoff, special, n_steps, clm_system)
 end
 
 # Add a pair to the pair list
@@ -619,7 +621,7 @@ CellListMap.reducer(nl1::NeighborList, nl2::NeighborList) = append!(nl1, nl2)
 
 function find_neighbors(sys::System{D, AT},
                         nf::CellListMapNeighborFinder,
-                        current_neighbors=nf.cm_particlesystem.neighbors,
+                        current_neighbors=sys.neighbor_finder.clm_particlesystem.neighbors, 
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where {D, AT}
@@ -628,21 +630,18 @@ function find_neighbors(sys::System{D, AT},
         return current_neighbors
     end
 
-    if AT <: AbstractGPUArray
-        neighbors = NeighborList(current_neighbors.n, from_device(current_neighbors.list))
-    else
-        neighbors = current_neighbors
-    end
-
     # Update the CellListMap.ParticleSystem
-    CellListMap.update!(nf.cm_particlesystem; 
+    CellListMap.update!(nf.clm_particlesystem; 
         positions=from_device(sys.coords),
-        unitcell=clm_unitcell_arg(sys.boundary), 
+        unitcell=first(clm_unitcell_arg(sys.boundary)), 
         parallel=n_threads > 1,
     )
 
     # Update the neighborlist
-    CellListMap.pairwise!((p, neighbors) -> push_pair!(p, neighbors, nf.eligible, nf.special), nf.cm_particlesystem)
+    neighbors = CellListMap.pairwise!(
+        (p, neighbors) -> push_pair!(p, neighbors, nf.eligible, nf.special), 
+        nf.clm_particlesystem
+    )
 
     if AT <: AbstractGPUArray
         return NeighborList(neighbors.n, to_device(neighbors.list, AT))

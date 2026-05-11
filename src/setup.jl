@@ -1903,7 +1903,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             special=special,
             n_steps=10,
             x0=coords,
-            unit_cell=boundary_used,
+            boundary=boundary_used,
             dist_cutoff=T(dist_neighbors),
         )
     else
