@@ -120,10 +120,13 @@ end
         state.density .= fill(1 / 3, 3)
         state.log_dens .= log.(state.density)
         state.weights .= [0.2, 0.5, 0.3]
+        state.reduced_pot .= state.f .+ state.log_dens .- log.(state.weights)
         old_f = copy(state.f)
         old_tilts = copy(state.tilts)
 
-        ratio = state.weights ./ state.density
+        log_terms = old_f .+ log.(state.density) .- state.reduced_pot
+        log_den = maximum(log_terms) + log(sum(exp.(log_terms .- maximum(log_terms))))
+        ratio = exp.(old_f .- state.reduced_pot .- log_den)
         gain = 1.0
         delta_f = -log1p.(gain .* (ratio .- 1.0))
         expected_f = old_f .+ delta_f
@@ -144,6 +147,39 @@ end
         @test all(>(0), state.density)
         @test_throws ArgumentError Molly.update_tss_estimates!(state; visited_state=0)
         @test_throws ArgumentError Molly.update_tss_estimates!(state; visited_state=4)
+    end
+
+    @testset "zero-weight estimator update remains finite" begin
+        state = Molly.TSSState(thermo_states;
+            gamma=[1.0, 1.0, 1.0],
+            ETA=0.0,
+            dens_reg=1e-4,
+        )
+
+        state.f .= 0.0
+        state.density .= fill(1 / 3, 3)
+        state.log_dens .= log.(state.density)
+        state.reduced_pot .= [0.0, 1_000.0, 2_000.0]
+        @. state.log_state_bias = state.f + state.log_dens
+        Molly.conditional_state_weights!(
+            state.weights,
+            state.log_state_bias,
+            state.reduced_pot,
+            state.scratch,
+        )
+
+        @test any(iszero, state.weights)
+
+        max_delta_f = Molly.update_tss_estimates!(state; visited_state=1)
+
+        @test isfinite(max_delta_f)
+        @test all(isfinite, state.f)
+        @test state.f ≈ [0.0, 1_000.0, 2_000.0]
+        @test state.iteration == 1
+        @test sum(state.density) ≈ 1.0
+
+        state.reduced_pot[2] = NaN
+        @test_throws ArgumentError Molly.update_tss_estimates!(state; visited_state=1)
     end
 
     @testset "sample processing and simulation logging" begin

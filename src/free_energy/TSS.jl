@@ -29,6 +29,73 @@ function should_log_tss(iteration::Int, log_freq::Int)
     return iteration == 1 || (iteration % log_freq == 0)
 end
 
+function tss_vector_diagnostic(name, values, state)
+    bad = findall(x -> !isfinite(x), values)
+    n_show = min(length(bad), 8)
+    shown_bad = bad[1:n_show]
+    finite_values = filter(isfinite, collect(values))
+    finite_msg = isempty(finite_values) ?
+                 "no finite values" :
+                 "finite range $(minimum(finite_values)) to $(maximum(finite_values))"
+
+    return "TSS $(name) contains non-finite values at iteration $(state.iteration) " *
+           "with active state $(state.active_state.active_idx); " *
+           "bad indices $(shown_bad)$(length(bad) > n_show ? " ..." : ""); " *
+           finite_msg
+end
+
+function check_tss_finite!(values, name::AbstractString, state)
+    all(isfinite, values) || throw(ArgumentError(tss_vector_diagnostic(name, values, state)))
+    return values
+end
+
+function check_tss_probabilities!(weights::AbstractVector{FT},
+                                  name::AbstractString,
+                                  state) where {FT}
+    check_tss_finite!(weights, name, state)
+    if any(<(zero(FT)), weights)
+        throw(ArgumentError("TSS $(name) contains negative values at iteration " *
+                            "$(state.iteration) with active state " *
+                            "$(state.active_state.active_idx)."))
+    end
+
+    s = sum(weights)
+    if !isfinite(s) || s <= zero(FT)
+        throw(ArgumentError("TSS $(name) has invalid total weight $(s) at iteration " *
+                            "$(state.iteration) with active state " *
+                            "$(state.active_state.active_idx)."))
+    end
+    return weights
+end
+
+function check_tss_positive_probabilities!(weights::AbstractVector{FT},
+                                           name::AbstractString,
+                                           state) where {FT}
+    check_tss_probabilities!(weights, name, state)
+    if any(<=(zero(FT)), weights)
+        throw(ArgumentError("TSS $(name) contains non-positive values at iteration " *
+                            "$(state.iteration) with active state " *
+                            "$(state.active_state.active_idx)."))
+    end
+    return weights
+end
+
+@inline function logaddexp_tss(a::T, b::T) where T
+    if a == -T(Inf)
+        return b
+    elseif b == -T(Inf)
+        return a
+    end
+
+    m = max(a, b)
+    return m + log(exp(a - m) + exp(b - m))
+end
+
+@inline function tss_log_update_arg(log_ratio::T, gain::T) where T
+    gain == one(T) && return log_ratio
+    return logaddexp_tss(log1p(-gain), log(gain) + log_ratio)
+end
+
 
 mutable struct TSSState{T, ES, AS, ST}
 
@@ -180,14 +247,17 @@ function process_tss_sample!(state::TSSState{FT}) where {FT}
         state.state_space,
         boundary,
         iter,)
+    check_tss_finite!(state.reduced_pot, "reduced potentials", state)
 
     @. state.log_state_bias = state.f + state.log_dens
+    check_tss_finite!(state.log_state_bias, "log state bias", state)
     conditional_state_weights!(
         state.weights,
         state.log_state_bias,
         state.reduced_pot,
         state.scratch
     )
+    check_tss_probabilities!(state.weights, "conditional weights", state)
 
     return state.weights
 
@@ -195,13 +265,32 @@ end
 
 function update_tss_sampling_distribution!(state::TSSState{FT}) where {FT}
 
+    check_tss_finite!(state.tilts, "visit tilts", state)
+    if any(<(zero(FT)), state.tilts)
+        throw(ArgumentError("TSS visit tilts contain negative values at iteration " *
+                            "$(state.iteration) with active state " *
+                            "$(state.active_state.active_idx)."))
+    end
+
     density_raw   = FT.(state.gamma .* state.tilts.^state.ETA)
-    density_raw ./= sum(density_raw)
+    raw_sum = sum(density_raw)
+    if !isfinite(raw_sum) || raw_sum <= zero(FT)
+        throw(ArgumentError("TSS raw sampling density has invalid total $(raw_sum) " *
+                            "at iteration $(state.iteration) with active state " *
+                            "$(state.active_state.active_idx)."))
+    end
+    density_raw ./= raw_sum
 
     state.density   = FT.((1 - state.dens_reg) .* density_raw .+ state.dens_reg .* state.gamma)
     s = sum(state.density)
+    if !isfinite(s) || s <= zero(FT)
+        throw(ArgumentError("TSS sampling density has invalid total $(s) " *
+                            "at iteration $(state.iteration) with active state " *
+                            "$(state.active_state.active_idx)."))
+    end
     state.density ./= s
     state.log_dens = log.(state.density)
+    check_tss_positive_probabilities!(state.density, "sampling density", state)
 
     return
 
@@ -213,19 +302,39 @@ function update_tss_estimates!(state::TSSState{FT}; visited_state::Int) where {F
         throw(ArgumentError("Visited state $(visited_state) out of state space."))
     end
 
-    ratio  = state.weights ./ state.density
+    check_tss_probabilities!(state.weights, "conditional weights", state)
+    check_tss_positive_probabilities!(state.density, "sampling density", state)
+    check_tss_finite!(state.f, "free energy estimates", state)
+    check_tss_finite!(state.reduced_pot, "reduced potentials", state)
+
+    @. state.log_state_bias = state.f + state.log_dens
+    check_tss_finite!(state.log_state_bias, "log state bias", state)
+    @. state.scratch = state.log_state_bias - state.reduced_pot
+    log_den = logsumexp(state.scratch)
+    isfinite(log_den) || throw(ArgumentError("TSS log normalization is non-finite " *
+                                             "($(log_den)) at iteration " *
+                                             "$(state.iteration) with active state " *
+                                             "$(state.active_state.active_idx)."))
+
     t_next = state.iteration + 1
     gain   = inv(FT(t_next))
 
-    delta_f = -log1p.(gain .* (ratio .- one(FT)))
+    delta_f = similar(state.f)
+    @inbounds for k in eachindex(delta_f)
+        log_ratio = state.f[k] - state.reduced_pot[k] - log_den
+        delta_f[k] = -tss_log_update_arg(log_ratio, gain)
+    end
+    check_tss_finite!(delta_f, "free energy update", state)
 
     @. state.f += delta_f
     @. state.f -= state.f[1]
+    check_tss_finite!(state.f, "free energy estimates", state)
 
     for k in eachindex(state.tilts)
         target = (k == visited_state ? one(FT) : zero(FT)) / state.gamma[k]
         state.tilts[k] += gain * (target - state.tilts[k])
     end
+    check_tss_finite!(state.tilts, "visit tilts", state)
 
     state.iteration += 1
 
