@@ -379,4 +379,147 @@ end
         @test_throws ArgumentError Molly.TSSSimulation(state;
             n_md_steps=1, n_cycles=1, self_adjustment_steps=1.5)
     end
+
+    @testset "windowed TSS construction and validation" begin
+        thermo_states4 = make_tss_thermo_states(n_states=4)
+        windows = [[1], [1, 2], [2, 3], [3, 4], [4]]
+        state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=2,
+            first_window=2,
+            gamma=[1.0, 2.0, 3.0, 4.0],
+            initial_f=[0.0, 1.0, 3.0, 6.0],
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+
+        @test length(state.windows) == 5
+        @test [window.state_indices for window in state.windows] == [Int[w...] for w in windows]
+        @test state.state_to_windows == [[1, 2], [2, 3], [3, 4], [4, 5]]
+        @test state.active_window == 2
+        @test state.active_state.active_idx == 2
+        @test all(est -> est.state_space === state.state_space, state.estimators)
+        @test all(est -> est.active_state === state.active_state, state.estimators)
+        @test [est.state_indices for est in state.estimators] == [Int[w...] for w in windows]
+        @test state.estimators[2].gamma ≈ [1 / 3, 2 / 3]
+        @test state.estimators[3].gamma ≈ [2 / 5, 3 / 5]
+        @test state.estimators[2].f == [0.0, 1.0]
+        @test state.estimators[3].f == [0.0, 2.0]
+
+        linear_windows = Molly.linear_tss_windows(8; window_size=4)
+        @test [window.state_indices for window in linear_windows] ==
+              [[1, 2], [1, 2, 3, 4], [3, 4, 5, 6], [5, 6, 7, 8], [7, 8]]
+
+        @test_throws ArgumentError Molly.TSSWindow(1, [1, 3])
+        @test_throws ArgumentError Molly.TSSWindow(1, [1, 1])
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=[[1], [1, 2], [2, 2], [3, 4], [4]])
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=[[1], [1, 2], [2, 3], [3, 4]])
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=[[1], [1, 2], [2], [2, 3], [3, 4], [4]])
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=[[1], [1, 2], [2], [3], [3, 4], [4]])
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=windows, first_state=2, first_window=1)
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=windows, gamma=[1.0, 2.0])
+        @test_throws ArgumentError Molly.linear_tss_windows(7; window_size=4)
+    end
+
+    @testset "windowed active-window switching and local processing" begin
+        thermo_states4 = make_tss_thermo_states(n_states=4)
+        state = Molly.WindowedTSSState(thermo_states4;
+            windows=[[1], [1, 2], [2, 3], [3, 4], [4]],
+            first_state=2,
+            first_window=2,
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+
+        @test Molly.windows_for_state(state, 2) == [2, 3]
+        @test Molly.other_window_for_state(state, 2) == 3
+        Molly.switch_active_window!(state; current_state=2)
+        @test state.active_window == 3
+        @test Molly.window_contains_state(state.windows[state.active_window], state.active_state.active_idx)
+
+        estimator = Molly.active_tss_estimator(state)
+        weights = Molly.process_tss_sample!(estimator)
+        @test weights === estimator.weights
+        @test length(weights) == length(state.windows[state.active_window].state_indices)
+        @test sum(weights) ≈ 1.0
+        @test all(>=(0), weights)
+
+        rng = MersenneTwister(11)
+        samples = [Molly.tss_sample_global_state(rng, estimator) for _ in 1:50]
+        @test all(s -> s in state.windows[state.active_window].state_indices, samples)
+        @test_throws ArgumentError Molly.update_tss_estimates!(estimator; visited_state=1)
+
+        state.active_window = 1
+        @test_throws ArgumentError Molly.switch_active_window!(state; current_state=2)
+    end
+
+    @testset "windowed TSS simulation and alignment" begin
+        thermo_states4 = make_tss_thermo_states(n_states=4)
+        windows = [[1], [1, 2], [2, 3], [3, 4], [4]]
+        state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=2,
+            first_window=2,
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+        sim = Molly.WindowedTSSSimulation(state;
+            n_md_steps=1,
+            n_cycles=4,
+            self_adjustment_steps=3,
+            log_freq=1,
+        )
+        Molly.simulate!(sim; rng=MersenneTwister(12))
+
+        @test state.iteration == 4
+        @test sum(est.iteration for est in state.estimators) == 4
+        @test state.stats.iterations == [1, 2, 3, 4]
+        @test length(state.stats.update_window) == 4
+        @test all(w -> 1 <= w <= length(state.windows), state.stats.update_window)
+        for i in eachindex(state.stats.iterations)
+            update_window = state.stats.update_window[i]
+            @test state.stats.visited_state[i] in state.windows[update_window].state_indices
+            @test state.stats.sampled_next_state[i] in state.windows[update_window].state_indices
+        end
+        @test state.active_state.active_idx in state.windows[state.active_window].state_indices
+        @test all(est -> all(isfinite, est.f), state.estimators)
+        @test all(est -> all(isfinite, est.density) && sum(est.density) ≈ 1.0, state.estimators)
+        @test all(est -> all(isfinite, est.tilts), state.estimators)
+        @test all(f -> length(f) == 4 && all(isfinite, f), state.stats.reported_f_history)
+
+        @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
+            n_md_steps=0, n_cycles=1)
+        @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
+            n_md_steps=1, n_cycles=-1)
+        @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
+            n_md_steps=1, n_cycles=1, self_adjustment_steps=0)
+        @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
+            n_md_steps=1, n_cycles=1, self_adjustment_steps=1.5)
+
+        alignment_state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=0.0,
+            dens_reg=1e-4,
+        )
+        true_f = [0.0, 1.0, 3.0, 6.0]
+        window_offsets = [10.0, -2.0, 5.0, 8.0, -4.0]
+        for (window_i, estimator) in enumerate(alignment_state.estimators)
+            estimator.f .= true_f[alignment_state.windows[window_i].state_indices] .+
+                           window_offsets[window_i]
+        end
+
+        reported_f, offsets, residuals = Molly.align_window_free_energies(alignment_state)
+        @test reported_f ≈ true_f .- true_f[1]
+        @test all(isfinite, offsets)
+        @test all(isapprox(0.0; atol=1e-10), residuals)
+        @test Molly.windowed_tss_free_energies(alignment_state) ≈ true_f .- true_f[1]
+    end
 end
