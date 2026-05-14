@@ -405,6 +405,10 @@ end
         @test state.estimators[3].gamma ≈ [2 / 5, 3 / 5]
         @test state.estimators[2].f == [0.0, 1.0]
         @test state.estimators[3].f == [0.0, 2.0]
+        @test state.coupling !== nothing
+        @test state.coupling.converged
+        @test state.coupling.max_abs_residual <= state.coupling.tolerance
+        @test Molly.windowed_tss_visit_control_free_energies(state) ≈ [0.0, 1.0, 3.0, 6.0]
 
         linear_windows = Molly.linear_tss_windows(8; window_size=4)
         @test [window.state_indices for window in linear_windows] ==
@@ -425,6 +429,21 @@ end
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
             windows=windows, gamma=[1.0, 2.0])
         @test_throws ArgumentError Molly.linear_tss_windows(7; window_size=4)
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=windows, visit_control_tolerance=0.0)
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=windows, visit_control_max_iterations=0)
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=windows, visit_control_damping=0.0)
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
+            windows=windows, window_prob_regularization=0.0)
+
+        local_only_state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            global_visit_control=false,
+        )
+        @test local_only_state.coupling === nothing
+        @test_throws ArgumentError Molly.windowed_tss_visit_control_free_energies(local_only_state)
     end
 
     @testset "windowed active-window switching and local processing" begin
@@ -459,6 +478,51 @@ end
         @test_throws ArgumentError Molly.switch_active_window!(state; current_state=2)
     end
 
+    @testset "windowed visit-control coupling" begin
+        thermo_states4 = make_tss_thermo_states(n_states=4)
+        windows = [[1], [1, 2], [2, 3], [3, 4], [4]]
+        true_f = [0.0, 1.0, 3.0, 6.0]
+        state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            initial_f=true_f,
+            ETA=1.0,
+            dens_reg=1e-4,
+            visit_control_tolerance=1e-8,
+        )
+
+        coupling = state.coupling
+        @test coupling !== nothing
+        @test coupling.converged
+        @test coupling.max_abs_residual <= coupling.tolerance
+        @test Molly.windowed_tss_visit_control_free_energies(state) ≈ true_f
+        @test sum(coupling.window_probs) ≈ 1.0
+        @test all(>(0), coupling.window_probs)
+        @test all(d -> length(d) > 0 && all(>(0), d) && sum(d) ≈ 1.0,
+                  coupling.candidate_densities)
+        @test isapprox(coupling.lhs_marginal, coupling.rhs_marginal; atol=1e-8)
+
+        coupling.visit_control_f .= [0.0, 2.0, 0.0, 0.0]
+        Molly.compute_windowed_sampling_densities!(state)
+        density_12 = coupling.candidate_densities[2]
+        @test density_12[2] > state.estimators[2].gamma[2]
+
+        old_f = [copy(est.f) for est in state.estimators]
+        old_tilts = [copy(est.tilts) for est in state.estimators]
+        Molly.apply_windowed_sampling_densities!(state)
+        @test all(i -> state.estimators[i].density ≈ coupling.candidate_densities[i],
+                  eachindex(state.estimators))
+        @test all(i -> state.estimators[i].f == old_f[i], eachindex(state.estimators))
+        @test all(i -> state.estimators[i].tilts == old_tilts[i], eachindex(state.estimators))
+
+        state.window_update_counts .= [0, 2, 0, 1, 0]
+        Molly.update_window_probabilities!(state)
+        @test sum(coupling.window_probs) ≈ 1.0
+        @test coupling.window_probs[2] > coupling.window_probs[1]
+        @test coupling.window_probs[4] > coupling.window_probs[1]
+    end
+
     @testset "windowed TSS simulation and alignment" begin
         thermo_states4 = make_tss_thermo_states(n_states=4)
         windows = [[1], [1, 2], [2, 3], [3, 4], [4]]
@@ -479,6 +543,7 @@ end
 
         @test state.iteration == 4
         @test sum(est.iteration for est in state.estimators) == 4
+        @test sum(state.window_update_counts) == 4
         @test state.stats.iterations == [1, 2, 3, 4]
         @test length(state.stats.update_window) == 4
         @test all(w -> 1 <= w <= length(state.windows), state.stats.update_window)
@@ -492,6 +557,16 @@ end
         @test all(est -> all(isfinite, est.density) && sum(est.density) ≈ 1.0, state.estimators)
         @test all(est -> all(isfinite, est.tilts), state.estimators)
         @test all(f -> length(f) == 4 && all(isfinite, f), state.stats.reported_f_history)
+        @test length(state.stats.visit_control_converged) == 4
+        @test length(state.stats.visit_control_iterations) == 4
+        @test length(state.stats.visit_control_max_abs_residual) == 4
+        @test all(isfinite, state.stats.visit_control_max_abs_residual)
+        @test all(p -> length(p) == length(state.windows) && sum(p) ≈ 1.0,
+                  state.stats.window_prob_history)
+        @test all(f -> length(f) == 4 && all(isfinite, f),
+                  state.stats.visit_control_f_history)
+        @test all(state.estimators[i].density ≈ state.coupling.candidate_densities[i]
+                  for i in eachindex(state.estimators))
 
         @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
             n_md_steps=0, n_cycles=1)

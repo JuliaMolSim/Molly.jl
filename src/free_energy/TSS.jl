@@ -1,8 +1,12 @@
 export
     TSSState,
     TSSSimulation,
+    TSSWindow,
     WindowedTSSState,
-    WindowedTSSSimulation
+    WindowedTSSSimulation,
+    linear_tss_windows,
+    windowed_tss_free_energies,
+    windowed_tss_visit_control_free_energies
 
 mutable struct TSSStats{T}
     iterations::Vector{Int}
@@ -571,6 +575,11 @@ mutable struct WindowedTSSStats{T}
     max_abs_delta_f::Vector{T}
     active_window_history::Vector{Int}
     reported_f_history::Vector{Vector{T}}
+    visit_control_converged::Vector{Bool}
+    visit_control_iterations::Vector{Int}
+    visit_control_max_abs_residual::Vector{T}
+    window_prob_history::Vector{Vector{T}}
+    visit_control_f_history::Vector{Vector{T}}
 end
 
 function WindowedTSSStats(::Type{FT}) where {FT}
@@ -582,7 +591,28 @@ function WindowedTSSStats(::Type{FT}) where {FT}
         FT[],
         Int[],
         Vector{FT}[],
+        Bool[],
+        Int[],
+        FT[],
+        Vector{FT}[],
+        Vector{FT}[],
     )
+end
+
+mutable struct WindowedTSSCoupling{T}
+    visit_control_f::Vector{T}
+    window_probs::Vector{T}
+    lhs_marginal::Vector{T}
+    rhs_marginal::Vector{T}
+    residual::Vector{T}
+    candidate_densities::Vector{Vector{T}}
+    iterations::Int
+    converged::Bool
+    max_abs_residual::T
+    tolerance::T
+    max_iterations::Int
+    damping::T
+    prob_regularization::T
 end
 
 mutable struct WindowedTSSState{T, ES, AS, W, E}
@@ -592,8 +622,10 @@ mutable struct WindowedTSSState{T, ES, AS, W, E}
     estimators::Vector{E} # One local TSSState per window
     state_to_windows::Vector{Vector{Int}} # Global state index to containing windows
     active_window::Int # Current window index
+    window_update_counts::Vector{Int} # Number of estimator updates per window
     iteration::Int # Total number of windowed updates
     stats::WindowedTSSStats{T} # Diagnostics
+    coupling::Union{Nothing, WindowedTSSCoupling{T}} # Global visit-control state
 end
 
 function _coerce_tss_windows(windows, K::Int)
@@ -692,7 +724,12 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
                           initial_f = nothing,
                           ETA::Real = 2.0,
                           dens_reg::Real = 1e-6,
-                          reuse_neighbors::Bool = true)
+                          reuse_neighbors::Bool = true,
+                          global_visit_control::Bool = true,
+                          visit_control_tolerance::Real = 1e-8,
+                          visit_control_max_iterations::Integer = 100,
+                          visit_control_damping::Real = 0.25,
+                          window_prob_regularization::Real = 1e-12)
 
     state_space = ExtendedStateSpace(thermo_states; reuse_neighbors = reuse_neighbors)
     K = n_states(state_space)
@@ -737,7 +774,7 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
 
     stats = WindowedTSSStats(FT)
 
-    return WindowedTSSState{
+    state = WindowedTSSState{
         FT,
         typeof(state_space),
         typeof(active_state),
@@ -750,9 +787,24 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
         estimators,
         state_to_windows,
         active_window,
+        zeros(Int, length(normalized_windows)),
         0,
         stats,
+        nothing,
     )
+
+    if global_visit_control
+        state.coupling = initialize_windowed_tss_coupling(
+            state;
+            tolerance = visit_control_tolerance,
+            max_iterations = visit_control_max_iterations,
+            damping = visit_control_damping,
+            prob_regularization = window_prob_regularization,
+        )
+        update_windowed_tss_coupling!(state)
+    end
+
+    return state
 end
 
 function linear_tss_windows(n_states::Integer; window_size::Integer)
@@ -824,6 +876,18 @@ function _check_windowed_tss_invariant(state::WindowedTSSState)
     window_contains_state(active_window, state.active_state.active_idx) ||
         throw(ArgumentError("active window $(state.active_window) does not contain active state " *
                             "$(state.active_state.active_idx)."))
+    length(state.window_update_counts) == length(state.windows) ||
+        throw(ArgumentError("window update counts do not match the number of TSS windows."))
+    if !isnothing(state.coupling)
+        coupling = state.coupling
+        K = n_states(state.state_space)
+        length(coupling.visit_control_f) == K ||
+            throw(ArgumentError("visit-control free energies do not match the number of states."))
+        length(coupling.window_probs) == length(state.windows) ||
+            throw(ArgumentError("visit-control window probabilities do not match the number of windows."))
+        length(coupling.candidate_densities) == length(state.windows) ||
+            throw(ArgumentError("visit-control candidate densities do not match the number of windows."))
+    end
     return state
 end
 
@@ -908,6 +972,297 @@ function windowed_tss_free_energies(state::WindowedTSSState; reference_state::In
     return reported
 end
 
+function _windowed_tss_coupling(state::WindowedTSSState)
+    isnothing(state.coupling) &&
+        throw(ArgumentError("global TSS visit control is not enabled for this WindowedTSSState."))
+    return state.coupling
+end
+
+function _validate_windowed_tss_coupling_params(::Type{FT};
+                                                tolerance::Real,
+                                                max_iterations::Integer,
+                                                damping::Real,
+                                                prob_regularization::Real) where {FT}
+    isfinite(tolerance) && tolerance > 0 ||
+        throw(ArgumentError("visit_control_tolerance must be finite and positive."))
+    max_iterations > 0 ||
+        throw(ArgumentError("visit_control_max_iterations must be positive."))
+    isfinite(damping) && 0 < damping <= 1 ||
+        throw(ArgumentError("visit_control_damping must be in the (0, 1] interval."))
+    isfinite(prob_regularization) && prob_regularization > 0 ||
+        throw(ArgumentError("window_prob_regularization must be finite and positive."))
+
+    return (
+        tolerance = FT(tolerance),
+        max_iterations = Int(max_iterations),
+        damping = FT(damping),
+        prob_regularization = FT(prob_regularization),
+    )
+end
+
+function _gauge_windowed_visit_control!(coupling::WindowedTSSCoupling{FT}) where {FT}
+    reference = coupling.visit_control_f[1]
+    isfinite(reference) ||
+        throw(ArgumentError("TSS visit-control gauge reference is non-finite ($(reference))."))
+    @. coupling.visit_control_f -= reference
+    all(isfinite, coupling.visit_control_f) ||
+        throw(ArgumentError("TSS visit-control free energies contain non-finite values."))
+    return coupling.visit_control_f
+end
+
+function _normalize_windowed_tss_probabilities!(weights::AbstractVector{FT},
+                                                name::AbstractString,
+                                                state::WindowedTSSState{FT}) where {FT}
+    check_tss_probabilities!(weights, name, state)
+    s = sum(weights)
+    weights ./= s
+    check_tss_positive_probabilities!(weights, name, state)
+    return weights
+end
+
+function initialize_windowed_tss_coupling(state::WindowedTSSState{FT};
+                                          tolerance::Real = 1e-8,
+                                          max_iterations::Integer = 100,
+                                          damping::Real = 0.25,
+                                          prob_regularization::Real = 1e-12) where {FT}
+    params = _validate_windowed_tss_coupling_params(
+        FT;
+        tolerance = tolerance,
+        max_iterations = max_iterations,
+        damping = damping,
+        prob_regularization = prob_regularization,
+    )
+
+    K = n_states(state.state_space)
+    n_windows = length(state.windows)
+    visit_control_f = windowed_tss_free_energies(state)
+    visit_control_f = FT.(visit_control_f)
+    visit_control_f .-= visit_control_f[1]
+
+    coupling = WindowedTSSCoupling{FT}(
+        visit_control_f,
+        fill(inv(FT(n_windows)), n_windows),
+        zeros(FT, K),
+        zeros(FT, K),
+        zeros(FT, K),
+        [copy(estimator.density) for estimator in state.estimators],
+        0,
+        false,
+        FT(Inf),
+        params.tolerance,
+        params.max_iterations,
+        params.damping,
+        params.prob_regularization,
+    )
+    _gauge_windowed_visit_control!(coupling)
+    return coupling
+end
+
+function update_window_probabilities!(state::WindowedTSSState{FT}) where {FT}
+    coupling = _windowed_tss_coupling(state)
+    reg = coupling.prob_regularization
+    total = FT(sum(state.window_update_counts)) + reg * FT(length(state.window_update_counts))
+    isfinite(total) && total > zero(FT) ||
+        throw(ArgumentError("TSS window probabilities have invalid total $(total)."))
+
+    for window_i in eachindex(state.window_update_counts)
+        coupling.window_probs[window_i] =
+            (FT(state.window_update_counts[window_i]) + reg) / total
+    end
+    _normalize_windowed_tss_probabilities!(coupling.window_probs, "window probabilities", state)
+    return coupling.window_probs
+end
+
+function compute_windowed_sampling_densities!(state::WindowedTSSState{FT}) where {FT}
+    coupling = _windowed_tss_coupling(state)
+    check_tss_finite!(coupling.visit_control_f, "visit-control free energies", state)
+
+    for (window_i, estimator) in enumerate(state.estimators)
+        candidate = coupling.candidate_densities[window_i]
+        length(candidate) == length(estimator.state_indices) ||
+            throw(ArgumentError("candidate density for TSS window $(window_i) has invalid length."))
+
+        check_tss_finite!(estimator.f, "window $(window_i) free energies", estimator)
+        check_tss_positive_probabilities!(estimator.gamma, "window $(window_i) gamma", estimator)
+
+        coupling_strength = estimator.ETA / (estimator.ETA + one(FT))
+        for local_state in eachindex(estimator.state_indices)
+            global_state = estimator.state_indices[local_state]
+            estimator.scratch[local_state] =
+                estimator.log_gamma[local_state] +
+                coupling_strength * (coupling.visit_control_f[global_state] -
+                                     estimator.f[local_state])
+        end
+
+        log_norm = logsumexp(estimator.scratch)
+        isfinite(log_norm) ||
+            throw(ArgumentError("TSS window $(window_i) candidate density normalization is non-finite."))
+
+        for local_state in eachindex(candidate)
+            candidate[local_state] = exp(estimator.scratch[local_state] - log_norm)
+        end
+        @. candidate = (one(FT) - estimator.dens_reg) * candidate +
+                       estimator.dens_reg * estimator.gamma
+        _normalize_windowed_tss_probabilities!(
+            candidate,
+            "candidate density for window $(window_i)",
+            state,
+        )
+    end
+
+    return coupling.candidate_densities
+end
+
+function compute_visit_control_lhs!(state::WindowedTSSState{FT}) where {FT}
+    coupling = _windowed_tss_coupling(state)
+    fill!(coupling.lhs_marginal, zero(FT))
+    tilt_floor = coupling.prob_regularization
+
+    for (window_i, estimator) in enumerate(state.estimators)
+        check_tss_finite!(estimator.tilts, "window $(window_i) visit tilts", estimator)
+        if any(<(zero(FT)), estimator.tilts)
+            throw(ArgumentError("TSS window $(window_i) visit tilts contain negative values."))
+        end
+
+        denom = zero(FT)
+        for local_state in eachindex(estimator.state_indices)
+            denom += estimator.gamma[local_state] * max(estimator.tilts[local_state], tilt_floor)
+        end
+        isfinite(denom) && denom > zero(FT) ||
+            throw(ArgumentError("TSS window $(window_i) has invalid visit-control lhs denominator $(denom)."))
+
+        for local_state in eachindex(estimator.state_indices)
+            global_state = estimator.state_indices[local_state]
+            tilt = max(estimator.tilts[local_state], tilt_floor)
+            coupling.lhs_marginal[global_state] +=
+                coupling.window_probs[window_i] * estimator.gamma[local_state] * tilt / denom
+        end
+    end
+
+    _normalize_windowed_tss_probabilities!(coupling.lhs_marginal, "visit-control lhs", state)
+    return coupling.lhs_marginal
+end
+
+function compute_visit_control_rhs!(state::WindowedTSSState{FT}) where {FT}
+    coupling = _windowed_tss_coupling(state)
+    fill!(coupling.rhs_marginal, zero(FT))
+
+    for (window_i, estimator) in enumerate(state.estimators)
+        candidate = coupling.candidate_densities[window_i]
+        check_tss_positive_probabilities!(
+            candidate,
+            "candidate density for window $(window_i)",
+            state,
+        )
+
+        for local_state in eachindex(estimator.state_indices)
+            global_state = estimator.state_indices[local_state]
+            estimator.scratch[local_state] =
+                log(candidate[local_state]) +
+                estimator.f[local_state] -
+                coupling.visit_control_f[global_state]
+        end
+
+        log_den = logsumexp(estimator.scratch)
+        isfinite(log_den) ||
+            throw(ArgumentError("TSS window $(window_i) has non-finite visit-control rhs denominator."))
+
+        for local_state in eachindex(estimator.state_indices)
+            global_state = estimator.state_indices[local_state]
+            coupling.rhs_marginal[global_state] +=
+                coupling.window_probs[window_i] * exp(estimator.scratch[local_state] - log_den)
+        end
+    end
+
+    _normalize_windowed_tss_probabilities!(coupling.rhs_marginal, "visit-control rhs", state)
+    return coupling.rhs_marginal
+end
+
+function compute_visit_control_residual!(state::WindowedTSSState{FT}) where {FT}
+    coupling = _windowed_tss_coupling(state)
+    for state_i in eachindex(coupling.residual)
+        lhs = coupling.lhs_marginal[state_i]
+        rhs = coupling.rhs_marginal[state_i]
+        isfinite(lhs) && lhs > zero(FT) ||
+            throw(ArgumentError("TSS visit-control lhs is invalid at state $(state_i): $(lhs)."))
+        isfinite(rhs) && rhs > zero(FT) ||
+            throw(ArgumentError("TSS visit-control rhs is invalid at state $(state_i): $(rhs)."))
+        coupling.residual[state_i] = log(rhs) - log(lhs)
+    end
+    check_tss_finite!(coupling.residual, "visit-control residual", state)
+    coupling.max_abs_residual = maximum(abs, coupling.residual)
+    return coupling.residual
+end
+
+function solve_windowed_visit_control!(state::WindowedTSSState{FT}) where {FT}
+    coupling = _windowed_tss_coupling(state)
+    coupling.converged = false
+    coupling.iterations = 0
+
+    for iteration in 1:coupling.max_iterations
+        compute_windowed_sampling_densities!(state)
+        compute_visit_control_lhs!(state)
+        compute_visit_control_rhs!(state)
+        compute_visit_control_residual!(state)
+
+        coupling.iterations = iteration
+        if coupling.max_abs_residual <= coupling.tolerance
+            coupling.converged = true
+            return coupling
+        end
+
+        if iteration < coupling.max_iterations
+            @. coupling.visit_control_f += coupling.damping * coupling.residual
+            _gauge_windowed_visit_control!(coupling)
+        end
+    end
+
+    return coupling
+end
+
+function apply_windowed_sampling_densities!(state::WindowedTSSState{FT}) where {FT}
+    coupling = _windowed_tss_coupling(state)
+
+    for (window_i, estimator) in enumerate(state.estimators)
+        candidate = coupling.candidate_densities[window_i]
+        _normalize_windowed_tss_probabilities!(
+            candidate,
+            "candidate density for window $(window_i)",
+            state,
+        )
+        estimator.density .= candidate
+        estimator.log_dens .= log.(estimator.density)
+        check_tss_positive_probabilities!(
+            estimator.density,
+            "sampling density for window $(window_i)",
+            estimator,
+        )
+    end
+
+    return state
+end
+
+function update_windowed_tss_coupling!(state::WindowedTSSState)
+    isnothing(state.coupling) && return nothing
+    update_window_probabilities!(state)
+    solve_windowed_visit_control!(state)
+    apply_windowed_sampling_densities!(state)
+    return state.coupling
+end
+
+function windowed_tss_visit_control_free_energies(state::WindowedTSSState;
+                                                  reference_state::Integer = 1)
+    coupling = _windowed_tss_coupling(state)
+    K = n_states(state.state_space)
+    reference_state = Int(reference_state)
+    1 <= reference_state <= K ||
+        throw(ArgumentError("reference_state $(reference_state) out of bounds."))
+
+    visit_control_f = copy(coupling.visit_control_f)
+    visit_control_f .-= visit_control_f[reference_state]
+    return visit_control_f
+end
+
 function log_windowed_tss_stats!(
     stats::WindowedTSSStats{FT},
     state::WindowedTSSState{FT},
@@ -923,6 +1278,20 @@ function log_windowed_tss_stats!(
     push!(stats.max_abs_delta_f, max_delta_f)
     push!(stats.active_window_history, state.active_window)
     push!(stats.reported_f_history, windowed_tss_free_energies(state))
+    if isnothing(state.coupling)
+        push!(stats.visit_control_converged, false)
+        push!(stats.visit_control_iterations, 0)
+        push!(stats.visit_control_max_abs_residual, FT(NaN))
+        push!(stats.window_prob_history, FT[])
+        push!(stats.visit_control_f_history, FT[])
+    else
+        coupling = state.coupling
+        push!(stats.visit_control_converged, coupling.converged)
+        push!(stats.visit_control_iterations, coupling.iterations)
+        push!(stats.visit_control_max_abs_residual, coupling.max_abs_residual)
+        push!(stats.window_prob_history, copy(coupling.window_probs))
+        push!(stats.visit_control_f_history, copy(coupling.visit_control_f))
+    end
 
     return stats
 end
@@ -994,7 +1363,9 @@ function simulate!(sim::WindowedTSSSimulation; rng = Random.default_rng())
 
         estimator = state.estimators[final_window]
         max_df = update_tss_estimates!(estimator; visited_state = final_visited_state)
+        state.window_update_counts[final_window] += 1
         state.iteration += 1
+        update_windowed_tss_coupling!(state)
 
         if should_log_tss(estimator.iteration, sim.log_freq)
             log_tss_stats!(estimator.stats, estimator, final_visited_state, final_next_state, max_df)
