@@ -1264,6 +1264,47 @@ end
     # and weight updates trigger during a short 2000 step test
     awh_state = AWHState(thermo_states; first_state=1, n_bias=10)
 
+    awh_first_state = AWHState(thermo_states; first_state=3, n_bias=10)
+    @test awh_first_state.active_idx == 3
+    @test awh_first_state.active_intg === thermo_states[3].integrator
+    @test awh_first_state.active_sys.pairwise_inters == thermo_states[3].system.pairwise_inters
+
+    space = awh_state.state_space
+    subset = [1, 3]
+    full_energies = evaluate_energy_all!(space.partition, awh_state.active_sys.coords,
+                                         awh_state.active_sys.boundary)
+    subset_energies = evaluate_energy_subset(space.partition, awh_state.active_sys.coords,
+                                             awh_state.active_sys.boundary, subset)
+    @test subset_energies[1] ≈ full_energies[1]
+    @test subset_energies[2] ≈ full_energies[3]
+
+    full_reduced = zeros(typeof(awh_state.N_bias), n_windows)
+    subset_reduced = zeros(typeof(awh_state.N_bias), length(subset))
+    reduced_potentials!(full_reduced, full_energies, space, awh_state.active_sys.boundary,
+                        Base.OneTo(n_windows))
+    reduced_potentials!(subset_reduced, subset_energies, space, awh_state.active_sys.boundary,
+                        subset)
+    @test subset_reduced ≈ full_reduced[subset]
+
+    pressure_state = ThermoState(thermo_states[1].system, thermo_states[1].integrator;
+                                 temperature=temp, pressure=1.0u"bar")
+    pressure_space = ExtendedStateSpace([pressure_state])
+    probe_energy = 1.25u"kJ * mol^-1"
+    expected_reduced = pressure_space.betas[1] *
+                       (ustrip(probe_energy) +
+                        ustrip(pressure_space.pressures[1] * volume(boundary)))
+    @test reduced_potential(pressure_space, probe_energy, boundary, 1) ≈ expected_reduced
+
+    log_state_bias = [0.2, -0.4, 0.1]
+    reduced = [1.0, 2.0, 0.5]
+    weights = zeros(3)
+    scratch = zeros(3)
+    conditional_state_weights!(weights, log_state_bias, reduced, scratch)
+    z = log_state_bias .- reduced
+    log_den = maximum(z) + log(sum(exp.(z .- maximum(z))))
+    @test weights ≈ exp.(z .- log_den)
+    @test sum(weights) ≈ 1.0
+
     # Wrap in AWHSimulation
     awh_sim = AWHSimulation(
         awh_state;

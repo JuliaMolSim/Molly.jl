@@ -1,0 +1,315 @@
+export
+    TSSState,
+    TSSSimulation
+
+mutable struct TSSStats{T}
+    iterations::Vector{Int}
+    active_state::Vector{Int}
+    sampled_next_state::Vector{Int}
+    max_abs_delta_f::Vector{T}
+    f_history::Vector{Vector{T}}
+    dens_history::Vector{Vector{T}}
+    tilt_history::Vector{Vector{T}}
+end
+
+function TSSStats(::Type{FT}) where {FT}
+    return TSSStats{FT}(
+        Int[],
+        Int[],
+        Int[],
+        FT[],
+        Vector{FT}[],
+        Vector{FT}[],
+        Vector{FT}[],
+    )
+
+end
+
+function should_log_tss(iteration::Int, log_freq::Int)
+    return iteration == 1 || (iteration % log_freq == 0)
+end
+
+
+mutable struct TSSState{T, ES, AS, ST}
+
+    state_space::ES  # The different hamiltonians
+    active_state::AS # The hamiltonian that is currently active
+
+    f::Vector{T} # Free energy estimate, dimensionless
+    gamma::Vector{T} # Akin to target distribution. Must be positive and normalised!
+    log_gamma::Vector{T} # Avoids recomputation of this magnitude that appears a lot
+
+    tilts::Vector{T} # Empirical visit control of the rungs
+    density::Vector{T} # Current TSS sampling density over rungs
+    log_dens::Vector{T} # Log of prev. quantity
+    
+    weights::Vector{T} # Conditional state probabilities
+    reduced_pot::Vector{T} # u_k(x) values for last configuration
+    energies::Vector{ST} # Raw potential energy, before reduced
+    scratch::Vector{T} # Used for log-sum-exp 
+    log_state_bias::Vector{T} # f .+ log_dens in log form
+
+    iteration::Int # Number of updates already applied
+    ETA::T # Visit-control strength. ETA == 0 disables visit control, gives dens == gamma
+    dens_reg::T # Small interp. towards gamma, keeps all states reachable
+    stats::TSSStats{T} # Diagnostics
+
+end
+
+function TSSState(thermo_states::AbstractVector{<:ThermoState};
+                  first_state::Int      = 1,
+                  gamma                 = nothing,
+                  initial_f             = nothing,
+                  ETA::Real             = 2.0,
+                  dens_reg::Real        = 1e-6,
+                  reuse_neighbors::Bool = true)
+
+    state_space  = ExtendedStateSpace(thermo_states; reuse_neighbors = reuse_neighbors)
+    active_state = ActiveThermoState(state_space, first_state)
+
+    FT = typeof(ustrip(active_state.active_sys.total_mass))
+    EU = active_state.active_sys.energy_units
+    K  = n_states(state_space)
+
+    if !(K >= 1)
+        throw(ArgumentError("Number of states must be larger or equal than 1."))
+    end
+
+    if !(1 <= first_state <= K)
+        throw(ArgumentError("First state must be larger or equal than 1 and smaller or equal than $(K)."))
+    end
+
+    if ETA < 0
+        throw(ArgumentError("ETA must be larger or equal than 0."))
+    end
+
+    if !(0 < dens_reg < 1)
+        throw(ArgumentError("dens_reg must be contained in the (0, 1) interval."))
+    end
+
+    if isnothing(gamma)
+        gamma = fill(inv(FT(K)), K)
+    else
+        if !(length(gamma) == K)
+            throw(ArgumentError("gamma must be of length $(K)."))
+        end
+        if !all(isfinite, gamma)
+            throw(ArgumentError("All gamma values must be finite."))
+        end
+        if !all(>(zero(FT)), gamma)
+            throw(ArgumentError("All gamma values must be stictly positive."))
+        end
+        if sum(gamma) <= 0
+            throw(ArgumentError("sum(gamma) must be strictly positive."))
+        end
+        gamma = FT.(gamma)
+        s = sum(gamma)
+        gamma ./= s
+    end
+
+    if isnothing(initial_f)
+        initial_f = zeros(FT, K)
+    else
+        if !(length(initial_f) == K)
+            throw(ArgumentError("initial_f must be of length $(K)."))
+        end
+        if !all(isfinite, initial_f)
+            throw(ArgumentError("All values of initial_f mus be finite."))
+        end
+        initial_f = FT.(initial_f)
+        initial_f .-= initial_f[1]
+    end
+
+    tilts = ones(FT, K)
+
+    density_raw   = FT.(gamma .* tilts.^ETA)
+    density_raw ./= sum(density_raw)
+
+    density     = FT.((1 - dens_reg) .* density_raw .+ dens_reg .* gamma)
+    density   ./= sum(density)
+    log_density = log.(density)
+
+    weights = zeros(FT, K)
+    reduced_potentials = zeros(FT, K)
+    energies = zeros(FT, K) .* EU
+    scratch = zeros(FT, K)
+    log_state_bias = zeros(FT, K)
+
+    stats = TSSStats(FT)
+
+
+    return TSSState(
+        state_space, 
+        active_state,
+        initial_f,
+        gamma,
+        log.(gamma),
+        tilts,
+        density,
+        log_density,
+        weights,
+        reduced_potentials,
+        energies,
+        scratch,
+        log_state_bias,
+        0,
+        FT(ETA),
+        FT(dens_reg),
+        stats
+    )
+
+end
+
+function process_tss_sample!(state::TSSState{FT}) where {FT}
+    coords = state.active_state.active_sys.coords
+    boundary = state.active_state.active_sys.boundary
+
+    iter = Base.OneTo(n_states(state.state_space))
+
+    evaluate_energy_subset!(
+        state.energies,
+        state.state_space.partition,
+        coords,
+        boundary,
+        iter,
+    )
+
+    reduced_potentials!(
+        state.reduced_pot,
+        state.energies,
+        state.state_space,
+        boundary,
+        iter,)
+
+    @. state.log_state_bias = state.f + state.log_dens
+    conditional_state_weights!(
+        state.weights,
+        state.log_state_bias,
+        state.reduced_pot,
+        state.scratch
+    )
+
+    return state.weights
+
+end
+
+function update_tss_sampling_distribution!(state::TSSState{FT}) where {FT}
+
+    density_raw   = FT.(state.gamma .* state.tilts.^state.ETA)
+    density_raw ./= sum(density_raw)
+
+    state.density   = FT.((1 - state.dens_reg) .* density_raw .+ state.dens_reg .* state.gamma)
+    s = sum(state.density)
+    state.density ./= s
+    state.log_dens = log.(state.density)
+
+    return
+
+end
+
+function update_tss_estimates!(state::TSSState{FT}; visited_state::Int) where {FT}
+
+    if !(1 <= visited_state <= length(state.gamma))
+        throw(ArgumentError("Visited state $(visited_state) out of state space."))
+    end
+
+    ratio  = state.weights ./ state.density
+    t_next = state.iteration + 1
+    gain   = inv(FT(t_next))
+
+    delta_f = -log1p.(gain .* (ratio .- one(FT)))
+
+    @. state.f += delta_f
+    @. state.f -= state.f[1]
+
+    for k in eachindex(state.tilts)
+        target = (k == visited_state ? one(FT) : zero(FT)) / state.gamma[k]
+        state.tilts[k] += gain * (target - state.tilts[k])
+    end
+
+    state.iteration += 1
+
+    update_tss_sampling_distribution!(state)
+
+    return maximum(abs, delta_f .- delta_f[1])
+
+end
+
+function log_tss_stats!(
+    stats::TSSStats{FT},
+    state::TSSState{FT},
+    visited_state::Int,
+    next_state::Int,
+    max_delta_f::FT) where {FT}
+
+    push!(stats.iterations, state.iteration)
+    push!(stats.active_state, visited_state)
+    push!(stats.sampled_next_state, next_state)
+    push!(stats.max_abs_delta_f, max_delta_f)
+    push!(stats.f_history, copy(state.f))
+    push!(stats.dens_history, copy(state.density))
+    push!(stats.tilt_history, copy(state.tilts))
+
+    return stats
+
+end
+
+mutable struct TSSSimulation{S}
+    state::S
+    n_md_steps::Int
+    n_cycles::Int
+    log_freq::Int
+end
+
+function TSSSimulation(state::TSSState;
+                       n_md_steps::Int,
+                       n_cycles::Int,
+                       log_freq::Int = 1000)
+
+    n_md_steps > 0 || throw(ArgumentError("n_md_steps must be positive."))
+    n_cycles >= 0 || throw(ArgumentError("n_cycles must be non-negative."))
+    log_freq > 0 || throw(ArgumentError("log_freq must be positive."))
+
+    return TSSSimulation(
+        state,
+        n_md_steps,
+        n_cycles,
+        log_freq
+    )
+
+end
+
+function simulate!(sim::TSSSimulation; rng = Random.default_rng())
+
+    state::TSSState = sim.state
+
+    for cycle in 1:sim.n_cycles
+
+        visited_state = state.active_state.active_idx
+
+        simulate!(
+            state.active_state.active_sys,
+            state.active_state.active_integrator,
+            sim.n_md_steps
+        )
+
+        weights = process_tss_sample!(state)
+
+        next_state = sample_state(rng, weights)
+
+        max_df = update_tss_estimates!(state; visited_state = visited_state)
+
+        if should_log_tss(state.iteration, sim.log_freq)
+
+            log_tss_stats!(state.stats, state, visited_state, next_state, max_df)
+
+        end
+
+        set_active_state!(state.active_state, state.state_space, next_state)
+
+
+    end
+
+    return state
+
+end

@@ -35,21 +35,9 @@ accumulated statistical weights, free energy estimates, and target distribution 
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for adjacent λ windows. Generally improves performance.
 """
-mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI}
-    partition::P
-    
-    active_idx::Int
-    active_sys::S
-    active_intg::I
-    
-    λ_integrators::Vector{I}
-    λ_β::B
-    λ_p::PR
-    
-    # Store full interactions for accurate MD integration forces
-    state_pairwise_inters::SPI
-    state_specific_inter_lists::SSI
-    state_general_inters::SGI
+mutable struct AWHState{T, ES, AS}
+    state_space::ES
+    active_state::AS
 
     # Probability & Free Energy
     f::Vector{T}
@@ -73,36 +61,65 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI}
     stats::AWHStats{T}
 end
 
+function Base.getproperty(state::AWHState, name::Symbol)
+    if name === :partition
+        return getfield(getfield(state, :state_space), :partition)
+    elseif name === :active_idx
+        return getfield(getfield(state, :active_state), :active_idx)
+    elseif name === :active_sys
+        return getfield(getfield(state, :active_state), :active_sys)
+    elseif name === :active_intg
+        return getfield(getfield(state, :active_state), :active_integrator)
+    elseif name === :λ_integrators
+        return getfield(getfield(state, :state_space), :integrators)
+    elseif name === :λ_β
+        return getfield(getfield(state, :state_space), :betas)
+    elseif name === :λ_p
+        return getfield(getfield(state, :state_space), :pressures)
+    elseif name === :state_pairwise_inters
+        return getfield(getfield(state, :state_space), :state_pairwise_inters)
+    elseif name === :state_specific_inter_lists
+        return getfield(getfield(state, :state_space), :state_specific_inter_lists)
+    elseif name === :state_general_inters
+        return getfield(getfield(state, :state_space), :state_general_inters)
+    elseif name === :λ_hamiltonians
+        return getfield(getfield(getfield(state, :state_space), :partition), :λ_hamiltonians)
+    end
+    return getfield(state, name)
+end
+
+function Base.setproperty!(state::AWHState, name::Symbol, value)
+    if name === :active_idx
+        getfield(state, :active_state).active_idx = value
+    elseif name === :active_sys
+        getfield(state, :active_state).active_sys = value
+    elseif name === :active_intg
+        getfield(state, :active_state).active_integrator = value
+    else
+        setfield!(state, name, value)
+    end
+    return value
+end
+
+function Base.propertynames(state::AWHState, private::Bool=false)
+    names = collect(fieldnames(typeof(state)))
+    append!(names, (:partition, :active_idx, :active_sys, :active_intg, :λ_integrators,
+                    :λ_β, :λ_p, :state_pairwise_inters, :state_specific_inter_lists,
+                    :state_general_inters, :λ_hamiltonians))
+    return Tuple(names)
+end
+
 function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   first_state::Int = 1,
                   n_bias::Int = 100,
                   ρ::Union{Nothing, AbstractArray} = nothing,
                   reuse_neighbors::Bool = true)
 
-    n_λ = length(thermo_states)
-    ref_sys = thermo_states[first_state].system
+    state_space = ExtendedStateSpace(thermo_states; reuse_neighbors=reuse_neighbors)
+    active_state = ActiveThermoState(state_space, first_state)
+    n_λ = n_states(state_space)
+    ref_sys = state_space.systems[first_state]
     FT = typeof(ustrip(ref_sys.total_mass))
-
-    # Delegate the separation of interactions to the core abstraction
-    partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
-
-    # Extract integrators and parameters
-    λ_integrators = [ts.integrator for ts in thermo_states]
-    λ_β = [ts.beta for ts in thermo_states]
-    λ_p = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states]
-
-    # Extract complete interaction lists for standard MD forces
-    state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states]
-    state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states]
-    state_general_inters = [ts.system.general_inters for ts in thermo_states]
-
-    active_sys = System(deepcopy(ref_sys);
-        atoms = partition.λ_atoms[first_state],
-        pairwise_inters = state_pairwise_inters[first_state],
-        specific_inter_lists = state_specific_inter_lists[first_state],
-        general_inters = state_general_inters[first_state]
-    )
-    active_intg = λ_integrators[first_state]
 
     # Handle Target Distribution (ρ)
     if isnothing(ρ)
@@ -114,19 +131,9 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
 
     stats = AWHStats(Int[], Int[], Vector{FT}[], FT[], Symbol[], FT[])
 
-    return AWHState{FT, typeof(partition), typeof(active_sys), typeof(active_intg), 
-                    typeof(λ_β), typeof(λ_p), typeof(state_pairwise_inters),
-                    typeof(state_specific_inter_lists), typeof(state_general_inters)}(
-        partition,
-        first_state,
-        active_sys,
-        active_intg,
-        λ_integrators,
-        λ_β,
-        λ_p,
-        state_pairwise_inters,
-        state_specific_inter_lists,
-        state_general_inters,
+    return AWHState{FT, typeof(state_space), typeof(active_state)}(
+        state_space,
+        active_state,
         zeros(FT, n_λ),
         rho_val,
         log_ρ,
@@ -312,7 +319,7 @@ function AWHPMFDeconvolution(
     num_hist = zeros(T, n_bins)
     den_hist = zeros(T, n_bins)
 
-    n_wins = length(awh_state.λ_hamiltonians)
+    n_wins = n_states(awh_state.state_space)
     n_bins_total = prod(n_bins)
 
     return AWHPMFDeconvolution(
@@ -496,7 +503,7 @@ function AWHSimulation(
     target_pressure = nothing
 ) where T
 
-    n_win = length(awh_state.partition.λ_hamiltonians)
+    n_win = n_states(awh_state.state_space)
 
     pmf_calc = nothing
     if !isnothing(pmf_grid)
@@ -523,50 +530,23 @@ end
 
 # Swaps Hamiltionians
 function update_active_sys!(awh_state::AWHState, active_idx::Int)
-    awh_state.active_idx = active_idx
-    awh_state.active_sys.atoms = awh_state.partition.λ_atoms[active_idx]
-    awh_state.active_sys.pairwise_inters = awh_state.state_pairwise_inters[active_idx]
-    awh_state.active_sys.specific_inter_lists = awh_state.state_specific_inter_lists[active_idx]
-    awh_state.active_sys.general_inters = awh_state.state_general_inters[active_idx]
-    awh_state.active_intg = awh_state.λ_integrators[active_idx]
+    set_active_state!(awh_state.active_state, awh_state.state_space, active_idx)
+    return awh_state
 end
 
 # Reweights coordinates along λ windows and accumulates histogram
 function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where FT
-    n_states = length(awh.λ_β)
+    n_win = n_states(awh.state_space)
     coords = awh.active_sys.coords
     bound  = awh.active_sys.boundary
 
-    # Exploit the AlchemicalPartition abstraction
-    energies = evaluate_energy_all!(awh.partition, coords, bound)
-    
-    potentials = awh.scratch_potentials 
-    active_pe = nothing
+    state_indices = Base.OneTo(n_win)
+    energies = evaluate_energy_subset(awh.partition, coords, bound, state_indices)
+    reduced_potentials!(awh.scratch_potentials, energies, awh.state_space, bound, state_indices)
+    active_pe = energies[awh.active_idx]
 
-    for n in 1:n_states
-        pe = energies[n]
-        if n == awh.active_idx
-            active_pe = pe
-        end
-        
-        pe_val = ustrip(pe)
-        
-        # Trap r=0 Lennard-Jones overlaps (Inf - Inf = NaN)
-        if isnan(pe_val)
-            pe_val = typemax(FT)
-        end
-        
-        # β is already converted to a raw float in correct units
-        potentials[n] = awh.λ_β[n] * pe_val
-    end
-
-    # Calculate Z in-place
-    @. awh.scratch_z = awh.log_rho + awh.f - potentials
-    
-    log_den = Molly.logsumexp(awh.scratch_z)
-    
-    # Calculate W directly into w_last
-    @. awh.w_last = exp(awh.scratch_z - log_den)
+    @. awh.scratch_z = awh.log_rho + awh.f
+    conditional_state_weights!(awh.w_last, awh.scratch_z, awh.scratch_potentials, awh.scratch_z)
 
     # Accumulate
     awh.w_seg .+= awh.w_last
@@ -575,7 +555,7 @@ function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where F
 
     # Check visited windows using w_last
     for (i, val) in enumerate(awh.w_last)
-        if val > weight_relevance/n_states
+        if val > weight_relevance/n_win
             push!(awh.visited_windows, i)
         end
     end
@@ -585,7 +565,7 @@ end
 
 # Decides which is the new Hamiltonian given some weights
 function gibbs_sample_window(state::AWHState)
-    return sample(1:length(state.w_last), Weights(state.w_last))
+    return sample_state(state.w_last)
 end
 
 # Logs important stuff
@@ -665,7 +645,6 @@ function simulate!(awh_sim::AWHSimulation{T},
                    n_steps::Int) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
-    active_idx = 1
 
     for iteration_n in 1:n_iterations
         simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
@@ -709,11 +688,7 @@ function simulate!(awh_sim::AWHSimulation{T},
         end
 
         active_idx_new = gibbs_sample_window(awh_sim.state)
-        if active_idx_new != active_idx
-            active_idx = active_idx_new
-        end
-
-        update_active_sys!(awh_sim.state, active_idx)
+        update_active_sys!(awh_sim.state, active_idx_new)
         update_awh_bias!(awh_sim, iteration_n)
     end
 end
