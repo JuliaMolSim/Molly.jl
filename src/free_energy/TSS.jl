@@ -102,6 +102,9 @@ mutable struct TSSState{T, ES, AS, ST}
     state_space::ES  # The different hamiltonians
     active_state::AS # The hamiltonian that is currently active
 
+    state_indices::Vector{Int} # Local index to global state index
+    local_index_by_state::Vector{Int} # Global index to local index, 0 mean not in local estimator
+
     f::Vector{T} # Free energy estimate, dimensionless
     gamma::Vector{T} # Akin to target distribution. Must be positive and normalised!
     log_gamma::Vector{T} # Avoids recomputation of this magnitude that appears a lot
@@ -125,6 +128,7 @@ end
 
 function TSSState(thermo_states::AbstractVector{<:ThermoState};
                   first_state::Int      = 1,
+                  state_indices         = nothing,
                   gamma                 = nothing,
                   initial_f             = nothing,
                   ETA::Real             = 2.0,
@@ -146,6 +150,33 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
         throw(ArgumentError("First state must be larger or equal than 1 and smaller or equal than $(K)."))
     end
 
+    if isnothing(state_indices)
+        state_indices = collect(Base.OneTo(K))
+    else
+        state_indices = Int.(collect(state_indices))
+        if length(state_indices) > K
+            throw(ArgumentError("state_indices cannot be longer than $(K)."))
+        end
+        if length(state_indices) == 0
+            throw(ArgumentError("state_indices must be non-empty."))
+        end
+        if any(i -> !(1 <= i <= K), state_indices)
+            throw(ArgumentError("state_indices entries must be in 1:$(K)."))
+        end
+        if !allunique(state_indices)
+            throw(ArgumentError("state_indices entries must be unique."))
+        end
+    end
+
+    if !(first_state ∈ state_indices)
+        throw(ArgumentError("first_state must be contained in state_indices"))
+    end
+
+    local_index_by_state = zeros(Int, K)
+    for (local_k, global_k) in enumerate(state_indices)
+        local_index_by_state[global_k] = local_k
+    end
+
     if ETA < 0
         throw(ArgumentError("ETA must be larger or equal than 0."))
     end
@@ -154,12 +185,15 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
         throw(ArgumentError("dens_reg must be contained in the (0, 1) interval."))
     end
 
+    local_K = length(state_indices)
+
     if isnothing(gamma)
-        gamma = fill(inv(FT(K)), K)
+        gamma = fill(inv(FT(local_K)), local_K)
     else
-        if !(length(gamma) == K)
-            throw(ArgumentError("gamma must be of length $(K)."))
+        if !(length(gamma) == local_K)
+            throw(ArgumentError("gamma must be of length $(local_K)."))
         end
+
         if !all(isfinite, gamma)
             throw(ArgumentError("All gamma values must be finite."))
         end
@@ -175,10 +209,13 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
     end
 
     if isnothing(initial_f)
-        initial_f = zeros(FT, K)
+        initial_f = zeros(FT, local_K)
     else
-        if !(length(initial_f) == K)
-            throw(ArgumentError("initial_f must be of length $(K)."))
+        if !(length(initial_f) == local_K)
+            throw(ArgumentError("initial_f must be of length $(local_K)."))
+        end
+        if !(length(initial_f) == length(state_indices))
+            throw(ArgumentError("initial_f and state_indices must have the same length."))
         end
         if !all(isfinite, initial_f)
             throw(ArgumentError("All values of initial_f mus be finite."))
@@ -187,7 +224,7 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
         initial_f .-= initial_f[1]
     end
 
-    tilts = ones(FT, K)
+    tilts = ones(FT, local_K)
 
     density_raw   = FT.(gamma .* tilts.^ETA)
     density_raw ./= sum(density_raw)
@@ -196,18 +233,19 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
     density   ./= sum(density)
     log_density = log.(density)
 
-    weights = zeros(FT, K)
-    reduced_potentials = zeros(FT, K)
-    energies = zeros(FT, K) .* EU
-    scratch = zeros(FT, K)
-    log_state_bias = zeros(FT, K)
+    weights = zeros(FT, local_K)
+    reduced_potentials = zeros(FT, local_K)
+    energies = zeros(FT, local_K) .* EU
+    scratch = zeros(FT, local_K)
+    log_state_bias = zeros(FT, local_K)
 
     stats = TSSStats(FT)
-
 
     return TSSState(
         state_space, 
         active_state,
+        state_indices,
+        local_index_by_state,
         initial_f,
         gamma,
         log.(gamma),
@@ -227,11 +265,39 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
 
 end
 
+function tss_local_index(state::TSSState, global_state::Int)
+    if !(1 <= global_state <= n_states(state.state_space))
+        throw(ArgumentError("global_state $(global_state) out of bounds."))
+    end
+    local_idx = state.local_index_by_state[global_state]
+    if local_idx == 0
+        throw(ArgumentError("$(global_state) does not map to any local state."))
+    end
+    return local_idx
+end
+
+function tss_global_index(state::TSSState, local_state::Int)
+    if !(1 <= local_state <= length(state.state_indices))
+        throw(ArgumentError("$(local_state) out of bounds."))
+    end
+    return state.state_indices[local_state]
+end
+
+function tss_active_local_index(state::TSSState)
+    idx = state.active_state.active_idx
+    return tss_local_index(state, idx)
+end
+
+function tss_sample_global_state(rng::AbstractRNG, state::TSSState)
+    idx = sample_state(rng, state.weights)
+    return tss_global_index(state, idx)
+end
+
 function process_tss_sample!(state::TSSState{FT}) where {FT}
     coords = state.active_state.active_sys.coords
     boundary = state.active_state.active_sys.boundary
 
-    iter = Base.OneTo(n_states(state.state_space))
+    iter = state.state_indices
 
     evaluate_energy_subset!(
         state.energies,
@@ -246,7 +312,9 @@ function process_tss_sample!(state::TSSState{FT}) where {FT}
         state.energies,
         state.state_space,
         boundary,
-        iter,)
+        iter,
+    )
+
     check_tss_finite!(state.reduced_pot, "reduced potentials", state)
 
     @. state.log_state_bias = state.f + state.log_dens
@@ -298,7 +366,9 @@ end
 
 function update_tss_estimates!(state::TSSState{FT}; visited_state::Int) where {FT}
 
-    if !(1 <= visited_state <= length(state.gamma))
+    visited_local = tss_local_index(state, visited_state)
+
+    if !(1 <= visited_state <= n_states(state.state_space))
         throw(ArgumentError("Visited state $(visited_state) out of state space."))
     end
 
@@ -331,7 +401,7 @@ function update_tss_estimates!(state::TSSState{FT}; visited_state::Int) where {F
     check_tss_finite!(state.f, "free energy estimates", state)
 
     for k in eachindex(state.tilts)
-        target = (k == visited_state ? one(FT) : zero(FT)) / state.gamma[k]
+        target = (k == visited_local ? one(FT) : zero(FT)) / state.gamma[k]
         state.tilts[k] += gain * (target - state.tilts[k])
     end
     check_tss_finite!(state.tilts, "visit tilts", state)
@@ -367,22 +437,28 @@ mutable struct TSSSimulation{S}
     state::S
     n_md_steps::Int
     n_cycles::Int
+    self_adjustment_steps::Int
     log_freq::Int
 end
 
 function TSSSimulation(state::TSSState;
                        n_md_steps::Int,
                        n_cycles::Int,
+                       self_adjustment_steps = 1,
                        log_freq::Int = 1000)
 
     n_md_steps > 0 || throw(ArgumentError("n_md_steps must be positive."))
     n_cycles >= 0 || throw(ArgumentError("n_cycles must be non-negative."))
+    self_adjustment_steps isa Integer ||
+        throw(ArgumentError("self_adjustment_steps must be an integer."))
+    self_adjustment_steps > 0 || throw(ArgumentError("self_adjustment_steps must be positive."))
     log_freq > 0 || throw(ArgumentError("log_freq must be positive."))
 
     return TSSSimulation(
         state,
         n_md_steps,
         n_cycles,
+        Int(self_adjustment_steps),
         log_freq
     )
 
@@ -394,28 +470,38 @@ function simulate!(sim::TSSSimulation; rng = Random.default_rng())
 
     for cycle in 1:sim.n_cycles
 
-        visited_state = state.active_state.active_idx
+        final_visited_state = state.active_state.active_idx
+        final_next_state    = state.active_state.active_idx
 
-        simulate!(
-            state.active_state.active_sys,
-            state.active_state.active_integrator,
-            sim.n_md_steps
-        )
+        for substep in 1:sim.self_adjustment_steps
 
-        weights = process_tss_sample!(state)
+            visited_state = state.active_state.active_idx
 
-        next_state = sample_state(rng, weights)
+            simulate!(
+                state.active_state.active_sys,
+                state.active_state.active_integrator,
+                sim.n_md_steps
+            )
 
-        max_df = update_tss_estimates!(state; visited_state = visited_state)
+            process_tss_sample!(state)
+            next_state = tss_sample_global_state(rng, state)
 
-        if should_log_tss(state.iteration, sim.log_freq)
+            final_visited_state = visited_state
+            final_next_state    = next_state
 
-            log_tss_stats!(state.stats, state, visited_state, next_state, max_df)
+            if substep < sim.self_adjustment_steps
+                set_active_state!(state.active_state, state.state_space, next_state)
+            end
 
         end
 
-        set_active_state!(state.active_state, state.state_space, next_state)
+        max_df = update_tss_estimates!(state; visited_state = final_visited_state)
 
+        if should_log_tss(state.iteration, sim.log_freq)
+            log_tss_stats!(state.stats, state, final_visited_state, final_next_state, max_df)
+        end
+
+        set_active_state!(state.active_state, state.state_space, final_next_state)
 
     end
 

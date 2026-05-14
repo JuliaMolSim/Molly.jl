@@ -62,6 +62,63 @@ end
         @test_throws ArgumentError Molly.TSSState(thermo_states; dens_reg=0.0)
     end
 
+    @testset "subset constructor validation and index mapping" begin
+        thermo_states4 = make_tss_thermo_states(n_states=4)
+        state = Molly.TSSState(thermo_states4;
+            first_state=2,
+            state_indices=[2, 3],
+        )
+
+        @test state.state_indices == [2, 3]
+        @test state.local_index_by_state == [0, 1, 2, 0]
+        @test state.active_state.active_idx == 2
+        @test Molly.tss_local_index(state, 2) == 1
+        @test Molly.tss_local_index(state, 3) == 2
+        @test Molly.tss_global_index(state, 1) == 2
+        @test Molly.tss_global_index(state, 2) == 3
+        @test_throws ArgumentError Molly.tss_local_index(state, 1)
+        @test_throws ArgumentError Molly.tss_local_index(state, 4)
+        @test_throws ArgumentError Molly.tss_global_index(state, 0)
+        @test_throws ArgumentError Molly.tss_global_index(state, 3)
+
+        @test state.gamma ≈ [0.5, 0.5]
+        @test sum(state.gamma) ≈ 1.0
+        @test state.density ≈ state.gamma
+        @test length(state.f) == 2
+        @test length(state.weights) == 2
+        @test length(state.reduced_pot) == 2
+
+        custom_state = Molly.TSSState(thermo_states4;
+            first_state=3,
+            state_indices=2:3,
+            gamma=[2.0, 1.0],
+            initial_f=[10.0, 12.0],
+            ETA=0.0,
+            dens_reg=1e-4,
+        )
+        @test custom_state.state_indices == [2, 3]
+        @test custom_state.gamma ≈ [2 / 3, 1 / 3]
+        @test custom_state.f == [0.0, 2.0]
+        @test custom_state.density ≈ custom_state.gamma
+
+        @test_throws ArgumentError Molly.TSSState(thermo_states4; first_state=1,
+            state_indices=[2, 3])
+        @test_throws ArgumentError Molly.TSSState(thermo_states4; first_state=2,
+            state_indices=[2, 2])
+        @test_throws ArgumentError Molly.TSSState(thermo_states4; first_state=2,
+            state_indices=[0, 2])
+        @test_throws ArgumentError Molly.TSSState(thermo_states4; first_state=2,
+            state_indices=[-1, 2])
+        @test_throws ArgumentError Molly.TSSState(thermo_states4; first_state=2,
+            state_indices=[2, 5])
+        @test_throws ArgumentError Molly.TSSState(thermo_states4; first_state=2,
+            state_indices=Int[])
+        @test_throws ArgumentError Molly.TSSState(thermo_states4; first_state=2,
+            state_indices=[2, 3], gamma=[1.0, 1.0, 1.0, 1.0])
+        @test_throws ArgumentError Molly.TSSState(thermo_states4; first_state=2,
+            state_indices=[2, 3], initial_f=[0.0, 1.0, 2.0, 3.0])
+    end
+
     @testset "sampling distribution update" begin
         state = Molly.TSSState(thermo_states;
             gamma=[2.0, 1.0, 1.0],
@@ -182,6 +239,45 @@ end
         @test_throws ArgumentError Molly.update_tss_estimates!(state; visited_state=1)
     end
 
+    @testset "subset sample processing and estimator update" begin
+        thermo_states4 = make_tss_thermo_states(n_states=4)
+        state = Molly.TSSState(thermo_states4;
+            first_state=2,
+            state_indices=[2, 3],
+            gamma=[1.0, 1.0],
+            initial_f=[0.0, 0.1],
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+
+        weights = Molly.process_tss_sample!(state)
+        @test weights === state.weights
+        @test length(weights) == 2
+        @test sum(weights) ≈ 1.0
+        @test all(>=(0), weights)
+        @test all(isfinite, state.reduced_pot)
+
+        rng = MersenneTwister(1)
+        samples = [Molly.tss_sample_global_state(rng, state) for _ in 1:50]
+        @test all(s -> s in (2, 3), samples)
+
+        state.f .= [0.0, 0.1]
+        state.density .= fill(0.5, 2)
+        state.log_dens .= log.(state.density)
+        state.weights .= [0.4, 0.6]
+        state.reduced_pot .= state.f .+ state.log_dens .- log.(state.weights)
+
+        max_delta_f = Molly.update_tss_estimates!(state; visited_state=3)
+
+        @test isfinite(max_delta_f)
+        @test state.iteration == 1
+        @test all(isfinite, state.f)
+        @test state.tilts ≈ [0.0, 2.0]
+        @test sum(state.density) ≈ 1.0
+        @test all(>(0), state.density)
+        @test_throws ArgumentError Molly.update_tss_estimates!(state; visited_state=1)
+    end
+
     @testset "sample processing and simulation logging" begin
         state = Molly.TSSState(thermo_states;
             first_state=1,
@@ -221,5 +317,66 @@ end
         @test_throws ArgumentError Molly.TSSSimulation(state; n_md_steps=0, n_cycles=1)
         @test_throws ArgumentError Molly.TSSSimulation(state; n_md_steps=1, n_cycles=-1)
         @test_throws ArgumentError Molly.TSSSimulation(state; n_md_steps=1, n_cycles=1, log_freq=0)
+    end
+
+    @testset "self-adjustment simulation" begin
+        state = Molly.TSSState(thermo_states;
+            first_state=1,
+            gamma=[1.0, 1.0, 1.0],
+            ETA=2.0,
+            dens_reg=1e-4,
+        )
+        sim = Molly.TSSSimulation(state;
+            n_md_steps=1,
+            n_cycles=3,
+            self_adjustment_steps=4,
+            log_freq=1,
+        )
+        Molly.simulate!(sim; rng=MersenneTwister(2))
+
+        @test state.iteration == 3
+        @test state.stats.iterations == [1, 2, 3]
+        @test length(state.stats.active_state) == 3
+        @test length(state.stats.sampled_next_state) == 3
+        @test all(in(1:3), state.stats.active_state)
+        @test all(in(1:3), state.stats.sampled_next_state)
+        @test all(isfinite, state.stats.max_abs_delta_f)
+        @test all(f -> length(f) == 3 && all(isfinite, f), state.stats.f_history)
+        @test all(d -> length(d) == 3 && sum(d) ≈ 1.0, state.stats.dens_history)
+
+        subset_state = Molly.TSSState(make_tss_thermo_states(n_states=4);
+            first_state=2,
+            state_indices=[2, 3],
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+        subset_sim = Molly.TSSSimulation(subset_state;
+            n_md_steps=1,
+            n_cycles=2,
+            self_adjustment_steps=3,
+            log_freq=1,
+        )
+        Molly.simulate!(subset_sim; rng=MersenneTwister(3))
+
+        @test subset_state.iteration == 2
+        @test subset_state.stats.iterations == [1, 2]
+        @test all(in([2, 3]), subset_state.stats.active_state)
+        @test all(in([2, 3]), subset_state.stats.sampled_next_state)
+        @test all(f -> length(f) == 2 && all(isfinite, f), subset_state.stats.f_history)
+        @test all(d -> length(d) == 2 && sum(d) ≈ 1.0, subset_state.stats.dens_history)
+        @test subset_state.active_state.active_idx in (2, 3)
+
+        zero_cycle_state = Molly.TSSState(thermo_states)
+        zero_cycle_sim = Molly.TSSSimulation(zero_cycle_state; n_md_steps=1, n_cycles=0)
+        Molly.simulate!(zero_cycle_sim; rng=MersenneTwister(4))
+        @test zero_cycle_state.iteration == 0
+        @test isempty(zero_cycle_state.stats.iterations)
+
+        @test_throws ArgumentError Molly.TSSSimulation(state;
+            n_md_steps=1, n_cycles=1, self_adjustment_steps=0)
+        @test_throws ArgumentError Molly.TSSSimulation(state;
+            n_md_steps=1, n_cycles=1, self_adjustment_steps=-1)
+        @test_throws ArgumentError Molly.TSSSimulation(state;
+            n_md_steps=1, n_cycles=1, self_adjustment_steps=1.5)
     end
 end
