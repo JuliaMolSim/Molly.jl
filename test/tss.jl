@@ -60,6 +60,16 @@ end
         @test_throws ArgumentError Molly.TSSState(thermo_states; initial_f=[0.0, NaN, 1.0])
         @test_throws ArgumentError Molly.TSSState(thermo_states; ETA=-1.0)
         @test_throws ArgumentError Molly.TSSState(thermo_states; dens_reg=0.0)
+
+        history = Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2)
+        history_state = Molly.TSSState(thermo_states; history_forgetting=history)
+        @test history_state.history !== nothing
+        @test history_state.history.config.alpha == 0.0
+        @test history_state.history.config.phi == 1.2
+        @test_throws ArgumentError Molly.TSSHistoryForgetting(alpha=-0.1)
+        @test_throws ArgumentError Molly.TSSHistoryForgetting(alpha=1.0)
+        @test_throws ArgumentError Molly.TSSHistoryForgetting(n_epochs=0)
+        @test_throws ArgumentError Molly.TSSHistoryForgetting(phi=1.0)
     end
 
     @testset "subset constructor validation and index mapping" begin
@@ -129,7 +139,7 @@ end
         state.tilts .= [1.0, 2.0, 4.0]
         Molly.update_tss_sampling_distribution!(state)
 
-        raw = state.gamma .* state.tilts .^ state.ETA
+        raw = state.gamma .* state.tilts .^ (-state.ETA)
         raw ./= sum(raw)
         expected = (1 - state.dens_reg) .* raw .+ state.dens_reg .* state.gamma
         expected ./= sum(expected)
@@ -138,6 +148,15 @@ end
         @test state.log_dens ≈ log.(expected)
         @test sum(state.density) ≈ 1.0
         @test all(>(0), state.density)
+        @test state.density[1] > state.gamma[1]
+        @test state.density[3] < state.gamma[3]
+
+        state.tilts .= [0.0, 1.0, 2.0]
+        Molly.update_tss_sampling_distribution!(state)
+        @test all(isfinite, state.density)
+        @test all(>(0), state.density)
+        @test sum(state.density) ≈ 1.0
+        @test state.density[1] > state.density[2]
 
         state_eta_zero = Molly.TSSState(thermo_states;
             gamma=[2.0, 1.0, 1.0],
@@ -237,6 +256,63 @@ end
 
         state.reduced_pot[2] = NaN
         @test_throws ArgumentError Molly.update_tss_estimates!(state; visited_state=1)
+    end
+
+    @testset "history forgetting local estimator" begin
+        no_history = Molly.TSSState(thermo_states;
+            gamma=[1.0, 1.0, 1.0],
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+        keep_all = Molly.TSSState(thermo_states;
+            gamma=[1.0, 1.0, 1.0],
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+
+        samples = (
+            ([0.0, 0.3, 1.1], 1),
+            ([0.2, -0.1, 0.8], 2),
+            ([0.4, 0.5, -0.2], 3),
+            ([0.1, 0.7, 0.3], 2),
+        )
+        for (reduced_pot, visited_state) in samples
+            for state in (no_history, keep_all)
+                state.weights .= fill(1 / 3, 3)
+                state.reduced_pot .= reduced_pot
+                Molly.update_tss_estimates!(state; visited_state=visited_state)
+            end
+        end
+
+        @test keep_all.iteration == no_history.iteration
+        @test Molly.tss_recent_count(keep_all) == keep_all.iteration
+        @test Molly.tss_retained_epoch_count(keep_all) >= 1
+        @test keep_all.f ≈ no_history.f
+        @test keep_all.tilts ≈ no_history.tilts
+        @test keep_all.density ≈ no_history.density
+
+        forget_old = Molly.TSSState(thermo_states;
+            gamma=[1.0, 1.0, 1.0],
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.5, phi=1.2),
+        )
+        for step in 1:10
+            forget_old.weights .= fill(1 / 3, 3)
+            forget_old.reduced_pot .= [0.1 * step, -0.05 * step, 0.2]
+            Molly.update_tss_estimates!(forget_old; visited_state=mod1(step, 3))
+        end
+
+        @test Molly.tss_recent_count(forget_old) < forget_old.iteration
+        @test Molly.tss_recent_count(forget_old) > 0
+        @test Molly.tss_retained_epoch_count(forget_old) < forget_old.iteration
+        @test all(isfinite, forget_old.f)
+        @test all(isfinite, forget_old.tilts)
+        @test all(isfinite, forget_old.density)
+        @test all(>(0), forget_old.density)
+        @test sum(forget_old.density) ≈ 1.0
+        @test forget_old.f[1] == 0.0
     end
 
     @testset "subset sample processing and estimator update" begin
@@ -409,6 +485,7 @@ end
         @test state.coupling.converged
         @test state.coupling.max_abs_residual <= state.coupling.tolerance
         @test Molly.windowed_tss_visit_control_free_energies(state) ≈ [0.0, 1.0, 3.0, 6.0]
+        @test Molly.windowed_tss_free_energies(state) ≈ [0.0, 1.0, 3.0, 6.0]
 
         linear_windows = Molly.linear_tss_windows(8; window_size=4)
         @test [window.state_indices for window in linear_windows] ==
@@ -436,7 +513,7 @@ end
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
             windows=windows, visit_control_damping=0.0)
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=windows, window_prob_regularization=0.0)
+            windows=windows, pi_regularization=0.0)
 
         local_only_state = Molly.WindowedTSSState(thermo_states4;
             windows=windows,
@@ -444,6 +521,7 @@ end
         )
         @test local_only_state.coupling === nothing
         @test_throws ArgumentError Molly.windowed_tss_visit_control_free_energies(local_only_state)
+        @test_throws ArgumentError Molly.windowed_tss_free_energies(local_only_state)
     end
 
     @testset "windowed active-window switching and local processing" begin
@@ -489,19 +567,27 @@ end
             initial_f=true_f,
             ETA=1.0,
             dens_reg=1e-4,
-            visit_control_tolerance=1e-8,
+            visit_control_tolerance=1e-10,
         )
 
         coupling = state.coupling
         @test coupling !== nothing
         @test coupling.converged
         @test coupling.max_abs_residual <= coupling.tolerance
-        @test Molly.windowed_tss_visit_control_free_energies(state) ≈ true_f
+        @test isapprox(
+            Molly.windowed_tss_visit_control_free_energies(state),
+            true_f;
+            atol=1e-8,
+        )
+        @test Molly.windowed_tss_free_energies(state) ≈ true_f
         @test sum(coupling.window_probs) ≈ 1.0
         @test all(>(0), coupling.window_probs)
         @test all(d -> length(d) > 0 && all(>(0), d) && sum(d) ≈ 1.0,
                   coupling.candidate_densities)
-        @test isapprox(coupling.lhs_marginal, coupling.rhs_marginal; atol=1e-8)
+        @test isapprox(coupling.global_rung_weights, coupling.rhs_marginal; atol=1e-8)
+        @test all(isfinite, coupling.window_offsets)
+        @test all(isfinite, coupling.reported_offsets)
+        @test coupling.reported_f ≈ true_f
 
         coupling.visit_control_f .= [0.0, 2.0, 0.0, 0.0]
         Molly.compute_windowed_sampling_densities!(state)
@@ -519,11 +605,26 @@ end
         state.window_update_counts .= [0, 2, 0, 1, 0]
         Molly.update_window_probabilities!(state)
         @test sum(coupling.window_probs) ≈ 1.0
+        @test coupling.window_probs[1] == 0.0
+        @test coupling.window_probs[3] == 0.0
+        @test coupling.window_probs[5] == 0.0
         @test coupling.window_probs[2] > coupling.window_probs[1]
         @test coupling.window_probs[4] > coupling.window_probs[1]
+
+        state.window_update_counts .= 1
+        foreach(est -> fill!(est.tilts, 1.0), state.estimators)
+        Molly.update_window_probabilities!(state)
+        flat_probs = copy(coupling.window_probs)
+        @test sum(flat_probs) ≈ 1.0
+        @test all(>(0), flat_probs)
+
+        state.estimators[2].tilts .= [0.25, 4.0]
+        Molly.update_window_probabilities!(state)
+        @test sum(coupling.window_probs) ≈ 1.0
+        @test coupling.window_probs != flat_probs
     end
 
-    @testset "windowed TSS simulation and alignment" begin
+    @testset "windowed TSS simulation and reported free energies" begin
         thermo_states4 = make_tss_thermo_states(n_states=4)
         windows = [[1], [1, 2], [2, 3], [3, 4], [4]]
         state = Molly.WindowedTSSState(thermo_states4;
@@ -568,6 +669,37 @@ end
         @test all(state.estimators[i].density ≈ state.coupling.candidate_densities[i]
                   for i in eachindex(state.estimators))
 
+        history_state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=2,
+            first_window=2,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.5, phi=1.2),
+        )
+        history_sim = Molly.WindowedTSSSimulation(history_state;
+            n_md_steps=1,
+            n_cycles=6,
+            self_adjustment_steps=2,
+            log_freq=1,
+        )
+        Molly.simulate!(history_sim; rng=MersenneTwister(13))
+
+        recent_counts = [Molly.tss_recent_count(est) for est in history_state.estimators]
+        retained_epochs = [Molly.tss_retained_epoch_count(est) for est in history_state.estimators]
+        @test history_state.iteration == 6
+        @test sum(est.iteration for est in history_state.estimators) == 6
+        @test sum(recent_counts) <= 6
+        @test any(>(0), recent_counts)
+        @test all(>=(0), retained_epochs)
+        @test Molly._windowed_tss_visited_mask(history_state) == (recent_counts .> 0)
+        @test all(est -> est.history !== nothing, history_state.estimators)
+        @test all(est -> all(isfinite, est.f), history_state.estimators)
+        @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
+                         sum(est.density) ≈ 1.0, history_state.estimators)
+        @test all(isfinite, Molly.windowed_tss_free_energies(history_state; visited_only=true))
+        @test all(isfinite, Molly.windowed_tss_visit_control_free_energies(history_state))
+
         @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
             n_md_steps=0, n_cycles=1)
         @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
@@ -577,7 +709,7 @@ end
         @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
             n_md_steps=1, n_cycles=1, self_adjustment_steps=1.5)
 
-        alignment_state = Molly.WindowedTSSState(thermo_states4;
+        reported_state = Molly.WindowedTSSState(thermo_states4;
             windows=windows,
             first_state=1,
             first_window=1,
@@ -586,15 +718,22 @@ end
         )
         true_f = [0.0, 1.0, 3.0, 6.0]
         window_offsets = [10.0, -2.0, 5.0, 8.0, -4.0]
-        for (window_i, estimator) in enumerate(alignment_state.estimators)
-            estimator.f .= true_f[alignment_state.windows[window_i].state_indices] .+
+        for (window_i, estimator) in enumerate(reported_state.estimators)
+            estimator.f .= true_f[reported_state.windows[window_i].state_indices] .+
                            window_offsets[window_i]
         end
 
-        reported_f, offsets, residuals = Molly.align_window_free_energies(alignment_state)
+        reported_f = Molly.windowed_tss_free_energies(reported_state)
+        visit_control_f = Molly.windowed_tss_visit_control_free_energies(reported_state)
         @test reported_f ≈ true_f .- true_f[1]
-        @test all(isfinite, offsets)
-        @test all(isapprox(0.0; atol=1e-10), residuals)
-        @test Molly.windowed_tss_free_energies(alignment_state) ≈ true_f .- true_f[1]
+        @test all(isfinite, visit_control_f)
+        @test all(isfinite, reported_state.coupling.reported_gamma)
+        @test sum(reported_state.coupling.reported_gamma) ≈ 1.0
+
+        foreach(est -> fill!(est.tilts, 1.0), reported_state.estimators)
+        reported_eta_zero = Molly.windowed_tss_free_energies(reported_state)
+        foreach(est -> (est.ETA = 4.0), reported_state.estimators)
+        reported_eta_four = Molly.windowed_tss_free_energies(reported_state)
+        @test reported_eta_four ≈ reported_eta_zero
     end
 end
