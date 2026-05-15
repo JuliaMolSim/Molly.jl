@@ -106,6 +106,44 @@ function _drop_old_tss_epochs!(history::TSSEpochHistory, t::Integer)
     return history
 end
 
+function _tss_retained_epoch_indices!(history::TSSEpochHistory, t::Integer)
+    t > 0 || throw(ArgumentError("TSS jackknife requires a positive history time."))
+    _ensure_tss_epoch_bounds!(history, t)
+    first_recent = max(2, _tss_epoch_index!(history, floor(Int, history.config.alpha * t)))
+    current = _tss_epoch_index!(history, t)
+    current >= first_recent ||
+        throw(ArgumentError("TSS jackknife could not identify retained epochs at time $(t)."))
+    return collect(first_recent:current)
+end
+
+function _tss_epoch_weights!(history::TSSEpochHistory{FT},
+                             epoch_indices::AbstractVector{Int},
+                             t::Integer) where {FT}
+    isempty(epoch_indices) && return FT[]
+    _ensure_tss_epoch_bounds!(history, t)
+
+    first_epoch = first(epoch_indices)
+    first_epoch >= 2 ||
+        throw(ArgumentError("TSS epoch indices must be at least 2."))
+    denominator = FT(t - history.taus[first_epoch - 1])
+    denominator > zero(FT) ||
+        throw(ArgumentError("TSS jackknife retained-history duration must be positive."))
+
+    weights = FT[]
+    for epoch_index in epoch_indices
+        epoch_index <= length(history.taus) ||
+            throw(ArgumentError("TSS epoch index $(epoch_index) has no stored boundary."))
+        lower = history.taus[epoch_index - 1]
+        upper = min(history.taus[epoch_index], t)
+        duration = upper - lower
+        duration > 0 ||
+            throw(ArgumentError("TSS epoch $(epoch_index) has non-positive duration $(duration)."))
+        push!(weights, FT(duration) / denominator)
+    end
+
+    return weights
+end
+
 function tss_recent_count(state)
     history = getfield(state, :history)
     if isnothing(history)
@@ -145,14 +183,52 @@ function _aggregate_tss_history!(state)
     return state
 end
 
+function _aggregate_tss_history_free_energies(state;
+                                              omit_epoch_index = nothing,
+                                              epoch_indices = nothing)
+    history = state.history
+    isnothing(history) &&
+        throw(ArgumentError("TSS jackknife requires history forgetting to be enabled."))
+
+    retained = isnothing(epoch_indices) ? nothing : Set(epoch_indices)
+    total_count = 0
+    for epoch in history.epochs
+        epoch.count > 0 || continue
+        !isnothing(retained) && !(epoch.index in retained) && continue
+        !isnothing(omit_epoch_index) && epoch.index == omit_epoch_index && continue
+        total_count += epoch.count
+    end
+    total_count > 0 ||
+        throw(ArgumentError("TSS jackknife deletion of epoch $(omit_epoch_index) leaves " *
+                            "window with no retained samples."))
+
+    FT = eltype(state.f)
+    f = similar(state.f)
+    for k in eachindex(f)
+        log_z = -FT(Inf)
+        for epoch in history.epochs
+            epoch.count > 0 || continue
+            !isnothing(retained) && !(epoch.index in retained) && continue
+            !isnothing(omit_epoch_index) && epoch.index == omit_epoch_index && continue
+            log_z = logaddexp_tss(log_z, log(FT(epoch.count)) - epoch.f[k])
+        end
+        f[k] = -(log_z - log(FT(total_count)))
+    end
+    f .-= f[1]
+    check_tss_finite!(f, "history-aggregated jackknife free energies", state)
+    return f
+end
+
 function _update_tss_history!(state,
                               visited_local::Int,
                               log_den,
-                              t_next::Int;
+                              history_time::Int;
                               aggregate::Bool = true)
     FT = eltype(state.f)
     history = state.history
-    epoch = _tss_epoch_for_update!(history, t_next, length(state.f))
+    history_time > 0 ||
+        throw(ArgumentError("history_time must be positive."))
+    epoch = _tss_epoch_for_update!(history, history_time, length(state.f))
     epoch.count += 1
     gain = inv(FT(epoch.count))
 
@@ -168,7 +244,7 @@ function _update_tss_history!(state,
     end
     check_tss_finite!(epoch.tilts, "epoch visit tilts", state)
 
-    _drop_old_tss_epochs!(history, t_next)
+    _drop_old_tss_epochs!(history, history_time)
     aggregate && _aggregate_tss_history!(state)
     return state
 end

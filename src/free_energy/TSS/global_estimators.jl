@@ -66,7 +66,32 @@ function _windowed_tss_visited_mask(state::WindowedTSSState)
     return visited
 end
 
-function _windowed_local_average_free_energies(state::WindowedTSSState{FT}) where {FT}
+function _windowed_current_local_free_energies(state::WindowedTSSState)
+    return [estimator.f for estimator in state.estimators]
+end
+
+function _validate_windowed_local_free_energies(state::WindowedTSSState,
+                                                local_f_by_window)
+    length(local_f_by_window) == length(state.estimators) ||
+        throw(ArgumentError("local_f_by_window must match the number of TSS windows."))
+
+    for (window_i, estimator) in enumerate(state.estimators)
+        local_f = local_f_by_window[window_i]
+        length(local_f) == length(estimator.state_indices) ||
+            throw(ArgumentError("local free-energy vector for TSS window $(window_i) " *
+                                "has length $(length(local_f)); expected " *
+                                "$(length(estimator.state_indices))."))
+        all(isfinite, local_f) ||
+            throw(ArgumentError("local free-energy vector for TSS window $(window_i) " *
+                                "contains non-finite values."))
+    end
+
+    return local_f_by_window
+end
+
+function _windowed_local_average_free_energies(state::WindowedTSSState{FT},
+                                               local_f_by_window) where {FT}
+    _validate_windowed_local_free_energies(state, local_f_by_window)
     K = n_states(state.state_space)
     values = zeros(FT, K)
     counts = zeros(Int, K)
@@ -74,7 +99,7 @@ function _windowed_local_average_free_energies(state::WindowedTSSState{FT}) wher
     for (window_i, estimator) in enumerate(state.estimators)
         for global_state in state.windows[window_i].state_indices
             local_state = tss_local_index(estimator, global_state)
-            values[global_state] += estimator.f[local_state]
+            values[global_state] += local_f_by_window[window_i][local_state]
             counts[global_state] += 1
         end
     end
@@ -86,6 +111,13 @@ function _windowed_local_average_free_energies(state::WindowedTSSState{FT}) wher
     end
     values .-= values[1]
     return values
+end
+
+function _windowed_local_average_free_energies(state::WindowedTSSState)
+    return _windowed_local_average_free_energies(
+        state,
+        _windowed_current_local_free_energies(state),
+    )
 end
 
 function initialize_windowed_tss_coupling(state::WindowedTSSState{FT};
@@ -491,50 +523,54 @@ function _reported_active_mask(state::WindowedTSSState, visited_only::Bool)
     return _windowed_tss_visited_mask(state)
 end
 
-function compute_reported_tss_free_energies!(state::WindowedTSSState{FT};
-                                             visited_only::Bool = false) where {FT}
-    coupling = _windowed_tss_coupling(state)
+function _compute_reported_tss_free_energy_components(state::WindowedTSSState{FT},
+                                                      local_f_by_window;
+                                                      visited_only::Bool = false) where {FT}
+    _validate_windowed_local_free_energies(state, local_f_by_window)
     active_mask = _reported_active_mask(state, visited_only)
+    n_windows = length(state.windows)
+    reported_window_probs = zeros(FT, n_windows)
     solve_window_probability_eigenvector!(
         state;
         use_tilts = false,
         visited_mask = active_mask,
-        output = coupling.reported_window_probs,
-        transition = zeros(FT, length(state.windows), length(state.windows)),
+        output = reported_window_probs,
+        transition = zeros(FT, n_windows, n_windows),
     )
 
-    fill!(coupling.reported_gamma, zero(FT))
     K = n_states(state.state_space)
+    reported_gamma = zeros(FT, K)
     for (window_j, estimator) in enumerate(state.estimators)
-        p_j = coupling.reported_window_probs[window_j]
+        p_j = reported_window_probs[window_j]
         p_j > zero(FT) || continue
         for local_state in eachindex(estimator.state_indices)
             global_state = estimator.state_indices[local_state]
-            coupling.reported_gamma[global_state] += p_j * estimator.gamma[local_state]
+            reported_gamma[global_state] += p_j * estimator.gamma[local_state]
         end
     end
 
-    reported_total = sum(coupling.reported_gamma)
+    reported_total = sum(reported_gamma)
     isfinite(reported_total) && reported_total > zero(FT) ||
         throw(ArgumentError("TSS reported rung density has invalid total $(reported_total)."))
-    coupling.reported_gamma ./= reported_total
+    reported_gamma ./= reported_total
 
-    active_windows = findall(>(zero(FT)), coupling.reported_window_probs)
+    active_windows = findall(>(zero(FT)), reported_window_probs)
     isempty(active_windows) &&
         throw(ArgumentError("no TSS windows are available for reported free-energy estimation."))
 
     n_active = length(active_windows)
     global_weighted_f = zeros(FT, K)
     for global_state in 1:K
-        gamma_tss = coupling.reported_gamma[global_state]
+        gamma_tss = reported_gamma[global_state]
         gamma_tss > zero(FT) || continue
         for window_j in state.state_to_windows[global_state]
-            p_j = coupling.reported_window_probs[window_j]
+            p_j = reported_window_probs[window_j]
             p_j > zero(FT) || continue
             estimator = state.estimators[window_j]
             local_state = tss_local_index(estimator, global_state)
             global_weighted_f[global_state] +=
-                p_j * estimator.gamma[local_state] * estimator.f[local_state] / gamma_tss
+                p_j * estimator.gamma[local_state] *
+                local_f_by_window[window_j][local_state] / gamma_tss
         end
     end
 
@@ -544,19 +580,20 @@ function compute_reported_tss_free_energies!(state::WindowedTSSState{FT};
         estimator_i = state.estimators[window_i]
 
         for global_state in state.windows[window_i].state_indices
-            gamma_tss = coupling.reported_gamma[global_state]
+            gamma_tss = reported_gamma[global_state]
             gamma_tss > zero(FT) || continue
             local_i_state = tss_local_index(estimator_i, global_state)
             gamma_i = estimator_i.gamma[local_i_state]
             rhs[local_i] += gamma_i *
-                            (estimator_i.f[local_i_state] - global_weighted_f[global_state])
+                            (local_f_by_window[window_i][local_i_state] -
+                             global_weighted_f[global_state])
 
             for (local_j, window_j) in enumerate(active_windows)
                 window_j in state.state_to_windows[global_state] || continue
                 estimator_j = state.estimators[window_j]
                 local_j_state = tss_local_index(estimator_j, global_state)
                 transition[local_i, local_j] +=
-                    gamma_i * coupling.reported_window_probs[window_j] *
+                    gamma_i * reported_window_probs[window_j] *
                     estimator_j.gamma[local_j_state] / gamma_tss
             end
         end
@@ -564,38 +601,63 @@ function compute_reported_tss_free_energies!(state::WindowedTSSState{FT};
 
     A = Matrix{FT}(I, n_active, n_active) - transition
     b = rhs
-    A[n_active, :] .= coupling.reported_window_probs[active_windows]
+    A[n_active, :] .= reported_window_probs[active_windows]
     b[n_active] = zero(FT)
 
     offsets = pinv(A) * b
-    fill!(coupling.reported_offsets, zero(FT))
+    reported_offsets = zeros(FT, n_windows)
     for (local_i, window_i) in enumerate(active_windows)
-        coupling.reported_offsets[window_i] = offsets[local_i]
+        reported_offsets[window_i] = offsets[local_i]
     end
-    _gauge_window_offsets!(coupling.reported_offsets, coupling.reported_window_probs)
+    _gauge_window_offsets!(reported_offsets, reported_window_probs)
 
-    fallback = _windowed_local_average_free_energies(state)
+    fallback = _windowed_local_average_free_energies(state, local_f_by_window)
+    reported_f = zeros(FT, K)
     for global_state in 1:K
-        gamma_tss = coupling.reported_gamma[global_state]
+        gamma_tss = reported_gamma[global_state]
         if gamma_tss <= zero(FT)
-            coupling.reported_f[global_state] = fallback[global_state]
+            reported_f[global_state] = fallback[global_state]
             continue
         end
 
         value = zero(FT)
         for window_j in state.state_to_windows[global_state]
-            p_j = coupling.reported_window_probs[window_j]
+            p_j = reported_window_probs[window_j]
             p_j > zero(FT) || continue
             estimator = state.estimators[window_j]
             local_state = tss_local_index(estimator, global_state)
             value += p_j * estimator.gamma[local_state] *
-                     (estimator.f[local_state] - coupling.reported_offsets[window_j])
+                     (local_f_by_window[window_j][local_state] - reported_offsets[window_j])
         end
-        coupling.reported_f[global_state] = value / gamma_tss
+        reported_f[global_state] = value / gamma_tss
     end
 
-    coupling.reported_f .-= coupling.reported_f[1]
-    check_tss_finite!(coupling.reported_f, "reported free energies", state)
+    reported_f .-= reported_f[1]
+    check_tss_finite!(reported_f, "reported free energies", state)
+    check_tss_finite!(reported_offsets, "reported window offsets", state)
+    check_tss_probabilities!(reported_gamma, "reported rung density", state)
+    check_tss_probabilities!(reported_window_probs, "reported window probabilities", state)
+
+    return (
+        reported_f = reported_f,
+        reported_gamma = reported_gamma,
+        reported_offsets = reported_offsets,
+        reported_window_probs = reported_window_probs,
+    )
+end
+
+function compute_reported_tss_free_energies!(state::WindowedTSSState{FT};
+                                             visited_only::Bool = false) where {FT}
+    coupling = _windowed_tss_coupling(state)
+    components = _compute_reported_tss_free_energy_components(
+        state,
+        _windowed_current_local_free_energies(state);
+        visited_only = visited_only,
+    )
+    coupling.reported_window_probs .= components.reported_window_probs
+    coupling.reported_gamma .= components.reported_gamma
+    coupling.reported_offsets .= components.reported_offsets
+    coupling.reported_f .= components.reported_f
     return coupling.reported_f
 end
 
@@ -644,6 +706,126 @@ function windowed_tss_free_energies(state::WindowedTSSState;
     reported = copy(coupling.reported_f)
     reported .-= reported[reference_state]
     return reported
+end
+
+struct TSSJackknifeResult{T}
+    free_energies::Vector{T}
+    standard_errors::Vector{T}
+    mse::Vector{T}
+    reference_state::Int
+    epoch_indices::Vector{Int}
+    epoch_weights::Vector{T}
+    replicates::Matrix{T}
+end
+
+function _windowed_tss_jackknife_histories(state::WindowedTSSState)
+    histories = map(state.estimators) do estimator
+        isnothing(estimator.history) &&
+            throw(ArgumentError("TSS jackknife requires history forgetting to be enabled."))
+        estimator.history
+    end
+
+    config = first(histories).config
+    for (window_i, history) in enumerate(histories)
+        history.config.alpha == config.alpha &&
+            history.config.phi == config.phi &&
+            history.config.target_n_epochs == config.target_n_epochs ||
+            throw(ArgumentError("TSS jackknife requires matching history-forgetting " *
+                                "configuration in every window; window $(window_i) differs."))
+    end
+
+    return histories
+end
+
+function _windowed_tss_jackknife_epoch_indices!(histories, t::Int)
+    epoch_indices = _tss_retained_epoch_indices!(first(histories), t)
+    for history in histories
+        current = _tss_retained_epoch_indices!(history, t)
+        current == epoch_indices ||
+            throw(ArgumentError("TSS jackknife retained epoch boundaries differ across windows."))
+    end
+    length(epoch_indices) >= 2 ||
+        throw(ArgumentError("TSS jackknife requires at least two retained epochs; " *
+                            "got $(length(epoch_indices))."))
+    return epoch_indices
+end
+
+function _windowed_tss_jackknife_local_free_energies(state::WindowedTSSState;
+                                                     omit_epoch_index = nothing,
+                                                     epoch_indices = nothing)
+    return [
+        _aggregate_tss_history_free_energies(estimator;
+            omit_epoch_index = omit_epoch_index,
+            epoch_indices = epoch_indices,
+        )
+        for estimator in state.estimators
+    ]
+end
+
+function windowed_tss_free_energy_uncertainties(state::WindowedTSSState{FT};
+                                                reference_state::Integer = 1) where {FT}
+    _windowed_tss_coupling(state)
+
+    K = n_states(state.state_space)
+    reference_state = Int(reference_state)
+    1 <= reference_state <= K ||
+        throw(ArgumentError("reference_state $(reference_state) out of bounds."))
+    state.iteration > 0 ||
+        throw(ArgumentError("TSS jackknife requires at least one windowed update."))
+
+    histories = _windowed_tss_jackknife_histories(state)
+    epoch_indices = _windowed_tss_jackknife_epoch_indices!(histories, state.iteration)
+    epoch_weights = _tss_epoch_weights!(first(histories), epoch_indices, state.iteration)
+    all(>(zero(FT)), epoch_weights) ||
+        throw(ArgumentError("TSS jackknife epoch weights must be strictly positive."))
+
+    full_local_f = _windowed_tss_jackknife_local_free_energies(
+        state;
+        epoch_indices = epoch_indices,
+    )
+    full_components = _compute_reported_tss_free_energy_components(state, full_local_f)
+    full_f = copy(full_components.reported_f)
+    full_f .-= full_f[reference_state]
+
+    n_replicates = length(epoch_indices)
+    replicates = zeros(FT, K, n_replicates)
+    for (replicate_i, epoch_index) in enumerate(epoch_indices)
+        local_f = _windowed_tss_jackknife_local_free_energies(
+            state;
+            omit_epoch_index = epoch_index,
+            epoch_indices = epoch_indices,
+        )
+        components = _compute_reported_tss_free_energy_components(state, local_f)
+        replicate = components.reported_f
+        replicate .-= replicate[reference_state]
+        replicates[:, replicate_i] .= replicate
+    end
+
+    mse = zeros(FT, K)
+    denominator = FT(n_replicates - 1)
+    for state_i in 1:K
+        acc = zero(FT)
+        for replicate_i in 1:n_replicates
+            weight = epoch_weights[replicate_i]
+            delta = replicates[state_i, replicate_i] - full_f[state_i]
+            acc += ((one(FT) - weight)^2 / weight) * delta^2
+        end
+        mse[state_i] = acc / denominator
+    end
+    mse[reference_state] = zero(FT)
+    check_tss_finite!(mse, "jackknife mean-square errors", state)
+
+    standard_errors = sqrt.(max.(mse, zero(FT)))
+    standard_errors[reference_state] = zero(FT)
+    return TSSJackknifeResult(
+        full_f,
+        standard_errors,
+        mse,
+        reference_state,
+        epoch_indices,
+        epoch_weights,
+        replicates,
+    )
 end
 
 function windowed_tss_visit_control_free_energies(state::WindowedTSSState;

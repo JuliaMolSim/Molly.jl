@@ -302,7 +302,9 @@ function update_tss_sampling_distribution!(state::TSSState{FT}) where {FT}
 
 end
 
-function update_tss_estimates!(state::TSSState{FT}; visited_state::Int) where {FT}
+function update_tss_estimates!(state::TSSState{FT};
+                               visited_state::Int,
+                               history_time = nothing) where {FT}
 
     visited_local = tss_local_index(state, visited_state)
 
@@ -325,6 +327,15 @@ function update_tss_estimates!(state::TSSState{FT}; visited_state::Int) where {F
                                              "$(state.active_state.active_idx)."))
 
     t_next = state.iteration + 1
+    history_time_int = if isnothing(history_time)
+        t_next
+    else
+        history_time isa Integer ||
+            throw(ArgumentError("history_time must be an integer."))
+        Int(history_time)
+    end
+    history_time_int > 0 ||
+        throw(ArgumentError("history_time must be positive."))
     old_f = copy(state.f)
     use_standard_update = isnothing(state.history) || iszero(state.history.config.alpha)
 
@@ -353,12 +364,12 @@ function update_tss_estimates!(state::TSSState{FT}; visited_state::Int) where {F
                 state,
                 visited_local,
                 log_den,
-                t_next;
+                history_time_int;
                 aggregate = false,
             )
         end
     else
-        _update_tss_history!(state, visited_local, log_den, t_next)
+        _update_tss_history!(state, visited_local, log_den, history_time_int)
     end
 
     state.iteration += 1

@@ -101,6 +101,19 @@ function _check_windowed_tss_cycle_window!(state::WindowedTSSState,
     return state
 end
 
+function _drop_old_windowed_tss_histories!(state::WindowedTSSState, history_time::Int)
+    for estimator in state.estimators
+        isnothing(estimator.history) && continue
+
+        _drop_old_tss_epochs!(estimator.history, history_time)
+        if tss_recent_count(estimator) > 0
+            _aggregate_tss_history!(estimator)
+            update_tss_sampling_distribution!(estimator)
+        end
+    end
+    return state
+end
+
 function _run_windowed_tss_cycle!(state::WindowedTSSState,
                                   n_md_steps::Int,
                                   self_adjustment_steps::Int,
@@ -159,9 +172,15 @@ function _run_windowed_tss_cycle!(state::WindowedTSSState,
         end
     end
 
-    max_df = update_tss_estimates!(estimator; visited_state = final_visited_state)
+    history_time = state.iteration + 1
+    max_df = update_tss_estimates!(
+        estimator;
+        visited_state = final_visited_state,
+        history_time = history_time,
+    )
     state.window_update_counts[cycle_window] += 1
     state.iteration += 1
+    _drop_old_windowed_tss_histories!(state, state.iteration)
     update_windowed_tss_coupling!(state)
 
     set_active_state!(state.active_state, state.state_space, final_next_state)

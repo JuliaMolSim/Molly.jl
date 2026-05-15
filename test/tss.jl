@@ -850,5 +850,69 @@ end
         foreach(est -> (est.ETA = 4.0), reported_state.estimators)
         reported_eta_four = Molly.windowed_tss_free_energies(reported_state)
         @test reported_eta_four ≈ reported_eta_zero
+
+        @test_throws ArgumentError Molly.windowed_tss_free_energy_uncertainties(state)
+
+        short_history_state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=0.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=2.0),
+        )
+        short_history_state.iteration = 1
+        @test_throws ArgumentError Molly.windowed_tss_free_energy_uncertainties(short_history_state)
+
+        jackknife_state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=0.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=2.0),
+        )
+        jackknife_state.iteration = 4
+        for (window_i, estimator) in enumerate(jackknife_state.estimators)
+            local_f = true_f[jackknife_state.windows[window_i].state_indices] .+
+                      window_offsets[window_i]
+            estimator.f .= local_f
+            estimator.tilts .= 1.0
+            estimator.density .= estimator.gamma
+            estimator.log_dens .= log.(estimator.density)
+
+            history = estimator.history
+            empty!(history.epochs)
+            Molly._ensure_tss_epoch_bounds!(history, jackknife_state.iteration)
+            stale_epoch = Molly.TSSEpoch(1, Float64, length(estimator.f))
+            stale_epoch.count = 50
+            stale_epoch.f .= reverse(local_f) .+ 10.0
+            stale_epoch.tilts .= 1.0
+            push!(history.epochs, stale_epoch)
+            for epoch_index in 2:4
+                epoch = Molly.TSSEpoch(epoch_index, Float64, length(estimator.f))
+                epoch.count = 1
+                epoch.f .= local_f
+                epoch.tilts .= 1.0
+                push!(history.epochs, epoch)
+            end
+        end
+
+        jackknife = Molly.windowed_tss_free_energy_uncertainties(jackknife_state)
+        @test jackknife isa Molly.TSSJackknifeResult
+        @test jackknife.reference_state == 1
+        @test jackknife.free_energies ≈ true_f
+        @test all(<=(1e-12), abs.(jackknife.standard_errors))
+        @test all(<=(1e-24), abs.(jackknife.mse))
+        @test jackknife.epoch_indices == [2, 3, 4]
+        @test jackknife.epoch_weights ≈ [0.25, 0.25, 0.5]
+        @test size(jackknife.replicates) == (length(true_f), 3)
+        @test all(replicate -> replicate ≈ true_f, eachcol(jackknife.replicates))
+
+        jackknife_state.estimators[2].history.epochs[1].f[2] += 0.5
+        noisy_jackknife = Molly.windowed_tss_free_energy_uncertainties(jackknife_state)
+        @test all(isfinite, noisy_jackknife.standard_errors)
+        @test noisy_jackknife.standard_errors[1] == 0.0
+        @test any(>(0), noisy_jackknife.standard_errors[2:end])
     end
 end
