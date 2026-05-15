@@ -1,7 +1,7 @@
 struct TSSWindow
     index::Int
     state_indices::Vector{Int}
-    function TSSWindow(index::Integer, state_indices)
+    function TSSWindow(index::Integer, state_indices; check_contiguous::Bool = true)
         if !(index > 0)
             throw(ArgumentError("index must be strictly positive."))
         end
@@ -17,9 +17,12 @@ struct TSSWindow
             throw(ArgumentError("state_indices entries must be unique."))
         end
 
-        sort!(state_indices)
-        if length(state_indices) > 1 && any(!=(1), diff(state_indices))
-            throw(ArgumentError("state_indices must be contiguous for linear TSS windows."))
+        if check_contiguous
+            sort!(state_indices)
+            if length(state_indices) > 1 && any(!=(1), diff(state_indices))
+                throw(ArgumentError("state_indices must be contiguous for linear TSS windows; " *
+                                    "use check_contiguous=false for advanced non-linear windows."))
+            end
         end
 
         return new(Int(index), state_indices)
@@ -102,7 +105,7 @@ function _coerce_tss_windows(windows, K::Int)
         normalized_window = if window isa TSSWindow
             window.index == i ||
                 throw(ArgumentError("TSSWindow index $(window.index) must match position $(i)."))
-            TSSWindow(i, window.state_indices)
+            TSSWindow(i, window.state_indices; check_contiguous = false)
         else
             TSSWindow(i, window)
         end
@@ -306,6 +309,33 @@ function linear_tss_windows(n_states::Integer; window_size::Integer)
     end
 
     return [TSSWindow(i, window) for (i, window) in enumerate(unique_windows)]
+end
+
+function _periodic_tss_window_indices(n_states::Int, start::Int, window_size::Int)
+    return [mod1(start + offset, n_states) for offset in 0:(window_size - 1)]
+end
+
+function periodic_tss_windows(n_states::Integer; window_size::Integer)
+    n_states > 0 || throw(ArgumentError("n_states must be positive."))
+    window_size >= 2 || throw(ArgumentError("window_size must be at least 2."))
+    iseven(window_size) || throw(ArgumentError("window_size must be even."))
+    n_states >= window_size || throw(ArgumentError("n_states must be at least window_size."))
+
+    n_states = Int(n_states)
+    window_size = Int(window_size)
+    stride = window_size ÷ 2
+    n_states % stride == 0 ||
+        throw(ArgumentError("n_states must be divisible by half the window_size for periodic TSS windows."))
+
+    starts = collect(1:stride:n_states)
+    return [
+        TSSWindow(
+            window_i,
+            _periodic_tss_window_indices(n_states, start, window_size);
+            check_contiguous = false,
+        )
+        for (window_i, start) in enumerate(starts)
+    ]
 end
 
 active_tss_estimator(state::WindowedTSSState) = state.estimators[state.active_window]

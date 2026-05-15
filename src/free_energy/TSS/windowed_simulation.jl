@@ -61,63 +61,151 @@ function WindowedTSSSimulation(state::WindowedTSSState;
     )
 end
 
+function _windowed_tss_cycle_error(state::WindowedTSSState,
+                                   message::AbstractString,
+                                   cycle_window::Int,
+                                   substep::Int)
+    return ArgumentError(
+        "TSS windowed cycle invariant failed at iteration $(state.iteration), " *
+        "substep $(substep), fixed cycle window $(cycle_window): $(message)"
+    )
+end
+
+function _check_windowed_tss_cycle_state!(state::WindowedTSSState,
+                                          cycle_window::Int,
+                                          state_idx::Int,
+                                          substep::Int,
+                                          label::AbstractString)
+    if !window_contains_state(state.windows[cycle_window], state_idx)
+        throw(_windowed_tss_cycle_error(
+            state,
+            "$(label) state $(state_idx) is not contained in fixed cycle window $(cycle_window)",
+            cycle_window,
+            substep,
+        ))
+    end
+    return state
+end
+
+function _check_windowed_tss_cycle_window!(state::WindowedTSSState,
+                                           cycle_window::Int,
+                                           substep::Int)
+    if state.active_window != cycle_window
+        throw(_windowed_tss_cycle_error(
+            state,
+            "active window $(state.active_window) changed during the cycle",
+            cycle_window,
+            substep,
+        ))
+    end
+    return state
+end
+
+function _run_windowed_tss_cycle!(state::WindowedTSSState,
+                                  n_md_steps::Int,
+                                  self_adjustment_steps::Int,
+                                  rng)
+    _check_windowed_tss_invariant(state)
+
+    entry_state = state.active_state.active_idx
+    switch_active_window!(state; current_state = entry_state)
+    cycle_window = state.active_window
+    estimator = active_tss_estimator(state)
+    _check_windowed_tss_cycle_state!(
+        state,
+        cycle_window,
+        entry_state,
+        0,
+        "entry",
+    )
+
+    final_visited_state = entry_state
+    final_next_state = entry_state
+
+    for substep in 1:self_adjustment_steps
+        visited_state = state.active_state.active_idx
+        _check_windowed_tss_cycle_state!(
+            state,
+            cycle_window,
+            visited_state,
+            substep,
+            "visited",
+        )
+
+        simulate!(
+            state.active_state.active_sys,
+            state.active_state.active_integrator,
+            n_md_steps,
+        )
+
+        _check_windowed_tss_cycle_window!(state, cycle_window, substep)
+
+        process_tss_sample!(estimator)
+        next_state = tss_sample_global_state(rng, estimator)
+        _check_windowed_tss_cycle_state!(
+            state,
+            cycle_window,
+            next_state,
+            substep,
+            "sampled next",
+        )
+
+        final_visited_state = visited_state
+        final_next_state = next_state
+
+        if substep < self_adjustment_steps
+            set_active_state!(state.active_state, state.state_space, next_state)
+            _check_windowed_tss_invariant(state)
+        end
+    end
+
+    max_df = update_tss_estimates!(estimator; visited_state = final_visited_state)
+    state.window_update_counts[cycle_window] += 1
+    state.iteration += 1
+    update_windowed_tss_coupling!(state)
+
+    set_active_state!(state.active_state, state.state_space, final_next_state)
+    _check_windowed_tss_invariant(state)
+
+    return (
+        update_window = cycle_window,
+        visited_state = final_visited_state,
+        next_state = final_next_state,
+        max_delta_f = max_df,
+    )
+end
+
 function simulate!(sim::WindowedTSSSimulation; rng = Random.default_rng())
     state::WindowedTSSState = sim.state
 
     for cycle in 1:sim.n_cycles
-        _check_windowed_tss_invariant(state)
-
-        final_window = state.active_window
-        final_visited_state = state.active_state.active_idx
-        final_next_state = state.active_state.active_idx
-
-        for substep in 1:sim.self_adjustment_steps
-            visited_state = state.active_state.active_idx
-
-            simulate!(
-                state.active_state.active_sys,
-                state.active_state.active_integrator,
-                sim.n_md_steps,
-            )
-
-            switch_active_window!(state; current_state = visited_state)
-            estimator = active_tss_estimator(state)
-
-            process_tss_sample!(estimator)
-            next_state = tss_sample_global_state(rng, estimator)
-
-            final_window = state.active_window
-            final_visited_state = visited_state
-            final_next_state = next_state
-
-            if substep < sim.self_adjustment_steps
-                set_active_state!(state.active_state, state.state_space, next_state)
-                _check_windowed_tss_invariant(state)
-            end
-        end
-
-        estimator = state.estimators[final_window]
-        max_df = update_tss_estimates!(estimator; visited_state = final_visited_state)
-        state.window_update_counts[final_window] += 1
-        state.iteration += 1
-        update_windowed_tss_coupling!(state)
+        result = _run_windowed_tss_cycle!(
+            state,
+            sim.n_md_steps,
+            sim.self_adjustment_steps,
+            rng,
+        )
+        estimator = state.estimators[result.update_window]
 
         if should_log_tss(estimator.iteration, sim.log_freq)
-            log_tss_stats!(estimator.stats, estimator, final_visited_state, final_next_state, max_df)
+            log_tss_stats!(
+                estimator.stats,
+                estimator,
+                result.visited_state,
+                result.next_state,
+                result.max_delta_f,
+            )
         end
         if should_log_tss(state.iteration, sim.log_freq)
             log_windowed_tss_stats!(
                 state.stats,
                 state,
-                final_window,
-                final_visited_state,
-                final_next_state,
-                max_df,
+                result.update_window,
+                result.visited_state,
+                result.next_state,
+                result.max_delta_f,
             )
         end
-
-        set_active_state!(state.active_state, state.state_space, final_next_state)
-        _check_windowed_tss_invariant(state)
     end
 
     return state

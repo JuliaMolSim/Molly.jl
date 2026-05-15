@@ -492,6 +492,8 @@ end
               [[1, 2], [1, 2, 3, 4], [3, 4, 5, 6], [5, 6, 7, 8], [7, 8]]
 
         @test_throws ArgumentError Molly.TSSWindow(1, [1, 3])
+        custom_window = Molly.TSSWindow(1, [1, 3]; check_contiguous=false)
+        @test custom_window.state_indices == [1, 3]
         @test_throws ArgumentError Molly.TSSWindow(1, [1, 1])
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
             windows=[[1], [1, 2], [2, 2], [3, 4], [4]])
@@ -522,6 +524,49 @@ end
         @test local_only_state.coupling === nothing
         @test_throws ArgumentError Molly.windowed_tss_visit_control_free_energies(local_only_state)
         @test_throws ArgumentError Molly.windowed_tss_free_energies(local_only_state)
+    end
+
+    @testset "periodic TSS windows" begin
+        periodic_windows = Molly.periodic_tss_windows(8; window_size=4)
+        @test [window.state_indices for window in periodic_windows] ==
+              [[1, 2, 3, 4], [3, 4, 5, 6], [5, 6, 7, 8], [7, 8, 1, 2]]
+
+        coverage = zeros(Int, 8)
+        for window in periodic_windows
+            for state_index in window.state_indices
+                coverage[state_index] += 1
+            end
+        end
+        @test coverage == fill(2, 8)
+
+        thermo_states8 = make_tss_thermo_states(n_states=8)
+        state = Molly.WindowedTSSState(thermo_states8;
+            windows=periodic_windows,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+
+        @test length(state.windows) == 4
+        @test state.state_to_windows == [[1, 4], [1, 4], [1, 2], [1, 2],
+                                         [2, 3], [2, 3], [3, 4], [3, 4]]
+        @test Molly.other_window_for_state(state, 1) == 4
+        @test state.coupling !== nothing
+        @test state.coupling.converged
+
+        edge_windows = Molly.periodic_tss_windows(8; window_size=2)
+        @test first(edge_windows).state_indices == [1, 2]
+        @test last(edge_windows).state_indices == [8, 1]
+        edge_coverage = zeros(Int, 8)
+        for window in edge_windows, state_index in window.state_indices
+            edge_coverage[state_index] += 1
+        end
+        @test edge_coverage == fill(2, 8)
+
+        @test_throws ArgumentError Molly.periodic_tss_windows(8; window_size=3)
+        @test_throws ArgumentError Molly.periodic_tss_windows(9; window_size=4)
+        @test_throws ArgumentError Molly.periodic_tss_windows(8; window_size=10)
     end
 
     @testset "windowed active-window switching and local processing" begin
@@ -622,6 +667,76 @@ end
         Molly.update_window_probabilities!(state)
         @test sum(coupling.window_probs) ≈ 1.0
         @test coupling.window_probs != flat_probs
+    end
+
+    @testset "windowed self-adjustment cycle order" begin
+        thermo_states8 = make_tss_thermo_states(n_states=8)
+        windows = Molly.linear_tss_windows(8; window_size=4)
+
+        state = Molly.WindowedTSSState(thermo_states8;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+        sim = Molly.WindowedTSSSimulation(state;
+            n_md_steps=1,
+            n_cycles=5,
+            self_adjustment_steps=4,
+            log_freq=1,
+        )
+        Molly.simulate!(sim; rng=MersenneTwister(31))
+
+        @test state.iteration == 5
+        @test sum(state.window_update_counts) == 5
+        @test length(state.stats.update_window) == 5
+        @test sum(est.iteration for est in state.estimators) == sim.n_cycles
+        for i in eachindex(state.stats.iterations)
+            update_window = state.stats.update_window[i]
+            @test state.stats.visited_state[i] in state.windows[update_window].state_indices
+            @test state.stats.sampled_next_state[i] in state.windows[update_window].state_indices
+        end
+        @test state.active_state.active_idx in state.windows[state.active_window].state_indices
+
+        first_cycle_state = Molly.WindowedTSSState(thermo_states8;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+        expected_window = Molly.other_window_for_state(first_cycle_state, 1)
+        first_cycle_sim = Molly.WindowedTSSSimulation(first_cycle_state;
+            n_md_steps=1,
+            n_cycles=1,
+            self_adjustment_steps=1,
+            log_freq=1,
+        )
+        Molly.simulate!(first_cycle_sim; rng=MersenneTwister(32))
+        @test only(first_cycle_state.stats.update_window) == expected_window
+        @test first_cycle_state.window_update_counts[expected_window] == 1
+
+        for self_adjustment_steps in (1, 5)
+            count_state = Molly.WindowedTSSState(thermo_states8;
+                windows=windows,
+                first_state=1,
+                first_window=1,
+                ETA=1.0,
+                dens_reg=1e-4,
+            )
+            count_sim = Molly.WindowedTSSSimulation(count_state;
+                n_md_steps=1,
+                n_cycles=3,
+                self_adjustment_steps=self_adjustment_steps,
+                log_freq=1,
+            )
+            Molly.simulate!(count_sim; rng=MersenneTwister(40 + self_adjustment_steps))
+
+            @test count_state.iteration == 3
+            @test sum(est.iteration for est in count_state.estimators) == 3
+            @test sum(count_state.window_update_counts) == 3
+        end
     end
 
     @testset "windowed TSS simulation and reported free energies" begin

@@ -6,6 +6,7 @@ export
     WindowedTSSState,
     WindowedTSSSimulation,
     linear_tss_windows,
+    periodic_tss_windows,
     windowed_tss_free_energies,
     windowed_tss_visit_control_free_energies
 
