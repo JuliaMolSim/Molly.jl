@@ -42,6 +42,11 @@ mutable struct WindowedTSSStats{T}
     visit_control_max_abs_residual::Vector{T}
     window_prob_history::Vector{Vector{T}}
     visit_control_f_history::Vector{Vector{T}}
+    replica_indices::Vector{Vector{Int}}
+    replica_update_windows::Vector{Vector{Int}}
+    replica_visited_states::Vector{Vector{Int}}
+    replica_sampled_next_states::Vector{Vector{Int}}
+    replica_max_abs_delta_f::Vector{Vector{T}}
 end
 
 function WindowedTSSStats(::Type{FT}) where {FT}
@@ -57,6 +62,11 @@ function WindowedTSSStats(::Type{FT}) where {FT}
         Int[],
         FT[],
         Vector{FT}[],
+        Vector{FT}[],
+        Vector{Int}[],
+        Vector{Int}[],
+        Vector{Int}[],
+        Vector{Int}[],
         Vector{FT}[],
     )
 end
@@ -350,18 +360,25 @@ function windows_for_state(state::WindowedTSSState, global_state::Integer)
     return state.state_to_windows[global_state]
 end
 
-function other_window_for_state(state::WindowedTSSState, global_state::Integer)
+function other_window_for_state(state::WindowedTSSState,
+                                active_window::Integer,
+                                global_state::Integer)
+    active_window = Int(active_window)
     win = windows_for_state(state, global_state)
     length(win) == 2 ||
         throw(ArgumentError("state $(global_state) is not covered by exactly two windows."))
 
-    if state.active_window == win[1]
+    if active_window == win[1]
         return win[2]
-    elseif state.active_window == win[2]
+    elseif active_window == win[2]
         return win[1]
     else
-        throw(ArgumentError("active window $(state.active_window) does not contain state $(global_state)."))
+        throw(ArgumentError("active window $(active_window) does not contain state $(global_state)."))
     end
+end
+
+function other_window_for_state(state::WindowedTSSState, global_state::Integer)
+    return other_window_for_state(state, state.active_window, global_state)
 end
 
 function switch_active_window!(state::WindowedTSSState; current_state::Integer = state.active_state.active_idx)

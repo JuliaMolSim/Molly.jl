@@ -222,9 +222,9 @@ function tss_sample_global_state(rng::AbstractRNG, state::TSSState)
     return tss_global_index(state, idx)
 end
 
-function process_tss_sample!(state::TSSState{FT}) where {FT}
-    coords = state.active_state.active_sys.coords
-    boundary = state.active_state.active_sys.boundary
+function process_tss_sample!(state::TSSState{FT}, active_state::ActiveThermoState) where {FT}
+    coords = active_state.active_sys.coords
+    boundary = active_state.active_sys.boundary
 
     iter = state.state_indices
 
@@ -258,6 +258,22 @@ function process_tss_sample!(state::TSSState{FT}) where {FT}
 
     return state.weights
 
+end
+
+function process_tss_sample!(state::TSSState{FT}) where {FT}
+    return process_tss_sample!(state, state.active_state)
+end
+
+function _tss_log_den!(state::TSSState)
+    @. state.log_state_bias = state.f + state.log_dens
+    check_tss_finite!(state.log_state_bias, "log state bias", state)
+    @. state.scratch = state.log_state_bias - state.reduced_pot
+    log_den = logsumexp(state.scratch)
+    isfinite(log_den) || throw(ArgumentError("TSS log normalization is non-finite " *
+                                             "($(log_den)) at iteration " *
+                                             "$(state.iteration) with active state " *
+                                             "$(state.active_state.active_idx)."))
+    return log_den
 end
 
 function update_tss_sampling_distribution!(state::TSSState{FT}) where {FT}
@@ -317,14 +333,7 @@ function update_tss_estimates!(state::TSSState{FT};
     check_tss_finite!(state.f, "free energy estimates", state)
     check_tss_finite!(state.reduced_pot, "reduced potentials", state)
 
-    @. state.log_state_bias = state.f + state.log_dens
-    check_tss_finite!(state.log_state_bias, "log state bias", state)
-    @. state.scratch = state.log_state_bias - state.reduced_pot
-    log_den = logsumexp(state.scratch)
-    isfinite(log_den) || throw(ArgumentError("TSS log normalization is non-finite " *
-                                             "($(log_den)) at iteration " *
-                                             "$(state.iteration) with active state " *
-                                             "$(state.active_state.active_idx)."))
+    log_den = _tss_log_den!(state)
 
     t_next = state.iteration + 1
     history_time_int = if isnothing(history_time)

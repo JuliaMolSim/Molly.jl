@@ -755,6 +755,9 @@ end
             self_adjustment_steps=3,
             log_freq=1,
         )
+        @test length(sim.replicas) == 1
+        @test sim.replicas[1].active_state === state.active_state
+        @test sim.replicas[1].active_window == state.active_window
         Molly.simulate!(sim; rng=MersenneTwister(12))
 
         @test state.iteration == 4
@@ -814,6 +817,184 @@ end
                          sum(est.density) ≈ 1.0, history_state.estimators)
         @test all(isfinite, Molly.windowed_tss_free_energies(history_state; visited_only=true))
         @test all(isfinite, Molly.windowed_tss_visit_control_free_energies(history_state))
+
+        @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
+            n_md_steps=1, n_cycles=1, n_replicas=2)
+
+        multi_state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        multi_sim = Molly.WindowedTSSSimulation(multi_state;
+            n_md_steps=1,
+            n_cycles=4,
+            self_adjustment_steps=2,
+            log_freq=1,
+            n_replicas=2,
+            first_states=[1, 3],
+        )
+        Molly.simulate!(multi_sim;
+            rng=MersenneTwister(14),
+            n_threads=1,
+            replica_parallel=:serial,
+        )
+
+        @test length(multi_sim.replicas) == 2
+        @test length(multi_sim.replica_workspaces) == 2
+        @test multi_state.iteration == 4
+        @test sum(est.iteration for est in multi_state.estimators) == 8
+        @test sum(multi_state.window_update_counts) == 8
+        @test sum(Molly.tss_recent_count(est) for est in multi_state.estimators) == 8
+        @test length(multi_state.stats.replica_indices) == 4
+        @test all(==([1, 2]), multi_state.stats.replica_indices)
+        @test all(windows -> length(windows) == 2, multi_state.stats.replica_update_windows)
+        for log_i in eachindex(multi_state.stats.replica_indices)
+            for obs_i in eachindex(multi_state.stats.replica_indices[log_i])
+                update_window = multi_state.stats.replica_update_windows[log_i][obs_i]
+                visited_state = multi_state.stats.replica_visited_states[log_i][obs_i]
+                next_state = multi_state.stats.replica_sampled_next_states[log_i][obs_i]
+                @test visited_state in multi_state.windows[update_window].state_indices
+                @test next_state in multi_state.windows[update_window].state_indices
+            end
+        end
+        @test all(replica -> replica.active_state.active_idx in
+                             multi_state.windows[replica.active_window].state_indices,
+                  multi_sim.replicas)
+        @test all(est -> all(isfinite, est.f), multi_state.estimators)
+        @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
+                         sum(est.density) ≈ 1.0, multi_state.estimators)
+        @test all(isfinite, Molly.windowed_tss_free_energies(multi_state; visited_only=true))
+        @test all(isfinite, Molly.windowed_tss_visit_control_free_energies(multi_state))
+
+        threaded_state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        threaded_sim = Molly.WindowedTSSSimulation(threaded_state;
+            n_md_steps=1,
+            n_cycles=4,
+            self_adjustment_steps=2,
+            log_freq=1,
+            n_replicas=2,
+            first_states=[1, 3],
+        )
+        Molly.simulate!(threaded_sim;
+            rng=MersenneTwister(15),
+            n_threads=2,
+            replica_parallel=:threads,
+        )
+        @test threaded_state.iteration == 4
+        @test sum(est.iteration for est in threaded_state.estimators) == 8
+        @test sum(threaded_state.window_update_counts) == 8
+        @test sum(Molly.tss_recent_count(est) for est in threaded_state.estimators) == 8
+        @test all(replica -> replica.active_state.active_idx in
+                             threaded_state.windows[replica.active_window].state_indices,
+                  threaded_sim.replicas)
+        @test all(est -> all(isfinite, est.f), threaded_state.estimators)
+        @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
+                         sum(est.density) ≈ 1.0, threaded_state.estimators)
+        @test all(isfinite, Molly.windowed_tss_free_energies(threaded_state; visited_only=true))
+        @test all(isfinite, Molly.windowed_tss_visit_control_free_energies(threaded_state))
+
+        serial_a = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        serial_b = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        serial_sim_a = Molly.WindowedTSSSimulation(serial_a;
+            n_md_steps=1,
+            n_cycles=3,
+            self_adjustment_steps=2,
+            log_freq=1,
+            n_replicas=2,
+            first_states=[1, 3],
+        )
+        serial_sim_b = Molly.WindowedTSSSimulation(serial_b;
+            n_md_steps=1,
+            n_cycles=3,
+            self_adjustment_steps=2,
+            log_freq=1,
+            n_replicas=2,
+            first_states=[1, 3],
+        )
+        Molly.simulate!(serial_sim_a;
+            rng=MersenneTwister(16),
+            n_threads=1,
+            replica_parallel=:serial,
+        )
+        Molly.simulate!(serial_sim_b;
+            rng=MersenneTwister(16),
+            n_threads=1,
+            replica_parallel=:serial,
+        )
+        @test serial_a.window_update_counts == serial_b.window_update_counts
+        @test [replica.active_state.active_idx for replica in serial_sim_a.replicas] ==
+              [replica.active_state.active_idx for replica in serial_sim_b.replicas]
+        @test all(serial_a.estimators[i].f ≈ serial_b.estimators[i].f
+                  for i in eachindex(serial_a.estimators))
+        @test all(serial_a.estimators[i].density ≈ serial_b.estimators[i].density
+                  for i in eachindex(serial_a.estimators))
+
+        supplied_state = Molly.WindowedTSSState(thermo_states4;
+            windows=windows,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        supplied_active_states = [
+            Molly.ActiveThermoState(supplied_state.state_space, 1),
+            Molly.ActiveThermoState(supplied_state.state_space, 3),
+        ]
+        supplied_sim = Molly.WindowedTSSSimulation(supplied_state;
+            n_md_steps=1,
+            n_cycles=2,
+            self_adjustment_steps=1,
+            log_freq=1,
+            replica_active_states=supplied_active_states,
+        )
+        @test length(supplied_sim.replicas) == 2
+        @test supplied_sim.replicas[1].active_state === supplied_active_states[1]
+        @test supplied_sim.replicas[2].active_state === supplied_active_states[2]
+        Molly.simulate!(supplied_sim;
+            rng=MersenneTwister(17),
+            n_threads=1,
+            replica_parallel=:serial,
+        )
+        @test supplied_state.iteration == 2
+        @test sum(est.iteration for est in supplied_state.estimators) == 4
+        @test sum(supplied_state.window_update_counts) == 4
+        @test all(replica -> replica.active_state.active_idx in
+                             supplied_state.windows[replica.active_window].state_indices,
+                  supplied_sim.replicas)
+
+        @test_throws ArgumentError Molly.simulate!(multi_sim; replica_parallel=:invalid)
+        @test_throws ArgumentError Molly.simulate!(multi_sim; n_threads=0)
+        @test_throws ArgumentError Molly.WindowedTSSSimulation(multi_state;
+            n_md_steps=1, n_cycles=1, n_replicas=2, first_states=[1])
+        @test_throws ArgumentError Molly.WindowedTSSSimulation(multi_state;
+            n_md_steps=1, n_cycles=1, n_replicas=2, first_states=[1, 3],
+            first_windows=[1, 1])
 
         @test_throws ArgumentError Molly.WindowedTSSSimulation(state;
             n_md_steps=0, n_cycles=1)
