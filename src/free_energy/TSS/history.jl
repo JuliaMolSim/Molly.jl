@@ -5,7 +5,7 @@ struct TSSHistoryForgetting{T}
 end
 
 function TSSHistoryForgetting(; alpha::Real = 0.19,
-                              n_epochs::Integer = 32,
+                              n_epochs::Integer = 16,
                               phi = nothing)
     isfinite(alpha) && 0 <= alpha < 1 ||
         throw(ArgumentError("alpha must be finite and in the [0, 1) interval."))
@@ -112,18 +112,20 @@ function _tss_epoch_for_update!(history::TSSEpochHistory{FT},
 end
 
 function _drop_old_tss_epochs!(history::TSSEpochHistory, t::Integer)
-    first_recent = _tss_epoch_index!(
-        history,
-        floor(Int, history.config.alpha * t),
-    )
+    first_recent = _tss_first_retained_epoch_index!(history, t)
     filter!(epoch -> epoch.index >= first_recent, history.epochs)
     return history
+end
+
+function _tss_first_retained_epoch_index!(history::TSSEpochHistory, t::Integer)
+    threshold = ceil(Int, history.config.alpha * t)
+    return _tss_epoch_index!(history, threshold)
 end
 
 function _tss_retained_epoch_indices!(history::TSSEpochHistory, t::Integer)
     t > 0 || throw(ArgumentError("TSS jackknife requires a positive history time."))
     _ensure_tss_epoch_bounds!(history, t)
-    first_recent = max(2, _tss_epoch_index!(history, floor(Int, history.config.alpha * t)))
+    first_recent = max(2, _tss_first_retained_epoch_index!(history, t))
     current = _tss_epoch_index!(history, t)
     current >= first_recent ||
         throw(ArgumentError("TSS jackknife could not identify retained epochs at time $(t)."))

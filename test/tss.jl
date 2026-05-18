@@ -74,6 +74,11 @@ end
         @test_throws ArgumentError Molly.TSSState(thermo_states; ETA=-1.0)
         @test_throws ArgumentError Molly.TSSState(thermo_states; dens_reg=0.0)
 
+        default_history = Molly.TSSHistoryForgetting()
+        @test default_history.alpha == 0.19
+        @test default_history.target_n_epochs == 16
+        @test default_history.phi ≈ 0.19^(-1 / 16)
+
         history = Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2)
         history_state = Molly.TSSState(thermo_states; history_forgetting=history)
         @test history_state.history !== nothing
@@ -344,6 +349,30 @@ end
         @test all(>(0), forget_old.density)
         @test sum(forget_old.density) ≈ 1.0
         @test forget_old.f[1] == 0.0
+
+        cutoff_config = Molly.TSSHistoryForgetting(alpha=0.19, phi=1.2)
+        cutoff_history = Molly.TSSEpochHistory(cutoff_config, Float64, 2)
+        cutoff_time = 95
+        Molly._ensure_tss_epoch_bounds!(cutoff_history, cutoff_time)
+        floor_cutoff = Molly._tss_epoch_index!(
+            cutoff_history,
+            floor(Int, cutoff_config.alpha * cutoff_time),
+        )
+        first_retained = Molly._tss_first_retained_epoch_index!(
+            cutoff_history,
+            cutoff_time,
+        )
+        @test cutoff_history.taus[first_retained] >= cutoff_config.alpha * cutoff_time
+        @test cutoff_history.taus[first_retained - 1] < cutoff_config.alpha * cutoff_time
+        @test first_retained > floor_cutoff
+
+        for epoch_index in (floor_cutoff, first_retained)
+            epoch = Molly.TSSEpoch(epoch_index, Float64, 2)
+            epoch.count = 1
+            push!(cutoff_history.epochs, epoch)
+        end
+        Molly._drop_old_tss_epochs!(cutoff_history, cutoff_time)
+        @test [epoch.index for epoch in cutoff_history.epochs] == [first_retained]
     end
 
     @testset "adaptive gamma observables" begin
@@ -626,9 +655,10 @@ end
 
     @testset "windowed TSS construction and validation" begin
         thermo_states4 = make_tss_thermo_states(n_states=4)
-        windows = [[1], [1, 2], [2, 3], [3, 4], [4]]
+        graph4 = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
+        windows = [window.state_indices for window in graph4.windows]
         state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=2,
             first_window=2,
             gamma=[1.0, 2.0, 3.0, 4.0],
@@ -655,38 +685,42 @@ end
         @test Molly.windowed_tss_visit_control_free_energies(state) ≈ [0.0, 1.0, 3.0, 6.0]
         @test Molly.windowed_tss_free_energies(state) ≈ [0.0, 1.0, 3.0, 6.0]
 
-        linear_windows = Molly.linear_tss_windows(8; window_size=4)
+        linear_graph = Molly.tss_grid_graph((8,); window_size=(4,), periodic=false)
+        linear_windows = linear_graph.windows
         @test [window.state_indices for window in linear_windows] ==
               [[1, 2], [1, 2, 3, 4], [3, 4, 5, 6], [5, 6, 7, 8], [7, 8]]
 
-        @test_throws ArgumentError Molly.TSSWindow(1, [1, 3])
-        custom_window = Molly.TSSWindow(1, [1, 3]; check_contiguous=false)
-        @test custom_window.state_indices == [1, 3]
-        @test_throws ArgumentError Molly.TSSWindow(1, [1, 1])
+        @test all(length.(graph4.state_to_windows) .== 2)
+        @test all(window -> all(state_index -> state_index in window.evaluation_state_indices,
+                                window.state_indices), graph4.windows)
+        @test graph4.rung_volumes == [0.5, 1.0, 1.0, 0.5]
+        @test graph4.rung_neighbors[1] == [(1, 2, 1)]
+        @test graph4.rung_neighbors[4] == [(3, 4, 1)]
+        @test !(:TSSWindow in names(Molly))
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=[[1], [1, 2], [2, 2], [3, 4], [4]])
+            windows=windows)
+        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4)
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=[[1], [1, 2], [2, 3], [3, 4]])
+            graph=graph4, first_state=2, first_window=1)
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=[[1], [1, 2], [2], [2, 3], [3, 4], [4]])
+            graph=graph4, gamma=[1.0, 2.0])
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=[[1], [1, 2], [2], [3], [3, 4], [4]])
+            graph=Molly.tss_grid_graph((8,); window_size=(4,), periodic=false))
+        @test_throws ArgumentError Molly.tss_grid_graph((7,); window_size=(4,), periodic=false)
+        @test_throws ArgumentError Molly.tss_grid_graph((8,); window_size=(3,), periodic=true)
+        @test_throws ArgumentError Molly.tss_grid_graph((9,); window_size=(4,), periodic=true)
+        @test_throws ArgumentError Molly.tss_grid_graph((8,); window_size=(10,), periodic=true)
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=windows, first_state=2, first_window=1)
+            graph=graph4, visit_control_tolerance=0.0)
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=windows, gamma=[1.0, 2.0])
-        @test_throws ArgumentError Molly.linear_tss_windows(7; window_size=4)
+            graph=graph4, visit_control_max_iterations=0)
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=windows, visit_control_tolerance=0.0)
+            graph=graph4, visit_control_damping=0.0)
         @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=windows, visit_control_max_iterations=0)
-        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=windows, visit_control_damping=0.0)
-        @test_throws ArgumentError Molly.WindowedTSSState(thermo_states4;
-            windows=windows, pi_regularization=0.0)
+            graph=graph4, pi_regularization=0.0)
 
         local_only_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             global_visit_control=false,
         )
         @test local_only_state.coupling === nothing
@@ -694,8 +728,9 @@ end
         @test_throws ArgumentError Molly.windowed_tss_free_energies(local_only_state)
     end
 
-    @testset "periodic TSS windows" begin
-        periodic_windows = Molly.periodic_tss_windows(8; window_size=4)
+    @testset "TSS graph construction" begin
+        periodic_graph = Molly.tss_grid_graph((8,); window_size=(4,), periodic=true)
+        periodic_windows = periodic_graph.windows
         @test [window.state_indices for window in periodic_windows] ==
               [[1, 2, 3, 4], [3, 4, 5, 6], [5, 6, 7, 8], [7, 8, 1, 2]]
 
@@ -709,7 +744,7 @@ end
 
         thermo_states8 = make_tss_thermo_states(n_states=8)
         state = Molly.WindowedTSSState(thermo_states8;
-            windows=periodic_windows,
+            graph=periodic_graph,
             first_state=1,
             first_window=1,
             ETA=1.0,
@@ -723,7 +758,8 @@ end
         @test state.coupling !== nothing
         @test state.coupling.converged
 
-        edge_windows = Molly.periodic_tss_windows(8; window_size=2)
+        edge_graph = Molly.tss_grid_graph((8,); window_size=(2,), periodic=true)
+        edge_windows = edge_graph.windows
         @test first(edge_windows).state_indices == [1, 2]
         @test last(edge_windows).state_indices == [8, 1]
         edge_coverage = zeros(Int, 8)
@@ -732,15 +768,45 @@ end
         end
         @test edge_coverage == fill(2, 8)
 
-        @test_throws ArgumentError Molly.periodic_tss_windows(8; window_size=3)
-        @test_throws ArgumentError Molly.periodic_tss_windows(9; window_size=4)
-        @test_throws ArgumentError Molly.periodic_tss_windows(8; window_size=10)
+        graph2d = Molly.tss_grid_graph((4, 4); window_size=(2, 2), periodic=(true, true))
+        @test graph2d.n_states == 16
+        @test all(length.(graph2d.state_to_windows) .== 2)
+        @test all(length(neighbors) == 2 for neighbors in graph2d.rung_neighbors)
+        @test graph2d.rung_neighbors[1] == [(4, 2, 2), (13, 5, 2)]
+        @test all(volume == 1.0 for volume in graph2d.rung_volumes)
+
+        nonperiodic_2d = Molly.tss_grid_graph((4, 4); window_size=(2, 2))
+        @test nonperiodic_2d.n_states == 16
+        @test length(nonperiodic_2d.windows) == 13
+        @test all(length.(nonperiodic_2d.state_to_windows) .== 2)
+        @test nonperiodic_2d.rung_volumes[1] == 0.25
+        @test nonperiodic_2d.rung_volumes[6] == 1.0
+
+        graph3d = Molly.tss_grid_graph((4, 4, 4);
+            window_size=(2, 2, 2),
+            periodic=(true, true, true),
+        )
+        @test graph3d.n_states == 64
+        @test all(length.(graph3d.state_to_windows) .== 2)
+        @test all(length(neighbors) == 3 for neighbors in graph3d.rung_neighbors)
+        @test all(volume == 1.0 for volume in graph3d.rung_volumes)
+
+        builder = Molly.TSSGraphBuilder()
+        Molly.add_tss_edge!(builder, ("A", "B"), (4,); window_size=(2,))
+        Molly.add_tss_edge!(builder, ("B", "C"), (4,); window_size=(2,))
+        stitched_graph = Molly.build_tss_graph(builder)
+        @test stitched_graph.n_states == 8
+        @test all(length.(stitched_graph.state_to_windows) .== 2)
+        @test all(length(window.state_indices) <= 2 for window in stitched_graph.windows)
+        @test_throws ArgumentError Molly.add_tss_edge!(
+            Molly.TSSGraphBuilder(), ("A", "A"), (4,); window_size=(2,))
     end
 
     @testset "windowed active-window switching and local processing" begin
         thermo_states4 = make_tss_thermo_states(n_states=4)
+        graph4 = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
         state = Molly.WindowedTSSState(thermo_states4;
-            windows=[[1], [1, 2], [2, 3], [3, 4], [4]],
+            graph=graph4,
             first_state=2,
             first_window=2,
             ETA=1.0,
@@ -771,10 +837,10 @@ end
 
     @testset "windowed visit-control coupling" begin
         thermo_states4 = make_tss_thermo_states(n_states=4)
-        windows = [[1], [1, 2], [2, 3], [3, 4], [4]]
+        graph4 = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
         true_f = [0.0, 1.0, 3.0, 6.0]
         state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             initial_f=true_f,
@@ -839,10 +905,10 @@ end
 
     @testset "windowed self-adjustment cycle order" begin
         thermo_states8 = make_tss_thermo_states(n_states=8)
-        windows = Molly.linear_tss_windows(8; window_size=4)
+        graph8 = Molly.tss_grid_graph((8,); window_size=(4,), periodic=false)
 
         state = Molly.WindowedTSSState(thermo_states8;
-            windows=windows,
+            graph=graph8,
             first_state=1,
             first_window=1,
             ETA=1.0,
@@ -868,7 +934,7 @@ end
         @test state.active_state.active_idx in state.windows[state.active_window].state_indices
 
         first_cycle_state = Molly.WindowedTSSState(thermo_states8;
-            windows=windows,
+            graph=graph8,
             first_state=1,
             first_window=1,
             ETA=1.0,
@@ -887,7 +953,7 @@ end
 
         for self_adjustment_steps in (1, 5)
             count_state = Molly.WindowedTSSState(thermo_states8;
-                windows=windows,
+                graph=graph8,
                 first_state=1,
                 first_window=1,
                 ETA=1.0,
@@ -909,9 +975,9 @@ end
 
     @testset "windowed TSS simulation and reported free energies" begin
         thermo_states4 = make_tss_thermo_states(n_states=4)
-        windows = [[1], [1, 2], [2, 3], [3, 4], [4]]
+        graph4 = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
         state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=2,
             first_window=2,
             ETA=1.0,
@@ -956,7 +1022,7 @@ end
                   for i in eachindex(state.estimators))
 
         history_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=2,
             first_window=2,
             ETA=1.0,
@@ -990,7 +1056,7 @@ end
             n_md_steps=1, n_cycles=1, n_replicas=2)
 
         multi_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=1.0,
@@ -1039,7 +1105,7 @@ end
         @test all(isfinite, Molly.windowed_tss_visit_control_free_energies(multi_state))
 
         adaptive_windowed_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=0.0,
@@ -1066,7 +1132,7 @@ end
         @test all(isfinite, Molly.windowed_tss_visit_control_free_energies(adaptive_windowed_state))
 
         adaptive_multi_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=0.0,
@@ -1100,7 +1166,7 @@ end
         @test all(isfinite, Molly.windowed_tss_free_energies(adaptive_multi_state; visited_only=true))
 
         threaded_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=1.0,
@@ -1134,7 +1200,7 @@ end
         @test all(isfinite, Molly.windowed_tss_visit_control_free_energies(threaded_state))
 
         serial_a = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=1.0,
@@ -1142,7 +1208,7 @@ end
             history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
         )
         serial_b = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=1.0,
@@ -1184,7 +1250,7 @@ end
                   for i in eachindex(serial_a.estimators))
 
         supplied_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=1.0,
@@ -1235,7 +1301,7 @@ end
             n_md_steps=1, n_cycles=1, self_adjustment_steps=1.5)
 
         reported_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=0.0,
@@ -1264,7 +1330,7 @@ end
         @test_throws ArgumentError Molly.windowed_tss_free_energy_uncertainties(state)
 
         short_history_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=0.0,
@@ -1275,7 +1341,7 @@ end
         @test_throws ArgumentError Molly.windowed_tss_free_energy_uncertainties(short_history_state)
 
         jackknife_state = Molly.WindowedTSSState(thermo_states4;
-            windows=windows,
+            graph=graph4,
             first_state=1,
             first_window=1,
             ETA=0.0,
