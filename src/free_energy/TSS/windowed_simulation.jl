@@ -54,6 +54,7 @@ struct WindowedTSSObservation{T, V}
     log_den::T
     reduced_pot::V
     weights::V
+    observable_values::Union{Nothing, Matrix{T}}
 end
 
 mutable struct WindowedTSSReplicaWorkspace{P, ST, T, R}
@@ -296,6 +297,7 @@ function _drop_old_windowed_tss_histories!(state::WindowedTSSState, history_time
         _drop_old_tss_epochs!(estimator.history, history_time)
         if tss_recent_count(estimator) > 0
             _aggregate_tss_history!(estimator)
+            _update_tss_adaptive_gamma!(estimator)
             update_tss_sampling_distribution!(estimator)
         end
     end
@@ -477,6 +479,15 @@ function _collect_windowed_tss_observation!(state::WindowedTSSState{FT},
         final_log_den,
         copy(_workspace_view(workspace, :reduced_pot, length(estimator.state_indices))),
         copy(_workspace_view(workspace, :weights, length(estimator.state_indices))),
+        _evaluate_tss_adaptive_observable(
+            estimator,
+            replica.active_state;
+            log_den = final_log_den,
+            history_time = state.iteration + 1,
+            energies = _workspace_view(workspace, :energies, length(estimator.state_indices)),
+            reduced_potentials = _workspace_view(workspace, :reduced_pot, length(estimator.state_indices)),
+            n_threads = n_threads,
+        ),
     )
     set_active_state!(replica.active_state, state.state_space, final_next_state)
     _check_windowed_tss_replica_invariant(state, replica)
@@ -492,6 +503,7 @@ function _apply_tss_observation_standard!(estimator::TSSState,
         estimator;
         visited_state = observation.visited_state,
         history_time = history_time,
+        observable_values = observation.observable_values,
     )
 end
 
@@ -508,6 +520,7 @@ function _apply_tss_observation_to_history!(estimator::TSSState,
         visited_local,
         observation.log_den,
         history_time;
+        observable_values = observation.observable_values,
         aggregate = false,
     )
     estimator.iteration += 1
@@ -709,6 +722,7 @@ function _run_windowed_tss_cycle!(state::WindowedTSSState,
         estimator;
         visited_state = final_visited_state,
         history_time = history_time,
+        n_threads = n_threads,
     )
     state.window_update_counts[cycle_window] += 1
     state.iteration += 1

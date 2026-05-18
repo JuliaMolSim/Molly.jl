@@ -1,4 +1,4 @@
-mutable struct TSSState{T, ES, AS, ST}
+mutable struct TSSState{T, ES, AS, ST, AG}
 
     state_space::ES  # The different hamiltonians
     active_state::AS # The hamiltonian that is currently active
@@ -25,6 +25,8 @@ mutable struct TSSState{T, ES, AS, ST}
     dens_reg::T # Small interp. towards gamma, keeps all states reachable
     stats::TSSStats{T} # Diagnostics
     history::Union{Nothing, TSSEpochHistory{T}} # Optional epoch history forgetting state
+    adaptive_gamma::AG # Optional adaptive reference-density estimator
+    observable_means::Union{Nothing, Matrix{T}} # Retained means for adaptive gamma
 
 end
 
@@ -36,7 +38,8 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
                   ETA::Real             = 2.0,
                   dens_reg::Real        = 1e-6,
                   reuse_neighbors::Bool = true,
-                  history_forgetting    = nothing)
+                  history_forgetting    = nothing,
+                  adaptive_gamma        = nothing)
 
     state_space  = ExtendedStateSpace(thermo_states; reuse_neighbors = reuse_neighbors)
     K  = n_states(state_space)
@@ -56,6 +59,7 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
         ETA = ETA,
         dens_reg = dens_reg,
         history_forgetting = history_forgetting,
+        adaptive_gamma = adaptive_gamma,
         require_active_state = true,
     )
 
@@ -69,6 +73,7 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
                                   ETA::Real = 2.0,
                                   dens_reg::Real = 1e-6,
                                   history_forgetting = nothing,
+                                  adaptive_gamma = nothing,
                                   require_active_state::Bool = false)
 
     FT = typeof(ustrip(active_state.active_sys.total_mass))
@@ -169,7 +174,16 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
               nothing :
               TSSEpochHistory(history_forgetting, FT, local_K)
 
-    return TSSState(
+    adaptive_gamma = isnothing(adaptive_gamma) ? nothing : adaptive_gamma
+    observable_means = nothing
+
+    return TSSState{
+        FT,
+        typeof(state_space),
+        typeof(active_state),
+        eltype(energies),
+        typeof(adaptive_gamma),
+    }(
         state_space, 
         active_state,
         state_indices,
@@ -189,7 +203,9 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
         FT(ETA),
         FT(dens_reg),
         stats,
-        history
+        history,
+        adaptive_gamma,
+        observable_means,
     )
 
 end
@@ -320,7 +336,9 @@ end
 
 function update_tss_estimates!(state::TSSState{FT};
                                visited_state::Int,
-                               history_time = nothing) where {FT}
+                               history_time = nothing,
+                               observable_values = nothing,
+                               n_threads::Integer = Threads.nthreads()) where {FT}
 
     visited_local = tss_local_index(state, visited_state)
 
@@ -346,6 +364,15 @@ function update_tss_estimates!(state::TSSState{FT};
     history_time_int > 0 ||
         throw(ArgumentError("history_time must be positive."))
     old_f = copy(state.f)
+    if isnothing(observable_values)
+        observable_values = _evaluate_tss_adaptive_observable(
+            state,
+            state.active_state;
+            log_den = log_den,
+            history_time = history_time_int,
+            n_threads = Int(n_threads),
+        )
+    end
     use_standard_update = isnothing(state.history) || iszero(state.history.config.alpha)
 
     if use_standard_update
@@ -361,6 +388,13 @@ function update_tss_estimates!(state::TSSState{FT};
         @. state.f += delta_f
         @. state.f -= state.f[1]
         check_tss_finite!(state.f, "free energy estimates", state)
+        _update_tss_running_observable_means!(
+            state,
+            old_f,
+            log_den,
+            gain,
+            observable_values,
+        )
 
         for k in eachindex(state.tilts)
             target = (k == visited_local ? one(FT) : zero(FT)) / state.gamma[k]
@@ -374,15 +408,23 @@ function update_tss_estimates!(state::TSSState{FT};
                 visited_local,
                 log_den,
                 history_time_int;
+                observable_values = observable_values,
                 aggregate = false,
             )
         end
     else
-        _update_tss_history!(state, visited_local, log_den, history_time_int)
+        _update_tss_history!(
+            state,
+            visited_local,
+            log_den,
+            history_time_int;
+            observable_values = observable_values,
+        )
     end
 
     state.iteration += 1
 
+    _update_tss_adaptive_gamma!(state)
     update_tss_sampling_distribution!(state)
 
     return maximum(abs, state.f .- old_f)

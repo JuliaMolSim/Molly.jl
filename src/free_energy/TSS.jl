@@ -1,4 +1,8 @@
 export
+    TSSAdaptiveGamma,
+    TSSCVObservable,
+    TSSObservableContext,
+    TSSSystemObservable,
     TSSHistoryForgetting,
     TSSState,
     TSSSimulation,
@@ -14,6 +18,7 @@ export
 
 include("TSS/common.jl")
 include("TSS/history.jl")
+include("TSS/observables.jl")
 include("TSS/single_window.jl")
 include("TSS/windows.jl")
 include("TSS/global_estimators.jl")

@@ -205,6 +205,7 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
                           dens_reg::Real = 1e-6,
                           reuse_neighbors::Bool = true,
                           history_forgetting = nothing,
+                          adaptive_gamma = nothing,
                           global_visit_control::Bool = true,
                           visit_control_tolerance::Real = 1e-8,
                           visit_control_max_iterations::Integer = 1_000,
@@ -248,6 +249,7 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
             ETA = ETA,
             dens_reg = dens_reg,
             history_forgetting = history_forgetting,
+            adaptive_gamma = adaptive_gamma,
             require_active_state = false,
         )
         for window in normalized_windows
