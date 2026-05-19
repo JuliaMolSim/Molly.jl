@@ -104,16 +104,16 @@ cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_cl
 
 function constrained_atom_inds(sr::SHAKE_RATTLE)
     atom_inds = Int[]
-    for cl in sr.clusters12
+    for cl in host_constraint_clusters(sr.clusters12)
         push!(atom_inds, cl.k1, cl.k2)
     end
-    for cl in sr.clusters23
+    for cl in host_constraint_clusters(sr.clusters23)
         push!(atom_inds, cl.k1, cl.k2, cl.k3)
     end
-    for cl in sr.clusters34
+    for cl in host_constraint_clusters(sr.clusters34)
         push!(atom_inds, cl.k1, cl.k2, cl.k3, cl.k4)
     end
-    for cl in sr.angle_clusters
+    for cl in host_constraint_clusters(sr.angle_clusters)
         push!(atom_inds, cl.k1, cl.k2, cl.k3)
     end
     return atom_inds

@@ -38,7 +38,7 @@ mutable struct TSSEpoch{T}
     count::Int
     f::Vector{T}
     tilts::Vector{T}
-    observable_means::Union{Nothing, Matrix{T}}
+    adaptive_moments::Union{Nothing, Matrix{T}}
 end
 
 mutable struct TSSEpochHistory{T}
@@ -50,20 +50,20 @@ end
 function TSSEpoch(index::Integer,
                   ::Type{FT},
                   n_states::Integer;
-                  n_observables::Integer = 0) where {FT}
-    observable_means = if n_observables == 0
+                  n_adaptive_moments::Integer = 0) where {FT}
+    adaptive_moments = if n_adaptive_moments == 0
         nothing
     else
-        n_observables > 0 ||
-            throw(ArgumentError("n_observables must be non-negative."))
-        zeros(FT, n_states, Int(n_observables))
+        n_adaptive_moments > 0 ||
+            throw(ArgumentError("n_adaptive_moments must be non-negative."))
+        zeros(FT, n_states, Int(n_adaptive_moments))
     end
     return TSSEpoch{FT}(
         Int(index),
         0,
         zeros(FT, n_states),
         zeros(FT, n_states),
-        observable_means,
+        adaptive_moments,
     )
 end
 
@@ -100,12 +100,12 @@ end
 function _tss_epoch_for_update!(history::TSSEpochHistory{FT},
                                 t::Integer,
                                 n_states::Integer;
-                                n_observables::Integer = 0) where {FT}
+                                n_adaptive_moments::Integer = 0) where {FT}
     epoch_index = _tss_epoch_index!(history, t)
     existing = findfirst(epoch -> epoch.index == epoch_index, history.epochs)
     if isnothing(existing)
         push!(history.epochs, TSSEpoch(epoch_index, FT, n_states;
-                                       n_observables = n_observables))
+                                       n_adaptive_moments = n_adaptive_moments))
         return last(history.epochs)
     end
     return history.epochs[existing]
@@ -196,7 +196,7 @@ function _aggregate_tss_history!(state)
     @. state.f -= state.f[1]
     check_tss_finite!(state.f, "history-aggregated free energies", state)
     check_tss_finite!(state.tilts, "history-aggregated visit tilts", state)
-    _aggregate_tss_history_observable_means!(state)
+    _aggregate_tss_history_adaptive_moments!(state)
     return state
 end
 
@@ -253,36 +253,36 @@ function _update_tss_history!(state,
                               visited_local::Int,
                               log_den,
                               history_time::Int;
-                              observable_values = nothing,
+                              adaptive_values = nothing,
                               aggregate::Bool = true)
     FT = eltype(state.f)
     history = state.history
     history_time > 0 ||
         throw(ArgumentError("history_time must be positive."))
-    n_observables = isnothing(observable_values) ? 0 : size(observable_values, 2)
+    n_adaptive_moments = isnothing(adaptive_values) ? 0 : size(adaptive_values, 2)
     epoch = _tss_epoch_for_update!(
         history,
         history_time,
         length(state.f);
-        n_observables = n_observables,
+        n_adaptive_moments = n_adaptive_moments,
     )
     epoch.count += 1
     gain = inv(FT(epoch.count))
-    old_epoch_f = isnothing(observable_values) ? FT[] : copy(epoch.f)
+    old_epoch_f = isnothing(adaptive_values) ? FT[] : copy(epoch.f)
 
-    if !isnothing(observable_values)
-        means = _ensure_tss_epoch_observable_means!(
+    if !isnothing(adaptive_values)
+        moments = _ensure_tss_epoch_adaptive_moments!(
             epoch,
             length(state.f),
-            n_observables,
+            n_adaptive_moments,
         )
-        _update_tss_observable_means!(
-            means,
+        _update_tss_adaptive_moments!(
+            moments,
             old_epoch_f,
             state.reduced_pot,
             FT(log_den),
             gain,
-            FT.(observable_values),
+            FT.(adaptive_values),
         )
     end
 

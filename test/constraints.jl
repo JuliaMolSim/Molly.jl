@@ -380,6 +380,56 @@ end
     end
 end
 
+@testset "GPU constrained System constructor" begin
+    if CuArray in array_list
+        T = Float32
+        AT = CuArray
+        n_atoms = 2
+        atom_mass = T(10.0)u"g/mol"
+        bond_length = T(0.13)u"nm"
+        dist_constraints = [DistanceConstraint(1, 2, bond_length)]
+        coords = to_device([
+            SVector(T(0.0), T(0.0), T(0.0))u"nm",
+            SVector(T(0.13), T(0.0), T(0.0))u"nm",
+        ], AT)
+        velocities = to_device(fill(SVector(T(0.0), T(0.0), T(0.0))u"nm * ps^-1",
+                                    n_atoms), AT)
+        atoms = to_device([
+            Atom(mass=atom_mass, σ=T(0.3)u"nm", ϵ=T(0.2)u"kJ * mol^-1")
+            for _ in 1:n_atoms
+        ], AT)
+        boundary = CubicBoundary(T(3.0)u"nm")
+        pairwise_inters = (LennardJones(use_neighbors=true),)
+
+        constraints = (
+            SHAKE_RATTLE(n_atoms, T(1e-6)u"nm", T(1e-6)u"nm^2/ps";
+                         dist_constraints=dist_constraints),
+            LINCS(masses=fill(atom_mass, n_atoms), dist_tolerance=T(1e-6)u"nm",
+                  vel_tolerance=T(1e-6)u"nm^2/ps", dist_constraints=dist_constraints),
+        )
+
+        for cons in constraints
+            neighbor_finder = GPUNeighborFinder(
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                dist_cutoff=T(1.0)u"nm",
+            )
+            sys = System(
+                atoms=atoms,
+                coords=coords,
+                boundary=boundary,
+                velocities=velocities,
+                pairwise_inters=pairwise_inters,
+                constraints=(cons,),
+                neighbor_finder=neighbor_finder,
+            )
+            sys_rebuilt = System(deepcopy(sys); general_inters=sys.general_inters)
+
+            @test sys_rebuilt.df == sys.df
+            @test length(sys_rebuilt.constraints) == length(sys.constraints)
+        end
+    end
+end
+
 # --- LINCS test helpers ---
 
 function make_lincs_diatomic(; mass1=12.0, mass2=12.0, bond_length=0.15,

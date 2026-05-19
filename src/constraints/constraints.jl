@@ -132,7 +132,7 @@ end
 
 function constrained_pairs(constraint_clusters)
     pairs = Tuple{Int32, Int32}[]
-    for interaction_list in cluster_interactions.(constraint_clusters)
+    for interaction_list in cluster_interactions.(host_constraint_clusters(constraint_clusters))
         for (i, j, _) in interaction_list
             i32 = Int32(i)
             j32 = Int32(j)
@@ -148,11 +148,11 @@ function constrained_pairs(constraint_clusters)
 end
 
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
-    atom_interactions = cluster_interactions.(constraint_clusters)
     if neighbor_finder isa GPUNeighborFinder
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
+    atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))
     if isa(neighbor_finder.eligible, AbstractGPUArray)
         i_idx, j_idx = Int[], Int[]
 
@@ -432,7 +432,20 @@ end
 abstract type ConstraintKernelData{D, N, M} end
 
 n_constraints(::ConstraintKernelData{<:Any, N}) where {N} = N
+n_constraints(::Type{<:ConstraintKernelData{<:Any, N}}) where {N} = N
 n_atoms_cluster(::ConstraintKernelData{<:Any, <:Any, M}) where {M} = M
+n_atoms_cluster(::Type{<:ConstraintKernelData{<:Any, <:Any, M}}) where {M} = M
+
+host_constraint_clusters(constraint_clusters) = constraint_clusters
+host_constraint_clusters(constraint_clusters::StructArray) =
+    replace_storage(Array, constraint_clusters)
+
+function n_dof_lost(D::Integer,
+                    constraint_clusters::AbstractVector{C}) where {C <: ConstraintKernelData}
+    N = n_atoms_cluster(C)
+    vibrational_dof_lost = (N == 2) ? D*N - (2*D - 1) : D*(N - 2)
+    return length(constraint_clusters) * vibrational_dof_lost
+end
 
 struct NoClusterData <: ConstraintKernelData{Nothing, 0, 0} end
 

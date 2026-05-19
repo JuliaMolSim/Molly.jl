@@ -24,12 +24,11 @@ end
 Configure on-the-fly TSS reweighting to a target thermodynamic state.
 
 `target_state` describes the unbiased or otherwise desired state to reweight
-sampled configurations to. `observable` may be a TSS observable callable,
-`TSSSystemObservable`, or `TSSCVObservable`; alternatively pass a Molly
-collective variable as `cv`. `grid` defines the PMF bins using the same formats
-accepted by the online PMF accumulator. `sample_stride` controls how often the
-online diagnostic accumulator stores an x/k sample; frozen replay logging is
-configured separately with `TSSReplayLogger`.
+sampled configurations to. Pass either a callable `observable` that accepts a
+TSS context, or a Molly collective variable as `cv`. `grid` defines the PMF bins
+using the same formats accepted by the online PMF accumulator. `sample_stride`
+controls how often the online diagnostic accumulator stores an x/k sample;
+frozen replay logging is configured separately with `TSSReplayLogger`.
 """
 function TSSReweightingTarget(target_state::ThermoState;
                               observable = nothing,
@@ -47,7 +46,7 @@ function TSSReweightingTarget(target_state::ThermoState;
     sample_stride > 0 ||
         throw(ArgumentError("sample_stride must be positive."))
 
-    final_observable = isnothing(cv) ? observable : TSSCVObservable(cv; transform = cv_transform)
+    final_observable = isnothing(cv) ? observable : _TSSCVObservable(cv; transform = cv_transform)
     policy = _validate_tss_observable_device_policy(device_policy)
     return TSSReweightingTarget{typeof(target_state), typeof(final_observable), typeof(grid)}(
         target_state,
@@ -101,7 +100,7 @@ end
 
 Collect frozen-TSS replay records for offline reweighting. The logger follows
 the Molly logger convention through `values(logger)` and `log_property!`, but is
-attached to `WindowedTSSSimulation` rather than to `System.loggers` because each
+attached to `TSSSimulation` rather than to `System.loggers` because each
 record also needs TSS metadata such as the active state, update window, and
 known frozen sampling log density.
 
@@ -123,7 +122,7 @@ function TSSReplayLogger(; observable = nothing,
     end
     n_steps > 0 ||
         throw(ArgumentError("n_steps must be positive."))
-    final_observable = isnothing(cv) ? observable : TSSCVObservable(cv; transform = cv_transform)
+    final_observable = isnothing(cv) ? observable : _TSSCVObservable(cv; transform = cv_transform)
     policy = _validate_tss_observable_device_policy(device_policy)
     return TSSReplayLogger(final_observable, policy, Int(n_steps), store_coords, Any[])
 end
@@ -140,12 +139,12 @@ function log_property!(logger::TSSReplayLogger, sys, buffers, neighbors, step_n;
     return logger
 end
 
-function _prepare_tss_reweighting(::Nothing, state::WindowedTSSState)
+function _prepare_tss_reweighting(::Nothing, state::TSSState)
     return nothing
 end
 
 function _prepare_tss_reweighting(target::TSSReweightingTarget,
-                                  state::WindowedTSSState{FT}) where FT
+                                  state::TSSState{FT}) where FT
     return TSSReweightingRuntime(
         target,
         OnlinePMFAccumulator(target.grid; T = Float64),
@@ -159,12 +158,12 @@ struct TSSTargetReducedPotentialWorkspace{P, F}
     mode::Symbol
 end
 
-function _tss_reweighting_workspace(::Nothing, state::WindowedTSSState)
+function _tss_reweighting_workspace(::Nothing, state::TSSState)
     return nothing
 end
 
 function _tss_reweighting_workspace(runtime::TSSReweightingRuntime,
-                                    state::WindowedTSSState)
+                                    state::TSSState)
     target_state = runtime.target.target_state
     reference_state = first(state.state_space.thermo_states)
     partitioned = try
@@ -227,18 +226,18 @@ end
 
 function _tss_observable_value(::Type{FT}, observable, context) where FT
     isnothing(observable) && return nothing
-    return _tss_reweighting_value(FT, evaluate_tss_observable(observable, context))
+    return _tss_reweighting_value(FT, _evaluate_tss_observable(observable, context))
 end
 
 function _tss_reweighting_observable_context(runtime::TSSReweightingRuntime,
-                                             estimator::TSSState,
+                                             estimator::_TSSLocalEstimator,
                                              active_state::ActiveThermoState;
                                              log_den,
                                              history_time::Int,
                                              energies,
                                              reduced_potentials,
                                              n_threads::Int)
-    return TSSObservableContext(
+    return _TSSObservableContext(
         active_state,
         estimator.state_space,
         estimator.state_indices,
@@ -256,14 +255,14 @@ function _tss_reweighting_observable_context(runtime::TSSReweightingRuntime,
 end
 
 function _tss_replay_observable_context(logger::TSSReplayLogger,
-                                        estimator::TSSState,
+                                        estimator::_TSSLocalEstimator,
                                         active_state::ActiveThermoState;
                                         log_den,
                                         history_time::Int,
                                         energies,
                                         reduced_potentials,
                                         n_threads::Int)
-    return TSSObservableContext(
+    return _TSSObservableContext(
         active_state,
         estimator.state_space,
         estimator.state_indices,
@@ -282,7 +281,7 @@ end
 
 function _collect_tss_reweighting_sample(runtime::TSSReweightingRuntime{<:Any, <:OnlinePMFAccumulator{N, WT}},
                                          target_workspace::TSSTargetReducedPotentialWorkspace,
-                                         estimator::TSSState{FT},
+                                         estimator::_TSSLocalEstimator{FT},
                                          active_state::ActiveThermoState;
                                          log_den,
                                          history_time::Int,
@@ -306,7 +305,7 @@ function _collect_tss_reweighting_sample(runtime::TSSReweightingRuntime{<:Any, <
     )
     value = _tss_reweighting_value(
         WT,
-        evaluate_tss_observable(runtime.target.observable, context),
+        _evaluate_tss_observable(runtime.target.observable, context),
     )
     length(value) == N ||
         throw(DimensionMismatch("TSS reweighting observable has $(length(value)) dimensions, " *
@@ -344,7 +343,7 @@ function _collect_tss_replay_record(::Nothing,
 end
 
 function _collect_tss_replay_record(logger::TSSReplayLogger,
-                                    estimator::TSSState{FT},
+                                    estimator::_TSSLocalEstimator{FT},
                                     active_state::ActiveThermoState;
                                     log_den,
                                     history_time::Int,

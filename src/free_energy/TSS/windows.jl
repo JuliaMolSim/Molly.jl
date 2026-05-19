@@ -28,7 +28,7 @@ struct TSSWindow
             end
         end
 
-        evaluation_state_indices = Int.(collect(evaluation_state_indices))
+        evaluation_state_indices = unique(Int.(collect(vcat(state_indices, evaluation_state_indices))))
         isempty(evaluation_state_indices) &&
             throw(ArgumentError("evaluation_state_indices must be non-empty"))
         if any(<=(0), evaluation_state_indices)
@@ -151,12 +151,12 @@ mutable struct WindowedTSSCoupling{T}
     pi_regularization::T
 end
 
-mutable struct WindowedTSSState{T, ES, AS, G, W, E}
+mutable struct TSSState{T, ES, AS, G, W, E}
     state_space::ES # Shared ExtendedStateSpace among windows
     active_state::AS # Shared ActiveThermoState among windows
     graph::G # Graph ladder defining rung/window topology
     windows::Vector{W} # Window definitions
-    estimators::Vector{E} # One local TSSState per window
+    estimators::Vector{E} # One local TSS estimator per window
     state_to_windows::Vector{Vector{Int}} # Global state index to containing windows
     active_window::Int # Current window index
     window_update_counts::Vector{Int} # Number of estimator updates per window
@@ -221,6 +221,42 @@ function _validate_tss_window_coverage!(windows::AbstractVector{TSSWindow},
 
     _check_tss_window_graph_connected(windows)
     return windows
+end
+
+function _validate_tss_state_window_coverage!(windows::AbstractVector{TSSWindow},
+                                              state_to_windows::Vector{Vector{Int}},
+                                              K::Int)
+    required_coverage = length(windows) == 1 ? 1 : 2
+    for state_index in 1:K
+        n_cover = length(state_to_windows[state_index])
+        n_cover == required_coverage ||
+            throw(ArgumentError("state $(state_index) must be covered by exactly " *
+                                "$(required_coverage) window(s); got $(n_cover)."))
+    end
+
+    _check_tss_window_graph_connected(windows)
+    return windows
+end
+
+function _single_window_tss_graph(K::Int)
+    K >= 1 || throw(ArgumentError("Number of states must be larger or equal than 1."))
+    window = TSSWindow(1, Base.OneTo(K))
+    state_to_windows = [[1] for _ in 1:K]
+    window_rung_to_local = [Dict(state_index => state_index for state_index in 1:K)]
+    rung_neighbors = [NTuple{3, Int}[] for _ in 1:K]
+    rung_volumes = ones(Float64, K)
+    rung_coordinates = [[state_index] for state_index in 1:K]
+    rung_edges = ones(Int, K)
+    return TSSGraph(
+        K,
+        [window],
+        state_to_windows,
+        window_rung_to_local,
+        rung_neighbors,
+        rung_volumes,
+        rung_coordinates,
+        rung_edges,
+    )
 end
 
 function _tss_tuple(value, n_dims::Int, name::AbstractString, ::Type{T}) where {T}
@@ -614,11 +650,47 @@ function _windowed_global_vector(values, name::AbstractString, K::Int)
     isnothing(values) && return nothing
     values = collect(values)
     length(values) == K ||
-        throw(ArgumentError("$(name) must have length $(K) for WindowedTSSState."))
+        throw(ArgumentError("$(name) must have length $(K) for TSSState."))
     return values
 end
 
-function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
+function _windowed_tss_adaptive_gamma_mode(adaptive_gamma)
+    isnothing(adaptive_gamma) && return nothing
+    if adaptive_gamma isa Symbol
+        adaptive_gamma == :covdet && return :covdet
+        throw(ArgumentError("unknown TSS adaptive_gamma mode $(adaptive_gamma); " *
+                            "the only supported mode is :covdet."))
+    end
+    throw(ArgumentError("TSSState adaptive_gamma accepts only nothing or :covdet."))
+end
+
+function _windowed_tss_adaptive_gamma_for_window(mode,
+                                                 graph::TSSGraph,
+                                                 window::TSSWindow,
+                                                 ::Type{FT}) where {FT}
+    isnothing(mode) && return nothing
+    mode == :covdet ||
+        throw(ArgumentError("unknown TSS adaptive_gamma mode $(mode)."))
+
+    first_state = first(window.state_indices)
+    dimension = length(graph.rung_neighbors[first_state])
+    for state_index in window.state_indices
+        length(graph.rung_neighbors[state_index]) == dimension ||
+            throw(ArgumentError("TSS CovDet adaptive gamma requires all rungs in a " *
+                                "window to have the same lambda dimension."))
+    end
+    volumes = FT.(graph.rung_volumes[window.state_indices])
+    all(isfinite, volumes) && all(>=(zero(FT)), volumes) && sum(volumes) > zero(FT) ||
+        throw(ArgumentError("TSS CovDet adaptive gamma requires finite positive rung volumes."))
+    return _TSSCovDetAdaptiveGamma(
+        FT(_TSS_COVDET_GAMMA_EPSILON),
+        graph.rung_neighbors,
+        volumes,
+        dimension,
+    )
+end
+
+function TSSState(thermo_states::AbstractVector{<:ThermoState};
                           graph = nothing,
                           windows = nothing,
                           first_state::Int = 1,
@@ -639,15 +711,19 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
     isnothing(windows) ||
         throw(ArgumentError("explicit TSS windows are no longer supported; " *
                             "pass graph=tss_grid_graph(...) or graph=build_tss_graph(...)."))
-    graph isa TSSGraph ||
-        throw(ArgumentError("WindowedTSSState requires graph::TSSGraph; " *
-                            "construct one with tss_grid_graph or build_tss_graph."))
 
     state_space = ExtendedStateSpace(thermo_states; reuse_neighbors = reuse_neighbors)
     K = n_states(state_space)
+    explicit_graph = !isnothing(graph)
+    if isnothing(graph)
+        graph = _single_window_tss_graph(K)
+    elseif !(graph isa TSSGraph)
+        throw(ArgumentError("graph must be a TSSGraph; construct one with " *
+                            "tss_grid_graph or build_tss_graph."))
+    end
     graph.n_states == K ||
         throw(ArgumentError("TSS graph contains $(graph.n_states) states but " *
-                            "WindowedTSSState was given $(K) thermodynamic states."))
+                            "TSSState was given $(K) thermodynamic states."))
     1 <= first_state <= K ||
         throw(ArgumentError("first_state ($(first_state)) out of range 1:$(K)."))
 
@@ -656,7 +732,7 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
 
     normalized_windows = graph.windows
     state_to_windows = graph.state_to_windows
-    _validate_tss_window_coverage!(normalized_windows, state_to_windows, K)
+    _validate_tss_state_window_coverage!(normalized_windows, state_to_windows, K)
 
     first_windows = state_to_windows[first_state]
     active_window = if isnothing(first_window)
@@ -672,18 +748,29 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
 
     global_gamma = _windowed_global_vector(gamma, "gamma", K)
     global_initial_f = _windowed_global_vector(initial_f, "initial_f", K)
+    adaptive_mode = _windowed_tss_adaptive_gamma_mode(adaptive_gamma)
+    if adaptive_mode == :covdet && !explicit_graph
+        throw(ArgumentError("adaptive_gamma=:covdet requires an explicit TSS graph " *
+                            "with lambda-neighbor topology."))
+    end
 
     estimators = [
         make_tss_local_estimator(
             state_space,
             active_state;
             state_indices = window.state_indices,
+            evaluation_state_indices = window.evaluation_state_indices,
             gamma = isnothing(global_gamma) ? nothing : global_gamma[window.state_indices],
             initial_f = isnothing(global_initial_f) ? nothing : global_initial_f[window.state_indices],
             ETA = ETA,
             dens_reg = dens_reg,
             history_forgetting = history_forgetting,
-            adaptive_gamma = adaptive_gamma,
+            adaptive_gamma = _windowed_tss_adaptive_gamma_for_window(
+                adaptive_mode,
+                graph,
+                window,
+                FT,
+            ),
             require_active_state = false,
         )
         for window in normalized_windows
@@ -691,7 +778,7 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
 
     stats = WindowedTSSStats(FT)
 
-    state = WindowedTSSState{
+    state = TSSState{
         FT,
         typeof(state_space),
         typeof(active_state),
@@ -712,6 +799,8 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
         nothing,
     )
 
+    _update_windowed_tss_adaptive_gamma!(state)
+
     if global_visit_control
         state.coupling = initialize_windowed_tss_coupling(
             state;
@@ -726,34 +815,41 @@ function WindowedTSSState(thermo_states::AbstractVector{<:ThermoState};
     return state
 end
 
-active_tss_estimator(state::WindowedTSSState) = state.estimators[state.active_window]
+active_tss_estimator(state::TSSState) = state.estimators[state.active_window]
 
 window_contains_state(window::TSSWindow, global_state::Integer) =
     Int(global_state) in window.state_indices
 
-function windows_for_state(state::WindowedTSSState, global_state::Integer)
+function windows_for_state(state::TSSState, global_state::Integer)
     global_state = Int(global_state)
     1 <= global_state <= n_states(state.state_space) ||
         throw(ArgumentError("global_state $(global_state) out of bounds."))
     return state.state_to_windows[global_state]
 end
 
-function other_window_for_state(state::WindowedTSSState,
+function other_window_for_state(state::TSSState,
                                 active_window::Integer,
                                 global_state::Integer)
+    windows = windows_for_state(state, global_state)
+    if length(windows) == 1
+        only_window = only(windows)
+        Int(active_window) == only_window ||
+            throw(ArgumentError("active window $(active_window) does not contain state $(global_state)."))
+        return only_window
+    end
     return tss_swap_window(state.graph, active_window, global_state)
 end
 
-function other_window_for_state(state::WindowedTSSState, global_state::Integer)
+function other_window_for_state(state::TSSState, global_state::Integer)
     return other_window_for_state(state, state.active_window, global_state)
 end
 
-function switch_active_window!(state::WindowedTSSState; current_state::Integer = state.active_state.active_idx)
+function switch_active_window!(state::TSSState; current_state::Integer = state.active_state.active_idx)
     state.active_window = other_window_for_state(state, current_state)
     return state
 end
 
-function _check_windowed_tss_invariant(state::WindowedTSSState)
+function _check_windowed_tss_invariant(state::TSSState)
     active_window = state.windows[state.active_window]
     window_contains_state(active_window, state.active_state.active_idx) ||
         throw(ArgumentError("active window $(state.active_window) does not contain active state " *

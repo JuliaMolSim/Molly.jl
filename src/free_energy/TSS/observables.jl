@@ -1,96 +1,14 @@
-"""
-    TSSAdaptiveGamma(observable, gamma_from_means; epsilon_gamma=0.01,
-                     device_policy=:auto)
+const _TSS_COVDET_GAMMA_EPSILON = 0.01
 
-Configure adaptive reference-density estimates for Times Square Sampling.
-
-`observable` is evaluated at each TSS estimator update and may be a
-[`TSSCVObservable`](@ref), [`TSSSystemObservable`](@ref), or any callable that
-accepts a [`TSSObservableContext`](@ref). Its return value is converted to a
-numeric matrix with one row per local TSS state. Scalars and vectors are treated
-as configuration observables and broadcast to every local state; matrices must
-have size `n_local_states x n_observable_components`.
-
-`gamma_from_means(state_indices, means)` receives the retained-history means and
-must return positive unnormalised gamma values for the local states.
-`epsilon_gamma` mixes the normalized result with a local uniform density to keep
-all states reachable.
-
-`device_policy` controls how observable inputs are passed:
-
-- `:auto`: built-in CV observables are evaluated on CPU copies via
-  [`from_device`](@ref); other observables receive the native system.
-- `:cpu`: evaluate with CPU copies of system arrays.
-- `:native`: pass the live system and arrays as-is.
-"""
-struct TSSAdaptiveGamma{O, G, T}
-    observable::O
-    gamma_from_means::G
-    epsilon_gamma::T
-    device_policy::Symbol
-end
-
-function TSSAdaptiveGamma(observable, gamma_from_means;
-                          epsilon_gamma::Real = 0.01,
-                          device_policy = :auto)
-    isfinite(epsilon_gamma) && 0 <= epsilon_gamma <= 1 ||
-        throw(ArgumentError("epsilon_gamma must be finite and in the [0, 1] interval."))
-    policy = _validate_tss_observable_device_policy(device_policy)
-    FT = typeof(float(epsilon_gamma))
-    return TSSAdaptiveGamma{typeof(observable), typeof(gamma_from_means), FT}(
-        observable,
-        gamma_from_means,
-        FT(epsilon_gamma),
-        policy,
-    )
-end
-
-"""
-    TSSCVObservable(cv; transform=identity)
-
-Use a Molly collective variable as a TSS observable. The wrapper evaluates
-`calculate_cv(cv, coords, atoms, boundary, velocities)` on the active system and
-then applies `transform` to the result.
-
-For periodic CVs such as torsions, use `transform` or a custom observable when
-the adaptive gamma rule needs a continuous representation, e.g. return
-`SVector(sin(phi), cos(phi))` instead of the raw wrapped angle.
-"""
-struct TSSCVObservable{CV, F}
+struct _TSSCVObservable{CV, F}
     cv::CV
     transform::F
 end
 
-TSSCVObservable(cv; transform = identity) =
-    TSSCVObservable{typeof(cv), typeof(transform)}(cv, transform)
+_TSSCVObservable(cv; transform = identity) =
+    _TSSCVObservable{typeof(cv), typeof(transform)}(cv, transform)
 
-"""
-    TSSSystemObservable(observable)
-
-Adapt a logger-style Molly observable for TSS adaptive gamma. The wrapped
-function is called as
-
-```julia
-observable(sys, buffers, neighbors, step_n; n_threads)
-```
-
-matching the convention used by [`GeneralObservableLogger`](@ref) and related
-loggers. TSS does not mutate logger objects; this wrapper only reuses the
-observable function signature.
-"""
-struct TSSSystemObservable{F}
-    observable::F
-end
-
-"""
-    TSSObservableContext
-
-Context passed to raw TSS adaptive-gamma observables. User observables can read
-the active system, state indices, current reduced potentials, and update
-metadata from this object and return a scalar, vector, or `n_local_states x M`
-matrix of finite numeric values.
-"""
-struct TSSObservableContext{AS, ES, B, N, E, R, T}
+struct _TSSObservableContext{AS, ES, B, N, E, R, T}
     active_state::AS
     state_space::ES
     state_indices::Vector{Int}
@@ -104,6 +22,13 @@ struct TSSObservableContext{AS, ES, B, N, E, R, T}
     neighbors::N
     n_threads::Int
     device_policy::Symbol
+end
+
+struct _TSSCovDetAdaptiveGamma{T}
+    epsilon_gamma::T
+    rung_neighbors::Vector{Vector{NTuple{3, Int}}}
+    rung_volumes::Vector{T}
+    dimension::Int
 end
 
 function _validate_tss_observable_device_policy(device_policy)
@@ -128,8 +53,8 @@ function _tss_cpu_active_state(active_state::ActiveThermoState)
     )
 end
 
-function _tss_cpu_observable_context(context::TSSObservableContext)
-    return TSSObservableContext(
+function _tss_cpu_observable_context(context::_TSSObservableContext)
+    return _TSSObservableContext(
         _tss_cpu_active_state(context.active_state),
         context.state_space,
         context.state_indices,
@@ -146,24 +71,19 @@ function _tss_cpu_observable_context(context::TSSObservableContext)
     )
 end
 
-function _tss_context_for_observable(::TSSCVObservable, context::TSSObservableContext)
+function _tss_context_for_observable(::_TSSCVObservable, context::_TSSObservableContext)
     if context.device_policy in (:auto, :cpu)
         return _tss_cpu_observable_context(context)
     end
     return context
 end
 
-function _tss_context_for_observable(::TSSSystemObservable, context::TSSObservableContext)
+function _tss_context_for_observable(observable, context::_TSSObservableContext)
     context.device_policy == :cpu && return _tss_cpu_observable_context(context)
     return context
 end
 
-function _tss_context_for_observable(observable, context::TSSObservableContext)
-    context.device_policy == :cpu && return _tss_cpu_observable_context(context)
-    return context
-end
-
-function evaluate_tss_observable(observable::TSSCVObservable, context::TSSObservableContext)
+function _evaluate_tss_observable(observable::_TSSCVObservable, context::_TSSObservableContext)
     context = _tss_context_for_observable(observable, context)
     sys = context.active_state.active_sys
     value = calculate_cv(
@@ -176,186 +96,88 @@ function evaluate_tss_observable(observable::TSSCVObservable, context::TSSObserv
     return observable.transform(value)
 end
 
-function evaluate_tss_observable(observable::TSSSystemObservable,
-                                 context::TSSObservableContext)
-    context = _tss_context_for_observable(observable, context)
-    return observable.observable(
-        context.active_state.active_sys,
-        context.buffers,
-        context.neighbors,
-        context.step;
-        n_threads = context.n_threads,
-    )
-end
-
-function evaluate_tss_observable(observable, context::TSSObservableContext)
+function _evaluate_tss_observable(observable, context::_TSSObservableContext)
     context = _tss_context_for_observable(observable, context)
     return observable(context)
 end
 
 _tss_numeric_value(::Type{FT}, value) where {FT} = FT(ustrip(value))
 
-function _tss_observable_matrix(values,
-                                ::Type{FT},
-                                n_local_states::Int,
-                                name::AbstractString) where {FT}
-    n_local_states > 0 ||
-        throw(ArgumentError("TSS $(name) requires at least one local state."))
-
-    if values isa Number
-        out = fill(_tss_numeric_value(FT, values), n_local_states, 1)
-    else
-        values_cpu = if values isa Tuple
-            collect(values)
-        else
-            from_device(values)
-        end
-
-        if values_cpu isa AbstractVector
-            row = [_tss_numeric_value(FT, value) for value in values_cpu]
-            out = Matrix{FT}(undef, n_local_states, length(row))
-            for k in 1:n_local_states
-                out[k, :] .= row
-            end
-        elseif values_cpu isa AbstractMatrix
-            size(values_cpu, 1) == n_local_states ||
-                throw(ArgumentError("TSS $(name) matrix must have $(n_local_states) " *
-                                    "rows, got $(size(values_cpu, 1))."))
-            out = Matrix{FT}(undef, size(values_cpu, 1), size(values_cpu, 2))
-            for idx in eachindex(values_cpu)
-                out[idx] = _tss_numeric_value(FT, values_cpu[idx])
-            end
-        else
-            throw(ArgumentError("TSS $(name) must return a scalar, vector, tuple, " *
-                                "or matrix, got $(typeof(values))."))
-        end
+function _validate_tss_local_adaptive_gamma(adaptive_gamma)
+    isnothing(adaptive_gamma) && return nothing
+    adaptive_gamma isa _TSSCovDetAdaptiveGamma && return adaptive_gamma
+    if adaptive_gamma isa Symbol
+        adaptive_gamma == :covdet &&
+            throw(ArgumentError("adaptive_gamma=:covdet is only supported by TSSState " *
+                                "because it requires a TSSGraph."))
+        throw(ArgumentError("unknown TSS adaptive_gamma mode $(adaptive_gamma); " *
+                            "the only supported mode is :covdet."))
     end
-
-    size(out, 2) > 0 ||
-        throw(ArgumentError("TSS $(name) must contain at least one observable component."))
-    all(isfinite, out) ||
-        throw(ArgumentError("TSS $(name) contains non-finite values."))
-    return out
+    throw(ArgumentError("TSS adaptive_gamma accepts only nothing or :covdet."))
 end
 
-function _tss_observable_context(state,
-                                 active_state::ActiveThermoState;
-                                 log_den,
-                                 history_time::Int,
-                                 energies = state.energies,
-                                 reduced_potentials = state.reduced_pot,
-                                 buffers = nothing,
-                                 neighbors = nothing,
-                                 n_threads::Int = Threads.nthreads())
-    return TSSObservableContext(
-        active_state,
-        state.state_space,
-        state.state_indices,
-        active_state.active_idx,
-        tss_local_index(state, active_state.active_idx),
-        energies,
-        reduced_potentials,
-        log_den,
-        history_time,
-        buffers,
-        neighbors,
-        n_threads,
-        state.adaptive_gamma.device_policy,
-    )
-end
-
-function _evaluate_tss_adaptive_observable(state,
-                                           active_state::ActiveThermoState;
-                                           log_den,
-                                           history_time::Int,
-                                           energies = state.energies,
-                                           reduced_potentials = state.reduced_pot,
-                                           buffers = nothing,
-                                           neighbors = nothing,
-                                           n_threads::Int = Threads.nthreads())
-    isnothing(state.adaptive_gamma) && return nothing
-    context = _tss_observable_context(
-        state,
-        active_state;
-        log_den = log_den,
-        history_time = history_time,
-        energies = energies,
-        reduced_potentials = reduced_potentials,
-        buffers = buffers,
-        neighbors = neighbors,
-        n_threads = n_threads,
-    )
-    values = evaluate_tss_observable(state.adaptive_gamma.observable, context)
-    return _tss_observable_matrix(
-        values,
-        eltype(state.f),
-        length(state.f),
-        "adaptive-gamma observable",
-    )
-end
-
-function _ensure_tss_observable_means!(state, n_observables::Int)
-    if isnothing(state.observable_means)
-        state.observable_means = zeros(eltype(state.f), length(state.f), n_observables)
-    elseif size(state.observable_means) != (length(state.f), n_observables)
-        throw(ArgumentError("TSS adaptive-gamma observable dimension changed from " *
-                            "$(size(state.observable_means, 2)) to $(n_observables)."))
+function _ensure_tss_adaptive_moments!(state, n_moments::Int)
+    if isnothing(state.adaptive_moments)
+        state.adaptive_moments = zeros(eltype(state.f), length(state.f), n_moments)
+    elseif size(state.adaptive_moments) != (length(state.f), n_moments)
+        throw(ArgumentError("TSS adaptive-gamma moment dimension changed from " *
+                            "$(size(state.adaptive_moments, 2)) to $(n_moments)."))
     end
-    return state.observable_means
+    return state.adaptive_moments
 end
 
-function _ensure_tss_epoch_observable_means!(epoch::TSSEpoch{FT},
+function _ensure_tss_epoch_adaptive_moments!(epoch::TSSEpoch{FT},
                                              n_states::Int,
-                                             n_observables::Int) where {FT}
-    if isnothing(epoch.observable_means)
-        epoch.observable_means = zeros(FT, n_states, n_observables)
-    elseif size(epoch.observable_means) != (n_states, n_observables)
-        throw(ArgumentError("TSS epoch adaptive-gamma observable dimension changed."))
+                                             n_moments::Int) where {FT}
+    if isnothing(epoch.adaptive_moments)
+        epoch.adaptive_moments = zeros(FT, n_states, n_moments)
+    elseif size(epoch.adaptive_moments) != (n_states, n_moments)
+        throw(ArgumentError("TSS epoch adaptive-gamma moment dimension changed."))
     end
-    return epoch.observable_means
+    return epoch.adaptive_moments
 end
 
-function _update_tss_observable_means!(means::AbstractMatrix{FT},
+function _update_tss_adaptive_moments!(moments::AbstractMatrix{FT},
                                        old_f::AbstractVector{FT},
                                        reduced_pot::AbstractVector{FT},
                                        log_den::FT,
                                        gain::FT,
-                                       observable_values::AbstractMatrix{FT}) where {FT}
-    size(means) == size(observable_values) ||
-        throw(DimensionMismatch("TSS observable means and values must have matching sizes."))
-    length(old_f) == length(reduced_pot) == size(means, 1) ||
-        throw(DimensionMismatch("TSS observable means must match local state count."))
+                                       adaptive_values::AbstractMatrix{FT}) where {FT}
+    size(moments) == size(adaptive_values) ||
+        throw(DimensionMismatch("TSS adaptive moments and values must have matching sizes."))
+    length(old_f) == length(reduced_pot) == size(moments, 1) ||
+        throw(DimensionMismatch("TSS adaptive moments must match local state count."))
 
     log_gain = log(gain)
     log_keep = gain == one(FT) ? -FT(Inf) : log1p(-gain)
-    for k in axes(means, 1)
+    for k in axes(moments, 1)
         log_old_z = -old_f[k]
         log_sample_z = -reduced_pot[k] - log_den
         log_new_z = logaddexp_tss(log_keep + log_old_z, log_gain + log_sample_z)
         old_weight = exp(log_keep + log_old_z - log_new_z)
         sample_weight = exp(log_gain + log_sample_z - log_new_z)
-        for m in axes(means, 2)
-            means[k, m] = old_weight * means[k, m] +
-                          sample_weight * observable_values[k, m]
+        for m in axes(moments, 2)
+            moments[k, m] = old_weight * moments[k, m] +
+                            sample_weight * adaptive_values[k, m]
         end
     end
 
-    all(isfinite, means) ||
-        throw(ArgumentError("TSS adaptive-gamma observable means became non-finite."))
-    return means
+    all(isfinite, moments) ||
+        throw(ArgumentError("TSS adaptive-gamma moments became non-finite."))
+    return moments
 end
 
-function _update_tss_running_observable_means!(state,
+function _update_tss_running_adaptive_moments!(state,
                                                old_f::AbstractVector,
                                                log_den,
                                                gain,
-                                               observable_values)
-    isnothing(observable_values) && return state
+                                               adaptive_values)
+    isnothing(adaptive_values) && return state
     FT = eltype(state.f)
-    values = FT.(observable_values)
-    means = _ensure_tss_observable_means!(state, size(values, 2))
-    _update_tss_observable_means!(
-        means,
+    values = FT.(adaptive_values)
+    moments = _ensure_tss_adaptive_moments!(state, size(values, 2))
+    _update_tss_adaptive_moments!(
+        moments,
         FT.(old_f),
         state.reduced_pot,
         FT(log_den),
@@ -365,30 +187,30 @@ function _update_tss_running_observable_means!(state,
     return state
 end
 
-function _aggregate_tss_history_observable_means!(state)
+function _aggregate_tss_history_adaptive_moments!(state)
     isnothing(state.adaptive_gamma) && return state
     history = state.history
     isnothing(history) && return state
 
     FT = eltype(state.f)
 
-    n_observables = 0
+    n_moments = 0
     for epoch in history.epochs
         epoch.count > 0 || continue
-        isnothing(epoch.observable_means) && continue
-        n_observables = size(epoch.observable_means, 2)
+        isnothing(epoch.adaptive_moments) && continue
+        n_moments = size(epoch.adaptive_moments, 2)
         break
     end
-    n_observables == 0 && return state
+    n_moments == 0 && return state
 
-    means = _ensure_tss_observable_means!(state, n_observables)
-    for k in axes(means, 1)
+    moments = _ensure_tss_adaptive_moments!(state, n_moments)
+    for k in axes(moments, 1)
         log_norm = -FT(Inf)
         log_weights = FT[]
         epochs = TSSEpoch{FT}[]
         for epoch in history.epochs
             epoch.count > 0 || continue
-            isnothing(epoch.observable_means) && continue
+            isnothing(epoch.adaptive_moments) && continue
             log_weight = log(FT(epoch.count)) - epoch.f[k]
             push!(log_weights, log_weight)
             push!(epochs, epoch)
@@ -396,50 +218,153 @@ function _aggregate_tss_history_observable_means!(state)
         end
         isempty(epochs) && continue
 
-        for m in axes(means, 2)
+        for m in axes(moments, 2)
             value = zero(FT)
             for (epoch_i, epoch) in enumerate(epochs)
                 value += exp(log_weights[epoch_i] - log_norm) *
-                         epoch.observable_means[k, m]
+                         epoch.adaptive_moments[k, m]
             end
-            means[k, m] = value
+            moments[k, m] = value
         end
     end
 
-    all(isfinite, means) ||
-        throw(ArgumentError("TSS history-aggregated adaptive-gamma means are non-finite."))
+    all(isfinite, moments) ||
+        throw(ArgumentError("TSS history-aggregated adaptive-gamma moments are non-finite."))
+    return state
+end
+
+_tss_covdet_moment_count(dim::Int) = dim + dim * dim
+_tss_covdet_outer_col(dim::Int, i::Int, j::Int) = dim + (j - 1) * dim + i
+
+function _tss_covdet_moment_values(state,
+                                   evaluation_reduced_pot = state.evaluation_reduced_pot)
+    adaptive_gamma = state.adaptive_gamma
+    adaptive_gamma isa _TSSCovDetAdaptiveGamma || return nothing
+
+    FT = eltype(state.f)
+    dim = adaptive_gamma.dimension
+    n_moments = _tss_covdet_moment_count(dim)
+    values = zeros(FT, length(state.state_indices), n_moments)
+    derivatives = zeros(FT, dim)
+
+    for (local_i, global_state) in enumerate(state.state_indices)
+        neighbors = adaptive_gamma.rung_neighbors[global_state]
+        length(neighbors) == dim ||
+            throw(ArgumentError("TSS CovDet rung $(global_state) has $(length(neighbors)) " *
+                                "derivative dimensions, expected $(dim)."))
+
+        for d in 1:dim
+            reverse, forward, denominator = neighbors[d]
+            if denominator == 0
+                derivatives[d] = zero(FT)
+                continue
+            end
+            reverse_eval = state.evaluation_local_index_by_state[reverse]
+            forward_eval = state.evaluation_local_index_by_state[forward]
+            if reverse_eval == 0 || forward_eval == 0
+                throw(ArgumentError("TSS CovDet derivative for rung $(global_state) " *
+                                    "requires states $(reverse) and $(forward), but they " *
+                                    "were not included in the window evaluation set."))
+            end
+            derivatives[d] = (FT(evaluation_reduced_pot[forward_eval]) -
+                              FT(evaluation_reduced_pot[reverse_eval])) / FT(denominator)
+            values[local_i, d] = derivatives[d]
+        end
+
+        for j in 1:dim, i in 1:dim
+            values[local_i, _tss_covdet_outer_col(dim, i, j)] =
+                derivatives[i] * derivatives[j]
+        end
+    end
+
+    all(isfinite, values) ||
+        throw(ArgumentError("TSS CovDet adaptive-gamma moments contain non-finite values."))
+    return values
+end
+
+function _tss_covdet_raw_values(state)
+    adaptive_gamma = state.adaptive_gamma
+    adaptive_gamma isa _TSSCovDetAdaptiveGamma || return nothing
+    isnothing(state.adaptive_moments) && return nothing
+
+    FT = eltype(state.f)
+    dim = adaptive_gamma.dimension
+    size(state.adaptive_moments, 2) == _tss_covdet_moment_count(dim) ||
+        throw(ArgumentError("TSS CovDet adaptive moments have invalid dimension."))
+
+    raw = zeros(FT, length(state.state_indices))
+    covariance = Matrix{Float64}(undef, dim, dim)
+    for local_i in eachindex(raw)
+        for j in 1:dim, i in 1:dim
+            mean_outer = Float64(state.adaptive_moments[
+                local_i,
+                _tss_covdet_outer_col(dim, i, j),
+            ])
+            mean_i = Float64(state.adaptive_moments[local_i, i])
+            mean_j = Float64(state.adaptive_moments[local_i, j])
+            covariance[i, j] = mean_outer - mean_i * mean_j
+        end
+        for j in 1:dim, i in 1:(j - 1)
+            value = 0.5 * (covariance[i, j] + covariance[j, i])
+            covariance[i, j] = value
+            covariance[j, i] = value
+        end
+        detcov = dim == 1 ? covariance[1, 1] : det(Symmetric(covariance))
+        raw[local_i] = FT(sqrt(max(detcov, 0.0)))
+    end
+    all(isfinite, raw) ||
+        throw(ArgumentError("TSS CovDet adaptive-gamma estimates are non-finite."))
+    return raw
+end
+
+function _volume_weighted_tss_gamma!(state)
+    adaptive_gamma = state.adaptive_gamma
+    adaptive_gamma isa _TSSCovDetAdaptiveGamma || return state
+    FT = eltype(state.f)
+    weights = FT.(adaptive_gamma.rung_volumes)
+    total = sum(weights)
+    isfinite(total) && total > zero(FT) ||
+        throw(ArgumentError("TSS CovDet rung volumes have invalid total $(total)."))
+    state.gamma .= weights ./ total
+    state.log_gamma .= log.(state.gamma)
+    check_tss_positive_probabilities!(state.gamma, "CovDet adaptive gamma", state)
+    return state
+end
+
+function _apply_tss_covdet_gamma!(state, raw_values, max_detcov)
+    adaptive_gamma = state.adaptive_gamma
+    adaptive_gamma isa _TSSCovDetAdaptiveGamma || return state
+
+    FT = eltype(state.f)
+    raw = isnothing(raw_values) ? zeros(FT, length(state.gamma)) : FT.(raw_values)
+    length(raw) == length(state.gamma) ||
+        throw(ArgumentError("TSS CovDet adaptive gamma has invalid length $(length(raw)); " *
+                            "expected $(length(state.gamma))."))
+    all(isfinite, raw) ||
+        throw(ArgumentError("TSS CovDet adaptive gamma contains non-finite raw values."))
+
+    if !isfinite(max_detcov) || max_detcov <= zero(FT)
+        return _volume_weighted_tss_gamma!(state)
+    end
+
+    epsilon = FT(adaptive_gamma.epsilon_gamma)
+    for k in eachindex(state.gamma)
+        state.gamma[k] = ((one(FT) - epsilon) * max(raw[k], zero(FT)) +
+                          epsilon * FT(max_detcov)) *
+                         FT(adaptive_gamma.rung_volumes[k])
+    end
+    total = sum(state.gamma)
+    isfinite(total) && total > zero(FT) ||
+        throw(ArgumentError("TSS CovDet adaptive gamma has invalid total $(total)."))
+    state.gamma ./= total
+    state.log_gamma .= log.(state.gamma)
+    check_tss_positive_probabilities!(state.gamma, "CovDet adaptive gamma", state)
     return state
 end
 
 function _update_tss_adaptive_gamma!(state)
     isnothing(state.adaptive_gamma) && return state
-    isnothing(state.observable_means) && return state
-
-    FT = eltype(state.f)
-    raw_values = state.adaptive_gamma.gamma_from_means(
-        state.state_indices,
-        state.observable_means,
-    )
-    raw_source = raw_values isa Tuple ? collect(raw_values) : from_device(raw_values)
-    raw = FT.(collect(vec(raw_source)))
-    length(raw) == length(state.gamma) ||
-        throw(ArgumentError("TSS adaptive gamma rule must return $(length(state.gamma)) " *
-                            "values, got $(length(raw))."))
-    all(isfinite, raw) ||
-        throw(ArgumentError("TSS adaptive gamma rule returned non-finite values."))
-    all(>(zero(FT)), raw) ||
-        throw(ArgumentError("TSS adaptive gamma rule must return strictly positive values."))
-
-    total = sum(raw)
-    total > zero(FT) ||
-        throw(ArgumentError("TSS adaptive gamma rule returned an invalid total $(total)."))
-    raw ./= total
-
-    epsilon = FT(state.adaptive_gamma.epsilon_gamma)
-    uniform = inv(FT(length(raw)))
-    @. state.gamma = (one(FT) - epsilon) * raw + epsilon * uniform
-    state.gamma ./= sum(state.gamma)
-    state.log_gamma .= log.(state.gamma)
-    check_tss_positive_probabilities!(state.gamma, "adaptive gamma", state)
-    return state
+    raw = _tss_covdet_raw_values(state)
+    max_detcov = isnothing(raw) ? zero(eltype(state.f)) : maximum(raw)
+    return _apply_tss_covdet_gamma!(state, raw, max_detcov)
 end

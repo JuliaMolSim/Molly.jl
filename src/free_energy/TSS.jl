@@ -1,8 +1,4 @@
 export
-    TSSAdaptiveGamma,
-    TSSCVObservable,
-    TSSObservableContext,
-    TSSSystemObservable,
     TSSHistoryForgetting,
     TSSReweightingTarget,
     TSSReplayLogger,
@@ -11,17 +7,15 @@ export
     TSSGraph,
     TSSGraphBuilder,
     TSSJackknifeResult,
-    WindowedTSSState,
-    WindowedTSSSimulation,
     add_tss_edge!,
     build_tss_graph,
     tss_mbar_pmf,
     tss_offline_reweighted_pmf,
     tss_reweighted_pmf,
     tss_grid_graph,
-    windowed_tss_free_energy_uncertainties,
-    windowed_tss_free_energies,
-    windowed_tss_visit_control_free_energies
+    tss_free_energy_uncertainties,
+    tss_free_energies,
+    tss_visit_control_free_energies
 
 include("TSS/common.jl")
 include("TSS/history.jl")

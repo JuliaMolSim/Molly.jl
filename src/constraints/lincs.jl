@@ -998,6 +998,8 @@ function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
     end
 
     if arr_type <: AbstractGPUArray
+        lincs.lincs_data.atom1 isa arr_type && return lincs
+
         n_atoms = length(lincs.lincs_data.invmass)
         data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(
             lincs.lincs_data, lincs.workspace, arr_type, n_atoms, lincs.gpu_block_size)

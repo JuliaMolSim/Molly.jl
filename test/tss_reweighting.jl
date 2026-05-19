@@ -258,7 +258,7 @@ tss_reweighting_x_observable(context) =
     @testset "windowed TSS reweights every x/k sample" begin
         thermo_states = make_tss_reweighting_thermo_states()
         graph = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
-        state = Molly.WindowedTSSState(thermo_states;
+        state = Molly.TSSState(thermo_states;
             graph=graph,
             first_state=1,
             first_window=1,
@@ -272,7 +272,7 @@ tss_reweighting_x_observable(context) =
             device_policy=:cpu,
             sample_stride=1,
         )
-        sim = Molly.WindowedTSSSimulation(state;
+        sim = Molly.TSSSimulation(state;
             n_md_steps=1,
             n_cycles=3,
             self_adjustment_steps=2,
@@ -293,14 +293,14 @@ tss_reweighting_x_observable(context) =
         @test any(isfinite, result.F)
         @test sum(result.p) ≈ 1.0
 
-        no_reweighting_sim = Molly.WindowedTSSSimulation(
-            Molly.WindowedTSSState(thermo_states; graph=graph);
+        no_reweighting_sim = Molly.TSSSimulation(
+            Molly.TSSState(thermo_states; graph=graph);
             n_md_steps=1,
             n_cycles=0,
         )
         @test_throws ArgumentError Molly.tss_reweighted_pmf(no_reweighting_sim)
 
-        strided_state = Molly.WindowedTSSState(thermo_states;
+        strided_state = Molly.TSSState(thermo_states;
             graph=graph,
             first_state=1,
             first_window=1,
@@ -314,7 +314,7 @@ tss_reweighting_x_observable(context) =
             device_policy=:cpu,
             sample_stride=2,
         )
-        strided_sim = Molly.WindowedTSSSimulation(strided_state;
+        strided_sim = Molly.TSSSimulation(strided_state;
             n_md_steps=1,
             n_cycles=3,
             self_adjustment_steps=2,
@@ -328,7 +328,7 @@ tss_reweighting_x_observable(context) =
     @testset "multireplica TSS reweighting sample count" begin
         thermo_states = make_tss_reweighting_thermo_states()
         graph = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
-        state = Molly.WindowedTSSState(thermo_states;
+        state = Molly.TSSState(thermo_states;
             graph=graph,
             first_state=1,
             first_window=1,
@@ -343,7 +343,7 @@ tss_reweighting_x_observable(context) =
             device_policy=:cpu,
             sample_stride=1,
         )
-        sim = Molly.WindowedTSSSimulation(state;
+        sim = Molly.TSSSimulation(state;
             n_md_steps=1,
             n_cycles=2,
             self_adjustment_steps=2,
@@ -364,7 +364,7 @@ tss_reweighting_x_observable(context) =
         @test sim.reweighting.accumulator.accepted_samples > 0
         @test any(isfinite, Molly.tss_reweighted_pmf(sim).F)
 
-        threaded_state = Molly.WindowedTSSState(thermo_states;
+        threaded_state = Molly.TSSState(thermo_states;
             graph=graph,
             first_state=1,
             first_window=1,
@@ -372,7 +372,7 @@ tss_reweighting_x_observable(context) =
             dens_reg=1e-4,
             history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
         )
-        threaded_sim = Molly.WindowedTSSSimulation(threaded_state;
+        threaded_sim = Molly.TSSSimulation(threaded_state;
             n_md_steps=1,
             n_cycles=1,
             self_adjustment_steps=1,
@@ -396,7 +396,7 @@ tss_reweighting_x_observable(context) =
     @testset "frozen TSS replay supports offline reweighting" begin
         thermo_states = make_tss_reweighting_thermo_states()
         graph = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
-        state = Molly.WindowedTSSState(thermo_states;
+        state = Molly.TSSState(thermo_states;
             graph=graph,
             first_state=1,
             first_window=1,
@@ -421,7 +421,7 @@ tss_reweighting_x_observable(context) =
         initial_gamma = [copy(est.gamma) for est in state.estimators]
         initial_coupling_f = copy(state.coupling.visit_control_f)
 
-        sim = Molly.WindowedTSSSimulation(state;
+        sim = Molly.TSSSimulation(state;
             n_md_steps=1,
             n_cycles=2,
             self_adjustment_steps=2,
@@ -455,7 +455,7 @@ tss_reweighting_x_observable(context) =
         @test any(isfinite, mbar_pmf.F)
         @test sum(mbar_pmf.p) ≈ 1.0
 
-        compact_state = Molly.WindowedTSSState(thermo_states;
+        compact_state = Molly.TSSState(thermo_states;
             graph=graph,
             first_state=1,
             first_window=1,
@@ -468,7 +468,7 @@ tss_reweighting_x_observable(context) =
             n_steps=1,
             store_coords=false,
         )
-        compact_sim = Molly.WindowedTSSSimulation(compact_state;
+        compact_sim = Molly.TSSSimulation(compact_state;
             n_md_steps=1,
             n_cycles=2,
             self_adjustment_steps=2,
@@ -503,8 +503,8 @@ tss_reweighting_x_observable(context) =
             n_steps=1,
             store_coords=false,
         )
-        sparse_compact_sim = Molly.WindowedTSSSimulation(
-            Molly.WindowedTSSState(thermo_states; graph=graph);
+        sparse_compact_sim = Molly.TSSSimulation(
+            Molly.TSSState(thermo_states; graph=graph);
             n_md_steps=1,
             n_cycles=1,
             self_adjustment_steps=2,
@@ -530,8 +530,8 @@ tss_reweighting_x_observable(context) =
             n_steps=1,
             store_coords=true,
         )
-        dual_sim = Molly.WindowedTSSSimulation(
-            Molly.WindowedTSSState(thermo_states; graph=graph);
+        dual_sim = Molly.TSSSimulation(
+            Molly.TSSState(thermo_states; graph=graph);
             n_md_steps=1,
             n_cycles=1,
             self_adjustment_steps=2,
@@ -572,8 +572,8 @@ tss_reweighting_x_observable(context) =
             n_steps=1,
             store_coords=false,
         )
-        coords_free_sim = Molly.WindowedTSSSimulation(
-            Molly.WindowedTSSState(thermo_states; graph=graph);
+        coords_free_sim = Molly.TSSSimulation(
+            Molly.TSSState(thermo_states; graph=graph);
             n_md_steps=1,
             n_cycles=1,
             replay_logger=coords_free_replay,
