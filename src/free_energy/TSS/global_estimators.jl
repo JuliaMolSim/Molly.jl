@@ -750,6 +750,56 @@ function _windowed_tss_jackknife_epoch_indices!(histories, t::Int)
     return epoch_indices
 end
 
+function _summarize_tss_indices(indices; max_items::Int = 8)
+    values = collect(indices)
+    isempty(values) && return "[]"
+    if length(values) <= max_items
+        return repr(values)
+    end
+    head = join(values[1:max_items], ", ")
+    return "[$(head), ...]"
+end
+
+function _check_windowed_tss_jackknife_samples!(histories, epoch_indices)
+    empty_windows = Int[]
+    for (window_i, history) in enumerate(histories)
+        if _tss_history_sample_count(history; epoch_indices = epoch_indices) == 0
+            push!(empty_windows, window_i)
+        end
+    end
+    isempty(empty_windows) ||
+        throw(ArgumentError("TSS jackknife cannot be computed because windows " *
+                            "$(_summarize_tss_indices(empty_windows)) have no samples " *
+                            "in the shared retained epochs. Run longer, use more " *
+                            "replicas, or reduce history forgetting."))
+
+    invalid_deletions = Tuple{Int, Vector{Int}}[]
+    for epoch_index in epoch_indices
+        empty_after_delete = Int[]
+        for (window_i, history) in enumerate(histories)
+            if _tss_history_sample_count(history;
+                    omit_epoch_index = epoch_index,
+                    epoch_indices = epoch_indices,
+                ) == 0
+                push!(empty_after_delete, window_i)
+            end
+        end
+        isempty(empty_after_delete) || push!(invalid_deletions,
+                                             (epoch_index, empty_after_delete))
+    end
+
+    if !isempty(invalid_deletions)
+        epoch_index, windows = first(invalid_deletions)
+        throw(ArgumentError("TSS jackknife cannot delete every retained epoch: " *
+                            "deleting epoch $(epoch_index) leaves windows " *
+                            "$(_summarize_tss_indices(windows)) with no retained " *
+                            "samples. Run longer, use more replicas, or reduce " *
+                            "history forgetting."))
+    end
+
+    return nothing
+end
+
 function _windowed_tss_jackknife_local_free_energies(state::WindowedTSSState;
                                                      omit_epoch_index = nothing,
                                                      epoch_indices = nothing)
@@ -775,6 +825,7 @@ function windowed_tss_free_energy_uncertainties(state::WindowedTSSState{FT};
 
     histories = _windowed_tss_jackknife_histories(state)
     epoch_indices = _windowed_tss_jackknife_epoch_indices!(histories, state.iteration)
+    _check_windowed_tss_jackknife_samples!(histories, epoch_indices)
     epoch_weights = _tss_epoch_weights!(first(histories), epoch_indices, state.iteration)
     all(>(zero(FT)), epoch_weights) ||
         throw(ArgumentError("TSS jackknife epoch weights must be strictly positive."))

@@ -1390,5 +1390,36 @@ end
         @test all(isfinite, noisy_jackknife.standard_errors)
         @test noisy_jackknife.standard_errors[1] == 0.0
         @test any(>(0), noisy_jackknife.standard_errors[2:end])
+
+        empty_retained_state = deepcopy(jackknife_state)
+        for epoch in empty_retained_state.estimators[1].history.epochs
+            epoch.index == 1 || (epoch.count = 0)
+        end
+        empty_retained_err = try
+            Molly.windowed_tss_free_energy_uncertainties(empty_retained_state)
+            nothing
+        catch err
+            err
+        end
+        @test empty_retained_err isa ArgumentError
+        @test occursin("have no samples in the shared retained epochs",
+                       sprint(showerror, empty_retained_err))
+
+        sparse_delete_state = deepcopy(jackknife_state)
+        for estimator in sparse_delete_state.estimators
+            for epoch in estimator.history.epochs
+                epoch.index == 1 && continue
+                epoch.count = epoch.index == 2 ? 1 : 0
+            end
+        end
+        sparse_delete_err = try
+            Molly.windowed_tss_free_energy_uncertainties(sparse_delete_state)
+            nothing
+        catch err
+            err
+        end
+        @test sparse_delete_err isa ArgumentError
+        @test occursin("cannot delete every retained epoch",
+                       sprint(showerror, sparse_delete_err))
     end
 end

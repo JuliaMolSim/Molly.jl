@@ -200,13 +200,9 @@ function _aggregate_tss_history!(state)
     return state
 end
 
-function _aggregate_tss_history_free_energies(state;
-                                              omit_epoch_index = nothing,
-                                              epoch_indices = nothing)
-    history = state.history
-    isnothing(history) &&
-        throw(ArgumentError("TSS jackknife requires history forgetting to be enabled."))
-
+function _tss_history_sample_count(history;
+                                   omit_epoch_index = nothing,
+                                   epoch_indices = nothing)
     retained = isnothing(epoch_indices) ? nothing : Set(epoch_indices)
     total_count = 0
     for epoch in history.epochs
@@ -215,11 +211,28 @@ function _aggregate_tss_history_free_energies(state;
         !isnothing(omit_epoch_index) && epoch.index == omit_epoch_index && continue
         total_count += epoch.count
     end
+    return total_count
+end
+
+function _aggregate_tss_history_free_energies(state;
+                                              omit_epoch_index = nothing,
+                                              epoch_indices = nothing)
+    history = state.history
+    isnothing(history) &&
+        throw(ArgumentError("TSS jackknife requires history forgetting to be enabled."))
+
+    total_count = _tss_history_sample_count(history;
+        omit_epoch_index = omit_epoch_index,
+        epoch_indices = epoch_indices,
+    )
     total_count > 0 ||
-        throw(ArgumentError("TSS jackknife deletion of epoch $(omit_epoch_index) leaves " *
-                            "window with no retained samples."))
+        throw(ArgumentError(isnothing(omit_epoch_index) ?
+            "TSS history aggregation has no samples in the requested retained epochs." :
+            "TSS jackknife deletion of epoch $(omit_epoch_index) leaves window with " *
+            "no retained samples."))
 
     FT = eltype(state.f)
+    retained = isnothing(epoch_indices) ? nothing : Set(epoch_indices)
     f = similar(state.f)
     for k in eachindex(f)
         log_z = -FT(Inf)

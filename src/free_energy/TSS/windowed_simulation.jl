@@ -46,7 +46,7 @@ mutable struct WindowedTSSReplica{AS}
     active_window::Int
 end
 
-struct WindowedTSSObservation{T, V}
+struct WindowedTSSObservation{T, V, RS}
     replica_index::Int
     update_window::Int
     visited_state::Int
@@ -55,9 +55,11 @@ struct WindowedTSSObservation{T, V}
     reduced_pot::V
     weights::V
     observable_values::Union{Nothing, Matrix{T}}
+    reweighting_samples::RS
+    replay_records::Vector{Any}
 end
 
-mutable struct WindowedTSSReplicaWorkspace{P, ST, T, R}
+mutable struct WindowedTSSReplicaWorkspace{P, ST, T, R, RW}
     partition::P
     energies::Vector{ST}
     reduced_pot::Vector{T}
@@ -65,16 +67,21 @@ mutable struct WindowedTSSReplicaWorkspace{P, ST, T, R}
     scratch::Vector{T}
     log_state_bias::Vector{T}
     rng::R
+    reweighting_workspace::RW
+    sample_counter::Int
 end
 
-mutable struct WindowedTSSSimulation{S, R, W}
+mutable struct WindowedTSSSimulation{S, R, W, RW, RL}
     state::S
     replicas::Vector{R}
     replica_workspaces::Vector{W}
+    reweighting::RW
+    replay_logger::RL
     n_md_steps::Int
     n_cycles::Int
     self_adjustment_steps::Int
     log_freq::Int
+    frozen::Bool
 end
 
 function WindowedTSSSimulation(state::WindowedTSSState;
@@ -85,7 +92,10 @@ function WindowedTSSSimulation(state::WindowedTSSState;
                                n_replicas = nothing,
                                first_states = nothing,
                                first_windows = nothing,
-                               replica_active_states = nothing)
+                               replica_active_states = nothing,
+                               reweighting = nothing,
+                               replay_logger = nothing,
+                               frozen::Bool = false)
 
     n_md_steps > 0 || throw(ArgumentError("n_md_steps must be positive."))
     n_cycles >= 0 || throw(ArgumentError("n_cycles must be non-negative."))
@@ -101,9 +111,20 @@ function WindowedTSSSimulation(state::WindowedTSSState;
         first_windows = first_windows,
         replica_active_states = replica_active_states,
     )
-    _validate_windowed_tss_replica_history_support(state, replicas)
+    frozen || _validate_windowed_tss_replica_history_support(state, replicas)
+    reweighting_runtime = _prepare_tss_reweighting(reweighting, state)
+    share_gpu_workspaces = _windowed_tss_replicas_use_gpu(replicas)
+    shared_partition = share_gpu_workspaces ? state.state_space.partition : nothing
+    shared_reweighting_workspace = share_gpu_workspaces ?
+                                   _tss_reweighting_workspace(reweighting_runtime, state) :
+                                   nothing
     replica_workspaces = [
-        WindowedTSSReplicaWorkspace(state)
+        WindowedTSSReplicaWorkspace(
+            state,
+            reweighting_runtime;
+            partition = shared_partition,
+            reweighting_workspace = shared_reweighting_workspace,
+        )
         for _ in eachindex(replicas)
     ]
 
@@ -111,28 +132,46 @@ function WindowedTSSSimulation(state::WindowedTSSState;
         state,
         replicas,
         replica_workspaces,
+        reweighting_runtime,
+        replay_logger,
         n_md_steps,
         n_cycles,
         Int(self_adjustment_steps),
         log_freq,
+        frozen,
     )
 end
 
-function WindowedTSSReplicaWorkspace(state::WindowedTSSState)
+function WindowedTSSReplicaWorkspace(state::WindowedTSSState,
+                                     reweighting = nothing;
+                                     partition = nothing,
+                                     reweighting_workspace = nothing)
     max_local_states = maximum(length(estimator.state_indices) for estimator in state.estimators)
     reference_estimator = first(state.estimators)
     FT = eltype(reference_estimator.f)
     ST = eltype(reference_estimator.energies)
+    workspace_partition = isnothing(partition) ?
+                          deepcopy(state.state_space.partition) :
+                          partition
+    workspace_reweighting = isnothing(reweighting_workspace) ?
+                            _tss_reweighting_workspace(reweighting, state) :
+                            reweighting_workspace
 
     return WindowedTSSReplicaWorkspace(
-        deepcopy(state.state_space.partition),
+        workspace_partition,
         Vector{ST}(undef, max_local_states),
         zeros(FT, max_local_states),
         zeros(FT, max_local_states),
         zeros(FT, max_local_states),
         zeros(FT, max_local_states),
         MersenneTwister(0),
+        workspace_reweighting,
+        0,
     )
+end
+
+function _windowed_tss_replicas_use_gpu(replicas)
+    return any(replica -> is_on_gpu(replica.active_state.active_sys), replicas)
 end
 
 function _replica_count(n_replicas, replica_active_states)
@@ -407,6 +446,8 @@ end
 function _collect_windowed_tss_observation!(state::WindowedTSSState{FT},
                                             replica::WindowedTSSReplica,
                                             workspace::WindowedTSSReplicaWorkspace,
+                                            reweighting,
+                                            replay_logger,
                                             replica_index::Int,
                                             n_md_steps::Int,
                                             self_adjustment_steps::Int,
@@ -430,6 +471,8 @@ function _collect_windowed_tss_observation!(state::WindowedTSSState{FT},
     final_visited_state = entry_state
     final_next_state = entry_state
     final_log_den = zero(FT)
+    reweighting_samples = TSSReweightingSample{Float64}[]
+    replay_records = Any[]
 
     for substep in 1:self_adjustment_steps
         visited_state = replica.active_state.active_idx
@@ -452,6 +495,61 @@ function _collect_windowed_tss_observation!(state::WindowedTSSState{FT},
 
         sample = _process_tss_sample!(workspace, estimator, replica.active_state)
         final_log_den = sample.log_den
+        workspace.sample_counter += 1
+        sample_index = workspace.sample_counter
+        energies = _workspace_view(workspace, :energies, length(estimator.state_indices))
+        reduced_potentials = _workspace_view(workspace, :reduced_pot, length(estimator.state_indices))
+        window_offset = isnothing(state.coupling) ? zero(FT) :
+                        state.coupling.window_offsets[cycle_window]
+        reweighting_sample = _collect_tss_reweighting_sample(
+            reweighting,
+            workspace.reweighting_workspace,
+            estimator,
+            replica.active_state;
+            log_den = sample.log_den,
+            history_time = state.iteration + 1,
+            energies = energies,
+            reduced_potentials = reduced_potentials,
+            window_offset = window_offset,
+            sample_index = sample_index,
+            n_threads = n_threads,
+        )
+        isnothing(reweighting_sample) || push!(reweighting_samples, reweighting_sample)
+        replay_reweighting_sample = reweighting_sample
+        if replay_logger isa TSSReplayLogger && !replay_logger.store_coords &&
+           sample_index % replay_logger.n_steps == 0 && isnothing(replay_reweighting_sample)
+            replay_reweighting_sample = _collect_tss_reweighting_sample(
+                reweighting,
+                workspace.reweighting_workspace,
+                estimator,
+                replica.active_state;
+                log_den = sample.log_den,
+                history_time = state.iteration + 1,
+                energies = energies,
+                reduced_potentials = reduced_potentials,
+                window_offset = window_offset,
+                sample_index = sample_index,
+                n_threads = n_threads,
+                force = true,
+            )
+        end
+        replay_record = _collect_tss_replay_record(
+            replay_logger,
+            estimator,
+            replica.active_state;
+            log_den = sample.log_den,
+            history_time = state.iteration + 1,
+            energies = energies,
+            reduced_potentials = reduced_potentials,
+            window_offset = window_offset,
+            sample_index = sample_index,
+            replica_index = replica_index,
+            update_window = cycle_window,
+            substep = substep,
+            reweighting_sample = replay_reweighting_sample,
+            n_threads = n_threads,
+        )
+        isnothing(replay_record) || push!(replay_records, replay_record)
         next_state = _tss_sample_global_state(workspace.rng, estimator, sample.weights)
         _check_windowed_tss_replica_cycle_state!(
             state,
@@ -488,6 +586,8 @@ function _collect_windowed_tss_observation!(state::WindowedTSSState{FT},
             reduced_potentials = _workspace_view(workspace, :reduced_pot, length(estimator.state_indices)),
             n_threads = n_threads,
         ),
+        reweighting_samples,
+        replay_records,
     )
     set_active_state!(replica.active_state, state.state_space, final_next_state)
     _check_windowed_tss_replica_invariant(state, replica)
@@ -564,6 +664,15 @@ function _apply_windowed_tss_observations!(state::WindowedTSSState{FT},
     return max_df
 end
 
+function _apply_windowed_tss_frozen_observations!(state::WindowedTSSState{FT},
+                                                  observations::AbstractVector) where FT
+    for observation in observations
+        state.window_update_counts[observation.update_window] += 1
+    end
+    state.iteration += 1
+    return zero(FT)
+end
+
 function _seed_windowed_tss_replica_rngs!(sim::WindowedTSSSimulation, rng::AbstractRNG)
     for workspace in sim.replica_workspaces
         Random.seed!(workspace.rng, rand(rng, UInt))
@@ -579,7 +688,7 @@ function _validate_tss_replica_parallel(replica_parallel)
 end
 
 function _windowed_tss_uses_gpu_replicas(sim::WindowedTSSSimulation)
-    return any(replica -> is_on_gpu(replica.active_state.active_sys), sim.replicas)
+    return _windowed_tss_replicas_use_gpu(sim.replicas)
 end
 
 function _resolve_tss_replica_parallel(sim::WindowedTSSSimulation,
@@ -603,13 +712,14 @@ end
 function _collect_windowed_tss_observations_serial!(sim::WindowedTSSSimulation,
                                                     thread_div)
     state = sim.state
-    FT = eltype(first(state.estimators).f)
-    observations = Vector{WindowedTSSObservation{FT, Vector{FT}}}(undef, length(sim.replicas))
+    observations = Vector{WindowedTSSObservation}(undef, length(sim.replicas))
     for replica_i in eachindex(sim.replicas)
         observations[replica_i] = _collect_windowed_tss_observation!(
             state,
             sim.replicas[replica_i],
             sim.replica_workspaces[replica_i],
+            sim.reweighting,
+            sim.replay_logger,
             replica_i,
             sim.n_md_steps,
             sim.self_adjustment_steps,
@@ -622,14 +732,15 @@ end
 function _collect_windowed_tss_observations_threaded!(sim::WindowedTSSSimulation,
                                                       thread_div)
     state = sim.state
-    FT = eltype(first(state.estimators).f)
-    observations = Vector{WindowedTSSObservation{FT, Vector{FT}}}(undef, length(sim.replicas))
+    observations = Vector{WindowedTSSObservation}(undef, length(sim.replicas))
     @sync for replica_i in eachindex(sim.replicas)
         Threads.@spawn begin
             observations[replica_i] = _collect_windowed_tss_observation!(
                 state,
                 sim.replicas[replica_i],
                 sim.replica_workspaces[replica_i],
+                sim.reweighting,
+                sim.replay_logger,
                 replica_i,
                 sim.n_md_steps,
                 sim.self_adjustment_steps,
@@ -753,7 +864,10 @@ function simulate!(sim::WindowedTSSSimulation;
     thread_div = equal_parts(Int(n_threads), length(sim.replicas))
     legacy_single_path = length(sim.replicas) == 1 &&
                          sim.replicas[1].active_state === state.active_state &&
-                         sim.replicas[1].active_window == state.active_window
+                         sim.replicas[1].active_window == state.active_window &&
+                         isnothing(sim.reweighting) &&
+                         isnothing(sim.replay_logger) &&
+                         !sim.frozen
     legacy_single_path || _seed_windowed_tss_replica_rngs!(sim, rng)
 
     for cycle in 1:sim.n_cycles
@@ -795,10 +909,14 @@ function simulate!(sim::WindowedTSSSimulation;
         else
             _collect_windowed_tss_observations_serial!(sim, thread_div)
         end
-        max_delta_f = _apply_windowed_tss_observations!(state, observations)
+        _accumulate_tss_reweighting!(sim.reweighting, observations)
+        _append_tss_replay_records!(sim.replay_logger, observations)
+        max_delta_f = sim.frozen ?
+                      _apply_windowed_tss_frozen_observations!(state, observations) :
+                      _apply_windowed_tss_observations!(state, observations)
         _sync_windowed_tss_state_to_replica!(state, first(sim.replicas))
 
-        if should_log_tss(state.iteration, sim.log_freq)
+        if !sim.frozen && should_log_tss(state.iteration, sim.log_freq)
             for observation in observations
                 estimator = state.estimators[observation.update_window]
                 log_tss_stats!(
@@ -827,4 +945,16 @@ function simulate!(sim::WindowedTSSSimulation;
     end
 
     return state
+end
+
+"""
+    tss_reweighted_pmf(sim::WindowedTSSSimulation; zero=:min, kBT=nothing)
+
+Return the target-state PMF accumulated during a windowed TSS simulation that
+was configured with `reweighting=TSSReweightingTarget(...)`.
+"""
+function tss_reweighted_pmf(sim::WindowedTSSSimulation; kwargs...)
+    isnothing(sim.reweighting) &&
+        throw(ArgumentError("WindowedTSSSimulation was not configured with TSS reweighting."))
+    return tss_reweighted_pmf(sim.reweighting; kwargs...)
 end

@@ -10,8 +10,9 @@ export
     conditional_state_weights!,
     sample_state
 
-struct ExtendedStateSpace{P, S, I, B, PR, HP, SPI, SSI, SGI}
+struct ExtendedStateSpace{P, TS, S, I, B, PR, HP, SPI, SSI, SGI}
     partition::P
+    thermo_states::TS
     systems::S
     integrators::I
     betas::B
@@ -26,22 +27,24 @@ function ExtendedStateSpace(thermo_states::AbstractArray{<:ThermoState};
                             reuse_neighbors::Bool=true)
     isempty(thermo_states) && throw(ArgumentError("at least one ThermoState is required"))
 
-    ref_sys = first(thermo_states).system
+    thermo_states_vec = collect(thermo_states)
+    ref_sys = first(thermo_states_vec).system
     FT = typeof(ustrip(ref_sys.total_mass))
-    partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
+    partition = AlchemicalPartition(thermo_states_vec; reuse_neighbors=reuse_neighbors)
 
-    systems = [ts.system for ts in thermo_states]
-    integrators = [ts.integrator for ts in thermo_states]
-    betas = [ts.beta for ts in thermo_states]
-    has_pressure = [!isnothing(ts.p) for ts in thermo_states]
-    pressures = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states]
+    systems = [ts.system for ts in thermo_states_vec]
+    integrators = [ts.integrator for ts in thermo_states_vec]
+    betas = [ts.beta for ts in thermo_states_vec]
+    has_pressure = [!isnothing(ts.p) for ts in thermo_states_vec]
+    pressures = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states_vec]
 
-    state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states]
-    state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states]
-    state_general_inters = [ts.system.general_inters for ts in thermo_states]
+    state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states_vec]
+    state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states_vec]
+    state_general_inters = [ts.system.general_inters for ts in thermo_states_vec]
 
     return ExtendedStateSpace(
         partition,
+        thermo_states_vec,
         systems,
         integrators,
         betas,
@@ -54,6 +57,28 @@ function ExtendedStateSpace(thermo_states::AbstractArray{<:ThermoState};
 end
 
 n_states(space::ExtendedStateSpace) = length(space.betas)
+
+mutable struct PartitionedReducedPotentialWorkspace{P, TS, E}
+    partition::P
+    thermo_states::TS
+    energies::E
+end
+
+function PartitionedReducedPotentialWorkspace(thermo_states::AbstractArray{<:ThermoState};
+                                              reuse_neighbors::Bool=true)
+    thermo_states_vec = collect(thermo_states)
+    isempty(thermo_states_vec) &&
+        throw(ArgumentError("at least one ThermoState is required"))
+    partition = AlchemicalPartition(thermo_states_vec; reuse_neighbors=reuse_neighbors)
+    energies = Vector{typeof(partition.cached_master_pe)}(undef, length(thermo_states_vec))
+    return PartitionedReducedPotentialWorkspace(partition, thermo_states_vec, energies)
+end
+
+function _partitioned_workspace_energy_view(workspace::PartitionedReducedPotentialWorkspace,
+                                            n::Integer)
+    length(workspace.energies) < n && resize!(workspace.energies, n)
+    return @view workspace.energies[1:n]
+end
 
 mutable struct ActiveThermoState{S, I}
     active_idx::Int
@@ -103,22 +128,17 @@ function evaluate_energy_subset!(energies::AbstractVector,
         throw(DimensionMismatch("energies length ($(length(energies))) must match " *
                                 "state_indices length ($(length(state_indices)))"))
 
-    partition.master_sys.coords = coords
-    partition.master_sys.boundary = boundary
-    partition.cached_master_pe = potential_energy(partition.master_sys)
-    partition.cached_coords = coords
-
-    partition.λ_sys.coords = coords
-    partition.λ_sys.boundary = boundary
-    nbrs = find_neighbors(partition.λ_sys)
+    _update_master_energy!(partition, coords, boundary; force_recompute=true)
 
     @inbounds for (out_i, state_index) in pairs(state_indices)
-        partition.λ_sys.atoms = partition.λ_atoms[state_index]
-        partition.λ_sys.pairwise_inters = partition.λ_hamiltonians[state_index].pairwise_inters
-        partition.λ_sys.specific_inter_lists = partition.λ_hamiltonians[state_index].specific_inter_lists
-        partition.λ_sys.general_inters = partition.λ_hamiltonians[state_index].general_inters
-
-        pe_specific = potential_energy(partition.λ_sys, nbrs, 0)
+        1 <= state_index <= length(partition.λ_systems) ||
+            throw(ArgumentError("state_index ($state_index) out of range " *
+                                "1:$(length(partition.λ_systems))"))
+        pe_specific = _evaluate_λ_energy!(
+            partition.λ_systems[state_index],
+            coords,
+            boundary,
+        )
         energies[out_i] = partition.cached_master_pe + pe_specific
     end
 
@@ -151,6 +171,32 @@ function reduced_potential(space::ExtendedStateSpace,
     return red
 end
 
+function reduced_potential(state::ThermoState, energy, boundary)
+    T = typeof(state.beta)
+    red = state.beta * _safe_ustrip(T, energy)
+    if !isnothing(state.p)
+        red += state.beta * _safe_ustrip(T, state.p * volume(boundary))
+    end
+    return red
+end
+
+function reduced_potential(workspace::PartitionedReducedPotentialWorkspace,
+                           coords,
+                           boundary,
+                           state_index::Integer)
+    1 <= state_index <= length(workspace.thermo_states) ||
+        throw(ArgumentError("state_index ($state_index) out of range " *
+                            "1:$(length(workspace.thermo_states))"))
+    energy = evaluate_energy!(
+        workspace.partition,
+        coords,
+        boundary,
+        Int(state_index);
+        force_recompute = true,
+    )
+    return reduced_potential(workspace.thermo_states[state_index], energy, boundary)
+end
+
 function reduced_potentials!(out::AbstractVector,
                              energies::AbstractVector,
                              space::ExtendedStateSpace,
@@ -165,6 +211,32 @@ function reduced_potentials!(out::AbstractVector,
 
     @inbounds for (out_i, state_index) in pairs(state_indices)
         out[out_i] = reduced_potential(space, energies[out_i], boundary, state_index)
+    end
+    return out
+end
+
+function reduced_potentials!(out::AbstractVector,
+                             workspace::PartitionedReducedPotentialWorkspace,
+                             coords,
+                             boundary,
+                             state_indices=Base.OneTo(length(workspace.thermo_states)))
+    length(out) == length(state_indices) ||
+        throw(DimensionMismatch("out length ($(length(out))) must match " *
+                                "state_indices length ($(length(state_indices)))"))
+    energies = _partitioned_workspace_energy_view(workspace, length(state_indices))
+    evaluate_energy_subset!(
+        energies,
+        workspace.partition,
+        coords,
+        boundary,
+        state_indices,
+    )
+    @inbounds for (out_i, state_index) in pairs(state_indices)
+        out[out_i] = reduced_potential(
+            workspace.thermo_states[state_index],
+            energies[out_i],
+            boundary,
+        )
     end
     return out
 end

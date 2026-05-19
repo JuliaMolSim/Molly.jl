@@ -4,6 +4,8 @@ export
     TSSObservableContext,
     TSSSystemObservable,
     TSSHistoryForgetting,
+    TSSReweightingTarget,
+    TSSReplayLogger,
     TSSState,
     TSSSimulation,
     TSSGraph,
@@ -13,6 +15,9 @@ export
     WindowedTSSSimulation,
     add_tss_edge!,
     build_tss_graph,
+    tss_mbar_pmf,
+    tss_offline_reweighted_pmf,
+    tss_reweighted_pmf,
     tss_grid_graph,
     windowed_tss_free_energy_uncertainties,
     windowed_tss_free_energies,
@@ -23,5 +28,6 @@ include("TSS/history.jl")
 include("TSS/observables.jl")
 include("TSS/single_window.jl")
 include("TSS/windows.jl")
+include("TSS/reweighting.jl")
 include("TSS/global_estimators.jl")
 include("TSS/windowed_simulation.jl")
