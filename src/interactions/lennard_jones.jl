@@ -1736,7 +1736,7 @@ function build_packed_adj_list!(
     return packed_data
 end
 
-function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+function _packed_pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
     velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
     pairwise_inters_nonl, 
     pairwise_inters_nl::Tuple, 
@@ -1808,6 +1808,32 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     # end
 
     return fs_nounits
+end
+
+function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+    velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
+    pairwise_inters_nonl,
+    pairwise_inters_nl::Tuple,
+    ::Val{1}, ::Val{needs_vir}, step_n=0) where {needs_vir}
+
+    return _packed_pairwise_forces_loop!(
+        fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+        velocities, boundary, neighbors, force_units, n_atoms,
+        pairwise_inters_nonl, pairwise_inters_nl, Val(1), Val(needs_vir), step_n,
+    )
+end
+
+function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+    velocities, boundary, neighbors::PackedNeighborList, force_units, n_atoms,
+    pairwise_inters_nonl,
+    pairwise_inters_nl::Tuple,
+    ::Val{n_threads}, ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
+
+    return _packed_pairwise_forces_loop!(
+        fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
+        velocities, boundary, neighbors, force_units, n_atoms,
+        pairwise_inters_nonl, pairwise_inters_nl, Val(n_threads), Val(needs_vir), step_n,
+    )
 end
 
 @inline function simd_chunk_forces!(fs_nounits, i, packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, soa_params, sim_params, coords, flat_coords, inters::Tuple{<:SIMDLennardJones, <:AbstractSIMDCoulomb}, cutoffs,
