@@ -4675,6 +4675,32 @@ end
     return abs(signed_weight) * coulomb_const * qi * qj * inv_r3 * ewald_factor
 end
 
+@inline function _cluster_coul_force_div_r_masked(
+    coul::AbstractSIMDCoulomb,
+    safe_r2,
+    qi,
+    qj,
+    signed_weight,
+    valid,
+)
+    f_div_r = _cluster_coul_force_div_r(coul, safe_r2, qi, qj, signed_weight)
+    return vifelse(valid, f_div_r, zero(typeof(safe_r2)))
+end
+
+@inline function _cluster_coul_force_div_r_masked(
+    coul::SIMDCoulombEwald,
+    safe_r2,
+    qi,
+    qj,
+    signed_weight,
+    valid,
+)
+    any(valid) || return zero(typeof(safe_r2))
+
+    f_div_r = _cluster_coul_force_div_r(coul, safe_r2, qi, qj, signed_weight)
+    return vifelse(valid, f_div_r, zero(typeof(safe_r2)))
+end
+
 
 function _clustered_lj_forces_simd8_csr_chunk!(
     fx,
@@ -4852,15 +4878,14 @@ end
 
             weight = vifelse(special, -coul_special_weight, one(V8))
 
-            f_div_r = _cluster_coul_force_div_r(
-        coul,
-        safe_r2,
-        charge_i,
-        charge_j_s,
-        weight,
-    )
-
-            f_div_r = vifelse(valid, f_div_r, zero(V8))
+            f_div_r = _cluster_coul_force_div_r_masked(
+                coul,
+                safe_r2,
+                charge_i,
+                charge_j_s,
+                weight,
+                valid,
+            )
 
             fx_ij = f_div_r * dx
             fy_ij = f_div_r * dy
@@ -5103,15 +5128,14 @@ end
                 charge_j_s = _cluster_rotate_register(charge_j, Val(s))
 
                 coul_weight = vifelse(coul_special, -coul_special_weight, one(VFloat))
-                f_coul = _cluster_coul_force_div_r(
-        coul,
-        coul_safe_r2,
-        charge_i,
-        charge_j_s,
-        coul_weight,
-    )
-
-                f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
+                f_div_r += _cluster_coul_force_div_r_masked(
+                    coul,
+                    coul_safe_r2,
+                    charge_i,
+                    charge_j_s,
+                    coul_weight,
+                    coul_valid,
+                )
             end
 
             fx_ij = f_div_r * dx
@@ -5225,15 +5249,14 @@ end
 
         qi = data.charge[slot_i]
 
-        f_coul = _cluster_coul_force_div_r(
-        coul,
-        coul_safe_r2,
-        qi,
-        charge_j,
-        coul_weight,
-    )
-
-        f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
+        f_div_r += _cluster_coul_force_div_r_masked(
+            coul,
+            coul_safe_r2,
+            qi,
+            charge_j,
+            coul_weight,
+            coul_valid,
+        )
     end
 
     if DoLJ && has_lj_row
@@ -5323,14 +5346,14 @@ end
     weight = vifelse(special, -coul_special_weight, one(VFloat))
 
     qi = data.charge[slot_i]
-    f_div_r = _cluster_coul_force_div_r(
+    f_div_r = _cluster_coul_force_div_r_masked(
         coul,
         safe_r2,
         qi,
         charge_j,
         weight,
+        valid,
     )
-    f_div_r = vifelse(valid, f_div_r, zero(VFloat))
 
     fx_ij = f_div_r * dx
     fy_ij = f_div_r * dy
@@ -5750,15 +5773,14 @@ end
     coul_safe_r2 = vifelse(coul_valid, r2, one(VFloat))
 
     qi = data.charge[slot_i]
-    f_coul = _cluster_coul_force_div_r(
+    f_div_r += _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r2,
         qi,
         charge_j,
         one(VFloat),
+        coul_valid,
     )
-
-    f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
 
     has_lj_row = _cluster_row_has_pairs(
         lj_mask,
@@ -5841,14 +5863,14 @@ end
     safe_r2 = vifelse(valid, r2, one(VFloat))
 
     qi = data.charge[slot_i]
-    f_div_r = _cluster_coul_force_div_r(
+    f_div_r = _cluster_coul_force_div_r_masked(
         coul,
         safe_r2,
         qi,
         charge_j,
         one(VFloat),
+        valid,
     )
-    f_div_r = vifelse(valid, f_div_r, zero(VFloat))
 
     fx_ij = f_div_r * dx
     fy_ij = f_div_r * dy
@@ -5895,15 +5917,14 @@ end
         coul_safe_r2 = vifelse(coul_valid, r2, one(VFloat))
 
         qi = data.charge[slot_i]
-        f_coul = _cluster_coul_force_div_r(
-        coul,
-        coul_safe_r2,
-        qi,
-        charge_j,
-        one(VFloat),
-    )
-
-        f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
+        f_div_r += _cluster_coul_force_div_r_masked(
+            coul,
+            coul_safe_r2,
+            qi,
+            charge_j,
+            one(VFloat),
+            coul_valid,
+        )
     end
 
     if DoLJ && has_lj_row
@@ -6140,14 +6161,14 @@ end
     coul_valid1 = coul_active1 & (r21 <= coul_cutoff2)
     coul_safe_r21 = vifelse(coul_valid1, r21, one(VFloat))
     qi1 = data.charge[slot_i]
-    f_coul1 = _cluster_coul_force_div_r(
+    f_div_r1 += _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r21,
         qi1,
         charge_j,
         one(VFloat),
+        coul_valid1,
     )
-    f_div_r1 += vifelse(coul_valid1, f_coul1, zero(VFloat))
 
     if has_lj_row1
         lj_valid1 = lj_active1 & (r21 <= lj_cutoff2)
@@ -6200,14 +6221,14 @@ end
     coul_valid2 = coul_active2 & (r22 <= coul_cutoff2)
     coul_safe_r22 = vifelse(coul_valid2, r22, one(VFloat))
     qi2 = data.charge[slot_i]
-    f_coul2 = _cluster_coul_force_div_r(
+    f_div_r2 += _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r22,
         qi2,
         charge_j,
         one(VFloat),
+        coul_valid2,
     )
-    f_div_r2 += vifelse(coul_valid2, f_coul2, zero(VFloat))
 
     if has_lj_row2
         lj_valid2 = lj_active2 & (r22 <= lj_cutoff2)
@@ -6260,14 +6281,14 @@ end
     coul_valid3 = coul_active3 & (r23 <= coul_cutoff2)
     coul_safe_r23 = vifelse(coul_valid3, r23, one(VFloat))
     qi3 = data.charge[slot_i]
-    f_coul3 = _cluster_coul_force_div_r(
+    f_div_r3 += _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r23,
         qi3,
         charge_j,
         one(VFloat),
+        coul_valid3,
     )
-    f_div_r3 += vifelse(coul_valid3, f_coul3, zero(VFloat))
 
     if has_lj_row3
         lj_valid3 = lj_active3 & (r23 <= lj_cutoff2)
@@ -6320,14 +6341,14 @@ end
     coul_valid4 = coul_active4 & (r24 <= coul_cutoff2)
     coul_safe_r24 = vifelse(coul_valid4, r24, one(VFloat))
     qi4 = data.charge[slot_i]
-    f_coul4 = _cluster_coul_force_div_r(
+    f_div_r4 += _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r24,
         qi4,
         charge_j,
         one(VFloat),
+        coul_valid4,
     )
-    f_div_r4 += vifelse(coul_valid4, f_coul4, zero(VFloat))
 
     if has_lj_row4
         lj_valid4 = lj_active4 & (r24 <= lj_cutoff2)
@@ -6378,14 +6399,14 @@ end
     coul_valid5 = coul_active5 & (r25 <= coul_cutoff2)
     coul_safe_r25 = vifelse(coul_valid5, r25, one(VFloat))
     qi5 = data.charge[slot_i]
-    f_div_r5 = _cluster_coul_force_div_r(
+    f_div_r5 = _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r25,
         qi5,
         charge_j,
         one(VFloat),
+        coul_valid5,
     )
-    f_div_r5 = vifelse(coul_valid5, f_div_r5, zero(VFloat))
     fx_ij5 = f_div_r5 * dx5
     fy_ij5 = f_div_r5 * dy5
     fz_ij5 = f_div_r5 * dz5
@@ -6405,14 +6426,14 @@ end
     coul_valid6 = coul_active6 & (r26 <= coul_cutoff2)
     coul_safe_r26 = vifelse(coul_valid6, r26, one(VFloat))
     qi6 = data.charge[slot_i]
-    f_div_r6 = _cluster_coul_force_div_r(
+    f_div_r6 = _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r26,
         qi6,
         charge_j,
         one(VFloat),
+        coul_valid6,
     )
-    f_div_r6 = vifelse(coul_valid6, f_div_r6, zero(VFloat))
     fx_ij6 = f_div_r6 * dx6
     fy_ij6 = f_div_r6 * dy6
     fz_ij6 = f_div_r6 * dz6
@@ -6432,14 +6453,14 @@ end
     coul_valid7 = coul_active7 & (r27 <= coul_cutoff2)
     coul_safe_r27 = vifelse(coul_valid7, r27, one(VFloat))
     qi7 = data.charge[slot_i]
-    f_div_r7 = _cluster_coul_force_div_r(
+    f_div_r7 = _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r27,
         qi7,
         charge_j,
         one(VFloat),
+        coul_valid7,
     )
-    f_div_r7 = vifelse(coul_valid7, f_div_r7, zero(VFloat))
     fx_ij7 = f_div_r7 * dx7
     fy_ij7 = f_div_r7 * dy7
     fz_ij7 = f_div_r7 * dz7
@@ -6459,14 +6480,14 @@ end
     coul_valid8 = coul_active8 & (r28 <= coul_cutoff2)
     coul_safe_r28 = vifelse(coul_valid8, r28, one(VFloat))
     qi8 = data.charge[slot_i]
-    f_div_r8 = _cluster_coul_force_div_r(
+    f_div_r8 = _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r28,
         qi8,
         charge_j,
         one(VFloat),
+        coul_valid8,
     )
-    f_div_r8 = vifelse(coul_valid8, f_div_r8, zero(VFloat))
     fx_ij8 = f_div_r8 * dx8
     fy_ij8 = f_div_r8 * dy8
     fz_ij8 = f_div_r8 * dz8
@@ -6531,12 +6552,13 @@ end
     coul_weight = vifelse(coul_special, -coul_special_weight, one(VFloat))
 
     qi = data.charge[slot_i]
-    f_coul = _cluster_coul_force_div_r(
+    f_coul = _cluster_coul_force_div_r_masked(
         coul,
         coul_safe_r2,
         qi,
         charge_j,
         coul_weight,
+        coul_valid,
     )
 
     lj_active = _cluster_pairmask_row_vec(lj_mask, Val(LaneI), Val(SIMD_WIDTH), Val(SIMD_WIDTH))
@@ -6557,8 +6579,7 @@ end
         T,
     )
 
-    f_div_r = vifelse(coul_valid, f_coul, zero(VFloat)) +
-        vifelse(lj_valid, f_lj, zero(VFloat))
+    f_div_r = f_coul + vifelse(lj_valid, f_lj, zero(VFloat))
 
     fx_ij = f_div_r * dx
     fy_ij = f_div_r * dy
@@ -6601,14 +6622,14 @@ end
     weight = vifelse(special, -coul_special_weight, one(VFloat))
 
     qi = data.charge[slot_i]
-    f_div_r = _cluster_coul_force_div_r(
+    f_div_r = _cluster_coul_force_div_r_masked(
         coul,
         safe_r2,
         qi,
         charge_j,
         weight,
+        valid,
     )
-    f_div_r = vifelse(valid, f_div_r, zero(VFloat))
 
     fx_ij = f_div_r * dx
     fy_ij = f_div_r * dy
@@ -6986,15 +7007,14 @@ end
                 charge_j_s = _cluster_rotate_register(charge_j, Val(s))
 
                 coul_weight = vifelse(coul_special, -coul_special_weight, one(VFloat))
-                f_coul = _cluster_coul_force_div_r(
-        coul,
-        coul_safe_r2,
-        charge_i,
-        charge_j_s,
-        coul_weight,
-    )
-
-                f_div_r += vifelse(coul_valid, f_coul, zero(VFloat))
+                f_div_r += _cluster_coul_force_div_r_masked(
+                    coul,
+                    coul_safe_r2,
+                    charge_i,
+                    charge_j_s,
+                    coul_weight,
+                    coul_valid,
+                )
             end
 
             fx_ij = f_div_r * dx
