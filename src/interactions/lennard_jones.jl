@@ -7040,10 +7040,10 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
     coul_special_weight = T(coul.weight_special)
     #coulomb_const = T(coul.coulomb_const)
     
-    half_lj_coul_ns = UInt64(0)
-    full_lj_coul_ns = UInt64(0)
-    coul_only_ns = UInt64(0)
-    lj_only_ns = UInt64(0)
+    # half_lj_coul_ns = UInt64(0)
+    # full_lj_coul_ns = UInt64(0)
+    # coul_only_ns = UInt64(0)
+    # lj_only_ns = UInt64(0)
 
     @inbounds for ci in first_ci:step_ci:data.n_clusters
         first = Int(data.ci_offsets[ci])
@@ -7075,7 +7075,7 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
         # supported LJ mixing rules. Other cluster widths fall back in the wrapper.
 
         if first < half_masked_end
-            t_region = time_ns()
+            #t_region = time_ns()
             for pair_idx in first:(half_masked_end - 1)
                 dfx, dfy, dfz = _clustered_lj_coul_pair_8x8_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
@@ -7088,11 +7088,11 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
                 fiy_row += dfy
                 fiz_row += dfz
             end
-            half_lj_coul_ns += time_ns() - t_region
+            #half_lj_coul_ns += time_ns() - t_region
         end
 
         if half_masked_end < half_end
-            t_region = time_ns()
+            #t_region = time_ns()
             for pair_idx in half_masked_end:(half_end - 1)
                 dfx, dfy, dfz = _clustered_half_lj_coul_plain_pair_8x8_dedicated_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
@@ -7103,11 +7103,11 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
                 fiy_row += dfy
                 fiz_row += dfz
             end
-            half_lj_coul_ns += time_ns() - t_region
+            #half_lj_coul_ns += time_ns() - t_region
         end
 
         if half_end < both_end
-            t_region = time_ns()
+            #t_region = time_ns()
             for pair_idx in half_end:(both_end - 1)
                 dfx, dfy, dfz = _clustered_lj_coul_pair_8x8_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
@@ -7120,13 +7120,13 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
                 fiy_row += dfy
                 fiz_row += dfz
             end
-            full_lj_coul_ns += time_ns() - t_region
+            #full_lj_coul_ns += time_ns() - t_region
         end
 
         
 
         if both_end < coul_end
-            t_region = time_ns()
+            #t_region = time_ns()
             for pair_idx in both_end:(coul_end - 1)
                 dfx, dfy, dfz = _clustered_coul_pair_8x8_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
@@ -7137,12 +7137,12 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
                 fiy_row += dfy
                 fiz_row += dfz
             end
-            coul_only_ns += time_ns() - t_region
+            #coul_only_ns += time_ns() - t_region
         end
 
 
         if coul_end <= last
-            t_region = time_ns()
+            #t_region = time_ns()
             for pair_idx in coul_end:last
                 dfx, dfy, dfz = _clustered_lj_coul_pair_simd8_csr_accum_j!(
                     fx, fy, fz, data, ci, first_i, pair_idx,
@@ -7155,7 +7155,7 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
                 fiy_row += dfy
                 fiz_row += dfz
             end
-            lj_only_ns += time_ns() - t_region
+            #lj_only_ns += time_ns() - t_region
         end
         
         vstore(vload(VFloat, fx, first_i) + fix_row, fx, first_i)
@@ -7164,7 +7164,8 @@ function _clustered_lj_coul_forces_simd8_csr_chunk!(fx, fy, fz, data::ClusterPai
 
     end
 
-    return (half_lj_coul_ns, full_lj_coul_ns, coul_only_ns, lj_only_ns)
+    #return (half_lj_coul_ns, full_lj_coul_ns, coul_only_ns, lj_only_ns)
+    return nothing
 end
 
 function _clustered_lj_coul_forces_packed_csr_chunk!(
@@ -7439,8 +7440,28 @@ function pairwise_forces_loop!(
     t1 = time_ns()
     data.last_force_slot_zero_ms = (t1 - t0) / 1e6
 
+    # t0 = time_ns()
+    # section_times = _clustered_lj_coul_forces_packed_csr_chunk!(
+    #     data.fx,
+    #     data.fy,
+    #     data.fz,
+    #     atoms,
+    #     data,
+    #     boundary,
+    #     lj,
+    #     coul,
+    #     1,
+    #     1,
+    # )
+    # t1 = time_ns()
+    # data.last_force_kernel_ms = (t1 - t0) / 1e6
+    # data.last_force_half_lj_coul_ms = section_times[1] / 1e6
+    # data.last_force_full_lj_coul_ms = section_times[2] / 1e6
+    # data.last_force_coul_only_ms = section_times[3] / 1e6
+    # data.last_force_lj_only_ms = section_times[4] / 1e6
+
     t0 = time_ns()
-    section_times = _clustered_lj_coul_forces_packed_csr_chunk!(
+    _clustered_lj_coul_forces_packed_csr_chunk!(
         data.fx,
         data.fy,
         data.fz,
@@ -7454,10 +7475,6 @@ function pairwise_forces_loop!(
     )
     t1 = time_ns()
     data.last_force_kernel_ms = (t1 - t0) / 1e6
-    data.last_force_half_lj_coul_ms = section_times[1] / 1e6
-    data.last_force_full_lj_coul_ms = section_times[2] / 1e6
-    data.last_force_coul_only_ms = section_times[3] / 1e6
-    data.last_force_lj_only_ms = section_times[4] / 1e6
 
     t0 = time_ns()
     _scatter_cluster_forces!(fs_nounits, data)
@@ -7691,7 +7708,27 @@ function pairwise_forces_loop!(
         data.last_force_slot_zero_ms = (t1 - t0) / 1e6
 
         t0 = time_ns()
-        section_times = _clustered_lj_coul_forces_packed_csr_chunk!(
+        # section_times = _clustered_lj_coul_forces_packed_csr_chunk!(
+        #     data.fx,
+        #     data.fy,
+        #     data.fz,
+        #     atoms,
+        #     data,
+        #     boundary,
+        #     lj,
+        #     coul,
+        #     1,
+        #     1,
+        # )
+        
+        # t1 = time_ns()
+        # data.last_force_kernel_ms = (t1 - t0) / 1e6
+        # data.last_force_half_lj_coul_ms = section_times[1] / 1e6
+        # data.last_force_full_lj_coul_ms = section_times[2] / 1e6
+        # data.last_force_coul_only_ms = section_times[3] / 1e6
+        # data.last_force_lj_only_ms = section_times[4] / 1e6
+
+        _clustered_lj_coul_forces_packed_csr_chunk!(
             data.fx,
             data.fy,
             data.fz,
@@ -7703,13 +7740,8 @@ function pairwise_forces_loop!(
             1,
             1,
         )
-        
         t1 = time_ns()
         data.last_force_kernel_ms = (t1 - t0) / 1e6
-        data.last_force_half_lj_coul_ms = section_times[1] / 1e6
-        data.last_force_full_lj_coul_ms = section_times[2] / 1e6
-        data.last_force_coul_only_ms = section_times[3] / 1e6
-        data.last_force_lj_only_ms = section_times[4] / 1e6
 
         t0 = time_ns()
         _scatter_cluster_forces!(fs_nounits, data)
@@ -7730,14 +7762,31 @@ function pairwise_forces_loop!(
         t1 = time_ns()
         data.last_force_chunk_zero_ms = (t1 - t0) / 1e6
 
-        half_lj_coul_ns = zeros(UInt64, n_threads)
-        full_lj_coul_ns = zeros(UInt64, n_threads)
-        coul_only_ns = zeros(UInt64, n_threads)
-        lj_only_ns = zeros(UInt64, n_threads)
+        # half_lj_coul_ns = zeros(UInt64, n_threads)
+        # full_lj_coul_ns = zeros(UInt64, n_threads)
+        # coul_only_ns = zeros(UInt64, n_threads)
+        # lj_only_ns = zeros(UInt64, n_threads)
 
         t0 = time_ns()
         Threads.@threads for thread_i in 1:n_threads
-            section_times = _clustered_lj_coul_forces_packed_csr_chunk!(
+            # section_times = _clustered_lj_coul_forces_packed_csr_chunk!(
+            #     data.fx_chunks[thread_i],
+            #     data.fy_chunks[thread_i],
+            #     data.fz_chunks[thread_i],
+            #     atoms,
+            #     data,
+            #     boundary,
+            #     lj,
+            #     coul,
+            #     thread_i,
+            #     n_threads,
+            # )
+            # half_lj_coul_ns[thread_i] = section_times[1]
+            # full_lj_coul_ns[thread_i] = section_times[2]
+            # coul_only_ns[thread_i] = section_times[3]
+            # lj_only_ns[thread_i] = section_times[4]
+
+            _clustered_lj_coul_forces_packed_csr_chunk!(
                 data.fx_chunks[thread_i],
                 data.fy_chunks[thread_i],
                 data.fz_chunks[thread_i],
@@ -7749,18 +7798,15 @@ function pairwise_forces_loop!(
                 thread_i,
                 n_threads,
             )
-            half_lj_coul_ns[thread_i] = section_times[1]
-            full_lj_coul_ns[thread_i] = section_times[2]
-            coul_only_ns[thread_i] = section_times[3]
-            lj_only_ns[thread_i] = section_times[4]
+            
             
         end
         t1 = time_ns()
         data.last_force_kernel_ms = (t1 - t0) / 1e6
-        data.last_force_half_lj_coul_ms = sum(half_lj_coul_ns) / 1e6
-        data.last_force_full_lj_coul_ms = sum(full_lj_coul_ns) / 1e6
-        data.last_force_coul_only_ms = sum(coul_only_ns) / 1e6
-        data.last_force_lj_only_ms = sum(lj_only_ns) / 1e6
+        # data.last_force_half_lj_coul_ms = sum(half_lj_coul_ns) / 1e6
+        # data.last_force_full_lj_coul_ms = sum(full_lj_coul_ns) / 1e6
+        # data.last_force_coul_only_ms = sum(coul_only_ns) / 1e6
+        # data.last_force_lj_only_ms = sum(lj_only_ns) / 1e6
 
         t0 = time_ns()
         _reduce_scatter_cluster_forces!(fs_nounits, data, n_threads)
