@@ -1372,18 +1372,45 @@ function find_neighbors(sys::System, nf::SIMDNeighborFinder, old_neighbors, step
         packed_data = old_neighbors.packed_data
     end
     
-    build_packed_adj_list!(packed_data, sys.atoms, new_standard, SIMD_WIDTH, soa_params, canonical...,)
+    #build_packed_adj_list!(packed_data, sys.atoms, new_standard, SIMD_WIDTH, soa_params, canonical...,)
+    n_build_threads = Int(get(kwargs, :n_threads, Threads.nthreads()))
+    n_build_threads = max(1, min(n_build_threads, Threads.nthreads()))
+    
+    build_packed_adj_list!(
+        packed_data,
+        sys.atoms,
+        new_standard,
+        SIMD_WIDTH,
+        soa_params,
+        canonical...,
+        n_build_threads,
+    )
+    
 
     return PackedNeighborList(new_standard, packed_data, soa_params)
 end
 
-function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, atoms, molly_neighbours, N_SIMD, soa_params,
-    lj_inter::SIMDLennardJones, coul_inter::AbstractSIMDCoulomb,) where {T}
+# function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}, atoms, molly_neighbours, N_SIMD, soa_params,
+#     lj_inter::SIMDLennardJones, coul_inter::AbstractSIMDCoulomb,) where {T}
+
+function build_packed_adj_list!(
+        packed_data::PackedFlatSoA{T, LJCoulSplitLayout},
+        atoms,
+        molly_neighbours,
+        N_SIMD,
+        soa_params,
+        lj_inter::SIMDLennardJones,
+        coul_inter::AbstractSIMDCoulomb,
+        n_threads::Integer,
+    ) where {T}
+    
 
     n_atoms = length(atoms)
     n_pairs = molly_neighbours.n # total number of neighbour list pairs
     #n_parts = Threads.nthreads() # number of threads - the neighbour list gets split into this many parts 
-    n_parts = min(Threads.nthreads(), 8)
+    #n_parts = min(Threads.nthreads(), 8)
+    n_parts = max(1, min(Int(n_threads), Threads.nthreads(), 8))
+
     chunk_size = 2 * N_SIMD # how large a chunk is since its unrolled 2x 
     part_len = n_atoms * n_parts # each thread gets n_atom slots so total length 
 
@@ -1534,11 +1561,33 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}
     end
 
     # Pass 5: Pad rows in parallel, per atom 
-    Threads.@threads for i in 1:n_atoms
-        @inbounds begin
+    # Threads.@threads for i in 1:n_atoms
+    #     @inbounds begin
+    #         for pos in (packed_data.offsets[i] + packed_data._both_counts[i]):(packed_data.split_idxs[i] - 1)
+    #             # look at where the offset was + the total counts was until where the split index begins 
+    #             # pad with empty atoms
+    #             packed_data.adj_list[pos] = i
+    #             packed_data.sigmas[pos] = one(T)
+    #             packed_data.eps[pos] = one(T)
+    #             packed_data.charges[pos] = zero(T)
+    #             packed_data.lj_weights[pos] = zero(T)
+    #             packed_data.coul_weights[pos] = zero(T)
+    #         end
+
+    #         # look at where the split index + coulomb counts ends until where the next index begins and pad 
+    #         for pos in (packed_data.split_idxs[i] + packed_data._coul_counts[i]):(packed_data.offsets[i + 1] - 1)
+    #             packed_data.adj_list[pos] = i
+    #             packed_data.charges[pos] = zero(T)
+    #             packed_data.coul_weights[pos] = zero(T)
+    #         end
+    #     end
+    # end
+
+    Threads.@threads for part in 1:n_parts
+        first_i, last_i = _part_bounds(n_atoms, part, n_parts)
+    
+        @inbounds for i in first_i:last_i
             for pos in (packed_data.offsets[i] + packed_data._both_counts[i]):(packed_data.split_idxs[i] - 1)
-                # look at where the offset was + the total counts was until where the split index begins 
-                # pad with empty atoms
                 packed_data.adj_list[pos] = i
                 packed_data.sigmas[pos] = one(T)
                 packed_data.eps[pos] = one(T)
@@ -1546,8 +1595,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}
                 packed_data.lj_weights[pos] = zero(T)
                 packed_data.coul_weights[pos] = zero(T)
             end
-
-            # look at where the split index + coulomb counts ends until where the next index begins and pad 
+    
             for pos in (packed_data.split_idxs[i] + packed_data._coul_counts[i]):(packed_data.offsets[i + 1] - 1)
                 packed_data.adj_list[pos] = i
                 packed_data.charges[pos] = zero(T)
@@ -1555,6 +1603,7 @@ function build_packed_adj_list!(packed_data::PackedFlatSoA{T, LJCoulSplitLayout}
             end
         end
     end
+    
 
     return packed_data
 end
@@ -1615,6 +1664,15 @@ end
     packed_data.coul_weights[pos] = zero(T)
 end
 
+# function build_packed_adj_list!(
+#     packed_data::PackedFlatSoA{T, L},
+#     atoms,
+#     molly_neighbours,
+#     N_SIMD,
+#     soa_params,
+#     inter,
+# ) where {T, L<:Union{LJOnlyLayout, CoulOnlyLayout}}
+
 function build_packed_adj_list!(
     packed_data::PackedFlatSoA{T, L},
     atoms,
@@ -1622,12 +1680,16 @@ function build_packed_adj_list!(
     N_SIMD,
     soa_params,
     inter,
+    n_threads::Integer,
 ) where {T, L<:Union{LJOnlyLayout, CoulOnlyLayout}}
+
 
     n_atoms = length(atoms)
     n_pairs = molly_neighbours.n
     #n_parts = Threads.nthreads()
-    n_parts = min(Threads.nthreads(), 8)
+    #n_parts = min(Threads.nthreads(), 8)
+    n_parts = max(1, min(Int(n_threads), Threads.nthreads(), 8))
+
     chunk_size = 2 * N_SIMD
     part_len = n_atoms * n_parts
 
@@ -1727,11 +1789,22 @@ function build_packed_adj_list!(
     last_part_base = (n_parts - 1) * n_atoms
 
     #Threads.@threads :static for i in 1:n_atoms
-    Threads.@threads for i in 1:n_atoms
-        @inbounds for p in pos[last_part_base + i]:(packed_data.offsets[i + 1] - 1)
-            _pad_single_entry!(packed_data, p, i)
+    # Threads.@threads for i in 1:n_atoms
+    #     @inbounds for p in pos[last_part_base + i]:(packed_data.offsets[i + 1] - 1)
+    #         _pad_single_entry!(packed_data, p, i)
+    #     end
+    # end
+
+    Threads.@threads for part in 1:n_parts
+        first_i, last_i = _part_bounds(n_atoms, part, n_parts)
+    
+        @inbounds for i in first_i:last_i
+            for p in pos[last_part_base + i]:(packed_data.offsets[i + 1] - 1)
+                _pad_single_entry!(packed_data, p, i)
+            end
         end
     end
+    
 
     return packed_data
 end
@@ -1780,9 +1853,28 @@ function _packed_pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_c
     # Static scheduling bypasses atomic locks entirely.
     # The CPU distributes n_atoms across the threads once, instantly.
     #Threads.@threads :static for i in 1:n_atoms_total
-    Threads.@threads for i in 1:n_atoms_total
-        simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH))
+    # Threads.@threads for i in 1:n_atoms_total
+    #     simd_chunk_forces!(fs_nounits, i, packed_data, soa_params, sim_params, coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH))
+    # end
+
+    if n_threads == 1
+        @inbounds for i in 1:n_atoms_total
+            simd_chunk_forces!(
+                fs_nounits, i, packed_data, soa_params, sim_params,
+                coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH),
+            )
+        end
+    else
+        Threads.@threads for thread_i in 1:n_threads
+            @inbounds for i in thread_i:n_threads:n_atoms_total
+                simd_chunk_forces!(
+                    fs_nounits, i, packed_data, soa_params, sim_params,
+                    coords, flat_coords, canonical, cutoffs, Val(SIMD_WIDTH),
+                )
+            end
+        end
     end
+    
 
     # # Spawn the right number of tasks per cores
     # @sync for _ in 1:n_t
