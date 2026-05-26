@@ -531,8 +531,6 @@ function simulate!(awh_sim::AWHSimulation{T},
             )
         end
 
-        println("AWH iter $(iteration_n)")
-
         active_idx_new = gibbs_sample_window(awh_sim.state)
         update_active_sys!(awh_sim.state, active_idx_new)
         update_awh_bias!(awh_sim, iteration_n)
