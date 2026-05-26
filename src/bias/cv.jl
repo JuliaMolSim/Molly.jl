@@ -744,25 +744,36 @@ function calculate_virial!(virial_buff, cv::CalcRMSD, coords, forces, atoms, bou
 end
 
 """
-    CalcTorsion(atom_inds::AbstractVector{Int}; correction=:pbc, has_virial::Bool=true)
+    CalcTorsion(atom_inds::AbstractVector{Int}=[], correction=:pbc, has_virial::Bool=true;
+                gradient_singularity_tol=1e-6)
 
 A collective variable that calculates the torsion angle (dihedral) defined by four atoms.
 
 The angle is defined by the intersection of the planes formed by atoms (i, j, k) and (j, k, l), where the indices are given by `atom_inds`.
+The torsion gradient is regularized near collinear geometries using
+`gradient_singularity_tol`, a dimensionless relative tolerance applied to the
+bond-vector norms.
 
 # Fields
 - `atom_inds::AbstractVector{Int}`: The indices of the four atoms (i, j, k, l) defining the torsion.
 - `correction::Symbol`: The method used to handle periodic boundary conditions. Defaults to `:pbc`.
 - `has_virial::Bool`: Whether the virial contribution should be calculated for this collective variable. Defaults to `true`.
+- `gradient_singularity_tol::Float64`: Relative tolerance used to cap torsion gradients near collinear geometries.
 """
 struct CalcTorsion
     atom_inds::Vector{Int}
     correction::Symbol
     has_virial::Bool
+    gradient_singularity_tol::Float64
 
-    function CalcTorsion(atom_inds=[],correction=:pbc, has_virial = true)
+    function CalcTorsion(atom_inds=[], correction=:pbc, has_virial=true;
+                         gradient_singularity_tol=1e-6)
         check_correction_arg(correction)
-        return new(atom_inds, correction, has_virial)
+        tol = Float64(gradient_singularity_tol)
+        if !isfinite(tol) || tol <= 0
+            throw(ArgumentError("gradient_singularity_tol must be finite and positive, got $(gradient_singularity_tol)."))
+        end
+        return new(atom_inds, correction, has_virial, tol)
     end
 end
 
@@ -787,6 +798,14 @@ end
 # ∇_{r_l} ϕ = - (|b_2| / |n|^2) * n
 # ∇_{r_j} ϕ = - (1 + (b_1 · b_2)/|b_2|^2) * ∇_{r_i} ϕ + ((b_2 · b_3)/|b_2|^2) * ∇_{r_l} ϕ
 # ∇_{r_k} ϕ =   ((b_1 · b_2)/|b_2|^2) * ∇_{r_i} ϕ - (1 + (b_2 · b_3)/|b_2|^2) * ∇_{r_l} ϕ
+function _check_torsion_bond_norm(norm_value, label::AbstractString)
+    if !isfinite(ustrip(norm_value)) || norm_value <= zero(norm_value)
+        throw(ArgumentError("CalcTorsion cannot compute a finite gradient because $(label) " *
+                            "has non-positive or non-finite length ($(norm_value))."))
+    end
+    return norm_value
+end
+
 function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs...)
     i, j, k, l = cv.atom_inds
     ri, rj, rk, rl = coords[i], coords[j], coords[k], coords[l]
@@ -798,29 +817,40 @@ function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs..
     m = cross(b1, b2)
     n = cross(b2, b3)
     
+    b1_norm = _check_torsion_bond_norm(norm(b1), "bond i-j")
+    b2_norm = _check_torsion_bond_norm(norm(b2), "bond j-k")
+    b3_norm = _check_torsion_bond_norm(norm(b3), "bond k-l")
+    FT = typeof(float(ustrip(b2_norm)))
+    tol = FT(cv.gradient_singularity_tol)
+    length_scale = max(b1_norm, b2_norm, b3_norm)
+    norm_floor = tol * length_scale
+    b1_norm_eff = max(b1_norm, norm_floor)
+    b2_norm_eff = max(b2_norm, norm_floor)
+    b3_norm_eff = max(b3_norm, norm_floor)
+
     m_sq = sum(abs2, m)
     n_sq = sum(abs2, n)
-    b2_norm = norm(b2)
     b2_sq = b2_norm^2
-   
+    m_sq_eff = max(m_sq, (tol * b1_norm_eff * b2_norm_eff)^2)
+    n_sq_eff = max(n_sq, (tol * b2_norm_eff * b3_norm_eff)^2)
+    b2_sq_eff = max(b2_sq, b2_norm_eff^2)
+
     grad = ustrip_vec.(zero(coords)) / oneunit(eltype(eltype(coords)))
     phi = torsion_angle(ri, rj, rk, rl, boundary)
-    
-    if m_sq > zero(m_sq) && n_sq > zero(n_sq) && b2_sq > zero(b2_sq)
-        grad_i =  (b2_norm / m_sq) * m
-        grad_l = -(b2_norm / n_sq) * n
-        
-        b1_dot_b2 = dot(b1, b2)
-        b3_dot_b2 = dot(b3, b2)
-     
-        grad_j = -(1 + b1_dot_b2 / b2_sq) * grad_i + (b3_dot_b2 / b2_sq) * grad_l
-        grad_k = (b1_dot_b2 / b2_sq) * grad_i - (1 + b3_dot_b2 / b2_sq) * grad_l
-        
-        grad[i] = grad_i
-        grad[j] = grad_j
-        grad[k] = grad_k
-        grad[l] = grad_l
-    end
+
+    grad_i =  (b2_norm_eff / m_sq_eff) * m
+    grad_l = -(b2_norm_eff / n_sq_eff) * n
+
+    b1_dot_b2 = dot(b1, b2)
+    b3_dot_b2 = dot(b3, b2)
+
+    grad_j = -(1 + b1_dot_b2 / b2_sq_eff) * grad_i + (b3_dot_b2 / b2_sq_eff) * grad_l
+    grad_k = (b1_dot_b2 / b2_sq_eff) * grad_i - (1 + b3_dot_b2 / b2_sq_eff) * grad_l
+
+    grad[i] = grad_i
+    grad[j] = grad_j
+    grad[k] = grad_k
+    grad[l] = grad_l
  
     return -grad, phi
 end
