@@ -1,7 +1,6 @@
 export 
     AWHState,
-    AWHSimulation,
-    calc_pmf
+    AWHSimulation
     
 # Convenience struct to store relevant things
 # when running an AWH simulation.
@@ -150,291 +149,158 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
-# Implements the deconvolution method to obtain the unbiased PMF
-# See Lindahl et al. 2014 https://doi.org/10.1063/1.4890371
-
-mutable struct AWHPMFDeconvolution{N, T, F_CV}
-    min_vals::NTuple{N, T}
-    bin_widths::NTuple{N, T}
-    shape::NTuple{N, Int}
-
-    cv_function::F_CV         
-
-    # Optimization: Pre-computed exp(-Q(xi, lambda)) = exp(-beta_k * V_bias(xi))
-    # Rows: Linearized Bin Index, Cols: Window Index
-    coupling_matrix::Matrix{T} 
-
-    numerator_hist::Array{T, N}
-    denominator_hist::Array{T, N}
-    
-    sample_count::Int
-
+mutable struct _AWHPMFDeconvolutionBackend{N, T, F_CV, G, C, A}
+    grid::G
+    cv_function::F_CV
+    log_coupling_matrix::C
+    accumulator::A
     target_beta::Union{T, Nothing}
     target_pressure::Union{T, Nothing}
-    
     cv_history::Vector{NTuple{N, T}}
     active_idx_history::Vector{Int}
-
-    scratch_g::Vector{T}        # For g(λ)
-    scratch_weights::Vector{T}  # For exp(g)
-    scratch_denom::Vector{T}    # For coupling_matrix * weights
+    scratch_g::Vector{T}
+    scratch_log_bin_weights::Vector{T}
 end
 
-function AWHPMFDeconvolution(
-    awh_state::AWHState{T},
-    pmf_grid::Tuple;
-    cv_func = nothing,
-    coupling_func = nothing,
-    target_temp = nothing,
-    target_pressure = nothing
-) where T
-    
-    # Parse Grid Dimensions
-    # pmf_grid format: ((min_1, min_2...), (max_1, max_2...), (bins_1, bins_2...))
-    min_vals = T.(pmf_grid[1])
-    max_vals = T.(pmf_grid[2])
-    n_bins   = Int.(pmf_grid[3])
-    
-    N = length(n_bins)
-    bin_widths = (max_vals .- min_vals) ./ n_bins
-    
-    # --- CV Function Setup ---
-    local final_cv_func
-    
-    if !isnothing(cv_func)
-        # User provided explicit CV function
-        final_cv_func = cv_func
-    else
-        # Default: Auto-detect from BiasPotentials in the first window
-        first_ham = awh_state.partition.λ_hamiltonians[1]
-        bias_indices = findall(x -> x isa BiasPotential, first_ham.general_inters)
-        
-        if isempty(bias_indices)
-            error("No BiasPotential found in AWHState. Cannot auto-detect PMF settings.")
-        end
-        if length(bias_indices) != N
-            error("Found $(length(bias_indices)) BiasPotentials but grid is $(N)D.")
-        end
-
-        cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
-        
-        # Capture awh_state for system info
-        final_cv_func = (coords) -> begin
-            sys = awh_state.active_sys
-            return ntuple(N) do d
-                Molly.calculate_cv(
-                    cv_types[d], 
-                    coords, 
-                    sys.atoms, 
-                    sys.boundary, 
-                    sys.velocities
-                )
-            end
+function _awh_auto_pmf_cv(awh_state::AWHState, grid::_PMFGrid{N}) where N
+    first_ham = awh_state.partition.λ_hamiltonians[1]
+    bias_indices = findall(inter -> inter isa BiasPotential, first_ham.general_inters)
+    length(bias_indices) == N ||
+        throw(ArgumentError("automatic PMF deconvolution found $(length(bias_indices)) " *
+                            "BiasPotential interactions in the first AWH state, but the " *
+                            "PMF grid is $(N)D. Provide explicit cv and coupling functions."))
+    cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
+    return coords -> begin
+        sys = awh_state.active_sys
+        coords_cpu = from_device(coords)
+        atoms_cpu = from_device(sys.atoms)
+        velocities_cpu = from_device(sys.velocities)
+        ntuple(N) do dim_i
+            calculate_cv(
+                cv_types[dim_i],
+                coords_cpu,
+                atoms_cpu,
+                sys.boundary,
+                velocities_cpu,
+            )
         end
     end
+end
 
-    # --- Coupling Matrix Setup ---
-    total_bins = prod(n_bins)
-    n_windows  = length(awh_state.partition.λ_hamiltonians)
-    coupling_mat = Matrix{T}(undef, total_bins, n_windows)
-    
-    cart_indices = CartesianIndices(n_bins)
-    linear_indices = LinearIndices(n_bins)
-
-    # Pre-compute exp(-Q(xi, lambda))
-    # If user provides coupling_func, it must return dimensionless energy (beta * E)
-    if !isnothing(cv_func) && isnothing(coupling_func)
-        error("If a custom `pmf_cv` is provided, `pmf_coupling` must also be provided.")
-    end
-
-    for (k, ham_k) in enumerate(awh_state.partition.λ_hamiltonians)
-        beta_k = awh_state.λ_β[k]
-        
-        # If auto-detecting, find bias indices for this window once
-        local bias_indices_k
-        if isnothing(coupling_func)
-             bias_indices_k = findall(x -> x isa BiasPotential, ham_k.general_inters)
-        end
-
-        for idx in cart_indices
-            linear_i = linear_indices[idx]
-            
-            # Determine CV value at the center of this bin
-            cv_val_tuple = ntuple(N) do d
-                min_vals[d] + (idx[d] - 0.5) * bin_widths[d]
-            end
-            
-            dim_less_bias = zero(T)
-
-            if !isnothing(coupling_func)
-                # User provided coupling: returns dimensionless energy directly
-                dim_less_bias = coupling_func(cv_val_tuple, k)
-            else
-                # Auto-detect: Calculate physical energy and multiply by beta
-                physical_bias_energy = zero(T) * awh_state.active_sys.energy_units
-                
-                for (d, bias_idx) in enumerate(bias_indices_k)
-                    bias_inter = ham_k.general_inters[bias_idx]
-                    physical_bias_energy += potential_energy(bias_inter.bias_type, cv_val_tuple[d])
-                end
-                
-                if beta_k isa Quantity
-                    dim_less_bias = ustrip(beta_k * physical_bias_energy)
-                else
-                    dim_less_bias = beta_k * ustrip(physical_bias_energy)
-                end
-            end
-            coupling_mat[linear_i, k] = exp(-dim_less_bias)
-        end
-    end
-
-    # [NEW] Setup Reweighting Constants
-    sys = awh_state.active_sys
+function _awh_target_beta_pressure(sys, ::Type{T}, target_temp, target_pressure) where T
     e_unit = sys.energy_units
-    
-    tgt_beta = nothing
+
+    target_beta = nothing
     if !isnothing(target_temp)
-        # Convert kBT to system energy unit (kJ/mol) using R (Gas Constant)
         kBT_q = uconvert(e_unit, Unitful.R * target_temp)
-        # Invert and Strip to get Beta in [1/energy_unit]
-        tgt_beta = T(1.0 / ustrip(kBT_q))
+        target_beta = T(1 / ustrip(kBT_q))
     end
-    
-    tgt_press = nothing
+
+    target_press = nothing
     if !isnothing(target_pressure)
         l_unit = unit(sys.boundary.side_lengths[1])
-        v_unit = l_unit^3
-        p_unit = e_unit / v_unit
-        
-        # Deal with molar units
-        e_val = 1.0 * e_unit
-        molar_scaling = e_val / energy_remove_mol(e_val)
-        
-        # Scale macroscopic pressure to match the system's internal pressure dimensionality
-        p_val_scaled = target_pressure * molar_scaling
-        
-        tgt_press = T(ustrip(uconvert(p_unit, p_val_scaled)))
+        p_unit = e_unit / l_unit^3
+        e_val = one(T) * e_unit
+        p_val_scaled = target_pressure * (e_val / energy_remove_mol(e_val))
+        target_press = T(ustrip(uconvert(p_unit, p_val_scaled)))
     end
 
-    num_hist = zeros(T, n_bins)
-    den_hist = zeros(T, n_bins)
+    return target_beta, target_press
+end
 
-    n_wins = n_states(awh_state.state_space)
-    n_bins_total = prod(n_bins)
-
-    return AWHPMFDeconvolution(
-        min_vals, 
-        bin_widths, 
-        n_bins,
-        final_cv_func,
-        coupling_mat,
-        num_hist,
-        den_hist,
-        0,
-        tgt_beta,
-        tgt_press,
-        Vector{NTuple{N, T}}(),
-        Vector{Int}(),
-        zeros(T, n_wins),
-        zeros(T, n_wins),
-        zeros(T, n_bins_total)
+function PMFDeconvolution(awh_state::AWHState{T};
+                          grid,
+                          coupling = nothing,
+                          cv = nothing,
+                          target_temp = nothing,
+                          target_pressure = nothing,
+                          kwargs...) where T
+    isempty(kwargs) ||
+        throw(ArgumentError("unsupported PMFDeconvolution keyword(s): " *
+                            "$(join(keys(kwargs), ", "))."))
+    pmf_grid = _PMFGrid(grid; T = Float64)
+    if !isnothing(cv) && isnothing(coupling)
+        throw(ArgumentError("provide coupling when using a custom cv function for PMF deconvolution."))
+    end
+    cv_function = isnothing(cv) ? _awh_auto_pmf_cv(awh_state, pmf_grid) : cv
+    log_coupling_matrix = _pmf_build_log_coupling_matrix(
+        awh_state.state_space,
+        pmf_grid;
+        coupling = coupling,
     )
+    target_beta, target_press = _awh_target_beta_pressure(
+        awh_state.active_sys,
+        Float64,
+        target_temp,
+        target_pressure,
+    )
+    backend = _AWHPMFDeconvolutionBackend(
+        pmf_grid,
+        cv_function,
+        log_coupling_matrix,
+        _SampledPMFDeconvolutionAccumulator(pmf_grid),
+        target_beta,
+        target_press,
+        Vector{NTuple{length(pmf_grid.shape), Float64}}(),
+        Int[],
+        zeros(Float64, n_states(awh_state.state_space)),
+        zeros(Float64, prod(pmf_grid.shape)),
+    )
+    return PMFDeconvolution(backend)
 end
 
-function update_pmf!(
-    pmf::AWHPMFDeconvolution{N, T, F_CV},
-    awh_state, 
-    curr_coords;
-    weight_factor::T = one(T), 
-    potential_energy::T = zero(T),
-    box_volume::T = zero(T),
-    current_beta::T = one(T),
-    current_pressure::T = zero(T)
-) where {N, T, F_CV}
-    
-    # Calculate current CV
-    val = pmf.cv_function(from_device(curr_coords))
-    current_cv = val isa Tuple ? val : (val,)
+function update_pmf!(deconv::PMFDeconvolution{<:_AWHPMFDeconvolutionBackend{N, T}},
+                     awh_state,
+                     curr_coords;
+                     weight_factor = one(T),
+                     potential_energy = zero(T),
+                     box_volume = zero(T),
+                     current_beta = one(T),
+                     current_pressure = zero(T)) where {N, T}
+    backend = deconv.backend
+    val = backend.cv_function(from_device(curr_coords))
+    current_cv = _online_pmf_tuple(val, T)
+    length(current_cv) == N ||
+        throw(DimensionMismatch("PMF CV returned $(length(current_cv)) dimensions, " *
+                                "expected $(N)."))
+    push!(backend.cv_history, current_cv)
+    push!(backend.active_idx_history, awh_state.active_idx)
 
-    # Convert to T to ensure type stability within the struct
-    push!(pmf.cv_history, T.(current_cv))
-    push!(pmf.active_idx_history, awh_state.active_idx)
+    @. backend.scratch_g = Float64(awh_state.f) + Float64(awh_state.log_rho)
+    _pmf_log_bin_weights!(
+        backend.scratch_log_bin_weights,
+        backend.log_coupling_matrix,
+        backend.scratch_g;
+        log_weight_factor = _pmf_positive_log(weight_factor, "PMF deconvolution weight_factor", Float64),
+    )
 
-    # Determine Index
-    current_indices = ntuple(N) do d
-        rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
-        idx = Int(floor(rel)) + 1
-        clamp(idx, 1, pmf.shape[d])
+    reweight_log = 0.0
+    if !isnothing(backend.target_beta)
+        reweight_log -= (backend.target_beta - Float64(current_beta)) * Float64(potential_energy)
     end
-    current_cartesian = CartesianIndex(current_indices)
-    current_linear_idx = LinearIndices(pmf.shape)[current_cartesian]
+    if !isnothing(backend.target_pressure)
+        target_work = backend.target_beta * backend.target_pressure
+        current_work = Float64(current_beta) * Float64(current_pressure)
+        reweight_log -= (target_work - current_work) * Float64(box_volume)
+    end
 
-    # Compute Dynamic Weights (In-Place)
-    # g(λ) = f(λ) + ln ρ(λ)
-    @. pmf.scratch_g = awh_state.f + awh_state.log_rho
-    @. pmf.scratch_weights = exp(pmf.scratch_g)
-    
-    # Global Update (In-Place Matrix Multiplication)
-    # denom_vector = pmf.coupling_matrix * weights
-    mul!(pmf.scratch_denom, pmf.coupling_matrix, pmf.scratch_weights)
-
-    # Calculate Reweighting Factor W
-    # W = exp( - [ (beta_tgt - beta_curr)U + (beta_tgt*P_tgt - beta_curr*P_curr)V ] )
-    reweight_log = zero(T)
-    
-    if !isnothing(pmf.target_beta)
-        reweight_log -= (pmf.target_beta - current_beta) * potential_energy
-    end
-    
-    if !isnothing(pmf.target_pressure)
-        target_work  = pmf.target_beta * pmf.target_pressure
-        current_work = current_beta * current_pressure
-        reweight_log -= (target_work - current_work) * box_volume
-    end
-    
-    w_reweight = exp(reweight_log)
-    
-    # Iterate to update arrays using scratch_denom
-    for i in eachindex(pmf.denominator_hist)
-        term = weight_factor / pmf.scratch_denom[i]
-        
-        pmf.denominator_hist[i] += term
-        
-        if i == current_linear_idx
-            pmf.numerator_hist[i] += term * w_reweight
-        end
-    end
-    
-    pmf.sample_count += 1
+    _accumulate_pmf_deconvolution!(
+        backend.accumulator,
+        current_cv,
+        backend.scratch_log_bin_weights;
+        log_reweight = reweight_log,
+    )
+    return deconv
 end
 
-@doc raw"""
-    calc_pmf(pmf_calc::AWHPMFDeconvolution)
-
-Extracts the unbiased Potential of Mean Force (PMF) from the accumulated numerator 
-and denominator histograms. Unsampled bins are assigned a value of `Inf`, and the 
-global minimum of the valid PMF is shifted to zero.
-"""
-function calc_pmf(pmf_calc::AWHPMFDeconvolution{N, T, F_CV}) where {N, T, F_CV}
-    num = pmf_calc.numerator_hist
-    den = pmf_calc.denominator_hist
-    
-    # Identify bins with non-zero samples to avoid domain errors in log
-    valid = (num .> zero(T)) .& (den .> zero(T))
-    
-    # Initialize PMF array with infinity for unsampled regions
-    pmf = fill(T(Inf), size(num))
-    
-    # Calculate unbiased PMF for valid bins
-    pmf[valid] .= -log.(num[valid] ./ den[valid])
-    
-    # Shift the global minimum to zero
-    if any(valid)
-        min_val = minimum(pmf[valid])
-        pmf[valid] .-= min_val
-    end
-    
-    return pmf
+function pmf(backend::_AWHPMFDeconvolutionBackend{N, T};
+             zero::Symbol = :min,
+             kBT = nothing) where {N, T}
+    return _pmf_result_from_sampled_deconvolution(
+        backend.accumulator;
+        zero = zero,
+        kBT = kBT,
+    )
 end
 
 @doc raw"""
@@ -443,10 +309,10 @@ end
 
 Prepares an Accelerated Weight Histogram (AWH) simulation.
 
-This struct stores the parameters controlling the AWH updates. It can optionally perform
-on-the-fly PMF deconvolution to obtain an unbiased estimate of the true PMF, as described
-in [Lindahl et al. (2014)](https://doi.org/10.1063/1.4890371). Deconvolution is recommended
-for simulations where the λ coordinate represents a biased reaction coordinate (e.g., an 
+This struct stores the parameters controlling the AWH updates. It can optionally update a
+[`PMFDeconvolution`](@ref) object on the fly to obtain an unbiased PMF, as described in
+[Lindahl et al. (2014)](https://doi.org/10.1063/1.4890371). Deconvolution is recommended
+for simulations where the λ coordinate represents a biased reaction coordinate (e.g. an
 umbrella potential). It is typically not required for standard alchemical transformations.
 
 # Arguments
@@ -461,17 +327,7 @@ umbrella potential). It is typically not required for standard alchemical transf
 - `significant_weight::Real=0.1`: The fractional weight threshold (relative to an ideally uniform 
     distribution) required for a λ window to be considered "visited". This filters out sampling noise.
 - `log_freq::Int=100`: Number of AWH iterations between logging statistics.
-- `pmf_grid=nothing`: Tuple of tuples defining the PMF grid `((min_1, ...), (max_1, ...), (bins_1, ...))`.
-    Required if running with PMF deconvolution.
-- `pmf_cv=nothing`: Function taking system coordinates and returning a tuple of scalar Collective 
-    Variables (CVs). If omitted when `pmf_grid` is provided, Molly attempts to auto-detect CVs from 
-    the active `BiasPotential`s.
-- `pmf_coupling=nothing`: Function returning the dimensionless bias energy given the CV tuple and 
-    a `lambda_idx`. If omitted when `pmf_grid` is provided, Molly computes this automatically.
-- `target_temp=nothing`: Target temperature for the unbiased PMF. Recommended for proper reweighting 
-    if λ states have varying temperatures.
-- `target_pressure=nothing`: Target pressure for the unbiased PMF. Recommended for proper reweighting 
-    if λ states have varying pressures.
+- `pmf=nothing`: Optional [`PMFDeconvolution`](@ref) object created from `awh_state`.
 """
 struct AWHSimulation{T}
     n_windows::Int
@@ -483,8 +339,7 @@ struct AWHSimulation{T}
     significant_weight::T   
     log_freq::Int           
     state::AWHState{T}
-    
-    pmf_calc::Union{AWHPMFDeconvolution, Nothing}
+    pmf::Union{PMFDeconvolution, Nothing}
 end
 
 function AWHSimulation(
@@ -495,26 +350,13 @@ function AWHSimulation(
     coverage_threshold::Real = 1.0,
     significant_weight::Real = 0.1,
     log_freq::Int = 100,
-    # Optional PMF args
-    pmf_grid = nothing,
-    pmf_cv = nothing,
-    pmf_coupling = nothing,
-    target_temp = nothing,
-    target_pressure = nothing
+    pmf = nothing
 ) where T
 
     n_win = n_states(awh_state.state_space)
 
-    pmf_calc = nothing
-    if !isnothing(pmf_grid)
-        pmf_calc = AWHPMFDeconvolution(
-            awh_state, 
-            pmf_grid; 
-            cv_func=pmf_cv, 
-            coupling_func=pmf_coupling,
-            target_temp=target_temp,
-            target_pressure=target_pressure
-        )
+    if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:_AWHPMFDeconvolutionBackend})
+        throw(ArgumentError("AWHSimulation pmf must be created with PMFDeconvolution(awh_state; ...)."))
     end
 
     return AWHSimulation(n_win,
@@ -525,7 +367,7 @@ function AWHSimulation(
                          T(coverage_threshold),
                          T(significant_weight),
                          log_freq, awh_state,
-                         pmf_calc)
+                         pmf)
 end
 
 # Swaps Hamiltionians
@@ -652,7 +494,7 @@ function simulate!(awh_sim::AWHSimulation{T},
 
         active_pe_units = process_sample(awh_sim.state)
 
-        if !isnothing(awh_sim.pmf_calc)
+        if !isnothing(awh_sim.pmf)
             # Calculate a(t) factor for PMF Deconvolution [Lindahl et al. 2014, Eq. 9 text]
             # Initial Stage: N is constant => Delta N = 0 => a = N / (N + n_lambda)
             # Linear Stage: N grows => Delta N = n_lambda => a = 1.0
@@ -676,7 +518,7 @@ function simulate!(awh_sim::AWHSimulation{T},
             cur_press = awh_sim.state.λ_p[awh_sim.state.active_idx]
 
             update_pmf!(
-                awh_sim.pmf_calc, 
+                awh_sim.pmf,
                 awh_sim.state, 
                 awh_sim.state.active_sys.coords; 
                 weight_factor=w_fac,
@@ -686,6 +528,8 @@ function simulate!(awh_sim::AWHSimulation{T},
                 current_pressure=cur_press
             )
         end
+
+        println("AWH iter $(iteration_n)")
 
         active_idx_new = gibbs_sample_window(awh_sim.state)
         update_active_sys!(awh_sim.state, active_idx_new)

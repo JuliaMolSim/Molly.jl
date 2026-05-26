@@ -202,6 +202,11 @@ function effective_samples(acc::OnlinePMFAccumulator{N, T}) where {N, T}
     return ess
 end
 
+"""
+    total_effective_samples(acc::OnlinePMFAccumulator)
+
+Return the effective sample size of the complete accumulated PMF histogram.
+"""
 function total_effective_samples(acc::OnlinePMFAccumulator{N, T}) where {N, T}
     lw = _online_pmf_total_log_weight(acc.log_weight_sums)
     lw2 = _online_pmf_total_log_weight(acc.log_weight_sq_sums)

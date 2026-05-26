@@ -47,7 +47,7 @@ mutable struct WindowedTSSReplica{AS}
     active_window::Int
 end
 
-struct WindowedTSSObservation{T, V, RS}
+struct WindowedTSSObservation{T, V, RS, PS}
     replica_index::Int
     update_window::Int
     visited_state::Int
@@ -57,6 +57,7 @@ struct WindowedTSSObservation{T, V, RS}
     weights::V
     adaptive_values::Union{Nothing, Matrix{T}}
     reweighting_samples::RS
+    pmf_deconvolution_samples::PS
     replay_records::Vector{Any}
 end
 
@@ -72,12 +73,13 @@ mutable struct WindowedTSSReplicaWorkspace{P, ST, T, R, RW}
     sample_counter::Int
 end
 
-mutable struct TSSSimulation{S, R, W, RW, RL}
+mutable struct TSSSimulation{S, R, W, RW, RL, P}
     state::S
     replicas::Vector{R}
     replica_workspaces::Vector{W}
     reweighting::RW
     replay_logger::RL
+    pmf::P
     n_md_steps::Int
     n_cycles::Int
     self_adjustment_steps::Int
@@ -96,6 +98,7 @@ function TSSSimulation(state::TSSState;
                                replica_active_states = nothing,
                                reweighting = nothing,
                                replay_logger = nothing,
+                               pmf = nothing,
                                frozen::Bool = false)
 
     n_md_steps > 0 || throw(ArgumentError("n_md_steps must be positive."))
@@ -113,6 +116,12 @@ function TSSSimulation(state::TSSState;
         replica_active_states = replica_active_states,
     )
     frozen || _validate_windowed_tss_replica_history_support(state, replicas)
+    if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:_TSSPMFDeconvolutionBackend})
+        throw(ArgumentError("TSSSimulation pmf must be created with PMFDeconvolution(tss_state; ...)."))
+    end
+    if !isnothing(pmf) && pmf.backend.state !== state
+        throw(ArgumentError("TSSSimulation pmf must be created from the same TSSState object."))
+    end
     reweighting_runtime = _prepare_tss_reweighting(reweighting, state)
     share_gpu_workspaces = _windowed_tss_replicas_use_gpu(replicas)
     shared_partition = share_gpu_workspaces ? state.state_space.partition : nothing
@@ -135,6 +144,7 @@ function TSSSimulation(state::TSSState;
         replica_workspaces,
         reweighting_runtime,
         replay_logger,
+        pmf,
         n_md_steps,
         n_cycles,
         Int(self_adjustment_steps),
@@ -453,6 +463,7 @@ function _collect_windowed_tss_observation!(state::TSSState{FT},
                                             workspace::WindowedTSSReplicaWorkspace,
                                             reweighting,
                                             replay_logger,
+                                            pmf_deconvolution,
                                             replica_index::Int,
                                             n_md_steps::Int,
                                             self_adjustment_steps::Int,
@@ -477,6 +488,7 @@ function _collect_windowed_tss_observation!(state::TSSState{FT},
     final_next_state = entry_state
     final_log_den = zero(FT)
     reweighting_samples = TSSReweightingSample{Float64}[]
+    pmf_deconvolution_samples = Any[]
     replay_records = Any[]
 
     for substep in 1:self_adjustment_steps
@@ -506,6 +518,15 @@ function _collect_windowed_tss_observation!(state::TSSState{FT},
         reduced_potentials = _workspace_view(workspace, :reduced_pot, length(estimator.state_indices))
         window_offset = isnothing(state.coupling) ? zero(FT) :
                         state.coupling.window_offsets[cycle_window]
+        pmf_deconvolution_sample = _collect_tss_pmf_deconvolution_sample(
+            pmf_deconvolution,
+            state,
+            estimator,
+            replica.active_state;
+            window_offset = window_offset,
+        )
+        isnothing(pmf_deconvolution_sample) ||
+            push!(pmf_deconvolution_samples, pmf_deconvolution_sample)
         reweighting_sample = _collect_tss_reweighting_sample(
             reweighting,
             workspace.reweighting_workspace,
@@ -587,6 +608,7 @@ function _collect_windowed_tss_observation!(state::TSSState{FT},
             _workspace_view(workspace, :reduced_pot, length(estimator.evaluation_state_indices)),
         ),
         reweighting_samples,
+        pmf_deconvolution_samples,
         replay_records,
     )
     set_active_state!(replica.active_state, state.state_space, final_next_state)
@@ -723,6 +745,7 @@ function _collect_windowed_tss_observations_serial!(sim::TSSSimulation,
             sim.replica_workspaces[replica_i],
             sim.reweighting,
             sim.replay_logger,
+            sim.pmf,
             replica_i,
             sim.n_md_steps,
             sim.self_adjustment_steps,
@@ -744,6 +767,7 @@ function _collect_windowed_tss_observations_threaded!(sim::TSSSimulation,
                 sim.replica_workspaces[replica_i],
                 sim.reweighting,
                 sim.replay_logger,
+                sim.pmf,
                 replica_i,
                 sim.n_md_steps,
                 sim.self_adjustment_steps,
@@ -872,6 +896,7 @@ function simulate!(sim::TSSSimulation;
                          sim.replicas[1].active_window == state.active_window &&
                          isnothing(sim.reweighting) &&
                          isnothing(sim.replay_logger) &&
+                         isnothing(sim.pmf) &&
                          !sim.frozen
     legacy_single_path || _seed_windowed_tss_replica_rngs!(sim, rng)
 
@@ -915,13 +940,16 @@ function simulate!(sim::TSSSimulation;
             _collect_windowed_tss_observations_serial!(sim, thread_div)
         end
         _accumulate_tss_reweighting!(sim.reweighting, observations)
+        _accumulate_tss_pmf_deconvolution!(sim.pmf, observations)
         _append_tss_replay_records!(sim.replay_logger, observations)
         max_delta_f = sim.frozen ?
                       _apply_windowed_tss_frozen_observations!(state, observations) :
                       _apply_windowed_tss_observations!(state, observations)
         _sync_windowed_tss_state_to_replica!(state, first(sim.replicas))
 
-        println("Cycle $(cycle), mx df = $(max_delta_f)")
+        if should_log_tss(state.iteration, sim.log_freq)
+            println("Cycle $(cycle), mx df = $(max_delta_f)")
+        end
 
         if !sim.frozen && should_log_tss(state.iteration, sim.log_freq)
             for observation in observations

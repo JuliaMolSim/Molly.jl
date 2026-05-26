@@ -100,6 +100,185 @@ tss_reweighting_x_observable(context) =
         @test_throws DimensionMismatch Molly.accumulate!(acc, (0.5, 0.5), 0.0)
     end
 
+    @testset "shared PMF deconvolution API" begin
+        thermo_states = make_tss_reweighting_thermo_states(n_states=3)
+        tss_state = Molly.TSSState(thermo_states)
+        awh_state = Molly.AWHState(thermo_states; first_state=1, n_bias=10)
+
+        @test !isdefined(Molly, :IterativePMFDeconvolution)
+        @test !isdefined(Molly, :_solve_pmf_deconvolution)
+
+        coupling = (xi, state_i) -> 0.0
+        awh_deconv = Molly.PMFDeconvolution(
+            awh_state;
+            grid=(0.0, 3.0, 3),
+            cv=coords -> (0.5,),
+            coupling=coupling,
+        )
+        awh_sim = Molly.AWHSimulation(awh_state; pmf=awh_deconv)
+        @test awh_sim.pmf === awh_deconv
+        Molly.update_pmf!(awh_deconv, awh_state, awh_state.active_sys.coords)
+        @test Molly.pmf_deconvolution_diagnostics(awh_deconv).accepted_samples == 1
+
+        awh_deconv = Molly.PMFDeconvolution(
+            awh_state;
+            grid=(0.0, 3.0, 3),
+            cv=coords -> (0.5,),
+            coupling=coupling,
+        )
+
+        for value in (0.5, 1.5, 1.5)
+            Molly._accumulate_pmf_deconvolution!(
+                awh_deconv.backend.accumulator,
+                (value,),
+                zeros(3),
+            )
+        end
+        awh_pmf = Molly.pmf(awh_deconv)
+        @test eltype(awh_pmf.F) == Float64
+        @test awh_pmf.F[1:2] ≈ [log(2.0), 0.0] atol=1e-12
+        @test isinf(awh_pmf.F[3])
+        awh_diag = Molly.pmf_deconvolution_diagnostics(awh_deconv)
+        @test awh_diag isa Molly.PMFDeconvolutionDiagnostics
+        @test awh_diag.total_samples == 3
+        @test awh_diag.accepted_samples == 3
+        @test awh_diag.finite_bins == 2
+        @test awh_diag.total_effective_samples ≈ 3.0
+
+        weighted_deconv = Molly.PMFDeconvolution(
+            awh_state;
+            grid=(0.0, 2.0, 2),
+            cv=coords -> (0.5,),
+            coupling=coupling,
+        )
+        nonuniform_log_bin_weights = log.([0.5, 1.0])
+        Molly._accumulate_pmf_deconvolution!(
+            weighted_deconv.backend.accumulator,
+            (0.25,),
+            nonuniform_log_bin_weights,
+        )
+        Molly._accumulate_pmf_deconvolution!(
+            weighted_deconv.backend.accumulator,
+            (1.25,),
+            nonuniform_log_bin_weights,
+        )
+        weighted_pmf = Molly.pmf(weighted_deconv)
+        @test weighted_pmf.p ≈ [1 / 3, 2 / 3]
+        @test weighted_pmf.F ≈ [log(2.0), 0.0] atol=1e-12
+
+        tss_deconv = Molly.PMFDeconvolution(
+            tss_state;
+            grid=(0.0, 3.0, 3),
+            cv=active_state -> (0.5,),
+            coupling=coupling,
+        )
+        @test_throws ArgumentError Molly.PMFDeconvolution(
+            tss_state;
+            grid=(0.0, 3.0, 3),
+            cv=active_state -> (0.5,),
+            coupling=coupling,
+            free_energies=zeros(3),
+        )
+        @test_throws ArgumentError Molly.AWHSimulation(awh_state; pmf=tss_deconv)
+
+        tss_sample = Molly._collect_tss_pmf_deconvolution_sample(
+            tss_deconv,
+            first(tss_state.estimators),
+            tss_state.active_state;
+            window_offset=0.0,
+        )
+        Molly._accumulate_pmf_deconvolution!(tss_deconv.backend.accumulator, tss_sample)
+        tss_diag = Molly.pmf_deconvolution_diagnostics(tss_deconv)
+        @test tss_diag.accepted_samples == 1
+        @test tss_diag.finite_bins == 1
+
+        torsion_states = ThermoState[]
+        torsion_boundary = CubicBoundary(2.0u"nm")
+        torsion_coords = place_atoms(4, torsion_boundary; min_dist=0.3u"nm")
+        torsion_cv = CalcTorsion([1, 2, 3, 4], :pbc, true)
+        for target in range(-0.5, 0.5; length=3)
+            atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm",
+                          ϵ=0.2u"kJ * mol^-1", λ=1.0) for _ in 1:4]
+            bias = BiasPotential(
+                torsion_cv,
+                PeriodicFlatBottomBias(10.0u"kJ * mol^-1", 0.1, target),
+            )
+            sys = System(
+                atoms=atoms,
+                coords=torsion_coords,
+                boundary=torsion_boundary,
+                general_inters=(bias,),
+            )
+            intg = Langevin(dt=0.001u"ps", temperature=298.0u"K", friction=0.1u"ps^-1")
+            push!(torsion_states, ThermoState(sys, intg; temperature=298.0u"K"))
+        end
+        auto_tss_state = Molly.TSSState(torsion_states)
+        auto_tss_deconv = Molly.PMFDeconvolution(auto_tss_state; grid=(-π, π, 4))
+        auto_tss_sample = Molly._collect_tss_pmf_deconvolution_sample(
+            auto_tss_deconv,
+            first(auto_tss_state.estimators),
+            auto_tss_state.active_state,
+        )
+        @test length(auto_tss_sample.value) == 1
+        @test eltype(auto_tss_sample.value) == Float64
+
+        windowed_graph = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
+        windowed_state = Molly.TSSState(
+            make_tss_reweighting_thermo_states(n_states=4);
+            graph=windowed_graph,
+            first_state=1,
+            first_window=1,
+            initial_f=[0.0, 1.0, 2.0, 3.0],
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+        windowed_deconv = Molly.PMFDeconvolution(
+            windowed_state;
+            grid=(0.0, 4.0, 4),
+            cv=active_state -> (0.5,),
+            coupling=(xi, state_i) -> 0.25 * abs(xi[1] - state_i),
+        )
+        windowed_estimator = first(windowed_state.estimators)
+        windowed_sample = Molly._collect_tss_pmf_deconvolution_sample(
+            windowed_deconv,
+            windowed_state,
+            windowed_estimator,
+            windowed_state.active_state;
+            window_offset=windowed_state.coupling.window_offsets[1],
+        )
+        offset = windowed_state.coupling.window_offsets[1]
+        for bin_i in eachindex(windowed_sample.log_bin_weights)
+            xi = (windowed_deconv.backend.grid.centers[1][bin_i],)
+            log_den = -Inf
+            for local_i in eachindex(windowed_estimator.state_indices)
+                state_i = windowed_estimator.state_indices[local_i]
+                log_weight = windowed_estimator.f[local_i] +
+                             windowed_estimator.log_dens[local_i] -
+                             offset -
+                             0.25 * abs(xi[1] - state_i)
+                log_den = Molly._online_pmf_logaddexp(log_den, log_weight)
+            end
+            @test windowed_sample.log_bin_weights[bin_i] ≈ -log_den atol=1e-12
+        end
+
+        windowed_acc = Molly._SampledPMFDeconvolutionAccumulator(windowed_deconv.backend.grid)
+        Molly._accumulate_pmf_deconvolution!(
+            windowed_acc,
+            (0.5,),
+            windowed_sample.log_bin_weights,
+        )
+        Molly._accumulate_pmf_deconvolution!(
+            windowed_acc,
+            (1.5,),
+            windowed_sample.log_bin_weights,
+        )
+        windowed_pmf = Molly._pmf_result_from_sampled_deconvolution(windowed_acc)
+        expected_windowed_p = exp.(windowed_sample.log_bin_weights[1:2])
+        expected_windowed_p ./= sum(expected_windowed_p)
+        @test windowed_pmf.p[1:2] ≈ expected_windowed_p
+        @test windowed_pmf.p[3:4] ≈ zeros(2)
+    end
+
     @testset "TSS reweighting target validation" begin
         thermo_states = make_tss_reweighting_thermo_states()
         target = Molly.TSSReweightingTarget(

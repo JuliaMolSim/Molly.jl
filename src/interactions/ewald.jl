@@ -73,13 +73,15 @@ end
     return charge(atom) * electrostatic_lambda(scheduler, atom, Val(T))
 end
 
-# Passing vec_ij and r, and not having calculate_forces as a Val, was required to avoid allocations
 function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, scheduler,
-                            i, j, vec_ij, r, calculate_forces, ::Val{T}, ::Val{atomic},
-                            ::Val{needs_vir}) where {T, atomic, needs_vir}
+                            i, j,
+                            ::Val{T}, ::Val{calculate_forces}, ::Val{atomic},
+                            ::Val{needs_vir}) where {T, calculate_forces, atomic, needs_vir}
     sqrt_π = sqrt(T(π))
     charge_ij = effective_charge(scheduler, atoms[i], Val(T)) *
                 effective_charge(scheduler, atoms[j], Val(T))
+    vec_ij = vector(coords[i], coords[j], boundary)
+    r = norm(vec_ij)
     αr = α * r
     erf_αr = erf(αr)
     if erf_αr > T(1e-6)
@@ -119,10 +121,8 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
                                 ::Val{needs_vir}) where {T, needs_vir}
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
-        vec_ij = vector(coords[i], coords[j], boundary)
-        r = norm(vec_ij)
         E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr,
-                            scheduler, i, j, vec_ij, r, calculate_forces, Val(T), Val(false),
+                            scheduler, i, j, Val(T), Val(calculate_forces), Val(false),
                             Val(needs_vir))
         exclusion_E += E
     end
@@ -162,11 +162,9 @@ end
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
-        vec_ij = vector(coords[i], coords[j], boundary)
-        r = norm(vec_ij)
         E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f_div_ϵr,
-                                scheduler, i, j, vec_ij, r, calculate_forces, Val(T),
-                                Val(true), Val(needs_vir))
+                                scheduler, i, j, Val(T), Val(calculate_forces), Val(true),
+                                Val(needs_vir))
         exclusion_Es[ei] = ustrip(energy_units, E)
     end
 end
@@ -207,6 +205,13 @@ function Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing,
     excluded_pairs = find_excluded_pairs(eligible, special)
     return Ewald(dist_cutoff, T(error_tol), excluded_pairs, scheduler)
 end
+
+Unitful.ustrip(inter::Ewald) = Ewald(
+    ustrip(inter.dist_cutoff),
+    inter.error_tol,
+    inter.excluded_pairs,
+    inter.scheduler,
+)
 
 function ewald_error(αr::T, target, guess) where T
     t = guess * T(π) / αr
@@ -446,24 +451,7 @@ struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B, SCH} <: Abstrac
     grad_safe::Bool
 end
 
-function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
-             scheduler=DefaultLambdaScheduler(), grad_safe=false,
-             n_threads::Integer=Threads.nthreads())
-    T = typeof(ustrip(dist_cutoff))
-    AT = array_type(atoms)
-    n_atoms = length(atoms)
-    error_tol_T = T(error_tol)
-    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
-    mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
-    grid_indices = to_device(zeros(Int, 3, n_atoms), AT)
-    grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
-    bsplines_θ = to_device(zeros(T, order * n_atoms, 3), AT)
-    bsplines_dθ = zero(bsplines_θ)
-    # Ordered z/y/x for better memory access
-    charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
-    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
-
+function _pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
     bsplines_moduli = (zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3]))
     nmax = maximum(mesh_dims)
     data, ddata = zeros(T, order), zeros(T, order)
@@ -511,6 +499,29 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
             end
         end
     end
+
+    return bsplines_moduli
+end
+
+function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
+             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
+             scheduler=DefaultLambdaScheduler(), grad_safe=false,
+             n_threads::Integer=Threads.nthreads())
+    T = typeof(ustrip(dist_cutoff))
+    AT = array_type(atoms)
+    n_atoms = length(atoms)
+    error_tol_T = T(error_tol)
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
+    mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
+    grid_indices = to_device(zeros(Int, 3, n_atoms), AT)
+    grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
+    bsplines_θ = to_device(zeros(T, order * n_atoms, 3), AT)
+    bsplines_dθ = zero(bsplines_θ)
+    # Ordered z/y/x for better memory access
+    charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
+    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
+
+    bsplines_moduli = _pme_bspline_moduli(T, order, mesh_dims)
 
     if AT <: AbstractGPUArray
         charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)

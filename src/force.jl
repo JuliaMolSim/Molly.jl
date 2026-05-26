@@ -60,6 +60,7 @@ force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, da
 force_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data) = force(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data)
 
 @inline zero_pairwise_force(dr, force_units) = ustrip.(zero(dr)) * force_units
+@inline zero_pairwise_energy(dr, energy_units) = ustrip(zero(dr[1])) * energy_units
 
 @inline function radial_force_vector(f, r, dr, force_units)
     return iszero_value(r) ? zero_pairwise_force(dr, force_units) : (f / r) * dr
