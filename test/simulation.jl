@@ -1271,35 +1271,49 @@ end
 
     space = awh_state.state_space
     subset = [1, 3]
-    full_energies = evaluate_energy_all!(space.partition, awh_state.active_sys.coords,
-                                         awh_state.active_sys.boundary)
-    subset_energies = evaluate_energy_subset(space.partition, awh_state.active_sys.coords,
-                                             awh_state.active_sys.boundary, subset)
+    full_energies = Molly.evaluate_energy_all!(space.partition, awh_state.active_sys.coords,
+                                               awh_state.active_sys.boundary)
+    subset_energies = Molly.evaluate_energy_subset(
+        space.partition,
+        awh_state.active_sys.coords,
+        awh_state.active_sys.boundary,
+        subset,
+    )
     @test subset_energies[1] ≈ full_energies[1]
     @test subset_energies[2] ≈ full_energies[3]
 
     full_reduced = zeros(typeof(awh_state.N_bias), n_windows)
     subset_reduced = zeros(typeof(awh_state.N_bias), length(subset))
-    reduced_potentials!(full_reduced, full_energies, space, awh_state.active_sys.boundary,
-                        Base.OneTo(n_windows))
-    reduced_potentials!(subset_reduced, subset_energies, space, awh_state.active_sys.boundary,
-                        subset)
+    Molly.reduced_potentials!(
+        full_reduced,
+        full_energies,
+        space,
+        awh_state.active_sys.boundary,
+        Base.OneTo(n_windows),
+    )
+    Molly.reduced_potentials!(
+        subset_reduced,
+        subset_energies,
+        space,
+        awh_state.active_sys.boundary,
+        subset,
+    )
     @test subset_reduced ≈ full_reduced[subset]
 
     pressure_state = ThermoState(thermo_states[1].system, thermo_states[1].integrator;
                                  temperature=temp, pressure=1.0u"bar")
-    pressure_space = ExtendedStateSpace([pressure_state])
+    pressure_space = Molly.ExtendedStateSpace([pressure_state])
     probe_energy = 1.25u"kJ * mol^-1"
     expected_reduced = pressure_space.betas[1] *
                        (ustrip(probe_energy) +
                         ustrip(pressure_space.pressures[1] * volume(boundary)))
-    @test reduced_potential(pressure_space, probe_energy, boundary, 1) ≈ expected_reduced
+    @test Molly.reduced_potential(pressure_space, probe_energy, boundary, 1) ≈ expected_reduced
 
     log_state_bias = [0.2, -0.4, 0.1]
     reduced = [1.0, 2.0, 0.5]
     weights = zeros(3)
     scratch = zeros(3)
-    conditional_state_weights!(weights, log_state_bias, reduced, scratch)
+    Molly.conditional_state_weights!(weights, log_state_bias, reduced, scratch)
     z = log_state_bias .- reduced
     log_den = maximum(z) + log(sum(exp.(z .- maximum(z))))
     @test weights ≈ exp.(z .- log_den)

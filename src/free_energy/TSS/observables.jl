@@ -1,107 +1,11 @@
 const _TSS_COVDET_GAMMA_EPSILON = 0.01
 
-struct _TSSCVObservable{CV, F}
-    cv::CV
-    transform::F
-end
-
-_TSSCVObservable(cv; transform = identity) =
-    _TSSCVObservable{typeof(cv), typeof(transform)}(cv, transform)
-
-struct _TSSObservableContext{AS, ES, B, N, E, R, T}
-    active_state::AS
-    state_space::ES
-    state_indices::Vector{Int}
-    active_global_state::Int
-    active_local_state::Int
-    energies::E
-    reduced_potentials::R
-    log_den::T
-    step::Int
-    buffers::B
-    neighbors::N
-    n_threads::Int
-    device_policy::Symbol
-end
-
 struct _TSSCovDetAdaptiveGamma{T}
     epsilon_gamma::T
     rung_neighbors::Vector{Vector{NTuple{3, Int}}}
     rung_volumes::Vector{T}
     dimension::Int
 end
-
-function _validate_tss_observable_device_policy(device_policy)
-    policy = device_policy isa Symbol ? device_policy : Symbol(device_policy)
-    policy in (:auto, :cpu, :native) ||
-        throw(ArgumentError("device_policy must be one of :auto, :cpu, or :native."))
-    return policy
-end
-
-function _tss_cpu_active_state(active_state::ActiveThermoState)
-    sys = active_state.active_sys
-    cpu_sys = System(
-        sys;
-        atoms = from_device(sys.atoms),
-        coords = from_device(sys.coords),
-        velocities = from_device(sys.velocities),
-    )
-    return ActiveThermoState(
-        active_state.active_idx,
-        cpu_sys,
-        active_state.active_integrator,
-    )
-end
-
-function _tss_cpu_observable_context(context::_TSSObservableContext)
-    return _TSSObservableContext(
-        _tss_cpu_active_state(context.active_state),
-        context.state_space,
-        context.state_indices,
-        context.active_global_state,
-        context.active_local_state,
-        from_device(context.energies),
-        from_device(context.reduced_potentials),
-        context.log_den,
-        context.step,
-        context.buffers,
-        context.neighbors,
-        context.n_threads,
-        context.device_policy,
-    )
-end
-
-function _tss_context_for_observable(::_TSSCVObservable, context::_TSSObservableContext)
-    if context.device_policy in (:auto, :cpu)
-        return _tss_cpu_observable_context(context)
-    end
-    return context
-end
-
-function _tss_context_for_observable(observable, context::_TSSObservableContext)
-    context.device_policy == :cpu && return _tss_cpu_observable_context(context)
-    return context
-end
-
-function _evaluate_tss_observable(observable::_TSSCVObservable, context::_TSSObservableContext)
-    context = _tss_context_for_observable(observable, context)
-    sys = context.active_state.active_sys
-    value = calculate_cv(
-        observable.cv,
-        sys.coords,
-        sys.atoms,
-        sys.boundary,
-        sys.velocities,
-    )
-    return observable.transform(value)
-end
-
-function _evaluate_tss_observable(observable, context::_TSSObservableContext)
-    context = _tss_context_for_observable(observable, context)
-    return observable(context)
-end
-
-_tss_numeric_value(::Type{FT}, value) where {FT} = FT(ustrip(value))
 
 function _validate_tss_local_adaptive_gamma(adaptive_gamma)
     isnothing(adaptive_gamma) && return nothing

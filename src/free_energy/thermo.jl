@@ -1,9 +1,3 @@
-export
-    LambdaHamiltonian,
-    AlchemicalPartition,
-    evaluate_energy!,
-    evaluate_energy_all!
-
 # Convenience struct that stores the interaction lists that change 
 # across thermodynamic states (e.g., along a reaction coordinate or replica states).
 struct LambdaHamiltonian{PI, SI, GI}
@@ -12,14 +6,13 @@ struct LambdaHamiltonian{PI, SI, GI}
     general_inters::GI
 end
 
-@doc raw"""
-    AlchemicalPartition(thermo_states::AbstractArray{ThermoState}; <keyword arguments>)
-
-Isolates shared topological and interactive components (the `master_sys`) from components 
-that are unique to specific thermodynamic states (the `λ_systems` and `λ_hamiltonians`).
-This guarantees that unperturbed components (e.g., bulk solvent) are evaluated 
-exactly once when checking cross-energies or evaluating multiple states.
-"""
+# AlchemicalPartition(thermo_states::AbstractArray{ThermoState}; <keyword arguments>)
+#
+# Isolates shared topological and interactive components (the `master_sys`) from
+# components that are unique to specific thermodynamic states (the `λ_systems`
+# and `λ_hamiltonians`). This guarantees that unperturbed components (e.g.,
+# bulk solvent) are evaluated exactly once when checking cross-energies or
+# evaluating multiple states.
 mutable struct AlchemicalPartition{S, L, LS, A, H, T}
     master_sys::S
     # First lambda system, kept as a convenience alias for older callers/tests.
@@ -248,13 +241,12 @@ function _evaluate_λ_energy!(λ_sys, coords, boundary)
     return potential_energy(λ_sys, nbrs, 0)
 end
 
-"""
-    evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int; force_recompute::Bool=false)
-
-Calculates the total potential energy for a specific thermodynamic state. Caches the `master_sys` 
-energy. If `coords` is identical to `cached_coords`, the `master_sys` energy is not recomputed 
-unless `force_recompute` is true.
-"""
+# evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int;
+#                  force_recompute::Bool=false)
+#
+# Calculates the total potential energy for a specific thermodynamic state.
+# Caches the `master_sys` energy. If `coords` is identical to `cached_coords`,
+# the `master_sys` energy is not recomputed unless `force_recompute` is true.
 function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int; 
                           force_recompute::Bool=false)
     1 <= state_index <= length(partition.λ_systems) ||
@@ -266,12 +258,11 @@ function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, stat
     return partition.cached_master_pe + pe_specific
 end
 
-"""
-    evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
-
-Efficiently evaluates the potential energy of the current coordinates mapped across all 
-thermodynamic states simultaneously, evaluating the unperturbed `master_sys` only once.
-"""
+# evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
+#
+# Efficiently evaluates the potential energy of the current coordinates mapped
+# across all thermodynamic states simultaneously, evaluating the unperturbed
+# `master_sys` only once.
 function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
     _update_master_energy!(partition, coords, boundary; force_recompute=true)
     energies = Vector{typeof(partition.cached_master_pe)}(undef, length(partition.λ_systems))

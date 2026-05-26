@@ -715,9 +715,18 @@ function update_windowed_tss_coupling!(state::TSSState)
     return state.coupling
 end
 
+"""
+    tss_free_energies(state::TSSState; reference_state=1, visited_only=false)
+
+Return reported TSS free energies relative to `reference_state`.
+
+For windowed TSS this combines the local window estimators using the current
+visit-control coupling. Set `visited_only=true` to report only states that have
+received TSS samples.
+"""
 function tss_free_energies(state::TSSState;
-                                    reference_state::Integer = 1,
-                                    visited_only::Bool = false)
+                           reference_state::Integer = 1,
+                           visited_only::Bool = false)
     coupling = _windowed_tss_coupling(state)
     K = n_states(state.state_space)
     reference_state = Int(reference_state)
@@ -730,6 +739,16 @@ function tss_free_energies(state::TSSState;
     return reported
 end
 
+"""
+    TSSJackknifeResult
+
+Jackknife uncertainty summary returned by
+[`tss_free_energy_uncertainties`](@ref).
+
+`free_energies` and `standard_errors` are reported relative to
+`reference_state`. `mse`, retained `epoch_indices`, epoch weights, and the
+jackknife `replicates` matrix are stored for diagnostics.
+"""
 struct TSSJackknifeResult{T}
     free_energies::Vector{T}
     standard_errors::Vector{T}
@@ -834,8 +853,18 @@ function _windowed_tss_jackknife_local_free_energies(state::TSSState;
     ]
 end
 
+"""
+    tss_free_energy_uncertainties(state::TSSState; reference_state=1)
+
+Estimate TSS free-energy standard errors with a delete-one-epoch jackknife.
+
+The TSS state must use [`TSSHistoryForgetting`](@ref), and each window must have
+samples in the retained epochs. The returned [`TSSJackknifeResult`](@ref)
+contains relative free energies, standard errors, mean-square errors, and the
+jackknife replicates.
+"""
 function tss_free_energy_uncertainties(state::TSSState{FT};
-                                                reference_state::Integer = 1) where {FT}
+                                       reference_state::Integer = 1) where {FT}
     _windowed_tss_coupling(state)
 
     K = n_states(state.state_space)
@@ -901,8 +930,14 @@ function tss_free_energy_uncertainties(state::TSSState{FT};
     )
 end
 
+# tss_visit_control_free_energies(state::TSSState; reference_state=1)
+#
+# Return the visit-control free energies relative to `reference_state`.
+#
+# This updates the window probabilities and solves the current visit-control
+# system before returning the shifted visit-control free-energy vector.
 function tss_visit_control_free_energies(state::TSSState;
-                                                  reference_state::Integer = 1)
+                                         reference_state::Integer = 1)
     coupling = _windowed_tss_coupling(state)
     K = n_states(state.state_space)
     reference_state = Int(reference_state)

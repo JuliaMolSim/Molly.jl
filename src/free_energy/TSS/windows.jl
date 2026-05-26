@@ -44,6 +44,13 @@ struct TSSWindow
     end
 end
 
+# TSSGraph
+#
+# A window graph for TSS expanded-ensemble states.
+#
+# The graph stores the global state count, overlapping local windows, state to
+# window membership, neighbor relationships between rungs, and the geometric
+# metadata used by adaptive TSS estimators.
 struct TSSGraph
     n_states::Int
     windows::Vector{TSSWindow}
@@ -63,6 +70,12 @@ struct _TSSGraphEdge
     primary_window_tiling_only::Bool
 end
 
+# TSSGraphBuilder()
+#
+# Create an empty builder for a multi-edge TSS graph.
+#
+# Add one or more edges with add_tss_edge!, then call build_tss_graph to
+# construct the immutable TSSGraph.
 mutable struct TSSGraphBuilder
     edges::Vector{_TSSGraphEdge}
 end
@@ -151,6 +164,23 @@ mutable struct WindowedTSSCoupling{T}
     pi_regularization::T
 end
 
+"""
+    TSSState
+    TSSState(thermo_states; graph=nothing, first_state=1, first_window=nothing,
+             gamma=nothing, initial_f=nothing, ETA=2.0, dens_reg=1e-6,
+             reuse_neighbors=true, history_forgetting=nothing,
+             adaptive_gamma=nothing, global_visit_control=true,
+             visit_control_tolerance=1e-8,
+             visit_control_max_iterations=1000,
+             visit_control_damping=1.0, pi_regularization=1e-3)
+
+Mutable state for a TSS simulation over a set of thermodynamic states.
+
+`thermo_states` defines the global expanded ensemble. `graph` may be omitted for
+a single-window TSS run, or provided as a `TSSGraph` for windowed TSS.
+The state owns the active thermodynamic state, local window estimators,
+visit-control coupling state, and diagnostic histories.
+"""
 mutable struct TSSState{T, ES, AS, G, W, E}
     state_space::ES # Shared ExtendedStateSpace among windows
     active_state::AS # Shared ActiveThermoState among windows
@@ -298,6 +328,15 @@ function _validate_tss_edge_nodes(nodes, n_dims::Int)
     return nodes
 end
 
+# add_tss_edge!(builder::TSSGraphBuilder, nodes, shape; window_size,
+#               periodic=false, primary_window_tiling_only=false)
+#
+# Add one edge to a TSSGraphBuilder.
+#
+# `shape` gives the number of rungs along each edge dimension. `window_size`
+# controls the local TSS window size, and `periodic` marks periodic dimensions.
+# `nodes` names shared edge corners so separate edges can be joined in the final
+# graph.
 function add_tss_edge!(builder::TSSGraphBuilder,
                        nodes,
                        shape;
@@ -326,6 +365,14 @@ function _anonymous_tss_nodes(n_dims::Int)
     return fill("_", ntuple(_ -> 2, n_dims))
 end
 
+"""
+    tss_grid_graph(shape; window_size, periodic=false)
+
+Construct a regular TSS grid graph.
+
+This is a convenience wrapper around `TSSGraphBuilder`, `add_tss_edge!`, and
+`build_tss_graph` for a single anonymous edge with regular windows.
+"""
 function tss_grid_graph(shape; window_size, periodic = false)
     shape = _tss_shape_tuple(shape)
     builder = TSSGraphBuilder()
@@ -574,6 +621,13 @@ function _evaluation_states_for_window(state_indices::Vector{Int},
     return unique(evaluation_states)
 end
 
+# build_tss_graph(builder::TSSGraphBuilder)
+#
+# Build a TSSGraph from all edges stored in `builder`.
+#
+# The builder must contain at least one edge. The resulting graph validates
+# window coverage, constructs rung neighbor lists, and merges compatible window
+# specifications across named edge nodes.
 function build_tss_graph(builder::TSSGraphBuilder)
     isempty(builder.edges) &&
         throw(ArgumentError("TSSGraphBuilder must contain at least one edge."))

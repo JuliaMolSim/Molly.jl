@@ -1,7 +1,5 @@
 export
     PMFDeconvolution,
-    PMFDeconvolutionDiagnostics,
-    pmf_deconvolution_diagnostics,
     pmf
 
 struct _PMFGrid{N, T, E, C, W, V}
@@ -181,15 +179,13 @@ function _pmf_build_log_coupling_matrix(state_space,
     return matrix
 end
 
-"""
-    PMFDeconvolutionDiagnostics
-
-Diagnostics from sampled PMF deconvolution.
-
-The effective sample sizes and maximum weight fractions are computed from the
-observed-bin numerator weights. Bins with `max_weight_fraction` near one are
-dominated by a single configuration.
-"""
+# PMFDeconvolutionDiagnostics
+#
+# Diagnostics from sampled PMF deconvolution.
+#
+# The effective sample sizes and maximum weight fractions are computed from the
+# observed-bin numerator weights. Bins with `max_weight_fraction` near one are
+# dominated by a single configuration.
 struct PMFDeconvolutionDiagnostics{T, N}
     total_samples::Int
     accepted_samples::Int
@@ -428,11 +424,9 @@ end
 
 pmf(deconv::PMFDeconvolution; kwargs...) = pmf(deconv.backend; kwargs...)
 
-"""
-    pmf_deconvolution_diagnostics(deconv::PMFDeconvolution)
-
-Return support diagnostics for the sampled PMF deconvolution object.
-"""
+# pmf_deconvolution_diagnostics(deconv::PMFDeconvolution)
+#
+# Return support diagnostics for the sampled PMF deconvolution object.
 pmf_deconvolution_diagnostics(deconv::PMFDeconvolution) =
     _pmf_deconvolution_diagnostics(deconv.backend)
 

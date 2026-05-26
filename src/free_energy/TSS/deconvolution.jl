@@ -46,8 +46,7 @@ function PMFDeconvolution(state::TSSState{T};
                             "$(join(keys(kwargs), ", "))."))
     isnothing(target_temp) && isnothing(target_pressure) ||
         throw(ArgumentError("target_temp and target_pressure are not supported by " *
-                            "TSS sampled PMF deconvolution; use TSSReweightingTarget " *
-                            "for target-ensemble reweighting."))
+                            "TSS sampled PMF deconvolution."))
     isnothing(free_energies) && isnothing(uncertainty) && isnothing(solver) ||
         throw(ArgumentError("direct TSS PMF deconvolution from final free energies has " *
                             "been removed. Create PMFDeconvolution(tss_state; grid=...) " *

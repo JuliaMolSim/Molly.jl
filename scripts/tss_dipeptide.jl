@@ -62,18 +62,14 @@ random_velocities!(sys, TEMP; rng = rng)
 vverlet = VelocityVerlet(DT, (thermostat, barostat), 100)
 simulate!(sys, vverlet, STEPS_EQ)
 
-target_state = ThermoState(sys, vverlet)
-
-##
-
 PHI_INDS = [5, 7, 9, 15]
 PSI_INDS = [7, 9, 15, 17]
 PHI_CV = CalcTorsion(PHI_INDS, :pbc, true)
 PSI_CV = CalcTorsion(PSI_INDS, :pbc, true)
 
 
-N_PHI_STATES = 30
-N_PSI_STATES = 30
+N_PHI_STATES = 20
+N_PSI_STATES = 20
 
 PHI_MIN = FT(-π)
 PHI_MAX = FT(π)
@@ -87,20 +83,6 @@ PSI_TARGETS = collect(range(PSI_MIN, PSI_MAX; length=N_PSI_STATES + 1))[1:end-1]
 
 GRID_LINEAR = LinearIndices((N_PHI_STATES, N_PSI_STATES))
 state_index(phi_i, psi_i) = GRID_LINEAR[phi_i, psi_i]
-
-function wrap_angle(x)
-    return mod(FT(x) - PHI_MIN, FT(2π)) + PHI_MIN
-end
-
-function torsion_value(sys, cv)
-    value = FT(ustrip(calculate_cv(cv, sys.coords, sys.atoms, sys.boundary, sys.velocities)))
-    return wrap_angle(value)
-end
-
-function phi_psi_pmf_observable(context)
-    sys = context.active_state.active_sys
-    return (torsion_value(sys, PHI_CV), torsion_value(sys, PSI_CV))
-end
 
 ##
 
@@ -153,21 +135,12 @@ tss_state = TSSState(
     adaptive_gamma = :covdet,
 )
 
-pmf_reweighting = TSSReweightingTarget(
-    target_state;
-    observable = phi_psi_pmf_observable,
-    grid = ((PHI_MIN, PSI_MIN), (PHI_MAX, PSI_MAX), (N_PHI_STATES, N_PSI_STATES)),
-    device_policy = :cpu,
-    name = :phi_psi_pmf,
-    sample_stride = 1,
-)
-
 N_MD_STEPS    = 50
 SELF_ADJ_STEPS = 5
 
 N_REPLICAS = 2
 
-TSS_TIME = FT(4)u"ns"
+TSS_TIME = FT(100.0)u"ns"
 TOTAL_STEPS = Int(floor(TSS_TIME / DT))
 N_CYCLES = Int(floor(TOTAL_STEPS / (SELF_ADJ_STEPS * N_MD_STEPS)))
 
@@ -189,6 +162,11 @@ else
     states
 end
 
+pmf_deconv = PMFDeconvolution(
+    tss_state;
+    grid = ((PHI_MIN, PSI_MIN), (PHI_MAX, PSI_MAX), (N_PHI_STATES, N_PSI_STATES)),
+)
+
 tss_sim = TSSSimulation(
     tss_state;
     n_md_steps = N_MD_STEPS, # steps per TSS cycle
@@ -196,7 +174,7 @@ tss_sim = TSSSimulation(
     self_adjustment_steps = SELF_ADJ_STEPS,
     n_replicas = N_REPLICAS,
     replica_active_states = replica_active_states,
-    reweighting = pmf_reweighting,
+    pmf = pmf_deconv,
     log_freq   = 10
 )
 
@@ -204,33 +182,7 @@ tss_sim = TSSSimulation(
 simulate!(tss_sim; rng=rng, replica_parallel = :auto)
 
 ##
-pmf_deconv = PMFDeconvolution(
-    tss_state;
-    grid = ((PHI_MIN, PSI_MIN), (PHI_MAX, PSI_MAX), (N_PHI_STATES, N_PSI_STATES)),
-    uncertainty = tss_free_energy_uncertainties(tss_state),
-)
 pmf_result = pmf(pmf_deconv)
-
-##
-pmf_acc = tss_sim.reweighting.accumulator
-pmf_occupied = count(>(0), pmf_acc.counts)
-pmf_total_bins = length(pmf_acc.counts)
-pmf_ess = Molly.effective_samples(pmf_acc)
-pmf_max_weight_fraction = Molly.max_weight_fraction(pmf_acc)
-pmf_occupied_mask = pmf_acc.counts .> 0
-
-println("=========================================")
-println("TSS reweighted PMF support")
-println("Accepted samples:    ", pmf_acc.accepted_samples)
-println("Out-of-grid samples: ", pmf_acc.out_of_grid_samples)
-println("Occupied bins:       ", pmf_occupied, " / ", pmf_total_bins)
-println("Total ESS:           ", Molly.total_effective_samples(pmf_acc))
-println("Bins with ESS >= 5:  ", count(>=(5), pmf_ess), " / ", pmf_total_bins)
-if any(pmf_occupied_mask)
-    println("Worst max-weight fraction in occupied bins: ",
-            maximum(pmf_max_weight_fraction[pmf_occupied_mask]))
-end
-println("=========================================")
 
 ##
 

@@ -1,15 +1,14 @@
 export
-    ExtendedStateSpace,
-    ActiveThermoState,
-    n_states,
-    set_active_state!,
-    evaluate_energy_subset,
-    evaluate_energy_subset!,
-    reduced_potential,
-    reduced_potentials!,
-    conditional_state_weights!,
-    sample_state
+    ActiveThermoState
 
+# ExtendedStateSpace(thermo_states; reuse_neighbors=true)
+#
+# An expanded ensemble over a collection of thermodynamic states.
+#
+# `thermo_states` supplies the systems, integrators, temperatures, and optional
+# pressures for each state. The resulting state space stores shared alchemical
+# partition data for evaluating energies across states while preserving each
+# state's interactions and integrator.
 struct ExtendedStateSpace{P, TS, S, I, B, PR, HP, SPI, SSI, SGI}
     partition::P
     thermo_states::TS
@@ -56,6 +55,9 @@ function ExtendedStateSpace(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
+# n_states(space::ExtendedStateSpace)
+#
+# Return the number of thermodynamic states in an expanded ensemble.
 n_states(space::ExtendedStateSpace) = length(space.betas)
 
 mutable struct PartitionedReducedPotentialWorkspace{P, TS, E}
@@ -80,6 +82,15 @@ function _partitioned_workspace_energy_view(workspace::PartitionedReducedPotenti
     return @view workspace.energies[1:n]
 end
 
+"""
+    ActiveThermoState(space::ExtendedStateSpace, first_state=1)
+
+Mutable active state for simulations over an `ExtendedStateSpace`.
+
+The active state owns a simulation system and integrator corresponding to the
+current thermodynamic state index. It can be retargeted with `set_active_state!`
+without reallocating the active wrapper.
+"""
 mutable struct ActiveThermoState{S, I}
     active_idx::Int
     active_sys::S
@@ -104,6 +115,13 @@ function ActiveThermoState(space::ExtendedStateSpace, first_state::Integer=1)
     )
 end
 
+# set_active_state!(active::ActiveThermoState, space::ExtendedStateSpace, state_index)
+#
+# Retarget an ActiveThermoState to another thermodynamic state.
+#
+# The active state index, atoms, interactions, and integrator are updated from
+# `space`. Coordinates, velocities, and boundary already stored in the active
+# system are preserved.
 function set_active_state!(active::ActiveThermoState,
                            space::ExtendedStateSpace,
                            state_index::Integer)
@@ -119,6 +137,14 @@ function set_active_state!(active::ActiveThermoState,
     return active
 end
 
+# evaluate_energy_subset!(energies, partition::AlchemicalPartition,
+#                         coords, boundary, state_indices)
+#
+# Fill `energies` with total potential energies for selected alchemical states.
+#
+# The unperturbed master energy is evaluated once for `coords` and `boundary`;
+# the state-specific energy contribution is then evaluated for each entry in
+# `state_indices`. The output vector length must match `state_indices`.
 function evaluate_energy_subset!(energies::AbstractVector,
                                  partition::AlchemicalPartition,
                                  coords,
@@ -145,6 +171,12 @@ function evaluate_energy_subset!(energies::AbstractVector,
     return energies
 end
 
+# evaluate_energy_subset(partition::AlchemicalPartition, coords, boundary, state_indices)
+#
+# Return total potential energies for selected alchemical states.
+#
+# This allocating wrapper calls evaluate_energy_subset! with a freshly created
+# output vector.
 function evaluate_energy_subset(partition::AlchemicalPartition,
                                 coords,
                                 boundary,
@@ -158,6 +190,16 @@ end
     return isnan(val) ? typemax(T) : val
 end
 
+# reduced_potential(space::ExtendedStateSpace, energy, boundary, state_index)
+# reduced_potential(state::ThermoState, energy, boundary)
+# reduced_potential(workspace, coords, boundary, state_index)
+#
+# Convert an energy, and optional pressure-volume term, to a dimensionless
+# reduced potential.
+#
+# For `ExtendedStateSpace` and `ThermoState` inputs the supplied `energy` is used
+# directly. For a partitioned workspace, the energy for `coords`, `boundary`, and
+# `state_index` is evaluated before conversion.
 function reduced_potential(space::ExtendedStateSpace,
                            energy,
                            boundary,
@@ -197,6 +239,15 @@ function reduced_potential(workspace::PartitionedReducedPotentialWorkspace,
     return reduced_potential(workspace.thermo_states[state_index], energy, boundary)
 end
 
+# reduced_potentials!(out, energies, space::ExtendedStateSpace, boundary, state_indices)
+# reduced_potentials!(out, workspace, coords, boundary, state_indices)
+# reduced_potentials!(out, space::ExtendedStateSpace, coords, boundary, state_indices)
+#
+# Fill `out` with reduced potentials for selected thermodynamic states.
+#
+# Depending on the method, potential energies are supplied explicitly in
+# `energies`, evaluated through a reusable workspace, or evaluated from
+# `space.partition`. The output length must match `state_indices`.
 function reduced_potentials!(out::AbstractVector,
                              energies::AbstractVector,
                              space::ExtendedStateSpace,
@@ -251,6 +302,13 @@ function reduced_potentials!(out::AbstractVector,
     return out
 end
 
+# conditional_state_weights!(weights, log_state_bias, reduced_potentials, scratch)
+#
+# Normalize conditional expanded-ensemble state weights in log space.
+#
+# The normalized weights are proportional to
+# `exp(log_state_bias .- reduced_potentials)`. `scratch` is used as temporary
+# storage and all input/output vectors must have matching lengths.
 function conditional_state_weights!(weights::AbstractVector,
                                     log_state_bias::AbstractVector,
                                     reduced_potentials::AbstractVector,
@@ -267,5 +325,12 @@ function conditional_state_weights!(weights::AbstractVector,
     return weights
 end
 
+# sample_state(weights)
+# sample_state(rng, weights)
+#
+# Sample a state index from normalized state weights.
+#
+# The returned index is in `1:length(weights)`. Pass an explicit random number
+# generator for reproducible sampling.
 sample_state(weights::AbstractVector) = sample(1:length(weights), Weights(weights))
 sample_state(rng::AbstractRNG, weights::AbstractVector) = sample(rng, 1:length(weights), Weights(weights))

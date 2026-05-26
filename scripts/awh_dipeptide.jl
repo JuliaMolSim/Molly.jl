@@ -67,8 +67,8 @@ PSI_INDS = [7, 9, 15, 17]
 PHI_CV = CalcTorsion(PHI_INDS, :pbc, true)
 PSI_CV = CalcTorsion(PSI_INDS, :pbc, true)
 
-N_PHI_STATES = 30
-N_PSI_STATES = 30
+N_PHI_STATES = 20
+N_PSI_STATES = 20
 
 PHI_MIN = FT(-π)
 PHI_MAX = FT(π)
@@ -109,7 +109,7 @@ awh_state = AWHState(thermo_states; first_state=1, n_bias=100, reuse_neighbors=t
 
 N_MD_STEPS = 50
 
-AWH_TIME = FT(4)u"ns"
+AWH_TIME = FT(100)u"ns"
 TOTAL_STEPS = Int(floor(AWH_TIME / DT))
 
 pmf_deconv = PMFDeconvolution(
