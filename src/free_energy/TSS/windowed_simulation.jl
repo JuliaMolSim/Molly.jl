@@ -809,7 +809,8 @@ end
 function simulate!(sim::TSSSimulation;
                    rng = Random.default_rng(),
                    n_threads::Integer = Threads.nthreads(),
-                   replica_parallel = :auto)
+                   replica_parallel = :auto,
+                   show_progress = default_show_progress())
     state::TSSState = sim.state
     n_threads > 0 || throw(ArgumentError("n_threads must be positive."))
     length(sim.replica_workspaces) == length(sim.replicas) ||
@@ -824,6 +825,7 @@ function simulate!(sim::TSSSimulation;
                          !sim.frozen
     legacy_single_path || _seed_windowed_tss_replica_rngs!(sim, rng)
 
+    progress = setup_progress(sim.n_cycles, show_progress)
     for cycle in 1:sim.n_cycles
         if legacy_single_path
             result = _run_windowed_tss_cycle!(
@@ -869,10 +871,6 @@ function simulate!(sim::TSSSimulation;
                       _apply_windowed_tss_observations!(state, observations)
         _sync_windowed_tss_state_to_replica!(state, first(sim.replicas))
 
-        if should_log_tss(state.iteration, sim.log_freq)
-            println("Cycle $(cycle), mx df = $(max_delta_f)")
-        end
-
         if !sim.frozen && should_log_tss(state.iteration, sim.log_freq)
             for observation in observations
                 estimator = state.estimators[observation.update_window]
@@ -900,6 +898,7 @@ function simulate!(sim::TSSSimulation;
             )
 
         end
+        next_nograd!(progress)
     end
 
     return state

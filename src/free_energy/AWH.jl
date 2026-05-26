@@ -484,10 +484,12 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
 end
 
 function simulate!(awh_sim::AWHSimulation{T},
-                   n_steps::Int) where T
+                   n_steps::Int;
+                   show_progress = default_show_progress()) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
 
+    progress = setup_progress(n_iterations, show_progress)
     for iteration_n in 1:n_iterations
         simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
 
@@ -534,5 +536,6 @@ function simulate!(awh_sim::AWHSimulation{T},
         active_idx_new = gibbs_sample_window(awh_sim.state)
         update_active_sys!(awh_sim.state, active_idx_new)
         update_awh_bias!(awh_sim, iteration_n)
+        next_nograd!(progress)
     end
 end
