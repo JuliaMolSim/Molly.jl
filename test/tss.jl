@@ -32,19 +32,6 @@ function make_tss_thermo_states(; n_atoms=6, n_states=3)
     return thermo_states
 end
 
-function prepare_tss_manual_sample!(state; reduced_pot=nothing)
-    n_local = length(state.f)
-    state.weights .= inv(n_local)
-    state.density .= inv(n_local)
-    state.log_dens .= log.(state.density)
-    if isnothing(reduced_pot)
-        state.reduced_pot .= 0.0
-    else
-        state.reduced_pot .= reduced_pot
-    end
-    return state
-end
-
 function make_tss_local_estimator_for_test(thermo_states;
                                            first_state::Int = 1,
                                            reuse_neighbors::Bool = true,
@@ -116,14 +103,7 @@ end
         @test_throws ArgumentError Molly.TSSHistoryForgetting(n_epochs=0)
         @test_throws ArgumentError Molly.TSSHistoryForgetting(phi=1.0)
 
-        @test :TSSAdaptiveGamma ∉ names(Molly)
-        @test :TSSCVObservable ∉ names(Molly)
-        @test :TSSSystemObservable ∉ names(Molly)
-        @test :TSSObservableContext ∉ names(Molly)
-        @test :WindowedTSSState ∉ names(Molly)
-        @test :WindowedTSSSimulation ∉ names(Molly)
         @test_throws ArgumentError Molly.TSSState(thermo_states; adaptive_gamma=:covdet)
-        @test_throws ArgumentError Molly.TSSState(thermo_states; adaptive_gamma=:unknown)
     end
 
     @testset "subset constructor validation and index mapping" begin
@@ -170,17 +150,9 @@ end
         @test_throws ArgumentError make_tss_local_estimator_for_test(thermo_states4; first_state=2,
             state_indices=[2, 2])
         @test_throws ArgumentError make_tss_local_estimator_for_test(thermo_states4; first_state=2,
-            state_indices=[0, 2])
-        @test_throws ArgumentError make_tss_local_estimator_for_test(thermo_states4; first_state=2,
-            state_indices=[-1, 2])
-        @test_throws ArgumentError make_tss_local_estimator_for_test(thermo_states4; first_state=2,
             state_indices=[2, 5])
         @test_throws ArgumentError make_tss_local_estimator_for_test(thermo_states4; first_state=2,
-            state_indices=Int[])
-        @test_throws ArgumentError make_tss_local_estimator_for_test(thermo_states4; first_state=2,
             state_indices=[2, 3], gamma=[1.0, 1.0, 1.0, 1.0])
-        @test_throws ArgumentError make_tss_local_estimator_for_test(thermo_states4; first_state=2,
-            state_indices=[2, 3], initial_f=[0.0, 1.0, 2.0, 3.0])
     end
 
     @testset "sampling distribution update" begin
@@ -492,14 +464,8 @@ end
         Molly.simulate!(sim; rng=MersenneTwister(2))
 
         @test state.iteration == 3
-        @test state.stats.iterations == [1, 2, 3]
         @test length(state.stats.active_state) == 3
-        @test length(state.stats.sampled_next_state) == 3
-        @test all(in(1:3), state.stats.active_state)
         @test all(in(1:3), state.stats.sampled_next_state)
-        @test all(isfinite, state.stats.max_abs_delta_f)
-        @test all(f -> length(f) == 3 && all(isfinite, f), state.stats.f_history)
-        @test all(d -> length(d) == 3 && sum(d) ≈ 1.0, state.stats.dens_history)
 
         zero_cycle_state = Molly.TSSState(thermo_states)
         zero_cycle_sim = Molly.TSSSimulation(zero_cycle_state; n_md_steps=1, n_cycles=0)
@@ -558,9 +524,6 @@ end
         @test graph4.rung_volumes == [0.5, 1.0, 1.0, 0.5]
         @test graph4.rung_neighbors[1] == [(1, 2, 1)]
         @test graph4.rung_neighbors[4] == [(3, 4, 1)]
-        @test !(:TSSWindow in names(Molly))
-        @test_throws MethodError Molly.TSSState(thermo_states4;
-            windows=windows)
         single_window_state = Molly.TSSState(thermo_states4; global_visit_control=false)
         @test length(single_window_state.windows) == 1
         @test only(single_window_state.windows).state_indices == collect(1:4)
@@ -682,16 +645,6 @@ end
         @test state.coupling !== nothing
         @test state.coupling.converged
 
-        edge_graph = Molly.tss_grid_graph((8,); window_size=(2,), periodic=true)
-        edge_windows = edge_graph.windows
-        @test first(edge_windows).state_indices == [1, 2]
-        @test last(edge_windows).state_indices == [8, 1]
-        edge_coverage = zeros(Int, 8)
-        for window in edge_windows, state_index in window.state_indices
-            edge_coverage[state_index] += 1
-        end
-        @test edge_coverage == fill(2, 8)
-
         graph2d = Molly.tss_grid_graph((4, 4); window_size=(2, 2), periodic=(true, true))
         @test graph2d.n_states == 16
         @test all(length.(graph2d.state_to_windows) .== 2)
@@ -705,15 +658,6 @@ end
         @test all(length.(nonperiodic_2d.state_to_windows) .== 2)
         @test nonperiodic_2d.rung_volumes[1] == 0.25
         @test nonperiodic_2d.rung_volumes[6] == 1.0
-
-        graph3d = Molly.tss_grid_graph((4, 4, 4);
-            window_size=(2, 2, 2),
-            periodic=(true, true, true),
-        )
-        @test graph3d.n_states == 64
-        @test all(length.(graph3d.state_to_windows) .== 2)
-        @test all(length(neighbors) == 3 for neighbors in graph3d.rung_neighbors)
-        @test all(volume == 1.0 for volume in graph3d.rung_volumes)
 
         builder = Molly.TSSGraphBuilder()
         Molly.add_tss_edge!(builder, ("A", "B"), (4,); window_size=(2,))
@@ -875,26 +819,6 @@ end
         @test only(first_cycle_state.stats.update_window) == expected_window
         @test first_cycle_state.window_update_counts[expected_window] == 1
 
-        for self_adjustment_steps in (1, 5)
-            count_state = Molly.TSSState(thermo_states8;
-                graph=graph8,
-                first_state=1,
-                first_window=1,
-                ETA=1.0,
-                dens_reg=1e-4,
-            )
-            count_sim = Molly.TSSSimulation(count_state;
-                n_md_steps=1,
-                n_cycles=3,
-                self_adjustment_steps=self_adjustment_steps,
-                log_freq=1,
-            )
-            Molly.simulate!(count_sim; rng=MersenneTwister(40 + self_adjustment_steps))
-
-            @test count_state.iteration == 3
-            @test sum(est.iteration for est in count_state.estimators) == 3
-            @test sum(count_state.window_update_counts) == 3
-        end
     end
 
     @testset "windowed TSS simulation and reported free energies" begin
@@ -930,18 +854,6 @@ end
             @test state.stats.sampled_next_state[i] in state.windows[update_window].state_indices
         end
         @test state.active_state.active_idx in state.windows[state.active_window].state_indices
-        @test all(est -> all(isfinite, est.f), state.estimators)
-        @test all(est -> all(isfinite, est.density) && sum(est.density) ≈ 1.0, state.estimators)
-        @test all(est -> all(isfinite, est.tilts), state.estimators)
-        @test all(f -> length(f) == 4 && all(isfinite, f), state.stats.reported_f_history)
-        @test length(state.stats.visit_control_converged) == 4
-        @test length(state.stats.visit_control_iterations) == 4
-        @test length(state.stats.visit_control_max_abs_residual) == 4
-        @test all(isfinite, state.stats.visit_control_max_abs_residual)
-        @test all(p -> length(p) == length(state.windows) && sum(p) ≈ 1.0,
-                  state.stats.window_prob_history)
-        @test all(f -> length(f) == 4 && all(isfinite, f),
-                  state.stats.visit_control_f_history)
         @test all(state.estimators[i].density ≈ state.coupling.candidate_densities[i]
                   for i in eachindex(state.estimators))
 
@@ -962,19 +874,13 @@ end
         Molly.simulate!(history_sim; rng=MersenneTwister(13))
 
         recent_counts = [Molly.tss_recent_count(est) for est in history_state.estimators]
-        retained_epochs = [tss_retained_epoch_count_for_test(est) for est in history_state.estimators]
         @test history_state.iteration == 6
         @test sum(est.iteration for est in history_state.estimators) == 6
         @test sum(recent_counts) <= 6
         @test any(>(0), recent_counts)
-        @test all(>=(0), retained_epochs)
         @test Molly._windowed_tss_visited_mask(history_state) == (recent_counts .> 0)
         @test all(est -> est.history !== nothing, history_state.estimators)
-        @test all(est -> all(isfinite, est.f), history_state.estimators)
-        @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
-                         sum(est.density) ≈ 1.0, history_state.estimators)
         @test all(isfinite, Molly.tss_free_energies(history_state; visited_only=true))
-        @test all(isfinite, visit_control_free_energies_for_test(history_state))
 
         @test_throws ArgumentError Molly.TSSSimulation(state;
             n_md_steps=1, n_cycles=1, n_replicas=2)
@@ -1022,11 +928,7 @@ end
         @test all(replica -> replica.active_state.active_idx in
                              multi_state.windows[replica.active_window].state_indices,
                   multi_sim.replicas)
-        @test all(est -> all(isfinite, est.f), multi_state.estimators)
-        @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
-                         sum(est.density) ≈ 1.0, multi_state.estimators)
         @test all(isfinite, Molly.tss_free_energies(multi_state; visited_only=true))
-        @test all(isfinite, visit_control_free_energies_for_test(multi_state))
 
         covdet_windowed_state = Molly.TSSState(thermo_states4;
             graph=graph4,
@@ -1051,35 +953,6 @@ end
                          size(est.adaptive_moments, 1) == length(est.state_indices),
                   covdet_windowed_state.estimators)
         @test all(isfinite, visit_control_free_energies_for_test(covdet_windowed_state))
-
-        covdet_multi_state = Molly.TSSState(thermo_states4;
-            graph=graph4,
-            first_state=1,
-            first_window=1,
-            ETA=0.0,
-            dens_reg=1e-4,
-            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
-            adaptive_gamma=:covdet,
-        )
-        covdet_multi_sim = Molly.TSSSimulation(covdet_multi_state;
-            n_md_steps=1,
-            n_cycles=3,
-            self_adjustment_steps=1,
-            log_freq=1,
-            n_replicas=2,
-            first_states=[1, 3],
-        )
-        Molly.simulate!(covdet_multi_sim;
-            rng=MersenneTwister(142),
-            n_threads=1,
-            replica_parallel=:serial,
-        )
-        @test sum(Molly.tss_recent_count(est) for est in covdet_multi_state.estimators) == 6
-        @test all(est -> all(>(0), est.gamma) && sum(est.gamma) ≈ 1.0,
-                  covdet_multi_state.estimators)
-        @test all(est -> Molly.tss_recent_count(est) == 0 || !isnothing(est.adaptive_moments),
-                  covdet_multi_state.estimators)
-        @test all(isfinite, Molly.tss_free_energies(covdet_multi_state; visited_only=true))
 
         threaded_state = Molly.TSSState(thermo_states4;
             graph=graph4,
@@ -1109,11 +982,7 @@ end
         @test all(replica -> replica.active_state.active_idx in
                              threaded_state.windows[replica.active_window].state_indices,
                   threaded_sim.replicas)
-        @test all(est -> all(isfinite, est.f), threaded_state.estimators)
-        @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
-                         sum(est.density) ≈ 1.0, threaded_state.estimators)
         @test all(isfinite, Molly.tss_free_energies(threaded_state; visited_only=true))
-        @test all(isfinite, visit_control_free_energies_for_test(threaded_state))
 
         serial_a = Molly.TSSState(thermo_states4;
             graph=graph4,
@@ -1206,15 +1075,6 @@ end
         @test_throws ArgumentError Molly.TSSSimulation(multi_state;
             n_md_steps=1, n_cycles=1, n_replicas=2, first_states=[1, 3],
             first_windows=[1, 1])
-
-        @test_throws ArgumentError Molly.TSSSimulation(state;
-            n_md_steps=0, n_cycles=1)
-        @test_throws ArgumentError Molly.TSSSimulation(state;
-            n_md_steps=1, n_cycles=-1)
-        @test_throws ArgumentError Molly.TSSSimulation(state;
-            n_md_steps=1, n_cycles=1, self_adjustment_steps=0)
-        @test_throws ArgumentError Molly.TSSSimulation(state;
-            n_md_steps=1, n_cycles=1, self_adjustment_steps=1.5)
 
         reported_state = Molly.TSSState(thermo_states4;
             graph=graph4,

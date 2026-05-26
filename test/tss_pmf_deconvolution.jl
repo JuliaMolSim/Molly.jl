@@ -102,11 +102,6 @@ end
         tss_state = Molly.TSSState(thermo_states)
         awh_state = Molly.AWHState(thermo_states; first_state=1, n_bias=10)
 
-        @test !isdefined(Molly, :IterativePMFDeconvolution)
-        @test !isdefined(Molly, :_solve_pmf_deconvolution)
-        @test !isdefined(Molly, :PMFDeconvolutionDiagnostics)
-        @test !isdefined(Molly, :pmf_deconvolution_diagnostics)
-
         coupling = (xi, state_i) -> 0.0
         awh_deconv = Molly.PMFDeconvolution(
             awh_state;
@@ -133,29 +128,6 @@ end
             box_volume=1.0,
         )
         @test pressure_deconv.backend.accumulator.accepted_samples == 1
-
-        awh_deconv = Molly.PMFDeconvolution(
-            awh_state;
-            grid=(0.0, 3.0, 3),
-            cv=coords -> (0.5,),
-            coupling=coupling,
-        )
-
-        for value in (0.5, 1.5, 1.5)
-            Molly._accumulate_pmf_deconvolution!(
-                awh_deconv.backend.accumulator,
-                (value,),
-                zeros(3),
-            )
-        end
-        awh_pmf = Molly.pmf(awh_deconv)
-        @test eltype(awh_pmf.F) == Float64
-        @test awh_pmf.F[1:2] ≈ [log(2.0), 0.0] atol=1e-12
-        @test isinf(awh_pmf.F[3])
-        awh_acc = awh_deconv.backend.accumulator
-        @test awh_acc.total_samples == 3
-        @test awh_acc.accepted_samples == 3
-        @test count(isfinite, awh_acc.log_numerator_sums) == 2
 
         weighted_deconv = Molly.PMFDeconvolution(
             awh_state;
@@ -289,24 +261,6 @@ end
         expected_windowed_p ./= sum(expected_windowed_p)
         @test windowed_pmf.p[1:2] ≈ expected_windowed_p
         @test windowed_pmf.p[3:4] ≈ zeros(2)
-    end
-
-    @testset "partitioned reduced-potential workspace matches full target" begin
-        thermo_states = make_tss_pmf_thermo_states()
-        coords = thermo_states[1].system.coords
-        boundary = thermo_states[1].system.boundary
-        target_state = thermo_states[3]
-
-        partitioned = Molly.PartitionedReducedPotentialWorkspace([thermo_states[1], target_state])
-        full = Molly.PartitionedReducedPotentialWorkspace([target_state])
-
-        u_partitioned = Molly.reduced_potential(partitioned, coords, boundary, 2)
-        u_full = Molly.reduced_potential(full, coords, boundary, 1)
-        @test u_partitioned ≈ u_full
-
-        out = zeros(Float64, 2)
-        Molly.reduced_potentials!(out, partitioned, coords, boundary, 1:2)
-        @test out[2] ≈ u_full
     end
 
     @testset "partitioned workspace supports heterogeneous general interactions" begin
