@@ -59,6 +59,19 @@ function make_tss_local_estimator_for_test(thermo_states;
     )
 end
 
+function tss_retained_epoch_count_for_test(state)
+    history = getfield(state, :history)
+    return isnothing(history) ? 0 : length(history.epochs)
+end
+
+function visit_control_free_energies_for_test(state; reference_state::Integer = 1)
+    Molly.update_window_probabilities!(state)
+    Molly.solve_windowed_visit_control!(state)
+    visit_control_f = copy(state.coupling.visit_control_f)
+    visit_control_f .-= visit_control_f[reference_state]
+    return visit_control_f
+end
+
 @testset "Times Square Sampling (TSS)" begin
     thermo_states = make_tss_thermo_states()
 
@@ -328,7 +341,7 @@ end
 
         @test keep_all.iteration == no_history.iteration
         @test Molly.tss_recent_count(keep_all) == keep_all.iteration
-        @test Molly.tss_retained_epoch_count(keep_all) >= 1
+        @test tss_retained_epoch_count_for_test(keep_all) >= 1
         @test keep_all.f ≈ no_history.f
         @test keep_all.tilts ≈ no_history.tilts
         @test keep_all.density ≈ no_history.density
@@ -347,7 +360,7 @@ end
 
         @test Molly.tss_recent_count(forget_old) < forget_old.iteration
         @test Molly.tss_recent_count(forget_old) > 0
-        @test Molly.tss_retained_epoch_count(forget_old) < forget_old.iteration
+        @test tss_retained_epoch_count_for_test(forget_old) < forget_old.iteration
         @test all(isfinite, forget_old.f)
         @test all(isfinite, forget_old.tilts)
         @test all(isfinite, forget_old.density)
@@ -531,7 +544,7 @@ end
         @test state.coupling !== nothing
         @test state.coupling.converged
         @test state.coupling.max_abs_residual <= state.coupling.tolerance
-        @test Molly.tss_visit_control_free_energies(state) ≈ [0.0, 1.0, 3.0, 6.0]
+        @test visit_control_free_energies_for_test(state) ≈ [0.0, 1.0, 3.0, 6.0]
         @test Molly.tss_free_energies(state) ≈ [0.0, 1.0, 3.0, 6.0]
 
         linear_graph = Molly.tss_grid_graph((8,); window_size=(4,), periodic=false)
@@ -546,7 +559,7 @@ end
         @test graph4.rung_neighbors[1] == [(1, 2, 1)]
         @test graph4.rung_neighbors[4] == [(3, 4, 1)]
         @test !(:TSSWindow in names(Molly))
-        @test_throws ArgumentError Molly.TSSState(thermo_states4;
+        @test_throws MethodError Molly.TSSState(thermo_states4;
             windows=windows)
         single_window_state = Molly.TSSState(thermo_states4; global_visit_control=false)
         @test length(single_window_state.windows) == 1
@@ -635,7 +648,7 @@ end
             global_visit_control=false,
         )
         @test local_only_state.coupling === nothing
-        @test_throws ArgumentError Molly.tss_visit_control_free_energies(local_only_state)
+        @test isnothing(local_only_state.coupling)
         @test_throws ArgumentError Molly.tss_free_energies(local_only_state)
     end
 
@@ -765,7 +778,7 @@ end
         @test coupling.converged
         @test coupling.max_abs_residual <= coupling.tolerance
         @test isapprox(
-            Molly.tss_visit_control_free_energies(state),
+            visit_control_free_energies_for_test(state),
             true_f;
             atol=1e-8,
         )
@@ -949,7 +962,7 @@ end
         Molly.simulate!(history_sim; rng=MersenneTwister(13))
 
         recent_counts = [Molly.tss_recent_count(est) for est in history_state.estimators]
-        retained_epochs = [Molly.tss_retained_epoch_count(est) for est in history_state.estimators]
+        retained_epochs = [tss_retained_epoch_count_for_test(est) for est in history_state.estimators]
         @test history_state.iteration == 6
         @test sum(est.iteration for est in history_state.estimators) == 6
         @test sum(recent_counts) <= 6
@@ -961,7 +974,7 @@ end
         @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
                          sum(est.density) ≈ 1.0, history_state.estimators)
         @test all(isfinite, Molly.tss_free_energies(history_state; visited_only=true))
-        @test all(isfinite, Molly.tss_visit_control_free_energies(history_state))
+        @test all(isfinite, visit_control_free_energies_for_test(history_state))
 
         @test_throws ArgumentError Molly.TSSSimulation(state;
             n_md_steps=1, n_cycles=1, n_replicas=2)
@@ -1013,7 +1026,7 @@ end
         @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
                          sum(est.density) ≈ 1.0, multi_state.estimators)
         @test all(isfinite, Molly.tss_free_energies(multi_state; visited_only=true))
-        @test all(isfinite, Molly.tss_visit_control_free_energies(multi_state))
+        @test all(isfinite, visit_control_free_energies_for_test(multi_state))
 
         covdet_windowed_state = Molly.TSSState(thermo_states4;
             graph=graph4,
@@ -1037,7 +1050,7 @@ end
         @test all(est -> isnothing(est.adaptive_moments) ||
                          size(est.adaptive_moments, 1) == length(est.state_indices),
                   covdet_windowed_state.estimators)
-        @test all(isfinite, Molly.tss_visit_control_free_energies(covdet_windowed_state))
+        @test all(isfinite, visit_control_free_energies_for_test(covdet_windowed_state))
 
         covdet_multi_state = Molly.TSSState(thermo_states4;
             graph=graph4,
@@ -1100,7 +1113,7 @@ end
         @test all(est -> all(isfinite, est.density) && all(>(0), est.density) &&
                          sum(est.density) ≈ 1.0, threaded_state.estimators)
         @test all(isfinite, Molly.tss_free_energies(threaded_state; visited_only=true))
-        @test all(isfinite, Molly.tss_visit_control_free_energies(threaded_state))
+        @test all(isfinite, visit_control_free_energies_for_test(threaded_state))
 
         serial_a = Molly.TSSState(thermo_states4;
             graph=graph4,
@@ -1218,7 +1231,7 @@ end
         end
 
         reported_f = Molly.tss_free_energies(reported_state)
-        visit_control_f = Molly.tss_visit_control_free_energies(reported_state)
+        visit_control_f = visit_control_free_energies_for_test(reported_state)
         @test reported_f ≈ true_f .- true_f[1]
         @test all(isfinite, visit_control_f)
         @test all(isfinite, reported_state.coupling.reported_gamma)

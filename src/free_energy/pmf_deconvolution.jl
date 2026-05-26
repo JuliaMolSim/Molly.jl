@@ -179,24 +179,6 @@ function _pmf_build_log_coupling_matrix(state_space,
     return matrix
 end
 
-# PMFDeconvolutionDiagnostics
-#
-# Diagnostics from sampled PMF deconvolution.
-#
-# The effective sample sizes and maximum weight fractions are computed from the
-# observed-bin numerator weights. Bins with `max_weight_fraction` near one are
-# dominated by a single configuration.
-struct PMFDeconvolutionDiagnostics{T, N}
-    total_samples::Int
-    accepted_samples::Int
-    out_of_grid_samples::Int
-    finite_bins::Int
-    total_bins::Int
-    total_effective_samples::T
-    effective_samples::Array{T, N}
-    max_weight_fraction::Array{T, N}
-end
-
 """
     PMFDeconvolution(state; grid, coupling=nothing, cv=nothing, ...)
 
@@ -326,62 +308,11 @@ function _sampled_pmf_probability(acc::_SampledPMFDeconvolutionAccumulator{N, T}
     return probability
 end
 
-function _sampled_pmf_raw_free_energy(acc::_SampledPMFDeconvolutionAccumulator)
-    return _pmf_raw_free_energy_from_probability(acc.grid, _sampled_pmf_probability(acc))
-end
-
 function _pmf_result_from_sampled_deconvolution(acc::_SampledPMFDeconvolutionAccumulator;
                                                zero::Symbol = :min,
                                                kBT = nothing)
     probability = _sampled_pmf_probability(acc)
     return _pmf_result_from_probability(acc.grid, probability; zero = zero, kBT = kBT)
-end
-
-function _sampled_pmf_effective_samples(acc::_SampledPMFDeconvolutionAccumulator{N, T}) where {N, T}
-    ess = zeros(T, acc.grid.shape)
-    for idx in CartesianIndices(ess)
-        lw = acc.log_numerator_sums[idx]
-        lw2 = acc.log_numerator_sq_sums[idx]
-        if isfinite(lw) && isfinite(lw2)
-            ess[idx] = exp(T(2) * lw - lw2)
-        end
-    end
-    return ess
-end
-
-function _sampled_pmf_total_effective_samples(acc::_SampledPMFDeconvolutionAccumulator{N, T}) where {N, T}
-    lw = _online_pmf_total_log_weight(acc.log_numerator_sums)
-    lw2 = _online_pmf_total_log_weight(acc.log_numerator_sq_sums)
-    if isfinite(lw) && isfinite(lw2)
-        return exp(T(2) * lw - lw2)
-    end
-    return zero(T)
-end
-
-function _sampled_pmf_max_weight_fraction(acc::_SampledPMFDeconvolutionAccumulator{N, T}) where {N, T}
-    fraction = zeros(T, acc.grid.shape)
-    for idx in CartesianIndices(fraction)
-        lw = acc.log_numerator_sums[idx]
-        max_lw = acc.max_log_numerator_weights[idx]
-        if isfinite(lw) && isfinite(max_lw)
-            fraction[idx] = exp(max_lw - lw)
-        end
-    end
-    return fraction
-end
-
-function _sampled_pmf_deconvolution_diagnostics(acc::_SampledPMFDeconvolutionAccumulator{N, T}) where {N, T}
-    finite_bins = count(isfinite, acc.log_numerator_sums)
-    return PMFDeconvolutionDiagnostics(
-        acc.total_samples,
-        acc.accepted_samples,
-        acc.out_of_grid_samples,
-        finite_bins,
-        length(acc.log_numerator_sums),
-        _sampled_pmf_total_effective_samples(acc),
-        _sampled_pmf_effective_samples(acc),
-        _sampled_pmf_max_weight_fraction(acc),
-    )
 end
 
 function _pmf_log_bin_weights!(dest::AbstractVector{T},
@@ -423,14 +354,3 @@ function _pmf_positive_log(value, label::AbstractString, ::Type{T}) where T
 end
 
 pmf(deconv::PMFDeconvolution; kwargs...) = pmf(deconv.backend; kwargs...)
-
-# pmf_deconvolution_diagnostics(deconv::PMFDeconvolution)
-#
-# Return support diagnostics for the sampled PMF deconvolution object.
-pmf_deconvolution_diagnostics(deconv::PMFDeconvolution) =
-    _pmf_deconvolution_diagnostics(deconv.backend)
-
-_pmf_deconvolution_diagnostics(backend) =
-    hasproperty(backend, :accumulator) ?
-    _sampled_pmf_deconvolution_diagnostics(getproperty(backend, :accumulator)) :
-    nothing

@@ -746,7 +746,6 @@ end
 
 function TSSState(thermo_states::AbstractVector{<:ThermoState};
                           graph = nothing,
-                          windows = nothing,
                           first_state::Int = 1,
                           first_window = nothing,
                           gamma = nothing,
@@ -761,10 +760,6 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
                           visit_control_max_iterations::Integer = 1_000,
                           visit_control_damping::Real = 1.0,
                           pi_regularization::Real = 1e-3)
-
-    isnothing(windows) ||
-        throw(ArgumentError("explicit TSS windows are no longer supported; " *
-                            "pass graph=tss_grid_graph(...) or graph=build_tss_graph(...)."))
 
     state_space = ExtendedStateSpace(thermo_states; reuse_neighbors = reuse_neighbors)
     K = n_states(state_space)

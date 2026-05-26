@@ -178,12 +178,6 @@ function tss_recent_count(state)
     return sum(epoch.count for epoch in history.epochs)
 end
 
-function tss_retained_epoch_count(state)
-    history = getfield(state, :history)
-    isnothing(history) && return 0
-    return length(history.epochs)
-end
-
 function _aggregate_tss_history!(state)
     history = state.history
     total_count = tss_recent_count(state)

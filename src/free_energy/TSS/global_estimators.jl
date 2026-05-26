@@ -739,16 +739,15 @@ function tss_free_energies(state::TSSState;
     return reported
 end
 
-"""
-    TSSJackknifeResult
 
-Jackknife uncertainty summary returned by
-[`tss_free_energy_uncertainties`](@ref).
+#     TSSJackknifeResult
 
-`free_energies` and `standard_errors` are reported relative to
-`reference_state`. `mse`, retained `epoch_indices`, epoch weights, and the
-jackknife `replicates` matrix are stored for diagnostics.
-"""
+# Jackknife uncertainty summary returned by
+# [`tss_free_energy_uncertainties`](@ref).
+
+# `free_energies` and `standard_errors` are reported relative to
+# `reference_state`. `mse`, retained `epoch_indices`, epoch weights, and the
+# jackknife `replicates` matrix are stored for diagnostics.
 struct TSSJackknifeResult{T}
     free_energies::Vector{T}
     standard_errors::Vector{T}
@@ -859,7 +858,7 @@ end
 Estimate TSS free-energy standard errors with a delete-one-epoch jackknife.
 
 The TSS state must use [`TSSHistoryForgetting`](@ref), and each window must have
-samples in the retained epochs. The returned [`TSSJackknifeResult`](@ref)
+samples in the retained epochs. The returned `TSSJackknifeResult`
 contains relative free energies, standard errors, mean-square errors, and the
 jackknife replicates.
 """
@@ -928,25 +927,4 @@ function tss_free_energy_uncertainties(state::TSSState{FT};
         epoch_weights,
         replicates,
     )
-end
-
-# tss_visit_control_free_energies(state::TSSState; reference_state=1)
-#
-# Return the visit-control free energies relative to `reference_state`.
-#
-# This updates the window probabilities and solves the current visit-control
-# system before returning the shifted visit-control free-energy vector.
-function tss_visit_control_free_energies(state::TSSState;
-                                         reference_state::Integer = 1)
-    coupling = _windowed_tss_coupling(state)
-    K = n_states(state.state_space)
-    reference_state = Int(reference_state)
-    1 <= reference_state <= K ||
-        throw(ArgumentError("reference_state $(reference_state) out of bounds."))
-
-    update_window_probabilities!(state)
-    solve_windowed_visit_control!(state)
-    visit_control_f = copy(coupling.visit_control_f)
-    visit_control_f .-= visit_control_f[reference_state]
-    return visit_control_f
 end

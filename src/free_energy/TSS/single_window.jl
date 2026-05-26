@@ -218,11 +218,6 @@ function tss_global_index(state::_TSSLocalEstimator, local_state::Int)
     return state.state_indices[local_state]
 end
 
-function tss_active_local_index(state::_TSSLocalEstimator)
-    idx = state.active_state.active_idx
-    return tss_local_index(state, idx)
-end
-
 function tss_sample_global_state(rng::AbstractRNG, state::_TSSLocalEstimator)
     idx = sample_state(rng, state.weights)
     return tss_global_index(state, idx)

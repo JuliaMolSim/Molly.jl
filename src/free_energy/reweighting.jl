@@ -292,31 +292,3 @@ function _target_coords_for_system(coords, sys::System)
     array_type(coords) == target_array_type && return coords
     return to_device(from_device(coords), target_array_type)
 end
-
-mutable struct ReducedPotentialWorkspace{TS, B}
-    target_state::TS
-    buffers::B
-end
-
-function ReducedPotentialWorkspace(target_state::ThermoState)
-    target_copy = deepcopy(target_state)
-    buffers = is_on_gpu(target_copy.system) ? init_buffers!(target_copy.system, 1, true) : nothing
-    return ReducedPotentialWorkspace(target_copy, buffers)
-end
-
-function reduced_potential(workspace::ReducedPotentialWorkspace,
-                           coords,
-                           boundary;
-                           n_threads::Integer = 1)
-    target = workspace.target_state
-    sys = target.system
-    sys.coords .= _target_coords_for_system(coords, sys)
-    sys.boundary = boundary
-    energy = potential_energy(
-        sys,
-        find_neighbors(sys),
-        workspace.buffers;
-        n_threads = n_threads,
-    )
-    return reduced_potential(target, energy, boundary)
-end

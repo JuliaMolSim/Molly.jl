@@ -2,7 +2,6 @@ export
     TSSHistoryForgetting,
     TSSState,
     TSSSimulation,
-    TSSJackknifeResult,
     tss_grid_graph,
     tss_free_energy_uncertainties,
     tss_free_energies

@@ -104,6 +104,8 @@ end
 
         @test !isdefined(Molly, :IterativePMFDeconvolution)
         @test !isdefined(Molly, :_solve_pmf_deconvolution)
+        @test !isdefined(Molly, :PMFDeconvolutionDiagnostics)
+        @test !isdefined(Molly, :pmf_deconvolution_diagnostics)
 
         coupling = (xi, state_i) -> 0.0
         awh_deconv = Molly.PMFDeconvolution(
@@ -115,7 +117,7 @@ end
         awh_sim = Molly.AWHSimulation(awh_state; pmf=awh_deconv)
         @test awh_sim.pmf === awh_deconv
         Molly.update_pmf!(awh_deconv, awh_state, awh_state.active_sys.coords)
-        @test Molly.pmf_deconvolution_diagnostics(awh_deconv).accepted_samples == 1
+        @test awh_deconv.backend.accumulator.accepted_samples == 1
 
         awh_deconv = Molly.PMFDeconvolution(
             awh_state;
@@ -135,12 +137,10 @@ end
         @test eltype(awh_pmf.F) == Float64
         @test awh_pmf.F[1:2] ≈ [log(2.0), 0.0] atol=1e-12
         @test isinf(awh_pmf.F[3])
-        awh_diag = Molly.pmf_deconvolution_diagnostics(awh_deconv)
-        @test awh_diag isa Molly.PMFDeconvolutionDiagnostics
-        @test awh_diag.total_samples == 3
-        @test awh_diag.accepted_samples == 3
-        @test awh_diag.finite_bins == 2
-        @test awh_diag.total_effective_samples ≈ 3.0
+        awh_acc = awh_deconv.backend.accumulator
+        @test awh_acc.total_samples == 3
+        @test awh_acc.accepted_samples == 3
+        @test count(isfinite, awh_acc.log_numerator_sums) == 2
 
         weighted_deconv = Molly.PMFDeconvolution(
             awh_state;
@@ -185,9 +185,9 @@ end
             window_offset=0.0,
         )
         Molly._accumulate_pmf_deconvolution!(tss_deconv.backend.accumulator, tss_sample)
-        tss_diag = Molly.pmf_deconvolution_diagnostics(tss_deconv)
-        @test tss_diag.accepted_samples == 1
-        @test tss_diag.finite_bins == 1
+        tss_acc = tss_deconv.backend.accumulator
+        @test tss_acc.accepted_samples == 1
+        @test count(isfinite, tss_acc.log_numerator_sums) == 1
 
         torsion_states = ThermoState[]
         torsion_boundary = CubicBoundary(2.0u"nm")
