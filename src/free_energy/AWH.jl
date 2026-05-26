@@ -279,7 +279,8 @@ function update_pmf!(deconv::PMFDeconvolution{<:_AWHPMFDeconvolutionBackend{N, T
         reweight_log -= (backend.target_beta - Float64(current_beta)) * Float64(potential_energy)
     end
     if !isnothing(backend.target_pressure)
-        target_work = backend.target_beta * backend.target_pressure
+        target_beta = isnothing(backend.target_beta) ? Float64(current_beta) : backend.target_beta
+        target_work = target_beta * backend.target_pressure
         current_work = Float64(current_beta) * Float64(current_pressure)
         reweight_log -= (target_work - current_work) * Float64(box_volume)
     end

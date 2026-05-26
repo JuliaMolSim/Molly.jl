@@ -857,6 +857,7 @@ function simulate!(sim::TSSSimulation;
                     result.max_delta_f,
                 )
             end
+            next_nograd!(progress)
             continue
         end
 

@@ -1,4 +1,4 @@
-# Convenience struct that stores the interaction lists that change 
+# Convenience struct that stores the interaction lists that change
 # across thermodynamic states (e.g., along a reaction coordinate or replica states).
 struct LambdaHamiltonian{PI, SI, GI}
     pairwise_inters::PI
@@ -20,14 +20,14 @@ mutable struct AlchemicalPartition{S, L, LS, A, H, T}
     λ_systems::LS
     λ_atoms::A
     λ_hamiltonians::H
-    
-    # State cache for master energy to prevent redundant calculations 
+
+    # State cache for master energy to prevent redundant calculations
     # across multiple single-state queries
     cached_coords::Any
     cached_master_pe::T
 end
 
-function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState}; 
+function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                              reuse_neighbors::Bool=true)
     n_λ = length(thermo_states)
     ref_sys = thermo_states[1].system
@@ -48,7 +48,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         for (atom_i, atom) in pairs(atoms_cpu)
             # Flag if the atom possesses alchemical scaling properties,
             # or if its properties explicitly diverge from the reference.
-            if (atom.λ < 1.0) || 
+            if (atom.λ < 1.0) ||
                (atom.λ != ref_atoms_cpu[atom_i].λ)
                 push!(solute_indices, atom_i)
             end
@@ -59,16 +59,16 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     ref_nfinder = ref_sys.neighbor_finder
     base_eligible_cpu, base_special_cpu = neighbor_finder_masks(ref_nfinder, length(ref_sys))
     n_atoms = size(base_eligible_cpu, 1)
-    
+
     master_eligible_cpu = copy(base_eligible_cpu)
     for idx in solute_indices
         master_eligible_cpu[idx, :] .= false
         master_eligible_cpu[:, idx] .= false
     end
-    
+
     specific_eligible_cpu = copy(base_eligible_cpu)
     solvent_indices = [i for i in 1:n_atoms if !(i in solute_indices)]
-    
+
     if !isempty(solvent_indices)
         specific_eligible_cpu[solvent_indices, solvent_indices] .= false
     end
@@ -77,7 +77,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     master_eligible = to_device(master_eligible_cpu, AT)
     λ_eligible      = to_device(specific_eligible_cpu, AT)
     special_mask    = to_device(base_special_cpu, AT)
-    
+
     # 3. Extract and Partition Interaction Lists
     list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_λ]
     list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_λ]
@@ -87,13 +87,13 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     @inbounds for (i, tstate) in enumerate(thermo_states)
         sils = tstate.system.specific_inter_lists
         for inter in sils
-            if inter isa InteractionList1Atoms 
+            if inter isa InteractionList1Atoms
                 push!(list_1a[i], inter)
-            elseif inter isa InteractionList2Atoms 
+            elseif inter isa InteractionList2Atoms
                 push!(list_2a[i], inter)
-            elseif inter isa InteractionList3Atoms 
+            elseif inter isa InteractionList3Atoms
                 push!(list_3a[i], inter)
-            elseif inter isa InteractionList4Atoms 
+            elseif inter isa InteractionList4Atoms
                 push!(list_4a[i], inter)
             end
         end
@@ -121,7 +121,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         u_3 = setdiff(list_3a[i], master_sils_3a)
         u_4 = setdiff(list_4a[i], master_sils_4a)
         λ_specific[i] = (u_1..., u_2..., u_3..., u_4...)
-        
+
         u_g = setdiff(all_gils[i], master_gils)
         λ_general[i] = (u_g...,)
         λ_pairwise[i] = (all_pils[i]...,)
@@ -131,12 +131,12 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     master_nf = build_neighbor_finder(ref_nfinder, master_eligible, special_mask;
                                       reuse_neighbors=reuse_neighbors, boundary=ref_sys.boundary)
 
-    master_sys = System(deepcopy(ref_sys); 
+    master_sys = System(deepcopy(ref_sys);
         pairwise_inters      = (master_pils...,),
         general_inters       = (master_gils...,),
-        specific_inter_lists = (master_sils_1a..., 
-                                master_sils_2a..., 
-                                master_sils_3a..., 
+        specific_inter_lists = (master_sils_1a...,
+                                master_sils_2a...,
+                                master_sils_3a...,
                                 master_sils_4a...),
         neighbor_finder      = master_nf
     )
@@ -162,7 +162,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
 
     # Initialize cache values with safe defaults
     initial_pe = zero(FT) * master_sys.energy_units
-    
+
     return AlchemicalPartition(
         master_sys,
         first(λ_systems),
@@ -177,7 +177,7 @@ end
 function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::Bool = true, boundary = nothing)
     if ref_nfinder isa DistanceNeighborFinder
         return DistanceNeighborFinder(
-            eligible = eligible, 
+            eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special   = special,
             n_steps = 1
@@ -201,7 +201,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             )
         else
             return DistanceNeighborFinder(
-                eligible = eligible, 
+                eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special   = special,
                 n_steps = 1
@@ -247,7 +247,7 @@ end
 # Calculates the total potential energy for a specific thermodynamic state.
 # Caches the `master_sys` energy. If `coords` is identical to `cached_coords`,
 # the `master_sys` energy is not recomputed unless `force_recompute` is true.
-function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int; 
+function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int;
                           force_recompute::Bool=false)
     1 <= state_index <= length(partition.λ_systems) ||
         throw(ArgumentError("state_index ($state_index) out of range " *
@@ -266,12 +266,12 @@ end
 function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
     _update_master_energy!(partition, coords, boundary; force_recompute=true)
     energies = Vector{typeof(partition.cached_master_pe)}(undef, length(partition.λ_systems))
-    
+
     for state_index in eachindex(partition.λ_systems)
         pe_specific = _evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary)
         energies[state_index] = partition.cached_master_pe + pe_specific
     end
-    
+
     return energies
 end
 
@@ -279,8 +279,8 @@ function logsumexp(x::AbstractVector{T}) where T
     isempty(x) && return -T(Inf)
     x_max = maximum(x)
     # If all weights are -Inf (e.g. huge energy overlap issues), return -Inf
-    !isfinite(x_max) && return x_max 
-    
+    !isfinite(x_max) && return x_max
+
     s = zero(T)
     for val in x
         s += exp(val - x_max)

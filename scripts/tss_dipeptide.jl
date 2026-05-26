@@ -36,8 +36,8 @@ barostat = CRescaleBarostat(PRES, TAU_P; n_steps = N_PRES)
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir   = joinpath(data_dir, "force_fields")
 ff = MolecularForceField(
-    FT, 
-    joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...; 
+    FT,
+    joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true)
 
 sys = System(
@@ -99,15 +99,7 @@ for psi in PSI_TARGETS
         bp_psi = BiasPotential(PSI_CV, bias_psi)
 
         sys_bias = System(deepcopy(sys),
-            # atoms=sys.atoms,
-            # coords=sys.coords,
-            # boundary=sys.boundary,
-            # velocities=sys.velocities,
-            # pairwise_inters=sys.pairwise_inters,
-            # specific_inter_lists=sys.specific_inter_lists,
             general_inters=(sys.general_inters..., bp_phi, bp_psi),
-            # constraints=sys.constraints,
-            # neighbor_finder=sys.neighbor_finder,
         )
 
         push!(thermo_states, ThermoState(sys_bias, vverlet))
@@ -117,7 +109,7 @@ end
 
 ##
 
-PHI_WIN_SIZE = Int(N_PHI_STATES // 5) 
+PHI_WIN_SIZE = Int(N_PHI_STATES // 5)
 PSI_WIN_SIZE = Int(N_PSI_STATES // 5)
 
 tss_graph = Molly.tss_grid_graph(
@@ -192,9 +184,9 @@ pmf_plot = map(x -> isfinite(x) ? x : FT(NaN), pmf_kbt)
 
 fig_fe = Figure(size = (720, 720))
 
-ax_fe = Axis(fig_fe[1,1], 
+ax_fe = Axis(fig_fe[1,1],
           title = L"\textbf{Free Energy}",
-          xlabel = L"\textbf{\phi / rad}", 
+          xlabel = L"\textbf{\phi / rad}",
           ylabel = L"\textbf{\psi / rad}",
           xlabelsize = 20, ylabelsize = 20,
           titlesize = 24,

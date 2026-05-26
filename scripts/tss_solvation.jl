@@ -97,7 +97,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
     )
 
     thermostat = VelocityRescaleThermostat(T0, FT(0.1)u"ps"; n_steps=1)
-    
+
     if is_vacuum
         integrator = VelocityVerlet(Δt, (thermostat,), 100)
     else
@@ -118,7 +118,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
     idx_coul = findfirst(x -> x isa Union{Coulomb, CoulombEwald}, p_inters)
     isnothing(idx_lj) && error("could not find LennardJones pairwise interaction")
     isnothing(idx_coul) && error("could not find Coulomb or CoulombEwald pairwise interaction")
-    
+
     lj_sc = alchemical_lj_softcore(p_inters[idx_lj])
     cl_sc = alchemical_coulomb_softcore(p_inters[idx_coul])
 
@@ -171,7 +171,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
         first_states = first_states,
         log_freq   = 10
     )
-    
+
     return tss_state, tss_sim
 end
 
@@ -222,9 +222,9 @@ se_vac_plot = reverse(se_vac)
 ##
 fig_fe = Figure(size = (720, 720))
 
-ax_fe = Axis(fig_fe[1,1], 
+ax_fe = Axis(fig_fe[1,1],
           title = L"\textbf{Alchemical Free Energy}",
-          xlabel = L"\textbf{\lambda}", 
+          xlabel = L"\textbf{\lambda}",
           ylabel = L"\textbf{F / k_{B}T}",
           xlabelsize = 20, ylabelsize = 20,
           titlesize = 24,
@@ -234,7 +234,7 @@ ax_fe = Axis(fig_fe[1,1],
 lines!(
     ax_fe,
     lambda_plot, f_solv_plot;
-    color = :royalblue, 
+    color = :royalblue,
     linewidth = 3,
     linecap = :round,
     joinstyle = :round,
@@ -250,9 +250,9 @@ band!(
 lines!(
     ax_fe,
     lambda_plot, f_vac_plot;
-    color = :firebrick, 
-    linewidth = 3, 
-    linecap = :round, 
+    color = :firebrick,
+    linewidth = 3,
+    linecap = :round,
     joinstyle = :round,
     label = "Vacuum"
 
@@ -289,7 +289,7 @@ fig_df = Figure(size = (720, 720))
 ax_df = Axis(
     fig_df[1,1],
     title = L"\textbf{Max. $\Delta$F}",
-    xlabel = L"\textbf{Iteration}", 
+    xlabel = L"\textbf{Iteration}",
     ylabel = L"\textbf{log_{10}($\Delta$F)}",
     xlabelsize = 20, ylabelsize = 20,
     titlesize = 24,

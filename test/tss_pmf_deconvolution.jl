@@ -119,6 +119,21 @@ end
         Molly.update_pmf!(awh_deconv, awh_state, awh_state.active_sys.coords)
         @test awh_deconv.backend.accumulator.accepted_samples == 1
 
+        pressure_deconv = Molly.PMFDeconvolution(
+            awh_state;
+            grid=(0.0, 3.0, 3),
+            cv=coords -> (0.5,),
+            coupling=coupling,
+            target_pressure=1.0u"bar",
+        )
+        Molly.update_pmf!(
+            pressure_deconv,
+            awh_state,
+            awh_state.active_sys.coords;
+            box_volume=1.0,
+        )
+        @test pressure_deconv.backend.accumulator.accepted_samples == 1
+
         awh_deconv = Molly.PMFDeconvolution(
             awh_state;
             grid=(0.0, 3.0, 3),
@@ -283,10 +298,10 @@ end
         target_state = thermo_states[3]
 
         partitioned = Molly.PartitionedReducedPotentialWorkspace([thermo_states[1], target_state])
-        full = Molly.ReducedPotentialWorkspace(target_state)
+        full = Molly.PartitionedReducedPotentialWorkspace([target_state])
 
         u_partitioned = Molly.reduced_potential(partitioned, coords, boundary, 2)
-        u_full = Molly.reduced_potential(full, coords, boundary)
+        u_full = Molly.reduced_potential(full, coords, boundary, 1)
         @test u_partitioned ≈ u_full
 
         out = zeros(Float64, 2)
@@ -300,7 +315,7 @@ end
         boundary = thermo_states[1].system.boundary
 
         partitioned = Molly.PartitionedReducedPotentialWorkspace(thermo_states)
-        full_target = Molly.ReducedPotentialWorkspace(thermo_states[2])
+        full_target = Molly.PartitionedReducedPotentialWorkspace([thermo_states[2]])
 
         energies = Molly.evaluate_energy_all!(partitioned.partition, coords, boundary)
         direct = [potential_energy(ts.system) for ts in thermo_states]
@@ -309,7 +324,7 @@ end
 
         out = zeros(Float64, 2)
         Molly.reduced_potentials!(out, partitioned, coords, boundary, 1:2)
-        @test out[2] ≈ Molly.reduced_potential(full_target, coords, boundary)
+        @test out[2] ≈ Molly.reduced_potential(full_target, coords, boundary, 1)
 
     end
 

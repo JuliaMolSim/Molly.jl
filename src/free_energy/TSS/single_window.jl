@@ -15,13 +15,13 @@ mutable struct _TSSLocalEstimator{T, ES, AS, ST, AG}
     tilts::Vector{T} # Empirical visit control of the rungs
     density::Vector{T} # Current TSS sampling density over rungs
     log_dens::Vector{T} # Log of prev. quantity
-    
+
     weights::Vector{T} # Conditional state probabilities
     reduced_pot::Vector{T} # u_k(x) values for last configuration
     energies::Vector{ST} # Raw potential energy, before reduced
     evaluation_reduced_pot::Vector{T} # u_k(x) values for evaluation_state_indices
     evaluation_energies::Vector{ST} # Raw energies for evaluation_state_indices
-    scratch::Vector{T} # Used for log-sum-exp 
+    scratch::Vector{T} # Used for log-sum-exp
     log_state_bias::Vector{T} # f .+ log_dens in log form
 
     iteration::Int # Number of updates already applied
@@ -170,7 +170,7 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
         eltype(energies),
         typeof(adaptive_gamma),
     }(
-        state_space, 
+        state_space,
         active_state,
         state_indices,
         local_index_by_state,
