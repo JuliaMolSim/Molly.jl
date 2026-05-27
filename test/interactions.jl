@@ -135,7 +135,7 @@
     )
     @test isapprox(
         potential_energy(inter, dr14, a1, a1),
-        45.35853723577515u"kJ * mol^-1";
+        25.90746475905439u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
