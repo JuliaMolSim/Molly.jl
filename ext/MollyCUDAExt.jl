@@ -24,8 +24,6 @@ using CUDA
 using Atomix
 using KernelAbstractions
 
-const CUDA_CORE = isdefined(CUDA, :CUDACore) ? CUDA.CUDACore : CUDA
-
 const WARPSIZE = UInt32(32)
 const MAX_BLOCK_Y = 32
 const AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES = (1, 2, 4, 8, 16)
@@ -67,7 +65,7 @@ end
 
 Molly.uses_gpu_neighbor_finder(::Type{<:CuArray}) = true
 
-CUDA_CORE.Const(nl::Molly.NoNeighborList) = nl
+Const(nl::Molly.NoNeighborList) = nl
 
 function env_int(name::AbstractString)
     value = ENV[name]
@@ -129,7 +127,7 @@ effective_force_maxregs_override(config::Molly.CUDALaunchConfig) =
 
 function autotune_key(sys::System{D, <:CuArray}, pairwise_inters, force_maxregs_override) where D
     dev = CUDA.device()
-    sm_count = CUDA.attribute(dev, CUDA_CORE.CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)
+    sm_count = CUDA.attribute(dev, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)
     n_atoms = length(sys.coords)
     return LaunchAutotuneKey(
         CUDA.name(dev),
@@ -741,10 +739,10 @@ macro shfl_multiple_sync(mask, target, width, vars...)
     return esc(Expr(:block, all_lines...))
 end
 
-CUDA_CORE.shfl_recurse(op, x::Quantity) = op(x.val) * unit(x)
-CUDA_CORE.shfl_recurse(op, x::SVector{1, C}) where C = SVector{1, C}(op(x[1]))
-CUDA_CORE.shfl_recurse(op, x::SVector{2, C}) where C = SVector{2, C}(op(x[1]), op(x[2]))
-CUDA_CORE.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2]), op(x[3]))
+shfl_recurse(op, x::Quantity) = op(x.val) * unit(x)
+shfl_recurse(op, x::SVector{1, C}) where C = SVector{1, C}(op(x[1]))
+shfl_recurse(op, x::SVector{2, C}) where C = SVector{2, C}(op(x[1]), op(x[2]))
+shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2]), op(x[3]))
 
 function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray}, pairwise_inters,
                             nbs::Molly.NoNeighborList, step_n) where D
@@ -1077,8 +1075,8 @@ function kernel_min_max!(
     r = Int32(n % D32)
     i = threadIdx().x + (blockIdx().x - a) * blockDim().x
     local_i = threadIdx().x
-    sorted_seq_ro = CUDA_CORE.Const(sorted_seq)
-    coords = CUDA_CORE.Const(coords_var)
+    sorted_seq_ro = Const(sorted_seq)
+    coords = Const(coords_var)
     mins_smem = CuStaticSharedArray(C, (D32, b))
     maxs_smem = CuStaticSharedArray(C, (D32, b))
     r_smem = CuStaticSharedArray(C, (r, b))
@@ -1176,8 +1174,8 @@ function kernel_min_max_triclinic!(
     r = Int32(n % D32)
     i = threadIdx().x + (blockIdx().x - a) * blockDim().x
     local_i = threadIdx().x
-    sorted_seq_ro = CUDA_CORE.Const(sorted_seq)
-    coords = CUDA_CORE.Const(coords_var)
+    sorted_seq_ro = Const(sorted_seq)
+    coords = Const(coords_var)
     mins_smem = CuStaticSharedArray(C, (D32, b))
     maxs_smem = CuStaticSharedArray(C, (D32, b))
     r_smem = CuStaticSharedArray(C, (r, b))
@@ -1270,7 +1268,7 @@ positions in `inv_morton_seq`.
 """
 function update_inv_morton_kernel!(inv_morton_seq, morton_seq, ::Val{N}) where N
     i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
-    morton_seq_ro = CUDA_CORE.Const(morton_seq)
+    morton_seq_ro = Const(morton_seq)
     if i <= N
         @inbounds inv_morton_seq[morton_seq_ro[i]] = i
     end
@@ -1355,11 +1353,11 @@ function apply_sparse_exceptions_kernel!(
     inv_morton_seq, compressed_masks, tile_is_clean,
     ::Val{n_blocks}, ::Val{n_excluded}, ::Val{n_special}
 ) where {n_blocks, n_excluded, n_special}
-    excluded_i_ro = CUDA_CORE.Const(excluded_i)
-    excluded_j_ro = CUDA_CORE.Const(excluded_j)
-    special_i_ro = CUDA_CORE.Const(special_i)
-    special_j_ro = CUDA_CORE.Const(special_j)
-    inv_morton_seq_ro = CUDA_CORE.Const(inv_morton_seq)
+    excluded_i_ro = Const(excluded_i)
+    excluded_j_ro = Const(excluded_j)
+    special_i_ro = Const(special_i)
+    special_j_ro = Const(special_j)
+    inv_morton_seq_ro = Const(inv_morton_seq)
 
     idx = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     
@@ -1503,9 +1501,9 @@ function find_interacting_blocks_kernel!(
     mins::AbstractArray{C}, maxs::AbstractArray{C}, boundary, ::Val{r_cut2}, ::Val{N_blocks}, ::Val{D}, max_total_tiles,
     compressed_masks, tile_is_clean
 ) where {C, r_cut2, N_blocks, D}
-    mins_ro = CUDA_CORE.Const(mins)
-    maxs_ro = CUDA_CORE.Const(maxs)
-    tile_is_clean_ro = CUDA_CORE.Const(tile_is_clean)
+    mins_ro = Const(mins)
+    maxs_ro = Const(maxs)
+    tile_is_clean_ro = Const(tile_is_clean)
     i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     j = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
 
@@ -1584,15 +1582,15 @@ function force_kernel!(
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
-    coords = CUDA_CORE.Const(coords_var)
-    velocities = CUDA_CORE.Const(velocities_var)
-    atoms = CUDA_CORE.Const(atoms_var)
-    compressed_masks_ro = CUDA_CORE.Const(compressed_masks)
-    tiles_i_ro = CUDA_CORE.Const(interacting_tiles_i)
-    tiles_j_ro = CUDA_CORE.Const(interacting_tiles_j)
-    tiles_type_ro = CUDA_CORE.Const(interacting_tiles_type)
-    num_interacting_tiles_ro = CUDA_CORE.Const(num_interacting_tiles)
-    interacting_tiles_overflow_ro = CUDA_CORE.Const(interacting_tiles_overflow)
+    coords = Const(coords_var)
+    velocities = Const(velocities_var)
+    atoms = Const(atoms_var)
+    compressed_masks_ro = Const(compressed_masks)
+    tiles_i_ro = Const(interacting_tiles_i)
+    tiles_j_ro = Const(interacting_tiles_j)
+    tiles_type_ro = Const(interacting_tiles_type)
+    num_interacting_tiles_ro = Const(num_interacting_tiles)
+    interacting_tiles_overflow_ro = Const(interacting_tiles_overflow)
     
     idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
 
@@ -2050,15 +2048,15 @@ function energy_kernel!(
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
-    coords = CUDA_CORE.Const(coords_var)
-    velocities = CUDA_CORE.Const(velocities_var)
-    atoms = CUDA_CORE.Const(atoms_var)
-    compressed_masks_ro = CUDA_CORE.Const(compressed_masks)
-    tiles_i_ro = CUDA_CORE.Const(interacting_tiles_i)
-    tiles_j_ro = CUDA_CORE.Const(interacting_tiles_j)
-    tiles_type_ro = CUDA_CORE.Const(interacting_tiles_type)
-    num_interacting_tiles_ro = CUDA_CORE.Const(num_interacting_tiles)
-    interacting_tiles_overflow_ro = CUDA_CORE.Const(interacting_tiles_overflow)
+    coords = Const(coords_var)
+    velocities = Const(velocities_var)
+    atoms = Const(atoms_var)
+    compressed_masks_ro = Const(compressed_masks)
+    tiles_i_ro = Const(interacting_tiles_i)
+    tiles_j_ro = Const(interacting_tiles_j)
+    tiles_type_ro = Const(interacting_tiles_type)
+    num_interacting_tiles_ro = Const(num_interacting_tiles)
+    interacting_tiles_overflow_ro = Const(interacting_tiles_overflow)
 
     idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
 
@@ -2276,9 +2274,9 @@ tiled `GPUNeighborFinder` path is the production fast path for CUDA systems.
 =#
 function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, velocities_var,
                         atoms_var, boundary, inters, step_n, ::Val{D}, ::Val{F}) where {T, D, F}
-    coords = CUDA_CORE.Const(coords_var)
-    velocities = CUDA_CORE.Const(velocities_var)
-    atoms = CUDA_CORE.Const(atoms_var)
+    coords = Const(coords_var)
+    velocities = Const(velocities_var)
+    atoms = Const(atoms_var)
     n_atoms = length(atoms)
 
     tidx = threadIdx().x
