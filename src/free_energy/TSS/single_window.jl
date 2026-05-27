@@ -34,6 +34,14 @@ mutable struct _TSSLocalEstimator{T, ES, AS, ST, AG}
 
 end
 
+function Base.show(io::IO, state::_TSSLocalEstimator)
+    print(io, "_TSSLocalEstimator with ", _tss_count(length(state.state_indices), "state"),
+          ", active state ", state.active_state.active_idx,
+          ", iteration ", state.iteration)
+end
+
+Base.show(io::IO, ::MIME"text/plain", state::_TSSLocalEstimator) = show(io, state)
+
 function make_tss_local_estimator(state_space::ExtendedStateSpace,
                                   active_state::ActiveThermoState;
                                   state_indices = nothing,

@@ -1263,6 +1263,11 @@ end
     # n_bias is set low (10) to guarantee the initial stage is rapidly saturated 
     # and weight updates trigger during a short 2000 step test
     awh_state = AWHState(thermo_states; first_state=1, n_bias=10)
+    awh_state_show = sprint(show, awh_state)
+    @test occursin("AWHState with 4 windows", awh_state_show)
+    @test occursin("active window 1", awh_state_show)
+    @test !occursin("scratch_potentials", awh_state_show)
+    @test sprint(show, MIME"text/plain"(), awh_state) == awh_state_show
 
     awh_first_state = AWHState(thermo_states; first_state=3, n_bias=10)
     @test awh_first_state.active_idx == 3
@@ -1328,6 +1333,11 @@ end
         coverage_threshold=1.0,
         log_freq=10
     )
+    awh_sim_show = sprint(show, awh_sim)
+    @test occursin("AWHSimulation with 4 windows", awh_sim_show)
+    @test occursin("PMF deconvolution disabled", awh_sim_show)
+    @test !occursin("well_tempered_fac", awh_sim_show)
+    @test sprint(show, MIME"text/plain"(), awh_sim) == awh_sim_show
 
     initial_f = copy(awh_sim.state.f)
 

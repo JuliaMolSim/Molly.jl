@@ -2,6 +2,9 @@ export
     AWHState,
     AWHSimulation
     
+_awh_count(n::Integer, singular::AbstractString, plural::AbstractString=string(singular, "s")) =
+    string(n, " ", n == 1 ? singular : plural)
+
 # Convenience struct to store relevant things
 # when running an AWH simulation.
 mutable struct AWHStats{T}
@@ -12,6 +15,13 @@ mutable struct AWHStats{T}
     stage_history::Vector{Symbol}
     max_delta_f_history::Vector{T}
 end
+
+function Base.show(io::IO, stats::AWHStats)
+    print(io, "AWHStats with ",
+          _awh_count(length(stats.step_indices), "logged entry", "logged entries"))
+end
+
+Base.show(io::IO, ::MIME"text/plain", stats::AWHStats) = show(io, stats)
 
 
 @doc raw"""
@@ -107,6 +117,16 @@ function Base.propertynames(state::AWHState, private::Bool=false)
                     :state_general_inters, :λ_hamiltonians))
     return Tuple(names)
 end
+
+function Base.show(io::IO, state::AWHState)
+    stage = state.in_initial_stage ? "initial" : "linear"
+    print(io, "AWHState with ", _awh_count(n_states(state.state_space), "window"),
+          ", active window ", state.active_idx, ", ", stage, " stage, N_eff=",
+          state.N_eff, ", N_bias=", state.N_bias, ", ",
+          _awh_count(state.n_accum, "accumulated sample"))
+end
+
+Base.show(io::IO, ::MIME"text/plain", state::AWHState) = show(io, state)
 
 function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   first_state::Int = 1,
@@ -370,6 +390,17 @@ function AWHSimulation(
                          log_freq, awh_state,
                          pmf)
 end
+
+function Base.show(io::IO, sim::AWHSimulation)
+    pmf_status = isnothing(sim.pmf) ? "disabled" : "enabled"
+    print(io, "AWHSimulation with ", _awh_count(sim.n_windows, "window"),
+          ", active window ", sim.state.active_idx, ", ",
+          _awh_count(sim.n_md_steps, "MD step"), " per iteration",
+          ", update frequency ", sim.update_freq, ", log frequency ", sim.log_freq,
+          ", PMF deconvolution ", pmf_status)
+end
+
+Base.show(io::IO, ::MIME"text/plain", sim::AWHSimulation) = show(io, sim)
 
 # Swaps Hamiltionians
 function update_active_sys!(awh_state::AWHState, active_idx::Int)

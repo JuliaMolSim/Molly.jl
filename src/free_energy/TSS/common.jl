@@ -1,3 +1,6 @@
+_tss_count(n::Integer, singular::AbstractString, plural::AbstractString=string(singular, "s")) =
+    string(n, " ", n == 1 ? singular : plural)
+
 mutable struct TSSStats{T}
     iterations::Vector{Int}
     active_state::Vector{Int}
@@ -7,6 +10,13 @@ mutable struct TSSStats{T}
     dens_history::Vector{Vector{T}}
     tilt_history::Vector{Vector{T}}
 end
+
+function Base.show(io::IO, stats::TSSStats)
+    print(io, "TSSStats with ",
+          _tss_count(length(stats.iterations), "logged entry", "logged entries"))
+end
+
+Base.show(io::IO, ::MIME"text/plain", stats::TSSStats) = show(io, stats)
 
 function TSSStats(::Type{FT}) where {FT}
     return TSSStats{FT}(

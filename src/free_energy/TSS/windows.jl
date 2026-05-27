@@ -44,6 +44,14 @@ struct TSSWindow
     end
 end
 
+function Base.show(io::IO, window::TSSWindow)
+    print(io, "TSSWindow ", window.index, " with ",
+          _tss_count(length(window.state_indices), "state"), ", ",
+          _tss_count(length(window.evaluation_state_indices), "evaluated state"))
+end
+
+Base.show(io::IO, ::MIME"text/plain", window::TSSWindow) = show(io, window)
+
 # TSSGraph
 #
 # A window graph for TSS expanded-ensemble states.
@@ -61,6 +69,14 @@ struct TSSGraph
     rung_coordinates::Vector{Vector{Int}}
     rung_edges::Vector{Int}
 end
+
+function Base.show(io::IO, graph::TSSGraph)
+    print(io, "TSSGraph with ", _tss_count(graph.n_states, "state"), ", ",
+          _tss_count(length(graph.windows), "window"), ", ",
+          _tss_count(length(graph.rung_edges), "edge"))
+end
+
+Base.show(io::IO, ::MIME"text/plain", graph::TSSGraph) = show(io, graph)
 
 struct _TSSGraphEdge
     nodes::Any
@@ -119,6 +135,15 @@ mutable struct WindowedTSSStats{T}
     replica_max_abs_delta_f::Vector{Vector{T}}
 end
 
+function Base.show(io::IO, stats::WindowedTSSStats)
+    print(io, "WindowedTSSStats with ",
+          _tss_count(length(stats.iterations), "logged entry", "logged entries"),
+          " and ", _tss_count(length(stats.replica_indices), "replica log entry",
+                              "replica log entries"))
+end
+
+Base.show(io::IO, ::MIME"text/plain", stats::WindowedTSSStats) = show(io, stats)
+
 function WindowedTSSStats(::Type{FT}) where {FT}
     return WindowedTSSStats{FT}(
         Int[],
@@ -164,6 +189,15 @@ mutable struct WindowedTSSCoupling{T}
     pi_regularization::T
 end
 
+function Base.show(io::IO, coupling::WindowedTSSCoupling)
+    print(io, "WindowedTSSCoupling with ",
+          _tss_count(length(coupling.visit_control_f), "state"), ", ",
+          _tss_count(length(coupling.window_probs), "window"), ", converged=",
+          coupling.converged, ", iterations=", coupling.iterations)
+end
+
+Base.show(io::IO, ::MIME"text/plain", coupling::WindowedTSSCoupling) = show(io, coupling)
+
 """
     TSSState
     TSSState(thermo_states; graph=nothing, first_state=1, first_window=nothing,
@@ -194,6 +228,16 @@ mutable struct TSSState{T, ES, AS, G, W, E}
     stats::WindowedTSSStats{T} # Diagnostics
     coupling::Union{Nothing, WindowedTSSCoupling{T}} # Global visit-control state
 end
+
+function Base.show(io::IO, state::TSSState)
+    visit_control = isnothing(state.coupling) ? "disabled" : "enabled"
+    print(io, "TSSState with ", _tss_count(n_states(state.state_space), "state"), ", ",
+          _tss_count(length(state.windows), "window"), ", active state ",
+          state.active_state.active_idx, ", active window ", state.active_window,
+          ", iteration ", state.iteration, ", visit control ", visit_control)
+end
+
+Base.show(io::IO, ::MIME"text/plain", state::TSSState) = show(io, state)
 
 function _build_tss_state_to_windows(windows::AbstractVector{TSSWindow}, K::Int)
     state_to_windows = [Int[] for _ in 1:K]

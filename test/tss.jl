@@ -412,7 +412,15 @@ end
             ETA=2.0,
             dens_reg=1e-4,
         )
+        tss_state_show = sprint(show, tss_state)
+        @test occursin("TSSState with 3 states", tss_state_show)
+        @test occursin("active state 1", tss_state_show)
+        @test !occursin("window_update_counts", tss_state_show)
+        @test sprint(show, MIME"text/plain"(), tss_state) == tss_state_show
         state = Molly.active_tss_estimator(tss_state)
+        estimator_show = sprint(show, state)
+        @test occursin("_TSSLocalEstimator with 3 states", estimator_show)
+        @test !occursin("reduced_pot", estimator_show)
 
         weights = Molly.process_tss_sample!(state)
         @test weights === state.weights
@@ -421,6 +429,11 @@ end
         @test all(isfinite, state.reduced_pot)
 
         sim = Molly.TSSSimulation(tss_state; n_md_steps=1, n_cycles=3, log_freq=1)
+        sim_show = sprint(show, sim)
+        @test occursin("TSSSimulation with 1 replica", sim_show)
+        @test occursin("PMF deconvolution disabled", sim_show)
+        @test !occursin("replica_workspaces", sim_show)
+        @test sprint(show, MIME"text/plain"(), sim) == sim_show
         Molly.simulate!(sim; rng=MersenneTwister(1))
 
         @test tss_state.iteration == 3

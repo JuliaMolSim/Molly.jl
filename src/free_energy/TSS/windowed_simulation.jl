@@ -47,6 +47,13 @@ mutable struct WindowedTSSReplica{AS}
     active_window::Int
 end
 
+function Base.show(io::IO, replica::WindowedTSSReplica)
+    print(io, "WindowedTSSReplica with active state ",
+          replica.active_state.active_idx, ", active window ", replica.active_window)
+end
+
+Base.show(io::IO, ::MIME"text/plain", replica::WindowedTSSReplica) = show(io, replica)
+
 struct WindowedTSSObservation{T, V, PS}
     replica_index::Int
     update_window::Int
@@ -93,6 +100,17 @@ mutable struct TSSSimulation{S, R, W, P}
     log_freq::Int
     frozen::Bool
 end
+
+function Base.show(io::IO, sim::TSSSimulation)
+    pmf_status = isnothing(sim.pmf) ? "disabled" : "enabled"
+    print(io, "TSSSimulation with ", _tss_count(length(sim.replicas), "replica"),
+          ", ", _tss_count(sim.n_cycles, "cycle"), ", ",
+          _tss_count(sim.n_md_steps, "MD step"), " per cycle, ",
+          _tss_count(sim.self_adjustment_steps, "self-adjustment step"),
+          " per cycle, frozen=", sim.frozen, ", PMF deconvolution ", pmf_status)
+end
+
+Base.show(io::IO, ::MIME"text/plain", sim::TSSSimulation) = show(io, sim)
 
 function TSSSimulation(state::TSSState;
                                n_md_steps::Int,
