@@ -1,8 +1,3 @@
-using Molly
-using Random
-using Test
-using Unitful
-
 function make_tss_thermo_states(; n_atoms=6, n_states=3)
     atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(2.0u"nm")

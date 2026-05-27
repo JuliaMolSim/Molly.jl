@@ -1,8 +1,3 @@
-using Molly
-using Random
-using Test
-using Unitful
-
 function make_tss_pmf_thermo_states(; n_atoms=4, n_states=4)
     atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(2.0u"nm")
