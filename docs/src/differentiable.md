@@ -432,6 +432,29 @@ The [code is available](https://github.com/greener-group/GB99dms).
 Molly.jl was also used to code [reversible simulation](https://doi.org/10.1073/pnas.2426058122), an extension of differentiable simulation with RAD where the gradients are calculated explicitly.
 This means the memory cost is constant in step number.
 
+## Machine Learning Potentials
+
+Molly supports custom neural network architectures to define potential energy surfaces via `MachineLearningPotential`. This uses `Lux.jl` to define the model and `Zygote.jl` for automatic force calculations.
+
+```julia
+using Molly, Lux, Random
+
+# Define a neural network (Input size must match 3 * N_atoms)
+model = Chain(Dense(9 => 16, tanh), Dense(16 => 1))
+ps, st = Lux.setup(Random.default_rng(), model)
+
+# Initialize the potential
+mlp = MachineLearningPotential(model, ps, st)
+
+# Add to your system
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=CubicBoundary(10.0, 10.0, 10.0),
+    general_inters=(mlp,)
+)
+```
+
 ## Molecular loss functions
 
 Ultimately, you need some objective function in order to calculate the gradient for each parameter.
