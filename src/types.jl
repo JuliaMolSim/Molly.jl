@@ -23,7 +23,11 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator
+    ASECalculator,
+    AbstractMLPotential,
+    ANIPotential,
+    compute_aevs,
+    cosine_cutoff
 
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64
@@ -1827,6 +1831,49 @@ struct ASECalculator{T}
 end
 
 function update_ase_calc! end
+
+# Base type for ML interatomic potentials.
+# Concrete subtypes (ANIPotential, etc.) are defined in ext/MollyLuxExt.jl.
+abstract type AbstractMLPotential end
+
+"""
+    ANIPotential(path; force_units, energy_units, T, ensemble_idx)
+
+Load an ANI neural network potential from an HDF5 file exported by
+`scripts/torchani_reference.py`. Requires `Lux` and `HDF5` to be loaded.
+"""
+struct ANIPotential{M, PS, ST, SP, P, SE, D, F, E} <: AbstractMLPotential
+    model::M         # NamedTuple of per-element Lux.Chain sub-networks
+    ps::PS           # NamedTuple of Lux parameters
+    st::ST           # NamedTuple of Lux states
+    species_map::SP  # Dict{String,Int}: element → 1-based index
+    aev_params::P    # NamedTuple: η_R, r_s_R, r_c_R, η_A, r_s_A, θ_s, ζ, r_c_A
+    self_energies::SE # Vector: atomic self-energy per species (Hartree)
+    cutoff::D        # max(r_c_R, r_c_A), plain Float (Å)
+    force_units::F
+    energy_units::E
+end
+
+# Constructor and implementation are in ext/MollyLuxExt.jl (needs Lux + HDF5).
+function ANIPotential(path::AbstractString; kwargs...)
+    error("ANIPotential requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
+end
+
+"""
+    compute_aevs(coords, species_indices, neighbors, boundary, aev_params, n_species)
+
+Compute atomic environment vectors (AEVs) for all atoms.
+Returns a `(n_atoms, aev_length)` matrix.
+Implementation is in ext/MollyLuxExt.jl.
+"""
+function compute_aevs end
+
+"""
+    cosine_cutoff(r, r_c)
+
+Smooth cutoff function: `0.5*(1+cos(π*r/r_c))` for `r < r_c`, else `0`.
+"""
+function cosine_cutoff end
 
 # ForwardDiff.jl checks both value and derivative
 # This could be extended to only check the value for Duals
