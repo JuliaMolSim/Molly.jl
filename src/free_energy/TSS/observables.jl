@@ -1,26 +1,27 @@
-const _TSS_COVDET_GAMMA_EPSILON = 0.01
+const TSS_COVDET_GAMMA_EPSILON = 0.01
 
-struct _TSSCovDetAdaptiveGamma{T}
+struct TSSCovDetAdaptiveGamma{T}
     epsilon_gamma::T
     rung_neighbors::Vector{Vector{NTuple{3, Int}}}
     rung_volumes::Vector{T}
     dimension::Int
 end
 
-function _validate_tss_local_adaptive_gamma(adaptive_gamma)
+function validate_tss_local_adaptive_gamma(adaptive_gamma)
     isnothing(adaptive_gamma) && return nothing
-    adaptive_gamma isa _TSSCovDetAdaptiveGamma && return adaptive_gamma
+    adaptive_gamma isa TSSCovDetAdaptiveGamma && return adaptive_gamma
     if adaptive_gamma isa Symbol
-        adaptive_gamma == :covdet &&
+        if adaptive_gamma == :covdet
             throw(ArgumentError("adaptive_gamma=:covdet is only supported by TSSState " *
                                 "because it requires a TSSGraph."))
+        end
         throw(ArgumentError("unknown TSS adaptive_gamma mode $(adaptive_gamma); " *
                             "the only supported mode is :covdet."))
     end
     throw(ArgumentError("TSS adaptive_gamma accepts only nothing or :covdet."))
 end
 
-function _ensure_tss_adaptive_moments!(state, n_moments::Int)
+function ensure_tss_adaptive_moments!(state, n_moments::Int)
     if isnothing(state.adaptive_moments)
         state.adaptive_moments = zeros(eltype(state.f), length(state.f), n_moments)
     elseif size(state.adaptive_moments) != (length(state.f), n_moments)
@@ -30,7 +31,7 @@ function _ensure_tss_adaptive_moments!(state, n_moments::Int)
     return state.adaptive_moments
 end
 
-function _ensure_tss_epoch_adaptive_moments!(epoch::TSSEpoch{FT},
+function ensure_tss_epoch_adaptive_moments!(epoch::TSSEpoch{FT},
                                              n_states::Int,
                                              n_moments::Int) where {FT}
     if isnothing(epoch.adaptive_moments)
@@ -41,16 +42,18 @@ function _ensure_tss_epoch_adaptive_moments!(epoch::TSSEpoch{FT},
     return epoch.adaptive_moments
 end
 
-function _update_tss_adaptive_moments!(moments::AbstractMatrix{FT},
+function update_tss_adaptive_moments!(moments::AbstractMatrix{FT},
                                        old_f::AbstractVector{FT},
                                        reduced_pot::AbstractVector{FT},
                                        log_den::FT,
                                        gain::FT,
                                        adaptive_values::AbstractMatrix{FT}) where {FT}
-    size(moments) == size(adaptive_values) ||
+    if size(moments) != size(adaptive_values)
         throw(DimensionMismatch("TSS adaptive moments and values must have matching sizes."))
-    length(old_f) == length(reduced_pot) == size(moments, 1) ||
+    end
+    if !(length(old_f) == length(reduced_pot) == size(moments, 1))
         throw(DimensionMismatch("TSS adaptive moments must match local state count."))
+    end
 
     log_gain = log(gain)
     log_keep = gain == one(FT) ? -FT(Inf) : log1p(-gain)
@@ -66,12 +69,13 @@ function _update_tss_adaptive_moments!(moments::AbstractMatrix{FT},
         end
     end
 
-    all(isfinite, moments) ||
+    if !all(isfinite, moments)
         throw(ArgumentError("TSS adaptive-gamma moments became non-finite."))
+    end
     return moments
 end
 
-function _update_tss_running_adaptive_moments!(state,
+function update_tss_running_adaptive_moments!(state,
                                                old_f::AbstractVector,
                                                log_den,
                                                gain,
@@ -79,8 +83,8 @@ function _update_tss_running_adaptive_moments!(state,
     isnothing(adaptive_values) && return state
     FT = eltype(state.f)
     values = FT.(adaptive_values)
-    moments = _ensure_tss_adaptive_moments!(state, size(values, 2))
-    _update_tss_adaptive_moments!(
+    moments =ensure_tss_adaptive_moments!(state, size(values, 2))
+   update_tss_adaptive_moments!(
         moments,
         FT.(old_f),
         state.reduced_pot,
@@ -91,7 +95,7 @@ function _update_tss_running_adaptive_moments!(state,
     return state
 end
 
-function _aggregate_tss_history_adaptive_moments!(state)
+function aggregate_tss_history_adaptive_moments!(state)
     isnothing(state.adaptive_gamma) && return state
     history = state.history
     isnothing(history) && return state
@@ -107,7 +111,7 @@ function _aggregate_tss_history_adaptive_moments!(state)
     end
     n_moments == 0 && return state
 
-    moments = _ensure_tss_adaptive_moments!(state, n_moments)
+    moments = ensure_tss_adaptive_moments!(state, n_moments)
     for k in axes(moments, 1)
         log_norm = -FT(Inf)
         log_weights = FT[]
@@ -132,30 +136,32 @@ function _aggregate_tss_history_adaptive_moments!(state)
         end
     end
 
-    all(isfinite, moments) ||
+    if !all(isfinite, moments)
         throw(ArgumentError("TSS history-aggregated adaptive-gamma moments are non-finite."))
+    end
     return state
 end
 
-_tss_covdet_moment_count(dim::Int) = dim + dim * dim
-_tss_covdet_outer_col(dim::Int, i::Int, j::Int) = dim + (j - 1) * dim + i
+tss_covdet_moment_count(dim::Int) = dim + dim * dim
+tss_covdet_outer_col(dim::Int, i::Int, j::Int) = dim + (j - 1) * dim + i
 
-function _tss_covdet_moment_values(state,
+function tss_covdet_moment_values(state,
                                    evaluation_reduced_pot = state.evaluation_reduced_pot)
     adaptive_gamma = state.adaptive_gamma
-    adaptive_gamma isa _TSSCovDetAdaptiveGamma || return nothing
+    adaptive_gamma isa TSSCovDetAdaptiveGamma || return nothing
 
     FT = eltype(state.f)
     dim = adaptive_gamma.dimension
-    n_moments = _tss_covdet_moment_count(dim)
+    n_moments = tss_covdet_moment_count(dim)
     values = zeros(FT, length(state.state_indices), n_moments)
     derivatives = zeros(FT, dim)
 
     for (local_i, global_state) in enumerate(state.state_indices)
         neighbors = adaptive_gamma.rung_neighbors[global_state]
-        length(neighbors) == dim ||
+        if length(neighbors) != dim
             throw(ArgumentError("TSS CovDet rung $(global_state) has $(length(neighbors)) " *
                                 "derivative dimensions, expected $(dim)."))
+        end
 
         for d in 1:dim
             reverse, forward, denominator = neighbors[d]
@@ -176,25 +182,27 @@ function _tss_covdet_moment_values(state,
         end
 
         for j in 1:dim, i in 1:dim
-            values[local_i, _tss_covdet_outer_col(dim, i, j)] =
+            values[local_i,tss_covdet_outer_col(dim, i, j)] =
                 derivatives[i] * derivatives[j]
         end
     end
 
-    all(isfinite, values) ||
+    if !all(isfinite, values)
         throw(ArgumentError("TSS CovDet adaptive-gamma moments contain non-finite values."))
+    end
     return values
 end
 
-function _tss_covdet_raw_values(state)
+function tss_covdet_raw_values(state)
     adaptive_gamma = state.adaptive_gamma
-    adaptive_gamma isa _TSSCovDetAdaptiveGamma || return nothing
+    adaptive_gamma isa TSSCovDetAdaptiveGamma || return nothing
     isnothing(state.adaptive_moments) && return nothing
 
     FT = eltype(state.f)
     dim = adaptive_gamma.dimension
-    size(state.adaptive_moments, 2) == _tss_covdet_moment_count(dim) ||
+    if size(state.adaptive_moments, 2) != tss_covdet_moment_count(dim)
         throw(ArgumentError("TSS CovDet adaptive moments have invalid dimension."))
+    end
 
     raw = zeros(FT, length(state.state_indices))
     covariance = Matrix{Float64}(undef, dim, dim)
@@ -202,7 +210,7 @@ function _tss_covdet_raw_values(state)
         for j in 1:dim, i in 1:dim
             mean_outer = Float64(state.adaptive_moments[
                 local_i,
-                _tss_covdet_outer_col(dim, i, j),
+               tss_covdet_outer_col(dim, i, j),
             ])
             mean_i = Float64(state.adaptive_moments[local_i, i])
             mean_j = Float64(state.adaptive_moments[local_i, j])
@@ -216,39 +224,43 @@ function _tss_covdet_raw_values(state)
         detcov = dim == 1 ? covariance[1, 1] : det(Symmetric(covariance))
         raw[local_i] = FT(sqrt(max(detcov, 0.0)))
     end
-    all(isfinite, raw) ||
+    if !all(isfinite, raw)
         throw(ArgumentError("TSS CovDet adaptive-gamma estimates are non-finite."))
+    end
     return raw
 end
 
-function _volume_weighted_tss_gamma!(state)
+function volume_weighted_tss_gamma!(state)
     adaptive_gamma = state.adaptive_gamma
-    adaptive_gamma isa _TSSCovDetAdaptiveGamma || return state
+    adaptive_gamma isa TSSCovDetAdaptiveGamma || return state
     FT = eltype(state.f)
     weights = FT.(adaptive_gamma.rung_volumes)
     total = sum(weights)
-    isfinite(total) && total > zero(FT) ||
+    if !(isfinite(total) && total > zero(FT))
         throw(ArgumentError("TSS CovDet rung volumes have invalid total $(total)."))
+    end
     state.gamma .= weights ./ total
     state.log_gamma .= log.(state.gamma)
     check_tss_positive_probabilities!(state.gamma, "CovDet adaptive gamma", state)
     return state
 end
 
-function _apply_tss_covdet_gamma!(state, raw_values, max_detcov)
+function apply_tss_covdet_gamma!(state, raw_values, max_detcov)
     adaptive_gamma = state.adaptive_gamma
-    adaptive_gamma isa _TSSCovDetAdaptiveGamma || return state
+    adaptive_gamma isa TSSCovDetAdaptiveGamma || return state
 
     FT = eltype(state.f)
     raw = isnothing(raw_values) ? zeros(FT, length(state.gamma)) : FT.(raw_values)
-    length(raw) == length(state.gamma) ||
+    if length(raw) != length(state.gamma)
         throw(ArgumentError("TSS CovDet adaptive gamma has invalid length $(length(raw)); " *
                             "expected $(length(state.gamma))."))
-    all(isfinite, raw) ||
+    end
+    if !all(isfinite, raw)
         throw(ArgumentError("TSS CovDet adaptive gamma contains non-finite raw values."))
+    end
 
     if !isfinite(max_detcov) || max_detcov <= zero(FT)
-        return _volume_weighted_tss_gamma!(state)
+        return volume_weighted_tss_gamma!(state)
     end
 
     epsilon = FT(adaptive_gamma.epsilon_gamma)
@@ -258,17 +270,18 @@ function _apply_tss_covdet_gamma!(state, raw_values, max_detcov)
                          FT(adaptive_gamma.rung_volumes[k])
     end
     total = sum(state.gamma)
-    isfinite(total) && total > zero(FT) ||
+    if !(isfinite(total) && total > zero(FT))
         throw(ArgumentError("TSS CovDet adaptive gamma has invalid total $(total)."))
+    end
     state.gamma ./= total
     state.log_gamma .= log.(state.gamma)
     check_tss_positive_probabilities!(state.gamma, "CovDet adaptive gamma", state)
     return state
 end
 
-function _update_tss_adaptive_gamma!(state)
+function update_tss_adaptive_gamma!(state)
     isnothing(state.adaptive_gamma) && return state
-    raw = _tss_covdet_raw_values(state)
+    raw =tss_covdet_raw_values(state)
     max_detcov = isnothing(raw) ? zero(eltype(state.f)) : maximum(raw)
-    return _apply_tss_covdet_gamma!(state, raw, max_detcov)
+    return apply_tss_covdet_gamma!(state, raw, max_detcov)
 end

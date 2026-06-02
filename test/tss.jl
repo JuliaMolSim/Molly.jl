@@ -338,12 +338,12 @@ end
         cutoff_config = Molly.TSSHistoryForgetting(alpha=0.19, phi=1.2)
         cutoff_history = Molly.TSSEpochHistory(cutoff_config, Float64, 2)
         cutoff_time = 95
-        Molly._ensure_tss_epoch_bounds!(cutoff_history, cutoff_time)
-        floor_cutoff = Molly._tss_epoch_index!(
+        Molly.ensure_tss_epoch_bounds!(cutoff_history, cutoff_time)
+        floor_cutoff = Molly.tss_epoch_index!(
             cutoff_history,
             floor(Int, cutoff_config.alpha * cutoff_time),
         )
-        first_retained = Molly._tss_first_retained_epoch_index!(
+        first_retained = Molly.tss_first_retained_epoch_index!(
             cutoff_history,
             cutoff_time,
         )
@@ -356,7 +356,7 @@ end
             epoch.count = 1
             push!(cutoff_history.epochs, epoch)
         end
-        Molly._drop_old_tss_epochs!(cutoff_history, cutoff_time)
+        Molly.drop_old_tss_epochs!(cutoff_history, cutoff_time)
         @test [epoch.index for epoch in cutoff_history.epochs] == [first_retained]
     end
 
@@ -581,7 +581,7 @@ end
         for (eval_i, state_i) in enumerate(derivative_estimator.evaluation_state_indices)
             derivative_estimator.evaluation_reduced_pot[eval_i] = u_by_state[state_i]
         end
-        covdet_values = Molly._tss_covdet_moment_values(derivative_estimator)
+        covdet_values = Molly.tss_covdet_moment_values(derivative_estimator)
         for (local_i, state_i) in enumerate(derivative_estimator.state_indices)
             reverse, forward, denominator = only(graph4.rung_neighbors[state_i])
             expected_derivative = denominator == 0 ? 0.0 :
@@ -605,7 +605,7 @@ end
                 estimator.adaptive_moments[local_i, 2] = state_i^2
             end
         end
-        Molly._update_windowed_tss_adaptive_gamma!(manual_covdet_state)
+        Molly.update_windowed_tss_adaptive_gamma!(manual_covdet_state)
         for estimator in manual_covdet_state.estimators
             raw = Float64.(estimator.state_indices)
             volumes = graph4.rung_volumes[estimator.state_indices]
@@ -886,7 +886,7 @@ end
         @test sum(est.iteration for est in history_state.estimators) == 6
         @test sum(recent_counts) <= 6
         @test any(>(0), recent_counts)
-        @test Molly._windowed_tss_visited_mask(history_state) == (recent_counts .> 0)
+        @test Molly.windowed_tss_visited_mask(history_state) == (recent_counts .> 0)
         @test all(est -> est.history !== nothing, history_state.estimators)
         @test all(isfinite, Molly.tss_free_energies(history_state; visited_only=true))
 
@@ -1143,7 +1143,7 @@ end
 
             history = estimator.history
             empty!(history.epochs)
-            Molly._ensure_tss_epoch_bounds!(history, jackknife_state.iteration)
+            Molly.ensure_tss_epoch_bounds!(history, jackknife_state.iteration)
             stale_epoch = Molly.TSSEpoch(1, Float64, length(estimator.f))
             stale_epoch.count = 50
             stale_epoch.f .= reverse(local_f) .+ 10.0

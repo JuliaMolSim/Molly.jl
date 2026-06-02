@@ -76,8 +76,8 @@ end
 # IMPORTANT Passing vec_ij and r, and not having calculate_forces as a Val, was required to avoid allocations
 function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, scheduler,
                             i, j, vec_ij, r,
-                            ::Val{T}, calculate_forces, ::Val{atomic},
-                            ::Val{needs_vir}) where {T, atomic, needs_vir}
+                            ::Val{T}, ::Val{calculate_forces}, ::Val{atomic},
+                            ::Val{needs_vir}) where {T, calculate_forces, atomic, needs_vir}
     sqrt_π = sqrt(T(π))
     charge_ij = effective_charge(scheduler, atoms[i], Val(T)) *
                 effective_charge(scheduler, atoms[j], Val(T))
@@ -116,14 +116,14 @@ end
 
 function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
                                 coords::Vector, boundary, α, f_div_ϵr, scheduler, force_units, energy_units,
-                                calculate_forces, ::Val{T},
-                                ::Val{needs_vir}) where {T, needs_vir}
+                                ::Val{calculate_forces}, ::Val{T},
+                                ::Val{needs_vir}) where {calculate_forces, T, needs_vir}
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
         vec_ij = vector(coords[i], coords[j], boundary)
         r = norm(vec_ij)
         E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr,
-                            scheduler, i, j, vec_ij, r, Val(T), calculate_forces, Val(false),
+                            scheduler, i, j, vec_ij, r, Val(T), Val(calculate_forces), Val(false),
                             Val(needs_vir))
         exclusion_E += E
     end
@@ -132,8 +132,8 @@ end
 
 function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
                                 coords::AbstractVector{SVector{D, C}}, boundary, α, f_div_ϵr,
-                                scheduler, force_units, energy_units, calculate_forces, ::Val{T},
-                                ::Val{needs_vir}) where {D, C, T, needs_vir}
+                                scheduler, force_units, energy_units, ::Val{calculate_forces}, ::Val{T},
+                                ::Val{needs_vir}) where {D, C, T, calculate_forces, needs_vir}
     if calculate_forces
         buffer_Fs .= zero(T)
         if needs_vir
@@ -144,7 +144,7 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
     n_threads_gpu = 128
     kernel! = excluded_interactions_kernel!(backend, n_threads_gpu)
     kernel!(buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms, coords, boundary, α,
-            f_div_ϵr, scheduler, energy_units, Val(T), calculate_forces, Val(needs_vir);
+            f_div_ϵr, scheduler, energy_units, Val(T), Val(calculate_forces), Val(needs_vir);
             ndrange=length(excluded_pairs))
 
     if calculate_forces
@@ -158,15 +158,15 @@ end
 
 @kernel function excluded_interactions_kernel!(Fs_mat, vir, exclusion_Es, @Const(excluded_pairs),
                             @Const(atoms), @Const(coords), boundary, α, f_div_ϵr, scheduler, energy_units,
-                            ::Val{T}, calculate_forces,
-                            ::Val{needs_vir}) where {T, needs_vir}
+                            ::Val{T}, ::Val{calculate_forces},
+                            ::Val{needs_vir}) where {T, calculate_forces, needs_vir}
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
         vec_ij = vector(coords[i], coords[j], boundary)
         r = norm(vec_ij)
         E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f_div_ϵr,
-                                scheduler, i, j, vec_ij, r, Val(T), calculate_forces, Val(true),
+                                scheduler, i, j, vec_ij, r, Val(T), Val(calculate_forces), Val(true),
                                 Val(needs_vir))
         exclusion_Es[ei] = ustrip(energy_units, E)
     end
@@ -244,13 +244,13 @@ function ewald_pe_forces!(Fs, vir, sys::System{3}, inter::AbstractEwald, ::Val{n
                           n_threads::Integer=Threads.nthreads()) where needs_vir
     calculate_forces = !isnothing(Fs)
     return ewald_pe_forces!(Fs, vir, inter, sys.atoms, sys.coords, sys.boundary, sys.force_units,
-                            sys.energy_units, Val(needs_vir), calculate_forces;
+                            sys.energy_units, Val(needs_vir), Val(calculate_forces);
                             n_threads=n_threads)
 end
 
 function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, force_units,
-                          energy_units, ::Val{needs_vir}, calculate_forces=true;
-                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
+                          energy_units, ::Val{needs_vir}, ::Val{calculate_forces}=Val(true);
+                          n_threads::Integer=Threads.nthreads()) where {T, calculate_forces, needs_vir}
     AT = array_type(atoms)
     n_atoms = length(atoms)
     atoms_cpu, coords_cpu = from_device(atoms), from_device(coords)
@@ -272,7 +272,7 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
 
     exclusion_E = excluded_interactions!(Fs_cpu, vir, nothing, nothing, nothing,
                         inter.excluded_pairs, atoms_cpu, coords_cpu, boundary, α, f,
-                        inter.scheduler, force_units, energy_units, calculate_forces, Val(T),
+                        inter.scheduler, force_units, energy_units, Val(calculate_forces), Val(T),
                         Val(needs_vir))
 
     recip_box_size = (2 * T(π)) ./ boundary.side_lengths
@@ -447,7 +447,7 @@ struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B, SCH} <: Abstrac
     grad_safe::Bool
 end
 
-function _pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
+function pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
     bsplines_moduli = (zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3]))
     nmax = maximum(mesh_dims)
     data, ddata = zeros(T, order), zeros(T, order)
@@ -517,7 +517,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
     excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
 
-    bsplines_moduli = _pme_bspline_moduli(T, order, mesh_dims)
+    bsplines_moduli = pme_bspline_moduli(T, order, mesh_dims)
 
     if AT <: AbstractGPUArray
         charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)
@@ -1010,8 +1010,8 @@ grad_safe_fft!( charge_grid, fft_plan ) = fft_plan  * charge_grid
 grad_safe_bfft!(charge_grid, bfft_plan) = bfft_plan * charge_grid
 
 function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force_units,
-                          energy_units, ::Val{needs_vir}, calculate_forces=true;
-                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
+                          energy_units, ::Val{needs_vir}, ::Val{calculate_forces}=Val(true);
+                          n_threads::Integer=Threads.nthreads()) where {T, calculate_forces, needs_vir}
     n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     V = volume(boundary)
@@ -1020,7 +1020,7 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
 
     exclusion_E = excluded_interactions!(Fs, vir, inter.excluded_buffer_Fs, inter.virial_buffer,
                     inter.excluded_buffer_Es, inter.excluded_pairs, atoms, coords, boundary, α,
-                    f_div_ϵr, inter.scheduler, force_units, energy_units, calculate_forces,
+                    f_div_ϵr, inter.scheduler, force_units, energy_units, Val(calculate_forces),
                     Val(T), Val(needs_vir))
 
     recip_box = invert_box_vectors(boundary)

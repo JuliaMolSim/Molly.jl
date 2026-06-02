@@ -24,6 +24,11 @@ using CUDA
 using Atomix
 using KernelAbstractions
 
+# At the moment this is needed, since a change on naming for CUDA 6
+# - In principle, CUDA does export Const, but it conflicts with another
+#   namespace, so annotation is required.
+# - shfl_recurse is unexported so annotation is required. A PR has been opened
+#   for this, we have to wait until it is available in the stable release.
 const CUDA_CORE = isdefined(CUDA, :CUDACore) ? CUDA.CUDACore : CUDA
 
 const WARPSIZE = UInt32(32)

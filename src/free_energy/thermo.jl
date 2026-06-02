@@ -221,7 +221,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
     end
 end
 
-function _update_master_energy!(partition::AlchemicalPartition, coords, boundary;
+function update_master_energy!(partition::AlchemicalPartition, coords, boundary;
                                 force_recompute::Bool=false)
     if force_recompute || isnothing(partition.cached_coords) || partition.cached_coords != coords
         partition.master_sys.coords = coords
@@ -234,7 +234,7 @@ function _update_master_energy!(partition::AlchemicalPartition, coords, boundary
     return partition.cached_master_pe
 end
 
-function _evaluate_λ_energy!(λ_sys, coords, boundary)
+function evaluate_λ_energy!(λ_sys, coords, boundary)
     λ_sys.coords = coords
     λ_sys.boundary = boundary
     nbrs = find_neighbors(λ_sys)
@@ -253,8 +253,8 @@ function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, stat
         throw(ArgumentError("state_index ($state_index) out of range " *
                             "1:$(length(partition.λ_systems))"))
 
-    _update_master_energy!(partition, coords, boundary; force_recompute=force_recompute)
-    pe_specific = _evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary)
+    update_master_energy!(partition, coords, boundary; force_recompute=force_recompute)
+    pe_specific = evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary)
     return partition.cached_master_pe + pe_specific
 end
 
@@ -264,11 +264,11 @@ end
 # across all thermodynamic states simultaneously, evaluating the unperturbed
 # `master_sys` only once.
 function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
-    _update_master_energy!(partition, coords, boundary; force_recompute=true)
+    update_master_energy!(partition, coords, boundary; force_recompute=true)
     energies = Vector{typeof(partition.cached_master_pe)}(undef, length(partition.λ_systems))
 
     for state_index in eachindex(partition.λ_systems)
-        pe_specific = _evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary)
+        pe_specific = evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary)
         energies[state_index] = partition.cached_master_pe + pe_specific
     end
 

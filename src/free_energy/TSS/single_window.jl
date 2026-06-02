@@ -1,4 +1,4 @@
-mutable struct _TSSLocalEstimator{T, ES, AS, ST, AG}
+mutable struct TSSLocalEstimator{T, ES, AS, ST, AG}
 
     state_space::ES  # The different hamiltonians
     active_state::AS # The hamiltonian that is currently active
@@ -34,13 +34,13 @@ mutable struct _TSSLocalEstimator{T, ES, AS, ST, AG}
 
 end
 
-function Base.show(io::IO, state::_TSSLocalEstimator)
-    print(io, "_TSSLocalEstimator with ", _tss_count(length(state.state_indices), "state"),
+function Base.show(io::IO, state::TSSLocalEstimator)
+    print(io, "_TSSLocalEstimator with ", tss_count(length(state.state_indices), "state"),
           ", active state ", state.active_state.active_idx,
           ", iteration ", state.iteration)
 end
 
-Base.show(io::IO, ::MIME"text/plain", state::_TSSLocalEstimator) = show(io, state)
+Base.show(io::IO, ::MIME"text/plain", state::TSSLocalEstimator) = show(io, state)
 
 function make_tss_local_estimator(state_space::ExtendedStateSpace,
                                   active_state::ActiveThermoState;
@@ -168,10 +168,10 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
               nothing :
               TSSEpochHistory(history_forgetting, FT, local_K)
 
-    adaptive_gamma = _validate_tss_local_adaptive_gamma(adaptive_gamma)
+    adaptive_gamma = validate_tss_local_adaptive_gamma(adaptive_gamma)
     adaptive_moments = nothing
 
-    return _TSSLocalEstimator{
+    return TSSLocalEstimator{
         FT,
         typeof(state_space),
         typeof(active_state),
@@ -208,7 +208,7 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
 
 end
 
-function tss_local_index(state::_TSSLocalEstimator, global_state::Int)
+function tss_local_index(state::TSSLocalEstimator, global_state::Int)
     if !(1 <= global_state <= n_states(state.state_space))
         throw(ArgumentError("global_state $(global_state) out of bounds."))
     end
@@ -219,19 +219,19 @@ function tss_local_index(state::_TSSLocalEstimator, global_state::Int)
     return local_idx
 end
 
-function tss_global_index(state::_TSSLocalEstimator, local_state::Int)
+function tss_global_index(state::TSSLocalEstimator, local_state::Int)
     if !(1 <= local_state <= length(state.state_indices))
         throw(ArgumentError("$(local_state) out of bounds."))
     end
     return state.state_indices[local_state]
 end
 
-function tss_sample_global_state(rng::AbstractRNG, state::_TSSLocalEstimator)
+function tss_sample_global_state(rng::AbstractRNG, state::TSSLocalEstimator)
     idx = sample_state(rng, state.weights)
     return tss_global_index(state, idx)
 end
 
-function process_tss_sample!(state::_TSSLocalEstimator{FT}, active_state::ActiveThermoState) where {FT}
+function process_tss_sample!(state::TSSLocalEstimator{FT}, active_state::ActiveThermoState) where {FT}
     coords = active_state.active_sys.coords
     boundary = active_state.active_sys.boundary
 
@@ -274,11 +274,11 @@ function process_tss_sample!(state::_TSSLocalEstimator{FT}, active_state::Active
 
 end
 
-function process_tss_sample!(state::_TSSLocalEstimator{FT}) where {FT}
+function process_tss_sample!(state::TSSLocalEstimator{FT}) where {FT}
     return process_tss_sample!(state, state.active_state)
 end
 
-function _tss_log_den!(state::_TSSLocalEstimator)
+function tss_log_den!(state::TSSLocalEstimator)
     @. state.log_state_bias = state.f + state.log_dens
     check_tss_finite!(state.log_state_bias, "log state bias", state)
     @. state.scratch = state.log_state_bias - state.reduced_pot
@@ -290,7 +290,7 @@ function _tss_log_den!(state::_TSSLocalEstimator)
     return log_den
 end
 
-function update_tss_sampling_distribution!(state::_TSSLocalEstimator{FT}) where {FT}
+function update_tss_sampling_distribution!(state::TSSLocalEstimator{FT}) where {FT}
 
     check_tss_finite!(state.tilts, "visit tilts", state)
     if any(<(zero(FT)), state.tilts)
@@ -309,10 +309,11 @@ function update_tss_sampling_distribution!(state::_TSSLocalEstimator{FT}) where 
     end
 
     log_norm = logsumexp(state.scratch)
-    isfinite(log_norm) ||
+    if !isfinite(log_norm)
         throw(ArgumentError("TSS raw sampling density has non-finite log normalization " *
                             "$(log_norm) at iteration $(state.iteration) with active state " *
                             "$(state.active_state.active_idx)."))
+    end
 
     for k in eachindex(state.density)
         state.density[k] = exp(state.scratch[k] - log_norm)
@@ -332,7 +333,7 @@ function update_tss_sampling_distribution!(state::_TSSLocalEstimator{FT}) where 
 
 end
 
-function update_tss_estimates!(state::_TSSLocalEstimator{FT};
+function update_tss_estimates!(state::TSSLocalEstimator{FT};
                                visited_state::Int,
                                history_time = nothing,
                                adaptive_values = nothing,
@@ -350,21 +351,23 @@ function update_tss_estimates!(state::_TSSLocalEstimator{FT};
     check_tss_finite!(state.f, "free energy estimates", state)
     check_tss_finite!(state.reduced_pot, "reduced potentials", state)
 
-    log_den = _tss_log_den!(state)
+    log_den = tss_log_den!(state)
 
     t_next = state.iteration + 1
     history_time_int = if isnothing(history_time)
         t_next
     else
-        history_time isa Integer ||
+        if !(history_time isa Integer)
             throw(ArgumentError("history_time must be an integer."))
+        end
         Int(history_time)
     end
-    history_time_int > 0 ||
+    if history_time_int <= 0
         throw(ArgumentError("history_time must be positive."))
+    end
     old_f = copy(state.f)
     if isnothing(adaptive_values)
-        adaptive_values = _tss_covdet_moment_values(state)
+        adaptive_values = tss_covdet_moment_values(state)
     end
     use_standard_update = isnothing(state.history) || iszero(state.history.config.alpha)
 
@@ -381,7 +384,7 @@ function update_tss_estimates!(state::_TSSLocalEstimator{FT};
         @. state.f += delta_f
         @. state.f -= state.f[1]
         check_tss_finite!(state.f, "free energy estimates", state)
-        _update_tss_running_adaptive_moments!(
+        update_tss_running_adaptive_moments!(
             state,
             old_f,
             log_den,
@@ -396,7 +399,7 @@ function update_tss_estimates!(state::_TSSLocalEstimator{FT};
         check_tss_finite!(state.tilts, "visit tilts", state)
 
         if !isnothing(state.history)
-            _update_tss_history!(
+            update_tss_history!(
                 state,
                 visited_local,
                 log_den,
@@ -406,7 +409,7 @@ function update_tss_estimates!(state::_TSSLocalEstimator{FT};
             )
         end
     else
-        _update_tss_history!(
+        update_tss_history!(
             state,
             visited_local,
             log_den,
@@ -417,7 +420,7 @@ function update_tss_estimates!(state::_TSSLocalEstimator{FT};
 
     state.iteration += 1
 
-    update_adaptive_gamma && _update_tss_adaptive_gamma!(state)
+    update_adaptive_gamma && update_tss_adaptive_gamma!(state)
     update_tss_sampling_distribution!(state)
 
     return maximum(abs, state.f .- old_f)
@@ -426,7 +429,7 @@ end
 
 function log_tss_stats!(
     stats::TSSStats{FT},
-    state::_TSSLocalEstimator{FT},
+    state::TSSLocalEstimator{FT},
     visited_state::Int,
     next_state::Int,
     max_delta_f::FT) where {FT}

@@ -1,22 +1,27 @@
-function _windowed_tss_coupling(state::TSSState)
-    isnothing(state.coupling) &&
+function windowed_tss_coupling(state::TSSState)
+    if isnothing(state.coupling)
         throw(ArgumentError("global TSS visit control is not enabled for this TSSState."))
+    end
     return state.coupling
 end
 
-function _validate_windowed_tss_coupling_params(::Type{FT};
+function validate_windowed_tss_coupling_params(::Type{FT};
                                                 tolerance::Real,
                                                 max_iterations::Integer,
                                                 damping::Real,
                                                 pi_regularization::Real) where {FT}
-    isfinite(tolerance) && tolerance > 0 ||
+    if !(isfinite(tolerance) && tolerance > 0)
         throw(ArgumentError("visit_control_tolerance must be finite and positive."))
-    max_iterations > 0 ||
+    end
+    if max_iterations <= 0
         throw(ArgumentError("visit_control_max_iterations must be positive."))
-    isfinite(damping) && 0 < damping <= 1 ||
+    end
+    if !(isfinite(damping) && 0 < damping <= 1)
         throw(ArgumentError("visit_control_damping must be in the (0, 1] interval."))
-    isfinite(pi_regularization) && 0 < pi_regularization < 1 ||
+    end
+    if !(isfinite(pi_regularization) && 0 < pi_regularization < 1)
         throw(ArgumentError("pi_regularization must be in the (0, 1) interval."))
+    end
 
     return (
         tolerance = FT(tolerance),
@@ -26,17 +31,19 @@ function _validate_windowed_tss_coupling_params(::Type{FT};
     )
 end
 
-function _gauge_windowed_visit_control!(coupling::WindowedTSSCoupling{FT}) where {FT}
+function gauge_windowed_visit_control!(coupling::WindowedTSSCoupling{FT}) where {FT}
     reference = coupling.visit_control_f[1]
-    isfinite(reference) ||
+    if !isfinite(reference)
         throw(ArgumentError("TSS visit-control gauge reference is non-finite ($(reference))."))
+    end
     @. coupling.visit_control_f -= reference
-    all(isfinite, coupling.visit_control_f) ||
+    if !all(isfinite, coupling.visit_control_f)
         throw(ArgumentError("TSS visit-control free energies contain non-finite values."))
+    end
     return coupling.visit_control_f
 end
 
-function _normalize_windowed_tss_probabilities!(weights::AbstractVector{FT},
+function normalize_windowed_tss_probabilities!(weights::AbstractVector{FT},
                                                 name::AbstractString,
                                                 state::TSSState{FT}) where {FT}
     check_tss_probabilities!(weights, name, state)
@@ -46,7 +53,7 @@ function _normalize_windowed_tss_probabilities!(weights::AbstractVector{FT},
     return weights
 end
 
-function _normalize_windowed_tss_nonnegative_probabilities!(weights::AbstractVector{FT},
+function normalize_windowed_tss_nonnegative_probabilities!(weights::AbstractVector{FT},
                                                             name::AbstractString,
                                                             state::TSSState{FT}) where {FT}
     check_tss_probabilities!(weights, name, state)
@@ -55,7 +62,7 @@ function _normalize_windowed_tss_nonnegative_probabilities!(weights::AbstractVec
     return weights
 end
 
-function _windowed_tss_visited_mask(state::TSSState)
+function windowed_tss_visited_mask(state::TSSState)
     use_recent_counts = any(estimator -> !isnothing(estimator.history), state.estimators)
     visited = use_recent_counts ?
               [tss_recent_count(estimator) > 0 for estimator in state.estimators] :
@@ -66,32 +73,35 @@ function _windowed_tss_visited_mask(state::TSSState)
     return visited
 end
 
-function _windowed_current_local_free_energies(state::TSSState)
+function windowed_current_local_free_energies(state::TSSState)
     return [estimator.f for estimator in state.estimators]
 end
 
-function _validate_windowed_local_free_energies(state::TSSState,
+function validate_windowed_local_free_energies(state::TSSState,
                                                 local_f_by_window)
-    length(local_f_by_window) == length(state.estimators) ||
+    if length(local_f_by_window) != length(state.estimators)
         throw(ArgumentError("local_f_by_window must match the number of TSS windows."))
+    end
 
     for (window_i, estimator) in enumerate(state.estimators)
         local_f = local_f_by_window[window_i]
-        length(local_f) == length(estimator.state_indices) ||
+        if length(local_f) != length(estimator.state_indices)
             throw(ArgumentError("local free-energy vector for TSS window $(window_i) " *
                                 "has length $(length(local_f)); expected " *
                                 "$(length(estimator.state_indices))."))
-        all(isfinite, local_f) ||
+        end
+        if !all(isfinite, local_f)
             throw(ArgumentError("local free-energy vector for TSS window $(window_i) " *
                                 "contains non-finite values."))
+        end
     end
 
     return local_f_by_window
 end
 
-function _windowed_local_average_free_energies(state::TSSState{FT},
+function windowed_local_average_free_energies(state::TSSState{FT},
                                                local_f_by_window) where {FT}
-    _validate_windowed_local_free_energies(state, local_f_by_window)
+   validate_windowed_local_free_energies(state, local_f_by_window)
     K = n_states(state.state_space)
     values = zeros(FT, K)
     counts = zeros(Int, K)
@@ -105,18 +115,19 @@ function _windowed_local_average_free_energies(state::TSSState{FT},
     end
 
     for state_i in 1:K
-        counts[state_i] > 0 ||
+        if counts[state_i] <= 0
             throw(ArgumentError("state $(state_i) has no local TSS free-energy estimates."))
+        end
         values[state_i] /= FT(counts[state_i])
     end
     values .-= values[1]
     return values
 end
 
-function _windowed_local_average_free_energies(state::TSSState)
-    return _windowed_local_average_free_energies(
+function windowed_local_average_free_energies(state::TSSState)
+    return windowed_local_average_free_energies(
         state,
-        _windowed_current_local_free_energies(state),
+       windowed_current_local_free_energies(state),
     )
 end
 
@@ -125,7 +136,7 @@ function initialize_windowed_tss_coupling(state::TSSState{FT};
                                           max_iterations::Integer = 1_000,
                                           damping::Real = 1.0,
                                           pi_regularization::Real = 1e-3) where {FT}
-    params = _validate_windowed_tss_coupling_params(
+    params =validate_windowed_tss_coupling_params(
         FT;
         tolerance = tolerance,
         max_iterations = max_iterations,
@@ -135,7 +146,7 @@ function initialize_windowed_tss_coupling(state::TSSState{FT};
 
     K = n_states(state.state_space)
     n_windows = length(state.windows)
-    visit_control_f = _windowed_local_average_free_energies(state)
+    visit_control_f =windowed_local_average_free_energies(state)
 
     coupling = WindowedTSSCoupling{FT}(
         visit_control_f,
@@ -159,11 +170,11 @@ function initialize_windowed_tss_coupling(state::TSSState{FT};
         params.damping,
         params.pi_regularization,
     )
-    _gauge_windowed_visit_control!(coupling)
+   gauge_windowed_visit_control!(coupling)
     return coupling
 end
 
-function _windowed_local_weight(estimator::_TSSLocalEstimator{FT},
+function windowed_local_weight(estimator::TSSLocalEstimator{FT},
                                 local_state::Integer,
                                 use_tilts::Bool) where {FT}
     weight = estimator.gamma[local_state]
@@ -175,29 +186,32 @@ end
 
 function compute_window_transition_matrix!(state::TSSState{FT};
                                            use_tilts::Bool = true,
-                                           visited_mask = _windowed_tss_visited_mask(state),
-                                           transition = _windowed_tss_coupling(state).window_transition) where {FT}
+                                           visited_mask =windowed_tss_visited_mask(state),
+                                           transition =windowed_tss_coupling(state).window_transition) where {FT}
     Q = transition
     fill!(Q, zero(FT))
 
-    length(visited_mask) == length(state.windows) ||
+    if length(visited_mask) != length(state.windows)
         throw(ArgumentError("visited_mask must match the number of TSS windows."))
-    any(visited_mask) ||
+    end
+    if !any(visited_mask)
         throw(ArgumentError("at least one TSS window must be active in the window-probability solve."))
+    end
 
     for (window_j, estimator) in enumerate(state.estimators)
         visited_mask[window_j] || continue
 
         denom = zero(FT)
         for local_state in eachindex(estimator.state_indices)
-            denom += _windowed_local_weight(estimator, local_state, use_tilts)
+            denom +=windowed_local_weight(estimator, local_state, use_tilts)
         end
-        isfinite(denom) && denom > zero(FT) ||
+        if !(isfinite(denom) && denom > zero(FT))
             throw(ArgumentError("TSS window $(window_j) has invalid transition denominator $(denom)."))
+        end
 
         for local_state in eachindex(estimator.state_indices)
             global_state = estimator.state_indices[local_state]
-            contribution = FT(0.5) * _windowed_local_weight(estimator, local_state, use_tilts) / denom
+            contribution = FT(0.5) *windowed_local_weight(estimator, local_state, use_tilts) / denom
             for window_i in state.state_to_windows[global_state]
                 if visited_mask[window_i]
                     Q[window_i, window_j] += contribution
@@ -220,9 +234,9 @@ end
 
 function solve_window_probability_eigenvector!(state::TSSState{FT};
                                                use_tilts::Bool = true,
-                                               visited_mask = _windowed_tss_visited_mask(state),
-                                               output = _windowed_tss_coupling(state).window_probs,
-                                               transition = _windowed_tss_coupling(state).window_transition) where {FT}
+                                               visited_mask =windowed_tss_visited_mask(state),
+                                               output =windowed_tss_coupling(state).window_probs,
+                                               transition =windowed_tss_coupling(state).window_transition) where {FT}
     Q = compute_window_transition_matrix!(
         state;
         use_tilts = use_tilts,
@@ -260,7 +274,7 @@ function solve_window_probability_eigenvector!(state::TSSState{FT};
     for (local_i, window_i) in enumerate(visited)
         output[window_i] = probs[local_i]
     end
-    _normalize_windowed_tss_nonnegative_probabilities!(output, "window probabilities", state)
+   normalize_windowed_tss_nonnegative_probabilities!(output, "window probabilities", state)
     return output
 end
 
@@ -268,13 +282,13 @@ function update_window_probabilities!(state::TSSState{FT}) where {FT}
     return solve_window_probability_eigenvector!(
         state;
         use_tilts = true,
-        visited_mask = _windowed_tss_visited_mask(state),
-        output = _windowed_tss_coupling(state).window_probs,
+        visited_mask =windowed_tss_visited_mask(state),
+        output =windowed_tss_coupling(state).window_probs,
     )
 end
 
 function compute_global_rung_weights!(state::TSSState{FT}) where {FT}
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
     fill!(coupling.global_rung_weights, zero(FT))
 
     for (window_j, estimator) in enumerate(state.estimators)
@@ -283,30 +297,32 @@ function compute_global_rung_weights!(state::TSSState{FT}) where {FT}
 
         denom = zero(FT)
         for local_state in eachindex(estimator.state_indices)
-            denom += _windowed_local_weight(estimator, local_state, true)
+            denom +=windowed_local_weight(estimator, local_state, true)
         end
-        isfinite(denom) && denom > zero(FT) ||
+        if !(isfinite(denom) && denom > zero(FT))
             throw(ArgumentError("TSS window $(window_j) has invalid global-rung denominator $(denom)."))
+        end
 
         for local_state in eachindex(estimator.state_indices)
             global_state = estimator.state_indices[local_state]
             coupling.global_rung_weights[global_state] +=
-                p_j * _windowed_local_weight(estimator, local_state, true) / denom
+                p_j *windowed_local_weight(estimator, local_state, true) / denom
         end
     end
 
     total = sum(coupling.global_rung_weights)
-    isfinite(total) && total > zero(FT) ||
+    if !(isfinite(total) && total > zero(FT))
         throw(ArgumentError("TSS global rung weights have invalid total $(total)."))
+    end
     coupling.global_rung_weights ./= total
     coupling.lhs_marginal .= coupling.global_rung_weights
     return coupling.global_rung_weights
 end
 
-function _windowed_log_offset_denominator(state::TSSState{FT},
+function windowed_log_offset_denominator(state::TSSState{FT},
                                           global_state::Int,
                                           eta_plus_one::FT) where {FT}
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
     log_den = -FT(Inf)
 
     for window_i in state.state_to_windows[global_state]
@@ -319,12 +335,13 @@ function _windowed_log_offset_denominator(state::TSSState{FT},
         log_den = logaddexp_tss(log_den, term)
     end
 
-    isfinite(log_den) ||
+    if !isfinite(log_den)
         throw(ArgumentError("TSS visit-control offset denominator is non-finite for state $(global_state)."))
+    end
     return log_den
 end
 
-function _gauge_window_offsets!(offsets::AbstractVector{FT},
+function gauge_window_offsets!(offsets::AbstractVector{FT},
                                 probs::AbstractVector{FT}) where {FT}
     weight = sum(probs)
     weight > zero(FT) || return offsets
@@ -334,13 +351,13 @@ function _gauge_window_offsets!(offsets::AbstractVector{FT},
 end
 
 function solve_windowed_visit_control!(state::TSSState{FT}) where {FT}
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
     eta = first(state.estimators).ETA
     compute_global_rung_weights!(state)
 
     if iszero(eta)
         coupling.window_offsets .= zero(FT)
-        coupling.visit_control_f .= _windowed_local_average_free_energies(state)
+        coupling.visit_control_f .=windowed_local_average_free_energies(state)
         compute_visit_control_residual!(state)
         coupling.iterations = 0
         coupling.converged = true
@@ -363,23 +380,24 @@ function solve_windowed_visit_control!(state::TSSState{FT}) where {FT}
                 global_state = estimator.state_indices[local_state]
                 q_k = coupling.global_rung_weights[global_state]
                 q_k > zero(FT) || continue
-                log_den = _windowed_log_offset_denominator(state, global_state, eta_plus_one)
+                log_den =windowed_log_offset_denominator(state, global_state, eta_plus_one)
                 term = log(q_k) + estimator.log_gamma[local_state] +
                        estimator.f[local_state] / eta_plus_one - log_den
                 log_sum = logaddexp_tss(log_sum, term)
             end
 
-            isfinite(log_sum) ||
+            if !isfinite(log_sum)
                 throw(ArgumentError("TSS window $(window_j) has non-finite visit-control offset update."))
+            end
             proposed[window_j] = eta_plus_one * log_sum
         end
 
-        _gauge_window_offsets!(proposed, coupling.window_probs)
+       gauge_window_offsets!(proposed, coupling.window_probs)
         coupling.iterations = iteration
         delta = maximum(abs, proposed .- coupling.window_offsets)
 
         @. coupling.window_offsets += coupling.damping * (proposed - coupling.window_offsets)
-        _gauge_window_offsets!(coupling.window_offsets, coupling.window_probs)
+       gauge_window_offsets!(coupling.window_offsets, coupling.window_probs)
 
         if delta <= coupling.tolerance
             coupling.converged = true
@@ -393,9 +411,9 @@ function solve_windowed_visit_control!(state::TSSState{FT}) where {FT}
 end
 
 function update_windowed_visit_control_free_energies!(state::TSSState{FT}) where {FT}
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
     eta_plus_one = first(state.estimators).ETA + one(FT)
-    fallback = _windowed_local_average_free_energies(state)
+    fallback =windowed_local_average_free_energies(state)
 
     for global_state in eachindex(coupling.visit_control_f)
         q_k = coupling.global_rung_weights[global_state]
@@ -415,23 +433,25 @@ function update_windowed_visit_control_free_energies!(state::TSSState{FT}) where
             log_sum = logaddexp_tss(log_sum, term)
         end
 
-        isfinite(log_sum) ||
+        if !isfinite(log_sum)
             throw(ArgumentError("TSS visit-control free energy is undefined for state $(global_state)."))
+        end
         coupling.visit_control_f[global_state] = eta_plus_one * (log_sum - log(q_k))
     end
 
-    _gauge_windowed_visit_control!(coupling)
+   gauge_windowed_visit_control!(coupling)
     return coupling.visit_control_f
 end
 
 function compute_windowed_sampling_densities!(state::TSSState{FT}) where {FT}
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
     check_tss_finite!(coupling.visit_control_f, "visit-control free energies", state)
 
     for (window_i, estimator) in enumerate(state.estimators)
         candidate = coupling.candidate_densities[window_i]
-        length(candidate) == length(estimator.state_indices) ||
+        if length(candidate) != length(estimator.state_indices)
             throw(ArgumentError("candidate density for TSS window $(window_i) has invalid length."))
+        end
 
         check_tss_finite!(estimator.f, "window $(window_i) free energies", estimator)
         check_tss_positive_probabilities!(estimator.gamma, "window $(window_i) gamma", estimator)
@@ -446,15 +466,16 @@ function compute_windowed_sampling_densities!(state::TSSState{FT}) where {FT}
         end
 
         log_norm = logsumexp(estimator.scratch)
-        isfinite(log_norm) ||
+        if !isfinite(log_norm)
             throw(ArgumentError("TSS window $(window_i) candidate density normalization is non-finite."))
+        end
 
         for local_state in eachindex(candidate)
             candidate[local_state] = exp(estimator.scratch[local_state] - log_norm)
         end
         @. candidate = (one(FT) - coupling.pi_regularization) * candidate +
                        coupling.pi_regularization * estimator.gamma
-        _normalize_windowed_tss_probabilities!(
+       normalize_windowed_tss_probabilities!(
             candidate,
             "candidate density for window $(window_i)",
             state,
@@ -465,7 +486,7 @@ function compute_windowed_sampling_densities!(state::TSSState{FT}) where {FT}
 end
 
 function compute_visit_control_rhs!(state::TSSState{FT}) where {FT}
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
     fill!(coupling.rhs_marginal, zero(FT))
 
     for (window_i, estimator) in enumerate(state.estimators)
@@ -480,8 +501,9 @@ function compute_visit_control_rhs!(state::TSSState{FT}) where {FT}
         end
 
         log_den = logsumexp(estimator.scratch)
-        isfinite(log_den) ||
+        if !isfinite(log_den)
             throw(ArgumentError("TSS window $(window_i) has non-finite visit-control rhs denominator."))
+        end
 
         for local_state in eachindex(estimator.state_indices)
             global_state = estimator.state_indices[local_state]
@@ -498,7 +520,7 @@ function compute_visit_control_rhs!(state::TSSState{FT}) where {FT}
 end
 
 function compute_visit_control_residual!(state::TSSState{FT}) where {FT}
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
     compute_visit_control_rhs!(state)
     coupling.max_abs_residual = zero(FT)
 
@@ -506,8 +528,9 @@ function compute_visit_control_residual!(state::TSSState{FT}) where {FT}
         lhs = coupling.global_rung_weights[state_i]
         rhs = coupling.rhs_marginal[state_i]
         if lhs > zero(FT)
-            isfinite(rhs) && rhs > zero(FT) ||
+            if !(isfinite(rhs) && rhs > zero(FT))
                 throw(ArgumentError("TSS visit-control rhs is invalid at state $(state_i): $(rhs)."))
+            end
             coupling.residual[state_i] = log(rhs) - log(lhs)
             coupling.max_abs_residual = max(coupling.max_abs_residual, abs(coupling.residual[state_i]))
         else
@@ -518,16 +541,16 @@ function compute_visit_control_residual!(state::TSSState{FT}) where {FT}
     return coupling.residual
 end
 
-function _reported_active_mask(state::TSSState, visited_only::Bool)
+function reported_active_mask(state::TSSState, visited_only::Bool)
     visited_only || return trues(length(state.windows))
-    return _windowed_tss_visited_mask(state)
+    return windowed_tss_visited_mask(state)
 end
 
-function _compute_reported_tss_free_energy_components(state::TSSState{FT},
+function compute_reported_tss_free_energy_components(state::TSSState{FT},
                                                       local_f_by_window;
                                                       visited_only::Bool = false) where {FT}
-    _validate_windowed_local_free_energies(state, local_f_by_window)
-    active_mask = _reported_active_mask(state, visited_only)
+   validate_windowed_local_free_energies(state, local_f_by_window)
+    active_mask =reported_active_mask(state, visited_only)
     n_windows = length(state.windows)
     reported_window_probs = zeros(FT, n_windows)
     solve_window_probability_eigenvector!(
@@ -550,13 +573,15 @@ function _compute_reported_tss_free_energy_components(state::TSSState{FT},
     end
 
     reported_total = sum(reported_gamma)
-    isfinite(reported_total) && reported_total > zero(FT) ||
+    if !(isfinite(reported_total) && reported_total > zero(FT))
         throw(ArgumentError("TSS reported rung density has invalid total $(reported_total)."))
+    end
     reported_gamma ./= reported_total
 
     active_windows = findall(>(zero(FT)), reported_window_probs)
-    isempty(active_windows) &&
+    if isempty(active_windows)
         throw(ArgumentError("no TSS windows are available for reported free-energy estimation."))
+    end
 
     n_active = length(active_windows)
     global_weighted_f = zeros(FT, K)
@@ -609,9 +634,9 @@ function _compute_reported_tss_free_energy_components(state::TSSState{FT},
     for (local_i, window_i) in enumerate(active_windows)
         reported_offsets[window_i] = offsets[local_i]
     end
-    _gauge_window_offsets!(reported_offsets, reported_window_probs)
+   gauge_window_offsets!(reported_offsets, reported_window_probs)
 
-    fallback = _windowed_local_average_free_energies(state, local_f_by_window)
+    fallback =windowed_local_average_free_energies(state, local_f_by_window)
     reported_f = zeros(FT, K)
     for global_state in 1:K
         gamma_tss = reported_gamma[global_state]
@@ -648,10 +673,10 @@ end
 
 function compute_reported_tss_free_energies!(state::TSSState{FT};
                                              visited_only::Bool = false) where {FT}
-    coupling = _windowed_tss_coupling(state)
-    components = _compute_reported_tss_free_energy_components(
+    coupling =windowed_tss_coupling(state)
+    components =compute_reported_tss_free_energy_components(
         state,
-        _windowed_current_local_free_energies(state);
+       windowed_current_local_free_energies(state);
         visited_only = visited_only,
     )
     coupling.reported_window_probs .= components.reported_window_probs
@@ -662,11 +687,11 @@ function compute_reported_tss_free_energies!(state::TSSState{FT};
 end
 
 function apply_windowed_sampling_densities!(state::TSSState{FT}) where {FT}
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
 
     for (window_i, estimator) in enumerate(state.estimators)
         candidate = coupling.candidate_densities[window_i]
-        _normalize_windowed_tss_probabilities!(
+       normalize_windowed_tss_probabilities!(
             candidate,
             "candidate density for window $(window_i)",
             state,
@@ -683,14 +708,14 @@ function apply_windowed_sampling_densities!(state::TSSState{FT}) where {FT}
     return state
 end
 
-function _update_windowed_tss_adaptive_gamma!(state::TSSState{FT}) where {FT}
-    any(estimator -> estimator.adaptive_gamma isa _TSSCovDetAdaptiveGamma,
+function update_windowed_tss_adaptive_gamma!(state::TSSState{FT}) where {FT}
+    any(estimator -> estimator.adaptive_gamma isa TSSCovDetAdaptiveGamma,
         state.estimators) || return state
 
     raw_by_window = Vector{Union{Nothing, Vector{FT}}}(undef, length(state.estimators))
     max_detcov = zero(FT)
     for (window_i, estimator) in enumerate(state.estimators)
-        raw = _tss_covdet_raw_values(estimator)
+        raw =tss_covdet_raw_values(estimator)
         raw_by_window[window_i] = raw
         isnothing(raw) && continue
         if !isempty(raw)
@@ -699,7 +724,7 @@ function _update_windowed_tss_adaptive_gamma!(state::TSSState{FT}) where {FT}
     end
 
     for (window_i, estimator) in enumerate(state.estimators)
-        _apply_tss_covdet_gamma!(estimator, raw_by_window[window_i], max_detcov)
+       apply_tss_covdet_gamma!(estimator, raw_by_window[window_i], max_detcov)
         isnothing(state.coupling) && update_tss_sampling_distribution!(estimator)
     end
     return state
@@ -727,11 +752,12 @@ received TSS samples.
 function tss_free_energies(state::TSSState;
                            reference_state::Integer = 1,
                            visited_only::Bool = false)
-    coupling = _windowed_tss_coupling(state)
+    coupling =windowed_tss_coupling(state)
     K = n_states(state.state_space)
     reference_state = Int(reference_state)
-    1 <= reference_state <= K ||
+    if !(1 <= reference_state <= K)
         throw(ArgumentError("reference_state $(reference_state) out of bounds."))
+    end
 
     compute_reported_tss_free_energies!(state; visited_only = visited_only)
     reported = copy(coupling.reported_f)
@@ -758,39 +784,43 @@ struct TSSJackknifeResult{T}
     replicates::Matrix{T}
 end
 
-function _windowed_tss_jackknife_histories(state::TSSState)
+function windowed_tss_jackknife_histories(state::TSSState)
     histories = map(state.estimators) do estimator
-        isnothing(estimator.history) &&
+        if isnothing(estimator.history)
             throw(ArgumentError("TSS jackknife requires history forgetting to be enabled."))
+        end
         estimator.history
     end
 
     config = first(histories).config
     for (window_i, history) in enumerate(histories)
-        history.config.alpha == config.alpha &&
-            history.config.phi == config.phi &&
-            history.config.target_n_epochs == config.target_n_epochs ||
+        if !(history.config.alpha == config.alpha &&
+                history.config.phi == config.phi &&
+                history.config.target_n_epochs == config.target_n_epochs)
             throw(ArgumentError("TSS jackknife requires matching history-forgetting " *
                                 "configuration in every window; window $(window_i) differs."))
+        end
     end
 
     return histories
 end
 
-function _windowed_tss_jackknife_epoch_indices!(histories, t::Int)
-    epoch_indices = _tss_retained_epoch_indices!(first(histories), t)
+function windowed_tss_jackknife_epoch_indices!(histories, t::Int)
+    epoch_indices =tss_retained_epoch_indices!(first(histories), t)
     for history in histories
-        current = _tss_retained_epoch_indices!(history, t)
-        current == epoch_indices ||
+        current =tss_retained_epoch_indices!(history, t)
+        if current != epoch_indices
             throw(ArgumentError("TSS jackknife retained epoch boundaries differ across windows."))
+        end
     end
-    length(epoch_indices) >= 2 ||
+    if length(epoch_indices) < 2
         throw(ArgumentError("TSS jackknife requires at least two retained epochs; " *
                             "got $(length(epoch_indices))."))
+    end
     return epoch_indices
 end
 
-function _summarize_tss_indices(indices; max_items::Int = 8)
+function summarize_tss_indices(indices; max_items::Int = 8)
     values = collect(indices)
     isempty(values) && return "[]"
     if length(values) <= max_items
@@ -800,24 +830,25 @@ function _summarize_tss_indices(indices; max_items::Int = 8)
     return "[$(head), ...]"
 end
 
-function _check_windowed_tss_jackknife_samples!(histories, epoch_indices)
+function check_windowed_tss_jackknife_samples!(histories, epoch_indices)
     empty_windows = Int[]
     for (window_i, history) in enumerate(histories)
-        if _tss_history_sample_count(history; epoch_indices = epoch_indices) == 0
+        if tss_history_sample_count(history; epoch_indices = epoch_indices) == 0
             push!(empty_windows, window_i)
         end
     end
-    isempty(empty_windows) ||
+    if !isempty(empty_windows)
         throw(ArgumentError("TSS jackknife cannot be computed because windows " *
-                            "$(_summarize_tss_indices(empty_windows)) have no samples " *
+                            "$(summarize_tss_indices(empty_windows)) have no samples " *
                             "in the shared retained epochs. Run longer, use more " *
                             "replicas, or reduce history forgetting."))
+    end
 
     invalid_deletions = Tuple{Int, Vector{Int}}[]
     for epoch_index in epoch_indices
         empty_after_delete = Int[]
         for (window_i, history) in enumerate(histories)
-            if _tss_history_sample_count(history;
+            if tss_history_sample_count(history;
                     omit_epoch_index = epoch_index,
                     epoch_indices = epoch_indices,
                 ) == 0
@@ -832,7 +863,7 @@ function _check_windowed_tss_jackknife_samples!(histories, epoch_indices)
         epoch_index, windows = first(invalid_deletions)
         throw(ArgumentError("TSS jackknife cannot delete every retained epoch: " *
                             "deleting epoch $(epoch_index) leaves windows " *
-                            "$(_summarize_tss_indices(windows)) with no retained " *
+                            "$(summarize_tss_indices(windows)) with no retained " *
                             "samples. Run longer, use more replicas, or reduce " *
                             "history forgetting."))
     end
@@ -840,11 +871,11 @@ function _check_windowed_tss_jackknife_samples!(histories, epoch_indices)
     return nothing
 end
 
-function _windowed_tss_jackknife_local_free_energies(state::TSSState;
+function windowed_tss_jackknife_local_free_energies(state::TSSState;
                                                      omit_epoch_index = nothing,
                                                      epoch_indices = nothing)
     return [
-        _aggregate_tss_history_free_energies(estimator;
+       aggregate_tss_history_free_energies(estimator;
             omit_epoch_index = omit_epoch_index,
             epoch_indices = epoch_indices,
         )
@@ -864,39 +895,42 @@ jackknife replicates.
 """
 function tss_free_energy_uncertainties(state::TSSState{FT};
                                        reference_state::Integer = 1) where {FT}
-    _windowed_tss_coupling(state)
+   windowed_tss_coupling(state)
 
     K = n_states(state.state_space)
     reference_state = Int(reference_state)
-    1 <= reference_state <= K ||
+    if !(1 <= reference_state <= K)
         throw(ArgumentError("reference_state $(reference_state) out of bounds."))
-    state.iteration > 0 ||
+    end
+    if state.iteration <= 0
         throw(ArgumentError("TSS jackknife requires at least one windowed update."))
+    end
 
-    histories = _windowed_tss_jackknife_histories(state)
-    epoch_indices = _windowed_tss_jackknife_epoch_indices!(histories, state.iteration)
-    _check_windowed_tss_jackknife_samples!(histories, epoch_indices)
-    epoch_weights = _tss_epoch_weights!(first(histories), epoch_indices, state.iteration)
-    all(>(zero(FT)), epoch_weights) ||
+    histories =windowed_tss_jackknife_histories(state)
+    epoch_indices =windowed_tss_jackknife_epoch_indices!(histories, state.iteration)
+   check_windowed_tss_jackknife_samples!(histories, epoch_indices)
+    epoch_weights =tss_epoch_weights!(first(histories), epoch_indices, state.iteration)
+    if !all(>(zero(FT)), epoch_weights)
         throw(ArgumentError("TSS jackknife epoch weights must be strictly positive."))
+    end
 
-    full_local_f = _windowed_tss_jackknife_local_free_energies(
+    full_local_f =windowed_tss_jackknife_local_free_energies(
         state;
         epoch_indices = epoch_indices,
     )
-    full_components = _compute_reported_tss_free_energy_components(state, full_local_f)
+    full_components =compute_reported_tss_free_energy_components(state, full_local_f)
     full_f = copy(full_components.reported_f)
     full_f .-= full_f[reference_state]
 
     n_replicates = length(epoch_indices)
     replicates = zeros(FT, K, n_replicates)
     for (replicate_i, epoch_index) in enumerate(epoch_indices)
-        local_f = _windowed_tss_jackknife_local_free_energies(
+        local_f =windowed_tss_jackknife_local_free_energies(
             state;
             omit_epoch_index = epoch_index,
             epoch_indices = epoch_indices,
         )
-        components = _compute_reported_tss_free_energy_components(state, local_f)
+        components =compute_reported_tss_free_energy_components(state, local_f)
         replicate = components.reported_f
         replicate .-= replicate[reference_state]
         replicates[:, replicate_i] .= replicate

@@ -44,7 +44,7 @@ function Base.:+(c1::Coulomb, c2::Coulomb)
     )
 end
 
-function inject_interaction(inter::Coulomb, params_dic::AbstractDict)
+function inject_interaction(inter::Coulomb, params_dic)
     key_prefix = "inter_CO_"
     return Coulomb(
         inter.cutoff,
@@ -619,7 +619,7 @@ function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
     )
 end
 
-function inject_interaction(inter::CoulombReactionField, params_dic::AbstractDict)
+function inject_interaction(inter::CoulombReactionField, params_dic)
     key_prefix = "inter_CRF_"
     return CoulombReactionField(
         dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
@@ -1128,7 +1128,7 @@ function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
     )
 end
 
-function inject_interaction(inter::CoulombEwald, params_dic::AbstractDict)
+function inject_interaction(inter::CoulombEwald, params_dic)
     key_prefix = "inter_CE_"
     return CoulombEwald(
         dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),

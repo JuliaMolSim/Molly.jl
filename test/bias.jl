@@ -486,7 +486,7 @@ end
     )
 
     fs_bad = Molly.zero_forces(sys)
-    @test_throws ArgumentError AtomsCalculators.forces!(
+    @test_throws ErrorException AtomsCalculators.forces!(
         fs_bad,
         sys,
         BiasPotential(calc_dist, BiasNaNGradient()),

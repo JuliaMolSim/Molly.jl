@@ -23,7 +23,7 @@ struct MBARInput{U, UT, N, W, S}
     shifts::S
 end
 
-function _mbar_frame_layout(coords_k, boundaries_k, K::Integer)
+function mbar_frame_layout(coords_k, boundaries_k, K::Integer)
     if length(coords_k) != K || length(boundaries_k) != K
         throw(ArgumentError("length of coordinates, boundaries and states do not match"))
     end
@@ -70,7 +70,7 @@ function _mbar_frame_layout(coords_k, boundaries_k, K::Integer)
     return Nk, starts, ends, win_of, all_coords, all_boundaries, all_volumes
 end
 
-function _mbar_apply_shift!(u::AbstractMatrix, shift::Bool)
+function mbar_apply_shift!(u::AbstractMatrix, shift::Bool)
     if shift
         shifts = Vector{Float64}(undef, size(u, 1))
         Threads.@threads for n in axes(u, 1)
@@ -82,7 +82,7 @@ function _mbar_apply_shift!(u::AbstractMatrix, shift::Bool)
     return nothing
 end
 
-function _assemble_mbar_inputs_partitioned(coords_k,
+function assemble_mbar_inputs_partitioned(coords_k,
                                            boundaries_k,
                                            states::AbstractVector{<:ThermoState};
                                            target_state::Union{Nothing, ThermoState}=nothing,
@@ -94,7 +94,7 @@ function _assemble_mbar_inputs_partitioned(coords_k,
     end
 
     Nk, starts, ends, win_of, all_coords, all_boundaries, all_volumes =
-        _mbar_frame_layout(coords_k, boundaries_k, K)
+        mbar_frame_layout(coords_k, boundaries_k, K)
     N = sum(Nk)
 
     eval_states = isnothing(target_state) ? states : vcat(states, [target_state])
@@ -155,11 +155,11 @@ function _assemble_mbar_inputs_partitioned(coords_k,
         end
     end
 
-    shifts = _mbar_apply_shift!(u, shift)
+    shifts = mbar_apply_shift!(u, shift)
     return MBARInput(u, u_target, Nk, win_of, shifts)
 end
 
-function _assemble_mbar_inputs_full(coords_k,
+function assemble_mbar_inputs_full(coords_k,
                                     boundaries_k,
                                     states::AbstractVector{<:ThermoState};
                                     target_state::Union{Nothing, ThermoState}=nothing,
@@ -170,7 +170,7 @@ function _assemble_mbar_inputs_full(coords_k,
     end
 
     Nk, starts, ends, win_of, all_coords, all_boundaries, all_volumes =
-        _mbar_frame_layout(coords_k, boundaries_k, K)
+        mbar_frame_layout(coords_k, boundaries_k, K)
     N = sum(Nk)
 
     # N×K reduced potentials: thread over states (columns)
@@ -184,7 +184,7 @@ function _assemble_mbar_inputs_full(coords_k,
         end
     end
 
-    shifts = _mbar_apply_shift!(u, shift)
+    shifts = mbar_apply_shift!(u, shift)
 
     u_target = isnothing(target_state) ? nothing :
                assemble_target_u(all_coords, all_boundaries, all_volumes, target_state)
@@ -192,7 +192,7 @@ function _assemble_mbar_inputs_full(coords_k,
     return MBARInput(u, u_target, Nk, win_of, shifts)
 end
 
-function _mbar_partitioned_workspace_or_nothing(states::AbstractVector{<:ThermoState},
+function mbar_partitioned_workspace_or_nothing(states::AbstractVector{<:ThermoState},
                                                 target_state)
     eval_states = isnothing(target_state) ? states : vcat(states, [target_state])
     try
@@ -235,9 +235,9 @@ function assemble_mbar_inputs(coords_k,
                               states::AbstractVector{<:ThermoState};
                               target_state::Union{Nothing, ThermoState}=nothing,
                               shift::Bool=false)
-    workspace = _mbar_partitioned_workspace_or_nothing(states, target_state)
+    workspace = mbar_partitioned_workspace_or_nothing(states, target_state)
     if !isnothing(workspace)
-        return _assemble_mbar_inputs_partitioned(
+        return assemble_mbar_inputs_partitioned(
             coords_k,
             boundaries_k,
             states;
@@ -246,7 +246,7 @@ function assemble_mbar_inputs(coords_k,
             first_workspace = workspace,
         )
     else
-        return _assemble_mbar_inputs_full(
+        return assemble_mbar_inputs_full(
             coords_k,
             boundaries_k,
             states;
@@ -489,8 +489,9 @@ function mbar_target_log_weights(u_target::AbstractVector, logD_n::AbstractVecto
             m = x
         end
     end
-    isfinite(m) ||
+    if !isfinite(m)
         throw(DomainError(logw, "target MBAR log weights have no finite entries"))
+    end
 
     sumexp = 0.0
     @inbounds for n in 1:N
@@ -577,7 +578,7 @@ function mbar_weights(u::AbstractMatrix,
     end
 
     logD = mbar_logD(u, f, logN)
-    W, _ = mbar_weights_sampled(u, f, logN; logD_n=logD)
+    W,  = mbar_weights_sampled(u, f, logN; logD_n=logD)
     w = mbar_weights_target(u_target, logD; shifts=shifts)
 
     if !all(isfinite, W)
@@ -663,20 +664,27 @@ function mbar_pmf(u::AbstractMatrix,
                   shifts::Union{Nothing, AbstractVector}=nothing,
                   kwargs...)
     N, K = size(u)
-    length(u_target) == N ||
+    if length(u_target) != N
         throw(DimensionMismatch("length of u_target ($(length(u_target))) must equal N ($N)."))
-    length(observables) == N ||
+    end
+    if length(observables) != N
         throw(DimensionMismatch("length of observables ($(length(observables))) must equal N ($N)."))
-    length(f) == K && length(N_counts) == K && length(logN) == K ||
+    end
+    if !(length(f) == K && length(N_counts) == K && length(logN) == K)
         throw(DimensionMismatch("lengths of f, N_counts, and logN must all equal K ($K)."))
-    all(>(0), N_counts) ||
+    end
+    if !all(>(0), N_counts)
         throw(DomainError(N_counts, "all N_counts must be > 0"))
-    all(isfinite, u) ||
+    end
+    if !all(isfinite, u)
         throw(DomainError(u, "infinite value found in reduced potential"))
-    all(isfinite, u_target) ||
+    end
+    if !all(isfinite, u_target)
         throw(DomainError(u_target, "infinite value found in target system reduced potential"))
-    all(isfinite, f) ||
+    end
+    if !all(isfinite, f)
         throw(DomainError(f, "infinite value found in free energies"))
+    end
 
     logD = mbar_logD(u, f, logN)
     log_weights = mbar_target_log_weights(u_target, logD; shifts=shifts)

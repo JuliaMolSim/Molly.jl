@@ -131,12 +131,12 @@ end
             coupling=coupling,
         )
         nonuniform_log_bin_weights = log.([0.5, 1.0])
-        Molly._accumulate_pmf_deconvolution!(
+        Molly.accumulate_pmf_deconvolution!(
             weighted_deconv.backend.accumulator,
             (0.25,),
             nonuniform_log_bin_weights,
         )
-        Molly._accumulate_pmf_deconvolution!(
+        Molly.accumulate_pmf_deconvolution!(
             weighted_deconv.backend.accumulator,
             (1.25,),
             nonuniform_log_bin_weights,
@@ -160,13 +160,13 @@ end
         )
         @test_throws ArgumentError Molly.AWHSimulation(awh_state; pmf=tss_deconv)
 
-        tss_sample = Molly._collect_tss_pmf_deconvolution_sample(
+        tss_sample = Molly.collect_tss_pmf_deconvolution_sample(
             tss_deconv,
             first(tss_state.estimators),
             tss_state.active_state;
             window_offset=0.0,
         )
-        Molly._accumulate_pmf_deconvolution!(tss_deconv.backend.accumulator, tss_sample)
+        Molly.accumulate_pmf_deconvolution!(tss_deconv.backend.accumulator, tss_sample)
         tss_acc = tss_deconv.backend.accumulator
         @test tss_acc.accepted_samples == 1
         @test count(isfinite, tss_acc.log_numerator_sums) == 1
@@ -193,7 +193,7 @@ end
         end
         auto_tss_state = Molly.TSSState(torsion_states)
         auto_tss_deconv = Molly.PMFDeconvolution(auto_tss_state; grid=(-π, π, 4))
-        auto_tss_sample = Molly._collect_tss_pmf_deconvolution_sample(
+        auto_tss_sample = Molly.collect_tss_pmf_deconvolution_sample(
             auto_tss_deconv,
             first(auto_tss_state.estimators),
             auto_tss_state.active_state,
@@ -218,7 +218,7 @@ end
             coupling=(xi, state_i) -> 0.25 * abs(xi[1] - state_i),
         )
         windowed_estimator = first(windowed_state.estimators)
-        windowed_sample = Molly._collect_tss_pmf_deconvolution_sample(
+        windowed_sample = Molly.collect_tss_pmf_deconvolution_sample(
             windowed_deconv,
             windowed_state,
             windowed_estimator,
@@ -235,23 +235,23 @@ end
                              windowed_estimator.log_dens[local_i] -
                              offset -
                              0.25 * abs(xi[1] - state_i)
-                log_den = Molly._online_pmf_logaddexp(log_den, log_weight)
+                log_den = Molly.online_pmf_logaddexp(log_den, log_weight)
             end
             @test windowed_sample.log_bin_weights[bin_i] ≈ -log_den atol=1e-12
         end
 
-        windowed_acc = Molly._SampledPMFDeconvolutionAccumulator(windowed_deconv.backend.grid)
-        Molly._accumulate_pmf_deconvolution!(
+        windowed_acc = Molly.SampledPMFDeconvolutionAccumulator(windowed_deconv.backend.grid)
+        Molly.accumulate_pmf_deconvolution!(
             windowed_acc,
             (0.5,),
             windowed_sample.log_bin_weights,
         )
-        Molly._accumulate_pmf_deconvolution!(
+        Molly.accumulate_pmf_deconvolution!(
             windowed_acc,
             (1.5,),
             windowed_sample.log_bin_weights,
         )
-        windowed_pmf = Molly._pmf_result_from_sampled_deconvolution(windowed_acc)
+        windowed_pmf = Molly.pmf_result_from_sampled_deconvolution(windowed_acc)
         expected_windowed_p = exp.(windowed_sample.log_bin_weights[1:2])
         expected_windowed_p ./= sum(expected_windowed_p)
         @test windowed_pmf.p[1:2] ≈ expected_windowed_p
@@ -296,7 +296,7 @@ end
             sampled_states;
             target_state=target_state,
         )
-        full = Molly._assemble_mbar_inputs_full(
+        full = Molly.assemble_mbar_inputs_full(
             coords_k,
             boundaries_k,
             sampled_states;
@@ -314,7 +314,7 @@ end
             target_state=target_state,
             shift=true,
         )
-        full_shifted = Molly._assemble_mbar_inputs_full(
+        full_shifted = Molly.assemble_mbar_inputs_full(
             coords_k,
             boundaries_k,
             sampled_states;
@@ -335,7 +335,7 @@ end
             hetero_states[1:1];
             target_state=hetero_states[2],
         )
-        hetero_full = Molly._assemble_mbar_inputs_full(
+        hetero_full = Molly.assemble_mbar_inputs_full(
             hetero_coords_k,
             hetero_boundaries_k,
             hetero_states[1:1];

@@ -2,7 +2,7 @@ export
     AWHState,
     AWHSimulation
     
-_awh_count(n::Integer, singular::AbstractString, plural::AbstractString=string(singular, "s")) =
+awh_count(n::Integer, singular::AbstractString, plural::AbstractString=string(singular, "s")) =
     string(n, " ", n == 1 ? singular : plural)
 
 # Convenience struct to store relevant things
@@ -18,7 +18,7 @@ end
 
 function Base.show(io::IO, stats::AWHStats)
     print(io, "AWHStats with ",
-          _awh_count(length(stats.step_indices), "logged entry", "logged entries"))
+          awh_count(length(stats.step_indices), "logged entry", "logged entries"))
 end
 
 Base.show(io::IO, ::MIME"text/plain", stats::AWHStats) = show(io, stats)
@@ -120,10 +120,10 @@ end
 
 function Base.show(io::IO, state::AWHState)
     stage = state.in_initial_stage ? "initial" : "linear"
-    print(io, "AWHState with ", _awh_count(n_states(state.state_space), "window"),
+    print(io, "AWHState with ", awh_count(n_states(state.state_space), "window"),
           ", active window ", state.active_idx, ", ", stage, " stage, N_eff=",
           state.N_eff, ", N_bias=", state.N_bias, ", ",
-          _awh_count(state.n_accum, "accumulated sample"))
+          awh_count(state.n_accum, "accumulated sample"))
 end
 
 Base.show(io::IO, ::MIME"text/plain", state::AWHState) = show(io, state)
@@ -169,7 +169,7 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
-mutable struct _AWHPMFDeconvolutionBackend{N, T, F_CV, G, C, A}
+mutable struct AWHPMFDeconvolutionBackend{N, T, F_CV, G, C, A}
     grid::G
     cv_function::F_CV
     log_coupling_matrix::C
@@ -182,7 +182,7 @@ mutable struct _AWHPMFDeconvolutionBackend{N, T, F_CV, G, C, A}
     scratch_log_bin_weights::Vector{T}
 end
 
-function _awh_auto_pmf_cv(awh_state::AWHState, grid::_PMFGrid{N}) where N
+function awh_auto_pmf_cv(awh_state::AWHState, grid::PMFGrid{N}) where N
     first_ham = awh_state.partition.λ_hamiltonians[1]
     bias_indices = findall(inter -> inter isa BiasPotential, first_ham.general_inters)
     length(bias_indices) == N ||
@@ -207,7 +207,7 @@ function _awh_auto_pmf_cv(awh_state::AWHState, grid::_PMFGrid{N}) where N
     end
 end
 
-function _awh_target_beta_pressure(sys, ::Type{T}, target_temp, target_pressure) where T
+function awh_target_beta_pressure(sys, ::Type{T}, target_temp, target_pressure) where T
     e_unit = sys.energy_units
 
     target_beta = nothing
@@ -238,27 +238,27 @@ function PMFDeconvolution(awh_state::AWHState{T};
     isempty(kwargs) ||
         throw(ArgumentError("unsupported PMFDeconvolution keyword(s): " *
                             "$(join(keys(kwargs), ", "))."))
-    pmf_grid = _PMFGrid(grid; T = Float64)
+    pmf_grid = PMFGrid(grid; T = Float64)
     if !isnothing(cv) && isnothing(coupling)
         throw(ArgumentError("provide coupling when using a custom cv function for PMF deconvolution."))
     end
-    cv_function = isnothing(cv) ? _awh_auto_pmf_cv(awh_state, pmf_grid) : cv
-    log_coupling_matrix = _pmf_build_log_coupling_matrix(
+    cv_function = isnothing(cv) ? awh_auto_pmf_cv(awh_state, pmf_grid) : cv
+    log_coupling_matrix = pmf_build_log_coupling_matrix(
         awh_state.state_space,
         pmf_grid;
         coupling = coupling,
     )
-    target_beta, target_press = _awh_target_beta_pressure(
+    target_beta, target_press = awh_target_beta_pressure(
         awh_state.active_sys,
         Float64,
         target_temp,
         target_pressure,
     )
-    backend = _AWHPMFDeconvolutionBackend(
+    backend = AWHPMFDeconvolutionBackend(
         pmf_grid,
         cv_function,
         log_coupling_matrix,
-        _SampledPMFDeconvolutionAccumulator(pmf_grid),
+        SampledPMFDeconvolutionAccumulator(pmf_grid),
         target_beta,
         target_press,
         Vector{NTuple{length(pmf_grid.shape), Float64}}(),
@@ -269,7 +269,7 @@ function PMFDeconvolution(awh_state::AWHState{T};
     return PMFDeconvolution(backend)
 end
 
-function update_pmf!(deconv::PMFDeconvolution{<:_AWHPMFDeconvolutionBackend{N, T}},
+function update_pmf!(deconv::PMFDeconvolution{<:AWHPMFDeconvolutionBackend{N, T}},
                      awh_state,
                      curr_coords;
                      weight_factor = one(T),
@@ -279,7 +279,7 @@ function update_pmf!(deconv::PMFDeconvolution{<:_AWHPMFDeconvolutionBackend{N, T
                      current_pressure = zero(T)) where {N, T}
     backend = deconv.backend
     val = backend.cv_function(from_device(curr_coords))
-    current_cv = _online_pmf_tuple(val, T)
+    current_cv = online_pmf_tuple(val, T)
     length(current_cv) == N ||
         throw(DimensionMismatch("PMF CV returned $(length(current_cv)) dimensions, " *
                                 "expected $(N)."))
@@ -287,11 +287,11 @@ function update_pmf!(deconv::PMFDeconvolution{<:_AWHPMFDeconvolutionBackend{N, T
     push!(backend.active_idx_history, awh_state.active_idx)
 
     @. backend.scratch_g = Float64(awh_state.f) + Float64(awh_state.log_rho)
-    _pmf_log_bin_weights!(
+    pmf_log_bin_weights!(
         backend.scratch_log_bin_weights,
         backend.log_coupling_matrix,
         backend.scratch_g;
-        log_weight_factor = _pmf_positive_log(weight_factor, "PMF deconvolution weight_factor", Float64),
+        log_weight_factor = pmf_positive_log(weight_factor, "PMF deconvolution weight_factor", Float64),
     )
 
     reweight_log = 0.0
@@ -305,7 +305,7 @@ function update_pmf!(deconv::PMFDeconvolution{<:_AWHPMFDeconvolutionBackend{N, T
         reweight_log -= (target_work - current_work) * Float64(box_volume)
     end
 
-    _accumulate_pmf_deconvolution!(
+    accumulate_pmf_deconvolution!(
         backend.accumulator,
         current_cv,
         backend.scratch_log_bin_weights;
@@ -314,10 +314,10 @@ function update_pmf!(deconv::PMFDeconvolution{<:_AWHPMFDeconvolutionBackend{N, T
     return deconv
 end
 
-function pmf(backend::_AWHPMFDeconvolutionBackend{N, T};
+function pmf(backend::AWHPMFDeconvolutionBackend{N, T};
              zero::Symbol = :min,
              kBT = nothing) where {N, T}
-    return _pmf_result_from_sampled_deconvolution(
+    return pmf_result_from_sampled_deconvolution(
         backend.accumulator;
         zero = zero,
         kBT = kBT,
@@ -376,7 +376,7 @@ function AWHSimulation(
 
     n_win = n_states(awh_state.state_space)
 
-    if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:_AWHPMFDeconvolutionBackend})
+    if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:AWHPMFDeconvolutionBackend})
         throw(ArgumentError("AWHSimulation pmf must be created with PMFDeconvolution(awh_state; ...)."))
     end
 
@@ -393,9 +393,9 @@ end
 
 function Base.show(io::IO, sim::AWHSimulation)
     pmf_status = isnothing(sim.pmf) ? "disabled" : "enabled"
-    print(io, "AWHSimulation with ", _awh_count(sim.n_windows, "window"),
+    print(io, "AWHSimulation with ", awh_count(sim.n_windows, "window"),
           ", active window ", sim.state.active_idx, ", ",
-          _awh_count(sim.n_md_steps, "MD step"), " per iteration",
+          awh_count(sim.n_md_steps, "MD step"), " per iteration",
           ", update frequency ", sim.update_freq, ", log frequency ", sim.log_freq,
           ", PMF deconvolution ", pmf_status)
 end

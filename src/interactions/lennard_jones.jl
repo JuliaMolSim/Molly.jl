@@ -58,7 +58,7 @@ function Base.:+(l1::LennardJones, l2::LennardJones)
     )
 end
 
-function inject_interaction(inter::LennardJones, params_dic::AbstractDict)
+function inject_interaction(inter::LennardJones, params_dic)
     key_prefix = "inter_LJ_"
     return LennardJones(
         inter.cutoff,

@@ -1,4 +1,4 @@
-_tss_count(n::Integer, singular::AbstractString, plural::AbstractString=string(singular, "s")) =
+tss_count(n::Integer, singular::AbstractString, plural::AbstractString=string(singular, "s")) =
     string(n, " ", n == 1 ? singular : plural)
 
 mutable struct TSSStats{T}
@@ -13,7 +13,7 @@ end
 
 function Base.show(io::IO, stats::TSSStats)
     print(io, "TSSStats with ",
-          _tss_count(length(stats.iterations), "logged entry", "logged entries"))
+         tss_count(length(stats.iterations), "logged entry", "logged entries"))
 end
 
 Base.show(io::IO, ::MIME"text/plain", stats::TSSStats) = show(io, stats)

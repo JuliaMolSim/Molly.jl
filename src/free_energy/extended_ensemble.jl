@@ -69,14 +69,15 @@ end
 function PartitionedReducedPotentialWorkspace(thermo_states::AbstractArray{<:ThermoState};
                                               reuse_neighbors::Bool=true)
     thermo_states_vec = collect(thermo_states)
-    isempty(thermo_states_vec) &&
+    if isempty(thermo_states_vec)
         throw(ArgumentError("at least one ThermoState is required"))
+    end
     partition = AlchemicalPartition(thermo_states_vec; reuse_neighbors=reuse_neighbors)
     energies = Vector{typeof(partition.cached_master_pe)}(undef, length(thermo_states_vec))
     return PartitionedReducedPotentialWorkspace(partition, thermo_states_vec, energies)
 end
 
-function _partitioned_workspace_energy_view(workspace::PartitionedReducedPotentialWorkspace,
+function partitioned_workspace_energy_view(workspace::PartitionedReducedPotentialWorkspace,
                                             n::Integer)
     length(workspace.energies) < n && resize!(workspace.energies, n)
     return @view workspace.energies[1:n]
@@ -98,8 +99,9 @@ mutable struct ActiveThermoState{S, I}
 end
 
 function ActiveThermoState(space::ExtendedStateSpace, first_state::Integer=1)
-    1 <= first_state <= n_states(space) ||
+    if !(1 <= first_state <= n_states(space))
         throw(ArgumentError("first_state ($first_state) out of range 1:$(n_states(space))"))
+    end
 
     ref_sys = space.systems[first_state]
     active_sys = System(deepcopy(ref_sys);
@@ -125,8 +127,9 @@ end
 function set_active_state!(active::ActiveThermoState,
                            space::ExtendedStateSpace,
                            state_index::Integer)
-    1 <= state_index <= n_states(space) ||
+    if !(1 <= state_index <= n_states(space))
         throw(ArgumentError("state_index ($state_index) out of range 1:$(n_states(space))"))
+    end
 
     active.active_idx = Int(state_index)
     active.active_sys.atoms = space.partition.λ_atoms[state_index]
@@ -150,17 +153,19 @@ function evaluate_energy_subset!(energies::AbstractVector,
                                  coords,
                                  boundary,
                                  state_indices)
-    length(energies) == length(state_indices) ||
+    if length(energies) != length(state_indices)
         throw(DimensionMismatch("energies length ($(length(energies))) must match " *
                                 "state_indices length ($(length(state_indices)))"))
+    end
 
-    _update_master_energy!(partition, coords, boundary; force_recompute=true)
+    update_master_energy!(partition, coords, boundary; force_recompute=true)
 
     @inbounds for (out_i, state_index) in pairs(state_indices)
-        1 <= state_index <= length(partition.λ_systems) ||
+        if !(1 <= state_index <= length(partition.λ_systems))
             throw(ArgumentError("state_index ($state_index) out of range " *
                                 "1:$(length(partition.λ_systems))"))
-        pe_specific = _evaluate_λ_energy!(
+        end
+        pe_specific = evaluate_λ_energy!(
             partition.λ_systems[state_index],
             coords,
             boundary,
@@ -185,7 +190,7 @@ function evaluate_energy_subset(partition::AlchemicalPartition,
     return evaluate_energy_subset!(energies, partition, coords, boundary, state_indices)
 end
 
-@inline function _safe_ustrip(::Type{T}, x) where T
+@inline function safe_ustrip(::Type{T}, x) where T
     val = T(ustrip(x))
     return isnan(val) ? typemax(T) : val
 end
@@ -205,19 +210,19 @@ function reduced_potential(space::ExtendedStateSpace,
                            boundary,
                            state_index::Integer)
     T = typeof(space.betas[state_index])
-    red = space.betas[state_index] * _safe_ustrip(T, energy)
+    red = space.betas[state_index] * safe_ustrip(T, energy)
     if space.has_pressure[state_index]
         red += space.betas[state_index] *
-               _safe_ustrip(T, space.pressures[state_index] * volume(boundary))
+               safe_ustrip(T, space.pressures[state_index] * volume(boundary))
     end
     return red
 end
 
 function reduced_potential(state::ThermoState, energy, boundary)
     T = typeof(state.beta)
-    red = state.beta * _safe_ustrip(T, energy)
+    red = state.beta * safe_ustrip(T, energy)
     if !isnothing(state.p)
-        red += state.beta * _safe_ustrip(T, state.p * volume(boundary))
+        red += state.beta * safe_ustrip(T, state.p * volume(boundary))
     end
     return red
 end
@@ -226,9 +231,10 @@ function reduced_potential(workspace::PartitionedReducedPotentialWorkspace,
                            coords,
                            boundary,
                            state_index::Integer)
-    1 <= state_index <= length(workspace.thermo_states) ||
+    if !(1 <= state_index <= length(workspace.thermo_states))
         throw(ArgumentError("state_index ($state_index) out of range " *
                             "1:$(length(workspace.thermo_states))"))
+    end
     energy = evaluate_energy!(
         workspace.partition,
         coords,
@@ -253,12 +259,14 @@ function reduced_potentials!(out::AbstractVector,
                              space::ExtendedStateSpace,
                              boundary,
                              state_indices)
-    length(out) == length(state_indices) ||
+    if length(out) != length(state_indices)
         throw(DimensionMismatch("out length ($(length(out))) must match " *
                                 "state_indices length ($(length(state_indices)))"))
-    length(energies) == length(state_indices) ||
+    end
+    if length(energies) != length(state_indices)
         throw(DimensionMismatch("energies length ($(length(energies))) must match " *
                                 "state_indices length ($(length(state_indices)))"))
+    end
 
     @inbounds for (out_i, state_index) in pairs(state_indices)
         out[out_i] = reduced_potential(space, energies[out_i], boundary, state_index)
@@ -271,10 +279,11 @@ function reduced_potentials!(out::AbstractVector,
                              coords,
                              boundary,
                              state_indices=Base.OneTo(length(workspace.thermo_states)))
-    length(out) == length(state_indices) ||
+    if length(out) != length(state_indices)
         throw(DimensionMismatch("out length ($(length(out))) must match " *
                                 "state_indices length ($(length(state_indices)))"))
-    energies = _partitioned_workspace_energy_view(workspace, length(state_indices))
+    end
+    energies = partitioned_workspace_energy_view(workspace, length(state_indices))
     evaluate_energy_subset!(
         energies,
         workspace.partition,
@@ -313,9 +322,10 @@ function conditional_state_weights!(weights::AbstractVector,
                                     log_state_bias::AbstractVector,
                                     reduced_potentials::AbstractVector,
                                     scratch::AbstractVector)
-    length(weights) == length(log_state_bias) == length(reduced_potentials) == length(scratch) ||
+    if !(length(weights) == length(log_state_bias) == length(reduced_potentials) == length(scratch))
         throw(DimensionMismatch("weights, log_state_bias, reduced_potentials, and scratch " *
                                 "must have matching lengths"))
+    end
 
     @. scratch = log_state_bias - reduced_potentials
     log_den = logsumexp(scratch)

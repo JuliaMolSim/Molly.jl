@@ -798,7 +798,7 @@ end
 # ∇_{r_l} ϕ = - (|b_2| / |n|^2) * n
 # ∇_{r_j} ϕ = - (1 + (b_1 · b_2)/|b_2|^2) * ∇_{r_i} ϕ + ((b_2 · b_3)/|b_2|^2) * ∇_{r_l} ϕ
 # ∇_{r_k} ϕ =   ((b_1 · b_2)/|b_2|^2) * ∇_{r_i} ϕ - (1 + (b_2 · b_3)/|b_2|^2) * ∇_{r_l} ϕ
-function _check_torsion_bond_norm(norm_value, label::AbstractString)
+function check_torsion_bond_norm(norm_value, label::AbstractString)
     if !isfinite(ustrip(norm_value)) || norm_value <= zero(norm_value)
         throw(ArgumentError("CalcTorsion cannot compute a finite gradient because $(label) " *
                             "has non-positive or non-finite length ($(norm_value))."))
@@ -817,9 +817,9 @@ function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs..
     m = cross(b1, b2)
     n = cross(b2, b3)
     
-    b1_norm = _check_torsion_bond_norm(norm(b1), "bond i-j")
-    b2_norm = _check_torsion_bond_norm(norm(b2), "bond j-k")
-    b3_norm = _check_torsion_bond_norm(norm(b3), "bond k-l")
+    b1_norm = check_torsion_bond_norm(norm(b1), "bond i-j")
+    b2_norm = check_torsion_bond_norm(norm(b2), "bond j-k")
+    b3_norm = check_torsion_bond_norm(norm(b3), "bond k-l")
     FT = typeof(float(ustrip(b2_norm)))
     tol = FT(cv.gradient_singularity_tol)
     length_scale = max(b1_norm, b2_norm, b3_norm)

@@ -81,7 +81,7 @@ function bias_gradient(sb::SquareBias, cv_sim)
 end
 
 
-function _validate_flat_bottom_width(r_fb, label::AbstractString)
+ function validate_flat_bottom_width(r_fb, label::AbstractString)
     if !isfinite(ustrip(r_fb)) || r_fb < zero(r_fb)
         throw(ArgumentError("$(label) flat-bottom width must be finite and non-negative, got $(r_fb)."))
     end
@@ -121,7 +121,7 @@ struct FlatBottomSquareBias{K, R, C}
     cv_target::C
 
     function FlatBottomSquareBias(k::K, r_fb::R, cv_target::C) where {K, R, C}
-        _validate_flat_bottom_width(r_fb, "FlatBottomSquareBias")
+        validate_flat_bottom_width(r_fb, "FlatBottomSquareBias")
         return new{K, R, C}(k, r_fb, cv_target)
     end
 end
@@ -174,12 +174,12 @@ struct PeriodicFlatBottomBias{K, R, T}
     cv_target::T
 
     function PeriodicFlatBottomBias(k::K, r_fb::R, cv_target::T) where {K, R, T}
-        _validate_flat_bottom_width(r_fb, "PeriodicFlatBottomBias")
+        validate_flat_bottom_width(r_fb, "PeriodicFlatBottomBias")
         return new{K, R, T}(k, r_fb, cv_target)
     end
 end
 
-function _periodic_flat_bottom_displacement(cv_sim, cv_target)
+ function periodic_flat_bottom_displacement(cv_sim, cv_target)
     d = cv_sim - cv_target
     FT = typeof(float(ustrip(d)))
     twopi = FT(2π) * oneunit(d)
@@ -189,7 +189,7 @@ end
 
 function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     FT = typeof(float(ustrip(cv_sim - pb.cv_target)))
-    d_wrapped = _periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
+    d_wrapped = periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
     
     dist = abs(d_wrapped)
     
@@ -202,7 +202,7 @@ function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
 end
 
 function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
-    d_wrapped = _periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
+    d_wrapped = periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
     
     dist = abs(d_wrapped)
     
@@ -238,19 +238,19 @@ struct BiasPotential{C, B}
     bias_type::B
 end
 
-_bias_all_finite(values::AbstractArray) = all(_bias_all_finite, values)
-_bias_all_finite(value) = isfinite(ustrip(value))
+bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)
+bias_all_finite(value) = isfinite(ustrip(value))
 
-function _bias_max_abs_ustrip(values::AbstractArray)
+ function bias_max_abs_ustrip(values::AbstractArray)
     isempty(values) && return 0.0
-    return mapreduce(_bias_max_abs_ustrip, max, values)
+    return mapreduce(bias_max_abs_ustrip, max, values)
 end
 
-_bias_max_abs_ustrip(value) = abs(ustrip(value))
+bias_max_abs_ustrip(value) = abs(ustrip(value))
 
-function _check_bias_finite(value, label::AbstractString, bias::BiasPotential;
+ function check_bias_finite(value, label::AbstractString, bias::BiasPotential;
                             cv_sim=nothing, max_abs_component=nothing)
-    _bias_all_finite(value) && return value
+    bias_all_finite(value) && return value
     msg = "BiasPotential with CV $(typeof(bias.cv_type)) and bias " *
           "$(typeof(bias.bias_type)) produced non-finite $(label)"
     if !isnothing(cv_sim)
@@ -259,7 +259,7 @@ function _check_bias_finite(value, label::AbstractString, bias::BiasPotential;
     if !isnothing(max_abs_component)
         msg *= ", max_abs_component=$(max_abs_component)"
     end
-    throw(ArgumentError(msg * "."))
+    error(msg * ".")
 end
 
 function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
@@ -277,10 +277,10 @@ function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
         from_device(sys.velocities);
         kwargs...,
     )
-    _check_bias_finite(cv_sim, "collective variable", bias)
+    check_bias_finite(cv_sim, "collective variable", bias)
 
     pe = potential_energy(bias.bias_type, cv_sim; kwargs...)
-    return _check_bias_finite(pe, "potential energy", bias; cv_sim=cv_sim)
+    return check_bias_finite(pe, "potential energy", bias; cv_sim=cv_sim)
 end
 
 function AtomsCalculators.forces!(
@@ -303,20 +303,20 @@ function AtomsCalculators.forces!(
         sys.boundary,
         from_device(sys.velocities),
     )
-    _check_bias_finite(cv_sim, "collective variable", bias)
-    _check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
+    check_bias_finite(cv_sim, "collective variable", bias)
+    check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
 
     # Gradient of bias function with respect to CV
     d_bias = bias_gradient(bias.bias_type, cv_sim)
-    _check_bias_finite(d_bias, "bias gradient", bias; cv_sim=cv_sim)
+    check_bias_finite(d_bias, "bias gradient", bias; cv_sim=cv_sim)
 
     fs_svec = d_bias .* d_coords
-    _check_bias_finite(
+    check_bias_finite(
         fs_svec,
         "bias force",
         bias;
         cv_sim=cv_sim,
-        max_abs_component=_bias_max_abs_ustrip(fs_svec),
+        max_abs_component = bias_max_abs_ustrip(fs_svec),
     )
     
     if needs_vir && bias.cv_type.has_virial

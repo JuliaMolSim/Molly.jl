@@ -1,4 +1,4 @@
-@inline function _online_pmf_logaddexp(a::T, b::T) where T
+@inline function online_pmf_logaddexp(a::T, b::T) where T
     if a == -T(Inf)
         return b
     elseif b == -T(Inf)
@@ -8,56 +8,63 @@
     return m + log(exp(a - m) + exp(b - m))
 end
 
-function _online_pmf_tuple(values::Tuple, ::Type{T}) where T
-    return tuple((_safe_ustrip(T, value) for value in values)...)
+function online_pmf_tuple(values::Tuple, ::Type{T}) where T
+    return tuple((safe_ustrip(T, value) for value in values)...)
 end
 
-function _online_pmf_tuple(value::Number, ::Type{T}) where T
-    return (_safe_ustrip(T, value),)
+function online_pmf_tuple(value::Number, ::Type{T}) where T
+    return (safe_ustrip(T, value),)
 end
 
-function _online_pmf_tuple(value, ::Type{T}) where T
+function online_pmf_tuple(value, ::Type{T}) where T
     values = from_device(value)
-    values isa AbstractVector ||
+    if !(values isa AbstractVector)
         throw(ArgumentError("PMF coordinate must be a scalar, tuple, or vector."))
-    return tuple((_safe_ustrip(T, v) for v in values)...)
+    end
+    return tuple((safe_ustrip(T, v) for v in values)...)
 end
 
-function _online_pmf_edges_from_bounds(mins, maxs, bins, ::Type{T}) where T
-    length(mins) == length(maxs) == length(bins) ||
+function online_pmf_edges_from_bounds(mins, maxs, bins, ::Type{T}) where T
+    if length(mins) != length(maxs) || length(maxs) != length(bins)
         throw(ArgumentError("PMF grid minima, maxima, and bin counts must have matching lengths."))
+    end
     return ntuple(length(bins)) do d
-        min_d = _safe_ustrip(T, mins[d])
-        max_d = _safe_ustrip(T, maxs[d])
+        min_d = safe_ustrip(T, mins[d])
+        max_d = safe_ustrip(T, maxs[d])
         n_d = Int(bins[d])
-        isfinite(min_d) && isfinite(max_d) && max_d > min_d ||
+        if !(isfinite(min_d) && isfinite(max_d) && max_d > min_d)
             throw(ArgumentError("PMF grid dimension $(d) must have finite max > min."))
-        n_d > 0 ||
+        end
+        if n_d <= 0
             throw(ArgumentError("PMF grid dimension $(d) must have a positive bin count."))
+        end
         step = (max_d - min_d) / T(n_d)
         [min_d + T(i) * step for i in 0:n_d]
     end
 end
 
-function _online_pmf_edges(grid, ::Type{T}) where T
+function online_pmf_edges(grid, ::Type{T}) where T
     if grid isa Tuple && length(grid) == 3 && grid[3] isa Integer
-        return _online_pmf_edges_from_bounds((grid[1],), (grid[2],), (grid[3],), T)
+        return online_pmf_edges_from_bounds((grid[1],), (grid[2],), (grid[3],), T)
     elseif grid isa Tuple && length(grid) == 3 && !(grid[1] isa AbstractVector) &&
            !(grid[1] isa Tuple)
-        return _online_pmf_edges_from_bounds((grid[1],), (grid[2],), (grid[3],), T)
+        return online_pmf_edges_from_bounds((grid[1],), (grid[2],), (grid[3],), T)
     elseif grid isa Tuple && length(grid) == 3 &&
            (grid[3] isa Tuple || (grid[3] isa AbstractVector && all(x -> x isa Integer, grid[3]))) &&
            all(x -> x isa Tuple || x isa AbstractVector, grid)
-        return _online_pmf_edges_from_bounds(grid[1], grid[2], grid[3], T)
+        return online_pmf_edges_from_bounds(grid[1], grid[2], grid[3], T)
     elseif grid isa Tuple && all(edge -> edge isa AbstractVector, grid)
         return ntuple(length(grid)) do d
-            edges_d = T.(_safe_ustrip.(Ref(T), grid[d]))
-            length(edges_d) >= 2 ||
+            edges_d = T.(safe_ustrip.(Ref(T), grid[d]))
+            if length(edges_d) < 2
                 throw(ArgumentError("PMF grid dimension $(d) must have at least two edges."))
-            all(isfinite, edges_d) ||
+            end
+            if !all(isfinite, edges_d)
                 throw(ArgumentError("PMF grid dimension $(d) contains non-finite edges."))
-            all(>(zero(T)), diff(edges_d)) ||
+            end
+            if !all(>(zero(T)), diff(edges_d))
                 throw(ArgumentError("PMF grid dimension $(d) edges must be strictly increasing."))
+            end
             collect(edges_d)
         end
     else
@@ -66,13 +73,13 @@ function _online_pmf_edges(grid, ::Type{T}) where T
     end
 end
 
-function _online_pmf_centers(edges::NTuple{N, <:AbstractVector{T}}) where {N, T}
+function online_pmf_centers(edges::NTuple{N, <:AbstractVector{T}}) where {N, T}
     return ntuple(N) do d
         [(edges[d][i] + edges[d][i + 1]) / T(2) for i in 1:(length(edges[d]) - 1)]
     end
 end
 
-function _online_pmf_widths(edges::NTuple{N, <:AbstractVector{T}}) where {N, T}
+function online_pmf_widths(edges::NTuple{N, <:AbstractVector{T}}) where {N, T}
     return ntuple(N) do d
         [edges[d][i + 1] - edges[d][i] for i in 1:(length(edges[d]) - 1)]
     end
@@ -102,9 +109,9 @@ edge vectors. Samples are added with `accumulate!(acc, value, log_weight)`, and
 `pmf(acc)` returns a `PMF` result.
 """
 function OnlinePMFAccumulator(grid; T::Type = Float64)
-    edges = _online_pmf_edges(grid, T)
-    centers = _online_pmf_centers(edges)
-    widths = _online_pmf_widths(edges)
+    edges = online_pmf_edges(grid, T)
+    centers = online_pmf_centers(edges)
+    widths = online_pmf_widths(edges)
     shape = ntuple(d -> length(edges[d]) - 1, length(edges))
     return OnlinePMFAccumulator(
         edges,
@@ -120,7 +127,7 @@ function OnlinePMFAccumulator(grid; T::Type = Float64)
     )
 end
 
-function _online_pmf_bin_index(edges::NTuple{N, <:AbstractVector{T}},
+function online_pmf_bin_index(edges::NTuple{N, <:AbstractVector{T}},
                                values::NTuple{N, T}) where {N, T}
     return ntuple(N) do d
         edges_d = edges[d]
@@ -137,17 +144,20 @@ end
 
 function accumulate!(acc::OnlinePMFAccumulator{N, T}, value, log_weight) where {N, T}
     lw = T(log_weight)
-    isfinite(lw) ||
+    if !isfinite(lw)
         throw(ArgumentError("online PMF log weight is non-finite ($(log_weight))."))
+    end
 
-    values = _online_pmf_tuple(value, T)
-    length(values) == N ||
+    values = online_pmf_tuple(value, T)
+    if length(values) != N
         throw(DimensionMismatch("PMF coordinate has $(length(values)) dimensions, expected $(N)."))
-    all(isfinite, values) ||
+    end
+    if !all(isfinite, values)
         throw(ArgumentError("PMF coordinate contains non-finite values."))
+    end
 
     acc.total_samples += 1
-    idx = _online_pmf_bin_index(acc.edges, values)
+    idx = online_pmf_bin_index(acc.edges, values)
     if any(==(0), idx)
         acc.out_of_grid_samples += 1
         return acc
@@ -155,24 +165,24 @@ function accumulate!(acc::OnlinePMFAccumulator{N, T}, value, log_weight) where {
 
     cart_idx = CartesianIndex(idx)
     acc.log_weight_sums[cart_idx] =
-        _online_pmf_logaddexp(acc.log_weight_sums[cart_idx], lw)
+        online_pmf_logaddexp(acc.log_weight_sums[cart_idx], lw)
     acc.log_weight_sq_sums[cart_idx] =
-        _online_pmf_logaddexp(acc.log_weight_sq_sums[cart_idx], T(2) * lw)
+        online_pmf_logaddexp(acc.log_weight_sq_sums[cart_idx], T(2) * lw)
     acc.max_log_weights[cart_idx] = max(acc.max_log_weights[cart_idx], lw)
     acc.counts[cart_idx] += 1
     acc.accepted_samples += 1
     return acc
 end
 
-function _online_pmf_total_log_weight(log_weight_sums::AbstractArray{T}) where T
+function online_pmf_total_log_weight(log_weight_sums::AbstractArray{T}) where T
     total = -T(Inf)
     for lw in log_weight_sums
-        total = _online_pmf_logaddexp(total, lw)
+        total = online_pmf_logaddexp(total, lw)
     end
     return total
 end
 
-function _online_pmf_bin_volumes(widths::NTuple{N, <:AbstractVector{T}},
+function online_pmf_bin_volumes(widths::NTuple{N, <:AbstractVector{T}},
                                  shape::NTuple{N, Int}) where {N, T}
     volumes = Array{T, N}(undef, shape)
     for idx in CartesianIndices(volumes)
@@ -208,8 +218,8 @@ end
 Return the effective sample size of the complete accumulated PMF histogram.
 """
 function total_effective_samples(acc::OnlinePMFAccumulator{N, T}) where {N, T}
-    lw = _online_pmf_total_log_weight(acc.log_weight_sums)
-    lw2 = _online_pmf_total_log_weight(acc.log_weight_sq_sums)
+    lw = online_pmf_total_log_weight(acc.log_weight_sums)
+    lw2 = online_pmf_total_log_weight(acc.log_weight_sq_sums)
     if isfinite(lw) && isfinite(lw2)
         return exp(T(2) * lw - lw2)
     end
@@ -243,14 +253,16 @@ reduced units, shifted according to `zero`; when `kBT` is provided, `F_energy`
 is also populated.
 """
 function pmf(acc::OnlinePMFAccumulator{N, T}; zero::Symbol = :min, kBT = nothing) where {N, T}
-    zero in (:min, :last, :none) ||
+    if !(zero in (:min, :last, :none))
         throw(ArgumentError("zero must be one of :min, :last, or :none."))
+    end
 
-    log_total = _online_pmf_total_log_weight(acc.log_weight_sums)
-    isfinite(log_total) ||
+    log_total = online_pmf_total_log_weight(acc.log_weight_sums)
+    if !isfinite(log_total)
         throw(ArgumentError("cannot compute PMF before at least one in-grid weighted sample."))
+    end
 
-    volumes = _online_pmf_bin_volumes(acc.widths, size(acc.log_weight_sums))
+    volumes = online_pmf_bin_volumes(acc.widths, size(acc.log_weight_sums))
     probability = zeros(T, size(acc.log_weight_sums))
     F = fill(T(Inf), size(acc.log_weight_sums))
     for idx in CartesianIndices(acc.log_weight_sums)
@@ -287,7 +299,7 @@ function pmf(acc::OnlinePMFAccumulator{N, T}; zero::Symbol = :min, kBT = nothing
     return PMF(centers, widths, edges, F, F_energy, nothing, nothing, probability, nothing)
 end
 
-function _target_coords_for_system(coords, sys::System)
+function target_coords_for_system(coords, sys::System)
     target_array_type = array_type(sys)
     array_type(coords) == target_array_type && return coords
     return to_device(from_device(coords), target_array_type)

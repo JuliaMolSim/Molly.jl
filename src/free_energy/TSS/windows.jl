@@ -29,16 +29,18 @@ struct TSSWindow
         end
 
         evaluation_state_indices = unique(Int.(collect(vcat(state_indices, evaluation_state_indices))))
-        isempty(evaluation_state_indices) &&
+        if isempty(evaluation_state_indices)
             throw(ArgumentError("evaluation_state_indices must be non-empty"))
+        end
         if any(<=(0), evaluation_state_indices)
             throw(ArgumentError("evaluation_state_indices entries must be positive."))
         end
         if !allunique(evaluation_state_indices)
             throw(ArgumentError("evaluation_state_indices entries must be unique."))
         end
-        all(state_index -> state_index in evaluation_state_indices, state_indices) ||
+        if !all(state_index -> state_index in evaluation_state_indices, state_indices)
             throw(ArgumentError("evaluation_state_indices must contain all state_indices."))
+        end
 
         return new(Int(index), state_indices, evaluation_state_indices)
     end
@@ -46,8 +48,8 @@ end
 
 function Base.show(io::IO, window::TSSWindow)
     print(io, "TSSWindow ", window.index, " with ",
-          _tss_count(length(window.state_indices), "state"), ", ",
-          _tss_count(length(window.evaluation_state_indices), "evaluated state"))
+          tss_count(length(window.state_indices), "state"), ", ",
+          tss_count(length(window.evaluation_state_indices), "evaluated state"))
 end
 
 Base.show(io::IO, ::MIME"text/plain", window::TSSWindow) = show(io, window)
@@ -71,14 +73,14 @@ struct TSSGraph
 end
 
 function Base.show(io::IO, graph::TSSGraph)
-    print(io, "TSSGraph with ", _tss_count(graph.n_states, "state"), ", ",
-          _tss_count(length(graph.windows), "window"), ", ",
-          _tss_count(length(graph.rung_edges), "edge"))
+    print(io, "TSSGraph with ", tss_count(graph.n_states, "state"), ", ",
+          tss_count(length(graph.windows), "window"), ", ",
+          tss_count(length(graph.rung_edges), "edge"))
 end
 
 Base.show(io::IO, ::MIME"text/plain", graph::TSSGraph) = show(io, graph)
 
-struct _TSSGraphEdge
+struct TSSGraphEdge
     nodes::Any
     shape::Vector{Int}
     window_size::Vector{Int}
@@ -93,23 +95,23 @@ end
 # Add one or more edges with add_tss_edge!, then call build_tss_graph to
 # construct the immutable TSSGraph.
 mutable struct TSSGraphBuilder
-    edges::Vector{_TSSGraphEdge}
+    edges::Vector{TSSGraphEdge}
 end
 
-TSSGraphBuilder() = TSSGraphBuilder(_TSSGraphEdge[])
+TSSGraphBuilder() = TSSGraphBuilder(TSSGraphEdge[])
 
-struct _TSSPartialMembership
+struct TSSPartialMembership
     dimension::Int
     side::Int
 end
 
-struct _TSSDimWindow
+struct TSSDimWindow
     start::Int
     size::Int
-    partials::Vector{_TSSPartialMembership}
+    partials::Vector{TSSPartialMembership}
 end
 
-struct _TSSWindowSpec
+struct TSSWindowSpec
     sort_key::Vector{Int}
     state_indices::Vector{Int}
     partial_signature::Union{Nothing, Tuple{Vararg{String}}}
@@ -137,8 +139,8 @@ end
 
 function Base.show(io::IO, stats::WindowedTSSStats)
     print(io, "WindowedTSSStats with ",
-          _tss_count(length(stats.iterations), "logged entry", "logged entries"),
-          " and ", _tss_count(length(stats.replica_indices), "replica log entry",
+          tss_count(length(stats.iterations), "logged entry", "logged entries"),
+          " and ", tss_count(length(stats.replica_indices), "replica log entry",
                               "replica log entries"))
 end
 
@@ -191,8 +193,8 @@ end
 
 function Base.show(io::IO, coupling::WindowedTSSCoupling)
     print(io, "WindowedTSSCoupling with ",
-          _tss_count(length(coupling.visit_control_f), "state"), ", ",
-          _tss_count(length(coupling.window_probs), "window"), ", converged=",
+          tss_count(length(coupling.visit_control_f), "state"), ", ",
+          tss_count(length(coupling.window_probs), "window"), ", converged=",
           coupling.converged, ", iterations=", coupling.iterations)
 end
 
@@ -231,15 +233,15 @@ end
 
 function Base.show(io::IO, state::TSSState)
     visit_control = isnothing(state.coupling) ? "disabled" : "enabled"
-    print(io, "TSSState with ", _tss_count(n_states(state.state_space), "state"), ", ",
-          _tss_count(length(state.windows), "window"), ", active state ",
+    print(io, "TSSState with ", tss_count(n_states(state.state_space), "state"), ", ",
+          tss_count(length(state.windows), "window"), ", active state ",
           state.active_state.active_idx, ", active window ", state.active_window,
           ", iteration ", state.iteration, ", visit control ", visit_control)
 end
 
 Base.show(io::IO, ::MIME"text/plain", state::TSSState) = show(io, state)
 
-function _build_tss_state_to_windows(windows::AbstractVector{TSSWindow}, K::Int)
+function build_tss_state_to_windows(windows::AbstractVector{TSSWindow}, K::Int)
     state_to_windows = [Int[] for _ in 1:K]
     for window in windows
         for state_index in window.state_indices
@@ -249,7 +251,7 @@ function _build_tss_state_to_windows(windows::AbstractVector{TSSWindow}, K::Int)
     return state_to_windows
 end
 
-function _tss_window_overlap_adjacency(windows::AbstractVector{TSSWindow})
+function tss_window_overlap_adjacency(windows::AbstractVector{TSSWindow})
     adjacency = [Int[] for _ in eachindex(windows)]
 
     for i in eachindex(windows)
@@ -264,8 +266,8 @@ function _tss_window_overlap_adjacency(windows::AbstractVector{TSSWindow})
     return adjacency
 end
 
-function _check_tss_window_graph_connected(windows::AbstractVector{TSSWindow})
-    adjacency = _tss_window_overlap_adjacency(windows)
+function check_tss_window_graph_connected(windows::AbstractVector{TSSWindow})
+    adjacency = tss_window_overlap_adjacency(windows)
     visited = falses(length(windows))
     queue = [1]
     visited[1] = true
@@ -284,35 +286,37 @@ function _check_tss_window_graph_connected(windows::AbstractVector{TSSWindow})
     return adjacency
 end
 
-function _validate_tss_window_coverage!(windows::AbstractVector{TSSWindow},
+function validate_tss_window_coverage!(windows::AbstractVector{TSSWindow},
                                         state_to_windows::Vector{Vector{Int}},
                                         K::Int)
     for state_index in 1:K
         n_cover = length(state_to_windows[state_index])
-        n_cover == 2 ||
+        if n_cover != 2
             throw(ArgumentError("state $(state_index) must be covered by exactly two windows; got $(n_cover)."))
+        end
     end
 
-    _check_tss_window_graph_connected(windows)
+    check_tss_window_graph_connected(windows)
     return windows
 end
 
-function _validate_tss_state_window_coverage!(windows::AbstractVector{TSSWindow},
+function validate_tss_state_window_coverage!(windows::AbstractVector{TSSWindow},
                                               state_to_windows::Vector{Vector{Int}},
                                               K::Int)
     required_coverage = length(windows) == 1 ? 1 : 2
     for state_index in 1:K
         n_cover = length(state_to_windows[state_index])
-        n_cover == required_coverage ||
+        if n_cover != required_coverage
             throw(ArgumentError("state $(state_index) must be covered by exactly " *
                                 "$(required_coverage) window(s); got $(n_cover)."))
+        end
     end
 
-    _check_tss_window_graph_connected(windows)
+    check_tss_window_graph_connected(windows)
     return windows
 end
 
-function _single_window_tss_graph(K::Int)
+function single_window_tss_graph(K::Int)
     K >= 1 || throw(ArgumentError("Number of states must be larger or equal than 1."))
     window = TSSWindow(1, Base.OneTo(K))
     state_to_windows = [[1] for _ in 1:K]
@@ -333,21 +337,22 @@ function _single_window_tss_graph(K::Int)
     )
 end
 
-function _tss_tuple(value, n_dims::Int, name::AbstractString, ::Type{T}) where {T}
+function tss_tuple(value, n_dims::Int, name::AbstractString, ::Type{T}) where {T}
     values = if value isa Tuple || value isa AbstractVector
         collect(value)
     else
         fill(value, n_dims)
     end
-    length(values) == n_dims ||
+    if length(values) != n_dims
         throw(ArgumentError("$(name) must have length $(n_dims)."))
+    end
     return T[values...]
 end
 
-_tss_shape_tuple(value, name::AbstractString = "shape") =
+tss_shape_tuple(value, name::AbstractString = "shape") =
     value isa Integer ? [Int(value)] : Int.(collect(value))
 
-function _tss_node_name(nodes, corner::Vector{Int})
+function tss_node_name(nodes, corner::Vector{Int})
     value = if nodes isa AbstractArray && ndims(nodes) == length(corner)
         nodes[corner...]
     else
@@ -360,14 +365,15 @@ function _tss_node_name(nodes, corner::Vector{Int})
     return String(value)
 end
 
-function _validate_tss_edge_nodes(nodes, n_dims::Int)
+function validate_tss_edge_nodes(nodes, n_dims::Int)
     seen = Dict{String, Int}()
     for corner in CartesianIndices(ntuple(_ -> 2, n_dims))
-        name = _tss_node_name(nodes, collect(Tuple(corner)))
+        name = tss_node_name(nodes, collect(Tuple(corner)))
         name == "_" && continue
         seen[name] = get(seen, name, 0) + 1
-        seen[name] == 1 ||
+        if seen[name] != 1
             throw(ArgumentError("TSS edge node name $(name) is repeated within one edge."))
+        end
     end
     return nodes
 end
@@ -387,25 +393,26 @@ function add_tss_edge!(builder::TSSGraphBuilder,
                        window_size,
                        periodic = false,
                        primary_window_tiling_only::Bool = false)
-    shape = _tss_shape_tuple(shape)
+    shape = tss_shape_tuple(shape)
     n_dims = length(shape)
     n_dims > 0 || throw(ArgumentError("TSS edge shape must have at least one dimension."))
     all(>(0), shape) || throw(ArgumentError("TSS edge shape entries must be positive."))
 
-    window_size = _tss_tuple(window_size, n_dims, "window_size", Int)
-    all(>(0), window_size) ||
+    window_size = tss_tuple(window_size, n_dims, "window_size", Int)
+    if !all(>(0), window_size)
         throw(ArgumentError("TSS window_size entries must be positive."))
-    periodic = _tss_tuple(periodic, n_dims, "periodic", Bool)
-    _validate_tss_edge_nodes(nodes, n_dims)
+    end
+    periodic = tss_tuple(periodic, n_dims, "periodic", Bool)
+    validate_tss_edge_nodes(nodes, n_dims)
 
     push!(
         builder.edges,
-        _TSSGraphEdge(nodes, shape, window_size, periodic, primary_window_tiling_only),
+        TSSGraphEdge(nodes, shape, window_size, periodic, primary_window_tiling_only),
     )
     return builder
 end
 
-function _anonymous_tss_nodes(n_dims::Int)
+function anonymous_tss_nodes(n_dims::Int)
     return fill("_", ntuple(_ -> 2, n_dims))
 end
 
@@ -418,11 +425,11 @@ This is a convenience wrapper around `TSSGraphBuilder`, `add_tss_edge!`, and
 `build_tss_graph` for a single anonymous edge with regular windows.
 """
 function tss_grid_graph(shape; window_size, periodic = false)
-    shape = _tss_shape_tuple(shape)
+    shape = tss_shape_tuple(shape)
     builder = TSSGraphBuilder()
     add_tss_edge!(
         builder,
-        _anonymous_tss_nodes(length(shape)),
+        anonymous_tss_nodes(length(shape)),
         shape;
         window_size = window_size,
         periodic = periodic,
@@ -430,7 +437,7 @@ function tss_grid_graph(shape; window_size, periodic = false)
     return build_tss_graph(builder)
 end
 
-function _tss_edge_offsets(edges::Vector{_TSSGraphEdge})
+function tss_edge_offsets(edges::Vector{TSSGraphEdge})
     offsets = Int[]
     next_index = 1
     for edge in edges
@@ -440,22 +447,22 @@ function _tss_edge_offsets(edges::Vector{_TSSGraphEdge})
     return offsets
 end
 
-function _tss_edge_rung_index(edge::_TSSGraphEdge, offset::Int, coord::Vector{Int})
+function tss_edge_rung_index(edge::TSSGraphEdge, offset::Int, coord::Vector{Int})
     return offset + LinearIndices(Tuple(edge.shape))[CartesianIndex(Tuple(coord))] - 1
 end
 
-function _tss_edge_coordinates(edge::_TSSGraphEdge)
+function tss_edge_coordinates(edge::TSSGraphEdge)
     return [collect(Tuple(coord)) for coord in CartesianIndices(Tuple(edge.shape))]
 end
 
-function _tss_rung_volume(edge::_TSSGraphEdge, coord::Vector{Int})
+function tss_rung_volume(edge::TSSGraphEdge, coord::Vector{Int})
     n_edge_dims = count(eachindex(coord)) do dim
         !edge.periodic[dim] && (coord[dim] == 1 || coord[dim] == edge.shape[dim])
     end
     return 0.5 ^ n_edge_dims
 end
 
-function _tss_neighbor_coord(edge::_TSSGraphEdge,
+function tss_neighbor_coord(edge::TSSGraphEdge,
                              coord::Vector{Int},
                              dim::Int,
                              step::Int)
@@ -474,19 +481,19 @@ function _tss_neighbor_coord(edge::_TSSGraphEdge,
     return neighbor
 end
 
-function _tss_rung_neighbors(edge::_TSSGraphEdge, offset::Int, coord::Vector{Int})
+function tss_rung_neighbors(edge::TSSGraphEdge, offset::Int, coord::Vector{Int})
     neighbors = NTuple{3, Int}[]
-    self = _tss_edge_rung_index(edge, offset, coord)
+    self = tss_edge_rung_index(edge, offset, coord)
     for dim in eachindex(coord)
-        reverse = _tss_edge_rung_index(
+        reverse = tss_edge_rung_index(
             edge,
             offset,
-            _tss_neighbor_coord(edge, coord, dim, -1),
+            tss_neighbor_coord(edge, coord, dim, -1),
         )
-        forward = _tss_edge_rung_index(
+        forward = tss_edge_rung_index(
             edge,
             offset,
-            _tss_neighbor_coord(edge, coord, dim, 1),
+            tss_neighbor_coord(edge, coord, dim, 1),
         )
         real_neighbor_count = (reverse != self) + (forward != self)
         push!(neighbors, (reverse, forward, real_neighbor_count))
@@ -494,50 +501,53 @@ function _tss_rung_neighbors(edge::_TSSGraphEdge, offset::Int, coord::Vector{Int
     return neighbors
 end
 
-function _tss_dim_windows(n_states::Int,
+function tss_dim_windows(n_states::Int,
                           window_size::Int,
                           periodic::Bool,
                           dim::Int,
                           generate_overlapping::Bool)
-    n_states >= window_size ||
+    if n_states < window_size
         throw(ArgumentError("TSS window_size[$(dim)] must not exceed shape[$(dim)]."))
-    n_states % window_size == 0 ||
+    end
+    if n_states % window_size != 0
         throw(ArgumentError("TSS shape[$(dim)] must be divisible by window_size[$(dim)]."))
+    end
 
-    regular = [_TSSDimWindow(start, window_size, _TSSPartialMembership[])
+    regular = [TSSDimWindow(start, window_size, TSSPartialMembership[])
                for start in 1:window_size:n_states]
-    !generate_overlapping && return regular, _TSSDimWindow[]
+    !generate_overlapping && return regular, TSSDimWindow[]
 
-    iseven(window_size) ||
+    if !iseven(window_size)
         throw(ArgumentError("TSS window_size[$(dim)] must be even for overlapping windows."))
+    end
     half_width = window_size ÷ 2
-    overlap = _TSSDimWindow[]
+    overlap = TSSDimWindow[]
 
     if periodic
         for start in (1 + half_width):window_size:n_states
-            push!(overlap, _TSSDimWindow(start, window_size, _TSSPartialMembership[]))
+            push!(overlap, TSSDimWindow(start, window_size, TSSPartialMembership[]))
         end
     else
         for start in (1 + half_width):window_size:(n_states - window_size + 1)
-            push!(overlap, _TSSDimWindow(start, window_size, _TSSPartialMembership[]))
+            push!(overlap, TSSDimWindow(start, window_size, TSSPartialMembership[]))
         end
         push!(
             overlap,
-            _TSSDimWindow(1, half_width, [_TSSPartialMembership(dim, 0)]),
+            TSSDimWindow(1, half_width, [TSSPartialMembership(dim, 0)]),
         )
         push!(
             overlap,
-            _TSSDimWindow(
+            TSSDimWindow(
                 n_states - half_width + 1,
                 half_width,
-                [_TSSPartialMembership(dim, 1)],
+                [TSSPartialMembership(dim, 1)],
             ),
         )
     end
     return regular, overlap
 end
 
-function _tss_dim_state_values(dim_window::_TSSDimWindow,
+function tss_dim_state_values(dim_window::TSSDimWindow,
                                n_states::Int,
                                periodic::Bool)
     return [periodic ? mod1(dim_window.start + offset, n_states) :
@@ -545,8 +555,8 @@ function _tss_dim_state_values(dim_window::_TSSDimWindow,
             for offset in 0:(dim_window.size - 1)]
 end
 
-function _tss_partial_signature(edge::_TSSGraphEdge,
-                                partials::Vector{_TSSPartialMembership})
+function tss_partial_signature(edge::TSSGraphEdge,
+                                partials::Vector{TSSPartialMembership})
     isempty(partials) && return nothing
     fixed = Dict(partial.dimension => partial.side + 1 for partial in partials)
     names = String[]
@@ -554,7 +564,7 @@ function _tss_partial_signature(edge::_TSSGraphEdge,
         corner_vec = collect(Tuple(corner))
         if all(get(fixed, dim, corner_vec[dim]) == corner_vec[dim]
                for dim in eachindex(corner_vec))
-            name = _tss_node_name(edge.nodes, corner_vec)
+            name = tss_node_name(edge.nodes, corner_vec)
             name == "_" || push!(names, name)
         end
     end
@@ -562,36 +572,36 @@ function _tss_partial_signature(edge::_TSSGraphEdge,
     return Tuple(sort!(unique(names)))
 end
 
-function _tss_window_spec(edge::_TSSGraphEdge,
+function tss_window_spec(edge::TSSGraphEdge,
                           offset::Int,
                           windows_by_dim)
     n_dims = length(edge.shape)
     values_by_dim = [
-        _tss_dim_state_values(windows_by_dim[dim], edge.shape[dim], edge.periodic[dim])
+        tss_dim_state_values(windows_by_dim[dim], edge.shape[dim], edge.periodic[dim])
         for dim in 1:n_dims
     ]
     state_indices = Int[]
     for coord_tuple in Iterators.product(values_by_dim...)
-        push!(state_indices, _tss_edge_rung_index(edge, offset, collect(coord_tuple)))
+        push!(state_indices, tss_edge_rung_index(edge, offset, collect(coord_tuple)))
     end
 
     partials = reduce(
         vcat,
         (window.partials for window in windows_by_dim);
-        init = _TSSPartialMembership[],
+        init = TSSPartialMembership[],
     )
-    return _TSSWindowSpec(
+    return TSSWindowSpec(
         [window.start for window in windows_by_dim],
         state_indices,
-        _tss_partial_signature(edge, partials),
+        tss_partial_signature(edge, partials),
     )
 end
 
-function _tss_edge_window_specs(edge::_TSSGraphEdge, offset::Int)
-    regular_by_dim = Vector{_TSSDimWindow}[]
-    overlap_by_dim = Vector{_TSSDimWindow}[]
+function tss_edge_window_specs(edge::TSSGraphEdge, offset::Int)
+    regular_by_dim = Vector{TSSDimWindow}[]
+    overlap_by_dim = Vector{TSSDimWindow}[]
     for dim in eachindex(edge.shape)
-        regular, overlap = _tss_dim_windows(
+        regular, overlap = tss_dim_windows(
             edge.shape[dim],
             edge.window_size[dim],
             edge.periodic[dim],
@@ -602,28 +612,28 @@ function _tss_edge_window_specs(edge::_TSSGraphEdge, offset::Int)
         push!(overlap_by_dim, overlap)
     end
 
-    specs = _TSSWindowSpec[]
+    specs = TSSWindowSpec[]
     for window_tuple in Iterators.product(regular_by_dim...)
-        push!(specs, _tss_window_spec(edge, offset, window_tuple))
+        push!(specs, tss_window_spec(edge, offset, window_tuple))
     end
     if !edge.primary_window_tiling_only
         for window_tuple in Iterators.product(overlap_by_dim...)
-            push!(specs, _tss_window_spec(edge, offset, window_tuple))
+            push!(specs, tss_window_spec(edge, offset, window_tuple))
         end
     end
     return specs
 end
 
-function _merge_tss_window_specs(specs::Vector{_TSSWindowSpec})
-    full_specs = _TSSWindowSpec[]
-    unmerged_partials = _TSSWindowSpec[]
-    partial_groups = Dict{Tuple{Vararg{String}}, Vector{_TSSWindowSpec}}()
+function merge_tss_window_specs(specs::Vector{TSSWindowSpec})
+    full_specs = TSSWindowSpec[]
+    unmerged_partials = TSSWindowSpec[]
+    partial_groups = Dict{Tuple{Vararg{String}}, Vector{TSSWindowSpec}}()
 
     for spec in specs
         if isnothing(spec.partial_signature)
             push!(full_specs, spec)
         else
-            group = get!(partial_groups, spec.partial_signature, _TSSWindowSpec[])
+            group = get!(partial_groups, spec.partial_signature, TSSWindowSpec[])
             push!(group, spec)
         end
     end
@@ -646,18 +656,18 @@ function _merge_tss_window_specs(specs::Vector{_TSSWindowSpec})
                 sort_key = copy(spec.sort_key)
             end
         end
-        push!(merged_specs, _TSSWindowSpec(sort_key, state_indices, nothing))
+        push!(merged_specs, TSSWindowSpec(sort_key, state_indices, nothing))
     end
     append!(merged_specs, unmerged_partials)
     sort!(merged_specs; by = spec -> (spec.sort_key, length(spec.state_indices), spec.state_indices))
     return merged_specs
 end
 
-function _evaluation_states_for_window(state_indices::Vector{Int},
+function evaluation_states_for_window(state_indices::Vector{Int},
                                        rung_neighbors::Vector{Vector{NTuple{3, Int}}})
     evaluation_states = copy(state_indices)
     for state_index in state_indices
-        for (reverse, forward, _) in rung_neighbors[state_index]
+        for (reverse, forward, ) in rung_neighbors[state_index]
             push!(evaluation_states, reverse)
             push!(evaluation_states, forward)
         end
@@ -673,35 +683,36 @@ end
 # window coverage, constructs rung neighbor lists, and merges compatible window
 # specifications across named edge nodes.
 function build_tss_graph(builder::TSSGraphBuilder)
-    isempty(builder.edges) &&
+    if isempty(builder.edges)
         throw(ArgumentError("TSSGraphBuilder must contain at least one edge."))
+    end
 
-    offsets = _tss_edge_offsets(builder.edges)
+    offsets = tss_edge_offsets(builder.edges)
     n_total = sum(prod(edge.shape) for edge in builder.edges)
     rung_neighbors = [NTuple{3, Int}[] for _ in 1:n_total]
     rung_volumes = zeros(Float64, n_total)
     rung_coordinates = [Int[] for _ in 1:n_total]
     rung_edges = zeros(Int, n_total)
 
-    specs = _TSSWindowSpec[]
+    specs = TSSWindowSpec[]
     for (edge_i, edge) in enumerate(builder.edges)
         offset = offsets[edge_i]
-        for coord in _tss_edge_coordinates(edge)
-            state_index = _tss_edge_rung_index(edge, offset, coord)
-            rung_neighbors[state_index] = _tss_rung_neighbors(edge, offset, coord)
-            rung_volumes[state_index] = _tss_rung_volume(edge, coord)
+        for coord in tss_edge_coordinates(edge)
+            state_index = tss_edge_rung_index(edge, offset, coord)
+            rung_neighbors[state_index] = tss_rung_neighbors(edge, offset, coord)
+            rung_volumes[state_index] = tss_rung_volume(edge, coord)
             rung_coordinates[state_index] = coord
             rung_edges[state_index] = edge_i
         end
-        append!(specs, _tss_edge_window_specs(edge, offset))
+        append!(specs, tss_edge_window_specs(edge, offset))
     end
 
-    merged_specs = _merge_tss_window_specs(specs)
+    merged_specs = merge_tss_window_specs(specs)
     windows = [
         TSSWindow(
             window_i,
             spec.state_indices;
-            evaluation_state_indices = _evaluation_states_for_window(
+            evaluation_state_indices = evaluation_states_for_window(
                 spec.state_indices,
                 rung_neighbors,
             ),
@@ -709,8 +720,8 @@ function build_tss_graph(builder::TSSGraphBuilder)
         )
         for (window_i, spec) in enumerate(merged_specs)
     ]
-    state_to_windows = _build_tss_state_to_windows(windows, n_total)
-    _validate_tss_window_coverage!(windows, state_to_windows, n_total)
+    state_to_windows = build_tss_state_to_windows(windows, n_total)
+    validate_tss_window_coverage!(windows, state_to_windows, n_total)
     window_rung_to_local = [
         Dict(state_index => local_i for (local_i, state_index) in enumerate(window.state_indices))
         for window in windows
@@ -730,12 +741,14 @@ end
 
 function tss_swap_window(graph::TSSGraph, active_window::Integer, state_index::Integer)
     state_index = Int(state_index)
-    1 <= state_index <= graph.n_states ||
+    if !(1 <= state_index <= graph.n_states)
         throw(ArgumentError("state $(state_index) is out of TSS graph bounds."))
+    end
     active_window = Int(active_window)
     windows = graph.state_to_windows[state_index]
-    length(windows) == 2 ||
+    if length(windows) != 2
         throw(ArgumentError("state $(state_index) is not covered by exactly two windows."))
+    end
     if active_window == windows[1]
         return windows[2]
     elseif active_window == windows[2]
@@ -744,15 +757,16 @@ function tss_swap_window(graph::TSSGraph, active_window::Integer, state_index::I
     throw(ArgumentError("active window $(active_window) does not contain state $(state_index)."))
 end
 
-function _windowed_global_vector(values, name::AbstractString, K::Int)
+function windowed_global_vector(values, name::AbstractString, K::Int)
     isnothing(values) && return nothing
     values = collect(values)
-    length(values) == K ||
+    if length(values) != K
         throw(ArgumentError("$(name) must have length $(K) for TSSState."))
+    end
     return values
 end
 
-function _windowed_tss_adaptive_gamma_mode(adaptive_gamma)
+function windowed_tss_adaptive_gamma_mode(adaptive_gamma)
     isnothing(adaptive_gamma) && return nothing
     if adaptive_gamma isa Symbol
         adaptive_gamma == :covdet && return :covdet
@@ -762,26 +776,29 @@ function _windowed_tss_adaptive_gamma_mode(adaptive_gamma)
     throw(ArgumentError("TSSState adaptive_gamma accepts only nothing or :covdet."))
 end
 
-function _windowed_tss_adaptive_gamma_for_window(mode,
+function windowed_tss_adaptive_gamma_for_window(mode,
                                                  graph::TSSGraph,
                                                  window::TSSWindow,
                                                  ::Type{FT}) where {FT}
     isnothing(mode) && return nothing
-    mode == :covdet ||
+    if mode != :covdet
         throw(ArgumentError("unknown TSS adaptive_gamma mode $(mode)."))
+    end
 
     first_state = first(window.state_indices)
     dimension = length(graph.rung_neighbors[first_state])
     for state_index in window.state_indices
-        length(graph.rung_neighbors[state_index]) == dimension ||
+        if length(graph.rung_neighbors[state_index]) != dimension
             throw(ArgumentError("TSS CovDet adaptive gamma requires all rungs in a " *
                                 "window to have the same lambda dimension."))
+        end
     end
     volumes = FT.(graph.rung_volumes[window.state_indices])
-    all(isfinite, volumes) && all(>=(zero(FT)), volumes) && sum(volumes) > zero(FT) ||
+    if !(all(isfinite, volumes) && all(>=(zero(FT)), volumes) && sum(volumes) > zero(FT))
         throw(ArgumentError("TSS CovDet adaptive gamma requires finite positive rung volumes."))
-    return _TSSCovDetAdaptiveGamma(
-        FT(_TSS_COVDET_GAMMA_EPSILON),
+    end
+    return TSSCovDetAdaptiveGamma(
+        FT(TSS_COVDET_GAMMA_EPSILON),
         graph.rung_neighbors,
         volumes,
         dimension,
@@ -809,39 +826,43 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
     K = n_states(state_space)
     explicit_graph = !isnothing(graph)
     if isnothing(graph)
-        graph = _single_window_tss_graph(K)
+        graph = single_window_tss_graph(K)
     elseif !(graph isa TSSGraph)
         throw(ArgumentError("graph must be a TSSGraph; construct one with " *
                             "tss_grid_graph or build_tss_graph."))
     end
-    graph.n_states == K ||
+    if graph.n_states != K
         throw(ArgumentError("TSS graph contains $(graph.n_states) states but " *
                             "TSSState was given $(K) thermodynamic states."))
-    1 <= first_state <= K ||
+    end
+    if !(1 <= first_state <= K)
         throw(ArgumentError("first_state ($(first_state)) out of range 1:$(K)."))
+    end
 
     active_state = ActiveThermoState(state_space, first_state)
     FT = typeof(ustrip(active_state.active_sys.total_mass))
 
     normalized_windows = graph.windows
     state_to_windows = graph.state_to_windows
-    _validate_tss_state_window_coverage!(normalized_windows, state_to_windows, K)
+    validate_tss_state_window_coverage!(normalized_windows, state_to_windows, K)
 
     first_windows = state_to_windows[first_state]
     active_window = if isnothing(first_window)
         first(first_windows)
     else
-        first_window isa Integer ||
+        if !(first_window isa Integer)
             throw(ArgumentError("first_window must be an integer window index."))
+        end
         first_window = Int(first_window)
-        first_window in first_windows ||
+        if !(first_window in first_windows)
             throw(ArgumentError("first_window must contain first_state."))
+        end
         first_window
     end
 
-    global_gamma = _windowed_global_vector(gamma, "gamma", K)
-    global_initial_f = _windowed_global_vector(initial_f, "initial_f", K)
-    adaptive_mode = _windowed_tss_adaptive_gamma_mode(adaptive_gamma)
+    global_gamma = windowed_global_vector(gamma, "gamma", K)
+    global_initial_f = windowed_global_vector(initial_f, "initial_f", K)
+    adaptive_mode = windowed_tss_adaptive_gamma_mode(adaptive_gamma)
     if adaptive_mode == :covdet && !explicit_graph
         throw(ArgumentError("adaptive_gamma=:covdet requires an explicit TSS graph " *
                             "with lambda-neighbor topology."))
@@ -858,7 +879,7 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
             ETA = ETA,
             dens_reg = dens_reg,
             history_forgetting = history_forgetting,
-            adaptive_gamma = _windowed_tss_adaptive_gamma_for_window(
+            adaptive_gamma = windowed_tss_adaptive_gamma_for_window(
                 adaptive_mode,
                 graph,
                 window,
@@ -892,7 +913,7 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
         nothing,
     )
 
-    _update_windowed_tss_adaptive_gamma!(state)
+    update_windowed_tss_adaptive_gamma!(state)
 
     if global_visit_control
         state.coupling = initialize_windowed_tss_coupling(
@@ -915,8 +936,9 @@ window_contains_state(window::TSSWindow, global_state::Integer) =
 
 function windows_for_state(state::TSSState, global_state::Integer)
     global_state = Int(global_state)
-    1 <= global_state <= n_states(state.state_space) ||
+    if !(1 <= global_state <= n_states(state.state_space))
         throw(ArgumentError("global_state $(global_state) out of bounds."))
+    end
     return state.state_to_windows[global_state]
 end
 
@@ -926,8 +948,9 @@ function other_window_for_state(state::TSSState,
     windows = windows_for_state(state, global_state)
     if length(windows) == 1
         only_window = only(windows)
-        Int(active_window) == only_window ||
+        if Int(active_window) != only_window
             throw(ArgumentError("active window $(active_window) does not contain state $(global_state)."))
+        end
         return only_window
     end
     return tss_swap_window(state.graph, active_window, global_state)
@@ -942,24 +965,30 @@ function switch_active_window!(state::TSSState; current_state::Integer = state.a
     return state
 end
 
-function _check_windowed_tss_invariant(state::TSSState)
+function check_windowed_tss_invariant(state::TSSState)
     active_window = state.windows[state.active_window]
-    window_contains_state(active_window, state.active_state.active_idx) ||
+    if !window_contains_state(active_window, state.active_state.active_idx)
         throw(ArgumentError("active window $(state.active_window) does not contain active state " *
                             "$(state.active_state.active_idx)."))
-    length(state.window_update_counts) == length(state.windows) ||
+    end
+    if length(state.window_update_counts) != length(state.windows)
         throw(ArgumentError("window update counts do not match the number of TSS windows."))
-    state.graph.n_states == n_states(state.state_space) ||
+    end
+    if state.graph.n_states != n_states(state.state_space)
         throw(ArgumentError("TSS graph state count does not match the state space."))
+    end
     if !isnothing(state.coupling)
         coupling = state.coupling
         K = n_states(state.state_space)
-        length(coupling.visit_control_f) == K ||
+        if length(coupling.visit_control_f) != K
             throw(ArgumentError("visit-control free energies do not match the number of states."))
-        length(coupling.window_probs) == length(state.windows) ||
+        end
+        if length(coupling.window_probs) != length(state.windows)
             throw(ArgumentError("visit-control window probabilities do not match the number of windows."))
-        length(coupling.candidate_densities) == length(state.windows) ||
+        end
+        if length(coupling.candidate_densities) != length(state.windows)
             throw(ArgumentError("visit-control candidate densities do not match the number of windows."))
+        end
     end
     return state
 end
