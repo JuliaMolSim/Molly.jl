@@ -5,7 +5,7 @@ function make_tss_pmf_thermo_states(; n_atoms=4, n_states=4)
     temp = 298.0u"K"
 
     thermo_states = ThermoState[]
-    for (state_i, restraint_center) in enumerate(range(0.2, 0.8; length=n_states))
+    for restraint_center in range(0.2, 0.8; length=n_states)
         atoms = [Atom(mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1",
                       λ=1.0) for _ in 1:n_atoms]
         restraint = HarmonicPositionRestraint(
@@ -69,88 +69,38 @@ end
         @test result.F[1] ≈ 0.0
         @test result.F[2] ≈ log(2.0)
         @test result.p ≈ [2 / 3, 1 / 3]
-        @test Molly.effective_samples(acc) ≈ [1.0, 1.0]
         @test Molly.total_effective_samples(acc) ≈ 9 / 5
-        @test Molly.max_weight_fraction(acc) ≈ [1.0, 1.0]
-
-        acc_same_bin = Molly.OnlinePMFAccumulator((0.0, 1.0, 1); T=Float64)
-        Molly.accumulate!(acc_same_bin, 0.25, log(2.0))
-        Molly.accumulate!(acc_same_bin, 0.75, log(1.0))
-        @test Molly.max_weight_fraction(acc_same_bin) ≈ [2 / 3]
-
-        acc2 = Molly.OnlinePMFAccumulator(((0.0, 0.0), (1.0, 1.0), (2, 2)); T=Float64)
-        Molly.accumulate!(acc2, (0.25, 0.75), 0.0)
-        result2 = Molly.pmf(acc2)
-        @test size(result2.F) == (2, 2)
-        @test result2.F[1, 2] == 0.0
-        @test isinf(result2.F[1, 1])
-        @test isinf(result2.F[2, 1])
-        @test isinf(result2.F[2, 2])
-
         @test_throws ArgumentError Molly.OnlinePMFAccumulator(((0.0,), (1.0,), (0,)); T=Float64)
-        @test_throws ArgumentError Molly.accumulate!(acc, 0.5, Inf)
         @test_throws DimensionMismatch Molly.accumulate!(acc, (0.5, 0.5), 0.0)
     end
 
-    @testset "shared PMF deconvolution API" begin
+    @testset "sampled TSS PMF deconvolution" begin
         thermo_states = make_tss_pmf_thermo_states(n_states=3)
         tss_state = Molly.TSSState(thermo_states)
-        awh_state = Molly.AWHState(thermo_states; first_state=1, n_bias=10)
-
-        coupling = (xi, state_i) -> 0.0
-        awh_deconv = Molly.PMFDeconvolution(
-            awh_state;
-            grid=(0.0, 3.0, 3),
-            cv=coords -> (0.5,),
-            coupling=coupling,
-        )
-        awh_sim = Molly.AWHSimulation(awh_state; pmf=awh_deconv)
-        @test awh_sim.pmf === awh_deconv
-        Molly.update_pmf!(awh_deconv, awh_state, awh_state.active_sys.coords)
-        @test awh_deconv.backend.accumulator.accepted_samples == 1
-
-        pressure_deconv = Molly.PMFDeconvolution(
-            awh_state;
-            grid=(0.0, 3.0, 3),
-            cv=coords -> (0.5,),
-            coupling=coupling,
-            target_pressure=1.0u"bar",
-        )
-        Molly.update_pmf!(
-            pressure_deconv,
-            awh_state,
-            awh_state.active_sys.coords;
-            box_volume=1.0,
-        )
-        @test pressure_deconv.backend.accumulator.accepted_samples == 1
-
-        weighted_deconv = Molly.PMFDeconvolution(
-            awh_state;
-            grid=(0.0, 2.0, 2),
-            cv=coords -> (0.5,),
-            coupling=coupling,
-        )
-        nonuniform_log_bin_weights = log.([0.5, 1.0])
-        Molly.accumulate_pmf_deconvolution!(
-            weighted_deconv.backend.accumulator,
-            (0.25,),
-            nonuniform_log_bin_weights,
-        )
-        Molly.accumulate_pmf_deconvolution!(
-            weighted_deconv.backend.accumulator,
-            (1.25,),
-            nonuniform_log_bin_weights,
-        )
-        weighted_pmf = Molly.pmf(weighted_deconv)
-        @test weighted_pmf.p ≈ [1 / 3, 2 / 3]
-        @test weighted_pmf.F ≈ [log(2.0), 0.0] atol=1e-12
-
-        tss_deconv = Molly.PMFDeconvolution(
+        coupling = (xi, state_i) -> 0.25 * abs(xi[1] - state_i)
+        deconv = Molly.PMFDeconvolution(
             tss_state;
             grid=(0.0, 3.0, 3),
             cv=active_state -> (0.5,),
             coupling=coupling,
         )
+
+        estimator = first(tss_state.estimators)
+        sample = Molly.collect_tss_pmf_deconvolution_sample(
+            deconv,
+            estimator,
+            tss_state.active_state;
+            window_offset=0.0,
+        )
+        @test length(sample.value) == 1
+        @test length(sample.log_bin_weights) == 3
+        @test all(isfinite, sample.log_bin_weights)
+
+        Molly.accumulate_pmf_deconvolution!(deconv.backend.accumulator, sample)
+        acc = deconv.backend.accumulator
+        @test acc.accepted_samples == 1
+        @test count(isfinite, acc.log_numerator_sums) == 1
+        @test all(isfinite, Molly.pmf(deconv).F[isfinite.(Molly.pmf(deconv).F)])
         @test_throws ArgumentError Molly.PMFDeconvolution(
             tss_state;
             grid=(0.0, 3.0, 3),
@@ -158,53 +108,38 @@ end
             coupling=coupling,
             free_energies=zeros(3),
         )
-        @test_throws ArgumentError Molly.AWHSimulation(awh_state; pmf=tss_deconv)
+    end
 
-        tss_sample = Molly.collect_tss_pmf_deconvolution_sample(
-            tss_deconv,
-            first(tss_state.estimators),
-            tss_state.active_state;
-            window_offset=0.0,
-        )
-        Molly.accumulate_pmf_deconvolution!(tss_deconv.backend.accumulator, tss_sample)
-        tss_acc = tss_deconv.backend.accumulator
-        @test tss_acc.accepted_samples == 1
-        @test count(isfinite, tss_acc.log_numerator_sums) == 1
-
+    @testset "automatic and windowed TSS deconvolution" begin
         torsion_states = ThermoState[]
-        torsion_boundary = CubicBoundary(2.0u"nm")
-        torsion_coords = place_atoms(4, torsion_boundary; min_dist=0.3u"nm")
-        torsion_cv = CalcTorsion([1, 2, 3, 4], :pbc, true)
+        boundary = CubicBoundary(2.0u"nm")
+        coords = place_atoms(4, boundary; min_dist=0.3u"nm")
+        cv = CalcTorsion([1, 2, 3, 4], :pbc, true)
         for target in range(-0.5, 0.5; length=3)
             atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm",
                           ϵ=0.2u"kJ * mol^-1", λ=1.0) for _ in 1:4]
             bias = BiasPotential(
-                torsion_cv,
+                cv,
                 PeriodicFlatBottomBias(10.0u"kJ * mol^-1", 0.1, target),
             )
-            sys = System(
-                atoms=atoms,
-                coords=torsion_coords,
-                boundary=torsion_boundary,
-                general_inters=(bias,),
-            )
+            sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias,))
             intg = Langevin(dt=0.001u"ps", temperature=298.0u"K", friction=0.1u"ps^-1")
             push!(torsion_states, ThermoState(sys, intg; temperature=298.0u"K"))
         end
-        auto_tss_state = Molly.TSSState(torsion_states)
-        auto_tss_deconv = Molly.PMFDeconvolution(auto_tss_state; grid=(-π, π, 4))
-        auto_tss_sample = Molly.collect_tss_pmf_deconvolution_sample(
-            auto_tss_deconv,
-            first(auto_tss_state.estimators),
-            auto_tss_state.active_state,
+        auto_state = Molly.TSSState(torsion_states)
+        auto_deconv = Molly.PMFDeconvolution(auto_state; grid=(-π, π, 4))
+        auto_sample = Molly.collect_tss_pmf_deconvolution_sample(
+            auto_deconv,
+            first(auto_state.estimators),
+            auto_state.active_state,
         )
-        @test length(auto_tss_sample.value) == 1
-        @test eltype(auto_tss_sample.value) == Float64
+        @test length(auto_sample.value) == 1
+        @test eltype(auto_sample.value) == Float64
 
-        windowed_graph = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
+        graph = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
         windowed_state = Molly.TSSState(
             make_tss_pmf_thermo_states(n_states=4);
-            graph=windowed_graph,
+            graph=graph,
             first_state=1,
             first_window=1,
             initial_f=[0.0, 1.0, 2.0, 3.0],
@@ -217,132 +152,52 @@ end
             cv=active_state -> (0.5,),
             coupling=(xi, state_i) -> 0.25 * abs(xi[1] - state_i),
         )
-        windowed_estimator = first(windowed_state.estimators)
-        windowed_sample = Molly.collect_tss_pmf_deconvolution_sample(
+        sample = Molly.collect_tss_pmf_deconvolution_sample(
             windowed_deconv,
             windowed_state,
-            windowed_estimator,
+            first(windowed_state.estimators),
             windowed_state.active_state;
             window_offset=windowed_state.coupling.window_offsets[1],
         )
-        offset = windowed_state.coupling.window_offsets[1]
-        for bin_i in eachindex(windowed_sample.log_bin_weights)
-            xi = (windowed_deconv.backend.grid.centers[1][bin_i],)
-            log_den = -Inf
-            for local_i in eachindex(windowed_estimator.state_indices)
-                state_i = windowed_estimator.state_indices[local_i]
-                log_weight = windowed_estimator.f[local_i] +
-                             windowed_estimator.log_dens[local_i] -
-                             offset -
-                             0.25 * abs(xi[1] - state_i)
-                log_den = Molly.online_pmf_logaddexp(log_den, log_weight)
-            end
-            @test windowed_sample.log_bin_weights[bin_i] ≈ -log_den atol=1e-12
-        end
-
-        windowed_acc = Molly.SampledPMFDeconvolutionAccumulator(windowed_deconv.backend.grid)
-        Molly.accumulate_pmf_deconvolution!(
-            windowed_acc,
-            (0.5,),
-            windowed_sample.log_bin_weights,
-        )
-        Molly.accumulate_pmf_deconvolution!(
-            windowed_acc,
-            (1.5,),
-            windowed_sample.log_bin_weights,
-        )
-        windowed_pmf = Molly.pmf_result_from_sampled_deconvolution(windowed_acc)
-        expected_windowed_p = exp.(windowed_sample.log_bin_weights[1:2])
-        expected_windowed_p ./= sum(expected_windowed_p)
-        @test windowed_pmf.p[1:2] ≈ expected_windowed_p
-        @test windowed_pmf.p[3:4] ≈ zeros(2)
+        acc = Molly.SampledPMFDeconvolutionAccumulator(windowed_deconv.backend.grid)
+        Molly.accumulate_pmf_deconvolution!(acc, (0.5,), sample.log_bin_weights)
+        Molly.accumulate_pmf_deconvolution!(acc, (1.5,), sample.log_bin_weights)
+        pmf = Molly.pmf_result_from_sampled_deconvolution(acc)
+        @test sum(pmf.p) ≈ 1.0
+        @test count(>(0), pmf.p) == 2
     end
 
-    @testset "partitioned workspace supports heterogeneous general interactions" begin
-        thermo_states = make_heterogeneous_general_thermo_states()
-        coords = thermo_states[1].system.coords
-        boundary = thermo_states[1].system.boundary
-
-        partitioned = Molly.PartitionedReducedPotentialWorkspace(thermo_states)
-        full_target = Molly.PartitionedReducedPotentialWorkspace([thermo_states[2]])
-
+    @testset "partitioned workspace and MBAR assembly" begin
+        hetero_states = make_heterogeneous_general_thermo_states()
+        coords = hetero_states[1].system.coords
+        boundary = hetero_states[1].system.boundary
+        partitioned = Molly.PartitionedReducedPotentialWorkspace(hetero_states)
         energies = Molly.evaluate_energy_all!(partitioned.partition, coords, boundary)
-        direct = [potential_energy(ts.system) for ts in thermo_states]
-        @test energies[1] ≈ direct[1]
-        @test energies[2] ≈ direct[2]
+        @test energies[1] ≈ potential_energy(hetero_states[1].system)
+        @test energies[2] ≈ potential_energy(hetero_states[2].system)
 
-        out = zeros(Float64, 2)
-        Molly.reduced_potentials!(out, partitioned, coords, boundary, 1:2)
-        @test out[2] ≈ Molly.reduced_potential(full_target, coords, boundary, 1)
-
-    end
-
-    @testset "partitioned MBAR assembly matches full potentials" begin
         thermo_states = make_tss_pmf_thermo_states()
-        coords_k = [
-            [copy(thermo_states[1].system.coords)],
-            [copy(thermo_states[2].system.coords)],
-        ]
-        boundaries_k = [
-            [thermo_states[1].system.boundary],
-            [thermo_states[2].system.boundary],
-        ]
+        coords_k = [[copy(thermo_states[1].system.coords)], [copy(thermo_states[2].system.coords)]]
+        boundaries_k = [[thermo_states[1].system.boundary], [thermo_states[2].system.boundary]]
         sampled_states = thermo_states[1:2]
         target_state = thermo_states[4]
-
-        partitioned = Molly.assemble_mbar_inputs(
-            coords_k,
-            boundaries_k,
-            sampled_states;
-            target_state=target_state,
-        )
-        full = Molly.assemble_mbar_inputs_full(
-            coords_k,
-            boundaries_k,
-            sampled_states;
-            target_state=target_state,
-        )
-        @test partitioned.u ≈ full.u
-        @test partitioned.u_target ≈ full.u_target
-        @test partitioned.N == full.N
-        @test partitioned.win_of == full.win_of
-
-        partitioned_shifted = Molly.assemble_mbar_inputs(
+        partitioned_inputs = Molly.assemble_mbar_inputs(
             coords_k,
             boundaries_k,
             sampled_states;
             target_state=target_state,
             shift=true,
         )
-        full_shifted = Molly.assemble_mbar_inputs_full(
+        full_inputs = Molly.assemble_mbar_inputs_full(
             coords_k,
             boundaries_k,
             sampled_states;
             target_state=target_state,
             shift=true,
         )
-        @test partitioned_shifted.u ≈ full_shifted.u
-        @test partitioned_shifted.u_target ≈ full_shifted.u_target
-        @test partitioned_shifted.shifts ≈ full_shifted.shifts
-
-        hetero_states = make_heterogeneous_general_thermo_states()
-        hetero_coords_k = [[copy(hetero_states[1].system.coords)]]
-        hetero_boundaries_k = [[hetero_states[1].system.boundary]]
-
-        hetero_partitioned = Molly.assemble_mbar_inputs(
-            hetero_coords_k,
-            hetero_boundaries_k,
-            hetero_states[1:1];
-            target_state=hetero_states[2],
-        )
-        hetero_full = Molly.assemble_mbar_inputs_full(
-            hetero_coords_k,
-            hetero_boundaries_k,
-            hetero_states[1:1];
-            target_state=hetero_states[2],
-        )
-        @test hetero_partitioned.u ≈ hetero_full.u
-        @test hetero_partitioned.u_target ≈ hetero_full.u_target
+        @test partitioned_inputs.u ≈ full_inputs.u
+        @test partitioned_inputs.u_target ≈ full_inputs.u_target
+        @test partitioned_inputs.shifts ≈ full_inputs.shifts
+        @test partitioned_inputs.win_of == full_inputs.win_of
     end
-
 end

@@ -140,7 +140,7 @@ function TSSSimulation(state::TSSState;
         replica_active_states = replica_active_states,
     )
     frozen || validate_windowed_tss_replica_history_support(state, replicas)
-    if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:_TSSPMFDeconvolutionBackend})
+    if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:TSSPMFDeconvolutionBackend})
         throw(ArgumentError("TSSSimulation pmf must be created with PMFDeconvolution(tss_state; ...)."))
     end
     if !isnothing(pmf) && pmf.backend.state !== state
