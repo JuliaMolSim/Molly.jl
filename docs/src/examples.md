@@ -608,6 +608,84 @@ sys = System(
 potential_energy(sys) # -2080.2391023908813 eV
 ```
 
+## Lux.jl machine learning potential
+[Lux.jl](https://lux.csail.mit.edu) models can be integrated into Molly simulations as explicit-parameter neural network potentials. This approach separates the network architecture from its parameters and state (`model`, `ps`, `st`), which ensures type-stability and facilitates high-performance scientific machine learning.
+
+A complete, runnable script demonstrating how to define a custom `MachineLearningPotential` struct, evaluate potential energy, and compute analytical, energy-conserving forces using `Zygote.jl` can be found in the repository at:
+
+[`examples/lux_machine_learning_potential.jl`](https://github.com/JuliaMolSim/Molly.jl/blob/master/examples/lux_machine_learning_potential.jl)
+
+This educational example serves as a foundation for implementing explicit-parameter neural network potentials in molecular dynamics simulations. Future core integrations aim to utilize `Enzyme.jl` for non-mutating, native LLVM-level automatic differentiation.
+
+```julia
+# examples/lux_machine_learning_potential.jl
+
+using Molly
+using Lux
+using Random
+using StaticArrays
+using Zygote # Note: Future implementations aim to transition to Enzyme.jl
+
+# 1. Define the custom interaction struct
+struct MachineLearningPotential{M, P, S}
+    model::M      
+    ps::P         
+    st::S         
+end
+
+# 2. Implement the potential energy function for Molly
+function Molly.potential_energy(s::System, inter::MachineLearningPotential, neighbors=nothing)
+    # Flatten coordinates to match neural network input size (3N)
+    # Using Float32 to match Lux's default precision and avoid slow fallback
+    flat_coords = Float32.(reduce(vcat, s.coords)) 
+    energy, _ = inter.model(flat_coords, inter.ps, inter.st)
+    return energy[1] 
+end
+
+# 3. Implement the analytical forces function via Zygote
+function Molly.forces(s::System, inter::MachineLearningPotential, neighbors=nothing)
+    flat_coords = Float32.(reduce(vcat, s.coords))
+    grad = Zygote.gradient(c -> first(inter.model(c, inter.ps, inter.st)[1]), flat_coords)[1]
+
+    n_atoms = length(s.coords)
+    neg_grad = -grad
+    return [SVector{3}(neg_grad[3i-2], neg_grad[3i-1], neg_grad[3i]) for i in 1:n_atoms]
+end
+
+# ==========================================
+# Example Usage / Simulation Setup
+# ==========================================
+
+# Setup a dummy 3-atom system
+coords = [SVector(1.0, 2.0, -1.0), SVector(0.5, 0.0, 1.1), SVector(0.0, -0.5, 0.2)]
+velocities = [SVector(0.0, 0.0, 0.0) for _ in 1:3]
+atoms = [Atom(mass=1.0, σ=0.3, ϵ=0.2), Atom(mass=1.0, σ=0.3, ϵ=0.2), Atom(mass=1.0, σ=0.3, ϵ=0.2)]
+boundary = CubicBoundary(10.0, 10.0, 10.0)
+
+# Setup the Lux Neural Network (Input: 9 floats for 3 atoms in 3D)
+rng = Random.default_rng()
+model = Chain(Dense(9 => 16, tanh), Dense(16 => 1))
+ps, st = Lux.setup(rng, model)
+
+# Wrap the model in our custom potential
+inter = MachineLearningPotential(model, ps, st)
+
+# Create the Molly System (using NoUnits for the ML model compatibility)
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    velocities=velocities,
+    boundary=boundary,
+    general_inters=(inter,),
+    energy_units=NoUnits,
+    force_units=NoUnits
+)
+
+println("Evaluating Lux.jl Machine Learning Potential...")
+println("System Energy: ", Molly.potential_energy(sys, inter))
+println("System Forces: ", Molly.forces(sys, inter))
+```
+
 ## Density functional theory
 
 [DFTK.jl](https://github.com/JuliaMolSim/DFTK.jl) can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly.
