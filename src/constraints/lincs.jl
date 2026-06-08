@@ -26,12 +26,13 @@ struct LincsData{A1, A2, L, IM, SD, CM}
     niter::Int
 end
 
-struct LincsWorkspace{BV, R, S, TM, BL}
+struct LincsWorkspace{BV, R, S, TM, BL, FS}
     B::BV
     rhs::R
     sol::S
     tmp::TM
     blcc::BL
+    factor_sum::FS
 end
 
 """
@@ -287,7 +288,8 @@ function create_lincs_workspace(data::LincsData)
     sol = zeros(T, K)
     tmp = zeros(T, K)
     blcc = zeros(T, ncc)
-    return LincsWorkspace(B, rhs, sol, tmp, blcc)
+    factor_sum = zeros(T, K)
+    return LincsWorkspace(B, rhs, sol, tmp, blcc, factor_sum)
 end
 
 # --- GPU grouping and dense coupling layout ---
@@ -634,6 +636,11 @@ end
 # --- CPU solve path ---
 
 function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
+    return lincs_solve!(coords, data, ws, unit_scale, nothing)
+end
+
+function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale,
+                      factor_sum)
     T = eltype(data.lengths)
     coupling = data.coupling
     rhs = ws.rhs
@@ -658,6 +665,9 @@ function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
     @inbounds for i in eachindex(data.atom1)
         a1, a2 = data.atom1[i], data.atom2[i]
         factor = data.sdiag[i] * ws.sol[i]
+        if !isnothing(factor_sum)
+            factor_sum[i] += factor
+        end
         delta = ws.B[i] * factor
         coords[a1] -= (data.invmass[a1] * delta) .* unit_scale
         coords[a2] += (data.invmass[a2] * delta) .* unit_scale
@@ -665,12 +675,16 @@ function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
 end
 
 function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
-                      boundary)
+                      boundary, context)
     T = eltype(data.lengths)
     K = length(data.atom1)
     coupling = data.coupling
 
     unit_scale = oneunit(eltype(eltype(coords)))
+    factor_sum = context.needs_virial ? ws.factor_sum : nothing
+    if !isnothing(factor_sum)
+        fill!(factor_sum, zero(eltype(factor_sum)))
+    end
 
     # Compute unit bond vectors and initial RHS
     @inbounds for i in 1:K
@@ -693,7 +707,7 @@ function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
     end
 
     copyto!(ws.sol, ws.rhs)
-    lincs_solve!(coords, data, ws, unit_scale)
+    lincs_solve!(coords, data, ws, unit_scale, factor_sum)
 
     # Outer correction iterations (rotational lengthening)
     for _ in 1:data.niter
@@ -708,11 +722,34 @@ function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
             ws.rhs[i] = data.sdiag[i] * (data.lengths[i] - p)
         end
         copyto!(ws.sol, ws.rhs)
-        lincs_solve!(coords, data, ws, unit_scale)
+        lincs_solve!(coords, data, ws, unit_scale, factor_sum)
     end
 
+    accumulate_lincs_position_virial!(data, ws, context)
     return coords
 end
+
+function accumulate_lincs_position_virial!(data::LincsData, ws::LincsWorkspace,
+                                           context)
+    context.needs_virial || return context
+    context.kind isa PositionConstraintApplication ||
+        error("LINCS position virial accumulation requires a position constraint context")
+    isnothing(context.buffers) &&
+        error("LINCS position virial accumulation requires context.buffers")
+
+    @inbounds for i in eachindex(data.atom1)
+        coeff = -data.lengths[i] * ws.factor_sum[i]
+        B_i = ws.B[i]
+        contribution = coeff * (B_i * transpose(B_i))
+        accumulate_constraint_virial!(context.buffers, contribution, context)
+    end
+    return context
+end
+
+default_position_constraint_context() = ConstraintApplicationContext(
+    PositionConstraintApplication();
+    needs_virial=false,
+)
 
 function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace, boundary)
     K = length(data.atom1)
@@ -831,14 +868,18 @@ end
 # --- Molly interface ---
 
 function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained_update;
-                                     kwargs...)
+                                     context=nothing, kwargs...)
+    context = isnothing(context) ? default_position_constraint_context() : context
     if !isnothing(ca.delta_buf)
+        if context.needs_virial
+            error("LINCS GPU position constraint virial is not implemented")
+        end
         lincs_apply_gpu!(sys.coords, r_pre_unconstrained_update,
                          ca.lincs_data, ca.workspace, sys.boundary,
                          ca.delta_buf, ca.constrained_atoms, ca.gpu_block_size)
     else
         lincs_apply!(sys.coords, r_pre_unconstrained_update,
-                     ca.lincs_data, ca.workspace, sys.boundary)
+                     ca.lincs_data, ca.workspace, sys.boundary, context)
     end
     return sys
 end
@@ -985,7 +1026,9 @@ function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms, block_size)
     sol_gpu = KernelAbstractions.zeros(backend, T, K_padded)
     tmp_gpu = KernelAbstractions.zeros(backend, T, K_padded)
     blcc_gpu = KernelAbstractions.zeros(backend, T, 1)  # unused in fused kernels
-    ws_gpu = LincsWorkspace(B_gpu, rhs_gpu, sol_gpu, tmp_gpu, blcc_gpu)
+    factor_sum_gpu = KernelAbstractions.zeros(backend, T, K_padded)
+    ws_gpu = LincsWorkspace(B_gpu, rhs_gpu, sol_gpu, tmp_gpu, blcc_gpu,
+                            factor_sum_gpu)
 
     delta_buf = KernelAbstractions.zeros(backend, T, 3, n_atoms)
 

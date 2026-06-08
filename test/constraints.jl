@@ -491,6 +491,32 @@ function lincs_center_of_mass(x, masses_val)
     return sum(masses_val[i] * x[i] for i in eachindex(x)) / total
 end
 
+function make_lincs_no_unit_buffer_system(coords, masses_val)
+    atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
+    sys = System(
+        atoms=atoms,
+        coords=copy(coords),
+        velocities=zero.(coords),
+        boundary=CubicBoundary(5.0),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+    return sys, Molly.init_buffers!(sys, 1)
+end
+
+function lincs_position_context(buffers=nothing; needs_virial=true, step_n=1,
+                                virial_scale=1.0)
+    return Molly.ConstraintApplicationContext(
+        Molly.PositionConstraintApplication();
+        needs_virial=needs_virial,
+        step_n=step_n,
+        virial_scale=virial_scale,
+        buffers=buffers,
+    )
+end
+
+lincs_no_virial_context() = lincs_position_context(; needs_virial=false)
+
 function make_lincs_chain(natoms; bond_length=0.15, mass=12.0)
     x = [SVector(i * bond_length, 0.0, 0.0) for i in 0:natoms-1]
     v = [SVector(0.01 * randn(), 0.01 * randn(), 0.01 * randn()) for _ in 1:natoms]
@@ -660,7 +686,8 @@ end
             data = Molly.build_lincs_data(dc, masses_val; nrec, niter=1)
             ws = Molly.create_lincs_workspace(data)
             xp = x .+ v .* dt
-            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                               lincs_no_virial_context())
 
             max_dev = maximum(abs(norm(xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
                               for i in eachindex(data.atom1))
@@ -681,7 +708,8 @@ end
         )
         dt = 0.002
         xp = x .+ v .* dt
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                           lincs_no_virial_context())
 
         d = norm(xp[1] - xp[2])
         @test d ≈ 0.15 atol=1e-10
@@ -698,7 +726,8 @@ end
         xp = x .+ v .* dt
 
         com_before = lincs_center_of_mass(xp, masses_val)
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                           lincs_no_virial_context())
         com_after = lincs_center_of_mass(xp, masses_val)
 
         d = norm(xp[1] - xp[2])
@@ -713,7 +742,8 @@ end
         )
         dt = 0.002
         xp = x .+ v .* dt
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                           lincs_no_virial_context())
 
         @test lincs_check_constraints(xp, data; atol=1e-6)
     end
@@ -730,7 +760,8 @@ end
         ]
         dt = 0.002
         xp = x .+ v .* dt
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                           lincs_no_virial_context())
 
         @test lincs_check_constraints(xp, data; atol=1e-6)
     end
@@ -740,9 +771,47 @@ end
         x, v, data, ws = make_lincs_diatomic()
         xp = copy(x)
         x_orig = copy(x)
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                           lincs_no_virial_context())
 
         @test xp ≈ x_orig atol=1e-14
+    end
+
+    # position constraint virial for a stretched diatomic
+    @testset begin
+        bond_length = 0.15
+        x, _, data, ws = make_lincs_diatomic(; bond_length, nrec=0, niter=0)
+        xp = [x[1], x[2] + SVector(0.001, 0.0, 0.0)]
+        sys, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
+        step_n = 7
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = lincs_position_context(buffers; step_n)
+
+        B = normalize(x[1] - x[2])
+        factor = data.sdiag[1]^2 * (dot(B, xp[1] - xp[2]) - bond_length)
+        expected = -bond_length * factor * (B * transpose(B))
+
+        Molly.lincs_apply!(xp, x, data, ws, sys.boundary, context)
+
+        @test norm(xp[1] - xp[2]) ≈ bond_length atol=1e-14
+        @test ws.factor_sum[1] ≈ factor atol=1e-14
+        @test buffers.constraint_virial_nounits ≈ Matrix(expected) atol=1e-14
+        @test Molly.has_constraint_virial(buffers, step_n)
+    end
+
+    # valid zero constraint virial remains valid
+    @testset begin
+        x, _, data, ws = make_lincs_diatomic(; nrec=0, niter=0)
+        xp = copy(x)
+        sys, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
+        step_n = 8
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = lincs_position_context(buffers; step_n)
+
+        Molly.lincs_apply!(xp, x, data, ws, sys.boundary, context)
+
+        @test all(iszero, buffers.constraint_virial_nounits)
+        @test Molly.has_constraint_virial(buffers, step_n)
     end
 
     # niter > 1 improves accuracy
@@ -761,7 +830,8 @@ end
         for niter in [1, 2, 4]
             x_copy, _, data, ws = make_lincs_methane(; niter)
             xp = x .+ v .* dt
-            Molly.lincs_apply!(xp, x_copy, data, ws, CubicBoundary(5.0))
+            Molly.lincs_apply!(xp, x_copy, data, ws, CubicBoundary(5.0),
+                               lincs_no_virial_context())
             max_dev = maximum(abs(norm(xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
                               for i in eachindex(data.atom1))
             push!(deviations, max_dev)
@@ -781,7 +851,8 @@ end
         xp = x .+ v .* dt
 
         com_before = lincs_center_of_mass(xp, masses_val)
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                           lincs_no_virial_context())
         com_after = lincs_center_of_mass(xp, masses_val)
 
         @test lincs_check_constraints(xp, data; atol=1e-4)
@@ -799,7 +870,8 @@ end
         xp = x .+ v .* dt
 
         com_before = lincs_center_of_mass(xp, masses_val)
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                           lincs_no_virial_context())
         com_after = lincs_center_of_mass(xp, masses_val)
 
         @test lincs_check_constraints(xp, data; atol=1e-4)
@@ -1034,7 +1106,8 @@ end
     d_w = Molly.build_lincs_data(c_w, m_w)
     ws_w = Molly.create_lincs_workspace(d_w)
     xp_w = x_w .+ v_w .* 0.002
-    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0))
+    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0),
+                       lincs_no_virial_context())
 
     # apply_lincs! zero allocations
     @testset begin
@@ -1048,10 +1121,12 @@ end
             xp = x .+ v .* 0.002
 
             # Warmup
-            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+            context = lincs_no_virial_context()
+            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0), context)
             xp .= x .+ v .* 0.002
 
-            allocs = @allocated Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+            allocs = @allocated Molly.lincs_apply!(xp, x, data, ws,
+                                                   CubicBoundary(5.0), context)
             @test allocs == 0
         end
     end
