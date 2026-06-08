@@ -19,6 +19,12 @@ function strip_coords(coords::AbstractVector{SVector{D,T}}) where {D,T}
         ustrip_vec.(u"Å", from_device(coords))   # returns SVector{D, Float64/32}
 end
 
+# Strip length units from a CubicBoundary so it is consistent with unit-stripped coords (Å).
+function strip_boundary(b::CubicBoundary)
+    unit(b.side_lengths[1]) == NoUnits ? b :
+        CubicBoundary(ustrip.(u"Å", b.side_lengths))
+end
+
 # ============================================================================
 # AEV computation  (pure Julia, Enzyme-differentiable in a later PR)
 # ============================================================================
@@ -131,24 +137,17 @@ function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
                       boundary,
                       p,          # aev_params NamedTuple
                       n_species::Int) where {D,T}
-    n_atoms      = length(coords)
-    n_rad_per    = length(p.η_R) * length(p.r_s_R)    # outer product: EtaR × ShfR
-    n_ang_per    = length(p.η_A) * length(p.r_s_A) * length(p.θ_s)  # EtaA × ShfZ × ShfA
-    n_pairs      = n_species * (n_species + 1) ÷ 2
-    aev_len      = n_species * n_rad_per + n_pairs * n_ang_per
+    n_atoms  = length(coords)
+    r_c_R    = T(p.r_c_R)
+    r_c_A    = T(p.r_c_A)
+    r_c_max  = max(r_c_R, r_c_A)
 
-    aevs    = zeros(T, n_atoms, aev_len)
-    r_c_R   = T(p.r_c_R)
-    r_c_A   = T(p.r_c_A)
-    r_c_max = max(r_c_R, r_c_A)
-
-    for atom_i in 1:n_atoms
+    # Build per-atom AEV row; use reduce(vcat, ...) so no mutation — required for Zygote.
+    rows = map(1:n_atoms) do atom_i
         nbr_coords  = SVector{D,T}[]
         nbr_species = Int[]
 
         if isnothing(neighbors)
-            # O(N²) fallback — coords and boundary must have consistent units.
-            # Uses raw vector difference (no PBC) which is correct for large boundaries.
             for j in 1:n_atoms
                 j == atom_i && continue
                 dr = coords[j] - coords[atom_i]
@@ -172,20 +171,17 @@ function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
                             p.η_R, p.r_s_R, r_c_R, n_species)
         G_ang = _angular_aev(coords[atom_i], nbr_coords, nbr_species,
                              p.η_A, p.r_s_A, p.θ_s, T(p.ζ), r_c_A, n_species)
-        split = n_species * n_rad_per
-        aevs[atom_i, 1:split]       = G_rad
-        aevs[atom_i, (split+1):end] = G_ang
+        vcat(G_rad, G_ang)'   # (1, aev_len) row
     end
-    return aevs
+    return reduce(vcat, rows)  # (n_atoms, aev_len)
 end
 
 # ============================================================================
 # HDF5 weight loader
 # ============================================================================
 
-# CELU activation with α=0.1 (standard for ANI networks).
-# Inlined to avoid NNlib keyword-vs-positional ambiguity across versions.
-_celu01(x::T) where T = x >= zero(T) ? x : T(0.1) * (exp(x / T(0.1)) - one(T))
+# Use the public Molly.celu01 so AD backends (Enzyme, Zygote) can register rules.
+const _celu01 = Molly.celu01
 
 # Build one element's Lux.Chain from the HDF5 group at /ensemble_idx/element/.
 # Dense layer indices 0, 2, 4, ... in the group; activations implicit between them.
@@ -220,7 +216,7 @@ function Molly.ANIPotential(path::String;
                            force_units  = u"eV/Å",
                            energy_units = u"eV",
                            T            = Float32,
-                           ensemble_idx = 0)
+                           ensemble_idx = nothing)
     h5open(path, "r") do h5
         # AEV hyperparameters
         ag    = h5["aev_params"]
@@ -240,20 +236,40 @@ function Molly.ANIPotential(path::String;
         species_map   = Dict{String,Int}(s => i for (i, s) in enumerate(species_list))
         self_energies = _h5vec(ag, "self_energies", T)   # (n_species,) Hartree
 
-        ens_grp = h5[string(ensemble_idx)]
-        models_v = []; ps_v = []; st_v = []
-        for elem in species_list
-            m, ps, st = _build_element_model(ens_grp[elem])
-            push!(models_v, m); push!(ps_v, ps); push!(st_v, st)
+        # Determine which ensemble members to load.
+        # All integer-keyed top-level groups are ensemble members.
+        ens_indices = if isnothing(ensemble_idx)
+            sort([parse(Int, k) for k in keys(h5) if tryparse(Int, k) !== nothing])
+        else
+            [ensemble_idx]
         end
 
+        # Build shared model architecture from the first ensemble member.
         syms = Tuple(Symbol.(species_list))
+        first_grp = h5[string(first(ens_indices))]
+        models_v  = []
+        for elem in species_list
+            m, _, _ = _build_element_model(first_grp[elem])
+            push!(models_v, m)
+        end
         model_nt = NamedTuple{syms}(Tuple(models_v))
-        ps_nt    = NamedTuple{syms}(Tuple(ps_v))
-        st_nt    = NamedTuple{syms}(Tuple(st_v))
-        cutoff   = T(max(r_c_R, r_c_A))
 
-        return ANIPotential(model_nt, ps_nt, st_nt, species_map,
+        # Load parameters and states for each ensemble member.
+        ps_list = NamedTuple[]
+        st_list = NamedTuple[]
+        for idx in ens_indices
+            ens_grp = h5[string(idx)]
+            ps_v = []; st_v = []
+            for elem in species_list
+                _, ps, st = _build_element_model(ens_grp[elem])
+                push!(ps_v, ps); push!(st_v, st)
+            end
+            push!(ps_list, NamedTuple{syms}(Tuple(ps_v)))
+            push!(st_list, NamedTuple{syms}(Tuple(st_v)))
+        end
+
+        cutoff = T(max(r_c_R, r_c_A))
+        return ANIPotential(model_nt, ps_list, st_list, species_map,
                             aev_params, self_energies, cutoff, force_units, energy_units)
     end
 end
@@ -262,28 +278,40 @@ end
 # AtomsCalculators interface
 # ============================================================================
 
-# Internal: compute raw energy sum (Hartree) from stripped coordinates.
+# Internal: energy (Hartree) for one ensemble member given pre-computed AEVs.
+function _ani_energy_single(aevs, species_idx, idx_to_elem, model, self_energies,
+                            ps, st, ::Type{T}) where T
+    E = zero(T)
+    for atom_i in eachindex(species_idx)
+        s    = species_idx[atom_i]
+        sym  = Symbol(idx_to_elem[s])
+        aev_i = @view aevs[atom_i, :]
+        out, _ = Lux.apply(getfield(model, sym),
+                            reshape(aev_i, :, 1),
+                            getfield(ps, sym),
+                            getfield(st, sym))
+        E += T(out[1]) + self_energies[s]
+    end
+    return E
+end
+
+# Internal: compute raw energy (Hartree) averaged over all ensemble members.
 function _ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
                          species_idx::AbstractVector{Int},
                          boundary, inter::ANIPotential,
                          neighbors) where {D,T}
     n_species = length(inter.species_map)
-    aevs = Molly.compute_aevs(coords_strip, species_idx, neighbors, boundary,
+    # coords_strip is unit-free (Å); boundary must also be unit-free for vector() to work.
+    aevs = Molly.compute_aevs(coords_strip, species_idx, neighbors, strip_boundary(boundary),
                                inter.aev_params, n_species)
-    E = zero(T)
     idx_to_elem = Dict(v => k for (k, v) in inter.species_map)
-    for atom_i in eachindex(species_idx)
-        s     = species_idx[atom_i]
-        elem  = idx_to_elem[s]
-        sym   = Symbol(elem)
-        aev_i = @view aevs[atom_i, :]
-        out, _ = Lux.apply(getfield(inter.model, sym),
-                            reshape(aev_i, :, 1),
-                            getfield(inter.ps, sym),
-                            getfield(inter.st, sym))
-        E += T(out[1]) + inter.self_energies[s]   # add atomic self-energy (Hartree)
+    n_ens = length(inter.ps_vec)
+    E = zero(T)
+    for i in 1:n_ens
+        E += _ani_energy_single(aevs, species_idx, idx_to_elem, inter.model,
+                                inter.self_energies, inter.ps_vec[i], inter.st_vec[i], T)
     end
-    return E
+    return E / n_ens
 end
 
 function AtomsCalculators.potential_energy(sys::System{D, AT, T},
@@ -307,12 +335,12 @@ function AtomsCalculators.potential_energy(sys::System{D, AT, T},
     end
 end
 
-# Forces via finite differences (temporary; Enzyme reverse-mode AD added in Week 3).
+# Forces via finite differences (fallback when Enzyme is not loaded).
 function AtomsCalculators.forces!(fs,
                                   sys::System{D, AT, T},
                                   inter::ANIPotential;
                                   kwargs...) where {D, AT, T}
-    h = T(1e-4)   # Å
+    h = T(1e-4)   # Å — must be T (Float64) for numerical precision
     Ha_to_eV = T(27.211396132)
 
     coords_strip = strip_coords(sys.coords)
@@ -320,7 +348,7 @@ function AtomsCalculators.forces!(fs,
     nbrs = get(kwargs, :neighbors, nothing)
 
     for atom_i in eachindex(coords_strip)
-        fi = zero(SVector{D,T})
+        fi = zero(SVector{D, T})
         for dim in 1:D
             cp = copy(coords_strip)
             cm = copy(coords_strip)
@@ -328,7 +356,7 @@ function AtomsCalculators.forces!(fs,
             cm[atom_i] = _setcomp(cm[atom_i], dim, cm[atom_i][dim] - h)
             Ep = _ani_raw_energy(cp, species_idx, sys.boundary, inter, nbrs)
             Em = _ani_raw_energy(cm, species_idx, sys.boundary, inter, nbrs)
-            fi = _setcomp(fi, dim, -(Ep - Em) / (2h) * Ha_to_eV)
+            fi = _setcomp(fi, dim, T(-(Ep - Em) / (2h) * Ha_to_eV))
         end
 
         f_unit = if sys.force_units == NoUnits
