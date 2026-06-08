@@ -198,6 +198,34 @@ has_constraint_virial(v::BufferValidity, step_n::Integer)  = v.constraint_virial
 has_total_virial(v::BufferValidity, step_n::Integer)       = v.total_virial_step       == step_n
 has_pressure(v::BufferValidity, step_n::Integer)           = v.pressure_step           == step_n
 
+has_interaction_virial(buffers, step_n::Integer) = has_interaction_virial(buffers.validity, step_n)
+has_constraint_virial(buffers, step_n::Integer)  = has_constraint_virial(buffers.validity, step_n)
+has_total_virial(buffers, step_n::Integer)       = has_total_virial(buffers.validity, step_n)
+has_pressure(buffers, step_n::Integer)           = has_pressure(buffers.validity, step_n)
+
+function clear_constraint_virial!(buffers, step_n::Integer)
+    fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+    fill!(buffers.constraint_virial_nounits, zero(eltype(buffers.constraint_virial_nounits)))
+    mark_constraint_virial!(buffers.validity, step_n)
+    invalidate_total_virial!(buffers.validity)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+clear_constraint_virial!(buffers, sys, step_n::Integer) = clear_constraint_virial!(buffers, step_n)
+
+function accumulate_constraint_virial!(buffers, contribution)
+    buffers.constraint_virial_nounits .+= ustrip.(contribution)
+    invalidate_total_virial!(buffers.validity)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+function accumulate_constraint_virial!(buffers, contribution, context)
+    context.needs_virial || return buffers
+    return accumulate_constraint_virial!(buffers, contribution .* context.virial_scale)
+end
+
 struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     fs_nounits::F
     fs_chunks::A
@@ -355,6 +383,44 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, step_n_preprocessed,
                       sparse_pair_generation, num_pairs)
+end
+
+function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
+    fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+    fill!(buffers.constraint_virial_nounits, zero(eltype(buffers.constraint_virial_nounits)))
+    for chunk in buffers.constraint_virial_chunks
+        fill!(chunk, zero(eltype(chunk)))
+    end
+    mark_constraint_virial!(buffers.validity, step_n)
+    invalidate_total_virial!(buffers.validity)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+function merge_constraint_virial!(buffers::BuffersCPU, sys, step_n::Integer)
+    has_interaction_virial(buffers, step_n) ||
+        error("cannot merge constraint virial before interaction virial is valid for step $step_n")
+    has_constraint_virial(buffers, step_n) ||
+        error("cannot merge constraint virial before constraint virial is valid for step $step_n")
+
+    buffers.constraint_virial .= buffers.constraint_virial_nounits .* sys.energy_units
+    buffers.virial .+= buffers.constraint_virial
+    mark_total_virial!(buffers.validity, step_n)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+function merge_constraint_virial!(buffers::BuffersGPU, sys, step_n::Integer)
+    has_interaction_virial(buffers, step_n) ||
+        error("cannot merge constraint virial before interaction virial is valid for step $step_n")
+    has_constraint_virial(buffers, step_n) ||
+        error("cannot merge constraint virial before constraint virial is valid for step $step_n")
+
+    buffers.constraint_virial .= from_device(buffers.constraint_virial_nounits) .* sys.energy_units
+    buffers.virial .+= buffers.constraint_virial
+    mark_total_virial!(buffers.validity, step_n)
+    invalidate_pressure!(buffers.validity)
+    return buffers
 end
 
 #=

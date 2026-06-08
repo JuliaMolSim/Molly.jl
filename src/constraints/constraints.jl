@@ -53,6 +53,31 @@ struct AngleConstraint{D, I}
     end
 end
 
+abstract type ConstraintApplicationKind end
+
+struct PositionConstraintApplication <: ConstraintApplicationKind end
+
+struct VelocityConstraintApplication <: ConstraintApplicationKind end
+
+struct ConstraintApplicationContext{K <: ConstraintApplicationKind, B, DT, S}
+    kind::K
+    needs_virial::Bool
+    step_n::Int
+    dt::DT
+    virial_scale::S
+    buffers::B
+end
+
+function ConstraintApplicationContext(kind::K;
+                                      needs_virial::Bool=false,
+                                      step_n::Integer=0,
+                                      dt=nothing,
+                                      virial_scale=1,
+                                      buffers=nothing) where {K <: ConstraintApplicationKind}
+    return ConstraintApplicationContext(kind, needs_virial, Int(step_n), dt,
+                                        virial_scale, buffers)
+end
+
 to_distance_constraints(ac::AngleConstraint) = (
     DistanceConstraint(ac.i, ac.j, ac.dist_ij), # i-j bond
     DistanceConstraint(ac.j, ac.k, ac.dist_jk), # j-k bond

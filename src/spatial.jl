@@ -1006,6 +1006,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
         P_bar = uconvert.(u"bar", P)
         buffers.pres_tensor .= P_bar
     end
+    mark_pressure!(buffers.validity, step_n)
     return buffers.pres_tensor
 end
 
