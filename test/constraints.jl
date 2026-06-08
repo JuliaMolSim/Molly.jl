@@ -517,6 +517,19 @@ end
 
 lincs_no_virial_context() = lincs_position_context(; needs_virial=false)
 
+function lincs_velocity_context(buffers=nothing; needs_virial=true, step_n=1,
+                                virial_scale=1.0)
+    return Molly.ConstraintApplicationContext(
+        Molly.VelocityConstraintApplication();
+        needs_virial=needs_virial,
+        step_n=step_n,
+        virial_scale=virial_scale,
+        buffers=buffers,
+    )
+end
+
+lincs_no_velocity_virial_context() = lincs_velocity_context(; needs_virial=false)
+
 function make_lincs_chain(natoms; bond_length=0.15, mass=12.0)
     x = [SVector(i * bond_length, 0.0, 0.0) for i in 0:natoms-1]
     v = [SVector(0.01 * randn(), 0.01 * randn(), 0.01 * randn()) for _ in 1:natoms]
@@ -812,6 +825,56 @@ end
 
         @test all(iszero, buffers.constraint_virial_nounits)
         @test Molly.has_constraint_virial(buffers, step_n)
+    end
+
+    # velocity constraint virial for a separating diatomic
+    @testset begin
+        bond_length = 0.15
+        x, _, data, ws = make_lincs_diatomic(; bond_length, nrec=0, niter=0)
+        velocities = [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0)]
+        sys, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
+        step_n = 10
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = lincs_velocity_context(buffers; step_n)
+
+        B = normalize(x[1] - x[2])
+        factor = data.sdiag[1]^2 * dot(B, velocities[1] - velocities[2])
+        expected = -bond_length * factor * (B * transpose(B))
+
+        Molly.lincs_vel_apply!(velocities, x, data, ws, sys.boundary, context)
+
+        @test dot(B, velocities[2] - velocities[1]) ≈ 0.0 atol=1e-14
+        @test ws.factor_sum[1] ≈ factor atol=1e-14
+        @test buffers.constraint_virial_nounits ≈ Matrix(expected) atol=1e-14
+        @test Molly.has_constraint_virial(buffers, step_n)
+    end
+
+    # valid zero velocity constraint virial remains valid
+    @testset begin
+        x, _, data, ws = make_lincs_diatomic(; nrec=0, niter=0)
+        velocities = zero.(x)
+        sys, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
+        step_n = 11
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = lincs_velocity_context(buffers; step_n)
+
+        Molly.lincs_vel_apply!(velocities, x, data, ws, sys.boundary, context)
+
+        @test all(iszero, buffers.constraint_virial_nounits)
+        @test Molly.has_constraint_virial(buffers, step_n)
+    end
+
+    # needs_virial=false leaves the velocity constraint virial buffer untouched
+    @testset begin
+        x, _, data, ws = make_lincs_diatomic(; nrec=0, niter=0)
+        velocities = [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0)]
+        _, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
+        fill!(buffers.constraint_virial_nounits, 3.0)
+        context = lincs_velocity_context(buffers; needs_virial=false)
+
+        Molly.lincs_vel_apply!(velocities, x, data, ws, CubicBoundary(5.0), context)
+
+        @test all(==(3.0), buffers.constraint_virial_nounits)
     end
 
     # niter > 1 improves accuracy

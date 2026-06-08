@@ -751,10 +751,15 @@ default_position_constraint_context() = ConstraintApplicationContext(
     needs_virial=false,
 )
 
-function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace, boundary)
+function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace,
+                          boundary, context)
     K = length(data.atom1)
     coupling = data.coupling
     unit_vel_scale = oneunit(eltype(eltype(velocities)))
+    factor_sum = context.needs_virial ? ws.factor_sum : nothing
+    if !isnothing(factor_sum)
+        fill!(factor_sum, zero(eltype(factor_sum)))
+    end
 
     # Bond vectors from current (constrained) coords + velocity RHS
     @inbounds for i in 1:K
@@ -774,7 +779,7 @@ function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspac
     end
 
     copyto!(ws.sol, ws.rhs)
-    lincs_solve!(velocities, data, ws, unit_vel_scale)
+    lincs_solve!(velocities, data, ws, unit_vel_scale, factor_sum)
 
     # Iterative correction: re-evaluate velocity residual and solve again
     for _ in 1:data.niter
@@ -784,9 +789,37 @@ function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspac
             ws.rhs[i] = -data.sdiag[i] * dot(ws.B[i], dv)
         end
         copyto!(ws.sol, ws.rhs)
-        lincs_solve!(velocities, data, ws, unit_vel_scale)
+        lincs_solve!(velocities, data, ws, unit_vel_scale, factor_sum)
     end
+
+    accumulate_lincs_velocity_virial!(data, ws, context)
+    return velocities
 end
+
+function accumulate_lincs_velocity_virial!(data::LincsData, ws::LincsWorkspace,
+                                           context)
+    context.needs_virial || return context
+    
+    if !(context.kind isa VelocityConstraintApplication)
+        error("LINCS velocity virial accumulation requires a velocity constraint context")
+    end
+    if isnothing(context.buffers)
+        error("LINCS velocity virial accumulation requires context.buffers")
+    end
+
+    @inbounds for i in eachindex(data.atom1)
+        coeff = -data.lengths[i] * ws.factor_sum[i]
+        B_i = ws.B[i]
+        contribution = coeff * (B_i * transpose(B_i))
+        accumulate_constraint_virial!(context.buffers, contribution, context)
+    end
+    return context
+end
+
+default_velocity_constraint_context() = ConstraintApplicationContext(
+    VelocityConstraintApplication();
+    needs_virial=false,
+)
 
 # --- GPU solve path ---
 
@@ -884,15 +917,19 @@ function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained
     return sys
 end
 
-function apply_velocity_constraints!(sys::System, ca::LINCS; kwargs...)
+function apply_velocity_constraints!(sys::System, ca::LINCS; context=nothing, kwargs...)
     ca.iter_vel_correction || return sys
+    context = isnothing(context) ? default_velocity_constraint_context() : context
     if !isnothing(ca.delta_buf)
+        if context.needs_virial
+            error("LINCS GPU velocity constraint virial is not implemented")
+        end
         lincs_vel_apply_gpu!(sys.velocities, sys.coords,
                              ca.lincs_data, ca.workspace, sys.boundary,
                              ca.delta_buf, ca.constrained_atoms, ca.gpu_block_size)
     else
         lincs_vel_apply!(sys.velocities, sys.coords,
-                         ca.lincs_data, ca.workspace, sys.boundary)
+                         ca.lincs_data, ca.workspace, sys.boundary, context)
     end
     return sys
 end
