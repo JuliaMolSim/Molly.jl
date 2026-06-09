@@ -5,9 +5,9 @@ from openmm.unit import *
 # Calculate forces with Gromacs and OpenMM for comparison to Molly using a99SB-disp force field
 # Used OpenMM v8.4.0, Python v3.12.12 and Gromacs 2021.4
 
-# protein.gro and topol.top files in Molly/data/a99SB-disp_refs/gromacs_files were 
-# prepared with Gromacs' pdb2gmx and editconf using structures in Molly/data/openmm_refs:
-# gmx pdb2gmx -f protein.pdb -o processed.gro -p topol.top -ignh -ff 'a99SBdisp'
+# To run this script, .gro and .top files need to be prepared with Gromacs' pdb2gmx and editconf 
+# using $protein.pdb files from Molly/data/openmm_refs as follows: 
+# gmx pdb2gmx -f $protein.pdb -o processed.gro -p topol.top -ignh -ff 'a99SBdisp'
 # gmx editconf -f processed.gro -o protein.gro -c -d 1.0 -bt cubic
 
 # a99SBdisp force field files compatible with Gromacs are required to run this script
@@ -18,10 +18,10 @@ def write_forces_to_file(protein):
 
     # load files prepared and parameterised with gromacs
     gro = GromacsGroFile(
-        f'../data/a99SB-disp_refs/gromacs_files/{protein}/protein.gro'
+        f'path_to_gromacs_output/{protein}/protein.gro' # generate with Gromacs
     )
     top = GromacsTopFile(
-        f'../data/a99SB-disp_refs/gromacs_files/{protein}/topol.top', # make sure to add path to Gromacs force field files in topol.top
+        f'path_to_gromacs_output/{protein}/topol.top', # generate with Gromacs
         periodicBoxVectors=gro.getPeriodicBoxVectors(),
         includeDir='/Gromacs_FFs/a99SBdisp.ff' # make sure to add path to Gromacs force field files here
     )

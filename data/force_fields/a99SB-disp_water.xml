@@ -1,4 +1,8 @@
 <ForceField>
+  <Info>
+    <DateGenerated>2026-06-09</DateGenerated>
+    <Reference>Robustelli, P., Piana, S., Shaw, D.E. (2018). Developing a molecular dynamics force field for both folded and disordered protein states. Proc Natl Acad Sci USA 115 (21), E4758-E4766.</Reference>
+  </Info>
   <AtomTypes>
     <Type element="O" name="OW" class="OW" mass="16.00000"/>
     <Type element="H" name="HW" class="HW" mass="1.00800"/>
