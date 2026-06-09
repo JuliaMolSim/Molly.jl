@@ -491,13 +491,15 @@ function lincs_center_of_mass(x, masses_val)
     return sum(masses_val[i] * x[i] for i in eachindex(x)) / total
 end
 
-function lincs_virial_from_atom_forces(coords, fs)
+function constraint_virial_from_atom_forces(coords, fs)
     vir = zeros(typeof(ustrip(coords[1][1] * fs[1][1])), 3, 3)
     @inbounds for i in eachindex(coords)
         vir .+= ustrip.(coords[i] * transpose(fs[i]))
     end
     return vir
 end
+
+lincs_virial_from_atom_forces(coords, fs) = constraint_virial_from_atom_forces(coords, fs)
 
 function make_lincs_no_unit_buffer_system(coords, masses_val)
     atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
@@ -538,6 +540,16 @@ end
 
 lincs_no_velocity_virial_context() = lincs_velocity_context(; needs_virial=false)
 
+shake_position_context(buffers=nothing; needs_virial=true, step_n=1,
+                       virial_scale=1.0) = lincs_position_context(
+    buffers; needs_virial, step_n, virial_scale,
+)
+
+shake_velocity_context(buffers=nothing; needs_virial=true, step_n=1,
+                       virial_scale=1.0) = lincs_velocity_context(
+    buffers; needs_virial, step_n, virial_scale,
+)
+
 function make_lincs_chain(natoms; bond_length=0.15, mass=12.0)
     x = [SVector(i * bond_length, 0.0, 0.0) for i in 0:natoms-1]
     v = [SVector(0.01 * randn(), 0.01 * randn(), 0.01 * randn()) for _ in 1:natoms]
@@ -574,6 +586,295 @@ function make_lincs_branched(nbackbone; nbranch=3, backbone_length=0.153, branch
 
     v = [SVector(0.01 * randn(), 0.01 * randn(), 0.01 * randn()) for _ in 1:natoms]
     return x, v, dc, masses_val
+end
+
+# --- SHAKE/RATTLE virial tests ---
+
+@testset "SHAKE_RATTLE CPU virial" begin
+    function make_shake_system(coords, velocities, masses_val;
+                               dist_constraints=nothing, angle_constraints=nothing)
+        atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
+        cons = SHAKE_RATTLE(
+            length(coords), 1e-10, 1e-10;
+            dist_constraints=dist_constraints,
+            angle_constraints=angle_constraints,
+            max_iters=50,
+        )
+        sys = System(
+            atoms=atoms,
+            coords=copy(coords),
+            velocities=copy(velocities),
+            boundary=CubicBoundary(5.0),
+            constraints=(cons,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+        return sys, sys.constraints[1]
+    end
+
+    function expected_position_constraint_virial(coords_before, coords_after, masses_val, dt)
+        correction_forces = [
+            masses_val[i] * (coords_after[i] - coords_before[i]) / dt^2
+                for i in eachindex(coords_after)
+        ]
+        return constraint_virial_from_atom_forces(coords_after, correction_forces)
+    end
+
+    function expected_velocity_constraint_virial(coords, velocities_before, velocities_after,
+                                                 masses_val, dt)
+        correction_forces = [
+            masses_val[i] * (velocities_after[i] - velocities_before[i]) / dt
+                for i in eachindex(velocities_after)
+        ]
+        return constraint_virial_from_atom_forces(coords, correction_forces)
+    end
+
+    dt = 0.5
+    bond_length = 0.15
+
+    # 2-atom position virial
+    @testset begin
+        masses_val = [12.0, 16.0]
+        direction = normalize(SVector(1.0, 2.0, -1.0))
+        origin = SVector(0.2, -0.1, 0.05)
+        old_coords = [origin, origin + bond_length * direction]
+        unconstrained = [old_coords[1], old_coords[2] + 0.001 * direction]
+        velocities = zero.(old_coords)
+        dc = [DistanceConstraint(1, 2, bond_length)]
+        sys, cons = make_shake_system(unconstrained, velocities, masses_val;
+                                      dist_constraints=dc)
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 31
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
+
+        apply_position_constraints!(sys, cons, old_coords; context)
+        expected = expected_position_constraint_virial(unconstrained, sys.coords,
+                                                       masses_val, dt)
+
+        @test check_position_constraints(sys, cons)
+        @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
+        @test Molly.has_constraint_virial(buffers, step_n)
+    end
+
+    # 2-atom velocity virial
+    @testset begin
+        masses_val = [12.0, 16.0]
+        direction = normalize(SVector(1.0, 2.0, -1.0))
+        origin = SVector(0.2, -0.1, 0.05)
+        coords = [origin, origin + bond_length * direction]
+        velocities = [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0)]
+        velocities_before = copy(velocities)
+        dc = [DistanceConstraint(1, 2, bond_length)]
+        sys, cons = make_shake_system(coords, velocities, masses_val; dist_constraints=dc)
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 32
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = shake_velocity_context(buffers; step_n, virial_scale=inv(dt))
+
+        apply_velocity_constraints!(sys, cons; context)
+        expected = expected_velocity_constraint_virial(coords, velocities_before,
+                                                       sys.velocities, masses_val, dt)
+
+        @test check_velocity_constraints(sys, cons)
+        @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
+        @test Molly.has_constraint_virial(buffers, step_n)
+    end
+
+    # 3-atom two-constraint position and velocity virial
+    @testset begin
+        masses_val = [12.0, 16.0, 14.0]
+        d12 = normalize(SVector(1.0, 2.0, -1.0))
+        d13 = normalize(SVector(-1.0, 1.0, 2.0))
+        origin = SVector(0.2, -0.1, 0.05)
+        old_coords = [
+            origin,
+            origin + bond_length * d12,
+            origin + bond_length * d13,
+        ]
+        unconstrained = old_coords .+ [
+            0.0005 * d13,
+            -0.0007 * d12,
+            0.0009 * (d12 - d13),
+        ]
+        dc = [
+            DistanceConstraint(1, 2, bond_length),
+            DistanceConstraint(1, 3, bond_length),
+        ]
+        sys, cons = make_shake_system(unconstrained, zero.(old_coords), masses_val;
+                                      dist_constraints=dc)
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 33
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
+
+        apply_position_constraints!(sys, cons, old_coords; context)
+        expected = expected_position_constraint_virial(unconstrained, sys.coords,
+                                                       masses_val, dt)
+
+        @test check_position_constraints(sys, cons)
+        @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
+
+        common_velocity = SVector(0.04, -0.02, 0.03)
+        velocities = [
+            common_velocity - 0.06 * d12,
+            common_velocity + 0.04 * d12 - 0.05 * d13,
+            common_velocity + 0.07 * d13,
+        ]
+        velocities_before = copy(velocities)
+        sys, cons = make_shake_system(old_coords, velocities, masses_val;
+                                      dist_constraints=dc)
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 34
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = shake_velocity_context(buffers; step_n, virial_scale=inv(dt))
+
+        apply_velocity_constraints!(sys, cons; context)
+        expected = expected_velocity_constraint_virial(old_coords, velocities_before,
+                                                       sys.velocities, masses_val, dt)
+
+        @test check_velocity_constraints(sys, cons)
+        @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
+    end
+
+    # Angle-cluster position and velocity virial
+    @testset begin
+        masses_val = [1.0, 16.0, 1.0]
+        angle = deg2rad(104.5)
+        origin = SVector(0.2, -0.1, 0.05)
+        d21 = SVector(1.0, 0.0, 0.0)
+        d23 = SVector(cos(angle), sin(angle), 0.0)
+        old_coords = [
+            origin + bond_length * d21,
+            origin,
+            origin + bond_length * d23,
+        ]
+        unconstrained = old_coords .+ [
+            SVector(0.0005, -0.0004, 0.0002),
+            SVector(-0.0002, 0.0003, -0.0001),
+            SVector(-0.0004, 0.0005, 0.0003),
+        ]
+        ac = [AngleConstraint(1, 2, 3, angle, bond_length, bond_length)]
+        sys, cons = make_shake_system(unconstrained, zero.(old_coords), masses_val;
+                                      angle_constraints=ac)
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 35
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
+
+        apply_position_constraints!(sys, cons, old_coords; context)
+        expected = expected_position_constraint_virial(unconstrained, sys.coords,
+                                                       masses_val, dt)
+
+        @test check_position_constraints(sys, cons)
+        @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
+
+        velocities = [
+            SVector(0.08, -0.03, 0.01),
+            SVector(-0.02, 0.04, -0.01),
+            SVector(-0.05, 0.02, 0.03),
+        ]
+        velocities_before = copy(velocities)
+        sys, cons = make_shake_system(old_coords, velocities, masses_val;
+                                      angle_constraints=ac)
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 36
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = shake_velocity_context(buffers; step_n, virial_scale=inv(dt))
+
+        apply_velocity_constraints!(sys, cons; context)
+        expected = expected_velocity_constraint_virial(old_coords, velocities_before,
+                                                       sys.velocities, masses_val, dt)
+
+        @test check_velocity_constraints(sys, cons)
+        @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
+    end
+
+    # needs_virial=false leaves the virial buffer untouched
+    @testset begin
+        masses_val = [12.0, 16.0]
+        direction = normalize(SVector(1.0, 2.0, -1.0))
+        old_coords = [zero(direction), bond_length * direction]
+        unconstrained = [old_coords[1], old_coords[2] + 0.001 * direction]
+        dc = [DistanceConstraint(1, 2, bond_length)]
+        sys, cons = make_shake_system(unconstrained, zero.(old_coords), masses_val;
+                                      dist_constraints=dc)
+        buffers = Molly.init_buffers!(sys, 1)
+        fill!(buffers.constraint_virial_nounits, 3.0)
+        context = shake_position_context(buffers; needs_virial=false)
+
+        apply_position_constraints!(sys, cons, old_coords; context)
+
+        @test all(==(3.0), buffers.constraint_virial_nounits)
+    end
+
+    # high-level merge smoke test
+    @testset begin
+        masses_val = [12.0, 16.0]
+        direction = normalize(SVector(1.0, 2.0, -1.0))
+        old_coords = [zero(direction), bond_length * direction]
+        unconstrained = [old_coords[1], old_coords[2] + 0.001 * direction]
+        dc = [DistanceConstraint(1, 2, bond_length)]
+        sys, cons = make_shake_system(unconstrained, zero.(old_coords), masses_val;
+                                      dist_constraints=dc)
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 37
+        interaction_virial = [
+            1.0 0.2 0.0
+            0.2 0.5 0.1
+            0.0 0.1 0.25
+        ]
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        buffers.virial .= interaction_virial
+        Molly.mark_interaction_virial!(buffers.validity, step_n)
+        context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
+
+        apply_position_constraints!(sys, cons, old_coords; context)
+        expected_constraint = copy(buffers.constraint_virial_nounits)
+        Molly.merge_constraint_virial!(buffers, sys, step_n)
+
+        @test buffers.constraint_virial ≈ expected_constraint atol=1e-12
+        @test buffers.virial ≈ interaction_virial + expected_constraint atol=1e-12
+        @test Molly.has_total_virial(buffers, step_n)
+    end
+end
+
+@testset "SHAKE_RATTLE GPU virial guard" begin
+    T = Float32
+    bond_length = T(0.15)
+    masses_val = T[12.0, 16.0]
+    direction = normalize(SVector{3, T}(1.0, 2.0, -1.0))
+    old_coords = [zero(direction), bond_length * direction]
+    unconstrained = [old_coords[1], old_coords[2] + T(0.001) * direction]
+    velocities = zero.(old_coords)
+    dc = [DistanceConstraint(1, 2, bond_length)]
+
+    for AT in array_list[2:end]
+        atoms = [Atom(mass=m, σ=zero(T), ϵ=zero(T)) for m in masses_val]
+        cons = SHAKE_RATTLE(2, T(1e-5), T(1e-5); dist_constraints=dc)
+        sys = System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(copy(unconstrained), AT),
+            velocities=to_device(copy(velocities), AT),
+            boundary=CubicBoundary(T(5.0)),
+            constraints=(cons,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 38
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = shake_position_context(buffers; step_n)
+
+        @test_throws ErrorException apply_position_constraints!(
+            sys, sys.constraints[1], to_device(old_coords, AT); context
+        )
+
+        context = shake_velocity_context(buffers; step_n)
+        @test_throws ErrorException apply_velocity_constraints!(
+            sys, sys.constraints[1]; context
+        )
+    end
 end
 
 # --- LINCS tests ---

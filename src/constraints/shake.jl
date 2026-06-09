@@ -152,6 +152,117 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
     return sr
 end
 
+default_shake_position_constraint_context() = ConstraintApplicationContext(
+    PositionConstraintApplication();
+    needs_virial=false,
+)
+
+default_shake_velocity_constraint_context() = ConstraintApplicationContext(
+    VelocityConstraintApplication();
+    needs_virial=false,
+)
+
+function validate_shake_position_virial_context(context)
+    context.needs_virial || return context
+    if !(context.kind isa PositionConstraintApplication)
+        error("SHAKE position virial accumulation requires a position constraint context")
+    end
+    if isnothing(context.buffers)
+        error("SHAKE position virial accumulation requires context.buffers")
+    end
+    return context
+end
+
+function validate_shake_velocity_virial_context(context)
+    context.needs_virial || return context
+    if !(context.kind isa VelocityConstraintApplication)
+        error("RATTLE velocity virial accumulation requires a velocity constraint context")
+    end
+    if isnothing(context.buffers)
+        error("RATTLE velocity virial accumulation requires context.buffers")
+    end
+    return context
+end
+
+function accumulate_shake_position_virial!(coords_before, coords_after, ms, context)
+    context.needs_virial || return context
+    @inbounds for i in eachindex(coords_after)
+        correction_impulse = ms[i] * (coords_after[i] - coords_before[i])
+        contribution = coords_after[i] * transpose(correction_impulse)
+        accumulate_constraint_virial!(context.buffers, contribution, context)
+    end
+    return context
+end
+
+function accumulate_rattle_velocity_virial!(coords, velocities_before, velocities_after, ms,
+                                            context)
+    context.needs_virial || return context
+    @inbounds for i in eachindex(velocities_after)
+        correction_impulse = ms[i] * (velocities_after[i] - velocities_before[i])
+        contribution = coords[i] * transpose(correction_impulse)
+        accumulate_constraint_virial!(context.buffers, contribution, context)
+    end
+    return context
+end
+
+@inline function accumulate_constraint_virial_atomic!(constraint_virial_nounits, coords,
+                                                      correction_impulse, virial_scale)
+    for alpha in 1:3
+        for beta in 1:3
+            Atomix.@atomic constraint_virial_nounits[alpha, beta] +=
+                ustrip(virial_scale * coords[alpha] * correction_impulse[beta])
+        end
+    end
+    return nothing
+end
+
+@kernel inbounds=true function shake_position_virial_kernel!(
+        constraint_virial_nounits,
+        @Const(coords_before), @Const(coords_after), @Const(ms), virial_scale)
+    i = @index(Global, Linear)
+    if i <= length(coords_after)
+        correction_impulse = ms[i] * (coords_after[i] - coords_before[i])
+        accumulate_constraint_virial_atomic!(constraint_virial_nounits, coords_after[i],
+                                             correction_impulse, virial_scale)
+    end
+end
+
+@kernel inbounds=true function rattle_velocity_virial_kernel!(
+        constraint_virial_nounits,
+        @Const(coords), @Const(velocities_before), @Const(velocities_after), @Const(ms),
+        virial_scale)
+    i = @index(Global, Linear)
+    if i <= length(velocities_after)
+        correction_impulse = ms[i] * (velocities_after[i] - velocities_before[i])
+        accumulate_constraint_virial_atomic!(constraint_virial_nounits, coords[i],
+                                             correction_impulse, virial_scale)
+    end
+end
+
+function accumulate_shake_position_virial_gpu!(coords_before, coords_after, ms, context,
+                                               backend, block_size)
+    context.needs_virial || return context
+    virial_kern! = shake_position_virial_kernel!(backend, block_size)
+    VT = eltype(context.buffers.constraint_virial_nounits)
+    virial_scale = VT(ustrip(context.virial_scale))
+    virial_kern!(context.buffers.constraint_virial_nounits, coords_before, coords_after, ms,
+                 virial_scale; ndrange=length(coords_after))
+    KernelAbstractions.synchronize(backend)
+    return context
+end
+
+function accumulate_rattle_velocity_virial_gpu!(coords, velocities_before, velocities_after, ms,
+                                                context, backend, block_size)
+    context.needs_virial || return context
+    virial_kern! = rattle_velocity_virial_kernel!(backend, block_size)
+    VT = eltype(context.buffers.constraint_virial_nounits)
+    virial_scale = VT(ustrip(context.virial_scale))
+    virial_kern!(context.buffers.constraint_virial_nounits, coords, velocities_before,
+                 velocities_after, ms, virial_scale; ndrange=length(velocities_after))
+    KernelAbstractions.synchronize(backend)
+    return context
+end
+
 # The RATTLE equations are modified from LAMMPS:
 # https://github.com/lammps/lammps/blob/develop/src/RIGID/fix_rattle.cpp
 
@@ -756,7 +867,12 @@ end
 function apply_position_constraints!(sys::System,
                                      ca::SHAKE_RATTLE,
                                      r_pre_unconstrained_update;
+                                     context=nothing,
                                      kwargs...)
+    context = isnothing(context) ? default_shake_position_constraint_context() : context
+    validate_shake_position_virial_context(context)
+    coords_before = context.needs_virial ? copy(sys.coords) : nothing
+
     N12_clusters = length(ca.clusters12)
     N23_clusters = length(ca.clusters23)
     N34_clusters = length(ca.clusters34)
@@ -826,9 +942,20 @@ function apply_position_constraints!(sys::System,
     end
 
     KernelAbstractions.synchronize(backend)
+    if sys.coords isa AbstractGPUArray
+        accumulate_shake_position_virial_gpu!(coords_before, sys.coords, masses(sys), context,
+                                              backend, ca.gpu_block_size)
+    else
+        accumulate_shake_position_virial!(coords_before, sys.coords, masses(sys), context)
+    end
+    return sys
 end
 
-function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
+function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; context=nothing, kwargs...)
+    context = isnothing(context) ? default_shake_velocity_constraint_context() : context
+    validate_shake_velocity_virial_context(context)
+    velocities_before = context.needs_virial ? copy(sys.velocities) : nothing
+
     N12_clusters = length(ca.clusters12)
     N23_clusters = length(ca.clusters23)
     N34_clusters = length(ca.clusters34)
@@ -898,6 +1025,14 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
     end
 
     KernelAbstractions.synchronize(backend)
+    if sys.velocities isa AbstractGPUArray
+        accumulate_rattle_velocity_virial_gpu!(sys.coords, velocities_before, sys.velocities,
+                                               masses(sys), context, backend, ca.gpu_block_size)
+    else
+        accumulate_rattle_velocity_virial!(sys.coords, velocities_before, sys.velocities,
+                                           masses(sys), context)
+    end
+    return sys
 end
 
 function check_position_constraints(sys::System{<:Any, <:Any, FT}, ca::SHAKE_RATTLE) where FT
