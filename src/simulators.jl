@@ -278,24 +278,49 @@ end
 needs_virial_on_step(needs_virial::Bool, steps, step_n::Integer) =
     needs_virial && step_n % steps == 0
 
-function position_constraint_context(buffers, step_n::Integer, dt, needs_virial::Bool)
+function position_constraint_virial_scale(sys, buffers, dt)
+    e_unit = unit(eltype(buffers.constraint_virial))
+    if e_unit == NoUnits
+        return inv(dt^2)
+    else
+        m_unit = unit(eltype(masses(sys)))
+        x_unit = unit(eltype(eltype(sys.coords)))
+        raw_unit = m_unit * x_unit^2
+        return uconvert(e_unit, raw_unit * inv(dt^2))
+    end
+end
+
+function velocity_constraint_virial_scale(sys, buffers, dt)
+    e_unit = unit(eltype(buffers.constraint_virial))
+    if e_unit == NoUnits
+        return inv(dt)
+    else
+        m_unit = unit(eltype(masses(sys)))
+        x_unit = unit(eltype(eltype(sys.coords)))
+        v_unit = unit(eltype(eltype(sys.velocities)))
+        raw_unit = m_unit * x_unit * v_unit
+        return uconvert(e_unit, raw_unit * inv(dt))
+    end
+end
+
+function position_constraint_context(buffers, sys, step_n::Integer, dt, needs_virial::Bool)
     return ConstraintApplicationContext(
         PositionConstraintApplication();
         needs_virial=needs_virial,
         step_n=step_n,
         dt=dt,
-        virial_scale=inv(dt^2),
+        virial_scale=position_constraint_virial_scale(sys, buffers, dt),
         buffers=buffers,
     )
 end
 
-function velocity_constraint_context(buffers, step_n::Integer, dt, needs_virial::Bool)
+function velocity_constraint_context(buffers, sys, step_n::Integer, dt, needs_virial::Bool)
     return ConstraintApplicationContext(
         VelocityConstraintApplication();
         needs_virial=needs_virial,
         step_n=step_n,
         dt=dt,
-        virial_scale=inv(dt),
+        virial_scale=velocity_constraint_virial_scale(sys, buffers, dt),
         buffers=buffers,
     )
 end
@@ -388,7 +413,8 @@ end
 
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
         if using_constraints
-            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      needs_vir_step)
             apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
                                         context=pos_context, n_threads=n_threads)
         end
@@ -401,7 +427,8 @@ end
 
         sys.velocities .+= (accels_t .+ accels_t_dt) .* dt_div2
         if using_constraints
-            vel_context = velocity_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      needs_vir_step)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end
@@ -519,7 +546,8 @@ end
         # Position update: r(t+dt) = r(t) + v(t)*dt + a(t)*dt²/2
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
         if using_constraints
-            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      needs_vir_step)
             apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
                                         context=pos_context, n_threads=n_threads)
         end
@@ -537,7 +565,8 @@ end
         # Final velocity: v(t+dt) = v(t) + (dt/2)*(a(t) + a(t+dt))
         sys.velocities .= velocities_t .+ (accels_t .+ accels_t_dt) .* dt_div2
         if using_constraints
-            vel_context = velocity_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      needs_vir_step)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end
@@ -645,7 +674,8 @@ end
         end
         sys.coords .+= sys.velocities .* sim.dt
         if using_constraints
-            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      needs_vir_step)
             apply_position_constraints!(sys, cons_coord_storage; context=pos_context,
                                         n_threads=n_threads)
         end
@@ -747,7 +777,8 @@ end
         end
 
         if using_constraints
-            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      needs_vir_step)
             apply_position_constraints!(sys, coords_copy; context=pos_context,
                                         n_threads=n_threads)
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
@@ -861,7 +892,8 @@ end
         sys.velocities .+= accels_t .* sim.dt
         if using_constraints
             prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
-            vel_context = velocity_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      needs_vir_step)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
         end
 
@@ -876,7 +908,8 @@ end
         sys.coords .+= sys.velocities .* dt_div2
 
         if using_constraints
-            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      needs_vir_step)
             apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
                                         context=pos_context, n_threads=n_threads)
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)

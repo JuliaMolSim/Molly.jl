@@ -214,8 +214,17 @@ end
 
 clear_constraint_virial!(buffers, sys, step_n::Integer) = clear_constraint_virial!(buffers, step_n)
 
+function constraint_virial_nounits(buffers, contribution)
+    e_unit = unit(eltype(buffers.constraint_virial))
+    if e_unit == NoUnits
+        return ustrip.(contribution)
+    else
+        return ustrip.(e_unit, contribution)
+    end
+end
+
 function accumulate_constraint_virial!(buffers, contribution)
-    buffers.constraint_virial_nounits .+= ustrip.(contribution)
+    buffers.constraint_virial_nounits .+= constraint_virial_nounits(buffers, contribution)
     invalidate_total_virial!(buffers.validity)
     invalidate_pressure!(buffers.validity)
     return buffers

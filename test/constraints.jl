@@ -1412,6 +1412,54 @@ end
         @test Molly.has_constraint_virial(buffers, step_n)
     end
 
+    # unitful position virial is independent of the timestep unit spelling
+    @testset begin
+        function lincs_unitful_position_virial(dt)
+            bond_length = 0.15f0u"nm"
+            masses_val = [12.0f0u"g/mol", 12.0f0u"g/mol"]
+            dc = [DistanceConstraint(1, 2, bond_length)]
+            lincs = LINCS(masses=masses_val, dist_constraints=dc,
+                          dist_tolerance=1.0f-8u"nm",
+                          vel_tolerance=1.0f-8u"nm^2 * ps^-1",
+                          nrec=0, niter=0)
+            old_coords = [
+                SVector(0.0f0, 0.0f0, 0.0f0)u"nm",
+                SVector(0.15f0, 0.0f0, 0.0f0)u"nm",
+            ]
+            coords = [
+                old_coords[1],
+                old_coords[2] + SVector(0.001f0, 0.0f0, 0.0f0)u"nm",
+            ]
+            atoms = [Atom(mass=m, σ=0.0f0u"nm", ϵ=0.0f0u"kJ/mol")
+                     for m in masses_val]
+            sys = System(
+                atoms=atoms,
+                coords=copy(coords),
+                velocities=zero.(coords) ./ 1.0f0u"ps",
+                boundary=CubicBoundary(5.0f0u"nm"),
+                constraints=(lincs,),
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
+            )
+            buffers = Molly.init_buffers!(sys, 1)
+            step_n = 9
+            Molly.clear_constraint_virial!(buffers, sys, step_n)
+            context = Molly.position_constraint_context(buffers, sys, step_n, dt, true)
+
+            apply_position_constraints!(sys, lincs, old_coords; context)
+
+            return copy(buffers.constraint_virial_nounits) .* u"kJ/mol"
+        end
+
+        virial_fs = lincs_unitful_position_virial(4.0f0u"fs")
+        virial_ps = lincs_unitful_position_virial(0.004f0u"ps")
+
+        @test virial_fs ≈ virial_ps rtol=1e-6
+        @test virial_ps[1, 1] ≈ -56.25f0u"kJ/mol" rtol=1e-5
+        @test all(iszero, virial_ps[2:3, :])
+        @test all(iszero, virial_ps[:, 2:3])
+    end
+
     # valid zero constraint virial remains valid
     @testset begin
         x, _, data, ws = make_lincs_diatomic(; nrec=0, niter=0)

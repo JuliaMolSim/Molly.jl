@@ -187,8 +187,8 @@ end
 function accumulate_shake_position_virial!(coords_before, coords_after, ms, context)
     context.needs_virial || return context
     @inbounds for i in eachindex(coords_after)
-        correction_impulse = ms[i] * (coords_after[i] - coords_before[i])
-        contribution = coords_after[i] * transpose(correction_impulse)
+        correction_impulse = ustrip(ms[i]) * ustrip.(coords_after[i] - coords_before[i])
+        contribution = ustrip.(coords_after[i]) * transpose(correction_impulse)
         accumulate_constraint_virial!(context.buffers, contribution, context)
     end
     return context
@@ -198,8 +198,8 @@ function accumulate_rattle_velocity_virial!(coords, velocities_before, velocitie
                                             context)
     context.needs_virial || return context
     @inbounds for i in eachindex(velocities_after)
-        correction_impulse = ms[i] * (velocities_after[i] - velocities_before[i])
-        contribution = coords[i] * transpose(correction_impulse)
+        correction_impulse = ustrip(ms[i]) * ustrip.(velocities_after[i] - velocities_before[i])
+        contribution = ustrip.(coords[i]) * transpose(correction_impulse)
         accumulate_constraint_virial!(context.buffers, contribution, context)
     end
     return context
@@ -221,8 +221,8 @@ end
         @Const(coords_before), @Const(coords_after), @Const(ms), virial_scale)
     i = @index(Global, Linear)
     if i <= length(coords_after)
-        correction_impulse = ms[i] * (coords_after[i] - coords_before[i])
-        accumulate_constraint_virial_atomic!(constraint_virial_nounits, coords_after[i],
+        correction_impulse = ustrip(ms[i]) * ustrip.(coords_after[i] - coords_before[i])
+        accumulate_constraint_virial_atomic!(constraint_virial_nounits, ustrip.(coords_after[i]),
                                              correction_impulse, virial_scale)
     end
 end
@@ -233,8 +233,8 @@ end
         virial_scale)
     i = @index(Global, Linear)
     if i <= length(velocities_after)
-        correction_impulse = ms[i] * (velocities_after[i] - velocities_before[i])
-        accumulate_constraint_virial_atomic!(constraint_virial_nounits, coords[i],
+        correction_impulse = ustrip(ms[i]) * ustrip.(velocities_after[i] - velocities_before[i])
+        accumulate_constraint_virial_atomic!(constraint_virial_nounits, ustrip.(coords[i]),
                                              correction_impulse, virial_scale)
     end
 end
