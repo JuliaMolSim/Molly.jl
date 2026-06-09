@@ -982,8 +982,14 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     else
         buffers = buffers_in
     end
-    if recompute
+    if recompute && length(sys.constraints) > 0
+        if isnothing(buffers_in) || !has_total_virial(buffers, step_n)
+            error("cannot recompute pressure for constrained systems without a valid total virial")
+        end
+    elseif recompute
         forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
+    elseif length(sys.constraints) > 0 && !has_total_virial(buffers, step_n)
+        error("cannot calculate pressure for constrained systems without a valid total virial")
     end
 
     # Always evaluate K in case velocities were rescaled by a thermostat

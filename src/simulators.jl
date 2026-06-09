@@ -230,6 +230,118 @@ function VelocityVerlet(; dt, coupling=nothing, remove_CM_motion=1)
     return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
+function virial_schedule_from_steps(steps)
+    isempty(steps) && return false, Inf
+    smin = minimum(steps)
+    for s in steps
+        if s % smin != 0
+            throw(ArgumentError("incompatible virial step interval $steps, all must be " *
+                                "multiples of the minimum interval $smin"))
+        end
+    end
+    return true, smin
+end
+
+same_logger_observable(observable, name::Symbol) =
+    isdefined(@__MODULE__, name) && observable === getfield(@__MODULE__, name)
+
+function logger_virial_interval(logger)
+    if hasproperty(logger, :observable) && hasproperty(logger, :n_steps)
+        observable = getproperty(logger, :observable)
+        if same_logger_observable(observable, :virial_wrapper) ||
+                same_logger_observable(observable, :scalar_virial_wrapper) ||
+                same_logger_observable(observable, :pressure_wrapper) ||
+                same_logger_observable(observable, :scalar_pressure_wrapper)
+            return getproperty(logger, :n_steps)
+        end
+    end
+    return Inf
+end
+
+function needs_virial_schedule(coupling, loggers, run_loggers)
+    steps = Int[]
+    coupling_needs_virial, coupling_steps = needs_virial_schedule(coupling)
+    if coupling_needs_virial
+        push!(steps, Int(coupling_steps))
+    end
+    if run_loggers != false
+        for logger in loggers
+            logger_steps = logger_virial_interval(logger)
+            if !isinf(logger_steps)
+                push!(steps, Int(logger_steps))
+            end
+        end
+    end
+    return virial_schedule_from_steps(steps)
+end
+
+needs_virial_on_step(needs_virial::Bool, steps, step_n::Integer) =
+    needs_virial && step_n % steps == 0
+
+function position_constraint_context(buffers, step_n::Integer, dt, needs_virial::Bool)
+    return ConstraintApplicationContext(
+        PositionConstraintApplication();
+        needs_virial=needs_virial,
+        step_n=step_n,
+        dt=dt,
+        virial_scale=inv(dt^2),
+        buffers=buffers,
+    )
+end
+
+function velocity_constraint_context(buffers, step_n::Integer, dt, needs_virial::Bool)
+    return ConstraintApplicationContext(
+        VelocityConstraintApplication();
+        needs_virial=needs_virial,
+        step_n=step_n,
+        dt=dt,
+        virial_scale=inv(dt),
+        buffers=buffers,
+    )
+end
+
+function prepare_constraint_virial!(buffers, sys, step_n::Integer, needs_virial::Bool)
+    if needs_virial && length(sys.constraints) > 0
+        clear_constraint_virial!(buffers, sys, step_n)
+    end
+    return buffers
+end
+
+function merge_constraint_virial_if_needed!(buffers, sys, step_n::Integer,
+                                            needs_virial::Bool)
+    if needs_virial && length(sys.constraints) > 0
+        merge_constraint_virial!(buffers, sys, step_n)
+    end
+    return buffers
+end
+
+function merge_zero_constraint_virial_if_needed!(buffers, sys, step_n::Integer,
+                                                 needs_virial::Bool)
+    if needs_virial && length(sys.constraints) > 0
+        clear_constraint_virial!(buffers, sys, step_n)
+        merge_constraint_virial!(buffers, sys, step_n)
+    end
+    return buffers
+end
+
+function recompute_forces_after_coupling!(forces_out, sys, neighbors, buffers, step_n::Integer,
+                                          needs_virial::Bool;
+                                          n_threads::Integer=Threads.nthreads())
+    preserve_total_virial = needs_virial && length(sys.constraints) > 0 &&
+                            has_total_virial(buffers, step_n)
+    if preserve_total_virial
+        total_virial = copy(buffers.virial)
+        forces!(forces_out, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
+        buffers.virial .= total_virial
+        mark_total_virial!(buffers.validity, step_n)
+        invalidate_pressure!(buffers.validity)
+    else
+        forces!(forces_out, sys, neighbors, buffers, Val(needs_virial), step_n;
+                n_threads=n_threads)
+    end
+    return forces_out
+end
+
 @inline function simulate!(sys,
                            sim::VelocityVerlet,
                            n_steps_or_time;
@@ -242,7 +354,7 @@ end
                            strictness=default_strictness())
     check_strictness(strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
-    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -250,7 +362,10 @@ end
                                n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), init_step; n_threads=n_threads)
+    needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir_init), init_step;
+            n_threads=n_threads)
+    merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, needs_vir_init)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
@@ -265,22 +380,31 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
+        needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         if using_constraints
             cons_coord_storage .= sys.coords
+            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
         end
-        needs_vir = (step_n % needs_vir_steps == 0)
 
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
-                                                         sim.dt; n_threads=n_threads)
+        if using_constraints
+            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
+                                        context=pos_context, n_threads=n_threads)
+        end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
-        forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+        forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir_step), step_n;
+                n_threads=n_threads)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .+= (accels_t .+ accels_t_dt) .* dt_div2
-        using_constraints && apply_velocity_constraints!(sys; n_threads=n_threads)
+        if using_constraints
+            vel_context = velocity_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
+            merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+        end
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -291,7 +415,8 @@ end
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
         if recompute_forces
-            forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+            recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
+                                             needs_vir_step; n_threads=n_threads)
             forces_t .= forces_t_dt
             accels_t .= calc_accels.(forces_t, masses(sys))
         else
@@ -355,7 +480,7 @@ end
                            strictness=default_strictness())
     check_strictness(strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
-    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -363,7 +488,10 @@ end
                                n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), init_step; n_threads=n_threads)
+    needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    forces!(forces_t, sys, neighbors, buffers, Val(needs_vir_init), init_step;
+            n_threads=n_threads)
+    merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, needs_vir_init)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
@@ -380,17 +508,21 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
+        needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         if using_constraints
             cons_coord_storage .= sys.coords
+            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
         end
-        needs_vir = (step_n % needs_vir_steps == 0)
 
         velocities_t .= sys.velocities
 
         # Position update: r(t+dt) = r(t) + v(t)*dt + a(t)*dt²/2
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
-                                                         sim.dt; n_threads=n_threads)
+        if using_constraints
+            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
+                                        context=pos_context, n_threads=n_threads)
+        end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
@@ -398,12 +530,17 @@ end
         sys.velocities .= velocities_t .+ accels_t .* λ_dt
 
         # Compute forces at new positions with predicted velocities
-        forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+        forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir_step), step_n;
+                n_threads=n_threads)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         # Final velocity: v(t+dt) = v(t) + (dt/2)*(a(t) + a(t+dt))
         sys.velocities .= velocities_t .+ (accels_t .+ accels_t_dt) .* dt_div2
-        using_constraints && apply_velocity_constraints!(sys; n_threads=n_threads)
+        if using_constraints
+            vel_context = velocity_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
+            merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+        end
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -414,7 +551,8 @@ end
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
         if recompute_forces
-            forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+            recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
+                                             needs_vir_step; n_threads=n_threads)
             forces_t .= forces_t_dt
             accels_t .= calc_accels.(forces_t, masses(sys))
         else
@@ -469,7 +607,7 @@ end
                            strictness=default_strictness())
     check_strictness(strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
-    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -477,7 +615,15 @@ end
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    if needs_vir_init
+        forces!(forces_t, sys, neighbors, buffers, Val(true), init_step; n_threads=n_threads)
+        merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, true)
+        apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
+    else
+        apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    end
     accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -486,21 +632,27 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        needs_vir = (step_n % needs_vir_steps == 0)
-        forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+        needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
+        forces!(forces_t, sys, neighbors, buffers, Val(needs_vir_step), step_n;
+                n_threads=n_threads)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         sys.velocities .+= accels_t .* sim.dt
 
         if using_constraints
             cons_coord_storage .= sys.coords
+            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
         end
         sys.coords .+= sys.velocities .* sim.dt
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage;
-                                                         n_threads=n_threads)
+        if using_constraints
+            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            apply_position_constraints!(sys, cons_coord_storage; context=pos_context,
+                                        n_threads=n_threads)
+        end
 
         if using_constraints
             sys.velocities .= (sys.coords .- cons_coord_storage) ./ sim.dt
+            merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -557,14 +709,22 @@ end
                            strictness=default_strictness())
     check_strictness(strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
-    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    if needs_vir_init
+        forces!(forces_t, sys, neighbors, buffers, Val(true), init_step; n_threads=n_threads)
+        merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, true)
+        apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
+    else
+        apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    end
     coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
     accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
@@ -572,11 +732,13 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        needs_vir = (step_n % needs_vir_steps == 0)
-        forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+        needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
+        forces!(forces_t, sys, neighbors, buffers, Val(needs_vir_step), step_n;
+                n_threads=n_threads)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         coords_copy .= sys.coords
+        prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
         if step_n == 1
             # Use the velocities at the first step since there is only one set of coordinates
             sys.coords .+= sys.velocities .* sim.dt .+ (accels_t .* dt_sq) ./ 2
@@ -584,7 +746,12 @@ end
             sys.coords .+= vector.(coords_last, sys.coords, (sys.boundary,)) .+ accels_t .* dt_sq
         end
 
-        using_constraints && apply_position_constraints!(sys, coords_copy; n_threads=n_threads)
+        if using_constraints
+            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            apply_position_constraints!(sys, coords_copy; context=pos_context,
+                                        n_threads=n_threads)
+            merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+        end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
@@ -658,7 +825,7 @@ end
                            strictness=default_strictness())
     check_strictness(strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
-    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -666,7 +833,15 @@ end
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    if needs_vir_init
+        forces!(forces_t, sys, neighbors, buffers, Val(true), init_step; n_threads=n_threads)
+        merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, true)
+        apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
+    else
+        apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    end
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     using_constraints = (length(sys.constraints) > 0)
@@ -678,12 +853,17 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        needs_vir = (step_n % needs_vir_steps == 0)
-        forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
+        needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
+        forces!(forces_t, sys, neighbors, buffers, Val(needs_vir_step), step_n;
+                n_threads=n_threads)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         sys.velocities .+= accels_t .* sim.dt
-        apply_velocity_constraints!(sys; n_threads=n_threads)
+        if using_constraints
+            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
+            vel_context = velocity_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
+        end
 
         if using_constraints
             cons_coord_storage .= sys.coords
@@ -695,8 +875,12 @@ end
 
         sys.coords .+= sys.velocities .* dt_div2
 
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
-                                                         sim.dt; n_threads=n_threads)
+        if using_constraints
+            pos_context = position_constraint_context(buffers, step_n, sim.dt, needs_vir_step)
+            apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
+                                        context=pos_context, n_threads=n_threads)
+            merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+        end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 

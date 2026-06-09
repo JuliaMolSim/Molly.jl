@@ -326,11 +326,23 @@ function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper
             dl.n_steps, ", ", length(values(dl)), " densities recorded")
 end
 
+valid_total_virial(buffers, step_n::Integer) =
+    !isnothing(buffers) && has_total_virial(buffers, step_n)
+
+valid_pressure(buffers, step_n::Integer) =
+    !isnothing(buffers) && has_pressure(buffers, step_n)
+
+function constrained_virial_error(quantity, step_n)
+    error("$quantity for constrained systems requires a valid total virial for step $step_n")
+end
+
 function virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-    if all(iszero_value, buffers.virial)
-        return virial(sys, neighbors, step_n; n_threads=n_threads)
-    else
+    if valid_total_virial(buffers, step_n)
         return copy(buffers.virial)
+    elseif length(sys.constraints) > 0
+        constrained_virial_error("virial logging", step_n)
+    else
+        return virial(sys, neighbors, step_n; n_threads=n_threads)
     end
 end
 
@@ -349,10 +361,12 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)
 end
 
 function scalar_virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-    if all(iszero_value, buffers.virial)
-        return scalar_virial(sys, neighbors, step_n; n_threads=n_threads)
-    else
+    if valid_total_virial(buffers, step_n)
         return tr(buffers.virial)
+    elseif length(sys.constraints) > 0
+        constrained_virial_error("scalar virial logging", step_n)
+    else
+        return scalar_virial(sys, neighbors, step_n; n_threads=n_threads)
     end
 end
 
@@ -371,11 +385,16 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(scalar_virial_w
 end
 
 function pressure_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-    if all(iszero_value, buffers.pres_tensor)
+    if valid_pressure(buffers, step_n)
+        return copy(buffers.pres_tensor)
+    elseif valid_total_virial(buffers, step_n)
+        P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads)
+        return copy(P)
+    elseif length(sys.constraints) > 0
+        constrained_virial_error("pressure logging", step_n)
+    else
         P = pressure(sys, neighbors, step_n, buffers; recompute=true, n_threads=n_threads)
         return copy(P)
-    else
-        return copy(buffers.pres_tensor)
     end
 end
 
@@ -397,10 +416,15 @@ end
 
 function scalar_pressure_wrapper(sys::System{D}, buffers, neighbors, step_n; n_threads,
                                  kwargs...) where D
-    if all(iszero_value, buffers.pres_tensor)
-        return scalar_pressure(sys, neighbors, step_n, buffers; n_threads=n_threads)
-    else
+    if valid_pressure(buffers, step_n)
         return tr(buffers.pres_tensor) / D
+    elseif valid_total_virial(buffers, step_n)
+        return scalar_pressure(sys, neighbors, step_n, buffers; recompute=false,
+                               n_threads=n_threads)
+    elseif length(sys.constraints) > 0
+        constrained_virial_error("scalar pressure logging", step_n)
+    else
+        return scalar_pressure(sys, neighbors, step_n, buffers; n_threads=n_threads)
     end
 end
 

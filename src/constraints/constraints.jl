@@ -348,19 +348,21 @@ Apply the coordinate constraints to the system.
 
 If `vel_storage` and `dt` are provided then velocity constraints are applied as well.
 """
-function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys, coord_storage; context=nothing,
+                                     n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
-        apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+        apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads)
     end
     return sys
 end
 
 function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
+                                     context=nothing,
                                      n_threads::Integer=Threads.nthreads())
     if length(sys.constraints) > 0
         vel_storage .= -sys.coords ./ dt
         for ca in sys.constraints
-            apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
+            apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads)
         end
         vel_storage .+= sys.coords ./ dt
         sys.velocities .+= vel_storage
@@ -373,9 +375,10 @@ end
 
 Apply the velocity constraints to the system.
 """
-function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+function apply_velocity_constraints!(sys; context=nothing,
+                                     n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
-        apply_velocity_constraints!(sys, ca)
+        apply_velocity_constraints!(sys, ca; context)
     end
     return sys
 end

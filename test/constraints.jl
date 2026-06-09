@@ -839,42 +839,300 @@ end
     end
 end
 
-@testset "SHAKE_RATTLE GPU virial guard" begin
+@testset "SHAKE_RATTLE GPU CPU agreement" begin
     T = Float32
     bond_length = T(0.15)
-    masses_val = T[12.0, 16.0]
-    direction = normalize(SVector{3, T}(1.0, 2.0, -1.0))
-    old_coords = [zero(direction), bond_length * direction]
-    unconstrained = [old_coords[1], old_coords[2] + T(0.001) * direction]
-    velocities = zero.(old_coords)
-    dc = [DistanceConstraint(1, 2, bond_length)]
+    boundary = CubicBoundary(T(5.0))
+    dt = T(0.5)
 
-    for AT in array_list[2:end]
+    function make_shake(dist_constraints, angle_constraints, natoms)
+        return SHAKE_RATTLE(
+            natoms, T(1e-5), T(1e-5);
+            dist_constraints=dist_constraints,
+            angle_constraints=angle_constraints,
+            max_iters=50,
+        )
+    end
+
+    function make_shake_cpu_system(coords, velocities, masses_val;
+                                   dist_constraints=nothing, angle_constraints=nothing)
         atoms = [Atom(mass=m, σ=zero(T), ϵ=zero(T)) for m in masses_val]
-        cons = SHAKE_RATTLE(2, T(1e-5), T(1e-5); dist_constraints=dc)
-        sys = System(
-            atoms=to_device(atoms, AT),
-            coords=to_device(copy(unconstrained), AT),
-            velocities=to_device(copy(velocities), AT),
-            boundary=CubicBoundary(T(5.0)),
-            constraints=(cons,),
+        return System(
+            atoms=atoms,
+            coords=copy(coords),
+            velocities=copy(velocities),
+            boundary=boundary,
+            constraints=(make_shake(dist_constraints, angle_constraints, length(coords)),),
             force_units=NoUnits,
             energy_units=NoUnits,
         )
-        buffers = Molly.init_buffers!(sys, 1)
-        step_n = 38
-        Molly.clear_constraint_virial!(buffers, sys, step_n)
-        context = shake_position_context(buffers; step_n)
+    end
 
-        @test_throws ErrorException apply_position_constraints!(
-            sys, sys.constraints[1], to_device(old_coords, AT); context
-        )
-
-        context = shake_velocity_context(buffers; step_n)
-        @test_throws ErrorException apply_velocity_constraints!(
-            sys, sys.constraints[1]; context
+    function make_shake_gpu_system(coords, velocities, masses_val, AT;
+                                   dist_constraints=nothing, angle_constraints=nothing)
+        atoms = [Atom(mass=m, σ=zero(T), ϵ=zero(T)) for m in masses_val]
+        return System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(copy(coords), AT),
+            velocities=to_device(copy(velocities), AT),
+            boundary=boundary,
+            constraints=(make_shake(dist_constraints, angle_constraints, length(coords)),),
+            force_units=NoUnits,
+            energy_units=NoUnits,
         )
     end
+
+    function test_shake_gpu_position!(old_coords, unconstrained_coords, masses_val, AT,
+                                      step_n; dist_constraints=nothing,
+                                      angle_constraints=nothing)
+        zero_velocities = zero.(old_coords)
+        cpu_sys = make_shake_cpu_system(
+            unconstrained_coords, zero_velocities, masses_val;
+            dist_constraints, angle_constraints,
+        )
+        gpu_sys = make_shake_gpu_system(
+            unconstrained_coords, zero_velocities, masses_val, AT;
+            dist_constraints, angle_constraints,
+        )
+        cpu_buffers = Molly.init_buffers!(cpu_sys, 1)
+        gpu_buffers = Molly.init_buffers!(gpu_sys, 1)
+        Molly.clear_constraint_virial!(cpu_buffers, cpu_sys, step_n)
+        Molly.clear_constraint_virial!(gpu_buffers, gpu_sys, step_n)
+        cpu_context = shake_position_context(cpu_buffers; step_n,
+                                             virial_scale=inv(dt^2))
+        gpu_context = shake_position_context(gpu_buffers; step_n,
+                                             virial_scale=inv(dt^2))
+
+        apply_position_constraints!(cpu_sys, cpu_sys.constraints[1], old_coords;
+                                    context=cpu_context)
+        apply_position_constraints!(gpu_sys, gpu_sys.constraints[1], to_device(old_coords, AT);
+                                    context=gpu_context)
+
+        @test from_device(gpu_sys.coords) ≈ cpu_sys.coords atol=T(1e-5)
+        @test from_device(gpu_buffers.constraint_virial_nounits) ≈
+              cpu_buffers.constraint_virial_nounits atol=T(1e-4)
+        @test abs(cpu_buffers.constraint_virial_nounits[1, 2]) > T(1e-7)
+        @test Molly.has_constraint_virial(gpu_buffers, step_n)
+    end
+
+    function test_shake_gpu_velocity!(coords, velocities, masses_val, AT, step_n;
+                                      dist_constraints=nothing, angle_constraints=nothing)
+        cpu_sys = make_shake_cpu_system(
+            coords, velocities, masses_val;
+            dist_constraints, angle_constraints,
+        )
+        gpu_sys = make_shake_gpu_system(
+            coords, velocities, masses_val, AT;
+            dist_constraints, angle_constraints,
+        )
+        cpu_buffers = Molly.init_buffers!(cpu_sys, 1)
+        gpu_buffers = Molly.init_buffers!(gpu_sys, 1)
+        Molly.clear_constraint_virial!(cpu_buffers, cpu_sys, step_n)
+        Molly.clear_constraint_virial!(gpu_buffers, gpu_sys, step_n)
+        cpu_context = shake_velocity_context(cpu_buffers; step_n, virial_scale=inv(dt))
+        gpu_context = shake_velocity_context(gpu_buffers; step_n, virial_scale=inv(dt))
+
+        apply_velocity_constraints!(cpu_sys, cpu_sys.constraints[1]; context=cpu_context)
+        apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1]; context=gpu_context)
+
+        @test from_device(gpu_sys.velocities) ≈ cpu_sys.velocities atol=T(1e-5)
+        @test from_device(gpu_buffers.constraint_virial_nounits) ≈
+              cpu_buffers.constraint_virial_nounits atol=T(1e-4)
+        @test abs(cpu_buffers.constraint_virial_nounits[1, 2]) > T(1e-7)
+        @test Molly.has_constraint_virial(gpu_buffers, step_n)
+    end
+
+    for AT in array_list[2:end]
+        @testset "$(AT)" begin
+            direction = normalize(SVector{3, T}(1.0, 2.0, -1.0))
+            origin = SVector{3, T}(0.2, -0.1, 0.05)
+            masses_2 = T[12.0, 16.0]
+            old_2 = [origin, origin + bond_length * direction]
+            unconstrained_2 = [old_2[1], old_2[2] + T(0.001) * direction]
+            dc_2 = [DistanceConstraint(1, 2, bond_length)]
+            test_shake_gpu_position!(
+                old_2, unconstrained_2, masses_2, AT, 38;
+                dist_constraints=dc_2,
+            )
+            velocities_2 = [
+                SVector{3, T}(-0.1, 0.0, 0.0),
+                SVector{3, T}(0.1, 0.0, 0.0),
+            ]
+            test_shake_gpu_velocity!(
+                old_2, velocities_2, masses_2, AT, 39;
+                dist_constraints=dc_2,
+            )
+
+            masses_3 = T[12.0, 16.0, 14.0]
+            d12 = normalize(SVector{3, T}(1.0, 2.0, -1.0))
+            d13 = normalize(SVector{3, T}(-1.0, 1.0, 2.0))
+            old_3 = [
+                origin,
+                origin + bond_length * d12,
+                origin + bond_length * d13,
+            ]
+            unconstrained_3 = old_3 .+ [
+                T(0.0005) * d13,
+                T(-0.0007) * d12,
+                T(0.0009) * (d12 - d13),
+            ]
+            dc_3 = [
+                DistanceConstraint(1, 2, bond_length),
+                DistanceConstraint(1, 3, bond_length),
+            ]
+            test_shake_gpu_position!(
+                old_3, unconstrained_3, masses_3, AT, 40;
+                dist_constraints=dc_3,
+            )
+            common_velocity = SVector{3, T}(0.04, -0.02, 0.03)
+            velocities_3 = [
+                common_velocity - T(0.06) * d12,
+                common_velocity + T(0.04) * d12 - T(0.05) * d13,
+                common_velocity + T(0.07) * d13,
+            ]
+            test_shake_gpu_velocity!(
+                old_3, velocities_3, masses_3, AT, 41;
+                dist_constraints=dc_3,
+            )
+
+            masses_angle = T[1.0, 16.0, 1.0]
+            angle = T(deg2rad(104.5))
+            d21 = SVector{3, T}(1.0, 0.0, 0.0)
+            d23 = SVector{3, T}(cos(angle), sin(angle), 0.0)
+            old_angle = [
+                origin + bond_length * d21,
+                origin,
+                origin + bond_length * d23,
+            ]
+            unconstrained_angle = old_angle .+ [
+                SVector{3, T}(0.0005, -0.0004, 0.0002),
+                SVector{3, T}(-0.0002, 0.0003, -0.0001),
+                SVector{3, T}(-0.0004, 0.0005, 0.0003),
+            ]
+            ac = [AngleConstraint(1, 2, 3, angle, bond_length, bond_length)]
+            test_shake_gpu_position!(
+                old_angle, unconstrained_angle, masses_angle, AT, 42;
+                angle_constraints=ac,
+            )
+            velocities_angle = [
+                SVector{3, T}(0.08, -0.03, 0.01),
+                SVector{3, T}(-0.02, 0.04, -0.01),
+                SVector{3, T}(-0.05, 0.02, 0.03),
+            ]
+            test_shake_gpu_velocity!(
+                old_angle, velocities_angle, masses_angle, AT, 43;
+                angle_constraints=ac,
+            )
+
+            gpu_sys = make_shake_gpu_system(
+                unconstrained_2, zero.(old_2), masses_2, AT;
+                dist_constraints=dc_2,
+            )
+            gpu_buffers = Molly.init_buffers!(gpu_sys, 1)
+            sentinel = T(3.0)
+            fill!(gpu_buffers.constraint_virial_nounits, sentinel)
+            position_context = shake_position_context(gpu_buffers; needs_virial=false)
+            apply_position_constraints!(
+                gpu_sys, gpu_sys.constraints[1], to_device(old_2, AT);
+                context=position_context,
+            )
+            velocity_context = shake_velocity_context(gpu_buffers; needs_virial=false)
+            apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1];
+                                        context=velocity_context)
+            @test all(==(sentinel), from_device(gpu_buffers.constraint_virial_nounits))
+        end
+    end
+end
+
+@testset "Constraint virial simulator integration" begin
+    dt = 0.5
+    bond_length = 0.15
+    direction = normalize(SVector(1.0, 2.0, -1.0))
+    origin = SVector(0.2, -0.1, 0.05)
+    coords = [origin, origin + bond_length * direction]
+    velocities = [-0.01 * direction, 0.01 * direction]
+    masses_val = [12.0, 12.0]
+    atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
+    dc = [DistanceConstraint(1, 2, bond_length)]
+
+    function simulator_constraint(kind)
+        if kind == :shake
+            return SHAKE_RATTLE(2, 1e-10, 1e-10; dist_constraints=dc, max_iters=50)
+        elseif kind == :lincs
+            return LINCS(
+                masses=masses_val,
+                dist_constraints=dc,
+                dist_tolerance=1e-10,
+                vel_tolerance=1e-10,
+                iter_vel_correction=true,
+            )
+        end
+        error("unknown constraint kind $kind")
+    end
+
+    function simulator_constraint_system(kind; loggers)
+        return System(
+            atoms=copy(atoms),
+            coords=copy(coords),
+            velocities=copy(velocities),
+            boundary=CubicBoundary(5.0),
+            constraints=(simulator_constraint(kind),),
+            loggers=loggers,
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+    end
+
+    simulators = (
+        VelocityVerlet(dt=dt, remove_CM_motion=0),
+        DPDVelocityVerlet(dt=dt, remove_CM_motion=0),
+        Verlet(dt=dt, remove_CM_motion=0),
+        StormerVerlet(dt=dt),
+        Langevin(dt=dt, temperature=1.0, friction=0.0, remove_CM_motion=0),
+    )
+
+    for constraint_kind in (:shake, :lincs)
+        for simulator in simulators
+            sys = simulator_constraint_system(
+                constraint_kind;
+                loggers=(virial=VirialLogger(Matrix{Float64}, 1),),
+            )
+
+            simulate!(sys, simulator, 1; run_loggers=:skipzero, n_threads=1,
+                      rng=MersenneTwister(1234))
+
+            logged_virial = only(values(sys.loggers.virial))
+            @test maximum(abs.(logged_virial)) > 1e-8
+        end
+    end
+
+    sys = simulator_constraint_system(
+        :shake;
+        loggers=(
+            pressure=PressureLogger(Matrix{Float64}, 1),
+            scalar_pressure=ScalarPressureLogger(Float64, 1),
+        ),
+    )
+
+    simulate!(sys, VelocityVerlet(dt=dt, remove_CM_motion=0), 1;
+              run_loggers=:skipzero, n_threads=1)
+
+    logged_pressure = only(values(sys.loggers.pressure))
+    logged_scalar_pressure = only(values(sys.loggers.scalar_pressure))
+    @test all(isfinite, logged_pressure)
+    @test logged_scalar_pressure ≈ tr(logged_pressure) / 3
+
+    barostat = BerendsenBarostat(1.0, 1.0; compressibility=1.0, n_steps=1,
+                                 max_scale_frac=0.001)
+    sys = simulator_constraint_system(
+        :shake;
+        loggers=(pressure=PressureLogger(Matrix{Float64}, 1),),
+    )
+
+    simulate!(sys, VelocityVerlet(dt=dt, coupling=(barostat,), remove_CM_motion=0), 1;
+              run_loggers=:skipzero, n_threads=1)
+
+    @test length(values(sys.loggers.pressure)) == 1
 end
 
 # --- LINCS tests ---
