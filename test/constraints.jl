@@ -1232,6 +1232,133 @@ end
     end
 end
 
+@testset "LINCS GPU CPU agreement" begin
+    T = Float32
+    bond_length = T(0.15)
+    masses_val = T[12.0, 16.0, 14.0]
+    atoms = [Atom(mass=m, σ=zero(T), ϵ=zero(T)) for m in masses_val]
+    boundary = CubicBoundary(T(5.0))
+    d12 = normalize(SVector{3, T}(1.0, 2.0, -1.0))
+    d23 = normalize(SVector{3, T}(-1.0, 1.0, 2.0))
+    origin = SVector{3, T}(0.2, -0.1, 0.05)
+    old_coords = [
+        origin,
+        origin + bond_length * d12,
+        origin + bond_length * d12 + bond_length * d23,
+    ]
+    dist_constraints = [
+        DistanceConstraint(1, 2, bond_length),
+        DistanceConstraint(2, 3, bond_length),
+    ]
+
+    function make_lincs()
+        return LINCS(masses=masses_val, dist_constraints=dist_constraints,
+                     dist_tolerance=T(1e-5), vel_tolerance=T(1e-5),
+                     nrec=4, niter=2, iter_vel_correction=true)
+    end
+
+    function make_cpu_system(coords, velocities)
+        return System(
+            atoms=copy(atoms),
+            coords=copy(coords),
+            velocities=copy(velocities),
+            boundary=boundary,
+            constraints=(make_lincs(),),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+    end
+
+    function make_gpu_system(coords, velocities, AT)
+        return System(
+            atoms=to_device(copy(atoms), AT),
+            coords=to_device(copy(coords), AT),
+            velocities=to_device(copy(velocities), AT),
+            boundary=boundary,
+            constraints=(make_lincs(),),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+    end
+
+    for AT in array_list[2:end]
+        @testset "$(AT)" begin
+            dt = T(0.5)
+
+            # Position constraints and virial.
+            unconstrained_coords = old_coords .+ [
+                T(0.0005) * d23,
+                T(-0.0007) * d12,
+                T(0.0009) * (d12 - d23),
+            ]
+            zero_velocities = zero.(old_coords)
+            cpu_sys = make_cpu_system(unconstrained_coords, zero_velocities)
+            gpu_sys = make_gpu_system(unconstrained_coords, zero_velocities, AT)
+            cpu_buffers = Molly.init_buffers!(cpu_sys, 1)
+            gpu_buffers = Molly.init_buffers!(gpu_sys, 1)
+            step_n = 21
+            Molly.clear_constraint_virial!(cpu_buffers, cpu_sys, step_n)
+            Molly.clear_constraint_virial!(gpu_buffers, gpu_sys, step_n)
+            cpu_context = lincs_position_context(cpu_buffers; step_n,
+                                                 virial_scale=inv(dt^2))
+            gpu_context = lincs_position_context(gpu_buffers; step_n,
+                                                 virial_scale=inv(dt^2))
+
+            apply_position_constraints!(cpu_sys, cpu_sys.constraints[1], old_coords;
+                                        context=cpu_context)
+            apply_position_constraints!(gpu_sys, gpu_sys.constraints[1],
+                                        to_device(old_coords, AT); context=gpu_context)
+
+            @test from_device(gpu_sys.coords) ≈ cpu_sys.coords atol=T(1e-5)
+            @test from_device(gpu_buffers.constraint_virial_nounits) ≈
+                  cpu_buffers.constraint_virial_nounits atol=T(1e-4)
+            @test abs(cpu_buffers.constraint_virial_nounits[1, 2]) > T(1e-7)
+            @test Molly.has_constraint_virial(gpu_buffers, step_n)
+
+            # Velocity constraints and virial.
+            common_velocity = SVector{3, T}(0.04, -0.02, 0.03)
+            velocities = [
+                common_velocity - T(0.06) * d12,
+                common_velocity + T(0.04) * d12 - T(0.05) * d23,
+                common_velocity + T(0.07) * d23,
+            ]
+            cpu_sys = make_cpu_system(old_coords, velocities)
+            gpu_sys = make_gpu_system(old_coords, velocities, AT)
+            cpu_buffers = Molly.init_buffers!(cpu_sys, 1)
+            gpu_buffers = Molly.init_buffers!(gpu_sys, 1)
+            step_n = 22
+            Molly.clear_constraint_virial!(cpu_buffers, cpu_sys, step_n)
+            Molly.clear_constraint_virial!(gpu_buffers, gpu_sys, step_n)
+            cpu_context = lincs_velocity_context(cpu_buffers; step_n,
+                                                 virial_scale=inv(dt))
+            gpu_context = lincs_velocity_context(gpu_buffers; step_n,
+                                                 virial_scale=inv(dt))
+
+            apply_velocity_constraints!(cpu_sys, cpu_sys.constraints[1];
+                                        context=cpu_context)
+            apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1];
+                                        context=gpu_context)
+
+            @test from_device(gpu_sys.velocities) ≈ cpu_sys.velocities atol=T(1e-5)
+            @test from_device(gpu_buffers.constraint_virial_nounits) ≈
+                  cpu_buffers.constraint_virial_nounits atol=T(1e-4)
+            @test abs(cpu_buffers.constraint_virial_nounits[1, 2]) > T(1e-7)
+            @test Molly.has_constraint_virial(gpu_buffers, step_n)
+
+            # No-virial path must not touch the constraint virial buffer.
+            gpu_sys = make_gpu_system(unconstrained_coords, zero_velocities, AT)
+            gpu_buffers = Molly.init_buffers!(gpu_sys, 1)
+            sentinel = T(3.0)
+            fill!(gpu_buffers.constraint_virial_nounits, sentinel)
+            context = lincs_position_context(gpu_buffers; needs_virial=false)
+            apply_position_constraints!(gpu_sys, gpu_sys.constraints[1],
+                                        to_device(old_coords, AT); context)
+
+            @test all(==(sentinel), from_device(gpu_buffers.constraint_virial_nounits))
+        end
+    end
+end
+
 @testset "LINCS GPU block size validation" begin
     # Chain of 130 constraints sharing atoms: 1-2, 2-3, ..., 130-131
     # Forms a single connected component of 130 constraints
