@@ -491,6 +491,14 @@ function lincs_center_of_mass(x, masses_val)
     return sum(masses_val[i] * x[i] for i in eachindex(x)) / total
 end
 
+function lincs_virial_from_atom_forces(coords, fs)
+    vir = zeros(typeof(ustrip(coords[1][1] * fs[1][1])), 3, 3)
+    @inbounds for i in eachindex(coords)
+        vir .+= ustrip.(coords[i] * transpose(fs[i]))
+    end
+    return vir
+end
+
 function make_lincs_no_unit_buffer_system(coords, masses_val)
     atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
     sys = System(
@@ -812,6 +820,39 @@ end
         @test Molly.has_constraint_virial(buffers, step_n)
     end
 
+    # position constraint virial matches the correction-force definition
+    @testset begin
+        bond_length = 0.15
+        masses_val = [12.0, 16.0]
+        direction = normalize(SVector(1.0, 2.0, -1.0))
+        origin = SVector(0.2, -0.1, 0.05)
+        old_coords = [origin, origin + bond_length * direction]
+        unconstrained = [old_coords[1], old_coords[2] + 0.001 * direction]
+        xp = copy(unconstrained)
+        _, _, data, ws = make_lincs_diatomic(; mass1=masses_val[1],
+                                             mass2=masses_val[2], bond_length,
+                                             nrec=0, niter=0)
+        sys, buffers = make_lincs_no_unit_buffer_system(old_coords, masses_val)
+        dt = 0.5
+        step_n = 8
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = lincs_position_context(buffers; step_n, virial_scale=inv(dt^2))
+
+        Molly.lincs_apply!(xp, old_coords, data, ws, sys.boundary, context)
+
+        correction_forces = [
+            masses_val[i] * (xp[i] - unconstrained[i]) / dt^2 for i in eachindex(xp)
+        ]
+        expected = lincs_virial_from_atom_forces(xp, correction_forces)
+
+        @test norm(xp[1] - xp[2]) ≈ bond_length atol=1e-14
+        @test sum(correction_forces) ≈ zero(correction_forces[1]) atol=1e-14
+        @test abs(expected[1, 2]) > 1e-8
+        @test abs(expected[1, 3]) > 1e-8
+        @test buffers.constraint_virial_nounits ≈ expected atol=1e-14
+        @test Molly.has_constraint_virial(buffers, step_n)
+    end
+
     # valid zero constraint virial remains valid
     @testset begin
         x, _, data, ws = make_lincs_diatomic(; nrec=0, niter=0)
@@ -849,6 +890,44 @@ end
         @test Molly.has_constraint_virial(buffers, step_n)
     end
 
+    # velocity constraint virial matches the correction-force definition
+    @testset begin
+        bond_length = 0.15
+        masses_val = [12.0, 16.0]
+        direction = normalize(SVector(1.0, 2.0, -1.0))
+        origin = SVector(0.2, -0.1, 0.05)
+        coords = [origin, origin + bond_length * direction]
+        common_velocity = SVector(0.04, -0.02, 0.03)
+        velocities_before = [
+            common_velocity - 0.1 * direction,
+            common_velocity + 0.1 * direction,
+        ]
+        velocities = copy(velocities_before)
+        _, _, data, ws = make_lincs_diatomic(; mass1=masses_val[1],
+                                             mass2=masses_val[2], bond_length,
+                                             nrec=0, niter=0)
+        sys, buffers = make_lincs_no_unit_buffer_system(coords, masses_val)
+        dt = 0.5
+        step_n = 11
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = lincs_velocity_context(buffers; step_n, virial_scale=inv(dt))
+
+        Molly.lincs_vel_apply!(velocities, coords, data, ws, sys.boundary, context)
+
+        correction_forces = [
+            masses_val[i] * (velocities[i] - velocities_before[i]) / dt
+                for i in eachindex(velocities)
+        ]
+        expected = lincs_virial_from_atom_forces(coords, correction_forces)
+
+        @test dot(direction, velocities[2] - velocities[1]) ≈ 0.0 atol=1e-14
+        @test sum(correction_forces) ≈ zero(correction_forces[1]) atol=1e-14
+        @test abs(expected[1, 2]) > 1e-8
+        @test abs(expected[1, 3]) > 1e-8
+        @test buffers.constraint_virial_nounits ≈ expected atol=1e-14
+        @test Molly.has_constraint_virial(buffers, step_n)
+    end
+
     # valid zero velocity constraint virial remains valid
     @testset begin
         x, _, data, ws = make_lincs_diatomic(; nrec=0, niter=0)
@@ -875,6 +954,92 @@ end
         Molly.lincs_vel_apply!(velocities, x, data, ws, CubicBoundary(5.0), context)
 
         @test all(==(3.0), buffers.constraint_virial_nounits)
+    end
+
+    # high-level position constraint application computes and merges scaled virial
+    @testset begin
+        bond_length = 0.15
+        masses_val = [12.0, 12.0]
+        dc = [DistanceConstraint(1, 2, bond_length)]
+        lincs = LINCS(masses=masses_val, dist_constraints=dc,
+                      dist_tolerance=1e-8, vel_tolerance=1e-8,
+                      nrec=0, niter=0)
+        old_coords = [SVector(0.0, 0.0, 0.0), SVector(bond_length, 0.0, 0.0)]
+        coords = [old_coords[1], old_coords[2] + SVector(0.001, 0.0, 0.0)]
+        atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
+        sys = System(
+            atoms=atoms,
+            coords=copy(coords),
+            velocities=zero.(coords),
+            boundary=CubicBoundary(5.0),
+            constraints=(lincs,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 12
+        scale = 2.0
+        interaction_virial = [
+            1.0 0.2 0.0
+            0.2 0.5 0.1
+            0.0 0.1 0.25
+        ]
+
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        buffers.virial .= interaction_virial
+        Molly.mark_interaction_virial!(buffers.validity, step_n)
+        context = lincs_position_context(buffers; step_n, virial_scale=scale)
+
+        B = normalize(old_coords[1] - old_coords[2])
+        factor = lincs.lincs_data.sdiag[1]^2 *
+                 (dot(B, coords[1] - coords[2]) - bond_length)
+        expected_constraint = scale * (-bond_length * factor * (B * transpose(B)))
+
+        apply_position_constraints!(sys, lincs, old_coords; context)
+        Molly.merge_constraint_virial!(buffers, sys, step_n)
+
+        @test norm(sys.coords[1] - sys.coords[2]) ≈ bond_length atol=1e-14
+        @test buffers.constraint_virial_nounits ≈ Matrix(expected_constraint) atol=1e-14
+        @test buffers.constraint_virial ≈ Matrix(expected_constraint) atol=1e-14
+        @test buffers.virial ≈ interaction_virial + Matrix(expected_constraint) atol=1e-14
+        @test Molly.has_total_virial(buffers, step_n)
+    end
+
+    # high-level velocity constraint application computes scaled virial
+    @testset begin
+        bond_length = 0.15
+        masses_val = [12.0, 12.0]
+        dc = [DistanceConstraint(1, 2, bond_length)]
+        lincs = LINCS(masses=masses_val, dist_constraints=dc,
+                      dist_tolerance=1e-8, vel_tolerance=1e-8,
+                      nrec=0, niter=0, iter_vel_correction=true)
+        coords = [SVector(0.0, 0.0, 0.0), SVector(bond_length, 0.0, 0.0)]
+        velocities = [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0)]
+        atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
+        sys = System(
+            atoms=atoms,
+            coords=copy(coords),
+            velocities=copy(velocities),
+            boundary=CubicBoundary(5.0),
+            constraints=(lincs,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+        buffers = Molly.init_buffers!(sys, 1)
+        step_n = 13
+        scale = 3.0
+        Molly.clear_constraint_virial!(buffers, sys, step_n)
+        context = lincs_velocity_context(buffers; step_n, virial_scale=scale)
+
+        B = normalize(coords[1] - coords[2])
+        factor = lincs.lincs_data.sdiag[1]^2 * dot(B, velocities[1] - velocities[2])
+        expected_constraint = scale * (-bond_length * factor * (B * transpose(B)))
+
+        apply_velocity_constraints!(sys, lincs; context)
+
+        @test dot(B, sys.velocities[2] - sys.velocities[1]) ≈ 0.0 atol=1e-14
+        @test buffers.constraint_virial_nounits ≈ Matrix(expected_constraint) atol=1e-14
+        @test Molly.has_constraint_virial(buffers, step_n)
     end
 
     # niter > 1 improves accuracy
