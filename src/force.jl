@@ -430,6 +430,32 @@ function forces!(fs,
     return fs, buffers
 end
 
+function reduce_force_chunks!(fs_nounits, fs_chunks, vir_nounits, vir_chunks,
+                              ::Val{n_threads}, ::Val{needs_vir},
+                              ::Val{add_to_existing}) where {n_threads, needs_vir, add_to_existing}
+    @inbounds Threads.@threads for i in eachindex(fs_nounits)
+        f = (add_to_existing ? fs_nounits[i] : zero(eltype(fs_nounits)))
+        for chunk_i in 1:n_threads
+            f += fs_chunks[chunk_i][i]
+        end
+        fs_nounits[i] = f
+    end
+
+    if needs_vir
+        if add_to_existing
+            @inbounds for chunk_i in 1:n_threads
+                vir_nounits .+= vir_chunks[chunk_i]
+            end
+        else
+            @inbounds vir_nounits .= vir_chunks[1]
+            @inbounds for chunk_i in 2:n_threads
+                vir_nounits .+= vir_chunks[chunk_i]
+            end
+        end
+    end
+    return fs_nounits
+end
+
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, ::Val{1},
@@ -586,16 +612,8 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         end
     end
 
-    @inbounds fs_nounits .= fs_chunks[1]
-    if needs_vir
-        @inbounds vir_nounits .= vir_chunks[1]
-    end
-    @inbounds for chunk_i in 2:n_threads
-        fs_nounits .+= fs_chunks[chunk_i]
-        if needs_vir
-            vir_nounits .+= vir_chunks[chunk_i]
-        end
-    end
+    reduce_force_chunks!(fs_nounits, fs_chunks, vir_nounits, vir_chunks,
+                         Val(n_threads), Val(needs_vir), Val(false))
 
     return fs_nounits
 end
