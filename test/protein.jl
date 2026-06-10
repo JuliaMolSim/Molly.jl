@@ -109,6 +109,30 @@ end
         center_coords=false,
         hydrogen_mass=2,
     )
+    sys_hbonds = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+    )
+    sys_hmr_hbonds = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+        hydrogen_mass=2,
+    )
+    sys_hmr_rigid_water = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+        rigid_water=true,
+        hydrogen_mass=2,
+    )
     zero(sys)
     zero(sys_pme)
     neighbors = find_neighbors(sys)
@@ -159,13 +183,22 @@ end
     @test maximum(norm.(forces(sys) .- forces(sys_lj14))) < 1e-10u"kJ * nm^-1 * mol^-1"
 
     mass_inds = [1, 2, 3, 4, 5, 6, 7, 15952, 15953, 15954]
+    expected_hmr_masses = [11.034, 2.0, 2.0, 2.0, 10.026, 2.0, 2.0,
+                           14.015324, 2.0, 2.0]u"g/mol"
     @test masses(sys)[mass_inds] ≈ [14.01, 1.008, 1.008, 1.008, 12.01, 1.008, 1.008,
                                     15.99943, 1.007947, 1.007947]u"g/mol"
-    @test masses(sys_hmr)[mass_inds] ≈ [11.034, 2.0, 2.0, 2.0, 10.026, 2.0, 2.0,
-                                        14.015324, 2.0, 2.0]u"g/mol"
+    @test masses(sys_hmr)[mass_inds] ≈ expected_hmr_masses
+    @test masses(sys_hmr_hbonds)[mass_inds] ≈ expected_hmr_masses
+    @test masses(sys_hmr_rigid_water)[mass_inds] ≈ expected_hmr_masses
     @test sum(masses(sys)) ≈ sum(masses(sys_hmr))
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr_hbonds))
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr_rigid_water))
     @test potential_energy(sys) ≈ potential_energy(sys_hmr)
     @test maximum(norm.(forces(sys) .- forces(sys_hmr))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test potential_energy(sys_hbonds) ≈ potential_energy(sys_hmr_hbonds)
+    @test maximum(norm.(forces(sys_hbonds) .- forces(sys_hmr_hbonds))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test first(sys_hmr_hbonds.constraints).lincs_data.invmass[mass_inds] ≈
+        inv.(ustrip.(u"g/mol", masses(sys_hmr_hbonds)[mass_inds]))
     @test_throws ErrorException System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=6)
     @test_throws ArgumentError System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=true)
 
