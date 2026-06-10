@@ -18,7 +18,7 @@ The pipeline generally follows these steps:
 module MollyCUDAExt
 
 using Molly
-using Molly: from_device, box_sides, sorted_morton_seq!, sum_pairwise_forces,
+using Molly: from_device, box_sides, sorted_morton_seq!, sum_pairwise_forces_gpu,
              sum_pairwise_potentials, volume
 using CUDA
 using Atomix
@@ -1660,7 +1660,7 @@ function force_kernel!(
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
                 
                 if any_active
-                    f = condition ? sum_pairwise_forces(
+                    f = condition ? sum_pairwise_forces_gpu(
                         inters_tuple, atoms_i, atoms_j_shuffle, Val(force_units),
                         false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
@@ -1711,7 +1711,7 @@ function force_kernel!(
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
                 
                 if any_active
-                    f = condition ? sum_pairwise_forces(
+                    f = condition ? sum_pairwise_forces_gpu(
                         inters_tuple, atoms_i, atoms_j_shuffle, Val(force_units),
                         (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
@@ -1778,7 +1778,7 @@ function force_kernel!(
             any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
 
             if any_active
-                f = condition ? sum_pairwise_forces(
+                f = condition ? sum_pairwise_forces_gpu(
                     inters_tuple, atoms_i, atoms_j, Val(force_units),
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                 ) : zero(SVector{D, T})
@@ -1838,7 +1838,7 @@ function force_kernel!(
             condition = (excl & 0x1) == true && r2 <= r_cut2
             
             # Divergence-safe execution (no vote_any_sync)
-            f = condition ? sum_pairwise_forces(
+            f = condition ? sum_pairwise_forces_gpu(
                 inters_tuple, atoms_i, atoms_j, Val(force_units),
                 (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
             ) : zero(SVector{D, T})
@@ -1904,7 +1904,7 @@ function force_kernel!(
                 condition = (excl & 0x1) == true && r2 <= r_cut2
                 
                 # Divergence-safe execution (no vote_any_sync)
-                f = condition ? sum_pairwise_forces(
+                f = condition ? sum_pairwise_forces_gpu(
                     inters_tuple, atoms_i, atoms_j, Val(force_units),
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                 ) : zero(SVector{D, T})
@@ -2299,8 +2299,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
                 j = j_0_tile + del_j
                 if i != j
                     @inbounds atom_j, coord_j, vel_j = atoms[j], coords[j], velocities[j]
-                    f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i,
-                                            coord_j, boundary, vel_i, vel_j, step_n)
+                    f = sum_pairwise_forces_gpu(inters, atom_i, atom_j, Val(F), false, coord_i,
+                                                coord_j, boundary, vel_i, vel_j, step_n)
                     for dim in 1:D
                         forces_shmem[dim, tidx] += -ustrip(f[dim])
                     end
@@ -2324,8 +2324,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
         @inbounds for _ in 1:tilesteps
             sync_warp()
             @inbounds atom_j = atoms[j]
-            f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
-                                    boundary, vel_i, vel_j, step_n)
+            f = sum_pairwise_forces_gpu(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
+                                        boundary, vel_i, vel_j, step_n)
             for dim in 1:D
                 forces_shmem[dim, tidx] += -ustrip(f[dim])
             end

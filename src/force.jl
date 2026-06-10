@@ -68,6 +68,21 @@ force_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl
     return iszero_value(r) ? zero_pairwise_force(dr, force_units) : (f / r) * dr
 end
 
+@inline function sum_pairwise_forces(inters::Tuple{T}, dr, atom_i, atom_j, force_units,
+                                     special, coord_i, coord_j, boundary, vel_i, vel_j,
+                                     step_n) where {T}
+    return force(inters[1], dr, atom_i, atom_j, force_units, special, coord_i, coord_j,
+                 boundary, vel_i, vel_j, step_n)
+end
+
+@inline function sum_pairwise_forces(inters::Tuple, dr, atom_i, atom_j, force_units,
+                                     special, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+    return force(first(inters), dr, atom_i, atom_j, force_units, special, coord_i, coord_j,
+                 boundary, vel_i, vel_j, step_n) +
+           sum_pairwise_forces(Base.tail(inters), dr, atom_i, atom_j, force_units, special,
+                               coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+end
+
 """
     pairwise_force(inter, r, params)
 
@@ -426,16 +441,17 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
     @inbounds if length(pairwise_inters_nonl) > 0
         for i in 1:n_atoms
+            coord_i = coords[i]
+            atom_i = atoms[i]
+            vel_i = velocities[i]
             for j in (i + 1):n_atoms
-                dr = vector(coords[i], coords[j], boundary)
-                f = force(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], force_units, false,
-                          coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-                for inter in pairwise_inters_nonl[2:end]
-                    f += force(inter, dr, atoms[i], atoms[j], force_units, false, coords[i],
-                               coords[j], boundary, velocities[i], velocities[j], step_n)
-                end
-                check_force_units(f, force_units)
-                f_ustrip = ustrip.(f)
+                coord_j = coords[j]
+                atom_j = atoms[j]
+                vel_j = velocities[j]
+                dr = vector(coord_i, coord_j, boundary)
+                f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
+                                        false, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+                f_ustrip = checked_ustrip(f, force_units)
                 fs_nounits[i] -= f_ustrip
                 fs_nounits[j] += f_ustrip
 
@@ -454,15 +470,16 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         end
         for ni in eachindex(neighbors)
             i, j, special = neighbors[ni]
-            dr = vector(coords[i], coords[j], boundary)
-            f = force(pairwise_inters_nl[1], dr, atoms[i], atoms[j], force_units, special,
-                      coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-            for inter in pairwise_inters_nl[2:end]
-                f += force(inter, dr, atoms[i], atoms[j], force_units, special, coords[i],
-                           coords[j], boundary, velocities[i], velocities[j], step_n)
-            end
-            check_force_units(f, force_units)
-            f_ustrip = ustrip.(f)
+            coord_i = coords[i]
+            coord_j = coords[j]
+            atom_i = atoms[i]
+            atom_j = atoms[j]
+            vel_i = velocities[i]
+            vel_j = velocities[j]
+            dr = vector(coord_i, coord_j, boundary)
+            f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
+                                    special, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+            f_ustrip = checked_ustrip(f, force_units)
             fs_nounits[i] -= f_ustrip
             fs_nounits[j] += f_ustrip
 
@@ -470,7 +487,6 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 v = dr * transpose(f)
                 vir_nounits .+= ustrip.(v)
             end
-
         end
     end
 
@@ -501,24 +517,27 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
     @inbounds if length(pairwise_inters_nonl) > 0
         Threads.@threads for chunk_i in 1:n_threads
+            fs_chunk = fs_chunks[chunk_i]
+            vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
             for i in chunk_i:n_threads:n_atoms
+                coord_i = coords[i]
+                atom_i = atoms[i]
+                vel_i = velocities[i]
                 for j in (i + 1):n_atoms
-                    dr = vector(coords[i], coords[j], boundary)
-                    f = force(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], force_units,
-                              false, coords[i], coords[j], boundary, velocities[i],
-                              velocities[j], step_n)
-                    for inter in pairwise_inters_nonl[2:end]
-                        f += force(inter, dr, atoms[i], atoms[j], force_units, false, coords[i],
-                                   coords[j], boundary, velocities[i], velocities[j], step_n)
-                    end
-                    check_force_units(f, force_units)
-                    f_ustrip = ustrip.(f)
-                    fs_chunks[chunk_i][i] -= f_ustrip
-                    fs_chunks[chunk_i][j] += f_ustrip
+                    coord_j = coords[j]
+                    atom_j = atoms[j]
+                    vel_j = velocities[j]
+                    dr = vector(coord_i, coord_j, boundary)
+                    f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
+                                            false, coord_i, coord_j, boundary, vel_i, vel_j,
+                                            step_n)
+                    f_ustrip = checked_ustrip(f, force_units)
+                    fs_chunk[i] -= f_ustrip
+                    fs_chunk[j] += f_ustrip
 
                     if needs_vir
                         v = dr * transpose(f)
-                        vir_chunks[chunk_i] .+= ustrip.(v)
+                        vir_chunk .+= ustrip.(v)
                     end
                 end
             end
@@ -529,24 +548,39 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         if isnothing(neighbors)
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
-        Threads.@threads for chunk_i in 1:n_threads
-            for ni in chunk_i:n_threads:length(neighbors)
-                i, j, special = neighbors[ni]
-                dr = vector(coords[i], coords[j], boundary)
-                f = force(pairwise_inters_nl[1], dr, atoms[i], atoms[j], force_units, special,
-                          coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-                for inter in pairwise_inters_nl[2:end]
-                    f += force(inter, dr, atoms[i], atoms[j], force_units, special, coords[i],
-                               coords[j], boundary, velocities[i], velocities[j], step_n)
-                end
-                check_force_units(f, force_units)
-                f_ustrip = ustrip.(f)
-                fs_chunks[chunk_i][i] -= f_ustrip
-                fs_chunks[chunk_i][j] += f_ustrip
+        n_neighbors = length(neighbors)
+        # Task-local buffers avoid relying on thread IDs while still balancing neighbor blocks
+        block_size = 8192
+        next_block_start = Threads.Atomic{Int}(1)
+        @sync for chunk_i in 1:n_threads
+            Threads.@spawn begin
+                fs_chunk = fs_chunks[chunk_i]
+                vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
+                while true
+                    block_start = Threads.atomic_add!(next_block_start, block_size)
+                    block_start > n_neighbors && break
+                    block_stop = min(block_start + block_size - 1, n_neighbors)
+                    for ni in block_start:block_stop
+                        i, j, special = neighbors[ni]
+                        coord_i = coords[i]
+                        coord_j = coords[j]
+                        atom_i = atoms[i]
+                        atom_j = atoms[j]
+                        vel_i = velocities[i]
+                        vel_j = velocities[j]
+                        dr = vector(coord_i, coord_j, boundary)
+                        f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
+                                                special, coord_i, coord_j, boundary, vel_i, vel_j,
+                                                step_n)
+                        f_ustrip = checked_ustrip(f, force_units)
+                        fs_chunk[i] -= f_ustrip
+                        fs_chunk[j] += f_ustrip
 
-                if needs_vir
-                    v = dr * transpose(f)
-                    vir_chunks[chunk_i] .+= ustrip.(v)
+                        if needs_vir
+                            v = dr * transpose(f)
+                            vir_chunk .+= ustrip.(v)
+                        end
+                    end
                 end
             end
         end
@@ -573,8 +607,7 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
         for (i, inter) in zip(inter_list.is, inter_list.inters)
             sf = force(inter, coords[i], boundary, atoms[i], force_units, velocities[i], step_n,
                        inter_list.data)
-            check_force_units(sf.f1, force_units)
-            fs_nounits[i] += ustrip.(sf.f1)
+            fs_nounits[i] += checked_ustrip(sf.f1, force_units)
 
             if needs_vir
                 r_i = coords[i]
@@ -588,10 +621,8 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
         for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
             sf = force(inter, coords[i], coords[j], boundary, atoms[i], atoms[j], force_units,
                        velocities[i], velocities[j], step_n, inter_list.data)
-            check_force_units(sf.f1, force_units)
-            check_force_units(sf.f2, force_units)
-            fs_nounits[i] += ustrip.(sf.f1)
-            fs_nounits[j] += ustrip.(sf.f2)
+            fs_nounits[i] += checked_ustrip(sf.f1, force_units)
+            fs_nounits[j] += checked_ustrip(sf.f2, force_units)
 
             if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
@@ -607,12 +638,9 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
             sf = force(inter, coords[i], coords[j], coords[k], boundary, atoms[i], atoms[j],
                        atoms[k], force_units, velocities[i], velocities[j], velocities[k], step_n,
                        inter_list.data)
-            check_force_units(sf.f1, force_units)
-            check_force_units(sf.f2, force_units)
-            check_force_units(sf.f3, force_units)
-            fs_nounits[i] += ustrip.(sf.f1)
-            fs_nounits[j] += ustrip.(sf.f2)
-            fs_nounits[k] += ustrip.(sf.f3)
+            fs_nounits[i] += checked_ustrip(sf.f1, force_units)
+            fs_nounits[j] += checked_ustrip(sf.f2, force_units)
+            fs_nounits[k] += checked_ustrip(sf.f3, force_units)
 
             if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j (second atom is the reference, MIC)
@@ -629,14 +657,10 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
             sf = force(inter, coords[i], coords[j], coords[k], coords[l], boundary, atoms[i],
                        atoms[j], atoms[k], atoms[l], force_units, velocities[i], velocities[j],
                        velocities[k], velocities[l], step_n, inter_list.data)
-            check_force_units(sf.f1, force_units)
-            check_force_units(sf.f2, force_units)
-            check_force_units(sf.f3, force_units)
-            check_force_units(sf.f4, force_units)
-            fs_nounits[i] += ustrip.(sf.f1)
-            fs_nounits[j] += ustrip.(sf.f2)
-            fs_nounits[k] += ustrip.(sf.f3)
-            fs_nounits[l] += ustrip.(sf.f4)
+            fs_nounits[i] += checked_ustrip(sf.f1, force_units)
+            fs_nounits[j] += checked_ustrip(sf.f2, force_units)
+            fs_nounits[k] += checked_ustrip(sf.f3, force_units)
+            fs_nounits[l] += checked_ustrip(sf.f4, force_units)
 
             if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
@@ -656,16 +680,11 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
                        atoms[i], atoms[j], atoms[k], atoms[l], atoms[m], force_units, velocities[i],
                        velocities[j], velocities[k], velocities[l], velocities[m], step_n,
                        inter_list.data)
-            check_force_units(sf.f1, force_units)
-            check_force_units(sf.f2, force_units)
-            check_force_units(sf.f3, force_units)
-            check_force_units(sf.f4, force_units)
-            check_force_units(sf.f5, force_units)
-            fs_nounits[i] += ustrip.(sf.f1)
-            fs_nounits[j] += ustrip.(sf.f2)
-            fs_nounits[k] += ustrip.(sf.f3)
-            fs_nounits[l] += ustrip.(sf.f4)
-            fs_nounits[m] += ustrip.(sf.f5)
+            fs_nounits[i] += checked_ustrip(sf.f1, force_units)
+            fs_nounits[j] += checked_ustrip(sf.f2, force_units)
+            fs_nounits[k] += checked_ustrip(sf.f3, force_units)
+            fs_nounits[l] += checked_ustrip(sf.f4, force_units)
+            fs_nounits[m] += checked_ustrip(sf.f5, force_units)
 
             if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j

@@ -1,7 +1,7 @@
 # KernelAbstractions.jl kernels, CUDA kernels are in an extension
 
-@inline function sum_pairwise_forces(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
-                                     boundary, vel_i, vel_j, step_n) where F
+@inline function sum_pairwise_forces_gpu(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
+                                         boundary, vel_i, vel_j, step_n) where F
     dr = vector(coord_i, coord_j, boundary)
     f_tuple = ntuple(length(inters)) do inter_type_i
         force_gpu(inters[inter_type_i], dr, atom_i, atom_j, F, special, coord_i, coord_j, boundary,
@@ -75,8 +75,8 @@ end
     if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
         dr = vector(coords[i], coords[j], boundary)
-        f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j],
-                                boundary, velocities[i], velocities[j], step_n)
+        f = sum_pairwise_forces_gpu(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j],
+                                    boundary, velocities[i], velocities[j], step_n)
         dr = vector(coords[i], coords[j], boundary)
         for dim in 1:D
             fval = ustrip(f[dim])

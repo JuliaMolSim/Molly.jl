@@ -17,6 +17,16 @@ Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)
 """
 ustrip_vec(x...) = ustrip.(x...)
 
+@inline function checked_ustrip(x, force_units)
+    check_force_units(x, force_units)
+    return ustrip.(x)
+end
+
+@inline function checked_ustrip(x, ::typeof(NoUnits))
+    check_force_units(x, NoUnits)
+    return x
+end
+
 # Parses the length, mass, velocity, energy and force units and verifies they are
 #   correct and consistent with other parameters passed to the system
 function check_units(atoms, coords, velocities, energy_units, force_units,
