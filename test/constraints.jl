@@ -1088,3 +1088,18 @@ end
         @test allocs == 0
     end
 end
+
+@testset "Minimization with constraints" begin
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
+    sys_nocons = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; nonbonded_method=:pme)
+    sys_cons = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; nonbonded_method=:pme,
+                      constraints=:hbonds, rigid_water=true)
+
+    sim = SteepestDescentMinimizer(tol=10_000.0u"kJ * mol^-1 * nm^-1")
+    simulate!(sys_nocons, sim)
+    simulate!(sys_cons, sim)
+
+    @test rmsd(sys_nocons.coords[1:1170], sys_cons.coords[1:1170]) < 0.01u"nm"
+    @test potential_energy(sys_nocons) < -100_000u"kJ/mol"
+    @test potential_energy(sys_cons)   < -150_000u"kJ/mol"
+end

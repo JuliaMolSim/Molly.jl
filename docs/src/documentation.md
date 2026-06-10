@@ -1589,11 +1589,14 @@ Higher values of either improve accuracy at the cost of performance.
     LINCS requires that angle constraints are isolated: none of their atoms may participate in distance constraints or in other angle constraints. This is because internally angle constraints are treated as a triangle of distance constraints, so interactions with other constraints may violate the constrained angle.
 
 Currently, constraints are supported by the following simulators:
-- [`SteepestDescentMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
+
+The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
+- [`SteepestDescentMinimizer`](@ref)
+
 Simulators incompatible with constraints will print a warning and continue without applying constraints when used with systems containing constraints.
 
 Molly supports [`DistanceConstraint`](@ref) and [`AngleConstraint`](@ref) on CPU and GPU.
