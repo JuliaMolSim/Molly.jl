@@ -550,6 +550,66 @@ shake_velocity_context(buffers=nothing; needs_virial=true, step_n=1,
     buffers; needs_virial, step_n, virial_scale,
 )
 
+@testset "constraint virial context scaling" begin
+    coords = [
+        SVector(0.0, 0.0, 0.0),
+        SVector(0.15, 0.0, 0.0),
+    ]
+    sys, buffers = make_lincs_no_unit_buffer_system(coords, [12.0, 16.0])
+    dt = 0.5
+
+    vv = VelocityVerlet(dt=dt)
+    dpd_vv = DPDVelocityVerlet(dt=dt)
+    verlet = Verlet(dt=dt)
+    stormer = StormerVerlet(dt=dt)
+    langevin = Langevin(dt=dt, temperature=1.0, friction=1.0)
+
+    pos_non_vv = Molly.position_constraint_virial_scale(sys, buffers, dt)
+    vel_non_vv = Molly.velocity_constraint_virial_scale(sys, buffers, dt)
+
+    @test pos_non_vv == inv(dt^2)
+    @test vel_non_vv == inv(dt)
+
+    @test Molly.position_constraint_virial_scale(sys, buffers, dt, vv) == 2 * pos_non_vv
+    @test Molly.velocity_constraint_virial_scale(sys, buffers, dt, vv) == 2 * vel_non_vv
+
+    for sim in (dpd_vv, verlet, stormer, langevin)
+        @test Molly.position_constraint_virial_scale(sys, buffers, dt, sim) == pos_non_vv
+        @test Molly.velocity_constraint_virial_scale(sys, buffers, dt, sim) == vel_non_vv
+    end
+
+    @test Molly.position_constraint_context(buffers, sys, 1, dt, true).virial_scale == pos_non_vv
+    @test Molly.velocity_constraint_context(buffers, sys, 1, dt, true).virial_scale == vel_non_vv
+    @test Molly.position_constraint_context(buffers, sys, 1, dt, true, vv).virial_scale ==
+          2 * pos_non_vv
+    @test Molly.velocity_constraint_context(buffers, sys, 1, dt, true, vv).virial_scale ==
+          2 * vel_non_vv
+
+    masses_val = [12.0u"g/mol", 16.0u"g/mol"]
+    unit_coords = [
+        SVector(0.0, 0.0, 0.0)u"nm",
+        SVector(0.15, 0.0, 0.0)u"nm",
+    ]
+    atoms = [Atom(mass=m, σ=0.0u"nm", ϵ=0.0u"kJ/mol") for m in masses_val]
+    unit_sys = System(
+        atoms=atoms,
+        coords=unit_coords,
+        velocities=zero.(unit_coords) ./ 1.0u"ps",
+        boundary=CubicBoundary(5.0u"nm"),
+        force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
+    )
+    unit_buffers = Molly.init_buffers!(unit_sys, 1)
+    unit_dt = 0.004u"ps"
+    unit_pos_non_vv = Molly.position_constraint_virial_scale(unit_sys, unit_buffers, unit_dt)
+    unit_vel_non_vv = Molly.velocity_constraint_virial_scale(unit_sys, unit_buffers, unit_dt)
+
+    @test Molly.position_constraint_virial_scale(unit_sys, unit_buffers, unit_dt, vv) ≈
+          2 * unit_pos_non_vv
+    @test Molly.velocity_constraint_virial_scale(unit_sys, unit_buffers, unit_dt, vv) ≈
+          2 * unit_vel_non_vv
+end
+
 function make_lincs_chain(natoms; bond_length=0.15, mass=12.0)
     x = [SVector(i * bond_length, 0.0, 0.0) for i in 0:natoms-1]
     v = [SVector(0.01 * randn(), 0.01 * randn(), 0.01 * randn()) for _ in 1:natoms]
@@ -612,21 +672,45 @@ end
         return sys, sys.constraints[1]
     end
 
-    function expected_position_constraint_virial(coords_before, coords_after, masses_val, dt)
-        correction_forces = [
-            masses_val[i] * (coords_after[i] - coords_before[i]) / dt^2
-                for i in eachindex(coords_after)
-        ]
-        return constraint_virial_from_atom_forces(coords_after, correction_forces)
+    expected_cluster_atom_inds(cluster) =
+        filter(!isnothing, (
+            Int(cluster.k1),
+            Int(cluster.k2),
+            hasproperty(cluster, :k3) ? Int(cluster.k3) : nothing,
+            hasproperty(cluster, :k4) ? Int(cluster.k4) : nothing,
+        ))
+
+    function expected_constraint_virial_local(coords_ref, values_before, values_after,
+                                              masses_val, scale, boundary, cons)
+        expected = zeros(3, 3)
+        for clusters in (cons.clusters12, cons.clusters23, cons.clusters34, cons.angle_clusters)
+            for cluster in clusters
+                atom_inds = expected_cluster_atom_inds(cluster)
+                anchor = first(atom_inds)
+                anchor_coord = coords_ref[anchor]
+                for atom_i in atom_inds
+                    local_coord = atom_i == anchor ? zero(coords_ref[atom_i]) :
+                                  vector(anchor_coord, coords_ref[atom_i], boundary)
+                    correction_force = masses_val[atom_i] *
+                                       (values_after[atom_i] - values_before[atom_i]) *
+                                       scale
+                    expected .+= local_coord * transpose(correction_force)
+                end
+            end
+        end
+        return expected
+    end
+
+    function expected_position_constraint_virial(coords_ref, coords_before, coords_after,
+                                                 masses_val, dt, boundary, cons)
+        return expected_constraint_virial_local(coords_ref, coords_before, coords_after,
+                                                masses_val, inv(dt^2), boundary, cons)
     end
 
     function expected_velocity_constraint_virial(coords, velocities_before, velocities_after,
-                                                 masses_val, dt)
-        correction_forces = [
-            masses_val[i] * (velocities_after[i] - velocities_before[i]) / dt
-                for i in eachindex(velocities_after)
-        ]
-        return constraint_virial_from_atom_forces(coords, correction_forces)
+                                                 masses_val, dt, boundary, cons)
+        return expected_constraint_virial_local(coords, velocities_before, velocities_after,
+                                                masses_val, inv(dt), boundary, cons)
     end
 
     dt = 0.5
@@ -649,8 +733,8 @@ end
         context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
 
         apply_position_constraints!(sys, cons, old_coords; context)
-        expected = expected_position_constraint_virial(unconstrained, sys.coords,
-                                                       masses_val, dt)
+        expected = expected_position_constraint_virial(old_coords, unconstrained, sys.coords,
+                                                       masses_val, dt, sys.boundary, cons)
 
         @test check_position_constraints(sys, cons)
         @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
@@ -674,7 +758,8 @@ end
 
         apply_velocity_constraints!(sys, cons; context)
         expected = expected_velocity_constraint_virial(coords, velocities_before,
-                                                       sys.velocities, masses_val, dt)
+                                                       sys.velocities, masses_val, dt,
+                                                       sys.boundary, cons)
 
         @test check_velocity_constraints(sys, cons)
         @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
@@ -709,8 +794,8 @@ end
         context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
 
         apply_position_constraints!(sys, cons, old_coords; context)
-        expected = expected_position_constraint_virial(unconstrained, sys.coords,
-                                                       masses_val, dt)
+        expected = expected_position_constraint_virial(old_coords, unconstrained, sys.coords,
+                                                       masses_val, dt, sys.boundary, cons)
 
         @test check_position_constraints(sys, cons)
         @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
@@ -731,7 +816,8 @@ end
 
         apply_velocity_constraints!(sys, cons; context)
         expected = expected_velocity_constraint_virial(old_coords, velocities_before,
-                                                       sys.velocities, masses_val, dt)
+                                                       sys.velocities, masses_val, dt,
+                                                       sys.boundary, cons)
 
         @test check_velocity_constraints(sys, cons)
         @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
@@ -763,8 +849,8 @@ end
         context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
 
         apply_position_constraints!(sys, cons, old_coords; context)
-        expected = expected_position_constraint_virial(unconstrained, sys.coords,
-                                                       masses_val, dt)
+        expected = expected_position_constraint_virial(old_coords, unconstrained, sys.coords,
+                                                       masses_val, dt, sys.boundary, cons)
 
         @test check_position_constraints(sys, cons)
         @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
@@ -784,7 +870,8 @@ end
 
         apply_velocity_constraints!(sys, cons; context)
         expected = expected_velocity_constraint_virial(old_coords, velocities_before,
-                                                       sys.velocities, masses_val, dt)
+                                                       sys.velocities, masses_val, dt,
+                                                       sys.boundary, cons)
 
         @test check_velocity_constraints(sys, cons)
         @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
@@ -1048,9 +1135,13 @@ end
     dt = 0.5
     bond_length = 0.15
     direction = normalize(SVector(1.0, 2.0, -1.0))
+    tangent = normalize(SVector(direction[2], -direction[1], 0.0))
     origin = SVector(0.2, -0.1, 0.05)
     coords = [origin, origin + bond_length * direction]
-    velocities = [-0.01 * direction, 0.01 * direction]
+    velocities = [
+        -0.01 * direction + 0.03 * tangent,
+         0.01 * direction - 0.03 * tangent,
+    ]
     masses_val = [12.0, 12.0]
     atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
     dc = [DistanceConstraint(1, 2, bond_length)]
@@ -1070,11 +1161,11 @@ end
         error("unknown constraint kind $kind")
     end
 
-    function simulator_constraint_system(kind; loggers)
+    function simulator_constraint_system(kind; loggers, coords_in=coords, velocities_in=velocities)
         return System(
             atoms=copy(atoms),
-            coords=copy(coords),
-            velocities=copy(velocities),
+            coords=copy(coords_in),
+            velocities=copy(velocities_in),
             boundary=CubicBoundary(5.0),
             constraints=(simulator_constraint(kind),),
             loggers=loggers,
@@ -1104,6 +1195,104 @@ end
             logged_virial = only(values(sys.loggers.virial))
             @test maximum(abs.(logged_virial)) > 1e-8
         end
+    end
+
+    @testset "VelocityVerlet constraint virial merge" begin
+        sim = VelocityVerlet(dt=dt, remove_CM_motion=0)
+        vv_velocities = [
+            -0.01 * direction + 0.03 * tangent,
+             0.01 * direction - 0.03 * tangent,
+        ]
+
+        function manual_vv_virials(constraint_kind)
+            manual_sys = simulator_constraint_system(
+                constraint_kind; loggers=(), velocities_in=vv_velocities)
+            manual_buffers = Molly.init_buffers!(manual_sys, 1)
+            neighbors = Molly.find_neighbors(
+                manual_sys, manual_sys.neighbor_finder, nothing, 0, true; n_threads=1)
+            forces_t = Molly.zero_forces(manual_sys)
+            forces_t_dt = Molly.zero_forces(manual_sys)
+            Molly.forces!(forces_t, manual_sys, neighbors, manual_buffers, Val(false), 0;
+                          n_threads=1)
+            accels_t = Molly.calc_accels.(forces_t, Molly.masses(manual_sys))
+
+            step_n = 1
+            vel_storage = zero(manual_sys.velocities)
+
+            Molly.clear_constraint_virial!(manual_buffers, manual_sys, step_n)
+            manual_sys.velocities .+= accels_t .* (dt / 2)
+            vel_context = Molly.velocity_constraint_context(
+                manual_buffers, manual_sys, step_n, dt, true, sim)
+            apply_velocity_constraints!(manual_sys; context=vel_context, n_threads=1)
+            velocity_virial = copy(manual_buffers.constraint_virial_nounits)
+
+            coord_storage = copy(manual_sys.coords)
+            manual_sys.coords .+= manual_sys.velocities .* dt
+
+            Molly.clear_constraint_virial!(manual_buffers, manual_sys, step_n)
+            pos_context = Molly.position_constraint_context(
+                manual_buffers, manual_sys, step_n, dt, true, sim)
+            apply_position_constraints!(manual_sys, coord_storage, vel_storage, dt;
+                                        context=pos_context, n_threads=1)
+            position_virial = copy(manual_buffers.constraint_virial_nounits)
+
+            neighbors = Molly.find_neighbors(
+                manual_sys, manual_sys.neighbor_finder, neighbors, step_n, true;
+                n_threads=1)
+            Molly.forces!(forces_t_dt, manual_sys, neighbors, manual_buffers, Val(true),
+                          step_n; n_threads=1)
+            accels_t_dt = Molly.calc_accels.(forces_t_dt, Molly.masses(manual_sys))
+            manual_sys.velocities .+= accels_t_dt .* (dt / 2)
+            vel_context_no_virial = Molly.velocity_constraint_context(
+                manual_buffers, manual_sys, step_n, dt, false, sim)
+            apply_velocity_constraints!(manual_sys; context=vel_context_no_virial,
+                                        n_threads=1)
+            Molly.merge_constraint_virial!(manual_buffers, manual_sys, step_n)
+
+            return velocity_virial, position_virial, copy(manual_buffers.virial)
+        end
+
+        for constraint_kind in (:shake, :lincs)
+            sys = simulator_constraint_system(
+                constraint_kind;
+                loggers=(virial=VirialLogger(Matrix{Float64}, 1),),
+                velocities_in=vv_velocities,
+            )
+            simulate!(sys, sim, 1; run_loggers=:skipzero, n_threads=1)
+            logged_virial = only(values(sys.loggers.virial))
+
+            velocity_virial, position_virial, expected_virial =
+                manual_vv_virials(constraint_kind)
+
+            @test maximum(abs.(velocity_virial)) > 1e-8
+            @test maximum(abs.(position_virial)) > 1e-8
+            @test logged_virial ≈ expected_virial atol=1e-12
+            @test maximum(abs.(logged_virial .- (expected_virial .+ velocity_virial))) > 1e-8
+        end
+    end
+
+    @testset "VelocityVerlet default LINCS velocity virial" begin
+        sys = System(
+            atoms=copy(atoms),
+            coords=copy(coords),
+            velocities=copy(velocities),
+            boundary=CubicBoundary(5.0),
+            constraints=(LINCS(
+                masses=masses_val,
+                dist_constraints=dc,
+                dist_tolerance=1e-10,
+                vel_tolerance=1e-10,
+            ),),
+            loggers=(virial=VirialLogger(Matrix{Float64}, 1),),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+
+        simulate!(sys, VelocityVerlet(dt=dt, remove_CM_motion=0), 1;
+                  run_loggers=:skipzero, n_threads=1)
+
+        @test check_velocity_constraints(sys)
+        @test maximum(abs.(only(values(sys.loggers.virial)))) > 1e-8
     end
 
     sys = simulator_constraint_system(

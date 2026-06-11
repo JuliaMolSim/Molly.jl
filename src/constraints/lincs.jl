@@ -67,10 +67,8 @@ for the original LINCS paper.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
 - `iter_vel_correction=false`: whether to use iterative velocity constraint solving.
-    When `false` (the default), velocity correction uses the simple one-step approach
-    `v += Δx/dt` as in GROMACS (for the Verlet simulator only, otherwise velocities are
-    not constrained). When `true`, a full iterative velocity constraint projection
-    is performed.
+    When `false` (the default), velocity correction uses one LINCS projection as in
+    GROMACS. When `true`, additional iterative velocity corrections are performed.
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 """
 struct LINCS{CL, LD, LW, DC, AC, E, F, DB, CI}
@@ -781,7 +779,7 @@ default_position_constraint_context() = ConstraintApplicationContext(
 )
 
 function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace,
-                          boundary, context)
+                          boundary, context, niter_velocity::Integer=data.niter)
     K = length(data.atom1)
     coupling = data.coupling
     unit_vel_scale = oneunit(eltype(eltype(velocities)))
@@ -811,7 +809,7 @@ function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspac
     lincs_solve!(velocities, data, ws, unit_vel_scale, factor_sum)
 
     # Iterative correction: re-evaluate velocity residual and solve again
-    for _ in 1:data.niter
+    for _ in 1:niter_velocity
         @inbounds for i in 1:K
             a1, a2 = data.atom1[i], data.atom2[i]
             dv = ustrip.(velocities[a2] - velocities[a1])
@@ -929,7 +927,8 @@ function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
 end
 
 function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
-                               delta_buf, constrained_atoms, block_size, context)
+                              delta_buf, constrained_atoms, block_size, context,
+                              niter_velocity::Integer=data.niter)
     K_padded = length(data.atom1)
     backend = get_backend(velocities)
     unit_vel_scale = oneunit(eltype(eltype(velocities)))
@@ -953,7 +952,7 @@ function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
                 ndrange=n_ca)
 
     # Iterative correction: re-evaluate velocity residual and solve again
-    for _ in 1:data.niter
+    for _ in 1:niter_velocity
         corr_kern! = lincs_fused_velocity_correction_kernel!(backend, block_size)
         corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
                    velocities,
@@ -989,16 +988,16 @@ function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained
 end
 
 function apply_velocity_constraints!(sys::System, ca::LINCS; context=nothing, kwargs...)
-    ca.iter_vel_correction || return sys
     context = isnothing(context) ? default_velocity_constraint_context() : context
+    niter_velocity = ca.iter_vel_correction ? ca.lincs_data.niter : 0
     if !isnothing(ca.delta_buf)
         lincs_vel_apply_gpu!(sys.velocities, sys.coords,
                              ca.lincs_data, ca.workspace, sys.boundary,
-                             ca.delta_buf, ca.constrained_atoms, ca.gpu_block_size,
-                             context)
+                             ca.delta_buf, ca.constrained_atoms, ca.gpu_block_size, context,
+                             niter_velocity)
     else
         lincs_vel_apply!(sys.velocities, sys.coords,
-                         ca.lincs_data, ca.workspace, sys.boundary, context)
+                         ca.lincs_data, ca.workspace, sys.boundary, context, niter_velocity)
     end
     return sys
 end

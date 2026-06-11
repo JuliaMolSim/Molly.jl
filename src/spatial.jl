@@ -976,7 +976,8 @@ function pressure(sys; n_threads::Integer=Threads.nthreads())
 end
 
 function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothing;
-                  recompute::Bool=true, n_threads::Integer=Threads.nthreads()) where D
+                  recompute::Bool=true, n_threads::Integer=Threads.nthreads(),
+                  kin_tensor=nothing) where D
     if isnothing(buffers_in)
         buffers = init_buffers!(sys, n_threads)
     else
@@ -992,8 +993,12 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
         error("cannot calculate pressure for constrained systems without a valid total virial")
     end
 
-    # Always evaluate K in case velocities were rescaled by a thermostat
-    kinetic_energy_tensor!(buffers.kin_tensor, sys)
+    if isnothing(kin_tensor)
+        # Always evaluate K in case velocities were rescaled by a thermostat.
+        kinetic_energy_tensor!(buffers.kin_tensor, sys)
+    else
+        buffers.kin_tensor .= kin_tensor
+    end
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
@@ -1030,8 +1035,10 @@ function scalar_pressure(sys; n_threads::Integer=Threads.nthreads())
 end
 
 function scalar_pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers=nothing;
-                         recompute::Bool=true, n_threads::Integer=Threads.nthreads()) where D
-    P = pressure(sys, neighbors, step_n, buffers; recompute=recompute, n_threads=n_threads)
+                         recompute::Bool=true, n_threads::Integer=Threads.nthreads(),
+                         kin_tensor=nothing) where D
+    P = pressure(sys, neighbors, step_n, buffers; recompute=recompute,
+                 n_threads=n_threads, kin_tensor=kin_tensor)
     return tr(P) / D
 end
 

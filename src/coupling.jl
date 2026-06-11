@@ -42,6 +42,26 @@ apply_coupling!(sys, buffers, ::Nothing, sim, neighbors, step_n; kwargs...) = fa
 abstract type AbstractThermostat end
 abstract type AbstractBarostat end
 
+function apply_coupling_with_pressure_kin_tensor!(sys, buffers,
+                                                  couplers::Union{Tuple, NamedTuple},
+                                                  sim, neighbors, step_n,
+                                                  pressure_kin_tensor; kwargs...)
+    recompute_forces = false
+    for coupler in couplers
+        rf = apply_coupling_with_pressure_kin_tensor!(
+            sys, buffers, coupler, sim, neighbors, step_n, pressure_kin_tensor; kwargs...)
+        if rf
+            recompute_forces = true
+        end
+    end
+    return recompute_forces
+end
+
+function apply_coupling_with_pressure_kin_tensor!(sys, buffers, coupler, sim, neighbors,
+                                                  step_n, pressure_kin_tensor; kwargs...)
+    return apply_coupling!(sys, buffers, coupler, sim, neighbors, step_n; kwargs...)
+end
+
 @doc raw"""
     ImmediateThermostat(temperature) <: AbstractThermostat
 
@@ -367,13 +387,15 @@ function apply_coupling!(sys::System{D},
                          neighbors=nothing,
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
+                         pressure_kin_tensor=nothing,
                          kwargs...) where {D, PT, CT, ST, ICT, FT}
     if step_n % barostat.n_steps != 0
         return false
     end
 
     # Pressure in barostat units
-    P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads)
+    P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
+                 kin_tensor=pressure_kin_tensor)
 
     τp = barostat.coupling_const
     dt = sim.dt * barostat.n_steps
@@ -582,18 +604,21 @@ function apply_coupling!(sys::System{D},
                          neighbors=nothing,
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, PT, CT, ST, ICT, FT}
+                         rng=Random.default_rng(),
+                         pressure_kin_tensor=nothing) where {D, PT, CT, ST, ICT, FT}
     if step_n % barostat.n_steps != 0
         return false
     end
 
     # Pressure tensor in barostat units
-    P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads, )
+    P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
+                 kin_tensor=pressure_kin_tensor)
 
     # Thermo factors
     V         = volume(sys.boundary)
     τp, dt    = barostat.coupling_const, sim.dt * barostat.n_steps
-    kT_energy = energy_remove_mol(sys.k * temperature(sys; kin_tensor=buffers.kin_tensor))
+    kT_energy = energy_remove_mol(sys.k * temperature(
+        sys; kin_tensor=buffers.kin_tensor, recompute=isnothing(pressure_kin_tensor)))
     kT_pv     = uconvert(unit(P[1,1]) * unit(V), kT_energy)
 
     scalarP(P) = (P[1,1] + P[2,2] + P[3,3]) / D
@@ -676,6 +701,13 @@ function apply_coupling!(sys::System{D},
 
     scale_coords!(sys, SMatrix{3,3,FT}(μ); scale_velocities=true)
     return true
+end
+
+function apply_coupling_with_pressure_kin_tensor!(
+        sys, buffers, barostat::Union{BerendsenBarostat, CRescaleBarostat},
+        sim, neighbors, step_n, pressure_kin_tensor; kwargs...)
+    return apply_coupling!(sys, buffers, barostat, sim, neighbors, step_n;
+                           pressure_kin_tensor=pressure_kin_tensor, kwargs...)
 end
 
 @doc raw"""
