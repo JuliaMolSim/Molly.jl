@@ -1197,7 +1197,7 @@ end
         end
     end
 
-    @testset "VelocityVerlet constraint virial merge" begin
+    @testset "VelocityVerlet final velocity constraint virial merge" begin
         sim = VelocityVerlet(dt=dt, remove_CM_motion=0)
         vv_velocities = [
             -0.01 * direction + 0.03 * tangent,
@@ -1224,7 +1224,7 @@ end
             vel_context = Molly.velocity_constraint_context(
                 manual_buffers, manual_sys, step_n, dt, true, sim)
             apply_velocity_constraints!(manual_sys; context=vel_context, n_threads=1)
-            velocity_virial = copy(manual_buffers.constraint_virial_nounits)
+            first_velocity_virial = copy(manual_buffers.constraint_virial_nounits)
 
             coord_storage = copy(manual_sys.coords)
             manual_sys.coords .+= manual_sys.velocities .* dt
@@ -1243,13 +1243,17 @@ end
                           step_n; n_threads=1)
             accels_t_dt = Molly.calc_accels.(forces_t_dt, Molly.masses(manual_sys))
             manual_sys.velocities .+= accels_t_dt .* (dt / 2)
-            vel_context_no_virial = Molly.velocity_constraint_context(
-                manual_buffers, manual_sys, step_n, dt, false, sim)
-            apply_velocity_constraints!(manual_sys; context=vel_context_no_virial,
+
+            Molly.clear_constraint_virial!(manual_buffers, manual_sys, step_n)
+            final_vel_context = Molly.velocity_constraint_context(
+                manual_buffers, manual_sys, step_n, dt, true, sim)
+            apply_velocity_constraints!(manual_sys; context=final_vel_context,
                                         n_threads=1)
+            final_velocity_virial = copy(manual_buffers.constraint_virial_nounits)
             Molly.merge_constraint_virial!(manual_buffers, manual_sys, step_n)
 
-            return velocity_virial, position_virial, copy(manual_buffers.virial)
+            return first_velocity_virial, position_virial, final_velocity_virial,
+                   copy(manual_buffers.virial)
         end
 
         for constraint_kind in (:shake, :lincs)
@@ -1261,17 +1265,21 @@ end
             simulate!(sys, sim, 1; run_loggers=:skipzero, n_threads=1)
             logged_virial = only(values(sys.loggers.virial))
 
-            velocity_virial, position_virial, expected_virial =
+            first_velocity_virial, position_virial, final_velocity_virial, expected_virial =
                 manual_vv_virials(constraint_kind)
 
-            @test maximum(abs.(velocity_virial)) > 1e-8
+            @test maximum(abs.(first_velocity_virial)) > 1e-8
             @test maximum(abs.(position_virial)) > 1e-8
+            @test maximum(abs.(final_velocity_virial)) > 1e-8
             @test logged_virial ≈ expected_virial atol=1e-12
-            @test maximum(abs.(logged_virial .- (expected_virial .+ velocity_virial))) > 1e-8
+            @test maximum(abs.(logged_virial .- (expected_virial .+ first_velocity_virial))) >
+                  1e-8
+            @test maximum(abs.(logged_virial .- (expected_virial .+
+                                                 position_virial))) > 1e-8
         end
     end
 
-    @testset "VelocityVerlet default LINCS velocity virial" begin
+    @testset "VelocityVerlet default LINCS final velocity virial" begin
         sys = System(
             atoms=copy(atoms),
             coords=copy(coords),

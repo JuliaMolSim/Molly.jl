@@ -426,21 +426,13 @@ end
             vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
                                                       false, sim)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
-            if needs_vir_step
-                kinetic_energy_tensor!(buffers.kin_tensor, sys)
-                pressure_kin_tensor = copy(buffers.kin_tensor)
-            end
             cons_coord_storage .= sys.coords
         end
 
         sys.coords .+= sys.velocities .* sim.dt
         if using_constraints
-            # GROMACS overwrites shake_vir on each constraint call. For VV pressure
-            # coupling, the coordinate-constraint virial from this pass is the one
-            # combined with the force virial.
-            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
-                                                      needs_vir_step, sim)
+                                                      false, sim)
             apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
                                         context=pos_context, n_threads=n_threads)
         end
@@ -453,10 +445,15 @@ end
 
         sys.velocities .+= accels_t_dt .* dt_div2
         if using_constraints
+            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
             vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
                                                       needs_vir_step, sim)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+            if needs_vir_step
+                kinetic_energy_tensor!(buffers.kin_tensor, sys)
+                pressure_kin_tensor = copy(buffers.kin_tensor)
+            end
         end
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
