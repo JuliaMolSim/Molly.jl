@@ -1363,10 +1363,10 @@ function AtomsBase.atomic_number(s::ReplicaSystem)
     end
 end
 
-
 # Avoid unnecessary Array calls on CPU
 from_device(x::Array) = x
 from_device(x) = Array(x)
+from_device(x::StructArray) = replace_storage(Array, x)
 
 to_device(x::Array, ::Type{<:Array}) = x
 to_device(x, ::Type{AT}) where AT = AT(x)

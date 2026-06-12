@@ -104,13 +104,13 @@ cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_cl
 
 function constrained_atom_inds(sr::SHAKE_RATTLE)
     atom_inds = Int[]
-    for cl in sr.clusters12
+    for cl in from_device(sr.clusters12)
         push!(atom_inds, cl.k1, cl.k2)
     end
-    for cl in sr.clusters23
+    for cl in from_device(sr.clusters23)
         push!(atom_inds, cl.k1, cl.k2, cl.k3)
     end
-    for cl in sr.clusters34
+    for cl in from_device(sr.clusters34)
         push!(atom_inds, cl.k1, cl.k2, cl.k3, cl.k4)
     end
     for cl in sr.angle_clusters
@@ -121,14 +121,14 @@ end
 
 function constrained_atom_pairs(sr::SHAKE_RATTLE{D}) where D
     atom_pairs = Tuple{Int, Int, D}[]
-    for cl in sr.clusters12
+    for cl in from_device(sr.clusters12)
         push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12))
     end
-    for cl in sr.clusters23
+    for cl in from_device(sr.clusters23)
         push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
                           sort_pair(cl.k1, cl.k3, cl.dist13))
     end
-    for cl in sr.clusters34
+    for cl in from_device(sr.clusters34)
         push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
                           sort_pair(cl.k1, cl.k3, cl.dist13),
                           sort_pair(cl.k1, cl.k4, cl.dist14))

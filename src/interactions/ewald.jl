@@ -120,7 +120,7 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
         vec_ij = vector(coords[i], coords[j], boundary)
-        r = sqrt(sum(abs2, dr))
+        r = sqrt(sum(abs2, vec_ij))
         E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr,
                             scheduler, i, j, vec_ij, r, calculate_forces, Val(T), Val(false),
                             Val(needs_vir))
@@ -163,7 +163,7 @@ end
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
         vec_ij = vector(coords[i], coords[j], boundary)
-        r = sqrt(sum(abs2, dr))
+        r = sqrt(sum(abs2, vec_ij))
         E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f_div_ϵr,
                                 scheduler, i, j, vec_ij, r, calculate_forces, Val(T),
                                 Val(true), Val(needs_vir))
