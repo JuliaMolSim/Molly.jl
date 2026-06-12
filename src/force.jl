@@ -871,7 +871,7 @@ function forces!(fs,
                             sys.boundary, Val(needs_vir), step_n, sys.force_units, Val(T))
     end
 
-    fs .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
+    apply_force_units_gpu!(fs, buffers.fs_mat, sys.force_units, Val(D), Val(T))
 
     if needs_vir
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units

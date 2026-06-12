@@ -220,8 +220,9 @@
             Molly.sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
             
             backend = Molly.get_backend(sys.coords)
-            Molly.reorder_kernel!(backend, n_threads)(buffers.coords_reordered, sys.coords, buffers.morton_seq, ndrange=n_atoms)
-            
+            Molly.reorder_kernel!(backend, n_threads)(buffers.coords_reordered, sys.coords,
+                                                      buffers.morton_seq; ndrange=n_atoms)
+
             reordered_coords = Array(buffers.coords_reordered)
             orig_coords = Array(sys.coords)
             morton_seq = Array(buffers.morton_seq)
@@ -232,8 +233,9 @@
             
             fill!(buffers.fs_mat, 0.0)
             fill!(buffers.fs_mat_reordered, 1.0)
-            Molly.reverse_reorder_forces_kernel!(backend, n_threads)(buffers.fs_mat, buffers.fs_mat_reordered, buffers.morton_seq, ndrange=n_atoms)
-            
+            Molly.reverse_reorder_forces_kernel!(backend, n_threads)(buffers.fs_mat,
+                        buffers.fs_mat_reordered, buffers.morton_seq, Val(3); ndrange=n_atoms)
+
             fs_mat = Array(buffers.fs_mat)
             for i in 1:n_atoms
                 orig_idx = morton_seq[i]

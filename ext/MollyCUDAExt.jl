@@ -19,7 +19,7 @@ module MollyCUDAExt
 
 using Molly
 using Molly: from_device, box_sides, sorted_morton_seq!, sum_pairwise_forces_gpu,
-             sum_pairwise_potentials, volume
+             sum_pairwise_forces_nonl, sum_pairwise_potentials, volume
 using CUDA
 using Atomix
 using KernelAbstractions
@@ -378,7 +378,6 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
             buffers.interacting_tiles_j,
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow,
         )
     end
 
@@ -402,7 +401,6 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
         buffers.interacting_tiles_j,
         buffers.interacting_tiles_type,
         buffers.num_interacting_tiles,
-        buffers.interacting_tiles_overflow,
     )
 end
 
@@ -454,8 +452,7 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise
                 buffers.interacting_tiles_i,
                 buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type,
-                buffers.num_interacting_tiles,
-                buffers.interacting_tiles_overflow;
+                buffers.num_interacting_tiles;
                 threads=(32, block_y),
                 blocks=n_blocks_launch,
             ),
@@ -500,7 +497,6 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
         buffers.interacting_tiles_j,
         buffers.interacting_tiles_type,
         buffers.num_interacting_tiles,
-        buffers.interacting_tiles_overflow,
     )
     candidates = autotune_block_y_candidates(kernel, 4, AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES)
     num_pairs = buffers.num_pairs
@@ -529,8 +525,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
                 buffers.interacting_tiles_i,
                 buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type,
-                buffers.num_interacting_tiles,
-                buffers.interacting_tiles_overflow;
+                buffers.num_interacting_tiles;
                 blocks=n_blocks_launch,
                 threads=(32, block_y),
             ),
@@ -659,6 +654,7 @@ function force_launch_params(sys, kernel)
     maxregs_override = prefer_override(config.force_maxregs, env_override("MOLLY_CUDA_FORCE_MAXREGS"))
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_FORCE_BLOCK_Y", block_y_override)
     maxregs_override === nothing || maxregs_override > 0 || error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(maxregs_override)")
+    block_y_override === nothing || return (block_y_override, maxregs_override)
 
     conf = launch_configuration(kernel.fun)
     # Ensure block_y does not exceed physical kernel limits
@@ -675,6 +671,7 @@ function energy_launch_params(sys, kernel)
     config = Molly.cuda_launch_config(sys)
     block_y_override = prefer_override(config.energy_block_y, env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_ENERGY_BLOCK_Y", block_y_override)
+    block_y_override === nothing || return block_y_override
 
     conf = launch_configuration(kernel.fun)
     # Ensure block_y does not exceed physical kernel limits
@@ -715,9 +712,9 @@ function tile_launch_params(sys, kernel)
 end
 
 function reset_interacting_tile_state!(buffers)
-     fill!(buffers.num_interacting_tiles, 0)
-     fill!(buffers.interacting_tiles_overflow, 0)
-     return nothing
+    fill!(buffers.num_interacting_tiles, 0)
+    fill!(buffers.interacting_tiles_overflow, 0)
+    return nothing
 end
 
 function throw_if_interacting_tiles_overflowed(buffers)
@@ -805,6 +802,7 @@ function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray, T}, N::In
         threads=tile_threads_xy)
 
     buffers.num_pairs = only(from_device(buffers.num_interacting_tiles))
+    throw_if_interacting_tiles_overflowed(buffers)
     return nothing
 end
 
@@ -835,7 +833,6 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
                          nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, needs_vir}
     N = length(sys.coords)
     r_cut2 = sys.neighbor_finder.dist_cutoff_2
-    backend = get_backend(sys.coords)
     nf = sys.neighbor_finder
 
     needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh =
@@ -855,8 +852,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         end
 
         if needs_reorder
-            reorder_system_gpu!(buffers, sys)
-            KernelAbstractions.synchronize(backend)
+            reorder_system_gpu!(buffers, sys, Val(needs_morton_refresh))
         end
 
         if needs_tile_refresh
@@ -874,7 +870,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         sys.boundary, step_n, buffers.compressed_masks,
         Val(needs_vir), Val(T), Val(D),
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+        buffers.num_interacting_tiles)
     block_y, maxregs = force_launch_params(sys, auto_kernel)
     
     num_pairs = buffers.num_pairs
@@ -891,7 +887,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+            buffers.num_interacting_tiles)
     end
 
     if num_pairs > 0
@@ -903,14 +899,12 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
+            buffers.num_interacting_tiles;
             threads=(32, block_y), blocks=n_blocks_launch
         )
     end
 
     reverse_reorder_forces_gpu!(buffers, sys)
-    KernelAbstractions.synchronize(backend)
-    throw_if_interacting_tiles_overflowed(buffers)
 
     return buffers
 end
@@ -953,7 +947,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         end
 
         if needs_reorder
-            reorder_system_gpu!(buffers, sys)
+            reorder_system_gpu!(buffers, sys, Val(needs_morton_refresh))
             KernelAbstractions.synchronize(backend)
         end
 
@@ -968,7 +962,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
             Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+            buffers.interacting_tiles_type, buffers.num_interacting_tiles)
     block_y = energy_launch_params(sys, kernel)
     
     num_pairs = buffers.num_pairs
@@ -980,10 +974,9 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
                 buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
                 sys.boundary, step_n, buffers.compressed_masks,
                 Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
-                buffers.interacting_tiles_type, buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
+                buffers.interacting_tiles_type, buffers.num_interacting_tiles;
                 blocks=n_blocks_launch, threads=(32, block_y))
     end
-     throw_if_interacting_tiles_overflowed(buffers)
      return pe_vec_nounits
  end
 
@@ -1023,15 +1016,38 @@ Reorders `coords`, `velocities`, and `atoms` into `_reordered` buffers
 according to the Morton sequence to improve spatial cache locality.
 """
 function reorder_system_gpu!(buffers, sys)
+    return reorder_system_gpu!(buffers, sys, Val(true))
+end
+
+function reorder_system_gpu!(buffers, sys, ::Val{reorder_atoms}) where reorder_atoms
     N = length(sys)
-    backend = get_backend(sys.coords)
     n_threads = 256
-    
-    # We use KernelAbstractions kernels from Molly
-    Molly.reorder_kernel!(backend, n_threads)(buffers.coords_reordered, sys.coords, buffers.morton_seq, ndrange=N)
-    Molly.reorder_kernel!(backend, n_threads)(buffers.velocities_reordered, sys.velocities, buffers.morton_seq, ndrange=N)
-    Molly.reorder_kernel!(backend, n_threads)(buffers.atoms_reordered, sys.atoms, buffers.morton_seq, ndrange=N)
-    
+    n_blocks = cld(N, n_threads)
+
+    @cuda threads=n_threads blocks=n_blocks reorder_system_kernel!(
+        buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
+        sys.coords, sys.velocities, sys.atoms, buffers.morton_seq, Val(N), Val(reorder_atoms))
+
+    return nothing
+end
+
+function reorder_system_kernel!(coords_reordered, velocities_reordered, atoms_reordered,
+                                coords_var, velocities_var, atoms_var, seq_var,
+                                ::Val{N}, ::Val{reorder_atoms}) where {N, reorder_atoms}
+    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    coords = CUDA.Const(coords_var)
+    velocities = CUDA.Const(velocities_var)
+    atoms = CUDA.Const(atoms_var)
+    seq = CUDA.Const(seq_var)
+
+    @inbounds if i <= N
+        original_i = seq[i]
+        coords_reordered[i] = coords[original_i]
+        velocities_reordered[i] = velocities[original_i]
+        if reorder_atoms
+            atoms_reordered[i] = atoms[original_i]
+        end
+    end
     return nothing
 end
 
@@ -1048,7 +1064,8 @@ function reverse_reorder_forces_gpu!(buffers, sys::System{D, <:CuArray, T}) wher
     
     # fs_mat is D x N. We need to reverse reorder each dimension or use a specialized kernel.
     # Let's use a specialized kernel for D x N matrix reverse reordering.
-    Molly.reverse_reorder_forces_kernel!(backend, n_threads)(buffers.fs_mat, buffers.fs_mat_reordered, buffers.morton_seq, ndrange=N)
+    Molly.reverse_reorder_forces_kernel!(backend, n_threads)(
+        buffers.fs_mat, buffers.fs_mat_reordered, buffers.morton_seq, Val(D); ndrange=N)
     
     return nothing
 end
@@ -1539,7 +1556,7 @@ end
     force_kernel!(fs_mat, global_virial, coords, velocities, atoms, N, r_cut2, force_units,
                   inters_tuple, boundary, step_n, compressed_masks, needs_vir, T, D,
                   interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-                  num_interacting_tiles, interacting_tiles_overflow)
+                  num_interacting_tiles)
 
 Compute pairwise forces for the compact list of interacting 32x32 tiles produced
 by `find_interacting_blocks_kernel!`.
@@ -1576,8 +1593,8 @@ function force_kernel!(
     ::Val{needs_vir},
     ::Val{T},
     ::Val{D},
-    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, r_cut2, A, force_units, needs_vir, T, D}
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
+    num_interacting_tiles) where {N, r_cut2, A, force_units, needs_vir, T, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -1590,14 +1607,9 @@ function force_kernel!(
     tiles_j_ro = CUDA.Const(interacting_tiles_j)
     tiles_type_ro = CUDA.Const(interacting_tiles_type)
     num_interacting_tiles_ro = CUDA.Const(num_interacting_tiles)
-    interacting_tiles_overflow_ro = CUDA.Const(interacting_tiles_overflow)
     
     idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
 
-    @inbounds if interacting_tiles_overflow_ro[1] != 0
-        return nothing
-    end
-    
     @inbounds num_pairs = num_interacting_tiles_ro[1]
     if idx > num_pairs
         return nothing
@@ -1647,7 +1659,6 @@ function force_kernel!(
         
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
-                sync_warp()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
                 vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
@@ -1661,7 +1672,7 @@ function force_kernel!(
                 
                 if any_active
                     f = condition ? sum_pairwise_forces_gpu(
-                        inters_tuple, atoms_i, atoms_j_shuffle, Val(force_units),
+                        inters_tuple, dr, atoms_i, atoms_j_shuffle, Val(force_units),
                         false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
 
@@ -1695,7 +1706,6 @@ function force_kernel!(
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
 
             @inbounds for m in a:warpsize()
-                sync_warp()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
                 vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
@@ -1712,7 +1722,7 @@ function force_kernel!(
                 
                 if any_active
                     f = condition ? sum_pairwise_forces_gpu(
-                        inters_tuple, atoms_i, atoms_j_shuffle, Val(force_units),
+                        inters_tuple, dr, atoms_i, atoms_j_shuffle, Val(force_units),
                         (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
 
@@ -1779,7 +1789,7 @@ function force_kernel!(
 
             if any_active
                 f = condition ? sum_pairwise_forces_gpu(
-                    inters_tuple, atoms_i, atoms_j, Val(force_units),
+                    inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                 ) : zero(SVector{D, T})
 
@@ -1839,7 +1849,7 @@ function force_kernel!(
             
             # Divergence-safe execution (no vote_any_sync)
             f = condition ? sum_pairwise_forces_gpu(
-                inters_tuple, atoms_i, atoms_j, Val(force_units),
+                inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                 (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
             ) : zero(SVector{D, T})
 
@@ -1905,7 +1915,7 @@ function force_kernel!(
                 
                 # Divergence-safe execution (no vote_any_sync)
                 f = condition ? sum_pairwise_forces_gpu(
-                    inters_tuple, atoms_i, atoms_j, Val(force_units),
+                    inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                 ) : zero(SVector{D, T})
 
@@ -2017,7 +2027,7 @@ end
     energy_kernel!(energy_nounits, coords, velocities, atoms, N, r_cut2, energy_units,
                    inters_tuple, boundary, step_n, compressed_masks, T, D,
                    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-                   num_interacting_tiles, interacting_tiles_overflow)
+                   num_interacting_tiles)
 
 Compute pairwise potential energies for the compact list of interacting 32x32
 tiles produced by `find_interacting_blocks_kernel!`.
@@ -2042,8 +2052,8 @@ function energy_kernel!(
     compressed_masks,
     ::Val{T},
     ::Val{D},
-    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, D}
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
+    num_interacting_tiles) where {N, r_cut2, A, energy_units, T, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -2056,13 +2066,8 @@ function energy_kernel!(
     tiles_j_ro = CUDA.Const(interacting_tiles_j)
     tiles_type_ro = CUDA.Const(interacting_tiles_type)
     num_interacting_tiles_ro = CUDA.Const(num_interacting_tiles)
-    interacting_tiles_overflow_ro = CUDA.Const(interacting_tiles_overflow)
 
     idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
-
-    @inbounds if interacting_tiles_overflow_ro[1] != 0
-        return nothing
-    end
 
     @inbounds num_pairs = num_interacting_tiles_ro[1]
     if idx > num_pairs
@@ -2299,8 +2304,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
                 j = j_0_tile + del_j
                 if i != j
                     @inbounds atom_j, coord_j, vel_j = atoms[j], coords[j], velocities[j]
-                    f = sum_pairwise_forces_gpu(inters, atom_i, atom_j, Val(F), false, coord_i,
-                                                coord_j, boundary, vel_i, vel_j, step_n)
+                    f = sum_pairwise_forces_nonl(inters, atom_i, atom_j, Val(F), false, coord_i,
+                                                 coord_j, boundary, vel_i, vel_j, step_n)
                     for dim in 1:D
                         forces_shmem[dim, tidx] += -ustrip(f[dim])
                     end
@@ -2324,8 +2329,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
         @inbounds for _ in 1:tilesteps
             sync_warp()
             @inbounds atom_j = atoms[j]
-            f = sum_pairwise_forces_gpu(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
-                                        boundary, vel_i, vel_j, step_n)
+            f = sum_pairwise_forces_nonl(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
+                                         boundary, vel_i, vel_j, step_n)
             for dim in 1:D
                 forces_shmem[dim, tidx] += -ustrip(f[dim])
             end
