@@ -1278,7 +1278,8 @@ The available couplers are:
 - [`BerendsenBarostat`](@ref)
 - [`CRescaleBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
-Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
+Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
+[`StormerVerlet`](@ref) does not support coupling methods because its recurrence stores coordinate history rather than advancing velocities as primary state.
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
 temp = 300.0u"K"

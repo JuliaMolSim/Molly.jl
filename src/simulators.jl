@@ -417,9 +417,6 @@ end
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         pressure_kin_tensor = nothing
-        if using_constraints
-            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
-        end
 
         sys.velocities .+= accels_t .* dt_div2
         if using_constraints
@@ -519,6 +516,8 @@ function DPDVelocityVerlet(; dt, λ=0.65, coupling=nothing, remove_CM_motion=1)
     return DPDVelocityVerlet(dt, λ, coupling, Int(remove_CM_motion))
 end
 
+constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
+
 @inline function simulate!(sys,
                            sim::DPDVelocityVerlet,
                            n_steps_or_time;
@@ -552,54 +551,67 @@ end
         cons_coord_storage = zero(sys.coords)
         cons_vel_storage = zero(sys.velocities)
     end
-    velocities_t = zero(sys.velocities)
+    velocities_half = zero(sys.velocities)
     dt_div2 = sim.dt / 2
-    dt_sq_div2 = sim.dt^2 / 2
-    λ_dt = sim.λ * sim.dt
+    λ_shift_dt = (sim.λ - 1//2) * sim.dt
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
+        pressure_kin_tensor = nothing
+
+        sys.velocities .+= accels_t .* dt_div2
         if using_constraints
+            vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      false, sim)
+            apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
             cons_coord_storage .= sys.coords
-            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
         end
 
-        velocities_t .= sys.velocities
-
-        # Position update: r(t+dt) = r(t) + v(t)*dt + a(t)*dt²/2
-        sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
+        sys.coords .+= sys.velocities .* sim.dt
         if using_constraints
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
-                                                      needs_vir_step, sim)
+                                                      false, sim)
             apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
                                         context=pos_context, n_threads=n_threads)
         end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
-        # Velocity prediction for dissipative force evaluation
-        sys.velocities .= velocities_t .+ accels_t .* λ_dt
+        velocities_half .= sys.velocities
 
-        # Compute forces at new positions with predicted velocities
+        # DPD dissipative forces depend on velocity. Temporarily use the
+        # Groot-Warren predicted velocity for the force evaluation, then restore
+        # the real half-step velocity below for the final VV update.
+        sys.velocities .= velocities_half .+ accels_t .* λ_shift_dt
+        if using_constraints
+            vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
+                                                      false, sim)
+            apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
+        end
         forces!(forces_t_dt, sys, neighbors, buffers, Val(needs_vir_step), step_n;
                 n_threads=n_threads)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
-        # Final velocity: v(t+dt) = v(t) + (dt/2)*(a(t) + a(t+dt))
-        sys.velocities .= velocities_t .+ (accels_t .+ accels_t_dt) .* dt_div2
+        sys.velocities .= velocities_half .+ accels_t_dt .* dt_div2
         if using_constraints
+            prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
             vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
                                                       needs_vir_step, sim)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+            if needs_vir_step
+                kinetic_energy_tensor!(buffers.kin_tensor, sys)
+                pressure_kin_tensor = copy(buffers.kin_tensor)
+            end
         end
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
-                                           n_threads=n_threads, rng=rng)
+        recompute_forces = apply_coupling_with_pressure_kin_tensor!(
+            sys, buffers, sim.coupling, sim, neighbors, step_n, pressure_kin_tensor;
+            n_threads=n_threads, rng=rng)
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -737,18 +749,51 @@ end
 
 The Störmer-Verlet integrator.
 
-The velocity calculation is accurate to O(dt).
+This is a coordinate-history integrator: after the first step, coordinates are
+advanced using the previous and current coordinate arrays rather than using
+velocities as primary state variables. The velocity calculation is only
+accurate to O(dt) and is reconstructed from the coordinate displacement each
+step.
 
-Does not currently work with coupling methods that alter the velocity.
-Does not currently remove the center of mass motion.
+Position constraints are supported. Their virial contribution can be logged,
+but this integrator should not be used for pressure coupling. Barostats scale
+coordinates and the simulation box, but Störmer-Verlet would also need a
+consistent transformation of its stored previous coordinates. Without that
+extra coordinate-history update the recurrence is no longer the intended
+Störmer-Verlet algorithm.
+
+Coupling methods are therefore intentionally unsupported, except for `nothing`
+or empty coupler tuples/named tuples. This includes barostats, thermostats, and
+other couplers that alter coordinates, velocities, or forces. Center of mass
+motion removal is also not supported for the same reason: velocities are derived
+diagnostics here, not the state advanced by the integrator.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
-- `coupling::C=nothing`: the coupling which applies during the simulation.
+- `coupling::C=nothing`: no coupling. Non-empty coupling methods throw an
+    `ArgumentError` when the simulation starts.
 """
 @kwdef struct StormerVerlet{T, C}
     dt::T
     coupling::C = nothing
+end
+
+stormer_verlet_coupling_supported(::Nothing) = true
+stormer_verlet_coupling_supported(couplers::Tuple) =
+    all(stormer_verlet_coupling_supported, couplers)
+stormer_verlet_coupling_supported(couplers::NamedTuple) =
+    all(stormer_verlet_coupling_supported, values(couplers))
+stormer_verlet_coupling_supported(coupler) = false
+
+function check_stormer_verlet_coupling(coupling)
+    stormer_verlet_coupling_supported(coupling) && return nothing
+    throw(ArgumentError(
+        "StormerVerlet does not support coupling methods. It stores coordinate " *
+        "history instead of advancing velocities as primary state, so barostats, " *
+        "thermostats, center-of-mass removal, and other state-changing couplers " *
+        "would need to transform that history consistently. Use coupling=nothing " *
+        "or choose a different integrator.",
+    ))
 end
 
 @inline function simulate!(sys,
@@ -762,6 +807,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_strictness(strictness)
+    check_stormer_verlet_coupling(sim.coupling)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))

@@ -570,10 +570,12 @@ shake_velocity_context(buffers=nothing; needs_virial=true, step_n=1,
     @test pos_non_vv == inv(dt^2)
     @test vel_non_vv == inv(dt)
 
-    @test Molly.position_constraint_virial_scale(sys, buffers, dt, vv) == 2 * pos_non_vv
-    @test Molly.velocity_constraint_virial_scale(sys, buffers, dt, vv) == 2 * vel_non_vv
+    for sim in (vv, dpd_vv)
+        @test Molly.position_constraint_virial_scale(sys, buffers, dt, sim) == 2 * pos_non_vv
+        @test Molly.velocity_constraint_virial_scale(sys, buffers, dt, sim) == 2 * vel_non_vv
+    end
 
-    for sim in (dpd_vv, verlet, stormer, langevin)
+    for sim in (verlet, stormer, langevin)
         @test Molly.position_constraint_virial_scale(sys, buffers, dt, sim) == pos_non_vv
         @test Molly.velocity_constraint_virial_scale(sys, buffers, dt, sim) == vel_non_vv
     end
@@ -583,6 +585,10 @@ shake_velocity_context(buffers=nothing; needs_virial=true, step_n=1,
     @test Molly.position_constraint_context(buffers, sys, 1, dt, true, vv).virial_scale ==
           2 * pos_non_vv
     @test Molly.velocity_constraint_context(buffers, sys, 1, dt, true, vv).virial_scale ==
+          2 * vel_non_vv
+    @test Molly.position_constraint_context(buffers, sys, 1, dt, true, dpd_vv).virial_scale ==
+          2 * pos_non_vv
+    @test Molly.velocity_constraint_context(buffers, sys, 1, dt, true, dpd_vv).virial_scale ==
           2 * vel_non_vv
 
     masses_val = [12.0u"g/mol", 16.0u"g/mol"]
@@ -1198,13 +1204,16 @@ end
     end
 
     @testset "VelocityVerlet final velocity constraint virial merge" begin
-        sim = VelocityVerlet(dt=dt, remove_CM_motion=0)
+        simulators = (
+            VelocityVerlet(dt=dt, remove_CM_motion=0),
+            DPDVelocityVerlet(dt=dt, remove_CM_motion=0),
+        )
         vv_velocities = [
             -0.01 * direction + 0.03 * tangent,
              0.01 * direction - 0.03 * tangent,
         ]
 
-        function manual_vv_virials(constraint_kind)
+        function manual_vv_virials(constraint_kind, sim)
             manual_sys = simulator_constraint_system(
                 constraint_kind; loggers=(), velocities_in=vv_velocities)
             manual_buffers = Molly.init_buffers!(manual_sys, 1)
@@ -1256,26 +1265,28 @@ end
                    copy(manual_buffers.virial)
         end
 
-        for constraint_kind in (:shake, :lincs)
-            sys = simulator_constraint_system(
-                constraint_kind;
-                loggers=(virial=VirialLogger(Matrix{Float64}, 1),),
-                velocities_in=vv_velocities,
-            )
-            simulate!(sys, sim, 1; run_loggers=:skipzero, n_threads=1)
-            logged_virial = only(values(sys.loggers.virial))
+        for sim in simulators
+            for constraint_kind in (:shake, :lincs)
+                sys = simulator_constraint_system(
+                    constraint_kind;
+                    loggers=(virial=VirialLogger(Matrix{Float64}, 1),),
+                    velocities_in=vv_velocities,
+                )
+                simulate!(sys, sim, 1; run_loggers=:skipzero, n_threads=1)
+                logged_virial = only(values(sys.loggers.virial))
 
-            first_velocity_virial, position_virial, final_velocity_virial, expected_virial =
-                manual_vv_virials(constraint_kind)
+                first_velocity_virial, position_virial, final_velocity_virial, expected_virial =
+                    manual_vv_virials(constraint_kind, sim)
 
-            @test maximum(abs.(first_velocity_virial)) > 1e-8
-            @test maximum(abs.(position_virial)) > 1e-8
-            @test maximum(abs.(final_velocity_virial)) > 1e-8
-            @test logged_virial ≈ expected_virial atol=1e-12
-            @test maximum(abs.(logged_virial .- (expected_virial .+ first_velocity_virial))) >
-                  1e-8
-            @test maximum(abs.(logged_virial .- (expected_virial .+
-                                                 position_virial))) > 1e-8
+                @test maximum(abs.(first_velocity_virial)) > 1e-8
+                @test maximum(abs.(position_virial)) > 1e-8
+                @test maximum(abs.(final_velocity_virial)) > 1e-8
+                @test logged_virial ≈ expected_virial atol=1e-12
+                @test maximum(abs.(logged_virial .-
+                                   (expected_virial .+ first_velocity_virial))) > 1e-8
+                @test maximum(abs.(logged_virial .-
+                                   (expected_virial .+ position_virial))) > 1e-8
+            end
         end
     end
 
@@ -1330,6 +1341,30 @@ end
               run_loggers=:skipzero, n_threads=1)
 
     @test length(values(sys.loggers.pressure)) == 1
+
+    @testset "StormerVerlet unsupported coupling" begin
+        sys = simulator_constraint_system(:shake; loggers=())
+        simulate!(sys, StormerVerlet(dt=dt, coupling=()), 1; n_threads=1)
+
+        sys = simulator_constraint_system(:shake; loggers=())
+        @test_throws ArgumentError simulate!(
+            sys,
+            StormerVerlet(dt=dt, coupling=(barostat,)),
+            1;
+            n_threads=1,
+        )
+
+        sys = simulator_constraint_system(:shake; loggers=())
+        @test_throws ArgumentError simulate!(
+            sys,
+            StormerVerlet(
+                dt=dt,
+                coupling=(thermostat=VelocityRescaleThermostat(1.0, 1.0),),
+            ),
+            1;
+            n_threads=1,
+        )
+    end
 end
 
 # --- LINCS tests ---
