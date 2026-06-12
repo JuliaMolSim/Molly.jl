@@ -120,25 +120,25 @@ if GROUP in ("All", "NotGradients")
         Aqua.test_all(Molly)
     end
 
-   #=  include("basic.jl")
+    include("basic.jl")
     include("interactions.jl")
     include("minimization.jl")
     include("agent.jl")
     include("simulation.jl")
     include("bias.jl")
-    include("coupling.jl") =#
+    include("coupling.jl")
     include("constraints.jl")
-    #= include("analysis.jl")
+    include("analysis.jl")
     if run_cuda_tests
         include("gpu_consistency.jl")
         include("gpu_optimizations.jl")
-    end =#
+    end
 end
-#= 
+
 if GROUP in ("All", "Protein", "NotGradients")
     include("protein.jl")
 end
 
 if GROUP in ("All", "Gradients")
     include("gradients.jl")
-end =#
+end
