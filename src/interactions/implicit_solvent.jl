@@ -622,7 +622,7 @@ end
 
 function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)
     I = zero(coord_i[1] / unit(dist_cutoff)^2)
-    r = norm(vector(coord_i, coord_j, boundary))
+    r = sqrt(sum(abs2, vector(coord_i, coord_j, boundary)))
     if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         return I
     end
@@ -695,7 +695,7 @@ function born_radii_loop_GBN2(coord_i::SVector{D, C}, coord_j, ori, orj, srj, di
                                 offset, neck_scale, neck_cut, d0, m0, boundary) where {D, C}
     I = zero(coord_i[1] / unit(dist_cutoff)^2)
     I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
-    r = norm(vector(coord_i, coord_j, boundary))
+    r = sqrt(sum(abs2, vector(coord_i, coord_j, boundary)))
     if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         return I, I_grad
     end
@@ -800,7 +800,7 @@ end
         j = (inter_i - 1) % n_atoms + 1
         if i != j
             coord_i, coord_j = coords[i], coords[j]
-            r = norm(vector(coord_i, coord_j, boundary))
+            r = sqrt(sum(abs2, vector(coord_i, coord_j, boundary)))
             if iszero_value(dist_cutoff) || r <= dist_cutoff
                 I = zero(coord_i[1] / unit(dist_cutoff)^2)
                 I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
@@ -877,7 +877,7 @@ end
 
 function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, boundary)
     dr = vector(coord_i, coord_j, boundary)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         return zero(bi ./ coord_i .^ 2)
     end
@@ -1047,7 +1047,7 @@ end
         j = (inter_i - 1) % n_atoms + 1
         if i != j
             dr = vector(coords[i], coords[j], boundary)
-            r = norm(dr)
+            r = sqrt(sum(abs2, dr))
 
             if iszero_value(dist_cutoff) || r <= dist_cutoff
                 ori, srj = or[i], sor[j]

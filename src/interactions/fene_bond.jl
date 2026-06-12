@@ -30,7 +30,7 @@ FENEBond(; k, r0, σ, ϵ) = FENEBond{typeof(k), typeof(r0), typeof(ϵ)}(k, r0, �
 
 @inline function force(b::FENEBond, coord_i, coord_j, boundary, args...)
     ab = vector(coord_i, coord_j, boundary)
-    r = norm(ab)
+    r = sqrt(sum(abs2, dr))
     r2 = r^2
     r2inv = inv(r2)
     r6inv = r2inv^3
@@ -49,7 +49,7 @@ end
 
 @inline function potential_energy(b::FENEBond, coord_i, coord_j, boundary, args...)
     dr = vector(coord_i, coord_j, boundary)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     r2 = r^2
     r2inv = inv(r2)
     r6inv = r2inv^3

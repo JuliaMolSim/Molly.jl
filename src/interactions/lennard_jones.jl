@@ -84,13 +84,13 @@ end
                        special=false,
                        args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 
@@ -122,7 +122,7 @@ end
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 
@@ -304,7 +304,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -388,7 +388,7 @@ end
         σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
         ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
-        r = norm(dr)
+        r = sqrt(sum(abs2, dr))
         σ2 = σ^2
         params = (σ2, ϵ, nothing, nothing)
 
@@ -405,7 +405,7 @@ end
     ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
     σ6_fac = inter.α * (1 - λ)
@@ -540,7 +540,7 @@ end
     end
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -619,7 +619,7 @@ end
     end
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     σ6 = σ^6
@@ -756,7 +756,7 @@ end
                        special::Bool=false,
                        args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
@@ -764,7 +764,7 @@ end
     λ = λ_mixing(inter.λ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
@@ -803,7 +803,7 @@ end
     λ = λ_mixing(inter.λ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 

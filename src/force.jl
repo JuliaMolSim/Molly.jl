@@ -64,6 +64,14 @@ force_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl
 
 @inline zero_pairwise_force(dr, force_units) = ustrip.(zero(dr)) * force_units
 
+@inline function zero_pairwise_force(dr::SVector{N, <:Unitful.Quantity{T}}, force_units) where {N, T}
+    return zero(SVector{N, T}) * force_units
+end
+
+@inline function zero_pairwise_force(dr::SVector{N, T}, ::typeof(NoUnits)) where {N, T <: AbstractFloat}
+    return zero(SVector{N, T})
+end
+
 @inline function radial_force_vector(f, r, dr, force_units)
     return iszero_value(r) ? zero_pairwise_force(dr, force_units) : (f / r) * dr
 end

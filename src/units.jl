@@ -17,15 +17,30 @@ Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)
 """
 ustrip_vec(x...) = ustrip.(x...)
 
+function check_force_units(F, force_units)
+    if unit(F) != force_units
+        error("system force units are ", force_units, " but encountered force units ", unit(F))
+    end
+end
+
+check_force_units(F::SVector, force_units) = @inbounds check_force_units(F[1], force_units)
+
+function check_energy_units(E, energy_units)
+    if unit(E) != energy_units
+        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
+    end
+end
+
 @inline function checked_ustrip(x, force_units)
     check_force_units(x, force_units)
     return ustrip.(x)
 end
 
-@inline function checked_ustrip(x, ::typeof(NoUnits))
-    check_force_units(x, NoUnits)
-    return x
+@inline function checked_ustrip(x::SVector{N, <:Unitful.Quantity{T, D, U}}, ::U) where {N, T, D, U}
+    return SVector{N, T}(ntuple(i -> ustrip(x[i]), Val(N)))
 end
+
+@inline checked_ustrip(x::SVector{<:Any, <:AbstractFloat}, ::typeof(NoUnits)) = x
 
 # Parses the length, mass, velocity, energy and force units and verifies they are
 #   correct and consistent with other parameters passed to the system
@@ -205,20 +220,6 @@ function convert_k_units(T, k, energy_units, strictness)
         throw(ArgumentError("energy units do not have dimensions of energy: $energy_units"))
     end
     return k_converted
-end
-
-function check_force_units(F, force_units)
-    if unit(F) != force_units
-        error("system force units are ", force_units, " but encountered force units ", unit(F))
-    end
-end
-
-check_force_units(F::SVector, force_units) = @inbounds check_force_units(F[1], force_units)
-
-function check_energy_units(E, energy_units)
-    if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
-    end
 end
 
 function energy_remove_mol(x)
