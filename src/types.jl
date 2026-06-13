@@ -1615,8 +1615,8 @@ function System(sys::AtomsBase.AbstractSystem{D};
     end
 
     length_unit = unit(first(AtomsBase.position(sys, 1)))
-    atoms = Vector{Atom}(undef, (length(sys),))
-    atoms_data = Vector{AtomData}(undef, (length(sys),))
+    atoms = Vector{Atom}(undef, length(sys))
+    atoms_data = Vector{AtomData}(undef, length(sys))
     for (i, atom) in enumerate(sys)
         atoms[i] = Atom(
             index=i,

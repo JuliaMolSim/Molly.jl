@@ -209,8 +209,8 @@ function init_buffers!(sys::System{D}, n_threads) where D
     pres        = zero(vir_nounits) .* (sys.energy_units == NoUnits ? NoUnits : u"bar")
     # Enzyme errors with nothing when n_threads is 1
     n_copies = (n_threads == 1 ? 0 : n_threads)
-    fs_chunks  = [similar(fs_nounits) for _ in 1:n_copies]
-    vir_chunks = [similar(vir_nounits) for _ in 1:n_copies]
+    fs_chunks  = [zero(fs_nounits) for _ in 1:n_copies]
+    vir_chunks = [zero(vir_nounits) for _ in 1:n_copies]
     # fs_mat is only used for virtual sites to do atomic addition
     fs_mat = (length(sys.virtual_sites) > 0 ? zeros(CT, D, length(sys)) : nothing)
     return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
@@ -323,9 +323,9 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
     interacting_tiles_overflow = KernelAbstractions.zeros(backend, Int32, 1)
 
-    coords_reordered = similar(sys.coords)
-    velocities_reordered = similar(sys.velocities)
-    atoms_reordered = similar(sys.atoms)
+    coords_reordered = zero(sys.coords)
+    velocities_reordered = zero(sys.velocities)
+    atoms_reordered = zero(sys.atoms)
 
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
