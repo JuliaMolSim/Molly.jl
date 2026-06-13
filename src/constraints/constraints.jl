@@ -553,7 +553,7 @@ function constrained_atom_pairs(constraints::Union{Tuple, NamedTuple})
     end
 end
 
-function constraints_to_bonds(sys, k::K) where K
+function constraints_to_bonds(sys::System{<:Any, AT}, k::K) where {AT, K}
     cons_pairs = constrained_atom_pairs(sys)
     if length(cons_pairs) > 0
         bond_is, bond_js = Int32[], Int32[]
@@ -564,7 +564,8 @@ function constraints_to_bonds(sys, k::K) where K
             push!(bond_js, j)
             push!(bond_inters, HarmonicBond(k, d))
         end
-        return InteractionList2Atoms(bond_is, bond_js, bond_inters)
+        return InteractionList2Atoms(to_device(bond_is, AT), to_device(bond_js, AT),
+                                     to_device(bond_inters, AT))
     else
         return InteractionList2Atoms(Any)
     end

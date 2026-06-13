@@ -336,8 +336,8 @@ end
                     rigid_water=rigid_water, # No water present
                     constraint_algorithm=constraint_algorithm,    
                 )
-                if constraint_algorithm === LINCS
-                    # increase tolerances from default
+                if constraint_algorithm == LINCS
+                    # Increase tolerances from default
                     lincs = LINCS(
                         masses=Array(masses(sys)),
                         dist_constraints=sys.constraints[1].dist_constraints,
@@ -1091,15 +1091,28 @@ end
 
 @testset "Minimization with constraints" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
-    sys_nocons = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; nonbonded_method=:pme)
-    sys_cons = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; nonbonded_method=:pme,
-                      constraints=:hbonds, rigid_water=true)
+    for AT in array_list
+        sys_nocons = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            array_type=AT,
+            nonbonded_method=:pme,
+        )
+        sys_cons = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            array_type=AT,
+            nonbonded_method=:pme,
+            constraints=:hbonds,
+            rigid_water=true,
+        )
 
-    sim = SteepestDescentMinimizer(tol=10_000.0u"kJ * mol^-1 * nm^-1")
-    simulate!(sys_nocons, sim)
-    simulate!(sys_cons, sim)
+        sim = SteepestDescentMinimizer(tol=10_000.0u"kJ * mol^-1 * nm^-1")
+        simulate!(sys_nocons, sim)
+        simulate!(sys_cons, sim)
 
-    @test rmsd(sys_nocons.coords[1:1170], sys_cons.coords[1:1170]) < 0.01u"nm"
-    @test potential_energy(sys_nocons) < -100_000u"kJ/mol"
-    @test potential_energy(sys_cons)   < -150_000u"kJ/mol"
+        @test rmsd(sys_nocons.coords[1:1170], sys_cons.coords[1:1170]) < 0.01u"nm"
+        @test potential_energy(sys_nocons) < -100_000u"kJ/mol"
+        @test potential_energy(sys_cons)   < -150_000u"kJ/mol"
+    end
 end
