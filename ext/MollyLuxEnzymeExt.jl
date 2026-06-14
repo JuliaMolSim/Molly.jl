@@ -1,11 +1,14 @@
-# ANI forces via two-stage reverse-mode AD.
+# ANI forces via reverse-mode AD (Enzyme + Zygote).
 # Loaded when Enzyme, Lux, and HDF5 are all in the environment.
 # Overrides the finite-difference forces! from MollyLuxExt.
 #
-# Strategy (avoids LLVM symbol-collision bug in Enzyme ≤ 0.13):
-#   Stage 1 — Zygote differentiates E wrt AEVs (Lux network only; no exp duplication).
-#   Stage 2 — Enzyme differentiates AEVs wrt coords (pure math; no custom activations).
-#   Chain rule combines the two: dE/d_coords = J_AEV^T · (dE/d_AEVs).
+# Strategy:
+#   EnzymeRules for Molly.celu01 bypass the LLVM symbol-collision bug in Enzyme ≤ 0.13
+#   that fired when exp() from the activation appeared multiple times in one trace.
+#   With the rule in place, Enzyme can differentiate the full AEV + Lux pipeline in
+#   a single backward pass via _ani_energy_for_ad.
+#   Fallback: if single-pass Enzyme still fails for any system, the two-stage path
+#   (Zygote for Lux, Enzyme for AEV VJP) remains available as _aev_vjp_kernel.
 #
 # __precompile__(false): method overwriting between extension modules is not
 # allowed during precompilation; loading at runtime avoids this restriction.
@@ -21,10 +24,10 @@ using ChainRulesCore
 using StaticArrays, Unitful, LinearAlgebra
 
 # ============================================================================
-# ChainRule for Molly.celu01 — enables Zygote to differentiate through Lux layers
+# AD rules for Molly.celu01
 # ============================================================================
 
-# d/dx celu(x; α=0.1) = 1 if x ≥ 0, else exp(x/0.1)
+# ChainRule (Zygote path): d/dx celu(x; α=0.1) = 1 if x ≥ 0, else exp(x/0.1)
 function ChainRulesCore.rrule(::typeof(Molly.celu01), x::T) where T
     y = Molly.celu01(x)
     function celu01_pullback(ȳ)
@@ -32,6 +35,26 @@ function ChainRulesCore.rrule(::typeof(Molly.celu01), x::T) where T
         return NoTangent(), ȳ * dx
     end
     return y, celu01_pullback
+end
+
+# Enzyme augmented_primal: run forward pass and store input as tape for reverse.
+# Conditional primal return avoids AugmentedRuleReturnError when primal not requested.
+function EnzymeRules.augmented_primal(config,
+                                       ::EnzymeRules.Const{typeof(Molly.celu01)},
+                                       ::Type{<:EnzymeRules.Active},
+                                       x::EnzymeRules.Active)
+    val = Molly.celu01(x.val)
+    primal = EnzymeRules.needs_primal(config) ? val : nothing
+    return EnzymeRules.AugmentedReturn(primal, nothing, x.val)  # tape = input x
+end
+
+# Enzyme reverse: return analytical gradient, bypassing exp() symbol duplication.
+function EnzymeRules.reverse(config,
+                               ::EnzymeRules.Const{typeof(Molly.celu01)},
+                               dret, tape, x::EnzymeRules.Active)
+    xval = tape
+    d = xval >= zero(xval) ? one(xval) : exp(xval / typeof(xval)(0.1f0))
+    return (nothing, dret.val * d)  # (nothing for Const func; gradient for Active x)
 end
 
 # ============================================================================
@@ -52,7 +75,42 @@ function _lue_f32coords(coords::AbstractVector{SVector{D,T}}) where {D,T}
 end
 
 # ============================================================================
-# Enzyme-differentiable AEV kernel (top-level, no captured mutable state)
+# Single-pass Enzyme energy kernel (used when celu01 EnzymeRule is in effect)
+# ============================================================================
+
+# Full energy (Hartree) for one ensemble member — AEVs + Lux network.
+# coords_mat: (3, N) Float32 — the only Active argument.
+# All other args are Const so Enzyme doesn't need to differentiate through them.
+function _ani_energy_for_ad(
+    coords_mat    :: AbstractMatrix{Float32},
+    species_idx,
+    boundary_strip,
+    aev_params,
+    n_species     :: Int,
+    neighbors,
+    per_atom_model,
+    per_atom_ps,
+    per_atom_st,
+    self_energies,
+)
+    n_atoms = size(coords_mat, 2)
+    coords  = [SVector{3, Float32}(coords_mat[:, i]) for i in 1:n_atoms]
+    aevs    = Molly.compute_aevs(coords, species_idx, neighbors, boundary_strip,
+                                 aev_params, n_species)
+    E = 0f0
+    for atom_i in 1:n_atoms
+        aev_i = @view aevs[atom_i, :]
+        out, _ = Lux.apply(per_atom_model[atom_i],
+                           Float32.(reshape(aev_i, :, 1)),
+                           per_atom_ps[atom_i],
+                           per_atom_st[atom_i])
+        E += Float32(out[1]) + self_energies[species_idx[atom_i]]
+    end
+    return E
+end
+
+# ============================================================================
+# Two-stage AEV VJP kernel (fallback when single-pass Enzyme is unavailable)
 # ============================================================================
 
 # VJP kernel for Enzyme: computes sum(aevs(coords) .* cotangent).
@@ -66,7 +124,7 @@ function _aev_vjp_kernel(coords_mat, cotangent, species_idx, neighbors, boundary
 end
 
 # ============================================================================
-# Two-stage reverse-mode AD forces! (replaces finite-diff version from MollyLuxExt)
+# Reverse-mode AD forces! (replaces finite-diff version from MollyLuxExt)
 # ============================================================================
 
 function AtomsCalculators.forces!(fs,
@@ -95,44 +153,61 @@ function AtomsCalculators.forces!(fs,
         per_atom_ps = [getfield(inter.ps_vec[ens_i], Symbol(idx_to_elem[s])) for s in species_idx]
         per_atom_st = [getfield(inter.st_vec[ens_i], Symbol(idx_to_elem[s])) for s in species_idx]
 
-        # ── Stage 1: compute AEVs forward (plain Julia, no AD) ──────────────
-        aevs = Molly.compute_aevs(coords_f32, species_idx, nbrs, bdy_f32,
-                                  inter.aev_params, n_species)
-
-        # ── Stage 2: Zygote — dE/d_AEVs (only Lux network, no exp collision) ─
-        dE_d_aevs = Zygote.gradient(
-            aevs_mat -> begin
-                E = 0f0
-                for atom_i in 1:n_atoms
-                    aev_i = @view aevs_mat[atom_i, :]
-                    out, _ = Lux.apply(per_atom_model[atom_i],
-                                       reshape(aev_i, :, 1),
-                                       per_atom_ps[atom_i],
-                                       per_atom_st[atom_i])
-                    E += Float32(out[1]) + inter.self_energies[species_idx[atom_i]]
-                end
-                E
-            end,
-            aevs,
-        )[1]
-
-        # ── Stage 3: Enzyme VJP — d_AEVs/d_coords via chain rule ───────────
-        # Computes d(sum(aevs .* cotangent))/d_coords_mat = J_AEV^T · cotangent.
-        # All captured data passed as explicit Const args so Enzyme can prove read-only.
         dcoords_i = zeros(Float32, 3, n_atoms)
-        Enzyme.autodiff(
-            Enzyme.set_runtime_activity(Enzyme.Reverse),
-            _aev_vjp_kernel,
-            Enzyme.Active,
-            Enzyme.Duplicated(coords_mat, dcoords_i),
-            Enzyme.Const(dE_d_aevs),
-            Enzyme.Const(species_idx),
-            Enzyme.Const(nbrs),
-            Enzyme.Const(bdy_f32),
-            Enzyme.Const(inter.aev_params),
-            Enzyme.Const(n_species),
-            Enzyme.Const(n_atoms),
-        )
+
+        # ── Single-pass Enzyme backward through AEVs + Lux ──────────────────
+        # Works when the EnzymeRules for Molly.celu01 are in effect (this file).
+        # Falls back to two-stage if Enzyme errors at runtime.
+        try
+            Enzyme.autodiff(
+                Enzyme.set_runtime_activity(Enzyme.Reverse),
+                _ani_energy_for_ad,
+                Enzyme.Active,
+                Enzyme.Duplicated(coords_mat, dcoords_i),
+                Enzyme.Const(species_idx),
+                Enzyme.Const(bdy_f32),
+                Enzyme.Const(inter.aev_params),
+                Enzyme.Const(n_species),
+                Enzyme.Const(nbrs),
+                Enzyme.Const(per_atom_model),
+                Enzyme.Const(per_atom_ps),
+                Enzyme.Const(per_atom_st),
+                Enzyme.Const(inter.self_energies),
+            )
+        catch
+            # ── Fallback: two-stage (Zygote for Lux, Enzyme VJP for AEVs) ───
+            fill!(dcoords_i, 0f0)
+            aevs = Molly.compute_aevs(coords_f32, species_idx, nbrs, bdy_f32,
+                                      inter.aev_params, n_species)
+            dE_d_aevs = Zygote.gradient(
+                aevs_mat -> begin
+                    E = 0f0
+                    for atom_i in 1:n_atoms
+                        aev_i = @view aevs_mat[atom_i, :]
+                        out, _ = Lux.apply(per_atom_model[atom_i],
+                                           Float32.(reshape(aev_i, :, 1)),
+                                           per_atom_ps[atom_i],
+                                           per_atom_st[atom_i])
+                        E += Float32(out[1]) + inter.self_energies[species_idx[atom_i]]
+                    end
+                    E
+                end,
+                aevs,
+            )[1]
+            Enzyme.autodiff(
+                Enzyme.set_runtime_activity(Enzyme.Reverse),
+                _aev_vjp_kernel,
+                Enzyme.Active,
+                Enzyme.Duplicated(coords_mat, dcoords_i),
+                Enzyme.Const(dE_d_aevs),
+                Enzyme.Const(species_idx),
+                Enzyme.Const(nbrs),
+                Enzyme.Const(bdy_f32),
+                Enzyme.Const(inter.aev_params),
+                Enzyme.Const(n_species),
+                Enzyme.Const(n_atoms),
+            )
+        end
         dcoords_sum .+= dcoords_i
     end
     dcoords = dcoords_sum ./ n_ens

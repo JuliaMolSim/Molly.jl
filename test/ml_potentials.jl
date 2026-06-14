@@ -348,7 +348,7 @@ end
 # ============================================================================
 
 if isdefined(@__MODULE__, :Enzyme) || @isdefined(Enzyme)
-    @testset "ANIPotential: Enzyme+Zygote AD forces vs TorchANI" begin
+    @testset "ANIPotential: Enzyme AD forces vs TorchANI (N₂, single-pass)" begin
         ref_path = joinpath(REF_DIR, "n2_dimer_ani2x.json")
         h5_path  = joinpath(REF_DIR, "ani2x.h5")
         if !isfile(ref_path) || !isfile(h5_path)
@@ -376,8 +376,91 @@ if isdefined(@__MODULE__, :Enzyme) || @isdefined(Enzyme)
             @test isapprox(fs_val[1], f_ref1; atol=1e-4)
             @test isapprox(fs_val[1] + fs_val[2], zeros(3); atol=1e-10)
 
-            println("Enzyme+Zygote force on N1: ", round.(fs_val[1], sigdigits=7), " eV/Å")
+            println("Enzyme AD force on N1: ", round.(fs_val[1], sigdigits=7), " eV/Å")
             println("Max deviation: ", maximum(abs.(fs_val[1] .- f_ref1)), " eV/Å")
         end
+    end
+end
+
+# ============================================================================
+# Test 10: H₂O AEV validation against TorchANI (multi-element system)
+# ============================================================================
+
+@testset "ANIPotential: H₂O AEV matches TorchANI" begin
+    ref_path = joinpath(REF_DIR, "water_aevs.json")
+    h5_path  = joinpath(REF_DIR, "ani2x.h5")
+    if !isfile(ref_path) || !isfile(h5_path)
+        @warn "Water AEV reference not found — run scripts/torchani_reference.py first"
+        @test_broken false
+    else
+        ref = JSON3.read(read(ref_path, String))
+        # ref.aevs is a 3×1008 nested array
+        aev_ref = Float32.(reduce(hcat, ref.aevs)')   # (3, 1008)
+
+        pot = ANIPotential(h5_path; ensemble_idx=0)
+        n_species = length(pot.species_map)
+
+        # Read coordinates DIRECTLY from the reference JSON to use the exact same
+        # Float32 positions TorchANI used when computing the reference AEVs.
+        water_ref = JSON3.read(read(joinpath(REF_DIR, "water_ani2x.json"), String))
+        coords = [SVector{3, Float32}(row...) for row in water_ref.coordinates_A]
+        species_idx = [pot.species_map[s] for s in ["O", "H", "H"]]
+        boundary    = CubicBoundary(1000f0)
+
+        aevs = Molly.compute_aevs(coords, species_idx, nothing, boundary,
+                                  pot.aev_params, n_species)
+
+        @test size(aevs) == size(aev_ref)
+        @test aevs ≈ aev_ref atol=1e-4
+        println("H₂O AEV max deviation: ", maximum(abs.(aevs .- aev_ref)))
+    end
+end
+
+# ============================================================================
+# Test 11: H₂O forces match TorchANI (multi-element, non-trivial angular AEV)
+# ============================================================================
+
+@testset "ANIPotential: H₂O forces match TorchANI" begin
+    ref_path = joinpath(REF_DIR, "water_ani2x.json")
+    h5_path  = joinpath(REF_DIR, "ani2x.h5")
+    if !isfile(ref_path) || !isfile(h5_path)
+        @warn "Water reference not found — run scripts/torchani_reference.py first"
+        @test_broken false
+    else
+        ref = JSON3.read(read(ref_path, String))
+        f_ref = [SVector{3,Float64}(row...) for row in ref.forces_eV_per_A]
+
+        pot    = ANIPotential(h5_path; ensemble_idx=0)
+
+        atoms = [
+            Atom(mass=15.999u"u"),   # O
+            Atom(mass=1.008u"u"),    # H1
+            Atom(mass=1.008u"u"),    # H2
+        ]
+        # Use exact coordinates from JSON reference (same Float64 values TorchANI used)
+        coords = [SVector{3,Float64}(row...) * u"Å" for row in ref.coordinates_A]
+        atoms_data = [AtomData(element="O"), AtomData(element="H"), AtomData(element="H")]
+        boundary   = CubicBoundary(100.0u"Å")
+
+        sys = System(
+            atoms=atoms, coords=coords, boundary=boundary, atoms_data=atoms_data,
+            general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV",
+        )
+
+        fs     = forces(sys)
+        fs_val = [ustrip.(u"eV/Å", f) for f in fs]
+
+        # Float32 AEV + angular terms: ~5 meV/Å precision (TorchANI forces are Float64)
+        for i in 1:3
+            @test isapprox(fs_val[i], f_ref[i]; atol=5e-3)
+        end
+        # Newton's 3rd law: forces sum to zero (Float32 precision → ~1e-6 residual)
+        @test isapprox(sum(fs_val), zeros(3); atol=1e-6)
+
+        println("H₂O force on O:  ", round.(fs_val[1], sigdigits=6), " eV/Å")
+        println("H₂O force on H1: ", round.(fs_val[2], sigdigits=6), " eV/Å")
+        println("H₂O force on H2: ", round.(fs_val[3], sigdigits=6), " eV/Å")
+        dev = maximum(maximum(abs.(fs_val[i] .- f_ref[i])) for i in 1:3)
+        println("Max force deviation: ", round(dev, sigdigits=4), " eV/Å")
     end
 end

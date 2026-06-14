@@ -1851,7 +1851,7 @@ struct ANIPotential{M, PV, SV, SP, P, SE, D, F, E} <: AbstractMLPotential
     ps_vec::PV        # Vector of per-element parameter NamedTuples, one per ensemble member
     st_vec::SV        # Vector of per-element state NamedTuples, one per ensemble member
     species_map::SP   # Dict{String,Int}: element → 1-based index
-    aev_params::P     # NamedTuple: η_R, r_s_R, r_c_R, η_A, r_s_A, θ_s, ζ, r_c_A
+    aev_params::P     # NamedTuple: η_R, r_s_R, r_c_R, η_A, r_s_A (ShfA, Å), θ_s (ShfZ, rad), ζ, r_c_A
     self_energies::SE # Vector: atomic self-energy per species (Hartree)
     cutoff::D         # max(r_c_R, r_c_A), plain Float (Å)
     force_units::F

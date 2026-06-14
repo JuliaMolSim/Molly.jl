@@ -94,7 +94,7 @@ function _angular_aev(coord_i::SVector{D,T},
         drj[idx] = d
     end
 
-    prefac0 = T(0.25)   # TorchANI normalization convention (replaces 2^(1-ζ))
+    prefac0 = T(2)^(one(T) - ζ)   # TorchANI angular prefactor: 2^(1-ζ)
 
     for j in 1:n_nbr
         ok[j] || continue
@@ -110,7 +110,7 @@ function _angular_aev(coord_i::SVector{D,T},
             r_avg  = (rj[j] + rj[k]) * T(0.5)
             fc_jk  = fcj[j] * fcj[k]
             cos_th = clamp(dot(drj[j], drj[k]) / (rj[j] * rj[k]), T(-1), T(1))
-            theta  = acos(cos_th)
+            theta  = acos(T(0.95) * cos_th)   # 0.95 scaling matches TorchANI to avoid NaN near ±1
 
             base = (pair_idx - 1) * n_eta * n_shf_r * n_th
             for p in 1:n_eta
@@ -225,8 +225,10 @@ function Molly.ANIPotential(path::String;
         η_R   = _h5vec(ag, "EtaR", T)
         r_s_R = _h5vec(ag, "ShfR", T)
         η_A   = _h5vec(ag, "EtaA", T)
-        r_s_A = _h5vec(ag, "ShfZ", T)   # ShfZ = radial shift for angular Gaussian
-        θ_s   = _h5vec(ag, "ShfA", T)   # ShfA = angular shift angles
+        # TorchANI naming is counterintuitive: ShfA holds *radial* shifts (Å) and
+        # ShfZ holds *angular* shifts (rad) for the angular AEV Gaussian.
+        r_s_A = _h5vec(ag, "ShfA", T)   # ShfA = radial shifts for angular Gaussian (Å)
+        θ_s   = _h5vec(ag, "ShfZ", T)   # ShfZ = angular shifts θ_s (rad)
         ζ     = T(only(read(ag["Zeta"])))
         species_list = String.(read(ag["species"]))
 
@@ -287,7 +289,7 @@ function _ani_energy_single(aevs, species_idx, idx_to_elem, model, self_energies
         sym  = Symbol(idx_to_elem[s])
         aev_i = @view aevs[atom_i, :]
         out, _ = Lux.apply(getfield(model, sym),
-                            reshape(aev_i, :, 1),
+                            Float32.(reshape(aev_i, :, 1)),
                             getfield(ps, sym),
                             getfield(st, sym))
         E += T(out[1]) + self_energies[s]

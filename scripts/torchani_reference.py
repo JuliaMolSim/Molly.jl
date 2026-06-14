@@ -6,6 +6,8 @@ Tested with TorchANI 2.2.4 + PyTorch 2.8.0 + Python 3.9.
 Outputs written to data/ani_reference/:
   n2_dimer_ani2x.json   energy, forces, coordinates for N₂ dimer at 1.1 Å
   n2_aevs.json          raw AEV vectors (2 × 1008) for both N atoms
+  water_ani2x.json      energy + forces for H₂O at TIP3P geometry (multi-element)
+  water_aevs.json       raw AEV vectors (3 × 1008) for O, H, H
   6mrr_ani2x.json       energy + per-atom forces for 6mrr_equil.pdb (slow)
   ani2x.h5              ANI-2x weights + AEV params in HDF5 for the Julia loader
 
@@ -228,6 +230,70 @@ def export_weights_h5(model, output="data/ani_reference/ani2x.h5"):
 
 
 # -------------------------------------------------------------------------
+# H₂O water molecule reference (multi-element: O + 2H)
+# -------------------------------------------------------------------------
+
+def water_reference(model):
+    """Generate ANI-2x reference for H₂O at TIP3P geometry (no PBC)."""
+    print("\n=== H₂O water molecule (TIP3P geometry, no PBC) ===")
+
+    r_oh   = 0.9572          # O-H bond length (Å)
+    theta  = 104.52 * np.pi / 180.0   # H-O-H angle (rad)
+
+    # O at origin, H1 along +x, H2 in xy plane
+    atomic_nums = [8, 1, 1]
+    positions   = [
+        [0.0,                  0.0, 0.0],
+        [r_oh,                 0.0, 0.0],
+        [r_oh * np.cos(theta), r_oh * np.sin(theta), 0.0],
+    ]
+
+    species = torch.tensor([atomic_nums], dtype=torch.long)
+    coords  = torch.tensor([positions],   dtype=torch.float32, requires_grad=True)
+
+    result    = model((species, coords))
+    energy_ha = result.energies.item()
+    energy_ev = energy_ha * HARTREE_TO_EV
+
+    grads      = torch.autograd.grad(result.energies.sum(), coords)[0]
+    forces_ha  = (-grads[0]).detach().numpy()
+    forces_ev  = forces_ha * HARTREE_TO_EV
+
+    aev_np = compute_aev_vectors(model, atomic_nums, positions)
+
+    data = {
+        "description":          "ANI-2x reference: H₂O at TIP3P geometry, no PBC",
+        "species":              ["O", "H", "H"],
+        "atomic_numbers":       atomic_nums,
+        "coordinates_A":        positions,
+        "energy_hartree":       float(energy_ha),
+        "energy_eV":            float(energy_ev),
+        "forces_hartree_per_A": forces_ha.tolist(),
+        "forces_eV_per_A":      forces_ev.tolist(),
+        "torchani_version":     torchani.__version__,
+    }
+    aev_data = {
+        "description": "ANI-2x AEV vectors for H₂O; shape (3, 1008)",
+        "n_atoms":     3,
+        "aev_length":  int(aev_np.shape[1]),
+        "species":     ["O", "H", "H"],
+        "aevs":        aev_np.tolist(),
+    }
+
+    with open("data/ani_reference/water_ani2x.json", "w") as f:
+        json.dump(data, f, indent=2)
+    with open("data/ani_reference/water_aevs.json", "w") as f:
+        json.dump(aev_data, f, indent=2)
+
+    print(f"  E = {energy_ha:.10f} Ha = {energy_ev:.10f} eV")
+    print(f"  F[O]  = {forces_ev[0].tolist()} eV/Å")
+    print(f"  F[H1] = {forces_ev[1].tolist()} eV/Å")
+    print(f"  F[H2] = {forces_ev[2].tolist()} eV/Å")
+    print(f"  AEV shape: {aev_np.shape}  (saved to water_aevs.json)")
+    return data
+
+
+# -------------------------------------------------------------------------
 # Print AEV parameter summary
 # -------------------------------------------------------------------------
 
@@ -240,8 +306,9 @@ def print_aev_summary(model):
     print(f"  ShfR: {aev.ShfR.squeeze().tolist()}")
     print(f"  EtaA: {aev.EtaA.squeeze().tolist()}")
     print(f"  Zeta: {float(aev.Zeta.item())}")
-    print(f"  ShfA (angular shifts θ_s): {aev.ShfA.squeeze().tolist()}")
-    print(f"  ShfZ (radial shifts r_s_A): {aev.ShfZ.squeeze().tolist()}")
+    # TorchANI naming: ShfA = radial shifts for angular Gaussian; ShfZ = angular shifts.
+    print(f"  ShfA (radial shifts r_s_A, Å): {aev.ShfA.squeeze().tolist()}")
+    print(f"  ShfZ (angular shifts θ_s, rad): {aev.ShfZ.squeeze().tolist()}")
 
     n_sp   = len(ELEMENTS)
     n_etaR = aev.EtaR.numel()
@@ -267,6 +334,7 @@ if __name__ == "__main__":
     model = get_model()
 
     n2_dimer_reference(model)
+    water_reference(model)
     print_aev_summary(model)
 
     if not args.skip_protein:
