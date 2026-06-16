@@ -5,6 +5,8 @@ export
     GeneralObservableLogger,
     values,
     log_property!,
+    logger_virial_interval,
+    logger_pressure_interval,
     TemperatureLogger,
     CoordinatesLogger,
     BoxLogger,
@@ -95,6 +97,27 @@ function log_property!(logger::GeneralObservableLogger, s::System, buffers, neig
         push!(logger.history, obs)
     end
 end
+
+"""
+    logger_virial_interval(logger)
+
+Return the interval in simulation steps at which `logger` needs a valid virial.
+
+Custom loggers that need the total virial should extend this function. The
+default `Inf` means that the logger does not require virial calculation.
+"""
+logger_virial_interval(logger) = Inf
+
+"""
+    logger_pressure_interval(logger)
+
+Return the interval in simulation steps at which `logger` needs a valid pressure.
+
+Custom pressure loggers should extend this function in addition to
+[`logger_virial_interval`](@ref). The default `Inf` means that the logger does
+not require pressure-specific pre-coupling state.
+"""
+logger_pressure_interval(logger) = Inf
 
 function Base.show(io::IO, gol::GeneralObservableLogger)
     print(io, "GeneralObservableLogger with n_steps ", gol.n_steps, ", ",
@@ -332,6 +355,24 @@ valid_total_virial(buffers, step_n::Integer) =
 valid_pressure(buffers, step_n::Integer) =
     !isnothing(buffers) && has_pressure(buffers, step_n)
 
+valid_pre_coupling_virial(buffers, step_n::Integer) =
+    !isnothing(buffers) && has_pre_coupling_virial(buffers, step_n)
+
+valid_pre_coupling_pressure(buffers, step_n::Integer) =
+    !isnothing(buffers) && has_pre_coupling_pressure(buffers, step_n)
+
+function pre_coupling_pressure!(buffers, sys, step_n::Integer)
+    valid_pre_coupling_pressure(buffers, step_n) ||
+        constrained_virial_error("pre-coupling pressure logging", step_n)
+    return pressure_from_tensors!(
+        buffers.pres_tensor,
+        sys,
+        buffers.pre_coupling_kin_tensor[],
+        buffers.pre_coupling_virial[],
+        buffers.pre_coupling_volume[],
+    )
+end
+
 function constrained_virial_error(quantity, step_n)
     error("$quantity for constrained systems requires a valid total virial for step $step_n")
 end
@@ -339,6 +380,8 @@ end
 function virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
     if valid_total_virial(buffers, step_n)
         return copy(buffers.virial)
+    elseif valid_pre_coupling_virial(buffers, step_n)
+        return copy(buffers.pre_coupling_virial[])
     elseif length(sys.constraints) > 0
         constrained_virial_error("virial logging", step_n)
     else
@@ -351,6 +394,9 @@ end
     VirialLogger(T, n_steps)
 
 Log the [`virial`](@ref) tensor of a system throughout a simulation.
+
+For constrained systems on coordinate-scaling coupling steps, this records the
+pre-coupling virial for that step.
 """
 VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
 VirialLogger(n_steps::Integer) = VirialLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"kJ * mol^-1"), n_steps)
@@ -363,6 +409,8 @@ end
 function scalar_virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
     if valid_total_virial(buffers, step_n)
         return tr(buffers.virial)
+    elseif valid_pre_coupling_virial(buffers, step_n)
+        return tr(buffers.pre_coupling_virial[])
     elseif length(sys.constraints) > 0
         constrained_virial_error("scalar virial logging", step_n)
     else
@@ -375,6 +423,9 @@ end
     ScalarVirialLogger(T, n_steps)
 
 Log the [`scalar_virial`](@ref) tensor of a system throughout a simulation.
+
+For constrained systems on coordinate-scaling coupling steps, this records the
+pre-coupling scalar virial for that step.
 """
 ScalarVirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_virial_wrapper, T, n_steps)
 ScalarVirialLogger(n_steps::Integer) = ScalarVirialLogger(typeof(one(DefaultFloat)*u"kJ * mol^-1"), n_steps)
@@ -390,6 +441,8 @@ function pressure_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
     elseif valid_total_virial(buffers, step_n)
         P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads)
         return copy(P)
+    elseif valid_pre_coupling_pressure(buffers, step_n)
+        return copy(pre_coupling_pressure!(buffers, sys, step_n))
     elseif length(sys.constraints) > 0
         constrained_virial_error("pressure logging", step_n)
     else
@@ -403,6 +456,10 @@ end
     PressureLogger(T, n_steps)
 
 Log the [`pressure`](@ref) tensor of a system throughout a simulation.
+
+For constrained systems on coordinate-scaling coupling steps, this records the
+pre-coupling pressure used for coupling, not a pressure recomputed with the
+post-coupling box.
 
 This should only be used on 3-dimensional systems.
 """
@@ -421,6 +478,8 @@ function scalar_pressure_wrapper(sys::System{D}, buffers, neighbors, step_n; n_t
     elseif valid_total_virial(buffers, step_n)
         return scalar_pressure(sys, neighbors, step_n, buffers; recompute=false,
                                n_threads=n_threads)
+    elseif valid_pre_coupling_pressure(buffers, step_n)
+        return tr(pre_coupling_pressure!(buffers, sys, step_n)) / D
     elseif length(sys.constraints) > 0
         constrained_virial_error("scalar pressure logging", step_n)
     else
@@ -434,6 +493,10 @@ end
 
 Log the [`scalar_pressure`](@ref) of a system throughout a simulation.
 
+For constrained systems on coordinate-scaling coupling steps, this records the
+pre-coupling pressure used for coupling, not a pressure recomputed with the
+post-coupling box.
+
 This should only be used on 3-dimensional systems.
 """
 ScalarPressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_pressure_wrapper, T, n_steps)
@@ -442,6 +505,26 @@ ScalarPressureLogger(n_steps::Integer) = ScalarPressureLogger(typeof(one(Default
 function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(scalar_pressure_wrapper)}) where T
     print(io, "ScalarPressureLogger{", eltype(values(pl)), "} with n_steps ",
             pl.n_steps, ", ", length(values(pl)), " pressures recorded")
+end
+
+const VirialLoggerObservable = Union{
+    typeof(virial_wrapper),
+    typeof(scalar_virial_wrapper),
+    typeof(pressure_wrapper),
+    typeof(scalar_pressure_wrapper),
+}
+
+const PressureLoggerObservable = Union{
+    typeof(pressure_wrapper),
+    typeof(scalar_pressure_wrapper),
+}
+
+function logger_virial_interval(logger::GeneralObservableLogger{<:Any, <:VirialLoggerObservable})
+    return logger.n_steps
+end
+
+function logger_pressure_interval(logger::GeneralObservableLogger{<:Any, <:PressureLoggerObservable})
+    return logger.n_steps
 end
 
 """
@@ -1024,6 +1107,14 @@ function Base.show(io::IO, aol::AverageObservableLogger)
     print(io, "AverageObservableLogger with n_steps ", aol.n_steps, ", ",
             aol.current_block_size * length(aol.block_averages),
             " samples collected for observable ", aol.observable)
+end
+
+function logger_virial_interval(logger::AverageObservableLogger{<:Any, <:VirialLoggerObservable})
+    return logger.n_steps
+end
+
+function logger_pressure_interval(logger::AverageObservableLogger{<:Any, <:PressureLoggerObservable})
+    return logger.n_steps
 end
 
 """

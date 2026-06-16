@@ -1003,7 +1003,8 @@ function apply_position_constraints!(sys::System,
                                      kwargs...)
     context = isnothing(context) ? default_shake_position_constraint_context() : context
     validate_shake_position_virial_context(context)
-    coords_before = context.needs_virial ? copy(sys.coords) : nothing
+    coords_before = context.needs_virial ?
+        copyto_constraint_scratch!(context.coords_buffer, sys.coords) : nothing
 
     N12_clusters = length(ca.clusters12)
     N23_clusters = length(ca.clusters23)
@@ -1088,7 +1089,8 @@ end
 function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; context=nothing, kwargs...)
     context = isnothing(context) ? default_shake_velocity_constraint_context() : context
     validate_shake_velocity_virial_context(context)
-    velocities_before = context.needs_virial ? copy(sys.velocities) : nothing
+    velocities_before = context.needs_virial ?
+        copyto_constraint_scratch!(context.velocities_buffer, sys.velocities) : nothing
 
     N12_clusters = length(ca.clusters12)
     N23_clusters = length(ca.clusters23)

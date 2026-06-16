@@ -617,6 +617,8 @@ function wrap_coords(v, boundary::TriclinicBoundary)
 end
 
 # Unwrap coordinates so that molecules are not split over the boundary
+# Ensures that the center of geometry of bonded clusters of molecules
+# (we assume those are molecules!) falls always inside the simulation box.
 # Returns coordinates on CPU
 unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 
@@ -658,7 +660,12 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
         push!(adj[j], i)
     end
 
-    # BFS over whole system (one lattice tiling)
+    # Unwrap each bonded connected component.
+    #
+    # For each cluster:
+    # 1. Anchor the seed atom in the primary box.
+    # 2. Reconstruct bonded neighbours using nearest-image fractional offsets.
+    # 3. Translate the entire cluster by a lattice vector so that COG falls inside box.
     u = similar(f) # Dimensionless
     visited = falses(N)
     @inbounds for seed in 1:N
@@ -666,17 +673,35 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
         u[seed] = f[seed]
         visited[seed] = true
         stack = Int[seed]
+        cluster = Int[seed]
         while !isempty(stack)
             i = pop!(stack)
             fi, ui = f[i], u[i]
             for j in adj[i]
                 visited[j] && continue
                 df = f[j] - fi
-                df -= round.(df) # Shift to (-0.5,0.5]
+                df -= round.(df) # Shift to nearest image, component-wise
                 u[j] = ui + df
                 visited[j] = true
                 push!(stack, j)
+                push!(cluster, j)
             end
+        end
+
+        # Move the whole bonded cluster so its center of geometry is inside [0, 1).
+        #
+        # This preserves the unwrapped internal geometry because the same integer
+        # lattice shift is applied to every atom in the cluster.
+        cog = zero(u[seed])
+        for i in cluster
+            cog += u[i]
+        end
+        cog /= length(cluster)
+
+        shift = floor.(cog)
+
+        for i in cluster
+            u[i] -= shift
         end
     end
 
@@ -956,6 +981,7 @@ end
 @doc raw"""
     pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
              recompute=true, n_threads=Threads.nthreads())
+    pressure(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the pressure tensor of the system.
 
@@ -968,11 +994,36 @@ and ``\bf{W}`` is the virial tensor.
 
 To calculate the scalar pressure, see [`scalar_pressure`](@ref).
 
+For constrained systems, direct recomputation approximates constraint
+contributions using a deterministic small-step constraint preview. To reuse a
+total virial from a simulation step, pass valid simulator buffers with
+`recompute=false`.
+Passing a simulator for constrained systems uses the same deterministic preview
+convention, and is accepted for clarity and future extensibility.
+
 Not compatible with infinite boundaries.
 """
 function pressure(sys; n_threads::Integer=Threads.nthreads())
     return pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;
                     recompute=true, n_threads=n_threads)
+end
+
+function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial, vol) where D
+    K = energy_remove_mol.(kin_tensor) # (1/2) Σ m v⊗v
+    W = energy_remove_mol.(virial)     # Σ r⊗f
+
+    P = (2 .* K .+ W) ./ vol
+    if sys.energy_units == NoUnits || D != 3
+        # If implied energy units are (u * nm^2 * ps^-2) and everything is
+        #   consistent then this has implied units of (u * nm^-1 * ps^-2)
+        #   for 3 dimensions and (u * ps^-2) for 2 dimensions
+        pres_tensor .= P
+    else
+        # Sensible unit to return by default for 3 dimensions
+        P_bar = uconvert.(u"bar", P)
+        pres_tensor .= P_bar
+    end
+    return pres_tensor
 end
 
 function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothing;
@@ -985,7 +1036,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     end
     if recompute && length(sys.constraints) > 0
         if isnothing(buffers_in) || !has_total_virial(buffers, step_n)
-            error("cannot recompute pressure for constrained systems without a valid total virial")
+            compute_initial_total_virial!(buffers, sys, neighbors, step_n; n_threads=n_threads)
         end
     elseif recompute
         forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
@@ -1003,20 +1054,8 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
         error("pressure calculation not compatible with infinite boundaries")
     end
 
-    K = energy_remove_mol.(buffers.kin_tensor) # (1/2) Σ m v⊗v
-    W = energy_remove_mol.(buffers.virial) # Σ r⊗f
-
-    P = (2 .* K .+ W) ./ volume(sys.boundary)
-    if sys.energy_units == NoUnits || D != 3
-        # If implied energy units are (u * nm^2 * ps^-2) and everything is
-        #   consistent then this has implied units of (u * nm^-1 * ps^-2)
-        #   for 3 dimensions and (u * ps^-2) for 2 dimensions
-        buffers.pres_tensor .= P
-    else
-        # Sensible unit to return by default for 3 dimensions
-        P_bar = uconvert.(u"bar", P)
-        buffers.pres_tensor .= P_bar
-    end
+    pressure_from_tensors!(buffers.pres_tensor, sys, buffers.kin_tensor, buffers.virial,
+                           volume(sys.boundary))
     mark_pressure!(buffers.validity, step_n)
     return buffers.pres_tensor
 end
@@ -1024,10 +1063,13 @@ end
 """
     scalar_pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                     recompute=true, n_threads=Threads.nthreads())
+    scalar_pressure(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the pressure of the system as a scalar.
 
 This is the trace of the [`pressure`](@ref) tensor.
+For constrained systems, the same deterministic preview convention as
+[`pressure`](@ref) applies.
 """
 function scalar_pressure(sys; n_threads::Integer=Threads.nthreads())
     return scalar_pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;

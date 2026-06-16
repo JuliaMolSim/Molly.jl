@@ -53,19 +53,21 @@ struct AngleConstraint{D, I}
     end
 end
 
-abstract type ConstraintApplicationKind end
+abstract type AbstractConstraintApplication end
 
-struct PositionConstraintApplication <: ConstraintApplicationKind end
+struct PositionConstraintApplication <: AbstractConstraintApplication end
 
-struct VelocityConstraintApplication <: ConstraintApplicationKind end
+struct VelocityConstraintApplication <: AbstractConstraintApplication end
 
-struct ConstraintApplicationContext{K <: ConstraintApplicationKind, B, DT, S}
+struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, DT, S, CB, VB}
     kind::K
     needs_virial::Bool
     step_n::Int
     dt::DT
     virial_scale::S
     buffers::B
+    coords_buffer::CB
+    velocities_buffer::VB
 end
 
 function ConstraintApplicationContext(kind::K;
@@ -73,9 +75,27 @@ function ConstraintApplicationContext(kind::K;
                                       step_n::Integer=0,
                                       dt=nothing,
                                       virial_scale=1,
-                                      buffers=nothing) where {K <: ConstraintApplicationKind}
+                                      buffers=nothing,
+                                      coords_buffer=nothing,
+                                      velocities_buffer=nothing) where {K <: AbstractConstraintApplication}
     return ConstraintApplicationContext(kind, needs_virial, Int(step_n), dt,
-                                        virial_scale, buffers)
+                                        virial_scale, buffers, coords_buffer,
+                                        velocities_buffer)
+end
+
+function copyto_constraint_scratch!(scratch, values)
+    if isnothing(scratch)
+        return copy(values)
+    elseif scratch isa Base.RefValue
+        if isnothing(scratch[])
+            scratch[] = similar(values)
+        end
+        scratch[] .= values
+        return scratch[]
+    else
+        scratch .= values
+        return scratch
+    end
 end
 
 to_distance_constraints(ac::AngleConstraint) = (

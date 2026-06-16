@@ -483,11 +483,13 @@ end
         @test bench_result.memory <= 850
 
         scalar_vir = scalar_virial(sys)
-        scalar_P = scalar_pressure(sys)
         @test scalar_vir ≈ tr(virial(sys))
-        @test scalar_P ≈ tr(pressure(sys)) / 3
         @test scalar_vir ≈ scalar_virial(sys; n_threads=1)
-        @test scalar_P ≈ scalar_pressure(sys; n_threads=1)
+        pressure_t = pressure(sys)
+        scalar_P = scalar_pressure(sys)
+        @test all(isfinite, pressure_t)
+        @test scalar_P ≈ tr(pressure_t) / 3
+        @test scalar_pressure(sys; n_threads=1) ≈ tr(pressure_t) / 3
 
         forces_molly = forces(sys, neighbors; n_threads=1)
         openmm_forces_fp = joinpath(openmm_dir, "charmm", "forces.txt")
@@ -542,7 +544,9 @@ end
         @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65524.08096011398u"kJ * mol^-1"
         @test temperature(sys_nounits)u"K" ≈ start_temp
         @test scalar_virial(sys_nounits) ≈ tr(virial(sys_nounits))
-        @test scalar_pressure(sys_nounits) ≈ tr(pressure(sys_nounits)) / 3
+        pressure_nounits = pressure(sys_nounits)
+        @test all(isfinite, pressure_nounits)
+        @test scalar_pressure(sys_nounits) ≈ tr(pressure_nounits) / 3
 
         neighbors_nounits = find_neighbors(sys_nounits)
         @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",

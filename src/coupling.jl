@@ -42,6 +42,9 @@ apply_coupling!(sys, buffers, ::Nothing, sim, neighbors, step_n; kwargs...) = fa
 abstract type AbstractThermostat end
 abstract type AbstractBarostat end
 
+may_recompute_forces_after_coupling(::AbstractThermostat) = false
+may_recompute_forces_after_coupling(::AbstractBarostat) = true
+
 function apply_coupling_with_pressure_kin_tensor!(sys, buffers,
                                                   couplers::Union{Tuple, NamedTuple},
                                                   sim, neighbors, step_n,

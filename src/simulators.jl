@@ -242,20 +242,20 @@ function virial_schedule_from_steps(steps)
     return true, smin
 end
 
-same_logger_observable(observable, name::Symbol) =
-    isdefined(@__MODULE__, name) && observable === getfield(@__MODULE__, name)
+function logger_due_on_step(logger_interval, step_n::Integer, run_loggers)
+    run_loggers == false && return false
+    run_loggers == :skipzero && step_n == 0 && return false
+    return !isinf(logger_interval) && step_n % logger_interval == 0
+end
 
-function logger_virial_interval(logger)
-    if hasproperty(logger, :observable) && hasproperty(logger, :n_steps)
-        observable = getproperty(logger, :observable)
-        if same_logger_observable(observable, :virial_wrapper) ||
-                same_logger_observable(observable, :scalar_virial_wrapper) ||
-                same_logger_observable(observable, :pressure_wrapper) ||
-                same_logger_observable(observable, :scalar_pressure_wrapper)
-            return getproperty(logger, :n_steps)
-        end
-    end
-    return Inf
+function virial_logger_due_on_step(loggers, step_n::Integer, run_loggers)
+    return any(logger -> logger_due_on_step(logger_virial_interval(logger), step_n,
+                                            run_loggers), loggers)
+end
+
+function pressure_logger_due_on_step(loggers, step_n::Integer, run_loggers)
+    return any(logger -> logger_due_on_step(logger_pressure_interval(logger), step_n,
+                                            run_loggers), loggers)
 end
 
 function needs_virial_schedule(coupling, loggers, run_loggers)
@@ -277,6 +277,37 @@ end
 
 needs_virial_on_step(needs_virial::Bool, steps, step_n::Integer) =
     needs_virial && step_n % steps == 0
+
+may_recompute_forces_after_coupling(coupler) = true
+may_recompute_forces_after_coupling(::Nothing) = false
+may_recompute_forces_after_coupling(couplers::Union{Tuple, NamedTuple}) =
+    any(may_recompute_forces_after_coupling, couplers)
+
+function coupling_may_recompute_on_step(coupler, step_n::Integer)
+    may_recompute_forces_after_coupling(coupler) || return false
+    if hasproperty(coupler, :n_steps)
+        return step_n % getproperty(coupler, :n_steps) == 0
+    end
+    return true
+end
+
+coupling_may_recompute_on_step(couplers::Union{Tuple, NamedTuple}, step_n::Integer) =
+    any(coupler -> coupling_may_recompute_on_step(coupler, step_n), couplers)
+coupling_may_recompute_on_step(::Nothing, step_n::Integer) = false
+
+function save_pre_coupling_virial_for_loggers!(buffers, sys, coupling, step_n::Integer,
+                                               pressure_kin_tensor, run_loggers)
+    coupling_may_recompute_on_step(coupling, step_n) || return buffers
+    length(sys.constraints) > 0 || return buffers
+    has_total_virial(buffers, step_n) || return buffers
+    virial_logger_due_on_step(values(sys.loggers), step_n, run_loggers) || return buffers
+
+    save_pre_coupling_virial!(buffers, step_n)
+    if pressure_logger_due_on_step(values(sys.loggers), step_n, run_loggers)
+        save_pre_coupling_pressure!(buffers, sys, step_n, pressure_kin_tensor)
+    end
+    return buffers
+end
 
 constraint_virial_integrator_factor(sim) = 1
 constraint_virial_integrator_factor(sim::VelocityVerlet) = 2
@@ -321,6 +352,7 @@ function position_constraint_context(buffers, sys, step_n::Integer, dt, needs_vi
         dt=dt,
         virial_scale=position_constraint_virial_scale(sys, buffers, dt, sim),
         buffers=buffers,
+        coords_buffer=buffers.constraint_coords_buffer,
     )
 end
 
@@ -333,6 +365,7 @@ function velocity_constraint_context(buffers, sys, step_n::Integer, dt, needs_vi
         dt=dt,
         virial_scale=velocity_constraint_virial_scale(sys, buffers, dt, sim),
         buffers=buffers,
+        velocities_buffer=buffers.constraint_velocities_buffer,
     )
 end
 
@@ -351,30 +384,46 @@ function merge_constraint_virial_if_needed!(buffers, sys, step_n::Integer,
     return buffers
 end
 
-function merge_zero_constraint_virial_if_needed!(buffers, sys, step_n::Integer,
-                                                 needs_virial::Bool)
+function default_constraint_preview_dt(sys)
+    T = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
+    return sys.energy_units == NoUnits ? T(0.0005) : T(0.0005)u"ps"
+end
+
+function merge_initial_constraint_virial!(buffers, sys, step_n::Integer, needs_virial::Bool,
+                                          current_forces; n_threads::Integer=Threads.nthreads(),
+                                          dt=default_constraint_preview_dt(sys))
     if needs_virial && length(sys.constraints) > 0
+        coords = copyto_constraint_scratch!(buffers.constraint_preview_coords_buffer, sys.coords)
+        velocities = copyto_constraint_scratch!(buffers.constraint_velocities_buffer, sys.velocities)
+        accels = calc_accels.(current_forces, masses(sys))
+
         clear_constraint_virial!(buffers, sys, step_n)
+        sys.coords .+= sys.velocities .* dt .+ (accels .* dt^2) ./ 2
+        pos_context = position_constraint_context(buffers, sys, step_n, dt, true)
+        apply_position_constraints!(sys, coords; context=pos_context, n_threads=n_threads)
         merge_constraint_virial!(buffers, sys, step_n)
+
+        sys.coords .= coords
+        sys.velocities .= velocities
     end
     return buffers
+end
+
+function compute_initial_total_virial!(buffers, sys, neighbors, step_n::Integer;
+                                       n_threads::Integer=Threads.nthreads())
+    forces_t = zero_forces(sys)
+    forces!(forces_t, sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
+    merge_initial_constraint_virial!(buffers, sys, step_n, true, forces_t;
+                                     n_threads=n_threads)
+    return forces_t, buffers
 end
 
 function recompute_forces_after_coupling!(forces_out, sys, neighbors, buffers, step_n::Integer,
                                           needs_virial::Bool;
                                           n_threads::Integer=Threads.nthreads())
-    preserve_total_virial = needs_virial && length(sys.constraints) > 0 &&
-                            has_total_virial(buffers, step_n)
-    if preserve_total_virial
-        total_virial = copy(buffers.virial)
-        forces!(forces_out, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
-        buffers.virial .= total_virial
-        mark_total_virial!(buffers.validity, step_n)
-        invalidate_pressure!(buffers.validity)
-    else
-        forces!(forces_out, sys, neighbors, buffers, Val(needs_virial), step_n;
-                n_threads=n_threads)
-    end
+    needs_current_virial = needs_virial && length(sys.constraints) == 0
+    forces!(forces_out, sys, neighbors, buffers, Val(needs_current_virial), step_n;
+            n_threads=n_threads)
     return forces_out
 end
 
@@ -401,7 +450,8 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     forces!(forces_t, sys, neighbors, buffers, Val(needs_vir_init), init_step;
             n_threads=n_threads)
-    merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, needs_vir_init)
+    merge_initial_constraint_virial!(buffers, sys, init_step, needs_vir_init, forces_t;
+                                     n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
@@ -447,15 +497,23 @@ end
                                                       needs_vir_step, sim)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+        end
+
+        # Remove drift after the final velocity constraints/virial accumulation
+        # and before the kinetic tensor snapshot used for pressure coupling.
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
+
+        if using_constraints
             if needs_vir_step
                 kinetic_energy_tensor!(buffers.kin_tensor, sys)
                 pressure_kin_tensor = copy(buffers.kin_tensor)
             end
         end
 
-        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
-            remove_CM_motion!(sys)
-        end
+        save_pre_coupling_virial_for_loggers!(
+            buffers, sys, sim.coupling, step_n, pressure_kin_tensor, run_loggers)
         recompute_forces = apply_coupling_with_pressure_kin_tensor!(
             sys, buffers, sim.coupling, sim, neighbors, step_n, pressure_kin_tensor;
             n_threads=n_threads, rng=rng)
@@ -541,7 +599,8 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     forces!(forces_t, sys, neighbors, buffers, Val(needs_vir_init), init_step;
             n_threads=n_threads)
-    merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, needs_vir_init)
+    merge_initial_constraint_virial!(buffers, sys, init_step, needs_vir_init, forces_t;
+                                     n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
@@ -600,15 +659,23 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                                       needs_vir_step, sim)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+        end
+
+        # Remove drift after the final velocity constraints/virial accumulation
+        # and before the kinetic tensor snapshot used for pressure coupling.
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
+
+        if using_constraints
             if needs_vir_step
                 kinetic_energy_tensor!(buffers.kin_tensor, sys)
                 pressure_kin_tensor = copy(buffers.kin_tensor)
             end
         end
 
-        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
-            remove_CM_motion!(sys)
-        end
+        save_pre_coupling_virial_for_loggers!(
+            buffers, sys, sim.coupling, step_n, pressure_kin_tensor, run_loggers)
         recompute_forces = apply_coupling_with_pressure_kin_tensor!(
             sys, buffers, sim.coupling, sim, neighbors, step_n, pressure_kin_tensor;
             n_threads=n_threads, rng=rng)
@@ -683,7 +750,8 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, buffers, Val(true), init_step; n_threads=n_threads)
-        merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, true)
+        merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
+                                         n_threads=n_threads)
         apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
     else
@@ -724,6 +792,8 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
+        # Remove drift after the step velocity is finalized and before
+        # coupling/loggers observe the state.
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -749,44 +819,27 @@ end
 
 The Störmer-Verlet integrator.
 
-This is a coordinate-history integrator: after the first step, coordinates are
-advanced using the previous and current coordinate arrays rather than using
-velocities as primary state variables. The velocity calculation is only
-accurate to O(dt) and is reconstructed from the coordinate displacement each
-step.
-
-Position constraints are supported. Their virial contribution can be logged,
-but this integrator should not be used for pressure coupling. Barostats scale
-coordinates and the simulation box, but Störmer-Verlet would also need a
-consistent transformation of its stored previous coordinates. Without that
-extra coordinate-history update the recurrence is no longer the intended
-Störmer-Verlet algorithm.
-
-Coupling methods are therefore intentionally unsupported, except for `nothing`
-or empty coupler tuples/named tuples. This includes barostats, thermostats, and
-other couplers that alter coordinates, velocities, or forces. Center of mass
-motion removal is also not supported for the same reason: velocities are derived
-diagnostics here, not the state advanced by the integrator.
+Position constraints are supported. Coupling methods are intentionally
+unsupported.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
-- `coupling::C=nothing`: no coupling. Non-empty coupling methods throw an
-    `ArgumentError` when the simulation starts.
+- `coupling::C=nothing`: no coupling. Other values throw an `ArgumentError`
+    when the simulation starts.
 """
 @kwdef struct StormerVerlet{T, C}
     dt::T
     coupling::C = nothing
 end
 
-stormer_verlet_coupling_supported(::Nothing) = true
-stormer_verlet_coupling_supported(couplers::Tuple) =
-    all(stormer_verlet_coupling_supported, couplers)
-stormer_verlet_coupling_supported(couplers::NamedTuple) =
-    all(stormer_verlet_coupling_supported, values(couplers))
-stormer_verlet_coupling_supported(coupler) = false
+function check_stormer_verlet_coupling(::Nothing)
+    return nothing
+end
 
 function check_stormer_verlet_coupling(coupling)
-    stormer_verlet_coupling_supported(coupling) && return nothing
+    # This integrator advances coordinate history, not velocities. Couplers that
+    # change coordinates, velocities, or forces would need to transform that
+    # stored history consistently.
     throw(ArgumentError(
         "StormerVerlet does not support coupling methods. It stores coordinate " *
         "history instead of advancing velocities as primary state, so barostats, " *
@@ -819,7 +872,8 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, buffers, Val(true), init_step; n_threads=n_threads)
-        merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, true)
+        merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
+                                         n_threads=n_threads)
         apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
     else
@@ -840,9 +894,11 @@ end
         coords_copy .= sys.coords
         prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
         if step_n == 1
-            # Use the velocities at the first step since there is only one set of coordinates
+            # Use the velocities at the first step since there is only one set of coordinates.
             sys.coords .+= sys.velocities .* sim.dt .+ (accels_t .* dt_sq) ./ 2
         else
+            # After the first step, coordinates are advanced from the previous
+            # and current coordinate arrays rather than primary velocity state.
             sys.coords .+= vector.(coords_last, sys.coords, (sys.boundary,)) .+ accels_t .* dt_sq
         end
 
@@ -937,7 +993,8 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, buffers, Val(true), init_step; n_threads=n_threads)
-        merge_zero_constraint_virial_if_needed!(buffers, sys, init_step, true)
+        merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
+                                         n_threads=n_threads)
         apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
     else
@@ -987,6 +1044,8 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
+        # Remove drift after the step velocity is finalized and before
+        # coupling/loggers observe the state.
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -1006,6 +1065,54 @@ end
         next_nograd!(progress)
     end
     return sys
+end
+
+const ConstraintPreviewSimulator = Union{
+    VelocityVerlet,
+    DPDVelocityVerlet,
+    Verlet,
+    StormerVerlet,
+    Langevin,
+}
+
+virial(sys::System, sim::ConstraintPreviewSimulator; n_threads::Integer=Threads.nthreads()) =
+    virial(sys, find_neighbors(sys; n_threads=n_threads), sim, 0; n_threads=n_threads)
+
+virial(sys::System, neighbors, sim::ConstraintPreviewSimulator, step_n::Integer=0;
+       n_threads::Integer=Threads.nthreads()) =
+    virial(sys, neighbors, step_n; n_threads=n_threads)
+
+scalar_virial(sys::System, sim::ConstraintPreviewSimulator;
+              n_threads::Integer=Threads.nthreads()) =
+    tr(virial(sys, sim; n_threads=n_threads))
+
+scalar_virial(sys::System, neighbors, sim::ConstraintPreviewSimulator, step_n::Integer=0;
+              n_threads::Integer=Threads.nthreads()) =
+    tr(virial(sys, neighbors, sim, step_n; n_threads=n_threads))
+
+pressure(sys::System{D}, sim::ConstraintPreviewSimulator;
+         n_threads::Integer=Threads.nthreads()) where D =
+    pressure(sys, find_neighbors(sys; n_threads=n_threads), sim, 0, nothing;
+             n_threads=n_threads)
+
+function pressure(sys::System, neighbors, sim::ConstraintPreviewSimulator, step_n::Integer=0,
+                  buffers=nothing; recompute::Bool=true,
+                  n_threads::Integer=Threads.nthreads(), kin_tensor=nothing)
+    return pressure(sys, neighbors, step_n, buffers; recompute=recompute,
+                    n_threads=n_threads, kin_tensor=kin_tensor)
+end
+
+scalar_pressure(sys::System{D}, sim::ConstraintPreviewSimulator;
+                n_threads::Integer=Threads.nthreads()) where D =
+    scalar_pressure(sys, find_neighbors(sys; n_threads=n_threads), sim, 0, nothing;
+                    n_threads=n_threads)
+
+function scalar_pressure(sys::System{D}, neighbors, sim::ConstraintPreviewSimulator,
+                         step_n::Integer=0, buffers=nothing; recompute::Bool=true,
+                         n_threads::Integer=Threads.nthreads(), kin_tensor=nothing) where D
+    P = pressure(sys, neighbors, sim, step_n, buffers; recompute=recompute,
+                 n_threads=n_threads, kin_tensor=kin_tensor)
+    return tr(P) / D
 end
 
 """
@@ -1121,6 +1228,8 @@ end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
+        # Remove drift after all splitting substeps and before loggers observe
+        # the state.
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -1225,6 +1334,8 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
+        # Overdamped dynamics advance coordinates directly; removing velocity
+        # drift here only affects the velocity state seen by loggers.
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -1330,6 +1441,8 @@ end
         sys.velocities .= (v_half .+ accels_t_dt .* dt_div2) ./
                           (1 + (zeta * dt_div2))
 
+        # Remove drift after the Nose-Hoover velocity update and before
+        # coupling/loggers observe the state.
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
