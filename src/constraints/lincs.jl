@@ -645,18 +645,27 @@ end
 function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
     T = eltype(data.lengths)
     coupling = data.coupling
+    atom1 = data.atom1
+    atom2 = data.atom2
+    invmass = data.invmass
+    sdiag = data.sdiag
+    B = ws.B
+    sol = ws.sol
+    blcc = ws.blcc
+    crange = coupling.range
+    neighbors = coupling.neighbors
     rhs = ws.rhs
     tmp = ws.tmp
 
     # Matrix expansion: nrec iterations
     for rec in 1:data.nrec
-        @inbounds for i in eachindex(data.atom1)
+        @inbounds for i in eachindex(atom1)
             mvb = zero(T)
-            for n in coupling.range[i]:(coupling.range[i+1] - 1)
-                mvb += ws.blcc[n] * rhs[coupling.neighbors[n]]
+            for n in crange[i]:(crange[i + 1] - 1)
+                mvb += blcc[n] * rhs[neighbors[n]]
             end
             tmp[i] = mvb
-            ws.sol[i] += mvb
+            sol[i] += mvb
         end
         # Ping-pong: swap local bindings so next iteration reads from what was just written.
         # ws.rhs/ws.tmp fields still point to original arrays; callers reassign ws.rhs before reuse.
@@ -664,59 +673,68 @@ function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
     end
 
     # Position update
-    @inbounds for i in eachindex(data.atom1)
-        a1, a2 = data.atom1[i], data.atom2[i]
-        factor = data.sdiag[i] * ws.sol[i]
-        delta = ws.B[i] * factor
-        coords[a1] -= (data.invmass[a1] * delta) .* unit_scale
-        coords[a2] += (data.invmass[a2] * delta) .* unit_scale
+    @inbounds for i in eachindex(atom1)
+        a1 = atom1[i]
+        a2 = atom2[i]
+        delta = B[i] * (sdiag[i] * sol[i])
+        coords[a1] -= (invmass[a1] * delta) .* unit_scale
+        coords[a2] += (invmass[a2] * delta) .* unit_scale
     end
 end
 
 function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
                       boundary)
     T = eltype(data.lengths)
-    K = length(data.atom1)
+    atom1 = data.atom1
+    atom2 = data.atom2
+    lengths = data.lengths
+    sdiag = data.sdiag
     coupling = data.coupling
-
+    crange = coupling.range
+    neighbors = coupling.neighbors
+    coef = coupling.coef
+    B = ws.B
+    rhs = ws.rhs
+    blcc = ws.blcc
+    K = length(atom1)
     unit_scale = oneunit(eltype(eltype(coords)))
 
     # Compute unit bond vectors and initial RHS
     @inbounds for i in 1:K
-        diff_old = lincs_bond_vector(old_coords, data.atom1[i], data.atom2[i], boundary)
-        inv_len = inv(sqrt(dot(diff_old, diff_old)))
-        B_i = diff_old * inv_len
-        ws.B[i] = B_i
-
-        diff_new = lincs_bond_vector(coords, data.atom1[i], data.atom2[i], boundary)
-        proj = dot(B_i, diff_new)
-        ws.rhs[i] = data.sdiag[i] * (proj - data.lengths[i])
+        a1, a2 = atom1[i], atom2[i]
+        diff_old = lincs_bond_vector(old_coords, a1, a2, boundary)
+        B_i = diff_old * inv(sqrt(dot(diff_old, diff_old)))
+        B[i] = B_i
+        diff_new = lincs_bond_vector(coords, a1, a2, boundary)
+        rhs[i] = sdiag[i] * (dot(B_i, diff_new) - lengths[i])
     end
 
     # Compute runtime coupling coefficients: blcc = coef * dot(B[i], B[neighbor])
     @inbounds for i in 1:K
-        for n in coupling.range[i]:(coupling.range[i+1] - 1)
-            j = coupling.neighbors[n]
-            ws.blcc[n] = coupling.coef[n] * dot(ws.B[i], ws.B[j])
+        B_i = B[i]
+        for n in crange[i]:(crange[i + 1] - 1)
+            blcc[n] = coef[n] * dot(B_i, B[neighbors[n]])
         end
     end
 
-    copyto!(ws.sol, ws.rhs)
+    copyto!(ws.sol, rhs)
     lincs_solve!(coords, data, ws, unit_scale)
 
     # Outer correction iterations (rotational lengthening)
     for _ in 1:data.niter
         @inbounds for i in 1:K
-            diff = lincs_bond_vector(coords, data.atom1[i], data.atom2[i], boundary)
-            dlen2 = 2 * data.lengths[i]^2 - dot(diff, diff)
+            a1 = atom1[i]
+            a2 = atom2[i]
+            diff = lincs_bond_vector(coords, a1, a2, boundary)
+            dlen2 = 2 * lengths[i]^2 - dot(diff, diff)
             if dlen2 < zero(T)
-                @warn "LINCS correction: bond $(data.atom1[i])-$(data.atom2[i]) stretched " *
+                @warn "LINCS correction: bond $(a1)-$(a2) stretched " *
                       "beyond sqrt(2) * target length, constraint may be unreliable" maxlog=1
             end
             p = sqrt(max(dlen2, zero(T)))
-            ws.rhs[i] = data.sdiag[i] * (data.lengths[i] - p)
+            rhs[i] = sdiag[i] * (lengths[i] - p)
         end
-        copyto!(ws.sol, ws.rhs)
+        copyto!(ws.sol, rhs)
         lincs_solve!(coords, data, ws, unit_scale)
     end
 
@@ -724,38 +742,47 @@ function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
 end
 
 function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace, boundary)
-    K = length(data.atom1)
+    atom1 = data.atom1
+    atom2 = data.atom2
+    sdiag = data.sdiag
     coupling = data.coupling
+    crange = coupling.range
+    neighbors = coupling.neighbors
+    coef = coupling.coef
+    B = ws.B
+    rhs = ws.rhs
+    blcc = ws.blcc
+    K = length(atom1)
     unit_vel_scale = oneunit(eltype(eltype(velocities)))
 
     # Bond vectors from current (constrained) coords + velocity RHS
     @inbounds for i in 1:K
-        a1, a2 = data.atom1[i], data.atom2[i]
+        a1, a2 = atom1[i], atom2[i]
         diff = lincs_bond_vector(coords, a1, a2, boundary)
         inv_len = inv(sqrt(dot(diff, diff)))
-        ws.B[i] = diff * inv_len
+        B[i] = diff * inv_len
         dv = ustrip.(velocities[a2] - velocities[a1])
-        ws.rhs[i] = -data.sdiag[i] * dot(ws.B[i], dv)
+        rhs[i] = -sdiag[i] * dot(B[i], dv)
     end
 
     # Recompute coupling coefficients using current B vectors
     @inbounds for i in 1:K
-        for n in coupling.range[i]:(coupling.range[i+1] - 1)
-            ws.blcc[n] = coupling.coef[n] * dot(ws.B[i], ws.B[coupling.neighbors[n]])
+        for n in crange[i]:(crange[i+1] - 1)
+            blcc[n] = coef[n] * dot(B[i], B[neighbors[n]])
         end
     end
 
-    copyto!(ws.sol, ws.rhs)
+    copyto!(ws.sol, rhs)
     lincs_solve!(velocities, data, ws, unit_vel_scale)
 
     # Iterative correction: re-evaluate velocity residual and solve again
     for _ in 1:data.niter
         @inbounds for i in 1:K
-            a1, a2 = data.atom1[i], data.atom2[i]
+            a1, a2 = atom1[i], atom2[i]
             dv = ustrip.(velocities[a2] - velocities[a1])
-            ws.rhs[i] = -data.sdiag[i] * dot(ws.B[i], dv)
+            rhs[i] = -sdiag[i] * dot(B[i], dv)
         end
-        copyto!(ws.sol, ws.rhs)
+        copyto!(ws.sol, rhs)
         lincs_solve!(velocities, data, ws, unit_vel_scale)
     end
 end
@@ -796,7 +823,6 @@ function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
                     ndrange=n_ca)
     end
 
-    KernelAbstractions.synchronize(backend)
     return coords
 end
 
@@ -833,7 +859,6 @@ function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
                     ndrange=n_ca)
     end
 
-    KernelAbstractions.synchronize(backend)
     return velocities
 end
 

@@ -337,8 +337,7 @@ function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
         for ca in sys.constraints
             apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
         end
-        vel_storage .+= sys.coords ./ dt
-        sys.velocities .+= vel_storage
+        sys.velocities .+= vel_storage .+ sys.coords ./ dt
     end
     return sys
 end
