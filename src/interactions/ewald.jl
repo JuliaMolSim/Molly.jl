@@ -519,7 +519,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         excluded_buffer_Es = to_device(zeros(T, length(excluded_pairs)), AT)
         virial_buffer      = to_device(zeros(T, 3, 3), AT)
     elseif n_threads > 1
-        charge_grid_buffer = [zero(charge_grid) for _ in 1:n_threads]
+        charge_grid_buffer = [zeros(T, size(charge_grid)) for _ in 1:n_threads]
         recip_conv_buffer = zeros(T, n_threads)
         excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
         virial_buffer = [zeros(T, 3, 3) for _ in 1:n_threads]
@@ -718,6 +718,25 @@ end
     end
 end
 
+# Single-threaded case
+@inline function add_charge_grid!(charge_grid::AbstractArray{<:Complex}, zindex, yindex,
+                                  xindex, cb, ::Val{false})
+    @inbounds charge_grid[zindex, yindex, xindex] += Complex(cb, zero(cb))
+    return charge_grid
+end
+
+# Multi-threaded case, this is just the real part
+@inline function add_charge_grid!(charge_grid, zindex, yindex, xindex, cb, ::Val{false})
+    @inbounds charge_grid[zindex, yindex, xindex] += cb
+    return charge_grid
+end
+
+# GPU case, atomic doesn't work for complex numbers, this is just the real part
+@inline function add_charge_grid!(charge_grid, zindex, yindex, xindex, cb, ::Val{true})
+    @inbounds Atomix.@atomic charge_grid[zindex, yindex, xindex] += cb
+    return charge_grid
+end
+
 @inline function spread_charge_inner!(charge_grid, grid_indices, bsplines_θ,
                               mesh_dims, order, atoms, scheduler, i, ::Val{T},
                               ::Val{atomic}) where {T, atomic}
@@ -731,12 +750,7 @@ end
                 zindex = (z0index + iz) % mesh_dims[3]
                 cb = q * bsplines_θ[(i-1)*order+ix+1, 1] *
                             bsplines_θ[(i-1)*order+iy+1, 2] * bsplines_θ[(i-1)*order+iz+1, 3]
-                if atomic
-                    # Atomic doesn't work for complex numbers, this is just the real part
-                    Atomix.@atomic charge_grid[zindex+1, yindex+1, xindex+1] += cb
-                else
-                    charge_grid[zindex+1, yindex+1, xindex+1] += Complex(cb, zero(cb))
-                end
+                add_charge_grid!(charge_grid, zindex + 1, yindex + 1, xindex + 1, cb, Val(atomic))
             end
         end
     end
@@ -756,7 +770,7 @@ end
 function spread_charge!(charge_grid::Array{Complex{T}, 3}, buffer, grid_indices, bsplines_θ,
                         mesh_dims, order, atoms, scheduler, ::Val{n_threads}) where {T, n_threads}
     Threads.@threads for chunk_i in 1:n_threads
-        buffer[chunk_i] .= zero(Complex{T})
+        buffer[chunk_i] .= zero(T)
         for i in chunk_i:n_threads:length(atoms)
             spread_charge_inner!(buffer[chunk_i], grid_indices, bsplines_θ,
                                  mesh_dims, order, atoms, scheduler, i, Val(T), Val(false))
@@ -1005,6 +1019,11 @@ grad_safe_bfft!(charge_grid, bfft_plan) = bfft_plan * charge_grid
 function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force_units,
                           energy_units, ::Val{needs_vir}, calculate_forces=true;
                           n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
+    if !is_on_gpu(coords) && n_threads > 1 &&
+            (isnothing(inter.charge_grid_buffer) || length(inter.charge_grid_buffer) != n_threads)
+        ntc = (isnothing(inter.charge_grid_buffer) ? 1 : length(inter.charge_grid_buffer))
+        error("PME was created with n_threads $ntc but called with n_threads $n_threads")
+    end
     n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     V = volume(boundary)
@@ -1019,8 +1038,10 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     recip_box = invert_box_vectors(boundary)
     grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
     update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order, n_thr)
+    n_spread_thr = min(n_threads, 4)
     spread_charge!(inter.charge_grid, inter.charge_grid_buffer, inter.grid_indices,
-                   inter.bsplines_θ, mesh_dims, order, atoms, inter.scheduler, Val(n_thr))
+                   inter.bsplines_θ, mesh_dims, order, atoms, inter.scheduler,
+                   Val(n_spread_thr))
     grad_safe_fft!(inter.charge_grid, inter.fft_plan)
     reciprocal_space_E = recip_conv!(vir, inter.virial_buffer, inter.charge_grid,
                     inter.recip_conv_buffer, inter.bsplines_moduli_x, inter.bsplines_moduli_y,
