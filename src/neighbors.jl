@@ -625,7 +625,6 @@ function find_neighbors(sys::System{D, AT},
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where {D, AT}
-
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
@@ -634,13 +633,13 @@ function find_neighbors(sys::System{D, AT},
     CellListMap.update!(nf.clm_particlesystem; 
         positions=from_device(sys.coords),
         unitcell=first(clm_unitcell_arg(sys.boundary)), 
-        parallel=n_threads > 1,
+        parallel=(n_threads > 1),
     )
 
-    # Update the neighborlist
+    # Update the neighbor list
     neighbors = CellListMap.pairwise!(
         (p, neighbors) -> push_pair!(p, neighbors, nf.eligible, nf.special), 
-        nf.clm_particlesystem
+        nf.clm_particlesystem,
     )
 
     if AT <: AbstractGPUArray
