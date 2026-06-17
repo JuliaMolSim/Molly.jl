@@ -29,7 +29,7 @@ using KernelAbstractions
 #   namespace, so annotation is required.
 # - shfl_recurse is unexported so annotation is required. A PR has been opened
 #   for this, we have to wait until it is available in the stable release.
-const CUDA_CORE = isdefined(CUDA, :CUDACore) ? CUDA.CUDACore : CUDA
+const CUDA_CORE = isdefined(CUDA, :CUDACore) ? CUDACore : CUDA
 
 const WARPSIZE = UInt32(32)
 const MAX_BLOCK_Y = 32
@@ -118,23 +118,24 @@ function effective_tile_threads_override(config::Molly.CUDALaunchConfig)
     if xor(threads_x_env === nothing, threads_y_env === nothing)
         error("Set both MOLLY_CUDA_TILE_THREADS_X and MOLLY_CUDA_TILE_THREADS_Y together")
     end
-    return config.tile_threads === nothing ?
+    config_tile_threads = Molly.cuda_tile_threads(config)
+    return config_tile_threads === nothing ?
            (threads_x_env === nothing ? nothing : (threads_x_env, threads_y_env)) :
-           config.tile_threads
+           config_tile_threads
 end
 
 effective_force_block_y_override(config::Molly.CUDALaunchConfig) =
-    prefer_override(config.force_block_y, env_override("MOLLY_CUDA_FORCE_BLOCK_Y"))
+    prefer_override(Molly.cuda_force_block_y(config), env_override("MOLLY_CUDA_FORCE_BLOCK_Y"))
 
 effective_energy_block_y_override(config::Molly.CUDALaunchConfig) =
-    prefer_override(config.energy_block_y, env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
+    prefer_override(Molly.cuda_energy_block_y(config), env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
 
 effective_force_maxregs_override(config::Molly.CUDALaunchConfig) =
-    prefer_override(config.force_maxregs, env_override("MOLLY_CUDA_FORCE_MAXREGS"))
+    prefer_override(Molly.cuda_force_maxregs(config), env_override("MOLLY_CUDA_FORCE_MAXREGS"))
 
 function autotune_key(sys::System{D, <:CuArray}, pairwise_inters, force_maxregs_override) where D
     dev = CUDA.device()
-    sm_count = CUDA.attribute(dev, CUDACore.CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)
+    sm_count = CUDA.attribute(dev, CUDA_CORE.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)
     n_atoms = length(sys.coords)
     return LaunchAutotuneKey(
         CUDA.name(dev),
@@ -601,8 +602,10 @@ function Molly.optimize_cuda_launch_config!(sys::System{D, <:CuArray, T}) where 
     tile_threads_override = effective_tile_threads_override(current_config)
     force_maxregs_override = effective_force_maxregs_override(current_config)
 
-    current_config.force_block_y === nothing || validate_block_y("force_block_y", current_config.force_block_y)
-    current_config.energy_block_y === nothing || validate_block_y("energy_block_y", current_config.energy_block_y)
+    current_force_block_y = Molly.cuda_force_block_y(current_config)
+    current_energy_block_y = Molly.cuda_energy_block_y(current_config)
+    current_force_block_y === nothing || validate_block_y("force_block_y", current_force_block_y)
+    current_energy_block_y === nothing || validate_block_y("energy_block_y", current_energy_block_y)
     force_maxregs_override === nothing || force_maxregs_override > 0 ||
         error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(force_maxregs_override)")
 
@@ -622,16 +625,16 @@ function Molly.optimize_cuda_launch_config!(sys::System{D, <:CuArray, T}) where 
     end
 
     merged_config = Molly.CUDALaunchConfig(
-        force_block_y = needs_force ? tuned_config.force_block_y : current_config.force_block_y,
-        force_maxregs = current_config.force_maxregs,
-        tile_threads = needs_tile ? tuned_config.tile_threads : current_config.tile_threads,
-        energy_block_y = needs_energy ? tuned_config.energy_block_y : current_config.energy_block_y,
+        force_block_y = needs_force ? Molly.cuda_force_block_y(tuned_config) : current_force_block_y,
+        force_maxregs = Molly.cuda_force_maxregs(current_config),
+        tile_threads = needs_tile ? Molly.cuda_tile_threads(tuned_config) : Molly.cuda_tile_threads(current_config),
+        energy_block_y = needs_energy ? Molly.cuda_energy_block_y(tuned_config) : current_energy_block_y,
     )
     Molly.set_cuda_launch_config!(sys, merged_config)
 
     return something(
         effective_force_block_y_override(merged_config),
-        tuned_config.force_block_y,
+        Molly.cuda_force_block_y(tuned_config),
     )
 end
 
@@ -662,8 +665,8 @@ end
 
 function force_launch_params(sys, kernel)
     config = Molly.cuda_launch_config(sys)
-    block_y_override = prefer_override(config.force_block_y, env_override("MOLLY_CUDA_FORCE_BLOCK_Y"))
-    maxregs_override = prefer_override(config.force_maxregs, env_override("MOLLY_CUDA_FORCE_MAXREGS"))
+    block_y_override = prefer_override(Molly.cuda_force_block_y(config), env_override("MOLLY_CUDA_FORCE_BLOCK_Y"))
+    maxregs_override = prefer_override(Molly.cuda_force_maxregs(config), env_override("MOLLY_CUDA_FORCE_MAXREGS"))
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_FORCE_BLOCK_Y", block_y_override)
     maxregs_override === nothing || maxregs_override > 0 || error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(maxregs_override)")
 
@@ -680,7 +683,7 @@ end
 
 function energy_launch_params(sys, kernel)
     config = Molly.cuda_launch_config(sys)
-    block_y_override = prefer_override(config.energy_block_y, env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
+    block_y_override = prefer_override(Molly.cuda_energy_block_y(config), env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_ENERGY_BLOCK_Y", block_y_override)
 
     conf = launch_configuration(kernel.fun)
@@ -696,7 +699,7 @@ end
 
 function tile_launch_params(sys, kernel)
     config = Molly.cuda_launch_config(sys)
-    config_tile_threads = config.tile_threads
+    config_tile_threads = Molly.cuda_tile_threads(config)
     threads_x_override = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_X") : config_tile_threads[1]
     threads_y_override = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_Y") : config_tile_threads[2]
     if xor(threads_x_override === nothing, threads_y_override === nothing)
@@ -1275,7 +1278,7 @@ positions in `inv_morton_seq`.
 """
 function update_inv_morton_kernel!(inv_morton_seq, morton_seq, ::Val{N}) where N
     i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
-    morton_seq_ro = CUDACore.Const(morton_seq)
+    morton_seq_ro = CUDA_CORE.Const(morton_seq)
     if i <= N
         @inbounds inv_morton_seq[morton_seq_ro[i]] = i
     end

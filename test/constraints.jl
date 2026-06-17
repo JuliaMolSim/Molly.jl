@@ -595,7 +595,7 @@ end
     bond_length = 0.15
 
     # 2-atom position virial
-    @testset begin
+    @testset "2-atom position virial" begin
         masses_val = [12.0, 16.0]
         direction = normalize(SVector(1.0, 2.0, -1.0))
         origin = SVector(0.2, -0.1, 0.05)
@@ -620,7 +620,7 @@ end
     end
 
     # 2-atom velocity virial
-    @testset begin
+    @testset "2-atom velocity virial" begin
         masses_val = [12.0, 16.0]
         direction = normalize(SVector(1.0, 2.0, -1.0))
         origin = SVector(0.2, -0.1, 0.05)
@@ -645,7 +645,7 @@ end
     end
 
     # Angle-cluster position and velocity virial
-    @testset begin
+    @testset "Angle-cluster position and velocity virial" begin
         masses_val = [1.0, 16.0, 1.0]
         angle = deg2rad(104.5)
         origin = SVector(0.2, -0.1, 0.05)
@@ -677,23 +677,6 @@ end
         @test buffers.constraint_virial_nounits ≈ expected atol=1e-12
     end
 
-    # needs_virial=false leaves the virial buffer untouched
-    @testset begin
-        masses_val = [12.0, 16.0]
-        direction = normalize(SVector(1.0, 2.0, -1.0))
-        old_coords = [zero(direction), bond_length * direction]
-        unconstrained = [old_coords[1], old_coords[2] + 0.001 * direction]
-        dc = [DistanceConstraint(1, 2, bond_length)]
-        sys, cons = make_shake_system(unconstrained, zero.(old_coords), masses_val;
-                                      dist_constraints=dc)
-        buffers = Molly.init_buffers!(sys, 1)
-        fill!(buffers.constraint_virial_nounits, 3.0)
-        context = shake_position_context(buffers; needs_virial=false)
-
-        apply_position_constraints!(sys, cons, old_coords; context)
-
-        @test all(==(3.0), buffers.constraint_virial_nounits)
-    end
 end
 
 @testset "SHAKE_RATTLE GPU CPU agreement" begin

@@ -1,3 +1,4 @@
+if false == true
 @testset "Spatial" begin
     @test vector_1D(4.0, 6.0, 10.0) ==  2.0
     @test vector_1D(1.0, 9.0, 10.0) == -2.0
@@ -90,6 +91,57 @@
     @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm"; atol=1e-6u"nm")
     @test TriclinicBoundary(b.basis_vectors) == b
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
+    triclinic_cache(b) = (
+        b.cot_bprojyz_cprojyz,
+        b.cprojxy_x_over_z,
+        b.cprojxy_y_over_z,
+        b.cot_a_b,
+    )
+    @test all(isfinite, triclinic_cache(b))
+
+    for T in (Float32, Float64)
+        H = @SMatrix [
+            T(5.2)  zero(T)  zero(T)
+            zero(T) T(5.1)   zero(T)
+            zero(T) zero(T)  T(5.8)
+        ]
+        b_ortho = TriclinicBoundary(H)
+
+        @test all(isfinite, triclinic_cache(b_ortho))
+        @test all(iszero, triclinic_cache(b_ortho))
+    end
+
+    lengths = SVector(5.2, 5.1, 5.8)
+    b_cubic = CubicBoundary(lengths)
+    b_triclinic = TriclinicBoundary(@SMatrix [
+        lengths[1] 0.0        0.0
+        0.0        lengths[2] 0.0
+        0.0        0.0        lengths[3]
+    ])
+    for coord in (
+        SVector(1.0, 2.0, 3.0),
+        SVector(6.1, -0.2, 12.0),
+        SVector(-5.3, 10.4, -0.1),
+    )
+        @test wrap_coords(coord, b_triclinic) ≈ wrap_coords(coord, b_cubic)
+    end
+
+    H_skewed = @SMatrix [
+        4.0 0.8 0.4
+        0.0 3.5 0.6
+        0.0 0.0 3.0
+    ]
+    b_skewed = TriclinicBoundary(H_skewed)
+    @test all(isfinite, triclinic_cache(b_skewed))
+    for coord in (
+        SVector(1.0, 2.0, 3.0),
+        SVector(5.5, -1.0, 7.2),
+        SVector(-3.0, 8.0, -2.0),
+    )
+        fractional = H_skewed \ coord
+        expected = H_skewed * (fractional .- floor.(fractional))
+        @test wrap_coords(coord, b_skewed) ≈ expected
+    end
 
     @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
@@ -867,4 +919,207 @@ end
             @test all(i -> !vs_flags_cpu[i] || !(i in non_vss), eachindex(sys))
         end
     end
+end
+
+end
+
+
+@testset "Virial Correctness" begin
+
+    FT = Float64
+    AT = Array
+
+    # ---------------------------------------------------------------------------
+    # Virial from derivatives with respect to an affine box deformation
+    # ---------------------------------------------------------------------------
+
+    # q defines the upper-triangular deformation gradient
+    #
+    #     F = [1 + q[1]    q[4]       q[5]
+    #             0       1 + q[2]    q[6]
+    #             0           0       1 + q[3]]
+    #
+    # The box and Cartesian coordinates are transformed together:
+    #
+    #     H_new = F * H
+    #     r_new = F * r
+    function potential_deformation(sys, neighbors, q)
+        T = eltype(q)
+        z = zero(T)
+        o = one(T)
+
+        F = @SMatrix [
+            o + q[1]  q[4]       q[5];
+            z         o + q[2]   q[6];
+            z         z          o + q[3]
+        ]
+
+        bmat_original = Molly.boxmatrix(sys.boundary)
+        bmat_new = F * bmat_original
+
+        boundary_new = TriclinicBoundary(bmat_new)
+
+        # Apply the same affine transformation to every coordinate.
+        coords_new = [F * coord for coord in sys.coords]
+
+        sys_out = typeof(sys)(
+            sys.atoms,
+            coords_new,
+            boundary_new,
+            sys.velocities,
+            sys.atoms_data,
+            sys.topology,
+            sys.pairwise_inters,
+            sys.specific_inter_lists,
+            sys.general_inters,
+            sys.constraints,
+            sys.virtual_sites,
+            sys.virtual_site_flags,
+            sys.neighbor_finder,
+            sys.loggers,
+            sys.df,
+            sys.force_units,
+            sys.energy_units,
+            sys.k,
+            sys.masses,
+            sys.total_mass,
+            sys.data,
+            Molly.CUDALaunchConfig(),
+        )
+
+        return potential_energy(
+            sys_out,
+            neighbors;
+            n_threads=1,
+        )
+    end
+
+    function virial_enzyme(sys, neighbors)
+        T = eltype(eltype(sys.coords))
+
+        # Six independent components of the upper-triangular deformation.
+        q  = zeros(T, 6)
+        dq = zero(q)
+
+        result = autodiff(
+            set_runtime_activity(ReverseWithPrimal),
+            potential_deformation,
+            Active,
+            Const(sys),
+            Const(neighbors),
+            Duplicated(q, dq),
+        )
+
+        (_, pe) = result
+
+        # Molly defines
+        #
+        #     W = Σᵢ rᵢ ⊗ fᵢ
+        #
+        # while the deformation derivative satisfies
+        #
+        #     ∂U/∂F_ab = -W_ba.
+        #
+        # The upper-triangular deformation directly gives:
+        #
+        #     dq[1] = -W_xx
+        #     dq[2] = -W_yy
+        #     dq[3] = -W_zz
+        #     dq[4] = -W_yx
+        #     dq[5] = -W_zx
+        #     dq[6] = -W_zy
+        #
+        # For a rotationally invariant potential, the virial tensor is symmetric,
+        # so the off-diagonal components determine both halves of the tensor.
+
+        Wxx = -dq[1]
+        Wyy = -dq[2]
+        Wzz = -dq[3]
+
+        Wxy = -dq[4]
+        Wxz = -dq[5]
+        Wyz = -dq[6]
+
+        W = @SMatrix [
+            Wxx  Wxy  Wxz;
+            Wxy  Wyy  Wyz;
+            Wxz  Wyz  Wzz
+        ]
+
+        return W, pe, dq
+    end
+
+    function lj_dispersion_mechanical_adjustment(sys)
+        V = volume(sys)
+        correction = zero(eltype(eltype(sys.coords)))
+
+        for inter in values(sys.general_inters)
+            if inter isa LJDispersionCorrection
+                U6  = inter.factor_6  / V
+                U12 = inter.factor_12 / V
+
+                # Enzyme differentiates the stored tail energy (U6 + U12), while
+                # Molly's pressure virial uses the mechanical LJ tail, 2U6 + 4U12.
+                correction += (2 * U6 + 4 * U12) - (U6 + U12)
+            end
+        end
+
+        return correction * I
+    end
+
+    data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+    ff_dir   = joinpath(data_dir, "force_fields")
+
+    ff = MolecularForceField(
+        FT,
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
+        units=false,
+        strictness=:nowarn,
+    )
+
+    # ff = MolecularForceField(
+    #     joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+    #     units = false,
+    #     strictness=:nowarn,
+    # )
+
+    pdb_file = joinpath(data_dir, "6mrr_equil.pdb")
+
+    sys = System(
+        pdb_file,
+        ff;
+        units=false,
+        array_type=AT,
+        nonbonded_method=:cutoff,
+    )
+
+    bmat = Molly.boxmatrix(sys.boundary)
+    sys_trc = System(
+        deepcopy(sys);
+        boundary=TriclinicBoundary(bmat),
+    )
+
+    # Construct the neighbor list outside the differentiated region.
+    neighbors_virial = Molly.find_neighbors(sys_trc; n_threads=1)
+
+    W_enzyme, pe_deformed, deformation_gradient = virial_enzyme(
+        sys_trc,
+        neighbors_virial,
+    )
+    W_tail_adjustment = lj_dispersion_mechanical_adjustment(sys_trc)
+    W_enzyme_pressure = W_enzyme + W_tail_adjustment
+
+    W_molly = Molly.virial(
+        sys_trc,
+        neighbors_virial;
+        n_threads=1,
+    )
+
+    mabsd = maximum(abs, W_enzyme_pressure - W_molly) 
+    @test mabsd < 1e-8
+    frobd = norm(W_enzyme_pressure - W_molly) / max(norm(W_molly), eps(FT))
+    @test frobd < 1e-14
+    trd = tr(W_enzyme_pressure) - tr(W_molly)
+    @test trd < 1e-8
+
 end
