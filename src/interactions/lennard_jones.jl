@@ -165,6 +165,9 @@ struct LJDispersionCorrection{F6, F12}
     factor_12::F12
 end
 
+Base.getproperty(dc::LJDispersionCorrection, name::Symbol) =
+    name === :factor ? getfield(dc, :factor_6) + getfield(dc, :factor_12) : getfield(dc, name)
+
 
 function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
                                 σ_mix=LorentzMixing(),
