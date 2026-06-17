@@ -654,7 +654,6 @@ function force_launch_params(sys, kernel)
     maxregs_override = prefer_override(config.force_maxregs, env_override("MOLLY_CUDA_FORCE_MAXREGS"))
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_FORCE_BLOCK_Y", block_y_override)
     maxregs_override === nothing || maxregs_override > 0 || error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(maxregs_override)")
-    block_y_override === nothing || return (block_y_override, maxregs_override)
 
     conf = launch_configuration(kernel.fun)
     # Ensure block_y does not exceed physical kernel limits
@@ -671,7 +670,6 @@ function energy_launch_params(sys, kernel)
     config = Molly.cuda_launch_config(sys)
     block_y_override = prefer_override(config.energy_block_y, env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_ENERGY_BLOCK_Y", block_y_override)
-    block_y_override === nothing || return block_y_override
 
     conf = launch_configuration(kernel.fun)
     # Ensure block_y does not exceed physical kernel limits
