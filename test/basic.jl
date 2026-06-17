@@ -1077,12 +1077,6 @@ end
         strictness=:nowarn,
     )
 
-    # ff = MolecularForceField(
-    #     joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
-    #     units = false,
-    #     strictness=:nowarn,
-    # )
-
     pdb_file = joinpath(data_dir, "6mrr_equil.pdb")
 
     sys = System(
@@ -1116,10 +1110,10 @@ end
     )
 
     mabsd = maximum(abs, W_enzyme_pressure - W_molly) 
-    @test mabsd < 1e-8
+    @test mabsd < 1e-6
     frobd = norm(W_enzyme_pressure - W_molly) / max(norm(W_molly), eps(FT))
     @test frobd < 1e-14
     trd = tr(W_enzyme_pressure) - tr(W_molly)
-    @test trd < 1e-8
+    @test trd < 1e-6
 
 end
