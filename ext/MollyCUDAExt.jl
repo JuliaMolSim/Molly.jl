@@ -19,7 +19,7 @@ module MollyCUDAExt
 
 using Molly
 using Molly: from_device, box_sides, sorted_morton_seq!, sum_pairwise_forces_gpu,
-             sum_pairwise_forces_nonl, sum_pairwise_potentials, volume
+             sum_pairwise_forces_nonl, sum_pairwise_potentials_gpu, volume
 using CUDA
 using Atomix
 using KernelAbstractions
@@ -2073,7 +2073,6 @@ function energy_kernel!(
     end
 
     lane = threadIdx().x
-    warpid = threadIdx().y
 
     @inbounds i = tiles_i_ro[idx]
     @inbounds j = tiles_j_ro[idx]
@@ -2082,8 +2081,7 @@ function energy_kernel!(
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
 
-    E_smem = CuStaticSharedArray(T, (32, MAX_BLOCK_Y))
-    @inbounds E_smem[lane, warpid] = zero(T)
+    sum_E = zero(T)
 
     r = Int32((N - 1) % 32 + 1)
 
@@ -2104,7 +2102,6 @@ function energy_kernel!(
 
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
-                sync_warp()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
                 vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
@@ -2115,8 +2112,9 @@ function energy_kernel!(
                 r2 = @fastmath sum(abs2, dr)
                 condition = r2 <= r_cut2
 
-                pe = condition ? sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials_gpu(
                     inters_tuple,
+                    dr,
                     atoms_i, atoms_j_shuffle,
                     Val(energy_units),
                     false,
@@ -2125,14 +2123,13 @@ function energy_kernel!(
                     vel_i, vel_j,
                     step_n) : zero(SVector{1, T})
 
-                @fastmath E_smem[lane, warpid] += ustrip(pe[1])
+                @fastmath sum_E += ustrip(pe[1])
             end
         else # EXCLUDED
             @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
 
             @inbounds for m in a:warpsize()
-                sync_warp()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
                 vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
@@ -2145,8 +2142,9 @@ function energy_kernel!(
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
                 condition = (excl & 0x1) == true && r2 <= r_cut2
 
-                pe = condition ? sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials_gpu(
                     inters_tuple,
+                    dr,
                     atoms_i, atoms_j_shuffle,
                     Val(energy_units),
                     (spec & 0x1) == true,
@@ -2155,7 +2153,7 @@ function energy_kernel!(
                     vel_i, vel_j,
                     step_n) : zero(SVector{1, T})
 
-                @fastmath E_smem[lane, warpid] += ustrip(pe[1])
+                @fastmath sum_E += ustrip(pe[1])
             end
         end
     elseif j == n_blocks && i < n_blocks
@@ -2176,8 +2174,9 @@ function energy_kernel!(
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut2
 
-            pe = condition ? sum_pairwise_potentials(
+            pe = condition ? sum_pairwise_potentials_gpu(
                 inters_tuple,
+                dr,
                 atoms_i, atoms_j,
                 Val(energy_units),
                 (spec & 0x1) == true,
@@ -2185,7 +2184,7 @@ function energy_kernel!(
                 boundary,
                 vel_i, vel_j,
                 step_n) : zero(SVector{1, T})
-            @fastmath E_smem[lane, warpid] += ustrip(pe[1])
+            @fastmath sum_E += ustrip(pe[1])
         end
     elseif i == j && i < n_blocks
         @inbounds coords_i = coords[index_i]
@@ -2205,8 +2204,9 @@ function energy_kernel!(
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut2
 
-            pe = condition ? sum_pairwise_potentials(
+            pe = condition ? sum_pairwise_potentials_gpu(
                 inters_tuple,
+                dr,
                 atoms_i, atoms_j,
                 Val(energy_units),
                 (spec & 0x1) == true,
@@ -2214,7 +2214,7 @@ function energy_kernel!(
                 boundary,
                 vel_i, vel_j,
                 step_n) : zero(SVector{1, T})
-            @fastmath E_smem[lane, warpid] += ustrip(pe[1])
+            @fastmath sum_E += ustrip(pe[1])
         end
     elseif i == n_blocks && j == n_blocks
         if lane <= r
@@ -2235,8 +2235,9 @@ function energy_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut2
 
-                pe = condition ? sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials_gpu(
                     inters_tuple,
+                    dr,
                     atoms_i, atoms_j,
                     Val(energy_units),
                     (spec & 0x1) == true,
@@ -2244,13 +2245,11 @@ function energy_kernel!(
                     boundary,
                     vel_i, vel_j,
                     step_n) : zero(SVector{1, T})
-                @fastmath E_smem[lane, warpid] += ustrip(pe[1])
+                @fastmath sum_E += ustrip(pe[1])
             end
         end
     end
 
-    # No sync_threads needed since we only sum within warp
-    @inbounds sum_E = E_smem[lane, warpid]
 
     # Warp reduction
     offset = Int32(16)

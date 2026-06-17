@@ -30,15 +30,28 @@ end
     return f
 end
 
-@inline function sum_pairwise_potentials(inters, atom_i, atom_j, ::Val{E}, special, coord_i, coord_j,
-                                         boundary, vel_i, vel_j, step_n) where E
+@inline function sum_pairwise_potentials_gpu(inters::Tuple{T}, dr, atom_i, atom_j, ::Val{E},
+                                             special, coord_i, coord_j, boundary, vel_i, vel_j,
+                                             step_n) where {T, E}
+    # SVector is required to avoid a GPU error occurring with scalars
+    return SVector(potential_energy_gpu(inters[1], dr, atom_i, atom_j, E, special,
+                                        coord_i, coord_j, boundary, vel_i, vel_j, step_n))
+end
+
+@inline function sum_pairwise_potentials_gpu(inters::Tuple, dr, atom_i, atom_j, ::Val{E},
+                                             special, coord_i, coord_j, boundary, vel_i, vel_j,
+                                             step_n) where E
+    return SVector(potential_energy_gpu(first(inters), dr, atom_i, atom_j, E, special,
+                                        coord_i, coord_j, boundary, vel_i, vel_j, step_n)) +
+           sum_pairwise_potentials_gpu(Base.tail(inters), dr, atom_i, atom_j, Val(E), special,
+                                       coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+end
+
+@inline function sum_pairwise_potentials_nonl(inters, atom_i, atom_j, ::Val{E}, special, coord_i,
+                                              coord_j, boundary, vel_i, vel_j, step_n) where E
     dr = vector(coord_i, coord_j, boundary)
-    pe_tuple = ntuple(length(inters)) do inter_type_i
-        # SVector was required to avoid a GPU error occurring with scalars
-        SVector(potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special,
-                            coord_i, coord_j, boundary, vel_i, vel_j, step_n))
-    end
-    pe = sum(pe_tuple)
+    pe = sum_pairwise_potentials_gpu(inters, dr, atom_i, atom_j, Val(E), special, coord_i,
+                                     coord_j, boundary, vel_i, vel_j, step_n)
     if unit(pe[1]) != E
         error("wrong force unit returned, was expecting $E but got $(unit(pe[1]))")
     end
@@ -390,8 +403,8 @@ end
 
     if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        pe = sum_pairwise_potentials(inters, atoms[i], atoms[j], Val(E), special, coords[i],
-                                     coords[j], boundary, velocities[i], velocities[j], step_n)[1]
+        pe = sum_pairwise_potentials_nonl(inters, atoms[i], atoms[j], Val(E), special, coords[i],
+                                coords[j], boundary, velocities[i], velocities[j], step_n)[1]
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
