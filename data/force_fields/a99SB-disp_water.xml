@@ -1,0 +1,39 @@
+<ForceField>
+  <Info>
+    <DateGenerated>2026-06-09</DateGenerated>
+    <Reference>Robustelli, P., Piana, S., Shaw, D.E. (2018). Developing a molecular dynamics force field for both folded and disordered protein states. Proc Natl Acad Sci USA 115 (21), E4758-E4766.</Reference>
+  </Info>
+  <AtomTypes>
+    <Type element="O" name="OW" class="OW" mass="16.00000"/>
+    <Type element="H" name="HW" class="HW" mass="1.00800"/>
+    <Type name="MW" class="MW" mass="0.00000"/>
+  </AtomTypes>
+  <Residues>
+    <Residue name="HOH">
+      <Atom name="O" type="OW" charge="0.0"/>
+      <Atom name="H1" type="HW" charge="0.5900"/> 
+      <Atom name="H2" type="HW" charge="0.5900"/> 
+      <Atom name="M" type="MW" charge="-1.1800"/>
+      <Bond atomName1="H1" atomName2="O"/>
+      <Bond atomName1="H2" atomName2="O"/>
+      <VirtualSite type="average3" siteName="M" atomName1="O" atomName2="H1" atomName3="H2" weight1="0.736124464" weight2="0.131937768" weight3="0.131937768"/>
+    </Residue>
+  </Residues>
+  <HarmonicBondForce>
+    <Bond type1="HW" type2="OW" length="0.09572" k="462750.4"/> 
+  </HarmonicBondForce>
+  <HarmonicAngleForce>
+    <Angle type1="HW" type2="OW" type3="HW" angle="1.82421813" k="836.800"/> 
+  </HarmonicAngleForce>
+  <NonbondedForce coulomb14scale="0.8333" lj14scale="0.5"> 
+    <UseAttributeFromResidue name="charge"/>
+    <Atom type="OW" sigma="0.316500" epsilon="0"/> 
+    <Atom type="HW" sigma="0" epsilon="0"/>  
+    <Atom type="MW" sigma="0" epsilon="0"/> 
+  </NonbondedForce>
+  <LennardJonesForce lj14scale="0.5"> 
+    <Atom type="OW" sigma="0.316500" epsilon="0.998989"/> 
+    <Atom type="HW" sigma="0" epsilon="0"/>  
+    <Atom type="MW" sigma="0" epsilon="0"/> 
+  </LennardJonesForce>
+</ForceField>

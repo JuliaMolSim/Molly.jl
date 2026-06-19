@@ -94,11 +94,11 @@ end
                        velocity_i,
                        velocity_j,
                        step_n)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     r_c = inter.r_c
 
     if r >= r_c || iszero(r)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     w_R = 1 - r / r_c
@@ -126,7 +126,7 @@ end
                                   atom_j,
                                   energy_units=u"kJ * mol^-1",
                                   args...)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     r_c = inter.r_c
 
     if r >= r_c || iszero(r)

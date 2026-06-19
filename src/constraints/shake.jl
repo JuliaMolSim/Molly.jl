@@ -35,15 +35,15 @@ for the M-SHAKE algorithm.
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
 """
-struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer}
+struct SHAKE_RATTLE{D, A, B, C, E, V}
     clusters12::A
     clusters23::B
     clusters34::C
-    angle_clusters::D
-    dist_tolerance::E
-    vel_tolerance::F
-    gpu_block_size::I
-    max_iters::I
+    angle_clusters::E
+    dist_tolerance::D
+    vel_tolerance::V
+    gpu_block_size::Int
+    max_iters::Int
 end
 
 function SHAKE_RATTLE(n_atoms,
@@ -104,19 +104,41 @@ cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_cl
 
 function constrained_atom_inds(sr::SHAKE_RATTLE)
     atom_inds = Int[]
-    for cl in sr.clusters12
+    for cl in from_device(sr.clusters12)
         push!(atom_inds, cl.k1, cl.k2)
     end
-    for cl in sr.clusters23
+    for cl in from_device(sr.clusters23)
         push!(atom_inds, cl.k1, cl.k2, cl.k3)
     end
-    for cl in sr.clusters34
+    for cl in from_device(sr.clusters34)
         push!(atom_inds, cl.k1, cl.k2, cl.k3, cl.k4)
     end
     for cl in sr.angle_clusters
         push!(atom_inds, cl.k1, cl.k2, cl.k3)
     end
-    return atom_inds
+    return unique_ind_list(atom_inds)
+end
+
+function constrained_atom_pairs(sr::SHAKE_RATTLE{D}) where D
+    atom_pairs = Tuple{Int, Int, D}[]
+    for cl in from_device(sr.clusters12)
+        push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12))
+    end
+    for cl in from_device(sr.clusters23)
+        push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
+                          sort_pair(cl.k1, cl.k3, cl.dist13))
+    end
+    for cl in from_device(sr.clusters34)
+        push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
+                          sort_pair(cl.k1, cl.k3, cl.dist13),
+                          sort_pair(cl.k1, cl.k4, cl.dist14))
+    end
+    for cl in sr.angle_clusters
+        push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
+                          sort_pair(cl.k1, cl.k3, cl.dist13),
+                          sort_pair(cl.k2, cl.k3, cl.dist23))
+    end
+    return unique_pair_list(atom_pairs)
 end
 
 function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)

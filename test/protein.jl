@@ -159,9 +159,9 @@ end
     @test bench_result.memory <= 208
     forces_t = Molly.zero_forces(sys)
     buffers = Molly.init_buffers!(sys, 1)
-    bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $buffers, Val(false);
+    bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
                                             n_threads=1)
-    @test bench_result.allocs <= 3
+    @test bench_result.allocs <= 4
     @test bench_result.memory <= 144
 
     scalar_vir = scalar_virial(sys_pme)
@@ -221,7 +221,11 @@ end
             pin = ()
         end
 
-        if startswith(inter, "all")
+        if inter == "all_pme"
+            sils = sys_pme.specific_inter_lists
+        elseif inter == "all_pme_exact"
+            sils = sys_pme_exact.specific_inter_lists
+        elseif inter == "all_cut"
             sils = sys.specific_inter_lists
         elseif inter == "bond_only"
             sils = sys.specific_inter_lists[1:1]
@@ -458,6 +462,10 @@ end
             strictness=:nowarn,
         )
         show(devnull, ff)
+        @test_throws ErrorException MolecularForceField(
+            joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+            strictness=:error,
+        )
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
@@ -468,19 +476,26 @@ end
             constraint_algorithm=constraint_algorithm,
         )
         neighbors = find_neighbors(sys)
-        @test length(sys.specific_inter_lists) == 6
+        @test length(sys.specific_inter_lists) == 7
         @test length(sys.specific_inter_lists[1]) == 1691
         @test length(sys.specific_inter_lists[2]) == 2137
 
+        constrained_inds = Molly.constrained_atom_inds(sys)
+        @test length(constrained_inds) == 15747
+        @test count(i -> i <= 1170, constrained_inds) == 963
+        constrained_pairs = Molly.constrained_atom_pairs(sys)
+        @test length(constrained_pairs) == 15380
+        @test count(p -> (p[1] <= 1170 && p[2] <= 1170), constrained_pairs) == 596
+
         bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
-        @test bench_result.allocs <= 14
-        @test bench_result.memory <= 640
+        @test bench_result.allocs <= 16
+        @test bench_result.memory <= 1000
         forces_t = Molly.zero_forces(sys)
         buffers = Molly.init_buffers!(sys, 1)
-        bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $buffers, Val(false);
+        bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
                                                 n_threads=1)
-        @test bench_result.allocs <= 12
-        @test bench_result.memory <= 850
+        @test bench_result.allocs <= 14
+        @test bench_result.memory <= 1100
 
         scalar_vir = scalar_virial(sys)
         @test scalar_vir ≈ tr(virial(sys))
@@ -671,5 +686,62 @@ end
                 @test rmsd(coords_start, sys.coords) < 0.1u"nm"
             end
         end
+    end
+end
+
+@testset "a99SB-disp Gromacs/OpenMM protein comparison" begin
+
+    FT = Float64
+    AT = Array
+
+    ff = MolecularForceField(
+        FT,
+        joinpath.(ff_dir, ["a99SB-disp.xml", "a99SB-disp_water.xml"])...;
+        units=true,
+    )
+
+    struc_names = [
+        "a-synuclein_1",
+        "barn_bar",
+        "bpti",
+        "cd2_cd58",
+        "cole7_im7",
+        "drkN_SH3_1",
+        "gb3",
+        "hewl",
+        "NTail_1",
+        "PaaA2_1",
+        "sgpb_omtky3",
+        "ubiquitin",
+        "5AWL_A_noHET"
+    ]
+
+    for struc_name in struc_names
+
+        dat_file = joinpath(data_dir, "a99SB-disp_refs", "$struc_name.dat")
+        pdb_file = joinpath(data_dir, "a99SB-disp_refs", "$struc_name.pdb")
+
+        sys = System(
+            pdb_file,
+            ff;
+            array_type=AT,
+            dist_cutoff=1.0u"nm",
+            nonbonded_method=:pme,
+            approximate_pme=false,
+            disulfide_bonds=true,
+        )
+
+        fs_openmm = SVector{3}[]
+        open(dat_file, "r") do f
+            for line in readlines(f)
+                cols = split(line, ",")
+                f = SVector{3}([parse(FT, split(val, " ")[1])*u"kJ * mol^-1 * nm^-1"
+                                for val in cols])
+                push!(fs_openmm, f)
+            end
+        end
+
+        diff = mean(norm.(forces(sys) .- fs_openmm))
+        @test diff < FT(0.15)u"kJ * mol^-1 * nm^-1"
     end
 end

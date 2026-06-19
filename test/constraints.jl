@@ -336,8 +336,8 @@ end
                     rigid_water=rigid_water, # No water present
                     constraint_algorithm=constraint_algorithm,    
                 )
-                if constraint_algorithm === LINCS
-                    # increase tolerances from default
+                if constraint_algorithm == LINCS
+                    # Increase tolerances from default
                     lincs = LINCS(
                         masses=Array(masses(sys)),
                         dist_constraints=sys.constraints[1].dist_constraints,
@@ -406,6 +406,41 @@ function make_lincs_triatomic(; masses_val=[12.0, 12.0, 12.0], bond_length=0.15,
     data = Molly.build_lincs_data(dc, masses_val; nrec, niter)
     ws = Molly.create_lincs_workspace(data)
     return x, v, data, ws
+end
+
+function make_lincs_chain(natoms; bond_length=0.15, mass=12.0)
+    x = [SVector(i * bond_length, 0.0, 0.0) for i in 0:(natoms - 1)]
+    v = [SVector(0.01 * randn(), 0.01 * randn(), 0.01 * randn()) for _ in 1:natoms]
+    dc = [DistanceConstraint(i, i + 1, bond_length) for i in 1:(natoms - 1)]
+    return x, v, dc, fill(mass, natoms)
+end
+
+function make_lincs_branched(nbackbone; nbranch=3, backbone_length=0.153,
+                             branch_length=0.109, backbone_mass=12.0,
+                             branch_mass=1.008)
+    natoms = nbackbone * (nbranch + 1)
+    x = Vector{SVector{3, Float64}}(undef, natoms)
+    masses_val = Vector{Float64}(undef, natoms)
+    dc = DistanceConstraint{Float64, Int}[]
+
+    for i in 1:nbackbone
+        x[i] = SVector((i - 1) * backbone_length, 0.0, 0.0)
+        masses_val[i] = backbone_mass
+        i > 1 && push!(dc, DistanceConstraint(i - 1, i, backbone_length))
+    end
+
+    atom_idx = nbackbone
+    for i in 1:nbackbone, j in 1:nbranch
+        atom_idx += 1
+        angle = 2π * j / nbranch
+        x[atom_idx] = x[i] + SVector(0.0, branch_length * cos(angle),
+                                    branch_length * sin(angle))
+        masses_val[atom_idx] = branch_mass
+        push!(dc, DistanceConstraint(i, atom_idx, branch_length))
+    end
+
+    v = [SVector(0.01 * randn(), 0.01 * randn(), 0.01 * randn()) for _ in 1:natoms]
+    return x, v, dc, masses_val
 end
 
 function lincs_check_constraints(xp, data; atol=1e-10)
@@ -1671,5 +1706,94 @@ end
         s = sprint(show, cons)
         @test occursin("distance", s)
         @test occursin("angle", s)
+    end
+end
+
+@testset "LINCS benchmarks" begin
+    # Warmup
+    x_w, v_w, c_w, m_w = make_lincs_chain(10)
+    d_w = Molly.build_lincs_data(c_w, m_w)
+    ws_w = Molly.create_lincs_workspace(d_w)
+    xp_w = x_w .+ v_w .* 0.002
+    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0))
+
+    # apply_lincs! zero allocations
+    @testset begin
+        for (label, nbackbone, nbranch) in [
+            ("small (7 constraints)", 2, 3),
+            ("medium (399 constraints)", 100, 3),
+        ]
+            x, v, c, m = make_lincs_branched(nbackbone; nbranch)
+            data = Molly.build_lincs_data(c, m)
+            ws = Molly.create_lincs_workspace(data)
+            xp = x .+ v .* 0.002
+
+            # Warmup
+            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+            xp .= x .+ v .* 0.002
+
+            allocs = @allocated Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+            @test allocs == 0
+        end
+    end
+
+    # solve! zero allocations
+    @testset begin
+        x, v, c, m = make_lincs_branched(100; nbranch=3)
+        data = Molly.build_lincs_data(c, m)
+        ws = Molly.create_lincs_workspace(data)
+        xp = x .+ v .* 0.002
+
+        K = length(data.atom1)
+        for i in 1:K
+            ws.B[i] = normalize(x[data.atom1[i]] - x[data.atom2[i]])
+        end
+        coupling = data.coupling
+        for i in 1:K
+            for n in coupling.range[i]:(coupling.range[i+1]-1)
+                j = coupling.neighbors[n]
+                ws.blcc[n] = coupling.coef[n] * dot(ws.B[i], ws.B[j])
+            end
+        end
+        for i in 1:K
+            ws.rhs[i] = data.sdiag[i] * (dot(ws.B[i], xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
+        end
+        ws.sol .= ws.rhs
+
+        # Warmup
+        Molly.lincs_solve!(xp, data, ws, 1.0)
+        ws.sol .= ws.rhs
+        xp .= x .+ v .* 0.002
+
+        allocs = @allocated Molly.lincs_solve!(xp, data, ws, 1.0)
+        @test allocs == 0
+    end
+end
+
+@testset "Minimization with constraints" begin
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
+    for AT in array_list
+        sys_nocons = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            array_type=AT,
+            nonbonded_method=:pme,
+        )
+        sys_cons = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            array_type=AT,
+            nonbonded_method=:pme,
+            constraints=:hbonds,
+            rigid_water=true,
+        )
+
+        sim = SteepestDescentMinimizer(tol=10_000.0u"kJ * mol^-1 * nm^-1")
+        simulate!(sys_nocons, sim)
+        simulate!(sys_cons, sim)
+
+        @test rmsd(sys_nocons.coords[1:1170], sys_cons.coords[1:1170]) < 0.01u"nm"
+        @test potential_energy(sys_nocons) < -100_000u"kJ/mol"
+        @test potential_energy(sys_cons)   < -150_000u"kJ/mol"
     end
 end

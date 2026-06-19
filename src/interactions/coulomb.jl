@@ -68,7 +68,7 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...) where C
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
@@ -94,7 +94,7 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...) where C
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
@@ -209,7 +209,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -274,7 +274,7 @@ end
         return ustrip(zero(dr[1])) * energy_units
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     qi, qj = atom_i.charge, atom_j.charge
     cutoff = inter.cutoff
 
@@ -401,7 +401,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -466,7 +466,7 @@ end
         return ustrip(zero(dr[1])) * energy_units
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     qi, qj = atom_i.charge, atom_j.charge
     qij = qi * qj
     cutoff = inter.cutoff
@@ -974,8 +974,9 @@ end
 The short range Ewald electrostatic interaction between two atoms.
 
 Should be used alongside the [`Ewald`](@ref) or [`PME`](@ref) general interaction,
-which provide the long-range term.
-`dist_cutoff` and `error_tol` should match the general interaction.
+which provide the long-range term, and the [`EwaldExclusion`](@ref) specific
+interaction, which provides the exclusions for bonded atoms.
+`dist_cutoff` and `error_tol` should match these interactions.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
 `approximate_erfc` determines whether to use a fast approximation to the erfc function.
@@ -1218,7 +1219,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -1249,7 +1250,7 @@ end
         return ustrip(zero(dr[1])) * energy_units
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     qi, qj = atom_i.charge, atom_j.charge
     pe_soft = λ * inter.coulomb_const * ((qi * qj) / sqrt(cbrt(inter.α * (1 - λ) *
               σ_mixing(inter.σ_mixing, atom_i, atom_j)^6 + r^6)))
@@ -1357,7 +1358,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -1395,7 +1396,7 @@ end
         return ustrip(zero(dr[1])) * energy_units
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     qij = atom_i.charge * atom_j.charge
     R = inter.α * sqrt(cbrt(1 - λ)) * (oneunit(r) + inter.σQ * abs(qij))
 
@@ -1465,7 +1466,7 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
@@ -1492,7 +1493,7 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special::Bool=false,
                                   args...)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge

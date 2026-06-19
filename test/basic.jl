@@ -551,6 +551,14 @@ end
         strictness=:nowarn,
     )
     gpu_neighbors_ref = find_neighbors(gpu_ref_sys)
+    @test_throws ErrorException System(
+        joinpath(data_dir, "water_3mol_cubic.pdb"),
+        ff;
+        dist_cutoff=dist_cutoff,
+        dist_buffer=0.0u"nm",
+        neighbor_finder_type=DistanceNeighborFinder,
+        strictness=:error,
+    )
 
     for AT in array_list[2:end]
         sys_gpu = System(
@@ -1194,12 +1202,11 @@ end
         SVector(0.8, 1.4, 0.3),
     ]
 
-    function pme_system(atoms, coords; eligible=nothing)
+    function pme_system(atoms, coords)
         pme = PME(
             0.9,
             atoms,
             boundary_pme;
-            eligible=eligible,
             grad_safe=true,
             n_threads=1,
         )
@@ -1213,12 +1220,9 @@ end
         )
     end
 
-    eligible_pme = trues(3, 3)
-    eligible_pme[1, 2] = eligible_pme[2, 1] = false
     charged_atom = [Atom(mass=1.0, charge=1.0, σ=0.0, ϵ=0.0)]
     systems_pme = (
         ("reciprocal", pme_system(atoms_pme, coords_pme)),
-        ("exclusions", pme_system(atoms_pme, coords_pme; eligible=eligible_pme)),
         ("net charge", pme_system(charged_atom, [SVector(0.4, 0.6, 0.8)])),
     )
 
@@ -1231,5 +1235,24 @@ end
             )
         end
     end
+
+    exclusion_list = InteractionList2Atoms(
+        Int32[1],
+        Int32[2],
+        [EwaldExclusion()],
+        [""],
+        Molly.EwaldExclusionData(0.9),
+    )
+    sys_exclusion = System(
+        atoms=atoms_pme[1:2],
+        coords=coords_pme[1:2],
+        boundary=boundary_pme,
+        specific_inter_lists=(exclusion_list,),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+    W_exclusion, _, _ = virial_enzyme(sys_exclusion, nothing)
+    test_virial_match(W_exclusion, Molly.virial(sys_exclusion, nothing; n_threads=1);
+                      relative_tol=1e-12)
 
 end

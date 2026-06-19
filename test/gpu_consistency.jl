@@ -233,11 +233,12 @@
                 Molly.zero_forces(sys_gpu_overflow),
                 sys_gpu_overflow,
                 nothing,
+                0,
                 overflow_force_buffers,
                 Val(false),
-                0,
             )
-            @test_throws ErrorException potential_energy(sys_gpu_overflow, nothing, overflow_energy_buffers, 0)
+            @test_throws ErrorException potential_energy(sys_gpu_overflow, nothing, 0,
+                                                         overflow_energy_buffers)
         end
 
         @testset "Triclinic Boundary" begin
@@ -434,9 +435,9 @@
             buffers = Molly.init_buffers!(sys, 256)
             fs_reused = Molly.zero_forces(sys)
 
-            Molly.forces!(fs_reused, sys, neighbors, buffers, Val(false), 0; n_threads=1)
+            Molly.forces!(fs_reused, sys, neighbors, 0, buffers, Val(false); n_threads=1)
             sys.coords .+= sys.velocities .* T(0.5)
-            Molly.forces!(fs_reused, sys, neighbors, buffers, Val(false), 1; n_threads=1)
+            Molly.forces!(fs_reused, sys, neighbors, 1, buffers, Val(false); n_threads=1)
 
             fs_fresh = forces(sys, neighbors, 1; n_threads=1)
             fs_reused_host = Array(fs_reused)
@@ -471,12 +472,12 @@
             )
 
             buffers = Molly.init_buffers!(sys, 1, true)
-            pe_before = potential_energy(sys, nothing, buffers, 0)
+            pe_before = potential_energy(sys, nothing, 0, buffers)
 
             Molly.append_excluded_pairs!(sys.neighbor_finder, ((1, 2),))
 
-            pe_reused = potential_energy(sys, nothing, buffers, 0)
-            pe_fresh = potential_energy(sys, nothing, Molly.init_buffers!(sys, 1, true), 0)
+            pe_reused = potential_energy(sys, nothing, 0, buffers)
+            pe_fresh = potential_energy(sys, nothing, 0, Molly.init_buffers!(sys, 1, true))
 
             @test pe_before != pe_reused
             @test isapprox(pe_reused, pe_fresh, rtol=1e-8, atol=1e-10)

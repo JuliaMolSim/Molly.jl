@@ -384,8 +384,7 @@ function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
         for ca in sys.constraints
             apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads)
         end
-        vel_storage .+= sys.coords ./ dt
-        sys.velocities .+= vel_storage
+        sys.velocities .+= vel_storage .+ sys.coords ./ dt
     end
     return sys
 end
@@ -568,10 +567,53 @@ cluster_interactions(kd::AngleClusterData) = (
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
 
+unique_ind_list(l) = sort(collect(Set(l)))
+
+constrained_atom_inds(sys::System) = constrained_atom_inds(sys.constraints)
+
 function constrained_atom_inds(constraints::Union{Tuple, NamedTuple})
     inds_constrained = Int[]
     for ca in constraints
         append!(inds_constrained, constrained_atom_inds(ca))
     end
-    return inds_constrained
+    return unique_ind_list(inds_constrained)
+end
+
+sort_pair(i, j, d) = (min(i, j), max(i, j), d)
+
+unique_pair_list(l) = sort(
+    collect(Set(l));
+    lt=((p1, p2) -> p1[1] < p2[1] || (p1[1] == p2[1] && p1[2] < p2[2])),
+)
+
+constrained_atom_pairs(sys::System) = constrained_atom_pairs(sys.constraints)
+
+function constrained_atom_pairs(constraints::Union{Tuple, NamedTuple})
+    if iszero(length(constraints))
+        return []
+    else
+        pairs_constrained = constrained_atom_pairs(first(constraints))
+        for ca in constraints[2:end]
+            append!(pairs_constrained, constrained_atom_pairs(ca))
+        end
+        return unique_pair_list(pairs_constrained)
+    end
+end
+
+function constraints_to_bonds(sys::System{<:Any, AT}, k::K) where {AT, K}
+    cons_pairs = constrained_atom_pairs(sys)
+    if length(cons_pairs) > 0
+        bond_is, bond_js = Int32[], Int32[]
+        D = typeof(first(cons_pairs)[3])
+        bond_inters = HarmonicBond{K, D}[]
+        for (i, j, d) in cons_pairs
+            push!(bond_is, i)
+            push!(bond_js, j)
+            push!(bond_inters, HarmonicBond(k, d))
+        end
+        return InteractionList2Atoms(to_device(bond_is, AT), to_device(bond_js, AT),
+                                     to_device(bond_inters, AT))
+    else
+        return InteractionList2Atoms(Any)
+    end
 end

@@ -615,9 +615,17 @@ function Base.push!(nl::NeighborList, element)
 end
 
 function Base.append!(nl::NeighborList, list)
-    for element in list
-        push!(nl, element)
+    n_new = length(list)
+    n_avail = min(length(nl.list) - nl.n, n_new)
+    @inbounds if n_avail == n_new
+        nl.list[(nl.n + 1):(nl.n + n_avail)] .= list
+    elseif n_avail > 0
+        nl.list[(nl.n + 1):(nl.n + n_avail)] .= list[1:n_avail]
+        append!(nl.list, list[(n_avail + 1):end])
+    else # n_avail == 0
+        append!(nl.list, list)
     end
+    nl.n += n_new
     return nl
 end
 
@@ -1394,10 +1402,10 @@ function AtomsBase.atomic_number(s::ReplicaSystem)
     end
 end
 
-
 # Avoid unnecessary Array calls on CPU
 from_device(x::Array) = x
 from_device(x) = Array(x)
+from_device(x::StructArray) = replace_storage(Array, x)
 
 to_device(x::Array, ::Type{<:Array}) = x
 to_device(x, ::Type{AT}) where AT = AT(x)
@@ -1646,8 +1654,8 @@ function System(sys::AtomsBase.AbstractSystem{D};
     end
 
     length_unit = unit(first(AtomsBase.position(sys, 1)))
-    atoms = Vector{Atom}(undef, (length(sys),))
-    atoms_data = Vector{AtomData}(undef, (length(sys),))
+    atoms = Vector{Atom}(undef, length(sys))
+    atoms_data = Vector{AtomData}(undef, length(sys))
     for (i, atom) in enumerate(sys)
         atoms[i] = Atom(
             index=i,
@@ -1821,7 +1829,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return potential_energy(sys, nbs, nothing, step_n; n_threads=n_threads)
+    return potential_energy(sys, nbs, step_n, nothing; n_threads=n_threads)
 end
 
 """

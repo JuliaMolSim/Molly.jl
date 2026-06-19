@@ -533,6 +533,7 @@ end
 Log the displacements of atoms in a system throughout a simulation, useful for calculating
 properties like mean square displacement in periodic systems.
 
+The displacement accumulates as an atom moves over the periodic boundary.
 Displacements are updated every `n_steps_update` steps and a copy is saved every
 `n_steps` steps.
 `coords_start` are the initial reference positions and should match the coordinate type

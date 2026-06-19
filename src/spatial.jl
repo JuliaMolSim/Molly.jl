@@ -965,7 +965,10 @@ end
 
 @doc raw"""
     pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
-             recompute=true, n_threads=Threads.nthreads())
+             recompute=true, n_threads=Threads.nthreads(),
+             pairwise_inters=system.pairwise_inters,
+             specific_inter_lists=system.specific_inter_lists,
+             general_inters=system.general_inters)
     pressure(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the pressure tensor of the system.
@@ -988,9 +991,9 @@ convention, and is accepted for clarity and future extensibility.
 
 Not compatible with infinite boundaries.
 """
-function pressure(sys; n_threads::Integer=Threads.nthreads())
+function pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;
-                    recompute=true, n_threads=n_threads)
+                    n_threads=n_threads, kwargs...)
 end
 
 function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial, vol) where D
@@ -1013,7 +1016,7 @@ end
 
 function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothing;
                   recompute::Bool=true, n_threads::Integer=Threads.nthreads(),
-                  kin_tensor=nothing) where D
+                  kin_tensor=nothing, kwargs...) where D
     if isnothing(buffers_in)
         buffers = init_buffers!(sys, n_threads)
     else
@@ -1021,10 +1024,12 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     end
     if recompute && length(sys.constraints) > 0
         if isnothing(buffers_in) || !has_total_virial(buffers, step_n)
-            compute_initial_total_virial!(buffers, sys, neighbors, step_n; n_threads=n_threads)
+            compute_initial_total_virial!(buffers, sys, neighbors, step_n;
+                                          n_threads=n_threads, kwargs...)
         end
     elseif recompute
-        forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
+        forces!(zero_forces(sys), sys, neighbors, step_n, buffers, Val(true);
+                n_threads=n_threads, kwargs...)
     elseif length(sys.constraints) > 0 && !has_total_virial(buffers, step_n)
         error("cannot calculate pressure for constrained systems without a valid total virial")
     end
@@ -1047,7 +1052,10 @@ end
 
 """
     scalar_pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
-                    recompute=true, n_threads=Threads.nthreads())
+                    recompute=true, n_threads=Threads.nthreads(),
+                    pairwise_inters=system.pairwise_inters,
+                    specific_inter_lists=system.specific_inter_lists,
+                    general_inters=system.general_inters)
     scalar_pressure(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the pressure of the system as a scalar.
@@ -1056,16 +1064,16 @@ This is the trace of the [`pressure`](@ref) tensor.
 For constrained systems, the same deterministic preview convention as
 [`pressure`](@ref) applies.
 """
-function scalar_pressure(sys; n_threads::Integer=Threads.nthreads())
+function scalar_pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return scalar_pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;
-                           recompute=true, n_threads=n_threads)
+                           n_threads=n_threads, kwargs...)
 end
 
 function scalar_pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers=nothing;
                          recompute::Bool=true, n_threads::Integer=Threads.nthreads(),
-                         kin_tensor=nothing) where D
+                         kin_tensor=nothing, kwargs...) where D
     P = pressure(sys, neighbors, step_n, buffers; recompute=recompute,
-                 n_threads=n_threads, kin_tensor=kin_tensor)
+                 n_threads=n_threads, kin_tensor=kin_tensor, kwargs...)
     return tr(P) / D
 end
 
