@@ -1049,6 +1049,73 @@ end
         return W, pe, dq
     end
 
+    function potential_deformation_pme(pme, atoms, coords, boundary, force_units,
+                                       energy_units, q)
+        T = eltype(q)
+        z, o = zero(T), one(T)
+        F = @SMatrix [
+            o + q[1]  q[4]       q[5];
+            z         o + q[2]   q[6];
+            z         z          o + q[3]
+        ]
+        boundary_new = TriclinicBoundary(F * Molly.boxmatrix(boundary))
+        return Molly.ewald_pe_forces!(
+            nothing,
+            nothing,
+            pme,
+            atoms,
+            [F * coord for coord in coords],
+            boundary_new,
+            force_units,
+            energy_units,
+            Val(false),
+            false;
+            n_threads=1,
+        )
+    end
+
+    function virial_enzyme_pme(sys)
+        pme = only(sys.general_inters)
+        q = zeros(eltype(eltype(sys.coords)), 6)
+        dq = zero(q)
+        autodiff(
+            set_runtime_activity(ReverseWithPrimal),
+            potential_deformation_pme,
+            Active,
+            Duplicated(pme, zero(pme)),
+            Const(sys.atoms),
+            Const(sys.coords),
+            Const(sys.boundary),
+            Const(sys.force_units),
+            Const(sys.energy_units),
+            Duplicated(q, dq),
+        )
+        return @SMatrix [
+            -dq[1]  -dq[4]  -dq[5];
+            -dq[4]  -dq[2]  -dq[6];
+            -dq[5]  -dq[6]  -dq[3]
+        ]
+    end
+
+    function virial_pme(sys)
+        W = zeros(FT, 3, 3)
+        Molly.ewald_pe_forces!(
+            zero(sys.coords),
+            W,
+            sys,
+            only(sys.general_inters),
+            Val(true);
+            n_threads=1,
+        )
+        return W
+    end
+
+    function test_virial_match(W_reference, W_molly; relative_tol)
+        @test maximum(abs, W_reference - W_molly) < 1e-6
+        @test norm(W_reference - W_molly) / max(norm(W_molly), eps(FT)) < relative_tol
+        @test abs(tr(W_reference) - tr(W_molly)) < 1e-6
+    end
+
     function lj_dispersion_mechanical_adjustment(sys)
         V = volume(sys)
         correction = zero(eltype(eltype(sys.coords)))
@@ -1109,11 +1176,60 @@ end
         n_threads=1,
     )
 
-    mabsd = maximum(abs, W_enzyme_pressure - W_molly) 
-    @test mabsd < 1e-6
-    frobd = norm(W_enzyme_pressure - W_molly) / max(norm(W_molly), eps(FT))
-    @test frobd < 1e-14
-    trd = tr(W_enzyme_pressure) - tr(W_molly)
-    @test trd < 1e-6
+    test_virial_match(W_enzyme_pressure, W_molly; relative_tol=1e-14)
+
+    boundary_pme = TriclinicBoundary(@SMatrix [
+        2.2  0.1  0.0;
+        0.0  2.0  0.2;
+        0.0  0.0  2.4
+    ])
+    atoms_pme = [
+        Atom(mass=1.0, charge=1.0, σ=0.0, ϵ=0.0),
+        Atom(mass=1.0, charge=-0.7, σ=0.0, ϵ=0.0),
+        Atom(mass=1.0, charge=-0.3, σ=0.0, ϵ=0.0),
+    ]
+    coords_pme = [
+        SVector(0.4, 0.6, 0.8),
+        SVector(1.2, 0.7, 1.5),
+        SVector(0.8, 1.4, 0.3),
+    ]
+
+    function pme_system(atoms, coords; eligible=nothing)
+        pme = PME(
+            0.9,
+            atoms,
+            boundary_pme;
+            eligible=eligible,
+            grad_safe=true,
+            n_threads=1,
+        )
+        return System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary_pme,
+            general_inters=(pme,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+    end
+
+    eligible_pme = trues(3, 3)
+    eligible_pme[1, 2] = eligible_pme[2, 1] = false
+    charged_atom = [Atom(mass=1.0, charge=1.0, σ=0.0, ϵ=0.0)]
+    systems_pme = (
+        ("reciprocal", pme_system(atoms_pme, coords_pme)),
+        ("exclusions", pme_system(atoms_pme, coords_pme; eligible=eligible_pme)),
+        ("net charge", pme_system(charged_atom, [SVector(0.4, 0.6, 0.8)])),
+    )
+
+    for (name, sys_pme) in systems_pme
+        @testset "$name PME virial" begin
+            test_virial_match(
+                virial_enzyme_pme(sys_pme),
+                virial_pme(sys_pme);
+                relative_tol=1e-12,
+            )
+        end
+    end
 
 end

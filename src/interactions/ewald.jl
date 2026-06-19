@@ -95,7 +95,7 @@ function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_di
                     Atomix.@atomic Fs[dim, j] += -fval
                     if needs_vir
                         for alpha in 1:3
-                            Atomix.@atomic vir[alpha, dim] += ustrip(vec_ij[alpha]) * fval
+                            Atomix.@atomic vir[alpha, dim] -= ustrip(vec_ij[alpha]) * fval
                         end
                     end
                 end
@@ -103,7 +103,7 @@ function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_di
                 Fs[i] += F
                 Fs[j] -= F
                 if needs_vir
-                    vir .+= vec_ij * transpose(F)
+                    vir .-= vec_ij * transpose(F)
                 end
             end
         end
@@ -863,7 +863,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
         esum += esum_val
     end
     if needs_vir
-        vir .+= buffer_virial[1] .* energy_units
+        # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+        vir .+= buffer_virial[1] .* energy_units / 2
     end
     return esum / 2
 end
@@ -890,7 +891,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
     esum = sum(buffer) * energy_units
     if needs_vir
         for chunk_i in 1:n_threads
-            vir .+= buffer_virial[chunk_i] .* energy_units
+            # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+            vir .+= buffer_virial[chunk_i] .* energy_units / 2
         end
     end
     return esum / 2
@@ -911,7 +913,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::AbstractArray{Complex{T}, 
     kernel!(buffer_virial, buffer, charge_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
             energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir); ndrange=ndrange)
     if needs_vir
-        vir .+= from_device(buffer_virial) .* energy_units
+        # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+        vir .+= from_device(buffer_virial) .* energy_units / 2
     end
     return sum(buffer) * energy_units / 2
 end
@@ -1043,6 +1046,10 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     end
     charge_E = -f_div_ϵr * T(π) * pc_sum^2 / (2 * V * α^2)
     self_E = f_div_ϵr * -pc_abs2_sum * α / sqrt(T(π)) + charge_E
+    if needs_vir
+        # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I.
+        vir .+= charge_E .* I(3)
+    end
     total_E = reciprocal_space_E + self_E + exclusion_E
     return total_E
 end
