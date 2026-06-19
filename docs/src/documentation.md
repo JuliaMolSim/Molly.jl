@@ -766,6 +766,7 @@ The available specific interactions (1-5 atoms) are:
 - [`HarmonicBond`](@ref) - 2 atoms
 - [`MorseBond`](@ref) - 2 atoms
 - [`FENEBond`](@ref) - 2 atoms
+- [`EwaldExclusion`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
 - [`UreyBradley`](@ref) - 3 atoms
@@ -782,7 +783,7 @@ The available general interactions are:
 - [`ASECalculator`](@ref)
 
 Some interactions combine instances of the above.
-For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
+For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction, the [`EwaldExclusion`](@ref) specific interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
 
 By default, functions like [`potential_energy`](@ref) and [`forces`](@ref) use the interactions in the system.
 However, different interactions can be passed as keyword arguments.
@@ -951,7 +952,9 @@ function Molly.force(inter::MySpecificInter,
                      atom_j,
                      force_units,
                      velocity_i,
-                     velocity_j)
+                     velocity_j,
+                     step_n,
+                     data)
     dr = vector(coords_i, coords_j, boundary)
 
     # Replace this with your force calculation
@@ -963,7 +966,7 @@ function Molly.force(inter::MySpecificInter,
 end
 ```
 Again, most of these arguments are rarely used and can be replaced with `args...`.
-The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k)` and return `SpecificForce3Atoms(f1, f2, f3)`.
+The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k, step_n, data)` and return `SpecificForce3Atoms(f1, f2, f3)`.
 Virial computation is done automatically when required using the force function.
 
 To use your custom interaction, add it to the specific interaction lists along with the atom indices:
@@ -973,9 +976,12 @@ specific_inter_lists = (
         [1, 3],
         [2, 4],
         [MySpecificInter(), MySpecificInter()],
+        ["", ""], # Interaction type information, optional
+        nothing,  # Interaction data, optional
     ), # Don't forget the trailing comma!
 )
 ```
+Giving interaction data, including arrays, as the last argument to the interaction list means that it can be accessed in the [`force`](@ref) and [`potential_energy`](@ref) functions via the `data` argument.
 For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of indices.
 If using the GPU, the inner list of indices and interactions should be moved to the GPU with `CuArray`.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
@@ -990,7 +996,9 @@ function Molly.potential_energy(inter::MySpecificInter,
                                 atom_j,
                                 energy_units,
                                 velocity_i,
-                                velocity_j)
+                                velocity_j,
+                                step_n,
+                                data)
     # Example harmonic bond interaction
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)

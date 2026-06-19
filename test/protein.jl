@@ -188,7 +188,11 @@ end
             pin = ()
         end
 
-        if startswith(inter, "all")
+        if inter == "all_pme"
+            sils = sys_pme.specific_inter_lists
+        elseif inter == "all_pme_exact"
+            sils = sys_pme_exact.specific_inter_lists
+        elseif inter == "all_cut"
             sils = sys.specific_inter_lists
         elseif inter == "bond_only"
             sils = sys.specific_inter_lists[1:1]
@@ -439,7 +443,7 @@ end
             constraint_algorithm=constraint_algorithm,
         )
         neighbors = find_neighbors(sys)
-        @test length(sys.specific_inter_lists) == 6
+        @test length(sys.specific_inter_lists) == 7
         @test length(sys.specific_inter_lists[1]) == 1691
         @test length(sys.specific_inter_lists[2]) == 2137
 
@@ -451,14 +455,14 @@ end
         @test count(p -> (p[1] <= 1170 && p[2] <= 1170), constrained_pairs) == 596
 
         bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
-        @test bench_result.allocs <= 14
-        @test bench_result.memory <= 640
+        @test bench_result.allocs <= 16
+        @test bench_result.memory <= 1000
         forces_t = Molly.zero_forces(sys)
         buffers = Molly.init_buffers!(sys, 1)
         bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
                                                 n_threads=1)
-        @test bench_result.allocs <= 13
-        @test bench_result.memory <= 850
+        @test bench_result.allocs <= 14
+        @test bench_result.memory <= 1100
 
         scalar_vir = scalar_virial(sys)
         scalar_P = scalar_pressure(sys)

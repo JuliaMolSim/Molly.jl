@@ -1678,67 +1678,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     else
         ϵ_mix = GeometricMixing()
     end
-    # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
-    #   to zero for the pairwise interaction
-    pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
-    lj = LennardJones(
-        cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=using_neighbors,
-        σ_mixing=σ_mix,
-        ϵ_mixing=ϵ_mix,
-        weight_special=pi_weight_14_lj,
-    )
-
-    if nonbonded_method == :none
-        coul = Coulomb(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method == :cutoff
-        coul = CoulombReactionField(
-            dist_cutoff=T(dist_cutoff),
-            solvent_dielectric=T(crf_solvent_dielectric),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method in (:ewald, :pme)
-        coul = CoulombEwald(
-            dist_cutoff=T(dist_cutoff),
-            error_tol=T(ewald_error_tol),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-            approximate_erfc=approximate_pme,
-        )
-        if nonbonded_method == :ewald
-            ewald = Ewald(
-                T(dist_cutoff);
-                error_tol=T(ewald_error_tol),
-                eligible=eligible,
-                special=special,
-            )
-        else
-            ewald = PME(
-                T(dist_cutoff),
-                atoms,
-                boundary_used;
-                error_tol=T(ewald_error_tol),
-                eligible=eligible,
-                special=special,
-                grad_safe=grad_safe,
-            )
-        end
-        general_inters_ewald = (ewald,)
-    else
-        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
-                            ":none, :cutoff, :pme and :ewald"))
-    end
-    pairwise_inters = (lj, coul)
 
     # For the purposes of assigning molecules, add connections from atoms to virtual sites
     bonds_all_vs_is, bonds_all_vs_js = copy(bonds_all.is), copy(bonds_all.js)
@@ -1873,6 +1812,74 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             ))
         end
     end
+
+    # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
+    #   to zero for the pairwise interaction
+    pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
+    lj = LennardJones(
+        cutoff=DistanceCutoff(T(dist_cutoff)),
+        use_neighbors=using_neighbors,
+        σ_mixing=σ_mix,
+        ϵ_mixing=ϵ_mix,
+        weight_special=pi_weight_14_lj,
+    )
+
+    if nonbonded_method == :none
+        coul = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters_ewald = ()
+    elseif nonbonded_method == :cutoff
+        coul = CoulombReactionField(
+            dist_cutoff=T(dist_cutoff),
+            solvent_dielectric=T(crf_solvent_dielectric),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters_ewald = ()
+    elseif nonbonded_method in (:ewald, :pme)
+        coul = CoulombEwald(
+            dist_cutoff=T(dist_cutoff),
+            error_tol=T(ewald_error_tol),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+            approximate_erfc=approximate_pme,
+        )
+
+        excluded_pairs = find_excluded_pairs(eligible, special)
+        exclusion_data = EwaldExclusionData(T(dist_cutoff); error_tol=T(ewald_error_tol))
+        ewald_exclusions = InteractionList2Atoms(
+            to_device([ep[1] for ep in excluded_pairs], AT),
+            to_device([ep[2] for ep in excluded_pairs], AT),
+            to_device(fill(EwaldExclusion(), length(excluded_pairs)), AT),
+            fill("", length(excluded_pairs)),
+            exclusion_data,
+        )
+        push!(specific_inter_array, ewald_exclusions)
+
+        if nonbonded_method == :ewald
+            ewald = Ewald(T(dist_cutoff); error_tol=T(ewald_error_tol))
+        else
+            ewald = PME(
+                T(dist_cutoff),
+                atoms,
+                boundary_used;
+                error_tol=T(ewald_error_tol),
+                grad_safe=grad_safe,
+            )
+        end
+        general_inters_ewald = (ewald,)
+    else
+        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
+                            ":none, :cutoff, :pme and :ewald"))
+    end
+
+    pairwise_inters = (lj, coul)
     specific_inter_lists = tuple(specific_inter_array...)
 
     if neighbor_finder_type == NoNeighborFinder
