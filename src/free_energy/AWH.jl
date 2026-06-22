@@ -316,11 +316,13 @@ end
 
 function pmf(backend::AWHPMFDeconvolutionBackend{N, T};
              zero::Symbol = :min,
-             kBT = nothing) where {N, T}
+             kBT = nothing,
+             kwargs...) where {N, T}
     return pmf_result_from_sampled_deconvolution(
         backend.accumulator;
         zero = zero,
         kBT = kBT,
+        kwargs...,
     )
 end
 

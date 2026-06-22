@@ -1,9 +1,15 @@
+mutable struct TSSPMFEpochAccumulator{A}
+    index::Int
+    accumulator::A
+end
+
 mutable struct TSSPMFDeconvolutionBackend{N, T, S, F_CV, G, C, A}
     state::S
     cv_function::F_CV
     grid::G
     log_coupling_matrix::C
     accumulator::A
+    epoch_accumulators::Vector{TSSPMFEpochAccumulator{A}}
 end
 
 function tss_auto_pmf_cv(state::TSSState, grid::PMFGrid{N}) where N
@@ -81,6 +87,7 @@ function PMFDeconvolution(state::TSSState{T};
         pmf_grid,
         log_coupling_matrix,
         accumulator,
+        TSSPMFEpochAccumulator{typeof(accumulator)}[],
     )
     return PMFDeconvolution(backend)
 end
@@ -103,7 +110,8 @@ end
 function tss_pmf_log_bin_weights!(dest::AbstractVector{T},
                                    backend::TSSPMFDeconvolutionBackend,
                                    estimator::TSSLocalEstimator;
-                                   window_offset = 0) where T
+                                   window_offset = 0,
+                                   log_weight_factor = zero(T)) where T
     local_log_state_weights = Vector{T}(undef, length(estimator.state_indices))
     offset = T(window_offset)
     for local_i in eachindex(local_log_state_weights)
@@ -115,6 +123,7 @@ function tss_pmf_log_bin_weights!(dest::AbstractVector{T},
         backend.log_coupling_matrix,
         local_log_state_weights;
         state_indices = estimator.state_indices,
+        log_weight_factor = T(log_weight_factor),
     )
 end
 
@@ -131,7 +140,7 @@ function collect_tss_pmf_deconvolution_sample(
     end
 
     log_bin_weights = Vector{T}(undef, prod(backend.grid.shape))
-   tss_pmf_log_bin_weights!(
+    tss_pmf_log_bin_weights!(
         log_bin_weights,
         backend,
         estimator;
@@ -154,7 +163,7 @@ function collect_tss_pmf_deconvolution_sample(
     end
 
     log_bin_weights = Vector{T}(undef, prod(backend.grid.shape))
-   tss_pmf_log_bin_weights!(
+    tss_pmf_log_bin_weights!(
         log_bin_weights,
         backend,
         estimator;
@@ -179,12 +188,102 @@ function accumulate_tss_pmf_deconvolution!(
     return deconv
 end
 
+function tss_pmf_uses_epoch_history(estimator::TSSLocalEstimator)
+    return !isnothing(estimator.history) && !iszero(estimator.history.config.alpha)
+end
+
+function tss_pmf_epoch_accumulator!(backend::TSSPMFDeconvolutionBackend, epoch_index::Int)
+    existing = findfirst(epoch -> epoch.index == epoch_index, backend.epoch_accumulators)
+    if isnothing(existing)
+        push!(
+            backend.epoch_accumulators,
+            TSSPMFEpochAccumulator(
+                epoch_index,
+                SampledPMFDeconvolutionAccumulator(backend.grid),
+            ),
+        )
+        return last(backend.epoch_accumulators).accumulator
+    end
+    return backend.epoch_accumulators[existing].accumulator
+end
+
+function accumulate_tss_pmf_deconvolution!(
+    ::Nothing,
+    state::TSSState,
+    observations;
+    history_time::Integer,
+)
+    return nothing
+end
+
+function accumulate_tss_pmf_deconvolution!(
+    deconv::PMFDeconvolution{<:TSSPMFDeconvolutionBackend},
+    state::TSSState,
+    observations;
+    history_time::Integer,
+)
+    history_time > 0 || throw(ArgumentError("history_time must be positive."))
+    backend = deconv.backend
+    for observation in observations
+        estimator = state.estimators[observation.update_window]
+        accumulator = if tss_pmf_uses_epoch_history(estimator)
+            epoch_index = tss_epoch_index!(estimator.history, Int(history_time))
+            tss_pmf_epoch_accumulator!(backend, epoch_index)
+        else
+            backend.accumulator
+        end
+        for sample in observation.pmf_deconvolution_samples
+            accumulate_pmf_deconvolution!(accumulator, sample)
+        end
+    end
+    return deconv
+end
+
+function drop_old_tss_pmf_deconvolution_epochs!(::Nothing, state::TSSState, history_time::Integer)
+    return nothing
+end
+
+function drop_old_tss_pmf_deconvolution_epochs!(
+    deconv::PMFDeconvolution{<:TSSPMFDeconvolutionBackend},
+    state::TSSState,
+    history_time::Integer,
+)
+    backend = deconv.backend
+    isempty(backend.epoch_accumulators) && return deconv
+    retained = Set{Int}()
+    for estimator in state.estimators
+        tss_pmf_uses_epoch_history(estimator) || continue
+        first_recent = tss_first_retained_epoch_index!(estimator.history, Int(history_time))
+        current = tss_epoch_index!(estimator.history, Int(history_time))
+        for epoch_index in first_recent:current
+            push!(retained, epoch_index)
+        end
+    end
+    isempty(retained) && return deconv
+    filter!(epoch -> epoch.index in retained, backend.epoch_accumulators)
+    return deconv
+end
+
+function tss_pmf_retained_accumulator(backend::TSSPMFDeconvolutionBackend)
+    isempty(backend.epoch_accumulators) && return backend.accumulator
+    acc = SampledPMFDeconvolutionAccumulator(backend.grid)
+    for epoch in backend.epoch_accumulators
+        merge_pmf_deconvolution_accumulator!(acc, epoch.accumulator)
+    end
+    return acc
+end
+
+pmf_deconvolution_accumulator(backend::TSSPMFDeconvolutionBackend) =
+    tss_pmf_retained_accumulator(backend)
+
 function pmf(backend::TSSPMFDeconvolutionBackend;
              zero::Symbol = :min,
-             kBT = nothing)
+             kBT = nothing,
+             kwargs...)
     return pmf_result_from_sampled_deconvolution(
-        backend.accumulator;
+        tss_pmf_retained_accumulator(backend);
         zero = zero,
         kBT = kBT,
+        kwargs...,
     )
 end

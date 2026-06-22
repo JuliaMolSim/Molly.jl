@@ -530,15 +530,17 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
         final_log_den = sample.log_den
         window_offset = isnothing(state.coupling) ? zero(FT) :
                         state.coupling.window_offsets[cycle_window]
-        pmf_deconvolution_sample = collect_tss_pmf_deconvolution_sample(
-            pmf_deconvolution,
-            state,
-            estimator,
-            replica.active_state;
-            window_offset = window_offset,
-        )
-        if !isnothing(pmf_deconvolution_sample)
-            push!(pmf_deconvolution_samples, pmf_deconvolution_sample)
+        if substep == self_adjustment_steps
+            pmf_deconvolution_sample = collect_tss_pmf_deconvolution_sample(
+                pmf_deconvolution,
+                state,
+                estimator,
+                replica.active_state;
+                window_offset = window_offset,
+            )
+            if !isnothing(pmf_deconvolution_sample)
+                push!(pmf_deconvolution_samples, pmf_deconvolution_sample)
+            end
         end
         next_state = tss_sample_global_state(workspace.rng, estimator, sample.weights)
         check_windowed_tss_replica_cycle_state!(
@@ -901,10 +903,18 @@ function simulate!(sim::TSSSimulation;
         else
             collect_windowed_tss_observations_serial!(sim, thread_div)
         end
-        accumulate_tss_pmf_deconvolution!(sim.pmf, observations)
+        history_time = state.iteration + 1
+        accumulate_tss_pmf_deconvolution!(
+            sim.pmf,
+            state,
+            observations;
+            history_time = history_time,
+        )
         max_delta_f = sim.frozen ?
                       apply_windowed_tss_frozen_observations!(state, observations) :
                       apply_windowed_tss_observations!(state, observations)
+        sim.frozen ||
+            drop_old_tss_pmf_deconvolution_epochs!(sim.pmf, state, state.iteration)
         sync_windowed_tss_state_to_replica!(state, first(sim.replicas))
 
         if !sim.frozen && should_log_tss(state.iteration, sim.log_freq)

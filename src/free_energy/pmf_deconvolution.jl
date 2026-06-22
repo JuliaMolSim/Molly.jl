@@ -39,15 +39,23 @@ function pmf_bin_center(grid::PMFGrid{N}, idx::CartesianIndex{N}) where N
     end
 end
 
-function pmf_reference_index(F::AbstractArray, zero::Symbol)
+function pmf_reference_index(F::AbstractArray, zero::Symbol; reference_mask = nothing)
     if !(zero in (:min, :last, :none))
         throw(ArgumentError("zero must be one of :min, :last, or :none."))
     end
     zero == :none && return nothing
 
     finite_mask = isfinite.(F)
+    if !isnothing(reference_mask)
+        if size(reference_mask) != size(F)
+            throw(DimensionMismatch("PMF reference mask shape $(size(reference_mask)) does not " *
+                                    "match free-energy shape $(size(F))."))
+        end
+        finite_mask .&= reference_mask
+    end
     if !any(finite_mask)
-        throw(ArgumentError("cannot gauge a PMF without finite bins."))
+        label = isnothing(reference_mask) ? "finite bins" : "finite reliable bins"
+        throw(ArgumentError("cannot gauge a PMF without $(label)."))
     end
     if zero == :min
         finite_indices = findall(finite_mask)
@@ -98,9 +106,13 @@ function pmf_result_from_raw_free_energy(grid::PMFGrid{N, T},
                                           zero::Symbol = :min,
                                           kBT = nothing,
                                           sigma_F = nothing,
-                                          reference_index = nothing) where {N, T}
+                                          reference_index = nothing,
+                                          reference_mask = nothing,
+                                          report_mask = nothing) where {N, T}
     F = copy(F_raw)
-    ref_idx = isnothing(reference_index) ? pmf_reference_index(F, zero) : reference_index
+    ref_idx = isnothing(reference_index) ?
+        pmf_reference_index(F, zero; reference_mask = reference_mask) :
+        reference_index
     if !isnothing(ref_idx)
         if !isfinite(F[ref_idx])
             throw(ArgumentError("PMF reference bin $(ref_idx) is not finite."))
@@ -108,6 +120,14 @@ function pmf_result_from_raw_free_energy(grid::PMFGrid{N, T},
         offset = F[ref_idx]
         finite_mask = isfinite.(F)
         F[finite_mask] .-= offset
+    end
+
+    if !isnothing(report_mask)
+        if size(report_mask) != size(F)
+            throw(DimensionMismatch("PMF report mask shape $(size(report_mask)) does not " *
+                                    "match free-energy shape $(size(F))."))
+        end
+        F[.!report_mask] .= T(NaN)
     end
 
     p = isnothing(probability) ? pmf_probability_from_raw_free_energy(grid, F_raw) :
@@ -216,6 +236,13 @@ struct PMFDeconvolutionSample{N, T, W}
     log_reweight::T
 end
 
+struct PMFBinQuality{C, E, M, R}
+    counts::C
+    ess::E
+    maxfrac::M
+    reliable::R
+end
+
 mutable struct SampledPMFDeconvolutionAccumulator{N, T, G}
     grid::G
     log_numerator_sums::Array{T, N}
@@ -242,6 +269,11 @@ function SampledPMFDeconvolutionAccumulator(grid::PMFGrid{N}) where N
         0,
     )
 end
+
+pmf_deconvolution_accumulator(deconv::PMFDeconvolution) =
+    pmf_deconvolution_accumulator(deconv.backend)
+
+pmf_deconvolution_accumulator(backend) = backend.accumulator
 
 function pmf_deconvolution_check_log_weight(lw::T, label::AbstractString) where T
     if isnan(lw) || lw == T(Inf)
@@ -306,6 +338,90 @@ function accumulate_pmf_deconvolution!(acc::SampledPMFDeconvolutionAccumulator,
     )
 end
 
+function merge_pmf_deconvolution_accumulator!(
+    dest::SampledPMFDeconvolutionAccumulator{N, T},
+    src::SampledPMFDeconvolutionAccumulator{N, T},
+) where {N, T}
+    if dest.grid.shape != src.grid.shape
+        throw(DimensionMismatch("PMF deconvolution accumulator shapes do not match."))
+    end
+
+    for idx in CartesianIndices(dest.log_numerator_sums)
+        dest.log_numerator_sums[idx] =
+            online_pmf_logaddexp(dest.log_numerator_sums[idx], src.log_numerator_sums[idx])
+        dest.log_numerator_sq_sums[idx] =
+            online_pmf_logaddexp(dest.log_numerator_sq_sums[idx],
+                                 src.log_numerator_sq_sums[idx])
+        dest.max_log_numerator_weights[idx] =
+            max(dest.max_log_numerator_weights[idx], src.max_log_numerator_weights[idx])
+        dest.counts[idx] += src.counts[idx]
+    end
+    dest.total_samples += src.total_samples
+    dest.accepted_samples += src.accepted_samples
+    dest.out_of_grid_samples += src.out_of_grid_samples
+    return dest
+end
+
+function effective_samples(acc::SampledPMFDeconvolutionAccumulator{N, T}) where {N, T}
+    ess = zeros(T, size(acc.log_numerator_sums))
+    for idx in CartesianIndices(ess)
+        lw = acc.log_numerator_sums[idx]
+        lw2 = acc.log_numerator_sq_sums[idx]
+        if isfinite(lw) && isfinite(lw2)
+            ess[idx] = exp(T(2) * lw - lw2)
+        end
+    end
+    return ess
+end
+
+function sampled_pmf_max_weight_fraction(acc::SampledPMFDeconvolutionAccumulator{N, T}) where {N, T}
+    fraction = zeros(T, size(acc.log_numerator_sums))
+    for idx in CartesianIndices(fraction)
+        lw = acc.log_numerator_sums[idx]
+        max_lw = acc.max_log_numerator_weights[idx]
+        if isfinite(lw) && isfinite(max_lw)
+            fraction[idx] = exp(max_lw - lw)
+        end
+    end
+    return fraction
+end
+
+max_weight_fraction(acc::SampledPMFDeconvolutionAccumulator) =
+    sampled_pmf_max_weight_fraction(acc)
+
+function pmf_bin_quality(acc::SampledPMFDeconvolutionAccumulator{N, T};
+                         min_count::Integer = 20,
+                         min_ess::Real = 5.0,
+                         max_weight_fraction::Real = 0.5) where {N, T}
+    min_count >= 0 || throw(ArgumentError("min_count must be non-negative."))
+    if !(isfinite(min_ess) && min_ess >= 0)
+        throw(ArgumentError("min_ess must be finite and non-negative."))
+    end
+    if !(isfinite(max_weight_fraction) && 0 <= max_weight_fraction <= 1)
+        throw(ArgumentError("max_weight_fraction must be in the [0, 1] interval."))
+    end
+
+    ess = effective_samples(acc)
+    maxfrac = sampled_pmf_max_weight_fraction(acc)
+    reliable = falses(size(acc.counts))
+    for idx in CartesianIndices(reliable)
+        reliable[idx] =
+            acc.counts[idx] >= min_count &&
+            isfinite(acc.log_numerator_sums[idx]) &&
+            ess[idx] >= T(min_ess) &&
+            maxfrac[idx] <= T(max_weight_fraction)
+    end
+    return PMFBinQuality(copy(acc.counts), ess, maxfrac, reliable)
+end
+
+pmf_bin_quality(deconv::PMFDeconvolution; kwargs...) =
+    pmf_bin_quality(pmf_deconvolution_accumulator(deconv); kwargs...)
+
+pmf_quality_mask(::Nothing) = nothing
+pmf_quality_mask(quality::PMFBinQuality) = quality.reliable
+pmf_quality_mask(mask::AbstractArray{Bool}) = mask
+pmf_quality_mask(quality) = quality.reliable
+
 function sampled_pmf_probability(acc::SampledPMFDeconvolutionAccumulator{N, T}) where {N, T}
     log_total = online_pmf_total_log_weight(acc.log_numerator_sums)
     if !isfinite(log_total)
@@ -324,9 +440,26 @@ end
 
 function pmf_result_from_sampled_deconvolution(acc::SampledPMFDeconvolutionAccumulator;
                                                zero::Symbol = :min,
-                                               kBT = nothing)
+                                               kBT = nothing,
+                                               quality = nothing,
+                                               gauge_reliable_only::Bool = false,
+                                               mask_unreliable::Bool = false)
     probability = sampled_pmf_probability(acc)
-    return pmf_result_from_probability(acc.grid, probability; zero = zero, kBT = kBT)
+    bin_quality = quality
+    if isnothing(bin_quality) && (gauge_reliable_only || mask_unreliable)
+        bin_quality = pmf_bin_quality(acc)
+    end
+    reliable = pmf_quality_mask(bin_quality)
+    reference_mask = gauge_reliable_only ? reliable : nothing
+    report_mask = mask_unreliable ? reliable : nothing
+    return pmf_result_from_probability(
+        acc.grid,
+        probability;
+        zero = zero,
+        kBT = kBT,
+        reference_mask = reference_mask,
+        report_mask = report_mask,
+    )
 end
 
 function pmf_log_bin_weights!(dest::AbstractVector{T},
