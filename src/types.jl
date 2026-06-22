@@ -1856,6 +1856,7 @@ struct ANIPotential{M, PV, SV, SP, P, SE, D, F, E} <: AbstractMLPotential
     cutoff::D         # max(r_c_R, r_c_A), plain Float (Å)
     force_units::F
     energy_units::E
+    _buf::Ref{Any}    # lazily-initialized AEVBuffers for zero-allocation AEV computation
 end
 
 # Constructor and implementation are in ext/MollyLuxExt.jl (needs Lux + HDF5).

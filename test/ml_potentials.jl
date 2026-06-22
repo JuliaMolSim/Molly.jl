@@ -464,3 +464,65 @@ end
         println("Max force deviation: ", round(dev, sigdigits=4), " eV/Å")
     end
 end
+
+# ============================================================================
+# Test 12: 6mrr protein — energy sign + timing (validates large-system path)
+# ============================================================================
+
+@testset "ANIPotential: 6mrr protein energy (first 50 atoms)" begin
+    pdb_path = joinpath(@__DIR__, "..", "data", "6mrr_equil.pdb")
+    h5_path  = joinpath(REF_DIR, "ani2x.h5")
+    if !isfile(pdb_path) || !isfile(h5_path)
+        @warn "6mrr_equil.pdb or ani2x.h5 not found — skipping"
+        @test_broken false
+    else
+        pot = ANIPotential(h5_path; ensemble_idx=0)
+        valid_elements = Set(keys(pot.species_map))
+
+        # Parse PDB: collect first N atoms whose elements ANI-2x supports
+        max_atoms = 50
+        coords_list = SVector{3,Float64}[]
+        elem_list   = String[]
+        open(pdb_path) do f
+            for line in eachline(f)
+                (startswith(line, "ATOM") || startswith(line, "HETATM")) || continue
+                length(line) < 78 && continue
+                elem = strip(line[77:78])
+                elem in valid_elements || continue
+                x = parse(Float64, line[31:38])
+                y = parse(Float64, line[39:46])
+                z = parse(Float64, line[47:54])
+                push!(coords_list, SVector(x, y, z))
+                push!(elem_list, elem)
+                length(elem_list) == max_atoms && break
+            end
+        end
+
+        n = length(elem_list)
+        atoms      = [Atom(mass=1.0u"u") for _ in 1:n]
+        coords     = [c * u"Å" for c in coords_list]
+        atoms_data = [AtomData(element=e) for e in elem_list]
+        boundary   = CubicBoundary(100.0u"Å")
+
+        nf = DistanceNeighborFinder(
+            eligible    = trues(n, n),
+            dist_cutoff = (Float64(pot.cutoff) + 1.0) * u"Å",
+        )
+        sys = System(
+            atoms=atoms, coords=coords, boundary=boundary, atoms_data=atoms_data,
+            general_inters=(ani=pot,), neighbor_finder=nf,
+            force_units=u"eV/Å", energy_units=u"eV",
+        )
+
+        # Warmup + energy check
+        E = potential_energy(sys)
+        @test E < 0u"eV"
+
+        # Timing (second call — buffers warm, neighbor list computed)
+        t = @elapsed potential_energy(sys)
+        alloc = @allocated potential_energy(sys)
+        println("6mrr first $n atoms: E = $(round(typeof(E), E, sigdigits=8))")
+        println("  time (warm):  $(round(t*1000, sigdigits=3)) ms")
+        println("  allocs (warm): $alloc bytes")
+    end
+end
