@@ -526,3 +526,110 @@ end
         println("  allocs (warm): $alloc bytes")
     end
 end
+
+# ============================================================================
+# Test 13: 6mrr full protein — all 15,954 atoms, cross-validate with TorchANI
+# ============================================================================
+
+@testset "ANIPotential: 6mrr full protein energy (all atoms)" begin
+    pdb_path = joinpath(@__DIR__, "..", "data", "6mrr_equil.pdb")
+    ref_path = joinpath(REF_DIR, "6mrr_ani2x.json")
+    h5_path  = joinpath(REF_DIR, "ani2x.h5")
+    if !isfile(pdb_path) || !isfile(h5_path)
+        @warn "6mrr_equil.pdb or ani2x.h5 not found — skipping"
+        @test_broken false
+    else
+        pot = ANIPotential(h5_path; ensemble_idx=0)
+        valid_elements = Set(keys(pot.species_map))
+
+        # Parse all atoms from PDB
+        coords_list = SVector{3,Float64}[]
+        elem_list   = String[]
+        open(pdb_path) do f
+            for line in eachline(f)
+                (startswith(line, "ATOM") || startswith(line, "HETATM")) || continue
+                length(line) < 78 && continue
+                elem = strip(line[77:78])
+                elem in valid_elements || continue
+                x = parse(Float64, line[31:38])
+                y = parse(Float64, line[39:46])
+                z = parse(Float64, line[47:54])
+                push!(coords_list, SVector(x, y, z))
+                push!(elem_list, elem)
+            end
+        end
+
+        n = length(elem_list)
+        println("6mrr: loaded $n valid ANI-2x atoms")
+
+        nf = DistanceNeighborFinder(
+            eligible    = trues(n, n),
+            dist_cutoff = (Float64(pot.cutoff) + 1.0) * u"Å",
+        )
+        sys = System(
+            atoms          = [Atom(mass=1.0u"u") for _ in 1:n],
+            coords         = [c * u"Å" for c in coords_list],
+            boundary       = CubicBoundary(100.0u"Å"),
+            atoms_data     = [AtomData(element=e) for e in elem_list],
+            general_inters = (ani=pot,),
+            neighbor_finder = nf,
+            force_units    = u"eV/Å",
+            energy_units   = u"eV",
+        )
+
+        E = potential_energy(sys)
+        @test E < 0u"eV"
+
+        # Cross-validate against TorchANI if reference is available
+        if isfile(ref_path)
+            ref = JSON3.read(read(ref_path, String))
+            E_ref = Float64(ref.energy_eV) * u"eV"
+            # Ensemble member 0 vs ensemble average: allow 1% relative tolerance
+            @test isapprox(ustrip(u"eV", E), ustrip(u"eV", E_ref); rtol=0.01)
+            println("  Julia E = $(round(typeof(E), E, sigdigits=8))")
+            println("  TorchANI E = $(round(typeof(E_ref), E_ref, sigdigits=8))")
+        end
+
+        t = @elapsed potential_energy(sys)
+        println("  time (warm):  $(round(t, sigdigits=3)) s  ($n atoms)")
+    end
+end
+
+# ============================================================================
+# Test 14: KernelAbstractions AEV kernel — CPU and (optionally) GPU backend
+# ============================================================================
+
+if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
+    @testset "ANIPotential: KA AEV kernel matches scalar CPU (N₂ + H₂O)" begin
+        h5_path = joinpath(REF_DIR, "ani2x.h5")
+        if !isfile(h5_path)
+            @warn "ani2x.h5 not found — skipping"
+            @test_broken false
+        else
+            pot = ANIPotential(h5_path; ensemble_idx=0)
+            p   = pot.aev_params
+            n_sp = length(pot.species_map)
+
+            # N₂ dimer — only radial AEV (zero angular)
+            coords_n2  = [SVector(0f0, 0f0, 0f0), SVector(1.1f0, 0f0, 0f0)]
+            species_n2 = [pot.species_map["N"], pot.species_map["N"]]
+            bdy        = CubicBoundary(1000f0)
+
+            aevs_cpu = Molly.compute_aevs(coords_n2, species_n2, nothing, bdy, p, n_sp)
+            aevs_ka  = Molly.compute_aevs_ka(coords_n2, species_n2, p, n_sp)
+            @test aevs_ka ≈ aevs_cpu  atol=1f-6
+
+            # H₂O — non-trivial radial + angular AEV
+            water_ref = JSON3.read(read(joinpath(REF_DIR, "water_ani2x.json"), String))
+            coords_w  = [SVector{3,Float32}(row...) for row in water_ref.coordinates_A]
+            species_w = [pot.species_map[s] for s in ["O","H","H"]]
+
+            aevs_w_cpu = Molly.compute_aevs(coords_w, species_w, nothing, bdy, p, n_sp)
+            aevs_w_ka  = Molly.compute_aevs_ka(coords_w, species_w, p, n_sp)
+            @test aevs_w_ka ≈ aevs_w_cpu  atol=1f-5
+
+            println("KA N₂ deviation: ", maximum(abs.(aevs_ka .- aevs_cpu)))
+            println("KA H₂O deviation: ", maximum(abs.(aevs_w_ka .- aevs_w_cpu)))
+        end
+    end
+end

@@ -27,6 +27,7 @@ export
     AbstractMLPotential,
     ANIPotential,
     compute_aevs,
+    compute_aevs_ka,
     cosine_cutoff,
     celu01
 
@@ -1888,6 +1889,17 @@ CELU activation with α=0.1 (standard for ANI networks).
 Exported so AD backends can register rules without depending on MollyLuxExt.
 """
 @noinline celu01(x::T) where T = x >= zero(T) ? x : T(0.1) * (exp(x / T(0.1)) - one(T))
+
+"""
+    compute_aevs_ka(coords, species_indices, aev_params, n_species; backend=nothing)
+
+GPU-portable AEV computation using KernelAbstractions — one thread per atom.
+Requires `KernelAbstractions`, `Lux`, and `HDF5` to be loaded.
+"""
+function compute_aevs_ka(args...; kwargs...)
+    error("compute_aevs_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
+          "`using KernelAbstractions, Lux, HDF5`")
+end
 
 # ForwardDiff.jl checks both value and derivative
 # This could be extended to only check the value for Duals
