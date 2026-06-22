@@ -615,9 +615,17 @@ function Base.push!(nl::NeighborList, element)
 end
 
 function Base.append!(nl::NeighborList, list)
-    for element in list
-        push!(nl, element)
+    n_new = length(list)
+    n_avail = min(length(nl.list) - nl.n, n_new)
+    @inbounds if n_avail == n_new
+        nl.list[(nl.n + 1):(nl.n + n_avail)] .= list
+    elseif n_avail > 0
+        nl.list[(nl.n + 1):(nl.n + n_avail)] .= list[1:n_avail]
+        append!(nl.list, list[(n_avail + 1):end])
+    else # n_avail == 0
+        append!(nl.list, list)
     end
+    nl.n += n_new
     return nl
 end
 
@@ -651,11 +659,14 @@ Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 # CUDA launch configuration
+const CUDA_LAUNCH_UNSET = 0
+const CUDA_TILE_THREADS_UNSET = (0, 0)
+
 struct CUDALaunchConfig
-    force_block_y::Union{Nothing, Int}
-    force_maxregs::Union{Nothing, Int}
-    tile_threads::Union{Nothing, NTuple{2, Int}}
-    energy_block_y::Union{Nothing, Int}
+    force_block_y::Int
+    force_maxregs::Int
+    tile_threads::NTuple{2, Int}
+    energy_block_y::Int
 end
 
 function CUDALaunchConfig(;
@@ -675,7 +686,35 @@ function CUDALaunchConfig(;
         all(>(0), tile_threads) || throw(ArgumentError("tile_threads entries must be positive"))
     end
 
-    return CUDALaunchConfig(force_block_y, force_maxregs, tile_threads, energy_block_y)
+    tile_threads_raw = tile_threads === nothing ?
+                       CUDA_TILE_THREADS_UNSET :
+                       (Int(tile_threads[1]), Int(tile_threads[2]))
+    return CUDALaunchConfig(
+        Int(something(force_block_y, CUDA_LAUNCH_UNSET)),
+        Int(something(force_maxregs, CUDA_LAUNCH_UNSET)),
+        tile_threads_raw,
+        Int(something(energy_block_y, CUDA_LAUNCH_UNSET)),
+    )
+end
+
+@inline function cuda_force_block_y(config::CUDALaunchConfig)
+    value = config.force_block_y
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_force_maxregs(config::CUDALaunchConfig)
+    value = config.force_maxregs
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_tile_threads(config::CUDALaunchConfig)
+    value = config.tile_threads
+    return value == CUDA_TILE_THREADS_UNSET ? nothing : value
+end
+
+@inline function cuda_energy_block_y(config::CUDALaunchConfig)
+    value = config.energy_block_y
+    return iszero(value) ? nothing : value
 end
 
 """
@@ -1363,10 +1402,10 @@ function AtomsBase.atomic_number(s::ReplicaSystem)
     end
 end
 
-
 # Avoid unnecessary Array calls on CPU
 from_device(x::Array) = x
 from_device(x) = Array(x)
+from_device(x::StructArray) = replace_storage(Array, x)
 
 to_device(x::Array, ::Type{<:Array}) = x
 to_device(x, ::Type{AT}) where AT = AT(x)
@@ -1615,8 +1654,8 @@ function System(sys::AtomsBase.AbstractSystem{D};
     end
 
     length_unit = unit(first(AtomsBase.position(sys, 1)))
-    atoms = Vector{Atom}(undef, (length(sys),))
-    atoms_data = Vector{AtomData}(undef, (length(sys),))
+    atoms = Vector{Atom}(undef, length(sys))
+    atoms_data = Vector{AtomData}(undef, length(sys))
     for (i, atom) in enumerate(sys)
         atoms[i] = Atom(
             index=i,
@@ -1790,7 +1829,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return potential_energy(sys, nbs, nothing, step_n; n_threads=n_threads)
+    return potential_energy(sys, nbs, step_n, nothing; n_threads=n_threads)
 end
 
 """

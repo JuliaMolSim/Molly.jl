@@ -13,7 +13,7 @@ AT = CuArray
 RNG_SEED = 42
 rng = MersenneTwister(RNG_SEED)
 
-DT = FT(2)u"fs"
+DT = FT(4)u"fs"
 
 TIME_EQ = FT(100)u"ps"
 STEPS_EQ = Int(floor(TIME_EQ/DT))
@@ -127,7 +127,7 @@ tss_state = TSSState(
     adaptive_gamma = :covdet,
 )
 
-N_MD_STEPS    = 50
+N_MD_STEPS    = 25
 SELF_ADJ_STEPS = 5
 
 N_REPLICAS = 2

@@ -54,14 +54,14 @@ end
                        special=false,
                        args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
     A = A_mixing(inter.A_mixing, atom_i, atom_j, special)
     B = B_mixing(inter.B_mixing, atom_i, atom_j, special)
     C = C_mixing(inter.C_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     params = (A, B, C)
 
     f = force_cutoff(cutoff, inter, r, params)
@@ -92,7 +92,7 @@ end
     C = C_mixing(inter.C_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     params = (A, B, C)
 
     pe = pe_cutoff(cutoff, inter, r, params)

@@ -4,7 +4,8 @@ import Base: ==, hash
 
 export
     Ewald,
-    PME
+    PME,
+    EwaldExclusion
 
 abstract type AbstractEwald end
 
@@ -46,23 +47,6 @@ function AtomsCalculators.energy_forces(sys::System,
     return (energy=pe, forces=fs)
 end
 
-function find_excluded_pairs(eligible, special)
-    excluded_pairs = Tuple{Int32, Int32}[]
-    if !(isnothing(eligible) && isnothing(special))
-        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
-        eligible_cpu = (isnothing(eligible) ? trues( n_atoms, n_atoms) : from_device(eligible))
-        special_cpu  = (isnothing(special ) ? falses(n_atoms, n_atoms) : from_device(special ))
-        for i in 1:n_atoms
-            for j in (i+1):n_atoms
-                if !eligible_cpu[i, j] || special_cpu[i, j]
-                    push!(excluded_pairs, (Int32(i), Int32(j)))
-                end
-            end
-        end
-    end
-    return excluded_pairs
-end
-
 @inline electrostatic_lambda(::Any, atom, ::Val{T}) where T = one(T)
 
 @inline function electrostatic_lambda(scheduler, atom::Atom, ::Val{T}) where T
@@ -73,123 +57,18 @@ end
     return charge(atom) * electrostatic_lambda(scheduler, atom, Val(T))
 end
 
-# IMPORTANT Passing vec_ij and r, and not having calculate_forces as a Val, was required to avoid allocations
-function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr, scheduler,
-                            i, j, vec_ij, r,
-                            ::Val{T}, ::Val{calculate_forces}, ::Val{atomic},
-                            ::Val{needs_vir}) where {T, calculate_forces, atomic, needs_vir}
-    sqrt_π = sqrt(T(π))
-    charge_ij = effective_charge(scheduler, atoms[i], Val(T)) *
-                effective_charge(scheduler, atoms[j], Val(T))
-    αr = α * r
-    erf_αr = erf(αr)
-    if erf_αr > T(1e-6)
-        inv_r = inv(r)
-        exclusion_E = -f_div_ϵr * charge_ij * inv_r * erf_αr
-        if calculate_forces
-            dE_dr = f_div_ϵr * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
-            F = dE_dr * vec_ij
-            if atomic
-                for dim in 1:3
-                    fval = ustrip(F[dim])
-                    Atomix.@atomic Fs[dim, i] +=  fval
-                    Atomix.@atomic Fs[dim, j] += -fval
-                    if needs_vir
-                        for alpha in 1:3
-                            Atomix.@atomic vir[alpha, dim] += ustrip(vec_ij[alpha]) * fval
-                        end
-                    end
-                end
-            else
-                Fs[i] += F
-                Fs[j] -= F
-                if needs_vir
-                    vir .+= vec_ij * transpose(F)
-                end
-            end
-        end
-    else
-        exclusion_E = -α * 2 * f_div_ϵr * charge_ij / sqrt_π
-    end
-    return exclusion_E
-end
-
-function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
-                                coords::Vector, boundary, α, f_div_ϵr, scheduler, force_units, energy_units,
-                                ::Val{calculate_forces}, ::Val{T},
-                                ::Val{needs_vir}) where {calculate_forces, T, needs_vir}
-    exclusion_E = zero(T) * energy_units
-    for (i, j) in excluded_pairs
-        vec_ij = vector(coords[i], coords[j], boundary)
-        r = norm(vec_ij)
-        E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f_div_ϵr,
-                            scheduler, i, j, vec_ij, r, Val(T), Val(calculate_forces), Val(false),
-                            Val(needs_vir))
-        exclusion_E += E
-    end
-    return exclusion_E
-end
-
-function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
-                                coords::AbstractVector{SVector{D, C}}, boundary, α, f_div_ϵr,
-                                scheduler, force_units, energy_units, ::Val{calculate_forces}, ::Val{T},
-                                ::Val{needs_vir}) where {D, C, T, calculate_forces, needs_vir}
-    if calculate_forces
-        buffer_Fs .= zero(T)
-        if needs_vir
-            virial_buffer .= zero(T)
-        end
-    end
-    backend = get_backend(atoms)
-    n_threads_gpu = 128
-    kernel! = excluded_interactions_kernel!(backend, n_threads_gpu)
-    kernel!(buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms, coords, boundary, α,
-            f_div_ϵr, scheduler, energy_units, Val(T), Val(calculate_forces), Val(needs_vir);
-            ndrange=length(excluded_pairs))
-
-    if calculate_forces
-        Fs .+= reinterpret(SVector{D, T}, vec(buffer_Fs)) .* force_units
-        if needs_vir
-            vir .+= from_device(virial_buffer) .* energy_units
-        end
-    end
-    return sum(buffer_Es) * energy_units
-end
-
-@kernel function excluded_interactions_kernel!(Fs_mat, vir, exclusion_Es, @Const(excluded_pairs),
-                            @Const(atoms), @Const(coords), boundary, α, f_div_ϵr, scheduler, energy_units,
-                            ::Val{T}, ::Val{calculate_forces},
-                            ::Val{needs_vir}) where {T, calculate_forces, needs_vir}
-    ei = @index(Global, Linear)
-    if ei <= length(excluded_pairs)
-        i, j = excluded_pairs[ei]
-        vec_ij = vector(coords[i], coords[j], boundary)
-        r = norm(vec_ij)
-        E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f_div_ϵr,
-                                scheduler, i, j, vec_ij, r, Val(T), Val(calculate_forces), Val(true),
-                                Val(needs_vir))
-        exclusion_Es[ei] = ustrip(energy_units, E)
-    end
-end
-
 """
-    Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing,
-          scheduler=DefaultLambdaScheduler())
+    Ewald(dist_cutoff; error_tol=0.0005, scheduler=DefaultLambdaScheduler())
 
 Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
 
 Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
-which provide the short range term.
-`dist_cutoff` and `error_tol` should match [`CoulombEwald`](@ref).
+which provides the short range term, and the [`EwaldExclusion`](@ref) specific
+interaction, which provides the exclusions for bonded atoms.
+`dist_cutoff` and `error_tol` should match these interactions.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
-`eligible` indicates pairs eligible for short range interaction, and can
-be a matrix like the neighbor list or `nothing` to indicate that all pairs
-are eligible.
-`special` should also be given where relevant, as these interactions are
-excluded from long range calculation.
-
 This algorithm is O(N^2) and in general [`PME`](@ref) should be used instead.
 Only compatible with 3D systems and [`CubicBoundary`](@ref).
 Not compatible with infinite boundaries.
@@ -198,15 +77,12 @@ Runs on the CPU, even for GPU systems.
 struct Ewald{T, D, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
-    excluded_pairs::Vector{Tuple{Int32, Int32}}
     scheduler::SCH
 end
 
-function Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing,
-               scheduler=DefaultLambdaScheduler())
+function Ewald(dist_cutoff; error_tol=0.0005, scheduler=DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
-    excluded_pairs = find_excluded_pairs(eligible, special)
-    return Ewald(dist_cutoff, T(error_tol), excluded_pairs, scheduler)
+    return Ewald(dist_cutoff, T(error_tol), scheduler)
 end
 
 function ewald_error(αr::T, target, guess) where T
@@ -244,13 +120,13 @@ function ewald_pe_forces!(Fs, vir, sys::System{3}, inter::AbstractEwald, ::Val{n
                           n_threads::Integer=Threads.nthreads()) where needs_vir
     calculate_forces = !isnothing(Fs)
     return ewald_pe_forces!(Fs, vir, inter, sys.atoms, sys.coords, sys.boundary, sys.force_units,
-                            sys.energy_units, Val(needs_vir), Val(calculate_forces);
+                            sys.energy_units, Val(needs_vir), calculate_forces;
                             n_threads=n_threads)
 end
 
 function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, force_units,
-                          energy_units, ::Val{needs_vir}, ::Val{calculate_forces}=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {T, calculate_forces, needs_vir}
+                          energy_units, ::Val{needs_vir}, calculate_forces=true;
+                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
     AT = array_type(atoms)
     n_atoms = length(atoms)
     atoms_cpu, coords_cpu = from_device(atoms), from_device(coords)
@@ -269,11 +145,6 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
     else
         Fs_cpu = Fs
     end
-
-    exclusion_E = excluded_interactions!(Fs_cpu, vir, nothing, nothing, nothing,
-                        inter.excluded_pairs, atoms_cpu, coords_cpu, boundary, α, f,
-                        inter.scheduler, force_units, energy_units, Val(calculate_forces), Val(T),
-                        Val(needs_vir))
 
     recip_box_size = (2 * T(π)) ./ boundary.side_lengths
     eir = zeros(Complex{T}, kmax * n_atoms * 3)
@@ -359,7 +230,7 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
 
     charge_E = -f * T(π) * sum(partial_charges_cpu)^2 / (2 * V * α^2)
     self_E = f * -sum(abs2, partial_charges_cpu) * α / sqrt(T(π)) + charge_E
-    total_E = reciprocal_space_E + self_E + exclusion_E
+    total_E = reciprocal_space_E + self_E
 
     if needs_vir
         # E_charge = -A/V with A = f*π*Q^2/(2α^2) ⇒ W_charge = -E_charge * I
@@ -375,36 +246,29 @@ end
 function ==(a::Ewald, b::Ewald)
     return a.dist_cutoff == b.dist_cutoff &&
            a.error_tol   == b.error_tol   &&
-           a.excluded_pairs == b.excluded_pairs &&
            a.scheduler == b.scheduler
 end
 
 function hash(a::Ewald, h::UInt)
     v = hash(a.dist_cutoff, h)
     v = hash(a.error_tol, v)
-    v = hash(a.excluded_pairs, v)
     return hash(a.scheduler, v)
 end
 
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-        ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
-        scheduler=DefaultLambdaScheduler(), grad_safe=false,
-        n_threads=Threads.nthreads())
+        ϵr=1.0, fixed_charges=true, scheduler=DefaultLambdaScheduler(),
+        grad_safe=false, n_threads=Threads.nthreads())
 
 Particle mesh Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
 
 Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
-which provide the short range term.
-`dist_cutoff` and `error_tol` should match [`CoulombEwald`](@ref).
+which provides the short range term, and the [`EwaldExclusion`](@ref) specific
+interaction, which provides the exclusions for bonded atoms.
+`dist_cutoff` and `error_tol` should match these interactions.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
-`eligible` indicates pairs eligible for short range interaction, and can
-be a matrix like the neighbor list or `nothing` to indicate that all pairs
-are eligible.
-`special` should also be given where relevant, as these interactions are
-excluded from long range calculation.
 `fixed_charges` should be set to `false` if the partial charges can change,
 for example when using a polarizable force field.
 `grad_safe` should be set to `true` if gradients are going to be calculated
@@ -418,12 +282,11 @@ is based on the smooth PME algorithm from
 Only compatible with 3D systems.
 Not compatible with infinite boundaries.
 """
-struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B, SCH} <: AbstractEwald
+struct PME{T, D, A, I, M, BM, C, CB, RB, VB, P, F, B, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     order::Int
     ϵr::T
-    excluded_pairs::E
     α::A
     mesh_dims::SVector{3, Int}
     grid_indices::I
@@ -435,8 +298,6 @@ struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, VB, P, F, B, SCH} <: Abstrac
     bsplines_moduli_z::BM
     charge_grid::C
     charge_grid_buffer::CB
-    excluded_buffer_Fs::FB
-    excluded_buffer_Es::EB
     recip_conv_buffer::RB
     virial_buffer::VB
     pc_sum::P
@@ -522,17 +383,13 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     if AT <: AbstractGPUArray
         charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)
         recip_conv_buffer  = to_device(zeros(T, mesh_dims...), AT)
-        excluded_buffer_Fs = to_device(zeros(T, 3, n_atoms), AT)
-        excluded_buffer_Es = to_device(zeros(T, length(excluded_pairs)), AT)
         virial_buffer      = to_device(zeros(T, 3, 3), AT)
     elseif n_threads > 1
-        charge_grid_buffer = [zero(charge_grid) for _ in 1:n_threads]
+        charge_grid_buffer = [zeros(T, size(charge_grid)) for _ in 1:n_threads]
         recip_conv_buffer = zeros(T, n_threads)
-        excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
         virial_buffer = [zeros(T, 3, 3) for _ in 1:n_threads]
     else
         charge_grid_buffer, recip_conv_buffer = nothing, nothing
-        excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
         virial_buffer = [zeros(T, 3, 3)]
     end
 
@@ -551,11 +408,10 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     bsm_y = to_device(bsplines_moduli[2], AT)
     bsm_z = to_device(bsplines_moduli[3], AT)
 
-    return PME(dist_cutoff, error_tol_T, order, T(ϵr), excluded_pairs, α, mesh_dims,
-               grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z,
-               charge_grid, charge_grid_buffer, excluded_buffer_Fs, excluded_buffer_Es,
-               recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, fft_plan,
-               bfft_plan, scheduler, grad_safe)
+    return PME(dist_cutoff, error_tol_T, order, T(ϵr), α, mesh_dims, grid_indices, grid_fractions,
+               bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z, charge_grid, charge_grid_buffer,
+               recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan,
+               scheduler, grad_safe)
 end
 
 function Base.zero(pme::PME)
@@ -569,7 +425,6 @@ function Base.zero(pme::PME)
         zero(pme.error_tol),
         pme.order,
         zero(pme.ϵr),
-        pme.excluded_pairs,
         zero(pme.α),
         pme.mesh_dims,
         zero(pme.grid_indices),
@@ -581,8 +436,6 @@ function Base.zero(pme::PME)
         zero(pme.bsplines_moduli_z),
         zero(pme.charge_grid),
         charge_grid_buffer,
-        zero_or_nothing(pme.excluded_buffer_Fs),
-        zero_or_nothing(pme.excluded_buffer_Es),
         zero_or_nothing(pme.recip_conv_buffer),
         zero_or_nothing(pme.virial_buffer),
         zero_or_nothing(pme.pc_sum),
@@ -725,6 +578,25 @@ end
     end
 end
 
+# Single-threaded case
+@inline function add_charge_grid!(charge_grid::AbstractArray{<:Complex}, zindex, yindex,
+                                  xindex, cb, ::Val{false})
+    @inbounds charge_grid[zindex, yindex, xindex] += Complex(cb, zero(cb))
+    return charge_grid
+end
+
+# Multi-threaded case, this is just the real part
+@inline function add_charge_grid!(charge_grid, zindex, yindex, xindex, cb, ::Val{false})
+    @inbounds charge_grid[zindex, yindex, xindex] += cb
+    return charge_grid
+end
+
+# GPU case, atomic doesn't work for complex numbers, this is just the real part
+@inline function add_charge_grid!(charge_grid, zindex, yindex, xindex, cb, ::Val{true})
+    @inbounds Atomix.@atomic charge_grid[zindex, yindex, xindex] += cb
+    return charge_grid
+end
+
 @inline function spread_charge_inner!(charge_grid, grid_indices, bsplines_θ,
                               mesh_dims, order, atoms, scheduler, i, ::Val{T},
                               ::Val{atomic}) where {T, atomic}
@@ -738,12 +610,7 @@ end
                 zindex = (z0index + iz) % mesh_dims[3]
                 cb = q * bsplines_θ[(i-1)*order+ix+1, 1] *
                             bsplines_θ[(i-1)*order+iy+1, 2] * bsplines_θ[(i-1)*order+iz+1, 3]
-                if atomic
-                    # Atomic doesn't work for complex numbers, this is just the real part
-                    Atomix.@atomic charge_grid[zindex+1, yindex+1, xindex+1] += cb
-                else
-                    charge_grid[zindex+1, yindex+1, xindex+1] += Complex(cb, zero(cb))
-                end
+                add_charge_grid!(charge_grid, zindex + 1, yindex + 1, xindex + 1, cb, Val(atomic))
             end
         end
     end
@@ -763,7 +630,7 @@ end
 function spread_charge!(charge_grid::Array{Complex{T}, 3}, buffer, grid_indices, bsplines_θ,
                         mesh_dims, order, atoms, scheduler, ::Val{n_threads}) where {T, n_threads}
     Threads.@threads for chunk_i in 1:n_threads
-        buffer[chunk_i] .= zero(Complex{T})
+        buffer[chunk_i] .= zero(T)
         for i in chunk_i:n_threads:length(atoms)
             spread_charge_inner!(buffer[chunk_i], grid_indices, bsplines_θ,
                                  mesh_dims, order, atoms, scheduler, i, Val(T), Val(false))
@@ -870,7 +737,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
         esum += esum_val
     end
     if needs_vir
-        vir .+= buffer_virial[1] .* energy_units
+        # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+        vir .+= buffer_virial[1] .* energy_units / 2
     end
     return esum / 2
 end
@@ -897,7 +765,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
     esum = sum(buffer) * energy_units
     if needs_vir
         for chunk_i in 1:n_threads
-            vir .+= buffer_virial[chunk_i] .* energy_units
+            # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+            vir .+= buffer_virial[chunk_i] .* energy_units / 2
         end
     end
     return esum / 2
@@ -918,7 +787,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::AbstractArray{Complex{T}, 
     kernel!(buffer_virial, buffer, charge_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
             energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir); ndrange=ndrange)
     if needs_vir
-        vir .+= from_device(buffer_virial) .* energy_units
+        # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+        vir .+= from_device(buffer_virial) .* energy_units / 2
     end
     return sum(buffer) * energy_units / 2
 end
@@ -1010,24 +880,26 @@ grad_safe_fft!( charge_grid, fft_plan ) = fft_plan  * charge_grid
 grad_safe_bfft!(charge_grid, bfft_plan) = bfft_plan * charge_grid
 
 function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force_units,
-                          energy_units, ::Val{needs_vir}, ::Val{calculate_forces}=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {T, calculate_forces, needs_vir}
+                          energy_units, ::Val{needs_vir}, calculate_forces=true;
+                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
+    if !is_on_gpu(coords) && n_threads > 1 &&
+            (isnothing(inter.charge_grid_buffer) || length(inter.charge_grid_buffer) != n_threads)
+        ntc = (isnothing(inter.charge_grid_buffer) ? 1 : length(inter.charge_grid_buffer))
+        error("PME was created with n_threads $ntc but called with n_threads $n_threads")
+    end
     n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
     f_div_ϵr = f / ϵr
 
-    exclusion_E = excluded_interactions!(Fs, vir, inter.excluded_buffer_Fs, inter.virial_buffer,
-                    inter.excluded_buffer_Es, inter.excluded_pairs, atoms, coords, boundary, α,
-                    f_div_ϵr, inter.scheduler, force_units, energy_units, Val(calculate_forces),
-                    Val(T), Val(needs_vir))
-
     recip_box = invert_box_vectors(boundary)
     grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
     update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order, n_thr)
+    n_spread_thr = min(n_threads, 4)
     spread_charge!(inter.charge_grid, inter.charge_grid_buffer, inter.grid_indices,
-                   inter.bsplines_θ, mesh_dims, order, atoms, inter.scheduler, Val(n_thr))
+                   inter.bsplines_θ, mesh_dims, order, atoms, inter.scheduler,
+                   Val(n_spread_thr))
     grad_safe_fft!(inter.charge_grid, inter.fft_plan)
     reciprocal_space_E = recip_conv!(vir, inter.virial_buffer, inter.charge_grid,
                     inter.recip_conv_buffer, inter.bsplines_moduli_x, inter.bsplines_moduli_y,
@@ -1050,6 +922,120 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     end
     charge_E = -f_div_ϵr * T(π) * pc_sum^2 / (2 * V * α^2)
     self_E = f_div_ϵr * -pc_abs2_sum * α / sqrt(T(π)) + charge_E
-    total_E = reciprocal_space_E + self_E + exclusion_E
+    if needs_vir
+        # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I.
+        vir .+= charge_E .* I(3)
+    end
+    total_E = reciprocal_space_E + self_E
     return total_E
+end
+
+function find_excluded_pairs(eligible, special)
+    excluded_pairs = Tuple{Int32, Int32}[]
+    if !(isnothing(eligible) && isnothing(special))
+        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
+        eligible_cpu = (isnothing(eligible) ? trues( n_atoms, n_atoms) : from_device(eligible))
+        special_cpu  = (isnothing(special ) ? falses(n_atoms, n_atoms) : from_device(special ))
+        for i in 1:n_atoms
+            for j in (i+1):n_atoms
+                if !eligible_cpu[i, j] || special_cpu[i, j]
+                    push!(excluded_pairs, (Int32(i), Int32(j)))
+                end
+            end
+        end
+    end
+    return excluded_pairs
+end
+
+"""
+    EwaldExclusion()
+
+Exclusions for bonded interactions for long range electrostatics.
+
+Should be used alongside the [`Ewald`](@ref) or [`PME`](@ref) general interaction,
+which provide the long-range term, and the [`CoulombEwald`](@ref) pairwise interaction,
+which provides the short range term.
+
+Since the properties of the interaction are the same for all pairs, they are stored once
+in the `data` field of the [`InteractionList2Atoms`](@ref) with `EwaldExclusionData`.
+`dist_cutoff` and `error_tol` for `EwaldExclusionData` should match the above interactions.
+
+Only compatible with 3D systems.
+"""
+struct EwaldExclusion end
+
+Base.zero(::EwaldExclusion) = EwaldExclusion()
+Base.:+(::EwaldExclusion, ::EwaldExclusion) = EwaldExclusion()
+
+struct EwaldExclusionData{T, D, A, F, S}
+    dist_cutoff::D
+    error_tol::T
+    ϵr::T
+    α::A
+    f_div_ϵr::F
+    scheduler::S
+end
+
+function EwaldExclusionData(dist_cutoff; error_tol=0.0005, ϵr=1.0,
+                            scheduler=DefaultLambdaScheduler())
+    T = typeof(ustrip(dist_cutoff))
+    error_tol_T = T(error_tol)
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
+    f = (unit(dist_cutoff) == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
+    ϵr_T = T(ϵr)
+    f_div_ϵr = f / ϵr_T
+    return EwaldExclusionData(dist_cutoff, error_tol_T, ϵr_T, α, f_div_ϵr, scheduler)
+end
+
+function Base.zero(inter::EwaldExclusionData{T, D, A, F}) where {T, D, A, F}
+    return EwaldExclusionData(zero(D), zero(T), zero(T), zero(A), zero(F), inter.scheduler)
+end
+
+function Base.:+(i1::EwaldExclusionData, i2::EwaldExclusionData)
+    return EwaldExclusionData(
+        i1.dist_cutoff + i2.dist_cutoff,
+        i1.error_tol + i2.error_tol,
+        i1.ϵr + i2.ϵr,
+        i1.α + i2.α,
+        i1.f_div_ϵr + i2.f_div_ϵr,
+        i1.scheduler,
+    )
+end
+
+@inline function force(::EwaldExclusion, coord_i, coord_j, boundary, atom_i, atom_j,
+                       force_units, velocities_i, velocities_j, step_n,
+                       data::EwaldExclusionData{T}) where T
+    vec_ij = vector(coord_i, coord_j, boundary)
+    r = sqrt(sum(abs2, vec_ij))
+    scheduler, α, f_div_ϵr = data.scheduler, data.α, data.f_div_ϵr
+    charge_ij = effective_charge(scheduler, atom_i, Val(T)) *
+                effective_charge(scheduler, atom_j, Val(T))
+    αr = α * r
+    erf_αr = erf(αr)
+    if erf_αr > T(1e-6)
+        inv_r = inv(r)
+        dE_dr = f_div_ϵr * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt(T(π)))
+        F = dE_dr * vec_ij
+        return SpecificForce2Atoms(F, -F)
+    else
+        zf = zero(SVector{3, T}) * force_units
+        return SpecificForce2Atoms(zf, zf)
+    end
+end
+
+@inline function potential_energy(::EwaldExclusion, coord_i, coord_j, boundary, atom_i, atom_j,
+                                  energy_units, velocities_i, velocities_j, step_n,
+                                  data::EwaldExclusionData{T}) where T
+    vec_ij = vector(coord_i, coord_j, boundary)
+    r = sqrt(sum(abs2, vec_ij))
+    scheduler, α, f_div_ϵr = data.scheduler, data.α, data.f_div_ϵr
+    charge_ij = effective_charge(scheduler, atom_i, Val(T)) *
+                effective_charge(scheduler, atom_j, Val(T))
+    erf_αr = erf(α * r)
+    if erf_αr > T(1e-6)
+        E = -f_div_ϵr * charge_ij * inv(r) * erf_αr
+    else
+        E = -α * 2 * f_div_ϵr * charge_ij / sqrt(T(π))
+    end
+    return E
 end

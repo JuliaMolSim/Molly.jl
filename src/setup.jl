@@ -478,7 +478,7 @@ Gromacs file reading should be considered experimental.
     to `true`.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
-    atom they are bonded to. Hydrogens in a constraint are not modified.
+    atom they are bonded to. This is applied before constraints are generated.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -544,8 +544,7 @@ function System(coord_file::AbstractString,
                             "(e.g. `2` or `2u\"g/mol\"`)"))
     end
     if !isa(hydrogen_mass, Bool) && !(hydrogen_mass > zero(hydrogen_mass))
-        throw(ArgumentError("hydrogen_mass should be greater than zero, constrained atoms" *
-                            "are automatically given a mass of zero"))
+        throw(ArgumentError("hydrogen_mass should be greater than zero"))
     end
     if grad_safe && neighbor_finder_type == GPUNeighborFinder
         throw(ArgumentError("GPUNeighborFinder is not compatible with grad_safe"))
@@ -1606,9 +1605,8 @@ function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_da
     return constraints, bonds, angles
 end
 
-function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constraints,
+function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
                                    hydrogen_mass, units, T)
-    inds_constrained = constrained_atom_inds(constraints)
     atoms_cpu = from_device(atoms)
     modified_masses = mass.(atoms_cpu)
     if units
@@ -1626,7 +1624,7 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constrai
     end
 
     for i in eachindex(atoms_cpu)
-        if !(i in inds_constrained) && !is_heavy_atom(atoms_cpu[i], atoms_data[i])
+        if !is_heavy_atom(atoms_cpu[i], atoms_data[i])
             mass_change = new_h_mass - modified_masses[i]
             modified_masses[i] = new_h_mass
 
@@ -1678,67 +1676,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     else
         ϵ_mix = GeometricMixing()
     end
-    # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
-    #   to zero for the pairwise interaction
-    pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
-    lj = LennardJones(
-        cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=using_neighbors,
-        σ_mixing=σ_mix,
-        ϵ_mixing=ϵ_mix,
-        weight_special=pi_weight_14_lj,
-    )
-
-    if nonbonded_method == :none
-        coul = Coulomb(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method == :cutoff
-        coul = CoulombReactionField(
-            dist_cutoff=T(dist_cutoff),
-            solvent_dielectric=T(crf_solvent_dielectric),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method in (:ewald, :pme)
-        coul = CoulombEwald(
-            dist_cutoff=T(dist_cutoff),
-            error_tol=T(ewald_error_tol),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-            approximate_erfc=approximate_pme,
-        )
-        if nonbonded_method == :ewald
-            ewald = Ewald(
-                T(dist_cutoff);
-                error_tol=T(ewald_error_tol),
-                eligible=eligible,
-                special=special,
-            )
-        else
-            ewald = PME(
-                T(dist_cutoff),
-                atoms,
-                boundary_used;
-                error_tol=T(ewald_error_tol),
-                eligible=eligible,
-                special=special,
-                grad_safe=grad_safe,
-            )
-        end
-        general_inters_ewald = (ewald,)
-    else
-        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
-                            ":none, :cutoff, :pme and :ewald"))
-    end
-    pairwise_inters = (lj, coul)
 
     # For the purposes of assigning molecules, add connections from atoms to virtual sites
     bonds_all_vs_is, bonds_all_vs_js = copy(bonds_all.is), copy(bonds_all.js)
@@ -1754,6 +1691,11 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         topology = MolecularTopology(bonds_all_vs_is, bonds_all_vs_js, length(coords_dev))
     else
         topology = nothing
+    end
+
+    if hydrogen_mass != false # false, number or unitful mass
+        atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds_all.is, bonds_all.js,
+                                          hydrogen_mass, units, T)
     end
 
     masses = mass.(from_device(atoms))
@@ -1873,6 +1815,74 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             ))
         end
     end
+
+    # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
+    #   to zero for the pairwise interaction
+    pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
+    lj = LennardJones(
+        cutoff=DistanceCutoff(T(dist_cutoff)),
+        use_neighbors=using_neighbors,
+        σ_mixing=σ_mix,
+        ϵ_mixing=ϵ_mix,
+        weight_special=pi_weight_14_lj,
+    )
+
+    if nonbonded_method == :none
+        coul = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters_ewald = ()
+    elseif nonbonded_method == :cutoff
+        coul = CoulombReactionField(
+            dist_cutoff=T(dist_cutoff),
+            solvent_dielectric=T(crf_solvent_dielectric),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters_ewald = ()
+    elseif nonbonded_method in (:ewald, :pme)
+        coul = CoulombEwald(
+            dist_cutoff=T(dist_cutoff),
+            error_tol=T(ewald_error_tol),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+            approximate_erfc=approximate_pme,
+        )
+
+        excluded_pairs = find_excluded_pairs(eligible, special)
+        exclusion_data = EwaldExclusionData(T(dist_cutoff); error_tol=T(ewald_error_tol))
+        ewald_exclusions = InteractionList2Atoms(
+            to_device([ep[1] for ep in excluded_pairs], AT),
+            to_device([ep[2] for ep in excluded_pairs], AT),
+            to_device(fill(EwaldExclusion(), length(excluded_pairs)), AT),
+            fill("", length(excluded_pairs)),
+            exclusion_data,
+        )
+        push!(specific_inter_array, ewald_exclusions)
+
+        if nonbonded_method == :ewald
+            ewald = Ewald(T(dist_cutoff); error_tol=T(ewald_error_tol))
+        else
+            ewald = PME(
+                T(dist_cutoff),
+                atoms,
+                boundary_used;
+                error_tol=T(ewald_error_tol),
+                grad_safe=grad_safe,
+            )
+        end
+        general_inters_ewald = (ewald,)
+    else
+        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
+                            ":none, :cutoff, :pme and :ewald"))
+    end
+
+    pairwise_inters = (lj, coul)
     specific_inter_lists = tuple(specific_inter_array...)
 
     if neighbor_finder_type == NoNeighborFinder
@@ -1945,11 +1955,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         general_inters_disp = ()
     end
     general_inters = (general_inters_ewald..., general_inters_is..., general_inters_disp...)
-
-    if hydrogen_mass != false # false, number or unitful mass
-        atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds.is, bonds.js, constraints,
-                                          hydrogen_mass, units, T)
-    end
 
     k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     virtual_sites_dev = (length(virtual_sites) > 0 ? to_device(virtual_sites, AT) : virtual_sites)

@@ -1328,10 +1328,10 @@ end
                 sys = System(
                     sys_init;
                     pairwise_inters=(sys_init.pairwise_inters[2],),
-                    specific_inter_lists=(),
+                    specific_inter_lists=(sys_init.specific_inter_lists[end],),
                 )
 
-                @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-4u"kJ/mol"
+                @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=2e-4u"kJ/mol"
                 fs = from_device(forces(sys; n_threads=n_threads))
                 @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"
                 E_gi, fs_gi = AtomsCalculators.energy_forces(sys, sys.general_inters[1];
@@ -1400,10 +1400,10 @@ end
                     sys = System(
                         sys_init;
                         pairwise_inters=(sys_init.pairwise_inters[2],),
-                        specific_inter_lists=(),
+                        specific_inter_lists=(sys_init.specific_inter_lists[end],),
                     )
 
-                    @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=3e-4u"kJ/mol"
+                    @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=2e-4u"kJ/mol"
                     fs = from_device(forces(sys; n_threads=n_threads))
                     @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"
                     E_gi, fs_gi = AtomsCalculators.energy_forces(sys, sys.general_inters[1];

@@ -16,11 +16,12 @@ Other papers that use, contribute to or are compatible with Molly are listed bel
 - Witt WC et al. ACEpotentials.jl: A Julia implementation of the atomic cluster expansion, [J Chem Phys](https://doi.org/10.1063/5.0158783) 159, 164101 (2023)
 - Blassel N and Stoltz G. Fixing the Flux: A Dual Approach to Computing Transport Coefficients, [Journal of Statistical Physics](https://doi.org/10.1007/s10955-024-03230-x) 191, 17 (2024)
 - Spacek R, Monmarché P and Stoltz G. Transient Subtraction: A Control Variate Method for Computing Transport Coefficients, [Journal of Statistical Physics](https://doi.org/10.1007/s10955-025-03424-x) 192, 53 (2025)
-- Wu X, Shang X. Stochastic Norton Dynamics: An Alternative Approach for the Computation of Transport Coefficients in Dissipative Particle Dynamics, [arXiv](https://arxiv.org/abs/2504.14479) (2025)
+- Wu X, Shang X. Stochastic Norton dynamics: An alternative approach for the computation of transport coefficients in dissipative particle dynamics, [Journal of Computational Physics](https://doi.org/10.1016/j.jcp.2025.114316) 541, 114316 (2025)
+- Yamada T, Morinishi Y. Application of Nosé–Hoover dynamics for coarse-graining molecular systems: An evaluation of reproducibility in Lennard-Jones systems, [J Chem Phys](https://doi.org/10.1063/5.0254868) 162, 134107 (2025) 
 - Greener JG. Reversible molecular simulation for training classical and machine learning force field, [Proceedings of the National Academy of Sciences](https://doi.org/10.1073/pnas.2426058122) 122(22), e2426058122 (2025)
 - Blanco-González A, Schulze TK, Rovers E, Greener JG. Training a force field for proteins and small molecules from scratch, [arXiv](https://arxiv.org/abs/2603.16770) (2026)
-- Ayoubi Z, Iranbakhsh S, Irani E, Ejtehadi MR. Comparing the structure and dynamics of single and
-catenated partially active ring polymers, [J Chem Phys](https://doi.org/10.1063/5.0320593) 164, 134908 (2026)
+- Ayoubi Z, Iranbakhsh S, Irani E, Ejtehadi MR. Comparing the structure and dynamics of single and catenated partially active ring polymers, [J Chem Phys](https://doi.org/10.1063/5.0320593) 164, 134908 (2026)
+- Gao X, Jiang S, Liang J, Zhou Q. An O(log N) Monte Carlo method for periodic Coulomb systems, [arXiv](https://arxiv.org/abs/2601.09288v1) (2026)
 
 ## General resources
 

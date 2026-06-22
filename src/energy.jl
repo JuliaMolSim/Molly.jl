@@ -11,17 +11,23 @@ export
     pairwise_pe
 
 """
-    total_energy(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
+    total_energy(system, neighbors=find_neighbors(sys), step_n=0, buffers=nothing;
+                 n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
+                 specific_inter_lists=system.specific_inter_lists,
+                 general_inters=system.general_inters)
 
 Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
 """
-function total_energy(sys; n_threads::Integer=Threads.nthreads())
-    return total_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function total_energy(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
+    return total_energy(sys, find_neighbors(sys; n_threads=n_threads);
+                        n_threads=n_threads, kwargs...)
 end
 
-function total_energy(sys, neighbors; n_threads::Integer=Threads.nthreads())
-    return kinetic_energy(sys) + potential_energy(sys, neighbors; n_threads=n_threads)
+function total_energy(sys, neighbors, step_n::Integer=0, buffers=nothing; kwargs...)
+    ke = kinetic_energy(sys)
+    pe = potential_energy(sys, neighbors, step_n, buffers; kwargs...)
+    return ke + pe
 end
 
 @doc raw"""
@@ -76,7 +82,10 @@ end
 
 @doc raw"""
     virial(system, neighbors=find_neighbors(system), step_n=0;
-           n_threads=Threads.nthreads())
+           n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
+           specific_inter_lists=system.specific_inter_lists,
+           general_inters=system.general_inters)
+    virial(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the virial tensor of the system.
 
@@ -90,34 +99,50 @@ The [virial definition from LAMMPS](https://docs.lammps.org/compute_stress_atom.
 is used, taking into account pairwise interactions, specific interactions, and the
 [`Ewald`](@ref) and [`PME`](@ref) methods computed as indicated in
 [Essmann et al. 1995](https://doi.org/10.1063/1.470117).
-Contributions from constraints, implicit solvent methods and bias potentials are ignored.
+Contributions from implicit solvent methods and bias potentials are ignored.
+For constrained systems, constraint contributions are approximated using a
+deterministic small-step constraint preview.
 Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 
-To calculate the scalar virial, see [`scalar_virial`](@ref).
+Passing a simulator for constrained systems uses the same deterministic preview
+convention, and is accepted for clarity and future extensibility. To calculate
+the scalar virial, see [`scalar_virial`](@ref).
 """
-function virial(sys; n_threads::Integer=Threads.nthreads())
-    return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function virial(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
+    return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads, kwargs...)
 end
 
-function virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
-    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads)
+function virial(sys, neighbors, step_n::Integer=0;
+                n_threads::Integer=Threads.nthreads(), kwargs...)
+    if length(sys.constraints) > 0
+        buffers = init_buffers!(sys, n_threads)
+        compute_initial_total_virial!(buffers, sys, neighbors, step_n;
+                                      n_threads=n_threads, kwargs...)
+        return buffers.virial
+    end
+    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
     return v
 end
 
 """
     scalar_virial(system, neighbors=find_neighbors(system), step_n=0;
-                  n_threads=Threads.nthreads())
+                  n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
+                  specific_inter_lists=system.specific_inter_lists,
+                  general_inters=system.general_inters)
+    scalar_virial(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the virial of the system as a scalar.
 
 This is the trace of the [`virial`](@ref) tensor.
 """
-function scalar_virial(sys; n_threads::Integer=Threads.nthreads())
-    return scalar_virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function scalar_virial(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
+    return scalar_virial(sys, find_neighbors(sys; n_threads=n_threads);
+                         n_threads=n_threads, kwargs...)
 end
 
-function scalar_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
-    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads)
+function scalar_virial(sys, neighbors, step_n::Integer=0;
+                       n_threads::Integer=Threads.nthreads(), kwargs...)
+    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
     return tr(v)
 end
 
@@ -146,8 +171,10 @@ function temperature(sys::System{D}; kin_tensor=nothing, recompute=true) where D
 end
 
 """
-    potential_energy(system, neighbors=find_neighbors(system), step_n=0;
-                     n_threads=Threads.nthreads())
+    potential_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
+                     n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
+                     specific_inter_lists=system.specific_inter_lists,
+                     general_inters=system.general_inters)
 
 Calculate the potential energy of a system using the pairwise, specific and
 general interactions.
@@ -168,18 +195,25 @@ Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
 """
-function potential_energy(sys; n_threads::Integer=Threads.nthreads())
-    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function potential_energy(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
+    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads);
+                            n_threads=n_threads, kwargs...)
 end
 
-function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads())
+function potential_energy(sys::System,
+                          neighbors,
+                          step_n::Integer=0,
+                          buffers=nothing;
+                          n_threads::Integer=Threads.nthreads(),
+                          pairwise_inters=sys.pairwise_inters,
+                          specific_inter_lists=sys.specific_inter_lists,
+                          general_inters=sys.general_inters)
     # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
 
-    if length(sys.pairwise_inters) > 0
-        pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
-        pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+    if length(pairwise_inters) > 0
+        pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
+        pairwise_inters_nl   = filter( use_neighbors, values(pairwise_inters))
         pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
                               neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
                               pairwise_inters_nl, Val(T), Val(n_threads), step_n)
@@ -187,18 +221,18 @@ function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integ
         pe = zero(T) * sys.energy_units
     end
 
-    if length(sys.specific_inter_lists) > 0
-        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
-        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
-        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
-        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
-        sils_5_atoms = filter(il -> il isa InteractionList5Atoms, values(sys.specific_inter_lists))
+    if length(specific_inter_lists) > 0
+        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(specific_inter_lists))
+        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(specific_inter_lists))
+        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(specific_inter_lists))
+        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(specific_inter_lists))
+        sils_5_atoms = filter(il -> il isa InteractionList5Atoms, values(specific_inter_lists))
         pe += specific_pe(sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms,
                           Val(T), step_n)
     end
 
-    for inter in values(sys.general_inters)
+    for inter in values(general_inters)
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
@@ -363,36 +397,40 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
 end
 
 function potential_energy(sys::System{<:Any, <:AbstractGPUArray}, neighbors,
-                          buffers=nothing, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads())
+                          step_n::Integer=0, buffers_empty::Nothing=nothing; kwargs...)
     buffers = init_buffers!(sys, 1, true)
-    return potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads)
+    return potential_energy(sys, neighbors, step_n, buffers; kwargs...)
 end
 
-function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T}, neighbors,
-                          buffers::BuffersGPU, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where T
+function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T},
+                          neighbors,
+                          step_n::Integer,
+                          buffers::BuffersGPU;
+                          n_threads::Integer=Threads.nthreads(),
+                          pairwise_inters=sys.pairwise_inters,
+                          specific_inter_lists=sys.specific_inter_lists,
+                          general_inters=sys.general_inters) where T
     fill!(buffers.pe_vec_nounits, zero(T))
 
-    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(length(sys))
         pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
     end
 
-    pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nl = filter(use_neighbors, values(pairwise_inters))
     if length(pairwise_inters_nl) > 0
         pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)
     end
 
-    for inter_list in values(sys.specific_inter_lists)
+    for inter_list in values(specific_inter_lists)
         specific_pe_gpu!(buffers.pe_vec_nounits, inter_list, sys.coords, sys.velocities, sys.atoms,
                          sys.boundary, step_n, sys.energy_units, Val(T))
     end
 
     pe = only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
 
-    for inter in values(sys.general_inters)
+    for inter in values(general_inters)
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,

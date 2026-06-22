@@ -53,6 +53,51 @@ struct AngleConstraint{D, I}
     end
 end
 
+abstract type AbstractConstraintApplication end
+
+struct PositionConstraintApplication <: AbstractConstraintApplication end
+
+struct VelocityConstraintApplication <: AbstractConstraintApplication end
+
+struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, DT, S, CB, VB}
+    kind::K
+    needs_virial::Bool
+    step_n::Int
+    dt::DT
+    virial_scale::S
+    buffers::B
+    coords_buffer::CB
+    velocities_buffer::VB
+end
+
+function ConstraintApplicationContext(kind::K;
+                                      needs_virial::Bool=false,
+                                      step_n::Integer=0,
+                                      dt=nothing,
+                                      virial_scale=1,
+                                      buffers=nothing,
+                                      coords_buffer=nothing,
+                                      velocities_buffer=nothing) where {K <: AbstractConstraintApplication}
+    return ConstraintApplicationContext(kind, needs_virial, Int(step_n), dt,
+                                        virial_scale, buffers, coords_buffer,
+                                        velocities_buffer)
+end
+
+function copyto_constraint_scratch!(scratch, values)
+    if isnothing(scratch)
+        return copy(values)
+    elseif scratch isa Base.RefValue
+        if isnothing(scratch[])
+            scratch[] = similar(values)
+        end
+        scratch[] .= values
+        return scratch[]
+    else
+        scratch .= values
+        return scratch
+    end
+end
+
 to_distance_constraints(ac::AngleConstraint) = (
     DistanceConstraint(ac.i, ac.j, ac.dist_ij), # i-j bond
     DistanceConstraint(ac.j, ac.k, ac.dist_jk), # j-k bond
@@ -323,22 +368,23 @@ Apply the coordinate constraints to the system.
 
 If `vel_storage` and `dt` are provided then velocity constraints are applied as well.
 """
-function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys, coord_storage; context=nothing,
+                                     n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
-        apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+        apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads)
     end
     return sys
 end
 
 function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
+                                     context=nothing,
                                      n_threads::Integer=Threads.nthreads())
     if length(sys.constraints) > 0
         vel_storage .= -sys.coords ./ dt
         for ca in sys.constraints
-            apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
+            apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads)
         end
-        vel_storage .+= sys.coords ./ dt
-        sys.velocities .+= vel_storage
+        sys.velocities .+= vel_storage .+ sys.coords ./ dt
     end
     return sys
 end
@@ -348,9 +394,10 @@ end
 
 Apply the velocity constraints to the system.
 """
-function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+function apply_velocity_constraints!(sys; context=nothing,
+                                     n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
-        apply_velocity_constraints!(sys, ca)
+        apply_velocity_constraints!(sys, ca; context)
     end
     return sys
 end
@@ -533,10 +580,53 @@ cluster_interactions(kd::AngleClusterData) = (
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
 
+unique_ind_list(l) = sort(collect(Set(l)))
+
+constrained_atom_inds(sys::System) = constrained_atom_inds(sys.constraints)
+
 function constrained_atom_inds(constraints::Union{Tuple, NamedTuple})
     inds_constrained = Int[]
     for ca in constraints
         append!(inds_constrained, constrained_atom_inds(ca))
     end
-    return inds_constrained
+    return unique_ind_list(inds_constrained)
+end
+
+sort_pair(i, j, d) = (min(i, j), max(i, j), d)
+
+unique_pair_list(l) = sort(
+    collect(Set(l));
+    lt=((p1, p2) -> p1[1] < p2[1] || (p1[1] == p2[1] && p1[2] < p2[2])),
+)
+
+constrained_atom_pairs(sys::System) = constrained_atom_pairs(sys.constraints)
+
+function constrained_atom_pairs(constraints::Union{Tuple, NamedTuple})
+    if iszero(length(constraints))
+        return []
+    else
+        pairs_constrained = constrained_atom_pairs(first(constraints))
+        for ca in constraints[2:end]
+            append!(pairs_constrained, constrained_atom_pairs(ca))
+        end
+        return unique_pair_list(pairs_constrained)
+    end
+end
+
+function constraints_to_bonds(sys::System{<:Any, AT}, k::K) where {AT, K}
+    cons_pairs = constrained_atom_pairs(sys)
+    if length(cons_pairs) > 0
+        bond_is, bond_js = Int32[], Int32[]
+        D = typeof(first(cons_pairs)[3])
+        bond_inters = HarmonicBond{K, D}[]
+        for (i, j, d) in cons_pairs
+            push!(bond_is, i)
+            push!(bond_js, j)
+            push!(bond_inters, HarmonicBond(k, d))
+        end
+        return InteractionList2Atoms(to_device(bond_is, AT), to_device(bond_js, AT),
+                                     to_device(bond_inters, AT))
+    else
+        return InteractionList2Atoms(Any)
+    end
 end
