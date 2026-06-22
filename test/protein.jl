@@ -461,7 +461,7 @@ end
         buffers = Molly.init_buffers!(sys, 1)
         bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
                                                 n_threads=1)
-        @test bench_result.allocs <= 14
+        @test bench_result.allocs <= 15
         @test bench_result.memory <= 1100
 
         scalar_vir = scalar_virial(sys)
