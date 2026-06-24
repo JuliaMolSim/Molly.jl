@@ -696,7 +696,15 @@ end
         thermo_states,
         [copy(coords) for _ in 1:n_replicas];
         replica_loggers=replica_loggers,
+        initial_step=12,
         data="test_data_repsys",
+    )
+    @test repsys.current_step == 0
+    @test repsys2.current_step == 12
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        initial_step=-1,
     )
 
     sys2 = System(

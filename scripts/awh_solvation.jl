@@ -10,7 +10,7 @@ using Random
 CUDA.device!(parse(Int, get(ENV, "MOLLY_CUDA_DEVICE", "0")))
 FT = Float32
 AT = CuArray
-Δt = FT(2)u"fs"
+Δt = FT(4)u"fs"
 T0 = FT(310)u"K"
 P0 = FT(1)u"bar"
 RNG_SEED = 20240520
@@ -89,6 +89,7 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Ran
         neighbor_finder_type=neighbor_finder_type,
         nonbonded_method=nonbonded_method,
         constraints=:hbonds,
+        rigid_water=true,
         hydrogen_mass=2
     )
 

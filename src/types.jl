@@ -1282,6 +1282,7 @@ construction where `n` is the number of threads to be used per replica.
     to duplicating the boundary of the reference system (the first `ThermoState`).
 - `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: The logger used to record
     the exchange of replicas.
+- `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
 - `data::DA=nothing`: Arbitrary data associated with the replica system.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for perturbed state differences. Generally improves performance.
@@ -1301,6 +1302,8 @@ mutable struct ReplicaSystem{D, AT, T, P, B, I, C, V, BO, NF, RL, SPI, SSI, SGI,
     state_general_inters::SGI
     state_indices::Vector{Int}
     exchange_logger::EL
+    current_step::Int
+    initial_log_pending::Bool
     data::DA
 end
 
@@ -1311,10 +1314,12 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        replica_neighbor_finders=nothing,
                        replica_loggers=nothing,
                        exchange_logger=nothing,
+                       initial_step::Integer=0,
                        data=nothing,
                        reuse_neighbors::Bool=true)
     
     n_replicas = length(thermo_states)
+    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
     
     if length(replica_coords) != n_replicas
         throw(ArgumentError("Number of replica_coords ($(length(replica_coords))) " *
@@ -1383,7 +1388,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         partition, n_replicas, betas, integrators, replica_coords, replica_velocities, 
         replica_boundaries, replica_neighbor_finders, replica_loggers, 
         state_pairwise_inters, state_specific_inter_lists, state_general_inters,
-        state_indices, exchange_logger, data
+        state_indices, exchange_logger, Int(initial_step), true, data
     )
 end
 

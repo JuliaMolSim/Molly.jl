@@ -11,7 +11,7 @@ using StatsBase
 CUDA.device!(parse(Int, get(ENV, "MOLLY_CUDA_DEVICE", "0")))
 FT = Float32
 AT = CuArray
-Δt = FT(2)u"fs"
+Δt = FT(4)u"fs"
 T0 = FT(310)u"K"
 P0 = FT(1)u"bar"
 RNG_SEED = 20240520
@@ -20,7 +20,7 @@ N_LAMBDA_STATES = 20
 TSS_WINDOW_SIZE = 4
 N_MD_STEPS = 50
 SELF_ADJUSTMENT_STEPS = 5
-N_REPLICAS = 2
+N_REPLICAS = 1
 TSS_TIME = FT(4)u"ns"
 SOLVENT_EQUIL_TIME = FT(500)u"ps"
 VACUUM_EQUIL_TIME = FT(100)u"ps"
@@ -82,6 +82,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
     dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
+    loggers = is_vacuum ? () : (TrajectoryWriter(1000, "trj_solv.dcd"),)
 
     sys_base = System(
         pdb_file,
@@ -93,16 +94,20 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
         neighbor_finder_type=neighbor_finder_type,
         nonbonded_method=nonbonded_method,
         constraints=:hbonds,
-        hydrogen_mass=2
+        rigid_water=true,
+        hydrogen_mass=2,
+        loggers = loggers
     )
 
     thermostat = VelocityRescaleThermostat(T0, FT(0.1)u"ps"; n_steps=1)
 
     if is_vacuum
         integrator = VelocityVerlet(Δt, (thermostat,), 100)
+        int_eq     = VelocityVerlet(Δt/2, (thermostat,), 100)
     else
         barostat = CRescaleBarostat(P0, FT(4)u"ps"; n_steps=200)
         integrator = VelocityVerlet(Δt, (thermostat, barostat), 100)
+        int_eq     = VelocityVerlet(Δt/2, (thermostat, barostat), 100)
     end
 
     minim = SteepestDescentMinimizer(step_size=FT(0.01)u"nm", max_steps=1000)
@@ -111,6 +116,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
 
     equil_time = is_vacuum ? VACUUM_EQUIL_TIME : SOLVENT_EQUIL_TIME
     equil_steps = Int(floor(equil_time / Δt))
+    simulate!(sys_base, int_eq, 10_000; rng=rng)
     simulate!(sys_base, integrator, equil_steps; rng=rng)
 
     p_inters = sys_base.pairwise_inters
@@ -160,7 +166,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
 
     total_steps = Int(floor(TSS_TIME / Δt))
     n_cycles = Int(floor(total_steps / (SELF_ADJUSTMENT_STEPS * N_MD_STEPS)))
-    first_states = round.(Int, range(1, length(lambda_schedule); length=N_REPLICAS))
+    first_states = [1,]#round.(Int, range(1, length(lambda_schedule); length=N_REPLICAS))
 
     tss_sim = TSSSimulation(
         tss_state;

@@ -46,7 +46,9 @@ sys = System(
     array_type=AT,
     nonbonded_method=:cutoff,
     constraints=:hbonds,
-    hydrogen_mass=2
+    rigid_water = true,
+    hydrogen_mass=2,
+    #= loggers = (traj = TrajectoryWriter(1000, "trj_dip.dcd"),) =#
 )
 
 
@@ -127,12 +129,12 @@ tss_state = TSSState(
     adaptive_gamma = :covdet,
 )
 
-N_MD_STEPS    = 25
+N_MD_STEPS    = 50
 SELF_ADJ_STEPS = 5
 
 N_REPLICAS = 2
 
-TSS_TIME = FT(100.0)u"ns"
+TSS_TIME = FT(10.0)u"ns"
 TOTAL_STEPS = Int(floor(TSS_TIME / DT))
 N_CYCLES = Int(floor(TOTAL_STEPS / (SELF_ADJ_STEPS * N_MD_STEPS)))
 

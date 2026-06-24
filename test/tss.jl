@@ -1,3 +1,5 @@
+tss_step_wrapper(sys, buffers, neighbors, step_n; kwargs...) = step_n
+
 function make_tss_thermo_states(; n_atoms=6, n_states=3)
     atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(2.0u"nm")
@@ -19,6 +21,9 @@ function make_tss_thermo_states(; n_atoms=6, n_states=3)
             boundary=boundary,
             pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
             neighbor_finder=neighbor_finder,
+            loggers=(
+                step=GeneralObservableLogger(tss_step_wrapper, Int, 1),
+            ),
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")
         push!(thermo_states, ThermoState(sys, intg; temperature=temp))
@@ -134,7 +139,35 @@ end
         @test all(isfinite, estimator.stats.max_abs_delta_f)
         @test all(f -> length(f) == 3 && all(isfinite, f), estimator.stats.f_history)
         @test estimator.f[1] == 0.0
+        @test sim.current_step == 3
+        @test values(tss_state.active_state.active_sys.loggers.step) == collect(0:3)
+
+        Molly.simulate!(sim; rng=MersenneTwister(2))
+        @test sim.current_step == 6
+        @test values(tss_state.active_state.active_sys.loggers.step) == collect(0:6)
+
         @test_throws ArgumentError Molly.TSSSimulation(tss_state; n_md_steps=0, n_cycles=1)
+        @test_throws ArgumentError Molly.TSSSimulation(
+            tss_state;
+            n_md_steps=1,
+            n_cycles=1,
+            initial_step=-1,
+        )
+
+        resumed_state = Molly.TSSState(make_tss_thermo_states();
+            first_state=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+        )
+        resumed_sim = Molly.TSSSimulation(
+            resumed_state;
+            n_md_steps=1,
+            n_cycles=1,
+            initial_step=5,
+        )
+        Molly.simulate!(resumed_sim; rng=MersenneTwister(3))
+        @test resumed_sim.current_step == 6
+        @test values(resumed_state.active_state.active_sys.loggers.step) == [5, 6]
     end
 
     @testset "windowed graph, visit control, and CovDet" begin
@@ -216,6 +249,11 @@ end
         @test all(replica -> replica.active_state.active_idx in
                              state.windows[replica.active_window].state_indices,
                   sim.replicas)
+        @test sim.current_step == 8
+        @test all(
+            values(replica.active_state.active_sys.loggers.step) == collect(0:8)
+            for replica in sim.replicas
+        )
         @test all(isfinite, Molly.tss_free_energies(state; visited_only=true))
         @test_throws ArgumentError Molly.simulate!(sim; replica_parallel=:invalid)
     end

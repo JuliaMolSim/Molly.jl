@@ -351,8 +351,9 @@ umbrella potential). It is typically not required for standard alchemical transf
     distribution) required for a λ window to be considered "visited". This filters out sampling noise.
 - `log_freq::Int=100`: Number of AWH iterations between logging statistics.
 - `pmf=nothing`: Optional [`PMFDeconvolution`](@ref) object created from `awh_state`.
+- `initial_step::Int=0`: Absolute MD step for a new or resumed simulation.
 """
-struct AWHSimulation{T}
+mutable struct AWHSimulation{T}
     n_windows::Int
     initial_sampl_n::T
     n_md_steps::Int 
@@ -363,6 +364,8 @@ struct AWHSimulation{T}
     log_freq::Int           
     state::AWHState{T}
     pmf::Union{PMFDeconvolution, Nothing}
+    current_step::Int
+    initial_log_pending::Bool
 end
 
 function AWHSimulation(
@@ -373,10 +376,12 @@ function AWHSimulation(
     coverage_threshold::Real = 1.0,
     significant_weight::Real = 0.1,
     log_freq::Int = 100,
-    pmf = nothing
+    pmf = nothing,
+    initial_step::Integer = 0,
 ) where T
 
     n_win = n_states(awh_state.state_space)
+    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
 
     if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:AWHPMFDeconvolutionBackend})
         throw(ArgumentError("AWHSimulation pmf must be created with PMFDeconvolution(awh_state; ...)."))
@@ -390,7 +395,7 @@ function AWHSimulation(
                          T(coverage_threshold),
                          T(significant_weight),
                          log_freq, awh_state,
-                         pmf)
+                         pmf, Int(initial_step), true)
 end
 
 function Base.show(io::IO, sim::AWHSimulation)
@@ -525,7 +530,15 @@ function simulate!(awh_sim::AWHSimulation{T},
 
     progress = setup_progress(n_iterations, show_progress)
     for iteration_n in 1:n_iterations
-        simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
+        simulate!(
+            awh_sim.state.active_sys,
+            awh_sim.state.active_intg,
+            awh_sim.n_md_steps;
+            init_step = awh_sim.current_step,
+            log_initial_state = awh_sim.initial_log_pending,
+        )
+        awh_sim.current_step += awh_sim.n_md_steps
+        awh_sim.initial_log_pending = false
 
 
         active_pe_units = process_sample(awh_sim.state)

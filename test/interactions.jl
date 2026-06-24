@@ -709,6 +709,104 @@
         end
     end
 
+    @testset "AlchemicalPartition charge-dependent Ewald terms" begin
+        boundary_pme = CubicBoundary(2.4u"nm")
+        coords_pme = [
+            SVector(0.2, 0.2, 0.2)u"nm",
+            SVector(0.8, 0.4, 0.3)u"nm",
+            SVector(1.4, 1.2, 0.9)u"nm",
+        ]
+        rc = 1.0u"nm"
+        temp = 298.0u"K"
+        dt = 0.001u"ps"
+        λs = (1.0, 0.75, 0.6)
+        eligible = trues(3, 3)
+
+        atoms_λ(λ) = [
+            Atom(charge=1.0,  σ=0.3u"nm",  ϵ=0.2u"kJ * mol^-1",
+                 λ=λ, alch_role=Molly.InsertRole),
+            Atom(charge=-1.0, σ=0.25u"nm", ϵ=0.15u"kJ * mol^-1",
+                 λ=λ, alch_role=Molly.InsertRole),
+            Atom(charge=0.3,  σ=0.28u"nm", ϵ=0.12u"kJ * mol^-1"),
+        ]
+
+        ewald_exclusions() = InteractionList2Atoms(
+            Int32[1],
+            Int32[2],
+            [EwaldExclusion()],
+            [""],
+            Molly.EwaldExclusionData(rc),
+        )
+
+        function thermo_states(pairwise_inters, general_inter; specific_inter_lists=(),
+                               special=falses(3, 3))
+            return [
+                begin
+                    atoms = atoms_λ(λ)
+                    sys = System(
+                        atoms=atoms,
+                        coords=coords_pme,
+                        boundary=boundary_pme,
+                        pairwise_inters=pairwise_inters,
+                        specific_inter_lists=specific_inter_lists,
+                        general_inters=(general_inter(atoms),),
+                        neighbor_finder=DistanceNeighborFinder(
+                            eligible=eligible,
+                            special=special,
+                            dist_cutoff=rc,
+                        ),
+                    )
+                    ThermoState(sys, VelocityVerlet(dt=dt); temperature=temp)
+                end for λ in λs
+            ]
+        end
+
+        function test_partition_matches_direct(thermo_states, inter_type; has_exclusions=false)
+            partition = Molly.AlchemicalPartition(thermo_states)
+            partitioned = Molly.evaluate_energy_all!(partition, coords_pme, boundary_pme)
+            direct = [potential_energy(ts.system) for ts in thermo_states]
+
+            @test all(isapprox(pe_p, pe_d; rtol=1e-8, atol=1e-8u"kJ * mol^-1")
+                      for (pe_p, pe_d) in zip(partitioned, direct))
+            @test !any(inter -> inter isa inter_type, partition.master_sys.general_inters)
+            @test all(any(inter -> inter isa inter_type, λ_sys.general_inters)
+                      for λ_sys in partition.λ_systems)
+
+            if has_exclusions
+                is_ewald_exclusion_list(il) = il isa InteractionList2Atoms &&
+                                              il.data isa Molly.EwaldExclusionData
+                @test !any(is_ewald_exclusion_list, partition.master_sys.specific_inter_lists)
+                @test all(any(is_ewald_exclusion_list, λ_sys.specific_inter_lists)
+                          for λ_sys in partition.λ_systems)
+            end
+        end
+
+        pme_states = thermo_states(
+            (LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),
+             CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3, use_neighbors=true)),
+            atoms -> PME(rc, atoms, boundary_pme),
+        )
+        test_partition_matches_direct(pme_states, PME)
+
+        ewald_states = thermo_states(
+            (LennardJonesSoftCoreGapsys(α=0.85, use_neighbors=true),
+             CoulombSoftCoreGapsysEwald(dist_cutoff=rc, α=0.3, σQ=1.0u"nm",
+                                        use_neighbors=true)),
+            atoms -> Ewald(rc),
+        )
+        test_partition_matches_direct(ewald_states, Ewald)
+
+        special = falses(3, 3)
+        special[1, 2] = special[2, 1] = true
+        exclusion_states = thermo_states(
+            (CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3, use_neighbors=true),),
+            atoms -> PME(rc, atoms, boundary_pme);
+            specific_inter_lists=(ewald_exclusions(),),
+            special=special,
+        )
+        test_partition_matches_direct(exclusion_states, PME; has_exclusions=true)
+    end
+
     inter = Yukawa(; weight_special=0.5)
     @test isapprox(
         force(inter, dr12, a1, a1),

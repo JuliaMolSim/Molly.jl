@@ -27,6 +27,49 @@ mutable struct AlchemicalPartition{S, L, LS, A, H, T}
     cached_master_pe::T
 end
 
+function alchemical_atom_changed(atom, ref_atom)
+    return atom.λ < 1.0 ||
+           atom.λ != ref_atom.λ ||
+           atom.alch_role != ref_atom.alch_role ||
+           charge(atom) != charge(ref_atom)
+end
+
+function effective_charges(inter::AbstractEwald, atoms)
+    T = typeof(inter.error_tol)
+    atoms_cpu = from_device(atoms)
+    return [effective_charge(inter.scheduler, atom, Val(T)) for atom in atoms_cpu]
+end
+
+function effective_charges_vary(inter::AbstractEwald, λ_atoms)
+    ref_charges = effective_charges(inter, first(λ_atoms))
+    return any(atoms -> effective_charges(inter, atoms) != ref_charges, λ_atoms[2:end])
+end
+
+keep_master_general_inter(inter, λ_atoms) = !(inter isa AbstractEwald && effective_charges_vary(inter, λ_atoms))
+
+function ewald_exclusion_charges_vary(inter_list::InteractionList2Atoms, λ_atoms)
+    inter_list.data isa EwaldExclusionData || return false
+
+    inds = unique!(vcat(Int.(from_device(inter_list.is)), Int.(from_device(inter_list.js))))
+    isempty(inds) && return false
+
+    T = typeof(inter_list.data.error_tol)
+    scheduler = inter_list.data.scheduler
+    ref_atoms = from_device(first(λ_atoms))
+    ref_charges = [effective_charge(scheduler, ref_atoms[i], Val(T)) for i in inds]
+
+    for atoms in λ_atoms[2:end]
+        atoms_cpu = from_device(atoms)
+        charges = [effective_charge(scheduler, atoms_cpu[i], Val(T)) for i in inds]
+        charges != ref_charges && return true
+    end
+    return false
+end
+
+keep_master_specific_inter(inter_list, λ_atoms) = true
+keep_master_specific_inter(inter_list::InteractionList2Atoms, λ_atoms) =
+    !ewald_exclusion_charges_vary(inter_list, λ_atoms)
+
 function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                              reuse_neighbors::Bool=true)
     n_λ = length(thermo_states)
@@ -48,8 +91,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         for (atom_i, atom) in pairs(atoms_cpu)
             # Flag if the atom possesses alchemical scaling properties,
             # or if its properties explicitly diverge from the reference.
-            if (atom.λ < 1.0) ||
-               (atom.λ != ref_atoms_cpu[atom_i].λ)
+            if alchemical_atom_changed(atom, ref_atoms_cpu[atom_i])
                 push!(solute_indices, atom_i)
             end
         end
@@ -109,6 +151,9 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     master_sils_4a = intersect(list_4a...)
     master_gils    = intersect(all_gils...)
     master_pils    = intersect(all_pils...)
+
+    filter!(inter -> keep_master_specific_inter(inter, λ_atoms), master_sils_2a)
+    filter!(inter -> keep_master_general_inter(inter, λ_atoms), master_gils)
 
     λ_specific = Vector{Tuple}(undef, n_λ)
     λ_general  = Vector{Tuple}(undef, n_λ)

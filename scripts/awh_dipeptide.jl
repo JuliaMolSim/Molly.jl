@@ -13,7 +13,7 @@ AT = CuArray
 RNG_SEED = 42
 rng = MersenneTwister(RNG_SEED)
 
-DT = FT(2)u"fs"
+DT = FT(4)u"fs"
 
 TIME_EQ = FT(100)u"ps"
 STEPS_EQ = Int(floor(TIME_EQ/DT))
@@ -45,6 +45,7 @@ sys = System(
     array_type=AT,
     nonbonded_method=:cutoff,
     constraints=:hbonds,
+    rigid_water = true,
     hydrogen_mass=2
 )
 

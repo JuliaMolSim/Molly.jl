@@ -801,6 +801,10 @@ awh_sim = AWHSimulation(
 simulate!(awh_sim, TOTAL_STEPS)
 ```
 
+`AWHSimulation` stores its absolute MD step, so couplers and loggers retain their cadence
+across AWH iterations and repeated `simulate!` calls. Pass `initial_step` when resuming from
+a checkpoint whose coordinates and velocities already correspond to a nonzero step.
+
 After the run, `pmf(awh_sim.pmf)` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
 
 ```julia
@@ -1307,6 +1311,10 @@ tss_sim = TSSSimulation(
 
 simulate!(tss_sim; rng = rng, replica_parallel = :auto)
 ```
+
+`TSSSimulation` likewise stores one absolute MD step shared by its physical replicas.
+Each MD block receives that step, and repeated calls resume from `tss_sim.current_step`.
+Use the `initial_step` constructor keyword when restoring an existing simulation state.
 
 For PMF deconvolution, the script uses the automatic coupling path. This is safe for the same reason as in the AWH example above: each thermodynamic state contains exactly the two umbrella [`BiasPotential`](@ref)s that define the PMF dimensions, and they appear in the same order as the grid axes. The [`PMFDeconvolution`](@ref) object must be created before the run and passed to [`TSSSimulation`](@ref).
 

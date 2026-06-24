@@ -1155,13 +1155,16 @@ function log_property!(rexl::ReplicaExchangeLogger,
                        n_threads::Integer=Threads.nthreads(),
                        kwargs...)
     push!(rexl.indices, indices)
-    push!(rexl.steps, step_n + rexl.end_step)
+    push!(rexl.steps, step_n)
     push!(rexl.deltas, delta)
     rexl.n_exchanges += 1
 end
 
-function finish_logs!(rexl::ReplicaExchangeLogger; n_steps::Integer=0, n_attempts::Integer=0)
-    rexl.end_step += n_steps
+function finish_logs!(rexl::ReplicaExchangeLogger;
+                      n_steps::Integer=0,
+                      n_attempts::Integer=0,
+                      end_step=nothing)
+    rexl.end_step = isnothing(end_step) ? rexl.end_step + n_steps : Int(end_step)
     rexl.n_attempts += n_attempts
 end
 

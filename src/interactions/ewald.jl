@@ -962,7 +962,7 @@ in the `data` field of the [`InteractionList2Atoms`](@ref) with `EwaldExclusionD
 
 Only compatible with 3D systems.
 """
-struct EwaldExclusion end
+@kwdef struct EwaldExclusion null::UInt8 = 0 end
 
 Base.zero(::EwaldExclusion) = EwaldExclusion()
 Base.:+(::EwaldExclusion, ::EwaldExclusion) = EwaldExclusion()

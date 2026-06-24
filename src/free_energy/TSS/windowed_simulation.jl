@@ -81,13 +81,14 @@ end
                   self_adjustment_steps=1, log_freq=1000,
                   n_replicas=nothing, first_states=nothing,
                   first_windows=nothing, replica_active_states=nothing,
-                  pmf=nothing, frozen=false)
+                  pmf=nothing, frozen=false, initial_step=0)
 
 A windowed TSS simulation driver.
 
 Each cycle runs `self_adjustment_steps` blocks of `n_md_steps` molecular
 dynamics steps, collects TSS samples, updates window estimators unless
 `frozen=true`, and optionally records sampled PMF deconvolution diagnostics.
+`initial_step` sets the absolute MD step for a new or resumed simulation.
 """
 mutable struct TSSSimulation{S, R, W, P}
     state::S
@@ -99,6 +100,8 @@ mutable struct TSSSimulation{S, R, W, P}
     self_adjustment_steps::Int
     log_freq::Int
     frozen::Bool
+    current_step::Int
+    initial_log_pending::Bool
 end
 
 function Base.show(io::IO, sim::TSSSimulation)
@@ -122,10 +125,12 @@ function TSSSimulation(state::TSSState;
                                first_windows = nothing,
                                replica_active_states = nothing,
                                pmf = nothing,
-                               frozen::Bool = false)
+                               frozen::Bool = false,
+                               initial_step::Integer = 0)
 
     n_md_steps > 0 || throw(ArgumentError("n_md_steps must be positive."))
     n_cycles >= 0 || throw(ArgumentError("n_cycles must be non-negative."))
+    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
     if !(self_adjustment_steps isa Integer)
         throw(ArgumentError("self_adjustment_steps must be an integer."))
     end
@@ -166,6 +171,8 @@ function TSSSimulation(state::TSSState;
         Int(self_adjustment_steps),
         log_freq,
         frozen,
+        Int(initial_step),
+        true,
     )
 end
 
@@ -485,7 +492,9 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
                                             replica_index::Int,
                                             n_md_steps::Int,
                                             self_adjustment_steps::Int,
-                                            n_threads::Int) where {FT}
+                                            n_threads::Int,
+                                            initial_step::Int,
+                                            log_initial_state::Bool) where {FT}
     check_windowed_tss_invariant(state)
     check_windowed_tss_replica_invariant(state, replica)
 
@@ -524,6 +533,8 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
             n_md_steps;
             n_threads = n_threads,
             rng = workspace.rng,
+            init_step = initial_step + (substep - 1) * n_md_steps,
+            log_initial_state = log_initial_state && substep == 1,
         )
 
         sample = process_tss_sample!(workspace, estimator, replica.active_state)
@@ -701,7 +712,9 @@ function resolve_tss_replica_parallel(sim::TSSSimulation,
 end
 
 function collect_windowed_tss_observations_serial!(sim::TSSSimulation,
-                                                    thread_div)
+                                                    thread_div,
+                                                    initial_step::Int,
+                                                    log_initial_state::Bool)
     state = sim.state
     observations = Vector{WindowedTSSObservation}(undef, length(sim.replicas))
     for replica_i in eachindex(sim.replicas)
@@ -714,13 +727,17 @@ function collect_windowed_tss_observations_serial!(sim::TSSSimulation,
             sim.n_md_steps,
             sim.self_adjustment_steps,
             max(1, thread_div[replica_i]),
+            initial_step,
+            log_initial_state,
         )
     end
     return observations
 end
 
 function collect_windowed_tss_observations_threaded!(sim::TSSSimulation,
-                                                      thread_div)
+                                                      thread_div,
+                                                      initial_step::Int,
+                                                      log_initial_state::Bool)
     state = sim.state
     observations = Vector{WindowedTSSObservation}(undef, length(sim.replicas))
     @sync for replica_i in eachindex(sim.replicas)
@@ -734,6 +751,8 @@ function collect_windowed_tss_observations_threaded!(sim::TSSSimulation,
                 sim.n_md_steps,
                 sim.self_adjustment_steps,
                 max(1, thread_div[replica_i]),
+                initial_step,
+                log_initial_state,
             )
         end
     end
@@ -760,7 +779,9 @@ function run_windowed_tss_cycle!(state::TSSState,
                                   n_md_steps::Int,
                                   self_adjustment_steps::Int,
                                   n_threads::Int,
-                                  rng)
+                                  rng,
+                                  initial_step::Int,
+                                  log_initial_state::Bool)
     check_windowed_tss_invariant(state)
 
     entry_state = state.active_state.active_idx
@@ -794,6 +815,8 @@ function run_windowed_tss_cycle!(state::TSSState,
             n_md_steps;
             n_threads = n_threads,
             rng = rng,
+            init_step = initial_step + (substep - 1) * n_md_steps,
+            log_initial_state = log_initial_state && substep == 1,
         )
 
         check_windowed_tss_cycle_window!(state, cycle_window, substep)
@@ -864,6 +887,8 @@ function simulate!(sim::TSSSimulation;
 
     progress = setup_progress(sim.n_cycles, show_progress)
     for cycle in 1:sim.n_cycles
+        cycle_start_step = sim.current_step
+        log_initial_state = sim.initial_log_pending
         if legacy_single_path
             result = run_windowed_tss_cycle!(
                 state,
@@ -871,6 +896,8 @@ function simulate!(sim::TSSSimulation;
                 sim.self_adjustment_steps,
                 Int(n_threads),
                 rng,
+                cycle_start_step,
+                log_initial_state,
             )
             sim.replicas[1].active_window = state.active_window
             estimator = state.estimators[result.update_window]
@@ -894,14 +921,26 @@ function simulate!(sim::TSSSimulation;
                     result.max_delta_f,
                 )
             end
+            sim.current_step += sim.self_adjustment_steps * sim.n_md_steps
+            sim.initial_log_pending = false
             next_nograd!(progress)
             continue
         end
 
         observations = if parallel_mode == :threads
-            collect_windowed_tss_observations_threaded!(sim, thread_div)
+            collect_windowed_tss_observations_threaded!(
+                sim,
+                thread_div,
+                cycle_start_step,
+                log_initial_state,
+            )
         else
-            collect_windowed_tss_observations_serial!(sim, thread_div)
+            collect_windowed_tss_observations_serial!(
+                sim,
+                thread_div,
+                cycle_start_step,
+                log_initial_state,
+            )
         end
         history_time = state.iteration + 1
         accumulate_tss_pmf_deconvolution!(
@@ -913,8 +952,7 @@ function simulate!(sim::TSSSimulation;
         max_delta_f = sim.frozen ?
                       apply_windowed_tss_frozen_observations!(state, observations) :
                       apply_windowed_tss_observations!(state, observations)
-        sim.frozen ||
-            drop_old_tss_pmf_deconvolution_epochs!(sim.pmf, state, state.iteration)
+        sim.frozen || drop_old_tss_pmf_deconvolution_epochs!(sim.pmf, state, state.iteration)
         sync_windowed_tss_state_to_replica!(state, first(sim.replicas))
 
         if !sim.frozen && should_log_tss(state.iteration, sim.log_freq)
@@ -944,6 +982,8 @@ function simulate!(sim::TSSSimulation;
             )
 
         end
+        sim.current_step += sim.self_adjustment_steps * sim.n_md_steps
+        sim.initial_log_pending = false
         next_nograd!(progress)
     end
 
