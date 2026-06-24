@@ -76,6 +76,53 @@ function alchemical_lj_softcore(lj::LennardJones)
     )
 end
 
+function rebuild_alchemical_general_inters(sys_base, atoms_dev, lj_sc, coul_sc)
+    rebuilt = Any[]
+
+    for inter in sys_base.general_inters
+        if inter isa PME
+            # Rebuild PME using the λ/role-modified atoms.
+            # fixed_charges=false avoids reusing charge sums cached from the λ=1 system.
+            push!(rebuilt, PME(
+                inter.dist_cutoff,
+                atoms_dev,
+                sys_base.boundary;
+                error_tol = inter.error_tol,
+                order = inter.order,
+                ϵr = inter.ϵr,
+                fixed_charges = false,
+                scheduler = coul_sc.scheduler,
+                grad_safe = inter.grad_safe,
+            ))
+
+        elseif inter isa Ewald
+            # Same idea for non-PME Ewald: use the alchemical electrostatics scheduler.
+            push!(rebuilt, Ewald(
+                inter.dist_cutoff;
+                error_tol = inter.error_tol,
+                scheduler = coul_sc.scheduler,
+            ))
+
+        elseif inter isa LJDispersionCorrection
+
+            push!(rebuilt, LJDispersionCorrection(
+                atoms_dev,
+                lj_sc.cutoff.dist_cutoff,
+                lj_sc.σ_mixing,
+                lj_sc.ϵ_mixing,
+                lj_sc.λ_mixing,
+                lj_sc.scheduler,
+            ))
+
+        else
+            # Keep unrelated general interactions, but avoid sharing mutable state.
+            push!(rebuilt, deepcopy(inter))
+        end
+    end
+
+    return tuple(rebuilt...)
+end
+
 function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Random.default_rng())
     nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
@@ -142,10 +189,20 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
             end
         end
 
+        atoms_dev = Molly.to_device([acopy...], AT)
+
+        general_inters = rebuild_alchemical_general_inters(
+            sys_base,
+            atoms_dev,
+            lj_sc,
+            cl_sc,
+        )
+
         sys_w = System(
             deepcopy(sys_base);
-            atoms = Molly.to_device([acopy...], AT),
-            pairwise_inters = (lj_sc, cl_sc)
+            atoms = atoms_dev,
+            pairwise_inters = (lj_sc, cl_sc),
+            general_inters = general_inters,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))

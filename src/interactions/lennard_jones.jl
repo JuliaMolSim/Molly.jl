@@ -171,7 +171,9 @@ Base.getproperty(dc::LJDispersionCorrection, name::Symbol) =
 
 function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
                                 σ_mix=LorentzMixing(),
-                                ϵ_mix=GeometricMixing())
+                                ϵ_mix=GeometricMixing(),
+                                λ_mix=MinimumMixing(),
+                                scheduler = DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
     n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
@@ -204,20 +206,21 @@ function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
             atom_j = atoms_cpu[j]
             σ = σ_mixing(σ_mix, atom_i, atom_j, false)
             ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j, false)
-            ϵσ6_sum  += Tacc(ustrip(ϵ * σ^6))
-            ϵσ12_sum += Tacc(ustrip(ϵ * σ^12))
+
+            λ_glob = Tacc(λ_mixing(λ_mix, atom_i, atom_j))
+            pair_role = mix_roles(scheduler, atom_i.alch_role, atom_j.alch_role)
+            λ_eff = Tacc(scale_sterics(scheduler, λ_glob, pair_role))
+
+            ϵσ6_sum  +=  Tacc(ustrip(λ_eff * ϵ * σ^6))
+            ϵσ12_sum +=  Tacc(ustrip(λ_eff * ϵ * σ^12))
         end
     end
 
     # Compute the mean mixed coefficients using the same accumulation type.
     n_pairs_acc = Tacc((n_atoms * (n_atoms + 1)) ÷ 2)
 
-    # Restore the units.
-    ϵσ6_mean =
-        (ϵσ6_sum / n_pairs_acc) * unit(term_6_example)
-
-    ϵσ12_mean =
-        (ϵσ12_sum / n_pairs_acc) * unit(term_12_example)
+    ϵσ6_mean  = (ϵσ6_sum  / n_pairs_acc) * unit(term_6_example)
+    ϵσ12_mean = (ϵσ12_sum / n_pairs_acc) * unit(term_12_example)
 
     # Evaluate the final correction factors in the high-precision accumulator
     # type. The factors are defined so that dividing by the box volume gives
@@ -238,10 +241,10 @@ function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
     F6 = typeof(-(term_6_example / dist_cutoff^3))
     F12 = typeof(term_12_example / dist_cutoff^9)
 
-    factor_6 = convert(F6, factor_6_acc)
-    factor_12 = convert(F12, factor_12_acc)
-
-    return LJDispersionCorrection(factor_6, factor_12)
+    return LJDispersionCorrection(
+        convert(F6, factor_6_acc),
+        convert(F12, factor_12_acc),
+    )
 end
 
 Base.zero(dc::LJDispersionCorrection) =
@@ -254,7 +257,8 @@ function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
     )
 end
 
-Unitful.ustrip(dc::LJDispersionCorrection) = LJDispersionCorrection(ustrip(dc.factor))
+Unitful.ustrip(dc::LJDispersionCorrection) =
+    LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12))
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)

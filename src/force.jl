@@ -837,7 +837,6 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
                 if needs_vir
                     # Kronecker product of vector along which force acts and force itself
-                    v = dr * transpose(f)
                     vir_nounits .+= ustrip.(v)
                 end
             end
@@ -969,7 +968,8 @@ end
 
     if needs_vir
         r_i = coords[i]
-        v = r_i * transpose(sf.f1)
+        λ = λ_mixing(MinimumMixing(), atoms[i], atoms[i])
+        v = λ * r_i * transpose(sf.f1)
         vir_nounits .+= ustrip.(v)
     end
     return fs_nounits
@@ -988,7 +988,8 @@ end
 
     if needs_vir
         r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
-        v = r_ji * transpose(sf.f1)
+        λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+        v = λ * r_ji * transpose(sf.f1)
         vir_nounits .+= ustrip.(v)
     end
     return fs_nounits
@@ -1010,7 +1011,10 @@ end
     if needs_vir
         r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j (second atom is the reference, MIC)
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
-        vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) + r_jk * transpose(sf.f3))
+        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
+        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
+        λ = minimum((λ_ji, λ_jk))
+        vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) + r_jk * transpose(sf.f3))
     end
     return fs_nounits
 end
@@ -1035,7 +1039,11 @@ end
         r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
         r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
-        vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) +
+        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
+        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
+        λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
+        λ = minimum((λ_ji, λ_jk, λ_jl))
+        vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) +
                                 r_jk * transpose(sf.f3) +
                                 r_jl * transpose(sf.f4) )
     end
@@ -1065,7 +1073,12 @@ end
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
         r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
         r_jm = vector(coords[j], coords[m], boundary) # r_m - r_j
-        vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) +
+        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
+        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
+        λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
+        λ_jm = λ_mixing(MinimumMixing(), atoms[j], atoms[m])
+        λ = minimum((λ_ji, λ_jk, λ_jl, λ_jm))
+        vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) +
                                 r_jk * transpose(sf.f3) +
                                 r_jl * transpose(sf.f4) +
                                 r_jm * transpose(sf.f5))
