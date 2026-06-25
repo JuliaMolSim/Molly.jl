@@ -386,8 +386,8 @@ function n_dof(D::Integer, n_atoms::Integer, boundary)
 end
 
 """
-    apply_position_constraints!(sys, coord_storage)
-    apply_position_constraints!(sys, coord_storage, vel_storage, dt)
+    apply_position_constraints!(sys, coord_storage; n_threads=Threads.nthreads())
+    apply_position_constraints!(sys, coord_storage, vel_storage, dt; n_threads=Threads.nthreads())
 
 Apply the coordinate constraints to the system.
 
@@ -415,14 +415,14 @@ function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
 end
 
 """
-    apply_velocity_constraints!(sys)
+    apply_velocity_constraints!(sys; n_threads=Threads.nthreads())
 
 Apply the velocity constraints to the system.
 """
 function apply_velocity_constraints!(sys; context=nothing,
                                      n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
-        apply_velocity_constraints!(sys, ca; context)
+        apply_velocity_constraints!(sys, ca; context=context, n_threads=n_threads)
     end
     return sys
 end
