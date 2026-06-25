@@ -956,10 +956,15 @@ end
 
 update_vel(v, cm_v, vsf) = (vsf ? zero(v) : v - cm_v)
 
+# The CUDA extension has a fast 3D CUDA path
 function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
     cm_momentum = mapreduce((v, m) -> v .* m, +, sys.velocities, masses(sys))
     cm_velocity = cm_momentum / sys.total_mass
-    sys.velocities .= update_vel.(sys.velocities, (cm_velocity,), sys.virtual_site_flags)
+    if isempty(sys.virtual_sites)
+        sys.velocities .-= (cm_velocity,)
+    else
+        sys.velocities .= update_vel.(sys.velocities, (cm_velocity,), sys.virtual_site_flags)
+    end
     return sys
 end
 

@@ -113,6 +113,49 @@
             @test isapprox(pe_gpu, pe_cpu, rtol=1e-8, atol=1e-10)
         end
 
+        @testset "GPU remove_CM_motion!" begin
+            n_atoms = 8
+            T = Float32
+            boundary = CubicBoundary(T(10.0)u"nm")
+            coords = [SVector(T(i), T(i + 1), T(i + 2)) * u"nm" for i in 1:n_atoms]
+            velocities = [SVector(T(0.1 * i), T(-0.2 * i), T(0.05 * (i - 3))) * u"nm/ps"
+                          for i in 1:n_atoms]
+            atoms = [Atom(
+                index=i,
+                mass=T(i + 1)u"g/mol",
+                charge=T(0.0),
+                σ=T(0.3)u"nm",
+                ϵ=T(1.0)u"kJ * mol^-1",
+            ) for i in 1:n_atoms]
+
+            cpu_sys = System(
+                atoms=atoms,
+                coords=coords,
+                velocities=velocities,
+                boundary=boundary,
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
+            )
+            gpu_sys = System(
+                atoms=CuArray(atoms),
+                coords=CuArray(coords),
+                velocities=CuArray(velocities),
+                boundary=boundary,
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
+            )
+
+            remove_CM_motion!(cpu_sys)
+            remove_CM_motion!(gpu_sys)
+            gpu_velocities = Array(gpu_sys.velocities)
+
+            for i in 1:n_atoms
+                @test isapprox(gpu_velocities[i], cpu_sys.velocities[i], atol=T(1e-6)u"nm/ps")
+            end
+            cm_velocity = mapreduce((v, m) -> v * m, +, gpu_velocities, mass.(atoms)) / sum(mass.(atoms))
+            @test isapprox(cm_velocity, zero(cm_velocity), atol=T(1e-6)u"nm/ps")
+        end
+
         @testset "GPU tile lists (Units & Overflow)" begin
             n_atoms = 100
             atom_mass = 10.0u"g/mol"
