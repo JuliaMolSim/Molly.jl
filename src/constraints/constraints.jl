@@ -59,12 +59,13 @@ struct PositionConstraintApplication <: AbstractConstraintApplication end
 
 struct VelocityConstraintApplication <: AbstractConstraintApplication end
 
-struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, DT, S, CB, VB}
+struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, DT, S, A, CB, VB}
     kind::K
     needs_virial::Bool
     step_n::Int
     dt::DT
     virial_scale::S
+    atoms::A
     buffers::B
     coords_buffer::CB
     velocities_buffer::VB
@@ -75,12 +76,21 @@ function ConstraintApplicationContext(kind::K;
                                       step_n::Integer=0,
                                       dt=nothing,
                                       virial_scale=1,
+                                      atoms=nothing,
                                       buffers=nothing,
                                       coords_buffer=nothing,
                                       velocities_buffer=nothing) where {K <: AbstractConstraintApplication}
-    return ConstraintApplicationContext(kind, needs_virial, Int(step_n), dt,
-                                        virial_scale, buffers, coords_buffer,
-                                        velocities_buffer)
+    return ConstraintApplicationContext(
+        kind,
+        needs_virial,
+        Int(step_n),
+        dt,
+        virial_scale,
+        atoms,
+        buffers,
+        coords_buffer,
+        velocities_buffer,
+    )
 end
 
 function copyto_constraint_scratch!(scratch, values)
@@ -96,6 +106,29 @@ function copyto_constraint_scratch!(scratch, values)
         scratch .= values
         return scratch
     end
+end
+
+@inline constraint_virial_lambda(::Nothing, args...) = 1
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer)
+    return λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+end
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer)
+    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    return λ
+end
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer, l::Integer)
+    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[l]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[l]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[k], atoms[l]))
+    return λ
 end
 
 to_distance_constraints(ac::AngleConstraint) = (
