@@ -43,6 +43,7 @@ accumulated statistical weights, free energy estimates, and target distribution 
     a uniform distribution is used.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for adjacent λ windows. Generally improves performance.
+Loggers are attached by [`AWHSimulation`](@ref), not by `AWHState`.
 """
 mutable struct AWHState{T, ES, AS}
     state_space::ES
@@ -350,10 +351,11 @@ umbrella potential). It is typically not required for standard alchemical transf
 - `significant_weight::Real=0.1`: The fractional weight threshold (relative to an ideally uniform 
     distribution) required for a λ window to be considered "visited". This filters out sampling noise.
 - `log_freq::Int=100`: Number of AWH iterations between logging statistics.
+- `loggers=()`: Loggers attached to the active system used for AWH dynamics.
 - `pmf=nothing`: Optional [`PMFDeconvolution`](@ref) object created from `awh_state`.
 - `initial_step::Int=0`: Absolute MD step for a new or resumed simulation.
 """
-mutable struct AWHSimulation{T}
+mutable struct AWHSimulation{T, AS}
     n_windows::Int
     initial_sampl_n::T
     n_md_steps::Int 
@@ -363,6 +365,7 @@ mutable struct AWHSimulation{T}
     significant_weight::T   
     log_freq::Int           
     state::AWHState{T}
+    active_state::AS
     pmf::Union{PMFDeconvolution, Nothing}
     current_step::Int
     initial_log_pending::Bool
@@ -376,12 +379,19 @@ function AWHSimulation(
     coverage_threshold::Real = 1.0,
     significant_weight::Real = 0.1,
     log_freq::Int = 100,
+    loggers = (),
     pmf = nothing,
     initial_step::Integer = 0,
 ) where T
 
     n_win = n_states(awh_state.state_space)
     initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
+    active_state = ActiveThermoState(
+        awh_state.state_space,
+        awh_state.active_idx;
+        loggers = loggers,
+    )
+    sync_active_state_dynamics!(active_state, awh_state.active_state)
 
     if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:AWHPMFDeconvolutionBackend})
         throw(ArgumentError("AWHSimulation pmf must be created with PMFDeconvolution(awh_state; ...)."))
@@ -395,6 +405,7 @@ function AWHSimulation(
                          T(coverage_threshold),
                          T(significant_weight),
                          log_freq, awh_state,
+                         active_state,
                          pmf, Int(initial_step), true)
 end
 
@@ -415,16 +426,34 @@ function update_active_sys!(awh_state::AWHState, active_idx::Int)
     return awh_state
 end
 
+function sync_awh_state_from_sim!(awh_sim::AWHSimulation)
+    state_active = awh_sim.state.active_state
+    sim_active = awh_sim.active_state
+    if state_active.active_idx != sim_active.active_idx
+        set_active_state!(state_active, awh_sim.state.state_space, sim_active.active_idx)
+    end
+    sync_active_state_dynamics!(state_active, sim_active)
+    return awh_sim.state
+end
+
+function update_active_sys!(awh_sim::AWHSimulation, active_idx::Int)
+    set_active_state!(awh_sim.active_state, awh_sim.state.state_space, active_idx)
+    sync_awh_state_from_sim!(awh_sim)
+    return awh_sim
+end
+
 # Reweights coordinates along λ windows and accumulates histogram
-function process_sample(awh::AWHState{FT}; weight_relevance::Real = 0.1) where FT
+function process_sample(awh::AWHState{FT},
+                        active_state::ActiveThermoState = awh.active_state;
+                        weight_relevance::Real = 0.1) where FT
     n_win = n_states(awh.state_space)
-    coords = awh.active_sys.coords
-    bound  = awh.active_sys.boundary
+    coords = active_state.active_sys.coords
+    bound  = active_state.active_sys.boundary
 
     state_indices = Base.OneTo(n_win)
     energies = evaluate_energy_subset(awh.partition, coords, bound, state_indices)
     reduced_potentials!(awh.scratch_potentials, energies, awh.state_space, bound, state_indices)
-    active_pe = energies[awh.active_idx]
+    active_pe = energies[active_state.active_idx]
 
     @. awh.scratch_z = awh.log_rho + awh.f
     conditional_state_weights!(awh.w_last, awh.scratch_z, awh.scratch_potentials, awh.scratch_z)
@@ -531,17 +560,18 @@ function simulate!(awh_sim::AWHSimulation{T},
     progress = setup_progress(n_iterations, show_progress)
     for iteration_n in 1:n_iterations
         simulate!(
-            awh_sim.state.active_sys,
-            awh_sim.state.active_intg,
+            awh_sim.active_state.active_sys,
+            awh_sim.active_state.active_integrator,
             awh_sim.n_md_steps;
             init_step = awh_sim.current_step,
             log_initial_state = awh_sim.initial_log_pending,
         )
         awh_sim.current_step += awh_sim.n_md_steps
         awh_sim.initial_log_pending = false
+        sync_awh_state_from_sim!(awh_sim)
 
 
-        active_pe_units = process_sample(awh_sim.state)
+        active_pe_units = process_sample(awh_sim.state, awh_sim.active_state)
 
         if !isnothing(awh_sim.pmf)
             # Calculate a(t) factor for PMF Deconvolution [Lindahl et al. 2014, Eq. 9 text]
@@ -556,20 +586,20 @@ function simulate!(awh_sim::AWHSimulation{T},
             end
 
             # Extract System Info
-            sys = awh_sim.state.active_sys
+            sys = awh_sim.active_state.active_sys
             e_unit = sys.energy_units
             
             pot_eng = ustrip(e_unit, active_pe_units)
             
             vol_val = T(ustrip(volume(sys.boundary)))
 
-            cur_beta = awh_sim.state.λ_β[awh_sim.state.active_idx]            
-            cur_press = awh_sim.state.λ_p[awh_sim.state.active_idx]
+            cur_beta = awh_sim.state.λ_β[awh_sim.active_state.active_idx]
+            cur_press = awh_sim.state.λ_p[awh_sim.active_state.active_idx]
 
             update_pmf!(
                 awh_sim.pmf,
                 awh_sim.state, 
-                awh_sim.state.active_sys.coords; 
+                sys.coords;
                 weight_factor=w_fac,
                 potential_energy=pot_eng,
                 box_volume=vol_val,
@@ -579,7 +609,7 @@ function simulate!(awh_sim::AWHSimulation{T},
         end
 
         active_idx_new = gibbs_sample_window(awh_sim.state)
-        update_active_sys!(awh_sim.state, active_idx_new)
+        update_active_sys!(awh_sim, active_idx_new)
         update_awh_bias!(awh_sim, iteration_n)
         next_nograd!(progress)
     end

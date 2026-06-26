@@ -383,6 +383,7 @@ function position_constraint_context(buffers, sys, step_n::Integer, dt, needs_vi
         step_n=step_n,
         dt=dt,
         virial_scale=position_constraint_virial_scale(sys, buffers, dt, sim),
+        atoms=sys.atoms,
         buffers=buffers,
         coords_buffer=buffers.constraint_coords_buffer,
     )
@@ -396,6 +397,7 @@ function velocity_constraint_context(buffers, sys, step_n::Integer, dt, needs_vi
         step_n=step_n,
         dt=dt,
         virial_scale=velocity_constraint_virial_scale(sys, buffers, dt, sim),
+        atoms=sys.atoms,
         buffers=buffers,
         velocities_buffer=buffers.constraint_velocities_buffer,
     )

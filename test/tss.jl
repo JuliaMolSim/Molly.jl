@@ -1,4 +1,5 @@
 tss_step_wrapper(sys, buffers, neighbors, step_n; kwargs...) = step_n
+tss_step_logger() = (step=GeneralObservableLogger(tss_step_wrapper, Int, 1),)
 
 function make_tss_thermo_states(; n_atoms=6, n_states=3)
     atom_mass = 10.0u"g/mol"
@@ -21,9 +22,6 @@ function make_tss_thermo_states(; n_atoms=6, n_states=3)
             boundary=boundary,
             pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
             neighbor_finder=neighbor_finder,
-            loggers=(
-                step=GeneralObservableLogger(tss_step_wrapper, Int, 1),
-            ),
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")
         push!(thermo_states, ThermoState(sys, intg; temperature=temp))
@@ -55,6 +53,30 @@ end
 
 @testset "Times Square Sampling (TSS)" begin
     thermo_states = make_tss_thermo_states()
+
+    @testset "generalized ensemble logger handling" begin
+        logged_sys = System(first(thermo_states).system; loggers=tss_step_logger())
+        logged_state = @test_logs (:warn, r"Generalized ensemble methods ignore") ThermoState(
+            logged_sys,
+            first(thermo_states).integrator;
+            temperature=298.0u"K",
+        )
+        state_space = Molly.ExtendedStateSpace([logged_state])
+        @test isempty(values(state_space.partition.master_sys.loggers))
+        @test all(sys -> isempty(values(sys.loggers)), state_space.partition.λ_systems)
+        active_state = Molly.ActiveThermoState(state_space)
+        @test isempty(values(active_state.active_sys.loggers))
+
+        explicit_active = Molly.ActiveThermoState(state_space; loggers=tss_step_logger())
+        @test hasproperty(explicit_active.active_sys.loggers, :step)
+    end
+
+    @testset "TSSState does not accept loggers" begin
+        @test_throws MethodError Molly.TSSState(
+            thermo_states;
+            loggers=tss_step_logger(),
+        )
+    end
 
     @testset "local estimator construction and update" begin
         state = make_tss_local_estimator_for_test(thermo_states;
@@ -126,7 +148,13 @@ end
         )
         @test occursin("TSSState with 3 states", sprint(show, tss_state))
 
-        sim = Molly.TSSSimulation(tss_state; n_md_steps=1, n_cycles=3, log_freq=1)
+        sim = Molly.TSSSimulation(
+            tss_state;
+            n_md_steps=1,
+            n_cycles=3,
+            log_freq=1,
+            loggers=tss_step_logger(),
+        )
         @test occursin("TSSSimulation with 1 replica", sprint(show, sim))
         Molly.simulate!(sim; rng=MersenneTwister(1))
 
@@ -140,11 +168,11 @@ end
         @test all(f -> length(f) == 3 && all(isfinite, f), estimator.stats.f_history)
         @test estimator.f[1] == 0.0
         @test sim.current_step == 3
-        @test values(tss_state.active_state.active_sys.loggers.step) == collect(0:3)
+        @test values(sim.replicas[1].active_state.active_sys.loggers.step) == collect(0:3)
 
         Molly.simulate!(sim; rng=MersenneTwister(2))
         @test sim.current_step == 6
-        @test values(tss_state.active_state.active_sys.loggers.step) == collect(0:6)
+        @test values(sim.replicas[1].active_state.active_sys.loggers.step) == collect(0:6)
 
         @test_throws ArgumentError Molly.TSSSimulation(tss_state; n_md_steps=0, n_cycles=1)
         @test_throws ArgumentError Molly.TSSSimulation(
@@ -152,6 +180,13 @@ end
             n_md_steps=1,
             n_cycles=1,
             initial_step=-1,
+        )
+        @test_throws ArgumentError Molly.TSSSimulation(
+            tss_state;
+            n_md_steps=1,
+            n_cycles=1,
+            loggers=tss_step_logger(),
+            replica_loggers=[tss_step_logger()],
         )
 
         resumed_state = Molly.TSSState(make_tss_thermo_states();
@@ -164,10 +199,11 @@ end
             n_md_steps=1,
             n_cycles=1,
             initial_step=5,
+            loggers=tss_step_logger(),
         )
         Molly.simulate!(resumed_sim; rng=MersenneTwister(3))
         @test resumed_sim.current_step == 6
-        @test values(resumed_state.active_state.active_sys.loggers.step) == [5, 6]
+        @test values(resumed_sim.replicas[1].active_state.active_sys.loggers.step) == [5, 6]
     end
 
     @testset "windowed graph, visit control, and CovDet" begin
@@ -236,6 +272,7 @@ end
             log_freq=1,
             n_replicas=2,
             first_states=[1, 3],
+            replica_loggers=[tss_step_logger(), tss_step_logger()],
         )
         Molly.simulate!(sim; rng=MersenneTwister(14), n_threads=1, replica_parallel=:serial)
 
@@ -256,6 +293,22 @@ end
         )
         @test all(isfinite, Molly.tss_free_energies(state; visited_only=true))
         @test_throws ArgumentError Molly.simulate!(sim; replica_parallel=:invalid)
+        @test_throws ArgumentError Molly.TSSSimulation(state;
+            n_md_steps=1,
+            n_cycles=1,
+            n_replicas=2,
+            first_states=[1, 3],
+            replica_loggers=[tss_step_logger(), (step=tss_step_logger().step, temp=TemperatureLogger(1))],
+        )
+
+        @test_throws ArgumentError Molly.TSSSimulation(
+            state;
+            n_md_steps=1,
+            n_cycles=1,
+            n_replicas=2,
+            first_states=[1, 3],
+            loggers=tss_step_logger(),
+        )
     end
 
     @testset "windowed jackknife uncertainty" begin

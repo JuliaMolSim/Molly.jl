@@ -98,7 +98,7 @@ mutable struct ActiveThermoState{S, I}
     active_integrator::I
 end
 
-function ActiveThermoState(space::ExtendedStateSpace, first_state::Integer=1)
+function ActiveThermoState(space::ExtendedStateSpace, first_state::Integer=1; loggers=())
     if !(1 <= first_state <= n_states(space))
         throw(ArgumentError("first_state ($first_state) out of range 1:$(n_states(space))"))
     end
@@ -109,12 +109,20 @@ function ActiveThermoState(space::ExtendedStateSpace, first_state::Integer=1)
         pairwise_inters = space.state_pairwise_inters[first_state],
         specific_inter_lists = space.state_specific_inter_lists[first_state],
         general_inters = space.state_general_inters[first_state],
+        loggers = loggers,
     )
     return ActiveThermoState{typeof(active_sys), eltype(typeof(space.integrators))}(
         first_state,
         active_sys,
         space.integrators[first_state],
     )
+end
+
+function sync_active_state_dynamics!(dest::ActiveThermoState, src::ActiveThermoState)
+    dest.active_sys.coords .= src.active_sys.coords
+    dest.active_sys.velocities .= src.active_sys.velocities
+    dest.active_sys.boundary = src.active_sys.boundary
+    return dest
 end
 
 # set_active_state!(active::ActiveThermoState, space::ExtendedStateSpace, state_index)

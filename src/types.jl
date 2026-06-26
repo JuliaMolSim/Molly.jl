@@ -1173,6 +1173,10 @@ single thermodynamic state across all generalized ensemble methods.
 - `pressure=nothing`: Explicit target pressure. If `nothing`, it is inferred from the integrator's barostat.
 - `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on 
     the temperature and pressure is generated.
+
+If `system` has loggers, construction emits a warning: generalized ensemble
+methods ignore `ThermoState` system loggers and use loggers attached to the
+appropriate generalized-ensemble object instead.
 """
 struct ThermoState{S, I, B, P}
     system::S
@@ -1185,6 +1189,11 @@ end
 function ThermoState(sys::System{D, AT, FT}, integrator; 
                      temperature=nothing, pressure=nothing,
                      name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
+    if !isempty(values(sys.loggers))
+        @warn "ThermoState was constructed with a system that has loggers. " *
+              "Generalized ensemble methods ignore ThermoState system loggers; " *
+              "pass loggers to AWHSimulation, TSSSimulation or ReplicaSystem instead."
+    end
 
     temp_source = temperature
     press_source = pressure
@@ -1280,8 +1289,10 @@ construction where `n` is the number of threads to be used per replica.
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
     to duplicating the boundary of the reference system (the first `ThermoState`).
-- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: The logger used to record
-    the exchange of replicas.
+- `replica_loggers=nothing`: Logger collections for each replica. Stateful logger objects and
+    `TrajectoryWriter` file paths cannot be shared across replicas.
+- `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
+    a default [`ReplicaExchangeLogger`](@ref) is used.
 - `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
 - `data::DA=nothing`: Arbitrary data associated with the replica system.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
@@ -1362,6 +1373,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         throw(ArgumentError("Number of loggers arrays ($(length(replica_loggers))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
+    validate_replica_loggers(replica_loggers)
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)

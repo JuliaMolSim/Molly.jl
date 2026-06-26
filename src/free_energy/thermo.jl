@@ -183,7 +183,8 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                                 master_sils_2a...,
                                 master_sils_3a...,
                                 master_sils_4a...),
-        neighbor_finder      = master_nf
+        neighbor_finder      = master_nf,
+        loggers              = (),
     )
 
     hamiltonians = LambdaHamiltonian[]
@@ -200,7 +201,8 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
             pairwise_inters      = (λ_p...,),
             general_inters       = (λ_g...,),
             specific_inter_lists = (λ_s...,),
-            neighbor_finder      = λ_nf
+            neighbor_finder      = λ_nf,
+            loggers              = (),
         )
         push!(λ_systems, λ_sys)
     end

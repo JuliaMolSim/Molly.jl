@@ -216,6 +216,7 @@ Mutable state for a TSS simulation over a set of thermodynamic states.
 a single-window TSS run, or provided as a `TSSGraph` for windowed TSS.
 The state owns the active thermodynamic state, local window estimators,
 visit-control coupling state, and diagnostic histories.
+Loggers are attached by [`TSSSimulation`](@ref), not by `TSSState`.
 """
 mutable struct TSSState{T, ES, AS, G, W, E}
     state_space::ES # Shared ExtendedStateSpace among windows

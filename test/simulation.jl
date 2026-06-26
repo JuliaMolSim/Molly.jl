@@ -1328,9 +1328,6 @@ end
             boundary=boundary,
             pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
             neighbor_finder=neighbor_finder,
-            loggers=(
-                step=GeneralObservableLogger(simulation_step_wrapper, Int, 1),
-            ),
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")
         push!(thermo_states, ThermoState(sys, intg; temperature=temp))
@@ -1339,7 +1336,17 @@ end
     # Initialize AWH state using the newly generalized array of ThermoStates
     # n_bias is set low (10) to guarantee the initial stage is rapidly saturated 
     # and weight updates trigger during a short 2000 step test
-    awh_state = AWHState(thermo_states; first_state=1, n_bias=10)
+    awh_state = AWHState(
+        thermo_states;
+        first_state=1,
+        n_bias=10,
+    )
+    @test_throws MethodError AWHState(
+        thermo_states;
+        first_state=1,
+        n_bias=10,
+        loggers=(step=GeneralObservableLogger(simulation_step_wrapper, Int, 1),),
+    )
     awh_state_show = sprint(show, awh_state)
     @test occursin("AWHState with 4 windows", awh_state_show)
     @test occursin("active window 1", awh_state_show)
@@ -1408,7 +1415,8 @@ end
         update_freq=5,
         well_tempered_factor=10.0,
         coverage_threshold=1.0,
-        log_freq=10
+        log_freq=10,
+        loggers=(step=GeneralObservableLogger(simulation_step_wrapper, Int, 1),),
     )
     awh_sim_show = sprint(show, awh_sim)
     @test occursin("AWHSimulation with 4 windows", awh_sim_show)
@@ -1434,10 +1442,10 @@ end
     # 4. AWH enforces a structural constraint where the first state acts as the reference (f = 0.0)
     @test awh_sim.state.f[1] == 0.0
     @test awh_sim.current_step == n_steps
-    @test values(awh_sim.state.active_sys.loggers.step) == collect(0:n_steps)
+    @test values(awh_sim.active_state.active_sys.loggers.step) == collect(0:n_steps)
 
     simulate!(awh_sim, 20)
     @test awh_sim.current_step == n_steps + 20
-    @test values(awh_sim.state.active_sys.loggers.step) == collect(0:(n_steps + 20))
+    @test values(awh_sim.active_state.active_sys.loggers.step) == collect(0:(n_steps + 20))
     @test_throws ArgumentError AWHSimulation(awh_state; initial_step=-1)
 end

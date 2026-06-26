@@ -81,7 +81,8 @@ end
                   self_adjustment_steps=1, log_freq=1000,
                   n_replicas=nothing, first_states=nothing,
                   first_windows=nothing, replica_active_states=nothing,
-                  pmf=nothing, frozen=false, initial_step=0)
+                  loggers=(), replica_loggers=nothing, pmf=nothing,
+                  frozen=false, initial_step=0)
 
 A windowed TSS simulation driver.
 
@@ -89,6 +90,9 @@ Each cycle runs `self_adjustment_steps` blocks of `n_md_steps` molecular
 dynamics steps, collects TSS samples, updates window estimators unless
 `frozen=true`, and optionally records sampled PMF deconvolution diagnostics.
 `initial_step` sets the absolute MD step for a new or resumed simulation.
+`loggers` supplies the logger collection for a single-replica simulation.
+For multi-replica TSS, use `replica_loggers` to supply one logger collection
+per newly constructed replica active system.
 """
 mutable struct TSSSimulation{S, R, W, P}
     state::S
@@ -124,6 +128,8 @@ function TSSSimulation(state::TSSState;
                                first_states = nothing,
                                first_windows = nothing,
                                replica_active_states = nothing,
+                               loggers = (),
+                               replica_loggers = nothing,
                                pmf = nothing,
                                frozen::Bool = false,
                                initial_step::Integer = 0)
@@ -143,6 +149,8 @@ function TSSSimulation(state::TSSState;
         first_states = first_states,
         first_windows = first_windows,
         replica_active_states = replica_active_states,
+        loggers = loggers,
+        replica_loggers = replica_loggers,
     )
     frozen || validate_windowed_tss_replica_history_support(state, replicas)
     if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:TSSPMFDeconvolutionBackend})
@@ -224,6 +232,33 @@ function normalize_replica_values(values, n_replicas::Int, default, name::Abstra
     return normalized
 end
 
+function normalize_tss_replica_loggers(loggers, replica_loggers, n_replicas::Int)
+    if !isnothing(replica_loggers)
+        logger_collection_empty(loggers) ||
+            throw(ArgumentError("pass either loggers or replica_loggers to TSSSimulation, not both."))
+        normalized = collect(replica_loggers)
+        if length(normalized) != n_replicas
+            throw(ArgumentError("replica_loggers must have length $(n_replicas)."))
+        end
+        first_type = typeof(first(normalized))
+        if !all(logger_set -> typeof(logger_set) == first_type, normalized)
+            throw(ArgumentError("all TSS replica_loggers entries must have the same type"))
+        end
+        validate_replica_loggers(normalized)
+        return normalized
+    end
+
+    if n_replicas == 1
+        return [loggers]
+    end
+
+    if !logger_collection_empty(loggers)
+        throw(ArgumentError("TSSSimulation loggers can only be used with one replica; " *
+                            "pass replica_loggers for multi-replica TSS."))
+    end
+    return [() for _ in 1:n_replicas]
+end
+
 function default_tss_replica_windows(state::TSSState,
                                       first_states::AbstractVector{Int})
     return [first(windows_for_state(state, first_state)) for first_state in first_states]
@@ -249,12 +284,13 @@ function make_windowed_tss_replicas(state::TSSState;
                                      n_replicas,
                                      first_states,
                                      first_windows,
-                                     replica_active_states)
+                                     replica_active_states,
+                                     loggers,
+                                     replica_loggers)
     n_rep = replica_count(n_replicas, replica_active_states)
     if n_rep <= 0
         throw(ArgumentError("n_replicas must be positive."))
     end
-
     if isnothing(replica_active_states)
         first_state_values = normalize_replica_values(
             first_states,
@@ -262,39 +298,45 @@ function make_windowed_tss_replicas(state::TSSState;
             state.active_state.active_idx,
             "first_states",
         )
-        if n_rep == 1 && first_state_values[1] != state.active_state.active_idx
-            throw(ArgumentError("single-replica TSSSimulation must use the " *
-                                "TSSState active state; construct the state " *
-                                "with the desired first_state instead."))
-        end
-        active_states = n_rep == 1 ?
-                        [state.active_state] :
-                        [ActiveThermoState(state.state_space, first_state)
-                         for first_state in first_state_values]
+        replica_loggers_normalized = normalize_tss_replica_loggers(loggers, replica_loggers, n_rep)
+        active_states = [
+            ActiveThermoState(state.state_space, first_state;
+                              loggers=replica_loggers_normalized[i])
+            for (i, first_state) in pairs(first_state_values)
+        ]
     else
-        active_states = collect(replica_active_states)
-        if length(active_states) != n_rep
+        source_active_states = collect(replica_active_states)
+        if length(source_active_states) != n_rep
             throw(ArgumentError("replica_active_states must have length $(n_rep)."))
         end
-        first_state_values = [active_state.active_idx for active_state in active_states]
+        first_state_values = [active_state.active_idx for active_state in source_active_states]
         if !isnothing(first_states)
             supplied = normalize_replica_values(first_states, n_rep, first(first_state_values), "first_states")
             if supplied != first_state_values
                 throw(ArgumentError("first_states must match replica_active_states active indices."))
             end
         end
+        replica_loggers_normalized = normalize_tss_replica_loggers(loggers, replica_loggers, n_rep)
+        active_states = [
+            sync_active_state_dynamics!(
+                ActiveThermoState(state.state_space, source_active_state.active_idx;
+                                  loggers=replica_loggers_normalized[i]),
+                source_active_state,
+            )
+            for (i, source_active_state) in pairs(source_active_states)
+        ]
     end
 
     first_window_values = if isnothing(first_windows)
-        n_rep == 1 && active_states[1] === state.active_state ?
+        n_rep == 1 && first_state_values[1] == state.active_state.active_idx ?
         [state.active_window] :
         default_tss_replica_windows(state, first_state_values)
     else
         normalize_replica_values(first_windows, n_rep, state.active_window, "first_windows")
     end
 
-    if n_rep == 1 && first_window_values[1] != state.active_window &&
-            active_states[1] === state.active_state
+    if n_rep == 1 && first_state_values[1] == state.active_state.active_idx &&
+            first_window_values[1] != state.active_window
         throw(ArgumentError("single-replica TSSSimulation must use the " *
                             "TSSState active window; construct the state " *
                             "with the desired first_window instead."))
