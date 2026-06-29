@@ -23,7 +23,13 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator
+    ASECalculator,
+    AbstractMLPotential,
+    ANIPotential,
+    compute_aevs,
+    compute_aevs_ka,
+    cosine_cutoff,
+    celu01
 
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64
@@ -1835,6 +1841,75 @@ struct ASECalculator{T}
 end
 
 function update_ase_calc! end
+
+# Base type for ML interatomic potentials.
+# Concrete subtypes (ANIPotential, etc.) are defined in ext/MollyLuxExt.jl.
+abstract type AbstractMLPotential end
+
+"""
+    ANIPotential(path; force_units, energy_units, T, ensemble_idx)
+
+Load an ANI neural network potential from an HDF5 file exported by
+`scripts/torchani_reference.py`. Requires `Lux` and `HDF5` to be loaded.
+
+By default all ensemble members are loaded and energies are averaged.
+Pass `ensemble_idx` to load only a specific member (wrapped in a length-1 vector).
+"""
+struct ANIPotential{M, PV, SV, SP, P, SE, D, F, E} <: AbstractMLPotential
+    model::M          # NamedTuple of per-element Lux.Chain sub-networks (shared architecture)
+    ps_vec::PV        # Vector of per-element parameter NamedTuples, one per ensemble member
+    st_vec::SV        # Vector of per-element state NamedTuples, one per ensemble member
+    species_map::SP   # Dict{String,Int}: element → 1-based index
+    aev_params::P     # NamedTuple: η_R, r_s_R, r_c_R, η_A, r_s_A (ShfA, Å), θ_s (ShfZ, rad), ζ, r_c_A
+    self_energies::SE # Vector: atomic self-energy per species (Hartree)
+    cutoff::D         # max(r_c_R, r_c_A), plain Float (Å)
+    force_units::F
+    energy_units::E
+    _buf::Ref{Any}    # lazily-initialized AEVBuffers for zero-allocation AEV computation
+end
+
+# Constructor and implementation are in ext/MollyLuxExt.jl (needs Lux + HDF5).
+function ANIPotential(path::AbstractString; kwargs...)
+    error("ANIPotential requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
+end
+
+"""
+    compute_aevs(coords, species_indices, neighbors, boundary, aev_params, n_species)
+
+Compute atomic environment vectors (AEVs) for all atoms.
+Returns a `(n_atoms, aev_length)` matrix.
+Implementation is in ext/MollyLuxExt.jl.
+"""
+function compute_aevs end
+
+"""
+    cosine_cutoff(r, r_c)
+
+Smooth cutoff function: `0.5*(1+cos(π*r/r_c))` for `r < r_c`, else `0`.
+"""
+function cosine_cutoff end
+
+"""
+    celu01(x)
+
+CELU activation with α=0.1 — the nonlinearity between Dense layers of each ANI
+element network (matches the TorchANI ANI-2x architecture; see ANI-1, Smith et al.
+Chem. Sci. 2017, and ANI-2x, Devereux et al. JCTC 2020).
+`celu01(x) = x` for `x ≥ 0`, `0.1*(exp(x/0.1) - 1)` otherwise.
+Exported so AD backends can register rules without depending on MollyLuxExt.
+"""
+@noinline celu01(x::T) where T = x >= zero(T) ? x : T(0.1) * (exp(x / T(0.1)) - one(T))
+
+"""
+    compute_aevs_ka(coords, species_indices, aev_params, n_species; backend=nothing)
+
+GPU-portable AEV computation using KernelAbstractions — one thread per atom.
+Requires `KernelAbstractions`, `Lux`, and `HDF5` to be loaded.
+"""
+function compute_aevs_ka(args...; kwargs...)
+    error("compute_aevs_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
+          "`using KernelAbstractions, Lux, HDF5`")
+end
 
 # ForwardDiff.jl checks both value and derivative
 # This could be extended to only check the value for Duals
