@@ -634,3 +634,76 @@ if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
         end
     end
 end
+
+# ============================================================================
+# Test 15: threaded AEV matches serial path; batched-by-species NN energy
+#          matches the per-atom reference. Run with JULIA_NUM_THREADS>1 to
+#          exercise the multithreaded central-atom loop.
+# ============================================================================
+@testset "ANIPotential: threaded AEV == serial + batched NN energy" begin
+    h5_path = joinpath(REF_DIR, "ani2x.h5")
+    if !isfile(h5_path)
+        @warn "ani2x.h5 not found — skipping"
+        @test_broken false
+    else
+        pot  = ANIPotential(h5_path; ensemble_idx=0)
+        p    = pot.aev_params
+        n_sp = length(pot.species_map)
+        lux  = Base.get_extension(Molly, :MollyLuxExt)
+
+        # Multi-element slice of 6mrr so both radial and angular AEVs are non-trivial.
+        pdb   = joinpath(REF_DIR, "..", "6mrr_equil.pdb")
+        valid = Set(keys(pot.species_map))
+        coords = SVector{3,Float64}[]; elems = String[]
+        if isfile(pdb)
+            open(pdb) do f
+                for line in eachline(f)
+                    (startswith(line, "ATOM") || startswith(line, "HETATM")) || continue
+                    length(line) < 78 && continue
+                    e = strip(line[77:78]); e in valid || continue
+                    push!(coords, SVector(parse(Float64, line[31:38]),
+                                          parse(Float64, line[39:46]),
+                                          parse(Float64, line[47:54])))
+                    push!(elems, e)
+                    length(elems) == 300 && break
+                end
+            end
+        end
+        if isempty(coords)
+            @warn "6mrr_equil.pdb not found — skipping Test 15"
+            @test_broken false
+        else
+            species = [pot.species_map[e] for e in elems]
+            n = length(coords); bdy = CubicBoundary(200.0)
+
+            # Serial reference vs the buffered path (threaded when nthreads > 1).
+            aevs_serial = Molly.compute_aevs(coords, species, nothing, bdy, p, n_sp)
+            buf      = lux._get_aev_buf(pot, n, Val(3), Float64)
+            aevs_buf = lux._compute_aevs_buf!(buf, coords, species, nothing, bdy, p, n_sp)
+            @test aevs_buf == aevs_serial   # bit-identical: per-atom rows are independent
+            println("Test15: threads=", Threads.nthreads(), " scratch_sets=", length(buf.scratch),
+                    " max|buffered-serial| AEV = ", maximum(abs.(aevs_buf .- aevs_serial)))
+
+            # Batched-by-species NN energy matches the per-atom reference.
+            sys = System(atoms=[Atom(mass=1.0u"u") for _ in 1:n],
+                coords=[c*u"Å" for c in coords], boundary=CubicBoundary(200.0u"Å"),
+                atoms_data=[AtomData(element=e) for e in elems],
+                general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV")
+            E_batched = ustrip(potential_energy(sys))
+
+            idx_to_elem = Dict(v => k for (k, v) in pot.species_map)
+            E_ha = 0.0
+            for i in 1:n
+                s   = species[i]; sym = Symbol(idx_to_elem[s])
+                out, _ = Lux.apply(getfield(pot.model, sym),
+                                   reshape(Float32.(@view aevs_serial[i, :]), :, 1),
+                                   getfield(pot.ps_vec[1], sym), getfield(pot.st_vec[1], sym))
+                E_ha += Float64(out[1]) + pot.self_energies[s]
+            end
+            E_ref = E_ha * 27.211396132
+            @test E_batched ≈ E_ref atol=1e-3
+            println("Test15: batched energy = ", E_batched, " | per-atom ref = ", E_ref,
+                    " | diff = ", abs(E_batched - E_ref))
+        end
+    end
+end

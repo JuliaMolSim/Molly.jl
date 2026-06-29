@@ -74,16 +74,23 @@ end
 # Full energy (Hartree) for one ensemble member — AEVs + Lux network.
 # coords_mat: (3, N) Float32 — the only Active argument.
 # All other args are Const so Enzyme doesn't need to differentiate through them.
+#
+# Batched by species: gather each element's AEV rows into one (aev_len, n_s) matrix
+# and call Lux.apply once per element rather than once per atom. This cuts the number
+# of Lux.apply calls Enzyme has to trace from n_atoms to n_species, which both speeds
+# up the reverse pass and reduces allocation. `group_atoms[s]` lists the atom indices
+# of species s; the gather/permutedims are differentiable so forces stay exact.
 function _ani_energy_for_ad(
-    coords_mat    :: AbstractMatrix{Float32},
+    coords_mat        :: AbstractMatrix{Float32},
     species_idx,
     boundary_strip,
     aev_params,
-    n_species     :: Int,
+    n_species         :: Int,
     neighbors,
-    per_atom_model,
-    per_atom_ps,
-    per_atom_st,
+    group_atoms,
+    models_by_species,
+    ps_by_species,
+    st_by_species,
     self_energies,
 )
     n_atoms = size(coords_mat, 2)
@@ -91,13 +98,13 @@ function _ani_energy_for_ad(
     aevs    = Molly.compute_aevs(coords, species_idx, neighbors, boundary_strip,
                                  aev_params, n_species)
     E = 0f0
-    for atom_i in 1:n_atoms
-        aev_i = @view aevs[atom_i, :]
-        out, _ = Lux.apply(per_atom_model[atom_i],
-                           Float32.(reshape(aev_i, :, 1)),
-                           per_atom_ps[atom_i],
-                           per_atom_st[atom_i])
-        E += Float32(out[1]) + self_energies[species_idx[atom_i]]
+    for s in 1:n_species
+        atoms_s = group_atoms[s]
+        ns = length(atoms_s)
+        ns == 0 && continue
+        batch  = permutedims(aevs[atoms_s, :])   # (aev_len, ns)
+        out, _ = Lux.apply(models_by_species[s], batch, ps_by_species[s], st_by_species[s])
+        E += sum(@view out[1, :]) + self_energies[s] * ns
     end
     return E
 end
@@ -120,16 +127,19 @@ function AtomsCalculators.forces!(fs,
     n_species   = length(inter.species_map)
     n_atoms     = length(coords_f32)
 
-    idx_to_elem    = Dict(v => k for (k, v) in inter.species_map)
-    per_atom_model = [getfield(inter.model, Symbol(idx_to_elem[s])) for s in species_idx]
+    idx_to_elem = Dict(v => k for (k, v) in inter.species_map)
+    syms        = [Symbol(idx_to_elem[s]) for s in 1:n_species]
+    # Atom indices grouped by species (Const for Enzyme — pure index data).
+    group_atoms       = [findall(==(s), species_idx) for s in 1:n_species]
+    models_by_species = [getfield(inter.model, syms[s]) for s in 1:n_species]
 
     coords_mat  = reduce(hcat, coords_f32)
     dcoords_sum = zeros(Float32, 3, n_atoms)
     n_ens = length(inter.ps_vec)
 
     for ens_i in 1:n_ens
-        per_atom_ps = [getfield(inter.ps_vec[ens_i], Symbol(idx_to_elem[s])) for s in species_idx]
-        per_atom_st = [getfield(inter.st_vec[ens_i], Symbol(idx_to_elem[s])) for s in species_idx]
+        ps_by_species = [getfield(inter.ps_vec[ens_i], syms[s]) for s in 1:n_species]
+        st_by_species = [getfield(inter.st_vec[ens_i], syms[s]) for s in 1:n_species]
 
         dcoords_i = zeros(Float32, 3, n_atoms)
 
@@ -143,9 +153,10 @@ function AtomsCalculators.forces!(fs,
             Enzyme.Const(inter.aev_params),
             Enzyme.Const(n_species),
             Enzyme.Const(nbrs),
-            Enzyme.Const(per_atom_model),
-            Enzyme.Const(per_atom_ps),
-            Enzyme.Const(per_atom_st),
+            Enzyme.Const(group_atoms),
+            Enzyme.Const(models_by_species),
+            Enzyme.Const(ps_by_species),
+            Enzyme.Const(st_by_species),
             Enzyme.Const(inter.self_energies),
         )
 

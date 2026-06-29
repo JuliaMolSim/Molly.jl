@@ -127,20 +127,39 @@ function _angular_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
     end
 end
 
-# Internal buffer struct (lazily allocated per ANIPotential, sized for a given system).
-mutable struct AEVBuffers{D, T}
-    n_atoms     :: Int
-    aevs        :: Matrix{T}           # (n_atoms, aev_len) — AEV output
-    lux_input   :: Matrix{Float32}     # (aev_len, 1) — reusable Float32 input for Lux.apply
+# Per-chunk scratch for the threaded AEV loop. Each chunk (≈ one thread) gets its
+# own scratch so the central-atom loop has no shared mutable state to race on.
+struct AEVScratch{D, T}
     nbr_coords  :: Vector{SVector{D, T}}
     nbr_species :: Vector{Int}
     rj          :: Vector{T}
     fcj         :: Vector{T}
     drj         :: Vector{SVector{D, T}}
-    ok           :: Vector{Bool}
-    species_idx  :: Vector{Int}          # per-atom species indices (reused across calls)
-    idx_to_elem  :: Dict{Int, String}    # inverse of species_map (precomputed once)
-    coords_strip :: Vector{SVector{D,T}} # pre-allocated strip buffer (avoids strip_coords alloc)
+    ok          :: Vector{Bool}
+end
+
+function AEVScratch{D, T}(max_nbrs::Int) where {D, T}
+    AEVScratch{D, T}(
+        Vector{SVector{D, T}}(undef, max_nbrs),
+        Vector{Int}(undef, max_nbrs),
+        Vector{T}(undef, max_nbrs),
+        Vector{T}(undef, max_nbrs),
+        Vector{SVector{D, T}}(undef, max_nbrs),
+        Vector{Bool}(undef, max_nbrs),
+    )
+end
+
+# Internal buffer struct (lazily allocated per ANIPotential, sized for a given system).
+mutable struct AEVBuffers{D, T}
+    n_atoms     :: Int
+    aevs        :: Matrix{T}                  # (n_atoms, aev_len) — AEV output
+    nn_batch    :: Matrix{Float32}            # (aev_len, n_atoms) — reusable per-species NN input
+    scratch     :: Vector{AEVScratch{D, T}}   # one scratch set per chunk/thread (no shared races)
+    species_idx  :: Vector{Int}               # per-atom species indices (reused across calls)
+    idx_to_elem  :: Dict{Int, String}         # inverse of species_map (precomputed once)
+    coords_strip :: Vector{SVector{D,T}}      # pre-allocated strip buffer (avoids strip_coords alloc)
+    group_atoms  :: Vector{Vector{Int}}       # group_atoms[s] = atom indices of species s (NN batching)
+    group_count  :: Vector{Int}               # group_count[s] = #atoms of species s this call
 end
 
 # Return (lazily allocated) AEVBuffers for this potential + system size.
@@ -156,27 +175,77 @@ function _get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) wh
         aev_len   = n_species * n_rad_per + n_pairs * n_ang_per
         max_nbrs  = n_atoms
         idx_to_elem = Dict{Int,String}(v => k for (k, v) in inter.species_map)
+        # One scratch set per thread so the central-atom loop can run with
+        # Threads.@threads :static and no shared mutable state.
+        nchunks = max(1, Threads.nthreads())
+        scratch = AEVScratch{D, T}[AEVScratch{D, T}(max_nbrs) for _ in 1:nchunks]
+        # Per-species index buckets for batched NN evaluation (one Lux.apply per element).
+        group_atoms = Vector{Int}[Vector{Int}(undef, n_atoms) for _ in 1:n_species]
         buf = AEVBuffers{D, T}(
             n_atoms,
             zeros(T, n_atoms, aev_len),
-            zeros(Float32, aev_len, 1),
-            Vector{SVector{D,T}}(undef, max_nbrs),
-            Vector{Int}(undef, max_nbrs),
-            Vector{T}(undef, max_nbrs),
-            Vector{T}(undef, max_nbrs),
-            Vector{SVector{D,T}}(undef, max_nbrs),
-            Vector{Bool}(undef, max_nbrs),
+            zeros(Float32, aev_len, n_atoms),
+            scratch,
             Vector{Int}(undef, n_atoms),
             idx_to_elem,
             Vector{SVector{D,T}}(undef, n_atoms),
+            group_atoms,
+            zeros(Int, n_species),
         )
         inter._buf[] = buf
     end
     return buf::AEVBuffers{D, T}
 end
 
+# Compute the AEV rows for one contiguous chunk of central atoms, using a single
+# private scratch set. Output rows buf.aevs[atom_i, :] are disjoint per atom, so
+# distinct chunks never touch the same memory — safe to run on separate threads.
+function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
+                     coords, species_indices, neighbors, boundary, p, n_species::Int,
+                     r_c_R::T, r_c_A::T, r_c_max::T, split::Int, aev_len::Int) where {D,T}
+    n_atoms = length(coords)
+    for atom_i in atom_range
+        # Build neighbor list into this chunk's private scratch (no push!, no heap alloc).
+        n_nbrs = 0
+        if isnothing(neighbors)
+            for j in 1:n_atoms
+                j == atom_i && continue
+                dr = coords[j] - coords[atom_i]
+                norm(dr) < r_c_max || continue
+                n_nbrs += 1
+                sc.nbr_coords[n_nbrs]  = coords[j]
+                sc.nbr_species[n_nbrs] = Int(species_indices[j])
+            end
+        else
+            for ni in eachindex(neighbors)
+                idx_i, idx_j, _ = neighbors[ni]
+                nbr_idx = (Int(idx_i) == atom_i) ? Int(idx_j) :
+                          (Int(idx_j) == atom_i) ? Int(idx_i) : 0
+                nbr_idx == 0 && continue
+                dr = vector(coords[atom_i], coords[nbr_idx], boundary)
+                n_nbrs += 1
+                sc.nbr_coords[n_nbrs]  = coords[atom_i] + dr
+                sc.nbr_species[n_nbrs] = Int(species_indices[nbr_idx])
+            end
+        end
+
+        # Write AEV components directly into pre-allocated output rows.
+        _radial_aev!(@view(buf.aevs[atom_i, 1:split]),
+                     coords[atom_i], sc.nbr_coords, sc.nbr_species, n_nbrs,
+                     p.η_R, p.r_s_R, r_c_R, n_species)
+        _angular_aev!(@view(buf.aevs[atom_i, split+1:aev_len]),
+                      coords[atom_i], sc.nbr_coords, sc.nbr_species, n_nbrs,
+                      p.η_A, p.r_s_A, p.θ_s, T(p.ζ), r_c_A, n_species,
+                      sc.rj, sc.fcj, sc.drj, sc.ok)
+    end
+    return nothing
+end
+
 # Compute AEVs for all atoms, writing into buf.aevs (zero allocations after buf is warm).
 # Returns a view of buf.aevs — callers must not hold onto it across calls.
+# Partitions the central-atom loop into `length(buf.scratch)` contiguous chunks and
+# runs them with Threads.@threads :static (chunk c → thread c → scratch c). With one
+# thread it falls back to a plain serial loop (bit-identical, zero extra allocations).
 function _compute_aevs_buf!(buf::AEVBuffers{D,T},
                              coords::AbstractVector{SVector{D,T}},
                              species_indices::AbstractVector{<:Integer},
@@ -194,39 +263,20 @@ function _compute_aevs_buf!(buf::AEVBuffers{D,T},
     aev_len   = n_species * n_rad_per + n_pairs * n_ang_per
     split     = n_species * n_rad_per
 
-    for atom_i in 1:n_atoms
-        # Build neighbor list into pre-allocated scratch (no push!, no heap alloc).
-        n_nbrs = 0
-        if isnothing(neighbors)
-            for j in 1:n_atoms
-                j == atom_i && continue
-                dr = coords[j] - coords[atom_i]
-                norm(dr) < r_c_max || continue
-                n_nbrs += 1
-                buf.nbr_coords[n_nbrs]  = coords[j]
-                buf.nbr_species[n_nbrs] = Int(species_indices[j])
-            end
-        else
-            for ni in eachindex(neighbors)
-                idx_i, idx_j, _ = neighbors[ni]
-                nbr_idx = (Int(idx_i) == atom_i) ? Int(idx_j) :
-                          (Int(idx_j) == atom_i) ? Int(idx_i) : 0
-                nbr_idx == 0 && continue
-                dr = vector(coords[atom_i], coords[nbr_idx], boundary)
-                n_nbrs += 1
-                buf.nbr_coords[n_nbrs]  = coords[atom_i] + dr
-                buf.nbr_species[n_nbrs] = Int(species_indices[nbr_idx])
-            end
+    nchunks = clamp(length(buf.scratch), 1, max(n_atoms, 1))
+    if nchunks == 1
+        _aev_chunk!(buf, 1:n_atoms, buf.scratch[1], coords, species_indices,
+                    neighbors, boundary, p, n_species, r_c_R, r_c_A, r_c_max, split, aev_len)
+    else
+        base = n_atoms ÷ nchunks
+        rem  = n_atoms % nchunks
+        Threads.@threads :static for c in 1:nchunks
+            lo = (c - 1) * base + min(c - 1, rem) + 1
+            hi = c * base + min(c, rem)
+            lo <= hi && _aev_chunk!(buf, lo:hi, buf.scratch[c], coords, species_indices,
+                                    neighbors, boundary, p, n_species, r_c_R, r_c_A, r_c_max,
+                                    split, aev_len)
         end
-
-        # Write AEV components directly into pre-allocated output rows.
-        _radial_aev!(@view(buf.aevs[atom_i, 1:split]),
-                     coords[atom_i], buf.nbr_coords, buf.nbr_species, n_nbrs,
-                     p.η_R, p.r_s_R, r_c_R, n_species)
-        _angular_aev!(@view(buf.aevs[atom_i, split+1:aev_len]),
-                      coords[atom_i], buf.nbr_coords, buf.nbr_species, n_nbrs,
-                      p.η_A, p.r_s_A, p.θ_s, T(p.ζ), r_c_A, n_species,
-                      buf.rj, buf.fcj, buf.drj, buf.ok)
     end
     return @view buf.aevs[1:n_atoms, :]
 end
@@ -395,23 +445,41 @@ end
 # AtomsCalculators interface
 # ============================================================================
 
+# Bucket atoms by species into buf.group_atoms / buf.group_count (no heap alloc after warmup).
+# Independent of ensemble member, so computed once per energy call.
+function _bucket_species!(group_atoms, group_count, species_idx)
+    fill!(group_count, 0)
+    @inbounds for atom_i in eachindex(species_idx)
+        s = species_idx[atom_i]
+        c = (group_count[s] += 1)
+        group_atoms[s][c] = atom_i
+    end
+    return nothing
+end
+
 # Internal: energy (Hartree) for one ensemble member given pre-computed AEVs.
-# lux_input is a pre-allocated (aev_len, 1) Float32 buffer to avoid per-atom allocation.
-function _ani_energy_single(aevs, species_idx, idx_to_elem, model, self_energies,
-                            ps, st, lux_input::Matrix{Float32}, ::Type{T}) where T
+# Batched by species: one Lux.apply per element (an (aev_len, n_s) matmul) instead of
+# one tiny matmul per atom. nn_batch is a reusable (aev_len, n_atoms) Float32 scratch.
+function _ani_energy_single(aevs, idx_to_elem, model, self_energies, ps, st,
+                            nn_batch::Matrix{Float32}, group_atoms, group_count, ::Type{T}) where T
     E = zero(T)
-    n_atoms = length(species_idx)
-    for atom_i in 1:n_atoms
-        s    = species_idx[atom_i]
-        sym  = Symbol(idx_to_elem[s])
-        aev_i = @view aevs[atom_i, :]
-        # Write AEV into pre-allocated Float32 buffer (no heap allocation).
-        @views lux_input[:, 1] .= aev_i
-        out, _ = Lux.apply(getfield(model, sym),
-                            lux_input,
-                            getfield(ps, sym),
-                            getfield(st, sym))
-        E += T(out[1]) + self_energies[s]
+    n_species = length(group_count)
+    for s in 1:n_species
+        ns = group_count[s]
+        ns == 0 && continue
+        sym = Symbol(idx_to_elem[s])
+        # Gather this species' AEV rows into the first ns columns of nn_batch.
+        atoms_s = group_atoms[s]
+        @inbounds for k in 1:ns
+            @views nn_batch[:, k] .= aevs[atoms_s[k], :]
+        end
+        batch  = @view nn_batch[:, 1:ns]
+        out, _ = Lux.apply(getfield(model, sym), batch, getfield(ps, sym), getfield(st, sym))
+        # out is (1, ns); add per-atom NN output plus this species' self-energy.
+        s_e = self_energies[s]
+        @inbounds for k in 1:ns
+            E += T(out[1, k]) + s_e
+        end
     end
     return E
 end
@@ -431,12 +499,15 @@ function _ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
     aevs = _compute_aevs_buf!(buf, coords_strip, species_idx, neighbors, bdy_strip,
                                inter.aev_params, n_species)
 
+    # Bucket atoms by species once (shared across ensemble members).
+    _bucket_species!(buf.group_atoms, buf.group_count, species_idx)
+
     n_ens = length(inter.ps_vec)
     E = zero(T)
     for i in 1:n_ens
-        E += _ani_energy_single(aevs, species_idx, buf.idx_to_elem, inter.model,
+        E += _ani_energy_single(aevs, buf.idx_to_elem, inter.model,
                                 inter.self_energies, inter.ps_vec[i], inter.st_vec[i],
-                                buf.lux_input, T)
+                                buf.nn_batch, buf.group_atoms, buf.group_count, T)
     end
     return E / n_ens
 end
