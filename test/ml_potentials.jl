@@ -707,3 +707,49 @@ end
         end
     end
 end
+
+# ============================================================================
+# Test 16: KA neighbour-list AEV kernel matches the all-pairs kernel and the
+#          scalar CPU path on a multi-element system. Runs on the KA CPU backend
+#          (no GPU needed); the same kernel runs on Metal/CUDA/ROCm.
+# ============================================================================
+if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
+    @testset "ANIPotential: KA neighbour-list kernel matches all-pairs (CPU backend)" begin
+        h5_path = joinpath(REF_DIR, "ani2x.h5")
+        pdb     = joinpath(REF_DIR, "..", "6mrr_equil.pdb")
+        if !isfile(h5_path) || !isfile(pdb)
+            @warn "ani2x.h5 or 6mrr_equil.pdb not found — skipping"
+            @test_broken false
+        else
+            pot  = ANIPotential(h5_path; ensemble_idx=0)
+            p    = pot.aev_params
+            n_sp = length(pot.species_map)
+            valid = Set(keys(pot.species_map))
+            coords = SVector{3,Float64}[]; elems = String[]
+            open(pdb) do f
+                for line in eachline(f)
+                    (startswith(line, "ATOM") || startswith(line, "HETATM")) || continue
+                    length(line) < 78 && continue
+                    e = strip(line[77:78]); e in valid || continue
+                    push!(coords, SVector(parse(Float64, line[31:38]),
+                                          parse(Float64, line[39:46]),
+                                          parse(Float64, line[47:54])))
+                    push!(elems, e)
+                    length(elems) == 400 && break
+                end
+            end
+            species = [pot.species_map[e] for e in elems]
+            bdy     = CubicBoundary(200.0)
+            cpu     = KernelAbstractions.CPU()
+
+            ref    = Molly.compute_aevs(coords, species, nothing, bdy, p, n_sp)
+            ka_ap  = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu)
+            ka_nl  = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu, neighbors=:auto)
+
+            @test ka_nl ≈ ref   atol=1e-4
+            @test ka_nl ≈ ka_ap atol=1e-4
+            println("KA NL vs scalar max dev:    ", maximum(abs.(ka_nl .- ref)))
+            println("KA NL vs all-pairs max dev: ", maximum(abs.(ka_nl .- ka_ap)))
+        end
+    end
+end

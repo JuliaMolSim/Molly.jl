@@ -56,9 +56,36 @@ All **15/15** ANI tests pass (Tests 1–14 + new Test 15) under `-t8` with Enzym
 KernelAbstractions loaded. AEV deviations vs TorchANI ~1e-8; Enzyme N₂ force dev
 4.3e-5 eV/Å, H₂O 2.4e-3 eV/Å (unchanged by batching).
 
+## GPU: neighbour-list AEV kernel on Metal
+
+New `_aev_kernel_nl!` scans only each atom's neighbours (CSR list built within
+`max(r_c_R, r_c_A)`), turning the all-pairs O(N²)/O(N³) cost into O(N·k)/O(N·k²).
+Selected via `compute_aevs_ka(...; neighbors=:auto)` (or pass a prebuilt `(off, idx)`).
+Validated bit-identical to the all-pairs kernel on the CPU backend (Test 16) and
+matching to 3e-6 on Metal (Float32 transcendentals).
+
+AEV-only kernel time (ms), 6mrr slices on Apple Metal:
+
+| N atoms | avg neigh | Metal NL | Metal all-pairs | CPU-KA NL (1 thread) |
+|---------|-----------|----------|-----------------|----------------------|
+| 1000    | 40.5      | 31.1     | 61.3            | 68.9                 |
+| 2000    | 27.7      | 32.0     | 95.7            | 88.7                 |
+| 4000    | 21.2      | 33.0     | (O(N³))         | 113.0                |
+| 8000    | 25.2      | 35.4     | (O(N³))         | 224.2                |
+
+Metal NL stays ~flat 31→35 ms from 1k→8k atoms (kernel launch + transfer dominate;
+GPU is under-occupied at these sizes), already 6.3× the single-thread CPU-KA kernel
+at 8000 atoms and ≥2× the all-pairs kernel even at 1000. The neighbour list is what
+makes ≥2000 atoms tractable on the GPU at all.
+
+`workgroup` is now a tunable kwarg (default 256).
+
 ## Next (not in this round)
 
 - Forces still run AEV serially inside the Enzyme pass; thread the AD AEV or the
   ensemble loop for a forces speedup at MD scale.
-- GPU (`_aev_kernel!`) is still O(N³) all-pairs (no neighbor list) — needs a cutoff
-  neighbor list before 6mrr is feasible on Metal.
+- GPU global-write reduction: each thread still does a global read-modify-write per
+  AEV term. A shared-memory tile of the AEV row (or neighbour coords) would cut global
+  traffic further — left as future work since the NL kernel already scales flat.
+- Run the NN forward pass on-GPU (currently CPU/Lux) for an end-to-end GPU energy.
+- Build the GPU neighbour list with a cell list (current host build is O(N²)).
