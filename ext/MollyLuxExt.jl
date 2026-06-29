@@ -1,5 +1,30 @@
 # ANI (and future ML potential) support via Lux.jl + HDF5.jl
 # Loaded when both Lux and HDF5 are in the user environment.
+#
+# ===========================================================================
+# How ANI works (and where each equation lives in this file)
+# ===========================================================================
+# References:
+#   [ANI-1]  J. S. Smith, O. Isayev, A. E. Roitberg, "ANI-1: an extensible neural
+#            network potential with DFT accuracy at force field computational cost",
+#            Chem. Sci. 2017, 8, 3192–3203.  doi:10.1039/C6SC05720A
+#   [ANI-2x] C. Devereux et al., "Extending the Applicability of the ANI Deep Learning
+#            Molecular Potential to Sulfur and Halogens", J. Chem. Theory Comput. 2020,
+#            16, 4192–4202.  doi:10.1021/acs.jctc.0c00121   (adds S, F, Cl; same AEV form)
+#
+# The total potential energy is a sum of per-atom contributions, [ANI-1] Eq. (1):
+#       E = Σ_i E_i
+# Each atom i is described by an Atomic Environment Vector (AEV) — a fixed-length
+# fingerprint of its local chemical environment built from modified Behler–Parrinello
+# symmetry functions. The AEV is fed to a small element-specific neural network that
+# outputs that atom's energy E_i; ANI-2x averages 8 such networks (an ensemble).
+#
+#   cosine_cutoff   → [ANI-1] Eq. (2)  smooth radial cutoff f_C(R_ij)
+#   _radial_aev!    → [ANI-1] Eq. (3)  radial symmetry function  G^R
+#   _angular_aev!   → [ANI-1] Eq. (4)  angular symmetry function G^A
+#   _ani_energy_single / _ani_raw_energy → [ANI-1] Eq. (1) energy sum + ensemble average
+# The element NN architecture is in _build_element_model; per-atom self-energies are an
+# additive reference shift (Hartree). Forces are −∇E (Enzyme reverse-mode AD).
 
 module MollyLuxExt
 
@@ -43,7 +68,9 @@ end
 # AEV computation — zero-allocation in-place implementation
 # ============================================================================
 
-# Smooth cutoff: 0.5*(1+cos(π*r/r_c)) for r<r_c, else 0.
+# Smooth cosine cutoff f_C — [ANI-1] Eq. (2):
+#   f_C(R_ij) = 0.5·cos(π·R_ij/R_c) + 0.5   for R_ij ≤ R_c,   else 0
+# Decays the contribution of a neighbour smoothly to zero at the cutoff R_c.
 Molly.cosine_cutoff(r::T, r_c::T) where T =
     r < r_c ? T(0.5) * (one(T) + cos(T(π) * r / r_c)) : zero(T)
 
@@ -54,8 +81,13 @@ Molly.cosine_cutoff(r::T, r_c::T) where T =
     SVector{D,T}(ntuple(k -> k == d ? x : sv[k], Val(D)))
 end
 
-# In-place radial AEV: writes into G (a pre-allocated view of the AEV matrix row).
-# nbr_coords/nbr_species hold the first n_nbr neighbors.
+# Radial AEV — radial symmetry function G^R, [ANI-1] Eq. (3):
+#   G^R_{η,R_s} = Σ_{j≠i} exp(−η·(R_ij − R_s)²) · f_C(R_ij)
+# One element per (η_R, r_s_R) pair, computed separately per neighbour species (the
+# `base` offset selects the species block). ANI-2x uses one η_R and 16 shifts R_s.
+# The 0.25 prefactor follows the TorchANI reference implementation (not in the paper).
+# Writes into G (a pre-allocated view of the AEV matrix row);
+# nbr_coords/nbr_species hold the first n_nbr neighbours.
 function _radial_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
                       nbr_coords, nbr_species, n_nbr::Int,
                       η_R, r_s_R, r_c_R::T, n_species::Int) where {D,T}
@@ -78,8 +110,15 @@ function _radial_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
     end
 end
 
-# In-place angular AEV: writes into G.
-# Uses pre-allocated scratch vectors rj_buf, fcj_buf, drj_buf, ok_buf (sized ≥ n_nbr).
+# Angular AEV — modified angular symmetry function G^A, [ANI-1] Eq. (4):
+#   G^A_{η,ζ,R_s,θ_s} = 2^{1−ζ} · Σ_{j,k≠i} (1 + cos(θ_ijk − θ_s))^ζ
+#                       · exp(−η·((R_ij + R_ik)/2 − R_s)²) · f_C(R_ij) · f_C(R_ik)
+# Sum over unordered pairs of neighbours (j,k). One element per (η_A, r_s_A, θ_s) and
+# per unordered species pair (the `pair_idx`/`base` offset). prefac0 = 2^{1−ζ},
+# r_avg = (R_ij+R_ik)/2, fc_jk = f_C(R_ij)·f_C(R_ik), theta = θ_ijk.
+# θ is taken as acos(0.95·cosθ): the 0.95 is the TorchANI NaN guard against |cosθ|→1.
+# Phase 1 caches r/f_C/Δr per neighbour; phase 2 loops valid pairs. Writes into G;
+# uses pre-allocated scratch vectors rj_buf, fcj_buf, drj_buf, ok_buf (sized ≥ n_nbr).
 function _angular_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
                        nbr_coords, nbr_species, n_nbr::Int,
                        η_A, r_s_A, θ_s, ζ::T, r_c_A::T, n_species::Int,
@@ -458,6 +497,8 @@ function _bucket_species!(group_atoms, group_count, species_idx)
 end
 
 # Internal: energy (Hartree) for one ensemble member given pre-computed AEVs.
+# Implements the per-atom energy sum E = Σ_i E_i ([ANI-1] Eq. 1): each atom's AEV is
+# mapped by its element network to E_i (plus an additive self-energy reference shift).
 # Batched by species: one Lux.apply per element (an (aev_len, n_s) matmul) instead of
 # one tiny matmul per atom. nn_batch is a reusable (aev_len, n_atoms) Float32 scratch.
 function _ani_energy_single(aevs, idx_to_elem, model, self_energies, ps, st,

@@ -15,6 +15,7 @@ using StaticArrays, LinearAlgebra
 # Scalar helpers (device-compatible — no closures, no allocation)
 # ============================================================================
 
+# Smooth cosine cutoff f_C — [ANI-1, Smith et al. Chem. Sci. 2017] Eq. (2).
 @inline function _ka_cosine_cutoff(r::T, r_c::T) where T
     r < r_c ? T(0.5) * (one(T) + cos(T(π) * r / r_c)) : zero(T)
 end
@@ -24,6 +25,8 @@ end
 # ============================================================================
 
 # Compute radial + angular AEV for atom `atom_i` from a dense distance table.
+# GPU-portable form of _radial_aev! / _angular_aev! — same equations:
+#   radial block  = [ANI-1] Eq. (3) G^R,   angular block = [ANI-1] Eq. (4) G^A.
 # Uses the O(N²) all-pairs approach: each thread scans all n_atoms neighbours.
 # For neighbour-list systems: call _aev_kernel_nl! instead (see below).
 @kernel inbounds=true function _aev_kernel!(
