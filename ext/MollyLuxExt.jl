@@ -11,6 +11,9 @@
 #   [ANI-2x] C. Devereux et al., "Extending the Applicability of the ANI Deep Learning
 #            Molecular Potential to Sulfur and Halogens", J. Chem. Theory Comput. 2020,
 #            16, 4192–4202.  doi:10.1021/acs.jctc.0c00121   (adds S, F, Cl; same AEV form)
+#   [ANI-1x] J. S. Smith et al., "Less is more: Sampling chemical space with active
+#            learning", J. Chem. Phys. 2018, 148, 241733.  doi:10.1063/1.5023802
+#            (the ensemble model — energy is averaged over M networks; ANI-2x uses M=8)
 #
 # The total potential energy is a sum of per-atom contributions, [ANI-1] Eq. (1):
 #       E = Σ_i E_i
@@ -237,8 +240,10 @@ function _get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) wh
 end
 
 # Compute the AEV rows for one contiguous chunk of central atoms, using a single
-# private scratch set. Output rows buf.aevs[atom_i, :] are disjoint per atom, so
-# distinct chunks never touch the same memory — safe to run on separate threads.
+# private scratch set. Each row = radial block ([ANI-1] Eq. 3, via _radial_aev!)
+# followed by angular block ([ANI-1] Eq. 4, via _angular_aev!). Output rows
+# buf.aevs[atom_i, :] are disjoint per atom, so distinct chunks never touch the
+# same memory — safe to run on separate threads.
 function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
                      coords, species_indices, neighbors, boundary, p, n_species::Int,
                      r_c_R::T, r_c_A::T, r_c_max::T, split::Int, aev_len::Int) where {D,T}
@@ -321,6 +326,8 @@ function _compute_aevs_buf!(buf::AEVBuffers{D,T},
 end
 
 # Public interface: allocating version (for Enzyme AD path and standalone use).
+# Same AEV equations as the buffered path: radial block = [ANI-1] Eq. 3 (G^R),
+# angular block = [ANI-1] Eq. 4 (G^A), both using the f_C cutoff of [ANI-1] Eq. 2.
 function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
                              species_indices::AbstractVector{<:Integer},
                              neighbors,
@@ -526,6 +533,9 @@ function _ani_energy_single(aevs, idx_to_elem, model, self_energies, ps, st,
 end
 
 # Internal: compute raw energy (Hartree) averaged over all ensemble members.
+# Total energy E = Σ_i E_i ([ANI-1] Eq. 1) from each member, then the ensemble
+# average E = (1/M) Σ_m E^(m) ([ANI-1x] Smith et al., J. Chem. Phys. 2018, 148,
+# 241733 — ANI-2x uses M = 8 networks).
 # Uses the lazy AEVBuffers cache in inter._buf for zero allocations after warmup.
 function _ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
                          species_idx::AbstractVector{Int},

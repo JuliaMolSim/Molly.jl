@@ -58,7 +58,7 @@ end
     r_c_max = max(r_c_R, r_c_A)
     prefac0 = T(2)^(one(T) - ζ)
 
-    # --- Radial AEV ---
+    # --- Radial AEV G^R, [ANI-1] Eq. (3) ---
     for j in 1:n_atoms
         j == atom_i && continue
         dr = coords[j] - ci
@@ -75,7 +75,7 @@ end
         end
     end
 
-    # --- Angular AEV ---
+    # --- Angular AEV G^A, [ANI-1] Eq. (4) ---
     for j in 1:n_atoms
         j == atom_i && continue
         drj = coords[j] - ci
@@ -155,7 +155,7 @@ end
     lo      = nbr_off[atom_i] + 1
     hi      = nbr_off[atom_i + 1]
 
-    # --- Radial AEV (over neighbours only) ---
+    # --- Radial AEV G^R, [ANI-1] Eq. (3) (over neighbours only) ---
     for jj in lo:hi
         j  = nbr_idx[jj]
         dr = coords[j] - ci
@@ -172,7 +172,7 @@ end
         end
     end
 
-    # --- Angular AEV (over neighbour pairs only) ---
+    # --- Angular AEV G^A, [ANI-1] Eq. (4) (over neighbour pairs only) ---
     for jj in lo:hi
         j   = nbr_idx[jj]
         drj = coords[j] - ci

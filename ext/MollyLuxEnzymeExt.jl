@@ -72,6 +72,9 @@ end
 # ============================================================================
 
 # Full energy (Hartree) for one ensemble member — AEVs + Lux network.
+# Differentiable replica of the energy pipeline (forces are F = −∇E):
+#   AEVs via compute_aevs — radial [ANI-1] Eq. 3, angular [ANI-1] Eq. 4, cutoff Eq. 2;
+#   energy E = Σ_i E_i ([ANI-1] Eq. 1) from the per-element networks + self-energies.
 # coords_mat: (3, N) Float32 — the only Active argument.
 # All other args are Const so Enzyme doesn't need to differentiate through them.
 #

@@ -1884,7 +1884,9 @@ function cosine_cutoff end
 """
     celu01(x)
 
-CELU activation with α=0.1 (standard for ANI networks).
+CELU activation with α=0.1 — the nonlinearity between Dense layers of each ANI
+element network (matches the TorchANI ANI-2x architecture; see ANI-1, Smith et al.
+Chem. Sci. 2017, and ANI-2x, Devereux et al. JCTC 2020).
 `celu01(x) = x` for `x ≥ 0`, `0.1*(exp(x/0.1) - 1)` otherwise.
 Exported so AD backends can register rules without depending on MollyLuxExt.
 """
