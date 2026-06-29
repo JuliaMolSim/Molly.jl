@@ -749,10 +749,11 @@ function forces!(fs,
     if length(pairwise_inters) > 0
         pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
         pairwise_inters_nl   = filter( use_neighbors, values(pairwise_inters))
+        use_vel = any_uses_velocity(pairwise_inters)
         pairwise_forces_loop!(buffers.fs_nounits, buffers.fs_chunks, buffers.vir_nounits,
                 buffers.vir_chunks, sys.atoms, sys.coords, sys.velocities, sys.boundary,
                 neighbors, sys.force_units, length(sys), pairwise_inters_nonl,
-                pairwise_inters_nl, step_n, Val(n_threads), Val(needs_vir))
+                pairwise_inters_nl, step_n, Val(n_threads), Val(needs_vir), Val(use_vel))
     end
 
     if length(specific_inter_lists) > 0
@@ -817,16 +818,16 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{1},
-                               ::Val{needs_vir}) where needs_vir
+                               ::Val{needs_vir}, ::Val{use_vel}) where {needs_vir, use_vel}
     @inbounds if length(pairwise_inters_nonl) > 0
         for i in 1:n_atoms
             coord_i = coords[i]
             atom_i = atoms[i]
-            vel_i = velocities[i]
+            vel_i = maybe_velocity(velocities, i, Val(use_vel))
             for j in (i + 1):n_atoms
                 coord_j = coords[j]
                 atom_j = atoms[j]
-                vel_j = velocities[j]
+                vel_j = maybe_velocity(velocities, j, Val(use_vel))
                 dr = vector(coord_i, coord_j, boundary)
                 f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
                                         false, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
@@ -853,8 +854,8 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
             coord_j = coords[j]
             atom_i = atoms[i]
             atom_j = atoms[j]
-            vel_i = velocities[i]
-            vel_j = velocities[j]
+            vel_i = maybe_velocity(velocities, i, Val(use_vel))
+            vel_j = maybe_velocity(velocities, j, Val(use_vel))
             dr = vector(coord_i, coord_j, boundary)
             f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
                                     special, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
@@ -875,7 +876,7 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{n_threads},
-                               ::Val{needs_vir}) where {n_threads, needs_vir}
+                               ::Val{needs_vir}, ::Val{use_vel}) where {n_threads, needs_vir, use_vel}
     if isnothing(fs_chunks) || (needs_vir && isnothing(vir_chunks))
         throw(ArgumentError("fs_chunks / vir_chunks is not set but n_threads is > 1"))
     end
@@ -891,11 +892,11 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
             for i in chunk_i:n_threads:n_atoms
                 coord_i = coords[i]
                 atom_i = atoms[i]
-                vel_i = velocities[i]
+                vel_i = maybe_velocity(velocities, i, Val(use_vel))
                 for j in (i + 1):n_atoms
                     coord_j = coords[j]
                     atom_j = atoms[j]
-                    vel_j = velocities[j]
+                    vel_j = maybe_velocity(velocities, j, Val(use_vel))
                     dr = vector(coord_i, coord_j, boundary)
                     f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
                                             false, coord_i, coord_j, boundary, vel_i, vel_j,
@@ -934,8 +935,8 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                         coord_j = coords[j]
                         atom_i = atoms[i]
                         atom_j = atoms[j]
-                        vel_i = velocities[i]
-                        vel_j = velocities[j]
+                        vel_i = maybe_velocity(velocities, i, Val(use_vel))
+                        vel_j = maybe_velocity(velocities, j, Val(use_vel))
                         dr = vector(coord_i, coord_j, boundary)
                         f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
                                                 special, coord_i, coord_j, boundary, vel_i, vel_j,

@@ -47,6 +47,17 @@ Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
 
+# Whether a pairwise interaction uses velocities in its force/potential energy calculation
+pairwise_uses_velocity(inter) = false
+
+@inline any_uses_velocity(::Tuple{}) = false
+@inline function any_uses_velocity(inters::Tuple)
+    return pairwise_uses_velocity(first(inters)) || any_uses_velocity(Base.tail(inters))
+end
+
+maybe_velocity(velocities, i, ::Val{true}) = velocities[i]
+maybe_velocity(velocities, i, ::Val{false}) = nothing
+
 """
     InteractionList1Atoms(is, inters)
     InteractionList1Atoms(is, inters, types, data=nothing)

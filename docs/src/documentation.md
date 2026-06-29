@@ -883,6 +883,7 @@ You can use `args...` to indicate unused further arguments, e.g. `Molly.force(in
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 `force_units` can be useful for returning a zero force under certain conditions.
+If you want to use `velocity_i` and `velocity_j` you should set `Molly.pairwise_uses_velocity(::MyPairwiseInter) = true`, otherwise the velocities are passed as `nothing` for speed.
 `step_n` is the step number in the simulator, allowing time-dependent interactions.
 Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called unless you give the `init_step` argument, and can also be 0 to calculate forces before the first step.
 It also doesn't work with [`simulate_remd!`](@ref).

@@ -64,6 +64,8 @@ end
 
 use_neighbors(inter::DPDInteraction) = inter.use_neighbors
 
+pairwise_uses_velocity(::DPDInteraction) = true
+
 function Base.zero(d::DPDInteraction)
     return DPDInteraction(d.a, d.γ, d.σ, d.r_c, d.dt, d.use_neighbors)
 end
