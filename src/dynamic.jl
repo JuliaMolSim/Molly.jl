@@ -1,27 +1,87 @@
-# src/dynamic.jl
-
 export add_atom!, remove_atom!
 
-"""
-    add_atom!(sys::System, atom::Atom, coord, velocity=nothing)
+# ==========================================
+# Topological Shifting Engine
+# ==========================================
 
-Dynamically appends a new atom to the system. 
-Note: Modifying system size during simulation requires neighbor list invalidation.
-"""
+function prune_and_shift!(list::InteractionList2Atoms, deleted_idx::Int)
+    to_delete = Int[]
+    for n in 1:length(list.is)
+        if list.is[n] == deleted_idx || list.js[n] == deleted_idx
+            push!(to_delete, n)
+        end
+    end
+    
+    deleteat!(list.is, to_delete)
+    deleteat!(list.js, to_delete)
+    deleteat!(list.inters, to_delete)
+    
+    for n in 1:length(list.is)
+        list.is[n] > deleted_idx && (list.is[n] -= 1)
+        list.js[n] > deleted_idx && (list.js[n] -= 1)
+    end
+    return list
+end
+
+function prune_and_shift!(list::InteractionList3Atoms, deleted_idx::Int)
+    to_delete = Int[]
+    for n in 1:length(list.is)
+        if list.is[n] == deleted_idx || list.js[n] == deleted_idx || list.ks[n] == deleted_idx
+            push!(to_delete, n)
+        end
+    end
+    
+    deleteat!(list.is, to_delete)
+    deleteat!(list.js, to_delete)
+    deleteat!(list.ks, to_delete)
+    deleteat!(list.inters, to_delete)
+    
+    for n in 1:length(list.is)
+        list.is[n] > deleted_idx && (list.is[n] -= 1)
+        list.js[n] > deleted_idx && (list.js[n] -= 1)
+        list.ks[n] > deleted_idx && (list.ks[n] -= 1)
+    end
+    return list
+end
+
+function prune_and_shift!(list::InteractionList4Atoms, deleted_idx::Int)
+    to_delete = Int[]
+    for n in 1:length(list.is)
+        if list.is[n] == deleted_idx || list.js[n] == deleted_idx || list.ks[n] == deleted_idx || list.ls[n] == deleted_idx
+            push!(to_delete, n)
+        end
+    end
+    
+    deleteat!(list.is, to_delete)
+    deleteat!(list.js, to_delete)
+    deleteat!(list.ks, to_delete)
+    deleteat!(list.ls, to_delete)
+    deleteat!(list.inters, to_delete)
+    
+    for n in 1:length(list.is)
+        list.is[n] > deleted_idx && (list.is[n] -= 1)
+        list.js[n] > deleted_idx && (list.js[n] -= 1)
+        list.ks[n] > deleted_idx && (list.ks[n] -= 1)
+        list.ls[n] > deleted_idx && (list.ls[n] -= 1)
+    end
+    return list
+end
+
+# Fallback for unsupported lists
+prune_and_shift!(list, deleted_idx::Int) = list
+
+# ==========================================
+# Array Mutators
+# ==========================================
+
 function add_atom!(sys::System, atom::Atom, coord, velocity=nothing)
     push!(sys.atoms, atom)
     push!(sys.coords, coord)
     
-    # Only pushing if the system is actively tracking velocities
     if !isnothing(sys.velocities) && length(sys.velocities) > 0
-        if !isnothing(velocity)
-            push!(sys.velocities, velocity)
-        else
-            push!(sys.velocities, zero(eltype(sys.velocities)))
-        end
+        push!(sys.velocities, isnothing(velocity) ? zero(eltype(sys.velocities)) : velocity)
     end
     
-    # Only pushing if the system is actively tracking atom data
     if !isnothing(sys.atoms_data) && length(sys.atoms_data) > 0
         push!(sys.atoms_data, Dict{String, Any}())
     end
@@ -29,34 +89,24 @@ function add_atom!(sys::System, atom::Atom, coord, velocity=nothing)
     return sys
 end
 
-"""
-    remove_atom!(sys::System, i::Int)
-
-Removes the atom at index `i` from all system arrays using an O(1) swap-and-pop.
-Note: Modifying system size during simulation requires neighbor list invalidation.
-"""
 function remove_atom!(sys::System, i::Int)
     n = length(sys.atoms)
     @boundscheck (1 <= i <= n) || throw(BoundsError(sys.atoms, i))
     
-    # Fast O(1) delete: move the last element into the deleted slot, then pop
-    sys.atoms[i] = sys.atoms[n]
-    pop!(sys.atoms)
+    # Standard ordered deletion to preserve topology
+    deleteat!(sys.atoms, i)
+    deleteat!(sys.coords, i)
     
-    sys.coords[i] = sys.coords[n]
-    pop!(sys.coords)
-    
-    # Only popping if the system is actively tracking velocities
     if !isnothing(sys.velocities) && length(sys.velocities) > 0
-        sys.velocities[i] = sys.velocities[n]
-        pop!(sys.velocities)
+        deleteat!(sys.velocities, i)
     end
     
-    # Only popping if the system is actively tracking atom data
     if !isnothing(sys.atoms_data) && length(sys.atoms_data) > 0
-        sys.atoms_data[i] = sys.atoms_data[n]
-        pop!(sys.atoms_data)
+        deleteat!(sys.atoms_data, i)
     end
+    
+    # Broadcast shifting engine across all specific interaction tuples
+    map(list -> prune_and_shift!(list, i), sys.specific_inter_lists)
     
     return sys
 end
