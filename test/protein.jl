@@ -135,6 +135,7 @@ end
     )
     zero(sys)
     zero(sys_pme)
+    deepcopy(sys_pme)
     neighbors = find_neighbors(sys)
 
     cs = charges(sys)
@@ -347,6 +348,7 @@ end
         )
         show(devnull, sys.neighbor_finder)
         zero(sys)
+        deepcopy(sys)
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
 

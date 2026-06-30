@@ -231,7 +231,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
-                       current_potential_energy=E)
+                       current_potential_energy=E, specific_inter_lists=sis)
 
         if max_force < sim.tol
             break
