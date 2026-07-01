@@ -53,6 +53,51 @@ struct AngleConstraint{D, I}
     end
 end
 
+abstract type AbstractConstraintApplication end
+
+struct PositionConstraintApplication <: AbstractConstraintApplication end
+
+struct VelocityConstraintApplication <: AbstractConstraintApplication end
+
+struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, DT, S, CB, VB}
+    kind::K
+    needs_virial::Bool
+    step_n::Int
+    dt::DT
+    virial_scale::S
+    buffers::B
+    coords_buffer::CB
+    velocities_buffer::VB
+end
+
+function ConstraintApplicationContext(kind::K;
+                                      needs_virial::Bool=false,
+                                      step_n::Integer=0,
+                                      dt=nothing,
+                                      virial_scale=1,
+                                      buffers=nothing,
+                                      coords_buffer=nothing,
+                                      velocities_buffer=nothing) where {K <: AbstractConstraintApplication}
+    return ConstraintApplicationContext(kind, needs_virial, Int(step_n), dt,
+                                        virial_scale, buffers, coords_buffer,
+                                        velocities_buffer)
+end
+
+function copyto_constraint_scratch!(scratch, values)
+    if isnothing(scratch)
+        return copy(values)
+    elseif scratch isa Base.RefValue
+        if isnothing(scratch[])
+            scratch[] = similar(values)
+        end
+        scratch[] .= values
+        return scratch[]
+    else
+        scratch .= values
+        return scratch
+    end
+end
+
 to_distance_constraints(ac::AngleConstraint) = (
     DistanceConstraint(ac.i, ac.j, ac.dist_ij), # i-j bond
     DistanceConstraint(ac.j, ac.k, ac.dist_jk), # j-k bond
@@ -323,19 +368,21 @@ Apply the coordinate constraints to the system.
 
 If `vel_storage` and `dt` are provided then velocity constraints are applied as well.
 """
-function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys, coord_storage; context=nothing,
+                                     n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
-        apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+        apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads)
     end
     return sys
 end
 
 function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
+                                     context=nothing,
                                      n_threads::Integer=Threads.nthreads())
     if length(sys.constraints) > 0
         vel_storage .= -sys.coords ./ dt
         for ca in sys.constraints
-            apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
+            apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads)
         end
         sys.velocities .+= vel_storage .+ sys.coords ./ dt
     end
@@ -347,9 +394,10 @@ end
 
 Apply the velocity constraints to the system.
 """
-function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+function apply_velocity_constraints!(sys; context=nothing,
+                                     n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
-        apply_velocity_constraints!(sys, ca)
+        apply_velocity_constraints!(sys, ca; context)
     end
     return sys
 end

@@ -28,10 +28,14 @@
         @testset "CUDA Launch Config API" begin
             Molly.reset_cuda_launch_config!(sys)
             cfg_auto = Molly.cuda_launch_config(sys)
-            @test cfg_auto.force_block_y === nothing
-            @test cfg_auto.force_maxregs === nothing
-            @test cfg_auto.tile_threads === nothing
-            @test cfg_auto.energy_block_y === nothing
+            @test cfg_auto.force_block_y == Molly.CUDA_LAUNCH_UNSET
+            @test cfg_auto.force_maxregs == Molly.CUDA_LAUNCH_UNSET
+            @test cfg_auto.tile_threads == Molly.CUDA_TILE_THREADS_UNSET
+            @test cfg_auto.energy_block_y == Molly.CUDA_LAUNCH_UNSET
+            @test Molly.cuda_force_block_y(cfg_auto) === nothing
+            @test Molly.cuda_force_maxregs(cfg_auto) === nothing
+            @test Molly.cuda_tile_threads(cfg_auto) === nothing
+            @test Molly.cuda_energy_block_y(cfg_auto) === nothing
 
             cfg_explicit = Molly.set_cuda_launch_config!(sys;
                 force_block_y=T == Float64 ? 8 : 12,
@@ -40,20 +44,20 @@
                 energy_block_y=4,
             )
             cfg_current = Molly.cuda_launch_config(sys)
-            @test cfg_current.force_block_y == cfg_explicit.force_block_y
-            @test cfg_current.force_maxregs == cfg_explicit.force_maxregs
-            @test cfg_current.tile_threads == cfg_explicit.tile_threads
-            @test cfg_current.energy_block_y == cfg_explicit.energy_block_y
+            @test Molly.cuda_force_block_y(cfg_current) == Molly.cuda_force_block_y(cfg_explicit)
+            @test Molly.cuda_force_maxregs(cfg_current) == Molly.cuda_force_maxregs(cfg_explicit)
+            @test Molly.cuda_tile_threads(cfg_current) == Molly.cuda_tile_threads(cfg_explicit)
+            @test Molly.cuda_energy_block_y(cfg_current) == Molly.cuda_energy_block_y(cfg_explicit)
 
             fs_api = forces(sys, find_neighbors(sys))
             @test length(fs_api) == n_atoms
 
             Molly.reset_cuda_launch_config!(sys)
             cfg_reset = Molly.cuda_launch_config(sys)
-            @test cfg_reset.force_block_y === nothing
-            @test cfg_reset.force_maxregs === nothing
-            @test cfg_reset.tile_threads === nothing
-            @test cfg_reset.energy_block_y === nothing
+            @test Molly.cuda_force_block_y(cfg_reset) === nothing
+            @test Molly.cuda_force_maxregs(cfg_reset) === nothing
+            @test Molly.cuda_tile_threads(cfg_reset) === nothing
+            @test Molly.cuda_energy_block_y(cfg_reset) === nothing
         end
 
         @testset "CUDA Launch Autotuner" begin
@@ -66,10 +70,10 @@
 
             chosen_block_y = Molly.optimize_cuda_launch_config!(sys)
             tuned_cfg = Molly.cuda_launch_config(sys)
-            @test chosen_block_y == tuned_cfg.force_block_y
-            @test tuned_cfg.force_block_y in ext.AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES
-            @test tuned_cfg.energy_block_y in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
-            @test tuned_cfg.tile_threads in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
+            @test chosen_block_y == Molly.cuda_force_block_y(tuned_cfg)
+            @test Molly.cuda_force_block_y(tuned_cfg) in ext.AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES
+            @test Molly.cuda_energy_block_y(tuned_cfg) in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
+            @test Molly.cuda_tile_threads(tuned_cfg) in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
             @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
 
             # Test environment variable overrides
@@ -95,7 +99,7 @@
             Molly.reset_cuda_launch_config!(sys)
             cached_block_y = Molly.optimize_cuda_launch_config!(sys)
             cached_cfg = Molly.cuda_launch_config(sys)
-            @test cached_block_y == tuned_cfg.force_block_y
+            @test cached_block_y == Molly.cuda_force_block_y(tuned_cfg)
             @test cached_cfg == tuned_cfg
             @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
 
@@ -103,9 +107,9 @@
             Molly.set_cuda_launch_config!(sys; force_block_y=8)
             Molly.optimize_cuda_launch_config!(sys)
             merged_cfg = Molly.cuda_launch_config(sys)
-            @test merged_cfg.force_block_y == 8
-            @test merged_cfg.energy_block_y !== nothing
-            @test merged_cfg.tile_threads !== nothing
+            @test Molly.cuda_force_block_y(merged_cfg) == 8
+            @test Molly.cuda_energy_block_y(merged_cfg) !== nothing
+            @test Molly.cuda_tile_threads(merged_cfg) !== nothing
             @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
 
             cfg_before_reset = Molly.cuda_launch_config(sys)
@@ -138,26 +142,26 @@
             auto_cfg = Molly.cuda_launch_config(auto_sys)
             @test auto_sys.neighbor_finder isa GPUNeighborFinder
             @test auto_sys.neighbor_finder.dist_cutoff == 0.7u"nm"
-            @test auto_cfg.force_block_y in ext.AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES
-            @test auto_cfg.energy_block_y in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
-            @test auto_cfg.tile_threads in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
+            @test Molly.cuda_force_block_y(auto_cfg) in ext.AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES
+            @test Molly.cuda_energy_block_y(auto_cfg) in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
+            @test Molly.cuda_tile_threads(auto_cfg) in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
             @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
 
             Molly.reset_cuda_launch_autotune_cache!()
             opt_out_sys = setup_sys(autotune_launch=false)
             opt_out_cfg = Molly.cuda_launch_config(opt_out_sys)
-            @test opt_out_cfg.force_block_y === nothing
-            @test opt_out_cfg.force_maxregs === nothing
-            @test opt_out_cfg.tile_threads === nothing
-            @test opt_out_cfg.energy_block_y === nothing
+            @test Molly.cuda_force_block_y(opt_out_cfg) === nothing
+            @test Molly.cuda_force_maxregs(opt_out_cfg) === nothing
+            @test Molly.cuda_tile_threads(opt_out_cfg) === nothing
+            @test Molly.cuda_energy_block_y(opt_out_cfg) === nothing
             @test isempty(ext.CUDA_LAUNCH_AUTOTUNE_CACHE)
 
             Molly.reset_cuda_launch_autotune_cache!()
             merged_sys = setup_sys(launch_config=Molly.CUDALaunchConfig(force_block_y=8))
             merged_cfg = Molly.cuda_launch_config(merged_sys)
-            @test merged_cfg.force_block_y == 8
-            @test merged_cfg.energy_block_y in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
-            @test merged_cfg.tile_threads in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
+            @test Molly.cuda_force_block_y(merged_cfg) == 8
+            @test Molly.cuda_energy_block_y(merged_cfg) in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
+            @test Molly.cuda_tile_threads(merged_cfg) in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
             @test length(ext.CUDA_LAUNCH_AUTOTUNE_CACHE) == 1
 
             simulate_sys = System(sys; coords=copy(sys.coords), velocities=copy(sys.velocities))
@@ -198,9 +202,9 @@
             chosen_block_y = Molly.optimize_cuda_launch_config!(sys_tri)
             tuned_cfg = Molly.cuda_launch_config(sys_tri)
 
-            @test chosen_block_y == tuned_cfg.force_block_y
-            @test tuned_cfg.energy_block_y in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
-            @test tuned_cfg.tile_threads in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
+            @test chosen_block_y == Molly.cuda_force_block_y(tuned_cfg)
+            @test Molly.cuda_energy_block_y(tuned_cfg) in ext.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
+            @test Molly.cuda_tile_threads(tuned_cfg) in ext.AUTOTUNE_TILE_THREAD_CANDIDATES
         end
 
         @testset "Morton Code Granularity (Phase 1)" begin

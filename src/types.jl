@@ -659,11 +659,14 @@ Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 # CUDA launch configuration
+const CUDA_LAUNCH_UNSET = 0
+const CUDA_TILE_THREADS_UNSET = (0, 0)
+
 struct CUDALaunchConfig
-    force_block_y::Union{Nothing, Int}
-    force_maxregs::Union{Nothing, Int}
-    tile_threads::Union{Nothing, NTuple{2, Int}}
-    energy_block_y::Union{Nothing, Int}
+    force_block_y::Int
+    force_maxregs::Int
+    tile_threads::NTuple{2, Int}
+    energy_block_y::Int
 end
 
 function CUDALaunchConfig(;
@@ -683,7 +686,35 @@ function CUDALaunchConfig(;
         all(>(0), tile_threads) || throw(ArgumentError("tile_threads entries must be positive"))
     end
 
-    return CUDALaunchConfig(force_block_y, force_maxregs, tile_threads, energy_block_y)
+    tile_threads_raw = tile_threads === nothing ?
+                       CUDA_TILE_THREADS_UNSET :
+                       (Int(tile_threads[1]), Int(tile_threads[2]))
+    return CUDALaunchConfig(
+        Int(something(force_block_y, CUDA_LAUNCH_UNSET)),
+        Int(something(force_maxregs, CUDA_LAUNCH_UNSET)),
+        tile_threads_raw,
+        Int(something(energy_block_y, CUDA_LAUNCH_UNSET)),
+    )
+end
+
+@inline function cuda_force_block_y(config::CUDALaunchConfig)
+    value = config.force_block_y
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_force_maxregs(config::CUDALaunchConfig)
+    value = config.force_maxregs
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_tile_threads(config::CUDALaunchConfig)
+    value = config.tile_threads
+    return value == CUDA_TILE_THREADS_UNSET ? nothing : value
+end
+
+@inline function cuda_energy_block_y(config::CUDALaunchConfig)
+    value = config.energy_block_y
+    return iszero(value) ? nothing : value
 end
 
 """

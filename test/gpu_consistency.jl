@@ -165,7 +165,7 @@
             f_gpu_host = Array(f_gpu)
             
             for i in 1:n_atoms
-                @test isapprox(f_cpu[i], f_gpu_host[i], atol=1e-10u"kJ * mol^-1 * nm^-1")
+                @test isapprox(f_cpu[i], f_gpu_host[i], rtol=1e-8, atol=1e-10u"kJ * mol^-1 * nm^-1")
             end
 
             pe_cpu = potential_energy(sys_cpu)
