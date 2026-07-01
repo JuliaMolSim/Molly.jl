@@ -269,11 +269,13 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
 end
 
 function update_master_energy!(partition::AlchemicalPartition, coords, boundary;
-                                force_recompute::Bool=false)
+                               force_recompute::Bool=false,
+                               n_threads::Integer=Threads.nthreads())
     if force_recompute || isnothing(partition.cached_coords) || partition.cached_coords != coords
         partition.master_sys.coords = coords
         partition.master_sys.boundary = boundary
-        partition.cached_master_pe = potential_energy(partition.master_sys)
+        partition.cached_master_pe = potential_energy(partition.master_sys;
+                                                      n_threads=n_threads)
         # Forced multi-state calls already know they need a fresh master energy. Only the
         # single-state cached path keeps a coordinate snapshot for repeated same-frame queries.
         partition.cached_coords = force_recompute ? nothing : copy(coords)
@@ -281,11 +283,12 @@ function update_master_energy!(partition::AlchemicalPartition, coords, boundary;
     return partition.cached_master_pe
 end
 
-function evaluate_λ_energy!(λ_sys, coords, boundary)
+function evaluate_λ_energy!(λ_sys, coords, boundary;
+                            n_threads::Integer=Threads.nthreads())
     λ_sys.coords = coords
     λ_sys.boundary = boundary
-    nbrs = find_neighbors(λ_sys)
-    return potential_energy(λ_sys, nbrs, 0)
+    nbrs = find_neighbors(λ_sys; n_threads=n_threads)
+    return potential_energy(λ_sys, nbrs, 0; n_threads=n_threads)
 end
 
 # evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int;
@@ -295,13 +298,16 @@ end
 # Caches the `master_sys` energy. If `coords` is identical to `cached_coords`,
 # the `master_sys` energy is not recomputed unless `force_recompute` is true.
 function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int;
-                          force_recompute::Bool=false)
+                          force_recompute::Bool=false,
+                          n_threads::Integer=Threads.nthreads())
     1 <= state_index <= length(partition.λ_systems) ||
         throw(ArgumentError("state_index ($state_index) out of range " *
                             "1:$(length(partition.λ_systems))"))
 
-    update_master_energy!(partition, coords, boundary; force_recompute=force_recompute)
-    pe_specific = evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary)
+    update_master_energy!(partition, coords, boundary;
+                          force_recompute=force_recompute, n_threads=n_threads)
+    pe_specific = evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary;
+                                     n_threads=n_threads)
     return partition.cached_master_pe + pe_specific
 end
 
@@ -310,12 +316,15 @@ end
 # Efficiently evaluates the potential energy of the current coordinates mapped
 # across all thermodynamic states simultaneously, evaluating the unperturbed
 # `master_sys` only once.
-function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
-    update_master_energy!(partition, coords, boundary; force_recompute=true)
+function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary;
+                              n_threads::Integer=Threads.nthreads())
+    update_master_energy!(partition, coords, boundary;
+                          force_recompute=true, n_threads=n_threads)
     energies = Vector{typeof(partition.cached_master_pe)}(undef, length(partition.λ_systems))
 
     for state_index in eachindex(partition.λ_systems)
-        pe_specific = evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary)
+        pe_specific = evaluate_λ_energy!(partition.λ_systems[state_index], coords, boundary;
+                                         n_threads=n_threads)
         energies[state_index] = partition.cached_master_pe + pe_specific
     end
 

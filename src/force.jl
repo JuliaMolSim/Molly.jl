@@ -837,6 +837,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
                 if needs_vir
                     # Kronecker product of vector along which force acts and force itself
+                    v = dr * transpose(f)
                     vir_nounits .+= ustrip.(v)
                 end
             end

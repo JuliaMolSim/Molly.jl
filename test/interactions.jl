@@ -144,6 +144,47 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
+    @testset "Default decoupled LJ sterics" begin
+        alch_i = Atom(
+            charge=1.0,
+            σ=0.3u"nm",
+            ϵ=0.2u"kJ * mol^-1",
+            λ=0.25,
+            alch_role=Molly.InsertRole,
+        )
+        alch_j = Atom(
+            charge=1.0,
+            σ=0.3u"nm",
+            ϵ=0.2u"kJ * mol^-1",
+            λ=0.25,
+            alch_role=Molly.InsertRole,
+        )
+        off_alch = Atom(
+            charge=1.0,
+            σ=0.3u"nm",
+            ϵ=0.2u"kJ * mol^-1",
+            λ=0.0,
+            alch_role=Molly.InsertRole,
+        )
+        core = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
+        ref_inter = LennardJones()
+
+        for inter in (LennardJonesSoftCoreBeutler(α=0.3), LennardJonesSoftCoreGapsys(α=0.85))
+            @test isapprox(
+                force(inter, dr13, alch_i, alch_j),
+                force(ref_inter, dr13, alch_i, alch_j);
+                atol=1e-9u"kJ * mol^-1 * nm^-1",
+            )
+            @test isapprox(
+                potential_energy(inter, dr13, alch_i, alch_j),
+                potential_energy(ref_inter, dr13, alch_i, alch_j);
+                atol=1e-9u"kJ * mol^-1",
+            )
+            @test all(iszero, force(inter, dr13, off_alch, core))
+            @test iszero(potential_energy(inter, dr13, off_alch, core))
+        end
+    end
+
     AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 1.0)
     inter = AshbaughHatch(weight_special=0.5)
     @test isapprox(
@@ -285,6 +326,69 @@
             347.338645u"kJ * mol^-1";
             atol=1e-5u"kJ * mol^-1",
         )
+    end
+
+    @testset "Scaled Coulomb matches pre-scaled charges" begin
+        λ_state = 0.75
+        scheduler = Molly.DefaultLambdaScheduler()
+        λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+        raw_i = Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole)
+        raw_j = Atom(charge=-0.8, λ=λ_state, alch_role=Molly.InsertRole)
+        ref_i = Atom(charge=1.0 * λ_elec)
+        ref_j = Atom(charge=-0.8 * λ_elec)
+        rc_test = 1.0u"nm"
+
+        for (scaled_inter, ref_inter) in (
+            (CoulombScaled(scheduler=scheduler), Coulomb()),
+            (CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+             CoulombReactionField(dist_cutoff=rc_test)),
+            (CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+             CoulombEwald(dist_cutoff=rc_test)),
+        )
+            @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
+                           force(ref_inter, dr12, ref_i, ref_j);
+                           atol=1e-9u"kJ * mol^-1 * nm^-1")
+            @test isapprox(potential_energy(scaled_inter, dr12, raw_i, raw_j),
+                           potential_energy(ref_inter, dr12, ref_i, ref_j);
+                           atol=1e-9u"kJ * mol^-1")
+            @test isapprox(force(scaled_inter, dr12, raw_i, raw_j,
+                                 u"kJ * mol^-1 * nm^-1", true),
+                           force(ref_inter, dr12, ref_i, ref_j,
+                                 u"kJ * mol^-1 * nm^-1", true);
+                           atol=1e-9u"kJ * mol^-1 * nm^-1")
+            @test isapprox(potential_energy(scaled_inter, dr12, raw_i, raw_j,
+                                             u"kJ * mol^-1", true),
+                           potential_energy(ref_inter, dr12, ref_i, ref_j,
+                                            u"kJ * mol^-1", true);
+                           atol=1e-9u"kJ * mol^-1")
+        end
+
+        off_i = Atom(charge=1.0, λ=0.25, alch_role=Molly.InsertRole)
+        off_j = Atom(charge=-0.8, λ=0.25, alch_role=Molly.InsertRole)
+        dr_zero = zero(dr12)
+        for scaled_inter in (
+            CoulombScaled(scheduler=scheduler),
+            CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+        )
+            @test all(iszero, force(scaled_inter, dr12, off_i, off_j))
+            @test iszero(potential_energy(scaled_inter, dr12, off_i, off_j))
+            @test all(iszero, force(scaled_inter, dr_zero, raw_i, raw_j))
+            @test iszero(potential_energy(scaled_inter, dr_zero, raw_i, raw_j))
+        end
+
+        scheduler = Molly.EleScaledLambdaScheduler()
+        λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+        ref_i = Atom(charge=1.0 * λ_elec)
+        ref_j = Atom(charge=-0.8 * λ_elec)
+        scaled_inter = CoulombScaled(scheduler=scheduler)
+
+        @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
+                       force(Coulomb(), dr12, ref_i, ref_j);
+                       atol=1e-9u"kJ * mol^-1 * nm^-1")
+        @test isapprox(potential_energy(scaled_inter, dr12, raw_i, raw_j),
+                       potential_energy(Coulomb(), dr12, ref_i, ref_j);
+                       atol=1e-9u"kJ * mol^-1")
     end
 
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
@@ -561,17 +665,20 @@
             @test isfinite(pe_val)
         end
 
-        λ_zero_atom = Atom(
+        low_λ_atom = Atom(
             charge=1.0,
             σ=0.3u"nm",
             ϵ=0.2u"kJ * mol^-1",
             λ=0.25,
             alch_role=Molly.DeleteRole,
         )
+        core_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
 
         for inter in (LennardJonesSoftCoreBeutler(α=0.3), LennardJonesSoftCoreGapsys(α=0.85))
-            @test all(iszero, force(inter, dr12, λ_zero_atom, λ_zero_atom))
-            @test iszero(potential_energy(inter, dr12, λ_zero_atom, λ_zero_atom))
+            @test all(isfinite, force(inter, dr12, low_λ_atom, low_λ_atom))
+            @test isfinite(potential_energy(inter, dr12, low_λ_atom, low_λ_atom))
+            @test all(iszero, force(inter, dr12, low_λ_atom, core_atom))
+            @test iszero(potential_energy(inter, dr12, low_λ_atom, core_atom))
         end
     end
 
@@ -610,6 +717,26 @@
             @test isapprox(potential_energy(sys_raw), potential_energy(sys_ref);
                            atol=1e-9u"kJ * mol^-1")
             @test maximum(norm.(forces(sys_raw) .- forces(sys_ref))) <
+                  1e-9u"kJ * mol^-1 * nm^-1"
+
+            sys_raw_full = System(
+                atoms=atoms_raw,
+                coords=coords_pme,
+                boundary=boundary_pme,
+                pairwise_inters=(CoulombEwaldScaled(dist_cutoff=rc, scheduler=scheduler),),
+                general_inters=(PME(rc, atoms_raw, boundary_pme; scheduler=scheduler),),
+            )
+            sys_ref_full = System(
+                atoms=atoms_ref,
+                coords=coords_pme,
+                boundary=boundary_pme,
+                pairwise_inters=(CoulombEwald(dist_cutoff=rc),),
+                general_inters=(PME(rc, atoms_ref, boundary_pme),),
+            )
+
+            @test isapprox(potential_energy(sys_raw_full), potential_energy(sys_ref_full);
+                           atol=1e-9u"kJ * mol^-1")
+            @test maximum(norm.(forces(sys_raw_full) .- forces(sys_ref_full))) <
                   1e-9u"kJ * mol^-1 * nm^-1"
         end
 

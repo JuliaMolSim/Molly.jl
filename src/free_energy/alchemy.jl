@@ -24,6 +24,15 @@ https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_r
     end
 end
 
+@inline function sterics_lambda(scheduler, atom_i, atom_j, λ::T) where T
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    if role_i == role_j && role_i != CoreRole
+        return one(T)
+    end
+    return T(scale_sterics(scheduler, λ, mix_roles(scheduler, role_i, role_j)))
+end
+
 struct DefaultLambdaScheduler end
 
 @inline function scale_sterics(::DefaultLambdaScheduler, λ::T, role::AlchemicalRole) where T

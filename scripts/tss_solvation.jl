@@ -4,7 +4,6 @@ using CUDA
 using Unitful
 using GLMakie
 using Random
-using StatsBase
 
 ##
 # --- Simulation Constants ---
@@ -15,20 +14,21 @@ AT = CuArray
 T0 = FT(310)u"K"
 P0 = FT(1)u"bar"
 RNG_SEED = 20240520
+OUTPUT_PREFIX = "tss_solvation"
 
 N_LAMBDA_STATES = 20
 TSS_WINDOW_SIZE = 4
 N_MD_STEPS = 50
 SELF_ADJUSTMENT_STEPS = 5
-N_REPLICAS = 1
-TSS_TIME = FT(4)u"ns"
+N_REPLICAS = 4
+TSS_TIME = FT(15)u"ns"
 SOLVENT_EQUIL_TIME = FT(500)u"ps"
 VACUUM_EQUIL_TIME = FT(100)u"ps"
 
 # Annihilate by running from full interactions at λ=1 to decoupled at λ=0.
 # InsertRole with DefaultLambdaScheduler keeps sterics fully on while
 # electrostatics are removed from λ=1 -> 0.5, then removes sterics from
-# λ=0.5 -> 0.
+# λ=0.5 -> 0 using OpenFE-style charge scaling. Sterics use LJ soft core.
 lambda_schedule = FT.(range(1.0, stop=0.0, length=N_LAMBDA_STATES))
 
 # --- Force Field Setup ---
@@ -37,12 +37,70 @@ ff_dir   = joinpath(data_dir, "force_fields")
 ff = MolecularForceField(FT, joinpath.(ff_dir, ["tip3p_standard.xml", "gaff.xml", "ethanol.xml"])...; units=true)
 
 ##
-function alchemical_coulomb_softcore(coul::CoulombEwald)
-    return CoulombSoftCoreGapsysEwald(
+function tss_solvation_loggers(is_vacuum::Bool, replica_i=nothing)
+    suffix = isnothing(replica_i) ? "" : "_replica_$(replica_i)"
+    traj_path = "$(OUTPUT_PREFIX)_solvated$(suffix).dcd"
+
+    if is_vacuum
+        return ()
+    else
+        return (
+            trj = TrajectoryWriter(1000, traj_path),
+        )
+    end
+end
+
+tss_solvation_replica_rngs(seed::Integer) =
+    [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]
+
+function save_state_histogram(state_sets, labels, bins, path)
+    fig = Figure(size = (720, 720))
+    ax = Axis(
+        fig[1, 1],
+        title = L"\textbf{Visited States}",
+        xlabel = L"\textbf{State Index}",
+        ylabel = L"\textbf{PDF}",
+        xlabelsize = 20,
+        ylabelsize = 20,
+        titlesize = 24,
+        xlabelfont = :bold,
+        ylabelfont = :bold,
+        xticklabelsize = 18,
+        yticklabelsize = 18,
+    )
+
+    colors = (:royalblue, :firebrick, :seagreen, :darkorange)
+    for (i, states) in pairs(state_sets)
+        isempty(states) && continue
+        hist!(
+            ax,
+            states;
+            bins = bins,
+            color = colors[mod1(i, length(colors))],
+            alpha = 0.35,
+            strokewidth = 1,
+            strokecolor = :black,
+            normalization = :pdf,
+            label = labels[i],
+        )
+    end
+
+    axislegend(position = :rt, labelsize = 20)
+    display(fig)
+    save(path, fig)
+end
+
+function tss_visited_states(state)
+    replica_states = state.stats.replica_visited_states
+    return isempty(replica_states) ?
+        collect(state.stats.visited_state) :
+        collect(Iterators.flatten(replica_states))
+end
+
+function alchemical_coulomb_scaled(coul::CoulombEwald)
+    return CoulombEwaldScaled(
         dist_cutoff = coul.dist_cutoff,
         error_tol = coul.error_tol,
-        α = FT(0.3),
-        σQ = FT(1.0)u"nm",
         use_neighbors = coul.use_neighbors,
         scheduler = Molly.DefaultLambdaScheduler(),
         weight_special = coul.weight_special,
@@ -51,15 +109,22 @@ function alchemical_coulomb_softcore(coul::CoulombEwald)
     )
 end
 
-function alchemical_coulomb_softcore(coul::Coulomb)
-    return CoulombSoftCoreGapsys(
+function alchemical_coulomb_scaled(coul::Coulomb)
+    return CoulombScaled(
         cutoff = coul.cutoff,
-        α = FT(0.3),
-        σQ = FT(1.0)u"nm",
         use_neighbors = coul.use_neighbors,
         scheduler = Molly.DefaultLambdaScheduler(),
         weight_special = coul.weight_special,
         coulomb_const = coul.coulomb_const,
+    )
+end
+
+function alchemical_ewald_exclusion_data(data::Molly.EwaldExclusionData, scheduler)
+    return Molly.EwaldExclusionData(
+        data.dist_cutoff;
+        error_tol = data.error_tol,
+        ϵr = data.ϵr,
+        scheduler = scheduler,
     )
 end
 
@@ -76,7 +141,7 @@ function alchemical_lj_softcore(lj::LennardJones)
     )
 end
 
-function rebuild_alchemical_general_inters(sys_base, atoms_dev, lj_sc, coul_sc)
+function rebuild_alchemical_general_inters(sys_base, atoms_dev, lj_sc, coul_scaled)
     rebuilt = Any[]
 
     for inter in sys_base.general_inters
@@ -91,16 +156,8 @@ function rebuild_alchemical_general_inters(sys_base, atoms_dev, lj_sc, coul_sc)
                 order = inter.order,
                 ϵr = inter.ϵr,
                 fixed_charges = false,
-                scheduler = coul_sc.scheduler,
+                scheduler = coul_scaled.scheduler,
                 grad_safe = inter.grad_safe,
-            ))
-
-        elseif inter isa Ewald
-            # Same idea for non-PME Ewald: use the alchemical electrostatics scheduler.
-            push!(rebuilt, Ewald(
-                inter.dist_cutoff;
-                error_tol = inter.error_tol,
-                scheduler = coul_sc.scheduler,
             ))
 
         elseif inter isa LJDispersionCorrection
@@ -123,13 +180,37 @@ function rebuild_alchemical_general_inters(sys_base, atoms_dev, lj_sc, coul_sc)
     return tuple(rebuilt...)
 end
 
+function rebuild_alchemical_specific_inter_lists(sys_base, coul_scaled)
+    rebuilt = Any[]
+
+    for inter_list in sys_base.specific_inter_lists
+        if inter_list isa InteractionList2Atoms && inter_list.data isa Molly.EwaldExclusionData
+            data = alchemical_ewald_exclusion_data(inter_list.data, coul_scaled.scheduler)
+            push!(rebuilt, InteractionList2Atoms(
+                inter_list.is,
+                inter_list.js,
+                deepcopy(inter_list.inters),
+                copy(inter_list.types),
+                data,
+            ))
+        else
+            push!(rebuilt, deepcopy(inter_list))
+        end
+    end
+
+    return tuple(rebuilt...)
+end
+
 function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Random.default_rng())
     nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
     dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
-    loggers = is_vacuum ? () : (TrajectoryWriter(1000, "trj_solv.dcd"),)
+    replica_loggers = [
+        tss_solvation_loggers(is_vacuum, N_REPLICAS == 1 ? nothing : replica_i)
+        for replica_i in 1:N_REPLICAS
+    ]
 
     sys_base = System(
         pdb_file,
@@ -141,20 +222,18 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
         neighbor_finder_type=neighbor_finder_type,
         nonbonded_method=nonbonded_method,
         constraints=:hbonds,
+        constraint_algorithm=LINCS,
         rigid_water=true,
-        hydrogen_mass=2,
-        loggers = loggers
+        hydrogen_mass=3
     )
 
-    thermostat = VelocityRescaleThermostat(T0, FT(0.1)u"ps"; n_steps=1)
-
     if is_vacuum
-        integrator = VelocityVerlet(Δt, (thermostat,), 100)
-        int_eq     = VelocityVerlet(Δt/2, (thermostat,), 100)
+        integrator = Langevin(; dt = Δt,   temperature = T0, friction = FT(1)u"ps^-1", coupling = nothing, remove_CM_motion = 100)
+        int_eq     = Langevin(; dt = Δt/2, temperature = T0, friction = FT(1)u"ps^-1", coupling = nothing, remove_CM_motion = 100)
     else
-        barostat = CRescaleBarostat(P0, FT(4)u"ps"; n_steps=200)
-        integrator = VelocityVerlet(Δt, (thermostat, barostat), 100)
-        int_eq     = VelocityVerlet(Δt/2, (thermostat, barostat), 100)
+        barostat   = CRescaleBarostat(P0, FT(4)u"ps"; n_steps=200)
+        integrator = Langevin(dt = Δt,   temperature = T0, friction = FT(1)u"ps^-1", coupling = (barostat,), remove_CM_motion = 100)
+        int_eq     = Langevin(dt = Δt/2, temperature = T0, friction = FT(1)u"ps^-1", coupling = (barostat,), remove_CM_motion = 100)
     end
 
     minim = SteepestDescentMinimizer(step_size=FT(0.01)u"nm", max_steps=1000)
@@ -170,17 +249,17 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
     idx_lj   = findfirst(x -> x isa LennardJones, p_inters)
     idx_coul = findfirst(x -> x isa Union{Coulomb, CoulombEwald}, p_inters)
     isnothing(idx_lj) && error("could not find LennardJones pairwise interaction")
-    isnothing(idx_coul) && error("could not find Coulomb or CoulombEwald pairwise interaction")
+    isnothing(idx_coul) && error("could not find a Coulomb pairwise interaction")
 
     lj_sc = alchemical_lj_softcore(p_inters[idx_lj])
-    cl_sc = alchemical_coulomb_softcore(p_inters[idx_coul])
+    cl_scaled = alchemical_coulomb_scaled(p_inters[idx_coul])
 
     atoms_cpu = Molly.from_device(sys_base.atoms)
     thermo_states = ThermoState[]
 
     for λ in lambda_schedule
         acopy = Atom[]
-        for (i, a) in enumerate(atoms_cpu)
+        for a in atoms_cpu
             if a.index ∈ solute_indices
                 # Only update the global lambda; the scheduler handles the component logic
                 push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, FT(λ), Molly.InsertRole))
@@ -195,14 +274,16 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
             sys_base,
             atoms_dev,
             lj_sc,
-            cl_sc,
+            cl_scaled,
         )
+        specific_inter_lists = rebuild_alchemical_specific_inter_lists(sys_base, cl_scaled)
 
         sys_w = System(
             deepcopy(sys_base);
             atoms = atoms_dev,
-            pairwise_inters = (lj_sc, cl_sc),
+            pairwise_inters = (lj_sc, cl_scaled),
             general_inters = general_inters,
+            specific_inter_lists = specific_inter_lists,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -223,7 +304,10 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
 
     total_steps = Int(floor(TSS_TIME / Δt))
     n_cycles = Int(floor(total_steps / (SELF_ADJUSTMENT_STEPS * N_MD_STEPS)))
-    first_states = [1,]#round.(Int, range(1, length(lambda_schedule); length=N_REPLICAS))
+    first_states = N_REPLICAS == 1 ? [1] : round.(Int, range(1, length(lambda_schedule); length=N_REPLICAS))
+    logger_kwargs = N_REPLICAS == 1 ?
+        (; loggers = only(replica_loggers)) :
+        (; replica_loggers = replica_loggers)
 
     tss_sim = TSSSimulation(
         tss_state;
@@ -232,7 +316,8 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
         self_adjustment_steps = SELF_ADJUSTMENT_STEPS,
         n_replicas = N_REPLICAS,
         first_states = first_states,
-        log_freq   = 10
+        logger_kwargs...,
+        log_freq = 10,
     )
 
     return tss_state, tss_sim
@@ -259,10 +344,20 @@ tss_state_vac, tss_sim_vac   = setup_alchemical_tss(
 println()
 
 ##
-simulate!(tss_sim_solv; rng=MersenneTwister(RNG_SEED + 2), replica_parallel=:auto)
+simulate!(
+    tss_sim_solv;
+    rng=MersenneTwister(RNG_SEED + 2),
+    replica_rngs=tss_solvation_replica_rngs(RNG_SEED + 20),
+    replica_parallel=:auto,
+)
 
 ##
-simulate!(tss_sim_vac; rng=MersenneTwister(RNG_SEED + 3), replica_parallel=:auto)
+simulate!(
+    tss_sim_vac;
+    rng=MersenneTwister(RNG_SEED + 3),
+    replica_rngs=tss_solvation_replica_rngs(RNG_SEED + 40),
+    replica_parallel=:auto,
+)
 
 
 ##
@@ -334,7 +429,7 @@ axislegend(
 
 display(fig_fe)
 
-save("tss_solv_profile.png", fig_fe)
+save("$(OUTPUT_PREFIX)_profile.png", fig_fe)
 
 
 ##
@@ -385,11 +480,21 @@ axislegend(
     labelsize = 24
 )
 
+ylims!(ax_df, -5, 0.5)
+
 
 display(fig_df)
 
-save("tss_solv_convergence.png", fig_df)
+save("$(OUTPUT_PREFIX)_convergence.png", fig_df)
 
+##
+state_bins = 0.5:1:(N_LAMBDA_STATES + 0.5)
+save_state_histogram(
+    [tss_visited_states(tss_state_solv), tss_visited_states(tss_state_vac)],
+    ["Solvated", "Vacuum"],
+    state_bins,
+    "$(OUTPUT_PREFIX)_states.png",
+)
 
 ##
 
@@ -429,3 +534,20 @@ println("Standard State Correction (kJ mol^-1): ", dG_std_corr / beta)
 println("Solvation Free Energy (kJ mol^-1):     ", dG / beta)
 println("Jackknife SE, no std-state uncertainty (kJ mol^-1): ", dG_se / beta)
 println("=========================================")
+
+#=
+=========================================
+Annihilation in solvent (kBT):   8.696862
+Annihilation in vacuum (kBT):    3.4346604
+Standard State Correction (kBT): 3.249398594044294
+Solvation Free Energy (kBT):     -2.012803191996966
+Jackknife SE, no std-state uncertainty (kBT): 0.072397865
+=========================================
+=========================================
+Annihilation in solvent (kJ mol^-1):   22.416018
+Annihilation in vacuum (kJ mol^-1):    8.85278
+Standard State Correction (kJ mol^-1): 8.375271054356045
+Solvation Free Energy (kJ mol^-1):     -5.187966888071426
+Jackknife SE, no std-state uncertainty (kJ mol^-1): 0.1866043
+=========================================
+=#

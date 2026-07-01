@@ -6,3 +6,5 @@ docs/build
 benchmark/tune.json
 benchmark/results
 .vscode/settings.json
+.agents/
+.codex/

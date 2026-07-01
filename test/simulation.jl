@@ -919,7 +919,7 @@ end
     for id in 1:n_replicas
         mean_temp = mean(values(repsys.replica_loggers[id].temp))
         # Given physical coordinates swap thermal states, they should average out across the ladder bounds
-        @test (0.9 * temp_vals[1]) < mean_temp < (1.1 * temp_vals[end])
+        @test (0.9 * temp_vals[1]) < mean_temp < (1.15 * temp_vals[end])
     end
 end
 

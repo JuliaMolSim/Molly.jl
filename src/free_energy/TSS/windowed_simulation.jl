@@ -93,6 +93,8 @@ dynamics steps, collects TSS samples, updates window estimators unless
 `loggers` supplies the logger collection for a single-replica simulation.
 For multi-replica TSS, use `replica_loggers` to supply one logger collection
 per newly constructed replica active system.
+Pass `replica_rngs` to [`simulate!`](@ref) to supply one RNG stream per replica;
+otherwise, each replica RNG is reseeded from the top-level `rng`.
 """
 mutable struct TSSSimulation{S, R, W, P}
     state::S
@@ -716,9 +718,33 @@ function apply_windowed_tss_frozen_observations!(state::TSSState{FT},
     return zero(FT)
 end
 
+function validate_windowed_tss_replica_rngs(replica_rngs, workspaces)
+    rngs = collect(replica_rngs)
+    n_replicas = length(workspaces)
+    if length(rngs) != n_replicas
+        throw(ArgumentError("replica_rngs must have length $(n_replicas)."))
+    end
+    if !all(rng -> rng isa AbstractRNG, rngs)
+        throw(ArgumentError("all replica_rngs entries must be AbstractRNGs."))
+    end
+    rng_type = typeof(first(workspaces).rng)
+    if !all(rng -> rng isa rng_type, rngs)
+        throw(ArgumentError("all replica_rngs entries must have type $(rng_type)."))
+    end
+    return rngs
+end
+
 function seed_windowed_tss_replica_rngs!(sim::TSSSimulation, rng::AbstractRNG)
     for workspace in sim.replica_workspaces
         Random.seed!(workspace.rng, rand(rng, UInt))
+    end
+    return sim
+end
+
+function seed_windowed_tss_replica_rngs!(sim::TSSSimulation, replica_rngs)
+    rngs = validate_windowed_tss_replica_rngs(replica_rngs, sim.replica_workspaces)
+    for (workspace, rng) in zip(sim.replica_workspaces, rngs)
+        workspace.rng = deepcopy(rng)
     end
     return sim
 end
@@ -910,6 +936,7 @@ end
 function simulate!(sim::TSSSimulation;
                    rng = Random.default_rng(),
                    n_threads::Integer = Threads.nthreads(),
+                   replica_rngs = nothing,
                    replica_parallel = :auto,
                    show_progress = default_show_progress())
     state::TSSState = sim.state
@@ -925,7 +952,13 @@ function simulate!(sim::TSSSimulation;
                          sim.replicas[1].active_window == state.active_window &&
                          isnothing(sim.pmf) &&
                          !sim.frozen
-    legacy_single_path || seed_windowed_tss_replica_rngs!(sim, rng)
+    if isnothing(replica_rngs)
+        legacy_single_path || seed_windowed_tss_replica_rngs!(sim, rng)
+        cycle_rng = rng
+    else
+        seed_windowed_tss_replica_rngs!(sim, replica_rngs)
+        cycle_rng = legacy_single_path ? only(sim.replica_workspaces).rng : rng
+    end
 
     progress = setup_progress(sim.n_cycles, show_progress)
     for cycle in 1:sim.n_cycles
@@ -937,7 +970,7 @@ function simulate!(sim::TSSSimulation;
                 sim.n_md_steps,
                 sim.self_adjustment_steps,
                 Int(n_threads),
-                rng,
+                cycle_rng,
                 cycle_start_step,
                 log_initial_state,
             )

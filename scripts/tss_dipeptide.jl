@@ -11,6 +11,7 @@ FT = Float32
 AT = CuArray
 
 RNG_SEED = 42
+OUTPUT_PREFIX = "tss_dipeptide"
 rng = MersenneTwister(RNG_SEED)
 
 DT = FT(4)u"fs"
@@ -44,11 +45,10 @@ sys = System(
     joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
     array_type=AT,
-    nonbonded_method=:cutoff,
+    nonbonded_method=:pme,
     constraints=:hbonds,
     rigid_water = true,
-    hydrogen_mass=2,
-    #= loggers = (traj = TrajectoryWriter(1000, "trj_dip.dcd"),) =#
+    hydrogen_mass=3,
 )
 
 
@@ -132,9 +132,55 @@ tss_state = TSSState(
 N_MD_STEPS    = 50
 SELF_ADJ_STEPS = 5
 
-N_REPLICAS = 2
+N_REPLICAS = 4
 
-TSS_TIME = FT(10.0)u"ns"
+tss_dipeptide_loggers(replica_i::Integer) =
+    (traj = TrajectoryWriter(1000, "$(OUTPUT_PREFIX)_replica_$(replica_i).dcd"),)
+
+tss_dipeptide_replica_rngs(seed::Integer) =
+    [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]
+
+function save_state_histogram(states, bins, path)
+    fig = Figure(size = (720, 720))
+    ax = Axis(
+        fig[1, 1],
+        title = L"\textbf{Visited States}",
+        xlabel = L"\textbf{State Index}",
+        ylabel = L"\textbf{PDF}",
+        xlabelsize = 20,
+        ylabelsize = 20,
+        titlesize = 24,
+        xlabelfont = :bold,
+        ylabelfont = :bold,
+        xticklabelsize = 18,
+        yticklabelsize = 18,
+    )
+
+    hist!(
+        ax,
+        states;
+        bins = bins,
+        color = :royalblue,
+        alpha = 0.35,
+        strokewidth = 1,
+        strokecolor = :black,
+        normalization = :pdf,
+        label = "TSS",
+    )
+
+    axislegend(position = :rt, labelsize = 20)
+    display(fig)
+    save(path, fig)
+end
+
+function tss_visited_states(state)
+    replica_states = state.stats.replica_visited_states
+    return isempty(replica_states) ?
+        collect(state.stats.visited_state) :
+        collect(Iterators.flatten(replica_states))
+end
+
+TSS_TIME = FT(25.0)u"ns"
 TOTAL_STEPS = Int(floor(TSS_TIME / DT))
 N_CYCLES = Int(floor(TOTAL_STEPS / (SELF_ADJ_STEPS * N_MD_STEPS)))
 
@@ -145,16 +191,21 @@ replica_first_states = [
     )
     for replica_i in 1:N_REPLICAS
 ]
+initial_replica_rngs = tss_dipeptide_replica_rngs(RNG_SEED + 10)
 replica_active_states = if N_REPLICAS == 1
     nothing
 else
     states = [ActiveThermoState(tss_state.state_space, first_state)
               for first_state in replica_first_states]
-    for active_state in states
-        random_velocities!(active_state.active_sys, TEMP; rng=rng)
+    for (active_state, replica_rng) in zip(states, initial_replica_rngs)
+        random_velocities!(active_state.active_sys, TEMP; rng=replica_rng)
     end
     states
 end
+replica_loggers = [tss_dipeptide_loggers(replica_i) for replica_i in 1:N_REPLICAS]
+logger_kwargs = N_REPLICAS == 1 ?
+    (; loggers = only(replica_loggers)) :
+    (; replica_loggers = replica_loggers)
 
 pmf_deconv = PMFDeconvolution(
     tss_state;
@@ -168,12 +219,18 @@ tss_sim = TSSSimulation(
     self_adjustment_steps = SELF_ADJ_STEPS,
     n_replicas = N_REPLICAS,
     replica_active_states = replica_active_states,
+    logger_kwargs...,
     pmf = pmf_deconv,
-    log_freq   = 10
+    log_freq = 10,
 )
 
 ##
-simulate!(tss_sim; rng=rng, replica_parallel = :auto)
+simulate!(
+    tss_sim;
+    rng=rng,
+    replica_rngs=tss_dipeptide_replica_rngs(RNG_SEED + 20),
+    replica_parallel = :auto,
+)
 
 ##
 pmf_result = pmf(pmf_deconv)
@@ -214,6 +271,7 @@ Colorbar(
 
 ax_fe.aspect = DataAspect()
 display(fig_fe)
+save("$(OUTPUT_PREFIX)_pmf.png", fig_fe)
 
 ##
 
@@ -252,3 +310,12 @@ axislegend(
 )
 
 display(fig_df)
+save("$(OUTPUT_PREFIX)_convergence.png", fig_df)
+
+##
+state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
+save_state_histogram(
+    tss_visited_states(tss_state),
+    state_bins,
+    "$(OUTPUT_PREFIX)_states.png",
+)

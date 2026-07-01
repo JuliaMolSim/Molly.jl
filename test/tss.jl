@@ -293,6 +293,38 @@ end
         )
         @test all(isfinite, Molly.tss_free_energies(state; visited_only=true))
         @test_throws ArgumentError Molly.simulate!(sim; replica_parallel=:invalid)
+
+        rng_state = Molly.TSSState(thermo_states4;
+            graph=graph4,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        rng_sim = Molly.TSSSimulation(rng_state;
+            n_md_steps=1,
+            n_cycles=0,
+            n_replicas=2,
+            first_states=[1, 3],
+        )
+        replica_rngs = [MersenneTwister(101), MersenneTwister(202)]
+        expected_rngs = deepcopy(replica_rngs)
+        Molly.simulate!(
+            rng_sim;
+            replica_rngs=replica_rngs,
+            n_threads=1,
+            replica_parallel=:serial,
+        )
+        @test rand(rng_sim.replica_workspaces[1].rng, UInt) == rand(expected_rngs[1], UInt)
+        @test rand(rng_sim.replica_workspaces[2].rng, UInt) == rand(expected_rngs[2], UInt)
+        @test_throws ArgumentError Molly.simulate!(
+            rng_sim;
+            replica_rngs=[MersenneTwister(1)],
+            n_threads=1,
+            replica_parallel=:serial,
+        )
+
         @test_throws ArgumentError Molly.TSSSimulation(state;
             n_md_steps=1,
             n_cycles=1,

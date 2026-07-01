@@ -674,12 +674,12 @@ CUDA.device!(parse(Int, get(ENV, "MOLLY_CUDA_DEVICE", "0")))
 FT = Float32
 AT = CuArray
 
-DT = FT(2)u"fs"
+DT = FT(4)u"fs"
 TEMP = FT(310)u"K"
 PRES = one(FT)u"bar"
 
 thermostat = VelocityRescaleThermostat(TEMP, FT(0.1)u"ps"; n_steps = 1)
-barostat = CRescaleBarostat(PRES, FT(4)u"ps"; n_steps = 200)
+barostat = CRescaleBarostat(PRES, FT(4)u"ps"; n_steps = 100)
 vverlet = VelocityVerlet(DT, (thermostat, barostat), 100)
 ```
 
@@ -786,7 +786,7 @@ The simulation advances 50 MD steps per AWH iteration. The finite `well_tempered
 
 ```julia
 N_MD_STEPS = 50
-AWH_TIME = FT(4)u"ns"
+AWH_TIME = FT(25)u"ns"
 TOTAL_STEPS = Int(floor(AWH_TIME / DT))
 
 awh_sim = AWHSimulation(
@@ -887,6 +887,19 @@ save("awh_dipeptide_convergence.png", fig_df)
 
 ![AWH dipeptide convergence](images/awh_dipeptide_convergence.png)
 
+The script also saves a normalized histogram of the visited AWH thermodynamic states. This is a simple diagnostic for how the sampler moved over the 400 biased $\phi/\psi$ windows.
+
+```julia
+state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
+save_state_histogram(
+    awh_visited_states(awh_state),
+    state_bins,
+    "awh_dipeptide_states.png",
+)
+```
+
+![AWH dipeptide visited states](images/awh_dipeptide_states.png)
+
 ### Ethanol solvation free energy
 
 The full script can be found in `scripts/awh_solvation.jl`:
@@ -910,18 +923,20 @@ where the last term captures the free energy of taking a molecule from a gas to 
 FT = Float32
 AT = CuArray
 
-Δt = FT(2)u"fs"
+Δt = FT(4)u"fs"
 T0 = FT(310)u"K"
 P0 = FT(1)u"bar"
 
 N_LAMBDA_STATES = 20
 N_MD_STEPS = 50
-AWH_TIME = FT(4)u"ns"
+AWH_TIME = FT(15)u"ns"
+SOLVENT_EQUIL_TIME = FT(500)u"ps"
+VACUUM_EQUIL_TIME = FT(100)u"ps"
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
 ```
 
-The setup function builds either the solvated or vacuum leg. The solvated leg uses PME and an NPT integrator. The vacuum leg uses a non-periodic Coulomb model, an infinite boundary, and an infinite non-bonded cutoff so the ethanol molecule is not split by a finite cutoff.
+The setup function builds either the solvated or vacuum leg. The solvated leg uses PME and a Langevin integrator coupled to an NPT barostat. The vacuum leg uses short-range Coulomb with an infinite boundary and infinite non-bonded cutoff so the ethanol molecule is not split by a finite cutoff.
 
 ```julia
 function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
@@ -941,19 +956,22 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false, rng =
         neighbor_finder_type = neighbor_finder_type,
         nonbonded_method = nonbonded_method,
         constraints = :hbonds,
-        hydrogen_mass = 2,
+        constraint_algorithm = LINCS,
+        rigid_water = true,
+        hydrogen_mass = 3,
     )
 
-    thermostat = VelocityRescaleThermostat(T0, FT(0.1)u"ps"; n_steps = 1)
     integrator = if is_vacuum
-        VelocityVerlet(Δt, (thermostat,), 100)
+        Langevin(; dt = Δt, temperature = T0, friction = FT(1)u"ps^-1",
+                 coupling = nothing, remove_CM_motion = 100)
     else
         barostat = CRescaleBarostat(P0, FT(4)u"ps"; n_steps = 200)
-        VelocityVerlet(Δt, (thermostat, barostat), 100)
+        Langevin(dt = Δt, temperature = T0, friction = FT(1)u"ps^-1",
+                 coupling = (barostat,), remove_CM_motion = 100)
     end
 ```
 
-After minimization and equilibration, the script replaces the standard non-bonded interactions with [Gapsys soft-core variants](https://doi.org/10.1021/ct300220p) and creates one [`ThermoState`](@ref) per $\lambda$ value.
+After minimization and equilibration, the script replaces the standard Lennard-Jones interaction with a [Gapsys soft-core variant](https://doi.org/10.1021/ct300220p), replaces the Coulomb interaction with a scaled alchemical interaction, rebuilds PME and Ewald exclusion data with the same scheduler, and creates one [`ThermoState`](@ref) per $\lambda$ value.
 
 ```julia
     p_inters = sys_base.pairwise_inters
@@ -961,7 +979,7 @@ After minimization and equilibration, the script replaces the standard non-bonde
     idx_coul = findfirst(x -> x isa Union{Coulomb, CoulombEwald}, p_inters)
 
     lj_sc = alchemical_lj_softcore(p_inters[idx_lj])
-    cl_sc = alchemical_coulomb_softcore(p_inters[idx_coul])
+    cl_scaled = alchemical_coulomb_scaled(p_inters[idx_coul])
 
     atoms_cpu = Molly.from_device(sys_base.atoms)
     thermo_states = ThermoState[]
@@ -978,10 +996,21 @@ After minimization and equilibration, the script replaces the standard non-bonde
             end
         end
 
+        atoms_dev = Molly.to_device([acopy...], AT)
+        general_inters = rebuild_alchemical_general_inters(
+            sys_base,
+            atoms_dev,
+            lj_sc,
+            cl_scaled,
+        )
+        specific_inter_lists = rebuild_alchemical_specific_inter_lists(sys_base, cl_scaled)
+
         sys_w = System(
             deepcopy(sys_base);
-            atoms = Molly.to_device([acopy...], AT),
-            pairwise_inters = (lj_sc, cl_sc),
+            atoms = atoms_dev,
+            pairwise_inters = (lj_sc, cl_scaled),
+            general_inters = general_inters,
+            specific_inter_lists = specific_inter_lists,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -1074,10 +1103,10 @@ lines!(
 axislegend(position = :rt, labelsize = 24)
 display(fig_fe)
 
-save("awh_solv_profile.png", fig_fe)
+save("awh_solvation_profile.png", fig_fe)
 ```
 
-![AWH alchemical free energy profile](images/awh_solv_profile.png)
+![AWH alchemical free energy profile](images/awh_solvation_profile.png)
 
 It also plots the maximum free energy update at each logged AWH iteration.
 
@@ -1124,10 +1153,24 @@ lines!(
 axislegend(position = :rt, labelsize = 24)
 display(fig_df)
 
-save("awh_solv_convergence.png", fig_df)
+save("awh_solvation_convergence.png", fig_df)
 ```
 
-![AWH alchemical convergence](images/awh_solv_convergence.png)
+![AWH alchemical convergence](images/awh_solvation_convergence.png)
+
+The visited-state histogram is plotted for the solvent and vacuum legs on the same axes. The state index follows the original $\lambda$ schedule, from $\lambda=1$ at state 1 to $\lambda=0$ at state 20.
+
+```julia
+state_bins = 0.5:1:(N_LAMBDA_STATES + 0.5)
+save_state_histogram(
+    [awh_visited_states(awh_state_solv), awh_visited_states(awh_state_vac)],
+    ["Solvated", "Vacuum"],
+    state_bins,
+    "awh_solvation_states.png",
+)
+```
+
+![AWH alchemical visited states](images/awh_solvation_states.png)
 
 Finally, the endpoint differences and the standard-state correction are combined and printed in both $k_B T$ and kJ mol^-1.
 
@@ -1153,7 +1196,7 @@ println("=========================================")
 println("Annihilation in solvent (kJ mol^-1):   ", dG_solv / beta)
 println("Annihilation in vacuum (kJ mol^-1):    ", dG_vac / beta)
 println("Standard State Correction (kJ mol^-1): ", dG_std_corr / beta)
-println("Solvation Free Energy (kJ mol^-1): ", dG / beta)
+println("Solvation Free Energy (kJ mol^-1):     ", dG / beta)
 println("=========================================")
 ```
 
@@ -1161,17 +1204,17 @@ A representative run prints:
 
 ```text
 =========================================
-Annihilation in solvent (kBT):   12.930917
-Annihilation in vacuum (kBT):    3.422579
+Annihilation in solvent (kBT):   8.642657
+Annihilation in vacuum (kBT):    3.4234502
 Standard State Correction (kBT): 3.249398594044294
-Solvation Free Energy (kBT):     -6.258939380504046
+Solvation Free Energy (kBT):     -1.9698082159532646
 =========================================
 
 =========================================
-Annihilation in solvent (kJ mol^-1):   33.329224
-Annihilation in vacuum (kJ mol^-1):    8.821641
+Annihilation in solvent (kJ mol^-1):   22.276306
+Annihilation in vacuum (kJ mol^-1):    8.823886
 Standard State Correction (kJ mol^-1): 8.375271054356045
-Solvation Free Energy (kJ mol^-1):     -16.132312582575743
+Solvation Free Energy (kJ mol^-1):     -5.077148049471093
 =========================================
 ```
 
@@ -1264,14 +1307,17 @@ tss_state = TSSState(
 )
 ```
 
-The TSS simulation uses two replicas. For more than one replica, the script constructs explicit [`ActiveThermoState`](@ref) objects with different starting states, assigns velocities, and passes them to [`TSSSimulation`](@ref).
+The TSS simulation uses four replicas. For more than one replica, the script constructs explicit [`ActiveThermoState`](@ref) objects with different starting states, assigns velocities, and passes them to [`TSSSimulation`](@ref).
 
 ```julia
 N_MD_STEPS = 50
 SELF_ADJ_STEPS = 5
-N_REPLICAS = 2
+N_REPLICAS = 4
 
-TSS_TIME = FT(4)u"ns"
+tss_dipeptide_replica_rngs(seed::Integer) =
+    [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]
+
+TSS_TIME = FT(25)u"ns"
 TOTAL_STEPS = Int(floor(TSS_TIME / DT))
 N_CYCLES = Int(floor(TOTAL_STEPS / (SELF_ADJ_STEPS * N_MD_STEPS)))
 
@@ -1282,13 +1328,14 @@ replica_first_states = [
     )
     for replica_i in 1:N_REPLICAS
 ]
+initial_replica_rngs = tss_dipeptide_replica_rngs(RNG_SEED + 10)
 replica_active_states = if N_REPLICAS == 1
     nothing
 else
     states = [ActiveThermoState(tss_state.state_space, first_state)
               for first_state in replica_first_states]
-    for active_state in states
-        random_velocities!(active_state.active_sys, TEMP; rng=rng)
+    for (active_state, replica_rng) in zip(states, initial_replica_rngs)
+        random_velocities!(active_state.active_sys, TEMP; rng = replica_rng)
     end
     states
 end
@@ -1309,7 +1356,12 @@ tss_sim = TSSSimulation(
     log_freq = 10,
 )
 
-simulate!(tss_sim; rng = rng, replica_parallel = :auto)
+simulate!(
+    tss_sim;
+    rng = rng,
+    replica_rngs = tss_dipeptide_replica_rngs(RNG_SEED + 20),
+    replica_parallel = :auto,
+)
 ```
 
 `TSSSimulation` likewise stores one absolute MD step shared by its physical replicas.
@@ -1354,6 +1406,7 @@ Colorbar(
 
 ax_fe.aspect = DataAspect()
 display(fig_fe)
+save("tss_dipeptide_pmf.png", fig_fe)
 ```
 
 ![TSS deconvolved alanine dipeptide PMF](images/tss_dipeptide_pmf.png)
@@ -1390,9 +1443,23 @@ lines!(
 
 axislegend(position = :rt, labelsize = 24)
 display(fig_df)
+save("tss_dipeptide_convergence.png", fig_df)
 ```
 
 ![TSS dipeptide convergence](images/tss_dipeptide_convergence.png)
+
+The script also saves a normalized histogram of the visited TSS thermodynamic states. With multiple replicas, the histogram combines the state histories from all replicas.
+
+```julia
+state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
+save_state_histogram(
+    tss_visited_states(tss_state),
+    state_bins,
+    "tss_dipeptide_states.png",
+)
+```
+
+![TSS dipeptide visited states](images/tss_dipeptide_states.png)
 
 ### Ethanol solvation free energy
 
@@ -1408,7 +1475,7 @@ This example computes the standard solvation free energy of ethanol with a two-l
 FT = Float32
 AT = CuArray
 
-Δt = FT(2)u"fs"
+Δt = FT(4)u"fs"
 T0 = FT(310)u"K"
 P0 = FT(1)u"bar"
 
@@ -1416,13 +1483,18 @@ N_LAMBDA_STATES = 20
 TSS_WINDOW_SIZE = 4
 N_MD_STEPS = 50
 SELF_ADJUSTMENT_STEPS = 5
-N_REPLICAS = 2
-TSS_TIME = FT(4)u"ns"
+N_REPLICAS = 4
+TSS_TIME = FT(15)u"ns"
+SOLVENT_EQUIL_TIME = FT(500)u"ps"
+VACUUM_EQUIL_TIME = FT(100)u"ps"
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
+
+tss_solvation_replica_rngs(seed::Integer) =
+    [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]
 ```
 
-The setup function constructs the solvated and vacuum legs. The non-bonded treatment is chosen before alchemical states are generated: PME for the solvated leg, and non-periodic electrostatic summation with an infinite cutoff for the vacuum leg.
+The setup function constructs the solvated and vacuum legs. The non-bonded treatment is chosen before alchemical states are generated: PME for the solvated leg, and short-range Coulomb with an infinite cutoff for the vacuum leg.
 
 ```julia
 function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
@@ -1442,11 +1514,22 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum = false, rng =
         neighbor_finder_type = neighbor_finder_type,
         nonbonded_method = nonbonded_method,
         constraints = :hbonds,
-        hydrogen_mass = 2,
+        constraint_algorithm = LINCS,
+        rigid_water = true,
+        hydrogen_mass = 3,
     )
+
+    integrator = if is_vacuum
+        Langevin(; dt = Δt, temperature = T0, friction = FT(1)u"ps^-1",
+                 coupling = nothing, remove_CM_motion = 100)
+    else
+        barostat = CRescaleBarostat(P0, FT(4)u"ps"; n_steps = 200)
+        Langevin(dt = Δt, temperature = T0, friction = FT(1)u"ps^-1",
+                 coupling = (barostat,), remove_CM_motion = 100)
+    end
 ```
 
-After minimization and equilibration, the script finds the standard Lennard-Jones and Coulomb interactions, replaces them with Gapsys soft-core interactions, and creates one [`ThermoState`](@ref) for each $\lambda$ value.
+After minimization and equilibration, the script finds the standard Lennard-Jones and Coulomb interactions, replaces Lennard-Jones with a Gapsys soft-core interaction, uses a scaled Coulomb interaction, rebuilds PME and Ewald exclusion data with the same scheduler, and creates one [`ThermoState`](@ref) for each $\lambda$ value.
 
 ```julia
     p_inters = sys_base.pairwise_inters
@@ -1454,7 +1537,7 @@ After minimization and equilibration, the script finds the standard Lennard-Jone
     idx_coul = findfirst(x -> x isa Union{Coulomb, CoulombEwald}, p_inters)
 
     lj_sc = alchemical_lj_softcore(p_inters[idx_lj])
-    cl_sc = alchemical_coulomb_softcore(p_inters[idx_coul])
+    cl_scaled = alchemical_coulomb_scaled(p_inters[idx_coul])
 
     atoms_cpu = Molly.from_device(sys_base.atoms)
     thermo_states = ThermoState[]
@@ -1471,17 +1554,28 @@ After minimization and equilibration, the script finds the standard Lennard-Jone
             end
         end
 
+        atoms_dev = Molly.to_device([acopy...], AT)
+        general_inters = rebuild_alchemical_general_inters(
+            sys_base,
+            atoms_dev,
+            lj_sc,
+            cl_scaled,
+        )
+        specific_inter_lists = rebuild_alchemical_specific_inter_lists(sys_base, cl_scaled)
+
         sys_w = System(
             deepcopy(sys_base);
-            atoms = Molly.to_device([acopy...], AT),
-            pairwise_inters = (lj_sc, cl_sc),
+            atoms = atoms_dev,
+            pairwise_inters = (lj_sc, cl_scaled),
+            general_inters = general_inters,
+            specific_inter_lists = specific_inter_lists,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
     end
 ```
 
-The TSS graph is a one-dimensional non-periodic ladder. With 20 states and `TSS_WINDOW_SIZE = 4`, each local estimator spans four neighboring $\lambda$ states. The simulation uses two replicas and 8000 TSS cycles for a 4 ns run with this timestep and cycle definition.
+The TSS graph is a one-dimensional non-periodic ladder. With 20 states and `TSS_WINDOW_SIZE = 4`, each local estimator spans four neighboring $\lambda$ states. The simulation uses four replicas and 15000 TSS cycles for a 15 ns run with this timestep and cycle definition.
 
 ```julia
     tss_graph = Molly.tss_grid_graph(
@@ -1499,7 +1593,7 @@ The TSS graph is a one-dimensional non-periodic ladder. With 20 states and `TSS_
 
     total_steps = Int(floor(TSS_TIME / Δt))
     n_cycles = Int(floor(total_steps / (SELF_ADJUSTMENT_STEPS * N_MD_STEPS)))
-    first_states = round.(Int, range(1, length(lambda_schedule); length = N_REPLICAS))
+    first_states = N_REPLICAS == 1 ? [1] : round.(Int, range(1, length(lambda_schedule); length = N_REPLICAS))
 
     tss_sim = TSSSimulation(
         tss_state;
@@ -1532,8 +1626,19 @@ tss_state_vac, tss_sim_vac = setup_alchemical_tss(
     rng = MersenneTwister(RNG_SEED + 1),
 )
 
-simulate!(tss_sim_solv; rng = MersenneTwister(RNG_SEED + 2), replica_parallel = :auto)
-simulate!(tss_sim_vac; rng = MersenneTwister(RNG_SEED + 3), replica_parallel = :auto)
+simulate!(
+    tss_sim_solv;
+    rng = MersenneTwister(RNG_SEED + 2),
+    replica_rngs = tss_solvation_replica_rngs(RNG_SEED + 20),
+    replica_parallel = :auto,
+)
+
+simulate!(
+    tss_sim_vac;
+    rng = MersenneTwister(RNG_SEED + 3),
+    replica_rngs = tss_solvation_replica_rngs(RNG_SEED + 40),
+    replica_parallel = :auto,
+)
 ```
 
 After the run, `tss_free_energy_uncertainties` returns the reported free energies and jackknife standard errors over the retained epochs. The free energies are dimensionless, in units of $k_B T$.
@@ -1621,10 +1726,10 @@ band!(
 axislegend(position = :rt, labelsize = 24)
 display(fig_fe)
 
-save("tss_solv_profile.png", fig_fe)
+save("tss_solvation_profile.png", fig_fe)
 ```
 
-![TSS alchemical free energy profile](images/tss_solv_profile.png)
+![TSS alchemical free energy profile](images/tss_solvation_profile.png)
 
 The convergence plot shows `log10` of the maximum absolute reported TSS free energy update for each logged iteration.
 
@@ -1669,12 +1774,27 @@ lines!(
 )
 
 axislegend(position = :rt, labelsize = 24)
+ylims!(ax_df, -5, 0.5)
 display(fig_df)
 
-save("tss_solv_convergence.png", fig_df)
+save("tss_solvation_convergence.png", fig_df)
 ```
 
-![TSS alchemical convergence](images/tss_solv_convergence.png)
+![TSS alchemical convergence](images/tss_solvation_convergence.png)
+
+The visited-state histogram combines the state histories from all replicas in each leg, then plots the solvent and vacuum distributions together.
+
+```julia
+state_bins = 0.5:1:(N_LAMBDA_STATES + 0.5)
+save_state_histogram(
+    [tss_visited_states(tss_state_solv), tss_visited_states(tss_state_vac)],
+    ["Solvated", "Vacuum"],
+    state_bins,
+    "tss_solvation_states.png",
+)
+```
+
+![TSS alchemical visited states](images/tss_solvation_states.png)
 
 The final output reports the two annihilation free energies, the analytical standard-state correction, the solvation free energy, and the jackknife uncertainty estimate. Because the standard-state correction is analytical, the reported uncertainty only contains the TSS jackknife contribution from the two simulated legs.
 
@@ -1702,30 +1822,18 @@ A representative run prints:
 
 ```text
 =========================================
-Annihilation in solvent (kBT):   13.251678
-Annihilation in vacuum (kBT):    3.411924
+Annihilation in solvent (kBT):   8.696862
+Annihilation in vacuum (kBT):    3.4346604
 Standard State Correction (kBT): 3.249398594044294
-Solvation Free Energy (kBT):     -6.590355510569964
-Jackknife SE, no std-state uncertainty (kBT): 0.27612922
+Solvation Free Energy (kBT):     -2.012803191996966
+Jackknife SE, no std-state uncertainty (kBT): 0.072397865
 =========================================
 
 =========================================
-Annihilation in solvent (kJ mol^-1):   34.155983
-Annihilation in vacuum (kJ mol^-1):    8.794177
+Annihilation in solvent (kJ mol^-1):   22.416018
+Annihilation in vacuum (kJ mol^-1):    8.85278
 Standard State Correction (kJ mol^-1): 8.375271054356045
-Solvation Free Energy (kJ mol^-1):     -16.986532168370868
-Jackknife SE, no std-state uncertainty (kJ mol^-1): 0.7117185
+Solvation Free Energy (kJ mol^-1):     -5.187966888071426
+Jackknife SE, no std-state uncertainty (kJ mol^-1): 0.1866043
 =========================================
-```
-
-## PMF helper API
-
-The online PMF accumulator collects weighted histograms and converts them into free energy estimates. AWH and umbrella-based TSS use `PMFDeconvolution` to estimate an unbiased PMF from sampled configurations by accumulating the observed reaction-coordinate bins with inverse instantaneous mixture weights.
-
-```@docs
-Molly.OnlinePMFAccumulator
-Molly.effective_samples
-Molly.total_effective_samples
-Molly.max_weight_fraction
-Molly.pmf
 ```

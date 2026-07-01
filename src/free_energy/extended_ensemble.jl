@@ -160,13 +160,15 @@ function evaluate_energy_subset!(energies::AbstractVector,
                                  partition::AlchemicalPartition,
                                  coords,
                                  boundary,
-                                 state_indices)
+                                 state_indices;
+                                 n_threads::Integer=Threads.nthreads())
     if length(energies) != length(state_indices)
         throw(DimensionMismatch("energies length ($(length(energies))) must match " *
                                 "state_indices length ($(length(state_indices)))"))
     end
 
-    update_master_energy!(partition, coords, boundary; force_recompute=true)
+    update_master_energy!(partition, coords, boundary;
+                          force_recompute=true, n_threads=n_threads)
 
     @inbounds for (out_i, state_index) in pairs(state_indices)
         if !(1 <= state_index <= length(partition.λ_systems))
@@ -177,6 +179,7 @@ function evaluate_energy_subset!(energies::AbstractVector,
             partition.λ_systems[state_index],
             coords,
             boundary,
+            n_threads = n_threads,
         )
         energies[out_i] = partition.cached_master_pe + pe_specific
     end
@@ -193,9 +196,11 @@ end
 function evaluate_energy_subset(partition::AlchemicalPartition,
                                 coords,
                                 boundary,
-                                state_indices)
+                                state_indices;
+                                n_threads::Integer=Threads.nthreads())
     energies = Vector{typeof(partition.cached_master_pe)}(undef, length(state_indices))
-    return evaluate_energy_subset!(energies, partition, coords, boundary, state_indices)
+    return evaluate_energy_subset!(energies, partition, coords, boundary, state_indices;
+                                   n_threads=n_threads)
 end
 
 @inline function safe_ustrip(::Type{T}, x) where T
@@ -238,7 +243,8 @@ end
 function reduced_potential(workspace::PartitionedReducedPotentialWorkspace,
                            coords,
                            boundary,
-                           state_index::Integer)
+                           state_index::Integer;
+                           n_threads::Integer=Threads.nthreads())
     if !(1 <= state_index <= length(workspace.thermo_states))
         throw(ArgumentError("state_index ($state_index) out of range " *
                             "1:$(length(workspace.thermo_states))"))
@@ -249,6 +255,7 @@ function reduced_potential(workspace::PartitionedReducedPotentialWorkspace,
         boundary,
         Int(state_index);
         force_recompute = true,
+        n_threads = n_threads,
     )
     return reduced_potential(workspace.thermo_states[state_index], energy, boundary)
 end
@@ -286,7 +293,8 @@ function reduced_potentials!(out::AbstractVector,
                              workspace::PartitionedReducedPotentialWorkspace,
                              coords,
                              boundary,
-                             state_indices=Base.OneTo(length(workspace.thermo_states)))
+                             state_indices=Base.OneTo(length(workspace.thermo_states));
+                             n_threads::Integer=Threads.nthreads())
     if length(out) != length(state_indices)
         throw(DimensionMismatch("out length ($(length(out))) must match " *
                                 "state_indices length ($(length(state_indices)))"))
@@ -298,6 +306,7 @@ function reduced_potentials!(out::AbstractVector,
         coords,
         boundary,
         state_indices,
+        n_threads = n_threads,
     )
     @inbounds for (out_i, state_index) in pairs(state_indices)
         out[out_i] = reduced_potential(

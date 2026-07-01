@@ -11,6 +11,7 @@ FT = Float32
 AT = CuArray
 
 RNG_SEED = 42
+OUTPUT_PREFIX = "awh_dipeptide"
 rng = MersenneTwister(RNG_SEED)
 
 DT = FT(4)u"fs"
@@ -43,10 +44,10 @@ sys = System(
     joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
     array_type=AT,
-    nonbonded_method=:cutoff,
+    nonbonded_method=:pme,
     constraints=:hbonds,
     rigid_water = true,
-    hydrogen_mass=2
+    hydrogen_mass=3
 )
 
 ##
@@ -106,12 +107,52 @@ end
 
 ##
 
-awh_state = AWHState(thermo_states; first_state=1, n_bias=100, reuse_neighbors=true)
+awh_state = AWHState(
+    thermo_states;
+    first_state=1,
+    n_bias=100,
+    reuse_neighbors=true,
+)
 
 N_MD_STEPS = 50
 
-AWH_TIME = FT(100)u"ns"
+AWH_TIME = FT(25)u"ns"
 TOTAL_STEPS = Int(floor(AWH_TIME / DT))
+
+function save_state_histogram(states, bins, path)
+    fig = Figure(size = (720, 720))
+    ax = Axis(
+        fig[1, 1],
+        title = L"\textbf{Visited States}",
+        xlabel = L"\textbf{State Index}",
+        ylabel = L"\textbf{PDF}",
+        xlabelsize = 20,
+        ylabelsize = 20,
+        titlesize = 24,
+        xlabelfont = :bold,
+        ylabelfont = :bold,
+        xticklabelsize = 18,
+        yticklabelsize = 18,
+    )
+
+    hist!(
+        ax,
+        states;
+        bins = bins,
+        color = :royalblue,
+        alpha = 0.35,
+        strokewidth = 1,
+        strokecolor = :black,
+        normalization = :pdf,
+        label = "AWH",
+    )
+
+    axislegend(position = :rt, labelsize = 20)
+    display(fig)
+    save(path, fig)
+end
+
+awh_visited_states(state) = collect(state.stats.active_λ)
 
 pmf_deconv = PMFDeconvolution(
     awh_state;
@@ -124,6 +165,7 @@ awh_sim = AWHSimulation(
     update_freq = 1,
     well_tempered_factor = FT(500.0),
     log_freq = 10,
+    loggers = (traj = TrajectoryWriter(1000, "$(OUTPUT_PREFIX).dcd"),),
     pmf = pmf_deconv,
 )
 
@@ -169,7 +211,7 @@ Colorbar(
 ax_fe.aspect = DataAspect()
 display(fig_fe)
 
-save("awh_dipeptide_pmf.png", fig_fe)
+save("$(OUTPUT_PREFIX)_pmf.png", fig_fe)
 
 ##
 
@@ -209,4 +251,12 @@ axislegend(
 
 display(fig_df)
 
-save("awh_dipeptide_convergence.png", fig_df)
+save("$(OUTPUT_PREFIX)_convergence.png", fig_df)
+
+##
+state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
+save_state_histogram(
+    awh_visited_states(awh_state),
+    state_bins,
+    "$(OUTPUT_PREFIX)_states.png",
+)

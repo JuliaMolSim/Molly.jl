@@ -108,7 +108,9 @@ function copyto_constraint_scratch!(scratch, values)
     end
 end
 
-@inline constraint_virial_lambda(::Nothing, args...) = 1
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer) = 1
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer) = 1
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer, l::Integer) = 1
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer)
     return λ_mixing(MinimumMixing(), atoms[i], atoms[j])

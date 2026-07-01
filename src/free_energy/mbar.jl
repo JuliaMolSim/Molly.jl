@@ -82,6 +82,67 @@ function mbar_apply_shift!(u::AbstractMatrix, shift::Bool)
     return nothing
 end
 
+function fill_mbar_inputs_partitioned!(u::AbstractMatrix,
+                                       u_target::AbstractVector,
+                                       workspaces,
+                                       scratch,
+                                       all_coords,
+                                       all_boundaries,
+                                       state_indices,
+                                       K::Integer,
+                                       N::Integer,
+                                       n_workspaces::Integer)
+    Threads.@threads for chunk in 1:n_workspaces
+        local_u = scratch[chunk]
+        workspace = workspaces[chunk]
+        for n in chunk:n_workspaces:N
+            reduced_potentials!(
+                local_u,
+                workspace,
+                all_coords[n],
+                all_boundaries[n],
+                state_indices,
+                n_threads=1,
+            )
+            for k in 1:K
+                u[n, k] = local_u[k]
+            end
+            u_target[n] = local_u[end]
+        end
+    end
+    return nothing
+end
+
+function fill_mbar_inputs_partitioned!(u::AbstractMatrix,
+                                       ::Nothing,
+                                       workspaces,
+                                       scratch,
+                                       all_coords,
+                                       all_boundaries,
+                                       state_indices,
+                                       K::Integer,
+                                       N::Integer,
+                                       n_workspaces::Integer)
+    Threads.@threads for chunk in 1:n_workspaces
+        local_u = scratch[chunk]
+        workspace = workspaces[chunk]
+        for n in chunk:n_workspaces:N
+            reduced_potentials!(
+                local_u,
+                workspace,
+                all_coords[n],
+                all_boundaries[n],
+                state_indices,
+                n_threads=1,
+            )
+            for k in 1:K
+                u[n, k] = local_u[k]
+            end
+        end
+    end
+    return nothing
+end
+
 function assemble_mbar_inputs_partitioned(coords_k,
                                            boundaries_k,
                                            states::AbstractVector{<:ThermoState};
@@ -99,16 +160,16 @@ function assemble_mbar_inputs_partitioned(coords_k,
 
     eval_states = isnothing(target_state) ? states : vcat(states, [target_state])
     n_eval = length(eval_states)
-    use_threads = Threads.nthreads() > 1 && !any(ts -> is_on_gpu(ts.system), eval_states)
-    n_workspaces = use_threads ? Threads.nthreads() : 1
+    use_threads = N > 1 && Threads.nthreads() > 1 && !any(ts -> is_on_gpu(ts.system), eval_states)
+    n_workspaces = use_threads ? min(Threads.nthreads(), N) : 1
     first_partitioned_workspace = isnothing(first_workspace) ?
                                   PartitionedReducedPotentialWorkspace(eval_states) :
                                   first_workspace
-    workspaces = [
-        i == 1 ? first_partitioned_workspace :
-                 PartitionedReducedPotentialWorkspace(eval_states)
-        for i in 1:n_workspaces
-    ]
+    workspaces = Vector{typeof(first_partitioned_workspace)}(undef, n_workspaces)
+    workspaces[1] = first_partitioned_workspace
+    for i in 2:n_workspaces
+        workspaces[i] = PartitionedReducedPotentialWorkspace(eval_states)
+    end
     scratch = [Vector{Float64}(undef, n_eval) for _ in 1:n_workspaces]
     state_indices = Base.OneTo(n_eval)
 
@@ -116,25 +177,18 @@ function assemble_mbar_inputs_partitioned(coords_k,
     u_target = isnothing(target_state) ? nothing : Vector{Float64}(undef, N)
 
     if use_threads
-        Threads.@threads for n in 1:N
-            tid = Threads.threadid()
-            local_u = scratch[tid]
-            reduced_potentials!(
-                local_u,
-                workspaces[tid],
-                all_coords[n],
-                all_boundaries[n],
-                state_indices,
-            )
-            @inbounds begin
-                for k in 1:K
-                    u[n, k] = local_u[k]
-                end
-                if !isnothing(u_target)
-                    u_target[n] = local_u[end]
-                end
-            end
-        end
+        fill_mbar_inputs_partitioned!(
+            u,
+            u_target,
+            workspaces,
+            scratch,
+            all_coords,
+            all_boundaries,
+            state_indices,
+            K,
+            N,
+            n_workspaces,
+        )
     else
         local_u = scratch[1]
         workspace = workspaces[1]
