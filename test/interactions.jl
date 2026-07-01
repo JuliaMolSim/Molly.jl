@@ -3,9 +3,9 @@
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     c4 = SVector(1.1, 1.0, 1.0)u"nm"
-    a1 = Atom(atom_type=1, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 1.0)
-    a2 = Atom(atom_type=2, charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 1.0)
-    a3 = Atom(atom_type=3, charge=1.0, σ=0.4u"nm", ϵ=0.4u"kJ * mol^-1", λ = 1.0)
+    a1 = Atom(atom_type=1, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
+    a2 = Atom(atom_type=2, charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ=1.0)
+    a3 = Atom(atom_type=3, charge=1.0, σ=0.4u"nm", ϵ=0.4u"kJ * mol^-1", λ=1.0)
     boundary = CubicBoundary(2.0u"nm")
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)

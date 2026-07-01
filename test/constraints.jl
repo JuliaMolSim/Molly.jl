@@ -1799,6 +1799,8 @@ end
 
 @testset "Minimization with constraints" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
+    pe_cpu_nocons, pe_cpu_cons = 0.0u"kJ/mol", 0.0u"kJ/mol"
+
     for AT in array_list
         sys_nocons = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
@@ -1818,9 +1820,18 @@ end
         sim = SteepestDescentMinimizer()
         simulate!(sys_nocons, sim)
         simulate!(sys_cons, sim)
+        pe_nocons = potential_energy(sys_nocons)
+        pe_cons   = potential_energy(sys_cons)
+        if AT == Array
+            pe_cpu_nocons = pe_nocons
+            pe_cpu_cons   = pe_cons
+        else
+            @test pe_nocons ≈ pe_cpu_nocons
+            @test pe_cons   ≈ pe_cpu_cons
+        end
 
         @test rmsd(sys_nocons.coords[1:1170], sys_cons.coords[1:1170]) < 0.01u"nm"
-        @test potential_energy(sys_nocons) < -150_000u"kJ/mol"
-        @test potential_energy(sys_cons)   < -150_000u"kJ/mol"
+        @test pe_nocons < -150_000u"kJ/mol"
+        @test pe_cons   < -150_000u"kJ/mol"
     end
 end

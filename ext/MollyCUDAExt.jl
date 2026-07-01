@@ -773,13 +773,13 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray}, pai
 end
 
 @inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder, step_n)
-    first_preprocess = buffers.step_n_preprocessed == -1
-    step_changed = step_n != buffers.step_n_preprocessed
-    needs_morton_refresh = first_preprocess || (step_changed && step_n % nf.n_steps_reorder == 0)
-    sparse_changed = buffers.sparse_pair_generation != nf.cache_generation
-    needs_reorder = first_preprocess || step_changed
-    needs_sparse_refresh = needs_morton_refresh || !nf.initialized || sparse_changed
-    needs_tile_refresh = needs_morton_refresh || !nf.initialized || sparse_changed
+    first_preprocess = (buffers.step_n_preprocessed == -1)
+    step_changed = (step_n != buffers.step_n_preprocessed)
+    needs_morton_refresh = (first_preprocess || (step_changed && step_n % nf.n_steps_reorder == 0))
+    sparse_changed = (buffers.sparse_pair_generation != nf.cache_generation)
+    needs_reorder = true # Coordinates can be changed at any point
+    needs_sparse_refresh = (needs_morton_refresh || !nf.initialized || sparse_changed)
+    needs_tile_refresh = (needs_morton_refresh || !nf.initialized || sparse_changed)
     return needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh
 end
 
