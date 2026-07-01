@@ -215,7 +215,7 @@ Prepare a sampled PMF deconvolution object for an enhanced-sampling state.
 
 The same user-facing object is used by AWH, TSS, and future methods. The
 backend is selected from the type of `state`. `grid` follows the same format as
-[`OnlinePMFAccumulator`](@ref). `coupling(xi, state_i)` should return the
+`OnlinePMFAccumulator`. `coupling(xi, state_i)` should return the
 dimensionless bias energy at PMF coordinate `xi` in thermodynamic state
 `state_i`; when omitted, Molly attempts to infer matching [`BiasPotential`](@ref)
 interactions from the state Hamiltonians.

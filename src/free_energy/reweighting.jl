@@ -98,16 +98,14 @@ mutable struct OnlinePMFAccumulator{N, T, E, C, W}
     out_of_grid_samples::Int
 end
 
-"""
-    OnlinePMFAccumulator(grid; T=Float64)
+#     OnlinePMFAccumulator(grid; T=Float64)
 
-Online weighted histogram accumulator for target-state PMFs.
+# Online weighted histogram accumulator for target-state PMFs.
 
-`grid` can be `(min, max, bins)` for 1D,
-`((mins...), (maxs...), (bins...))` for N dimensions, or a tuple of explicit
-edge vectors. Samples are added with `accumulate!(acc, value, log_weight)`, and
-`pmf(acc)` returns a `PMF` result.
-"""
+# `grid` can be `(min, max, bins)` for 1D,
+# `((mins...), (maxs...), (bins...))` for N dimensions, or a tuple of explicit
+# edge vectors. Samples are added with `accumulate!(acc, value, log_weight)`, and
+# `pmf(acc)` returns a `PMF` result.
 function OnlinePMFAccumulator(grid; T::Type = Float64)
     edges = online_pmf_edges(grid, T)
     centers = online_pmf_centers(edges)
@@ -195,11 +193,11 @@ function online_pmf_bin_volumes(widths::NTuple{N, <:AbstractVector{T}},
     return volumes
 end
 
-"""
-    effective_samples(acc::OnlinePMFAccumulator)
+#
+#     effective_samples(acc::OnlinePMFAccumulator)
 
-Return per-bin effective sample sizes from the accumulated log weights.
-"""
+# Return per-bin effective sample sizes from the accumulated log weights.
+#
 function effective_samples(acc::OnlinePMFAccumulator{N, T}) where {N, T}
     ess = zeros(T, size(acc.log_weight_sums))
     for idx in CartesianIndices(ess)
@@ -212,11 +210,11 @@ function effective_samples(acc::OnlinePMFAccumulator{N, T}) where {N, T}
     return ess
 end
 
-"""
-    total_effective_samples(acc::OnlinePMFAccumulator)
+#
+#     total_effective_samples(acc::OnlinePMFAccumulator)
 
-Return the effective sample size of the complete accumulated PMF histogram.
-"""
+# Return the effective sample size of the complete accumulated PMF histogram.
+#
 function total_effective_samples(acc::OnlinePMFAccumulator{N, T}) where {N, T}
     lw = online_pmf_total_log_weight(acc.log_weight_sums)
     lw2 = online_pmf_total_log_weight(acc.log_weight_sq_sums)
@@ -226,13 +224,12 @@ function total_effective_samples(acc::OnlinePMFAccumulator{N, T}) where {N, T}
     return zero(T)
 end
 
-"""
-    max_weight_fraction(acc::OnlinePMFAccumulator)
 
-Return the largest normalized single-sample weight per occupied PMF bin.
-Values near one indicate that a bin is dominated by one configuration, which is
-a useful support diagnostic for offline reweighting.
-"""
+#     max_weight_fraction(acc::OnlinePMFAccumulator)
+
+# Return the largest normalized single-sample weight per occupied PMF bin.
+# Values near one indicate that a bin is dominated by one configuration, which is
+# a useful support diagnostic for offline reweighting.
 function max_weight_fraction(acc::OnlinePMFAccumulator{N, T}) where {N, T}
     fraction = zeros(T, size(acc.log_weight_sums))
     for idx in CartesianIndices(fraction)
