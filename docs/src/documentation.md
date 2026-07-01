@@ -384,7 +384,7 @@ To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the ar
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
-Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`.
+Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`, and is applied before constraints are generated.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
 The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -527,6 +527,10 @@ end
 # 314.0608014652237 K
 # 362.86427110336984 K
 ```
+
+`ReplicaSystem` records the absolute MD step, and subsequent `simulate!` calls resume from
+`rep_sys.current_step`. Set `initial_step` in the constructor when restoring replica
+coordinates and velocities from a checkpoint.
 
 The accelerated weight histogram method ([`AWHState`](@ref) and [`AWHSimulation`](@ref)) has also been implemented in Molly.jl, allowing enhanced sampling and on-the-fly estimation of free energies along arbitrary collective variables and alchemical transformations. A more detailed overview of this can be found in the [Free energy calculation](@ref) section.
 
@@ -1302,7 +1306,8 @@ The available couplers are:
 - [`BerendsenBarostat`](@ref)
 - [`CRescaleBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
-Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
+Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
+[`StormerVerlet`](@ref) does not support coupling methods because its recurrence stores coordinate history rather than advancing velocities as primary state.
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
 temp = 300.0u"K"
@@ -1355,7 +1360,11 @@ Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
-Contributions from constraints, implicit solvent methods and bias potentials are ignored.
+Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods and bias potentials are ignored.
+During supported constrained simulations, Molly can add constraint contributions to the total virial for steps where a barostat or virial/pressure logger requests it.
+For the initial simulation step, the same preview convention is used so that interactions and constraints both contribute to the logged virial/pressure.
+If a coordinate-scaling coupling method changes the box on a constrained step, virial and pressure loggers record the pre-coupling virial/pressure for that step, matching the state used by the coupling method.
+Other state loggers, such as [`BoxLogger`](@ref), continue to record the current post-coupling state.
 The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 As described previously, custom general interactions should implement virial calculation if required.
 
@@ -1403,17 +1412,30 @@ Base.values(logger::MyLogger) = logger.history
 Then, define the logging function that is called every step by the simulator:
 ```julia
 function Molly.log_property!(logger::MyLogger,
-                                sys,
-                                neighbors,
-                                step_n;
-                                n_threads=Threads.nthreads(),
-                                kwargs...)
+                             sys,
+                             buffers,
+                             neighbors,
+                             step_n;
+                             n_threads=Threads.nthreads(),
+                             kwargs...)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
 end
 ```
 The use of `n_steps` is optional and is an example of how to record a property periodically throughout the simulation.
+If a custom logger needs the total virial for constrained simulations, define
+[`logger_virial_interval`](@ref) so the simulator can compute the virial on the
+same interval:
+```julia
+Molly.logger_virial_interval(logger::MyLogger) = logger.n_steps
+```
+If it specifically logs pressure, also define [`logger_pressure_interval`](@ref):
+```julia
+Molly.logger_pressure_interval(logger::MyLogger) = logger.n_steps
+```
+Both functions return `Inf` by default, meaning no virial or pressure state is
+needed.
 To use your custom logger, add it to the named tuple of loggers given when creating the [`System`](@ref):
 ```julia
 loggers = (mylogger=MyLogger(10, []),) # Don't forget the trailing comma!
@@ -1434,14 +1456,14 @@ Many times, a logger will just record an observation to an `Array` containing a 
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
 Define your observation function as
 ```julia
-function my_observable(sys::System, neighbors, step_n; n_threads::Integer, kwargs...)
+function my_observable(sys::System, buffers, neighbors, step_n; n_threads::Integer, kwargs...)
     # Probe the system for some desired property
     return observation
 end
 ```
 Keyword arguments `current_forces` and `current_potential_energy` can also be used here to avoid recomputing values that are passed from the simulator:
 ```julia
-function my_pe_observable(sys::System, neighbors; n_threads::Integer,
+function my_pe_observable(sys::System, buffers, neighbors, step_n; n_threads::Integer,
                           current_potential_energy=nothing, kwargs...)
     if isnothing(current_potential_energy)
         # Compute potential energy
@@ -1598,6 +1620,7 @@ Higher values of either improve accuracy at the cost of performance.
 
 Currently, constraints are supported by the following simulators:
 - [`VelocityVerlet`](@ref)
+- [`DPDVelocityVerlet`](@ref)
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)

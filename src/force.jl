@@ -63,6 +63,7 @@ force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, da
 force_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data) = force(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data)
 
 @inline zero_pairwise_force(dr, force_units) = ustrip.(zero(dr)) * force_units
+@inline zero_pairwise_energy(dr, energy_units) = ustrip(zero(dr[1])) * energy_units
 
 @inline function zero_pairwise_force(dr::SVector{N, <:Unitful.Quantity{T}}, force_units) where {N, T}
     return zero(SVector{N, T}) * force_units
@@ -188,32 +189,247 @@ Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 Base.:+(x::SpecificForce5Atoms, y::SpecificForce5Atoms) = SpecificForce5Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4, x.f5 + y.f5)
 
+const INVALID_BUFFER_STEP = -1
+
+# Tracks which step cached virial and pressure buffers are valid for.
+mutable struct BufferValidity
+    interaction_virial_step::Int
+    constraint_virial_step::Int
+    total_virial_step::Int
+    pressure_step::Int
+    pre_coupling_virial_step::Int
+    pre_coupling_pressure_step::Int
+end
+
+BufferValidity() = BufferValidity(
+    INVALID_BUFFER_STEP,
+    INVALID_BUFFER_STEP,
+    INVALID_BUFFER_STEP,
+    INVALID_BUFFER_STEP,
+    INVALID_BUFFER_STEP,
+    INVALID_BUFFER_STEP,
+)
+
+function invalidate_interaction_virial!(v::BufferValidity)
+    v.interaction_virial_step = INVALID_BUFFER_STEP
+    return v
+end
+
+function invalidate_constraint_virial!(v::BufferValidity)
+    v.constraint_virial_step = INVALID_BUFFER_STEP
+    return v
+end
+
+function invalidate_total_virial!(v::BufferValidity)
+    v.total_virial_step = INVALID_BUFFER_STEP
+    return v
+end
+
+function invalidate_pressure!(v::BufferValidity)
+    v.pressure_step = INVALID_BUFFER_STEP
+    return v
+end
+
+function invalidate_pre_coupling_virial!(v::BufferValidity)
+    v.pre_coupling_virial_step = INVALID_BUFFER_STEP
+    return v
+end
+
+function invalidate_pre_coupling_pressure!(v::BufferValidity)
+    v.pre_coupling_pressure_step = INVALID_BUFFER_STEP
+    return v
+end
+
+function mark_interaction_virial!(v::BufferValidity, step_n::Integer)
+    v.interaction_virial_step = Int(step_n)
+    invalidate_total_virial!(v)
+    return v
+end
+
+function mark_constraint_virial!(v::BufferValidity, step_n::Integer)
+    v.constraint_virial_step = Int(step_n)
+    return v
+end
+
+function mark_total_virial!(v::BufferValidity, step_n::Integer)
+    v.total_virial_step = Int(step_n)
+    return v
+end
+
+function mark_pressure!(v::BufferValidity, step_n::Integer)
+    v.pressure_step = Int(step_n)
+    return v
+end
+
+function mark_pre_coupling_virial!(v::BufferValidity, step_n::Integer)
+    v.pre_coupling_virial_step = Int(step_n)
+    return v
+end
+
+function mark_pre_coupling_pressure!(v::BufferValidity, step_n::Integer)
+    v.pre_coupling_pressure_step = Int(step_n)
+    return v
+end
+
+function has_interaction_virial(v::BufferValidity, step_n::Integer)
+    return v.interaction_virial_step == step_n
+end
+
+function has_constraint_virial(v::BufferValidity, step_n::Integer)
+    return v.constraint_virial_step == step_n
+end
+
+function has_total_virial(v::BufferValidity, step_n::Integer)
+    return v.total_virial_step == step_n
+end
+
+function has_pressure(v::BufferValidity, step_n::Integer)
+    return v.pressure_step == step_n
+end
+
+function has_pre_coupling_virial(v::BufferValidity, step_n::Integer)
+    return v.pre_coupling_virial_step == step_n
+end
+
+function has_pre_coupling_pressure(v::BufferValidity, step_n::Integer)
+    return v.pre_coupling_pressure_step == step_n && has_pre_coupling_virial(v, step_n)
+end
+
+function has_interaction_virial(buffers, step_n::Integer)
+    return has_interaction_virial(buffers.validity, step_n)
+end
+
+function has_constraint_virial(buffers, step_n::Integer)
+    return has_constraint_virial(buffers.validity, step_n)
+end
+
+function has_total_virial(buffers, step_n::Integer)
+    return has_total_virial(buffers.validity, step_n)
+end
+
+function has_pressure(buffers, step_n::Integer)
+    return has_pressure(buffers.validity, step_n)
+end
+
+function has_pre_coupling_virial(buffers, step_n::Integer)
+    return has_pre_coupling_virial(buffers.validity, step_n)
+end
+
+function has_pre_coupling_pressure(buffers, step_n::Integer)
+    return has_pre_coupling_pressure(buffers.validity, step_n)
+end
+
+function clear_constraint_virial!(buffers, step_n::Integer)
+    fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+    fill!(buffers.constraint_virial_nounits, zero(eltype(buffers.constraint_virial_nounits)))
+    mark_constraint_virial!(buffers.validity, step_n)
+    invalidate_total_virial!(buffers.validity)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+clear_constraint_virial!(buffers, sys, step_n::Integer) = clear_constraint_virial!(buffers, step_n)
+
+function constraint_virial_nounits(buffers, contribution)
+    e_unit = unit(eltype(buffers.constraint_virial))
+    if e_unit == NoUnits
+        return ustrip.(contribution)
+    else
+        return ustrip.(e_unit, contribution)
+    end
+end
+
+function accumulate_constraint_virial!(buffers, contribution)
+    buffers.constraint_virial_nounits .+= constraint_virial_nounits(buffers, contribution)
+    invalidate_total_virial!(buffers.validity)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+function accumulate_constraint_virial!(buffers, contribution, context)
+    context.needs_virial || return buffers
+    return accumulate_constraint_virial!(buffers, contribution .* context.virial_scale)
+end
+
+pre_coupling_ref() = Ref{Any}(nothing)
+constraint_scratch_ref() = Ref{Any}(nothing)
+
 struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     fs_nounits::F
     fs_chunks::A
     virial::V
     vir_nounits::VN
     vir_chunks::VC
+    constraint_virial::V
+    constraint_virial_nounits::VN
+    constraint_virial_chunks::VC
     kin_tensor::KT
     pres_tensor::PT
+    pre_coupling_virial::Base.RefValue{Any}
+    pre_coupling_kin_tensor::Base.RefValue{Any}
+    pre_coupling_volume::Base.RefValue{Any}
+    constraint_coords_buffer::Base.RefValue{Any}
+    constraint_velocities_buffer::Base.RefValue{Any}
+    constraint_preview_coords_buffer::Base.RefValue{Any}
     fs_mat::FM
+    validity::BufferValidity
+end
+
+function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
+                    kin_tensor, pres_tensor, fs_mat)
+    constraint_virial = zero(virial)
+    constraint_virial_nounits = zero(vir_nounits)
+    constraint_virial_chunks = similar(vir_chunks)
+    for i in eachindex(vir_chunks)
+        constraint_virial_chunks[i] = zero(vir_chunks[i])
+    end
+    return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
+                      constraint_virial, constraint_virial_nounits,
+                      constraint_virial_chunks, kin_tensor, pres_tensor,
+                      pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      constraint_scratch_ref(), fs_mat, BufferValidity())
+end
+
+function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
+                    constraint_virial, constraint_virial_nounits,
+                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat)
+    return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
+                      constraint_virial, constraint_virial_nounits,
+                      constraint_virial_chunks, kin_tensor, pres_tensor,
+                      pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      constraint_scratch_ref(), fs_mat, BufferValidity())
 end
 
 function init_buffers!(sys::System{D}, n_threads) where D
     # Allows propagation of uncertainties to tensors
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-    fs_nounits  = ustrip_vec.(zero(sys.coords))
-    vir         = zeros(CT, D, D) .* sys.energy_units
-    vir_nounits = ustrip_vec.(zero(vir))
-    kin         = zero(vir)
-    pres        = zero(vir_nounits) .* (sys.energy_units == NoUnits ? NoUnits : u"bar")
+    fs_nounits    = ustrip_vec.(zero(sys.coords))
+    vir           = zeros(CT, D, D) .* sys.energy_units
+    vir_nounits   = ustrip_vec.(zero(vir))
+    constr_vir    = zero(vir)
+    constr_vir_nu = zero(vir_nounits)
+    kin           = zero(vir)
+    pres          = zero(vir_nounits) .* (sys.energy_units == NoUnits ? NoUnits : u"bar")
     # Enzyme errors with nothing when n_threads is 1
     n_copies = (n_threads == 1 ? 0 : n_threads)
-    fs_chunks  = [zero(fs_nounits) for _ in 1:n_copies]
-    vir_chunks = [zero(vir_nounits) for _ in 1:n_copies]
+    fs_chunks         = [zero(fs_nounits) for _ in 1:n_copies]
+    vir_chunks        = [zero(vir_nounits) for _ in 1:n_copies]
+    constr_vir_chunks = [zero(vir_nounits) for _ in 1:n_copies]
     # fs_mat is only used for virtual sites to do atomic addition
     fs_mat = (length(sys.virtual_sites) > 0 ? zeros(CT, D, length(sys)) : nothing)
-    return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres, fs_mat)
+    return BuffersCPU(
+        fs_nounits, fs_chunks,
+        vir, vir_nounits, vir_chunks,
+        constr_vir, constr_vir_nu, constr_vir_chunks,
+        kin,
+        pres,
+        pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
+        constraint_scratch_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
+        fs_mat,
+        BufferValidity(),
+    )
 end
 
 upper_tile_count(n_blocks::Integer) = (Int64(n_blocks) * (Int64(n_blocks) + 1)) ÷ 2
@@ -229,8 +445,16 @@ energy calculations.
 - `pe_vec_nounits`: Vector of size 1 for potential energy summation.
 - `virial`: 3x3 virial tensor (with units).
 - `virial_nounits`: 3x3 virial tensor on GPU (without units).
+- `constraint_virial`: 3x3 constraint virial tensor (with units).
+- `constraint_virial_nounits`: 3x3 constraint virial tensor on GPU (without units).
 - `kin_tensor`: 3x3 kinetic energy tensor (with units).
 - `pres_tensor`: 3x3 pressure tensor (with units).
+- `pre_coupling_virial`, `pre_coupling_kin_tensor`, `pre_coupling_volume`:
+  Optional state used by pressure/virial loggers after coordinate-scaling coupling.
+- `constraint_coords_buffer`, `constraint_velocities_buffer`,
+  `constraint_preview_coords_buffer`: Reusable scratch arrays for constraint virial
+  snapshots and initial-step previews.
+- `validity`: Step metadata describing which tensor buffers are current.
 - `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
 - `morton_seq`, `morton_seq_buffer_1`, `morton_seq_buffer_2`, `morton_seq_inv`:
   Morton-order indices and temporary buffers for reordering atoms on the GPU.
@@ -258,8 +482,17 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     pe_vec_nounits::P
     virial::V
     virial_nounits::VN
+    constraint_virial::V
+    constraint_virial_nounits::VN
     kin_tensor::KT
     pres_tensor::PT
+    pre_coupling_virial::Base.RefValue{Any}
+    pre_coupling_kin_tensor::Base.RefValue{Any}
+    pre_coupling_volume::Base.RefValue{Any}
+    constraint_coords_buffer::Base.RefValue{Any}
+    constraint_velocities_buffer::Base.RefValue{Any}
+    constraint_preview_coords_buffer::Base.RefValue{Any}
+    validity::BufferValidity
     box_mins::C
     box_maxs::C
     morton_seq::M
@@ -280,6 +513,86 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     step_n_preprocessed::Int
     sparse_pair_generation::UInt64
     num_pairs::Int
+end
+
+function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, pres_tensor,
+                    box_mins, box_maxs, morton_seq, morton_seq_buffer_1,
+                    morton_seq_buffer_2, morton_seq_inv, compressed_masks, tile_is_clean,
+                    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
+                    num_interacting_tiles, interacting_tiles_overflow, coords_reordered,
+                    velocities_reordered, atoms_reordered, fs_mat_reordered,
+                    step_n_preprocessed, sparse_pair_generation, num_pairs)
+    constraint_virial = zero(virial)
+    constraint_virial_nounits = similar(virial_nounits)
+    fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
+    return BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits,
+                      constraint_virial, constraint_virial_nounits, kin_tensor, pres_tensor,
+                      pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      constraint_scratch_ref(), BufferValidity(), box_mins, box_maxs, morton_seq,
+                      morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
+                      compressed_masks, tile_is_clean, interacting_tiles_i,
+                      interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+                      interacting_tiles_overflow, coords_reordered, velocities_reordered,
+                      atoms_reordered, fs_mat_reordered, step_n_preprocessed,
+                      sparse_pair_generation, num_pairs)
+end
+
+function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
+    fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+    fill!(buffers.constraint_virial_nounits, zero(eltype(buffers.constraint_virial_nounits)))
+    for chunk in buffers.constraint_virial_chunks
+        fill!(chunk, zero(eltype(chunk)))
+    end
+    mark_constraint_virial!(buffers.validity, step_n)
+    invalidate_total_virial!(buffers.validity)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+function merge_constraint_virial!(buffers::BuffersCPU, sys, step_n::Integer)
+    has_interaction_virial(buffers, step_n) ||
+        error("cannot merge constraint virial before interaction virial is valid for step $step_n")
+    has_constraint_virial(buffers, step_n) ||
+        error("cannot merge constraint virial before constraint virial is valid for step $step_n")
+
+    buffers.constraint_virial .= buffers.constraint_virial_nounits .* sys.energy_units
+    buffers.virial .+= buffers.constraint_virial
+    mark_total_virial!(buffers.validity, step_n)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+function merge_constraint_virial!(buffers::BuffersGPU, sys, step_n::Integer)
+    has_interaction_virial(buffers, step_n) ||
+        error("cannot merge constraint virial before interaction virial is valid for step $step_n")
+    has_constraint_virial(buffers, step_n) ||
+        error("cannot merge constraint virial before constraint virial is valid for step $step_n")
+
+    buffers.constraint_virial .= from_device(buffers.constraint_virial_nounits) .* sys.energy_units
+    buffers.virial .+= buffers.constraint_virial
+    mark_total_virial!(buffers.validity, step_n)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+function save_pre_coupling_virial!(buffers, step_n::Integer)
+    buffers.pre_coupling_virial[] = copy(buffers.virial)
+    mark_pre_coupling_virial!(buffers.validity, step_n)
+    invalidate_pre_coupling_pressure!(buffers.validity)
+    return buffers
+end
+
+function save_pre_coupling_pressure!(buffers, sys, step_n::Integer, kin_tensor)
+    if isnothing(kin_tensor)
+        kinetic_energy_tensor!(buffers.kin_tensor, sys)
+        buffers.pre_coupling_kin_tensor[] = copy(buffers.kin_tensor)
+    else
+        buffers.pre_coupling_kin_tensor[] = copy(kin_tensor)
+    end
+    buffers.pre_coupling_volume[] = volume(sys.boundary)
+    mark_pre_coupling_pressure!(buffers.validity, step_n)
+    return buffers
 end
 
 #=
@@ -305,6 +618,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     pe_vec_noun  = KernelAbstractions.zeros(backend, T, 1)
     virial       = zeros(CT, D, D) .* sys.energy_units
     virial_nu    = KernelAbstractions.zeros(backend, T, D, D)
+    constr_vir   = zero(virial)
+    constr_vir_nu = KernelAbstractions.zeros(backend, T, D, D)
     kin          = zero(virial)
     pres         = ustrip_vec.(zero(virial)) * (sys.energy_units == NoUnits ? NoUnits : u"bar")
     box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
@@ -331,13 +646,15 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
         sys.neighbor_finder.initialized = false
     end
 
-    return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, kin, pres, box_mins, box_maxs,
-                      morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
-                      compressed_masks,
-                      tile_is_clean, interacting_tiles_i, interacting_tiles_j,
-                      interacting_tiles_type, num_interacting_tiles, interacting_tiles_overflow,
-                      coords_reordered, velocities_reordered, atoms_reordered,
-                      fs_mat_reordered, -1, UInt64(0), 0)
+    return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
+                      kin, pres, pre_coupling_ref(), pre_coupling_ref(),
+                      pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
+                      constraint_scratch_ref(), BufferValidity(), box_mins, box_maxs, morton_seq,
+                      morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
+                      compressed_masks, tile_is_clean, interacting_tiles_i,
+                      interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+                      interacting_tiles_overflow, coords_reordered, velocities_reordered,
+                      atoms_reordered, fs_mat_reordered, -1, UInt64(0), 0)
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
@@ -369,6 +686,8 @@ end
 
 Calculate the forces on all atoms in a system and the virial using the pairwise,
 specific and general interactions.
+For constrained systems, constraint virial contributions are approximated using
+the same deterministic small-step constraint preview as [`virial`](@ref).
 
 Returns a tuple of the forces and the virial.
 This is faster than calling [`forces`](@ref) and [`virial`](@ref) separately.
@@ -381,6 +700,11 @@ end
 function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
                        kwargs...)
     buffers = init_buffers!(sys, n_threads)
+    if length(sys.constraints) > 0
+        fs, _ = compute_initial_total_virial!(buffers, sys, neighbors, step_n;
+                                              n_threads=n_threads, kwargs...)
+        return fs, buffers.virial
+    end
     fs = zero_forces(sys)
     forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
     return fs, buffers.virial
@@ -398,7 +722,11 @@ function forces!(fs,
                  general_inters=sys.general_inters) where {T, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
+    else
+        invalidate_interaction_virial!(buffers.validity)
+        invalidate_total_virial!(buffers.validity)
     end
+    invalidate_pressure!(buffers.validity)
     fill!(buffers.kin_tensor,  zero(T) * sys.energy_units)
     fill!(buffers.pres_tensor, zero(T) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
 
@@ -456,6 +784,13 @@ function forces!(fs,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
     end
     distribute_forces!(fs, sys, buffers)
+
+    if needs_vir
+        mark_interaction_virial!(buffers.validity, step_n)
+        if length(sys.constraints) == 0
+            mark_total_virial!(buffers.validity, step_n)
+        end
+    end
 
     return fs, buffers
 end
@@ -634,7 +969,8 @@ end
 
     if needs_vir
         r_i = coords[i]
-        v = r_i * transpose(sf.f1)
+        λ = λ_mixing(MinimumMixing(), atoms[i], atoms[i])
+        v = λ * r_i * transpose(sf.f1)
         vir_nounits .+= ustrip.(v)
     end
     return fs_nounits
@@ -653,7 +989,8 @@ end
 
     if needs_vir
         r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
-        v = r_ji * transpose(sf.f1)
+        λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+        v = λ * r_ji * transpose(sf.f1)
         vir_nounits .+= ustrip.(v)
     end
     return fs_nounits
@@ -675,7 +1012,10 @@ end
     if needs_vir
         r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j (second atom is the reference, MIC)
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
-        vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) + r_jk * transpose(sf.f3))
+        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
+        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
+        λ = minimum((λ_ji, λ_jk))
+        vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) + r_jk * transpose(sf.f3))
     end
     return fs_nounits
 end
@@ -700,7 +1040,11 @@ end
         r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
         r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
-        vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) +
+        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
+        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
+        λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
+        λ = minimum((λ_ji, λ_jk, λ_jl))
+        vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) +
                                 r_jk * transpose(sf.f3) +
                                 r_jl * transpose(sf.f4) )
     end
@@ -730,7 +1074,12 @@ end
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
         r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
         r_jm = vector(coords[j], coords[m], boundary) # r_m - r_j
-        vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) +
+        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
+        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
+        λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
+        λ_jm = λ_mixing(MinimumMixing(), atoms[j], atoms[m])
+        λ = minimum((λ_ji, λ_jk, λ_jl, λ_jm))
+        vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) +
                                 r_jk * transpose(sf.f3) +
                                 r_jl * transpose(sf.f4) +
                                 r_jm * transpose(sf.f5))
@@ -847,7 +1196,11 @@ function forces!(fs,
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
         fill!(buffers.virial_nounits, zero(T))
+    else
+        invalidate_interaction_virial!(buffers.validity)
+        invalidate_total_virial!(buffers.validity)
     end
+    invalidate_pressure!(buffers.validity)
     fill!(buffers.kin_tensor, zero(T) * sys.energy_units)
     fill!(buffers.pres_tensor, zero(T) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
     fill!(buffers.fs_mat, zero(T))
@@ -882,6 +1235,13 @@ function forces!(fs,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
     end
     distribute_forces!(fs, sys, buffers)
+
+    if needs_vir
+        mark_interaction_virial!(buffers.validity, step_n)
+        if length(sys.constraints) == 0
+            mark_total_virial!(buffers.validity, step_n)
+        end
+    end
 
     return fs, buffers
 end

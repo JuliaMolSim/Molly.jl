@@ -85,6 +85,7 @@ end
            n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
            specific_inter_lists=system.specific_inter_lists,
            general_inters=system.general_inters)
+    virial(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the virial tensor of the system.
 
@@ -98,17 +99,28 @@ The [virial definition from LAMMPS](https://docs.lammps.org/compute_stress_atom.
 is used, taking into account pairwise interactions, specific interactions, and the
 [`Ewald`](@ref) and [`PME`](@ref) methods computed as indicated in
 [Essmann et al. 1995](https://doi.org/10.1063/1.470117).
-Contributions from constraints, implicit solvent methods and bias potentials are ignored.
+Contributions from implicit solvent methods and bias potentials are ignored.
+For constrained systems, constraint contributions are approximated using a
+deterministic small-step constraint preview.
 Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 
-To calculate the scalar virial, see [`scalar_virial`](@ref).
+Passing a simulator for constrained systems uses the same deterministic preview
+convention, and is accepted for clarity and future extensibility. To calculate
+the scalar virial, see [`scalar_virial`](@ref).
 """
 function virial(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads, kwargs...)
 end
 
-function virial(sys, neighbors, step_n::Integer=0; kwargs...)
-    _, v = forces_virial(sys, neighbors, step_n; kwargs...)
+function virial(sys, neighbors, step_n::Integer=0;
+                n_threads::Integer=Threads.nthreads(), kwargs...)
+    if length(sys.constraints) > 0
+        buffers = init_buffers!(sys, n_threads)
+        compute_initial_total_virial!(buffers, sys, neighbors, step_n;
+                                      n_threads=n_threads, kwargs...)
+        return buffers.virial
+    end
+    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
     return v
 end
 
@@ -117,6 +129,7 @@ end
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
                   general_inters=system.general_inters)
+    scalar_virial(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the virial of the system as a scalar.
 

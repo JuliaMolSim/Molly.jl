@@ -109,6 +109,30 @@ end
         center_coords=false,
         hydrogen_mass=2,
     )
+    sys_hbonds = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+    )
+    sys_hmr_hbonds = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+        hydrogen_mass=2,
+    )
+    sys_hmr_rigid_water = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+        rigid_water=true,
+        hydrogen_mass=2,
+    )
     zero(sys)
     zero(sys_pme)
     neighbors = find_neighbors(sys)
@@ -159,13 +183,22 @@ end
     @test maximum(norm.(forces(sys) .- forces(sys_lj14))) < 1e-10u"kJ * nm^-1 * mol^-1"
 
     mass_inds = [1, 2, 3, 4, 5, 6, 7, 15952, 15953, 15954]
+    expected_hmr_masses = [11.034, 2.0, 2.0, 2.0, 10.026, 2.0, 2.0,
+                           14.015324, 2.0, 2.0]u"g/mol"
     @test masses(sys)[mass_inds] ≈ [14.01, 1.008, 1.008, 1.008, 12.01, 1.008, 1.008,
                                     15.99943, 1.007947, 1.007947]u"g/mol"
-    @test masses(sys_hmr)[mass_inds] ≈ [11.034, 2.0, 2.0, 2.0, 10.026, 2.0, 2.0,
-                                        14.015324, 2.0, 2.0]u"g/mol"
+    @test masses(sys_hmr)[mass_inds] ≈ expected_hmr_masses
+    @test masses(sys_hmr_hbonds)[mass_inds] ≈ expected_hmr_masses
+    @test masses(sys_hmr_rigid_water)[mass_inds] ≈ expected_hmr_masses
     @test sum(masses(sys)) ≈ sum(masses(sys_hmr))
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr_hbonds))
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr_rigid_water))
     @test potential_energy(sys) ≈ potential_energy(sys_hmr)
     @test maximum(norm.(forces(sys) .- forces(sys_hmr))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test potential_energy(sys_hbonds) ≈ potential_energy(sys_hmr_hbonds)
+    @test maximum(norm.(forces(sys_hbonds) .- forces(sys_hmr_hbonds))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test first(sys_hmr_hbonds.constraints).lincs_data.invmass[mass_inds] ≈
+        inv.(ustrip.(u"g/mol", masses(sys_hmr_hbonds)[mass_inds]))
     @test_throws ErrorException System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=6)
     @test_throws ArgumentError System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=true)
 
@@ -465,11 +498,13 @@ end
         @test bench_result.memory <= 1100
 
         scalar_vir = scalar_virial(sys)
-        scalar_P = scalar_pressure(sys)
         @test scalar_vir ≈ tr(virial(sys))
-        @test scalar_P ≈ tr(pressure(sys)) / 3
         @test scalar_vir ≈ scalar_virial(sys; n_threads=1)
-        @test scalar_P ≈ scalar_pressure(sys; n_threads=1)
+        pressure_t = pressure(sys)
+        scalar_P = scalar_pressure(sys)
+        @test all(isfinite, pressure_t)
+        @test scalar_P ≈ tr(pressure_t) / 3
+        @test scalar_pressure(sys; n_threads=1) ≈ tr(pressure_t) / 3
 
         forces_molly = forces(sys, neighbors; n_threads=1)
         openmm_forces_fp = joinpath(openmm_dir, "charmm", "forces.txt")
@@ -524,7 +559,9 @@ end
         @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65524.08096011398u"kJ * mol^-1"
         @test temperature(sys_nounits)u"K" ≈ start_temp
         @test scalar_virial(sys_nounits) ≈ tr(virial(sys_nounits))
-        @test scalar_pressure(sys_nounits) ≈ tr(pressure(sys_nounits)) / 3
+        pressure_nounits = pressure(sys_nounits)
+        @test all(isfinite, pressure_nounits)
+        @test scalar_pressure(sys_nounits) ≈ tr(pressure_nounits) / 3
 
         neighbors_nounits = find_neighbors(sys_nounits)
         @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",

@@ -478,7 +478,7 @@ Gromacs file reading should be considered experimental.
     to `true`.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
-    atom they are bonded to. Hydrogens in a constraint are not modified.
+    atom they are bonded to. This is applied before constraints are generated.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -544,8 +544,7 @@ function System(coord_file::AbstractString,
                             "(e.g. `2` or `2u\"g/mol\"`)"))
     end
     if !isa(hydrogen_mass, Bool) && !(hydrogen_mass > zero(hydrogen_mass))
-        throw(ArgumentError("hydrogen_mass should be greater than zero, constrained atoms" *
-                            "are automatically given a mass of zero"))
+        throw(ArgumentError("hydrogen_mass should be greater than zero"))
     end
     if grad_safe && neighbor_finder_type == GPUNeighborFinder
         throw(ArgumentError("GPUNeighborFinder is not compatible with grad_safe"))
@@ -1606,9 +1605,8 @@ function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_da
     return constraints, bonds, angles
 end
 
-function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constraints,
+function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
                                    hydrogen_mass, units, T)
-    inds_constrained = constrained_atom_inds(constraints)
     atoms_cpu = from_device(atoms)
     modified_masses = mass.(atoms_cpu)
     if units
@@ -1626,7 +1624,7 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constrai
     end
 
     for i in eachindex(atoms_cpu)
-        if !(i in inds_constrained) && !is_heavy_atom(atoms_cpu[i], atoms_data[i])
+        if !is_heavy_atom(atoms_cpu[i], atoms_data[i])
             mass_change = new_h_mass - modified_masses[i]
             modified_masses[i] = new_h_mass
 
@@ -1693,6 +1691,11 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         topology = MolecularTopology(bonds_all_vs_is, bonds_all_vs_js, length(coords_dev))
     else
         topology = nothing
+    end
+
+    if hydrogen_mass != false # false, number or unitful mass
+        atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds_all.is, bonds_all.js,
+                                          hydrogen_mass, units, T)
     end
 
     masses = mass.(from_device(atoms))
@@ -1952,11 +1955,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         general_inters_disp = ()
     end
     general_inters = (general_inters_ewald..., general_inters_is..., general_inters_disp...)
-
-    if hydrogen_mass != false # false, number or unitful mass
-        atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds.is, bonds.js, constraints,
-                                          hydrogen_mass, units, T)
-    end
 
     k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     virtual_sites_dev = (length(virtual_sites) > 0 ? to_device(virtual_sites, AT) : virtual_sites)

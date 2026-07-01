@@ -77,7 +77,7 @@ struct ExceptionList{N, K, V}
     values::SVector{N, V}
 end
 
-function ExceptionList(d::AbstractDict)
+function ExceptionList(d)
     n = length(d)
     ks = SVector{n}(collect(keys(d)))
     vs = SVector{n}(d[k] for k in ks)

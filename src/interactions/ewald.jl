@@ -246,14 +246,12 @@ end
 function ==(a::Ewald, b::Ewald)
     return a.dist_cutoff == b.dist_cutoff &&
            a.error_tol   == b.error_tol   &&
-           a.excluded_pairs == b.excluded_pairs &&
            a.scheduler == b.scheduler
 end
 
 function hash(a::Ewald, h::UInt)
     v = hash(a.dist_cutoff, h)
     v = hash(a.error_tol, v)
-    v = hash(a.excluded_pairs, v)
     return hash(a.scheduler, v)
 end
 
@@ -310,22 +308,7 @@ struct PME{T, D, A, I, M, BM, C, CB, RB, VB, P, F, B, SCH} <: AbstractEwald
     grad_safe::Bool
 end
 
-function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5, ϵr=1.0,
-             fixed_charges=true, scheduler=DefaultLambdaScheduler(), grad_safe=false,
-             n_threads::Integer=Threads.nthreads())
-    T = typeof(ustrip(dist_cutoff))
-    AT = array_type(atoms)
-    n_atoms = length(atoms)
-    error_tol_T = T(error_tol)
-    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
-    mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
-    grid_indices = to_device(zeros(Int, 3, n_atoms), AT)
-    grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
-    bsplines_θ = to_device(zeros(T, order * n_atoms, 3), AT)
-    bsplines_dθ = zero(bsplines_θ)
-    # Ordered z/y/x for better memory access
-    charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
-
+function pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
     bsplines_moduli = (zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3]))
     nmax = maximum(mesh_dims)
     data, ddata = zeros(T, order), zeros(T, order)
@@ -373,6 +356,29 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5, ϵr=1.0,
             end
         end
     end
+
+    return bsplines_moduli
+end
+
+function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
+             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
+             scheduler=DefaultLambdaScheduler(), grad_safe=false,
+             n_threads::Integer=Threads.nthreads())
+    T = typeof(ustrip(dist_cutoff))
+    AT = array_type(atoms)
+    n_atoms = length(atoms)
+    error_tol_T = T(error_tol)
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
+    mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
+    grid_indices = to_device(zeros(Int, 3, n_atoms), AT)
+    grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
+    bsplines_θ = to_device(zeros(T, order * n_atoms, 3), AT)
+    bsplines_dθ = zero(bsplines_θ)
+    # Ordered z/y/x for better memory access
+    charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
+    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
+
+    bsplines_moduli = pme_bspline_moduli(T, order, mesh_dims)
 
     if AT <: AbstractGPUArray
         charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)
@@ -731,7 +737,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
         esum += esum_val
     end
     if needs_vir
-        vir .+= buffer_virial[1] .* energy_units
+        # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+        vir .+= buffer_virial[1] .* energy_units / 2
     end
     return esum / 2
 end
@@ -758,7 +765,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
     esum = sum(buffer) * energy_units
     if needs_vir
         for chunk_i in 1:n_threads
-            vir .+= buffer_virial[chunk_i] .* energy_units
+            # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+            vir .+= buffer_virial[chunk_i] .* energy_units / 2
         end
     end
     return esum / 2
@@ -779,7 +787,8 @@ function recip_conv!(vir, buffer_virial, charge_grid::AbstractArray{Complex{T}, 
     kernel!(buffer_virial, buffer, charge_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
             energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir); ndrange=ndrange)
     if needs_vir
-        vir .+= from_device(buffer_virial) .* energy_units
+        # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+        vir .+= from_device(buffer_virial) .* energy_units / 2
     end
     return sum(buffer) * energy_units / 2
 end
@@ -913,6 +922,10 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     end
     charge_E = -f_div_ϵr * T(π) * pc_sum^2 / (2 * V * α^2)
     self_E = f_div_ϵr * -pc_abs2_sum * α / sqrt(T(π)) + charge_E
+    if needs_vir
+        # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I.
+        vir .+= charge_E .* I(3)
+    end
     total_E = reciprocal_space_E + self_E
     return total_E
 end
@@ -949,7 +962,7 @@ in the `data` field of the [`InteractionList2Atoms`](@ref) with `EwaldExclusionD
 
 Only compatible with 3D systems.
 """
-struct EwaldExclusion end
+@kwdef struct EwaldExclusion null::UInt8 = 0 end
 
 Base.zero(::EwaldExclusion) = EwaldExclusion()
 Base.:+(::EwaldExclusion, ::EwaldExclusion) = EwaldExclusion()

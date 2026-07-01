@@ -659,11 +659,14 @@ Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 # CUDA launch configuration
+const CUDA_LAUNCH_UNSET = 0
+const CUDA_TILE_THREADS_UNSET = (0, 0)
+
 struct CUDALaunchConfig
-    force_block_y::Union{Nothing, Int}
-    force_maxregs::Union{Nothing, Int}
-    tile_threads::Union{Nothing, NTuple{2, Int}}
-    energy_block_y::Union{Nothing, Int}
+    force_block_y::Int
+    force_maxregs::Int
+    tile_threads::NTuple{2, Int}
+    energy_block_y::Int
 end
 
 function CUDALaunchConfig(;
@@ -683,7 +686,35 @@ function CUDALaunchConfig(;
         all(>(0), tile_threads) || throw(ArgumentError("tile_threads entries must be positive"))
     end
 
-    return CUDALaunchConfig(force_block_y, force_maxregs, tile_threads, energy_block_y)
+    tile_threads_raw = tile_threads === nothing ?
+                       CUDA_TILE_THREADS_UNSET :
+                       (Int(tile_threads[1]), Int(tile_threads[2]))
+    return CUDALaunchConfig(
+        Int(something(force_block_y, CUDA_LAUNCH_UNSET)),
+        Int(something(force_maxregs, CUDA_LAUNCH_UNSET)),
+        tile_threads_raw,
+        Int(something(energy_block_y, CUDA_LAUNCH_UNSET)),
+    )
+end
+
+@inline function cuda_force_block_y(config::CUDALaunchConfig)
+    value = config.force_block_y
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_force_maxregs(config::CUDALaunchConfig)
+    value = config.force_maxregs
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_tile_threads(config::CUDALaunchConfig)
+    value = config.tile_threads
+    return value == CUDA_TILE_THREADS_UNSET ? nothing : value
+end
+
+@inline function cuda_energy_block_y(config::CUDALaunchConfig)
+    value = config.energy_block_y
+    return iszero(value) ? nothing : value
 end
 
 """
@@ -1142,6 +1173,10 @@ single thermodynamic state across all generalized ensemble methods.
 - `pressure=nothing`: Explicit target pressure. If `nothing`, it is inferred from the integrator's barostat.
 - `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on 
     the temperature and pressure is generated.
+
+If `system` has loggers, construction emits a warning: generalized ensemble
+methods ignore `ThermoState` system loggers and use loggers attached to the
+appropriate generalized-ensemble object instead.
 """
 struct ThermoState{S, I, B, P}
     system::S
@@ -1154,6 +1189,11 @@ end
 function ThermoState(sys::System{D, AT, FT}, integrator; 
                      temperature=nothing, pressure=nothing,
                      name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
+    if !isempty(values(sys.loggers))
+        @warn "ThermoState was constructed with a system that has loggers. " *
+              "Generalized ensemble methods ignore ThermoState system loggers; " *
+              "pass loggers to AWHSimulation, TSSSimulation or ReplicaSystem instead."
+    end
 
     temp_source = temperature
     press_source = pressure
@@ -1223,7 +1263,7 @@ end
 A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD).
 
 Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles 
-an [`AlchemicalPartition`](@ref) from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed 
+an `AlchemicalPartition` from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed
 topological and interactive components (e.g., bulk solvent) from state-specific perturbations. 
 During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
 necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
@@ -1249,8 +1289,11 @@ construction where `n` is the number of threads to be used per replica.
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
     to duplicating the boundary of the reference system (the first `ThermoState`).
-- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: The logger used to record
-    the exchange of replicas.
+- `replica_loggers=nothing`: Logger collections for each replica. Stateful logger objects and
+    `TrajectoryWriter` file paths cannot be shared across replicas.
+- `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
+    a default [`ReplicaExchangeLogger`](@ref) is used.
+- `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
 - `data::DA=nothing`: Arbitrary data associated with the replica system.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for perturbed state differences. Generally improves performance.
@@ -1270,6 +1313,8 @@ mutable struct ReplicaSystem{D, AT, T, P, B, I, C, V, BO, NF, RL, SPI, SSI, SGI,
     state_general_inters::SGI
     state_indices::Vector{Int}
     exchange_logger::EL
+    current_step::Int
+    initial_log_pending::Bool
     data::DA
 end
 
@@ -1280,10 +1325,12 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        replica_neighbor_finders=nothing,
                        replica_loggers=nothing,
                        exchange_logger=nothing,
+                       initial_step::Integer=0,
                        data=nothing,
                        reuse_neighbors::Bool=true)
     
     n_replicas = length(thermo_states)
+    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
     
     if length(replica_coords) != n_replicas
         throw(ArgumentError("Number of replica_coords ($(length(replica_coords))) " *
@@ -1326,6 +1373,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         throw(ArgumentError("Number of loggers arrays ($(length(replica_loggers))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
+    validate_replica_loggers(replica_loggers)
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
@@ -1352,7 +1400,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         partition, n_replicas, betas, integrators, replica_coords, replica_velocities, 
         replica_boundaries, replica_neighbor_finders, replica_loggers, 
         state_pairwise_inters, state_specific_inter_lists, state_general_inters,
-        state_indices, exchange_logger, data
+        state_indices, exchange_logger, Int(initial_step), true, data
     )
 end
 
