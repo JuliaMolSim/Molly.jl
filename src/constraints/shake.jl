@@ -735,6 +735,8 @@ function shake_gpu!(clusters::StructArray{C},
     # Doesnt need to be initialized, kernel will do that
     still_active = allocate(backend, Bool, N_active_clusters)
     KernelAbstractions.pagelock!(backend, still_active)
+    cluster_idxs  = getproperty.(Ref(clusters), idx_keys(C))
+    cluster_dists = getproperty.(Ref(clusters), dist_keys(C))
 
     iter = 1
     while iter <= max_iters
@@ -743,8 +745,8 @@ function shake_gpu!(clusters::StructArray{C},
             still_active,
             N_active_clusters,
             shake_kernel,
-            getproperty.(Ref(clusters), idx_keys(C))...,
-            getproperty.(Ref(clusters), dist_keys(C))...,
+            cluster_idxs...,
+            cluster_dists...,
             other_kernel_args...;
             ndrange=N_active_clusters,
         )
@@ -833,8 +835,8 @@ end
     s_k1k2 = vector(r_t2_k1, r_t2_k2, boundary)
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
 
-    tol12 = abs(norm(s_k1k2) - dist12)
-    tol13 = abs(norm(s_k1k3) - dist13)
+    tol12 = abs(sqrt(sum(abs2, s_k1k2)) - dist12)
+    tol13 = abs(sqrt(sum(abs2, s_k1k3)) - dist13)
 
     # Constraint still active if either above tolerance
     return (tol12 > dist_tol) || (tol13 > dist_tol)
@@ -922,9 +924,9 @@ end
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
     s_k1k4 = vector(r_t2_k1, r_t2_k4, boundary)
 
-    tol12 = abs(norm(s_k1k2) - dist12)
-    tol13 = abs(norm(s_k1k3) - dist13)
-    tol14 = abs(norm(s_k1k4) - dist14)
+    tol12 = abs(sqrt(sum(abs2, s_k1k2)) - dist12)
+    tol13 = abs(sqrt(sum(abs2, s_k1k3)) - dist13)
+    tol14 = abs(sqrt(sum(abs2, s_k1k4)) - dist14)
 
     # Constraint still active if either above tolerance
     return (tol12 > dist_tol) || (tol13 > dist_tol) || (tol14 > dist_tol)
@@ -1010,9 +1012,9 @@ end
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
     s_k2k3 = vector(r_t2_k2, r_t2_k3, boundary)
 
-    tol12 = abs(norm(s_k1k2) - dist12)
-    tol13 = abs(norm(s_k1k3) - dist13)
-    tol23 = abs(norm(s_k2k3) - dist23)
+    tol12 = abs(sqrt(sum(abs2, s_k1k2)) - dist12)
+    tol13 = abs(sqrt(sum(abs2, s_k1k3)) - dist13)
+    tol23 = abs(sqrt(sum(abs2, s_k2k3)) - dist23)
 
     # Constraint still active if either above tolerance
     return (tol12 > dist_tol) || (tol13 > dist_tol) || (tol23 > dist_tol)

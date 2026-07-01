@@ -619,6 +619,41 @@ CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list))
 CellListMap.reset_output!(nl::NeighborList) = empty!(nl)
 CellListMap.reducer(nl1::NeighborList, nl2::NeighborList) = append!(nl1, nl2)
 
+function CellListMap.reduce_output!(output::NeighborList, output_threaded::Vector{<:NeighborList})
+    n_start = output.n
+    n_tot = n_start
+    for nb in output_threaded
+        n_tot += nb.n
+    end
+    if length(output.list) < n_tot
+        resize!(output.list, n_tot)
+    end
+
+    if (n_tot - n_start) > 100_000 && length(output_threaded) > 1 && Threads.nthreads() > 1
+        Threads.@threads for i in eachindex(output_threaded)
+            offset = n_start
+            @inbounds for jb in 1:(i - 1)
+                offset += output_threaded[jb].n
+            end
+            nb = output_threaded[i]
+            if nb.n > 0
+                copyto!(output.list, offset + 1, nb.list, 1, nb.n)
+            end
+        end
+    else
+        offset = n_start
+        for nb in output_threaded
+            if nb.n > 0
+                copyto!(output.list, offset + 1, nb.list, 1, nb.n)
+                offset += nb.n
+            end
+        end
+    end
+
+    output.n = n_tot
+    return output
+end
+
 function find_neighbors(sys::System{D, AT},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=sys.neighbor_finder.clm_particlesystem.neighbors, 

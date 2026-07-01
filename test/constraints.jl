@@ -1788,12 +1788,12 @@ end
             rigid_water=true,
         )
 
-        sim = SteepestDescentMinimizer(tol=10_000.0u"kJ * mol^-1 * nm^-1")
+        sim = SteepestDescentMinimizer()
         simulate!(sys_nocons, sim)
         simulate!(sys_cons, sim)
 
         @test rmsd(sys_nocons.coords[1:1170], sys_cons.coords[1:1170]) < 0.01u"nm"
-        @test potential_energy(sys_nocons) < -100_000u"kJ/mol"
+        @test potential_energy(sys_nocons) < -150_000u"kJ/mol"
         @test potential_energy(sys_cons)   < -150_000u"kJ/mol"
     end
 end

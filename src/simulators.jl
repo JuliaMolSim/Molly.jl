@@ -83,10 +83,10 @@ Steepest descent energy minimization.
 
 # Arguments
 - `step_size::D=0.01u"nm"`: the initial maximum displacement.
-- `max_steps::Int=1000`: the maximum number of steps.
-- `tol::F=1000.0u"kJ * mol^-1 * nm^-1"`: the maximum force below which to
+- `max_steps::Int=1_000`: the maximum number of steps.
+- `tol::F=1_000.0u"kJ * mol^-1 * nm^-1"`: the maximum force below which to
     finish minimization.
-- `constraint_bond_constant::K=10000.0u"kJ * mol^-1 * nm^-2"`: the force constant
+- `constraint_bond_constant::K=500_000.0u"kJ * mol^-1 * nm^-2"`: the force constant
     for the harmonic bonds that are used instead of constraints during
     minimisation. Set to `nothing` to not use harmonic bonds and ignore
     constraints. Unused if the system does not have constraints.
@@ -95,8 +95,8 @@ Steepest descent energy minimization.
 @kwdef struct SteepestDescentMinimizer{D, F, K, L}
     step_size::D = 0.01u"nm"
     max_steps::Int = 1_000
-    tol::F = 1000.0u"kJ * mol^-1 * nm^-1"
-    constraint_bond_constant::K = 10000.0u"kJ * mol^-1 * nm^-2"
+    tol::F = 1_000.0u"kJ * mol^-1 * nm^-1"
+    constraint_bond_constant::K = 500_000.0u"kJ * mol^-1 * nm^-2"
     log_stream::L = devnull
 end
 
@@ -155,13 +155,18 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            strictness=default_strictness())
     # @inline needed to avoid Enzyme error
     check_strictness(strictness)
-    using_constraints = (length(sys.constraints) > 0)
-    if using_constraints && !isnothing(sim.constraint_bond_constant)
-        constraint_bonds = constraints_to_bonds(sys, sim.constraint_bond_constant)
-        if length(constraint_bonds) > 0
-            sis = (sys.specific_inter_lists..., constraint_bonds)
+    if length(sys.constraints) > 0
+        if isnothing(sim.constraint_bond_constant)
+            err_str = "System has constraints but constraint_bond_constant is nothing, " *
+                      "constraints will be ignored"
+            report_issue(err_str, strictness)
         else
-            sis = sys.specific_inter_lists
+            constraint_bonds = constraints_to_bonds(sys, sim.constraint_bond_constant)
+            if length(constraint_bonds) > 0
+                sis = (sys.specific_inter_lists..., constraint_bonds)
+            else
+                sis = sys.specific_inter_lists
+            end
         end
     else
         sis = sys.specific_inter_lists
@@ -191,7 +196,6 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
 
         coords_copy .= sys.coords
         sys.coords .+= hn .* F ./ max_force
-        using_constraints && apply_position_constraints!(sys, coords_copy; n_threads=n_threads)
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
@@ -805,6 +809,7 @@ end
         end
 
         if using_constraints
+            apply_position_constraints!(sys, cons_coord_storage; n_threads=n_threads)
             sys.velocities .= (sys.coords .- cons_coord_storage) ./ sim.dt
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end

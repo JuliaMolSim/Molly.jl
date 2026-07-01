@@ -600,12 +600,13 @@ function constrained_atom_pairs(constraints::Union{Tuple, NamedTuple})
     end
 end
 
-function constraints_to_bonds(sys::System{<:Any, AT}, k::K) where {AT, K}
+function constraints_to_bonds(sys::System{<:Any, AT, T}, k_in) where {AT, T}
     cons_pairs = constrained_atom_pairs(sys)
     if length(cons_pairs) > 0
         bond_is, bond_js = Int32[], Int32[]
         D = typeof(first(cons_pairs)[3])
-        bond_inters = HarmonicBond{K, D}[]
+        k = T(k_in)
+        bond_inters = HarmonicBond{typeof(k), D}[]
         for (i, j, d) in cons_pairs
             push!(bond_is, i)
             push!(bond_js, j)
