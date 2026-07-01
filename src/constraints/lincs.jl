@@ -1075,7 +1075,8 @@ function check_position_constraints(sys::System{<:Any, <:Any, FT}, ca::LINCS) wh
     max_err = typemin(FT)
     for dc in ca.dist_constraints
         dr = vector(sys.coords[dc.i], sys.coords[dc.j], sys.boundary)
-        err = ustrip(abs(norm(dr) - dc.dist))
+        r = sqrt(sum(abs2, dr))
+        err = ustrip(abs(r - dc.dist))
         max_err = max(err, max_err)
     end
     return max_err < ustrip(ca.dist_tolerance)
@@ -1094,7 +1095,8 @@ function check_position_constraints(sys::System{<:Any, <:AbstractGPUArray, FT}, 
     max_err = typemin(FT)
     for dc in ca.dist_constraints
         dr = vector(coords_cpu[dc.i], coords_cpu[dc.j], sys.boundary)
-        err = ustrip(abs(norm(dr) - dc.dist))
+        r = sqrt(sum(abs2, dr))
+        err = ustrip(abs(r - dc.dist))
         max_err = max(err, max_err)
     end
     return max_err < ustrip(ca.dist_tolerance)
