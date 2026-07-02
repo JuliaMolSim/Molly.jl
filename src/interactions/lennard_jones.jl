@@ -294,22 +294,6 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     return fs
 end
 
-@inline function overlap_pe_lj_softcore_beutler(dr, energy_units, C12, C6, λ, σ6_shift)
-    if iszero_value(σ6_shift)
-        return zero_pairwise_energy(dr, energy_units)
-    end
-    return λ * ((C12 / (σ6_shift * σ6_shift)) - (C6 / σ6_shift))
-end
-
-@inline function overlap_pe_lj_softcore_gapsys(dr, energy_units, C12, C6, λ, R)
-    if iszero_value(R)
-        return zero_pairwise_energy(dr, energy_units)
-    end
-    invR = inv(R)
-    invR6 = invR^6
-    return λ * ((91 * C12 * (invR6 * invR6)) - (28 * C6 * invR6))
-end
-
 @doc raw"""
     LennardJonesSoftCoreBeutler(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing,
                                 ϵ_mixing, weight_special)
@@ -493,6 +477,7 @@ end
     # If lambda is 1, the soft core formula reduces to standard LJ
     # We explicity branch to save compute.
     if λ >= 1
+        r = sqrt(sum(abs2, dr))
         if iszero_value(r)
             return zero_pairwise_energy(dr, energy_units)
         end
@@ -500,7 +485,6 @@ end
         σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
         ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
-        r = sqrt(sum(abs2, dr))
         σ2 = σ^2
         params = (σ2, ϵ, nothing, nothing)
 

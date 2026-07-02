@@ -18,8 +18,7 @@ The pipeline generally follows these steps:
 module MollyCUDAExt
 
 using Molly
-using Molly: from_device, box_sides, sorted_morton_seq!, sum_pairwise_forces_gpu,
-             sum_pairwise_forces_nonl, sum_pairwise_potentials_gpu, volume
+using Molly: from_device, box_sides, sorted_morton_seq!, volume
 using CUDA
 using Atomix
 using KernelAbstractions
@@ -59,6 +58,59 @@ end
 
 const CUDA_LAUNCH_AUTOTUNE_CACHE = Dict{LaunchAutotuneKey, Molly.CUDALaunchConfig}()
 const CUDA_LAUNCH_AUTOTUNE_LOCK = ReentrantLock()
+
+@inline function sum_pairwise_forces_gpu(inters::Tuple{T}, dr, atom_i, atom_j,
+                                         ::Val{F}, special, coord_i, coord_j,
+                                         boundary, vel_i, vel_j, step_n) where {T, F}
+    return Molly.force_gpu(inters[1], dr, atom_i, atom_j, F, special,
+                           coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+end
+
+@inline function sum_pairwise_forces_gpu(inters::Tuple, dr, atom_i, atom_j,
+                                         ::Val{F}, special, coord_i, coord_j,
+                                         boundary, vel_i, vel_j, step_n) where F
+    return Molly.force_gpu(first(inters), dr, atom_i, atom_j, F, special,
+                           coord_i, coord_j, boundary, vel_i, vel_j, step_n) +
+           sum_pairwise_forces_gpu(Base.tail(inters), dr, atom_i, atom_j,
+                                   Val(F), special, coord_i, coord_j,
+                                   boundary, vel_i, vel_j, step_n)
+end
+
+@inline function sum_pairwise_forces_nonl(inters, atom_i, atom_j, ::Val{F}, special,
+                                          coord_i, coord_j, boundary, vel_i, vel_j,
+                                          step_n) where F
+    return Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), special,
+                                     coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+end
+
+@inline function sum_pairwise_potentials_gpu(inters::Tuple{T}, dr, atom_i, atom_j,
+                                             ::Val{E}, ::Val{PT}, special, coord_i,
+                                             coord_j, boundary, vel_i, vel_j,
+                                             step_n) where {T, E, PT}
+    native_T = typeof(ustrip(oneunit(coord_i[1])))
+    atom_i_use = Molly._maybe_float_precision_convert(atom_i, PT, native_T)
+    atom_j_use = Molly._maybe_float_precision_convert(atom_j, PT, native_T)
+    dr_use = Molly._maybe_float_precision_convert(dr, PT, native_T)
+    coord_i_use = Molly._maybe_float_precision_convert(coord_i, PT, native_T)
+    coord_j_use = Molly._maybe_float_precision_convert(coord_j, PT, native_T)
+    vel_i_use = Molly._maybe_float_precision_convert(vel_i, PT, native_T)
+    vel_j_use = Molly._maybe_float_precision_convert(vel_j, PT, native_T)
+    return SVector(Molly.potential_energy_gpu(inters[1], dr_use, atom_i_use, atom_j_use,
+                                              E, special, coord_i_use, coord_j_use,
+                                              boundary, vel_i_use, vel_j_use, step_n))
+end
+
+@inline function sum_pairwise_potentials_gpu(inters::Tuple, dr, atom_i, atom_j,
+                                             ::Val{E}, ::Val{PT}, special, coord_i,
+                                             coord_j, boundary, vel_i, vel_j,
+                                             step_n) where {E, PT}
+    return sum_pairwise_potentials_gpu((first(inters),), dr, atom_i, atom_j,
+                                       Val(E), Val(PT), special, coord_i, coord_j,
+                                       boundary, vel_i, vel_j, step_n) +
+           sum_pairwise_potentials_gpu(Base.tail(inters), dr, atom_i, atom_j,
+                                       Val(E), Val(PT), special, coord_i, coord_j,
+                                       boundary, vel_i, vel_j, step_n)
+end
 
 function __init__()
     empty!(CUDA_LAUNCH_AUTOTUNE_CACHE)
@@ -982,7 +1034,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     kernel = @cuda launch=false always_inline=true energy_kernel!(
             pe_vec_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
-            sys.boundary, step_n, buffers.compressed_masks,
+            boundary, sys.boundary, step_n, buffers.compressed_masks,
             Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow)
@@ -995,7 +1047,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         kernel(
                 pe_vec_nounits, buffers.coords_reordered,
                 buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
-                sys.boundary, step_n, buffers.compressed_masks,
+                boundary, sys.boundary, step_n, buffers.compressed_masks,
                 Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type, buffers.num_interacting_tiles,
                 buffers.interacting_tiles_overflow;
@@ -2084,7 +2136,7 @@ function energy_kernel!(
     ::Val{ET},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-    num_interacting_tiles, interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, D}
+    num_interacting_tiles, interacting_tiles_overflow) where {N, r_cut2, A, energy_units, ET, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -2119,7 +2171,7 @@ function energy_kernel!(
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
 
-    sum_E = zero(T)
+    sum_E = zero(ET)
 
     r = Int32((N - 1) % 32 + 1)
 
@@ -2224,7 +2276,7 @@ function energy_kernel!(
                 coords_i, coords_j,
                 boundary_energy,
                 vel_i, vel_j,
-                step_n) : zero(SVector{1, T})
+                step_n) : zero(SVector{1, ET})
             @fastmath sum_E += ustrip(pe[1])
         end
     elseif i == j && i < n_blocks
@@ -2255,7 +2307,7 @@ function energy_kernel!(
                 coords_i, coords_j,
                 boundary_energy,
                 vel_i, vel_j,
-                step_n) : zero(SVector{1, T})
+                step_n) : zero(SVector{1, ET})
             @fastmath sum_E += ustrip(pe[1])
         end
     elseif i == n_blocks && j == n_blocks
@@ -2287,7 +2339,7 @@ function energy_kernel!(
                     coords_i, coords_j,
                     boundary_energy,
                     vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
+                    step_n) : zero(SVector{1, ET})
                 @fastmath sum_E += ustrip(pe[1])
             end
         end

@@ -119,58 +119,6 @@ function pairwise_pe(::Coulomb, r, (ke, qi, qj))
     return (ke * qi * qj) * inv(r)
 end
 
-# At exact overlap, use the finite soft-core limit whenever a nonzero
-# regularization scale exists. If softening is effectively disabled, fall back
-# to zero to avoid singular endpoint evaluations in the soft-core wrappers.
-@inline function overlap_pe_coulomb_softcore_beutler(dr, energy_units, ke, qij, λ, σ6_fac)
-    if iszero_value(σ6_fac)
-        return zero_pairwise_energy(dr, energy_units)
-    end
-    return λ * ke * (qij / sqrt(cbrt(σ6_fac)))
-end
-
-@inline function overlap_pe_coulomb_softcore_gapsys(dr, energy_units, ke, qij, λ, R)
-    if iszero_value(R)
-        return zero_pairwise_energy(dr, energy_units)
-    end
-    return λ * ke * ((3 * qij) / R)
-end
-
-@inline function overlap_pe_coulomb_softcore_beutler_rf(dr,
-                                                        energy_units,
-                                                        ke,
-                                                        qij,
-                                                        λ,
-                                                        σ6_fac,
-                                                        krf,
-                                                        rc,
-                                                        special)
-    if iszero_value(σ6_fac)
-        return zero_pairwise_energy(dr, energy_units)
-    end
-
-    R_eff = sqrt(cbrt(σ6_fac))
-    if special
-        return λ * ke * (qij / R_eff)
-    end
-
-    crf_λ = inv(sqrt(cbrt(σ6_fac + rc^6))) + krf * rc^2
-    return λ * ke * qij * (inv(R_eff) - crf_λ)
-end
-
-@inline function overlap_pe_coulomb_softcore_gapsys_rf(dr,
-                                                       energy_units,
-                                                       ke,
-                                                       qij,
-                                                       λ,
-                                                       R,
-                                                       crf)
-    if iszero_value(R)
-        return zero_pairwise_energy(dr, energy_units)
-    end
-    return λ * ke * qij * (3 * inv(R) - crf)
-end
-
 @doc raw"""
     CoulombScaled(; cutoff, use_neighbors, scheduler, weight_special, coulomb_const)
 

@@ -132,7 +132,7 @@ tss_state = TSSState(
 N_MD_STEPS    = 50
 SELF_ADJ_STEPS = 5
 
-N_REPLICAS = 4
+N_REPLICAS = 1
 
 tss_dipeptide_loggers(replica_i::Integer) =
     (traj = TrajectoryWriter(1000, "$(OUTPUT_PREFIX)_replica_$(replica_i).dcd"),)
@@ -180,7 +180,7 @@ function tss_visited_states(state)
         collect(Iterators.flatten(replica_states))
 end
 
-TSS_TIME = FT(25.0)u"ns"
+TSS_TIME = FT(1.0)u"ns"
 TOTAL_STEPS = Int(floor(TSS_TIME / DT))
 N_CYCLES = Int(floor(TOTAL_STEPS / (SELF_ADJ_STEPS * N_MD_STEPS)))
 

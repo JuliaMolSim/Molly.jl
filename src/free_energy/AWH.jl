@@ -51,7 +51,7 @@ accumulated statistical weights, free energy estimates, and target distribution 
     energies for adjacent λ windows. Generally improves performance.
 Loggers are attached by [`AWHSimulation`](@ref), not by `AWHState`.
 """
-mutable struct AWHState{T, ES, AS}
+mutable struct AWHState{T, ES, AS, SE}
     state_space::ES
     active_state::AS
 
@@ -167,11 +167,11 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
         rho_val ./= rho_sum
     end
     log_ρ = log.(rho_val)
-    scratch_energies = [zero(partition.cached_master_pe) for _ in 1:n_λ]
+    scratch_energies = [zero(state_space.partition.cached_master_pe) for _ in 1:n_λ]
 
     stats = AWHStats(Int[], Int[], Vector{FT}[], FT[], Vector{FT}[], Symbol[], FT[])
 
-    return AWHState{FT, typeof(state_space), typeof(active_state)}(
+    return AWHState{FT, typeof(state_space), typeof(active_state), typeof(scratch_energies)}(
         state_space,
         active_state,
         zeros(FT, n_λ),
@@ -474,7 +474,8 @@ end
 # Reweights coordinates along λ windows and accumulates histogram
 function process_sample(awh::AWHState{FT},
                         active_state::ActiveThermoState = awh.active_state;
-                        weight_relevance::Real = 0.1) where FT
+                        weight_relevance::Real = 0.1,
+                        coverage_type::Symbol = :reweighted) where FT
     n_win = n_states(awh.state_space)
     coords = active_state.active_sys.coords
     bound  = active_state.active_sys.boundary
@@ -492,10 +493,12 @@ function process_sample(awh::AWHState{FT},
     awh.w2_seg .+= awh.w_last .^ 2
     awh.n_accum += 1
 
-    # Check visited windows using w_last
-    for (i, val) in enumerate(awh.w_last)
-        if val > weight_relevance/n_win
-            push!(awh.visited_windows, i)
+    if coverage_type == :reweighted
+        # Check visited windows using w_last
+        for (i, val) in enumerate(awh.w_last)
+            if val > weight_relevance/n_win
+                push!(awh.visited_windows, i)
+            end
         end
     elseif coverage_type == :physical
         # Alchemical-style AWH: only the physically propagated window counts as visited.
@@ -616,6 +619,7 @@ function simulate!(awh_sim::AWHSimulation{T},
                    show_progress = default_show_progress()) where T
 
     n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
+    remaining_steps = n_steps - n_iterations * awh_sim.n_md_steps
 
     progress = setup_progress(n_iterations, show_progress)
     for iteration_n in 1:n_iterations
@@ -631,7 +635,12 @@ function simulate!(awh_sim::AWHSimulation{T},
         sync_awh_state_from_sim!(awh_sim)
 
 
-        active_pe_units = process_sample(awh_sim.state, awh_sim.active_state)
+        active_pe_units = process_sample(
+            awh_sim.state,
+            awh_sim.active_state;
+            weight_relevance=awh_sim.significant_weight,
+            coverage_type=awh_sim.coverage_type,
+        )
 
         if !isnothing(awh_sim.pmf)
             # Calculate a(t) factor for PMF Deconvolution [Lindahl et al. 2014, Eq. 9 text]
@@ -674,9 +683,17 @@ function simulate!(awh_sim::AWHSimulation{T},
         next_nograd!(progress)
     end
 
-    # Preserve the exact total number of requested MD steps unless converged early.
-    if !converged && remaining_steps > 0
-        simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, remaining_steps)
+    # Preserve the exact total number of requested MD steps.
+    if remaining_steps > 0
+        simulate!(
+            awh_sim.active_state.active_sys,
+            awh_sim.active_state.active_integrator,
+            remaining_steps;
+            init_step = awh_sim.current_step,
+            log_initial_state = awh_sim.initial_log_pending,
+        )
+        awh_sim.current_step += remaining_steps
+        sync_awh_state_from_sim!(awh_sim)
     end
 
     return awh_sim

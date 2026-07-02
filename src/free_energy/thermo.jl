@@ -81,9 +81,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     ref_sys = thermo_states[1].system
     FT = typeof(ustrip(ref_sys.total_mass))
 
-    # Append target state for comprehensive intersection
-    all_states = isnothing(target_state) ? collect(thermo_states) : [thermo_states..., target_state]
-    n_all = length(all_states)
+    thermo_states_vec = collect(thermo_states)
     
     # 1. Identify Global Solute Indices (Perturbed Atoms)
     solute_indices = Set{Int}()
@@ -92,7 +90,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     ref_atoms_cpu = from_device(ref_sys.atoms)
     n_ref_atoms = length(ref_atoms_cpu)
 
-    for tstate in all_states
+    for tstate in thermo_states_vec
         atoms = tstate.system.atoms
         push!(λ_atoms, atoms)
 
@@ -114,10 +112,10 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     end
 
     # 2. Neighbor Finder Policy
-    # Enforce a shared finder configuration across all λ windows (and target state),
+    # Enforce a shared finder configuration across all λ windows,
     # then build exactly one partitioned finder for master and one for λ interactions.
     ref_nfinder = ref_sys.neighbor_finder
-    @inbounds for (i, tstate) in enumerate(all_states)
+    @inbounds for (i, tstate) in enumerate(thermo_states_vec)
         state_nf = tstate.system.neighbor_finder
         if typeof(state_nf) != typeof(ref_nfinder)
             throw(ArgumentError(
@@ -151,18 +149,16 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
 
     AT = array_type(ref_sys)
     master_eligible = to_device(master_eligible_cpu, AT)
-    λ_eligible = to_device(λ_eligible_cpu, AT)
+    λ_eligible = to_device(specific_eligible_cpu, AT)
     special_mask    = to_device(base_special_cpu, AT)
 
     # 3. Extract and Partition Interaction Lists
-    # Size correctly for ALL states including the target
-    list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_all]
-    list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_all]
-    list_3a = [Vector{InteractionList3Atoms}() for _ in 1:n_all]
-    list_4a = [Vector{InteractionList4Atoms}() for _ in 1:n_all]
+    list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_λ]
+    list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_λ]
+    list_3a = [Vector{InteractionList3Atoms}() for _ in 1:n_λ]
+    list_4a = [Vector{InteractionList4Atoms}() for _ in 1:n_λ]
 
-    # Iterate over all_states to capture target interactions for valid intersection
-    @inbounds for (i, tstate) in enumerate(all_states)
+    @inbounds for (i, tstate) in enumerate(thermo_states_vec)
         sils = tstate.system.specific_inter_lists
         for inter in sils
             if inter isa InteractionList1Atoms
@@ -177,14 +173,14 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         end
     end
 
-    all_gils = [collect(tstate.system.general_inters) for tstate in all_states]
-    all_pils = [collect(tstate.system.pairwise_inters) for tstate in all_states]
+    all_gils = [collect(tstate.system.general_inters) for tstate in thermo_states_vec]
+    all_pils = [collect(tstate.system.pairwise_inters) for tstate in thermo_states_vec]
     # Pairwise interactions that do not use a neighbor list cannot be safely split
     # by an eligibility mask. Keep those fully state-specific to avoid double counting.
     all_pils_nl = [filter(use_neighbors, pils) for pils in all_pils]
     all_pils_nonl = [filter(!use_neighbors, pils) for pils in all_pils]
 
-    # Calculate interactions identical across ALL simulated windows AND the target state
+    # Calculate interactions identical across ALL simulated windows.
     master_sils_1a = intersect(list_1a...)
     master_sils_2a = intersect(list_2a...)
     master_sils_3a = intersect(list_3a...)
@@ -210,23 +206,6 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         u_g = setdiff(all_gils[i], master_gils)
         λ_general[i] = (u_g...,)
         λ_pairwise[i] = (all_pils[i]...,)
-    end
-
-    # Extract Target Hamiltonian (Safe because lists are length n_all)
-    if !isnothing(target_state)
-        tgt_idx = n_all
-        tgt_p_nl = split_pairwise_by_atoms ? all_pils_nl[tgt_idx] : setdiff(all_pils_nl[tgt_idx], master_pils)
-        tgt_p = (tgt_p_nl..., all_pils_nonl[tgt_idx]...)
-        tgt_s = (setdiff(list_1a[tgt_idx], master_sils_1a)..., 
-                 setdiff(list_2a[tgt_idx], master_sils_2a)...,
-                 setdiff(list_3a[tgt_idx], master_sils_3a)...,
-                 setdiff(list_4a[tgt_idx], master_sils_4a)...)
-        tgt_g = (setdiff(all_gils[tgt_idx], master_gils)...,)
-        target_hamiltonian = LambdaHamiltonian(tgt_p, tgt_s, tgt_g)
-        target_atoms_array = λ_atoms[tgt_idx]
-    else
-        target_hamiltonian = nothing
-        target_atoms_array = nothing
     end
 
     # 4. Construct Partitioned Systems
@@ -274,7 +253,10 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         λ_atoms,
         hamiltonians,
         nothing,
-        initial_pe
+        initial_pe,
+        0,
+        reuse_neighbors,
+        reuse_neighbors,
     )
 end
 
@@ -386,11 +368,6 @@ function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary;
     end
 
     return energies
-end
-
-function evaluate_energy_all!(partition::AlchemicalPartition, coords, boundary)
-    energies = Vector{typeof(partition.cached_master_pe)}(undef, length(partition.λ_hamiltonians))
-    return evaluate_energy_all!(partition, coords, boundary, energies)
 end
 
 function logsumexp(x::AbstractVector{T}) where T

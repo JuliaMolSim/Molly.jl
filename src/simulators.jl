@@ -190,7 +190,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
-    E = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads,
+    E = potential_energy(sys, neighbors, buffers, init_step; n_threads=n_threads,
                          specific_inter_lists=sis)
     initial_run_loggers = initial_logger_mode(run_loggers, log_initial_state)
     apply_loggers!(sys, buffers, neighbors, init_step, initial_run_loggers; n_threads=n_threads,
@@ -215,7 +215,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                     n_threads=n_threads)
-        E_trial = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
+        E_trial = potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads,
                                                             specific_inter_lists=sis)
         if E_trial < E
             hn = 6 * hn / 5
@@ -1841,7 +1841,7 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
-    E_old = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads)
+    E_old = potential_energy(sys, neighbors, buffers, init_step; n_threads=n_threads)
     coords_old = zero(sys.coords)
 
     progress = setup_progress(n_steps, show_progress)
@@ -1851,7 +1851,7 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
         neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-        E_new = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
+        E_new = potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads)
 
         ΔE = E_new - E_old
         δ = ΔE / (sys.k * sim.temperature)

@@ -3,6 +3,23 @@
 @inline _sum_tuple(x::Tuple{T}) where T = first(x)
 @inline _sum_tuple(x::Tuple) = first(x) + _sum_tuple(Base.tail(x))
 
+@inline function sum_pairwise_forces_gpu(inters::Tuple{T}, dr, atom_i, atom_j,
+                                         ::Val{F}, special, coord_i, coord_j,
+                                         boundary, vel_i, vel_j, step_n) where {T, F}
+    return force_gpu(inters[1], dr, atom_i, atom_j, F, special, coord_i, coord_j,
+                     boundary, vel_i, vel_j, step_n)
+end
+
+@inline function sum_pairwise_forces_gpu(inters::Tuple, dr, atom_i, atom_j,
+                                         ::Val{F}, special, coord_i, coord_j,
+                                         boundary, vel_i, vel_j, step_n) where F
+    return force_gpu(first(inters), dr, atom_i, atom_j, F, special, coord_i, coord_j,
+                     boundary, vel_i, vel_j, step_n) +
+           sum_pairwise_forces_gpu(Base.tail(inters), dr, atom_i, atom_j,
+                                   Val(F), special, coord_i, coord_j,
+                                   boundary, vel_i, vel_j, step_n)
+end
+
 @inline function sum_pairwise_forces(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
                                      boundary, vel_i, vel_j, step_n) where F
     dr = vector(coord_i, coord_j, boundary)

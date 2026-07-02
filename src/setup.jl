@@ -1166,7 +1166,8 @@ function System(coord_file::AbstractString,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
                   dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr, hydrogen_mass,
-                  strictness, launch_config, autotune_launch, constraint_algorithm)
+                  strictness, launch_config, autotune_launch, nonbonded_energy_type,
+                  constraint_algorithm)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1505,7 +1506,8 @@ function System(T::Type,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
                   dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
-                  hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
+                  hydrogen_mass, strictness, launch_config, autotune_launch, nonbonded_energy_type,
+                  constraint_algorithm)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1667,7 +1669,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
                 ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent, kappa,
                 grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
-                hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
+                hydrogen_mass, strictness, launch_config, autotune_launch, nonbonded_energy_type,
+                constraint_algorithm)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
 

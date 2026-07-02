@@ -116,7 +116,7 @@ awh_state = AWHState(
 
 N_MD_STEPS = 50
 
-AWH_TIME = FT(25)u"ns"
+AWH_TIME = FT(1)u"ns"
 TOTAL_STEPS = Int(floor(AWH_TIME / DT))
 
 function save_state_histogram(states, bins, path)

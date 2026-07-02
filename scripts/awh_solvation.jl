@@ -18,7 +18,7 @@ OUTPUT_PREFIX = "awh_solvation"
 
 N_LAMBDA_STATES = 20
 N_MD_STEPS = 50
-AWH_TIME = FT(15)u"ns"
+AWH_TIME = FT(1)u"ns"
 SOLVENT_EQUIL_TIME = FT(500)u"ps"
 VACUUM_EQUIL_TIME = FT(100)u"ps"
 
@@ -227,7 +227,7 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Ran
     equil_time = is_vacuum ? VACUUM_EQUIL_TIME : SOLVENT_EQUIL_TIME
     equil_steps = Int(floor(equil_time / Δt))
     simulate!(sys_base, int_eq, 10_000; rng=rng)
-    simulate!(sys_base, integrator, equil_steps; rng=rng)
+    simulate!(sys_base, integrator, 10_000; rng=rng)
 
     p_inters = sys_base.pairwise_inters
     idx_lj   = findfirst(x -> x isa LennardJones, p_inters)

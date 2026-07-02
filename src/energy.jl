@@ -26,7 +26,7 @@ end
 
 function total_energy(sys, neighbors, step_n::Integer=0, buffers=nothing; kwargs...)
     ke = kinetic_energy(sys)
-    pe = potential_energy(sys, neighbors, step_n, buffers; kwargs...)
+    pe = potential_energy(sys, neighbors, buffers, step_n; kwargs...)
     return ke + pe
 end
 
@@ -268,13 +268,14 @@ end
 end
 
 function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads())
+                          n_threads::Integer=Threads.nthreads(),
+                          specific_inter_lists=sys.specific_inter_lists)
     system_T = float_type(sys)
     pairwise_T = nonbonded_energy_type(sys)
     pairwise_atoms, pairwise_coords, pairwise_velocities, pairwise_boundary, pairwise_inters =
         _cpu_pairwise_energy_inputs(sys, Val(pairwise_T))
     pairwise_inters = values(pairwise_inters)
-    pairwise_specific_inters = (pairwise_T === system_T ? sys.specific_inter_lists : _float_precision_convert(sys.specific_inter_lists, pairwise_T))
+    pairwise_specific_inters = (pairwise_T === system_T ? specific_inter_lists : _float_precision_convert(specific_inter_lists, pairwise_T))
     pairwise_general_inters = (pairwise_T === system_T ? sys.general_inters : _float_precision_convert(sys.general_inters, pairwise_T))
 
     pe = pairwise_pe_loop(
@@ -439,18 +440,19 @@ end
 function potential_energy(sys::System{<:Any, <:AbstractGPUArray}, neighbors,
                           step_n::Integer=0, buffers_empty::Nothing=nothing; kwargs...)
     buffers = init_buffers!(sys, 1, true)
-    return potential_energy(sys, neighbors, step_n, buffers; kwargs...)
+    return potential_energy(sys, neighbors, buffers, step_n; kwargs...)
 end
 
 function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T}, neighbors,
                           buffers::BuffersGPU, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where T
+                          n_threads::Integer=Threads.nthreads(),
+                          specific_inter_lists=sys.specific_inter_lists) where T
     pairwise_T = nonbonded_energy_type(sys)
     pairwise_atoms, pairwise_coords, pairwise_velocities =
         _gpu_pairwise_energy_inputs(sys, Val(pairwise_T))
     pairwise_boundary = (pairwise_T === T ? sys.boundary : _pairwise_energy_boundary(sys.boundary, Val(pairwise_T)))
     pairwise_inters = (pairwise_T === T ? values(sys.pairwise_inters) : values(_pairwise_energy_inters(sys.pairwise_inters, Val(pairwise_T))))
-    pairwise_specific_inters = (pairwise_T === T ? sys.specific_inter_lists : _float_precision_convert(sys.specific_inter_lists, pairwise_T))
+    pairwise_specific_inters = (pairwise_T === T ? specific_inter_lists : _float_precision_convert(specific_inter_lists, pairwise_T))
     pairwise_general_inters = (pairwise_T === T ? sys.general_inters : _float_precision_convert(sys.general_inters, pairwise_T))
 
     fill!(buffers.pe_vec_nounits, zero(pairwise_T))

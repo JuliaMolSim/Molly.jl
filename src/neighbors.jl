@@ -692,6 +692,21 @@ function neighbor_finder_masks(nf::Union{DistanceNeighborFinder, TreeNeighborFin
     return copy_to_bitmatrix(from_device(nf.eligible)), copy_to_bitmatrix(from_device(nf.special))
 end
 
+function neighbor_finders_equivalent(nf1, nf2)
+    typeof(nf1) === typeof(nf2) || return false
+    neighbor_finder_masks(nf1) == neighbor_finder_masks(nf2) || return false
+    getfield(nf1, :dist_cutoff) == getfield(nf2, :dist_cutoff) || return false
+    return true
+end
+
+function neighbor_finders_equivalent(nf1::GPUNeighborFinder, nf2::GPUNeighborFinder)
+    neighbor_finder_masks(nf1) == neighbor_finder_masks(nf2) || return false
+    nf1.dist_cutoff == nf2.dist_cutoff || return false
+    return nf1.n_steps_reorder == nf2.n_steps_reorder
+end
+
+neighbor_finders_equivalent(::NoNeighborFinder, ::NoNeighborFinder) = true
+
 function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder,
                                 TreeNeighborFinder, CellListMapNeighborFinder})
     println(io, typeof(neighbor_finder))
