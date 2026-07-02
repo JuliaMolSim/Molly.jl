@@ -442,6 +442,56 @@
                 )
             end
         end
+
+        @testset "conducting boundary conditions" begin
+            crf_ref_inf = CoulombReactionField(dist_cutoff=rc_test, solvent_dielectric=Inf)
+            cscrfb_inf = CoulombSoftCoreBeutlerReactionField(
+                dist_cutoff=rc_test, solvent_dielectric=Inf, α=1.0,
+            )
+            cscrfg_inf = CoulombSoftCoreGapsysReactionField(
+                dist_cutoff=rc_test, solvent_dielectric=Inf, α=0.3, σQ=1.0u"nm",
+            )
+
+            # λ = 1 reduces to base reaction field at Inf, with no NaN
+            for dr_test in (dr12, dr13, dr14)
+                ref_f = force(crf_ref_inf, dr_test, a1_rf, a1_rf)
+                ref_pe = potential_energy(crf_ref_inf, dr_test, a1_rf, a1_rf)
+                @test all(isfinite, ref_f)
+                @test isfinite(ref_pe)
+                @test isapprox(force(cscrfb_inf, dr_test, a1_rf, a1_rf), ref_f;
+                               atol=1e-9u"kJ * mol^-1 * nm^-1")
+                @test isapprox(force(cscrfg_inf, dr_test, a1_rf, a1_rf), ref_f;
+                               atol=1e-9u"kJ * mol^-1 * nm^-1")
+                @test isapprox(potential_energy(cscrfb_inf, dr_test, a1_rf, a1_rf), ref_pe;
+                               atol=1e-9u"kJ * mol^-1")
+                @test isapprox(potential_energy(cscrfg_inf, dr_test, a1_rf, a1_rf), ref_pe;
+                               atol=1e-9u"kJ * mol^-1")
+            end
+
+            # λ = 0.5 stays finite and nonzero (previously NaN without isinf handling)
+            for inter_rf in (cscrfb_inf, cscrfg_inf)
+                for dr_test in (dr12, dr13, dr14)
+                    f_val = force(inter_rf, dr_test, a1_l05, a1_l05)
+                    pe_val = potential_energy(inter_rf, dr_test, a1_l05, a1_l05)
+                    @test all(isfinite, f_val)
+                    @test isfinite(pe_val)
+                    @test !all(iszero, f_val)
+                    @test !iszero(pe_val)
+                end
+            end
+
+            # potential is zero at the cutoff under conducting boundary conditions
+            @test isapprox(potential_energy(cscrfb_inf, dr_rc, a1_l05, a1_l05),
+                           0.0u"kJ * mol^-1"; atol=1e-10u"kJ * mol^-1")
+            @test isapprox(potential_energy(cscrfg_inf, dr_rc, a1_l05, a1_l05),
+                           0.0u"kJ * mol^-1"; atol=1e-10u"kJ * mol^-1")
+
+            # values vanish beyond cutoff under conducting boundary conditions
+            for inter_rf in (cscrfb_inf, cscrfg_inf)
+                @test all(iszero, force(inter_rf, dr_beyond, a1_l05, a1_l05))
+                @test iszero(potential_energy(inter_rf, dr_beyond, a1_l05, a1_l05))
+            end
+        end
     end
 
     @testset "Soft-core Ewald" begin

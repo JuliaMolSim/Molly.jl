@@ -724,6 +724,8 @@ end
 
     if special
         krf = inv(rc^3) * zero(T)
+    elseif isinf(inter.solvent_dielectric) # Conducting boundary conditions
+        krf = inv(2 * rc^3)
     else
         krf = inv(rc^3) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
     end
@@ -774,6 +776,9 @@ end
         if special
             krf = inv(rc^3) * zero(T)
             crf = inv(rc) * zero(T)
+        elseif isinf(inter.solvent_dielectric) # Conducting boundary conditions
+            krf = inv(2 * rc^3)
+            crf = 3 * inv(2 * rc)
         else
             krf = inv(rc^3) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
             crf = inv(rc) * ((3 * inter.solvent_dielectric) / (2 * inter.solvent_dielectric + 1))
@@ -794,7 +799,11 @@ end
         pe = λ * (ke * qi * qj) * inv(R_eff)
         return pe * inter.weight_special * (r <= rc)
     else
-        krf = inv(rc^3) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
+        if isinf(inter.solvent_dielectric) # Conducting boundary conditions
+            krf = inv(2 * rc^3)
+        else
+            krf = inv(rc^3) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
+        end
         crf_λ = inv(sqrt(cbrt(inter.α * (1 - λ) * σ6 + rc^6))) + krf * rc^2
         pe = λ * (ke * qi * qj) * (inv(R_eff) + krf * r2 - crf_λ)
         return pe * (r <= rc)
@@ -884,6 +893,8 @@ end
 
     if special
         krf = inv(rc^3) * zero(T)
+    elseif isinf(inter.solvent_dielectric) # Conducting boundary conditions
+        krf = inv(2 * rc^3)
     else
         krf = inv(rc^3) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
     end
@@ -936,6 +947,9 @@ end
     if special
         krf = inv(rc^3) * zero(T)
         crf = inv(rc) * zero(T)
+    elseif isinf(inter.solvent_dielectric) # Conducting boundary conditions
+        krf = inv(2 * rc^3)
+        crf = 3 * inv(2 * rc)
     else
         krf = inv(rc^3) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
         crf = inv(rc) * ((3 * inter.solvent_dielectric) / (2 * inter.solvent_dielectric + 1))
