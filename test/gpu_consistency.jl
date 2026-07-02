@@ -536,6 +536,61 @@
                 @test isapprox(energies[2], direct[2], rtol=1e-8, atol=1e-10u"kJ * mol^-1")
             end
         end
+
+        @testset "Langevin random numbers" begin
+            n_atoms = 50_000
+            boundary = CubicBoundary(50.0u"nm")
+
+            atom_mass = 10.0u"g/mol"
+            Q = Quantity{Float32, u"𝐋", typeof(u"nm")}
+            temp = 298.0u"K"
+            AT = CuArray
+            atoms = [Atom(mass=10.0f0u"g/mol", charge=0.0f0, σ=0.3f0u"nm", ϵ=0.1f0u"kJ * mol^-1") for i in 1:n_atoms]
+            coords = [SVector{3, Q}(1.0f0u"nm", 1.0f0u"nm", 1.0f0u"nm") for _ in 1:n_atoms]
+            velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+            pairwise_inters = Tuple([LennardJones(;cutoff=Molly.DistanceCutoff(0.9f0u"nm"),use_neighbors=false)])
+
+            sys = System(
+                atoms=deepcopy(atoms),
+                coords=deepcopy(coords),
+                boundary=boundary,
+                velocities=deepcopy(velocities),
+                pairwise_inters=pairwise_inters,
+                loggers=(temp=TemperatureLogger(100),)
+            )
+
+            sys2 = System(
+                atoms=AT(atoms),
+                coords=AT(coords),
+                boundary=boundary,
+                velocities=AT(velocities),
+                pairwise_inters=pairwise_inters,
+                loggers=(temp=TemperatureLogger(100),),
+                #neighbor_finder=neighbor_finder,
+            )
+
+            using Random, Statistics
+
+            velocities_gpu = AT(velocities)
+
+            ### benchmark against cpu version
+            for temp in [200.0u"K",250.0u"K",298.0u"K"] 
+                vel=deepcopy(velocities)
+                Molly.random_velocities!(vel, sys, temp)
+                mean_cpu = mean(mean(vel))
+                std_cpu = mean( std(vel))
+
+                vel= Molly.random_velocities!(velocities_gpu, sys2, temp; rng=cuRAND.LibraryRNG())
+                mean_gpu = mean(mean(vel))
+                std_gpu = mean( std(vel))
+
+                @test abs(mean_cpu) < 0.005u"nm * ps^-1"
+                @test abs(mean_gpu) < 0.005u"nm * ps^-1"
+
+                @test 0.99 < abs(std_cpu/std_gpu) < 1.01
+            end
+
+        end
     else
         @warn "CUDA not functional, skipping GPU consistency tests"
     end
