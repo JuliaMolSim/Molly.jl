@@ -1,16 +1,23 @@
 export
     Coulomb,
+    CoulombScaled,
     CoulombSoftCoreBeutler,
     CoulombSoftCoreGapsys,
     CoulombReactionField,
+    CoulombReactionFieldScaled,
     CoulombSoftCoreBeutlerReactionField,
     CoulombSoftCoreGapsysReactionField,
     CoulombEwald,
+    CoulombEwaldScaled,
     CoulombSoftCoreBeutlerEwald,
     CoulombSoftCoreGapsysEwald,
     Yukawa
 
 const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
+
+@inline function scaled_charge(scheduler, atom, ::Val{T}) where T
+    return atom.charge * T(scale_elec(scheduler, T(atom.λ), atom.alch_role))
+end
 
 @doc raw"""
     Coulomb(; cutoff, use_neighbors, weight_special, coulomb_const)
@@ -68,7 +75,7 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...) where C
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
@@ -94,7 +101,7 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...) where C
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
@@ -109,6 +116,157 @@ end
 end
 
 function pairwise_pe(::Coulomb, r, (ke, qi, qj))
+    return (ke * qi * qj) * inv(r)
+end
+
+# At exact overlap, use the finite soft-core limit whenever a nonzero
+# regularization scale exists. If softening is effectively disabled, fall back
+# to zero to avoid singular endpoint evaluations in the soft-core wrappers.
+@inline function overlap_pe_coulomb_softcore_beutler(dr, energy_units, ke, qij, λ, σ6_fac)
+    if iszero_value(σ6_fac)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    return λ * ke * (qij / sqrt(cbrt(σ6_fac)))
+end
+
+@inline function overlap_pe_coulomb_softcore_gapsys(dr, energy_units, ke, qij, λ, R)
+    if iszero_value(R)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    return λ * ke * ((3 * qij) / R)
+end
+
+@inline function overlap_pe_coulomb_softcore_beutler_rf(dr,
+                                                        energy_units,
+                                                        ke,
+                                                        qij,
+                                                        λ,
+                                                        σ6_fac,
+                                                        krf,
+                                                        rc,
+                                                        special)
+    if iszero_value(σ6_fac)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    R_eff = sqrt(cbrt(σ6_fac))
+    if special
+        return λ * ke * (qij / R_eff)
+    end
+
+    crf_λ = inv(sqrt(cbrt(σ6_fac + rc^6))) + krf * rc^2
+    return λ * ke * qij * (inv(R_eff) - crf_λ)
+end
+
+@inline function overlap_pe_coulomb_softcore_gapsys_rf(dr,
+                                                       energy_units,
+                                                       ke,
+                                                       qij,
+                                                       λ,
+                                                       R,
+                                                       crf)
+    if iszero_value(R)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    return λ * ke * qij * (3 * inv(R) - crf)
+end
+
+@doc raw"""
+    CoulombScaled(; cutoff, use_neighbors, scheduler, weight_special, coulomb_const)
+
+The Coulomb electrostatic interaction with charges scaled by an alchemical
+electrostatic scheduler.
+"""
+@kwdef struct CoulombScaled{C, SCH, W, T} <: PairwiseInteraction
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    scheduler::SCH = DefaultLambdaScheduler()
+    weight_special::W = 1
+    coulomb_const::T = coulomb_const
+end
+
+use_neighbors(inter::CoulombScaled) = inter.use_neighbors
+
+function Base.zero(coul::CoulombScaled{C, SCH, W, T}) where {C, SCH, W, T}
+    return CoulombScaled(
+        coul.cutoff,
+        coul.use_neighbors,
+        coul.scheduler,
+        zero(W),
+        zero(T),
+    )
+end
+
+function Base.:+(c1::CoulombScaled, c2::CoulombScaled)
+    return CoulombScaled(
+        c1.cutoff,
+        c1.use_neighbors,
+        c1.scheduler,
+        c1.weight_special + c2.weight_special,
+        c1.coulomb_const + c2.coulomb_const,
+    )
+end
+
+@inline function force(inter::CoulombScaled{C},
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...) where C
+    ke = inter.coulomb_const
+    T = typeof(ustrip(ke))
+    qi = scaled_charge(inter.scheduler, atom_i, Val(T))
+    qj = scaled_charge(inter.scheduler, atom_j, Val(T))
+    if iszero_value(qi) || iszero_value(qj)
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    r = sqrt(sum(abs2, dr))
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    cutoff = inter.cutoff
+    params = (ke, qi, qj)
+
+    f = force_cutoff(cutoff, inter, r, params)
+    fdr = (f / r) * dr
+    return special ? fdr * inter.weight_special : fdr
+end
+
+function pairwise_force(::CoulombScaled, r, (ke, qi, qj))
+    return (ke * qi * qj) / r^2
+end
+
+@inline function potential_energy(inter::CoulombScaled{C},
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...) where C
+    ke = inter.coulomb_const
+    T = typeof(ustrip(ke))
+    qi = scaled_charge(inter.scheduler, atom_i, Val(T))
+    qj = scaled_charge(inter.scheduler, atom_j, Val(T))
+    if iszero_value(qi) || iszero_value(qj)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    r = sqrt(sum(abs2, dr))
+    if iszero_value(r)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    cutoff = inter.cutoff
+    params = (ke, qi, qj)
+
+    pe = pe_cutoff(cutoff, inter, r, params)
+    return special ? pe * inter.weight_special : pe
+end
+
+function pairwise_pe(::CoulombScaled, r, (ke, qi, qj))
     return (ke * qi * qj) * inv(r)
 end
 
@@ -261,7 +419,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -326,7 +484,7 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     qi, qj = atom_i.charge, atom_j.charge
     qij = qi * qj
     cutoff = inter.cutoff
@@ -461,7 +619,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -526,7 +684,7 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     qi, qj = atom_i.charge, atom_j.charge
     qij = qi * qj
     cutoff = inter.cutoff
@@ -705,6 +863,117 @@ end
     else
         return pe * (r <= inter.dist_cutoff)
     end
+end
+
+@doc raw"""
+    CoulombReactionFieldScaled(; dist_cutoff, solvent_dielectric, use_neighbors,
+                               scheduler, weight_special, coulomb_const)
+
+The reaction-field Coulomb interaction with charges scaled by an alchemical
+electrostatic scheduler.
+"""
+@kwdef struct CoulombReactionFieldScaled{D, S, SCH, W, T} <: PairwiseInteraction
+    dist_cutoff::D
+    solvent_dielectric::S = crf_solvent_dielectric
+    use_neighbors::Bool = false
+    scheduler::SCH = DefaultLambdaScheduler()
+    weight_special::W = 1
+    coulomb_const::T = coulomb_const
+end
+
+use_neighbors(inter::CoulombReactionFieldScaled) = inter.use_neighbors
+
+function Base.zero(coul::CoulombReactionFieldScaled{D, S, SCH, W, T}) where {D, S, SCH, W, T}
+    return CoulombReactionFieldScaled{D, S, SCH, W, T}(
+        zero(D),
+        zero(S),
+        coul.use_neighbors,
+        coul.scheduler,
+        zero(W),
+        zero(T),
+    )
+end
+
+function Base.:+(c1::CoulombReactionFieldScaled, c2::CoulombReactionFieldScaled)
+    return CoulombReactionFieldScaled(
+        c1.dist_cutoff + c2.dist_cutoff,
+        c1.solvent_dielectric + c2.solvent_dielectric,
+        c1.use_neighbors,
+        c1.scheduler,
+        c1.weight_special + c2.weight_special,
+        c1.coulomb_const + c2.coulomb_const,
+    )
+end
+
+@inline function force(inter::CoulombReactionFieldScaled,
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...)
+    ke = inter.coulomb_const
+    T = typeof(ustrip(ke))
+    qij = scaled_charge(inter.scheduler, atom_i, Val(T)) *
+          scaled_charge(inter.scheduler, atom_j, Val(T))
+    if iszero_value(qij)
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    if special
+        krf = inv(inter.dist_cutoff^3) * 0
+    elseif isinf(inter.solvent_dielectric)
+        krf = inv(2 * inter.dist_cutoff^3)
+    else
+        krf = inv(inter.dist_cutoff^3) * (inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1)
+    end
+
+    f = (ke * qij) * (inv(r) - 2 * krf * r2) * inv(r2)
+    return special ? f * dr * inter.weight_special * (r <= inter.dist_cutoff) :
+                     f * dr * (r <= inter.dist_cutoff)
+end
+
+@inline function potential_energy(inter::CoulombReactionFieldScaled,
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...)
+    ke = inter.coulomb_const
+    T = typeof(ustrip(ke))
+    qij = scaled_charge(inter.scheduler, atom_i, Val(T)) *
+          scaled_charge(inter.scheduler, atom_j, Val(T))
+    if iszero_value(qij)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    if iszero_value(r)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    if special
+        krf = inv(inter.dist_cutoff^3) * 0
+        crf = inv(inter.dist_cutoff) * 0
+    elseif isinf(inter.solvent_dielectric)
+        krf = inv(2 * inter.dist_cutoff^3)
+        crf = 3 * inv(2 * inter.dist_cutoff)
+    else
+        krf = inv(inter.dist_cutoff^3) * (inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1)
+        crf = inv(inter.dist_cutoff) * (3 * inter.solvent_dielectric) / (2 * inter.solvent_dielectric + 1)
+    end
+
+    pe = (ke * qij) * (inv(r) + krf * r2 - crf)
+    return special ? pe * inter.weight_special * (r <= inter.dist_cutoff) :
+                     pe * (r <= inter.dist_cutoff)
 end
 
 @doc raw"""
@@ -1079,8 +1348,9 @@ end
 The short range Ewald electrostatic interaction between two atoms.
 
 Should be used alongside the [`Ewald`](@ref) or [`PME`](@ref) general interaction,
-which provide the long-range term.
-`dist_cutoff` and `error_tol` should match the general interaction.
+which provide the long-range term, and the [`EwaldExclusion`](@ref) specific
+interaction, which provides the exclusions for bonded atoms.
+`dist_cutoff` and `error_tol` should match these interactions.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
 `approximate_erfc` determines whether to use a fast approximation to the erfc function.
@@ -1201,6 +1471,125 @@ end
     exp_mαr2 = exp(-αr^2)
     erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
     pe = ke * qi * qj * inv_r
+    if special
+        return pe * inter.weight_special * (r <= inter.dist_cutoff)
+    else
+        return pe * erfc_αr * (r <= inter.dist_cutoff)
+    end
+end
+
+@doc raw"""
+    CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
+                       scheduler=DefaultLambdaScheduler(), weight_special=1,
+                       coulomb_const=coulomb_const, approximate_erfc=true)
+
+The short-range Ewald electrostatic interaction with charges scaled by an
+alchemical electrostatic scheduler.
+"""
+struct CoulombEwaldScaled{T, D, SCH, W, C, A} <: PairwiseInteraction
+    dist_cutoff::D
+    error_tol::T
+    use_neighbors::Bool
+    scheduler::SCH
+    weight_special::W
+    coulomb_const::C
+    α::A
+    approximate_erfc::Bool
+end
+
+function CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
+                            scheduler=DefaultLambdaScheduler(), weight_special=1,
+                            coulomb_const=coulomb_const, approximate_erfc=true)
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
+    return CoulombEwaldScaled(dist_cutoff, error_tol, use_neighbors, scheduler,
+                              weight_special, coulomb_const, α, approximate_erfc)
+end
+
+use_neighbors(inter::CoulombEwaldScaled) = inter.use_neighbors
+
+function Base.zero(coul::CoulombEwaldScaled{T, D, SCH, W, C, A}) where {T, D, SCH, W, C, A}
+    return CoulombEwaldScaled(
+        zero(D),
+        zero(T),
+        coul.use_neighbors,
+        coul.scheduler,
+        zero(W),
+        zero(C),
+        zero(A),
+        coul.approximate_erfc,
+    )
+end
+
+function Base.:+(c1::CoulombEwaldScaled, c2::CoulombEwaldScaled)
+    return CoulombEwaldScaled(
+        c1.dist_cutoff + c2.dist_cutoff,
+        c1.error_tol + c2.error_tol,
+        c1.use_neighbors,
+        c1.scheduler,
+        c1.weight_special + c2.weight_special,
+        c1.coulomb_const + c2.coulomb_const,
+        c1.α + c2.α,
+        c1.approximate_erfc,
+    )
+end
+
+@inline function force(inter::CoulombEwaldScaled{T},
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...) where T
+    ke, α = inter.coulomb_const, inter.α
+    qij = scaled_charge(inter.scheduler, atom_i, Val(T)) *
+          scaled_charge(inter.scheduler, atom_j, Val(T))
+    if iszero_value(qij)
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    inv_r = inv(r)
+    αr = α * r
+    exp_mαr2 = exp(-αr^2)
+    erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
+    f = ke * qij * inv_r^3
+    if special
+        return f * dr * inter.weight_special * (r <= inter.dist_cutoff)
+    else
+        return f * dr * (erfc_αr + 2 * αr * exp_mαr2 / sqrt(T(π))) * (r <= inter.dist_cutoff)
+    end
+end
+
+@inline function potential_energy(inter::CoulombEwaldScaled{T},
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...) where T
+    ke, α = inter.coulomb_const, inter.α
+    qij = scaled_charge(inter.scheduler, atom_i, Val(T)) *
+          scaled_charge(inter.scheduler, atom_j, Val(T))
+    if iszero_value(qij)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    if iszero_value(r)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    inv_r = inv(r)
+    αr = α * r
+    exp_mαr2 = exp(-αr^2)
+    erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
+    pe = ke * qij * inv_r
     if special
         return pe * inter.weight_special * (r <= inter.dist_cutoff)
     else
@@ -1333,7 +1722,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -1371,7 +1760,7 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     qi, qj = atom_i.charge, atom_j.charge
     qij = qi * qj
     if iszero_value(r)
@@ -1499,7 +1888,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -1542,7 +1931,7 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     qij = atom_i.charge * atom_j.charge
     if iszero_value(r)
         if λ_soft >= 1
@@ -1629,7 +2018,7 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
@@ -1656,7 +2045,7 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special::Bool=false,
                                   args...)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge

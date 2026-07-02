@@ -2,6 +2,7 @@ export
     assemble_mbar_inputs,
     iterate_mbar,
     mbar_weights,
+    mbar_pmf,
     pmf_with_uncertainty
 
 const LOG_PREVFLOAT0 = log(nextfloat(0.0))    # ≈ -744
@@ -11,7 +12,7 @@ const LOG_FLOATMAX   = log(floatmax(Float64)) # ≈ 709
 @inline function calc_energy!(sys::System, buffers, coords, boundary)
     sys.coords .= coords
     sys.boundary = boundary
-    return potential_energy(sys, find_neighbors(sys), buffers; n_threads=1)
+    return potential_energy(sys, find_neighbors(sys), 0, buffers; n_threads=1)
 end
 
 struct MBARInput{U, UT, N, W, S}
@@ -22,36 +23,7 @@ struct MBARInput{U, UT, N, W, S}
     shifts::S
 end
 
-"""
-    assemble_mbar_inputs(coords_k, boundaries_k, states;
-                         target_state=nothing, shift=false)
-
-Assemble the reduced potentials matrix `u` (size `N×K`) for MBAR from per-window
-coordinates and boundaries.
-
-# Arguments
-- `coords_k::Vector{<:Vector}` - subsampled coordinates for each window `k`.
-- `boundaries_k::Vector{<:Vector}` - subsampled boundaries for each window `k` (same lengths as `coords_k[k]`).
-- `states::Vector{ThermoState}` - thermodynamic states for each window.
-
-# Keyword arguments
-- `target_state::Union{Nothing, ThermoState}` - if set, also compute `u_target` for that state.
-- `shift::Bool=false` - if `true`, subtract per-frame row minima from `u` and return the `shifts`.
-
-# Returns
-MBARInput with:
-- `u::Matrix{Float64}` - `N×K` reduced potentials.
-- `u_target::Union{Vector{Float64}, Nothing}` - reduced potential at `target_state` or `nothing`.
-- `N::Vector{Int}` - sample counts per window.
-- `win_of::Vector{Int}` - window index for each frame.
-- `shifts::Union{Vector{Float64},Nothing}` - per-frame shifts when `shift=true`, else `nothing`.
-"""
-function assemble_mbar_inputs(coords_k,
-                              boundaries_k,
-                              states::Vector{ThermoState};
-                              target_state::Union{Nothing, ThermoState}=nothing,
-                              shift::Bool=false)
-    K = length(states)
+function mbar_frame_layout(coords_k, boundaries_k, K::Integer)
     if length(coords_k) != K || length(boundaries_k) != K
         throw(ArgumentError("length of coordinates, boundaries and states do not match"))
     end
@@ -78,9 +50,6 @@ function assemble_mbar_inputs(coords_k,
         @inbounds fill!(view(win_of, s:e), k)
     end
 
-    β = [states[i].β for i in 1:K]
-    p = [states[i].p for i in 1:K]
-
     # Flatten frames
     all_coords     = Vector{Any}(undef, N)
     all_boundaries = Vector{Any}(undef, N)
@@ -98,40 +67,178 @@ function assemble_mbar_inputs(coords_k,
         end
     end
 
+    return Nk, starts, ends, win_of, all_coords, all_boundaries, all_volumes
+end
+
+function mbar_apply_shift!(u::AbstractMatrix, shift::Bool)
+    if shift
+        shifts = Vector{Float64}(undef, size(u, 1))
+        Threads.@threads for n in axes(u, 1)
+            @inbounds shifts[n] = minimum(@view u[n, :])
+        end
+        u .-= reshape(shifts, :, 1)
+        return shifts
+    end
+    return nothing
+end
+
+function fill_mbar_inputs_partitioned!(u::AbstractMatrix,
+                                       u_target::AbstractVector,
+                                       workspaces,
+                                       scratch,
+                                       all_coords,
+                                       all_boundaries,
+                                       state_indices,
+                                       K::Integer,
+                                       N::Integer,
+                                       n_workspaces::Integer)
+    Threads.@threads for chunk in 1:n_workspaces
+        local_u = scratch[chunk]
+        workspace = workspaces[chunk]
+        for n in chunk:n_workspaces:N
+            reduced_potentials!(
+                local_u,
+                workspace,
+                all_coords[n],
+                all_boundaries[n],
+                state_indices,
+                n_threads=1,
+            )
+            for k in 1:K
+                u[n, k] = local_u[k]
+            end
+            u_target[n] = local_u[end]
+        end
+    end
+    return nothing
+end
+
+function fill_mbar_inputs_partitioned!(u::AbstractMatrix,
+                                       ::Nothing,
+                                       workspaces,
+                                       scratch,
+                                       all_coords,
+                                       all_boundaries,
+                                       state_indices,
+                                       K::Integer,
+                                       N::Integer,
+                                       n_workspaces::Integer)
+    Threads.@threads for chunk in 1:n_workspaces
+        local_u = scratch[chunk]
+        workspace = workspaces[chunk]
+        for n in chunk:n_workspaces:N
+            reduced_potentials!(
+                local_u,
+                workspace,
+                all_coords[n],
+                all_boundaries[n],
+                state_indices,
+                n_threads=1,
+            )
+            for k in 1:K
+                u[n, k] = local_u[k]
+            end
+        end
+    end
+    return nothing
+end
+
+function assemble_mbar_inputs_partitioned(coords_k,
+                                           boundaries_k,
+                                           states::AbstractVector{<:ThermoState};
+                                           target_state::Union{Nothing, ThermoState}=nothing,
+                                           shift::Bool=false,
+                                           first_workspace=nothing)
+    K = length(states)
+    if length(coords_k) != K || length(boundaries_k) != K
+        throw(ArgumentError("length of coordinates, boundaries and states do not match"))
+    end
+
+    Nk, starts, ends, win_of, all_coords, all_boundaries, all_volumes =
+        mbar_frame_layout(coords_k, boundaries_k, K)
+    N = sum(Nk)
+
+    eval_states = isnothing(target_state) ? states : vcat(states, [target_state])
+    n_eval = length(eval_states)
+    use_threads = N > 1 && Threads.nthreads() > 1 && !any(ts -> is_on_gpu(ts.system), eval_states)
+    n_workspaces = use_threads ? min(Threads.nthreads(), N) : 1
+    first_partitioned_workspace = isnothing(first_workspace) ?
+                                  PartitionedReducedPotentialWorkspace(eval_states) :
+                                  first_workspace
+    workspaces = Vector{typeof(first_partitioned_workspace)}(undef, n_workspaces)
+    workspaces[1] = first_partitioned_workspace
+    for i in 2:n_workspaces
+        workspaces[i] = PartitionedReducedPotentialWorkspace(eval_states)
+    end
+    scratch = [Vector{Float64}(undef, n_eval) for _ in 1:n_workspaces]
+    state_indices = Base.OneTo(n_eval)
+
+    u = Matrix{Float64}(undef, N, K)
+    u_target = isnothing(target_state) ? nothing : Vector{Float64}(undef, N)
+
+    if use_threads
+        fill_mbar_inputs_partitioned!(
+            u,
+            u_target,
+            workspaces,
+            scratch,
+            all_coords,
+            all_boundaries,
+            state_indices,
+            K,
+            N,
+            n_workspaces,
+        )
+    else
+        local_u = scratch[1]
+        workspace = workspaces[1]
+        @inbounds for n in 1:N
+            reduced_potentials!(
+                local_u,
+                workspace,
+                all_coords[n],
+                all_boundaries[n],
+                state_indices,
+            )
+            for k in 1:K
+                u[n, k] = local_u[k]
+            end
+            if !isnothing(u_target)
+                u_target[n] = local_u[end]
+            end
+        end
+    end
+
+    shifts = mbar_apply_shift!(u, shift)
+    return MBARInput(u, u_target, Nk, win_of, shifts)
+end
+
+function assemble_mbar_inputs_full(coords_k,
+                                    boundaries_k,
+                                    states::AbstractVector{<:ThermoState};
+                                    target_state::Union{Nothing, ThermoState}=nothing,
+                                    shift::Bool=false)
+    K = length(states)
+    if length(coords_k) != K || length(boundaries_k) != K
+        throw(ArgumentError("length of coordinates, boundaries and states do not match"))
+    end
+
+    Nk, starts, ends, win_of, all_coords, all_boundaries, all_volumes =
+        mbar_frame_layout(coords_k, boundaries_k, K)
+    N = sum(Nk)
+
     # N×K reduced potentials: thread over states (columns)
     u = Matrix{Float64}(undef, N, K)
     Threads.@threads for k in 1:K
         sys = states[k].system # Private to this thread when k is unique
-        βk = β[k]
-        pk = p[k]
-        # We initialize the buffers here to avoid copy overhead in GPU
-        if !isnothing(target_state) && is_on_gpu(target_state.system)
-            buffers = init_buffers!(sys, 1, true)
-        else
-            buffers = nothing
-        end
+        buffers = is_on_gpu(sys) ? init_buffers!(sys, 1, true) : nothing
         @inbounds for n in 1:N
-            Uk   = calc_energy!(sys, buffers, all_coords[n], all_boundaries[n])
-            Uk_u = energy_remove_mol(Uk)
-            red  = βk * Float64(ustrip(Uk_u))
-            if !isnothing(pk)
-                pV_u = energy_remove_mol(pk * all_volumes[n])
-                red += βk * Float64(ustrip(pV_u))
-            end
-            u[n,k] = red # Fill full column k
+            Uk = calc_energy!(sys, buffers, all_coords[n], all_boundaries[n])
+            u[n,k] = Float64(reduced_potential(states[k], Uk, all_boundaries[n]))
         end
     end
 
-    # Row minima (per frame) and shift
-    if shift
-        shifts = Vector{Float64}(undef, N)
-        Threads.@threads for n in 1:N
-            @inbounds shifts[n] = minimum(@view u[n, :])
-        end
-        u .-= reshape(shifts, :, 1)
-    else
-        shifts = nothing
-    end
+    shifts = mbar_apply_shift!(u, shift)
 
     u_target = isnothing(target_state) ? nothing :
                assemble_target_u(all_coords, all_boundaries, all_volumes, target_state)
@@ -139,33 +246,87 @@ function assemble_mbar_inputs(coords_k,
     return MBARInput(u, u_target, Nk, win_of, shifts)
 end
 
+function mbar_partitioned_workspace_or_nothing(states::AbstractVector{<:ThermoState},
+                                                target_state)
+    eval_states = isnothing(target_state) ? states : vcat(states, [target_state])
+    try
+        return PartitionedReducedPotentialWorkspace(eval_states)
+    catch err
+        err isa ArgumentError || rethrow()
+        return nothing
+    end
+end
+
+"""
+    assemble_mbar_inputs(coords_k, boundaries_k, states;
+                         target_state=nothing, shift=false)
+
+Assemble the reduced potentials matrix `u` (size `N×K`) for MBAR from per-window
+coordinates and boundaries. The default implementation uses an
+`AlchemicalPartition`-backed reduced-potential workspace so shared interactions
+are evaluated once per frame; a full-potential fallback is kept for states that
+cannot be partitioned safely.
+
+# Arguments
+- `coords_k::Vector{<:Vector}` - subsampled coordinates for each window `k`.
+- `boundaries_k::Vector{<:Vector}` - subsampled boundaries for each window `k` (same lengths as `coords_k[k]`).
+- `states::AbstractVector{<:ThermoState}` - thermodynamic states for each window.
+
+# Keyword arguments
+- `target_state::Union{Nothing, ThermoState}` - if set, also compute `u_target` for that state.
+- `shift::Bool=false` - if `true`, subtract per-frame row minima from `u` and return the `shifts`.
+
+# Returns
+MBARInput with:
+- `u::Matrix{Float64}` - `N×K` reduced potentials.
+- `u_target::Union{Vector{Float64}, Nothing}` - reduced potential at `target_state` or `nothing`.
+- `N::Vector{Int}` - sample counts per window.
+- `win_of::Vector{Int}` - window index for each frame.
+- `shifts::Union{Vector{Float64},Nothing}` - per-frame shifts when `shift=true`, else `nothing`.
+"""
+function assemble_mbar_inputs(coords_k,
+                              boundaries_k,
+                              states::AbstractVector{<:ThermoState};
+                              target_state::Union{Nothing, ThermoState}=nothing,
+                              shift::Bool=false)
+    workspace = mbar_partitioned_workspace_or_nothing(states, target_state)
+    if !isnothing(workspace)
+        return assemble_mbar_inputs_partitioned(
+            coords_k,
+            boundaries_k,
+            states;
+            target_state = target_state,
+            shift = shift,
+            first_workspace = workspace,
+        )
+    else
+        return assemble_mbar_inputs_full(
+            coords_k,
+            boundaries_k,
+            states;
+            target_state = target_state,
+            shift = shift,
+        )
+    end
+end
+
 # Assembles the reduced potentials vector for the target thermodynamic state
 function assemble_target_u(all_coords, all_boundaries, all_volumes,
-                           target::ThermoState{<:Any, <:Any, <:System{<:Any, AT}}) where AT
+                           target::ThermoState)
     N  = length(all_coords)
-    βa = target.β
-    pa = target.p
-    has_p = !isnothing(pa)
-
     # Single-state path, no threading to avoid per-thread system copies
     sys = target.system
     u_target = Vector{Float64}(undef, N)
 
-    if AT <: AbstractGPUArray
+    if is_on_gpu(sys)
         buffers = init_buffers!(sys, 1, true)
     else
         buffers = nothing
     end
 
     @inbounds for n in 1:N
-        Ua   = calc_energy!(sys, buffers, all_coords[n], all_boundaries[n])
-        Ua_u = energy_remove_mol(Ua)
-        red  = βa * Float64(ustrip(Ua_u))
-        if has_p
-            pV_u = energy_remove_mol(pa * all_volumes[n])
-            red += βa * Float64(ustrip(pV_u))
-        end
-        u_target[n] = red
+        Ua = calc_energy!(sys, buffers, all_coords[n], all_boundaries[n])
+        u_target[n] = Float64(reduced_potential(target, Ua, all_boundaries[n]))
     end
     return u_target
 end
@@ -360,8 +521,8 @@ end
 
 # wₙ ∝ exp( −(u_target[n] − sₙ) ) / Dₙ where `sₙ` are the same per-frame shifts applied to `u`
 # Pass `shifts` you subtracted from `u`; if none were used, leave default
-function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector;
-                             shifts::Union{Nothing, AbstractVector}=nothing)
+function mbar_target_log_weights(u_target::AbstractVector, logD_n::AbstractVector;
+                                 shifts::Union{Nothing, AbstractVector}=nothing)
     N = length(u_target)
     if N != length(logD_n)
         throw(ArgumentError("length of u_target ($N) must be equal " *
@@ -372,43 +533,54 @@ function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector;
                             "to length of shifts ($(length(shifts)))"))
     end
 
-    # vₙ = −(u_tgt[n] − sₙ) − logDₙ
-    @inbounds begin
-        m = -Inf
-        for n in 1:N
-            v = -Float64(u_target[n] - (isnothing(shifts) ? 0.0 : shifts[n])) - logD_n[n]
-            if v > m
-                m = v
-            end
+    logw = Vector{Float64}(undef, N)
+    m = -Inf
+    @inbounds for n in 1:N
+        shift_n = isnothing(shifts) ? 0.0 : shifts[n]
+        x = -Float64(u_target[n] - shift_n) - logD_n[n]
+        logw[n] = x
+        if x > m
+            m = x
         end
-        se = 0.0
-        for n in 1:N
-            se += exp(-Float64(u_target[n] - (isnothing(shifts) ? 0.0 : shifts[n])) - logD_n[n] - m)
-        end
-        logZ = m + log(se)
-
-        w = Vector{Float64}(undef, N)
-        min_x, max_x, min_n, max_n = Inf, -Inf, 0, 0
-        for n in 1:N
-            x = -Float64(u_target[n] - (isnothing(shifts) ? 0.0 : shifts[n])) - logD_n[n] - logZ
-            if x < min_x
-                min_x = x
-                min_n = n
-            end
-            if x > max_x
-                max_x = x
-                max_n = n
-            end
-            w[n] = exp(x)
-        end
-        if min_x < LOG_PREVFLOAT0
-            @warn "mbar_weights_target underflow at n=$min_n: x=$min_x < $(LOG_PREVFLOAT0)"
-        end
-        if max_x > LOG_FLOATMAX
-            throw(DomainError(max_x, "mbar_weights_target overflow at n=$max_n"))
-        end
-        return w
     end
+    if !isfinite(m)
+        throw(DomainError(logw, "target MBAR log weights have no finite entries"))
+    end
+
+    sumexp = 0.0
+    @inbounds for n in 1:N
+        sumexp += exp(logw[n] - m)
+    end
+    logZ = m + log(sumexp)
+    logw .-= logZ
+    return logw
+end
+
+function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector;
+                             shifts::Union{Nothing, AbstractVector}=nothing)
+    logw = mbar_target_log_weights(u_target, logD_n; shifts=shifts)
+    w = Vector{Float64}(undef, length(logw))
+
+    min_x, max_x, min_n, max_n = Inf, -Inf, 0, 0
+    @inbounds for n in eachindex(logw)
+        x = logw[n]
+        if x < min_x
+            min_x = x
+            min_n = n
+        end
+        if x > max_x
+            max_x = x
+            max_n = n
+        end
+        w[n] = exp(x)
+    end
+    if min_x < LOG_PREVFLOAT0
+        @warn "mbar_weights_target underflow at n=$min_n: x=$min_x < $(LOG_PREVFLOAT0)"
+    end
+    if max_x > LOG_FLOATMAX
+        throw(DomainError(max_x, "mbar_weights_target overflow at n=$max_n"))
+    end
+    return w
 end
 
 """
@@ -460,7 +632,7 @@ function mbar_weights(u::AbstractMatrix,
     end
 
     logD = mbar_logD(u, f, logN)
-    W, _ = mbar_weights_sampled(u, f, logN; logD_n=logD)
+    W,  = mbar_weights_sampled(u, f, logN; logD_n=logD)
     w = mbar_weights_target(u_target, logD; shifts=shifts)
 
     if !all(isfinite, W)
@@ -525,6 +697,56 @@ function mbar_weights(mbar_generator::MBARInput)
     W, w_target, logD = mbar_weights(u, u_target, F_k, N_counts, logN; shifts=shifts, check=false)
 
     return W, w_target, logD
+end
+
+"""
+    mbar_pmf(u, u_target, f, N_counts, logN, observables, grid;
+             shifts=nothing, zero=:min, kBT=nothing)
+
+Compute a target-state PMF from solved MBAR quantities using the shared
+log-space PMF accumulator. Unlike `pmf_with_uncertainty`, this routine supports
+multi-dimensional observables and arbitrary grids, but it does not compute the
+large-sample covariance estimate.
+"""
+function mbar_pmf(u::AbstractMatrix,
+                  u_target::AbstractVector,
+                  f::AbstractVector,
+                  N_counts::AbstractVector,
+                  logN::AbstractVector,
+                  observables::AbstractVector,
+                  grid;
+                  shifts::Union{Nothing, AbstractVector}=nothing,
+                  kwargs...)
+    N, K = size(u)
+    if length(u_target) != N
+        throw(DimensionMismatch("length of u_target ($(length(u_target))) must equal N ($N)."))
+    end
+    if length(observables) != N
+        throw(DimensionMismatch("length of observables ($(length(observables))) must equal N ($N)."))
+    end
+    if !(length(f) == K && length(N_counts) == K && length(logN) == K)
+        throw(DimensionMismatch("lengths of f, N_counts, and logN must all equal K ($K)."))
+    end
+    if !all(>(0), N_counts)
+        throw(DomainError(N_counts, "all N_counts must be > 0"))
+    end
+    if !all(isfinite, u)
+        throw(DomainError(u, "infinite value found in reduced potential"))
+    end
+    if !all(isfinite, u_target)
+        throw(DomainError(u_target, "infinite value found in target system reduced potential"))
+    end
+    if !all(isfinite, f)
+        throw(DomainError(f, "infinite value found in free energies"))
+    end
+
+    logD = mbar_logD(u, f, logN)
+    log_weights = mbar_target_log_weights(u_target, logD; shifts=shifts)
+    accumulator = OnlinePMFAccumulator(grid; T = Float64)
+    @inbounds for n in 1:N
+        accumulate!(accumulator, observables[n], log_weights[n])
+    end
+    return pmf(accumulator; kwargs...)
 end
 
 struct PMF{C, W, E, F, FE, SF, SFE, P, VP}
@@ -767,7 +989,7 @@ computes the PMF along `CV`.
 # Arguments
 - `coords_k::AbstractVector` - coordinates per window.
 - `boundaries_k::AbstractVector` - boundaries per window.
-- `states::Vector{ThermoState}` - thermodynamic states per window.
+- `states::AbstractVector{<:ThermoState}` - thermodynamic states per window.
 - `target_state::ThermoState` - state to reweight to.
 - `CV::AbstractVector` - CV values per window.
 
@@ -779,11 +1001,11 @@ Same `PMF` struct as the lower-level `pmf_with_uncertainty`.
 """
 function pmf_with_uncertainty(coords_k::AbstractVector,
                               boundaries_k::AbstractVector,
-                              states::Vector{ThermoState},
+                              states::AbstractVector{<:ThermoState},
                               target_state::ThermoState,
                               CV::AbstractVector;
                               shift::Bool=false)
-    kBT = Float64(inv(target_state.β)) * target_state.system.energy_units
+    kBT = Float64(inv(target_state.beta)) * target_state.system.energy_units
     mbar_gen = assemble_mbar_inputs(coords_k, boundaries_k, states;
                                     target_state=target_state, shift=shift)
 

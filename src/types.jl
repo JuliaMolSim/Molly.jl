@@ -7,6 +7,7 @@ export
     InteractionList2Atoms,
     InteractionList3Atoms,
     InteractionList4Atoms,
+    InteractionList5Atoms,
     Atom,
     mass,
     charge,
@@ -52,108 +53,147 @@ const PairwiseInteraction = NBodyInteraction{2}
 
 """
     InteractionList1Atoms(is, inters)
-    InteractionList1Atoms(is, inters, types)
+    InteractionList1Atoms(is, inters, types, data=nothing)
     InteractionList1Atoms(inter_type)
 
 A list of specific interactions that involve one atom such as position restraints.
 """
-struct InteractionList1Atoms{I, T} <: SpecificInteractionList{1}
+struct InteractionList1Atoms{I, T, D} <: SpecificInteractionList{1}
     is::I
     inters::T
     types::Vector{String}
+    data::D
 
-    function InteractionList1Atoms(is, inters, types)
+    function InteractionList1Atoms(is, inters, types, data=nothing)
         if !(length(is) == length(inters) == length(types))
             throw(ArgumentError("all arguments to InteractionList1Atoms should be the same length"))
         end
-        return new{typeof(is), typeof(inters)}(is, inters, types)
+        return new{typeof(is), typeof(inters), typeof(data)}(is, inters, types, data)
     end
 end
 
 """
     InteractionList2Atoms(is, js, inters)
-    InteractionList2Atoms(is, js, inters, types)
+    InteractionList2Atoms(is, js, inters, types, data=nothing)
     InteractionList2Atoms(inter_type)
 
 A list of specific interactions that involve two atoms such as bond potentials.
 """
-struct InteractionList2Atoms{I, T} <: SpecificInteractionList{2}
+struct InteractionList2Atoms{I, T, D} <: SpecificInteractionList{2}
     is::I
     js::I
     inters::T
     types::Vector{String}
+    data::D
 
-    function InteractionList2Atoms(is, js, inters, types)
+    function InteractionList2Atoms(is, js, inters, types, data=nothing)
         if !(length(is) == length(js) == length(inters) == length(types))
             throw(ArgumentError("all arguments to InteractionList2Atoms should be the same length"))
         end
-        return new{typeof(is), typeof(inters)}(is, js, inters, types)
+        return new{typeof(is), typeof(inters), typeof(data)}(is, js, inters, types, data)
     end
 end
 
 """
     InteractionList3Atoms(is, js, ks, inters)
-    InteractionList3Atoms(is, js, ks, inters, types)
+    InteractionList3Atoms(is, js, ks, inters, types, data=nothing)
     InteractionList3Atoms(inter_type)
 
 A list of specific interactions that involve three atoms such as bond angle potentials.
 """
-struct InteractionList3Atoms{I, T} <: SpecificInteractionList{3}
+struct InteractionList3Atoms{I, T, D} <: SpecificInteractionList{3}
     is::I
     js::I
     ks::I
     inters::T
     types::Vector{String}
+    data::D
 
-    function InteractionList3Atoms(is, js, ks, inters, types)
+    function InteractionList3Atoms(is, js, ks, inters, types, data=nothing)
         if !(length(is) == length(js) == length(ks) == length(inters) == length(types))
             throw(ArgumentError("all arguments to InteractionList3Atoms should be the same length"))
         end
-        return new{typeof(is), typeof(inters)}(is, js, ks, inters, types)
+        return new{typeof(is), typeof(inters), typeof(data)}(is, js, ks, inters, types, data)
     end
 end
 
 """
     InteractionList4Atoms(is, js, ks, ls, inters)
-    InteractionList4Atoms(is, js, ks, ls, inters, types)
+    InteractionList4Atoms(is, js, ks, ls, inters, types, data=nothing)
     InteractionList4Atoms(inter_type)
 
 A list of specific interactions that involve four atoms such as torsion potentials.
 """
-struct InteractionList4Atoms{I, T} <: SpecificInteractionList{4}
+struct InteractionList4Atoms{I, T, D} <: SpecificInteractionList{4}
     is::I
     js::I
     ks::I
     ls::I
     inters::T
     types::Vector{String}
+    data::D
 
-    function InteractionList4Atoms(is, js, ks, ls, inters, types)
+    function InteractionList4Atoms(is, js, ks, ls, inters, types, data=nothing)
         if !(length(is) == length(js) == length(ks) == length(ls) == length(inters) == length(types))
             throw(ArgumentError("all arguments to InteractionList4Atoms should be the same length"))
         end
-        return new{typeof(is), typeof(inters)}(is, js, ks, ls, inters, types)
+        return new{typeof(is), typeof(inters), typeof(data)}(is, js, ks, ls, inters, types, data)
     end
 end
 
-InteractionList1Atoms(is, inters) = InteractionList1Atoms(is, inters, fill("", length(is)))
-InteractionList2Atoms(is, js, inters) = InteractionList2Atoms(is, js, inters, fill("", length(is)))
-InteractionList3Atoms(is, js, ks, inters) = InteractionList3Atoms(is, js, ks, inters,
-                                                                  fill("", length(is)))
-InteractionList4Atoms(is, js, ks, ls, inters) = InteractionList4Atoms(is, js, ks, ls, inters,
-                                                                      fill("", length(is)))
+"""
+    InteractionList5Atoms(is, js, ks, ls, ms, inters)
+    InteractionList5Atoms(is, js, ks, ls, ms, inters, types, data=nothing)
+    InteractionList5Atoms(inter_type)
 
-InteractionList1Atoms(T) = InteractionList1Atoms(Int32[], T[], [])
-InteractionList2Atoms(T) = InteractionList2Atoms(Int32[], Int32[], T[], [])
-InteractionList3Atoms(T) = InteractionList3Atoms(Int32[], Int32[], Int32[], T[], [])
-InteractionList4Atoms(T) = InteractionList4Atoms(Int32[], Int32[], Int32[], Int32[], T[], [])
+A list of specific interactions that involve five atoms such as CMAP torsion potentials.
+"""
+struct InteractionList5Atoms{I, T, D} <: SpecificInteractionList{5}
+    is::I
+    js::I
+    ks::I
+    ls::I
+    ms::I
+    inters::T
+    types::Vector{String}
+    data::D
+
+    function InteractionList5Atoms(is, js, ks, ls, ms, inters, types, data=nothing)
+        if !(length(is) == length(js) == length(ks) == length(ls) == length(ms) ==
+             length(inters) == length(types))
+            throw(ArgumentError("all arguments to InteractionList5Atoms should be the same length"))
+        end
+        return new{typeof(is), typeof(inters), typeof(data)}(is, js, ks, ls, ms, inters, types, data)
+    end
+end
+
+InteractionList1Atoms(is, inters) = InteractionList1Atoms(is, inters, fill("", length(is)), nothing)
+InteractionList2Atoms(is, js, inters) = InteractionList2Atoms(is, js, inters,
+                                                        fill("", length(is)), nothing)
+InteractionList3Atoms(is, js, ks, inters) = InteractionList3Atoms(is, js, ks, inters,
+                                                        fill("", length(is)), nothing)
+InteractionList4Atoms(is, js, ks, ls, inters) = InteractionList4Atoms(is, js, ks, ls, inters,
+                                                        fill("", length(is)), nothing)
+InteractionList5Atoms(is, js, ks, ls, ms, inters) = InteractionList5Atoms(is, js, ks, ls, ms,
+                                                        inters, fill("", length(is)), nothing)
+
+InteractionList1Atoms(T) = InteractionList1Atoms(Int32[], T[], [], nothing)
+InteractionList2Atoms(T) = InteractionList2Atoms(Int32[], Int32[], T[], [], nothing)
+InteractionList3Atoms(T) = InteractionList3Atoms(Int32[], Int32[], Int32[], T[], [], nothing)
+InteractionList4Atoms(T) = InteractionList4Atoms(Int32[], Int32[], Int32[], Int32[], T[], [], nothing)
+InteractionList5Atoms(T) = InteractionList5Atoms(Int32[], Int32[], Int32[], Int32[], Int32[], T[], [], nothing)
 
 interaction_type(::InteractionList1Atoms{<:Any, T}) where {T} = eltype(T)
 interaction_type(::InteractionList2Atoms{<:Any, T}) where {T} = eltype(T)
 interaction_type(::InteractionList3Atoms{<:Any, T}) where {T} = eltype(T)
 interaction_type(::InteractionList4Atoms{<:Any, T}) where {T} = eltype(T)
+interaction_type(::InteractionList5Atoms{<:Any, T}) where {T} = eltype(T)
 
 Base.length(inter_list::SpecificInteractionList) = length(inter_list.is)
+
+zero_or_nothing(x) = zero(x)
+zero_or_nothing(x::Nothing) = nothing
+zero_or_nothing(x::Vector{Matrix{T}}) where {T} = zero.(x) # Required for Julia 1.10
 
 function Base.zero(inter_list::InteractionList1Atoms)
     n_inters = length(inter_list)
@@ -161,6 +201,7 @@ function Base.zero(inter_list::InteractionList1Atoms)
         zero(inter_list.is),
         zero.(inter_list.inters),
         fill("", n_inters),
+        zero_or_nothing(inter_list.data),
     )
 end
 
@@ -171,6 +212,7 @@ function Base.zero(inter_list::InteractionList2Atoms)
         zero(inter_list.js),
         zero.(inter_list.inters),
         fill("", n_inters),
+        zero_or_nothing(inter_list.data),
     )
 end
 
@@ -182,6 +224,7 @@ function Base.zero(inter_list::InteractionList3Atoms)
         zero(inter_list.ks),
         zero.(inter_list.inters),
         fill("", n_inters),
+        zero_or_nothing(inter_list.data),
     )
 end
 
@@ -194,6 +237,21 @@ function Base.zero(inter_list::InteractionList4Atoms)
         zero(inter_list.ls),
         zero.(inter_list.inters),
         fill("", n_inters),
+        zero_or_nothing(inter_list.data),
+    )
+end
+
+function Base.zero(inter_list::InteractionList5Atoms)
+    n_inters = length(inter_list)
+    return InteractionList5Atoms(
+        zero(inter_list.is),
+        zero(inter_list.js),
+        zero(inter_list.ks),
+        zero(inter_list.ls),
+        zero(inter_list.ms),
+        zero.(inter_list.inters),
+        fill("", n_inters),
+        zero_or_nothing(inter_list.data),
     )
 end
 
@@ -202,6 +260,7 @@ function Base.:+(il1::InteractionList1Atoms, il2::InteractionList1Atoms)
         il1.is,
         il1.inters .+ il2.inters,
         il1.types,
+        il1.data,
     )
 end
 
@@ -211,6 +270,7 @@ function Base.:+(il1::InteractionList2Atoms, il2::InteractionList2Atoms)
         il1.js,
         il1.inters .+ il2.inters,
         il1.types,
+        il1.data,
     )
 end
 
@@ -221,6 +281,7 @@ function Base.:+(il1::InteractionList3Atoms, il2::InteractionList3Atoms)
         il1.ks,
         il1.inters .+ il2.inters,
         il1.types,
+        il1.data,
     )
 end
 
@@ -232,44 +293,73 @@ function Base.:+(il1::InteractionList4Atoms, il2::InteractionList4Atoms)
         il1.ls,
         il1.inters .+ il2.inters,
         il1.types,
+        il1.data,
+    )
+end
+
+function Base.:+(il1::InteractionList5Atoms, il2::InteractionList5Atoms)
+    return InteractionList5Atoms(
+        il1.is,
+        il1.js,
+        il1.ks,
+        il1.ls,
+        il1.ms,
+        il1.inters .+ il2.inters,
+        il1.types,
+        il1.data,
     )
 end
 
 function ==(a::InteractionList1Atoms, b::InteractionList1Atoms)
-    return a.is == b.is &&
-           a.inters == b.inters &&
-           a.types == b.types
+    return a.is == b.is && 
+           a.inters == b.inters && 
+           a.types == b.types && 
+           a.data == b.data
 end
 
 function ==(a::InteractionList2Atoms, b::InteractionList2Atoms)
-    return a.is == b.is &&
-           a.js == b.js &&
-           a.inters == b.inters &&
-           a.types == b.types
+    return a.is == b.is && 
+           a.js == b.js && 
+           a.inters == b.inters && 
+           a.types == b.types && 
+           a.data == b.data
 end
 
 function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
-    return a.is == b.is &&
-           a.js == b.js &&
-           a.ks == b.ks &&
-           a.inters == b.inters &&
-           a.types == b.types
+    return a.is == b.is && 
+           a.js == b.js && 
+           a.ks == b.ks && 
+           a.inters == b.inters && 
+           a.types == b.types && 
+           a.data == b.data
 end
 
 function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
-    return a.is == b.is &&
-           a.js == b.js &&
-           a.ks == b.ks &&
-           a.ls == b.ls &&
-           a.inters == b.inters &&
-           a.types == b.types
+    return a.is == b.is && 
+           a.js == b.js && 
+           a.ks == b.ks && 
+           a.ls == b.ls && 
+           a.inters == b.inters && 
+           a.types == b.types && 
+           a.data == b.data
+end
+
+function ==(a::InteractionList5Atoms, b::InteractionList5Atoms)
+    return a.is == b.is && 
+           a.js == b.js && 
+           a.ks == b.ks && 
+           a.ls == b.ls && 
+           a.ms == b.ms && 
+           a.inters == b.inters && 
+           a.types == b.types && 
+           a.data == b.data
 end
 
 function hash(a::InteractionList1Atoms, h::UInt)
     is     = from_device(a.is)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(inters, hash(types, h)))
+    return hash(is, hash(inters, hash(types, hash(a.data, h))))
 end
 
 function hash(a::InteractionList2Atoms, h::UInt)
@@ -277,7 +367,7 @@ function hash(a::InteractionList2Atoms, h::UInt)
     js     = from_device(a.js)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(js, hash(inters, hash(types, h))))
+    return hash(is, hash(js, hash(inters, hash(types, hash(a.data, h)))))
 end
 
 function hash(a::InteractionList3Atoms, h::UInt)
@@ -286,7 +376,7 @@ function hash(a::InteractionList3Atoms, h::UInt)
     ks     = from_device(a.ks)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(js, hash(ks, hash(inters, hash(types, h)))))
+    return hash(is, hash(js, hash(ks, hash(inters, hash(types, hash(a.data, h))))))
 end
 
 function hash(a::InteractionList4Atoms, h::UInt)
@@ -296,7 +386,18 @@ function hash(a::InteractionList4Atoms, h::UInt)
     ls     = from_device(a.ls)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, h))))))
+    return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, hash(a.data, h)))))))
+end
+
+function hash(a::InteractionList5Atoms, h::UInt)
+    is     = from_device(a.is)
+    js     = from_device(a.js)
+    ks     = from_device(a.ks)
+    ls     = from_device(a.ls)
+    ms     = from_device(a.ms)
+    inters = from_device(a.inters)
+    types  = from_device(a.types)
+    return hash(is, hash(js, hash(ks, hash(ls, hash(ms, hash(inters, hash(types, hash(a.data, h))))))))
 end
 
 """
@@ -469,9 +570,17 @@ function Base.push!(nl::NeighborList, element)
 end
 
 function Base.append!(nl::NeighborList, list)
-    for element in list
-        push!(nl, element)
+    n_new = length(list)
+    n_avail = min(length(nl.list) - nl.n, n_new)
+    @inbounds if n_avail == n_new
+        nl.list[(nl.n + 1):(nl.n + n_avail)] .= list
+    elseif n_avail > 0
+        nl.list[(nl.n + 1):(nl.n + n_avail)] .= list[1:n_avail]
+        append!(nl.list, list[(n_avail + 1):end])
+    else # n_avail == 0
+        append!(nl.list, list)
     end
+    nl.n += n_new
     return nl
 end
 
@@ -505,11 +614,14 @@ Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 # CUDA launch configuration
+const CUDA_LAUNCH_UNSET = 0
+const CUDA_TILE_THREADS_UNSET = (0, 0)
+
 struct CUDALaunchConfig
-    force_block_y::Union{Nothing, Int}
-    force_maxregs::Union{Nothing, Int}
-    tile_threads::Union{Nothing, NTuple{2, Int}}
-    energy_block_y::Union{Nothing, Int}
+    force_block_y::Int
+    force_maxregs::Int
+    tile_threads::NTuple{2, Int}
+    energy_block_y::Int
 end
 
 function CUDALaunchConfig(;
@@ -529,7 +641,35 @@ function CUDALaunchConfig(;
         all(>(0), tile_threads) || throw(ArgumentError("tile_threads entries must be positive"))
     end
 
-    return CUDALaunchConfig(force_block_y, force_maxregs, tile_threads, energy_block_y)
+    tile_threads_raw = tile_threads === nothing ?
+                       CUDA_TILE_THREADS_UNSET :
+                       (Int(tile_threads[1]), Int(tile_threads[2]))
+    return CUDALaunchConfig(
+        Int(something(force_block_y, CUDA_LAUNCH_UNSET)),
+        Int(something(force_maxregs, CUDA_LAUNCH_UNSET)),
+        tile_threads_raw,
+        Int(something(energy_block_y, CUDA_LAUNCH_UNSET)),
+    )
+end
+
+@inline function cuda_force_block_y(config::CUDALaunchConfig)
+    value = config.force_block_y
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_force_maxregs(config::CUDALaunchConfig)
+    value = config.force_maxregs
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_tile_threads(config::CUDALaunchConfig)
+    value = config.tile_threads
+    return value == CUDA_TILE_THREADS_UNSET ? nothing : value
+end
+
+@inline function cuda_energy_block_y(config::CUDALaunchConfig)
+    value = config.energy_block_y
+    return iszero(value) ? nothing : value
 end
 
 """
@@ -1183,6 +1323,10 @@ single thermodynamic state across all generalized ensemble methods.
 - `pressure=nothing`: Explicit target pressure. If `nothing`, it is inferred from the integrator's barostat.
 - `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on
     the temperature and pressure is generated.
+
+If `system` has loggers, construction emits a warning: generalized ensemble
+methods ignore `ThermoState` system loggers and use loggers attached to the
+appropriate generalized-ensemble object instead.
 """
 struct ThermoState{S, I, B, P}
     system::S
@@ -1195,6 +1339,11 @@ end
 function ThermoState(sys::System{D, AT, FT}, integrator;
                      temperature=nothing, pressure=nothing,
                      name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
+    if !isempty(values(sys.loggers))
+        @warn "ThermoState was constructed with a system that has loggers. " *
+              "Generalized ensemble methods ignore ThermoState system loggers; " *
+              "pass loggers to AWHSimulation, TSSSimulation or ReplicaSystem instead."
+    end
 
     temp_source = temperature
     press_source = pressure
@@ -1263,10 +1412,10 @@ end
 
 A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD).
 
-Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles
-an [`AlchemicalPartition`](@ref) from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed
-topological and interactive components (e.g., bulk solvent) from state-specific perturbations.
-During an exchange attempt, cross-energies are evaluated efficiently by querying only the
+Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles 
+an `AlchemicalPartition` from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed
+topological and interactive components (e.g., bulk solvent) from state-specific perturbations. 
+During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
 necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
 
 Furthermore, upon a successful exchange, coordinates and velocities are no longer physically swapped in memory;
@@ -1290,8 +1439,11 @@ construction where `n` is the number of threads to be used per replica.
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults
     to duplicating the boundary of the reference system (the first `ThermoState`).
-- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: The logger used to record
-    the exchange of replicas.
+- `replica_loggers=nothing`: Logger collections for each replica. Stateful logger objects and
+    `TrajectoryWriter` file paths cannot be shared across replicas.
+- `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
+    a default [`ReplicaExchangeLogger`](@ref) is used.
+- `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
 - `data::DA=nothing`: Arbitrary data associated with the replica system.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for perturbed state differences. Generally improves performance.
@@ -1311,6 +1463,8 @@ mutable struct ReplicaSystem{D, AT, T, P, B, I, C, V, BO, NF, RL, SPI, SSI, SGI,
     state_general_inters::SGI
     state_indices::Vector{Int}
     exchange_logger::EL
+    current_step::Int
+    initial_log_pending::Bool
     data::DA
 end
 
@@ -1321,11 +1475,13 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        replica_neighbor_finders=nothing,
                        replica_loggers=nothing,
                        exchange_logger=nothing,
+                       initial_step::Integer=0,
                        data=nothing,
                        reuse_neighbors::Bool=true)
 
     n_replicas = length(thermo_states)
-
+    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
+    
     if length(replica_coords) != n_replicas
         throw(ArgumentError("Number of replica_coords ($(length(replica_coords))) " *
                             "does not match number of ThermoStates ($n_replicas)"))
@@ -1367,6 +1523,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         throw(ArgumentError("Number of loggers arrays ($(length(replica_loggers))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
+    validate_replica_loggers(replica_loggers)
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
@@ -1393,7 +1550,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         partition, n_replicas, betas, integrators, replica_coords, replica_velocities,
         replica_boundaries, replica_neighbor_finders, replica_loggers,
         state_pairwise_inters, state_specific_inter_lists, state_general_inters,
-        state_indices, exchange_logger, data
+        state_indices, exchange_logger, Int(initial_step), true, data
     )
 end
 
@@ -1706,8 +1863,8 @@ function System(sys::AtomsBase.AbstractSystem{D};
     end
 
     length_unit = unit(first(AtomsBase.position(sys, 1)))
-    atoms = Vector{Atom}(undef, (length(sys),))
-    atoms_data = Vector{AtomData}(undef, (length(sys),))
+    atoms = Vector{Atom}(undef, length(sys))
+    atoms_data = Vector{AtomData}(undef, length(sys))
     for (i, atom) in enumerate(sys)
         atoms[i] = Atom(
             index=i,
@@ -1881,7 +2038,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return potential_energy(sys, nbs, nothing, step_n; n_threads=n_threads)
+    return potential_energy(sys, nbs, step_n, nothing; n_threads=n_threads)
 end
 
 """

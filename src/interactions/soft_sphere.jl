@@ -35,13 +35,13 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 
@@ -67,7 +67,7 @@ end
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 

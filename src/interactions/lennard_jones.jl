@@ -84,13 +84,13 @@ end
                        special=false,
                        args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 
@@ -122,7 +122,7 @@ end
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 
@@ -152,58 +152,162 @@ The potential energy is defined as
 ```math
 E = \frac{8 \pi N^2}{V} \left( \frac{\left< \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
 ```
-The forces are zero.
+The forces are zero, with an isotropic virial contribution from the explicit
+volume dependence.
 
 The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
 volume can change).
 Only compatible with 3D systems.
 Not compatible with cutoffs other than [`DistanceCutoff`](@ref).
 """
-struct LJDispersionCorrection{F}
-    factor::F
+struct LJDispersionCorrection{F6, F12}
+    factor_6::F6
+    factor_12::F12
 end
 
-function LJDispersionCorrection(atoms, dist_cutoff, σ_mix=LorentzMixing(),
-                                ϵ_mix=GeometricMixing())
+Base.getproperty(dc::LJDispersionCorrection, name::Symbol) =
+    name === :factor ? getfield(dc, :factor_6) + getfield(dc, :factor_12) : getfield(dc, name)
+
+
+function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
+                                σ_mix=LorentzMixing(),
+                                ϵ_mix=GeometricMixing(),
+                                λ_mix=MinimumMixing(),
+                                scheduler = DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
     n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
     at = atoms_cpu[1]
-    ϵσ12_sum, ϵσ6_sum = zero(at.ϵ * at.σ^12), zero(at.ϵ * at.σ^6)
+
+    # Representative C6- and C12-like terms. Used to determine both the 
+    # physical units of the accumulated quantities and the factor types.
+    term_6_example  = at.ϵ * at.σ^6
+    term_12_example = at.ϵ * at.σ^12
+
+    # The correction requires summing over N(N + 1) / 2 atom pairs. For large
+    # systems this can involve millions of additions. Accumulating in Float32
+    # can cause loss of precision, so we will do the accumulation always in 
+    # Float64
+    Tacc = promote_type(
+        Float64,
+        typeof(ustrip(term_6_example)),
+        typeof(ustrip(term_12_example)),
+        typeof(ustrip(dist_cutoff)),
+    )
+
+    # Accumulate unitless numerical values in the higher-precision type.
+    ϵσ6_sum  = zero(Tacc)
+    ϵσ12_sum = zero(Tacc)
+
+    # Include each unordered atom pair once, including i == j.
     for i in 1:n_atoms
         atom_i = atoms_cpu[i]
         for j in 1:i
             atom_j = atoms_cpu[j]
             σ = σ_mixing(σ_mix, atom_i, atom_j, false)
             ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j, false)
-            ϵσ12_sum += ϵ * σ^12
-            ϵσ6_sum  += ϵ * σ^6
+
+            λ_glob = Tacc(λ_mixing(λ_mix, atom_i, atom_j))
+            pair_role = mix_roles(scheduler, atom_i.alch_role, atom_j.alch_role)
+            λ_eff = Tacc(scale_sterics(scheduler, λ_glob, pair_role))
+
+            ϵσ6_sum  +=  Tacc(ustrip(λ_eff * ϵ * σ^6))
+            ϵσ12_sum +=  Tacc(ustrip(λ_eff * ϵ * σ^12))
         end
     end
-    n_pairs = (n_atoms * (n_atoms + 1)) ÷ 2
-    ϵσ12_mean = ϵσ12_sum / n_pairs
-    ϵσ6_mean  = ϵσ6_sum  / n_pairs
-    inner_term = (ϵσ12_mean / (9 * dist_cutoff^9) - ϵσ6_mean / (3 * dist_cutoff^3))
-    factor = 8 * T(π) * n_atoms^2 * inner_term
-    return LJDispersionCorrection(factor)
+
+    # Compute the mean mixed coefficients using the same accumulation type.
+    n_pairs_acc = Tacc((n_atoms * (n_atoms + 1)) ÷ 2)
+
+    ϵσ6_mean  = (ϵσ6_sum  / n_pairs_acc) * unit(term_6_example)
+    ϵσ12_mean = (ϵσ12_sum / n_pairs_acc) * unit(term_12_example)
+
+    # Evaluate the final correction factors in the high-precision accumulator
+    # type. The factors are defined so that dividing by the box volume gives
+    # the attractive r^-6 and repulsive r^-12 energy corrections,
+    # respectively.
+    n_atoms_acc = Tacc(n_atoms)
+    π_acc = Tacc(π)
+
+    factor_6_acc =
+        8 * π_acc * n_atoms_acc^2 *
+        (-ϵσ6_mean / (Tacc(3) * dist_cutoff^3))
+
+    factor_12_acc =
+        8 * π_acc * n_atoms_acc^2 *
+        (ϵσ12_mean / (Tacc(9) * dist_cutoff^9))
+
+    # Store the final factors using the original type.
+    F6 = typeof(-(term_6_example / dist_cutoff^3))
+    F12 = typeof(term_12_example / dist_cutoff^9)
+
+    return LJDispersionCorrection(
+        convert(F6, factor_6_acc),
+        convert(F12, factor_12_acc),
+    )
 end
 
-Base.zero(dc::LJDispersionCorrection) = LJDispersionCorrection(zero(dc.factor))
+Base.zero(dc::LJDispersionCorrection) =
+    LJDispersionCorrection(zero(dc.factor_6), zero(dc.factor_12))
 
 function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
-    return LJDispersionCorrection(dc1.factor + dc2.factor)
+    return LJDispersionCorrection(
+        dc1.factor_6  + dc2.factor_6,
+        dc1.factor_12 + dc2.factor_12,
+    )
 end
 
-Unitful.ustrip(dc::LJDispersionCorrection) = LJDispersionCorrection(ustrip(dc.factor))
+Unitful.ustrip(dc::LJDispersionCorrection) =
+    LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12))
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)
-    return inter.factor / volume(sys)
+    return (inter.factor_6 + inter.factor_12) / volume(sys)
 end
 
-AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
-                                                        inter::LJDispersionCorrection; kwargs...)
+# The omitted LJ pairs have nonzero forces, but their isotropic average gives
+# no net force on any atom. Their virial contributions, however, do not cancel.
+#
+# For a term u(r) ∝ r^-n, r ⋅ f(r) = n ⋅ u(r), where f(r) = ∂u(r)/∂r so each
+# diagonal component of the isotropic tail virial is (n / 3)U_n. The r^-6 and 
+# r^-12 terms therefore contribute 2U6 and 4U12, respectively.
+#
+# This is the "mechanical" tail virial.
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
+        fs, sys, inter::LJDispersionCorrection;
+        buffers=nothing,
+        needs_vir=false,
+        kwargs...)
+
+    if needs_vir
+        vol = volume(sys)
+        U6  = inter.factor_6  / vol
+        U12 = inter.factor_12 / vol
+
+        w = 2 * U6 + 4 * U12
+
+        for d in axes(buffers.virial, 1)
+            buffers.virial[d, d] += w
+        end
+    end
+
     return fs
+end
+
+@inline function overlap_pe_lj_softcore_beutler(dr, energy_units, C12, C6, λ, σ6_shift)
+    if iszero_value(σ6_shift)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    return λ * ((C12 / (σ6_shift * σ6_shift)) - (C6 / σ6_shift))
+end
+
+@inline function overlap_pe_lj_softcore_gapsys(dr, energy_units, C12, C6, λ, R)
+    if iszero_value(R)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    invR = inv(R)
+    invR6 = invR^6
+    return λ * ((91 * C12 * (invR6 * invR6)) - (28 * C6 * invR6))
 end
 
 @doc raw"""
@@ -306,13 +410,7 @@ end
     T = typeof(ustrip(atom_i.σ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    # 1. Fetch alchemical roles from the contiguous array
-    role_i = atom_i.alch_role
-    role_j = atom_j.alch_role
-    pair_role = mix_roles(inter.scheduler, role_i, role_j)
-
-    # 2. Dispatch to the scheduler for the effective sterics lambda
-    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
 
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
@@ -322,7 +420,7 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -382,13 +480,7 @@ end
     T = typeof(ustrip(atom_i.σ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    # 1. Fetch alchemical roles from the contiguous array
-    role_i = atom_i.alch_role
-    role_j = atom_j.alch_role
-    pair_role = mix_roles(inter.scheduler, role_i, role_j)
-
-    # 2. Dispatch to the scheduler for the effective sterics lambda
-    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
 
     if λ <= 0
         return zero_pairwise_energy(dr, energy_units)
@@ -398,7 +490,6 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
 
-    r = norm(dr)
     # If lambda is 1, the soft core formula reduces to standard LJ
     # We explicity branch to save compute.
     if λ >= 1
@@ -409,6 +500,7 @@ end
         σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
         ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
+        r = sqrt(sum(abs2, dr))
         σ2 = σ^2
         params = (σ2, ϵ, nothing, nothing)
 
@@ -425,6 +517,7 @@ end
     ϵ  = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
+    r = sqrt(sum(abs2, dr))
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
     σ6_shift = inter.α * (1 - λ) * σ6
@@ -547,14 +640,7 @@ end
     T = typeof(ustrip(atom_i.σ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    # 1. Fetch alchemical roles from the contiguous array
-    role_i = atom_i.alch_role
-    role_j = atom_j.alch_role
-    pair_role = mix_roles(inter.scheduler, role_i, role_j)
-
-    # 2. Dispatch to the scheduler for the effective sterics lambda
-    # Changed scale_elec to scale_sterics
-    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
 
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
@@ -565,7 +651,7 @@ end
     end
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
@@ -626,14 +712,7 @@ end
     T = typeof(ustrip(atom_i.σ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    # 1. Fetch alchemical roles from the contiguous array
-    role_i = atom_i.alch_role
-    role_j = atom_j.alch_role
-    pair_role = mix_roles(inter.scheduler, role_i, role_j)
-
-    # 2. Dispatch to the scheduler for the effective sterics lambda
-    # Changed scale_elec to scale_sterics
-    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
 
     if λ <= 0
         return zero_pairwise_energy(dr, energy_units)
@@ -644,8 +723,7 @@ end
     end
 
     cutoff = inter.cutoff
-    r = norm(dr)
-
+    r = sqrt(sum(abs2, dr))
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     σ6 = σ^6
@@ -792,7 +870,7 @@ end
                        special::Bool=false,
                        args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
 
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
@@ -800,7 +878,7 @@ end
     λ = λ_mixing(inter.λ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
@@ -839,7 +917,7 @@ end
     λ = λ_mixing(inter.λ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 

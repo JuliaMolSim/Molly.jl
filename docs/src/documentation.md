@@ -366,7 +366,7 @@ The above 5 ps simulation looks something like this when you view it in PyMOL:
 
 The system setup procedure is tested against OpenMM, following their template matching procedure to assign force field parameters to the structures read from the structure file.
 Some margin in residue and atom naming is allowed, as the naming present in the structure files is queried against a renaming dictionary that contains common alternative names present in PDB files, which you can consult in [pdbNames.xml](https://github.com/JuliaMolSim/Molly.jl/blob/master/data/force_fields/pdbNames.xml).
-You can extend this dictionary yourself, if you really want to use your own naming; or you can build a standalone renaming dictionary following the same structure as the one mentioned above, and pass it as a keyword argument `custom_renaming_scheme` when you build your [`MolecularForceField`](@ref).
+You can extend this dictionary yourself, if you really want to use your own naming; or you can build an additional renaming dictionary following the same structure as the one mentioned above, and pass it as a keyword argument `custom_renaming_scheme` when you build your [`MolecularForceField`](@ref).
 The bonding topology of the system is automatically inferred for standard residues (protein and nucleic acids, plus water).
 If your simulation contains other types of molecules, you must provide the topology for them. You can do this either by using a structure file format with explicit bond definitions, such as Mol2 or mmCIF, by defining the appropriate `CONECT` records in a PDB file, or by providing a custom topology template in a format equivalent to the one found in [residues.xml](https://github.com/JuliaMolSim/Molly.jl/blob/master/data/force_fields/residues.xml).
 
@@ -384,7 +384,7 @@ To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the ar
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
-Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`.
+Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`, and is applied before constraints are generated.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
 The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -432,23 +432,24 @@ The following tags are supported:
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
 - `<PeriodicTorsionForce>`: both `<Proper>` and `<Improper>` tags are supported
+- `<CMAPTorsionForce>`
 - `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
 - `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
+- `<AmoebaUreyBradleyForce>`: this defines the bond-like part of a general Urey-Bradley interaction and is not specific to the AMOEBA force field, note that `k` is equivalent to the `k/2` harmonic bond factor
 - `<Include>`
 
 The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
-- `<AmoebaUreyBradleyForce>`
 - `<RBTorsionForce>`
-- `<CMAPTorsionForce>`
 - `<GBSAOBCForce>`
 - `<CustomBondForce>`
 - `<CustomAngleForce>`
-- `<CustomTorsionForce>`
+- `<CustomTorsionForce>`: the special case where `energy="k*(theta-theta0)^2"` is supported as it is used to define improper torsions in some force fields
 - `<CustomNonbondedForce>`
 - `<CustomGBForce>`
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
-- `<Script>`
+- `<Script>`: since this is not supported, XML files that do further setup with Python code in `<Script>` may not behave as expected
+- Any of the other polarisable force field tags, i.e. `<DrudeForce>`, `<HippoNonbondedForce>` and those starting with `Amoeba` other than `<AmoebaUreyBradleyForce>`.
 In general, custom forces should be implemented as described in [Forces and energies](@ref).
 
 ### Structure file formats
@@ -526,6 +527,10 @@ end
 # 314.0608014652237 K
 # 362.86427110336984 K
 ```
+
+`ReplicaSystem` records the absolute MD step, and subsequent `simulate!` calls resume from
+`rep_sys.current_step`. Set `initial_step` in the constructor when restoring replica
+coordinates and velocities from a checkpoint.
 
 The accelerated weight histogram method ([`AWHState`](@ref) and [`AWHSimulation`](@ref)) has also been implemented in Molly.jl, allowing enhanced sampling and on-the-fly estimation of free energies along arbitrary collective variables and alchemical transformations. A more detailed overview of this can be found in the [Free energy calculation](@ref) section.
 
@@ -760,11 +765,12 @@ The available pairwise interactions are:
 - [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 
-The available specific interactions are:
+The available specific interactions (1-5 atoms) are:
 - [`HarmonicPositionRestraint`](@ref) - 1 atom
 - [`HarmonicBond`](@ref) - 2 atoms
 - [`MorseBond`](@ref) - 2 atoms
 - [`FENEBond`](@ref) - 2 atoms
+- [`EwaldExclusion`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
 - [`UreyBradley`](@ref) - 3 atoms
@@ -781,7 +787,23 @@ The available general interactions are:
 - [`ASECalculator`](@ref)
 
 Some interactions combine instances of the above.
-For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
+For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction, the [`EwaldExclusion`](@ref) specific interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
+
+By default, functions like [`potential_energy`](@ref) and [`forces`](@ref) use the interactions in the system.
+However, different interactions can be passed as keyword arguments.
+This can be useful for isolating the contribution of individual interactions:
+```julia
+# Evaluate the potential energy of the system using the interactions in the system
+potential_energy(sys)
+
+# Evaluate the potential energy of the system using only the Lennard-Jones potential
+potential_energy(
+    sys;
+    pairwise_inters=(LennardJones(),),
+    specific_inter_lists=(),
+    general_inters=(),
+)
+```
 
 ### Pairwise interactions
 
@@ -923,7 +945,7 @@ struct MySpecificInter
 end
 ```
 Next, you need to define a method for the [`force`](@ref) function.
-The form of this will depend on whether the interaction involves 1, 2, 3 or 4 atoms.
+The form of this will depend on whether the interaction involves 1, 2, 3, 4 or 5 atoms.
 For example in the 2 atom case:
 ```julia
 function Molly.force(inter::MySpecificInter,
@@ -934,7 +956,9 @@ function Molly.force(inter::MySpecificInter,
                      atom_j,
                      force_units,
                      velocity_i,
-                     velocity_j)
+                     velocity_j,
+                     step_n,
+                     data)
     dr = vector(coords_i, coords_j, boundary)
 
     # Replace this with your force calculation
@@ -946,7 +970,7 @@ function Molly.force(inter::MySpecificInter,
 end
 ```
 Again, most of these arguments are rarely used and can be replaced with `args...`.
-The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k)` and return `SpecificForce3Atoms(f1, f2, f3)`.
+The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k, step_n, data)` and return `SpecificForce3Atoms(f1, f2, f3)`.
 Virial computation is done automatically when required using the force function.
 
 To use your custom interaction, add it to the specific interaction lists along with the atom indices:
@@ -956,9 +980,12 @@ specific_inter_lists = (
         [1, 3],
         [2, 4],
         [MySpecificInter(), MySpecificInter()],
+        ["", ""], # Interaction type information, optional
+        nothing,  # Interaction data, optional
     ), # Don't forget the trailing comma!
 )
 ```
+Giving interaction data, including arrays, as the last argument to the interaction list means that it can be accessed in the [`force`](@ref) and [`potential_energy`](@ref) functions via the `data` argument.
 For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of indices.
 If using the GPU, the inner list of indices and interactions should be moved to the GPU with `CuArray`.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
@@ -973,7 +1000,9 @@ function Molly.potential_energy(inter::MySpecificInter,
                                 atom_j,
                                 energy_units,
                                 velocity_i,
-                                velocity_j)
+                                velocity_j,
+                                step_n,
+                                data)
     # Example harmonic bond interaction
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
@@ -1048,6 +1077,7 @@ The available cutoffs are:
 - [`ShiftedPotentialCutoff`](@ref)
 - [`ShiftedForceCutoff`](@ref)
 - [`CubicSplineCutoff`](@ref)
+- [`PolynomialCutoff`](@ref)
 
 The following built-in interactions can use a cutoff:
 - [`LennardJones`](@ref)
@@ -1146,6 +1176,7 @@ This could be anything from a simple energy minimization to complicated replica 
 The available simulators are:
 - [`SteepestDescentMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
+- [`DPDVelocityVerlet`](@ref)
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
@@ -1275,7 +1306,8 @@ The available couplers are:
 - [`BerendsenBarostat`](@ref)
 - [`CRescaleBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
-Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
+Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
+[`StormerVerlet`](@ref) does not support coupling methods because its recurrence stores coordinate history rather than advancing velocities as primary state.
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
 temp = 300.0u"K"
@@ -1328,7 +1360,11 @@ Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
-Contributions from constraints, implicit solvent methods and bias potentials are ignored.
+Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods and bias potentials are ignored.
+During supported constrained simulations, Molly can add constraint contributions to the total virial for steps where a barostat or virial/pressure logger requests it.
+For the initial simulation step, the same preview convention is used so that interactions and constraints both contribute to the logged virial/pressure.
+If a coordinate-scaling coupling method changes the box on a constrained step, virial and pressure loggers record the pre-coupling virial/pressure for that step, matching the state used by the coupling method.
+Other state loggers, such as [`BoxLogger`](@ref), continue to record the current post-coupling state.
 The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 As described previously, custom general interactions should implement virial calculation if required.
 
@@ -1376,17 +1412,30 @@ Base.values(logger::MyLogger) = logger.history
 Then, define the logging function that is called every step by the simulator:
 ```julia
 function Molly.log_property!(logger::MyLogger,
-                                sys,
-                                neighbors,
-                                step_n;
-                                n_threads=Threads.nthreads(),
-                                kwargs...)
+                             sys,
+                             buffers,
+                             neighbors,
+                             step_n;
+                             n_threads=Threads.nthreads(),
+                             kwargs...)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
 end
 ```
 The use of `n_steps` is optional and is an example of how to record a property periodically throughout the simulation.
+If a custom logger needs the total virial for constrained simulations, define
+[`logger_virial_interval`](@ref) so the simulator can compute the virial on the
+same interval:
+```julia
+Molly.logger_virial_interval(logger::MyLogger) = logger.n_steps
+```
+If it specifically logs pressure, also define [`logger_pressure_interval`](@ref):
+```julia
+Molly.logger_pressure_interval(logger::MyLogger) = logger.n_steps
+```
+Both functions return `Inf` by default, meaning no virial or pressure state is
+needed.
 To use your custom logger, add it to the named tuple of loggers given when creating the [`System`](@ref):
 ```julia
 loggers = (mylogger=MyLogger(10, []),) # Don't forget the trailing comma!
@@ -1407,14 +1456,14 @@ Many times, a logger will just record an observation to an `Array` containing a 
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
 Define your observation function as
 ```julia
-function my_observable(sys::System, neighbors, step_n; n_threads::Integer, kwargs...)
+function my_observable(sys::System, buffers, neighbors, step_n; n_threads::Integer, kwargs...)
     # Probe the system for some desired property
     return observation
 end
 ```
 Keyword arguments `current_forces` and `current_potential_energy` can also be used here to avoid recomputing values that are passed from the simulator:
 ```julia
-function my_pe_observable(sys::System, neighbors; n_threads::Integer,
+function my_pe_observable(sys::System, buffers, neighbors, step_n; n_threads::Integer,
                           current_potential_energy=nothing, kwargs...)
     if isnothing(current_potential_energy)
         # Compute potential energy
@@ -1538,8 +1587,11 @@ The oscillatory behavior is due to the harmonic bond interactions.
 
 ## Constraints
 
-Molly implements SHAKE and its extension, RATTLE, to perform constrained molecular dynamics (see [`SHAKE_RATTLE`](@ref)).
+Molly implements SHAKE/RATTLE (see [`SHAKE_RATTLE`](@ref)) and LINCS (see [`LINCS`](@ref)) to perform constrained molecular dynamics.
 These methods are useful for maintaining bond lengths and angles during a simulation, often allowing the use of longer time steps and therefore more efficient use of computing resources.
+
+### SHAKE/RATTLE
+
 The constraints satisfied by SHAKE are solely on the atomic coordinates:
 ```math
 \begin{aligned}
@@ -1555,12 +1607,27 @@ whereas RATTLE also constrains the velocities:
 Here $\vec{r}_{ij}$ is the vector between atoms i and j in a constraint, $d_{ij}$ is the bond length to be maintained and $\vec{v}_{ij}$ is the difference in the velocity vectors for atoms i and j.
 SHAKE was originally derived for the Verlet integration scheme ([Ryckaert et al. 1977](https://doi.org/10.1016/0021-9991(77)90098-5)) with RATTLE extending SHAKE to work for velocity Verlet where the velocities are also integrated ([Andersen 1983](https://doi.org/10.1016/0021-9991(83)90014-1)).
 
+### LINCS
+
+LINCS (LINear Constraint Solver) is a non-iterative constraint algorithm that uses matrix expansion to approximate the inverse of the constraint coupling matrix ([Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)).
+It is typically faster than SHAKE/RATTLE for large systems.
+The implementation in Molly includes explicit velocity constraints.
+The key parameters controlling accuracy are `nrec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `niter`, the number of outer correction iterations for rotational lengthening (default 1).
+Higher values of either improve accuracy at the cost of performance.
+
+!!! note
+    LINCS requires that angle constraints are isolated: none of their atoms may participate in distance constraints or in other angle constraints. This is because internally angle constraints are treated as a triangle of distance constraints, so interactions with other constraints may violate the constrained angle.
+
 Currently, constraints are supported by the following simulators:
-- [`SteepestDescentMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
+- [`DPDVelocityVerlet`](@ref)
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
+
+The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
+- [`SteepestDescentMinimizer`](@ref)
+
 Simulators incompatible with constraints will print a warning and continue without applying constraints when used with systems containing constraints.
 
 Molly supports [`DistanceConstraint`](@ref) and [`AngleConstraint`](@ref) on CPU and GPU.
@@ -1584,6 +1651,20 @@ shake = SHAKE_RATTLE(
 # SHAKE_RATTLE with 0 2-atom clusters, 1 3-atom clusters, 0 4-atom clusters and 1 angle clusters
 ```
 `constraints=(shake,)` can then be given when setting up a [`System`](@ref).
+
+Alternatively, using LINCS:
+```julia
+masses = [1.0u"g/mol", 1.0u"g/mol", 1.0u"g/mol", 1.0u"g/mol", 1.0u"g/mol", 1.0u"g/mol"]
+
+lincs = LINCS(
+    masses=masses,
+    dist_constraints=dist_constraints,
+    angle_constraints=angle_constraints,
+)
+# LINCS with 2 distance and 1 angle constraints (nrec=4, niter=1) (implicitly 5 distance constraints)
+```
+`constraints=(lincs,)` can then be given when setting up a [`System`](@ref).
+
 See [this example](@ref "Constrained dynamics") for more.
 
 This diagram demonstrates the four allowed constraint types:
@@ -1594,13 +1675,14 @@ This diagram demonstrates the four allowed constraint types:
 - 3 atoms around 1 central atom, 3 [`DistanceConstraint`](@ref)s (e.g. an ammonia molecule).
 
 !!! note
-    You can't constrain a linear chain of four atoms or an angle of 180°. Constraints beyond the four valid classes can't be used. For example, you can't constrain all the hydrogen bonds and the double bond in ethylene simultaneously. This would create a cluster of 5 constraints which is not supported.
+    For SHAKE/RATTLE, you can't constrain a linear chain of four atoms or an angle of 180°. Constraints beyond the four valid classes can't be used. For example, you can't constrain all the hydrogen bonds and the double bond in ethylene simultaneously. This would create a cluster of 5 constraints which is not supported. LINCS does not have these cluster size limitations but does require that angle constraints are isolated (no shared atoms with distance constraints or other angle constraints).
 
 These constraints provide enough flexibility to constrain all hydrogen atoms in organic molecules as well as water molecules.
 
-All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse.
+For SHAKE/RATTLE, all velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse.
 The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented.
 Other methods can be used to solve larger constraint clusters, these are not yet supported by Molly.
+LINCS uses a matrix expansion approach that scales better with system size and does not have the same cluster size limitations.
 
 ## Virtual sites
 

@@ -35,15 +35,15 @@ for the M-SHAKE algorithm.
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
 """
-struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer}
+struct SHAKE_RATTLE{D, A, B, C, E, V}
     clusters12::A
     clusters23::B
     clusters34::C
-    angle_clusters::D
-    dist_tolerance::E
-    vel_tolerance::F
-    gpu_block_size::I
-    max_iters::I
+    angle_clusters::E
+    dist_tolerance::D
+    vel_tolerance::V
+    gpu_block_size::Int
+    max_iters::Int
 end
 
 function SHAKE_RATTLE(n_atoms,
@@ -115,19 +115,41 @@ cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_cl
 
 function constrained_atom_inds(sr::SHAKE_RATTLE)
     atom_inds = Int[]
-    for cl in sr.clusters12
+    for cl in from_device(sr.clusters12)
         push!(atom_inds, cl.k1, cl.k2)
     end
-    for cl in sr.clusters23
+    for cl in from_device(sr.clusters23)
         push!(atom_inds, cl.k1, cl.k2, cl.k3)
     end
-    for cl in sr.clusters34
+    for cl in from_device(sr.clusters34)
         push!(atom_inds, cl.k1, cl.k2, cl.k3, cl.k4)
     end
-    for cl in sr.angle_clusters
+    for cl in host_constraint_clusters(sr.angle_clusters)
         push!(atom_inds, cl.k1, cl.k2, cl.k3)
     end
-    return atom_inds
+    return unique_ind_list(atom_inds)
+end
+
+function constrained_atom_pairs(sr::SHAKE_RATTLE{D}) where D
+    atom_pairs = Tuple{Int, Int, D}[]
+    for cl in from_device(sr.clusters12)
+        push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12))
+    end
+    for cl in from_device(sr.clusters23)
+        push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
+                          sort_pair(cl.k1, cl.k3, cl.dist13))
+    end
+    for cl in from_device(sr.clusters34)
+        push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
+                          sort_pair(cl.k1, cl.k3, cl.dist13),
+                          sort_pair(cl.k1, cl.k4, cl.dist14))
+    end
+    for cl in sr.angle_clusters
+        push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
+                          sort_pair(cl.k1, cl.k3, cl.dist13),
+                          sort_pair(cl.k2, cl.k3, cl.dist23))
+    end
+    return unique_pair_list(atom_pairs)
 end
 
 function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
@@ -161,6 +183,280 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
     end
 
     return sr
+end
+
+default_shake_position_constraint_context() = ConstraintApplicationContext(
+    PositionConstraintApplication();
+    needs_virial=false,
+)
+
+default_shake_velocity_constraint_context() = ConstraintApplicationContext(
+    VelocityConstraintApplication();
+    needs_virial=false,
+)
+
+function validate_shake_position_virial_context(context)
+    context.needs_virial || return context
+    if !(context.kind isa PositionConstraintApplication)
+        error("SHAKE position virial accumulation requires a position constraint context")
+    end
+    if isnothing(context.buffers)
+        error("SHAKE position virial accumulation requires context.buffers")
+    end
+    return context
+end
+
+function validate_shake_velocity_virial_context(context)
+    context.needs_virial || return context
+    if !(context.kind isa VelocityConstraintApplication)
+        error("RATTLE velocity virial accumulation requires a velocity constraint context")
+    end
+    if isnothing(context.buffers)
+        error("RATTLE velocity virial accumulation requires context.buffers")
+    end
+    return context
+end
+
+cluster_atom_inds(cluster::Cluster12Data) =
+    (Int(cluster.k1), Int(cluster.k2))
+cluster_atom_inds(cluster::Union{Cluster23Data, AngleClusterData}) =
+    (Int(cluster.k1), Int(cluster.k2), Int(cluster.k3))
+cluster_atom_inds(cluster::Cluster34Data) =
+    (Int(cluster.k1), Int(cluster.k2), Int(cluster.k3), Int(cluster.k4))
+
+function accumulate_shake_cluster_virial!(coords_ref, values_before, values_after, ms,
+                                          boundary, cluster, context)
+    context.needs_virial || return context
+    atom_inds = cluster_atom_inds(cluster)
+    λ = constraint_virial_lambda(context.atoms, atom_inds...)
+    anchor = first(atom_inds)
+    anchor_coord = coords_ref[anchor]
+    @inbounds for atom_i in atom_inds
+        local_coord = atom_i == anchor ? zero(coords_ref[atom_i]) :
+                      vector(anchor_coord, coords_ref[atom_i], boundary)
+        correction_impulse = ustrip(ms[atom_i]) *
+                             ustrip.(values_after[atom_i] - values_before[atom_i])
+        contribution = λ * (ustrip.(local_coord) * transpose(correction_impulse))
+        accumulate_constraint_virial!(context.buffers, contribution, context)
+    end
+    return context
+end
+
+function accumulate_shake_cluster_virial!(coords_ref, values_before, values_after, ms,
+                                          boundary, clusters::AbstractVector, context)
+    context.needs_virial || return context
+    for cluster in clusters
+        accumulate_shake_cluster_virial!(coords_ref, values_before, values_after, ms,
+                                         boundary, cluster, context)
+    end
+    return context
+end
+
+function accumulate_shake_position_virial!(coords_ref, coords_before, coords_after, ms,
+                                           boundary, ca::SHAKE_RATTLE, context)
+    context.needs_virial || return context
+    for clusters in (ca.clusters12, ca.clusters23, ca.clusters34, ca.angle_clusters)
+        accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms,
+                                         boundary, clusters, context)
+    end
+    return context
+end
+
+function accumulate_rattle_velocity_virial!(coords, velocities_before, velocities_after, ms,
+                                            boundary, ca::SHAKE_RATTLE, context)
+    context.needs_virial || return context
+    for clusters in (ca.clusters12, ca.clusters23, ca.clusters34, ca.angle_clusters)
+        accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms,
+                                         boundary, clusters, context)
+    end
+    return context
+end
+
+@inline function accumulate_constraint_virial_atomic!(constraint_virial_nounits, coords,
+                                                      correction_impulse, virial_scale)
+    for alpha in 1:3
+        for beta in 1:3
+            Atomix.@atomic constraint_virial_nounits[alpha, beta] +=
+                ustrip(virial_scale * coords[alpha] * correction_impulse[beta])
+        end
+    end
+    return nothing
+end
+
+@kernel inbounds=true function shake_cluster12_virial_kernel!(
+        constraint_virial_nounits,
+        @Const(k1s), @Const(k2s),
+        @Const(atoms),
+        @Const(coords_ref), @Const(values_before), @Const(values_after), @Const(ms),
+        boundary, virial_scale)
+    idx = @index(Global, Linear)
+    if idx <= length(k1s)
+        k1 = k1s[idx]
+        k2 = k2s[idx]
+        λ = constraint_virial_lambda(atoms, k1, k2)
+        ref_k1 = coords_ref[k1]
+        local_k2 = vector(ref_k1, coords_ref[k2], boundary)
+        impulse_k2 = ustrip(ms[k2]) * ustrip.(values_after[k2] - values_before[k2])
+        accumulate_constraint_virial_atomic!(
+            constraint_virial_nounits,
+            ustrip.(local_k2),
+            impulse_k2,
+            λ * virial_scale,
+        )
+    end
+end
+
+@kernel inbounds=true function shake_cluster23_virial_kernel!(
+        constraint_virial_nounits,
+        @Const(k1s), @Const(k2s), @Const(k3s),
+        @Const(atoms),
+        @Const(coords_ref), @Const(values_before), @Const(values_after), @Const(ms),
+        boundary, virial_scale)
+    idx = @index(Global, Linear)
+    if idx <= length(k1s)
+        k1 = k1s[idx]
+        k2 = k2s[idx]
+        k3 = k3s[idx]
+        λ = constraint_virial_lambda(atoms, k1, k2, k3)
+        ref_k1 = coords_ref[k1]
+
+        local_k2 = vector(ref_k1, coords_ref[k2], boundary)
+        impulse_k2 = ustrip(ms[k2]) * ustrip.(values_after[k2] - values_before[k2])
+        accumulate_constraint_virial_atomic!(
+            constraint_virial_nounits,
+            ustrip.(local_k2),
+            impulse_k2,
+            λ * virial_scale,
+        )
+
+        local_k3 = vector(ref_k1, coords_ref[k3], boundary)
+        impulse_k3 = ustrip(ms[k3]) * ustrip.(values_after[k3] - values_before[k3])
+        accumulate_constraint_virial_atomic!(
+            constraint_virial_nounits,
+            ustrip.(local_k3),
+            impulse_k3,
+            λ * virial_scale,
+        )
+    end
+end
+
+@kernel inbounds=true function shake_cluster34_virial_kernel!(
+        constraint_virial_nounits,
+        @Const(k1s), @Const(k2s), @Const(k3s), @Const(k4s),
+        @Const(atoms),
+        @Const(coords_ref), @Const(values_before), @Const(values_after), @Const(ms),
+        boundary, virial_scale)
+    idx = @index(Global, Linear)
+    if idx <= length(k1s)
+        k1 = k1s[idx]
+        k2 = k2s[idx]
+        k3 = k3s[idx]
+        k4 = k4s[idx]
+        λ = constraint_virial_lambda(atoms, k1, k2, k3, k4)
+        ref_k1 = coords_ref[k1]
+
+        local_k2 = vector(ref_k1, coords_ref[k2], boundary)
+        impulse_k2 = ustrip(ms[k2]) * ustrip.(values_after[k2] - values_before[k2])
+        accumulate_constraint_virial_atomic!(
+            constraint_virial_nounits,
+            ustrip.(local_k2),
+            impulse_k2,
+            λ * virial_scale,
+        )
+
+        local_k3 = vector(ref_k1, coords_ref[k3], boundary)
+        impulse_k3 = ustrip(ms[k3]) * ustrip.(values_after[k3] - values_before[k3])
+        accumulate_constraint_virial_atomic!(
+            constraint_virial_nounits,
+            ustrip.(local_k3),
+            impulse_k3,
+            λ * virial_scale,
+        )
+
+        local_k4 = vector(ref_k1, coords_ref[k4], boundary)
+        impulse_k4 = ustrip(ms[k4]) * ustrip.(values_after[k4] - values_before[k4])
+        accumulate_constraint_virial_atomic!(
+            constraint_virial_nounits,
+            ustrip.(local_k4),
+            impulse_k4,
+            λ * virial_scale,
+        )
+    end
+end
+
+function accumulate_shake_cluster12_virial_gpu!(coords_ref, values_before, values_after, ms,
+                                                boundary, clusters, context, backend,
+                                                block_size)
+    context.needs_virial || return context
+    length(clusters) == 0 && return context
+    virial_kern! = shake_cluster12_virial_kernel!(backend, block_size)
+    VT = eltype(context.buffers.constraint_virial_nounits)
+    virial_scale = VT(ustrip(context.virial_scale))
+    virial_kern!(context.buffers.constraint_virial_nounits, clusters.k1, clusters.k2,
+                 context.atoms, coords_ref, values_before, values_after, ms, boundary, virial_scale;
+                 ndrange=length(clusters))
+    return context
+end
+
+function accumulate_shake_cluster23_virial_gpu!(coords_ref, values_before, values_after, ms,
+                                                boundary, clusters, context, backend,
+                                                block_size)
+    context.needs_virial || return context
+    length(clusters) == 0 && return context
+    virial_kern! = shake_cluster23_virial_kernel!(backend, block_size)
+    VT = eltype(context.buffers.constraint_virial_nounits)
+    virial_scale = VT(ustrip(context.virial_scale))
+    virial_kern!(context.buffers.constraint_virial_nounits, clusters.k1, clusters.k2,
+                 clusters.k3, context.atoms, coords_ref, values_before, values_after, ms, boundary,
+                 virial_scale; ndrange=length(clusters))
+    return context
+end
+
+function accumulate_shake_cluster34_virial_gpu!(coords_ref, values_before, values_after, ms,
+                                                boundary, clusters, context, backend,
+                                                block_size)
+    context.needs_virial || return context
+    length(clusters) == 0 && return context
+    virial_kern! = shake_cluster34_virial_kernel!(backend, block_size)
+    VT = eltype(context.buffers.constraint_virial_nounits)
+    virial_scale = VT(ustrip(context.virial_scale))
+    virial_kern!(context.buffers.constraint_virial_nounits, clusters.k1, clusters.k2,
+                 clusters.k3, clusters.k4, context.atoms, coords_ref, values_before, values_after, ms,
+                 boundary, virial_scale; ndrange=length(clusters))
+    return context
+end
+
+function accumulate_shake_virial_gpu!(coords_ref, values_before, values_after, ms, boundary,
+                                      ca::SHAKE_RATTLE, context, backend, block_size)
+    context.needs_virial || return context
+    accumulate_shake_cluster12_virial_gpu!(coords_ref, values_before, values_after, ms,
+                                           boundary, ca.clusters12, context, backend,
+                                           block_size)
+    accumulate_shake_cluster23_virial_gpu!(coords_ref, values_before, values_after, ms,
+                                           boundary, ca.clusters23, context, backend,
+                                           block_size)
+    accumulate_shake_cluster34_virial_gpu!(coords_ref, values_before, values_after, ms,
+                                           boundary, ca.clusters34, context, backend,
+                                           block_size)
+    accumulate_shake_cluster23_virial_gpu!(coords_ref, values_before, values_after, ms,
+                                           boundary, ca.angle_clusters, context, backend,
+                                           block_size)
+    KernelAbstractions.synchronize(backend)
+    return context
+end
+
+function accumulate_shake_position_virial_gpu!(coords_ref, coords_before, coords_after, ms,
+                                               boundary, ca::SHAKE_RATTLE, context,
+                                               backend, block_size)
+    return accumulate_shake_virial_gpu!(coords_ref, coords_before, coords_after, ms,
+                                        boundary, ca, context, backend, block_size)
+end
+
+function accumulate_rattle_velocity_virial_gpu!(coords, velocities_before, velocities_after, ms,
+                                                boundary, ca::SHAKE_RATTLE, context, backend,
+                                                block_size)
+    return accumulate_shake_virial_gpu!(coords, velocities_before, velocities_after, ms,
+                                        boundary, ca, context, backend, block_size)
 end
 
 # The RATTLE equations are modified from LAMMPS:
@@ -481,6 +777,8 @@ function shake_gpu!(clusters::StructArray{C},
     # Doesnt need to be initialized, kernel will do that
     still_active = allocate(backend, Bool, N_active_clusters)
     KernelAbstractions.pagelock!(backend, still_active)
+    cluster_idxs  = getproperty.(Ref(clusters), idx_keys(C))
+    cluster_dists = getproperty.(Ref(clusters), dist_keys(C))
 
     iter = 1
     while iter <= max_iters
@@ -489,8 +787,8 @@ function shake_gpu!(clusters::StructArray{C},
             still_active,
             N_active_clusters,
             shake_kernel,
-            getproperty.(Ref(clusters), idx_keys(C))...,
-            getproperty.(Ref(clusters), dist_keys(C))...,
+            cluster_idxs...,
+            cluster_dists...,
             other_kernel_args...;
             ndrange=N_active_clusters,
         )
@@ -579,8 +877,8 @@ end
     s_k1k2 = vector(r_t2_k1, r_t2_k2, boundary)
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
 
-    tol12 = abs(norm(s_k1k2) - dist12)
-    tol13 = abs(norm(s_k1k3) - dist13)
+    tol12 = abs(sqrt(sum(abs2, s_k1k2)) - dist12)
+    tol13 = abs(sqrt(sum(abs2, s_k1k3)) - dist13)
 
     # Constraint still active if either above tolerance
     return (tol12 > dist_tol) || (tol13 > dist_tol)
@@ -668,9 +966,9 @@ end
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
     s_k1k4 = vector(r_t2_k1, r_t2_k4, boundary)
 
-    tol12 = abs(norm(s_k1k2) - dist12)
-    tol13 = abs(norm(s_k1k3) - dist13)
-    tol14 = abs(norm(s_k1k4) - dist14)
+    tol12 = abs(sqrt(sum(abs2, s_k1k2)) - dist12)
+    tol13 = abs(sqrt(sum(abs2, s_k1k3)) - dist13)
+    tol14 = abs(sqrt(sum(abs2, s_k1k4)) - dist14)
 
     # Constraint still active if either above tolerance
     return (tol12 > dist_tol) || (tol13 > dist_tol) || (tol14 > dist_tol)
@@ -756,9 +1054,9 @@ end
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
     s_k2k3 = vector(r_t2_k2, r_t2_k3, boundary)
 
-    tol12 = abs(norm(s_k1k2) - dist12)
-    tol13 = abs(norm(s_k1k3) - dist13)
-    tol23 = abs(norm(s_k2k3) - dist23)
+    tol12 = abs(sqrt(sum(abs2, s_k1k2)) - dist12)
+    tol13 = abs(sqrt(sum(abs2, s_k1k3)) - dist13)
+    tol23 = abs(sqrt(sum(abs2, s_k2k3)) - dist23)
 
     # Constraint still active if either above tolerance
     return (tol12 > dist_tol) || (tol13 > dist_tol) || (tol23 > dist_tol)
@@ -767,7 +1065,13 @@ end
 function apply_position_constraints!(sys::System,
                                      ca::SHAKE_RATTLE,
                                      r_pre_unconstrained_update;
+                                     context=nothing,
                                      kwargs...)
+    context = isnothing(context) ? default_shake_position_constraint_context() : context
+    validate_shake_position_virial_context(context)
+    coords_before = context.needs_virial ?
+        copyto_constraint_scratch!(context.coords_buffer, sys.coords) : nothing
+
     N12_clusters = length(ca.clusters12)
     N23_clusters = length(ca.clusters23)
     N34_clusters = length(ca.clusters34)
@@ -837,9 +1141,23 @@ function apply_position_constraints!(sys::System,
     end
 
     KernelAbstractions.synchronize(backend)
+    if sys.coords isa AbstractGPUArray
+        accumulate_shake_position_virial_gpu!(r_pre_unconstrained_update, coords_before,
+                                              sys.coords, masses(sys), sys.boundary, ca,
+                                              context, backend, ca.gpu_block_size)
+    else
+        accumulate_shake_position_virial!(r_pre_unconstrained_update, coords_before,
+                                          sys.coords, masses(sys), sys.boundary, ca, context)
+    end
+    return sys
 end
 
-function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
+function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; context=nothing, kwargs...)
+    context = isnothing(context) ? default_shake_velocity_constraint_context() : context
+    validate_shake_velocity_virial_context(context)
+    velocities_before = context.needs_virial ?
+        copyto_constraint_scratch!(context.velocities_buffer, sys.velocities) : nothing
+
     N12_clusters = length(ca.clusters12)
     N23_clusters = length(ca.clusters23)
     N34_clusters = length(ca.clusters34)
@@ -909,4 +1227,62 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
     end
 
     KernelAbstractions.synchronize(backend)
+    if sys.velocities isa AbstractGPUArray
+        accumulate_rattle_velocity_virial_gpu!(sys.coords, velocities_before, sys.velocities,
+                                               masses(sys), sys.boundary, ca, context, backend,
+                                               ca.gpu_block_size)
+    else
+        accumulate_rattle_velocity_virial!(sys.coords, velocities_before, sys.velocities,
+                                           masses(sys), sys.boundary, ca, context)
+    end
+    return sys
+end
+
+function check_position_constraints(sys::System{<:Any, <:Any, FT}, ca::SHAKE_RATTLE) where FT
+    err_unit = unit(eltype(eltype(sys.coords)))
+    if err_unit != unit(ca.dist_tolerance)
+        throw(ArgumentError("distance tolerance units in SHAKE ($(unit(ca.dist_tolerance))) " *
+                            "are inconsistent with system coordinate units ($err_unit)"))
+    end
+
+    cluster_maxes = FT[]
+    backend = get_backend(sys.coords)
+    err_kernel = max_dist_error(backend, 128)
+
+    for cluster_type in cluster_keys(ca)
+        clusters = getproperty(ca, cluster_type)
+        if length(clusters) > 0
+            max_storage = allocate(backend, FT, length(clusters))
+            err_kernel(clusters, sys.coords, sys.boundary, max_storage; ndrange=length(clusters))
+            push!(cluster_maxes, reduce(max, Array(max_storage)))
+        end
+    end
+
+    KernelAbstractions.synchronize(backend)
+    return maximum(cluster_maxes) < ustrip(ca.dist_tolerance)
+end
+
+function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca::SHAKE_RATTLE) where FT
+    err_unit = unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
+    if err_unit != unit(ca.vel_tolerance)
+        throw(ArgumentError("velocity tolerance units in RATTLE ($(unit(ca.vel_tolerance))) " *
+                    "are inconsistent with system velocity and coordinate units ($err_unit)"))
+    end
+
+    cluster_maxes = FT[]
+    backend = get_backend(sys.coords)
+    err_kernel = max_vel_error(backend, 128)
+
+    for cluster_type in cluster_keys(ca)
+        clusters = getproperty(ca, cluster_type)
+        if length(clusters) > 0
+            max_storage = allocate(backend, FT, length(clusters))
+            err_kernel(clusters, sys.coords, sys.velocities, sys.boundary, max_storage;
+                       ndrange=length(clusters))
+            push!(cluster_maxes, reduce(max, Array(max_storage)))
+        end
+    end
+
+    KernelAbstractions.synchronize(backend)
+    return maximum(cluster_maxes) < ustrip(ca.vel_tolerance)
 end

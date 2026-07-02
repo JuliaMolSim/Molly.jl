@@ -70,13 +70,13 @@ end
                        special=false,
                        args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
@@ -110,7 +110,7 @@ end
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ

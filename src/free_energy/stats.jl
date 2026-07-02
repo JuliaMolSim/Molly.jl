@@ -1,7 +1,3 @@
-export
-    statistical_inefficiency,
-    subsample
-
 struct StatisticalInefficiency{I, S, L, E, LG}
     inefficiency::I
     stride::S
@@ -10,23 +6,22 @@ struct StatisticalInefficiency{I, S, L, E, LG}
     lag::LG
 end
 
-"""
-    statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing, Int}=nothing)
-
-Integrated autocorrelation time estimator with IPS truncation and finite-sample taper.
-
-Returns a `StatisticalInefficiency` struct with:
-- inefficiency: statistical inefficiency
-- stride: ceil(Int, g)
-- input_length: input length
-- effective_size: floor(N / stride)
-- lag: truncation lag used
-
-Notes:
-- Uses initial positive sequence (IPS) on paired lags to choose L.
-- Uses normalized ACF of the mean-removed series.
-- Includes the (1 - τ/N) taper in the sum.
-"""
+# statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing, Int}=nothing)
+#
+# Integrated autocorrelation time estimator with IPS truncation and
+# finite-sample taper.
+#
+# Returns a StatisticalInefficiency struct with:
+# - inefficiency: statistical inefficiency
+# - stride: ceil(Int, g)
+# - input_length: input length
+# - effective_size: floor(N / stride)
+# - lag: truncation lag used
+#
+# Notes:
+# - Uses initial positive sequence (IPS) on paired lags to choose L.
+# - Uses normalized ACF of the mean-removed series.
+# - Includes the (1 - τ/N) taper in the sum.
 function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
     x = ustrip.(series)
     N = length(x)

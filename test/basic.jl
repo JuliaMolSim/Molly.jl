@@ -90,6 +90,57 @@
     @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm"; atol=1e-6u"nm")
     @test TriclinicBoundary(b.basis_vectors) == b
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
+    triclinic_cache(b) = (
+        b.cot_bprojyz_cprojyz,
+        b.cprojxy_x_over_z,
+        b.cprojxy_y_over_z,
+        b.cot_a_b,
+    )
+    @test all(isfinite, triclinic_cache(b))
+
+    for T in (Float32, Float64)
+        H = @SMatrix [
+            T(5.2)  zero(T)  zero(T)
+            zero(T) T(5.1)   zero(T)
+            zero(T) zero(T)  T(5.8)
+        ]
+        b_ortho = TriclinicBoundary(H)
+
+        @test all(isfinite, triclinic_cache(b_ortho))
+        @test all(iszero, triclinic_cache(b_ortho))
+    end
+
+    lengths = SVector(5.2, 5.1, 5.8)
+    b_cubic = CubicBoundary(lengths)
+    b_triclinic = TriclinicBoundary(@SMatrix [
+        lengths[1] 0.0        0.0
+        0.0        lengths[2] 0.0
+        0.0        0.0        lengths[3]
+    ])
+    for coord in (
+        SVector(1.0, 2.0, 3.0),
+        SVector(6.1, -0.2, 12.0),
+        SVector(-5.3, 10.4, -0.1),
+    )
+        @test wrap_coords(coord, b_triclinic) ≈ wrap_coords(coord, b_cubic)
+    end
+
+    H_skewed = @SMatrix [
+        4.0 0.8 0.4
+        0.0 3.5 0.6
+        0.0 0.0 3.0
+    ]
+    b_skewed = TriclinicBoundary(H_skewed)
+    @test all(isfinite, triclinic_cache(b_skewed))
+    for coord in (
+        SVector(1.0, 2.0, 3.0),
+        SVector(5.5, -1.0, 7.2),
+        SVector(-3.0, 8.0, -2.0),
+    )
+        fractional = H_skewed \ coord
+        expected = H_skewed * (fractional .- floor.(fractional))
+        @test wrap_coords(coord, b_skewed) ≈ expected
+    end
 
     @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
@@ -262,7 +313,7 @@ end
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
-        @test_throws ArgumentError System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
+        @test_throws ErrorException System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
     end
 
     water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff)
@@ -313,7 +364,7 @@ end
 
         if struc_name == "sgpb_omtky3"
             # Catch if disulfide bonds are not added properly
-            @test_throws ArgumentError System(
+            @test_throws ErrorException System(
                 pdb_file,
                 ff;
                 array_type = AT,
@@ -342,7 +393,12 @@ end
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
-        nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
+        boundary=CubicBoundary(10.0u"nm")
+        if neighbor_finder == CellListMapNeighborFinder
+            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm", boundary=boundary)
+        else
+            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
+        end
         s = System(
             atoms=[Atom(), Atom(), Atom()],
             coords=[
@@ -350,7 +406,7 @@ end
                 SVector(2.0, 2.0, 2.0)u"nm",
                 SVector(5.0, 5.0, 5.0)u"nm",
             ],
-            boundary=CubicBoundary(10.0u"nm"),
+            boundary=boundary,
             neighbor_finder=nf,
         )
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
@@ -371,7 +427,7 @@ end
     boundary = CubicBoundary(10.0u"nm")
     neighbor_finder=CellListMapNeighborFinder(
         eligible=trues(3, 3), n_steps=10, x0=coords,
-        unit_cell=boundary, dist_cutoff=2.0u"nm",
+        boundary=boundary, dist_cutoff=2.0u"nm",
     )
     sys = System(
         atoms=[Atom(), Atom(), Atom()],
@@ -396,7 +452,10 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=0.01u"nm")
     atoms = fill(Atom(), n_atoms)
     dist_cutoff = 0.6u"nm"
-    nf = CellListMapNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=dist_cutoff)
+    nf = CellListMapNeighborFinder(eligible=trues(n_atoms, n_atoms), 
+                                   dist_cutoff=dist_cutoff,
+                                   boundary=boundary,
+                                  )
     sys = System(atoms=atoms, coords=coords, boundary=boundary, neighbor_finder=nf)
     neighbors = find_neighbors(sys)
 
@@ -435,6 +494,7 @@ end
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
+
     function dense_masks(nf::GPUNeighborFinder)
         eligible = trues(nf.n_atoms, nf.n_atoms)
         special = falses(nf.n_atoms, nf.n_atoms)
@@ -451,17 +511,28 @@ end
         end
         return eligible, special
     end
+
     function dense_masks(nf::Union{DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder})
         return BitMatrix(Array(nf.eligible)), BitMatrix(Array(nf.special))
     end
+
     eligible_cpu, special_cpu = dense_masks(sys.neighbor_finder)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
-        nf = neighbor_finder(
-            eligible=eligible_cpu,
-            special=special_cpu,
-            dist_cutoff=dist_cutoff,
-        )
+        if neighbor_finder == CellListMapNeighborFinder
+            nf = neighbor_finder(
+                eligible=eligible_cpu,
+                special=special_cpu,
+                dist_cutoff=dist_cutoff,
+                boundary=sys.boundary,
+            )
+        else
+            nf = neighbor_finder(
+                eligible=eligible_cpu,
+                special=special_cpu,
+                dist_cutoff=dist_cutoff,
+            )
+        end
         for n_threads in n_threads_list
             neighbors = find_neighbors(sys, nf; n_threads=n_threads)
             @test length(neighbors) == n_neighbors_ref
@@ -470,14 +541,33 @@ end
         end
     end
 
-    gpu_ref_sys = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff;
-                         dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm",
-                         neighbor_finder_type=DistanceNeighborFinder)
+    gpu_ref_sys = System(
+        joinpath(data_dir, "water_3mol_cubic.pdb"),
+        ff;
+        dist_cutoff=dist_cutoff,
+        dist_buffer=0.0u"nm",
+        neighbor_finder_type=DistanceNeighborFinder,
+        strictness=:nowarn,
+    )
     gpu_neighbors_ref = find_neighbors(gpu_ref_sys)
+    @test_throws ErrorException System(
+        joinpath(data_dir, "water_3mol_cubic.pdb"),
+        ff;
+        dist_cutoff=dist_cutoff,
+        dist_buffer=0.0u"nm",
+        neighbor_finder_type=DistanceNeighborFinder,
+        strictness=:error,
+    )
 
     for AT in array_list[2:end]
-        sys_gpu = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff;
-                         array_type=AT, dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm")
+        sys_gpu = System(
+            joinpath(data_dir, "water_3mol_cubic.pdb"),
+            ff;
+            array_type=AT,
+            dist_cutoff=dist_cutoff,
+            dist_buffer=0.0u"nm",
+            strictness=:nowarn,
+        )
         eligible_gpu, special_gpu = dense_masks(sys_gpu.neighbor_finder)
         for neighbor_finder in (DistanceNeighborFinder,)
             nf_gpu = neighbor_finder(
@@ -493,6 +583,20 @@ end
             @test identical_neighbors(neighbors_gpu, gpu_neighbors_ref)
         end
     end
+
+    # Tests specific for the interface of CellListMapNeighborFinder, when
+    # infinite boundaries are provided.
+    nf = CellListMapNeighborFinder(eligible=trues(100, 100), 
+                                   dist_cutoff=0.6u"nm",
+                                   boundary=CubicBoundary(SVector(Inf, Inf, Inf) .* u"nm"),
+                                  )
+    @test length(nf.clm_particlesystem.positions) == 0
+    @test size(nf.clm_particlesystem.unitcell) == (3,3)
+    @test first(nf.clm_particlesystem.unitcell) > 2 * 0.6u"nm"
+    @test_throws "Cannot use infinite boundaries" CellListMapNeighborFinder(eligible=trues(100,100), 
+                                                                            dist_cutoff=1.0u"nm",
+                                                                            boundary=CubicBoundary(SVector(Inf, 100.0, 100.0)))
+
 end
 
 @testset "GPUNeighborFinder sparse metadata" begin
@@ -614,14 +718,48 @@ end
         @test repsys.state_pairwise_inters[i] == sys.pairwise_inters
     end
 
-    # Test initialization with loggers and extra data
+    # Test initialization with replica-system-owned loggers and extra data
     replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)) for i in 1:n_replicas]
 
     repsys2 = ReplicaSystem(
         thermo_states,
         [copy(coords) for _ in 1:n_replicas];
         replica_loggers=replica_loggers,
+        initial_step=12,
         data="test_data_repsys",
+    )
+    remd_sim = ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps",
+    )
+    @test_throws MethodError ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps";
+        replica_loggers=replica_loggers,
+    )
+    @test_throws MethodError ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps";
+        exchange_logger=ReplicaExchangeLogger(Float64, n_replicas),
+    )
+    @test repsys.current_step == 0
+    @test repsys2.current_step == 12
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        initial_step=-1,
+    )
+    shared_writer = TrajectoryWriter(10, tempname() * ".dcd")
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        replica_loggers=[(trj=shared_writer,) for _ in 1:n_replicas],
+    )
+    shared_path = tempname() * ".dcd"
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        replica_loggers=[(trj=TrajectoryWriter(10, shared_path),) for _ in 1:n_replicas],
     )
 
     sys2 = System(
@@ -851,4 +989,329 @@ end
             @test all(i -> !vs_flags_cpu[i] || !(i in non_vss), eachindex(sys))
         end
     end
+end
+
+@testset "Virial Correctness" begin
+
+    FT = Float64
+    AT = Array
+
+    # ---------------------------------------------------------------------------
+    # Virial from derivatives with respect to an affine box deformation
+    # ---------------------------------------------------------------------------
+
+    # q defines the upper-triangular deformation gradient
+    #
+    #     F = [1 + q[1]    q[4]       q[5]
+    #             0       1 + q[2]    q[6]
+    #             0           0       1 + q[3]]
+    #
+    # The box and Cartesian coordinates are transformed together:
+    #
+    #     H_new = F * H
+    #     r_new = F * r
+    function potential_deformation(sys, neighbors, q)
+        T = eltype(q)
+        z = zero(T)
+        o = one(T)
+
+        F = @SMatrix [
+            o + q[1]  q[4]       q[5];
+            z         o + q[2]   q[6];
+            z         z          o + q[3]
+        ]
+
+        bmat_original = Molly.boxmatrix(sys.boundary)
+        bmat_new = F * bmat_original
+
+        boundary_new = TriclinicBoundary(bmat_new)
+
+        # Apply the same affine transformation to every coordinate.
+        coords_new = [F * coord for coord in sys.coords]
+
+        sys_out = typeof(sys)(
+            sys.atoms,
+            coords_new,
+            boundary_new,
+            sys.velocities,
+            sys.atoms_data,
+            sys.topology,
+            sys.pairwise_inters,
+            sys.specific_inter_lists,
+            sys.general_inters,
+            sys.constraints,
+            sys.virtual_sites,
+            sys.virtual_site_flags,
+            sys.neighbor_finder,
+            sys.loggers,
+            sys.df,
+            sys.force_units,
+            sys.energy_units,
+            sys.k,
+            sys.masses,
+            sys.total_mass,
+            sys.data,
+            Molly.CUDALaunchConfig(),
+        )
+
+        return potential_energy(
+            sys_out,
+            neighbors;
+            n_threads=1,
+        )
+    end
+
+    function virial_enzyme(sys, neighbors)
+        T = eltype(eltype(sys.coords))
+
+        # Six independent components of the upper-triangular deformation.
+        q  = zeros(T, 6)
+        dq = zero(q)
+
+        result = autodiff(
+            set_runtime_activity(ReverseWithPrimal),
+            potential_deformation,
+            Active,
+            Const(sys),
+            Const(neighbors),
+            Duplicated(q, dq),
+        )
+
+        (_, pe) = result
+
+        # Molly defines
+        #
+        #     W = Σᵢ rᵢ ⊗ fᵢ
+        #
+        # while the deformation derivative satisfies
+        #
+        #     ∂U/∂F_ab = -W_ba.
+        #
+        # The upper-triangular deformation directly gives:
+        #
+        #     dq[1] = -W_xx
+        #     dq[2] = -W_yy
+        #     dq[3] = -W_zz
+        #     dq[4] = -W_yx
+        #     dq[5] = -W_zx
+        #     dq[6] = -W_zy
+        #
+        # For a rotationally invariant potential, the virial tensor is symmetric,
+        # so the off-diagonal components determine both halves of the tensor.
+
+        Wxx = -dq[1]
+        Wyy = -dq[2]
+        Wzz = -dq[3]
+
+        Wxy = -dq[4]
+        Wxz = -dq[5]
+        Wyz = -dq[6]
+
+        W = @SMatrix [
+            Wxx  Wxy  Wxz;
+            Wxy  Wyy  Wyz;
+            Wxz  Wyz  Wzz
+        ]
+
+        return W, pe, dq
+    end
+
+    function potential_deformation_pme(pme, atoms, coords, boundary, force_units,
+                                       energy_units, q)
+        T = eltype(q)
+        z, o = zero(T), one(T)
+        F = @SMatrix [
+            o + q[1]  q[4]       q[5];
+            z         o + q[2]   q[6];
+            z         z          o + q[3]
+        ]
+        boundary_new = TriclinicBoundary(F * Molly.boxmatrix(boundary))
+        return Molly.ewald_pe_forces!(
+            nothing,
+            nothing,
+            pme,
+            atoms,
+            [F * coord for coord in coords],
+            boundary_new,
+            force_units,
+            energy_units,
+            Val(false),
+            false;
+            n_threads=1,
+        )
+    end
+
+    function virial_enzyme_pme(sys)
+        pme = only(sys.general_inters)
+        q = zeros(eltype(eltype(sys.coords)), 6)
+        dq = zero(q)
+        autodiff(
+            set_runtime_activity(ReverseWithPrimal),
+            potential_deformation_pme,
+            Active,
+            Duplicated(pme, zero(pme)),
+            Const(sys.atoms),
+            Const(sys.coords),
+            Const(sys.boundary),
+            Const(sys.force_units),
+            Const(sys.energy_units),
+            Duplicated(q, dq),
+        )
+        return @SMatrix [
+            -dq[1]  -dq[4]  -dq[5];
+            -dq[4]  -dq[2]  -dq[6];
+            -dq[5]  -dq[6]  -dq[3]
+        ]
+    end
+
+    function virial_pme(sys)
+        W = zeros(FT, 3, 3)
+        Molly.ewald_pe_forces!(
+            zero(sys.coords),
+            W,
+            sys,
+            only(sys.general_inters),
+            Val(true);
+            n_threads=1,
+        )
+        return W
+    end
+
+    function test_virial_match(W_reference, W_molly; relative_tol)
+        @test maximum(abs, W_reference - W_molly) < 1e-6
+        @test norm(W_reference - W_molly) / max(norm(W_molly), eps(FT)) < relative_tol
+        @test abs(tr(W_reference) - tr(W_molly)) < 1e-6
+    end
+
+    function lj_dispersion_mechanical_adjustment(sys)
+        V = volume(sys)
+        correction = zero(eltype(eltype(sys.coords)))
+
+        for inter in values(sys.general_inters)
+            if inter isa LJDispersionCorrection
+                U6  = inter.factor_6  / V
+                U12 = inter.factor_12 / V
+
+                # Enzyme differentiates the stored tail energy (U6 + U12), while
+                # Molly's pressure virial uses the mechanical LJ tail, 2U6 + 4U12.
+                correction += (2 * U6 + 4 * U12) - (U6 + U12)
+            end
+        end
+
+        return correction * I
+    end
+
+    data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+    ff_dir   = joinpath(data_dir, "force_fields")
+
+    ff = MolecularForceField(
+        FT,
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
+        units=false,
+        strictness=:nowarn,
+    )
+
+    pdb_file = joinpath(data_dir, "6mrr_equil.pdb")
+
+    sys = System(
+        pdb_file,
+        ff;
+        units=false,
+        array_type=AT,
+        nonbonded_method=:cutoff,
+    )
+
+    bmat = Molly.boxmatrix(sys.boundary)
+    sys_trc = System(
+        deepcopy(sys);
+        boundary=TriclinicBoundary(bmat),
+    )
+
+    # Construct the neighbor list outside the differentiated region.
+    neighbors_virial = Molly.find_neighbors(sys_trc; n_threads=1)
+
+    W_enzyme, pe_deformed, deformation_gradient = virial_enzyme(
+        sys_trc,
+        neighbors_virial,
+    )
+    W_tail_adjustment = lj_dispersion_mechanical_adjustment(sys_trc)
+    W_enzyme_pressure = W_enzyme + W_tail_adjustment
+
+    W_molly = Molly.virial(
+        sys_trc,
+        neighbors_virial;
+        n_threads=1,
+    )
+
+    test_virial_match(W_enzyme_pressure, W_molly; relative_tol=1e-14)
+
+    boundary_pme = TriclinicBoundary(@SMatrix [
+        2.2  0.1  0.0;
+        0.0  2.0  0.2;
+        0.0  0.0  2.4
+    ])
+    atoms_pme = [
+        Atom(mass=1.0, charge=1.0, σ=0.0, ϵ=0.0),
+        Atom(mass=1.0, charge=-0.7, σ=0.0, ϵ=0.0),
+        Atom(mass=1.0, charge=-0.3, σ=0.0, ϵ=0.0),
+    ]
+    coords_pme = [
+        SVector(0.4, 0.6, 0.8),
+        SVector(1.2, 0.7, 1.5),
+        SVector(0.8, 1.4, 0.3),
+    ]
+
+    function pme_system(atoms, coords)
+        pme = PME(
+            0.9,
+            atoms,
+            boundary_pme;
+            grad_safe=true,
+            n_threads=1,
+        )
+        return System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary_pme,
+            general_inters=(pme,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+    end
+
+    charged_atom = [Atom(mass=1.0, charge=1.0, σ=0.0, ϵ=0.0)]
+    systems_pme = (
+        ("reciprocal", pme_system(atoms_pme, coords_pme)),
+        ("net charge", pme_system(charged_atom, [SVector(0.4, 0.6, 0.8)])),
+    )
+
+    for (name, sys_pme) in systems_pme
+        @testset "$name PME virial" begin
+            test_virial_match(
+                virial_enzyme_pme(sys_pme),
+                virial_pme(sys_pme);
+                relative_tol=1e-12,
+            )
+        end
+    end
+
+    exclusion_list = InteractionList2Atoms(
+        Int32[1],
+        Int32[2],
+        [EwaldExclusion()],
+        [""],
+        Molly.EwaldExclusionData(0.9),
+    )
+    sys_exclusion = System(
+        atoms=atoms_pme[1:2],
+        coords=coords_pme[1:2],
+        boundary=boundary_pme,
+        specific_inter_lists=(exclusion_list,),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+    W_exclusion, _, _ = virial_enzyme(sys_exclusion, nothing)
+    test_virial_match(W_exclusion, Molly.virial(sys_exclusion, nothing; n_threads=1);
+                      relative_tol=1e-12)
+
 end

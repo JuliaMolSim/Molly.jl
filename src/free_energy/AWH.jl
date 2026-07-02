@@ -1,9 +1,10 @@
 export 
     AWHState,
-    AWHSimulation,
-    calc_pmf,
-    extract_awh_data
+    AWHSimulation
     
+awh_count(n::Integer, singular::AbstractString, plural::AbstractString=string(singular, "s")) =
+    string(n, " ", n == 1 ? singular : plural)
+
 # Convenience struct to store relevant things
 # when running an AWH simulation.
 mutable struct AWHStats{T}
@@ -21,6 +22,12 @@ end
     copyto!(buffer, arr)
     return buffer
 end
+function Base.show(io::IO, stats::AWHStats)
+    print(io, "AWHStats with ",
+          awh_count(length(stats.step_indices), "logged entry", "logged entries"))
+end
+
+Base.show(io::IO, ::MIME"text/plain", stats::AWHStats) = show(io, stats)
 
 
 @doc raw"""
@@ -42,33 +49,11 @@ accumulated statistical weights, free energy estimates, and target distribution 
     a uniform distribution is used.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for adjacent λ windows. Generally improves performance.
+Loggers are attached by [`AWHSimulation`](@ref), not by `AWHState`.
 """
-mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI, SNF, SCN, SVS, SVF, SLG, SM, STM, SE}
-    partition::P
-    
-    active_idx::Int
-    active_sys::S
-    active_intg::I
-    
-    λ_integrators::Vector{I}
-    λ_β::B
-    λ_p::PR
-    
-    target_β::Union{T, Nothing}
-    target_p::Union{T, Nothing}
-    
-    # Store full interactions for accurate MD integration forces
-    state_pairwise_inters::SPI
-    state_specific_inter_lists::SSI
-    state_general_inters::SGI
-    state_neighbor_finders::SNF
-    state_constraints::SCN
-    state_virtual_sites::SVS
-    state_virtual_site_flags::SVF
-    state_loggers::SLG
-    state_masses::SM
-    state_total_masses::STM
-    state_dfs::Vector{Int}
+mutable struct AWHState{T, ES, AS}
+    state_space::ES
+    active_state::AS
 
     # Probability & Free Energy
     f::Vector{T}
@@ -98,6 +83,64 @@ mutable struct AWHState{T, P, S, I, B, PR, SPI, SSI, SGI, SNF, SCN, SVS, SVF, SL
     cv_buffer::Vector{Vector{T}}
 end
 
+function Base.getproperty(state::AWHState, name::Symbol)
+    if name === :partition
+        return getfield(getfield(state, :state_space), :partition)
+    elseif name === :active_idx
+        return getfield(getfield(state, :active_state), :active_idx)
+    elseif name === :active_sys
+        return getfield(getfield(state, :active_state), :active_sys)
+    elseif name === :active_intg
+        return getfield(getfield(state, :active_state), :active_integrator)
+    elseif name === :λ_integrators
+        return getfield(getfield(state, :state_space), :integrators)
+    elseif name === :λ_β
+        return getfield(getfield(state, :state_space), :betas)
+    elseif name === :λ_p
+        return getfield(getfield(state, :state_space), :pressures)
+    elseif name === :state_pairwise_inters
+        return getfield(getfield(state, :state_space), :state_pairwise_inters)
+    elseif name === :state_specific_inter_lists
+        return getfield(getfield(state, :state_space), :state_specific_inter_lists)
+    elseif name === :state_general_inters
+        return getfield(getfield(state, :state_space), :state_general_inters)
+    elseif name === :λ_hamiltonians
+        return getfield(getfield(getfield(state, :state_space), :partition), :λ_hamiltonians)
+    end
+    return getfield(state, name)
+end
+
+function Base.setproperty!(state::AWHState, name::Symbol, value)
+    if name === :active_idx
+        getfield(state, :active_state).active_idx = value
+    elseif name === :active_sys
+        getfield(state, :active_state).active_sys = value
+    elseif name === :active_intg
+        getfield(state, :active_state).active_integrator = value
+    else
+        setfield!(state, name, value)
+    end
+    return value
+end
+
+function Base.propertynames(state::AWHState, private::Bool=false)
+    names = collect(fieldnames(typeof(state)))
+    append!(names, (:partition, :active_idx, :active_sys, :active_intg, :λ_integrators,
+                    :λ_β, :λ_p, :state_pairwise_inters, :state_specific_inter_lists,
+                    :state_general_inters, :λ_hamiltonians))
+    return Tuple(names)
+end
+
+function Base.show(io::IO, state::AWHState)
+    stage = state.in_initial_stage ? "initial" : "linear"
+    print(io, "AWHState with ", awh_count(n_states(state.state_space), "window"),
+          ", active window ", state.active_idx, ", ", stage, " stage, N_eff=",
+          state.N_eff, ", N_bias=", state.N_bias, ", ",
+          awh_count(state.n_accum, "accumulated sample"))
+end
+
+Base.show(io::IO, ::MIME"text/plain", state::AWHState) = show(io, state)
+
 function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   target_state::Union{ThermoState, Nothing} = nothing,
                   first_state::Int = 1,
@@ -105,59 +148,11 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   ρ::Union{Nothing, AbstractArray} = nothing,
                   reuse_neighbors::Bool = true)
 
-    n_λ = length(thermo_states)
-    n_λ > 0 || throw(ArgumentError("`thermo_states` cannot be empty."))
-    1 <= first_state <= n_λ || throw(ArgumentError("`first_state`=$first_state is out of bounds for $n_λ states."))
-    n_bias > 0 || throw(ArgumentError("`n_bias` must be positive, got $n_bias."))
-    ref_sys = thermo_states[first_state].system
-    FT_base = typeof(ustrip(ref_sys.total_mass))
-    FT = isnothing(ref_sys.nonbonded_energy_type) ? FT_base : ref_sys.nonbonded_energy_type
-
-    partition = AlchemicalPartition(thermo_states; 
-                                    target_state=target_state, 
-                                    reuse_neighbors=reuse_neighbors)
-
-    # Extract integrators and parameters
-    # Keep as Vector{Any} so mixed integrator types can be switched safely.
-    λ_integrators = Any[ts.integrator for ts in thermo_states]
-    λ_β = [FT(ts.beta) for ts in thermo_states]
-    λ_p = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states]
-
-    # Extract Target Thermodynamics for PMF
-    local target_β_val = nothing
-    local target_p_val = nothing
-    
-    if !isnothing(target_state)
-        # ThermoState stores beta and pressure in Molly-internal units already.
-        target_β_val = FT(target_state.beta)
-        target_p_val = isnothing(target_state.p) ? zero(FT) : FT(target_state.p)
-    end
-
-    # Extract complete interaction lists for standard MD forces
-    state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states]
-    state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states]
-    state_general_inters = [ts.system.general_inters for ts in thermo_states]
-    state_neighbor_finders = [deepcopy(ts.system.neighbor_finder) for ts in thermo_states]
-    state_constraints = [ts.system.constraints for ts in thermo_states]
-    state_virtual_sites = [ts.system.virtual_sites for ts in thermo_states]
-    state_virtual_site_flags = [ts.system.virtual_site_flags for ts in thermo_states]
-    state_loggers = [ts.system.loggers for ts in thermo_states]
-    state_masses = [ts.system.masses for ts in thermo_states]
-    state_total_masses = [ts.system.total_mass for ts in thermo_states]
-    state_dfs = [ts.system.df for ts in thermo_states]
-
-    active_sys = System(deepcopy(ref_sys);
-        atoms = partition.λ_atoms[first_state],
-        pairwise_inters = state_pairwise_inters[first_state],
-        specific_inter_lists = state_specific_inter_lists[first_state],
-        general_inters = state_general_inters[first_state],
-        constraints = state_constraints[first_state],
-        virtual_sites = state_virtual_sites[first_state],
-        neighbor_finder = state_neighbor_finders[first_state],
-        loggers = state_loggers[first_state]
-    )
-  
-    active_intg = λ_integrators[first_state]
+    state_space = ExtendedStateSpace(thermo_states; reuse_neighbors=reuse_neighbors)
+    active_state = ActiveThermoState(state_space, first_state)
+    n_λ = n_states(state_space)
+    ref_sys = state_space.systems[first_state]
+    FT = typeof(ustrip(ref_sys.total_mass))
 
     # Handle Target Distribution (ρ)
     if isnothing(ρ)
@@ -176,33 +171,9 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
 
     stats = AWHStats(Int[], Int[], Vector{FT}[], FT[], Vector{FT}[], Symbol[], FT[])
 
-    return AWHState{FT, typeof(partition), System, Any, 
-                    typeof(λ_β), typeof(λ_p), typeof(state_pairwise_inters),
-                    typeof(state_specific_inter_lists), typeof(state_general_inters),
-                    typeof(state_neighbor_finders), typeof(state_constraints),
-                    typeof(state_virtual_sites), typeof(state_virtual_site_flags),
-                    typeof(state_loggers), typeof(state_masses), typeof(state_total_masses),
-                    typeof(scratch_energies)}(
-        partition,
-        first_state,
-        active_sys,
-        active_intg,
-        λ_integrators,
-        λ_β,
-        λ_p,
-        target_β_val,
-        target_p_val,
-        state_pairwise_inters,
-        state_specific_inter_lists,
-        state_general_inters,
-        state_neighbor_finders,
-        state_constraints,
-        state_virtual_sites,
-        state_virtual_site_flags,
-        state_loggers,
-        state_masses,
-        state_total_masses,
-        state_dfs,
+    return AWHState{FT, typeof(state_space), typeof(active_state)}(
+        state_space,
+        active_state,
         zeros(FT, n_λ),
         rho_val,
         log_ρ,
@@ -223,246 +194,161 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
-# Implements global Multistate Bennett Acceptance Ratio (MBAR) reweighting
-# to obtain the unbiased PMF across distinct thermodynamic states.
-# See Lundborg et al. 2021 https://doi.org/10.1063/5.0044352
-#
-# Note on algorithmic transition:
-# The previous implementation utilized the spatial deconvolution method 
-# introduced in Lindahl et al. 2014 (https://doi.org/10.1063/1.4890371). 
-# That method assumes the total energy separates strictly into a static 
-# core potential and a varying geometric bias: U_λ(x) = U_core(x) + V(ξ(x), λ).
-# By assuming U_core(x) is identical across all λ states, it precomputes a 
-# static coupling matrix to unbias the trajectory.
-# 
-# However, during alchemical transformations or temperature-replica AWH runs, 
-# the core physical interactions fundamentally change across windows (ΔU_core or Δβ). 
-# The spatial deconvolution method cannot account for these Hamiltonian differences,
-# resulting in invalid free energy estimates for non-geometric variables.
-# 
-# To ensure thermodynamic consistency across all AWH application types, this 
-# implementation now abandons the spatial coupling matrix. Instead using 
-# exact MBAR reweighting by evaluating the full physical Hamiltonian for every 
-# sampled coordinate frame across all states to compute the exact mixture weight.
-mutable struct AWHPMFDeconvolution{N, T, F_CV, MV, BW, SH, TP}
-    min_vals::MV
-    bin_widths::BW
-    shape::SH
-    is_periodic::NTuple{N, Bool} 
-    cv_function::F_CV         
-
-    numerator_hist::Array{T, N}
-    denominator_hist::Array{T, N}
-    denominator_w2_hist::Array{T, N}
-    sample_count::Int
-
-    target_beta::T
-    target_pressure::TP
+mutable struct AWHPMFDeconvolutionBackend{N, T, F_CV, G, C, A}
+    grid::G
+    cv_function::F_CV
+    log_coupling_matrix::C
+    accumulator::A
+    target_beta::Union{T, Nothing}
+    target_pressure::Union{T, Nothing}
+    cv_history::Vector{NTuple{N, T}}
+    active_idx_history::Vector{Int}
+    scratch_g::Vector{T}
+    scratch_log_bin_weights::Vector{T}
 end
 
-function AWHPMFDeconvolution(
-    awh_state::AWHState{T},
-    pmf_grid::Tuple;
-    cv_func = nothing,
-    is_periodic = nothing
-) where T
-    length(pmf_grid) == 3 || throw(ArgumentError(
-        "`pmf_grid` must be a 3-tuple: (mins, maxs, bins)."
-    ))
-
-    min_vals = Tuple(pmf_grid[1])
-    max_vals = Tuple(pmf_grid[2])
-    n_bins   = Tuple(Int.(pmf_grid[3]))
-    N = length(n_bins)
-    length(min_vals) == N || throw(ArgumentError(
-        "PMF mins length $(length(min_vals)) must match bins length $N."
-    ))
-    length(max_vals) == N || throw(ArgumentError(
-        "PMF maxs length $(length(max_vals)) must match bins length $N."
-    ))
-    all(>(0), n_bins) || throw(ArgumentError("All PMF bin counts must be positive."))
-
-    bin_widths = ntuple(N) do d
-        width = (max_vals[d] - min_vals[d]) / n_bins[d]
-        if !(width > zero(width))
-            throw(ArgumentError(
-                "PMF axis $d must satisfy max > min; got min=$(min_vals[d]), max=$(max_vals[d])."
-            ))
-        end
-        width
-    end
-
-    periodic_flags = if isnothing(is_periodic)
-        ntuple(_ -> false, N)
-    else
-        flags = Tuple(Bool.(is_periodic))
-        length(flags) == N || throw(ArgumentError(
-            "`pmf_is_periodic` length $(length(flags)) must match PMF dimensionality $N."
-        ))
-        flags
-    end
-    
-    local final_cv_func
-    coords_host_buffer = awh_state.active_sys.coords isa Array ? nothing : copy(from_device(awh_state.active_sys.coords))
-    
-    if !isnothing(cv_func)
-        final_cv_func = (coords) -> begin
-            coords_cv = host_view_for_cv!(coords_host_buffer, coords)
-            return cv_func(coords_cv)
-        end
-    else
-        first_ham = awh_state.partition.λ_hamiltonians[1]
-        bias_indices = findall(x -> x isa BiasPotential, first_ham.general_inters)
-        
-        if isempty(bias_indices)
-            error("No BiasPotential found in AWHState. Cannot auto-detect PMF settings.")
-        end
-
-        cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
-        length(cv_types) == N || throw(ArgumentError(
-            "Auto-detected $(length(cv_types)) bias CVs but PMF dimensionality is $N. " *
-            "Provide a matching `pmf_grid`, or pass `pmf_cv` explicitly."
-        ))
-        state_atoms_host = [from_device(atoms) for atoms in awh_state.partition.λ_atoms]
-        velocities_host_buffer = awh_state.active_sys.velocities isa Array ? nothing : copy(from_device(awh_state.active_sys.velocities))
-        
-        final_cv_func = (coords) -> begin
-            sys = awh_state.active_sys
-            coords_cv = host_view_for_cv!(coords_host_buffer, coords)
-            velocities_cv = host_view_for_cv!(velocities_host_buffer, sys.velocities)
-            atoms_cv = state_atoms_host[awh_state.active_idx]
-            return ntuple(N) do d
-                Molly.calculate_cv(
-                    cv_types[d],
-                    coords_cv,
-                    atoms_cv,
-                    sys.boundary,
-                    velocities_cv,
-                )
-            end
+function awh_auto_pmf_cv(awh_state::AWHState, grid::PMFGrid{N}) where N
+    first_ham = awh_state.partition.λ_hamiltonians[1]
+    bias_indices = findall(inter -> inter isa BiasPotential, first_ham.general_inters)
+    length(bias_indices) == N ||
+        throw(ArgumentError("automatic PMF deconvolution found $(length(bias_indices)) " *
+                            "BiasPotential interactions in the first AWH state, but the " *
+                            "PMF grid is $(N)D. Provide explicit cv and coupling functions."))
+    cv_types = [first_ham.general_inters[i].cv_type for i in bias_indices]
+    return coords -> begin
+        sys = awh_state.active_sys
+        coords_cpu = from_device(coords)
+        atoms_cpu = from_device(sys.atoms)
+        velocities_cpu = from_device(sys.velocities)
+        ntuple(N) do dim_i
+            calculate_cv(
+                cv_types[dim_i],
+                coords_cpu,
+                atoms_cpu,
+                sys.boundary,
+                velocities_cpu,
+            )
         end
     end
+end
 
-    sample_val = final_cv_func(awh_state.active_sys.coords)
-    sample_tuple = sample_val isa Tuple ? sample_val : (sample_val,)
-    length(sample_tuple) == N || throw(ArgumentError(
-        "`pmf_cv` returned $(length(sample_tuple)) values but PMF dimensionality is $N."
-    ))
+function awh_target_beta_pressure(sys, ::Type{T}, target_temp, target_pressure) where T
+    e_unit = sys.energy_units
 
-    return AWHPMFDeconvolution(
-        min_vals, bin_widths, n_bins, periodic_flags, final_cv_func,
-        zeros(T, n_bins), zeros(T, n_bins), zeros(T, n_bins), 0, awh_state.target_β, awh_state.target_p
+    target_beta = nothing
+    if !isnothing(target_temp)
+        kBT_q = uconvert(e_unit, Unitful.R * target_temp)
+        target_beta = T(1 / ustrip(kBT_q))
+    end
+
+    target_press = nothing
+    if !isnothing(target_pressure)
+        l_unit = unit(sys.boundary.side_lengths[1])
+        p_unit = e_unit / l_unit^3
+        e_val = one(T) * e_unit
+        p_val_scaled = target_pressure * (e_val / energy_remove_mol(e_val))
+        target_press = T(ustrip(uconvert(p_unit, p_val_scaled)))
+    end
+
+    return target_beta, target_press
+end
+
+function PMFDeconvolution(awh_state::AWHState{T};
+                          grid,
+                          coupling = nothing,
+                          cv = nothing,
+                          target_temp = nothing,
+                          target_pressure = nothing,
+                          kwargs...) where T
+    isempty(kwargs) ||
+        throw(ArgumentError("unsupported PMFDeconvolution keyword(s): " *
+                            "$(join(keys(kwargs), ", "))."))
+    pmf_grid = PMFGrid(grid; T = Float64)
+    if !isnothing(cv) && isnothing(coupling)
+        throw(ArgumentError("provide coupling when using a custom cv function for PMF deconvolution."))
+    end
+    cv_function = isnothing(cv) ? awh_auto_pmf_cv(awh_state, pmf_grid) : cv
+    log_coupling_matrix = pmf_build_log_coupling_matrix(
+        awh_state.state_space,
+        pmf_grid;
+        coupling = coupling,
     )
-end
-
-function update_pmf!(
-    pmf::AWHPMFDeconvolution{N, T},
-    awh_state, 
-    curr_coords;
-    weight_factor::T = one(T), 
-    box_volume::T = zero(T),
-    apply_forgetting::Bool = true
-) where {N, T}
-    
-    val = pmf.cv_function(curr_coords)
-    current_cv = val isa Tuple ? val : (val,)
-    length(current_cv) == N || throw(ArgumentError(
-        "PMF CV function returned $(length(current_cv)) values, expected $N."
-    ))
-
-    # Determine Index with conditional periodic wrapping
-    current_indices = ntuple(N) do d
-        rel = (current_cv[d] - pmf.min_vals[d]) / pmf.bin_widths[d]
-        rel_val = ustrip(rel)
-        isfinite(rel_val) || throw(ArgumentError("Non-finite PMF CV value encountered on axis $d."))
-        idx = Int(floor(rel_val)) + 1
-        
-        if pmf.is_periodic[d]
-            mod(idx - 1, pmf.shape[d]) + 1
-        else
-            clamp(idx, 1, pmf.shape[d])
-        end
-    end
-    current_linear_idx = LinearIndices(pmf.shape)[CartesianIndex(current_indices)]
-
-    # 1. Mixture Denominator W_mix = \sum_k exp(f_k + ln ρ_k - u_k(x))
-    # Read directly from the preceding process_sample step
-    log_W_mix = Molly.logsumexp(awh_state.scratch_z)
-    if !isfinite(log_W_mix)
-        return nothing
-    end
-    
-    # 2. Evaluate Exact Target Energy
-    target_pe_units = evaluate_energy!(
-        awh_state.partition, 
-        curr_coords, 
-        awh_state.active_sys.boundary, 
-        awh_state.partition.target_hamiltonian, 
-        awh_state.partition.target_atoms
+    target_beta, target_press = awh_target_beta_pressure(
+        awh_state.active_sys,
+        Float64,
+        target_temp,
+        target_pressure,
     )
-    
-    unbiased_pe = ustrip(target_pe_units)
-    if isnan(unbiased_pe)
-        unbiased_pe = typemax(T)
-    end
-    
-    # 3. Calculate MBAR Reweighting Factor targeting the exact physical state
-    u_target = pmf.target_beta * (unbiased_pe + pmf.target_pressure * box_volume)
-    unbias_log = -u_target - log_W_mix
-    if !isfinite(unbias_log)
-        return nothing
-    end
-    w_frame = exp(unbias_log)
-    if !isfinite(w_frame)
-        return nothing
-    end
-    
-    # Scale by statistical inefficiency to account for temporal correlations
-    ineff = awh_state.inefficiency
-    w_frame_eff = w_frame / ineff
-    count_eff = 1 / ineff
-    w2_eff = 1 / (ineff^2)
-    
-    # 4. Exponential Forgetting & Accumulation
-    if apply_forgetting && weight_factor < one(T)
-        pmf.numerator_hist .*= weight_factor
-        pmf.denominator_hist .*= weight_factor
-        pmf.denominator_w2_hist .*= weight_factor^2
-    end
-    
-    pmf.numerator_hist[current_linear_idx] += w_frame_eff
-    pmf.denominator_hist[current_linear_idx] += count_eff
-    pmf.denominator_w2_hist[current_linear_idx] += w2_eff
-    pmf.sample_count += 1
+    backend = AWHPMFDeconvolutionBackend(
+        pmf_grid,
+        cv_function,
+        log_coupling_matrix,
+        SampledPMFDeconvolutionAccumulator(pmf_grid),
+        target_beta,
+        target_press,
+        Vector{NTuple{length(pmf_grid.shape), Float64}}(),
+        Int[],
+        zeros(Float64, n_states(awh_state.state_space)),
+        zeros(Float64, prod(pmf_grid.shape)),
+    )
+    return PMFDeconvolution(backend)
 end
 
-@doc raw"""
-    calc_pmf(pmf_calc::AWHPMFDeconvolution)
+function update_pmf!(deconv::PMFDeconvolution{<:AWHPMFDeconvolutionBackend{N, T}},
+                     awh_state,
+                     curr_coords;
+                     weight_factor = one(T),
+                     potential_energy = zero(T),
+                     box_volume = zero(T),
+                     current_beta = one(T),
+                     current_pressure = zero(T)) where {N, T}
+    backend = deconv.backend
+    val = backend.cv_function(from_device(curr_coords))
+    current_cv = online_pmf_tuple(val, T)
+    length(current_cv) == N ||
+        throw(DimensionMismatch("PMF CV returned $(length(current_cv)) dimensions, " *
+                                "expected $(N)."))
+    push!(backend.cv_history, current_cv)
+    push!(backend.active_idx_history, awh_state.active_idx)
 
-Extracts the unbiased Potential of Mean Force (PMF) from the accumulated numerator 
-histograms. Unsampled bins are assigned a value of `Inf`, and the 
-global minimum of the valid PMF is shifted to zero.
-"""
-function calc_pmf(pmf_calc::AWHPMFDeconvolution{N, T}) where {N, T}
-    num = pmf_calc.numerator_hist
-    
-    # Identify bins with non-zero reweighted samples to avoid domain errors in log.
-    # The denominator histogram is no longer used for the free energy calculation.
-    valid = num .> zero(T)
-    
-    # Initialize PMF array with infinity for unsampled regions
-    pmf = fill(T(Inf), size(num))
-    
-    # Calculate absolute unbiased PMF for valid bins based directly on the sum of MBAR weights
-    pmf[valid] .= -log.(num[valid])
-    
-    # Shift the global minimum to zero
-    if any(valid)
-        min_val = minimum(pmf[valid])
-        pmf[valid] .-= min_val
+    @. backend.scratch_g = Float64(awh_state.f) + Float64(awh_state.log_rho)
+    pmf_log_bin_weights!(
+        backend.scratch_log_bin_weights,
+        backend.log_coupling_matrix,
+        backend.scratch_g;
+        log_weight_factor = pmf_positive_log(weight_factor, "PMF deconvolution weight_factor", Float64),
+    )
+
+    reweight_log = 0.0
+    if !isnothing(backend.target_beta)
+        reweight_log -= (backend.target_beta - Float64(current_beta)) * Float64(potential_energy)
     end
-    
-    return pmf
+    if !isnothing(backend.target_pressure)
+        target_beta = isnothing(backend.target_beta) ? Float64(current_beta) : backend.target_beta
+        target_work = target_beta * backend.target_pressure
+        current_work = Float64(current_beta) * Float64(current_pressure)
+        reweight_log -= (target_work - current_work) * Float64(box_volume)
+    end
+
+    accumulate_pmf_deconvolution!(
+        backend.accumulator,
+        current_cv,
+        backend.scratch_log_bin_weights;
+        log_reweight = reweight_log,
+    )
+    return deconv
+end
+
+function pmf(backend::AWHPMFDeconvolutionBackend{N, T};
+             zero::Symbol = :min,
+             kBT = nothing,
+             kwargs...) where {N, T}
+    return pmf_result_from_sampled_deconvolution(
+        backend.accumulator;
+        zero = zero,
+        kBT = kBT,
+        kwargs...,
+    )
 end
 
 @doc raw"""
@@ -471,10 +357,10 @@ end
 
 Prepares an Accelerated Weight Histogram (AWH) simulation.
 
-This struct stores the parameters controlling the AWH updates. It can optionally perform
-on-the-fly PMF deconvolution to obtain an unbiased estimate of the true PMF, as described
-in [Lindahl et al. (2014)](https://doi.org/10.1063/1.4890371). Deconvolution is recommended
-for simulations where the λ coordinate represents a biased reaction coordinate (e.g., an 
+This struct stores the parameters controlling the AWH updates. It can optionally update a
+[`PMFDeconvolution`](@ref) object on the fly to obtain an unbiased PMF, as described in
+[Lindahl et al. (2014)](https://doi.org/10.1063/1.4890371). Deconvolution is recommended
+for simulations where the λ coordinate represents a biased reaction coordinate (e.g. an
 umbrella potential). It is typically not required for standard alchemical transformations.
 
 # Arguments
@@ -491,15 +377,11 @@ umbrella potential). It is typically not required for standard alchemical transf
 - `coverage_type::Symbol=:reweighted`: Coverage accounting mode. Use `:reweighted` for coordinate-based
     AWH and `:physical` for strictly physical (active-window-only) tracking.
 - `log_freq::Int=100`: Number of AWH iterations between logging statistics.
-- `pmf_grid=nothing`: Tuple of tuples defining the PMF grid `((min_1, ...), (max_1, ...), (bins_1, ...))`.
-    Required if running with PMF deconvolution.
-- `pmf_cv=nothing`: Function taking system coordinates and returning a tuple of scalar Collective 
-    Variables (CVs). If omitted when `pmf_grid` is provided, Molly attempts to auto-detect CVs from 
-    the active `BiasPotential`s.
-- `target_state` in [`AWHState`](@ref): Required when using PMF deconvolution (`pmf_grid`) and
-    defines the exact unbiased thermodynamic state used for MBAR frame reweighting.
+- `loggers=()`: Loggers attached to the active system used for AWH dynamics.
+- `pmf=nothing`: Optional [`PMFDeconvolution`](@ref) object created from `awh_state`.
+- `initial_step::Int=0`: Absolute MD step for a new or resumed simulation.
 """
-struct AWHSimulation{T}
+mutable struct AWHSimulation{T, AS}
     n_windows::Int
     initial_sampl_n::T
     n_md_steps::Int 
@@ -510,8 +392,10 @@ struct AWHSimulation{T}
     coverage_type::Symbol
     log_freq::Int           
     state::AWHState{T}
-    
-    pmf_calc::Union{AWHPMFDeconvolution, Nothing}
+    active_state::AS
+    pmf::Union{PMFDeconvolution, Nothing}
+    current_step::Int
+    initial_log_pending::Bool
 end
 
 function AWHSimulation(
@@ -523,41 +407,22 @@ function AWHSimulation(
     significant_weight::Real = 0.1,
     coverage_type::Symbol = :reweighted,
     log_freq::Int = 100,
-    pmf_grid = nothing,
-    pmf_cv = nothing,
-    pmf_is_periodic = nothing
+    loggers = (),
+    pmf = nothing,
+    initial_step::Integer = 0,
 ) where T
 
-    num_md_steps > 0 || throw(ArgumentError("`num_md_steps` must be positive, got $num_md_steps."))
-    update_freq > 0 || throw(ArgumentError("`update_freq` must be positive, got $update_freq."))
-    log_freq > 0 || throw(ArgumentError("`log_freq` must be positive, got $log_freq."))
-    0 < coverage_threshold <= 1 || throw(ArgumentError(
-        "`coverage_threshold` must be in (0, 1], got $coverage_threshold."
-    ))
-    significant_weight >= 0 || throw(ArgumentError(
-        "`significant_weight` must be non-negative, got $significant_weight."
-    ))
-    (isinf(well_tempered_factor) || well_tempered_factor > 0) || throw(ArgumentError(
-        "`well_tempered_factor` must be positive or `Inf`, got $well_tempered_factor."
-    ))
-    coverage_type in (:reweighted, :physical) || throw(ArgumentError(
-        "`coverage_type` must be either `:reweighted` or `:physical`, got $coverage_type."
-    ))
+    n_win = n_states(awh_state.state_space)
+    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
+    active_state = ActiveThermoState(
+        awh_state.state_space,
+        awh_state.active_idx;
+        loggers = loggers,
+    )
+    sync_active_state_dynamics!(active_state, awh_state.active_state)
 
-    n_win = length(awh_state.partition.λ_hamiltonians)
-
-    pmf_calc = nothing
-    if !isnothing(pmf_grid)
-        if isnothing(awh_state.target_β)
-            error("PMF deconvolution requires a target_state to be passed during AWHState initialization.")
-        end
-        
-        pmf_calc = AWHPMFDeconvolution(
-            awh_state, 
-            pmf_grid;
-            cv_func=pmf_cv, 
-            is_periodic=pmf_is_periodic
-        )
+    if !isnothing(pmf) && !(pmf isa PMFDeconvolution{<:AWHPMFDeconvolutionBackend})
+        throw(ArgumentError("AWHSimulation pmf must be created with PMFDeconvolution(awh_state; ...)."))
     end
 
     return AWHSimulation(n_win,
@@ -569,182 +434,68 @@ function AWHSimulation(
                          T(significant_weight),
                          coverage_type,
                          log_freq, awh_state,
-                         pmf_calc)
+                         active_state,
+                         pmf, Int(initial_step), true)
 end
 
-# Fast-path check: if all target state fields are type-compatible with the
-# current `active_sys`, update in place; otherwise rebuild `active_sys`.
-function can_update_active_sys_inplace(awh_state::AWHState, active_idx::Int)
-    sys = awh_state.active_sys
-    return awh_state.partition.λ_atoms[active_idx] isa typeof(sys.atoms) &&
-           awh_state.state_pairwise_inters[active_idx] isa typeof(sys.pairwise_inters) &&
-           awh_state.state_specific_inter_lists[active_idx] isa typeof(sys.specific_inter_lists) &&
-           awh_state.state_general_inters[active_idx] isa typeof(sys.general_inters) &&
-           awh_state.state_constraints[active_idx] isa typeof(sys.constraints) &&
-           awh_state.state_virtual_sites[active_idx] isa typeof(sys.virtual_sites) &&
-           awh_state.state_virtual_site_flags[active_idx] isa typeof(sys.virtual_site_flags) &&
-           awh_state.state_neighbor_finders[active_idx] isa typeof(sys.neighbor_finder) &&
-           awh_state.state_loggers[active_idx] isa typeof(sys.loggers) &&
-           awh_state.state_masses[active_idx] isa typeof(sys.masses) &&
-           awh_state.state_total_masses[active_idx] isa typeof(sys.total_mass)
+function Base.show(io::IO, sim::AWHSimulation)
+    pmf_status = isnothing(sim.pmf) ? "disabled" : "enabled"
+    print(io, "AWHSimulation with ", awh_count(sim.n_windows, "window"),
+          ", active window ", sim.state.active_idx, ", ",
+          awh_count(sim.n_md_steps, "MD step"), " per iteration",
+          ", update frequency ", sim.update_freq, ", log frequency ", sim.log_freq,
+          ", PMF deconvolution ", pmf_status)
 end
 
-# Swaps Hamiltonians and enforces kinetic energy continuity across temperature jumps and mass changes
+Base.show(io::IO, ::MIME"text/plain", sim::AWHSimulation) = show(io, sim)
+
+# Swaps Hamiltionians
 function update_active_sys!(awh_state::AWHState, active_idx::Int)
-    old_idx = awh_state.active_idx
-    
-    # Perform instantaneous velocity rescaling if the temperature target or atomic masses change
-    if old_idx != active_idx
-        β_old = awh_state.λ_β[old_idx]
-        β_new = awh_state.λ_β[active_idx]
-        
-        old_masses = from_device(awh_state.state_masses[old_idx])
-        new_masses = from_device(awh_state.state_masses[active_idx])
-        temps_or_masses_change = (β_old != β_new)
+    set_active_state!(awh_state.active_state, awh_state.state_space, active_idx)
+    return awh_state
+end
 
-        if !temps_or_masses_change
-            for i in eachindex(old_masses, new_masses)
-                if old_masses[i] != new_masses[i]
-                    temps_or_masses_change = true
-                    break
-                end
-            end
-        end
-
-        if temps_or_masses_change
-            vels_cpu = copy(from_device(awh_state.active_sys.velocities))
-
-            for i in eachindex(vels_cpu, old_masses, new_masses)
-                m_old = old_masses[i]
-                m_new = new_masses[i]
-
-                if β_old != β_new || m_old != m_new
-                    # Zero-mass particles have no kinetic contribution; avoid 0/0
-                    # when swapping between temperatures or mass-scaled states.
-                    if iszero(m_old) || iszero(m_new)
-                        continue
-                    end
-                    # ustrip ensures the resulting scalar is a raw float, preventing Unitful type instability
-                    velocity_scaling_factor = sqrt(ustrip((β_old * m_old) / (β_new * m_new)))
-                    vels_cpu[i] = vels_cpu[i] * velocity_scaling_factor
-                end
-            end
-
-            awh_state.active_sys.velocities .= to_device(vels_cpu, array_type(awh_state.active_sys))
-        end
+function sync_awh_state_from_sim!(awh_sim::AWHSimulation)
+    state_active = awh_sim.state.active_state
+    sim_active = awh_sim.active_state
+    if state_active.active_idx != sim_active.active_idx
+        set_active_state!(state_active, awh_sim.state.state_space, sim_active.active_idx)
     end
+    sync_active_state_dynamics!(state_active, sim_active)
+    return awh_sim.state
+end
 
-    awh_state.active_idx = active_idx
-    if can_update_active_sys_inplace(awh_state, active_idx)
-        awh_state.active_sys.atoms = awh_state.partition.λ_atoms[active_idx]
-        awh_state.active_sys.pairwise_inters = awh_state.state_pairwise_inters[active_idx]
-        awh_state.active_sys.specific_inter_lists = awh_state.state_specific_inter_lists[active_idx]
-        awh_state.active_sys.general_inters = awh_state.state_general_inters[active_idx]
-        awh_state.active_sys.constraints = awh_state.state_constraints[active_idx]
-        awh_state.active_sys.virtual_sites = awh_state.state_virtual_sites[active_idx]
-        awh_state.active_sys.virtual_site_flags = awh_state.state_virtual_site_flags[active_idx]
-        awh_state.active_sys.neighbor_finder = awh_state.state_neighbor_finders[active_idx]
-        awh_state.active_sys.loggers = awh_state.state_loggers[active_idx]
-        awh_state.active_sys.masses = awh_state.state_masses[active_idx]
-        awh_state.active_sys.total_mass = awh_state.state_total_masses[active_idx]
-        awh_state.active_sys.df = awh_state.state_dfs[active_idx]
-    else
-        sys = awh_state.active_sys
-        awh_state.active_sys = System(
-            sys;
-            atoms = awh_state.partition.λ_atoms[active_idx],
-            coords = sys.coords,
-            boundary = sys.boundary,
-            velocities = sys.velocities,
-            pairwise_inters = awh_state.state_pairwise_inters[active_idx],
-            specific_inter_lists = awh_state.state_specific_inter_lists[active_idx],
-            general_inters = awh_state.state_general_inters[active_idx],
-            constraints = awh_state.state_constraints[active_idx],
-            virtual_sites = awh_state.state_virtual_sites[active_idx],
-            neighbor_finder = awh_state.state_neighbor_finders[active_idx],
-            loggers = awh_state.state_loggers[active_idx],
-            strictness = :nowarn,
-        )
-        # Keep per-state cached values exactly as provided by ThermoState.
-        awh_state.active_sys.virtual_site_flags = awh_state.state_virtual_site_flags[active_idx]
-        awh_state.active_sys.masses = awh_state.state_masses[active_idx]
-        awh_state.active_sys.total_mass = awh_state.state_total_masses[active_idx]
-        awh_state.active_sys.df = awh_state.state_dfs[active_idx]
-    end
-    awh_state.active_intg = awh_state.λ_integrators[active_idx]
+function update_active_sys!(awh_sim::AWHSimulation, active_idx::Int)
+    set_active_state!(awh_sim.active_state, awh_sim.state.state_space, active_idx)
+    sync_awh_state_from_sim!(awh_sim)
+    return awh_sim
 end
 
 # Reweights coordinates along λ windows and accumulates histogram
-function process_sample(
-    awh::AWHState{FT};
-    weight_relevance::Real = 0.1,
-    coverage_type::Symbol = :reweighted,
-    pmf_calc::Union{AWHPMFDeconvolution, Nothing} = nothing,
-) where FT
-    n_states = length(awh.λ_β)
-    coords = awh.active_sys.coords
-    bound  = awh.active_sys.boundary
+function process_sample(awh::AWHState{FT},
+                        active_state::ActiveThermoState = awh.active_state;
+                        weight_relevance::Real = 0.1) where FT
+    n_win = n_states(awh.state_space)
+    coords = active_state.active_sys.coords
+    bound  = active_state.active_sys.boundary
 
-    # Exploit the AlchemicalPartition abstraction
-    energies = evaluate_energy_all!(awh.partition, coords, bound, awh.scratch_energies)
-    
-    # Extract volume in consistent units
-    vol_val = FT(ustrip(volume(bound)))
-    
-    potentials = awh.scratch_potentials 
-    active_pe = energies[awh.active_idx]
+    state_indices = Base.OneTo(n_win)
+    energies = evaluate_energy_subset(awh.partition, coords, bound, state_indices)
+    reduced_potentials!(awh.scratch_potentials, energies, awh.state_space, bound, state_indices)
+    active_pe = energies[active_state.active_idx]
 
-    for n in 1:n_states
-        pe = energies[n]
-        
-        pe_val = ustrip(pe)
-        
-        # Trap r=0 Lennard-Jones overlaps (Inf - Inf = NaN)
-        if isnan(pe_val)
-            pe_val = typemax(FT)
-        end
-        
-        # Include Pressure-Volume work for NPT ensemble validity
-        pv_work = awh.λ_p[n] * vol_val
-        
-        # β is already converted to a raw float in correct units
-        potentials[n] = awh.λ_β[n] * (pe_val + pv_work)
-    end
-
-    # Calculate Z in-place
-    @. awh.scratch_z = awh.log_rho + awh.f - potentials
-    
-    log_den = Molly.logsumexp(awh.scratch_z)
-    
-    # Prevent NaN propagation if all potentials evaluate to typemax(FT)
-    if isinf(log_den) && log_den < zero(FT)
-        fill!(awh.w_last, one(FT) / n_states)
-    else
-        # Calculate W directly into w_last
-        @. awh.w_last = exp(awh.scratch_z - log_den)
-    end
+    @. awh.scratch_z = awh.log_rho + awh.f
+    conditional_state_weights!(awh.w_last, awh.scratch_z, awh.scratch_potentials, awh.scratch_z)
 
     # Accumulate
     awh.w_seg .+= awh.w_last
     awh.w2_seg .+= awh.w_last .^ 2
     awh.n_accum += 1
 
-    # Buffer CV for autocorrelation calculation
-    val = if !isnothing(pmf_calc)
-        pmf_calc.cv_function(coords)
-    else
-        # Fallback to active index if no CV is defined (alchemical mode)
-        awh.active_idx
-    end
-    cv_val = val isa Tuple ? [ustrip(v) for v in val] : [ustrip(val)]
-    push!(awh.cv_buffer, cv_val)
-
-    if coverage_type == :reweighted
-        # Coordinate-style AWH: one frame may validly contribute to neighboring bins.
-        for (i, val) in enumerate(awh.w_last)
-            if val > weight_relevance * awh.rho[i]
-                push!(awh.visited_windows, i)
-            end
+    # Check visited windows using w_last
+    for (i, val) in enumerate(awh.w_last)
+        if val > weight_relevance/n_win
+            push!(awh.visited_windows, i)
         end
     elseif coverage_type == :physical
         # Alchemical-style AWH: only the physically propagated window counts as visited.
@@ -760,7 +511,7 @@ end
 
 # Decides which is the new Hamiltonian given some weights
 function gibbs_sample_window(state::AWHState)
-    return sample(1:length(state.w_last), Weights(state.w_last))
+    return sample_state(state.w_last)
 end
 
 # Logs important stuff
@@ -860,60 +611,33 @@ function update_awh_bias!(awh_sim::AWHSimulation, iteration_n::Int)
     return delta_f
 end
 
-function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshold=nothing, max_lag::Int=10) where T
-    n_steps >= 0 || throw(ArgumentError("`n_steps` must be non-negative, got $n_steps."))
-    max_lag > 0 || throw(ArgumentError("`max_lag` must be positive, got $max_lag."))
+function simulate!(awh_sim::AWHSimulation{T},
+                   n_steps::Int;
+                   show_progress = default_show_progress()) where T
 
-    n_iterations = fld(n_steps, awh_sim.n_md_steps)
-    remaining_steps = n_steps - n_iterations * awh_sim.n_md_steps
-    active_idx = awh_sim.state.active_idx
-    converged = false
+    n_iterations = Int(floor(n_steps / awh_sim.n_md_steps))
 
-    df_hist = T[]
-
+    progress = setup_progress(n_iterations, show_progress)
     for iteration_n in 1:n_iterations
-        # --- NEW: Sync active index to the logger ---
-        if hasproperty(awh_sim.state.active_sys.loggers, :awh_logger)
-            awh_sim.state.active_sys.loggers.awh_logger.active_idx = active_idx
-        end
-
-        simulate!(awh_sim.state.active_sys, awh_sim.state.active_intg, awh_sim.n_md_steps)
-
-
-        process_sample(
-            awh_sim.state;
-            weight_relevance=awh_sim.significant_weight,
-            coverage_type=awh_sim.coverage_type,
-            pmf_calc=awh_sim.pmf_calc,
+        simulate!(
+            awh_sim.active_state.active_sys,
+            awh_sim.active_state.active_integrator,
+            awh_sim.n_md_steps;
+            init_step = awh_sim.current_step,
+            log_initial_state = awh_sim.initial_log_pending,
         )
+        awh_sim.current_step += awh_sim.n_md_steps
+        awh_sim.initial_log_pending = false
+        sync_awh_state_from_sim!(awh_sim)
 
-        # Increment N_eff based on the current best estimate of inefficiency
-        # This ensures that N_eff grows even when cv_buffer is not yet full.
-        awh_sim.state.N_eff += (1 / awh_sim.state.inefficiency)
 
-        # Periodically update the statistical inefficiency estimate using CV history
-        if length(awh_sim.state.cv_buffer) >= 50
-            # Use the max inefficiency across all CV dimensions as a conservative scaling factor
-            cv_data = awh_sim.state.cv_buffer
-            n_cv = length(cv_data[1])
-            
-            new_ineff = 1.0
-            for d in 1:n_cv
-                cv_series = [v[d] for v in cv_data]
-                d_ineff = statistical_inefficiency(cv_series).inefficiency
-                new_ineff = max(new_ineff, d_ineff)
-            end
-            
-            # Correct N_eff for the last 50 steps using the improved inefficiency estimate
-            awh_sim.state.N_eff -= (50 / awh_sim.state.inefficiency)
-            awh_sim.state.N_eff += (50 / new_ineff)
-            
-            awh_sim.state.inefficiency = new_ineff
-            empty!(awh_sim.state.cv_buffer)
-        end
+        active_pe_units = process_sample(awh_sim.state, awh_sim.active_state)
 
-        if !isnothing(awh_sim.pmf_calc)
-            # PMF update logic
+        if !isnothing(awh_sim.pmf)
+            # Calculate a(t) factor for PMF Deconvolution [Lindahl et al. 2014, Eq. 9 text]
+            # Initial Stage: N is constant => Delta N = 0 => a = N / (N + n_lambda)
+            # Linear Stage: N grows => Delta N = n_lambda => a = 1.0
+            
             w_fac = one(T)
             if awh_sim.state.in_initial_stage
                 current_N = awh_sim.state.N_bias
@@ -923,14 +647,21 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshol
             end
 
             # Extract System Info
-            sys = awh_sim.state.active_sys
+            sys = awh_sim.active_state.active_sys
+            e_unit = sys.energy_units
+            
+            pot_eng = ustrip(e_unit, active_pe_units)
+            
             vol_val = T(ustrip(volume(sys.boundary)))
             apply_forgetting = awh_sim.state.n_accum == 1
 
+            cur_beta = awh_sim.state.λ_β[awh_sim.active_state.active_idx]
+            cur_press = awh_sim.state.λ_p[awh_sim.active_state.active_idx]
+
             update_pmf!(
-                awh_sim.pmf_calc, 
+                awh_sim.pmf,
                 awh_sim.state, 
-                awh_sim.state.active_sys.coords; 
+                sys.coords;
                 weight_factor=w_fac,
                 box_volume=vol_val,
                 apply_forgetting=apply_forgetting
@@ -938,32 +669,9 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshol
         end
 
         active_idx_new = gibbs_sample_window(awh_sim.state)
-        if active_idx_new != active_idx
-            active_idx = active_idx_new
-        end
-
-        update_active_sys!(awh_sim.state, active_idx)
-        
-        delta_f = update_awh_bias!(awh_sim, iteration_n)
-
-        # --- NEW: Convergence Evaluation ---
-        if !isnothing(convergence_threshold) && !isnothing(delta_f)
-            # Strict enforcement: only evaluate convergence during the linear stage
-            if !awh_sim.state.in_initial_stage
-                max_change = maximum(abs.(delta_f))
-                push!(df_hist, max_change)
-                if length(df_hist) > max_lag
-                    popfirst!(df_hist)
-                end
-                nonzero_changes = filter(x -> x != zero(T), df_hist)
-                mean_change = isempty(nonzero_changes) ? zero(T) : mean(nonzero_changes)
-                if mean_change <= convergence_threshold
-                    @info "AWH converged at iteration $iteration_n (max ΔF = $mean_change <= $convergence_threshold)"
-                    converged = true
-                    break
-                end
-            end
-        end
+        update_active_sys!(awh_sim, active_idx_new)
+        update_awh_bias!(awh_sim, iteration_n)
+        next_nograd!(progress)
     end
 
     # Preserve the exact total number of requested MD steps unless converged early.
@@ -972,22 +680,4 @@ function simulate!(awh_sim::AWHSimulation{T}, n_steps::Int; convergence_threshol
     end
 
     return awh_sim
-end
-
-@doc raw"""
-    extract_awh_data(awh_sim::AWHSimulation)
-
-Extracts the converged free energy profile (f), target distribution (rho), 
-log target distribution (log_rho), and statistics from an AWH simulation.
-Returns a NamedTuple containing deepcopied arrays to ensure the reference 
-data is preserved independently of the ongoing simulation state.
-"""
-function extract_awh_data(awh_sim::AWHSimulation)
-    return (
-        f = copy(awh_sim.state.f),
-        rho = copy(awh_sim.state.rho),
-        log_rho = copy(awh_sim.state.log_rho),
-        ess_history = copy(awh_sim.state.stats.ess_history),
-        stats = deepcopy(awh_sim.state.stats)
-    )
 end

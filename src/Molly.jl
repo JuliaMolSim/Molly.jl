@@ -9,7 +9,7 @@ using Atomix
 import AtomsBase
 import AtomsCalculators
 import BioStructures
-using CellListMap
+import CellListMap
 import Chemfiles
 using Combinatorics
 using DataStructures
@@ -63,12 +63,15 @@ include("interactions/cosine_angle.jl")
 include("interactions/urey_bradley.jl")
 include("interactions/periodic_torsion.jl")
 include("interactions/rb_torsion.jl")
+include("interactions/harmonic_torsion.jl")
+include("interactions/cmap_torsion.jl")
 include("interactions/ewald.jl")
 include("interactions/implicit_solvent.jl")
 include("interactions/muller_brown.jl")
 include("interactions/dpd.jl")
 include("constraints/constraints.jl")
 include("constraints/shake.jl")
+include("constraints/lincs.jl")
 include("simulators.jl")
 include("coupling.jl")
 include("neighbors.jl")
@@ -79,9 +82,13 @@ include("force_field.jl")
 include("setup.jl")
 include("trajectory.jl")
 include("free_energy/thermo.jl")
+include("free_energy/extended_ensemble.jl")
 include("free_energy/stats.jl")
 include("free_energy/mbar.jl")
+include("free_energy/reweighting.jl")
+include("free_energy/pmf_deconvolution.jl")
 include("free_energy/AWH.jl")
+include("free_energy/TSS.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
 include("device_transfer.jl")
