@@ -165,10 +165,6 @@ struct LJDispersionCorrection{F6, F12}
     factor_12::F12
 end
 
-Base.getproperty(dc::LJDispersionCorrection, name::Symbol) =
-    name === :factor ? getfield(dc, :factor_6) + getfield(dc, :factor_12) : getfield(dc, name)
-
-
 function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
                                 σ_mix=LorentzMixing(),
                                 ϵ_mix=GeometricMixing())
@@ -177,52 +173,38 @@ function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
     atoms_cpu = from_device(atoms)
     at = atoms_cpu[1]
 
-    # Representative C6- and C12-like terms. Used to determine both the 
-    # physical units of the accumulated quantities and the factor types.
+    # Representative terms for units and final factor types.
     term_6_example  = at.ϵ * at.σ^6
     term_12_example = at.ϵ * at.σ^12
 
-    # The correction requires summing over N(N + 1) / 2 atom pairs. For large
-    # systems this can involve millions of additions. Accumulating in Float32
-    # can cause loss of precision, so we will do the accumulation always in 
-    # Float64
-    Tacc = promote_type(
-        Float64,
-        typeof(ustrip(term_6_example)),
-        typeof(ustrip(term_12_example)),
-        typeof(ustrip(dist_cutoff)),
-    )
+    # Accumulate pair sums in Float64 for precision.
+    Tacc = Float64
 
-    # Accumulate unitless numerical values in the higher-precision type.
-    ϵσ6_sum  = zero(Tacc)
-    ϵσ12_sum = zero(Tacc)
+    ϵσ6_unit  = unit(term_6_example)
+    ϵσ12_unit = unit(term_12_example)
 
-    # Include each unordered atom pair once, including i == j.
+    # Accumulate with units, but keep the numerical values in Float64.
+    ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
+    ϵσ12_sum = zero(Tacc) * ϵσ12_unit
+
+    # Include each unordered atom pair once.
     for i in 1:n_atoms
         atom_i = atoms_cpu[i]
         for j in 1:i
             atom_j = atoms_cpu[j]
             σ = σ_mixing(σ_mix, atom_i, atom_j, false)
             ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j, false)
-            ϵσ6_sum  += Tacc(ustrip(ϵ * σ^6))
-            ϵσ12_sum += Tacc(ustrip(ϵ * σ^12))
+            ϵσ6_sum  += Tacc(ustrip(ϵσ6_unit, ϵ * σ^6)) * ϵσ6_unit
+            ϵσ12_sum += Tacc(ustrip(ϵσ12_unit, ϵ * σ^12)) * ϵσ12_unit
         end
     end
 
-    # Compute the mean mixed coefficients using the same accumulation type.
     n_pairs_acc = Tacc((n_atoms * (n_atoms + 1)) ÷ 2)
 
-    # Restore the units.
-    ϵσ6_mean =
-        (ϵσ6_sum / n_pairs_acc) * unit(term_6_example)
+    ϵσ6_mean = ϵσ6_sum / n_pairs_acc
+    ϵσ12_mean = ϵσ12_sum / n_pairs_acc
 
-    ϵσ12_mean =
-        (ϵσ12_sum / n_pairs_acc) * unit(term_12_example)
-
-    # Evaluate the final correction factors in the high-precision accumulator
-    # type. The factors are defined so that dividing by the box volume gives
-    # the attractive r^-6 and repulsive r^-12 energy corrections,
-    # respectively.
+    # Factors are divided by volume when evaluating the correction.
     n_atoms_acc = Tacc(n_atoms)
     π_acc = Tacc(π)
 
@@ -234,7 +216,6 @@ function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
         8 * π_acc * n_atoms_acc^2 *
         (ϵσ12_mean / (Tacc(9) * dist_cutoff^9))
 
-    # Store the final factors using the original type.
     F6 = typeof(-(term_6_example / dist_cutoff^3))
     F12 = typeof(term_12_example / dist_cutoff^9)
 

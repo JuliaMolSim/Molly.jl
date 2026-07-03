@@ -789,10 +789,12 @@ lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace, boundary) 
 function accumulate_lincs_position_virial!(data::LincsData, ws::LincsWorkspace,
                                            context)
     context.needs_virial || return context
-    context.kind isa PositionConstraintApplication ||
+    if !(context.kind isa PositionConstraintApplication)
         error("LINCS position virial accumulation requires a position constraint context")
-    isnothing(context.buffers) &&
+    end
+    if isnothing(context.buffers)
         error("LINCS position virial accumulation requires context.buffers")
+    end
 
     @inbounds for i in eachindex(data.atom1)
         coeff = -data.lengths[i] * ws.factor_sum[i]
@@ -804,7 +806,7 @@ function accumulate_lincs_position_virial!(data::LincsData, ws::LincsWorkspace,
 end
 
 default_position_constraint_context() = ConstraintApplicationContext(
-    PositionConstraintApplication();
+    kind=PositionConstraintApplication(),
     needs_virial=false,
 )
 
@@ -887,7 +889,7 @@ function accumulate_lincs_velocity_virial!(data::LincsData, ws::LincsWorkspace,
 end
 
 default_velocity_constraint_context() = ConstraintApplicationContext(
-    VelocityConstraintApplication();
+    kind=VelocityConstraintApplication(),
     needs_virial=false,
 )
 
