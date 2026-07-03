@@ -646,3 +646,18 @@ end
         end
     end
 end
+
+@kernel function random_velocities_kernel!(vels::AbstractVector{SVector{D, C}},@Const(masses::AbstractVector{M}), units, @Const(virtual_sites))  where {D,C,M}
+    i = @index(Global, Linear)
+    if i<= length(vels)
+        @inbounds scale = C(sqrt(units/masses[i]))
+        @inbounds vels[i] = SVector{D,C}(randn() * scale,randn() * scale, randn() * scale)
+    end
+end
+
+function random_velocities!(vels::AbstractGPUArray, sys::Molly.AbstractSystem, temp; rng)
+    backend = get_backend(vels)
+    kernel! = random_velocities_kernel!(backend)
+    kernel!(vels,sys.masses,  sys.k*temp, sys.virtual_site_flags,ndrange=length(vels))
+    return vels 
+end

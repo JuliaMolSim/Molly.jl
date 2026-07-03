@@ -2343,40 +2343,4 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
     return nothing
 end
 
-import Molly.random_velocities! 
-
-function random_velocities!(vels::CuArray, sys::Molly.AbstractSystem, temp; rng)
-    T = typeof(convert(AbstractFloat, ustrip(temp)))
-    V = unit(eltype(eltype(vels))) ### avoids SVector
-    masses=Molly.masses(sys)
-
-    M = unit(eltype(masses))
-    units =  T(ustrip(uconvert(V^2,T(sys.k) * temp / M))) ### use square units
-
-    N = length(vels)
-    raw_ptr = CuPtr{T}(Base.pointer(vels))
-
-    GC.@preserve vels masses begin
-        flat_vels_raw = Base.unsafe_wrap(CuArray, raw_ptr   , (3*N,))
-
-        CUDA.@cuda threads=256 blocks=cld(N, 256) fastmath=true random_velocities_kernel!(flat_vels_raw,ustrip.(masses), N,units)
-    end
-    
-    return vels 
-end
-
-function random_velocities_kernel!(vels,masses, N,units)
-    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
-    if i <= N
-        @inbounds scale = sqrt(units/masses[i])
-        base_idx = 3 * (i - 1)
-
-        @inbounds vels[base_idx+1] = randn() * scale
-        @inbounds vels[base_idx+2] = randn() * scale
-        @inbounds vels[base_idx+3] = randn() * scale
-    end
-    return nothing
-end
-
-
 end

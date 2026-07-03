@@ -569,8 +569,6 @@
                 #neighbor_finder=neighbor_finder,
             )
 
-            using Random, Statistics
-
             velocities_gpu = AT(velocities)
 
             ### benchmark against cpu version
