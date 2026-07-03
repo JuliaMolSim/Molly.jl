@@ -5,6 +5,8 @@ export
     GeneralObservableLogger,
     values,
     log_property!,
+    logger_virial_interval,
+    logger_pressure_interval,
     TemperatureLogger,
     CoordinatesLogger,
     BoxLogger,
@@ -29,7 +31,7 @@ export
     MonteCarloLogger
 
 """
-    apply_loggers!(system, buffers, neighbors=nothing, step_n=0, run_loggers=true;
+    apply_loggers!(system, neighbors=nothing, step_n=0, buffers=nothing, run_loggers=true;
                    n_threads=Threads.nthreads(), kwargs...)
 
 Run the loggers associated with a system.
@@ -39,14 +41,15 @@ are not run before the first step.
 Additional keyword arguments can be passed to the loggers if required.
 Ignored for gradient calculation during automatic differentiation.
 """
-function apply_loggers!(sys::System, buffers, neighbors=nothing, step_n::Integer=0, run_loggers=true;
+function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, buffers=nothing,
+                        run_loggers=true;
                         n_threads::Integer=Threads.nthreads(), kwargs...)
     if !(run_loggers in (true, false, :skipzero))
         throw(ArgumentError("run_loggers must be true, false or :skipzero, found $run_loggers"))
     end
     if run_loggers == true || (run_loggers == :skipzero && step_n != 0)
         for logger in values(sys.loggers)
-            log_property!(logger, sys, buffers, neighbors, step_n; n_threads=n_threads, kwargs...)
+            log_property!(logger, sys, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
         end
     end
     return sys
@@ -58,7 +61,7 @@ end
 A logger which holds a record of regularly sampled observations of a system.
 
 `observable` should return an object of type `T` and support the method
-`observable(s::System, neighbors; n_threads::Integer)::T`.
+`observable(s::System, neighbors, step_n, buffers; n_threads::Integer)::T`.
 """
 struct GeneralObservableLogger{T, F}
     observable::F
@@ -80,7 +83,7 @@ Access the stored observations in a logger.
 Base.values(logger::GeneralObservableLogger) = logger.history
 
 """
-    log_property!(logger, system, buffers, neighbors=nothing, step_n=0;
+    log_property!(logger, system, neighbors=nothing, step_n=0, buffers=nothing;
                   n_threads=Threads.nthreads(), kwargs...)
 
 Log a property of a system throughout a simulation.
@@ -88,13 +91,34 @@ Log a property of a system throughout a simulation.
 Custom loggers should implement this function.
 Additional keyword arguments can be passed to the logger if required.
 """
-function log_property!(logger::GeneralObservableLogger, s::System, buffers, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
+function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0, buffers=nothing; kwargs...)
     if (step_n % logger.n_steps) == 0
-        obs = logger.observable(s, buffers, neighbors, step_n; kwargs...)
+        obs = logger.observable(s, neighbors, step_n, buffers; kwargs...)
         push!(logger.history, obs)
     end
 end
+
+"""
+    logger_virial_interval(logger)
+
+Return the interval in simulation steps at which `logger` needs a valid virial.
+
+Custom loggers that need the total virial should extend this function. The
+default `Inf` means that the logger does not require virial calculation.
+"""
+logger_virial_interval(logger) = Inf
+
+"""
+    logger_pressure_interval(logger)
+
+Return the interval in simulation steps at which `logger` needs a valid pressure.
+
+Custom pressure loggers should extend this function in addition to
+[`logger_virial_interval`](@ref). The default `Inf` means that the logger does
+not require pressure-specific pre-coupling state.
+"""
+logger_pressure_interval(logger) = Inf
 
 function Base.show(io::IO, gol::GeneralObservableLogger)
     print(io, "GeneralObservableLogger with n_steps ", gol.n_steps, ", ",
@@ -102,7 +126,7 @@ function Base.show(io::IO, gol::GeneralObservableLogger)
             gol.observable)
 end
 
-temperature_wrapper(sys, buffers, args...; kwargs...) = temperature(sys)
+temperature_wrapper(sys, args...; kwargs...) = temperature(sys)
 
 """
     TemperatureLogger(n_steps)
@@ -193,7 +217,7 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrap
             length(values(vl)) > 0 ? length(first(values(vl))) : "?", " atoms")
 end
 
-kinetic_energy_wrapper(sys, buffers, args...; kwargs...) = kinetic_energy(sys)
+kinetic_energy_wrapper(sys, args...; kwargs...) = kinetic_energy(sys)
 
 """
     KineticEnergyLogger(n_steps)
@@ -212,7 +236,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(kinetic_energy_
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function potential_energy_wrapper(sys, buffers, neighbors, step_n::Integer; n_threads::Integer,
+function potential_energy_wrapper(sys, neighbors, step_n::Integer, buffers; n_threads::Integer,
                                   current_potential_energy=nothing, kwargs...)
     if isnothing(current_potential_energy)
         return potential_energy(sys, neighbors, step_n; n_threads=n_threads)
@@ -238,8 +262,8 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(potential_energ
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function total_energy_wrapper(sys, buffers, args...; kwargs...)
-    return kinetic_energy(sys) + potential_energy_wrapper(sys, buffers, args...; kwargs...)
+function total_energy_wrapper(sys, neighbors, step_n::Integer, buffers; kwargs...)
+    return kinetic_energy(sys) + potential_energy_wrapper(sys, neighbors, step_n, buffers; kwargs...)
 end
 
 """
@@ -256,7 +280,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy_wr
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function forces_wrapper(sys, buffers, neighbors, step_n::Integer; n_threads::Integer,
+function forces_wrapper(sys, neighbors, step_n::Integer, buffers; n_threads::Integer,
                         current_forces=nothing, kwargs...)
     if isnothing(current_forces)
         return forces(sys, neighbors, step_n; n_threads=n_threads)
@@ -326,11 +350,43 @@ function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper
             dl.n_steps, ", ", length(values(dl)), " densities recorded")
 end
 
-function virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-    if all(iszero_value, buffers.virial)
-        return virial(sys, neighbors, step_n; n_threads=n_threads)
-    else
+valid_total_virial(buffers, step_n::Integer) =
+    !isnothing(buffers) && has_total_virial(buffers, step_n)
+
+valid_pressure(buffers, step_n::Integer) =
+    !isnothing(buffers) && has_pressure(buffers, step_n)
+
+valid_pre_coupling_virial(buffers, step_n::Integer) =
+    !isnothing(buffers) && has_pre_coupling_virial(buffers, step_n)
+
+valid_pre_coupling_pressure(buffers, step_n::Integer) =
+    !isnothing(buffers) && has_pre_coupling_pressure(buffers, step_n)
+
+function pre_coupling_pressure!(buffers, sys, step_n::Integer)
+    valid_pre_coupling_pressure(buffers, step_n) ||
+        constrained_virial_error("pre-coupling pressure logging", step_n)
+    return pressure_from_tensors!(
+        buffers.pres_tensor,
+        sys,
+        buffers.pre_coupling_kin_tensor[],
+        buffers.pre_coupling_virial[],
+        buffers.pre_coupling_volume[],
+    )
+end
+
+function constrained_virial_error(quantity, step_n)
+    error("$quantity for constrained systems requires a valid total virial for step $step_n")
+end
+
+function virial_wrapper(sys, neighbors, step_n, buffers; n_threads, kwargs...)
+    if valid_total_virial(buffers, step_n)
         return copy(buffers.virial)
+    elseif valid_pre_coupling_virial(buffers, step_n)
+        return copy(buffers.pre_coupling_virial[])
+    elseif length(sys.constraints) > 0
+        constrained_virial_error("virial logging", step_n)
+    else
+        return virial(sys, neighbors, step_n; n_threads=n_threads)
     end
 end
 
@@ -339,6 +395,9 @@ end
     VirialLogger(T, n_steps)
 
 Log the [`virial`](@ref) tensor of a system throughout a simulation.
+
+For constrained systems on coordinate-scaling coupling steps, this records the
+pre-coupling virial for that step.
 """
 VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
 VirialLogger(n_steps::Integer) = VirialLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"kJ * mol^-1"), n_steps)
@@ -348,11 +407,15 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)
             vl.n_steps, ", ", length(values(vl)), " virials recorded")
 end
 
-function scalar_virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-    if all(iszero_value, buffers.virial)
-        return scalar_virial(sys, neighbors, step_n; n_threads=n_threads)
-    else
+function scalar_virial_wrapper(sys, neighbors, step_n, buffers; n_threads, kwargs...)
+    if valid_total_virial(buffers, step_n)
         return tr(buffers.virial)
+    elseif valid_pre_coupling_virial(buffers, step_n)
+        return tr(buffers.pre_coupling_virial[])
+    elseif length(sys.constraints) > 0
+        constrained_virial_error("scalar virial logging", step_n)
+    else
+        return scalar_virial(sys, neighbors, step_n; n_threads=n_threads)
     end
 end
 
@@ -361,6 +424,9 @@ end
     ScalarVirialLogger(T, n_steps)
 
 Log the [`scalar_virial`](@ref) tensor of a system throughout a simulation.
+
+For constrained systems on coordinate-scaling coupling steps, this records the
+pre-coupling scalar virial for that step.
 """
 ScalarVirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_virial_wrapper, T, n_steps)
 ScalarVirialLogger(n_steps::Integer) = ScalarVirialLogger(typeof(one(DefaultFloat)*u"kJ * mol^-1"), n_steps)
@@ -370,12 +436,19 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(scalar_virial_w
             vl.n_steps, ", ", length(values(vl)), " virials recorded")
 end
 
-function pressure_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-    if all(iszero_value, buffers.pres_tensor)
+function pressure_wrapper(sys, neighbors, step_n, buffers; n_threads, kwargs...)
+    if valid_pressure(buffers, step_n)
+        return copy(buffers.pres_tensor)
+    elseif valid_total_virial(buffers, step_n)
+        P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads)
+        return copy(P)
+    elseif valid_pre_coupling_pressure(buffers, step_n)
+        return copy(pre_coupling_pressure!(buffers, sys, step_n))
+    elseif length(sys.constraints) > 0
+        constrained_virial_error("pressure logging", step_n)
+    else
         P = pressure(sys, neighbors, step_n, buffers; recompute=true, n_threads=n_threads)
         return copy(P)
-    else
-        return copy(buffers.pres_tensor)
     end
 end
 
@@ -384,6 +457,10 @@ end
     PressureLogger(T, n_steps)
 
 Log the [`pressure`](@ref) tensor of a system throughout a simulation.
+
+For constrained systems on coordinate-scaling coupling steps, this records the
+pre-coupling pressure used for coupling, not a pressure recomputed with the
+post-coupling box.
 
 This should only be used on 3-dimensional systems.
 """
@@ -395,12 +472,19 @@ function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrappe
             pl.n_steps, ", ", length(values(pl)), " pressures recorded")
 end
 
-function scalar_pressure_wrapper(sys::System{D}, buffers, neighbors, step_n; n_threads,
+function scalar_pressure_wrapper(sys::System{D}, neighbors, step_n, buffers; n_threads,
                                  kwargs...) where D
-    if all(iszero_value, buffers.pres_tensor)
-        return scalar_pressure(sys, neighbors, step_n, buffers; n_threads=n_threads)
-    else
+    if valid_pressure(buffers, step_n)
         return tr(buffers.pres_tensor) / D
+    elseif valid_total_virial(buffers, step_n)
+        return scalar_pressure(sys, neighbors, step_n, buffers; recompute=false,
+                               n_threads=n_threads)
+    elseif valid_pre_coupling_pressure(buffers, step_n)
+        return tr(pre_coupling_pressure!(buffers, sys, step_n)) / D
+    elseif length(sys.constraints) > 0
+        constrained_virial_error("scalar pressure logging", step_n)
+    else
+        return scalar_pressure(sys, neighbors, step_n, buffers; n_threads=n_threads)
     end
 end
 
@@ -410,6 +494,10 @@ end
 
 Log the [`scalar_pressure`](@ref) of a system throughout a simulation.
 
+For constrained systems on coordinate-scaling coupling steps, this records the
+pre-coupling pressure used for coupling, not a pressure recomputed with the
+post-coupling box.
+
 This should only be used on 3-dimensional systems.
 """
 ScalarPressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_pressure_wrapper, T, n_steps)
@@ -418,6 +506,26 @@ ScalarPressureLogger(n_steps::Integer) = ScalarPressureLogger(typeof(one(Default
 function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(scalar_pressure_wrapper)}) where T
     print(io, "ScalarPressureLogger{", eltype(values(pl)), "} with n_steps ",
             pl.n_steps, ", ", length(values(pl)), " pressures recorded")
+end
+
+const VirialLoggerObservable = Union{
+    typeof(virial_wrapper),
+    typeof(scalar_virial_wrapper),
+    typeof(pressure_wrapper),
+    typeof(scalar_pressure_wrapper),
+}
+
+const PressureLoggerObservable = Union{
+    typeof(pressure_wrapper),
+    typeof(scalar_pressure_wrapper),
+}
+
+function logger_virial_interval(logger::GeneralObservableLogger{<:Any, <:VirialLoggerObservable})
+    return logger.n_steps
+end
+
+function logger_pressure_interval(logger::GeneralObservableLogger{<:Any, <:PressureLoggerObservable})
+    return logger.n_steps
 end
 
 """
@@ -457,8 +565,8 @@ end
 
 Base.values(dl::DisplacementsLogger) = dl.displacements
 
-function log_property!(dl::DisplacementsLogger, sys::System, buffers, neighbors=nothing,
-                       step_n::Integer=0; kwargs...)
+function log_property!(dl::DisplacementsLogger, sys::System, neighbors=nothing,
+                       step_n::Integer=0, buffers=nothing; kwargs...)
     if (step_n % dl.n_steps_update) == 0
         dl.last_displacements .+= vector.(dl.coords_ref, sys.coords, (sys.boundary,))
         dl.coords_ref .= sys.coords
@@ -744,8 +852,8 @@ function Base.show(io::IO, tw::TrajectoryWriter)
           "\", correction ", tw.correction, ", ", tw.structure_n, " frames written")
 end
 
-function log_property!(logger::TrajectoryWriter, sys::System, buffers, neighbors=nothing,
-                       step_n::Integer=0; kwargs...)
+function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
+                       step_n::Integer=0, buffers=nothing; kwargs...)
     if step_n % logger.n_steps == 0
         logger.structure_n += 1
         if logger.format == "PDB"
@@ -790,7 +898,7 @@ C(t)=\langle A_t\cdot B_0\rangle -\langle A \rangle\cdot \langle B\rangle
 These can be used to estimate statistical error, or to compute transport
 coefficients from Green-Kubo type formulas.
 *A* and *B* are observables, functions of the form
-`observable(sys::System, neighbors; n_threads::Integer)`.
+`observable(sys::System, neighbors, step_n, buffers; n_threads::Integer)`.
 The return values of *A* and *B* can be of scalar or vector type (including
 `Vector{SVector{...}}`, like positions or velocities) and must implement `dot`.
 
@@ -876,11 +984,12 @@ function Base.show(io::IO, tcl::TimeCorrelationLogger{TA, TA2, TA, TA2, TAB, TFA
             tcl.observableA)
 end
 
-function log_property!(logger::TimeCorrelationLogger, s::System, buffers, neighbors=nothing,
-                        step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
-    A = logger.observableA(s, neighbors, step_n; n_threads=n_threads, kwargs...)
+function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0, buffers=nothing;
+                        n_threads::Integer=Threads.nthreads(), kwargs...)
+    A = logger.observableA(s, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
     if logger.observableA != logger.observableB
-        B = logger.observableB(s, buffers, neighbors, step_n; n_threads=n_threads, kwargs...)
+        B = logger.observableB(s, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
     else
         B = A
     end
@@ -946,7 +1055,7 @@ deviation for this average based on the block averaging method described in
 
 # Arguments
 - `observable::Function`: the observable whose mean is recorded, must support
-    the method `observable(s::System, neighbors; n_threads::Integer)`.
+    the method `observable(s::System, neighbors, step_n, buffers; n_threads::Integer)`.
 - `T::DataType`: the type returned by `observable`.
 - `n_steps::Integer`: number of simulation steps between observations.
 - `n_blocks::Integer=1024`: the number of blocks used in the block averaging
@@ -977,10 +1086,10 @@ function Base.values(aol::AverageObservableLogger; std::Bool=true)
     end
 end
 
-function log_property!(aol::AverageObservableLogger{T}, s::System, buffers, neighbors=nothing,
-                        step_n::Integer=0; kwargs...) where T
+function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
+                        step_n::Integer=0, buffers=nothing; kwargs...) where T
     if (step_n % aol.n_steps) == 0
-        obs = aol.observable(s, buffers, neighbors, step_n; kwargs...)
+        obs = aol.observable(s, neighbors, step_n, buffers; kwargs...)
         push!(aol.current_block, obs)
 
         if length(aol.current_block) == aol.current_block_size
@@ -1001,6 +1110,14 @@ function Base.show(io::IO, aol::AverageObservableLogger)
     print(io, "AverageObservableLogger with n_steps ", aol.n_steps, ", ",
             aol.current_block_size * length(aol.block_averages),
             " samples collected for observable ", aol.observable)
+end
+
+function logger_virial_interval(logger::AverageObservableLogger{<:Any, <:VirialLoggerObservable})
+    return logger.n_steps
+end
+
+function logger_pressure_interval(logger::AverageObservableLogger{<:Any, <:PressureLoggerObservable})
+    return logger.n_steps
 end
 
 """
@@ -1032,9 +1149,9 @@ ReplicaExchangeLogger(n_replicas::Integer) = ReplicaExchangeLogger(DefaultFloat,
 
 function log_property!(rexl::ReplicaExchangeLogger,
                        sys::ReplicaSystem,
-                       buffers,
                        neighbors=nothing,
-                       step_n::Integer=0;
+                       step_n::Integer=0,
+                       buffers=nothing;
                        indices,
                        delta,
                        n_threads::Integer=Threads.nthreads(),
@@ -1073,9 +1190,9 @@ MonteCarloLogger(T::DataType=DefaultFloat) = MonteCarloLogger{T}(0, 0, T[], BitV
 
 function log_property!(mcl::MonteCarloLogger{T},
                         sys::System,
-                        buffers,
                         neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        buffers=nothing;
                         success::Bool,
                         energy_rate::T,
                         kwargs...) where T

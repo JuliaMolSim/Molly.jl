@@ -154,11 +154,10 @@ struct TriclinicBoundary{D, T, C, A, I} <: AbstractBoundary{D, T, C}
     β::T
     γ::T
     reciprocal_size::SVector{3, I}
-    tan_bprojyz_cprojyz::T
-    tan_c_cprojxy::T
-    cos_a_cprojxy::T
-    sin_a_cprojxy::T
-    tan_a_b::T
+    cot_bprojyz_cprojyz::T
+    cprojxy_x_over_z::T
+    cprojxy_y_over_z::T
+    cot_a_b::T
 end
 
 ispositive(x) = x > zero(x)
@@ -170,9 +169,6 @@ function TriclinicBoundary(bv::Union{SVector{3,<:SVector{3}}, SMatrix{3,3}}; app
     end
 
     NT  = typeof(ustrip(bv[1][1])) # Underlying floating point type
-    uL  = (bv[1][1] isa Unitful.Quantity) ? unit(bv[1][1]) : one(NT)
-    tolL = sqrt(eps(NT)) * uL      # Length tolerance (with units)
-    tol0 = sqrt(eps(NT))           # Unitless tolerance
 
     if !ispositive(bv[1][1]) || !iszero_value(bv[1][2]) || !iszero_value(bv[1][3])
         throw(ArgumentError("first basis vector must be along the x-axis (no y or z component) " *
@@ -195,37 +191,25 @@ function TriclinicBoundary(bv::Union{SVector{3,<:SVector{3}}, SMatrix{3,3}}; app
     β = NT(ustrip(bond_angle(bv[1], bv[3])))
     γ = NT(ustrip(bond_angle(bv[1], bv[2])))
 
-    # tan(angle between b_yz and c_yz)
+    # Cotangent of the angle between b_yz and c_yz.
     by, bz = bv[2][2], bv[2][3]
     cy, cz = bv[3][2], bv[3][3]
-    n_byz = hypot(by, bz)
-    n_cyz = hypot(cy, cz)
-    tan_bprojyz_cprojyz =
-        (n_byz ≤ tolL || n_cyz ≤ tolL) ? zero(NT) :
-        let num = ustrip(abs(by*cz - bz*cy)), den = ustrip(by*cy + bz*cz)
-            abs(den) ≤ tol0 ? NT(Inf) : NT(abs(num/den))
-        end
+    cross_yz = ustrip(by * cz - bz * cy)
+    dot_yz = ustrip(by * cy + bz * cz)
+    cot_bprojyz_cprojyz = NT(abs(dot_yz / cross_yz))
 
-    # tan(angle between c and its xy-projection), and a vs c_xy direction
-    cx, cxy, cz3 = bv[3][1], bv[3][2], bv[3][3]
-    n_cxy = hypot(cx, cxy)
-    if n_cxy ≤ tolL
-        tan_c_cprojxy = NT(Inf) # c ⟂ xy-plane
-        cos_a_cprojxy = one(NT) # define dir(c_xy) = +x
-        sin_a_cprojxy = zero(NT)
-    else
-        tan_c_cprojxy = NT(ustrip(abs(cz3) / n_cxy))
-        cos_a_cprojxy = NT(ustrip(cx / n_cxy))
-        sin_a_cprojxy = NT(ustrip(cxy / n_cxy))
-    end
+    # Direct ratios used to project along c into the xy plane.
+    cx, cy2, cz2 = bv[3][1], bv[3][2], bv[3][3]
+    cprojxy_x_over_z = NT(ustrip(cx / abs(cz2)))
+    cprojxy_y_over_z = NT(ustrip(cy2 / abs(cz2)))
 
-    # tan(angle between a and b) = b_y / b_x
-    bx = bv[2][1]
-    tan_a_b = (abs(bx) ≤ tolL) ? NT(Inf) : NT(ustrip(bv[2][2] / bx))
+    # Cotangent of the angle between a and b.
+    bx, by2 = bv[2][1], bv[2][2]
+    cot_a_b = NT(ustrip(bx / by2))
 
     return TriclinicBoundary{3, NT, eltype(eltype(bv)), approx_images, eltype(reciprocal_size)}(
-        bv, α, β, γ, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
-        cos_a_cprojxy, sin_a_cprojxy, tan_a_b,
+        bv, α, β, γ, reciprocal_size, cot_bprojyz_cprojyz,
+        cprojxy_x_over_z, cprojxy_y_over_z, cot_a_b,
     )
 end
 
@@ -607,16 +591,19 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     # Bound in z-axis
     v_wrap -= bv[3] * floor(v_wrap[3] * rs[3])
     # Bound in y-axis
-    v_wrap -= bv[2] * floor((v_wrap[2] - v_wrap[3] / boundary.tan_bprojyz_cprojyz) * rs[2])
-    dz_projxy = v_wrap[3] / boundary.tan_c_cprojxy
-    dx = dz_projxy * boundary.cos_a_cprojxy
-    dy = dz_projxy * boundary.sin_a_cprojxy
+    v_wrap -= bv[2] * floor((v_wrap[2] - v_wrap[3] * boundary.cot_bprojyz_cprojyz) * rs[2])
+    dx = v_wrap[3] * boundary.cprojxy_x_over_z
+    dy = v_wrap[3] * boundary.cprojxy_y_over_z
     # Bound in x-axis
-    v_wrap -= bv[1] * floor((v_wrap[1] - dx - (v_wrap[2] - dy) / boundary.tan_a_b) * rs[1])
+    v_wrap -= bv[1] * floor(
+        (v_wrap[1] - dx - (v_wrap[2] - dy) * boundary.cot_a_b) * rs[1],
+    )
     return v_wrap
 end
 
 # Unwrap coordinates so that molecules are not split over the boundary
+# Ensures that the center of geometry of bonded clusters of atoms
+# (we assume those are molecules!) falls always inside the simulation box.
 # Returns coordinates on CPU
 unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 
@@ -658,7 +645,12 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
         push!(adj[j], i)
     end
 
-    # BFS over whole system (one lattice tiling)
+    # Unwrap each bonded connected component.
+    #
+    # For each cluster:
+    # 1. Anchor the seed atom in the primary box.
+    # 2. Reconstruct bonded neighbours using nearest-image fractional offsets.
+    # 3. Translate the entire cluster by a lattice vector so that COG falls inside box.
     u = similar(f) # Dimensionless
     visited = falses(N)
     @inbounds for seed in 1:N
@@ -666,17 +658,35 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
         u[seed] = f[seed]
         visited[seed] = true
         stack = Int[seed]
+        cluster = Int[seed]
         while !isempty(stack)
             i = pop!(stack)
             fi, ui = f[i], u[i]
             for j in adj[i]
                 visited[j] && continue
                 df = f[j] - fi
-                df -= round.(df) # Shift to (-0.5,0.5]
+                df -= round.(df) # Shift to nearest image, component-wise
                 u[j] = ui + df
                 visited[j] = true
                 push!(stack, j)
+                push!(cluster, j)
             end
+        end
+
+        # Move the whole bonded cluster so its center of geometry is inside [0, 1).
+        #
+        # This preserves the unwrapped internal geometry because the same integer
+        # lattice shift is applied to every atom in the cluster.
+        cog = zero(u[seed])
+        for i in cluster
+            cog += u[i]
+        end
+        cog /= length(cluster)
+
+        shift = floor.(cog)
+
+        for i in cluster
+            u[i] -= shift
         end
     end
 
@@ -971,6 +981,11 @@ and ``\bf{W}`` is the virial tensor.
 
 To calculate the scalar pressure, see [`scalar_pressure`](@ref).
 
+For constrained systems, direct recomputation approximates constraint
+contributions using a deterministic small-step constraint preview. To reuse a
+total virial from a simulation step, pass valid simulator buffers with
+`recompute=false`.
+
 Not compatible with infinite boundaries.
 """
 function pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
@@ -978,39 +993,57 @@ function pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
                     n_threads=n_threads, kwargs...)
 end
 
+function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial, vol) where D
+    K = energy_remove_mol.(kin_tensor) # (1/2) Σ m v⊗v
+    W = energy_remove_mol.(virial)     # Σ r⊗f
+
+    P = (2 .* K .+ W) ./ vol
+    if sys.energy_units == NoUnits || D != 3
+        # If implied energy units are (u * nm^2 * ps^-2) and everything is
+        #   consistent then this has implied units of (u * nm^-1 * ps^-2)
+        #   for 3 dimensions and (u * ps^-2) for 2 dimensions
+        pres_tensor .= P
+    else
+        # Sensible unit to return by default for 3 dimensions
+        P_bar = uconvert.(u"bar", P)
+        pres_tensor .= P_bar
+    end
+    return pres_tensor
+end
+
 function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothing;
                   recompute::Bool=true, n_threads::Integer=Threads.nthreads(),
-                  kwargs...) where D
+                  kin_tensor=nothing, kwargs...) where D
     if isnothing(buffers_in)
         buffers = init_buffers!(sys, n_threads)
     else
         buffers = buffers_in
     end
-    if recompute
+    if recompute && length(sys.constraints) > 0
+        if isnothing(buffers_in) || !has_total_virial(buffers, step_n)
+            compute_initial_total_virial!(buffers, sys, neighbors, step_n;
+                                          n_threads=n_threads, kwargs...)
+        end
+    elseif recompute
         forces!(zero_forces(sys), sys, neighbors, step_n, buffers, Val(true);
                 n_threads=n_threads, kwargs...)
+    elseif length(sys.constraints) > 0 && !has_total_virial(buffers, step_n)
+        error("cannot calculate pressure for constrained systems without a valid total virial")
     end
 
-    # Always evaluate K in case velocities were rescaled by a thermostat
-    kinetic_energy_tensor!(buffers.kin_tensor, sys)
+    if isnothing(kin_tensor)
+        # Always evaluate K in case velocities were rescaled by a thermostat.
+        kinetic_energy_tensor!(buffers.kin_tensor, sys)
+    else
+        buffers.kin_tensor .= kin_tensor
+    end
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
 
-    K = energy_remove_mol.(buffers.kin_tensor) # (1/2) Σ m v⊗v
-    W = energy_remove_mol.(buffers.virial) # Σ r⊗f
-
-    P = (2 .* K .+ W) ./ volume(sys.boundary)
-    if sys.energy_units == NoUnits || D != 3
-        # If implied energy units are (u * nm^2 * ps^-2) and everything is
-        #   consistent then this has implied units of (u * nm^-1 * ps^-2)
-        #   for 3 dimensions and (u * ps^-2) for 2 dimensions
-        buffers.pres_tensor .= P
-    else
-        # Sensible unit to return by default for 3 dimensions
-        P_bar = uconvert.(u"bar", P)
-        buffers.pres_tensor .= P_bar
-    end
+    pressure_from_tensors!(buffers.pres_tensor, sys, buffers.kin_tensor, buffers.virial,
+                           volume(sys.boundary))
+    mark_pressure!(buffers.validity, step_n)
     return buffers.pres_tensor
 end
 
@@ -1024,6 +1057,8 @@ end
 Calculate the pressure of the system as a scalar.
 
 This is the trace of the [`pressure`](@ref) tensor.
+For constrained systems, the same deterministic preview convention as
+[`pressure`](@ref) applies.
 """
 function scalar_pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return scalar_pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;
@@ -1031,8 +1066,10 @@ function scalar_pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
 end
 
 function scalar_pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers=nothing;
-                         kwargs...) where D
-    P = pressure(sys, neighbors, step_n, buffers; kwargs...)
+                         recompute::Bool=true, n_threads::Integer=Threads.nthreads(),
+                         kin_tensor=nothing, kwargs...) where D
+    P = pressure(sys, neighbors, step_n, buffers; recompute=recompute,
+                 n_threads=n_threads, kin_tensor=kin_tensor, kwargs...)
     return tr(P) / D
 end
 

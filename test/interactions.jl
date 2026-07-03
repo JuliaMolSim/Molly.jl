@@ -1274,7 +1274,7 @@
     @test Molly.ϵ_mixing(Molly.GeometricMixing(), a1_mie, a_zero) ≈ 0.0u"kJ * mol^-1"
 
     ljdc = LJDispersionCorrection([a1, a2], 1.0u"nm")
-    @test ljdc.factor ≈ -0.00208532857855u"kJ * nm^3 * mol^-1"
+    @test ljdc.factor_6 + ljdc.factor_12 ≈ -0.00208532857855u"kJ * nm^3 * mol^-1"
 
     InteractionList2Atoms([1, 2], [3, 4], [0.0, 0.0])
     @test_throws ArgumentError InteractionList2Atoms([1, 2], [3, 4], [0.0])

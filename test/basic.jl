@@ -90,6 +90,57 @@
     @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm"; atol=1e-6u"nm")
     @test TriclinicBoundary(b.basis_vectors) == b
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
+    triclinic_cache(b) = (
+        b.cot_bprojyz_cprojyz,
+        b.cprojxy_x_over_z,
+        b.cprojxy_y_over_z,
+        b.cot_a_b,
+    )
+    @test all(isfinite, triclinic_cache(b))
+
+    for T in (Float32, Float64)
+        H = @SMatrix [
+            T(5.2)  zero(T)  zero(T)
+            zero(T) T(5.1)   zero(T)
+            zero(T) zero(T)  T(5.8)
+        ]
+        b_ortho = TriclinicBoundary(H)
+
+        @test all(isfinite, triclinic_cache(b_ortho))
+        @test all(iszero, triclinic_cache(b_ortho))
+    end
+
+    lengths = SVector(5.2, 5.1, 5.8)
+    b_cubic = CubicBoundary(lengths)
+    b_triclinic = TriclinicBoundary(@SMatrix [
+        lengths[1] 0.0        0.0
+        0.0        lengths[2] 0.0
+        0.0        0.0        lengths[3]
+    ])
+    for coord in (
+        SVector(1.0, 2.0, 3.0),
+        SVector(6.1, -0.2, 12.0),
+        SVector(-5.3, 10.4, -0.1),
+    )
+        @test wrap_coords(coord, b_triclinic) ≈ wrap_coords(coord, b_cubic)
+    end
+
+    H_skewed = @SMatrix [
+        4.0 0.8 0.4
+        0.0 3.5 0.6
+        0.0 0.0 3.0
+    ]
+    b_skewed = TriclinicBoundary(H_skewed)
+    @test all(isfinite, triclinic_cache(b_skewed))
+    for coord in (
+        SVector(1.0, 2.0, 3.0),
+        SVector(5.5, -1.0, 7.2),
+        SVector(-3.0, 8.0, -2.0),
+    )
+        fractional = H_skewed \ coord
+        expected = H_skewed * (fractional .- floor.(fractional))
+        @test wrap_coords(coord, b_skewed) ≈ expected
+    end
 
     @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
@@ -222,7 +273,6 @@
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
     end
 end
-
 @testset "Trajectory" begin
     trj_path = joinpath(data_dir, "water_frames", "water_trj.dcd")
     ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=true)
