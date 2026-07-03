@@ -1625,7 +1625,9 @@ Currently, constraints are supported by the following simulators:
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
+- [`MTSIntegrator`](@ref)
 
+Due to the nature of the velocity treatment in each integrator, the velocities stored in the system are expected to satisfy the constraints only for [`VelocityVerlet`](@ref), [`DPDVelocityVerlet`](@ref) and [`MTSIntegrator`](@ref) (in other cases the simulator behaviour is correct).
 The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
 - [`SteepestDescentMinimizer`](@ref)
 

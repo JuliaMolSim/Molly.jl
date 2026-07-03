@@ -1299,6 +1299,66 @@ end
     @test all(abs.(total_momentum) .< 1.0)
 end
 
+@testset "MTSIntegrator" begin
+    ff = MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))
+
+    for AT in array_list
+        for constraints in (:none, :hbonds)
+            sys = System(
+                joinpath(data_dir, "tip4pew.pdb"),
+                ff;
+                array_type=AT,
+                constraints=constraints,
+                nonbonded_method=:cutoff,
+                center_coords=false,
+            )
+
+            if constraints == :hbonds
+                # Do not constrain angles, or there would be no specific interactions left
+                cons_label = "cons"
+                si_fractions = (4,)
+            else
+                cons_label = "nocons"
+                si_fractions = (8, 4)
+            end
+            sim = MTSIntegrator(
+                dt=1.0u"fs",
+                pi_fractions=(1, 1),
+                si_fractions=si_fractions,
+                gi_fractions=(1,),
+                remove_CM_motion=false,
+            )
+
+            forces_molly = from_device(forces(sys))
+            openmm_forces_fp = joinpath(data_dir, "openmm_tip4pfb", "forces_$cons_label.txt")
+            forces_openmm_vs = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+            forces_openmm = [(iszero(i % 4) ? zero(forces_openmm_vs[i]) : forces_openmm_vs[i])
+                             for i in eachindex(sys)]
+            @test maximum(norm.(forces_molly .- forces_openmm)) < 1e-6u"kJ * mol^-1 * nm^-1"
+
+            E_molly = potential_energy(sys)
+            openmm_E_fp = joinpath(data_dir, "openmm_tip4pfb", "energy_$cons_label.txt")
+            E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+            @test abs(E_molly - E_openmm) < 1e-5u"kJ * mol^-1"
+
+            n_steps = 10
+            simulate!(sys, sim, n_steps)
+
+            openmm_coords_fp = joinpath(data_dir, "openmm_tip4pfb",
+                                        "coordinates_$(n_steps)steps_$cons_label.txt")
+            openmm_vels_fp   = joinpath(data_dir, "openmm_tip4pfb",
+                                        "velocities_$(n_steps)steps_$cons_label.txt" )
+            coords_openmm = SVector{3}.(eachrow(readdlm(openmm_coords_fp)))u"nm"
+            vels_openmm   = SVector{3}.(eachrow(readdlm(openmm_vels_fp)))u"nm * ps^-1"
+
+            coords_diff = from_device(sys.coords) .- wrap_coords.(coords_openmm, (sys.boundary,))
+            vels_diff = from_device(sys.velocities) .- vels_openmm
+            @test maximum(norm.(coords_diff)) < 1e-3u"nm"
+            @test maximum(norm.(vels_diff  )) < 0.1u"nm * ps^-1"
+        end
+    end
+end
+
 @testset "Accelerated Weight Histogram (AWH)" begin
     n_atoms = 50
     n_steps = 2_000

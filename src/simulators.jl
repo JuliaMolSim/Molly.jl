@@ -11,6 +11,7 @@ export
     LangevinSplitting,
     OverdampedLangevin,
     NoseHoover,
+    MTSIntegrator,
     ReplicaExchangeMD,
     simulate_remd!,
     remd_exchange!,
@@ -1462,6 +1463,216 @@ end
                        current_forces=forces_t)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
+            break
+        end
+        next_nograd!(progress)
+    end
+    return sys
+end
+
+"""
+    MTSIntegrator(; <keyword arguments>)
+
+The rRESPA multiple time step integration algorithm.
+
+See [Tuckerman et al. 1992](https://doi.org/10.1063/1.463137).
+This integrator allows different interactions to be evaluated at different frequencies,
+so more expensive interactions can be calculated less frequently.
+
+The fraction arguments correspond to the number of times each interaction is applied
+per outer step.
+For example, if your system had two pairwise interactions and three specific interactions
+you could pass `pi_fractions=(1, 1)` and `si_fractions=(2, 4)`.
+With a `dt` of 4 fs this means that the pairwise interactions are evaluated once per outer
+time step (every 4 fs), the first specific interaction twice (every 2 fs), and the second
+specific interaction four times (every 1 fs).
+All fractions should be multiples of previous fractions, and at least one fraction must
+be 1.
+When simulating, `n_steps` is the number of outer steps.
+Coupling, removing the center of mass motion and running loggers applies per outer time step.
+
+# Arguments
+- `dt::T`: the outer time step of the simulation.
+- `pi_fractions`: the number of times each pairwise interaction is evaluated per outer
+    timestep, should be a tuple of integers with the same length as `sys.pairwise_inters`.
+- `si_fractions`: the number of times each specific interaction is evaluated per outer
+    timestep, should be a tuple of integers with the same length as `sys.specific_inter_lists`.
+- `gi_fractions`: the number of times each general interaction is evaluated per outer
+    timestep, should be a tuple of integers with the same length as `sys.general_inters`.
+- `coupling::C=nothing`: the coupling which applies each outer step during the simulation.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of outer steps,
+    set to `false` or `0` to not remove center of mass motion.
+"""
+struct MTSIntegrator{T, NF, NP, NS, NG, C}
+    dt::T
+    ordered_fractions::NTuple{NF, Int}
+    pi_fractions::NTuple{NP, Int}
+    si_fractions::NTuple{NS, Int}
+    gi_fractions::NTuple{NG, Int}
+    coupling::C
+    remove_CM_motion::Int
+end
+
+check_integer(x) = iszero(length(x)) || all(i -> i isa Integer, x)
+
+function MTSIntegrator(; dt, pi_fractions=(), si_fractions=(), gi_fractions=(),
+                       coupling=nothing, remove_CM_motion=1)
+    if iszero(length(pi_fractions)) && iszero(length(si_fractions)) && iszero(length(gi_fractions))
+        throw(ArgumentError("MTSIntegrator requires one of pi_fractions, si_fractions " *
+                            "or gi_fractions to be provided"))
+    end
+    if !check_integer(pi_fractions) || !check_integer(si_fractions) || !check_integer(gi_fractions)
+        throw(ArgumentError("MTSIntegrator requires pi_fractions, si_fractions and " *
+                            "gi_fractions to consist of integers"))
+    end
+    fractions_set = Set((pi_fractions..., si_fractions..., gi_fractions...))
+    ordered_fractions = Tuple(sort(collect(fractions_set)))
+    if first(ordered_fractions) < 1
+        throw(ArgumentError("MTSIntegrator fraction $(first(ordered_fractions)) cannot " *
+                            "be less than 1"))
+    elseif first(ordered_fractions) > 1
+        throw(ArgumentError("MTSIntegrator fractions must include 1, lowest fraction " *
+                            "is $(first(ordered_fractions))"))
+    end
+    for i in eachindex(ordered_fractions)
+        if i > 1 && !iszero(ordered_fractions[i] % ordered_fractions[i - 1])
+            throw(ArgumentError("MTSIntegrator fraction $(ordered_fractions[i]) not a " *
+                                "multiple of fraction $(ordered_fractions[i - 1])"))
+        end
+    end
+    return MTSIntegrator(dt, ordered_fractions, Tuple(pi_fractions), Tuple(si_fractions),
+                         Tuple(gi_fractions), coupling, Int(remove_CM_motion))
+end
+
+function mts_interaction_groups(sys, sim::MTSIntegrator{<:Any, <:Any, NP, NS, NG}) where {NP, NS, NG}
+    if length(sys.pairwise_inters) != NP
+        throw(ArgumentError("the system has $(length(sys.pairwise_inters)) pairwise " *
+                            "interactions but there are $NP in the MTSIntegrator"))
+    elseif length(sys.specific_inter_lists) != NS
+        throw(ArgumentError("the system has $(length(sys.specific_inter_lists)) specific " *
+                            "interactions but there are $NS in the MTSIntegrator"))
+    elseif length(sys.general_inters) != NG
+        throw(ArgumentError("the system has $(length(sys.general_inters)) general " *
+                            "interactions but there are $NG in the MTSIntegrator"))
+    end
+    fraction_inters = map(sim.ordered_fractions) do f
+        pi_inds = filter(i -> sim.pi_fractions[i] == f, 1:NP)
+        si_inds = filter(i -> sim.si_fractions[i] == f, 1:NS)
+        gi_inds = filter(i -> sim.gi_fractions[i] == f, 1:NG)
+        # Iteration with Tuple works for named tuples, getindex with array doesn't
+        return (
+            pairwise_inters=Tuple(sys.pairwise_inters[i] for i in pi_inds),
+            specific_inter_lists=Tuple(sys.specific_inter_lists[i] for i in si_inds),
+            general_inters=Tuple(sys.general_inters[i] for i in gi_inds),
+        )
+    end
+    return fraction_inters
+end
+
+# Can modify sys, forces_t, accels_t, buffers, cons_coord_storage and cons_vel_storage
+function mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
+                       ordered_fractions, fraction_inters, neighbors, dt, step_n, n_threads,
+                       using_constraints, n_parent_substeps, recompute_forces_in)
+    n_substeps = first(ordered_fractions)
+    n_steps_per_parent_step = n_substeps ÷ n_parent_substeps
+    pis, sis, gis = first(fraction_inters)
+    dt_frac_x = dt / n_substeps
+    dt_frac_v = dt_frac_x / 2
+    recompute_forces = recompute_forces_in
+
+    for substep_n in 1:n_steps_per_parent_step
+        if recompute_forces
+            forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
+                    pairwise_inters=pis, specific_inter_lists=sis, general_inters=gis)
+            accels_t .= calc_accels.(forces_t, masses(sys))
+        end
+        sys.velocities .+= accels_t .* dt_frac_v
+
+        if length(ordered_fractions) == 1
+            if using_constraints
+                cons_coord_storage .= sys.coords
+            end
+            sys.coords .+= sys.velocities .* dt_frac_x
+
+            if using_constraints
+                apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
+                                            dt_frac_x; n_threads=n_threads)
+                apply_velocity_constraints!(sys; n_threads=n_threads)
+            end
+            sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+            place_virtual_sites!(sys)
+        else
+            mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
+                          Base.tail(ordered_fractions), Base.tail(fraction_inters), neighbors, dt,
+                          step_n, n_threads, using_constraints, n_substeps, true)
+        end
+
+        forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
+                pairwise_inters=pis, specific_inter_lists=sis, general_inters=gis)
+        accels_t .= calc_accels.(forces_t, masses(sys))
+        sys.velocities .+= accels_t .* dt_frac_v
+        recompute_forces = false
+    end
+
+    return sys
+end
+
+@inline function simulate!(sys,
+                           sim::MTSIntegrator,
+                           n_steps_or_time;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true,
+                           shortcut=nothing,
+                           init_step::Integer=0,
+                           show_progress=default_show_progress(),
+                           rng=Random.default_rng(),
+                           strictness=default_strictness())
+    check_strictness(strictness)
+    n_steps = calc_n_steps(n_steps_or_time, sim.dt)
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
+    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
+    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+                               n_threads=n_threads)
+    forces_t = zero_forces(sys)
+    buffers = init_buffers!(sys, n_threads)
+    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    accels_t = calc_accels.(forces_t, masses(sys))
+    using_constraints = (length(sys.constraints) > 0)
+    if using_constraints
+        cons_coord_storage = zero(sys.coords)
+        cons_vel_storage = zero(sys.velocities)
+    else
+        cons_coord_storage, cons_vel_storage = nothing, nothing
+    end
+    fraction_inters = mts_interaction_groups(sys, sim)
+    recompute_forces = true # Forces re-used between steps
+
+    progress = setup_progress(n_steps, show_progress)
+    for step_n in (init_step + 1):(init_step + n_steps)
+        mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
+                      sim.ordered_fractions, fraction_inters, neighbors, sim.dt, step_n,
+                      n_threads, using_constraints, 1, recompute_forces)
+        if step_n % needs_vir_steps == 0
+            # Virial calculated with all interactions
+            forces!(forces_t, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
+        end
+        if using_constraints
+            apply_velocity_constraints!(sys; n_threads=n_threads)
+        end
+
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
+        recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads, rng=rng)
+
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
+
+        apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads)
+        if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads)
             break
         end
         next_nograd!(progress)
