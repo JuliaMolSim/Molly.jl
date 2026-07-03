@@ -19,8 +19,7 @@
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
     cons_shake = SHAKE_RATTLE(n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1"; dist_constraints=constraints)
     cons_lincs = LINCS(masses=repeat([atom_mass], n_atoms), dist_tolerance=1e-8u"Å",
-                       vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints,
-                       iter_vel_correction=true)
+                       vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints)
 
     @test length(cons_shake.clusters12) == (n_atoms ÷ 2)
 
@@ -54,6 +53,7 @@
 
             @test check_position_constraints(sys, cons)
             if simulator isa VelocityVerlet
+                # Verlet and Langevin are half-step integrators so this is not expected to be true
                 @test check_velocity_constraints(sys, cons)
             end
         end
@@ -346,7 +346,6 @@ end
                         vel_tolerance=sys.constraints[1].vel_tolerance,
                         nrec=6,
                         niter=6,
-                        iter_vel_correction=true,
                     )
                     sys.constraints = (Molly.setup_constraints!(lincs, sys.neighbor_finder, AT),)
                 end
@@ -1455,6 +1454,99 @@ end
         @test deviations[3] <= deviations[2] + 1e-15
     end
 
+    # triangle ring
+    @testset begin
+        x, v, data, ws = make_lincs_triangle(;
+            v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.04, 0.0), SVector(0.01, -0.03, 0.0)]
+        )
+        masses_val = [12.0, 12.0, 12.0]
+        dt = 0.002
+        xp = x .+ v .* dt
+
+        com_before = lincs_center_of_mass(xp, masses_val)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        com_after = lincs_center_of_mass(xp, masses_val)
+
+        @test lincs_check_constraints(xp, data; atol=1e-4)
+        @test com_after ≈ com_before atol=1e-12
+    end
+
+    # square ring
+    @testset begin
+        x, v, data, ws = make_lincs_square(;
+            v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.04, 0.0),
+               SVector(0.01, -0.03, 0.0), SVector(-0.02, 0.01, 0.0)]
+        )
+        masses_val = [12.0, 12.0, 12.0, 12.0]
+        dt = 0.002
+        xp = x .+ v .* dt
+
+        com_before = lincs_center_of_mass(xp, masses_val)
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        com_after = lincs_center_of_mass(xp, masses_val)
+
+        @test lincs_check_constraints(xp, data; atol=1e-4)
+        @test com_after ≈ com_before atol=1e-12
+    end
+end
+
+@testset "LINCS integration with System" begin
+    r_cut = 8.5u"Å"
+    temp = 300.0u"K"
+    atom_mass = 1.00794u"g/mol"
+    n_atoms = 400
+    hydrogen_data = readdlm(joinpath(data_dir, "initial_hydrogen_data.atom"); skipstart=9)
+    coords_matrix = hydrogen_data[:, 2:4]
+    vel_matrix = hydrogen_data[:, 5:7]
+
+    bond_length = 0.74u"Å"
+    dist_constraints = [DistanceConstraint(j, j + 1, bond_length) for j in 1:2:n_atoms]
+    atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
+    atom_masses = [atom_mass for _ in 1:n_atoms]
+
+    cons = LINCS(masses=atom_masses, dist_tolerance=1e-8u"Å", vel_tolerance=1e-8u"Å^2 * ps^-1",
+                 dist_constraints=dist_constraints)
+
+    @test length(cons.clusters) == (n_atoms ÷ 2)
+
+    boundary = CubicBoundary(200.0u"Å")
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+    neighbor_finder = DistanceNeighborFinder(
+        eligible=trues(n_atoms, n_atoms),
+        dist_cutoff=1.5*r_cut,
+    )
+
+    simulators = (
+        VelocityVerlet(dt=0.002u"ps"),
+        Verlet(dt=0.002u"ps"),
+        StormerVerlet(dt=0.002u"ps"),
+        Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
+    )
+
+    for simulator in simulators
+        coords = [SVector(coords_matrix[j, 1]u"Å", coords_matrix[j, 2]u"Å", coords_matrix[j, 3]u"Å")
+                  for j in 1:n_atoms]
+        velocities = [1000 * SVector(vel_matrix[j, :]u"Å/ps"...) for j in 1:n_atoms]
+
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=(lj,),
+            neighbor_finder=neighbor_finder,
+            constraints=(cons,),
+            force_units=u"kcal * mol^-1 * Å^-1",
+            energy_units=u"kcal * mol^-1",
+        )
+
+        simulate!(sys, simulator, 10_000)
+
+        @test check_position_constraints(sys, cons)
+        if simulator isa VelocityVerlet
+            @test check_velocity_constraints(sys, cons)
+        end
+    end
 end
 
 @testset "LINCS GPU integration" begin
@@ -1471,13 +1563,12 @@ end
     atom_masses = [atom_mass for _ in 1:n_atoms]
 
     cons = LINCS(masses=atom_masses, dist_tolerance=T(1e-4)u"Å", vel_tolerance=T(1e-4)u"Å^2 * ps^-1",
-                 dist_constraints=dist_constraints, iter_vel_correction=true)
+                 dist_constraints=dist_constraints)
 
     boundary = CubicBoundary(T(200.0)u"Å")
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
 
     for AT in array_list[2:end]
-
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
                 eligible=to_device(trues(n_atoms, n_atoms), AT),

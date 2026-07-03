@@ -38,7 +38,7 @@ end
 """
     LINCS(masses, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
           dist_constraints=nothing, angle_constraints=nothing, nrec=4, niter=1,
-          iter_vel_correction=false, gpu_block_size=128)
+          iter_vel_correction=true, gpu_block_size=128)
 
 Constrain bond distances during a simulation using the LINCS (LINear Constraint Solver)
 algorithm.
@@ -66,9 +66,17 @@ for the original LINCS paper.
     improve accuracy for coupled constraints at the cost of performance.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
+<<<<<<< HEAD
 - `iter_vel_correction=false`: whether to use iterative velocity constraint solving.
     When `false` (the default), velocity correction uses one LINCS projection as in
     GROMACS. When `true`, additional iterative velocity corrections are performed.
+=======
+- `iter_vel_correction=true`: whether to use iterative velocity constraint solving.
+    When `false`, velocity correction uses the simple one-step approach
+    `v += Δx/dt` as in GROMACS (for the Verlet simulator only, otherwise velocities are
+    not constrained). When `true`, a full iterative velocity constraint projection
+    is performed.
+>>>>>>> afbd5df74 (LINCS constrain velocities by default)
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 """
 struct LINCS{CL, LD, LW, DC, AC, E, F, DB, CI}
@@ -124,7 +132,7 @@ function LINCS(;masses,
                angle_constraints=nothing,
                nrec::Integer=4,
                niter::Integer=1,
-               iter_vel_correction::Bool=false,
+               iter_vel_correction::Bool=true,
                gpu_block_size::Integer=128)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero"))
@@ -1053,8 +1061,8 @@ function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained
 end
 
 function apply_velocity_constraints!(sys::System, ca::LINCS; context=nothing, kwargs...)
-    context = isnothing(context) ? default_velocity_constraint_context() : context
-    niter_velocity = ca.iter_vel_correction ? ca.lincs_data.niter : 0
+    context = (isnothing(context) ? default_velocity_constraint_context() : context)
+    niter_velocity = (ca.iter_vel_correction ? ca.lincs_data.niter : 0)
     if !isnothing(ca.delta_buf)
         lincs_vel_apply_gpu!(sys.velocities, sys.coords,
                              ca.lincs_data, ca.workspace, sys.boundary,

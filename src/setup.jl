@@ -466,6 +466,8 @@ Gromacs file reading should be considered experimental.
 - `rigid_water=false`: whether to constrain the bonds and angle in water
     molecules. Applied on top of `constraints`, so `constraints=:hangles` and
     `rigid_water=false` gives rigid water.
+- `constraint_algorithm`: Constraint algorithm to use for enforcing the constraints.
+    Can be [`LINCS`](@ref) or [`SHAKE_RATTLE`](@ref), defaults to LINCS.
 - `nonbonded_method=:none`: method for long range interaction summation,
     options are `:none` (short range only), `:cutoff` (reaction field method),
     `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
@@ -504,8 +506,6 @@ Gromacs file reading should be considered experimental.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
-- `constraint_algorithm`: Constraint algorithm to use for enforcing the
-    constraints. Can be [`LINCS`](@ref) or [`SHAKE_RATTLE`](@ref), defaults to LINCS.
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
@@ -518,6 +518,7 @@ function System(coord_file::AbstractString,
                 dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,
                 rigid_water=false,
+                constraint_algorithm=LINCS,
                 nonbonded_method=:none,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
@@ -533,7 +534,6 @@ function System(coord_file::AbstractString,
                 disulfide_bonds=true,
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                constraint_algorithm=LINCS,
                 force_separate_lj14=false) where {AT <: AbstractArray}
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
@@ -1244,7 +1244,7 @@ function System(T::Type,
             continue
         end
         if startswith(sl, '[') && endswith(sl, ']')
-            current_field = strip(sl[2:end-1])
+            current_field = strip(sl[2:(end - 1)])
             continue
         end
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
@@ -1404,7 +1404,7 @@ function System(T::Type,
     end
 
     coords_abst = SArray[]
-    for (i, l) in enumerate(lines[3:end-1])
+    for (i, l) in enumerate(lines[3:(end - 1)])
         coord = SVector(parse(T, l[21:28]), parse(T, l[29:36]), parse(T, l[37:44]))
         if units
             push!(coords_abst, (coord)u"nm")
@@ -1981,6 +1981,9 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         launch_config=launch_config,
         strictness=strictness,
     )
+
+    # Virtual sites are in the structure file but not necessarily in the correct place
+    place_virtual_sites!(sys)
     maybe_optimize_cuda_launch_config!(sys; enabled=autotune_launch)
     return sys
 end
