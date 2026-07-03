@@ -578,7 +578,7 @@
                 mean_cpu = mean(mean(vel))
                 std_cpu = mean( std(vel))
 
-                vel= Molly.random_velocities!(velocities_gpu, sys2, temp; rng=cuRAND.LibraryRNG())
+                vel= Molly.random_velocities!(velocities_gpu, sys2, temp;rng=Random.TaskLocalRNG())
                 mean_gpu = mean(mean(vel))
                 std_gpu = mean( std(vel))
 

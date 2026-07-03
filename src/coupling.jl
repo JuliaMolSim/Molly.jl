@@ -177,12 +177,9 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng()) where {AT <: AbstractGPUArray, T}
-    rand_vec_dev = to_device(rand(rng, length(sys)), AT)
-    atoms_to_bump_dev = andersen_atoms_bump.(rand_vec_dev, sim.dt / thermostat.coupling_const,
-                                                            sys.virtual_site_flags)
-    atoms_to_leave_dev = one(T) .- atoms_to_bump_dev
-    vs = random_velocities(sys, thermostat.temperature; rng=rng)
-    sys.velocities .= sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
+    backend = get_backend(sys.velocities)
+    kernel! = apply_Andersen_coupling_kernel!(backend)
+    kernel!(sys.velocities,sys.masses,  sys.k*thermostat.temperature,sim.dt / thermostat.coupling_const , sys.virtual_site_flags,ndrange=length(sys.velocities))
     return false
 end
 
