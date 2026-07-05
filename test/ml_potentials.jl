@@ -767,3 +767,48 @@ if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
         end
     end
 end
+
+# ============================================================================
+# Test 17: end-to-end on-device ANI energy (compute_ani_energy_ka) — GPU AEV +
+#          on-device element networks. Runs on the KA CPU backend (no GPU needed);
+#          the same path runs on Metal/CUDA. Compared to potential_energy; the small
+#          gap is the Float32-AEV (KA) vs Float64-AEV (buffered) precision difference.
+# ============================================================================
+if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
+    @testset "ANIPotential: on-device energy (compute_ani_energy_ka, CPU backend)" begin
+        h5_path = joinpath(REF_DIR, "ani2x.h5")
+        pdb     = joinpath(REF_DIR, "..", "6mrr_equil.pdb")
+        if !isfile(h5_path) || !isfile(pdb)
+            @warn "ani2x.h5 or 6mrr_equil.pdb not found — skipping"
+            @test_broken false
+        else
+            pot   = ANIPotential(h5_path; ensemble_idx=0)
+            n_sp  = length(pot.species_map)
+            valid = Set(keys(pot.species_map))
+            coords = SVector{3,Float64}[]; elems = String[]
+            open(pdb) do f
+                for line in eachline(f)
+                    (startswith(line, "ATOM") || startswith(line, "HETATM")) || continue
+                    length(line) < 78 && continue
+                    e = strip(line[77:78]); e in valid || continue
+                    push!(coords, SVector(parse(Float64, line[31:38]),
+                                          parse(Float64, line[39:46]),
+                                          parse(Float64, line[47:54])))
+                    push!(elems, e)
+                    length(elems) == 100 && break
+                end
+            end
+            species = [pot.species_map[e] for e in elems]
+            n = length(coords)
+            sys = System(atoms=[Atom(mass=1.0u"u") for _ in 1:n],
+                coords=[c*u"Å" for c in coords], boundary=CubicBoundary(200.0u"Å"),
+                atoms_data=[AtomData(element=e) for e in elems],
+                general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV")
+            E_ref = ustrip(potential_energy(sys))                        # CPU, Float64 AEV
+            E_ka  = Molly.compute_ani_energy_ka(coords, species, pot, n_sp;
+                                                backend=KernelAbstractions.CPU())
+            @test isapprox(E_ref, E_ka; atol=0.05)   # ≤ ~5e-4 eV/atom (Float32 AEV gap)
+            println("Test17: E_ref=", E_ref, " E_ka=", E_ka, " diff=", abs(E_ref - E_ka))
+        end
+    end
+end

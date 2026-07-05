@@ -374,4 +374,48 @@ function Molly.compute_aevs_ka(
     return aevs
 end
 
+# ============================================================================
+# End-to-end on-device ANI energy: GPU AEV + on-device element networks.
+# The AEV matrix stays on the compute backend; the per-element Lux networks run on the
+# same device (params moved once per (member, element)), so a full energy evaluation
+# needs no host round-trip for the AEVs. Returns the ensemble-averaged energy in eV.
+# ============================================================================
+function Molly.compute_ani_energy_ka(
+    coords, species, pot, n_species::Int;
+    backend = nothing, neighbors = nothing,
+)
+    ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
+    aevs = Molly.compute_aevs_ka(coords, species, pot.aev_params, n_species;
+                                 backend = backend, neighbors = neighbors)   # (n_atoms, aev_len)
+    on_gpu = !(aevs isa Array)
+    dev    = on_gpu ? Lux.gpu_device() : Lux.cpu_device()
+
+    sp_host     = Array(species)
+    idx_to_elem = Dict(v => k for (k, v) in pot.species_map)
+    Ha_to_eV    = 27.211386
+
+    # Per-species atom-index groups; uploaded to the compute device for the AEV gather.
+    groups  = [Int32.(findall(==(s), sp_host)) for s in 1:n_species]
+    idx_dev = map(groups) do g
+        (on_gpu && !isempty(g)) || return g
+        d = KernelAbstractions.allocate(ka_backend, Int32, length(g)); copyto!(d, g); d
+    end
+
+    n_ens = length(pot.ps_vec)
+    E = 0.0
+    for ens_i in 1:n_ens
+        for s in 1:n_species
+            g = groups[s]
+            isempty(g) && continue
+            sym   = Symbol(idx_to_elem[s])
+            batch = permutedims(aevs[idx_dev[s], :])                  # (aev_len, n_s) on device
+            ps_d  = dev(getfield(pot.ps_vec[ens_i], sym))
+            st_d  = dev(getfield(pot.st_vec[ens_i], sym))
+            out, _ = Lux.apply(getfield(pot.model, sym), batch, ps_d, st_d)  # (1, n_s) on device
+            E += Float64(sum(out)) + Float64(pot.self_energies[s]) * length(g)
+        end
+    end
+    return (E / n_ens) * Ha_to_eV
+end
+
 end # module MollyKALuxExt

@@ -28,6 +28,7 @@ export
     ANIPotential,
     compute_aevs,
     compute_aevs_ka,
+    compute_ani_energy_ka,
     cosine_cutoff,
     celu01
 
@@ -1900,6 +1901,19 @@ Requires `KernelAbstractions`, `Lux`, and `HDF5` to be loaded.
 """
 function compute_aevs_ka(args...; kwargs...)
     error("compute_aevs_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
+          "`using KernelAbstractions, Lux, HDF5`")
+end
+
+"""
+    compute_ani_energy_ka(coords, species_indices, pot, n_species; backend=nothing, neighbors=nothing)
+
+End-to-end ANI energy (eV) computed on-device: GPU AEV (`compute_aevs_ka`) followed by
+the per-element neural networks run on the same backend (Lux on the GPU device), summed
+over atoms and averaged over ensemble members. Keeps a full energy evaluation on the GPU
+with no host round-trip for the AEVs. Requires `KernelAbstractions`, `Lux`, and `HDF5`.
+"""
+function compute_ani_energy_ka(args...; kwargs...)
+    error("compute_ani_energy_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
           "`using KernelAbstractions, Lux, HDF5`")
 end
 
