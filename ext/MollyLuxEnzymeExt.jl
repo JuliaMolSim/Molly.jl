@@ -136,34 +136,45 @@ function AtomsCalculators.forces!(fs,
     group_atoms       = [findall(==(s), species_idx) for s in 1:n_species]
     models_by_species = [getfield(inter.model, syms[s]) for s in 1:n_species]
 
-    coords_mat  = reduce(hcat, coords_f32)
-    dcoords_sum = zeros(Float32, 3, n_atoms)
+    coords_mat = reduce(hcat, coords_f32)
     n_ens = length(inter.ps_vec)
 
-    for ens_i in 1:n_ens
-        ps_by_species = [getfield(inter.ps_vec[ens_i], syms[s]) for s in 1:n_species]
-        st_by_species = [getfield(inter.st_vec[ens_i], syms[s]) for s in 1:n_species]
+    # Pre-gather per-member (ps, st); independent per ensemble member.
+    ps_all = [[getfield(inter.ps_vec[e], syms[s]) for s in 1:n_species] for e in 1:n_ens]
+    st_all = [[getfield(inter.st_vec[e], syms[s]) for s in 1:n_species] for e in 1:n_ens]
+    dcoords_all = [zeros(Float32, 3, n_atoms) for _ in 1:n_ens]
 
-        dcoords_i = zeros(Float32, 3, n_atoms)
+    # One reverse-mode pass per ensemble member. Each writes its own gradient buffer and
+    # only reads the shared primal coords_mat + Const args, so the passes are independent.
+    # `_ani_energy_for_ad` is compiled once (same types) — warm member 1 serially to avoid
+    # a compilation race, then run the rest across threads.
+    run_member!(e) = Enzyme.autodiff(
+        Enzyme.set_runtime_activity(Enzyme.Reverse),
+        _ani_energy_for_ad,
+        Enzyme.Active,
+        Enzyme.Duplicated(coords_mat, dcoords_all[e]),
+        Enzyme.Const(species_idx),
+        Enzyme.Const(bdy_f32),
+        Enzyme.Const(inter.aev_params),
+        Enzyme.Const(n_species),
+        Enzyme.Const(nbrs),
+        Enzyme.Const(group_atoms),
+        Enzyme.Const(models_by_species),
+        Enzyme.Const(ps_all[e]),
+        Enzyme.Const(st_all[e]),
+        Enzyme.Const(inter.self_energies),
+    )
 
-        Enzyme.autodiff(
-            Enzyme.set_runtime_activity(Enzyme.Reverse),
-            _ani_energy_for_ad,
-            Enzyme.Active,
-            Enzyme.Duplicated(coords_mat, dcoords_i),
-            Enzyme.Const(species_idx),
-            Enzyme.Const(bdy_f32),
-            Enzyme.Const(inter.aev_params),
-            Enzyme.Const(n_species),
-            Enzyme.Const(nbrs),
-            Enzyme.Const(group_atoms),
-            Enzyme.Const(models_by_species),
-            Enzyme.Const(ps_by_species),
-            Enzyme.Const(st_by_species),
-            Enzyme.Const(inter.self_energies),
-        )
+    run_member!(1)
+    if n_ens > 1
+        Threads.@threads for e in 2:n_ens
+            run_member!(e)
+        end
+    end
 
-        dcoords_sum .+= dcoords_i
+    dcoords_sum = dcoords_all[1]
+    for e in 2:n_ens
+        dcoords_sum .+= dcoords_all[e]
     end
     dcoords = dcoords_sum ./ n_ens
 
