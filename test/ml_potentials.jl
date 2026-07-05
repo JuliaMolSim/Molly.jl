@@ -750,6 +750,20 @@ if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
             @test ka_nl ≈ ka_ap atol=1e-4
             println("KA NL vs scalar max dev:    ", maximum(abs.(ka_nl .- ref)))
             println("KA NL vs all-pairs max dev: ", maximum(abs.(ka_nl .- ka_ap)))
+
+            # Production path: feed the kernel a real finder NeighborList (what a GPU
+            # DistanceNeighborFinder / CPU CellListMapNeighborFinder produce).
+            n     = length(coords)
+            sys_nl = System(atoms=[Atom(mass=1.0u"u") for _ in 1:n],
+                coords=[c*u"Å" for c in coords], boundary=CubicBoundary(200.0u"Å"),
+                atoms_data=[AtomData(element=e) for e in elems],
+                neighbor_finder=DistanceNeighborFinder(eligible=trues(n,n),
+                    dist_cutoff=(Float64(pot.cutoff)+1.0)u"Å"),
+                general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV")
+            nbrs   = Molly.find_neighbors(sys_nl)
+            ka_fnl = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu, neighbors=nbrs)
+            @test ka_fnl ≈ ref atol=1e-4
+            println("KA NL(finder) vs scalar max dev: ", maximum(abs.(ka_fnl .- ref)))
         end
     end
 end

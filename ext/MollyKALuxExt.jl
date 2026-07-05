@@ -212,8 +212,41 @@ end
     end  # if atom_i <= n_atoms
 end
 
+# Convert a Molly NeighborList (flat half-pairs (i,j,special)) into a host CSR
+# (offsets, symmetrised indices). This is the production path: it *consumes the
+# neighbours produced by the system's neighbour finder* (CellListMapNeighborFinder on
+# CPU, DistanceNeighborFinder on GPU) rather than building its own list. `neighbors.list`
+# may be device-resident (GPU finder) — `Array(...)` brings the pairs to the host for the
+# O(total_pairs) counting sort; offsets/indices are then uploaded to the compute backend.
+function _nl_to_csr(neighbors, n_atoms::Int)
+    npairs = length(neighbors)                 # = neighbors.n
+    host   = Array(neighbors.list)             # host copy (no-op if already on CPU)
+    off = zeros(Int32, n_atoms + 1)
+    cur = Vector{Int32}(undef, n_atoms)
+    idx = Vector{Int32}(undef, 2 * npairs)
+    @inbounds for ni in 1:npairs
+        i, j, _ = host[ni]
+        off[Int(i) + 1] += one(Int32)
+        off[Int(j) + 1] += one(Int32)
+    end
+    @inbounds for a in 1:n_atoms
+        off[a + 1] += off[a]
+    end
+    @inbounds for a in 1:n_atoms
+        cur[a] = off[a]
+    end
+    @inbounds for ni in 1:npairs
+        i, j, _ = host[ni]
+        ii = Int(i); jj = Int(j)
+        cur[ii] += one(Int32); idx[cur[ii]] = Int32(jj)
+        cur[jj] += one(Int32); idx[cur[jj]] = Int32(ii)
+    end
+    return off, idx
+end
+
 # Build a CSR neighbour list (offsets, indices) within `r_c_max` on the host.
-# O(N²) scan — fine for benchmarking; swap in a cell list for very large N.
+# O(N²) scan — benchmarking fallback only (`neighbors=:auto`); production code should
+# pass the system's NeighborList so Molly's neighbour finders drive the neighbour search.
 function _build_neighbor_csr(coords::AbstractVector{SVector{D,T}}, r_c_max::T) where {D,T}
     n   = length(coords)
     rc2 = r_c_max^2
@@ -255,10 +288,13 @@ Pass `backend=MetalBackend()`/`CUDABackend()` to run on GPU; defaults to the
 backend of `coords`.
 
 `neighbors` selects the algorithm:
-  * `nothing`  — O(N²)/O(N³) all-pairs kernel (only viable for tiny systems).
-  * `:auto`    — build a CSR neighbour list on the host within `max(r_c_R, r_c_A)`
-                 and run the O(N·k)/O(N·k²) neighbour-list kernel (use this ≥1000 atoms).
-  * `(off, idx)` — a precomputed CSR neighbour list (Int32 offsets + indices).
+  * `nothing`     — O(N²)/O(N³) all-pairs kernel (only viable for tiny systems).
+  * a `NeighborList` — consume the neighbours from the system's finder (production path;
+                    `DistanceNeighborFinder` on GPU, `CellListMapNeighborFinder` on CPU) →
+                    O(N·k)/O(N·k²) neighbour-list kernel. Preferred for ≥1000 atoms.
+  * `:auto`       — O(N²) host build from coords, then the neighbour-list kernel
+                    (benchmarking fallback only — does not use a real finder).
+  * `(off, idx)`  — a precomputed CSR neighbour list (Int32 offsets + indices).
 
 `workgroup` sets the KA workgroup size (tunable per backend).
 
@@ -311,9 +347,17 @@ function Molly.compute_aevs_ka(
             ndrange = n_atoms,
         )
     else
-        # Obtain a CSR neighbour list (build on host if requested) and move to device.
-        off_h, idx_h = neighbors === :auto ?
-            _build_neighbor_csr(coords, max(r_c_R, r_c_A)) : neighbors
+        # Obtain a CSR neighbour list and move it to the compute backend.
+        #   NeighborList  → consume the finder's neighbours (production path)
+        #   :auto         → O(N²) host build from coords (benchmarking fallback)
+        #   (off, idx)    → caller-supplied CSR
+        off_h, idx_h = if neighbors === :auto
+            _build_neighbor_csr(coords, max(r_c_R, r_c_A))
+        elseif neighbors isa Tuple
+            neighbors
+        else
+            _nl_to_csr(neighbors, n_atoms)
+        end
         off_d = KernelAbstractions.allocate(ka_backend, Int32, length(off_h)); copyto!(off_d, off_h)
         idx_d = KernelAbstractions.allocate(ka_backend, Int32, length(idx_h)); copyto!(idx_d, idx_h)
         kernel! = _aev_kernel_nl!(ka_backend, workgroup)

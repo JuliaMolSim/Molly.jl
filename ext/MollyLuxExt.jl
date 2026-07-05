@@ -202,6 +202,11 @@ mutable struct AEVBuffers{D, T}
     coords_strip :: Vector{SVector{D,T}}      # pre-allocated strip buffer (avoids strip_coords alloc)
     group_atoms  :: Vector{Vector{Int}}       # group_atoms[s] = atom indices of species s (NN batching)
     group_count  :: Vector{Int}               # group_count[s] = #atoms of species s this call
+    # CSR per-atom adjacency built once per call from the passed-in NeighborList:
+    # atom i's neighbours are nbr_idx[nbr_off[i]+1 : nbr_off[i+1]] (half-pairs symmetrised).
+    nbr_off      :: Vector{Int32}             # (n_atoms+1,) CSR offsets
+    nbr_idx      :: Vector{Int32}             # (2·total_pairs,) flattened neighbour indices (grows)
+    nbr_cursor   :: Vector{Int32}             # (n_atoms,) scatter cursor scratch
 end
 
 # Return (lazily allocated) AEVBuffers for this potential + system size.
@@ -233,6 +238,9 @@ function _get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) wh
             Vector{SVector{D,T}}(undef, n_atoms),
             group_atoms,
             zeros(Int, n_species),
+            Vector{Int32}(undef, n_atoms + 1),
+            Int32[],                       # nbr_idx grows to 2·total_pairs on first neighbour call
+            Vector{Int32}(undef, n_atoms),
         )
         inter._buf[] = buf
     end
@@ -245,13 +253,14 @@ end
 # buf.aevs[atom_i, :] are disjoint per atom, so distinct chunks never touch the
 # same memory — safe to run on separate threads.
 function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
-                     coords, species_indices, neighbors, boundary, p, n_species::Int,
+                     coords, species_indices, use_nl::Bool, boundary, p, n_species::Int,
                      r_c_R::T, r_c_A::T, r_c_max::T, split::Int, aev_len::Int) where {D,T}
     n_atoms = length(coords)
     for atom_i in atom_range
         # Build neighbor list into this chunk's private scratch (no push!, no heap alloc).
         n_nbrs = 0
-        if isnothing(neighbors)
+        if !use_nl
+            # No neighbour finder: O(N) all-pairs scan.
             for j in 1:n_atoms
                 j == atom_i && continue
                 dr = coords[j] - coords[atom_i]
@@ -261,11 +270,10 @@ function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
                 sc.nbr_species[n_nbrs] = Int(species_indices[j])
             end
         else
-            for ni in eachindex(neighbors)
-                idx_i, idx_j, _ = neighbors[ni]
-                nbr_idx = (Int(idx_i) == atom_i) ? Int(idx_j) :
-                          (Int(idx_j) == atom_i) ? Int(idx_i) : 0
-                nbr_idx == 0 && continue
+            # Read only atom_i's slice of the CSR adjacency built once from the passed-in
+            # NeighborList — O(k), not a rescan of the whole list.
+            @inbounds for jj in (buf.nbr_off[atom_i] + 1):buf.nbr_off[atom_i + 1]
+                nbr_idx = Int(buf.nbr_idx[jj])
                 dr = vector(coords[atom_i], coords[nbr_idx], boundary)
                 n_nbrs += 1
                 sc.nbr_coords[n_nbrs]  = coords[atom_i] + dr
@@ -285,11 +293,53 @@ function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
     return nothing
 end
 
+# Fill a CSR per-atom adjacency (off, idx) from a NeighborList in a single counting-sort
+# pass. Each half-pair (i,j) contributes j to atom i and i to atom j (the NeighborList
+# stores each pair once). `cur` is an n_atoms scatter-cursor scratch. O(total_pairs).
+# All integer work — Enzyme-inactive, so it is safe inside the AD energy function.
+function _fill_csr!(off, cur, idx, neighbors, n_atoms::Int, npairs::Int)
+    @inbounds for a in 1:(n_atoms + 1)
+        off[a] = zero(Int32)
+    end
+    # Pass 1: per-atom degree, accumulated into off[a+1].
+    @inbounds for ni in 1:npairs
+        i, j, _ = neighbors[ni]
+        off[Int(i) + 1] += one(Int32)
+        off[Int(j) + 1] += one(Int32)
+    end
+    # Prefix sum → offsets (atom a's slice is idx[off[a]+1 : off[a+1]]).
+    @inbounds for a in 1:n_atoms
+        off[a + 1] += off[a]
+    end
+    # Pass 2: scatter both directions of each half-pair.
+    @inbounds for a in 1:n_atoms
+        cur[a] = off[a]
+    end
+    @inbounds for ni in 1:npairs
+        i, j, _ = neighbors[ni]
+        ii = Int(i); jj = Int(j)
+        cur[ii] += one(Int32); idx[cur[ii]] = Int32(jj)
+        cur[jj] += one(Int32); idx[cur[jj]] = Int32(ii)
+    end
+    return nothing
+end
+
+# Buffered variant: build the CSR into the reusable AEVBuffers arrays (grows nbr_idx to
+# fit, zero-alloc after warmup). Replaces the previous O(N × total_pairs) per-atom rescan.
+function _neighbors_to_csr!(buf::AEVBuffers, neighbors, n_atoms::Int)
+    npairs = length(neighbors)
+    total  = 2 * npairs
+    length(buf.nbr_idx) < total && resize!(buf.nbr_idx, total)
+    _fill_csr!(buf.nbr_off, buf.nbr_cursor, buf.nbr_idx, neighbors, n_atoms, npairs)
+    return nothing
+end
+
 # Compute AEVs for all atoms, writing into buf.aevs (zero allocations after buf is warm).
 # Returns a view of buf.aevs — callers must not hold onto it across calls.
-# Partitions the central-atom loop into `length(buf.scratch)` contiguous chunks and
-# runs them with Threads.@threads :static (chunk c → thread c → scratch c). With one
-# thread it falls back to a plain serial loop (bit-identical, zero extra allocations).
+# When a NeighborList is passed in, its per-atom adjacency is built once (CSR) and each
+# chunk reads only its atoms' slices. Partitions the central-atom loop into
+# `length(buf.scratch)` contiguous chunks with Threads.@threads :static (chunk c → thread
+# c → scratch c). With one thread it is a plain serial loop (bit-identical, zero allocs).
 function _compute_aevs_buf!(buf::AEVBuffers{D,T},
                              coords::AbstractVector{SVector{D,T}},
                              species_indices::AbstractVector{<:Integer},
@@ -307,10 +357,13 @@ function _compute_aevs_buf!(buf::AEVBuffers{D,T},
     aev_len   = n_species * n_rad_per + n_pairs * n_ang_per
     split     = n_species * n_rad_per
 
+    use_nl = !isnothing(neighbors)
+    use_nl && _neighbors_to_csr!(buf, neighbors, n_atoms)
+
     nchunks = clamp(length(buf.scratch), 1, max(n_atoms, 1))
     if nchunks == 1
         _aev_chunk!(buf, 1:n_atoms, buf.scratch[1], coords, species_indices,
-                    neighbors, boundary, p, n_species, r_c_R, r_c_A, r_c_max, split, aev_len)
+                    use_nl, boundary, p, n_species, r_c_R, r_c_A, r_c_max, split, aev_len)
     else
         base = n_atoms ÷ nchunks
         rem  = n_atoms % nchunks
@@ -318,7 +371,7 @@ function _compute_aevs_buf!(buf::AEVBuffers{D,T},
             lo = (c - 1) * base + min(c - 1, rem) + 1
             hi = c * base + min(c, rem)
             lo <= hi && _aev_chunk!(buf, lo:hi, buf.scratch[c], coords, species_indices,
-                                    neighbors, boundary, p, n_species, r_c_R, r_c_A, r_c_max,
+                                    use_nl, boundary, p, n_species, r_c_R, r_c_A, r_c_max,
                                     split, aev_len)
         end
     end
@@ -352,9 +405,19 @@ function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
     drj_buf     = Vector{SVector{D,T}}(undef, n_atoms)
     ok_buf      = Vector{Bool}(undef, n_atoms)
 
+    # Build the per-atom CSR adjacency once from the passed-in NeighborList (integer-only,
+    # Enzyme-inactive) so each atom reads its own slice rather than rescanning the list.
+    use_nl = !isnothing(neighbors)
+    csr_off = Vector{Int32}(undef, use_nl ? n_atoms + 1 : 0)
+    csr_idx = Vector{Int32}(undef, use_nl ? 2 * length(neighbors) : 0)
+    if use_nl
+        _fill_csr!(csr_off, Vector{Int32}(undef, n_atoms), csr_idx,
+                   neighbors, n_atoms, length(neighbors))
+    end
+
     for atom_i in 1:n_atoms
         n_nbrs = 0
-        if isnothing(neighbors)
+        if !use_nl
             for j in 1:n_atoms
                 j == atom_i && continue
                 dr = coords[j] - coords[atom_i]
@@ -364,11 +427,8 @@ function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
                 nbr_species[n_nbrs] = Int(species_indices[j])
             end
         else
-            for ni in eachindex(neighbors)
-                idx_i, idx_j, _ = neighbors[ni]
-                nbr_idx = (Int(idx_i) == atom_i) ? Int(idx_j) :
-                          (Int(idx_j) == atom_i) ? Int(idx_i) : 0
-                nbr_idx == 0 && continue
+            for jj in (csr_off[atom_i] + 1):csr_off[atom_i + 1]
+                nbr_idx = Int(csr_idx[jj])
                 dr = vector(coords[atom_i], coords[nbr_idx], boundary)
                 n_nbrs += 1
                 nbr_coords[n_nbrs]  = coords[atom_i] + dr
