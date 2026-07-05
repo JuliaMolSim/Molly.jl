@@ -212,6 +212,137 @@ end
     end  # if atom_i <= n_atoms
 end
 
+# ============================================================================
+# Write-reduced kernel — ONE WORKGROUP per central atom.
+# The W threads of the group split atom_i's neighbours (radial) and neighbour pairs
+# (angular) and accumulate into a shared threadgroup row `acc` (aev_len floats, L passed
+# as Val so it is a compile-time size) via atomic adds; the row is then written to global
+# ONCE. This turns the ~O(nbrs²)·n_ang_per global read-modify-writes per atom of the
+# one-thread-per-atom kernel into aev_len plain global writes, keeping the accumulation in
+# fast threadgroup memory. Atomic order is nondeterministic → results match the scalar
+# kernel only to Float32 rounding (~1e-6), not bit-for-bit.
+@kernel function _aev_kernel_wg!(
+    aevs,
+    @Const(coords),
+    @Const(species),
+    @Const(nbr_off),
+    @Const(nbr_idx),
+    @Const(η_R),
+    @Const(r_s_R),
+    r_c_R,
+    @Const(η_A),
+    @Const(r_s_A),
+    @Const(θ_s),
+    ζ,
+    r_c_A,
+    n_species  :: Int,
+    n_atoms    :: Int,
+    n_eta_R    :: Int,
+    n_shf_R    :: Int,
+    n_eta_A    :: Int,
+    n_shf_r    :: Int,
+    n_th       :: Int,
+    split      :: Int,
+    ::Val{L},
+) where {L}
+    acc = @localmem Float32 (L,)
+
+    # Phase 0 — zero the shared row cooperatively.
+    Wz = @groupsize()[1]
+    iz = @index(Local, Linear)
+    while iz <= L
+        acc[iz] = 0f0
+        iz += Wz
+    end
+    @synchronize
+
+    # Phase 1 — accumulate atom_i's AEV into the shared row. Indices are recomputed after
+    # the barrier so this also runs on the KA CPU backend, which splits the kernel at
+    # @synchronize and does not carry scalar locals across it (@localmem does persist).
+    atom_i = @index(Group, Linear)
+    lt     = @index(Local, Linear)
+    W      = @groupsize()[1]
+    if atom_i <= n_atoms
+        T       = eltype(coords[1])
+        ci      = coords[atom_i]
+        prefac0 = T(2)^(one(T) - ζ)
+        lo      = nbr_off[atom_i] + 1
+        hi      = nbr_off[atom_i + 1]
+
+        # Radial — threads stride over neighbours; [ANI-1] Eq. (3).
+        jj = lo + (lt - 1)
+        while jj <= hi
+            j  = nbr_idx[jj]
+            dr = coords[j] - ci
+            r  = norm(dr)
+            if r < r_c_R
+                fc   = _ka_cosine_cutoff(r, r_c_R)
+                sj   = species[j]
+                base = (sj - 1) * n_eta_R * n_shf_R
+                for ki in 1:n_eta_R
+                    for kj in 1:n_shf_R
+                        KernelAbstractions.@atomic acc[base + (ki-1)*n_shf_R + kj] +=
+                            T(0.25) * exp(-η_R[ki] * (r - r_s_R[kj])^2) * fc
+                    end
+                end
+            end
+            jj += W
+        end
+
+        # Angular — threads stride over the outer neighbour, inner runs to hi; [ANI-1] Eq. (4).
+        jj = lo + (lt - 1)
+        while jj <= hi
+            j   = nbr_idx[jj]
+            drj = coords[j] - ci
+            rj  = norm(drj)
+            if rj < r_c_A
+                fcj = _ka_cosine_cutoff(rj, r_c_A)
+                sj  = species[j]
+                for kk in (jj + 1):hi
+                    k   = nbr_idx[kk]
+                    drk = coords[k] - ci
+                    rk  = norm(drk)
+                    if rk < r_c_A
+                        fck = _ka_cosine_cutoff(rk, r_c_A)
+                        sk  = species[k]
+                        s1, s2 = sj <= sk ? (sj, sk) : (sk, sj)
+                        pair_idx = (s1-1)*n_species - (s1-1)*(s1-2)÷2 + (s2-s1+1)
+                        r_avg  = (rj + rk) * T(0.5)
+                        fc_jk  = fcj * fck
+                        cos_th = clamp(dot(drj, drk) / (rj * rk), T(-1), T(1))
+                        theta  = acos(T(0.95) * cos_th)
+                        base = split + (pair_idx-1) * n_eta_A * n_shf_r * n_th
+                        for p in 1:n_eta_A
+                            for q in 1:n_shf_r
+                                r_factor = prefac0 * fc_jk * exp(-η_A[p] * (r_avg - r_s_A[q])^2)
+                                for l in 1:n_th
+                                    ang = (one(T) + cos(theta - θ_s[l]))^ζ
+                                    KernelAbstractions.@atomic acc[base + ((p-1)*n_shf_r + (q-1))*n_th + l] +=
+                                        r_factor * ang
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            jj += W
+        end
+    end
+    @synchronize
+
+    # Phase 2 — write the shared row to global once (coalesced across threads).
+    atom_o = @index(Group, Linear)
+    lto    = @index(Local, Linear)
+    Wo     = @groupsize()[1]
+    if atom_o <= n_atoms
+        io = lto
+        while io <= L
+            aevs[atom_o, io] = acc[io]
+            io += Wo
+        end
+    end
+end
+
 # Convert a Molly NeighborList (flat half-pairs (i,j,special)) into a host CSR
 # (offsets, symmetrised indices). This is the production path: it *consumes the
 # neighbours produced by the system's neighbour finder* (CellListMapNeighborFinder on
@@ -298,6 +429,10 @@ backend of `coords`.
 
 `workgroup` sets the KA workgroup size (tunable per backend).
 
+`write_reduce=true` (with a neighbour list) uses the one-workgroup-per-atom kernel that
+accumulates each atom's AEV row in shared threadgroup memory and writes it to global once,
+instead of a global read-modify-write per term. Results match to Float32 rounding (~1e-6).
+
 Returns the AEV matrix on the same device as `coords`.
 """
 function Molly.compute_aevs_ka(
@@ -305,9 +440,10 @@ function Molly.compute_aevs_ka(
     species :: AbstractVector{<:Integer},
     p,          # aev_params NamedTuple
     n_species :: Int;
-    backend   = nothing,
-    neighbors = nothing,
-    workgroup = 256,
+    backend      = nothing,
+    neighbors    = nothing,
+    workgroup    = 256,
+    write_reduce = false,
 ) where {D,T}
     n_atoms   = length(coords)
     n_eta_R   = length(p.η_R)
@@ -360,15 +496,28 @@ function Molly.compute_aevs_ka(
         end
         off_d = KernelAbstractions.allocate(ka_backend, Int32, length(off_h)); copyto!(off_d, off_h)
         idx_d = KernelAbstractions.allocate(ka_backend, Int32, length(idx_h)); copyto!(idx_d, idx_h)
-        kernel! = _aev_kernel_nl!(ka_backend, workgroup)
-        kernel!(
-            aevs, coords, species, off_d, idx_d,
-            η_R_d, r_s_R_d, r_c_R,
-            η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A,
-            n_species, n_atoms,
-            n_eta_R, n_shf_R, n_eta_A, n_shf_r, n_th, split;
-            ndrange = n_atoms,
-        )
+        if write_reduce
+            # One workgroup per atom; accumulate into a shared row, one global write per column.
+            kernel! = _aev_kernel_wg!(ka_backend, workgroup)
+            kernel!(
+                aevs, coords, species, off_d, idx_d,
+                η_R_d, r_s_R_d, r_c_R,
+                η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A,
+                n_species, n_atoms,
+                n_eta_R, n_shf_R, n_eta_A, n_shf_r, n_th, split, Val(aev_len);
+                ndrange = n_atoms * workgroup,
+            )
+        else
+            kernel! = _aev_kernel_nl!(ka_backend, workgroup)
+            kernel!(
+                aevs, coords, species, off_d, idx_d,
+                η_R_d, r_s_R_d, r_c_R,
+                η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A,
+                n_species, n_atoms,
+                n_eta_R, n_shf_R, n_eta_A, n_shf_r, n_th, split;
+                ndrange = n_atoms,
+            )
+        end
     end
     KernelAbstractions.synchronize(ka_backend)
     return aevs

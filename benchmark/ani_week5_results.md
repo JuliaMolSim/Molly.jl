@@ -149,15 +149,26 @@ moved via `Lux.gpu_device()`), so a full energy evaluation keeps the AEVs on-GPU
 KA-CPU agree to 4e-5 eV; both match the CPU `potential_energy` reference to 0.12 eV over 500
 atoms (2.4e-4 eV/atom — the Float32-AEV vs Float64-AEV precision gap, not a bug).
 
-## D — GPU global-write reduction (deferred to a Joe pairing)
+## D — GPU global-write reduction (`write_reduce=true`)
 
-The neighbour-list kernel does a global read-modify-write per AEV term. Analysis: at the
-tested sizes the Metal kernel is **launch/transfer-bound** (flat 31→35 ms for 1k→8k atoms),
-so per-term write traffic is not the current bottleneck, and the 1008-wide AEV row is too
-large to stage per-thread. A real reduction needs a **one-workgroup-per-atom** rewrite with
-a shared threadgroup accumulator row (1008×4 B = 4 KB, fits Metal's 32 KB threadgroup memory)
-plus in-group reduction/atomics — the substantial, atomics-heavy kernel Joe offered to pair
-on. Deferred with this design rather than shipping an unmeasured rewrite.
+`_aev_kernel_wg!`: **one workgroup per atom**. The W threads split the atom's neighbours
+(radial) and neighbour pairs (angular) and accumulate into a shared threadgroup row
+(`@localmem`, aev_len×4 B = 4 KB, fits Metal's 32 KB) via `@atomic` float-adds; the row is
+written to global **once** (coalesced) instead of a global read-modify-write per term. Metal
+supports atomic float-add on threadgroup memory (verified). Correct to 3.1e-6 vs scalar.
+
+This also **parallelises each atom's work across the workgroup** — the plain NL kernel used
+one thread per atom (serial per atom). Measured on Metal (`workgroup=64`):
+
+| N atoms | NL kernel | write-reduced | speedup |
+|---------|-----------|---------------|---------|
+| 1000    | 33.0 ms   | **7.5 ms**    | 4.4×    |
+| 2000    | 33.9 ms   | **7.9 ms**    | 4.3×    |
+| 4000    | 34.5 ms   | **10.1 ms**   | 3.4×    |
+| 8000    | 37.4 ms   | **20.5 ms**   | 1.8×    |
+
+(Correcting the Week-6 mid-week note that guessed the kernel was launch-bound: it was
+per-atom serialization-bound, so the workgroup rewrite helps substantially.)
 
 ## Tests
 

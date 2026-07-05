@@ -764,6 +764,12 @@ if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
             ka_fnl = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu, neighbors=nbrs)
             @test ka_fnl ≈ ref atol=1e-4
             println("KA NL(finder) vs scalar max dev: ", maximum(abs.(ka_fnl .- ref)))
+
+            # Write-reduced kernel (one workgroup per atom, shared-row accumulation).
+            ka_wr = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu,
+                                          neighbors=nbrs, write_reduce=true, workgroup=16)
+            @test ka_wr ≈ ref atol=1e-4
+            println("KA write-reduce vs scalar max dev: ", maximum(abs.(ka_wr .- ref)))
         end
     end
 end
