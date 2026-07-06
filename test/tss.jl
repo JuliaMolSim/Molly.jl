@@ -1,4 +1,4 @@
-tss_step_wrapper(sys, buffers, neighbors, step_n; kwargs...) = step_n
+tss_step_wrapper(sys, neighbors, step_n, buffers; kwargs...) = step_n
 tss_step_logger() = (step=GeneralObservableLogger(tss_step_wrapper, Int, 1),)
 
 function make_tss_thermo_states(; n_atoms=6, n_states=3)
@@ -49,6 +49,33 @@ function visit_control_free_energies_for_test(state; reference_state::Integer = 
     visit_control_f = copy(state.coupling.visit_control_f)
     visit_control_f .-= visit_control_f[reference_state]
     return visit_control_f
+end
+
+function make_tss_pmf_thermo_states(; n_atoms=4, n_states=4)
+    atom_mass = 10.0u"g/mol"
+    boundary = CubicBoundary(2.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    temp = 298.0u"K"
+
+    return [
+        begin
+            atoms = [Atom(mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1",
+                          λ=1.0) for _ in 1:n_atoms]
+            restraint = HarmonicPositionRestraint(
+                k=10.0u"kJ * mol^-1 * nm^-2",
+                x0=SVector(center, 0.0, 0.0)u"nm",
+            )
+            sys = System(
+                atoms=atoms,
+                coords=coords,
+                boundary=boundary,
+                specific_inter_lists=(InteractionList1Atoms([1], [restraint]),),
+            )
+            intg = Langevin(dt=0.001u"ps", temperature=temp, friction=0.1u"ps^-1")
+            ThermoState(sys, intg; temperature=temp)
+        end
+        for center in range(0.2, 0.8; length=n_states)
+    ]
 end
 
 @testset "Times Square Sampling (TSS)" begin
@@ -389,5 +416,240 @@ end
         noisy_jackknife = Molly.tss_free_energy_uncertainties(state)
         @test all(isfinite, noisy_jackknife.standard_errors)
         @test any(>(0), noisy_jackknife.standard_errors[2:end])
+    end
+
+    @testset "PMF accumulators and reporting" begin
+        acc = Molly.OnlinePMFAccumulator(((0.0,), (2.0,), (2,)); T=Float64)
+        Molly.accumulate!(acc, 0.25, log(2.0))
+        Molly.accumulate!(acc, 1.25, log(1.0))
+        Molly.accumulate!(acc, 3.0, log(1.0))
+        @test (acc.total_samples, acc.accepted_samples, acc.out_of_grid_samples) == (3, 2, 1)
+        @test acc.counts == [1, 1]
+        @test Molly.pmf(acc).p ≈ [2 / 3, 1 / 3]
+        @test Molly.total_effective_samples(acc) ≈ 9 / 5
+        @test_throws ArgumentError Molly.OnlinePMFAccumulator(((0.0,), (1.0,), (0,)); T=Float64)
+        @test_throws DimensionMismatch Molly.accumulate!(acc, (0.5, 0.5), 0.0)
+
+        grid = Molly.PMFGrid((0.0, 3.0, 3); T=Float64)
+        sampled = Molly.SampledPMFDeconvolutionAccumulator(grid)
+        for _ in 1:20
+            Molly.accumulate_pmf_deconvolution!(sampled, (0.5,), [0.0, 0.0, 0.0])
+        end
+        Molly.accumulate_pmf_deconvolution!(sampled, (1.5,), [0.0, log(1000.0), 0.0])
+        for _ in 1:19
+            Molly.accumulate_pmf_deconvolution!(sampled, (1.5,), [0.0, 0.0, 0.0])
+        end
+        Molly.accumulate_pmf_deconvolution!(sampled, (2.5,), [0.0, 0.0, log(2.0)])
+
+        quality = Molly.pmf_bin_quality(sampled; min_count=20, min_ess=5.0,
+                                        max_weight_fraction=0.5)
+        @test quality.counts == [20, 20, 1]
+        @test quality.reliable == [true, false, false]
+        @test quality.ess[1] ≈ 20.0
+        @test quality.ess[2] < 5.0
+        @test quality.maxfrac[2] > 0.5
+
+        raw = Molly.pmf_result_from_sampled_deconvolution(sampled)
+        reported = Molly.pmf_result_from_sampled_deconvolution(
+            sampled;
+            quality=quality,
+            gauge_reliable_only=true,
+            mask_unreliable=true,
+        )
+        @test raw.F[2] ≈ 0.0
+        @test reported.F[1] ≈ 0.0
+        @test isnan(reported.F[2]) && isnan(reported.F[3])
+        @test reported.p ≈ raw.p
+        @test_throws ArgumentError Molly.pmf_result_from_sampled_deconvolution(
+            sampled;
+            quality=Molly.pmf_bin_quality(sampled; min_count=1000),
+            gauge_reliable_only=true,
+        )
+    end
+
+    @testset "PMF deconvolution arithmetic and sampling" begin
+        pmf_states = make_tss_pmf_thermo_states(n_states=3)
+        tss_state = Molly.TSSState(pmf_states)
+        coupling = (xi, state_i) -> 0.17 * xi[1]^2 - 0.31 * xi[1] * state_i +
+                                    0.23 * state_i^2
+        deconv = Molly.PMFDeconvolution(
+            tss_state;
+            grid=(0.0, 5.0, 5),
+            cv=active_state -> (0.5,),
+            coupling=coupling,
+        )
+        estimator = first(tss_state.estimators)
+        estimator.f .= [0.8, -0.35, 0.2]
+        estimator.density .= [0.2, 0.5, 0.3]
+        estimator.log_dens .= log.(estimator.density)
+
+        sample = Molly.collect_tss_pmf_deconvolution_sample(
+            deconv,
+            estimator,
+            tss_state.active_state;
+            window_offset=-0.7,
+        )
+        @test length(sample.value) == 1
+        @test length(sample.log_bin_weights) == 5
+        @test all(isfinite, sample.log_bin_weights)
+
+        manual_weights = similar(sample.log_bin_weights)
+        Molly.pmf_log_bin_weights!(
+            manual_weights,
+            deconv.backend.log_coupling_matrix,
+            estimator.f .+ estimator.log_dens .+ 0.7;
+            state_indices=estimator.state_indices,
+        )
+        @test sample.log_bin_weights ≈ manual_weights
+
+        target_probability = [0.12, 0.27, 0.08, 0.33, 0.20]
+        biased_probability = target_probability .* exp.(-sample.log_bin_weights)
+        biased_probability ./= sum(biased_probability)
+        sampled = Molly.SampledPMFDeconvolutionAccumulator(deconv.backend.grid)
+        for (bin_i, center) in enumerate(0.5:1.0:4.5)
+            Molly.accumulate_pmf_deconvolution!(
+                sampled,
+                (center,),
+                sample.log_bin_weights;
+                log_reweight=log(biased_probability[bin_i]),
+            )
+        end
+        expected_F = -log.(target_probability)
+        expected_F .-= minimum(expected_F)
+        @test Molly.sampled_pmf_probability(sampled) ≈ target_probability atol=1e-12 rtol=1e-12
+        @test Molly.pmf_result_from_sampled_deconvolution(sampled).F ≈ expected_F atol=1e-12 rtol=1e-12
+
+        left = Molly.SampledPMFDeconvolutionAccumulator(deconv.backend.grid)
+        right = Molly.SampledPMFDeconvolutionAccumulator(deconv.backend.grid)
+        merged = Molly.SampledPMFDeconvolutionAccumulator(deconv.backend.grid)
+        Molly.accumulate_pmf_deconvolution!(left, (0.5,), sample.log_bin_weights)
+        Molly.accumulate_pmf_deconvolution!(right, (1.5,), sample.log_bin_weights)
+        Molly.merge_pmf_deconvolution_accumulator!(merged, left)
+        Molly.merge_pmf_deconvolution_accumulator!(merged, right)
+        @test merged.counts == [1, 1, 0, 0, 0]
+        @test merged.total_samples == 2
+
+        @test_throws ArgumentError Molly.PMFDeconvolution(
+            tss_state;
+            grid=(0.0, 3.0, 3),
+            cv=active_state -> (0.5,),
+            coupling=coupling,
+            free_energies=zeros(3),
+        )
+    end
+
+    @testset "PMF deconvolution with TSS history and simulation" begin
+        pmf_states = make_tss_pmf_thermo_states(n_states=3)
+        tss_state = Molly.TSSState(
+            pmf_states;
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.5, phi=2.0),
+        )
+        deconv = Molly.PMFDeconvolution(
+            tss_state;
+            grid=(0.0, 3.0, 3),
+            cv=active_state -> (0.5,),
+            coupling=(xi, state_i) -> 0.0,
+        )
+        old_sample = Molly.PMFDeconvolutionSample((0.5,), [log(1000.0), 0.0, 0.0], 0.0)
+        new_sample = Molly.PMFDeconvolutionSample((1.5,), [0.0, 0.0, 0.0], 0.0)
+        make_obs(sample) = Molly.WindowedTSSObservation(
+            1, 1, 1, 1, 0.0, zeros(3), fill(1 / 3, 3), nothing, Any[sample],
+        )
+
+        Molly.accumulate_tss_pmf_deconvolution!(
+            deconv,
+            tss_state,
+            [make_obs(old_sample)];
+            history_time=1,
+        )
+        Molly.accumulate_tss_pmf_deconvolution!(
+            deconv,
+            tss_state,
+            [make_obs(new_sample)];
+            history_time=8,
+        )
+        Molly.drop_old_tss_pmf_deconvolution_epochs!(deconv, tss_state, 8)
+        @test length(deconv.backend.epoch_accumulators) == 1
+        @test Molly.pmf(deconv).p ≈ [0.0, 1.0, 0.0]
+
+        torsion_states = ThermoState[]
+        boundary = CubicBoundary(2.0u"nm")
+        coords = place_atoms(4, boundary; min_dist=0.3u"nm")
+        cv = CalcTorsion([1, 2, 3, 4], :pbc, true)
+        for target in range(-0.5, 0.5; length=3)
+            atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm",
+                          ϵ=0.2u"kJ * mol^-1", λ=1.0) for _ in 1:4]
+            bias = BiasPotential(cv, PeriodicFlatBottomBias(10.0u"kJ * mol^-1", 0.1, target))
+            sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias,))
+            intg = Langevin(dt=0.001u"ps", temperature=298.0u"K", friction=0.1u"ps^-1")
+            push!(torsion_states, ThermoState(sys, intg; temperature=298.0u"K"))
+        end
+        auto_state = Molly.TSSState(torsion_states)
+        auto_deconv = Molly.PMFDeconvolution(auto_state; grid=(-π, π, 4))
+        auto_sample = Molly.collect_tss_pmf_deconvolution_sample(
+            auto_deconv,
+            first(auto_state.estimators),
+            auto_state.active_state,
+        )
+        @test length(auto_sample.value) == 1
+        @test eltype(auto_sample.value) == Float64
+
+        sim_state = Molly.TSSState(pmf_states)
+        sim_deconv = Molly.PMFDeconvolution(
+            sim_state;
+            grid=(0.0, 3.0, 3),
+            cv=active_state -> (0.5,),
+            coupling=(xi, state_i) -> 0.0,
+        )
+        sim = Molly.TSSSimulation(
+            sim_state;
+            n_md_steps=1,
+            n_cycles=1,
+            self_adjustment_steps=3,
+            pmf=sim_deconv,
+        )
+        Molly.simulate!(sim; rng=MersenneTwister(2), n_threads=1,
+                        replica_parallel=:serial, show_progress=false)
+        @test sim_deconv.backend.accumulator.accepted_samples == 1
+    end
+
+    @testset "partitioned workspace and MBAR assembly" begin
+        pmf_states = make_tss_pmf_thermo_states()
+        cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
+        bias = BiasPotential(cv, SquareBias(10.0u"kJ * mol^-1 * nm^-2", 0.4u"nm"))
+        biased = System(pmf_states[1].system; general_inters=(bias,))
+        unbiased = System(pmf_states[1].system; general_inters=())
+        intg = pmf_states[1].integrator
+        hetero_states = [
+            ThermoState(biased, intg; temperature=298.0u"K"),
+            ThermoState(unbiased, intg; temperature=298.0u"K"),
+        ]
+        coords = hetero_states[1].system.coords
+        boundary = hetero_states[1].system.boundary
+        partitioned = Molly.PartitionedReducedPotentialWorkspace(hetero_states)
+        energies = Molly.evaluate_energy_all!(partitioned.partition, coords, boundary)
+        @test energies[1] ≈ potential_energy(hetero_states[1].system)
+        @test energies[2] ≈ potential_energy(hetero_states[2].system)
+
+        coords_k = [[copy(pmf_states[1].system.coords)], [copy(pmf_states[2].system.coords)]]
+        boundaries_k = [[pmf_states[1].system.boundary], [pmf_states[2].system.boundary]]
+        partitioned_inputs = Molly.assemble_mbar_inputs(
+            coords_k,
+            boundaries_k,
+            pmf_states[1:2];
+            target_state=pmf_states[4],
+            shift=true,
+        )
+        full_inputs = Molly.assemble_mbar_inputs_full(
+            coords_k,
+            boundaries_k,
+            pmf_states[1:2];
+            target_state=pmf_states[4],
+            shift=true,
+        )
+        @test partitioned_inputs.u ≈ full_inputs.u
+        @test partitioned_inputs.u_target ≈ full_inputs.u_target
+        @test partitioned_inputs.shifts ≈ full_inputs.shifts
+        @test partitioned_inputs.win_of == full_inputs.win_of
     end
 end

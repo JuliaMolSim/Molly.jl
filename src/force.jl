@@ -63,7 +63,6 @@ force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, da
 force_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data) = force(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data)
 
 @inline zero_pairwise_force(dr, force_units) = ustrip.(zero(dr)) * force_units
-@inline zero_pairwise_energy(dr, energy_units) = ustrip(zero(dr[1])) * energy_units
 
 @inline function zero_pairwise_force(dr::SVector{N, <:Unitful.Quantity{T}}, force_units) where {N, T}
     return zero(SVector{N, T}) * force_units

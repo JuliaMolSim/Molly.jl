@@ -186,12 +186,12 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
 end
 
 default_shake_position_constraint_context() = ConstraintApplicationContext(
-    PositionConstraintApplication();
+    kind=PositionConstraintApplication(),
     needs_virial=false,
 )
 
 default_shake_velocity_constraint_context() = ConstraintApplicationContext(
-    VelocityConstraintApplication();
+    kind=VelocityConstraintApplication(),
     needs_virial=false,
 )
 

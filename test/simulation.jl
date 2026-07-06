@@ -1,4 +1,4 @@
-simulation_step_wrapper(sys, buffers, neighbors, step_n; kwargs...) = step_n
+simulation_step_wrapper(sys, neighbors, step_n, buffers; kwargs...) = step_n
 
 mutable struct StepTrackingCoupler
     n_steps::Int
@@ -64,7 +64,8 @@ end
         atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                  for i in 1:n_atoms]
         simulator = VelocityVerlet(dt=0.001u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
-        gen_temp_wrapper(s, buffers, args...; kwargs...) = temperature(s; kin_tensor = buffers.kin_tensor)
+        gen_temp_wrapper(s, neighbors, step_n, buffers; kwargs...) =
+            temperature(s; kin_tensor=buffers.kin_tensor)
 
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
@@ -136,7 +137,7 @@ end
     TP = typeof(0.2u"kJ * mol^-1")
 
     V(sys, args...; kwargs...) = sys.velocities
-    pot_obs(sys, neighbors, step_n; kwargs...) = potential_energy(sys, neighbors, step_n)
+    pot_obs(sys, neighbors, step_n, buffers; kwargs...) = potential_energy(sys, neighbors, step_n)
     kin_obs(sys, args...; kwargs...) = kinetic_energy(sys)
 
     for n_threads in n_threads_list

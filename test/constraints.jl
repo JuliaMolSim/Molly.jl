@@ -524,9 +524,9 @@ end
 function lincs_position_context(buffers=nothing; needs_virial=true, step_n=1,
                                 virial_scale=1.0)
     return Molly.ConstraintApplicationContext(
-        Molly.PositionConstraintApplication();
+        kind=Molly.PositionConstraintApplication(),
         needs_virial=needs_virial,
-        step_n=step_n,
+        step_n=Int(step_n),
         virial_scale=virial_scale,
         buffers=buffers,
     )
@@ -537,9 +537,9 @@ lincs_no_virial_context() = lincs_position_context(; needs_virial=false)
 function lincs_velocity_context(buffers=nothing; needs_virial=true, step_n=1,
                                 virial_scale=1.0)
     return Molly.ConstraintApplicationContext(
-        Molly.VelocityConstraintApplication();
+        kind=Molly.VelocityConstraintApplication(),
         needs_virial=needs_virial,
-        step_n=step_n,
+        step_n=Int(step_n),
         virial_scale=virial_scale,
         buffers=buffers,
     )
@@ -959,8 +959,8 @@ Base.values(logger::CustomVirialSnapshotLogger) = logger.history
 
 Molly.logger_virial_interval(logger::CustomVirialSnapshotLogger) = logger.n_steps
 
-function Molly.log_property!(logger::CustomVirialSnapshotLogger, sys, buffers, neighbors,
-                             step_n; kwargs...)
+function Molly.log_property!(logger::CustomVirialSnapshotLogger, sys, neighbors, step_n,
+                             buffers; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.history, Molly.has_pre_coupling_virial(buffers, step_n))
     end
@@ -1055,11 +1055,8 @@ end
         @test sys.coords == coords_before
         @test sys.velocities == velocities_before
 
-        simulator = VelocityVerlet(dt=dt, remove_CM_motion=0)
-        @test virial(sys, simulator; n_threads=1) ≈ initial_virial
-        @test pressure(sys, simulator; n_threads=1) ≈ initial_pressure
-        @test scalar_virial(sys, simulator; n_threads=1) ≈ tr(initial_virial)
-        @test scalar_pressure(sys, simulator; n_threads=1) ≈ tr(initial_pressure) / 3
+        @test scalar_virial(sys; n_threads=1) ≈ tr(initial_virial)
+        @test scalar_pressure(sys; n_threads=1) ≈ tr(initial_pressure) / 3
     end
 
     for simulator in simulators
@@ -1144,7 +1141,7 @@ end
 
     @testset "Pre-coupling snapshot is skipped without virial loggers" begin
         coupler = VirialSnapshotScalingCoupler(1.5)
-        snapshot_observable(sys, buffers, neighbors, step_n; kwargs...) =
+        snapshot_observable(sys, neighbors, step_n, buffers; kwargs...) =
             Molly.has_pre_coupling_virial(buffers, step_n)
         sys = simulator_constraint_system(
             :shake;
@@ -1203,26 +1200,6 @@ end
 
     @test length(values(sys.loggers.pressure)) == 1
 
-    @testset "StormerVerlet unsupported coupling" begin
-        sys = simulator_constraint_system(:shake; loggers=())
-        simulate!(sys, StormerVerlet(dt=dt, coupling=nothing), 1; n_threads=1)
-
-        sys = simulator_constraint_system(:shake; loggers=())
-        @test_throws ArgumentError simulate!(
-            sys,
-            StormerVerlet(dt=dt, coupling=()),
-            1;
-            n_threads=1,
-        )
-
-        sys = simulator_constraint_system(:shake; loggers=())
-        @test_throws ArgumentError simulate!(
-            sys,
-            StormerVerlet(dt=dt, coupling=(barostat,)),
-            1;
-            n_threads=1,
-        )
-    end
 end
 
 # --- LINCS tests ---

@@ -85,7 +85,6 @@ end
            n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
            specific_inter_lists=system.specific_inter_lists,
            general_inters=system.general_inters)
-    virial(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the virial tensor of the system.
 
@@ -104,9 +103,7 @@ For constrained systems, constraint contributions are approximated using a
 deterministic small-step constraint preview.
 Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 
-Passing a simulator for constrained systems uses the same deterministic preview
-convention, and is accepted for clarity and future extensibility. To calculate
-the scalar virial, see [`scalar_virial`](@ref).
+To calculate the scalar virial, see [`scalar_virial`](@ref).
 """
 function virial(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads, kwargs...)
@@ -129,7 +126,6 @@ end
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
                   general_inters=system.general_inters)
-    scalar_virial(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the virial of the system as a scalar.
 
@@ -142,8 +138,7 @@ end
 
 function scalar_virial(sys, neighbors, step_n::Integer=0;
                        n_threads::Integer=Threads.nthreads(), kwargs...)
-    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
-    return tr(v)
+    return tr(virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...))
 end
 
 """
@@ -511,6 +506,8 @@ potential_energy_gpu(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data) = potenti
 potential_energy_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data) = potential_energy(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data)
 potential_energy_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data) = potential_energy(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data)
 potential_energy_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data) = potential_energy(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data)
+
+@inline zero_pairwise_energy(dr, energy_units) = ustrip(zero(dr[1])) * energy_units
 
 """
     pairwise_pe(inter, r, params)
