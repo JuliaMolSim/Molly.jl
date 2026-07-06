@@ -59,38 +59,17 @@ struct PositionConstraintApplication <: AbstractConstraintApplication end
 
 struct VelocityConstraintApplication <: AbstractConstraintApplication end
 
-struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, DT, S, A, CB, VB}
+Base.@kwdef struct ConstraintApplicationContext{
+    K <: AbstractConstraintApplication, B, DT, S, CB, VB,
+}
     kind::K
-    needs_virial::Bool
-    step_n::Int
-    dt::DT
-    virial_scale::S
-    atoms::A
-    buffers::B
-    coords_buffer::CB
-    velocities_buffer::VB
-end
-
-function ConstraintApplicationContext(kind::K;
-                                      needs_virial::Bool=false,
-                                      step_n::Integer=0,
-                                      dt=nothing,
-                                      virial_scale=1,
-                                      atoms=nothing,
-                                      buffers=nothing,
-                                      coords_buffer=nothing,
-                                      velocities_buffer=nothing) where {K <: AbstractConstraintApplication}
-    return ConstraintApplicationContext(
-        kind,
-        needs_virial,
-        Int(step_n),
-        dt,
-        virial_scale,
-        atoms,
-        buffers,
-        coords_buffer,
-        velocities_buffer,
-    )
+    needs_virial::Bool = false
+    step_n::Int = 0
+    dt::DT = nothing
+    virial_scale::S = 1
+    buffers::B = nothing
+    coords_buffer::CB = nothing
+    velocities_buffer::VB = nothing
 end
 
 function copyto_constraint_scratch!(scratch, values)

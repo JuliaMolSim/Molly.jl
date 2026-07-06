@@ -602,7 +602,7 @@ function wrap_coords(v, boundary::TriclinicBoundary)
 end
 
 # Unwrap coordinates so that molecules are not split over the boundary
-# Ensures that the center of geometry of bonded clusters of molecules
+# Ensures that the center of geometry of bonded clusters of atoms
 # (we assume those are molecules!) falls always inside the simulation box.
 # Returns coordinates on CPU
 unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
@@ -969,7 +969,6 @@ end
              pairwise_inters=system.pairwise_inters,
              specific_inter_lists=system.specific_inter_lists,
              general_inters=system.general_inters)
-    pressure(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the pressure tensor of the system.
 
@@ -986,8 +985,6 @@ For constrained systems, direct recomputation approximates constraint
 contributions using a deterministic small-step constraint preview. To reuse a
 total virial from a simulation step, pass valid simulator buffers with
 `recompute=false`.
-Passing a simulator for constrained systems uses the same deterministic preview
-convention, and is accepted for clarity and future extensibility.
 
 Not compatible with infinite boundaries.
 """
@@ -1056,7 +1053,6 @@ end
                     pairwise_inters=system.pairwise_inters,
                     specific_inter_lists=system.specific_inter_lists,
                     general_inters=system.general_inters)
-    scalar_pressure(system, simulator; n_threads=Threads.nthreads())
 
 Calculate the pressure of the system as a scalar.
 

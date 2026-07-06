@@ -1234,7 +1234,7 @@ function Molly.simulate!(sys,
 
         # Apply the loggers like this
         # Computed quantities can also be given as keyword arguments to apply_loggers!
-        apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
@@ -1413,9 +1413,9 @@ Then, define the logging function that is called every step by the simulator:
 ```julia
 function Molly.log_property!(logger::MyLogger,
                              sys,
-                             buffers,
                              neighbors,
-                             step_n;
+                             step_n,
+                             buffers;
                              n_threads=Threads.nthreads(),
                              kwargs...)
     if step_n % logger.n_steps == 0
@@ -1456,14 +1456,14 @@ Many times, a logger will just record an observation to an `Array` containing a 
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
 Define your observation function as
 ```julia
-function my_observable(sys::System, buffers, neighbors, step_n; n_threads::Integer, kwargs...)
+function my_observable(sys::System, neighbors, step_n, buffers; n_threads::Integer, kwargs...)
     # Probe the system for some desired property
     return observation
 end
 ```
 Keyword arguments `current_forces` and `current_potential_energy` can also be used here to avoid recomputing values that are passed from the simulator:
 ```julia
-function my_pe_observable(sys::System, buffers, neighbors, step_n; n_threads::Integer,
+function my_pe_observable(sys::System, neighbors, step_n, buffers; n_threads::Integer,
                           current_potential_energy=nothing, kwargs...)
     if isnothing(current_potential_energy)
         # Compute potential energy
