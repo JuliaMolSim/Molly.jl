@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Free energy · Molly.jl</title><meta name="title" content="Free energy · Molly.jl"/><meta property="og:title" content="Free energy · Molly.jl"/><meta property="twitter:title" content="Free energy · Molly.jl"/><meta name="description" content="Documentation for Molly.jl."/><meta property="og:description" content="Documentation for Molly.jl."/><meta property="twitter:description" content="Documentation for Molly.jl."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.svg" alt="Molly.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">Molly.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../documentation/">Documentation</a></li><li><a class="tocitem" href="../differentiable/">Differentiable simulation</a></li><li class="is-active"><a class="tocitem" href>Free energy</a><ul class="internal"><li><a class="tocitem" href="#Free-energies-with-MBAR"><span>Free energies with MBAR</span></a></li><li><a class="tocitem" href="#How-to-run-MBAR-with-Molly"><span>How to run MBAR with Molly</span></a></li><li><a class="tocitem" href="#Free-energies-with-AWH"><span>Free energies with AWH</span></a></li><li><a class="tocitem" href="#How-to-run-AWH-with-Molly"><span>How to run AWH with Molly</span></a></li><li><a class="tocitem" href="#Calculating-Alchemical-Free-Energies-with-AWH"><span>Calculating Alchemical Free Energies with AWH</span></a></li></ul></li><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../exercises/">Exercises</a></li><li><a class="tocitem" href="../publications/">Publications</a></li><li><a class="tocitem" href="../related/">Related software</a></li><li><a class="tocitem" href="../developer/">Developer documentation</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Free energy</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Free energy</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaMolSim/Molly.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/free_energy.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Free-energy-calculation"><a class="docs-heading-anchor" href="#Free-energy-calculation">Free energy calculation</a><a id="Free-energy-calculation-1"></a><a class="docs-heading-anchor-permalink" href="#Free-energy-calculation" title="Permalink"></a></h1><h2 id="Free-energies-with-MBAR"><a class="docs-heading-anchor" href="#Free-energies-with-MBAR">Free energies with MBAR</a><a id="Free-energies-with-MBAR-1"></a><a class="docs-heading-anchor-permalink" href="#Free-energies-with-MBAR" title="Permalink"></a></h2><h3 id="A-brief-introduction"><a class="docs-heading-anchor" href="#A-brief-introduction">A brief introduction</a><a id="A-brief-introduction-1"></a><a class="docs-heading-anchor-permalink" href="#A-brief-introduction" title="Permalink"></a></h3><p>One of the most relevant uses of molecular dynamics (MD) is the estimation of free energy (FE) changes along a given reaction coordinate. One may be interested in, for example, how favorable the binding of a ligand to a target protein is; or which conformer of a molecule is the most stable. These are the kind of questions that can be addressed with FE techniques.</p><p>Through the years, researchers have developed a collection of techniques to solve these problems. As early as 1954, Robert W Zwanzig introduced the <a href="https://doi.org/10.1063/1.1740409">FE perturbation</a> method, leading to the Zwanzig equation:</p><p class="math-container">\[\Delta F_{A \rightarrow B} = F_B - F_A = k_B T \ln \left \langle \exp\left( - \frac{E_B - E_A}{k_B T} \right) \right \rangle _A\]</p><p>This states that, for a given system, the change of FE in going from state <em>A</em> to state <em>B</em> is equal to the FE difference between the two states and, more importantly, directly related to the total energy difference of states <em>A</em> and <em>B</em> through Botzmann statistics. In this equation, the angle brackets represent the expected value of the Boltzmann-weighted energy difference of the two states, but sampled only from conformations extracted from state <em>A</em>. This implies that, even when sampling only one state, we are able to infer information from the other, given that some niceness criteria is met, i.e. the energy difference between the two states is small enough. This reasoning about unsampled states by re-evaluating sampled states is known as reweighting.</p><p>A little over 20 years after Zwanzig introduced FE perturbation, Charles H Bennett expanded on this and developed the <a href="https://doi.org/10.1016/0021-9991(76)90078-4">Bennett Acceptance Ratio</a> (BAR). Bennett built directly upon the statistical foundation of the Zwanzig equation, and recognized that both forward and reverse energy differences between two states contain complementary information; that is, while Zwanzig’s formulation reweights configurations from a single ensemble to estimate the free energy of another, BAR symmetrizes this process. It combines samples from both states and determines the free energy shift <span>$\Delta F$</span> that makes each ensemble equally probable under some weighting derived from Boltzmann statistics. In this sense, BAR can be viewed as a generalization of Zwanzig’s exponential averaging, reducing to the Zwanzig equation when only one direction of sampling is available. However, it is because of this that BAR still suffers from the same issue as Zwanzig&#39;s reweighting method: the energy difference between states <span>$A$</span> and <span>$B$</span> must be small enough such that there is sufficient overlap between their configurational spaces, otherwise the necessary statistics for FE estimation will be very poor and intermediate steps between <span>$A$</span> and <span>$B$</span> are needed.</p><p>Thus, in 2008 Michael R Shirts and John D Chodera introduced the <a href="https://doi.org/10.1063/1.2978177">Multistate Bennett Acceptance Ratio</a> (MBAR) method. MBAR expands on BAR by instead of just using two states <em>A</em> and <em>B</em>, considering a collection of <em>k</em> <span>$\in$</span> <em>K</em> different thermodynamic states. The only thing that is expected from these states is that they must be sampled from equivalent thermodynamic ensembles, this is, all states should be NVT or NPT, etc.; but other than that, the specific Hamiltonian for each evaluated state can differ in an arbitrary manner. Then, a series of <span>$n_k$</span> samples are drawn from each thermodynamic state, until a total of <span>$N = \sum_{k}^{K} n_k$</span> samples are obtained. By evaluating each sample <span>$n \in N$</span> with each Hamiltonian <span>$\mathcal{H}_{k}; k \in K$</span>, one obtains a matrix of reduced potentials <span>$u_{nk} = \beta_{k} \left[ E_{k}(n)+p_{k}V(n) \right]$</span>. MBAR then solves a set of self-consistent equations that yield the relative free energies <span>$f_k$</span> of all states simultaneously, using every sample across all simulations to estimate each state’s free energy in a statistically optimal way. In this sense, MBAR generalizes BAR to an arbitrary number of thermodynamic states and provides the maximum-likelihood, minimum-variance estimator for free energies and ensemble averages, efficiently combining data from overlapping simulations into a unified framework. MBAR also allows the reweighting of any observable to a completely unsampled thermodynamic state. Because this themodynamic state is compared to a collection of sampled states, instead of just one, the conformational space between states is much more likely to overlap, therefore increasing the probability of the reweighting to be meaningful.</p><h2 id="How-to-run-MBAR-with-Molly"><a class="docs-heading-anchor" href="#How-to-run-MBAR-with-Molly">How to run MBAR with Molly</a><a id="How-to-run-MBAR-with-Molly-1"></a><a class="docs-heading-anchor-permalink" href="#How-to-run-MBAR-with-Molly" title="Permalink"></a></h2><h3 id="Defining-the-restraint-interactions"><a class="docs-heading-anchor" href="#Defining-the-restraint-interactions">Defining the restraint interactions</a><a id="Defining-the-restraint-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#Defining-the-restraint-interactions" title="Permalink"></a></h3><p>In this example, we will use MBAR to calculate the Potential of Mean Force (PMF) along the central torsion of an alanine dipeptide molecule. In order to do that, we will have to run a series of independent biased simulations, where each will apply an umbrella potential to restrain the peptide torsion fixed around a given angle. We will first define the restraint interaction:</p><p><img src="../images/dipeptide.png" alt="Alanine dipeptide and the relevant torsion"/></p><pre><code class="language-julia hljs"># restraints.jl file
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Free energy · Molly.jl</title><meta name="title" content="Free energy · Molly.jl"/><meta property="og:title" content="Free energy · Molly.jl"/><meta property="twitter:title" content="Free energy · Molly.jl"/><meta name="description" content="Documentation for Molly.jl."/><meta property="og:description" content="Documentation for Molly.jl."/><meta property="twitter:description" content="Documentation for Molly.jl."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.svg" alt="Molly.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">Molly.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../documentation/">Documentation</a></li><li><a class="tocitem" href="../differentiable/">Differentiable simulation</a></li><li class="is-active"><a class="tocitem" href>Free energy</a><ul class="internal"><li><a class="tocitem" href="#Free-energies-with-MBAR"><span>Free energies with MBAR</span></a></li><li><a class="tocitem" href="#How-to-run-MBAR-with-Molly"><span>How to run MBAR with Molly</span></a></li><li><a class="tocitem" href="#Free-energies-with-AWH"><span>Free energies with AWH</span></a></li><li><a class="tocitem" href="#Free-energies-with-TSS"><span>Free energies with TSS</span></a></li></ul></li><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../exercises/">Exercises</a></li><li><a class="tocitem" href="../publications/">Publications</a></li><li><a class="tocitem" href="../related/">Related software</a></li><li><a class="tocitem" href="../developer/">Developer documentation</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Free energy</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Free energy</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaMolSim/Molly.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/free_energy.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Free-energy-calculation"><a class="docs-heading-anchor" href="#Free-energy-calculation">Free energy calculation</a><a id="Free-energy-calculation-1"></a><a class="docs-heading-anchor-permalink" href="#Free-energy-calculation" title="Permalink"></a></h1><h2 id="Free-energies-with-MBAR"><a class="docs-heading-anchor" href="#Free-energies-with-MBAR">Free energies with MBAR</a><a id="Free-energies-with-MBAR-1"></a><a class="docs-heading-anchor-permalink" href="#Free-energies-with-MBAR" title="Permalink"></a></h2><h3 id="A-brief-introduction"><a class="docs-heading-anchor" href="#A-brief-introduction">A brief introduction</a><a id="A-brief-introduction-1"></a><a class="docs-heading-anchor-permalink" href="#A-brief-introduction" title="Permalink"></a></h3><p>One of the most relevant uses of molecular dynamics (MD) is the estimation of free energy (FE) changes along a given reaction coordinate. One may be interested in, for example, how favorable the binding of a ligand to a target protein is; or which conformer of a molecule is the most stable. These are the kind of questions that can be addressed with FE techniques.</p><p>Through the years, researchers have developed a collection of techniques to solve these problems. As early as 1954, Robert W Zwanzig introduced the <a href="https://doi.org/10.1063/1.1740409">FE perturbation</a> method, leading to the Zwanzig equation:</p><p class="math-container">\[\Delta F_{A \rightarrow B} = F_B - F_A = k_B T \ln \left \langle \exp\left( - \frac{E_B - E_A}{k_B T} \right) \right \rangle _A\]</p><p>This states that, for a given system, the change of FE in going from state <em>A</em> to state <em>B</em> is equal to the FE difference between the two states and, more importantly, directly related to the total energy difference of states <em>A</em> and <em>B</em> through Botzmann statistics. In this equation, the angle brackets represent the expected value of the Boltzmann-weighted energy difference of the two states, but sampled only from conformations extracted from state <em>A</em>. This implies that, even when sampling only one state, we are able to infer information from the other, given that some niceness criteria is met, i.e. the energy difference between the two states is small enough. This reasoning about unsampled states by re-evaluating sampled states is known as reweighting.</p><p>A little over 20 years after Zwanzig introduced FE perturbation, Charles H Bennett expanded on this and developed the <a href="https://doi.org/10.1016/0021-9991(76)90078-4">Bennett Acceptance Ratio</a> (BAR). Bennett built directly upon the statistical foundation of the Zwanzig equation, and recognized that both forward and reverse energy differences between two states contain complementary information; that is, while Zwanzig’s formulation reweights configurations from a single ensemble to estimate the free energy of another, BAR symmetrizes this process. It combines samples from both states and determines the free energy shift <span>$\Delta F$</span> that makes each ensemble equally probable under some weighting derived from Boltzmann statistics. In this sense, BAR can be viewed as a generalization of Zwanzig’s exponential averaging, reducing to the Zwanzig equation when only one direction of sampling is available. However, it is because of this that BAR still suffers from the same issue as Zwanzig&#39;s reweighting method: the energy difference between states <span>$A$</span> and <span>$B$</span> must be small enough such that there is sufficient overlap between their configurational spaces, otherwise the necessary statistics for FE estimation will be very poor and intermediate steps between <span>$A$</span> and <span>$B$</span> are needed.</p><p>Thus, in 2008 Michael R Shirts and John D Chodera introduced the <a href="https://doi.org/10.1063/1.2978177">Multistate Bennett Acceptance Ratio</a> (MBAR) method. MBAR expands on BAR by instead of just using two states <em>A</em> and <em>B</em>, considering a collection of <em>k</em> <span>$\in$</span> <em>K</em> different thermodynamic states. The only thing that is expected from these states is that they must be sampled from equivalent thermodynamic ensembles, this is, all states should be NVT or NPT, etc.; but other than that, the specific Hamiltonian for each evaluated state can differ in an arbitrary manner. Then, a series of <span>$n_k$</span> samples are drawn from each thermodynamic state, until a total of <span>$N = \sum_{k}^{K} n_k$</span> samples are obtained. By evaluating each sample <span>$n \in N$</span> with each Hamiltonian <span>$\mathcal{H}_{k}; k \in K$</span>, one obtains a matrix of reduced potentials <span>$u_{nk} = \beta_{k} \left[ E_{k}(n)+p_{k}V(n) \right]$</span>. MBAR then solves a set of self-consistent equations that yield the relative free energies <span>$f_k$</span> of all states simultaneously, using every sample across all simulations to estimate each state’s free energy in a statistically optimal way. In this sense, MBAR generalizes BAR to an arbitrary number of thermodynamic states and provides the maximum-likelihood, minimum-variance estimator for free energies and ensemble averages, efficiently combining data from overlapping simulations into a unified framework. MBAR also allows the reweighting of any observable to a completely unsampled thermodynamic state. Because this themodynamic state is compared to a collection of sampled states, instead of just one, the conformational space between states is much more likely to overlap, therefore increasing the probability of the reweighting to be meaningful.</p><h2 id="How-to-run-MBAR-with-Molly"><a class="docs-heading-anchor" href="#How-to-run-MBAR-with-Molly">How to run MBAR with Molly</a><a id="How-to-run-MBAR-with-Molly-1"></a><a class="docs-heading-anchor-permalink" href="#How-to-run-MBAR-with-Molly" title="Permalink"></a></h2><h3 id="Defining-the-restraint-interactions"><a class="docs-heading-anchor" href="#Defining-the-restraint-interactions">Defining the restraint interactions</a><a id="Defining-the-restraint-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#Defining-the-restraint-interactions" title="Permalink"></a></h3><p>In this example, we will use MBAR to calculate the Potential of Mean Force (PMF) along the central torsion of an alanine dipeptide molecule. In order to do that, we will have to run a series of independent biased simulations, where each will apply an umbrella potential to restrain the peptide torsion fixed around a given angle. We will first define the restraint interaction:</p><p><img src="../images/dipeptide.png" alt="Alanine dipeptide and the relevant torsion"/></p><pre><code class="language-julia hljs"># restraints.jl file
 
 using LinearAlgebra
 
@@ -450,7 +450,7 @@ kBT          = uconvert(energy_units, Unitful.R * temp)
 states = ThermoState[ThermoState(&quot;win_$i&quot;, βi, pres, TRJ_SYSTEMS[i].system)
                      for i in eachindex(TRJ_SYSTEMS)]
 
-target_state = ThermoState(&quot;target&quot;, βi, pres, sys_nobias)</code></pre><p>We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the <a href="../api/#Molly.assemble_mbar_inputs-Tuple{Any, Any, Vector{ThermoState}}"><code>assemble_mbar_inputs</code></a> method:</p><pre><code class="language-julia hljs"># MBAR.jl
+target_state = ThermoState(&quot;target&quot;, βi, pres, sys_nobias)</code></pre><p>We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the <a href="../api/#Molly.assemble_mbar_inputs-Tuple{Any, Any, AbstractVector{&lt;:ThermoState}}"><code>assemble_mbar_inputs</code></a> method:</p><pre><code class="language-julia hljs"># MBAR.jl
 
 mbar_gen = assemble_mbar_inputs(
     C, B, states; # Coordinates, boundaries and thermodynamic states
@@ -470,345 +470,895 @@ F_k, logN = iterate_mbar(u, win_of, N_counts)</code></pre><p>With this, we can a
 # Returns the weights matrix and the target weights
 W_s, w_target = mbar_weights(u, u_target, F_k, logN, N_counts; check=true, shifts=shifts)</code></pre><p>And finally, we can estimate the PMF using the output of the previous step by calling the <a href="../api/#Molly.pmf_with_uncertainty-Tuple{AbstractMatrix, AbstractVector, AbstractVector, AbstractVector, AbstractVector, Vector}"><code>pmf_with_uncertainty</code></a> method:</p><pre><code class="language-julia hljs"># MBAR.jl
 
-pmf = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts=shifts, kBT=kBT)
+pmf_result = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts=shifts, kBT=kBT)
 
-centers   = pmf.centers        # The collective variable
-PMF       = pmf.F              # PMF in kBT
-PMF_enr   = pmf.F_energy       # PMF in energy units
-sigma     = pmf.sigma_F        # Standard deviation in kBT
-sigma_enr = pmf.sigma_F_energy # Standard deviation in energy units</code></pre><p>But what about the short path? Well, we also provide an overload of the <a href="../api/#Molly.pmf_with_uncertainty-Tuple{AbstractMatrix, AbstractVector, AbstractVector, AbstractVector, AbstractVector, Vector}"><code>pmf_with_uncertainty</code></a> method that allows to get the PMF in a single call by doing:</p><pre><code class="language-julia hljs"># MBAR.jl
-pmf = pmf_with_uncertainty(
+centers   = pmf_result.centers        # The collective variable
+PMF       = pmf_result.F              # PMF in kBT
+PMF_enr   = pmf_result.F_energy       # PMF in energy units
+sigma     = pmf_result.sigma_F        # Standard deviation in kBT
+sigma_enr = pmf_result.sigma_F_energy # Standard deviation in energy units</code></pre><p>But what about the short path? Well, we also provide an overload of the <a href="../api/#Molly.pmf_with_uncertainty-Tuple{AbstractMatrix, AbstractVector, AbstractVector, AbstractVector, AbstractVector, Vector}"><code>pmf_with_uncertainty</code></a> method that allows to get the PMF in a single call by doing:</p><pre><code class="language-julia hljs"># MBAR.jl
+pmf_result = pmf_with_uncertainty(
     C,            # Coordinates
     B,            # Boundaries
     states,       # Themodynamic states
     target_state, # Target state
     CV,           # Collective variable
-)</code></pre><p>Now one can put this into a graph, for example using a scatter for the free energy and making use of the calculated sigmas (see the previous code blocks) to shade the plot and give a feel for the uncertainties. The code is left as an exercise to the reader, but the results should look like something similar to this:</p><p><img src="../images/dihedral_pmf_kbt.png" alt="PMF along the dipeptide torsion in kBT units"/> <img src="../images/dihedral_pmf_enr.png" alt="PMF along the dipeptide torsion in energy units"/></p><h2 id="Free-energies-with-AWH"><a class="docs-heading-anchor" href="#Free-energies-with-AWH">Free energies with AWH</a><a id="Free-energies-with-AWH-1"></a><a class="docs-heading-anchor-permalink" href="#Free-energies-with-AWH" title="Permalink"></a></h2><h3 id="An-overview"><a class="docs-heading-anchor" href="#An-overview">An overview</a><a id="An-overview-1"></a><a class="docs-heading-anchor-permalink" href="#An-overview" title="Permalink"></a></h3><p>One of the major challenges in MD is the timescale limitation when exploring complex free energy (FE) landscapes. While methods like MBAR excel at extracting free energies from a set of equilibrium simulations, obtaining that equilibrium sampling is often hindered by high free energy barriers. When a system gets trapped in a local minimum, standard MD, and even parallel equilibrium simulations, might fail to sample the transition regions adequately.</p><p>To overcome this, researchers turn their attention to adaptive biasing techniques. Rather than applying a static bias, adaptive methods build a bias potential on the fly to actively push the system out of local minima and drive the exploration of the collective variable (CV) space. Pioneering methods in this family include the Wang-Landau algorithm and Metadynamics. These approaches continuously add bias to previously visited states, effectively flattening the free energy landscape over time. However, a common drawback of these early adaptive methods is the need for heuristic parameters to decrease the bias update rate as the simulation progresses. If the bias update is shrunk too quickly, the system might not converge to the true free energy; if shrunk too slowly, the bias will continue to fluctuate, adding noise to the final FE estimate.</p><p>In 2012, Jack Lidmar <a href="https://doi.org/10.1103/PhysRevE.85.056708">introduced</a> the Accelerated Weight Histogram (AWH) method to solve this convergence problem. AWH continuously adapts a bias function to steer the simulation toward a predefined target distribution, using a rigorous statistical mechanics foundation that guarantees asymptotic convergence.</p><h3 id="The-Mathematics-of-AWH"><a class="docs-heading-anchor" href="#The-Mathematics-of-AWH">The Mathematics of AWH</a><a id="The-Mathematics-of-AWH-1"></a><a class="docs-heading-anchor-permalink" href="#The-Mathematics-of-AWH" title="Permalink"></a></h3><p>AWH operates within the framework of an extended ensemble. Instead of simulating a system at a fixed thermodynamic state, an state parameter <span>$\lambda$</span> is promoted to be a dynamic variable alongside the atomic coordinates <span>$x$</span>. In Molly, <span>$\lambda$</span> typically represents an index mapping to a specific discrete state (such as a specific umbrella restraint, an alchemical Hamiltonian, a particular temperature...). The goal of the extended ensemble is to sample the joint probability distribution:</p><p class="math-container">\[P(x, \lambda) \propto \exp\left( - \beta_\lambda E_\lambda(x) + g(\lambda) \right)\]</p><p>Here, <span>$\beta_{\lambda}​E_{\lambda}​(x)$</span> is the dimensionless potential energy of configuration <span>$x$</span> evaluated at state <span>$\lambda$</span>, and <span>$g(\lambda)$</span> is a (fictitious) bias function. We want the marginal distribution of the sampled states <span>$P(\lambda)$</span> to match a specific, user-defined target distribution <span>$\rho(\lambda)$</span> (which is often simply a flat, uniform distribution). To achieve this, the exact bias required is <span>$g(\lambda) = F(\lambda) + \log \rho (\lambda)$</span>, where <span>$F(\lambda)$</span> is the true dimensionless free energy. Because <span>$F(\lambda)$</span> is initially unknown, AWH substitutes it with an iteratively refined estimate, <span>$f(\lambda)$</span>:</p><p class="math-container">\[g(\lambda) = f(\lambda) + \ln \rho(\lambda)\]</p><p>In Molly&#39;s implementation, the dynamics of <span>$x$</span> and <span>$\lambda$</span> are decoupled using a Gibbs sampling approach. The simulation proceeds by integrating the equations of motion for the coordinates <span>$x$</span> using the Hamiltonian of the currently active state <span>$\lambda$</span>. Periodically, the simulation pauses the integration of <span>$x$</span> to sample a new <span>$\lambda$</span> state.</p><p>To do this, AWH leverages the same reweighting principles found in MBAR. The current configuration <span>$x$</span> is re-evaluated across all available Hamiltonians <span>$\mathcal{H}_{k}$</span>​ to compute the dimensionless potentials <span>$\beta_{k}​E_{k}​(x)$</span>. From these, a transition probability, or weight, is calculated for every state k:</p><p class="math-container">\[\omega_k(x) = \frac{\exp\left( f_k + \ln \rho_k - \beta_k E_k(x) \right)}{\sum_j \exp\left( f_j + \ln \rho_j - \beta_j E_j(x) \right)}\]</p><p>A new active state <span>$\lambda$</span> is then drawn randomly according to these weights <span>$\omega_{k}$</span>​. This allows the system to make arbitrarily large jumps in <span>$\lambda$</span>-space as long as there is sufficient phase-space overlap.</p><h3 id="The-Free-Energy-Update"><a class="docs-heading-anchor" href="#The-Free-Energy-Update">The Free Energy Update</a><a id="The-Free-Energy-Update-1"></a><a class="docs-heading-anchor-permalink" href="#The-Free-Energy-Update" title="Permalink"></a></h3><p>As the simulation progresses, the calculated weights <span>$\omega_{k}$</span>​ are accumulated into a segment histogram <span>$W_{k}$</span>​. After a set number of steps, AWH updates its free energy estimate <span>$f_{k}$</span>​. The core principle of AWH is that the accumulated weights represent fluctuations on top of an ideal reference weight histogram containing an effective number of samples <span>$N$</span>. The update equation is:</p><p class="math-container">\[f_k \leftarrow f_k - \ln \left( \frac{N \rho_k + W_k}{N \rho_k + n \rho_k} \right)\]</p><p>where <span>$n$</span> is the number of samples collected in the current update segment.</p><p>The magnitude of the free energy update is governed by <span>$N$</span>. AWH dictates a highly robust two-stage update scheme for <span>$N$</span>:</p><ol><li><p><strong>Initial Stage</strong>: <span>$N$</span> is kept artificially small and constant. This causes the <span>$\Delta f$</span> updates to remain large, rapidly filling in free energy basins and aggressively bootstrapping the system across high energy barriers. Once the system has sufficiently covered the <span>$\lambda$</span> space, <span>$N$</span> is scaled up exponentially.</p></li><li><p><strong>Linear Stage</strong>: Once the initial exploration is complete, <span>$N$</span> is allowed to grow linearly with the simulation time (<span>$N \propto t$</span>). Consequently, the magnitude of the free energy updates scales down exactly as <span>$1/t$</span>, which is the theoretically optimal statistical rate for convergence.</p></li></ol><h2 id="How-to-run-AWH-with-Molly"><a class="docs-heading-anchor" href="#How-to-run-AWH-with-Molly">How to run AWH with Molly</a><a id="How-to-run-AWH-with-Molly-1"></a><a class="docs-heading-anchor-permalink" href="#How-to-run-AWH-with-Molly" title="Permalink"></a></h2><h3 id="Defining-a-2D-collective-variable-space"><a class="docs-heading-anchor" href="#Defining-a-2D-collective-variable-space">Defining a 2D collective variable space</a><a id="Defining-a-2D-collective-variable-space-1"></a><a class="docs-heading-anchor-permalink" href="#Defining-a-2D-collective-variable-space" title="Permalink"></a></h3><p>In this example, we will calculate the free energy landscape of an alanine dipeptide molecule, but this time we will explore a two-dimensional reaction coordinate: both the <span>$\phi$</span> and <span>$\psi$</span> central torsions. While running standard Umbrella Sampling and MBAR on a 2D grid is possible, the number of required independent simulations grows geometrically (e.g., a <span>$15 \times 15$</span> grid requires 225 independent simulations!). Accelerated Weight Histogram (AWH) bypasses this issue. By treating the discrete bias grid as an extended ensemble parameter <span>$\lambda$</span>, AWH can dynamically explore the entire 2D space within a single, continuous molecular dynamics simulation.</p><p>We will begin by defining the basic simulation parameters. We want our 2D grid to span the entire periodic range from <span>$-\pi$</span> to <span>$\pi$</span> for both dihedral angles, using 15 bins per dimension.</p><pre><code class="language-julia hljs"># awh_2d.jl
-
-using Molly
-using LinearAlgebra
-using Statistics
-using Unitful
+)</code></pre><p>Now one can put this into a graph, for example using a scatter for the free energy and making use of the calculated sigmas (see the previous code blocks) to shade the plot and give a feel for the uncertainties. The code is left as an exercise to the reader, but the results should look like something similar to this:</p><p><img src="../images/dihedral_pmf_kbt.png" alt="PMF along the dipeptide torsion in kBT units"/> <img src="../images/dihedral_pmf_enr.png" alt="PMF along the dipeptide torsion in energy units"/></p><h2 id="Free-energies-with-AWH"><a class="docs-heading-anchor" href="#Free-energies-with-AWH">Free energies with AWH</a><a id="Free-energies-with-AWH-1"></a><a class="docs-heading-anchor-permalink" href="#Free-energies-with-AWH" title="Permalink"></a></h2><h3 id="Method-overview"><a class="docs-heading-anchor" href="#Method-overview">Method overview</a><a id="Method-overview-1"></a><a class="docs-heading-anchor-permalink" href="#Method-overview" title="Permalink"></a></h3><p><a href="https://doi.org/10.1103/PhysRevE.85.056708">The Accelerated Weight Histogram</a> (AWH) is an adaptive extended-ensemble method for estimating free energies over a discrete set of thermodynamic states where the thermodynamic-state index is treated as a dynamic variable. At each AWH iteration, the coordinates are propagated with the Hamiltonian of the active state, the current configuration is evaluated in all states, and a new active state is sampled from the conditional state probabilities.</p><p>For a target distribution <span>$\rho_k$</span>, current free energy estimate <span>$f_k$</span>, and reduced potential <span>$u_k(x)$</span>, the conditional weight of state <span>$k$</span> is</p><p class="math-container">\[\omega_k(x) =
+\frac{\exp\left(f_k + \log \rho_k - u_k(x)\right)}
+{\sum_j \exp\left(f_j + \log \rho_j - u_j(x)\right)}.\]</p><p>The same weights are accumulated into a segment histogram. After <code>update_freq</code> samples, Molly updates the free energy estimate from the segment histogram and an effective reference count. During the initial stage, the reference count is controlled by <code>n_bias</code>, so smaller values give more aggressive updates. After the state space has been covered, the effective count grows with simulation time and the updates become smaller.</p><p>The examples in this section show two common uses. The alanine dipeptide example uses AWH to move between umbrella centers on a two-dimensional <span>$\phi/\psi$</span> grid, then <a href="https://doi.org/10.1063/1.4890371">deconvolves the umbrella bias</a> to obtain an unbiased PMF. The ethanol solvation example uses AWH directly on a one-dimensional alchemical ladder, where the AWH free energy vector is the alchemical profile.</p><h3 id="Alanine-dipeptide-PMF"><a class="docs-heading-anchor" href="#Alanine-dipeptide-PMF">Alanine dipeptide PMF</a><a id="Alanine-dipeptide-PMF-1"></a><a class="docs-heading-anchor-permalink" href="#Alanine-dipeptide-PMF" title="Permalink"></a></h3><p>The full script is <code>scripts/awh_dipeptide.jl</code>. Run it from the package root:</p><pre><code class="language-bash hljs">julia scripts/awh_dipeptide.jl</code></pre><p>The script uses CUDA arrays and selects GPU <code>0</code> by default. Set <code>MOLLY_CUDA_DEVICE</code> before launching Julia to choose a different device.</p><p>The system is the alanine dipeptide structure from the Molly exercises. The script minimizes it, assigns Maxwell-Boltzmann velocities, and equilibrates it at 310 K and 1 bar before constructing the AWH states.</p><pre><code class="language-julia hljs">using Molly
 using CUDA
 using GLMakie
+using Random
 
-# --- 1. Simulation Parameters ---
+CUDA.device!(parse(Int, get(ENV, &quot;MOLLY_CUDA_DEVICE&quot;, &quot;0&quot;)))
 
 FT = Float32
 AT = CuArray
-T_sim = FT(310.0)u&quot;K&quot;
-K_bias = FT(500.0)u&quot;kJ * mol^-1&quot; # Bias force constant
-DT = FT(1.0)u&quot;fs&quot;
 
-tu = unit(DT)
-sim_t = uconvert(tu, FT(20)u&quot;ns&quot;)
-sim_steps = Int(floor(sim_t / DT))
+DT = FT(4)u&quot;fs&quot;
+TEMP = FT(310)u&quot;K&quot;
+PRES = one(FT)u&quot;bar&quot;
 
-# AWH Parameters (2D)
-PMF_MIN = FT(-π)
-PMF_MAX = FT(π)
-N_BINS = 15 # 15x15 = 225 discrete λ states
-GRID_WIDTH = FT((PMF_MAX - PMF_MIN) / N_BINS)
+thermostat = VelocityRescaleThermostat(TEMP, FT(0.1)u&quot;ps&quot;; n_steps = 1)
+barostat = CRescaleBarostat(PRES, FT(4)u&quot;ps&quot;; n_steps = 100)
+vverlet = VelocityVerlet(DT, (thermostat, barostat), 100)</code></pre><p>The PMF is defined over the central <span>$\phi$</span> and <span>$\psi$</span> torsions. In this example each angle is divided into 20 periodic bins, giving 400 umbrella centers. Each AWH state is a copy of the equilibrated system with one flat-bottom torsion bias on <span>$\phi$</span> and one on <span>$\psi$</span>.</p><pre><code class="language-julia hljs">PHI_INDS = [5, 7, 9, 15]
+PSI_INDS = [7, 9, 15, 17]
+PHI_CV = CalcTorsion(PHI_INDS, :pbc, true)
+PSI_CV = CalcTorsion(PSI_INDS, :pbc, true)
 
-DELTA_R = FT(12.0)u&quot;°&quot; 
-WIDTH_RAD = ustrip(u&quot;rad&quot;, DELTA_R)
+N_PHI_STATES = 20
+N_PSI_STATES = 20
 
-# Atom Indices for Alanine Dipeptide (ACE-ALA-NME)
-phi_inds = [5, 7, 9, 15] 
-psi_inds = [7, 9, 15, 17]</code></pre><p>Next, we load the initial configuration and define our standard base <a href="../api/#Molly.System"><code>System</code></a> and integration algorithms, exactly as we would for a normal MD run.</p><pre><code class="language-julia hljs"># awh_2d.jl
+PHI_MIN = FT(-π)
+PHI_MAX = FT(π)
+PSI_MIN = FT(-π)
+PSI_MAX = FT(π)
 
-data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
-ff_dir = joinpath(data_dir, &quot;force_fields&quot;)
-ff = MolecularForceField(FT, joinpath.(ff_dir, [&quot;ff99SBildn.xml&quot;, &quot;tip3p_standard.xml&quot;])...; units=true)
+FLAT_BOTTOM_WIDTH = ustrip(u&quot;rad&quot;, FT(360 / N_PHI_STATES)u&quot;°&quot;)
+BIAS_K = FT(100.0)u&quot;kJ * mol^-1&quot;
 
-# Load PDB
-sys = System(
-    joinpath(data_dir, &quot;..&quot;, &quot;exercises&quot;, &quot;dipeptide_equil.pdb&quot;),
-    ff;
-    array_type=AT,
-    nonbonded_method=:cutoff,
-)
-
-# Initialize standard integrator
-thermostat = VelocityRescaleThermostat(T_sim, FT(1)u&quot;ps&quot;)
-barostat   = CRescaleBarostat(FT(1)u&quot;bar&quot;, FT(1)u&quot;ps&quot;; n_steps = 100)
-
-simulator = VelocityVerlet(
-    dt=DT,
-    coupling=(thermostat, barostat),
-    remove_CM_motion = 100
-)</code></pre><h3 id="Setting-up-the-AWH-thermodynamic-states"><a class="docs-heading-anchor" href="#Setting-up-the-AWH-thermodynamic-states">Setting up the AWH thermodynamic states</a><a id="Setting-up-the-AWH-thermodynamic-states-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-up-the-AWH-thermodynamic-states" title="Permalink"></a></h3><p>AWH requires a collection of <a href="../api/#Molly.ThermoState"><code>ThermoState</code></a> objects, where each state represents a specific point <span>$\lambda$</span> in our extended ensemble. In our case, each <span>$\lambda$</span> is a unique combination of a <span>$\phi$</span> and <span>$\psi$</span> restraint target.</p><p>We will loop over our 15 × 15 grid. For each coordinate pair, we define the respective collective variables and biases. Notice a crucial optimization step here: instead of deep-copying the entire <a href="../api/#Molly.System"><code>System</code></a> 225 times (which would heavily bloat GPU memory with duplicate coordinate and atom arrays), we create shallow systems that share the heavy arrays but use unique <code>general_inters</code> lists containing the specific <a href="../api/#Molly.BiasPotential"><code>BiasPotential</code></a> for that window.</p><pre><code class="language-julia hljs"># awh_2d.jl
+PHI_TARGETS = collect(range(PHI_MIN, PHI_MAX; length=N_PHI_STATES + 1))[1:end-1]
+PSI_TARGETS = collect(range(PSI_MIN, PSI_MAX; length=N_PSI_STATES + 1))[1:end-1]
 
 thermo_states = ThermoState[]
-grid_points = range(PMF_MIN, PMF_MAX, length=N_BINS)
 
-println(&quot;Generating $(N_BINS*N_BINS) thermodynamic states...&quot;)
+for psi in PSI_TARGETS
+    for phi in PHI_TARGETS
+        bias_phi = PeriodicFlatBottomBias(BIAS_K, FLAT_BOTTOM_WIDTH, phi)
+        bias_psi = PeriodicFlatBottomBias(BIAS_K, FLAT_BOTTOM_WIDTH, psi)
 
-for phi_target in grid_points
-    for psi_target in grid_points
-        
-        # --- Bias 1: Phi ---
-        cv_phi = CalcTorsion(phi_inds, :pbc, true)
-        bias_phi = PeriodicFlatBottomBias(K_bias, WIDTH_RAD, phi_target)
-        bp_phi = BiasPotential(cv_phi, bias_phi)
-
-        # --- Bias 2: Psi ---
-        cv_psi = CalcTorsion(psi_inds, :pbc, true)
-        bias_psi = PeriodicFlatBottomBias(K_bias, WIDTH_RAD, psi_target)
-        bp_psi = BiasPotential(cv_psi, bias_psi)
-        
-        # --- Create System with Dual Bias ---
-        # We share heavy arrays (atoms, coords) to save memory
-        sys_window = System(
-            atoms=sys.atoms,
-            coords=sys.coords,
-            boundary=sys.boundary,
-            pairwise_inters=sys.pairwise_inters,
-            specific_inter_lists=sys.specific_inter_lists,
-            general_inters=(sys.general_inters..., bp_phi, bp_psi), # Inject the active biases
-            neighbor_finder=sys.neighbor_finder
+        sys_bias = System(
+            deepcopy(sys);
+            general_inters = (
+                sys.general_inters...,
+                BiasPotential(PHI_CV, bias_phi),
+                BiasPotential(PSI_CV, bias_psi),
+            ),
         )
-        
-        push!(thermo_states, ThermoState(sys_window, simulator))
+
+        push!(thermo_states, ThermoState(sys_bias, vverlet))
     end
-end</code></pre><h3 id="Initializing-and-running-the-AWH-simulation"><a class="docs-heading-anchor" href="#Initializing-and-running-the-AWH-simulation">Initializing and running the AWH simulation</a><a id="Initializing-and-running-the-AWH-simulation-1"></a><a class="docs-heading-anchor-permalink" href="#Initializing-and-running-the-AWH-simulation" title="Permalink"></a></h3><p>With our discrete grid of states ready, we initialize the <a href="../api/#Molly.AWHState"><code>AWHState</code></a> and the <a href="../api/#Molly.AWHSimulation"><code>AWHSimulation</code></a>.</p><p>Because our <span>$\lambda$</span> states represent harmonically biased umbrellas rather than true alchemical intermediates, the free energy <span>$f(\lambda)$</span> evaluated directly by AWH will be convoluted by the umbrella potentials. To obtain the unbiased PMF <span>$\Phi(\xi)$</span>, Molly provides an on-the-fly PMF deconvolution scheme. By providing the <code>pmf_grid</code> argument to <a href="../api/#Molly.AWHSimulation"><code>AWHSimulation</code></a>, Molly will continuously reweight the sampled coordinates to build a high-resolution, deconvoluted PMF during the simulation itself.</p><pre><code class="language-julia hljs"># awh_2d.jl
+end</code></pre><p>The AWH state index labels biased thermodynamic states, not the unbiased PMF bins. For this reason, the raw AWH free energies are not used directly as the Ramachandran free energy surface. Instead, the script attaches a <a href="../api/#Molly.PMFDeconvolution"><code>PMFDeconvolution</code></a> object to the simulation.</p><p>Here the automatic deconvolution path is safe because every thermodynamic state has exactly two <a href="../api/#Molly.BiasPotential"><code>BiasPotential</code></a>s in <code>general_inters</code>, and they are appended in the same order as the PMF grid dimensions: first the <span>$\phi$</span> bias, then the <span>$\psi$</span> bias. <a href="../api/#Molly.PMFDeconvolution"><code>PMFDeconvolution</code></a> can therefore infer both the collective variables and the reduced bias-energy coupling matrix from the states themselves.</p><pre><code class="language-julia hljs">awh_state = AWHState(thermo_states; first_state = 1, n_bias = 100, reuse_neighbors = true)
 
-println(&quot;Initializing AWH State...&quot;)
-awh_state = AWHState(thermo_states; n_bias=100)
-
-println(&quot;Setting up Simulation...&quot;)
-
-# Note the tuple structure for 2D pmf_grid: ((min_x, min_y), (max_x, max_y), (bins_x, bins_y))
-awh_sim = AWHSimulation(
+pmf_deconv = PMFDeconvolution(
     awh_state;
-    num_md_steps = 10,
-    update_freq  = 1,
-    well_tempered_factor = FT(500.0),
-    pmf_grid = ((PMF_MIN, PMF_MIN), (PMF_MAX, PMF_MAX), (60, 60)) # Deconvolve onto a 60x60 high-res grid
-)
+    grid = ((PHI_MIN, PSI_MIN), (PHI_MAX, PSI_MAX), (N_PHI_STATES, N_PSI_STATES)),
+)</code></pre><div class="admonition is-warning" id="Deconvolving-explicit-collective-variables-and-bias-potentials-3d25a70c045d0f4b"><header class="admonition-header">Deconvolving explicit collective variables and bias potentials<a class="admonition-anchor" href="#Deconvolving-explicit-collective-variables-and-bias-potentials-3d25a70c045d0f4b" title="Permalink"></a></header><div class="admonition-body"><p>Do not use the automatic path if:</p><ul><li>The state contains extra <code>BiasPotential</code>s that are not PMF windows.</li><li>The bias order does not match the PMF grid axes.</li><li>More than one bias contributes to one PMF dimension.</li><li>The coordinate used for the plotted PMF is transformed differently from the coordinate seen by the bias.</li></ul><p>In those cases, provide the collective-variable function and the reduced coupling explicitly. For example, if an extra flat-bottom restraint were also stored in <code>general_inters</code>, the PMF deconvolution would need to ignore it:</p></div></div><pre><code class="language-julia hljs">GRID_CARTESIAN = CartesianIndices((N_PHI_STATES, N_PSI_STATES))
 
-println(&quot;Starting Simulation...&quot;)
-simulate!(awh_sim, sim_steps)
-println(&quot;Simulation Complete.&quot;)</code></pre><h3 id="Extracting-and-plotting-the-PMF"><a class="docs-heading-anchor" href="#Extracting-and-plotting-the-PMF">Extracting and plotting the PMF</a><a id="Extracting-and-plotting-the-PMF-1"></a><a class="docs-heading-anchor-permalink" href="#Extracting-and-plotting-the-PMF" title="Permalink"></a></h3><p>Once the simulation completes, our deconvoluted PMF is safely stored inside <code>awh_sim.pmf_calc</code>. We can extract it by calculating the negative logarithm of the reweighted histogram ratio. We will write a small helper function to safely handle unvisited bins, shifting the global minimum of the free energy surface to zero.</p><pre><code class="language-julia hljs"># awh_2d.jl
-
-function get_pmf(pmf_struct)
-    num = pmf_struct.numerator_hist
-    den = pmf_struct.denominator_hist
-    
-    # Avoid log(0) for unsampled regions
-    valid = (num .&gt; 0) .&amp; (den .&gt; 0)
-    
-    # Create PMF array (implicitly 2D based on input)
-    pmf = fill(FT(Inf), size(num))
-    pmf[valid] .= -log.(num[valid] ./ den[valid])
-    
-    # Shift global minimum to 0
-    min_val = minimum(pmf[valid])
-    pmf[valid] .-= min_val
-    return pmf
+function torsion_value(coords, sys, cv)
+    return FT(ustrip(calculate_cv(cv, coords, sys.atoms, sys.boundary, sys.velocities)))
 end
 
-final_pmf = get_pmf(awh_sim.pmf_calc)
+function custom_pmf_cv(coords)
+    active_sys = awh_state.active_sys
+    return (
+        torsion_value(coords, active_sys, PHI_CV),
+        torsion_value(coords, active_sys, PSI_CV),
+    )
+end
 
-# Prepare grid axes in degrees for plotting
-phi_vals = rad2deg.(range(PMF_MIN, PMF_MAX, length=60))
-psi_vals = rad2deg.(range(PMF_MIN, PMF_MAX, length=60))
+function custom_pmf_coupling(cv_tuple, state_i)
+    grid_i = GRID_CARTESIAN[state_i]
+    bias_phi = PeriodicFlatBottomBias(BIAS_K, FLAT_BOTTOM_WIDTH, PHI_TARGETS[grid_i[1]])
+    bias_psi = PeriodicFlatBottomBias(BIAS_K, FLAT_BOTTOM_WIDTH, PSI_TARGETS[grid_i[2]])
+    bias_energy = potential_energy(bias_phi, FT(cv_tuple[1])) +
+                  potential_energy(bias_psi, FT(cv_tuple[2]))
+    return awh_state.λ_β[state_i] * FT(ustrip(bias_energy))
+end
 
-# Plot the 2D surface using GLMakie
-fig = Figure(resolution = (800, 600))
-ax = Axis(fig[1, 1], 
-    title = &quot;Alanine Dipeptide 2D PMF (AWH)&quot;,
-    xlabel = &quot;Phi (degrees)&quot;,
-    ylabel = &quot;Psi (degrees)&quot;
+pmf_deconv = PMFDeconvolution(
+    awh_state;
+    grid = ((PHI_MIN, PSI_MIN), (PHI_MAX, PSI_MAX), (N_PHI_STATES, N_PSI_STATES)),
+    cv = custom_pmf_cv,
+    coupling = custom_pmf_coupling,
+)</code></pre><p>The simulation advances 50 MD steps per AWH iteration. The finite <code>well_tempered_factor</code> lets the target distribution adapt during the run, favoring lower-free-energy regions while still keeping all windows accessible. Higher values soften this behaviour.</p><pre><code class="language-julia hljs">N_MD_STEPS = 50
+AWH_TIME = FT(25)u&quot;ns&quot;
+TOTAL_STEPS = Int(floor(AWH_TIME / DT))
+
+awh_sim = AWHSimulation(
+    awh_state;
+    num_md_steps = N_MD_STEPS,
+    update_freq = 1,
+    well_tempered_factor = FT(500.0),
+    log_freq = 10,
+    pmf = pmf_deconv,
 )
 
-hm = heatmap!(ax, phi_vals, psi_vals, final_pmf, colormap=:viridis, colorrange=(0, 25))
-Colorbar(fig[1, 2], hm, label=&quot;Free Energy (kBT)&quot;)
+simulate!(awh_sim, TOTAL_STEPS)</code></pre><p><code>AWHSimulation</code> stores its absolute MD step, so couplers and loggers retain their cadence across AWH iterations and repeated <code>simulate!</code> calls. Pass <code>initial_step</code> when resuming from a checkpoint whose coordinates and velocities already correspond to a nonzero step.</p><p>After the run, <code>pmf(awh_sim.pmf)</code> returns the deconvolved PMF in units of <span>$k_B T$</span> by default. Infinite bins are converted to <code>NaN</code> before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.</p><pre><code class="language-julia hljs">pmf_result = pmf(awh_sim.pmf)
+pmf_kbt = pmf_result.F
+pmf_plot = map(x -&gt; isfinite(x) ? x : FT(NaN), pmf_kbt)
 
-save(&quot;ala_dipeptide_2d_pmf.png&quot;, fig)</code></pre><p>This will output a robust 2D free energy map of the alanine dipeptide Ramachandran plot. All achieved without the need for manual sequential equilibration, thanks to the continuous adaptive biasing of AWH!</p><h2 id="Calculating-Alchemical-Free-Energies-with-AWH"><a class="docs-heading-anchor" href="#Calculating-Alchemical-Free-Energies-with-AWH">Calculating Alchemical Free Energies with AWH</a><a id="Calculating-Alchemical-Free-Energies-with-AWH-1"></a><a class="docs-heading-anchor-permalink" href="#Calculating-Alchemical-Free-Energies-with-AWH" title="Permalink"></a></h2><h3 id="The-alchemical-transformation-and-the-two-leg-cycle"><a class="docs-heading-anchor" href="#The-alchemical-transformation-and-the-two-leg-cycle">The alchemical transformation and the two-leg cycle</a><a id="The-alchemical-transformation-and-the-two-leg-cycle-1"></a><a class="docs-heading-anchor-permalink" href="#The-alchemical-transformation-and-the-two-leg-cycle" title="Permalink"></a></h3><p>In an alchemical free energy calculation, the collective variable is an alchemical parameter <span>$\lambda$</span> that interpolates the Hamiltonian between two thermodynamic end states. Using AWH eliminates the need to manually optimize a dense ladder of intermediate <span>$\lambda$</span> states, as the algorithm dynamically enforces a uniform target distribution, dedicating more sampling time to high-gradient regions. </p><p>For a rigorous standard state solvation calculation, a two-leg thermodynamic cycle must be used to account for intramolecular self-interactions and conformational entropy changes that occur upon removing the solvent:</p><ol><li><strong>Solvent Leg (Annihilation):</strong> Both solute-solvent and solute-solute non-bonded interactions are turned off.</li><li><strong>Vacuum Leg (Annihilation):</strong> The isolated solute is simulated, and its intramolecular non-bonded interactions are turned off.</li></ol><p>Subtracting the vacuum annihilation work from the solvent annihilation work perfectly isolates the free energy of solvation.</p><p>To prevent numerical instability when atoms overlap at low <span>$\lambda$</span> values, the schedule decouples electrostatic interactions linearly first, followed by van der Waals interactions using a soft-core potential. The timestep is set to <strong>1 fs</strong> to maintain stable numerical integration against the steep potential gradients present in highly decoupled states.</p><pre><code class="language-julia hljs"># alchemical_awh.jl
+fig_fe = Figure(size = (720, 720))
 
-using Molly
-using CUDA
-using Unitful
-using GLMakie
-using StatsBase
+ax_fe = Axis(fig_fe[1,1],
+    title = L&quot;\textbf{Free Energy}&quot;,
+    xlabel = L&quot;\textbf{\phi / rad}&quot;,
+    ylabel = L&quot;\textbf{\psi / rad}&quot;,
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+)
 
-# --- Simulation Constants ---
-FT = Float32
+hm_fe = heatmap!(
+    ax_fe,
+    PHI_TARGETS,
+    PSI_TARGETS,
+    pmf_plot;
+    colormap = :inferno,
+    nan_color = (:gray, 0.35),
+)
+
+Colorbar(
+    fig_fe[1, 2],
+    hm_fe;
+    label = L&quot;\textbf{F / k_{B}T}&quot;,
+    labelsize = 20,
+    ticklabelsize = 16,
+)
+
+ax_fe.aspect = DataAspect()
+display(fig_fe)
+
+save(&quot;awh_dipeptide_pmf.png&quot;, fig_fe)</code></pre><p><img src="../images/awh_dipeptide_pmf.png" alt="AWH deconvolved alanine dipeptide PMF"/></p><p>The convergence plot uses the maximum absolute free energy update recorded by AWH at each logged iteration. A decreasing <code>log10.(deltaF)</code> trace indicates that the adaptive bias updates are becoming smaller.</p><pre><code class="language-julia hljs">deltaF = awh_state.stats.max_delta_f_history
+iter = awh_state.stats.step_indices
+
+fig_df = Figure(size = (720, 720))
+
+ax_df = Axis(
+    fig_df[1,1],
+    title = L&quot;\textbf{Max. $\Delta$F}&quot;,
+    xlabel = L&quot;\textbf{Iteration}&quot;,
+    ylabel = L&quot;\textbf{log_{10}($\Delta$F)}&quot;,
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+)
+
+lines!(
+    ax_df,
+    iter,
+    log10.(deltaF);
+    color = :royalblue,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;PHI/PSI AWH&quot;,
+)
+
+axislegend(position = :rt, labelsize = 24)
+display(fig_df)
+
+save(&quot;awh_dipeptide_convergence.png&quot;, fig_df)</code></pre><p><img src="../images/awh_dipeptide_convergence.png" alt="AWH dipeptide convergence"/></p><p>The script also saves a normalized histogram of the visited AWH thermodynamic states. This is a simple diagnostic for how the sampler moved over the 400 biased <span>$\phi/\psi$</span> windows.</p><pre><code class="language-julia hljs">state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
+save_state_histogram(
+    awh_visited_states(awh_state),
+    state_bins,
+    &quot;awh_dipeptide_states.png&quot;,
+)</code></pre><p><img src="../images/awh_dipeptide_states.png" alt="AWH dipeptide visited states"/></p><h3 id="Ethanol-solvation-free-energy"><a class="docs-heading-anchor" href="#Ethanol-solvation-free-energy">Ethanol solvation free energy</a><a id="Ethanol-solvation-free-energy-1"></a><a class="docs-heading-anchor-permalink" href="#Ethanol-solvation-free-energy" title="Permalink"></a></h3><p>The full script can be found in <code>scripts/awh_solvation.jl</code>:</p><pre><code class="language-bash hljs">julia scripts/awh_solvation.jl</code></pre><p>The example computes the standard solvation free energy of ethanol with a two-leg annihilation cycle. Ethanol is annihilated, that is, its non-bonded interactions switched off, in solution and in vacuum. The standard solvation free energy is then described by the cycle:</p><p class="math-container">\[\Delta G_\mathrm{solvation} =
+\Delta G_\mathrm{vacuum}
+- \Delta G_\mathrm{solvent}
++ k_B T \log\left(\frac{V_\mathrm{gas}}{V_\mathrm{std}}\right).\]</p><p>where the last term captures the free energy of taking a molecule from a gas to a standard state solution. The alchemical ladder has 20 states from <span>$\lambda=1$</span> (solute fully turned on) to <span>$\lambda=0$</span> (solute fully turned off). The solute atoms are assigned <code>InsertRole</code>, and <code>DefaultLambdaScheduler</code> removes electrostatics over the first half of the ladder and sterics over the second half.</p><pre><code class="language-julia hljs">FT = Float32
 AT = CuArray
-Δt = FT(1)u&quot;fs&quot;
+
+Δt = FT(4)u&quot;fs&quot;
 T0 = FT(310)u&quot;K&quot;
 P0 = FT(1)u&quot;bar&quot;
 
-# 1D Lambda Schedule: Annihilate by running from 1.0 down to 0.0
-# The DefaultLambdaScheduler (with InsertRole) will automatically turn off 
-# electrostatics (1.0 -&gt; 0.5) and then sterics (0.5 -&gt; 0.0).
-lambda_schedule = FT.(range(1.0, stop=0.0, length=21))
+N_LAMBDA_STATES = 20
+N_MD_STEPS = 50
+AWH_TIME = FT(15)u&quot;ns&quot;
+SOLVENT_EQUIL_TIME = FT(500)u&quot;ps&quot;
+VACUUM_EQUIL_TIME = FT(100)u&quot;ps&quot;
 
-# --- Force Field Setup ---
-data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
-ff_dir   = joinpath(data_dir, &quot;force_fields&quot;)
-ff = MolecularForceField(FT, joinpath.(ff_dir, [&quot;tip3p_standard.xml&quot;, &quot;gaff.xml&quot;, &quot;ethanol.xml&quot;])...; units=true)</code></pre><h3 id="Annihilation-mixing-rules"><a class="docs-heading-anchor" href="#Annihilation-mixing-rules">Annihilation mixing rules</a><a id="Annihilation-mixing-rules-1"></a><a class="docs-heading-anchor-permalink" href="#Annihilation-mixing-rules" title="Permalink"></a></h3><p>To properly annihilate the solute, custom λ-mixing rules are required. By using a nested minimum function and clamping the highest value, both solute-solvent and solute-solute interactions are appropriately scaled down to zero. Note that using a Lorentz mixing rule in this case is not correct, since for a completely turned off solute <span>$\lambda_{solute} = 0$</span> and a completely turned on solvend <span>$\lambda_{solvent} = 1$</span> the overall lambda would yield <span>$\lambda = (0 + 1)/2 = 0.5$</span>. A geometric mixig such as <span>$\sqrt{\lambda \cdot \lambda}$</span> could be used instead, but that would lead to a non-linear scaling along the alchemical coordinate and would potentially degrade the convergence if the algorithm.</p><pre><code class="language-julia hljs"># alchemical_awh.jl
+lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))</code></pre><p>The setup function builds either the solvated or vacuum leg. The solvated leg uses PME and a Langevin integrator coupled to an NPT barostat. The vacuum leg uses short-range Coulomb with an infinite boundary and infinite non-bonded cutoff so the ethanol molecule is not split by a finite cutoff.</p><pre><code class="language-julia hljs">function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
+    nonbonded_method = is_vacuum ? :none : :pme
+    boundary = is_vacuum ? CubicBoundary(FT(Inf) * u&quot;nm&quot;) : nothing
+    dist_cutoff = is_vacuum ? FT(Inf) * u&quot;nm&quot; : FT(1) * u&quot;nm&quot;
+    dist_buffer = is_vacuum ? FT(0) * u&quot;nm&quot; : FT(0.2) * u&quot;nm&quot;
+    neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
 
-function annihilation_λ_vdw_mixing(a, b)
-    return min(typeof(a.λ_vdw)(0.99999), min(a.λ_vdw, b.λ_vdw))
-end
-
-function annihilation_λ_coul_mixing(a, b)
-    return min(typeof(a.λ_coul)(0.99999), min(a.λ_coul, b.λ_coul))
-end</code></pre><h3 id="Setting-up-the-alchemical-thermodynamic-states"><a class="docs-heading-anchor" href="#Setting-up-the-alchemical-thermodynamic-states">Setting up the alchemical thermodynamic states</a><a id="Setting-up-the-alchemical-thermodynamic-states-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-up-the-alchemical-thermodynamic-states" title="Permalink"></a></h3><p>The <code>setup_alchemical_awh</code> function constructs the <a href="../api/#Molly.AWHState"><code>AWHState</code></a> grid. The function handles ensemble selection via the <code>is_vacuum</code> flag: an NPT ensemble (<a href="../api/#Molly.VelocityRescaleThermostat"><code>VelocityRescaleThermostat</code></a> and <a href="../api/#Molly.CRescaleBarostat"><code>CRescaleBarostat</code></a>) is applied for the solvent leg, whereas an NVT ensemble (thermostat only) is applied for the vacuum leg to prevent the unconstrained simulation box from catastrophically collapsing.</p><p>Soft-core potentials (<a href="../api/#Molly.CoulombSoftCoreBeutler"><code>CoulombSoftCoreBeutler</code></a> and <a href="../api/#Molly.LennardJonesSoftCoreBeutler"><code>LennardJonesSoftCoreBeutler</code></a>) replace the standard non-bonded interactions.</p><pre><code class="language-julia hljs"># alchemical_awh.jl
-
-function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false)
     sys_base = System(
         pdb_file,
         ff;
-        array_type=AT,
-        nonbonded_method=:none
+        array_type = AT,
+        boundary = boundary,
+        dist_cutoff = dist_cutoff,
+        dist_buffer = dist_buffer,
+        neighbor_finder_type = neighbor_finder_type,
+        nonbonded_method = nonbonded_method,
+        constraints = :hbonds,
+        constraint_algorithm = LINCS,
+        rigid_water = true,
+        hydrogen_mass = 3,
     )
 
-    thermostat = VelocityRescaleThermostat(T0, FT(0.1)u&quot;ps&quot;)
-    
-    if is_vacuum
-        integrator = VelocityVerlet(Δt, (thermostat,), 100)
+    integrator = if is_vacuum
+        Langevin(; dt = Δt, temperature = T0, friction = FT(1)u&quot;ps^-1&quot;,
+                 coupling = nothing, remove_CM_motion = 100)
     else
-        barostat = CRescaleBarostat(P0, FT(1)u&quot;ps&quot;; n_steps=250)
-        integrator = VelocityVerlet(Δt, (thermostat, barostat), 100)
-    end
+        barostat = CRescaleBarostat(P0, FT(4)u&quot;ps&quot;; n_steps = 200)
+        Langevin(dt = Δt, temperature = T0, friction = FT(1)u&quot;ps^-1&quot;,
+                 coupling = (barostat,), remove_CM_motion = 100)
+    end</code></pre><div class="admonition is-warning" id="Integrating-equations-of-motion-with-alchemical-transformations-24d44dd9b0a517d5"><header class="admonition-header">Integrating equations of motion with alchemical transformations<a class="admonition-anchor" href="#Integrating-equations-of-motion-with-alchemical-transformations-24d44dd9b0a517d5" title="Permalink"></a></header><div class="admonition-body"><p>When running simulations in which some of the atoms are achemicaly decoupled from the system some care must be taken with the integrator of choice. Decoupling atoms can make them incredibly fast, which will appear as a huge contribution to the kinetic energy tensor. Therefore any temperature  calculation that depends on said tensor will be prone to errors, since one could argue that a fully decoupled set of atoms should not contribute to the overall temperature of the system.</p><p>Therefore, and since Molly currently does not yet support temperature groups, the recommended way of integrating this kind of system is by using a <a href="../api/#Molly.Langevin"><code>Langevin</code></a> scheme, instead of a <a href="../api/#Molly.VelocityVerlet"><code>VelocityVerlet</code></a> integrator accompanied by a <a href="../api/#Molly.VelocityRescaleThermostat"><code>VelocityRescaleThermostat</code></a> temperature coupling scheme; specially when using large integration timesteps.</p><p>Note that the <a href="../api/#Molly.Langevin"><code>Langevin</code></a> integrator is known to produce incorrect kinetics, but since free energies are an ensemble average property this issue can be safely ignored.</p></div></div><p>After minimization and equilibration, the script replaces the standard Lennard-Jones interaction with a <a href="https://doi.org/10.1021/ct300220p">Gapsys soft-core variant</a>, replaces the Coulomb interaction with a scaled alchemical interaction, rebuilds PME and Ewald exclusion data with the same scheduler, and creates one <a href="../api/#Molly.ThermoState"><code>ThermoState</code></a> per <span>$\lambda$</span> value.</p><pre><code class="language-julia hljs">    p_inters = sys_base.pairwise_inters
+    idx_lj = findfirst(x -&gt; x isa LennardJones, p_inters)
+    idx_coul = findfirst(x -&gt; x isa Union{Coulomb, CoulombEwald}, p_inters)
 
-    minim = SteepestDescentMinimizer(step_size=FT(0.01)u&quot;nm&quot;, max_steps=1000)
-    simulate!(sys_base, minim)
-
-    p_inters = sys_base.pairwise_inters
-    idx_lj   = findfirst(x -&gt; x isa LennardJones, p_inters)
-    idx_coul = findfirst(x -&gt; x isa Coulomb, p_inters)
-    
-    lj_0 = p_inters[idx_lj]
-    cl_0 = p_inters[idx_coul]
+    lj_sc = alchemical_lj_softcore(p_inters[idx_lj])
+    cl_scaled = alchemical_coulomb_scaled(p_inters[idx_coul])
 
     atoms_cpu = Molly.from_device(sys_base.atoms)
     thermo_states = ThermoState[]
 
-    lj_sc = LennardJonesSoftCoreBeutler(
-        cutoff = lj_0.cutoff,
-        α = FT(0.85),
-        use_neighbors = lj_0.use_neighbors,
-        scheduler = DefaultLambdaScheduler()
-    )
-
-    coul_sc = CoulombSoftCoreBeutler(
-        cutoff = cl_0.cutoff,
-        α = FT(0.3), 
-        coulomb_const = cl_0.coulomb_const,
-        use_neighbors = cl_0.use_neighbors,
-        scheduler = DefaultLambdaScheduler()
-    )
-
     for λ in lambda_schedule
         acopy = Atom[]
-        for (i, a) in enumerate(atoms_cpu)
+        for a in atoms_cpu
             if a.index ∈ solute_indices
-                # Only update the global lambda; the scheduler handles the component logic
-                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, FT(λ), i ∈ solute_indices ? Molly.InsertRole : Molly.CoreRole))
+                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge,
+                                  a.σ, a.ϵ, FT(λ), Molly.InsertRole))
             else
-                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, a.λ, a.alch_role))
+                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge,
+                                  a.σ, a.ϵ, FT(a.λ), a.alch_role))
             end
         end
 
+        atoms_dev = Molly.to_device([acopy...], AT)
+        general_inters = rebuild_alchemical_general_inters(
+            sys_base,
+            atoms_dev,
+            lj_sc,
+            cl_scaled,
+        )
+        specific_inter_lists = rebuild_alchemical_specific_inter_lists(sys_base, cl_scaled)
+
         sys_w = System(
             deepcopy(sys_base);
-            atoms = Molly.to_device([acopy...], AT),
-            pairwise_inters = (coul_sc, lj_sc)
+            atoms = atoms_dev,
+            pairwise_inters = (lj_sc, cl_scaled),
+            general_inters = general_inters,
+            specific_inter_lists = specific_inter_lists,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
-    end
+    end</code></pre><p>For an alchemical ladder, no PMF deconvolution is needed: the state coordinate already is the alchemical coordinate. The script disables the well-tempered target adaptation with <code>well_tempered_factor = Inf</code>, so AWH samples a fixed uniform target over the ladder.</p><pre><code class="language-julia hljs">    awh_state = AWHState(thermo_states; reuse_neighbors = true)
+    awh_sim = AWHSimulation(
+        awh_state;
+        num_md_steps = N_MD_STEPS,
+        update_freq = 1,
+        well_tempered_factor = FT(Inf),
+        log_freq = 10,
+    )
 
-    awh_state = AWHState(thermo_states; reuse_neighbors=true)
-    awh_sim   = AWHSimulation(awh_state; num_md_steps = 10, log_freq=100, well_tempered_factor=Inf)
-    
-    return awh_sim, sys_base
-end</code></pre><h3 id="Execution-and-Standard-State-Corrections"><a class="docs-heading-anchor" href="#Execution-and-Standard-State-Corrections">Execution and Standard State Corrections</a><a id="Execution-and-Standard-State-Corrections-1"></a><a class="docs-heading-anchor-permalink" href="#Execution-and-Standard-State-Corrections" title="Permalink"></a></h3><p>The calculation integrates both the solvated and vacuum legs. Since <span>$\lambda$</span> is tracked dynamically by AWH as a discrete index, the output vector <span>$f(\lambda)$</span> yields the alchemical free energy profile directly, requiring no PMF deconvolution.</p><p>An analytical standard state volume correction, <span>$k_{B}​T \ln(V_{gas}​/V_{std}​)$</span>, shifts the initial and final states from the finite simulation volume to their macroscopic standard definitions (an ideal gas at 1 bar to a 1 Molar solution).</p><pre><code class="language-julia hljs"># alchemical_awh.jl
+    return awh_state, awh_sim
+end</code></pre><p>The two legs are run independently. The free energy profile is stored in <code>awh_state.f</code>, gauge-fixed so the first state is zero.</p><pre><code class="language-julia hljs">solute_idx = 1:9
 
-md_time  = FT(10)u&quot;ns&quot;
-md_steps = Int(floor(uconvert(unit(Δt), md_time) / Δt))
-solute_idx = 1:9
+awh_state_solv, awh_sim_solv = setup_alchemical_awh(
+    joinpath(data_dir, &quot;ethanol_solv.pdb&quot;),
+    solute_idx;
+    is_vacuum = false,
+    rng = MersenneTwister(RNG_SEED),
+)
 
-# 1. Solvated Leg
-println(&quot;Running Solvated AWH Leg...&quot;)
-awh_solv, sys_solv = setup_alchemical_awh(&quot;ethanol_solv.pdb&quot;, solute_idx; is_vacuum=false)
-simulate!(awh_solv, md_steps)
-dF_solv = awh_solv.state.f[end] - awh_solv.state.f[1]
+awh_state_vac, awh_sim_vac = setup_alchemical_awh(
+    joinpath(data_dir, &quot;ethanol_vac.pdb&quot;),
+    solute_idx;
+    is_vacuum = true,
+    rng = MersenneTwister(RNG_SEED + 1),
+)
 
-# 2. Vacuum Leg
-println(&quot;Running Vacuum AWH Leg...&quot;)
-awh_vac, sys_vac = setup_alchemical_awh(&quot;ethanol.pdb&quot;, solute_idx; is_vacuum=true)
-simulate!(awh_vac, md_steps)
-dF_vac = awh_vac.state.f[end] - awh_vac.state.f[1]
+awh_steps = Int(floor(AWH_TIME / Δt))
 
-# --- Thermodynamic Cycle ---
+simulate!(awh_sim_solv, awh_steps)
+simulate!(awh_sim_vac, awh_steps)
+
+f_solv = awh_state_solv.f
+f_vac  = awh_state_vac.f</code></pre><p>The script reverses both the <span>$\lambda$</span> schedule and the free energy vectors before plotting, so <span>$\lambda=0$</span> is on the left and <span>$\lambda=1$</span> is on the right.</p><pre><code class="language-julia hljs">lambda_plot = reverse(lambda_schedule)
+f_solv_plot = reverse(f_solv)
+f_vac_plot = reverse(f_vac)
+
+fig_fe = Figure(size = (720, 720))
+
+ax_fe = Axis(fig_fe[1,1],
+    title = L&quot;\textbf{Alchemical Free Energy}&quot;,
+    xlabel = L&quot;\textbf{\lambda}&quot;,
+    ylabel = L&quot;\textbf{F / k_{B}T}&quot;,
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+)
+
+lines!(
+    ax_fe,
+    lambda_plot, f_solv_plot;
+    color = :royalblue,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;Solvated&quot;,
+)
+
+lines!(
+    ax_fe,
+    lambda_plot, f_vac_plot;
+    color = :firebrick,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;Vacuum&quot;,
+)
+
+axislegend(position = :rt, labelsize = 24)
+display(fig_fe)
+
+save(&quot;awh_solvation_profile.png&quot;, fig_fe)</code></pre><p><img src="../images/awh_solvation_profile.png" alt="AWH alchemical free energy profile"/></p><p>It also plots the maximum free energy update at each logged AWH iteration.</p><pre><code class="language-julia hljs">deltaF_solv = awh_state_solv.stats.max_delta_f_history
+deltaF_vac  = awh_state_vac.stats.max_delta_f_history
+
+iter_solv = awh_state_solv.stats.step_indices
+iter_vac = awh_state_vac.stats.step_indices
+
+fig_df = Figure(size = (720, 720))
+
+ax_df = Axis(
+    fig_df[1,1],
+    title = L&quot;\textbf{Max. $\Delta$F}&quot;,
+    xlabel = L&quot;\textbf{Iteration}&quot;,
+    ylabel = L&quot;\textbf{log_{10}($\Delta$F)}&quot;,
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+)
+
+lines!(
+    ax_df,
+    iter_solv, log10.(deltaF_solv);
+    color = :royalblue,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;Solvated&quot;,
+)
+
+lines!(
+    ax_df,
+    iter_vac, log10.(deltaF_vac);
+    color = :firebrick,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;Vacuum&quot;,
+)
+
+axislegend(position = :rt, labelsize = 24)
+display(fig_df)
+
+save(&quot;awh_solvation_convergence.png&quot;, fig_df)</code></pre><p><img src="../images/awh_solvation_convergence.png" alt="AWH alchemical convergence"/></p><p>The visited-state histogram is plotted for the solvent and vacuum legs on the same axes. The state index follows the original <span>$\lambda$</span> schedule, from <span>$\lambda=1$</span> at state 1 to <span>$\lambda=0$</span> at state 20.</p><pre><code class="language-julia hljs">state_bins = 0.5:1:(N_LAMBDA_STATES + 0.5)
+save_state_histogram(
+    [awh_visited_states(awh_state_solv), awh_visited_states(awh_state_vac)],
+    [&quot;Solvated&quot;, &quot;Vacuum&quot;],
+    state_bins,
+    &quot;awh_solvation_states.png&quot;,
+)</code></pre><p><img src="../images/awh_solvation_states.png" alt="AWH alchemical visited states"/></p><p>Finally, the endpoint differences and the standard-state correction are combined and printed in both <span>$k_B T$</span> and kJ mol^-1.</p><pre><code class="language-julia hljs">dG_solv = f_solv[end] - f_solv[1]
+dG_vac  = f_vac[end]  - f_vac[1]
+
 V_gas = ustrip(u&quot;nm^3&quot;, Unitful.k * T0 / P0)
 V_std = ustrip(u&quot;nm^3&quot;, 1.0u&quot;L&quot; / (1.0u&quot;mol&quot; * Unitful.Na))
 dG_std_corr = log(V_gas / V_std)
 
-dG_solv = dF_vac - dF_solv + dG_std_corr
-beta = awh_solv.state.λ_β[1]
+dG = dG_vac - dG_solv + dG_std_corr
+beta = awh_state_solv.state_space.betas[1]
 
 println(&quot;=========================================&quot;)
-println(&quot;Annihilation in solvent (kBT):   &quot;, dF_solv)
-println(&quot;Annihilation in vacuum (kBT):    &quot;, dF_vac)
+println(&quot;Annihilation in solvent (kBT):   &quot;, dG_solv)
+println(&quot;Annihilation in vacuum (kBT):    &quot;, dG_vac)
 println(&quot;Standard State Correction (kBT): &quot;, dG_std_corr)
-println(&quot;Solvation Free Energy (kBT):     &quot;, dG_solv)
+println(&quot;Solvation Free Energy (kBT):     &quot;, dG)
 println(&quot;=========================================&quot;)
 
 println(&quot;=========================================&quot;)
-println(&quot;Annihilation in solvent (kJ mol^-1):   &quot;, dF_solv / beta)
-println(&quot;Annihilation in vacuum (kJ mol^-1):    &quot;, dF_vac / beta)
+println(&quot;Annihilation in solvent (kJ mol^-1):   &quot;, dG_solv / beta)
+println(&quot;Annihilation in vacuum (kJ mol^-1):    &quot;, dG_vac / beta)
 println(&quot;Standard State Correction (kJ mol^-1): &quot;, dG_std_corr / beta)
-println(&quot;Solvation Free Energy (kJ mol^-1):     &quot;, dG_solv / beta)
-println(&quot;=========================================&quot;)</code></pre><pre><code class="nohighlight hljs">=========================================
-Annihilation in solvent (kBT):   23.419682
-Annihilation in vacuum (kBT):    5.6188874
+println(&quot;Solvation Free Energy (kJ mol^-1):     &quot;, dG / beta)
+println(&quot;=========================================&quot;)</code></pre><p>A representative run prints:</p><pre><code class="language-text hljs">=========================================
+Annihilation in solvent (kBT):   8.642657
+Annihilation in vacuum (kBT):    3.4234502
 Standard State Correction (kBT): 3.249398594044294
-Solvation Free Energy (kBT):     -14.551396007396136
+Solvation Free Energy (kBT):     -1.9698082159532646
 =========================================
 
 =========================================
-Annihilation in solvent (kJ mol^-1):   60.363842
-Annihilation in vacuum (kJ mol^-1):    14.48259
+Annihilation in solvent (kJ mol^-1):   22.276306
+Annihilation in vacuum (kJ mol^-1):    8.823886
 Standard State Correction (kJ mol^-1): 8.375271054356045
-Solvation Free Energy (kJ mol^-1):     -37.505982185316256
-=========================================</code></pre><h3 id="Analyzing-Convergence-and-Free-Energy-Profiles"><a class="docs-heading-anchor" href="#Analyzing-Convergence-and-Free-Energy-Profiles">Analyzing Convergence and Free Energy Profiles</a><a id="Analyzing-Convergence-and-Free-Energy-Profiles-1"></a><a class="docs-heading-anchor-permalink" href="#Analyzing-Convergence-and-Free-Energy-Profiles" title="Permalink"></a></h3><p>The <code>max_delta_f_history</code> array records the maximum bias update applied over time. Plotted logarithmically, this variable confirms convergence once it transitions into a linear <span>$1/t$</span> decay regime.</p><pre><code class="language-julia hljs"># alchemical_awh.jl
+Solvation Free Energy (kJ mol^-1):     -5.077148049471093
+=========================================</code></pre><h2 id="Free-energies-with-TSS"><a class="docs-heading-anchor" href="#Free-energies-with-TSS">Free energies with TSS</a><a id="Free-energies-with-TSS-1"></a><a class="docs-heading-anchor-permalink" href="#Free-energies-with-TSS" title="Permalink"></a></h2><h3 id="Method-overview-2"><a class="docs-heading-anchor" href="#Method-overview-2">Method overview</a><a class="docs-heading-anchor-permalink" href="#Method-overview-2" title="Permalink"></a></h3><p><a href="https://doi.org/10.1080/10618600.2023.2291108">Times Square Sampling</a> (TSS) is an adaptive simulated-tempering method over a discrete set of thermodynamic states, referred to as &quot;rungs&quot; in the paper describing the technique. As in AWH, the active state determines which Hamiltonian propagates the molecular coordinates. However, TSS differs in how the free energies are estimated and how the global state space is managed, putting special attention on the efficient assignement of computational resources to the ladder of thermodynamics states.</p><p>Molly&#39;s TSS implementation uses local estimators on graph windows; a graph defines the topology of the thermodynamic states, for example a one-dimensional alchemical ladder or a two-dimensional torsion grid. Each window contains a subset of neighboring states. During a TSS cycle, each replica samples states inside one active window, updates the local estimator for that window, and then the window-level estimates are combined into a reported global free energy profile.</p><p>The reference distribution over rungs is called <span>$\gamma$</span>. It sets the asymptotic density used by the free energy estimator. With <code>adaptive_gamma = :covdet</code>, Molly updates <span>$\gamma$</span> from a covariance-determinant estimate of local thermodynamic state density. This gives a larger target density to regions where the local state geometry indicates that more resolution is useful.</p><p>TSS can also forget early history. With <code>TSSHistoryForgetting(alpha, n_epochs)</code>, estimator history before approximately <span>$\alpha \cdot t$</span> is dropped at TSS iteration <span>$t$</span>. Retained history is grouped into logarithmically spaced epochs. Those epochs are used both to remove old data and to compute jackknife uncertainty estimates without storing every individual sample.</p><h3 id="Alanine-dipeptide-PMF-2"><a class="docs-heading-anchor" href="#Alanine-dipeptide-PMF-2">Alanine dipeptide PMF</a><a class="docs-heading-anchor-permalink" href="#Alanine-dipeptide-PMF-2" title="Permalink"></a></h3><p>The full script is <code>scripts/tss_dipeptide.jl</code>:</p><pre><code class="language-bash hljs">julia scripts/tss_dipeptide.jl</code></pre><p>This example estimates the unbiased alanine dipeptide <span>$\phi/\psi$</span> free energy surface with TSS. It starts from the alanine dipeptide structure, minimizes and equilibrates the system at 310 K and 1 bar, and then builds a 20 by 20 thermodynamic-state grid over the central <span>$\phi$</span> and <span>$\psi$</span> torsions.</p><pre><code class="language-julia hljs">PHI_INDS = [5, 7, 9, 15]
+PSI_INDS = [7, 9, 15, 17]
+PHI_CV = CalcTorsion(PHI_INDS, :pbc, true)
+PSI_CV = CalcTorsion(PSI_INDS, :pbc, true)
 
-function smooth_array(arr; smooth_n = 4)
-    N = length(arr)
-    return [mean(arr[max(i - smooth_n, 1):min(i + smooth_n, N)]) for i in eachindex(arr)]
+N_PHI_STATES = 20
+N_PSI_STATES = 20
+
+PHI_MIN = FT(-π)
+PHI_MAX = FT(π)
+PSI_MIN = FT(-π)
+PSI_MAX = FT(π)
+
+FLAT_BOTTOM_WIDTH = ustrip(u&quot;rad&quot;, FT(360 / N_PHI_STATES)u&quot;°&quot;)
+BIAS_K = FT(100.0)u&quot;kJ * mol^-1&quot;
+
+PHI_TARGETS = collect(range(PHI_MIN, PHI_MAX; length=N_PHI_STATES + 1))[1:end-1]
+PSI_TARGETS = collect(range(PSI_MIN, PSI_MAX; length=N_PSI_STATES + 1))[1:end-1]</code></pre><p>The TSS thermodynamic states are biased copies of the equilibrated system, one for each <span>$\phi/\psi$</span> umbrella center.</p><pre><code class="language-julia hljs">thermo_states = ThermoState[]
+
+for psi in PSI_TARGETS
+    for phi in PHI_TARGETS
+        bias_phi = PeriodicFlatBottomBias(BIAS_K, FLAT_BOTTOM_WIDTH, phi)
+        bias_psi = PeriodicFlatBottomBias(BIAS_K, FLAT_BOTTOM_WIDTH, psi)
+
+        sys_bias = System(
+            deepcopy(sys);
+            general_inters = (
+                sys.general_inters...,
+                BiasPotential(PHI_CV, bias_phi),
+                BiasPotential(PSI_CV, bias_psi),
+            ),
+        )
+
+        push!(thermo_states, ThermoState(sys_bias, vverlet))
+    end
+end</code></pre><p>The graph is a periodic two-dimensional grid. The window size is one fifth of the grid along each dimension, so each local estimator covers a <span>$4 \times 4$</span> patch of neighboring umbrella centers. The TSS state enables history forgetting and covariance-determinant adaptive <span>$\gamma$</span>.</p><pre><code class="language-julia hljs">PHI_WIN_SIZE = Int(N_PHI_STATES // 5)
+PSI_WIN_SIZE = Int(N_PSI_STATES // 5)
+
+tss_graph = Molly.tss_grid_graph(
+    (N_PHI_STATES, N_PSI_STATES);
+    window_size = (PHI_WIN_SIZE, PSI_WIN_SIZE),
+    periodic = (true, true),
+)
+
+tss_state = TSSState(
+    thermo_states;
+    graph = tss_graph,
+    first_state = 1,
+    first_window = 1,
+    history_forgetting = TSSHistoryForgetting(alpha = FT(0.19), n_epochs = 16),
+    adaptive_gamma = :covdet,
+)</code></pre><p>The TSS simulation uses four replicas. For more than one replica, the script constructs explicit <a href="../api/#Molly.ActiveThermoState"><code>ActiveThermoState</code></a> objects with different starting states, assigns velocities, and passes them to <a href="../api/#Molly.TSSSimulation"><code>TSSSimulation</code></a>.</p><pre><code class="language-julia hljs">N_MD_STEPS = 50
+SELF_ADJ_STEPS = 5
+N_REPLICAS = 4
+
+tss_dipeptide_replica_rngs(seed::Integer) =
+    [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]
+
+TSS_TIME = FT(25)u&quot;ns&quot;
+TOTAL_STEPS = Int(floor(TSS_TIME / DT))
+N_CYCLES = Int(floor(TOTAL_STEPS / (SELF_ADJ_STEPS * N_MD_STEPS)))
+
+replica_first_states = [
+    state_index(
+        mod1(1 + (replica_i - 1) * max(1, N_PHI_STATES ÷ N_REPLICAS), N_PHI_STATES),
+        mod1(1 + (replica_i - 1) * max(1, N_PSI_STATES ÷ N_REPLICAS), N_PSI_STATES),
+    )
+    for replica_i in 1:N_REPLICAS
+]
+initial_replica_rngs = tss_dipeptide_replica_rngs(RNG_SEED + 10)
+replica_active_states = if N_REPLICAS == 1
+    nothing
+else
+    states = [ActiveThermoState(tss_state.state_space, first_state)
+              for first_state in replica_first_states]
+    for (active_state, replica_rng) in zip(states, initial_replica_rngs)
+        random_velocities!(active_state.active_sys, TEMP; rng = replica_rng)
+    end
+    states
 end
 
-steps_solv = length(awh_solv.state.stats.max_delta_f_history)
-time_solv  = [ustrip(md_time) * n/steps_solv for n in 1:steps_solv]
-steps_vac = length(awh_vac.state.stats.max_delta_f_history)
-time_vac  = [ustrip(md_time) * n/steps_vac for n in 1:steps_vac]
+pmf_deconv = PMFDeconvolution(
+    tss_state;
+    grid = ((PHI_MIN, PSI_MIN), (PHI_MAX, PSI_MAX), (N_PHI_STATES, N_PSI_STATES)),
+)
 
-fig_conv = Figure(size = (720, 720))
-ax_conv = Axis(fig_conv[1,1], title = L&quot;\textbf{Max. ΔF Convergence}&quot;, xlabel = L&quot;\textbf{Time / ns}&quot;, ylabel = L&quot;\textbf{log}$_{10}$\textbf{(ΔF)}&quot;)
+tss_sim = TSSSimulation(
+    tss_state;
+    n_md_steps = N_MD_STEPS,
+    n_cycles = N_CYCLES,
+    self_adjustment_steps = SELF_ADJ_STEPS,
+    n_replicas = N_REPLICAS,
+    replica_active_states = replica_active_states,
+    pmf = pmf_deconv,
+    log_freq = 10,
+)
 
-lines!(ax_conv, time_solv, log10.(smooth_array(awh_solv.state.stats.max_delta_f_history)), color = :royalblue, label = &quot;Solvent Leg&quot;)
-lines!(ax_conv, time_vac, log10.(smooth_array(awh_vac.state.stats.max_delta_f_history)), color = :firebrick, label = &quot;Vacuum Leg&quot;)
-
-axislegend(ax_conv, position = :rt)
-save(&quot;awh_alchemical_convergence.png&quot;, fig_conv)</code></pre><p><img src="../images/awh_alchemical_convergence.png" alt="Convergence of Alchemical AWH"/></p><p>The resulting alchemical free energy profiles can be extracted and plotted directly from the converged <code>f</code> vectors.</p><pre><code class="language-julia hljs"># alchemical_awh.jl
-
-λ_indices = collect(eachindex(awh_solv.state.λ_β))
+simulate!(
+    tss_sim;
+    rng = rng,
+    replica_rngs = tss_dipeptide_replica_rngs(RNG_SEED + 20),
+    replica_parallel = :auto,
+)</code></pre><p><code>TSSSimulation</code> likewise stores one absolute MD step shared by its physical replicas. Each MD block receives that step, and repeated calls resume from <code>tss_sim.current_step</code>. Use the <code>initial_step</code> constructor keyword when restoring an existing simulation state.</p><p>For PMF deconvolution, the script uses the automatic coupling path. This is safe for the same reason as in the AWH example above: each thermodynamic state contains exactly the two umbrella <a href="../api/#Molly.BiasPotential"><code>BiasPotential</code></a>s that define the PMF dimensions, and they appear in the same order as the grid axes. The <a href="../api/#Molly.PMFDeconvolution"><code>PMFDeconvolution</code></a> object must be created before the run and passed to <a href="../api/#Molly.TSSSimulation"><code>TSSSimulation</code></a>.</p><pre><code class="language-julia hljs">pmf_result = pmf(pmf_deconv)
+pmf_kbt = pmf_result.F
+pmf_plot = map(x -&gt; isfinite(x) ? x : FT(NaN), pmf_kbt)
 
 fig_fe = Figure(size = (720, 720))
-ax_fe = Axis(fig_fe[1,1], title = L&quot;\textbf{Alchemical Free Energy}&quot;, xlabel = L&quot;\textbf{Alchemical State (\lambda)}&quot;, ylabel = L&quot;\textbf{F / k_{B}T}&quot;)
 
-lines!(ax_fe, λ_indices, awh_solv.state.f, color = :royalblue, linewidth = 5.0, label = &quot;Solvent Leg&quot;)
-lines!(ax_fe, λ_indices, awh_vac.state.f, color = :firebrick, linewidth = 5.0, label = &quot;Vacuum Leg&quot;)
+ax_fe = Axis(fig_fe[1,1],
+    title = L&quot;\textbf{Free Energy}&quot;,
+    xlabel = L&quot;\textbf{\phi / rad}&quot;,
+    ylabel = L&quot;\textbf{\psi / rad}&quot;,
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+)
 
-text!(ax_fe, 1.0, awh_solv.state.f[1], text = L&quot;\text{Fully coupled}&quot;, align = (:left, :bottom), offset = (5, 5), fontsize = 18)
-text!(ax_fe, 11.0, awh_solv.state.f[11], text = L&quot;\text{Charges switched off}&quot;, align = (:left, :top), offset = (5, -15), fontsize = 18)
-text!(ax_fe, 21.0, awh_solv.state.f[21], text = L&quot;\text{VdW switched off}&quot;, align = (:right, :top), offset = (-5, -25), fontsize = 18)
+hm_fe = heatmap!(
+    ax_fe,
+    PHI_TARGETS,
+    PSI_TARGETS,
+    pmf_plot;
+    colormap = :inferno,
+    nan_color = (:gray, 0.35),
+)
 
-axislegend(ax_fe, position = :lt)
-save(&quot;awh_alchemical_profile.png&quot;, fig_fe)</code></pre><p><img src="../images/awh_alchemical_profile.png" alt="Free Energy Alchemical Profile"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 6 July 2026 08:12">Monday 6 July 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+Colorbar(
+    fig_fe[1, 2],
+    hm_fe;
+    label = L&quot;\textbf{F / k_{B}T}&quot;,
+    labelsize = 20,
+    ticklabelsize = 16,
+)
+
+ax_fe.aspect = DataAspect()
+display(fig_fe)
+save(&quot;tss_dipeptide_pmf.png&quot;, fig_fe)</code></pre><p><img src="../images/tss_dipeptide_pmf.png" alt="TSS deconvolved alanine dipeptide PMF"/></p><p>The convergence plot uses <code>tss_state.stats.max_abs_delta_f</code>, the maximum absolute reported free energy update at each logged TSS iteration.</p><pre><code class="language-julia hljs">deltaF = tss_state.stats.max_abs_delta_f
+iter = tss_state.stats.iterations
+
+fig_df = Figure(size = (720, 720))
+
+ax_df = Axis(
+    fig_df[1,1],
+    title = L&quot;\textbf{Max. $\Delta$F}&quot;,
+    xlabel = L&quot;\textbf{Iteration}&quot;,
+    ylabel = L&quot;\textbf{log_{10}($\Delta$F)}&quot;,
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+)
+
+lines!(
+    ax_df,
+    iter,
+    log10.(deltaF);
+    color = :royalblue,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;PHI/PSI TSS&quot;,
+)
+
+axislegend(position = :rt, labelsize = 24)
+display(fig_df)
+save(&quot;tss_dipeptide_convergence.png&quot;, fig_df)</code></pre><p><img src="../images/tss_dipeptide_convergence.png" alt="TSS dipeptide convergence"/></p><p>The script also saves a normalized histogram of the visited TSS thermodynamic states. With multiple replicas, the histogram combines the state histories from all replicas.</p><pre><code class="language-julia hljs">state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
+save_state_histogram(
+    tss_visited_states(tss_state),
+    state_bins,
+    &quot;tss_dipeptide_states.png&quot;,
+)</code></pre><p><img src="../images/tss_dipeptide_states.png" alt="TSS dipeptide visited states"/></p><h3 id="Ethanol-solvation-free-energy-2"><a class="docs-heading-anchor" href="#Ethanol-solvation-free-energy-2">Ethanol solvation free energy</a><a class="docs-heading-anchor-permalink" href="#Ethanol-solvation-free-energy-2" title="Permalink"></a></h3><p>The full script is <code>scripts/tss_solvation.jl</code>:</p><pre><code class="language-bash hljs">julia scripts/tss_solvation.jl</code></pre><p>This example computes the standard solvation free energy of ethanol with a two-leg annihilation cycle. The setup is completely equivalent to the AWH case described above: ethanol is annihilated in solution and in vacuum, and the two endpoint differences are combined with the analytical gas-to-solution standard-state correction. The alchemical ladder has 20 states from <span>$\lambda=1$</span> to <span>$\lambda=0$</span>, and the solute atoms use <code>InsertRole</code> with <code>DefaultLambdaScheduler</code>.</p><pre><code class="language-julia hljs">FT = Float32
+AT = CuArray
+
+Δt = FT(4)u&quot;fs&quot;
+T0 = FT(310)u&quot;K&quot;
+P0 = FT(1)u&quot;bar&quot;
+
+N_LAMBDA_STATES = 20
+TSS_WINDOW_SIZE = 4
+N_MD_STEPS = 50
+SELF_ADJUSTMENT_STEPS = 5
+N_REPLICAS = 4
+TSS_TIME = FT(15)u&quot;ns&quot;
+SOLVENT_EQUIL_TIME = FT(500)u&quot;ps&quot;
+VACUUM_EQUIL_TIME = FT(100)u&quot;ps&quot;
+
+lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
+
+tss_solvation_replica_rngs(seed::Integer) =
+    [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]</code></pre><p>The setup function constructs the solvated and vacuum legs. The non-bonded treatment is chosen before alchemical states are generated: PME for the solvated leg, and short-range Coulomb with an infinite cutoff for the vacuum leg.</p><pre><code class="language-julia hljs">function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
+    nonbonded_method = is_vacuum ? :none : :pme
+    boundary = is_vacuum ? CubicBoundary(FT(Inf) * u&quot;nm&quot;) : nothing
+    dist_cutoff = is_vacuum ? FT(Inf) * u&quot;nm&quot; : FT(1) * u&quot;nm&quot;
+    dist_buffer = is_vacuum ? FT(0) * u&quot;nm&quot; : FT(0.2) * u&quot;nm&quot;
+    neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
+
+    sys_base = System(
+        pdb_file,
+        ff;
+        array_type = AT,
+        boundary = boundary,
+        dist_cutoff = dist_cutoff,
+        dist_buffer = dist_buffer,
+        neighbor_finder_type = neighbor_finder_type,
+        nonbonded_method = nonbonded_method,
+        constraints = :hbonds,
+        constraint_algorithm = LINCS,
+        rigid_water = true,
+        hydrogen_mass = 3,
+    )
+
+    integrator = if is_vacuum
+        Langevin(; dt = Δt, temperature = T0, friction = FT(1)u&quot;ps^-1&quot;,
+                 coupling = nothing, remove_CM_motion = 100)
+    else
+        barostat = CRescaleBarostat(P0, FT(4)u&quot;ps&quot;; n_steps = 200)
+        Langevin(dt = Δt, temperature = T0, friction = FT(1)u&quot;ps^-1&quot;,
+                 coupling = (barostat,), remove_CM_motion = 100)
+    end</code></pre><p>After minimization and equilibration, the script finds the standard Lennard-Jones and Coulomb interactions, replaces Lennard-Jones with a Gapsys soft-core interaction, uses a scaled Coulomb interaction, rebuilds PME and Ewald exclusion data with the same scheduler, and creates one <a href="../api/#Molly.ThermoState"><code>ThermoState</code></a> for each <span>$\lambda$</span> value.</p><pre><code class="language-julia hljs">    p_inters = sys_base.pairwise_inters
+    idx_lj = findfirst(x -&gt; x isa LennardJones, p_inters)
+    idx_coul = findfirst(x -&gt; x isa Union{Coulomb, CoulombEwald}, p_inters)
+
+    lj_sc = alchemical_lj_softcore(p_inters[idx_lj])
+    cl_scaled = alchemical_coulomb_scaled(p_inters[idx_coul])
+
+    atoms_cpu = Molly.from_device(sys_base.atoms)
+    thermo_states = ThermoState[]
+
+    for λ in lambda_schedule
+        acopy = Atom[]
+        for a in atoms_cpu
+            if a.index ∈ solute_indices
+                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge,
+                                  a.σ, a.ϵ, FT(λ), Molly.InsertRole))
+            else
+                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge,
+                                  a.σ, a.ϵ, FT(a.λ), a.alch_role))
+            end
+        end
+
+        atoms_dev = Molly.to_device([acopy...], AT)
+        general_inters = rebuild_alchemical_general_inters(
+            sys_base,
+            atoms_dev,
+            lj_sc,
+            cl_scaled,
+        )
+        specific_inter_lists = rebuild_alchemical_specific_inter_lists(sys_base, cl_scaled)
+
+        sys_w = System(
+            deepcopy(sys_base);
+            atoms = atoms_dev,
+            pairwise_inters = (lj_sc, cl_scaled),
+            general_inters = general_inters,
+            specific_inter_lists = specific_inter_lists,
+        )
+
+        push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
+    end</code></pre><p>The TSS graph is a one-dimensional non-periodic ladder. With 20 states and <code>TSS_WINDOW_SIZE = 4</code>, each local estimator spans four neighboring <span>$\lambda$</span> states. The simulation uses four replicas and 15000 TSS cycles for a 15 ns run with this timestep and cycle definition.</p><pre><code class="language-julia hljs">    tss_graph = Molly.tss_grid_graph(
+        (length(lambda_schedule),);
+        window_size = (TSS_WINDOW_SIZE,),
+        periodic = (false,),
+    )
+
+    tss_state = TSSState(
+        thermo_states;
+        graph = tss_graph,
+        history_forgetting = TSSHistoryForgetting(alpha = FT(0.2), n_epochs = 16),
+        adaptive_gamma = :covdet,
+    )
+
+    total_steps = Int(floor(TSS_TIME / Δt))
+    n_cycles = Int(floor(total_steps / (SELF_ADJUSTMENT_STEPS * N_MD_STEPS)))
+    first_states = N_REPLICAS == 1 ? [1] : round.(Int, range(1, length(lambda_schedule); length = N_REPLICAS))
+
+    tss_sim = TSSSimulation(
+        tss_state;
+        n_md_steps = N_MD_STEPS,
+        n_cycles = n_cycles,
+        self_adjustment_steps = SELF_ADJUSTMENT_STEPS,
+        n_replicas = N_REPLICAS,
+        first_states = first_states,
+        log_freq = 10,
+    )
+
+    return tss_state, tss_sim
+end</code></pre><p>The two legs are constructed and run independently. <code>replica_parallel = :auto</code> lets Molly choose a safe replica execution mode for the available hardware and array type.</p><pre><code class="language-julia hljs">tss_state_solv, tss_sim_solv = setup_alchemical_tss(
+    joinpath(data_dir, &quot;ethanol_solv.pdb&quot;),
+    solute_idx;
+    is_vacuum = false,
+    rng = MersenneTwister(RNG_SEED),
+)
+
+tss_state_vac, tss_sim_vac = setup_alchemical_tss(
+    joinpath(data_dir, &quot;ethanol_vac.pdb&quot;),
+    solute_idx;
+    is_vacuum = true,
+    rng = MersenneTwister(RNG_SEED + 1),
+)
+
+simulate!(
+    tss_sim_solv;
+    rng = MersenneTwister(RNG_SEED + 2),
+    replica_rngs = tss_solvation_replica_rngs(RNG_SEED + 20),
+    replica_parallel = :auto,
+)
+
+simulate!(
+    tss_sim_vac;
+    rng = MersenneTwister(RNG_SEED + 3),
+    replica_rngs = tss_solvation_replica_rngs(RNG_SEED + 40),
+    replica_parallel = :auto,
+)</code></pre><p>After the run, <code>tss_free_energy_uncertainties</code> returns the reported free energies and jackknife standard errors over the retained epochs. The free energies are dimensionless, in units of <span>$k_B T$</span>.</p><pre><code class="language-julia hljs">jk_solv = tss_free_energy_uncertainties(tss_state_solv)
+jk_vac  = tss_free_energy_uncertainties(tss_state_vac)
+
+f_solv = jk_solv.free_energies
+f_vac  = jk_vac.free_energies
+
+se_solv = jk_solv.standard_errors
+se_vac  = jk_vac.standard_errors
+
+dG_solv = f_solv[end] - f_solv[1]
+dG_vac  = f_vac[end]  - f_vac[1]
+
+V_gas = ustrip(u&quot;nm^3&quot;, Unitful.k * T0 / P0)
+V_std = ustrip(u&quot;nm^3&quot;, 1.0u&quot;L&quot; / (1.0u&quot;mol&quot; * Unitful.Na))
+dG_std_corr = log(V_gas / V_std)
+
+dG = dG_vac - dG_solv + dG_std_corr
+dG_se = hypot(se_solv[end], se_vac[end])</code></pre><p>The profile plot shows the solvent and vacuum annihilation free energies. The script reverses the <span>$\lambda$</span> schedule and the estimated profiles before plotting, then draws bands spanning three jackknife standard errors.</p><pre><code class="language-julia hljs">lambda_plot = reverse(lambda_schedule)
+f_solv_plot = reverse(f_solv)
+f_vac_plot = reverse(f_vac)
+se_solv_plot = reverse(se_solv)
+se_vac_plot = reverse(se_vac)
+
+fig_fe = Figure(size = (720, 720))
+
+ax_fe = Axis(fig_fe[1,1],
+    title = L&quot;\textbf{Alchemical Free Energy}&quot;,
+    xlabel = L&quot;\textbf{\lambda}&quot;,
+    ylabel = L&quot;\textbf{F / k_{B}T}&quot;,
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+)
+
+lines!(
+    ax_fe,
+    lambda_plot, f_solv_plot;
+    color = :royalblue,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;Solvated&quot;,
+)
+
+band!(
+    ax_fe,
+    lambda_plot,
+    f_solv_plot - 3 .* se_solv_plot,
+    f_solv_plot + 3 .* se_solv_plot;
+    color = :royalblue,
+    alpha = 0.45,
+)
+
+lines!(
+    ax_fe,
+    lambda_plot, f_vac_plot;
+    color = :firebrick,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;Vacuum&quot;,
+)
+
+band!(
+    ax_fe,
+    lambda_plot,
+    f_vac_plot - 3 .* se_vac_plot,
+    f_vac_plot + 3 .* se_vac_plot;
+    color = :firebrick,
+    alpha = 0.45,
+)
+
+axislegend(position = :rt, labelsize = 24)
+display(fig_fe)
+
+save(&quot;tss_solvation_profile.png&quot;, fig_fe)</code></pre><p><img src="../images/tss_solvation_profile.png" alt="TSS alchemical free energy profile"/></p><p>The convergence plot shows <code>log10</code> of the maximum absolute reported TSS free energy update for each logged iteration.</p><pre><code class="language-julia hljs">deltaF_solv = tss_state_solv.stats.max_abs_delta_f
+deltaF_vac  = tss_state_vac.stats.max_abs_delta_f
+
+iter_solv = tss_state_solv.stats.iterations
+iter_vac = tss_state_vac.stats.iterations
+
+fig_df = Figure(size = (720, 720))
+
+ax_df = Axis(
+    fig_df[1,1],
+    title = L&quot;\textbf{Max. $\Delta$F}&quot;,
+    xlabel = L&quot;\textbf{Iteration}&quot;,
+    ylabel = L&quot;\textbf{log_{10}($\Delta$F)}&quot;,
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+)
+
+lines!(
+    ax_df,
+    iter_solv, log10.(deltaF_solv);
+    color = :royalblue,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;Solvated&quot;,
+)
+
+lines!(
+    ax_df,
+    iter_vac, log10.(deltaF_vac);
+    color = :firebrick,
+    linewidth = 3,
+    linecap = :round,
+    joinstyle = :round,
+    label = &quot;Vacuum&quot;,
+)
+
+axislegend(position = :rt, labelsize = 24)
+ylims!(ax_df, -5, 0.5)
+display(fig_df)
+
+save(&quot;tss_solvation_convergence.png&quot;, fig_df)</code></pre><p><img src="../images/tss_solvation_convergence.png" alt="TSS alchemical convergence"/></p><p>The visited-state histogram combines the state histories from all replicas in each leg, then plots the solvent and vacuum distributions together.</p><pre><code class="language-julia hljs">state_bins = 0.5:1:(N_LAMBDA_STATES + 0.5)
+save_state_histogram(
+    [tss_visited_states(tss_state_solv), tss_visited_states(tss_state_vac)],
+    [&quot;Solvated&quot;, &quot;Vacuum&quot;],
+    state_bins,
+    &quot;tss_solvation_states.png&quot;,
+)</code></pre><p><img src="../images/tss_solvation_states.png" alt="TSS alchemical visited states"/></p><p>The final output reports the two annihilation free energies, the analytical standard-state correction, the solvation free energy, and the jackknife uncertainty estimate. Because the standard-state correction is analytical, the reported uncertainty only contains the TSS jackknife contribution from the two simulated legs.</p><pre><code class="language-julia hljs">beta = tss_state_solv.state_space.betas[1]
+
+println(&quot;=========================================&quot;)
+println(&quot;Annihilation in solvent (kBT):   &quot;, dG_solv)
+println(&quot;Annihilation in vacuum (kBT):    &quot;, dG_vac)
+println(&quot;Standard State Correction (kBT): &quot;, dG_std_corr)
+println(&quot;Solvation Free Energy (kBT):     &quot;, dG)
+println(&quot;Jackknife SE, no std-state uncertainty (kBT): &quot;, dG_se)
+println(&quot;=========================================&quot;)
+
+println(&quot;=========================================&quot;)
+println(&quot;Annihilation in solvent (kJ mol^-1):   &quot;, dG_solv / beta)
+println(&quot;Annihilation in vacuum (kJ mol^-1):    &quot;, dG_vac / beta)
+println(&quot;Standard State Correction (kJ mol^-1): &quot;, dG_std_corr / beta)
+println(&quot;Solvation Free Energy (kJ mol^-1):     &quot;, dG / beta)
+println(&quot;Jackknife SE, no std-state uncertainty (kJ mol^-1): &quot;, dG_se / beta)
+println(&quot;=========================================&quot;)</code></pre><p>A representative run prints:</p><pre><code class="language-text hljs">=========================================
+Annihilation in solvent (kBT):   8.696862
+Annihilation in vacuum (kBT):    3.4346604
+Standard State Correction (kBT): 3.249398594044294
+Solvation Free Energy (kBT):     -2.012803191996966
+Jackknife SE, no std-state uncertainty (kBT): 0.072397865
+=========================================
+
+=========================================
+Annihilation in solvent (kJ mol^-1):   22.416018
+Annihilation in vacuum (kJ mol^-1):    8.85278
+Standard State Correction (kJ mol^-1): 8.375271054356045
+Solvation Free Energy (kJ mol^-1):     -5.187966888071426
+Jackknife SE, no std-state uncertainty (kJ mol^-1): 0.1866043
+=========================================</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 6 July 2026 13:29">Monday 6 July 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
