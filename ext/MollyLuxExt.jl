@@ -71,13 +71,8 @@ end
 # AEV computation — zero-allocation in-place implementation
 # ============================================================================
 
-# Smooth cosine cutoff f_C — [ANI-1] Eq. (2):
-#   f_C(R_ij) = 0.5·cos(π·R_ij/R_c) + 0.5   for R_ij ≤ R_c,   else 0
-# Decays the contribution of a neighbour smoothly to zero at the cutoff R_c.
-Molly.cosine_cutoff(r::T, r_c::T) where T =
-    r < r_c ? T(0.5) * (one(T) + cos(T(π) * r / r_c)) : zero(T)
-
-@inline cosine_cutoff(r, r_c) = Molly.cosine_cutoff(r, r_c)
+# The smooth cosine cutoff f_C ([ANI-1] Eq. 2) is defined once in core Molly as
+# `cosine_cutoff` (imported via `using Molly`) and shared by the CPU and GPU AEV paths.
 
 # Replace the d-th component of SVector sv with value x.
 @inline function _setcomp(sv::SVector{D,T}, d::Int, x::T) where {D,T}
@@ -260,13 +255,16 @@ function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
         # Build neighbor list into this chunk's private scratch (no push!, no heap alloc).
         n_nbrs = 0
         if !use_nl
-            # No neighbour finder: O(N) all-pairs scan.
+            # No neighbour finder: O(N) all-pairs scan. Use vector() so the displacement
+            # respects the minimum-image convention under periodic boundaries; store the
+            # imaged neighbour position so _radial_aev!/_angular_aev! (which subtract
+            # coord_i) see the correct separation.
             for j in 1:n_atoms
                 j == atom_i && continue
-                dr = coords[j] - coords[atom_i]
+                dr = vector(coords[atom_i], coords[j], boundary)
                 norm(dr) < r_c_max || continue
                 n_nbrs += 1
-                sc.nbr_coords[n_nbrs]  = coords[j]
+                sc.nbr_coords[n_nbrs]  = coords[atom_i] + dr
                 sc.nbr_species[n_nbrs] = Int(species_indices[j])
             end
         else
@@ -418,12 +416,13 @@ function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
     for atom_i in 1:n_atoms
         n_nbrs = 0
         if !use_nl
+            # All-pairs scan with minimum-image displacement (see _aev_chunk!).
             for j in 1:n_atoms
                 j == atom_i && continue
-                dr = coords[j] - coords[atom_i]
+                dr = vector(coords[atom_i], coords[j], boundary)
                 norm(dr) < r_c_max || continue
                 n_nbrs += 1
-                nbr_coords[n_nbrs]  = coords[j]
+                nbr_coords[n_nbrs]  = coords[atom_i] + dr
                 nbr_species[n_nbrs] = Int(species_indices[j])
             end
         else

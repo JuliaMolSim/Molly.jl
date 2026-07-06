@@ -1,7 +1,13 @@
 # KernelAbstractions-based AEV computation for ANI ML potentials.
 # Loaded when KernelAbstractions, Lux, and HDF5 are all in the environment.
-# Provides GPU-portable @kernel implementations of _radial_aev! and _angular_aev!
-# so the same code runs on CPU (via KA CPU backend) and CUDA/ROCm/Metal GPUs.
+# Provides GPU-portable @kernel implementations of the radial/angular AEV so the same
+# code runs on CPU (via KA CPU backend) and CUDA/ROCm/Metal GPUs.
+#
+# BOUNDARY NOTE: these kernels compute neighbour displacements as raw coordinate
+# differences (coords[j] - coords[i]); they do NOT apply the minimum-image convention.
+# They are intended for non-periodic (gas-phase) systems, or where neighbour coordinates
+# are already imaged. For periodic systems use the CPU path (potential_energy /
+# compute_aevs), which applies vector(...) with the boundary.
 
 module MollyKALuxExt
 
@@ -11,14 +17,9 @@ using KernelAbstractions
 using Lux, HDF5
 using StaticArrays, LinearAlgebra
 
-# ============================================================================
-# Scalar helpers (device-compatible — no closures, no allocation)
-# ============================================================================
-
-# Smooth cosine cutoff f_C — [ANI-1, Smith et al. Chem. Sci. 2017] Eq. (2).
-@inline function _ka_cosine_cutoff(r::T, r_c::T) where T
-    r < r_c ? T(0.5) * (one(T) + cos(T(π) * r / r_c)) : zero(T)
-end
+# The smooth cosine cutoff f_C ([ANI-1] Eq. 2) is `Molly.cosine_cutoff` (defined in core
+# Molly, no Lux/HDF5 dependency) — a plain inlineable scalar function, device-compatible,
+# reused by these kernels via `using Molly`.
 
 # ============================================================================
 # KernelAbstractions AEV kernel — one thread per central atom
@@ -64,7 +65,7 @@ end
         dr = coords[j] - ci
         r  = norm(dr)
         r >= r_c_R && continue
-        fc   = _ka_cosine_cutoff(r, r_c_R)
+        fc   = cosine_cutoff(r, r_c_R)
         sj   = species[j]
         base = (sj - 1) * n_eta_R * n_shf_R
         for ki in 1:n_eta_R
@@ -81,7 +82,7 @@ end
         drj = coords[j] - ci
         rj  = norm(drj)
         rj >= r_c_A && continue
-        fcj = _ka_cosine_cutoff(rj, r_c_A)
+        fcj = cosine_cutoff(rj, r_c_A)
         sj  = species[j]
 
         for k in (j+1):n_atoms
@@ -89,7 +90,7 @@ end
             drk = coords[k] - ci
             rk  = norm(drk)
             rk >= r_c_A && continue
-            fck = _ka_cosine_cutoff(rk, r_c_A)
+            fck = cosine_cutoff(rk, r_c_A)
             sk  = species[k]
 
             s1, s2 = sj <= sk ? (sj, sk) : (sk, sj)
@@ -161,7 +162,7 @@ end
         dr = coords[j] - ci
         r  = norm(dr)
         r >= r_c_R && continue
-        fc   = _ka_cosine_cutoff(r, r_c_R)
+        fc   = cosine_cutoff(r, r_c_R)
         sj   = species[j]
         base = (sj - 1) * n_eta_R * n_shf_R
         for ki in 1:n_eta_R
@@ -178,7 +179,7 @@ end
         drj = coords[j] - ci
         rj  = norm(drj)
         rj >= r_c_A && continue
-        fcj = _ka_cosine_cutoff(rj, r_c_A)
+        fcj = cosine_cutoff(rj, r_c_A)
         sj  = species[j]
 
         for kk in (jj+1):hi
@@ -186,7 +187,7 @@ end
             drk = coords[k] - ci
             rk  = norm(drk)
             rk >= r_c_A && continue
-            fck = _ka_cosine_cutoff(rk, r_c_A)
+            fck = cosine_cutoff(rk, r_c_A)
             sk  = species[k]
 
             s1, s2 = sj <= sk ? (sj, sk) : (sk, sj)
@@ -276,7 +277,7 @@ end
             dr = coords[j] - ci
             r  = norm(dr)
             if r < r_c_R
-                fc   = _ka_cosine_cutoff(r, r_c_R)
+                fc   = cosine_cutoff(r, r_c_R)
                 sj   = species[j]
                 base = (sj - 1) * n_eta_R * n_shf_R
                 for ki in 1:n_eta_R
@@ -296,14 +297,14 @@ end
             drj = coords[j] - ci
             rj  = norm(drj)
             if rj < r_c_A
-                fcj = _ka_cosine_cutoff(rj, r_c_A)
+                fcj = cosine_cutoff(rj, r_c_A)
                 sj  = species[j]
                 for kk in (jj + 1):hi
                     k   = nbr_idx[kk]
                     drk = coords[k] - ci
                     rk  = norm(drk)
                     if rk < r_c_A
-                        fck = _ka_cosine_cutoff(rk, r_c_A)
+                        fck = cosine_cutoff(rk, r_c_A)
                         sk  = species[k]
                         s1, s2 = sj <= sk ? (sj, sk) : (sk, sj)
                         pair_idx = (s1-1)*n_species - (s1-1)*(s1-2)÷2 + (s2-s1+1)

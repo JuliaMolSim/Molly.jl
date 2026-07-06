@@ -1879,8 +1879,13 @@ function compute_aevs end
     cosine_cutoff(r, r_c)
 
 Smooth cutoff function: `0.5*(1+cos(π*r/r_c))` for `r < r_c`, else `0`.
+Used by the ANI AEV (radial/angular symmetry functions). Defined in core Molly — a
+plain scalar function with no Lux/HDF5 dependency — so both the CPU and GPU (KA) AEV
+paths share one definition.
 """
-function cosine_cutoff end
+@inline function cosine_cutoff(r::T, r_c::T) where T
+    r < r_c ? T(0.5) * (one(T) + cos(T(π) * r / r_c)) : zero(T)
+end
 
 """
     celu01(x)
