@@ -12,23 +12,14 @@ using Molly
 using Molly: from_device, to_device
 import AtomsCalculators
 using Enzyme, Lux, HDF5
-using ChainRulesCore
 using StaticArrays, Unitful, LinearAlgebra
 
 # ============================================================================
-# AD rules for Molly.celu01
+# Enzyme AD rule for Molly.celu01
 # ============================================================================
-
-# ChainRule (for any ChainRules-compatible AD system):
-# d/dx celu(x; α=0.1) = 1 if x ≥ 0, else exp(x/0.1)
-function ChainRulesCore.rrule(::typeof(Molly.celu01), x::T) where T
-    y = Molly.celu01(x)
-    function celu01_pullback(ȳ)
-        dx = x >= zero(x) ? one(x) : exp(x / T(0.1))
-        return NoTangent(), ȳ * dx
-    end
-    return y, celu01_pullback
-end
+# A custom rule avoids Enzyme duplicating the `exp` LLVM symbol across the many Dense
+# layers (the bug that motivated the single-pass Enzyme path). d/dx celu(x; α=0.1) = 1
+# for x ≥ 0, else exp(x/0.1).
 
 # Enzyme augmented_primal: run forward pass and store input as tape for reverse.
 # Conditional primal return avoids AugmentedRuleReturnError when primal not requested.
