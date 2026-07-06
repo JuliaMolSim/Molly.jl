@@ -649,9 +649,13 @@ end
 
 @kernel function random_velocities_kernel!(vels::AbstractVector{SVector{D, C}},@Const(masses::AbstractVector{M}), units, @Const(virtual_sites))  where {D,C,M}
     i = @index(Global, Linear)
-    if i<= length(vels) && !virtual_sites[i]
-        @inbounds scale = C(sqrt(units/masses[i]))
-        @inbounds vels[i] = SVector{D, C}(ntuple(i -> randn() * scale, Val(D)))
+    if i<= length(vels) 
+        @inbounds if !virtual_sites[i]
+            @inbounds scale = C(sqrt(units/masses[i]))
+            @inbounds vels[i] = SVector{D, C}(ntuple(i -> randn()* scale, Val(D)))
+        else
+            @inbounds velocities[i] = SVector{D, C}(ntuple(i -> 0.0, Val(D)))
+        end
     end
 end
 

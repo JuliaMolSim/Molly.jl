@@ -582,9 +582,9 @@
                 mean_gpu = mean(mean(vel))
                 std_gpu = mean( std(vel))
 
-                @test abs(mean_cpu) < 0.005u"nm * ps^-1"
-                @test abs(mean_gpu) < 0.005u"nm * ps^-1"
-
+                @test -0.005u"nm * ps^-1" <= mean_cpu <= 0.005u"nm * ps^-1"
+                @test -0.005u"nm * ps^-1" <= mean_gpu <= 0.005u"nm * ps^-1"
+                
                 @test 0.99 < abs(std_cpu/std_gpu) < 1.01
             end
 
