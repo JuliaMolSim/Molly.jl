@@ -95,7 +95,7 @@ end
 
 function run_bench()
     if !isfile(H5_PATH)
-        @warn "ani2x.h5 not found — run scripts/torchani_reference.py first"
+        @warn "ani2x.h5 not found — run test/torchani_reference.py first"
         return
     end
     println("="^72)

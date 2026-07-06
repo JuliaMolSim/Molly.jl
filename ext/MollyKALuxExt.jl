@@ -542,7 +542,7 @@ function Molly.compute_ani_energy_ka(
 
     sp_host     = Array(species)
     idx_to_elem = Dict(v => k for (k, v) in pot.species_map)
-    Ha_to_eV    = 27.211386
+    Ha_to_eV    = Molly.HARTREE_TO_EV
 
     # Per-species atom-index groups; uploaded to the compute device for the AEV gather.
     groups  = [Int32.(findall(==(s), sp_host)) for s in 1:n_species]

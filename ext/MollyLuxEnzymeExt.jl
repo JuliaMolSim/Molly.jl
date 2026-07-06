@@ -120,8 +120,6 @@ function AtomsCalculators.forces!(fs,
                                    sys::System{D, AT, T},
                                    inter::ANIPotential;
                                    kwargs...) where {D, AT, T}
-    Ha_to_eV = T(27.211396132)
-
     coords_f32  = _lue_f32coords(sys.coords)
     species_idx = [inter.species_map[ad.element] for ad in sys.atoms_data]
     nbrs        = get(kwargs, :neighbors, nothing)
@@ -179,15 +177,8 @@ function AtomsCalculators.forces!(fs,
     dcoords = dcoords_sum ./ n_ens
 
     for atom_i in 1:n_atoms
-        fi = SVector{D, T}(-dcoords[:, atom_i]) * Ha_to_eV
-        f_unit = if sys.force_units == NoUnits
-            fi
-        elseif dimension(sys.force_units) == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-            uconvert.(sys.force_units, fi .* (Unitful.Na * u"eV/Å"))
-        else
-            uconvert.(sys.force_units, fi .* u"eV/Å")
-        end
-        fs[atom_i] += to_device(f_unit, AT)
+        fi = SVector{D, T}(-dcoords[:, atom_i]) * T(Molly.HARTREE_TO_EV)
+        fs[atom_i] += Molly.ani_force_to_units(fi, sys.force_units, AT)
     end
     return fs
 end

@@ -149,5 +149,5 @@ if GROUP in ("All", "NotGradients") && isfile(ani_h5)
     include("ml_potentials.jl")
 elseif GROUP in ("All", "NotGradients")
     @warn "Skipping ML potential tests — ani2x.h5 not found. " *
-          "Run scripts/torchani_reference.py to generate it."
+          "Run test/torchani_reference.py to generate it."
 end

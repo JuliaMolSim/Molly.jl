@@ -13,9 +13,9 @@ Outputs written to data/ani_reference/:
 
 Usage:
   pip install torchani==2.2.4 ase h5py
-  python scripts/torchani_reference.py
-  python scripts/torchani_reference.py --skip-protein    # skip slow protein run
-  python scripts/torchani_reference.py --skip-weights    # skip HDF5 export
+  python test/torchani_reference.py
+  python test/torchani_reference.py --skip-protein    # skip slow protein run
+  python test/torchani_reference.py --skip-weights    # skip HDF5 export
 """
 
 import os, json, argparse, warnings

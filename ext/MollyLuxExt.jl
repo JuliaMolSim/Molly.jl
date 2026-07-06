@@ -207,7 +207,7 @@ end
 # Return (lazily allocated) AEVBuffers for this potential + system size.
 # Reallocates if n_atoms or T changes (e.g. first call on a new system size).
 function _get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) where {D, T}
-    buf = inter._buf[]
+    buf = inter.buffers[]
     if buf === nothing || buf.n_atoms < n_atoms || eltype(buf.aevs) != T
         p = inter.aev_params
         n_species = length(inter.species_map)
@@ -237,7 +237,7 @@ function _get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) wh
             Int32[],                       # nbr_idx grows to 2·total_pairs on first neighbour call
             Vector{Int32}(undef, n_atoms),
         )
-        inter._buf[] = buf
+        inter.buffers[] = buf
     end
     return buf::AEVBuffers{D, T}
 end
@@ -365,6 +365,11 @@ function _compute_aevs_buf!(buf::AEVBuffers{D,T},
     else
         base = n_atoms ÷ nchunks
         rem  = n_atoms % nchunks
+        # `:static` fixes the chunk→iteration mapping so chunk c always uses scratch[c]
+        # (its own buffer, no sharing). It is not about load balancing — the chunks are
+        # equal-sized and nchunks == length(buf.scratch) == nthreads, so one chunk runs per
+        # thread. (Plain @threads would also be correct since the scratch is per-chunk, but
+        # :static avoids the dynamic-scheduler overhead for this fixed, uniform partition.)
         Threads.@threads :static for c in 1:nchunks
             lo = (c - 1) * base + min(c - 1, rem) + 1
             hi = c * base + min(c, rem)
@@ -474,6 +479,9 @@ function _build_element_model(elem_grp::HDF5.Group)
 
     model = Lux.Chain(lux_layers...)
     ps    = NamedTuple(ps_pairs)
+    # We only need the model's state `st`; the randomly-initialised parameters from
+    # Lux.setup are discarded and replaced by `ps` loaded from HDF5, so the RNG seed is
+    # irrelevant to the result — a fixed Xoshiro(0) just makes construction deterministic.
     _, st = Lux.setup(Xoshiro(0), model)
     return model, ps, st
 end
@@ -595,7 +603,7 @@ end
 # Total energy E = Σ_i E_i ([ANI-1] Eq. 1) from each member, then the ensemble
 # average E = (1/M) Σ_m E^(m) ([ANI-1x] Smith et al., J. Chem. Phys. 2018, 148,
 # 241733 — ANI-2x uses M = 8 networks).
-# Uses the lazy AEVBuffers cache in inter._buf for zero allocations after warmup.
+# Uses the lazy AEVBuffers cache in inter.buffers for zero allocations after warmup.
 function _ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
                          species_idx::AbstractVector{Int},
                          boundary, inter::ANIPotential,
@@ -638,17 +646,7 @@ function AtomsCalculators.potential_energy(sys::System{D, AT, T},
     species_idx  = @view buf.species_idx[1:n_atoms]
 
     E_ha = _ani_raw_energy(coords_strip, species_idx, sys.boundary, inter, nbrs)
-
-    Ha_to_eV = T(27.211396132)
-    E_eV = E_ha * Ha_to_eV
-
-    if sys.energy_units == NoUnits
-        return E_eV
-    elseif dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        return uconvert(sys.energy_units, E_eV * Unitful.Na * u"eV")
-    else
-        return uconvert(sys.energy_units, E_eV * u"eV")
-    end
+    return Molly.ani_energy_to_units(E_ha * T(Molly.HARTREE_TO_EV), sys.energy_units)
 end
 
 # Forces via finite differences (fallback when Enzyme is not loaded).
@@ -657,7 +655,6 @@ function AtomsCalculators.forces!(fs,
                                   inter::ANIPotential;
                                   kwargs...) where {D, AT, T}
     h = T(1e-4)   # Å — must be T (Float64) for numerical precision
-    Ha_to_eV = T(27.211396132)
 
     coords_strip = strip_coords(sys.coords)
     species_idx  = [inter.species_map[ad.element] for ad in sys.atoms_data]
@@ -672,17 +669,9 @@ function AtomsCalculators.forces!(fs,
             cm[atom_i] = _setcomp(cm[atom_i], dim, cm[atom_i][dim] - h)
             Ep = _ani_raw_energy(cp, species_idx, sys.boundary, inter, nbrs)
             Em = _ani_raw_energy(cm, species_idx, sys.boundary, inter, nbrs)
-            fi = _setcomp(fi, dim, T(-(Ep - Em) / (2h) * Ha_to_eV))
+            fi = _setcomp(fi, dim, T(-(Ep - Em) / (2h) * Molly.HARTREE_TO_EV))
         end
-
-        f_unit = if sys.force_units == NoUnits
-            fi
-        elseif dimension(sys.force_units) == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-            uconvert.(sys.force_units, fi .* (Unitful.Na * u"eV/Å"))
-        else
-            uconvert.(sys.force_units, fi .* u"eV/Å")
-        end
-        fs[atom_i] += to_device(f_unit, AT)
+        fs[atom_i] += Molly.ani_force_to_units(fi, sys.force_units, AT)
     end
     return fs
 end
