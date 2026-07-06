@@ -1512,7 +1512,7 @@ AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x in atomkeys
 AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(typeof(sys))
 AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
 Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) =
-    hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("no field `$x`, allowed keys are $(keys(sys))")
+    hasfield(typeof(sys), x) ? getfield(sys, x) : throw(KeyError("no field `$x`, allowed keys are $(keys(sys))"))
 Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
 Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) =
     haskey(sys, x) ? getfield(sys, x) : default

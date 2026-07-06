@@ -551,7 +551,7 @@ function vector(c1, c2, boundary::TriclinicBoundary{3, T, <:Any, false}) where T
 end
 
 # Pad a vector to 3D to allow operations such as the cross product
-function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, boundary::RectangularBoundary{T}) where T
+function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, boundary::RectangularBoundary{2}) where T
     SVector{3, T}(
         vector_1D(c1[1], c2[1], boundary[1]),
         vector_1D(c1[2], c2[2], boundary[2]),
@@ -562,7 +562,7 @@ end
 vector_pad3D(c1::SVector{3}, c2::SVector{3}, boundary) = vector(c1, c2, boundary)
 
 # Trim a vector back to 2D if required
-trim3D(v::SVector{3, T}, boundary::RectangularBoundary{T}) where T = SVector{2, T}(v[1], v[2])
+trim3D(v::SVector{3, T}, boundary::RectangularBoundary{2}) where T = SVector{2, T}(v[1], v[2])
 trim3D(v::SVector{3}, boundary) = v
 
 """

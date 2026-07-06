@@ -168,11 +168,12 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
     # @inline needed to avoid Enzyme error
     check_strictness(strictness)
     init_step = check_init_step(init_step)
-    using_constraints = (length(sys.constraints) > 0)
-    if using_constraints && !isnothing(sim.constraint_bond_constant)
-        constraint_bonds = constraints_to_bonds(sys, sim.constraint_bond_constant)
-        if length(constraint_bonds) > 0
-            sis = (sys.specific_inter_lists..., constraint_bonds)
+    if length(sys.constraints) > 0
+        if isnothing(sim.constraint_bond_constant)
+            err_str = "System has constraints but constraint_bond_constant is nothing, " *
+                      "constraints will be ignored"
+            report_issue(err_str, strictness)
+            sis = sys.specific_inter_lists
         else
             constraint_bonds = constraints_to_bonds(sys, sim.constraint_bond_constant)
             if length(constraint_bonds) > 0
@@ -1164,8 +1165,17 @@ end
     end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     M_inv = inv.(masses(sys))
-    α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
-    σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
+    if !all(op -> op in ('A', 'B', 'O'), sim.splitting)
+        throw(ArgumentError("splitting must contain only A, B, and O steps"))
+    end
+    n_o_steps = count('O', sim.splitting)
+    if n_o_steps > 0
+        α_eff = exp.(-sim.friction * sim.dt .* M_inv / n_o_steps)
+        σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
+    else
+        α_eff = nothing
+        σ_eff = nothing
+    end
 
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -1400,7 +1410,7 @@ end
         report_issue(err_str, strictness)
     end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
-    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -1629,7 +1639,7 @@ end
                            strictness=default_strictness())
     check_strictness(strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
-    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
+    needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
