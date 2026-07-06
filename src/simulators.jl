@@ -645,6 +645,13 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
+    using_constraints = (length(sys.constraints) > 0)
+    if using_constraints
+        cons_coord_storage = zero(sys.coords)
+        cons_vel_storage = zero(sys.velocities)
+        vel_context = velocity_constraint_context(buffers, sys, init_step, sim.dt, false, sim)
+        apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
+    end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(needs_vir_init);
             n_threads=n_threads)
@@ -655,11 +662,6 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
     apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
                    current_forces=forces_t)
-    using_constraints = (length(sys.constraints) > 0)
-    if using_constraints
-        cons_coord_storage = zero(sys.coords)
-        cons_vel_storage = zero(sys.velocities)
-    end
     velocities_half = zero(sys.velocities)
     dt_div2 = sim.dt / 2
     λ_shift_dt = (sim.λ - 1//2) * sim.dt
@@ -838,10 +840,6 @@ end
                                                       needs_vir_step, sim)
             apply_position_constraints!(sys, cons_coord_storage; context=pos_context,
                                         n_threads=n_threads)
-        end
-
-        if using_constraints
-            apply_position_constraints!(sys, cons_coord_storage; n_threads=n_threads)
             sys.velocities .= (sys.coords .- cons_coord_storage) ./ sim.dt
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end

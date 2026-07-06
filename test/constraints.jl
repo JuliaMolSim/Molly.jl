@@ -1030,7 +1030,11 @@ end
             initial_virial = only(values(sys.loggers.virial))
             @test maximum(abs.(initial_virial)) > 1e-8
             @test sys.coords == coords_before
-            @test sys.velocities == velocities_before
+            if simulator isa DPDVelocityVerlet
+                @test check_velocity_constraints(sys)
+            else
+                @test sys.velocities == velocities_before
+            end
         end
 
         sys = simulator_constraint_system(
