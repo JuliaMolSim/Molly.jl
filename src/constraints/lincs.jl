@@ -38,7 +38,7 @@ end
 """
     LINCS(masses, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
           dist_constraints=nothing, angle_constraints=nothing, nrec=4, niter=1,
-          iter_vel_correction=true, gpu_block_size=128)
+          iter_vel_correction=false, gpu_block_size=128)
 
 Constrain bond distances during a simulation using the LINCS (LINear Constraint Solver)
 algorithm.
@@ -66,7 +66,7 @@ for the original LINCS paper.
     improve accuracy for coupled constraints at the cost of performance.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
-- `iter_vel_correction=true`: whether to use iterative velocity constraint solving.
+- `iter_vel_correction=false`: whether to use iterative velocity constraint solving.
     When `false`, velocity correction uses one LINCS projection as in
     GROMACS. When `true`, additional iterative velocity corrections are performed.
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
@@ -124,7 +124,7 @@ function LINCS(;masses,
                angle_constraints=nothing,
                nrec::Integer=4,
                niter::Integer=1,
-               iter_vel_correction::Bool=true,
+               iter_vel_correction::Bool=false,
                gpu_block_size::Integer=128)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero"))
