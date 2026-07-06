@@ -23,10 +23,10 @@
 # outputs that atom's energy E_i; ANI-2x averages 8 such networks (an ensemble).
 #
 #   cosine_cutoff   → [ANI-1] Eq. (2)  smooth radial cutoff f_C(R_ij)
-#   _radial_aev!    → [ANI-1] Eq. (3)  radial symmetry function  G^R
-#   _angular_aev!   → [ANI-1] Eq. (4)  angular symmetry function G^A
-#   _ani_energy_single / _ani_raw_energy → [ANI-1] Eq. (1) energy sum + ensemble average
-# The element NN architecture is in _build_element_model; per-atom self-energies are an
+#   radial_aev!    → [ANI-1] Eq. (3)  radial symmetry function  G^R
+#   angular_aev!   → [ANI-1] Eq. (4)  angular symmetry function G^A
+#   ani_energy_single / ani_raw_energy → [ANI-1] Eq. (1) energy sum + ensemble average
+# The element NN architecture is in build_element_model; per-atom self-energies are an
 # additive reference shift (Hartree). Forces are −∇E (Enzyme reverse-mode AD).
 
 module MollyLuxExt
@@ -48,7 +48,7 @@ function strip_coords(coords::AbstractVector{SVector{D,T}}) where {D,T}
 end
 
 # In-place coordinate stripping into a pre-allocated buffer — zero allocations.
-function _strip_coords_into!(out::AbstractVector{SVector{D,TF}},
+function strip_coords_into!(out::AbstractVector{SVector{D,TF}},
                               coords::AbstractVector{SVector{D,T}}) where {D, TF, T}
     if unit(first(coords)[1]) == NoUnits
         @inbounds for i in eachindex(coords)
@@ -75,7 +75,7 @@ end
 # `cosine_cutoff` (imported via `using Molly`) and shared by the CPU and GPU AEV paths.
 
 # Replace the d-th component of SVector sv with value x.
-@inline function _setcomp(sv::SVector{D,T}, d::Int, x::T) where {D,T}
+@inline function setcomp(sv::SVector{D,T}, d::Int, x::T) where {D,T}
     SVector{D,T}(ntuple(k -> k == d ? x : sv[k], Val(D)))
 end
 
@@ -86,7 +86,7 @@ end
 # The 0.25 prefactor follows the TorchANI reference implementation (not in the paper).
 # Writes into G (a pre-allocated view of the AEV matrix row);
 # nbr_coords/nbr_species hold the first n_nbr neighbours.
-function _radial_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
+function radial_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
                       nbr_coords, nbr_species, n_nbr::Int,
                       η_R, r_s_R, r_c_R::T, n_species::Int) where {D,T}
     fill!(G, zero(T))
@@ -117,7 +117,7 @@ end
 # θ is taken as acos(0.95·cosθ): the 0.95 is the TorchANI NaN guard against |cosθ|→1.
 # Phase 1 caches r/f_C/Δr per neighbour; phase 2 loops valid pairs. Writes into G;
 # uses pre-allocated scratch vectors rj_buf, fcj_buf, drj_buf, ok_buf (sized ≥ n_nbr).
-function _angular_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
+function angular_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
                        nbr_coords, nbr_species, n_nbr::Int,
                        η_A, r_s_A, θ_s, ζ::T, r_c_A::T, n_species::Int,
                        rj_buf, fcj_buf, drj_buf, ok_buf) where {D,T}
@@ -206,7 +206,7 @@ end
 
 # Return (lazily allocated) AEVBuffers for this potential + system size.
 # Reallocates if n_atoms or T changes (e.g. first call on a new system size).
-function _get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) where {D, T}
+function get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) where {D, T}
     buf = inter.buffers[]
     if buf === nothing || buf.n_atoms < n_atoms || eltype(buf.aevs) != T
         p = inter.aev_params
@@ -243,11 +243,11 @@ function _get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) wh
 end
 
 # Compute the AEV rows for one contiguous chunk of central atoms, using a single
-# private scratch set. Each row = radial block ([ANI-1] Eq. 3, via _radial_aev!)
-# followed by angular block ([ANI-1] Eq. 4, via _angular_aev!). Output rows
+# private scratch set. Each row = radial block ([ANI-1] Eq. 3, via radial_aev!)
+# followed by angular block ([ANI-1] Eq. 4, via angular_aev!). Output rows
 # buf.aevs[atom_i, :] are disjoint per atom, so distinct chunks never touch the
 # same memory — safe to run on separate threads.
-function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
+function aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
                      coords, species_indices, use_nl::Bool, boundary, p, n_species::Int,
                      r_c_R::T, r_c_A::T, r_c_max::T, split::Int, aev_len::Int) where {D,T}
     n_atoms = length(coords)
@@ -257,7 +257,7 @@ function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
         if !use_nl
             # No neighbour finder: O(N) all-pairs scan. Use vector() so the displacement
             # respects the minimum-image convention under periodic boundaries; store the
-            # imaged neighbour position so _radial_aev!/_angular_aev! (which subtract
+            # imaged neighbour position so radial_aev!/angular_aev! (which subtract
             # coord_i) see the correct separation.
             for j in 1:n_atoms
                 j == atom_i && continue
@@ -280,10 +280,10 @@ function _aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
         end
 
         # Write AEV components directly into pre-allocated output rows.
-        _radial_aev!(@view(buf.aevs[atom_i, 1:split]),
+        radial_aev!(@view(buf.aevs[atom_i, 1:split]),
                      coords[atom_i], sc.nbr_coords, sc.nbr_species, n_nbrs,
                      p.η_R, p.r_s_R, r_c_R, n_species)
-        _angular_aev!(@view(buf.aevs[atom_i, split+1:aev_len]),
+        angular_aev!(@view(buf.aevs[atom_i, split+1:aev_len]),
                       coords[atom_i], sc.nbr_coords, sc.nbr_species, n_nbrs,
                       p.η_A, p.r_s_A, p.θ_s, T(p.ζ), r_c_A, n_species,
                       sc.rj, sc.fcj, sc.drj, sc.ok)
@@ -295,7 +295,7 @@ end
 # pass. Each half-pair (i,j) contributes j to atom i and i to atom j (the NeighborList
 # stores each pair once). `cur` is an n_atoms scatter-cursor scratch. O(total_pairs).
 # All integer work — Enzyme-inactive, so it is safe inside the AD energy function.
-function _fill_csr!(off, cur, idx, neighbors, n_atoms::Int, npairs::Int)
+function fill_csr!(off, cur, idx, neighbors, n_atoms::Int, npairs::Int)
     @inbounds for a in 1:(n_atoms + 1)
         off[a] = zero(Int32)
     end
@@ -324,11 +324,11 @@ end
 
 # Buffered variant: build the CSR into the reusable AEVBuffers arrays (grows nbr_idx to
 # fit, zero-alloc after warmup). Replaces the previous O(N × total_pairs) per-atom rescan.
-function _neighbors_to_csr!(buf::AEVBuffers, neighbors, n_atoms::Int)
+function neighbors_to_csr!(buf::AEVBuffers, neighbors, n_atoms::Int)
     npairs = length(neighbors)
     total  = 2 * npairs
     length(buf.nbr_idx) < total && resize!(buf.nbr_idx, total)
-    _fill_csr!(buf.nbr_off, buf.nbr_cursor, buf.nbr_idx, neighbors, n_atoms, npairs)
+    fill_csr!(buf.nbr_off, buf.nbr_cursor, buf.nbr_idx, neighbors, n_atoms, npairs)
     return nothing
 end
 
@@ -338,7 +338,7 @@ end
 # chunk reads only its atoms' slices. Partitions the central-atom loop into
 # `length(buf.scratch)` contiguous chunks with Threads.@threads :static (chunk c → thread
 # c → scratch c). With one thread it is a plain serial loop (bit-identical, zero allocs).
-function _compute_aevs_buf!(buf::AEVBuffers{D,T},
+function compute_aevs_buf!(buf::AEVBuffers{D,T},
                              coords::AbstractVector{SVector{D,T}},
                              species_indices::AbstractVector{<:Integer},
                              neighbors,
@@ -356,11 +356,11 @@ function _compute_aevs_buf!(buf::AEVBuffers{D,T},
     split     = n_species * n_rad_per
 
     use_nl = !isnothing(neighbors)
-    use_nl && _neighbors_to_csr!(buf, neighbors, n_atoms)
+    use_nl && neighbors_to_csr!(buf, neighbors, n_atoms)
 
     nchunks = clamp(length(buf.scratch), 1, max(n_atoms, 1))
     if nchunks == 1
-        _aev_chunk!(buf, 1:n_atoms, buf.scratch[1], coords, species_indices,
+        aev_chunk!(buf, 1:n_atoms, buf.scratch[1], coords, species_indices,
                     use_nl, boundary, p, n_species, r_c_R, r_c_A, r_c_max, split, aev_len)
     else
         base = n_atoms ÷ nchunks
@@ -373,7 +373,7 @@ function _compute_aevs_buf!(buf::AEVBuffers{D,T},
         Threads.@threads :static for c in 1:nchunks
             lo = (c - 1) * base + min(c - 1, rem) + 1
             hi = c * base + min(c, rem)
-            lo <= hi && _aev_chunk!(buf, lo:hi, buf.scratch[c], coords, species_indices,
+            lo <= hi && aev_chunk!(buf, lo:hi, buf.scratch[c], coords, species_indices,
                                     use_nl, boundary, p, n_species, r_c_R, r_c_A, r_c_max,
                                     split, aev_len)
         end
@@ -414,14 +414,14 @@ function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
     csr_off = Vector{Int32}(undef, use_nl ? n_atoms + 1 : 0)
     csr_idx = Vector{Int32}(undef, use_nl ? 2 * length(neighbors) : 0)
     if use_nl
-        _fill_csr!(csr_off, Vector{Int32}(undef, n_atoms), csr_idx,
+        fill_csr!(csr_off, Vector{Int32}(undef, n_atoms), csr_idx,
                    neighbors, n_atoms, length(neighbors))
     end
 
     for atom_i in 1:n_atoms
         n_nbrs = 0
         if !use_nl
-            # All-pairs scan with minimum-image displacement (see _aev_chunk!).
+            # All-pairs scan with minimum-image displacement (see aev_chunk!).
             for j in 1:n_atoms
                 j == atom_i && continue
                 dr = vector(coords[atom_i], coords[j], boundary)
@@ -439,10 +439,10 @@ function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
                 nbr_species[n_nbrs] = Int(species_indices[nbr_idx])
             end
         end
-        _radial_aev!(@view(aevs[atom_i, 1:split]),
+        radial_aev!(@view(aevs[atom_i, 1:split]),
                      coords[atom_i], nbr_coords, nbr_species, n_nbrs,
                      p.η_R, p.r_s_R, r_c_R, n_species)
-        _angular_aev!(@view(aevs[atom_i, split+1:aev_len]),
+        angular_aev!(@view(aevs[atom_i, split+1:aev_len]),
                       coords[atom_i], nbr_coords, nbr_species, n_nbrs,
                       p.η_A, p.r_s_A, p.θ_s, T(p.ζ), r_c_A, n_species,
                       rj_buf, fcj_buf, drj_buf, ok_buf)
@@ -454,12 +454,12 @@ end
 # HDF5 weight loader
 # ============================================================================
 
-# Use the public Molly.celu01 so AD backends (Enzyme, Zygote) can register rules.
-const _celu01 = Molly.celu01
+# The element networks use the public `Molly.celu01` activation (imported via `using
+# Molly`) so AD backends (Enzyme) can register rules against a single shared function.
 
 # Build one element's Lux.Chain from the HDF5 group at /ensemble_idx/element/.
 # Dense layer indices 0, 2, 4, ... in the group; activations implicit between them.
-function _build_element_model(elem_grp::HDF5.Group)
+function build_element_model(elem_grp::HDF5.Group)
     layer_ids = sort(parse.(Int, keys(elem_grp)))   # [0, 2, 4, 6]
     n_dense   = length(layer_ids)
     lux_layers = []
@@ -472,7 +472,7 @@ function _build_element_model(elem_grp::HDF5.Group)
         W   = permutedims(Float32.(read(lg["weight"])))   # (out, in)
         b   = Float32.(read(lg["bias"]))                  # (out,)
         out_sz, in_sz = size(W)
-        act = k < n_dense ? _celu01 : identity
+        act = k < n_dense ? celu01 : identity
         push!(lux_layers, Lux.Dense(in_sz => out_sz, act))
         push!(ps_pairs, Symbol("layer_", k) => (weight = W, bias = b))
     end
@@ -487,7 +487,7 @@ function _build_element_model(elem_grp::HDF5.Group)
 end
 
 # Read an HDF5 dataset as a Vector{T}, handling scalar datasets gracefully.
-_h5vec(grp, name, T) = T.(vcat(read(grp[name])))
+h5vec(grp, name, T) = T.(vcat(read(grp[name])))
 
 function Molly.ANIPotential(path::String;
                            force_units  = u"eV/Å",
@@ -499,13 +499,13 @@ function Molly.ANIPotential(path::String;
         ag    = h5["aev_params"]
         r_c_R = T(only(read(ag["Rcr"])))
         r_c_A = T(only(read(ag["Rca"])))
-        η_R   = _h5vec(ag, "EtaR", T)
-        r_s_R = _h5vec(ag, "ShfR", T)
-        η_A   = _h5vec(ag, "EtaA", T)
+        η_R   = h5vec(ag, "EtaR", T)
+        r_s_R = h5vec(ag, "ShfR", T)
+        η_A   = h5vec(ag, "EtaA", T)
         # TorchANI naming is counterintuitive: ShfA holds *radial* shifts (Å) and
         # ShfZ holds *angular* shifts (rad) for the angular AEV Gaussian.
-        r_s_A = _h5vec(ag, "ShfA", T)   # ShfA = radial shifts for angular Gaussian (Å)
-        θ_s   = _h5vec(ag, "ShfZ", T)   # ShfZ = angular shifts θ_s (rad)
+        r_s_A = h5vec(ag, "ShfA", T)   # ShfA = radial shifts for angular Gaussian (Å)
+        θ_s   = h5vec(ag, "ShfZ", T)   # ShfZ = angular shifts θ_s (rad)
         ζ     = T(only(read(ag["Zeta"])))
         species_list = String.(read(ag["species"]))
 
@@ -513,7 +513,7 @@ function Molly.ANIPotential(path::String;
                       η_A=η_A, r_s_A=r_s_A, θ_s=θ_s, ζ=ζ, r_c_A=r_c_A)
 
         species_map   = Dict{String,Int}(s => i for (i, s) in enumerate(species_list))
-        self_energies = _h5vec(ag, "self_energies", T)   # (n_species,) Hartree
+        self_energies = h5vec(ag, "self_energies", T)   # (n_species,) Hartree
 
         # Determine which ensemble members to load.
         # All integer-keyed top-level groups are ensemble members.
@@ -528,7 +528,7 @@ function Molly.ANIPotential(path::String;
         first_grp = h5[string(first(ens_indices))]
         models_v  = []
         for elem in species_list
-            m, _, _ = _build_element_model(first_grp[elem])
+            m, _, _ = build_element_model(first_grp[elem])
             push!(models_v, m)
         end
         model_nt = NamedTuple{syms}(Tuple(models_v))
@@ -540,7 +540,7 @@ function Molly.ANIPotential(path::String;
             ens_grp = h5[string(idx)]
             ps_v = []; st_v = []
             for elem in species_list
-                _, ps, st = _build_element_model(ens_grp[elem])
+                _, ps, st = build_element_model(ens_grp[elem])
                 push!(ps_v, ps); push!(st_v, st)
             end
             push!(ps_list, NamedTuple{syms}(Tuple(ps_v)))
@@ -560,7 +560,7 @@ end
 
 # Bucket atoms by species into buf.group_atoms / buf.group_count (no heap alloc after warmup).
 # Independent of ensemble member, so computed once per energy call.
-function _bucket_species!(group_atoms, group_count, species_idx)
+function bucket_species!(group_atoms, group_count, species_idx)
     fill!(group_count, 0)
     @inbounds for atom_i in eachindex(species_idx)
         s = species_idx[atom_i]
@@ -575,7 +575,7 @@ end
 # mapped by its element network to E_i (plus an additive self-energy reference shift).
 # Batched by species: one Lux.apply per element (an (aev_len, n_s) matmul) instead of
 # one tiny matmul per atom. nn_batch is a reusable (aev_len, n_atoms) Float32 scratch.
-function _ani_energy_single(aevs, idx_to_elem, model, self_energies, ps, st,
+function ani_energy_single(aevs, idx_to_elem, model, self_energies, ps, st,
                             nn_batch::Matrix{Float32}, group_atoms, group_count, ::Type{T}) where T
     E = zero(T)
     n_species = length(group_count)
@@ -604,7 +604,7 @@ end
 # average E = (1/M) Σ_m E^(m) ([ANI-1x] Smith et al., J. Chem. Phys. 2018, 148,
 # 241733 — ANI-2x uses M = 8 networks).
 # Uses the lazy AEVBuffers cache in inter.buffers for zero allocations after warmup.
-function _ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
+function ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
                          species_idx::AbstractVector{Int},
                          boundary, inter::ANIPotential,
                          neighbors) where {D,T}
@@ -613,17 +613,17 @@ function _ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
     n_atoms   = length(coords_strip)
 
     # Use cached buffers (lazily allocated on first call, 0 allocs on subsequent).
-    buf  = _get_aev_buf(inter, n_atoms, Val(D), T)
-    aevs = _compute_aevs_buf!(buf, coords_strip, species_idx, neighbors, bdy_strip,
+    buf  = get_aev_buf(inter, n_atoms, Val(D), T)
+    aevs = compute_aevs_buf!(buf, coords_strip, species_idx, neighbors, bdy_strip,
                                inter.aev_params, n_species)
 
     # Bucket atoms by species once (shared across ensemble members).
-    _bucket_species!(buf.group_atoms, buf.group_count, species_idx)
+    bucket_species!(buf.group_atoms, buf.group_count, species_idx)
 
     n_ens = length(inter.ps_vec)
     E = zero(T)
     for i in 1:n_ens
-        E += _ani_energy_single(aevs, buf.idx_to_elem, inter.model,
+        E += ani_energy_single(aevs, buf.idx_to_elem, inter.model,
                                 inter.self_energies, inter.ps_vec[i], inter.st_vec[i],
                                 buf.nn_batch, buf.group_atoms, buf.group_count, T)
     end
@@ -637,15 +637,15 @@ function AtomsCalculators.potential_energy(sys::System{D, AT, T},
     nbrs    = get(kwargs, :neighbors, nothing)
 
     # Use cached buffers — all pre-allocated, zero heap allocations after first call.
-    buf = _get_aev_buf(inter, n_atoms, Val(D), T)
-    _strip_coords_into!(buf.coords_strip, sys.coords)
+    buf = get_aev_buf(inter, n_atoms, Val(D), T)
+    strip_coords_into!(buf.coords_strip, sys.coords)
     @inbounds for i in 1:n_atoms
         buf.species_idx[i] = inter.species_map[sys.atoms_data[i].element]
     end
     coords_strip = @view buf.coords_strip[1:n_atoms]
     species_idx  = @view buf.species_idx[1:n_atoms]
 
-    E_ha = _ani_raw_energy(coords_strip, species_idx, sys.boundary, inter, nbrs)
+    E_ha = ani_raw_energy(coords_strip, species_idx, sys.boundary, inter, nbrs)
     return Molly.ani_energy_to_units(E_ha * T(Molly.HARTREE_TO_EV), sys.energy_units)
 end
 
@@ -665,11 +665,11 @@ function AtomsCalculators.forces!(fs,
         for dim in 1:D
             cp = copy(coords_strip)
             cm = copy(coords_strip)
-            cp[atom_i] = _setcomp(cp[atom_i], dim, cp[atom_i][dim] + h)
-            cm[atom_i] = _setcomp(cm[atom_i], dim, cm[atom_i][dim] - h)
-            Ep = _ani_raw_energy(cp, species_idx, sys.boundary, inter, nbrs)
-            Em = _ani_raw_energy(cm, species_idx, sys.boundary, inter, nbrs)
-            fi = _setcomp(fi, dim, T(-(Ep - Em) / (2h) * Molly.HARTREE_TO_EV))
+            cp[atom_i] = setcomp(cp[atom_i], dim, cp[atom_i][dim] + h)
+            cm[atom_i] = setcomp(cm[atom_i], dim, cm[atom_i][dim] - h)
+            Ep = ani_raw_energy(cp, species_idx, sys.boundary, inter, nbrs)
+            Em = ani_raw_energy(cm, species_idx, sys.boundary, inter, nbrs)
+            fi = setcomp(fi, dim, T(-(Ep - Em) / (2h) * Molly.HARTREE_TO_EV))
         end
         fs[atom_i] += Molly.ani_force_to_units(fi, sys.force_units, AT)
     end

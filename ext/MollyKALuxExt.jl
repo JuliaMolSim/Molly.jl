@@ -26,11 +26,11 @@ using StaticArrays, LinearAlgebra
 # ============================================================================
 
 # Compute radial + angular AEV for atom `atom_i` from a dense distance table.
-# GPU-portable form of _radial_aev! / _angular_aev! — same equations:
+# GPU-portable form of radial_aev! / angular_aev! — same equations:
 #   radial block  = [ANI-1] Eq. (3) G^R,   angular block = [ANI-1] Eq. (4) G^A.
 # Uses the O(N²) all-pairs approach: each thread scans all n_atoms neighbours.
-# For neighbour-list systems: call _aev_kernel_nl! instead (see below).
-@kernel inbounds=true function _aev_kernel!(
+# For neighbour-list systems: call aev_kernel_nl! instead (see below).
+@kernel inbounds=true function aev_kernel!(
     aevs,               # (n_atoms, aev_len) output matrix
     @Const(coords),     # (n_atoms,) SVector coordinates (Å)
     @Const(species),    # (n_atoms,) 1-based species index
@@ -124,7 +124,7 @@ end
 # nbr_off[i+1]]. It is built within r_c_max = max(r_c_R, r_c_A); the per-term
 # cutoff checks (r ≥ r_c_R / r_c_A) still select the right shell.
 # ============================================================================
-@kernel inbounds=true function _aev_kernel_nl!(
+@kernel inbounds=true function aev_kernel_nl!(
     aevs,
     @Const(coords),
     @Const(species),
@@ -222,7 +222,7 @@ end
 # one-thread-per-atom kernel into aev_len plain global writes, keeping the accumulation in
 # fast threadgroup memory. Atomic order is nondeterministic → results match the scalar
 # kernel only to Float32 rounding (~1e-6), not bit-for-bit.
-@kernel function _aev_kernel_wg!(
+@kernel function aev_kernel_wg!(
     aevs,
     @Const(coords),
     @Const(species),
@@ -350,7 +350,7 @@ end
 # CPU, DistanceNeighborFinder on GPU) rather than building its own list. `neighbors.list`
 # may be device-resident (GPU finder) — `Array(...)` brings the pairs to the host for the
 # O(total_pairs) counting sort; offsets/indices are then uploaded to the compute backend.
-function _nl_to_csr(neighbors, n_atoms::Int)
+function nl_to_csr(neighbors, n_atoms::Int)
     npairs = length(neighbors)                 # = neighbors.n
     host   = Array(neighbors.list)             # host copy (no-op if already on CPU)
     off = zeros(Int32, n_atoms + 1)
@@ -379,7 +379,7 @@ end
 # Build a CSR neighbour list (offsets, indices) within `r_c_max` on the host.
 # O(N²) scan — benchmarking fallback only (`neighbors=:auto`); production code should
 # pass the system's NeighborList so Molly's neighbour finders drive the neighbour search.
-function _build_neighbor_csr(coords::AbstractVector{SVector{D,T}}, r_c_max::T) where {D,T}
+function build_neighbor_csr(coords::AbstractVector{SVector{D,T}}, r_c_max::T) where {D,T}
     n   = length(coords)
     rc2 = r_c_max^2
     off = Vector{Int32}(undef, n + 1)
@@ -474,7 +474,7 @@ function Molly.compute_aevs_ka(
     θ_s_d   = KernelAbstractions.allocate(ka_backend, T, length(p.θ_s)); copyto!(θ_s_d,  p.θ_s)
 
     if isnothing(neighbors)
-        kernel! = _aev_kernel!(ka_backend, workgroup)
+        kernel! = aev_kernel!(ka_backend, workgroup)
         kernel!(
             aevs, coords, species,
             η_R_d, r_s_R_d, r_c_R,
@@ -489,17 +489,17 @@ function Molly.compute_aevs_ka(
         #   :auto         → O(N²) host build from coords (benchmarking fallback)
         #   (off, idx)    → caller-supplied CSR
         off_h, idx_h = if neighbors === :auto
-            _build_neighbor_csr(coords, max(r_c_R, r_c_A))
+            build_neighbor_csr(coords, max(r_c_R, r_c_A))
         elseif neighbors isa Tuple
             neighbors
         else
-            _nl_to_csr(neighbors, n_atoms)
+            nl_to_csr(neighbors, n_atoms)
         end
         off_d = KernelAbstractions.allocate(ka_backend, Int32, length(off_h)); copyto!(off_d, off_h)
         idx_d = KernelAbstractions.allocate(ka_backend, Int32, length(idx_h)); copyto!(idx_d, idx_h)
         if write_reduce
             # One workgroup per atom; accumulate into a shared row, one global write per column.
-            kernel! = _aev_kernel_wg!(ka_backend, workgroup)
+            kernel! = aev_kernel_wg!(ka_backend, workgroup)
             kernel!(
                 aevs, coords, species, off_d, idx_d,
                 η_R_d, r_s_R_d, r_c_R,
@@ -509,7 +509,7 @@ function Molly.compute_aevs_ka(
                 ndrange = n_atoms * workgroup,
             )
         else
-            kernel! = _aev_kernel_nl!(ka_backend, workgroup)
+            kernel! = aev_kernel_nl!(ka_backend, workgroup)
             kernel!(
                 aevs, coords, species, off_d, idx_d,
                 η_R_d, r_s_R_d, r_c_R,

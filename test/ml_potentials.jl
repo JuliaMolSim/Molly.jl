@@ -678,8 +678,8 @@ end
 
             # Serial reference vs the buffered path (threaded when nthreads > 1).
             aevs_serial = Molly.compute_aevs(coords, species, nothing, bdy, p, n_sp)
-            buf      = lux._get_aev_buf(pot, n, Val(3), Float64)
-            aevs_buf = lux._compute_aevs_buf!(buf, coords, species, nothing, bdy, p, n_sp)
+            buf      = lux.get_aev_buf(pot, n, Val(3), Float64)
+            aevs_buf = lux.compute_aevs_buf!(buf, coords, species, nothing, bdy, p, n_sp)
             @test aevs_buf == aevs_serial   # bit-identical: per-atom rows are independent
             println("Test15: threads=", Threads.nthreads(), " scratch_sets=", length(buf.scratch),
                     " max|buffered-serial| AEV = ", maximum(abs.(aevs_buf .- aevs_serial)))

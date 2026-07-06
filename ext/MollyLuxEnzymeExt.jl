@@ -54,12 +54,12 @@ end
 # Shared utilities
 # ============================================================================
 
-function _lue_strip_boundary(b::CubicBoundary)
+function lue_strip_boundary(b::CubicBoundary)
     unit(b.side_lengths[1]) == NoUnits ? b :
         CubicBoundary(ustrip.(u"Å", b.side_lengths))
 end
 
-function _lue_f32coords(coords::AbstractVector{SVector{D,T}}) where {D,T}
+function lue_f32coords(coords::AbstractVector{SVector{D,T}}) where {D,T}
     if unit(first(coords)[1]) == NoUnits
         [SVector{D, Float32}(sv) for sv in coords]
     else
@@ -83,7 +83,7 @@ end
 # of Lux.apply calls Enzyme has to trace from n_atoms to n_species, which both speeds
 # up the reverse pass and reduces allocation. `group_atoms[s]` lists the atom indices
 # of species s; the gather/permutedims are differentiable so forces stay exact.
-function _ani_energy_for_ad(
+function ani_energy_for_ad(
     coords_mat        :: AbstractMatrix{Float32},
     species_idx,
     boundary_strip,
@@ -120,10 +120,10 @@ function AtomsCalculators.forces!(fs,
                                    sys::System{D, AT, T},
                                    inter::ANIPotential;
                                    kwargs...) where {D, AT, T}
-    coords_f32  = _lue_f32coords(sys.coords)
+    coords_f32  = lue_f32coords(sys.coords)
     species_idx = [inter.species_map[ad.element] for ad in sys.atoms_data]
     nbrs        = get(kwargs, :neighbors, nothing)
-    bdy         = _lue_strip_boundary(sys.boundary)
+    bdy         = lue_strip_boundary(sys.boundary)
     bdy_f32     = CubicBoundary(Float32.(bdy.side_lengths))
     n_species   = length(inter.species_map)
     n_atoms     = length(coords_f32)
@@ -144,11 +144,11 @@ function AtomsCalculators.forces!(fs,
 
     # One reverse-mode pass per ensemble member. Each writes its own gradient buffer and
     # only reads the shared primal coords_mat + Const args, so the passes are independent.
-    # `_ani_energy_for_ad` is compiled once (same types) — warm member 1 serially to avoid
+    # `ani_energy_for_ad` is compiled once (same types) — warm member 1 serially to avoid
     # a compilation race, then run the rest across threads.
     run_member!(e) = Enzyme.autodiff(
         Enzyme.set_runtime_activity(Enzyme.Reverse),
-        _ani_energy_for_ad,
+        ani_energy_for_ad,
         Enzyme.Active,
         Enzyme.Duplicated(coords_mat, dcoords_all[e]),
         Enzyme.Const(species_idx),
