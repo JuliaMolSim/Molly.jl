@@ -66,17 +66,9 @@ for the original LINCS paper.
     improve accuracy for coupled constraints at the cost of performance.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
-<<<<<<< HEAD
-- `iter_vel_correction=false`: whether to use iterative velocity constraint solving.
-    When `false` (the default), velocity correction uses one LINCS projection as in
-    GROMACS. When `true`, additional iterative velocity corrections are performed.
-=======
 - `iter_vel_correction=true`: whether to use iterative velocity constraint solving.
-    When `false`, velocity correction uses the simple one-step approach
-    `v += Δx/dt` as in GROMACS (for the Verlet simulator only, otherwise velocities are
-    not constrained). When `true`, a full iterative velocity constraint projection
-    is performed.
->>>>>>> afbd5df74 (LINCS constrain velocities by default)
+    When `false`, velocity correction uses one LINCS projection as in
+    GROMACS. When `true`, additional iterative velocity corrections are performed.
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 """
 struct LINCS{CL, LD, LW, DC, AC, E, F, DB, CI}
