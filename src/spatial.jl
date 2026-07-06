@@ -1044,7 +1044,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     end
 
     if isnothing(kin_tensor)
-        # Always evaluate K in case velocities were rescaled by a thermostat.
+        # Always evaluate K in case velocities were rescaled by a thermostat
         kinetic_energy_tensor!(buffers.kin_tensor, sys)
     else
         buffers.kin_tensor .= kin_tensor

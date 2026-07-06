@@ -1579,9 +1579,14 @@ function mts_interaction_groups(sys, sim::MTSIntegrator{<:Any, <:Any, NP, NS, NG
     return fraction_inters
 end
 
+function mts_coordinate_update!(sys, sim::MTSIntegrator, dt_frac_x)
+    sys.coords .+= sys.velocities .* dt_frac_x
+    return sys
+end
+
 # Can modify sys, forces_t, accels_t, buffers, cons_coord_storage and cons_vel_storage
 function mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
-                       ordered_fractions, fraction_inters, neighbors, dt, step_n, n_threads,
+                       sim, ordered_fractions, fraction_inters, neighbors, dt, step_n, n_threads,
                        using_constraints, n_parent_substeps, recompute_forces_in)
     n_substeps = first(ordered_fractions)
     n_steps_per_parent_step = n_substeps ÷ n_parent_substeps
@@ -1602,7 +1607,7 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, con
             if using_constraints
                 cons_coord_storage .= sys.coords
             end
-            sys.coords .+= sys.velocities .* dt_frac_x
+            mts_coordinate_update!(sys, sim, dt_frac_x)
 
             if using_constraints
                 apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
@@ -1613,8 +1618,8 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, con
             place_virtual_sites!(sys)
         else
             mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
-                          Base.tail(ordered_fractions), Base.tail(fraction_inters), neighbors, dt,
-                          step_n, n_threads, using_constraints, n_substeps, true)
+                          sim, Base.tail(ordered_fractions), Base.tail(fraction_inters),
+                          neighbors, dt, step_n, n_threads, using_constraints, n_substeps, true)
         end
 
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
@@ -1647,7 +1652,7 @@ end
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, init_step, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -1662,11 +1667,13 @@ end
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
-                      sim.ordered_fractions, fraction_inters, neighbors, sim.dt, step_n,
+                      sim, sim.ordered_fractions, fraction_inters, neighbors, sim.dt, step_n,
                       n_threads, using_constraints, 1, recompute_forces)
         if step_n % needs_vir_steps == 0
             # Virial calculated with all interactions
             forces!(forces_t, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
+            merge_initial_constraint_virial!(buffers, sys, step_n, true, forces_t;
+                                             n_threads=n_threads)
         end
         if using_constraints
             apply_velocity_constraints!(sys; n_threads=n_threads)
@@ -1681,7 +1688,7 @@ end
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
 
-        apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads)
             break
         end
