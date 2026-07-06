@@ -1,4 +1,4 @@
-simulation_step_wrapper(sys, buffers, neighbors, step_n; kwargs...) = step_n
+simulation_step_wrapper(sys, neighbors, step_n, buffers; kwargs...) = step_n
 
 mutable struct StepTrackingCoupler
     n_steps::Int

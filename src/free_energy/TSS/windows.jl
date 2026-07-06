@@ -65,17 +65,13 @@ struct TSSGraph
     n_states::Int
     windows::Vector{TSSWindow}
     state_to_windows::Vector{Vector{Int}}
-    window_rung_to_local::Vector{Dict{Int, Int}}
     rung_neighbors::Vector{Vector{NTuple{3, Int}}}
     rung_volumes::Vector{Float64}
-    rung_coordinates::Vector{Vector{Int}}
-    rung_edges::Vector{Int}
 end
 
 function Base.show(io::IO, graph::TSSGraph)
     print(io, "TSSGraph with ", tss_count(graph.n_states, "state"), ", ",
-          tss_count(length(graph.windows), "window"), ", ",
-          tss_count(length(graph.rung_edges), "edge"))
+          tss_count(length(graph.windows), "window"))
 end
 
 Base.show(io::IO, ::MIME"text/plain", graph::TSSGraph) = show(io, graph)
@@ -287,24 +283,10 @@ function check_tss_window_graph_connected(windows::AbstractVector{TSSWindow})
     return adjacency
 end
 
-function validate_tss_window_coverage!(windows::AbstractVector{TSSWindow},
-                                        state_to_windows::Vector{Vector{Int}},
-                                        K::Int)
-    for state_index in 1:K
-        n_cover = length(state_to_windows[state_index])
-        if n_cover != 2
-            throw(ArgumentError("state $(state_index) must be covered by exactly two windows; got $(n_cover)."))
-        end
-    end
-
-    check_tss_window_graph_connected(windows)
-    return windows
-end
-
 function validate_tss_state_window_coverage!(windows::AbstractVector{TSSWindow},
                                               state_to_windows::Vector{Vector{Int}},
-                                              K::Int)
-    required_coverage = length(windows) == 1 ? 1 : 2
+                                              K::Int;
+                                              required_coverage::Int = length(windows) == 1 ? 1 : 2)
     for state_index in 1:K
         n_cover = length(state_to_windows[state_index])
         if n_cover != required_coverage
@@ -321,20 +303,14 @@ function single_window_tss_graph(K::Int)
     K >= 1 || throw(ArgumentError("Number of states must be larger or equal than 1."))
     window = TSSWindow(1, Base.OneTo(K))
     state_to_windows = [[1] for _ in 1:K]
-    window_rung_to_local = [Dict(state_index => state_index for state_index in 1:K)]
     rung_neighbors = [NTuple{3, Int}[] for _ in 1:K]
     rung_volumes = ones(Float64, K)
-    rung_coordinates = [[state_index] for state_index in 1:K]
-    rung_edges = ones(Int, K)
     return TSSGraph(
         K,
         [window],
         state_to_windows,
-        window_rung_to_local,
         rung_neighbors,
         rung_volumes,
-        rung_coordinates,
-        rung_edges,
     )
 end
 
@@ -692,8 +668,6 @@ function build_tss_graph(builder::TSSGraphBuilder)
     n_total = sum(prod(edge.shape) for edge in builder.edges)
     rung_neighbors = [NTuple{3, Int}[] for _ in 1:n_total]
     rung_volumes = zeros(Float64, n_total)
-    rung_coordinates = [Int[] for _ in 1:n_total]
-    rung_edges = zeros(Int, n_total)
 
     specs = TSSWindowSpec[]
     for (edge_i, edge) in enumerate(builder.edges)
@@ -702,8 +676,6 @@ function build_tss_graph(builder::TSSGraphBuilder)
             state_index = tss_edge_rung_index(edge, offset, coord)
             rung_neighbors[state_index] = tss_rung_neighbors(edge, offset, coord)
             rung_volumes[state_index] = tss_rung_volume(edge, coord)
-            rung_coordinates[state_index] = coord
-            rung_edges[state_index] = edge_i
         end
         append!(specs, tss_edge_window_specs(edge, offset))
     end
@@ -722,21 +694,19 @@ function build_tss_graph(builder::TSSGraphBuilder)
         for (window_i, spec) in enumerate(merged_specs)
     ]
     state_to_windows = build_tss_state_to_windows(windows, n_total)
-    validate_tss_window_coverage!(windows, state_to_windows, n_total)
-    window_rung_to_local = [
-        Dict(state_index => local_i for (local_i, state_index) in enumerate(window.state_indices))
-        for window in windows
-    ]
+    validate_tss_state_window_coverage!(
+        windows,
+        state_to_windows,
+        n_total;
+        required_coverage = 2,
+    )
 
     return TSSGraph(
         n_total,
         windows,
         state_to_windows,
-        window_rung_to_local,
         rung_neighbors,
         rung_volumes,
-        rung_coordinates,
-        rung_edges,
     )
 end
 

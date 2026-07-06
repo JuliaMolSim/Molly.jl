@@ -971,6 +971,22 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false, rng =
     end
 ```
 
+!!! warning "Integrating equations of motion with alchemical transformations"
+    
+    When running simulations in which some of the atoms are achemicaly decoupled from the system
+    some care must be taken with the integrator of choice. Decoupling atoms can make them incredibly
+    fast, which will appear as a huge contribution to the kinetic energy tensor. Therefore any temperature 
+    calculation that depends on said tensor will be prone to errors, since one could argue
+    that a fully decoupled set of atoms should not contribute to the overall temperature of the system.
+
+    Therefore, and since Molly currently does not yet support temperature groups, the recommended way of
+    integrating this kind of system is by using a [`Langevin`](@ref) scheme, instead of a [`VelocityVerlet`](@ref)
+    integrator accompanied by a [`VelocityRescaleThermostat`](@ref) temperature coupling scheme; specially
+    when using large integration timesteps.
+
+    Note that the [`Langevin`](@ref) integrator is known to produce incorrect kinetics, but since
+    free energies are an ensemble average property this issue can be safely ignored.
+
 After minimization and equilibration, the script replaces the standard Lennard-Jones interaction with a [Gapsys soft-core variant](https://doi.org/10.1021/ct300220p), replaces the Coulomb interaction with a scaled alchemical interaction, rebuilds PME and Ewald exclusion data with the same scheduler, and creates one [`ThermoState`](@ref) per $\lambda$ value.
 
 ```julia
@@ -1238,7 +1254,7 @@ The full script is `scripts/tss_dipeptide.jl`:
 julia scripts/tss_dipeptide.jl
 ```
 
-This example estimates the unbiased alanine dipeptide $\phi/\psi$ free energy surface with TSS. It starts from the equilibrated alanine dipeptide structure, minimizes and equilibrates the system at 310 K and 1 bar, and then builds a 20 by 20 thermodynamic-state grid over the central $\phi$ and $\psi$ torsions.
+This example estimates the unbiased alanine dipeptide $\phi/\psi$ free energy surface with TSS. It starts from the alanine dipeptide structure, minimizes and equilibrates the system at 310 K and 1 bar, and then builds a 20 by 20 thermodynamic-state grid over the central $\phi$ and $\psi$ torsions.
 
 ```julia
 PHI_INDS = [5, 7, 9, 15]
@@ -1469,7 +1485,7 @@ The full script is `scripts/tss_solvation.jl`:
 julia scripts/tss_solvation.jl
 ```
 
-This example computes the standard solvation free energy of ethanol with a two-leg annihilation cycle. Ethanol is annihilated in solution and in vacuum, and the two endpoint differences are combined with the analytical gas-to-solution standard-state correction. The alchemical ladder has 20 states from $\lambda=1$ to $\lambda=0$, and the solute atoms use `InsertRole` with `DefaultLambdaScheduler`.
+This example computes the standard solvation free energy of ethanol with a two-leg annihilation cycle. The setup is completely equivalent to the AWH case described above: ethanol is annihilated in solution and in vacuum, and the two endpoint differences are combined with the analytical gas-to-solution standard-state correction. The alchemical ladder has 20 states from $\lambda=1$ to $\lambda=0$, and the solute atoms use `InsertRole` with `DefaultLambdaScheduler`.
 
 ```julia
 FT = Float32

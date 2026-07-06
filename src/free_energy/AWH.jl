@@ -71,40 +71,42 @@ mutable struct AWHState{T, ES, AS}
     stats::AWHStats{T}
 end
 
+const AWH_STATE_SPACE_PROPERTY_PATHS = (
+    partition = (:state_space, :partition),
+    λ_integrators = (:state_space, :integrators),
+    λ_β = (:state_space, :betas),
+    λ_p = (:state_space, :pressures),
+    state_pairwise_inters = (:state_space, :state_pairwise_inters),
+    state_specific_inter_lists = (:state_space, :state_specific_inter_lists),
+    state_general_inters = (:state_space, :state_general_inters),
+    λ_hamiltonians = (:state_space, :partition, :λ_hamiltonians),
+)
+
+const AWH_ACTIVE_STATE_PROPERTIES = (
+    active_idx = :active_idx,
+    active_sys = :active_sys,
+    active_intg = :active_integrator,
+)
+
+function awh_get_nested_property(object, path)
+    for field_name in path
+        object = getfield(object, field_name)
+    end
+    return object
+end
+
 function Base.getproperty(state::AWHState, name::Symbol)
-    if name === :partition
-        return getfield(getfield(state, :state_space), :partition)
-    elseif name === :active_idx
-        return getfield(getfield(state, :active_state), :active_idx)
-    elseif name === :active_sys
-        return getfield(getfield(state, :active_state), :active_sys)
-    elseif name === :active_intg
-        return getfield(getfield(state, :active_state), :active_integrator)
-    elseif name === :λ_integrators
-        return getfield(getfield(state, :state_space), :integrators)
-    elseif name === :λ_β
-        return getfield(getfield(state, :state_space), :betas)
-    elseif name === :λ_p
-        return getfield(getfield(state, :state_space), :pressures)
-    elseif name === :state_pairwise_inters
-        return getfield(getfield(state, :state_space), :state_pairwise_inters)
-    elseif name === :state_specific_inter_lists
-        return getfield(getfield(state, :state_space), :state_specific_inter_lists)
-    elseif name === :state_general_inters
-        return getfield(getfield(state, :state_space), :state_general_inters)
-    elseif name === :λ_hamiltonians
-        return getfield(getfield(getfield(state, :state_space), :partition), :λ_hamiltonians)
+    if haskey(AWH_STATE_SPACE_PROPERTY_PATHS, name)
+        return awh_get_nested_property(state, getproperty(AWH_STATE_SPACE_PROPERTY_PATHS, name))
+    elseif haskey(AWH_ACTIVE_STATE_PROPERTIES, name)
+        return getfield(getfield(state, :active_state), getproperty(AWH_ACTIVE_STATE_PROPERTIES, name))
     end
     return getfield(state, name)
 end
 
 function Base.setproperty!(state::AWHState, name::Symbol, value)
-    if name === :active_idx
-        getfield(state, :active_state).active_idx = value
-    elseif name === :active_sys
-        getfield(state, :active_state).active_sys = value
-    elseif name === :active_intg
-        getfield(state, :active_state).active_integrator = value
+    if haskey(AWH_ACTIVE_STATE_PROPERTIES, name)
+        setfield!(getfield(state, :active_state), getproperty(AWH_ACTIVE_STATE_PROPERTIES, name), value)
     else
         setfield!(state, name, value)
     end
@@ -113,9 +115,8 @@ end
 
 function Base.propertynames(state::AWHState, private::Bool=false)
     names = collect(fieldnames(typeof(state)))
-    append!(names, (:partition, :active_idx, :active_sys, :active_intg, :λ_integrators,
-                    :λ_β, :λ_p, :state_pairwise_inters, :state_specific_inter_lists,
-                    :state_general_inters, :λ_hamiltonians))
+    append!(names, keys(AWH_STATE_SPACE_PROPERTY_PATHS))
+    append!(names, keys(AWH_ACTIVE_STATE_PROPERTIES))
     return Tuple(names)
 end
 

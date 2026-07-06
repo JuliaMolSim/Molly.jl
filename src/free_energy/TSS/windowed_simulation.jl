@@ -914,7 +914,6 @@ function run_windowed_tss_cycle!(state::TSSState,
         visited_state = final_visited_state,
         history_time = history_time,
         update_adaptive_gamma = false,
-        n_threads = n_threads,
     )
     state.window_update_counts[cycle_window] += 1
     state.iteration += 1

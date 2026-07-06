@@ -1212,8 +1212,7 @@ function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
         disable_constrained_interactions!(neighbor_finder, lincs.clusters)
     end
 
-    if arr_type <: AbstractGPUArray
-        lincs.lincs_data.atom1 isa arr_type && return lincs
+    if arr_type <: AbstractGPUArray && !(lincs.lincs_data.atom1 isa arr_type)
 
         n_atoms = length(lincs.lincs_data.invmass)
         data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(

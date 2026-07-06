@@ -93,13 +93,6 @@ function PMFDeconvolution(state::TSSState{T};
 end
 
 function collect_tss_pmf_deconvolution_sample(::Nothing,
-                                               estimator,
-                                               active_state;
-                                               window_offset = 0)
-    return nothing
-end
-
-function collect_tss_pmf_deconvolution_sample(::Nothing,
                                                state,
                                                estimator,
                                                active_state;
@@ -150,42 +143,17 @@ function collect_tss_pmf_deconvolution_sample(
 end
 
 function collect_tss_pmf_deconvolution_sample(
-    deconv::PMFDeconvolution{<:TSSPMFDeconvolutionBackend{N, T}},
+    deconv::PMFDeconvolution{<:TSSPMFDeconvolutionBackend},
     state::TSSState,
     estimator::TSSLocalEstimator,
     active_state;
-    window_offset = 0) where {N, T}
-
-    backend = deconv.backend
-    value =online_pmf_tuple(backend.cv_function(active_state), T)
-    if length(value) != N
-        throw(DimensionMismatch("PMF CV returned $(length(value)) dimensions, expected $(N)."))
-    end
-
-    log_bin_weights = Vector{T}(undef, prod(backend.grid.shape))
-    tss_pmf_log_bin_weights!(
-        log_bin_weights,
-        backend,
-        estimator;
+    window_offset = 0)
+    return collect_tss_pmf_deconvolution_sample(
+        deconv,
+        estimator,
+        active_state;
         window_offset = window_offset,
     )
-    return PMFDeconvolutionSample(value, log_bin_weights, zero(T))
-end
-
-function accumulate_tss_pmf_deconvolution!(::Nothing, observations)
-    return nothing
-end
-
-function accumulate_tss_pmf_deconvolution!(
-    deconv::PMFDeconvolution{<:TSSPMFDeconvolutionBackend},
-    observations)
-
-    for observation in observations
-        for sample in observation.pmf_deconvolution_samples
-           accumulate_pmf_deconvolution!(deconv.backend.accumulator, sample)
-        end
-    end
-    return deconv
 end
 
 function tss_pmf_uses_epoch_history(estimator::TSSLocalEstimator)

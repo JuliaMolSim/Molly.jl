@@ -60,11 +60,12 @@ struct PositionConstraintApplication <: AbstractConstraintApplication end
 struct VelocityConstraintApplication <: AbstractConstraintApplication end
 
 Base.@kwdef struct ConstraintApplicationContext{
-    K <: AbstractConstraintApplication, B, DT, S, CB, VB,
+    K <: AbstractConstraintApplication, B, A, DT, S, CB, VB,
 }
     kind::K
     needs_virial::Bool = false
     step_n::Int = 0
+    atoms::A = nothing
     dt::DT = nothing
     virial_scale::S = 1
     buffers::B = nothing
@@ -86,6 +87,9 @@ function copyto_constraint_scratch!(scratch, values)
         return scratch
     end
 end
+
+# These types will enable coalesced memory access via StructArray{ConstraintKernelData}
+abstract type ConstraintKernelData{D, N, M} end
 
 @inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer) = 1
 @inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer) = 1
@@ -370,6 +374,13 @@ function n_dof_lost(D::Integer, constraint_clusters::AbstractVector)
     return vibrational_dof_lost
 end
 
+function n_dof_lost(D::Integer,
+                    constraint_clusters::AbstractVector{C}) where {C <: ConstraintKernelData}
+    N = n_atoms_cluster(C)
+    vibrational_dof_lost = (N == 2) ? D*N - (2*D - 1) : D*(N - 2)
+    return length(constraint_clusters) * vibrational_dof_lost
+end
+
 function n_dof(D::Integer, n_atoms::Integer, boundary)
     return D * n_atoms - (D - n_infinite_dims(boundary))
 end
@@ -489,9 +500,6 @@ function to_backend(arr, old::A, new::B) where {A <: Backend, B <: Backend}
     return out
 end
 
-# These types will enable coalesced memory access via StructArray{ConstraintKernelData}
-abstract type ConstraintKernelData{D, N, M} end
-
 n_constraints(::ConstraintKernelData{<:Any, N}) where {N} = N
 n_constraints(::Type{<:ConstraintKernelData{<:Any, N}}) where {N} = N
 n_atoms_cluster(::ConstraintKernelData{<:Any, <:Any, M}) where {M} = M
@@ -500,13 +508,6 @@ n_atoms_cluster(::Type{<:ConstraintKernelData{<:Any, <:Any, M}}) where {M} = M
 host_constraint_clusters(constraint_clusters) = constraint_clusters
 host_constraint_clusters(constraint_clusters::StructArray) =
     replace_storage(Array, constraint_clusters)
-
-function n_dof_lost(D::Integer,
-                    constraint_clusters::AbstractVector{C}) where {C <: ConstraintKernelData}
-    N = n_atoms_cluster(C)
-    vibrational_dof_lost = (N == 2) ? D*N - (2*D - 1) : D*(N - 2)
-    return length(constraint_clusters) * vibrational_dof_lost
-end
 
 struct NoClusterData <: ConstraintKernelData{Nothing, 0, 0} end
 

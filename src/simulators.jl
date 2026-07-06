@@ -192,7 +192,8 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
     buffers = init_buffers!(sys, n_threads)
     E = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads,
                          specific_inter_lists=sis)
-    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads,
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
+    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
                    current_potential_energy=E)
     println(sim.log_stream, "Step ", init_step, " - potential energy ", E,
             " - max force N/A - N/A")
@@ -384,9 +385,9 @@ function position_constraint_context(buffers, sys, step_n::Integer, dt, needs_vi
         kind=PositionConstraintApplication(),
         needs_virial=needs_virial,
         step_n=Int(step_n),
+        atoms=sys.atoms,
         dt=dt,
         virial_scale=position_constraint_virial_scale(sys, buffers, dt, sim),
-        atoms=sys.atoms,
         buffers=buffers,
         coords_buffer=buffers.constraint_coords_buffer,
     )
@@ -398,9 +399,9 @@ function velocity_constraint_context(buffers, sys, step_n::Integer, dt, needs_vi
         kind=VelocityConstraintApplication(),
         needs_virial=needs_virial,
         step_n=Int(step_n),
+        atoms=sys.atoms,
         dt=dt,
         virial_scale=velocity_constraint_virial_scale(sys, buffers, dt, sim),
-        atoms=sys.atoms,
         buffers=buffers,
         velocities_buffer=buffers.constraint_velocities_buffer,
     )
@@ -494,7 +495,8 @@ end
                                      n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads,
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
+    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
                    current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -648,7 +650,8 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                      n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads,
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
+    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
                    current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -798,14 +801,15 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
         merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
                                          n_threads=n_threads)
-        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads,
+        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
                        current_forces=forces_t)
     else
-        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
     end
     accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
@@ -901,14 +905,15 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
         merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
                                          n_threads=n_threads)
-        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads,
+        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
                        current_forces=forces_t)
     else
-        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
     end
     coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -1021,14 +1026,15 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
         merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
                                          n_threads=n_threads)
-        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads,
+        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
                        current_forces=forces_t)
     else
-        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
     end
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
@@ -1167,7 +1173,8 @@ end
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads)
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
+    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(false); n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
@@ -1305,7 +1312,8 @@ end
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads)
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
+    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     noise_prefac = sqrt((2 / sim.friction) * sim.dt)
@@ -1402,7 +1410,8 @@ end
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads,
+    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
+    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
                    current_forces=forces_t)
     v_half = zero(sys.velocities)
     zeta = zero(inv(sim.dt))
@@ -1664,7 +1673,8 @@ function simulate_remd!(sys::ReplicaSystem,
             Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; rng=rng)
             
             if run_loggers != false && exchanged && !isnothing(sys.exchange_logger)
-                log_property!(sys.exchange_logger, sys, nothing, cycle * cycle_length, nothing;
+                log_property!(sys.exchange_logger, sys, nothing,
+                              init_step + cycle * cycle_length, nothing;
                               indices=(n, m), delta=Δ, n_threads=n_threads)
             end
         end

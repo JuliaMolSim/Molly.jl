@@ -337,8 +337,7 @@ function update_tss_estimates!(state::TSSLocalEstimator{FT};
                                visited_state::Int,
                                history_time = nothing,
                                adaptive_values = nothing,
-                               update_adaptive_gamma::Bool = true,
-                               n_threads::Integer = Threads.nthreads()) where {FT}
+                               update_adaptive_gamma::Bool = true) where {FT}
 
     visited_local = tss_local_index(state, visited_state)
 
