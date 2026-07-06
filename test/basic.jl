@@ -688,14 +688,48 @@ end
         @test repsys.state_pairwise_inters[i] == sys.pairwise_inters
     end
 
-    # Test initialization with loggers and extra data
+    # Test initialization with replica-system-owned loggers and extra data
     replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)) for i in 1:n_replicas]
 
     repsys2 = ReplicaSystem(
         thermo_states,
         [copy(coords) for _ in 1:n_replicas];
         replica_loggers=replica_loggers,
+        initial_step=12,
         data="test_data_repsys",
+    )
+    remd_sim = ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps",
+    )
+    @test_throws MethodError ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps";
+        replica_loggers=replica_loggers,
+    )
+    @test_throws MethodError ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps";
+        exchange_logger=ReplicaExchangeLogger(Float64, n_replicas),
+    )
+    @test repsys.current_step == 0
+    @test repsys2.current_step == 12
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        initial_step=-1,
+    )
+    shared_writer = TrajectoryWriter(10, tempname() * ".dcd")
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        replica_loggers=[(trj=shared_writer,) for _ in 1:n_replicas],
+    )
+    shared_path = tempname() * ".dcd"
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        replica_loggers=[(trj=TrajectoryWriter(10, shared_path),) for _ in 1:n_replicas],
     )
 
     sys2 = System(

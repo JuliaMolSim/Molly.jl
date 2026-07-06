@@ -167,7 +167,9 @@ end
 
 function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
                                 σ_mix=LorentzMixing(),
-                                ϵ_mix=GeometricMixing())
+                                ϵ_mix=GeometricMixing(),
+                                λ_mix=MinimumMixing(),
+                                scheduler = DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
     n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
@@ -219,10 +221,10 @@ function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
     F6 = typeof(-(term_6_example / dist_cutoff^3))
     F12 = typeof(term_12_example / dist_cutoff^9)
 
-    factor_6 = convert(F6, factor_6_acc)
-    factor_12 = convert(F12, factor_12_acc)
-
-    return LJDispersionCorrection(factor_6, factor_12)
+    return LJDispersionCorrection(
+        convert(F6, factor_6_acc),
+        convert(F12, factor_12_acc),
+    )
 end
 
 Base.zero(dc::LJDispersionCorrection) =
@@ -234,6 +236,9 @@ function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
         dc1.factor_12 + dc2.factor_12,
     )
 end
+
+Unitful.ustrip(dc::LJDispersionCorrection) =
+    LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12))
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)
@@ -267,6 +272,22 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     end
 
     return fs
+end
+
+@inline function overlap_pe_lj_softcore_beutler(dr, energy_units, C12, C6, λ, σ6_shift)
+    if iszero_value(σ6_shift)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    return λ * ((C12 / (σ6_shift * σ6_shift)) - (C6 / σ6_shift))
+end
+
+@inline function overlap_pe_lj_softcore_gapsys(dr, energy_units, C12, C6, λ, R)
+    if iszero_value(R)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    invR = inv(R)
+    invR6 = invR^6
+    return λ * ((91 * C12 * (invR6 * invR6)) - (28 * C6 * invR6))
 end
 
 @doc raw"""
@@ -353,13 +374,7 @@ end
     T = typeof(ustrip(atom_i.σ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    # 1. Fetch alchemical roles from the contiguous array
-    role_i = atom_i.alch_role
-    role_j = atom_j.alch_role
-    pair_role = mix_roles(inter.scheduler, role_i, role_j)
-
-    # 2. Dispatch to the scheduler for the effective sterics lambda
-    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
 
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
@@ -396,12 +411,12 @@ end
 
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
-    σ6_fac = inter.α * (1 - λ)
-    params = (C12, C6, λ, σ6_fac)
+    σ6_shift = inter.α * (1 - λ) * σ6
+    params = (C12, C6, λ, σ6_shift)
 
     f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = radial_force_vector(f, r, dr, force_units)
-    
+
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -412,8 +427,8 @@ end
 end
 
 # Dispatch 2: Soft Core Logic
-function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_fac)::Tuple{Any, Any, Any, Any})
-    R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
+function pairwise_force(::LennardJonesSoftCoreBeutler, r, (C12, C6, λ, σ6_shift)::Tuple{Any, Any, Any, Any})
+    R = sqrt(cbrt(σ6_shift + r^6))
     R6 = R^6
     return λ*(((12*C12)/(R6*R6*R)) - ((6*C6)/(R6*R)))*((r/R)^5)
 end
@@ -429,26 +444,23 @@ end
     T = typeof(ustrip(atom_i.σ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    # 1. Fetch alchemical roles from the contiguous array
-    role_i = atom_i.alch_role
-    role_j = atom_j.alch_role
-    pair_role = mix_roles(inter.scheduler, role_i, role_j)
-
-    # 2. Dispatch to the scheduler for the effective sterics lambda
-    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
 
     if λ <= 0
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
-
+    r = norm(dr)
     # If lambda is 1, the soft core formula reduces to standard LJ
     # We explicity branch to save compute.
     if λ >= 1
+        if iszero_value(r)
+            return zero_pairwise_energy(dr, energy_units)
+        end
 
         σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
         ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
@@ -458,7 +470,7 @@ end
         params = (σ2, ϵ, nothing, nothing)
 
         pe = pe_cutoff(inter.cutoff, inter, r, params)
-        
+
         if special
             return pe * inter.weight_special
         else
@@ -473,8 +485,14 @@ end
     r = sqrt(sum(abs2, dr))
     C6 = 4 * ϵ * σ6
     C12 = C6 * σ6
-    σ6_fac = inter.α * (1 - λ)
-    params = (C12, C6, σ6_fac, λ)
+    σ6_shift = inter.α * (1 - λ) * σ6
+
+    if iszero_value(r)
+        pe = overlap_pe_lj_softcore_beutler(dr, energy_units, C12, C6, λ, σ6_shift)
+        return special ? pe * inter.weight_special : pe
+    end
+
+    params = (C12, C6, σ6_shift, λ)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -492,8 +510,8 @@ end
 end
 
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
-function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac, λ)::Tuple{Any, Any, Any, Any})
-    R6 = (σ6_fac * (C12 / C6)) + r^6
+function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_shift, λ)::Tuple{Any, Any, Any, Any})
+    R6 = σ6_shift + r^6
     return λ * ((C12 / (R6 * R6)) - (C6 / R6))
 end
 
@@ -587,14 +605,7 @@ end
     T = typeof(ustrip(atom_i.σ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    # 1. Fetch alchemical roles from the contiguous array
-    role_i = atom_i.alch_role
-    role_j = atom_j.alch_role
-    pair_role = mix_roles(inter.scheduler, role_i, role_j)
-
-    # 2. Dispatch to the scheduler for the effective sterics lambda
-    # Changed scale_elec to scale_sterics
-    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
 
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
@@ -645,7 +656,7 @@ end
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
 @inline function pairwise_force(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{Any, Any, Any, Any})
     r6 = r^6
-    if r >= R
+    if !(r < R)
         return λ * (((12*C12)/(r6*r6*r)) - ((6*C6)/(r6*r)))
     else
         invR = inv(R)
@@ -666,21 +677,14 @@ end
     T = typeof(ustrip(atom_i.σ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
 
-    # 1. Fetch alchemical roles from the contiguous array
-    role_i = atom_i.alch_role
-    role_j = atom_j.alch_role
-    pair_role = mix_roles(inter.scheduler, role_i, role_j)
-
-    # 2. Dispatch to the scheduler for the effective sterics lambda
-    # Changed scale_elec to scale_sterics
-    λ = T(scale_sterics(inter.scheduler, λ_glob, pair_role))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
 
     if λ <= 0
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
     cutoff = inter.cutoff
@@ -691,6 +695,9 @@ end
 
     # 3. Fast Path: Standard Lennard Jones
     if λ >= 1
+        if iszero_value(r)
+            return zero_pairwise_energy(dr, energy_units)
+        end
         # Pass standard LJ params tuple (Length 2)
         params = (σ^2, ϵ, nothing, nothing)
         pe = pe_cutoff(cutoff, inter, r, params)
@@ -702,6 +709,11 @@ end
     C12 = C6 * σ6
     val = (26 * σ6 * (1 - λ)) / 7
     R = inter.α * sqrt(cbrt(val))
+
+    if iszero_value(r)
+        pe = overlap_pe_lj_softcore_gapsys(dr, energy_units, C12, C6, λ, R)
+        return special ? pe * inter.weight_special : pe
+    end
 
     # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
@@ -719,15 +731,17 @@ end
 # Dispatch 2: Soft Core Logic (Matches Tuple length 4)
 @inline function pairwise_pe(::LennardJonesSoftCoreGapsys, r, (C12, C6, λ, R)::Tuple{Any, Any, Any, Any})
     r6 = r^6
-    if r >= R
+    if !(r < R)
         return λ * ((C12/(r6*r6)) - (C6/(r6)))
     else
         invR = inv(R)
         invR2 = invR^2
         invR6 = invR^6
-        return λ * ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
-                   ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
-                   (91*C12*(invR6*invR6)) - (28*C6*(invR6))
+        return λ * (
+            ((78 * C12 * (invR6 * invR6 * invR2)) - (21 * C6 * (invR2 * invR6))) * (r^2) -
+            ((168 * C12 * (invR6 * invR6 * invR)) - (48 * C6 * (invR6 * invR))) * r +
+            (91 * C12 * (invR6 * invR6)) - (28 * C6 * invR6)
+        )
     end
 end
 

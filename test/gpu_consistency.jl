@@ -521,8 +521,12 @@
             thermo_states = [gpu_state(atoms_ref), gpu_state(atoms_pert)]
 
             for reuse_neighbors in (true, false)
-                partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
-                energies = evaluate_energy_all!(partition, thermo_states[1].system.coords, boundary)
+                partition = Molly.AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
+                energies = Molly.evaluate_energy_all!(
+                    partition,
+                    thermo_states[1].system.coords,
+                    boundary,
+                )
                 direct = [potential_energy(ts.system) for ts in thermo_states]
 
                 @test length(energies) == length(thermo_states)

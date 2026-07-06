@@ -444,6 +444,8 @@ potential_energy_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, dat
 potential_energy_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data) = potential_energy(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data)
 potential_energy_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data) = potential_energy(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data)
 
+@inline zero_pairwise_energy(dr, energy_units) = ustrip(zero(dr[1])) * energy_units
+
 """
     pairwise_pe(inter, r, params)
 

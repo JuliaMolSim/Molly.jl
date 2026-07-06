@@ -528,6 +528,10 @@ end
 # 362.86427110336984 K
 ```
 
+`ReplicaSystem` records the absolute MD step, and subsequent `simulate!` calls resume from
+`rep_sys.current_step`. Set `initial_step` in the constructor when restoring replica
+coordinates and velocities from a checkpoint.
+
 The accelerated weight histogram method ([`AWHState`](@ref) and [`AWHSimulation`](@ref)) has also been implemented in Molly.jl, allowing enhanced sampling and on-the-fly estimation of free energies along arbitrary collective variables and alchemical transformations. A more detailed overview of this can be found in the [Free energy calculation](@ref) section.
 
 As described in the next section, bias potentials can also be added to standard simulators for enhanced sampling.

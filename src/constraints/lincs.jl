@@ -654,12 +654,22 @@ end
 
 @kernel inbounds=true function lincs_accumulate_virial_kernel!(
         constraint_virial_nounits,
-        @Const(B), @Const(lengths), @Const(sdiag), @Const(factor_sum),
+        @Const(B),
+        @Const(lengths),
+        @Const(sdiag),
+        @Const(factor_sum),
+        @Const(atom1),
+        @Const(atom2),
+        @Const(atoms),
         virial_scale)
     i = @index(Global, Linear)
     if !iszero(sdiag[i]) && !iszero(lengths[i])
+        a1 = atom1[i]
+        a2 = atom2[i]
+        λ = constraint_virial_lambda(atoms, a1, a2)
         B_i = B[i]
-        coeff = virial_scale * (-lengths[i] * factor_sum[i])
+        coeff = λ * virial_scale * (-lengths[i] * factor_sum[i])
+
         for alpha in 1:3
             for beta in 1:3
                 Atomix.@atomic constraint_virial_nounits[alpha, beta] +=
@@ -797,7 +807,11 @@ function accumulate_lincs_position_virial!(data::LincsData, ws::LincsWorkspace,
     end
 
     @inbounds for i in eachindex(data.atom1)
-        coeff = -data.lengths[i] * ws.factor_sum[i]
+        a1 = data.atom1[i]
+        a2 = data.atom2[i]
+        λ = constraint_virial_lambda(context.atoms, a1, a2)
+
+        coeff = λ * (-data.lengths[i] * ws.factor_sum[i])
         B_i = ws.B[i]
         contribution = coeff * (B_i * transpose(B_i))
         accumulate_constraint_virial!(context.buffers, contribution, context)
@@ -871,7 +885,7 @@ lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace, bounda
 function accumulate_lincs_velocity_virial!(data::LincsData, ws::LincsWorkspace,
                                            context)
     context.needs_virial || return context
-    
+
     if !(context.kind isa VelocityConstraintApplication)
         error("LINCS velocity virial accumulation requires a velocity constraint context")
     end
@@ -880,11 +894,17 @@ function accumulate_lincs_velocity_virial!(data::LincsData, ws::LincsWorkspace,
     end
 
     @inbounds for i in eachindex(data.atom1)
-        coeff = -data.lengths[i] * ws.factor_sum[i]
+        a1 = data.atom1[i]
+        a2 = data.atom2[i]
+        λ = constraint_virial_lambda(context.atoms, a1, a2)
+
+        coeff = λ * (-data.lengths[i] * ws.factor_sum[i])
         B_i = ws.B[i]
         contribution = coeff * (B_i * transpose(B_i))
         accumulate_constraint_virial!(context.buffers, contribution, context)
     end
+
+
     return context
 end
 
@@ -906,7 +926,7 @@ function accumulate_lincs_position_virial_gpu!(data, ws, context, backend, block
     virial_kern! = lincs_accumulate_virial_kernel!(backend, block_size)
     virial_scale = eltype(data.lengths)(ustrip(context.virial_scale))
     virial_kern!(context.buffers.constraint_virial_nounits, ws.B, data.lengths,
-                 data.sdiag, ws.factor_sum, virial_scale;
+                 data.sdiag, ws.factor_sum, data.atom1, data.atom2, context.atoms, virial_scale;
                  ndrange=length(data.atom1))
     return context
 end
@@ -922,7 +942,7 @@ function accumulate_lincs_velocity_virial_gpu!(data, ws, context, backend, block
     virial_kern! = lincs_accumulate_virial_kernel!(backend, block_size)
     virial_scale = eltype(data.lengths)(ustrip(context.virial_scale))
     virial_kern!(context.buffers.constraint_virial_nounits, ws.B, data.lengths,
-                 data.sdiag, ws.factor_sum, virial_scale;
+                 data.sdiag, ws.factor_sum, data.atom1, data.atom2, context.atoms, virial_scale;
                  ndrange=length(data.atom1))
     return context
 end
@@ -1192,7 +1212,8 @@ function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
         disable_constrained_interactions!(neighbor_finder, lincs.clusters)
     end
 
-    if arr_type <: AbstractGPUArray
+    if arr_type <: AbstractGPUArray && !(lincs.lincs_data.atom1 isa arr_type)
+
         n_atoms = length(lincs.lincs_data.invmass)
         data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(
             lincs.lincs_data, lincs.workspace, arr_type, n_atoms, lincs.gpu_block_size)

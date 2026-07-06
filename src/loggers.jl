@@ -55,6 +55,8 @@ function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, buffe
     return sys
 end
 
+logger_collection_empty(loggers) = isnothing(loggers) || isempty(values(loggers))
+
 """
     GeneralObservableLogger(observable::Function, T, n_steps)
 
@@ -847,6 +849,22 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                     false, 0)
 end
 
+function Base.deepcopy(tw::TrajectoryWriter)
+    return TrajectoryWriter(
+        tw.n_steps,
+        tw.filepath,
+        tw.format,
+        tw.correction,
+        deepcopy(tw.atom_inds),
+        copy(tw.excluded_res),
+        tw.write_velocities,
+        tw.write_boundary,
+        Chemfiles.Topology(),
+        false,
+        0,
+    )
+end
+
 function Base.show(io::IO, tw::TrajectoryWriter)
     print(io, "TrajectoryWriter with n_steps ", tw.n_steps, ", filepath \"", tw.filepath,
           "\", correction ", tw.correction, ", ", tw.structure_n, " frames written")
@@ -878,6 +896,35 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
             end
         end
     end
+end
+
+function validate_replica_loggers(replica_loggers)
+    seen_loggers = Tuple{Any, Int}[]
+    seen_paths = Dict{String, Int}()
+    for (replica_i, loggers) in pairs(replica_loggers)
+        for logger in values(loggers)
+            if !isbitstype(typeof(logger))
+                for (seen_logger, prev_i) in seen_loggers
+                    if logger === seen_logger && prev_i != replica_i
+                        throw(ArgumentError("replica_loggers cannot reuse the same " *
+                                            "stateful logger object across replicas"))
+                    end
+                end
+                push!(seen_loggers, (logger, replica_i))
+            end
+            if logger isa TrajectoryWriter
+                filepath = abspath(logger.filepath)
+                prev_i = get(seen_paths, filepath, nothing)
+                if !isnothing(prev_i) && prev_i != replica_i
+                    throw(ArgumentError("replica_loggers cannot contain multiple " *
+                                        "TrajectoryWriters with the same filepath " *
+                                        "($filepath)"))
+                end
+                seen_paths[filepath] = replica_i
+            end
+        end
+    end
+    return nothing
 end
 
 @doc raw"""
@@ -1157,13 +1204,16 @@ function log_property!(rexl::ReplicaExchangeLogger,
                        n_threads::Integer=Threads.nthreads(),
                        kwargs...)
     push!(rexl.indices, indices)
-    push!(rexl.steps, step_n + rexl.end_step)
+    push!(rexl.steps, step_n)
     push!(rexl.deltas, delta)
     rexl.n_exchanges += 1
 end
 
-function finish_logs!(rexl::ReplicaExchangeLogger; n_steps::Integer=0, n_attempts::Integer=0)
-    rexl.end_step += n_steps
+function finish_logs!(rexl::ReplicaExchangeLogger;
+                      n_steps::Integer=0,
+                      n_attempts::Integer=0,
+                      end_step=nothing)
+    rexl.end_step = isnothing(end_step) ? rexl.end_step + n_steps : Int(end_step)
     rexl.n_attempts += n_attempts
 end
 

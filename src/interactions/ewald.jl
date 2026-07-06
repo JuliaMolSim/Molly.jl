@@ -308,22 +308,7 @@ struct PME{T, D, A, I, M, BM, C, CB, RB, VB, P, F, B, SCH} <: AbstractEwald
     grad_safe::Bool
 end
 
-function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5, ϵr=1.0,
-             fixed_charges=true, scheduler=DefaultLambdaScheduler(), grad_safe=false,
-             n_threads::Integer=Threads.nthreads())
-    T = typeof(ustrip(dist_cutoff))
-    AT = array_type(atoms)
-    n_atoms = length(atoms)
-    error_tol_T = T(error_tol)
-    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
-    mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
-    grid_indices = to_device(zeros(Int, 3, n_atoms), AT)
-    grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
-    bsplines_θ = to_device(zeros(T, order * n_atoms, 3), AT)
-    bsplines_dθ = zero(bsplines_θ)
-    # Ordered z/y/x for better memory access
-    charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
-
+function pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
     bsplines_moduli = (zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3]))
     nmax = maximum(mesh_dims)
     data, ddata = zeros(T, order), zeros(T, order)
@@ -371,6 +356,29 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5, ϵr=1.0,
             end
         end
     end
+
+    return bsplines_moduli
+end
+
+function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
+             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
+             scheduler=DefaultLambdaScheduler(), grad_safe=false,
+             n_threads::Integer=Threads.nthreads())
+    T = typeof(ustrip(dist_cutoff))
+    AT = array_type(atoms)
+    n_atoms = length(atoms)
+    error_tol_T = T(error_tol)
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
+    mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
+    grid_indices = to_device(zeros(Int, 3, n_atoms), AT)
+    grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
+    bsplines_θ = to_device(zeros(T, order * n_atoms, 3), AT)
+    bsplines_dθ = zero(bsplines_θ)
+    # Ordered z/y/x for better memory access
+    charge_grid = to_device(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
+    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
+
+    bsplines_moduli = pme_bspline_moduli(T, order, mesh_dims)
 
     if AT <: AbstractGPUArray
         charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)
@@ -954,7 +962,7 @@ in the `data` field of the [`InteractionList2Atoms`](@ref) with `EwaldExclusionD
 
 Only compatible with 3D systems.
 """
-struct EwaldExclusion end
+@kwdef struct EwaldExclusion null::UInt8 = 0 end
 
 Base.zero(::EwaldExclusion) = EwaldExclusion()
 Base.:+(::EwaldExclusion, ::EwaldExclusion) = EwaldExclusion()

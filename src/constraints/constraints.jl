@@ -60,11 +60,12 @@ struct PositionConstraintApplication <: AbstractConstraintApplication end
 struct VelocityConstraintApplication <: AbstractConstraintApplication end
 
 Base.@kwdef struct ConstraintApplicationContext{
-    K <: AbstractConstraintApplication, B, DT, S, CB, VB,
+    K <: AbstractConstraintApplication, B, A, DT, S, CB, VB,
 }
     kind::K
     needs_virial::Bool = false
     step_n::Int = 0
+    atoms::A = nothing
     dt::DT = nothing
     virial_scale::S = 1
     buffers::B = nothing
@@ -85,6 +86,34 @@ function copyto_constraint_scratch!(scratch, values)
         scratch .= values
         return scratch
     end
+end
+
+# These types will enable coalesced memory access via StructArray{ConstraintKernelData}
+abstract type ConstraintKernelData{D, N, M} end
+
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer) = 1
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer) = 1
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer, l::Integer) = 1
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer)
+    return λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+end
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer)
+    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    return λ
+end
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer, l::Integer)
+    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[l]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[l]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[k], atoms[l]))
+    return λ
 end
 
 to_distance_constraints(ac::AngleConstraint) = (
@@ -166,7 +195,7 @@ end
 
 function constrained_pairs(constraint_clusters)
     pairs = Tuple{Int32, Int32}[]
-    for interaction_list in cluster_interactions.(constraint_clusters)
+    for interaction_list in cluster_interactions.(host_constraint_clusters(constraint_clusters))
         for (i, j, _) in interaction_list
             i32 = Int32(i)
             j32 = Int32(j)
@@ -182,11 +211,11 @@ function constrained_pairs(constraint_clusters)
 end
 
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
-    atom_interactions = cluster_interactions.(constraint_clusters)
     if neighbor_finder isa GPUNeighborFinder
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
+    atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))
     if isa(neighbor_finder.eligible, AbstractGPUArray)
         i_idx, j_idx = Int[], Int[]
 
@@ -345,6 +374,13 @@ function n_dof_lost(D::Integer, constraint_clusters::AbstractVector)
     return vibrational_dof_lost
 end
 
+function n_dof_lost(D::Integer,
+                    constraint_clusters::AbstractVector{C}) where {C <: ConstraintKernelData}
+    N = n_atoms_cluster(C)
+    vibrational_dof_lost = (N == 2) ? D*N - (2*D - 1) : D*(N - 2)
+    return length(constraint_clusters) * vibrational_dof_lost
+end
+
 function n_dof(D::Integer, n_atoms::Integer, boundary)
     return D * n_atoms - (D - n_infinite_dims(boundary))
 end
@@ -464,11 +500,14 @@ function to_backend(arr, old::A, new::B) where {A <: Backend, B <: Backend}
     return out
 end
 
-# These types will enable coalesced memory access via StructArray{ConstraintKernelData}
-abstract type ConstraintKernelData{D, N, M} end
-
 n_constraints(::ConstraintKernelData{<:Any, N}) where {N} = N
+n_constraints(::Type{<:ConstraintKernelData{<:Any, N}}) where {N} = N
 n_atoms_cluster(::ConstraintKernelData{<:Any, <:Any, M}) where {M} = M
+n_atoms_cluster(::Type{<:ConstraintKernelData{<:Any, <:Any, M}}) where {M} = M
+
+host_constraint_clusters(constraint_clusters) = constraint_clusters
+host_constraint_clusters(constraint_clusters::StructArray) =
+    replace_storage(Array, constraint_clusters)
 
 struct NoClusterData <: ConstraintKernelData{Nothing, 0, 0} end
 
