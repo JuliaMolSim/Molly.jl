@@ -18,6 +18,8 @@ struct DistanceConstraint{D, I}
     dist::D
 end
 
+Unitful.ustrip(dc::DistanceConstraint) = DistanceConstraint(dc.i, dc.j, ustrip(dc.dist))
+
 """
     AngleConstraint(i, j, k, angle_ijk, dist_ij, dist_jk)
 
@@ -53,6 +55,14 @@ struct AngleConstraint{D, I}
     end
 end
 
+function Unitful.ustrip(ac::AngleConstraint)
+    dist_ij = ustrip(ac.dist_ij)
+    dist_jk = ustrip(ac.dist_jk)
+    dist_ik = ustrip(ac.dist_ik)
+    cos_θ = (dist_ij^2 + dist_jk^2 - dist_ik^2) / (2 * dist_ij * dist_jk)
+    return AngleConstraint(ac.i, ac.j, ac.k, acos(cos_θ), dist_ij, dist_jk)
+end
+
 abstract type AbstractConstraintApplication end
 
 struct PositionConstraintApplication <: AbstractConstraintApplication end
@@ -72,6 +82,18 @@ Base.@kwdef struct ConstraintApplicationContext{
     coords_buffer::CB = nothing
     velocities_buffer::VB = nothing
 end
+
+Unitful.ustrip(context::ConstraintApplicationContext) = ConstraintApplicationContext(
+    kind = context.kind,
+    needs_virial = context.needs_virial,
+    step_n = context.step_n,
+    atoms = _maybe_strip_units(context.atoms),
+    dt = _maybe_strip_units(context.dt),
+    virial_scale = ustrip(context.virial_scale),
+    buffers = _maybe_strip_units(context.buffers),
+    coords_buffer = _maybe_strip_units(context.coords_buffer),
+    velocities_buffer = _maybe_strip_units(context.velocities_buffer),
+)
 
 function copyto_constraint_scratch!(scratch, values)
     if isnothing(scratch)

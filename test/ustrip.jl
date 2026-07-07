@@ -62,14 +62,76 @@
     )
     @test ustrip(rb).f4 == 4.0
 
+    dist_constraint = DistanceConstraint(1, 2, 0.3u"nm")
+    @test ustrip(dist_constraint).dist == 0.3
+
+    angle_constraint = AngleConstraint(1, 2, 3, 1.8, 0.2u"nm", 0.25u"nm")
+    angle_constraint_nounits = ustrip(angle_constraint)
+    @test angle_constraint_nounits.dist_ij == 0.2
+    @test angle_constraint_nounits.dist_jk == 0.25
+    @test angle_constraint_nounits.dist_ik ≈ ustrip(angle_constraint.dist_ik)
+
+    lincs = LINCS(
+        masses=[12.0u"g/mol", 14.0u"g/mol"],
+        dist_constraints=[dist_constraint],
+        dist_tolerance=1e-8u"nm",
+        vel_tolerance=1e-8u"nm^2/ps",
+    )
+    lincs_nounits = ustrip(lincs)
+    @test lincs_nounits.dist_tolerance == 1e-8
+    @test lincs_nounits.vel_tolerance == 1e-8
+    @test first(lincs_nounits.dist_constraints).dist == 0.3
+    @test first(from_device(lincs_nounits.clusters)).dist12 == 0.3
+    @test first(lincs_nounits.lincs_data.lengths) == 0.3
+
     ljdc = LJDispersionCorrection(atoms[1:2], 1.0u"nm")
-    @test ustrip(ljdc).factor ≈ ustrip(ljdc.factor)
+    ljdc_nounits = ustrip(ljdc)
+    @test ljdc_nounits.factor_6 ≈ ustrip(ljdc.factor_6)
+    @test ljdc_nounits.factor_12 ≈ ustrip(ljdc.factor_12)
+
+    coul_scaled = CoulombScaled(
+        cutoff=DistanceCutoff(1.0u"nm"),
+        weight_special=0.5,
+        coulomb_const=2.0u"kJ * mol^-1 * nm",
+    )
+    coul_scaled_nounits = ustrip(coul_scaled)
+    @test coul_scaled_nounits.cutoff.dist_cutoff == 1.0
+    @test coul_scaled_nounits.weight_special == 0.5
+    @test coul_scaled_nounits.coulomb_const == 2.0
+    @test coul_scaled_nounits.scheduler == coul_scaled.scheduler
+
+    crf_scaled = CoulombReactionFieldScaled(
+        dist_cutoff=1.2u"nm",
+        weight_special=0.25,
+        coulomb_const=3.0u"kJ * mol^-1 * nm",
+    )
+    crf_scaled_nounits = ustrip(crf_scaled)
+    @test crf_scaled_nounits.dist_cutoff == 1.2
+    @test crf_scaled_nounits.weight_special == 0.25
+    @test crf_scaled_nounits.coulomb_const == 3.0
+    @test crf_scaled_nounits.scheduler == crf_scaled.scheduler
 
     ewald = Ewald(1.0u"nm")
     ewald_nounits = ustrip(ewald)
     @test ewald_nounits.dist_cutoff == 1.0
     @test ewald_nounits.error_tol == ewald.error_tol
     @test ewald_nounits.excluded_pairs == ewald.excluded_pairs
+
+    coul_ewald_scaled = CoulombEwaldScaled(
+        dist_cutoff=1.4u"nm",
+        error_tol=0.001,
+        weight_special=0.75,
+        coulomb_const=4.0u"kJ * mol^-1 * nm",
+        approximate_erfc=false,
+    )
+    coul_ewald_scaled_nounits = ustrip(coul_ewald_scaled)
+    @test coul_ewald_scaled_nounits.dist_cutoff == 1.4
+    @test coul_ewald_scaled_nounits.error_tol == 0.001
+    @test coul_ewald_scaled_nounits.weight_special == 0.75
+    @test coul_ewald_scaled_nounits.coulomb_const == 4.0
+    @test coul_ewald_scaled_nounits.α ≈ ustrip(coul_ewald_scaled.α)
+    @test coul_ewald_scaled_nounits.scheduler == coul_ewald_scaled.scheduler
+    @test coul_ewald_scaled_nounits.approximate_erfc == false
 
     cubic = CubicBoundary(2.0u"nm")
     pme = PME(1.0u"nm", atoms, cubic)

@@ -2032,6 +2032,14 @@ Unitful.ustrip(c::Coulomb) = Coulomb(
     coulomb_const = ustrip(c.coulomb_const)
 )
 
+Unitful.ustrip(c::CoulombScaled) = CoulombScaled(
+    cutoff = ustrip(c.cutoff),
+    use_neighbors = c.use_neighbors,
+    scheduler = c.scheduler,
+    weight_special = ustrip(c.weight_special),
+    coulomb_const = ustrip(c.coulomb_const)
+)
+
 Unitful.ustrip(c::CoulombSoftCoreBeutler) = CoulombSoftCoreBeutler(
     cutoff = ustrip(c.cutoff),
     α = ustrip(c.α),
@@ -2059,6 +2067,15 @@ Unitful.ustrip(c::CoulombReactionField) = CoulombReactionField(
     dist_cutoff = ustrip(c.dist_cutoff),
     solvent_dielectric = ustrip(c.solvent_dielectric),
     use_neighbors = c.use_neighbors,
+    weight_special = ustrip(c.weight_special),
+    coulomb_const = ustrip(c.coulomb_const)
+)
+
+Unitful.ustrip(c::CoulombReactionFieldScaled) = CoulombReactionFieldScaled(
+    dist_cutoff = ustrip(c.dist_cutoff),
+    solvent_dielectric = ustrip(c.solvent_dielectric),
+    use_neighbors = c.use_neighbors,
+    scheduler = c.scheduler,
     weight_special = ustrip(c.weight_special),
     coulomb_const = ustrip(c.coulomb_const)
 )
@@ -2122,6 +2139,17 @@ Unitful.ustrip(c::CoulombEwald) = CoulombEwald(
     ustrip(c.dist_cutoff),
     ustrip(c.error_tol),
     c.use_neighbors,
+    ustrip(c.weight_special),
+    ustrip(c.coulomb_const),
+    ustrip(c.α),
+    c.approximate_erfc
+)
+
+Unitful.ustrip(c::CoulombEwaldScaled) = CoulombEwaldScaled(
+    ustrip(c.dist_cutoff),
+    ustrip(c.error_tol),
+    c.use_neighbors,
+    c.scheduler,
     ustrip(c.weight_special),
     ustrip(c.coulomb_const),
     ustrip(c.α),

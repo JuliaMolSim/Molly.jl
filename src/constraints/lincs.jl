@@ -8,12 +8,25 @@ struct LincsCouplingMatrix{R, N, C}
     coef::C        # mass-weighted coupling coefficients
 end
 
+Unitful.ustrip(cm::LincsCouplingMatrix) = LincsCouplingMatrix(
+    _maybe_strip_units(cm.range),
+    _maybe_strip_units(cm.neighbors),
+    _maybe_strip_units(cm.coef),
+)
+
 struct LincsCouplingDense{CI, CC, NC}
     coupled_indices::CI   # Int[max_coupled, K_padded]
     coupled_coef::CC      # T[max_coupled, K_padded]
     n_coupled::NC         # Int[K_padded]
     max_coupled::Int
 end
+
+Unitful.ustrip(cd::LincsCouplingDense) = LincsCouplingDense(
+    _maybe_strip_units(cd.coupled_indices),
+    _maybe_strip_units(cd.coupled_coef),
+    _maybe_strip_units(cd.n_coupled),
+    cd.max_coupled,
+)
 
 struct LincsData{A1, A2, L, IM, SD, CM}
     atom1::A1
@@ -26,6 +39,17 @@ struct LincsData{A1, A2, L, IM, SD, CM}
     niter::Int
 end
 
+Unitful.ustrip(data::LincsData) = LincsData(
+    _maybe_strip_units(data.atom1),
+    _maybe_strip_units(data.atom2),
+    _maybe_strip_units(data.lengths),
+    _maybe_strip_units(data.invmass),
+    _maybe_strip_units(data.sdiag),
+    ustrip(data.coupling),
+    data.nrec,
+    data.niter,
+)
+
 struct LincsWorkspace{BV, R, S, TM, BL, FS}
     B::BV
     rhs::R
@@ -34,6 +58,15 @@ struct LincsWorkspace{BV, R, S, TM, BL, FS}
     blcc::BL
     factor_sum::FS
 end
+
+Unitful.ustrip(ws::LincsWorkspace) = LincsWorkspace(
+    _maybe_strip_units(ws.B),
+    _maybe_strip_units(ws.rhs),
+    _maybe_strip_units(ws.sol),
+    _maybe_strip_units(ws.tmp),
+    _maybe_strip_units(ws.blcc),
+    _maybe_strip_units(ws.factor_sum),
+)
 
 """
     LINCS(masses, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
@@ -84,6 +117,20 @@ struct LINCS{CL, LD, LW, DC, AC, E, F, DB, CI}
     delta_buf::DB         # 3 × n_atoms matrix for atomic scatter (or nothing on CPU)
     constrained_atoms::CI # sorted unique atom indices in constraints (or nothing on CPU)
 end
+
+Unitful.ustrip(lincs::LINCS) = LINCS(
+    _strip_units_array(lincs.clusters),
+    ustrip(lincs.lincs_data),
+    ustrip(lincs.workspace),
+    _maybe_strip_units(lincs.dist_constraints),
+    _maybe_strip_units(lincs.angle_constraints),
+    ustrip(lincs.dist_tolerance),
+    ustrip(lincs.vel_tolerance),
+    lincs.iter_vel_correction,
+    lincs.gpu_block_size,
+    _maybe_strip_units(lincs.delta_buf),
+    _maybe_strip_units(lincs.constrained_atoms),
+)
 
 function validate_angle_constraints(dist_constraints, angle_constraints)
     dist_atoms = Set{Int}()
