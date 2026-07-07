@@ -703,10 +703,11 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
         fs, _ = compute_initial_total_virial!(buffers, sys, neighbors, step_n;
                                               n_threads=n_threads, kwargs...)
         return fs, buffers.virial
+    else
+        fs = zero_forces(sys)
+        forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
+        return fs, buffers.virial
     end
-    fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
-    return fs, buffers.virial
 end
 
 function forces!(fs,

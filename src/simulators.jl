@@ -427,12 +427,11 @@ function default_constraint_preview_dt(sys)
 end
 
 function merge_initial_constraint_virial!(buffers, sys, step_n::Integer, needs_virial::Bool,
-                                          current_forces; n_threads::Integer=Threads.nthreads(),
+                                          accels; n_threads::Integer=Threads.nthreads(),
                                           dt=default_constraint_preview_dt(sys))
     if needs_virial && length(sys.constraints) > 0
         coords = copyto_constraint_scratch!(buffers.constraint_preview_coords_buffer, sys.coords)
         velocities = copyto_constraint_scratch!(buffers.constraint_velocities_buffer, sys.velocities)
-        accels = calc_accels.(current_forces, masses(sys))
 
         clear_constraint_virial!(buffers, sys, step_n)
         sys.coords .+= sys.velocities .* dt .+ (accels .* dt^2) ./ 2
@@ -448,12 +447,11 @@ end
 
 function compute_initial_total_virial!(buffers, sys, neighbors, step_n::Integer;
                                        n_threads::Integer=Threads.nthreads(), kwargs...)
-    forces_t = zero_forces(sys)
-    forces!(forces_t, sys, neighbors, step_n, buffers, Val(true);
-            n_threads=n_threads, kwargs...)
-    merge_initial_constraint_virial!(buffers, sys, step_n, true, forces_t;
-                                     n_threads=n_threads)
-    return forces_t, buffers
+    fs = zero_forces(sys)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
+    accels = calc_accels.(fs, masses(sys))
+    merge_initial_constraint_virial!(buffers, sys, step_n, true, accels; n_threads=n_threads)
+    return fs, buffers
 end
 
 function recompute_forces_after_coupling!(forces_out, sys, neighbors, buffers, step_n::Integer,
@@ -488,10 +486,10 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(needs_vir_init);
             n_threads=n_threads)
-    merge_initial_constraint_virial!(buffers, sys, init_step, needs_vir_init, forces_t;
-                                     n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
+    merge_initial_constraint_virial!(buffers, sys, init_step, needs_vir_init, accels_t;
+                                     n_threads=n_threads)
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
                    current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
@@ -647,10 +645,10 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(needs_vir_init);
             n_threads=n_threads)
-    merge_initial_constraint_virial!(buffers, sys, init_step, needs_vir_init, forces_t;
-                                     n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
+    merge_initial_constraint_virial!(buffers, sys, init_step, needs_vir_init, accels_t;
+                                     n_threads=n_threads)
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
                    current_forces=forces_t)
     velocities_half = zero(sys.velocities)
@@ -792,11 +790,12 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
+    accels_t = calc_accels.(forces_t, masses(sys))
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
-        merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
+        merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads)
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                        n_threads=n_threads, current_forces=forces_t)
@@ -804,7 +803,6 @@ end
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                        n_threads=n_threads)
     end
-    accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
@@ -891,11 +889,12 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
+    accels_t = calc_accels.(forces_t, masses(sys))
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
-        merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
+        merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads)
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                        n_threads=n_threads, current_forces=forces_t)
@@ -904,7 +903,6 @@ end
                        n_threads=n_threads)
     end
     coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
-    accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     dt_sq = sim.dt^2
 
@@ -1010,11 +1008,12 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
+    accels_t = calc_accels.(forces_t, masses(sys))
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
-        merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
+        merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads)
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                        n_threads=n_threads, current_forces=forces_t)
@@ -1022,7 +1021,6 @@ end
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                        n_threads=n_threads)
     end
-    accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -1696,7 +1694,8 @@ mts_generate_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         if step_n % needs_vir_steps == 0
             # Virial calculated with all interactions
             forces!(forces_t, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
-            merge_initial_constraint_virial!(buffers, sys, step_n, true, forces_t;
+            accels_t .= calc_accels.(forces_t, masses(sys))
+            merge_initial_constraint_virial!(buffers, sys, step_n, true, accels_t;
                                              n_threads=n_threads)
         end
         if using_constraints

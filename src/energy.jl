@@ -124,9 +124,10 @@ function virial(sys, neighbors, step_n::Integer=0;
         compute_initial_total_virial!(buffers, sys, neighbors, step_n;
                                       n_threads=n_threads, kwargs...)
         return buffers.virial
+    else
+        _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
+        return v
     end
-    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
-    return v
 end
 
 """
