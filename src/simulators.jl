@@ -32,13 +32,15 @@ function calc_n_steps(sim_time::Number, dt)
     return Int(cld(sim_time, dt))
 end
 
-function check_init_step(init_step::Integer)
-    init_step >= 0 || throw(ArgumentError("init_step must be non-negative"))
-    return Int(init_step)
+function check_simulate_inputs(init_step::Integer, run_loggers, strictness)
+    if init_step < 0
+        throw(ArgumentError("init_step must be non-negative, found $init_step"))
+    end
+    if !(run_loggers in (true, false, :skipzero))
+        throw(ArgumentError("run_loggers must be true, false or :skipzero, found $run_loggers"))
+    end
+    check_strictness(strictness)
 end
-
-initial_logger_mode(run_loggers, log_initial_state::Bool) =
-    log_initial_state ? run_loggers : false
 
 function default_show_progress()
     if haskey(ENV, "MOLLY_SHOW_PROGRESS")
@@ -133,8 +135,6 @@ Constraints are applied during minimization, which can lead to issues.
     Unused for REMD simulations.
 - `init_step=0`: the step number before the first step is taken, useful for time-dependent
     potentials.
-- `log_initial_state=true`: whether to run loggers for the state at `init_step`. Set this
-    to `false` when continuing a simulation in blocks to avoid duplicate boundary records.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
     the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
     environmental variable `MOLLY_SHOW_PROGRESS`.
@@ -161,13 +161,11 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            run_loggers=false,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     # @inline needed to avoid Enzyme error
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
         if isnothing(sim.constraint_bond_constant)
             err_str = "System has constraints but constraint_bond_constant is nothing, " *
@@ -194,8 +192,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
     buffers = init_buffers!(sys, n_threads)
     E = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads,
                          specific_inter_lists=sis)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
-    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
+    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
                    current_potential_energy=E)
     println(sim.log_stream, "Step ", init_step, " - potential energy ", E,
             " - max force N/A - N/A")
@@ -475,12 +472,10 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -497,8 +492,7 @@ end
                                      n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
-    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
+    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
                    current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -630,12 +624,10 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                            run_loggers=true,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -659,8 +651,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                      n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
-    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
+    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
                    current_forces=forces_t)
     velocities_half = zero(sys.velocities)
     dt_div2 = sim.dt / 2
@@ -789,12 +780,10 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -805,15 +794,15 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
         merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
                                          n_threads=n_threads)
-        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
-                       current_forces=forces_t)
+        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
+                       n_threads=n_threads, current_forces=forces_t)
     else
-        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
+                       n_threads=n_threads)
     end
     accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
@@ -891,11 +880,10 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(nothing, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -905,15 +893,15 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
         merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
                                          n_threads=n_threads)
-        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
-                       current_forces=forces_t)
+        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
+                       n_threads=n_threads, current_forces=forces_t)
     else
-        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
+                       n_threads=n_threads)
     end
     coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -1010,12 +998,10 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -1026,15 +1012,15 @@ end
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
         merge_initial_constraint_virial!(buffers, sys, init_step, true, forces_t;
                                          n_threads=n_threads)
-        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
-                       current_forces=forces_t)
+        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
+                       n_threads=n_threads, current_forces=forces_t)
     else
-        apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
+                       n_threads=n_threads)
     end
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
@@ -1150,12 +1136,10 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
         err_str = "LangevinSplitting is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -1182,8 +1166,7 @@ end
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
-    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(false); n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
@@ -1302,12 +1285,10 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
         err_str = "OverdampedLangevin is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -1321,8 +1302,7 @@ end
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
-    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     noise_prefac = sqrt((2 / sim.friction) * sim.dt)
@@ -1396,12 +1376,10 @@ end
                            run_loggers=true,
                            shortcut=nothing,
                            init_step::Integer=0,
-                           log_initial_state::Bool=true,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
         err_str = "NoseHoover is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -1419,8 +1397,7 @@ end
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
-    initial_loggers = initial_logger_mode(run_loggers, log_initial_state)
-    apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads,
+    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
                    current_forces=forces_t)
     v_half = zero(sys.velocities)
     zeta = zero(inv(sim.dt))
@@ -1640,17 +1617,17 @@ end
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
-    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
+    init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -1729,7 +1706,7 @@ function simulate!(sys::ReplicaSystem,
                    show_progress=default_show_progress(),
                    rng=Random.default_rng(),
                    strictness=default_strictness())
-    check_strictness(strictness)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     if assign_velocities
         master_sys = sys.partition.master_sys
         k_B = master_sys.k
@@ -1851,8 +1828,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         show_progress=default_show_progress(),
                         rng=Random.default_rng(),
                         strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     sys.current_step = init_step
     n_steps = calc_n_steps(n_steps_or_time, remd_sim.dt)
     thread_div = equal_parts(n_threads, sys.n_replicas)
@@ -1990,8 +1966,7 @@ end
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
-    check_strictness(strictness)
-    init_step = check_init_step(init_step)
+    check_simulate_inputs(init_step, run_loggers, strictness)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;

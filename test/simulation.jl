@@ -43,9 +43,9 @@ end
     simulate!(sys_continuous, sim_continuous, 10; n_threads=1)
     simulate!(sys_chunked, sim_chunked, 3; n_threads=1)
     simulate!(sys_chunked, sim_chunked, 3; n_threads=1, init_step=3,
-              log_initial_state=false)
+              run_loggers=:skipzero)
     simulate!(sys_chunked, sim_chunked, 4; n_threads=1, init_step=6,
-              log_initial_state=false)
+              run_loggers=:skipzero)
 
     @test sys_chunked.coords == sys_continuous.coords
     @test sys_chunked.velocities == sys_continuous.velocities
