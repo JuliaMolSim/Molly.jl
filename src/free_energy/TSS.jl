@@ -2,6 +2,9 @@ export
     TSSHistoryForgetting,
     TSSState,
     TSSSimulation,
+    TSSReplayFrame,
+    TSSReplayLogger,
+    tss_replay_archive,
     tss_grid_graph,
     tss_free_energy_uncertainties,
     tss_free_energies

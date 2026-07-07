@@ -1,6 +1,8 @@
 tss_step_wrapper(sys, neighbors, step_n, buffers; kwargs...) = step_n
 tss_step_logger() = (step=GeneralObservableLogger(tss_step_wrapper, Int, 1),)
 
+tss_logsumexp_for_test(xs) = maximum(xs) + log(sum(exp.(xs .- maximum(xs))))
+
 function make_tss_thermo_states(; n_atoms=6, n_states=3)
     atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(2.0u"nm")
@@ -25,6 +27,37 @@ function make_tss_thermo_states(; n_atoms=6, n_states=3)
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")
         push!(thermo_states, ThermoState(sys, intg; temperature=temp))
+    end
+    return thermo_states
+end
+
+function make_tss_npt_thermo_states(; n_atoms=4, n_states=3)
+    atom_mass = 10.0u"g/mol"
+    boundary = CubicBoundary(2.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    temp = 298.0u"K"
+    press = 1.0u"bar"
+    neighbor_finder = DistanceNeighborFinder(
+        eligible=trues(n_atoms, n_atoms),
+        n_steps=10,
+        dist_cutoff=1.5u"nm",
+    )
+
+    thermo_states = ThermoState[]
+    for lambda in range(1.0, 0.7; length=n_states)
+        atoms = [Atom(mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1",
+                      λ=lambda) for _ in 1:n_atoms]
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+            neighbor_finder=neighbor_finder,
+        )
+        barostat = CRescaleBarostat(press, 1.0u"ps"; n_steps=10)
+        intg = Langevin(dt=0.001u"ps", temperature=temp, friction=0.1u"ps^-1",
+                        coupling=(barostat,))
+        push!(thermo_states, ThermoState(sys, intg; temperature=temp, pressure=press))
     end
     return thermo_states
 end
@@ -368,6 +401,101 @@ end
             first_states=[1, 3],
             loggers=tss_step_logger(),
         )
+    end
+
+    @testset "frozen replay archive" begin
+        thermo_states4 = make_tss_thermo_states(n_states=4)
+        graph4 = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
+        state = Molly.TSSState(thermo_states4;
+            graph=graph4,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        frozen_f = [copy(est.f) for est in state.estimators]
+        frozen_density = [copy(est.density) for est in state.estimators]
+        frozen_log_dens = [copy(est.log_dens) for est in state.estimators]
+        frozen_tilts = [copy(est.tilts) for est in state.estimators]
+        archive_logger = Molly.TSSReplayLogger(1; include_weights=true)
+        sim = Molly.TSSSimulation(state;
+            n_md_steps=2,
+            n_cycles=2,
+            frozen=true,
+            replay_logger=archive_logger,
+            loggers=(
+                coords=CoordinatesLogger(1),
+                box=BoxLogger(1),
+            ),
+        )
+
+        @test Molly.tss_replay_archive(sim) === archive_logger
+        Molly.simulate!(sim; rng=MersenneTwister(15), n_threads=1, replica_parallel=:serial)
+
+        frames = values(Molly.tss_replay_archive(sim))
+        coords_frames = values(sim.replicas[1].active_state.active_sys.loggers.coords)
+        box_frames = values(sim.replicas[1].active_state.active_sys.loggers.box)
+        @test length(frames) == length(coords_frames) == length(box_frames)
+        @test [frame.step for frame in frames] == collect(0:4)
+        @test [frame.coordinates for frame in frames] == coords_frames
+        @test [frame.box_matrix for frame in frames] == box_frames
+
+        for (estimator, f, density, log_dens, tilts) in
+                zip(state.estimators, frozen_f, frozen_density, frozen_log_dens, frozen_tilts)
+            @test estimator.f == f
+            @test estimator.density == density
+            @test estimator.log_dens == log_dens
+            @test estimator.tilts == tilts
+        end
+
+        for frame in frames
+            estimator = state.estimators[frame.active_window]
+            @test frame.active_state in frame.state_indices
+            @test frame.state_indices == estimator.state_indices
+            recomputed = tss_logsumexp_for_test(
+                estimator.f .+ estimator.log_dens .- frame.reduced_potentials,
+            )
+            @test frame.log_den ≈ recomputed
+            @test !isnothing(frame.weights)
+            @test sum(frame.weights) ≈ 1.0
+        end
+
+        @test_throws ArgumentError Molly.TSSSimulation(state;
+            n_md_steps=1,
+            n_cycles=1,
+            frozen=false,
+            replay_logger=Molly.TSSReplayLogger(1),
+        )
+
+        npt_state = Molly.TSSState(make_tss_npt_thermo_states(n_states=4);
+            graph=graph4,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        npt_sim = Molly.TSSSimulation(npt_state;
+            n_md_steps=1,
+            n_cycles=1,
+            frozen=true,
+            replay_logger=Molly.TSSReplayLogger(1),
+        )
+        Molly.simulate!(npt_sim; rng=MersenneTwister(16), n_threads=1, replica_parallel=:serial)
+        for frame in values(Molly.tss_replay_archive(npt_sim))
+            estimator = npt_state.estimators[frame.active_window]
+            recomputed = similar(frame.reduced_potentials)
+            Molly.reduced_potentials!(
+                recomputed,
+                estimator.state_space,
+                frame.coordinates,
+                frame.boundary,
+                frame.state_indices,
+            )
+            @test frame.box_matrix == Molly.boxmatrix(frame.boundary)
+            @test recomputed ≈ frame.reduced_potentials
+        end
     end
 
     @testset "windowed jackknife uncertainty" begin

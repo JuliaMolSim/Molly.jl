@@ -66,6 +66,59 @@ struct WindowedTSSObservation{T, V, PS}
     pmf_deconvolution_samples::PS
 end
 
+"""
+    TSSReplayFrame
+
+One frame in a frozen TSS replay archive. The frame stores the MD step,
+replica, coordinates, boundary and box matrix, active thermodynamic state and
+window, local window state indices, local reduced potentials, local reference
+denominator, and optional conditional weights.
+"""
+struct TSSReplayFrame{C, B, M, T, W}
+    step::Int
+    replica_index::Int
+    coordinates::C
+    boundary::B
+    box_matrix::M
+    active_state::Int
+    active_window::Int
+    state_indices::Vector{Int}
+    reduced_potentials::Vector{T}
+    log_den::T
+    weights::W
+end
+
+"""
+    TSSReplayLogger(n_steps; include_weights=false)
+
+TSS-level replay archive hook for frozen [`TSSSimulation`](@ref) runs.
+
+Frames are captured every `n_steps` MD steps using the same absolute-step
+cadence as system loggers. `include_weights=true` also stores the conditional
+local state weights for diagnostics. Access captured frames with
+`values(tss_replay_archive(sim))`.
+"""
+mutable struct TSSReplayLogger{F}
+    n_steps::Int
+    include_weights::Bool
+    frames::Vector{F}
+    lock::ReentrantLock
+end
+
+function TSSReplayLogger(n_steps::Integer; include_weights::Bool=false)
+    n_steps > 0 || throw(ArgumentError("TSSReplayLogger n_steps must be positive."))
+    return TSSReplayLogger{Any}(Int(n_steps), include_weights, Any[], ReentrantLock())
+end
+
+Base.values(logger::TSSReplayLogger) = logger.frames
+
+function Base.show(io::IO, logger::TSSReplayLogger)
+    print(io, "TSSReplayLogger with n_steps ", logger.n_steps, ", ",
+          length(logger.frames), " frames recorded")
+end
+
+Base.show(io::IO, ::MIME"text/plain", logger::TSSReplayLogger) = show(io, logger)
+
 mutable struct WindowedTSSReplicaWorkspace{P, ST, T, R}
     partition::P
     energies::Vector{ST}
@@ -82,7 +135,7 @@ end
                   n_replicas=nothing, first_states=nothing,
                   first_windows=nothing, replica_active_states=nothing,
                   loggers=(), replica_loggers=nothing, pmf=nothing,
-                  frozen=false, initial_step=0)
+                  frozen=false, initial_step=0, replay_logger=nothing)
 
 A windowed TSS simulation driver.
 
@@ -90,17 +143,21 @@ Each cycle runs `self_adjustment_steps` blocks of `n_md_steps` molecular
 dynamics steps, collects TSS samples, updates window estimators unless
 `frozen=true`, and optionally records sampled PMF deconvolution diagnostics.
 `initial_step` sets the absolute MD step for a new or resumed simulation.
+`replay_logger` can be a [`TSSReplayLogger`](@ref) for frozen runs, recording
+coordinates, box data, local reduced potentials and local reference
+denominators at a fixed MD-step cadence.
 `loggers` supplies the logger collection for a single-replica simulation.
 For multi-replica TSS, use `replica_loggers` to supply one logger collection
 per newly constructed replica active system.
 Pass `replica_rngs` to [`simulate!`](@ref) to supply one RNG stream per replica;
 otherwise, each replica RNG is reseeded from the top-level `rng`.
 """
-mutable struct TSSSimulation{S, R, W, P}
+mutable struct TSSSimulation{S, R, W, P, A}
     state::S
     replicas::Vector{R}
     replica_workspaces::Vector{W}
     pmf::P
+    replay_logger::A
     n_md_steps::Int
     n_cycles::Int
     self_adjustment_steps::Int
@@ -134,7 +191,8 @@ function TSSSimulation(state::TSSState;
                                replica_loggers = nothing,
                                pmf = nothing,
                                frozen::Bool = false,
-                               initial_step::Integer = 0)
+                               initial_step::Integer = 0,
+                               replay_logger = nothing)
 
     n_md_steps > 0 || throw(ArgumentError("n_md_steps must be positive."))
     n_cycles >= 0 || throw(ArgumentError("n_cycles must be non-negative."))
@@ -144,6 +202,11 @@ function TSSSimulation(state::TSSState;
     end
     self_adjustment_steps > 0 || throw(ArgumentError("self_adjustment_steps must be positive."))
     log_freq > 0 || throw(ArgumentError("log_freq must be positive."))
+    if !isnothing(replay_logger)
+        replay_logger isa TSSReplayLogger ||
+            throw(ArgumentError("replay_logger must be a TSSReplayLogger or nothing."))
+        frozen || throw(ArgumentError("TSS replay archives are only supported for frozen=true runs."))
+    end
 
     replicas = make_windowed_tss_replicas(
         state;
@@ -176,6 +239,7 @@ function TSSSimulation(state::TSSState;
         replicas,
         replica_workspaces,
         pmf,
+        replay_logger,
         n_md_steps,
         n_cycles,
         Int(self_adjustment_steps),
@@ -185,6 +249,14 @@ function TSSSimulation(state::TSSState;
         true,
     )
 end
+
+"""
+    tss_replay_archive(sim::TSSSimulation)
+
+Return the replay archive/logger attached to a `TSSSimulation`, or `nothing` if
+no replay archive was requested. Captured frames are available with `values`.
+"""
+tss_replay_archive(sim::TSSSimulation) = sim.replay_logger
 
 function WindowedTSSReplicaWorkspace(state::TSSState; partition = nothing)
     max_eval_states = maximum(length(estimator.evaluation_state_indices) for estimator in state.estimators)
@@ -463,6 +535,123 @@ function workspace_view(workspace::WindowedTSSReplicaWorkspace, field::Symbol, n
     return @view getfield(workspace, field)[1:n]
 end
 
+function should_log_tss_replay(logger::TSSReplayLogger, step_n::Integer)
+    return (step_n % logger.n_steps) == 0
+end
+
+function push_tss_replay_frame!(logger::TSSReplayLogger, frame::TSSReplayFrame)
+    lock(logger.lock) do
+        push!(logger.frames, frame)
+    end
+    return logger
+end
+
+function capture_tss_replay_frame!(logger::Nothing, args...)
+    return false
+end
+
+function prepare_tss_replay_initial_frame!(active_state::ActiveThermoState)
+    sys = active_state.active_sys
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    place_virtual_sites!(sys)
+    return active_state
+end
+
+function capture_tss_replay_frame!(logger::TSSReplayLogger,
+                                   workspace::WindowedTSSReplicaWorkspace,
+                                   estimator::TSSLocalEstimator,
+                                   active_state::ActiveThermoState,
+                                   replica_index::Int,
+                                   active_window::Int,
+                                   step_n::Integer)
+    should_log_tss_replay(logger, step_n) || return false
+
+    coords = copy(active_state.active_sys.coords)
+    boundary = deepcopy(active_state.active_sys.boundary)
+    state_indices = estimator.state_indices
+    n_local = length(state_indices)
+    energies = workspace_view(workspace, :energies, n_local)
+    reduced_pot = workspace_view(workspace, :reduced_pot, n_local)
+    scratch = workspace_view(workspace, :scratch, n_local)
+    log_state_bias = workspace_view(workspace, :log_state_bias, n_local)
+
+    evaluate_energy_subset!(
+        energies,
+        workspace.partition,
+        coords,
+        boundary,
+        state_indices,
+    )
+    reduced_potentials!(
+        reduced_pot,
+        energies,
+        estimator.state_space,
+        boundary,
+        state_indices,
+    )
+    check_tss_finite!(reduced_pot, "replay reduced potentials", estimator)
+
+    @. log_state_bias = estimator.f + estimator.log_dens
+    check_tss_finite!(log_state_bias, "replay log state bias", estimator)
+    @. scratch = log_state_bias - reduced_pot
+    log_den = logsumexp(scratch)
+    isfinite(log_den) || throw(ArgumentError("TSS replay log normalization is non-finite " *
+                                             "($(log_den)) at iteration " *
+                                             "$(estimator.iteration) with active state " *
+                                             "$(active_state.active_idx)."))
+
+    weights = if logger.include_weights
+        weights_view = workspace_view(workspace, :weights, n_local)
+        conditional_state_weights!(
+            weights_view,
+            log_state_bias,
+            reduced_pot,
+            scratch,
+        )
+        check_tss_probabilities!(weights_view, "replay conditional weights", estimator)
+        copy(weights_view)
+    else
+        nothing
+    end
+
+    frame = TSSReplayFrame(
+        Int(step_n),
+        replica_index,
+        coords,
+        boundary,
+        copy(boxmatrix(boundary)),
+        active_state.active_idx,
+        active_window,
+        copy(state_indices),
+        copy(reduced_pot),
+        log_den,
+        weights,
+    )
+    push_tss_replay_frame!(logger, frame)
+    return false
+end
+
+struct TSSReplayShortcut{L, W, E, A}
+    logger::L
+    workspace::W
+    estimator::E
+    active_state::A
+    replica_index::Int
+    active_window::Int
+end
+
+function shortcut_sim(shortcut::TSSReplayShortcut, sys, buffers, neighbors, step_n; kwargs...)
+    return capture_tss_replay_frame!(
+        shortcut.logger,
+        shortcut.workspace,
+        shortcut.estimator,
+        shortcut.active_state,
+        shortcut.replica_index,
+        shortcut.active_window,
+        step_n,
+    )
+end
+
 function process_tss_sample!(workspace::WindowedTSSReplicaWorkspace,
                               estimator::TSSLocalEstimator{FT},
                               active_state::ActiveThermoState) where {FT}
@@ -533,6 +722,7 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
                                             replica::WindowedTSSReplica,
                                             workspace::WindowedTSSReplicaWorkspace,
                                             pmf_deconvolution,
+                                            replay_logger,
                                             replica_index::Int,
                                             n_md_steps::Int,
                                             self_adjustment_steps::Int,
@@ -571,14 +761,36 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
             "visited",
         )
 
+        step_start = initial_step + (substep - 1) * n_md_steps
+        replay_shortcut = isnothing(replay_logger) ? nothing : TSSReplayShortcut(
+            replay_logger,
+            workspace,
+            estimator,
+            replica.active_state,
+            replica_index,
+            cycle_window,
+        )
+        if log_initial_state && substep == 1
+            prepare_tss_replay_initial_frame!(replica.active_state)
+            capture_tss_replay_frame!(
+                replay_logger,
+                workspace,
+                estimator,
+                replica.active_state,
+                replica_index,
+                cycle_window,
+                step_start,
+            )
+        end
         simulate!(
             replica.active_state.active_sys,
             replica.active_state.active_integrator,
             n_md_steps;
             n_threads = n_threads,
             rng = workspace.rng,
-            init_step = initial_step + (substep - 1) * n_md_steps,
+            init_step = step_start,
             log_initial_state = log_initial_state && substep == 1,
+            shortcut = replay_shortcut,
         )
 
         sample = process_tss_sample!(workspace, estimator, replica.active_state)
@@ -791,6 +1003,7 @@ function collect_windowed_tss_observations_serial!(sim::TSSSimulation,
             sim.replicas[replica_i],
             sim.replica_workspaces[replica_i],
             sim.pmf,
+            sim.replay_logger,
             replica_i,
             sim.n_md_steps,
             sim.self_adjustment_steps,
@@ -815,6 +1028,7 @@ function collect_windowed_tss_observations_threaded!(sim::TSSSimulation,
                 sim.replicas[replica_i],
                 sim.replica_workspaces[replica_i],
                 sim.pmf,
+                sim.replay_logger,
                 replica_i,
                 sim.n_md_steps,
                 sim.self_adjustment_steps,
