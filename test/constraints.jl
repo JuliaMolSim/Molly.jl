@@ -1068,7 +1068,7 @@ end
             loggers=(virial=VirialLogger(Matrix{Float64}, 1),),
         )
 
-        simulate!(sys, simulator, 1; run_loggers=:skipzero, n_threads=1,
+        simulate!(sys, simulator, 1; run_loggers=:skipstart, n_threads=1,
                   rng=MersenneTwister(1234))
 
         @test maximum(abs.(only(values(sys.loggers.virial)))) > 1e-8
@@ -1092,7 +1092,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         @test check_velocity_constraints(sys)
         @test maximum(abs.(only(values(sys.loggers.virial)))) > 1e-8
@@ -1107,7 +1107,7 @@ end
     )
 
     simulate!(sys, VelocityVerlet(dt=dt, remove_CM_motion=0), 1;
-              run_loggers=:skipzero, n_threads=1)
+              run_loggers=:skipstart, n_threads=1)
 
     logged_pressure = only(values(sys.loggers.pressure))
     logged_scalar_pressure = only(values(sys.loggers.scalar_pressure))
@@ -1127,7 +1127,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, coupling=(coupler,), remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         expected_pressure = (2 .* coupler.kin_tensor .+ coupler.virial) ./ coupler.volume
         post_coupling_pressure = (2 .* coupler.kin_tensor .+ coupler.virial) ./
@@ -1154,7 +1154,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, coupling=(coupler,), remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         @test !coupler.snapshot_seen
         @test only(values(sys.loggers.snapshot)) == false
@@ -1168,7 +1168,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, coupling=(coupler,), remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         @test coupler.snapshot_seen
         @test only(values(sys.loggers.snapshot)) == true
@@ -1184,7 +1184,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, coupling=(coupler,), remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         expected_pressure = (2 .* coupler.kin_tensor .+ coupler.virial) ./ coupler.volume
         @test coupler.snapshot_seen
@@ -1199,7 +1199,7 @@ end
     )
 
     simulate!(sys, VelocityVerlet(dt=dt, coupling=(barostat,), remove_CM_motion=0), 1;
-              run_loggers=:skipzero, n_threads=1)
+              run_loggers=:skipstart, n_threads=1)
 
     @test length(values(sys.loggers.pressure)) == 1
 

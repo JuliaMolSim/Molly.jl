@@ -43,9 +43,9 @@ end
     simulate!(sys_continuous, sim_continuous, 10; n_threads=1)
     simulate!(sys_chunked, sim_chunked, 3; n_threads=1)
     simulate!(sys_chunked, sim_chunked, 3; n_threads=1, init_step=3,
-              run_loggers=:skipzero)
+              run_loggers=:skipstart)
     simulate!(sys_chunked, sim_chunked, 4; n_threads=1, init_step=6,
-              run_loggers=:skipzero)
+              run_loggers=:skipstart)
 
     @test sys_chunked.coords == sys_continuous.coords
     @test sys_chunked.velocities == sys_continuous.velocities
@@ -377,7 +377,7 @@ end
     random_velocities!(s, temp)
 
     @time simulate!(s, simulator, n_steps ÷ 2)
-    @time simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipzero)
+    @time simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipstart)
 
     @test length(values(s.loggers.coords)) == 21
     @test maximum(distances(s.coords, boundary)) > 5.0u"nm"

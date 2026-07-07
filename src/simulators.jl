@@ -36,8 +36,8 @@ function check_simulate_inputs(init_step::Integer, run_loggers, strictness)
     if init_step < 0
         throw(ArgumentError("init_step must be non-negative, found $init_step"))
     end
-    if !(run_loggers in (true, false, :skipzero))
-        throw(ArgumentError("run_loggers must be true, false or :skipzero, found $run_loggers"))
+    if !(run_loggers in (true, false, :skipstart))
+        throw(ArgumentError("run_loggers must be true, false or :skipstart, found $run_loggers"))
     end
     check_strictness(strictness)
 end
@@ -128,7 +128,7 @@ Constraints are applied during minimization, which can lead to issues.
 - `n_threads=Threads.nthreads()`: the number of threads to run the simulation on, only
     relevant when running on CPU.
 - `run_loggers`: whether to run the loggers during the simulation. Can be `true`, `false`
-    or `:skipzero`, in which case the loggers are not run before the first step. `run_loggers`
+    or `:skipstart`, in which case the loggers are not run before the first step. `run_loggers`
     is `true` by default except for [`SteepestDescentMinimizer`](@ref), where it is `false`.
 - `shortcut=nothing`: when to stop the simulation early. A struct with the `shortcut_sim`
     method defined can be provided. `shortcut_sim` is checked at the end of each step.
@@ -279,7 +279,7 @@ end
 
 function logger_due_on_step(logger_interval, step_n::Integer, run_loggers)
     run_loggers == false && return false
-    run_loggers == :skipzero && step_n == 0 && return false
+    run_loggers == :skipstart && step_n == 0 && return false
     return !isinf(logger_interval) && step_n % logger_interval == 0
 end
 
@@ -1455,6 +1455,8 @@ end
     return sys
 end
 
+abstract type AbstractMTSIntegrator{NF, NP, NS, NG} end
+
 """
     MTSIntegrator(; <keyword arguments>)
 
@@ -1488,20 +1490,35 @@ Coupling, removing the center of mass motion and running loggers applies per out
 - `remove_CM_motion=1`: remove the center of mass motion every this number of outer steps,
     set to `false` or `0` to not remove center of mass motion.
 """
-struct MTSIntegrator{T, NF, NP, NS, NG, C}
-    dt::T
+struct MTSIntegrator{NF, NP, NS, NG, S, C} <: AbstractMTSIntegrator{NF, NP, NS, NG}
     ordered_fractions::NTuple{NF, Int}
     pi_fractions::NTuple{NP, Int}
     si_fractions::NTuple{NS, Int}
     gi_fractions::NTuple{NG, Int}
+    dt::S
     coupling::C
     remove_CM_motion::Int
 end
 
+"""
+"""
+struct MTSLangevinIntegrator{NF, NP, NS, NG, S, K, F, C, T} <: AbstractMTSIntegrator{NF, NP, NS, NG}
+    ordered_fractions::NTuple{NF, Int}
+    pi_fractions::NTuple{NP, Int}
+    si_fractions::NTuple{NS, Int}
+    gi_fractions::NTuple{NG, Int}
+    dt::S
+    temperature::K
+    friction::F
+    coupling::C
+    remove_CM_motion::Int
+    vel_scale::T
+    noise_scale::T
+end
+
 check_integer(x) = iszero(length(x)) || all(i -> i isa Integer, x)
 
-function MTSIntegrator(; dt, pi_fractions=(), si_fractions=(), gi_fractions=(),
-                       coupling=nothing, remove_CM_motion=1)
+function setup_mts_integrator(pi_fractions, si_fractions, gi_fractions)
     if iszero(length(pi_fractions)) && iszero(length(si_fractions)) && iszero(length(gi_fractions))
         throw(ArgumentError("MTSIntegrator requires one of pi_fractions, si_fractions " *
                             "or gi_fractions to be provided"))
@@ -1525,11 +1542,28 @@ function MTSIntegrator(; dt, pi_fractions=(), si_fractions=(), gi_fractions=(),
                                 "multiple of fraction $(ordered_fractions[i - 1])"))
         end
     end
-    return MTSIntegrator(dt, ordered_fractions, Tuple(pi_fractions), Tuple(si_fractions),
-                         Tuple(gi_fractions), coupling, Int(remove_CM_motion))
+    return ordered_fractions
 end
 
-function mts_interaction_groups(sys, sim::MTSIntegrator{<:Any, <:Any, NP, NS, NG}) where {NP, NS, NG}
+function MTSIntegrator(; dt, pi_fractions=(), si_fractions=(), gi_fractions=(),
+                       coupling=nothing, remove_CM_motion=1)
+    ordered_fractions = setup_mts_integrator(pi_fractions, si_fractions, gi_fractions)
+    return MTSIntegrator(ordered_fractions, Tuple(pi_fractions), Tuple(si_fractions),
+                         Tuple(gi_fractions), dt, coupling, Int(remove_CM_motion))
+end
+
+function MTSLangevinIntegrator(; dt, temperature, friction, pi_fractions=(), si_fractions=(),
+                               gi_fractions=(), coupling=nothing, remove_CM_motion=1)
+    ordered_fractions = setup_mts_integrator(pi_fractions, si_fractions, gi_fractions)
+    total_substeps = last(ordered_fractions)
+    vel_scale = exp(-dt * friction / total_substeps)
+    noise_scale = sqrt(1 - vel_scale^2)
+    return MTSIntegrator(ordered_fractions, Tuple(pi_fractions), Tuple(si_fractions),
+                         Tuple(gi_fractions), dt, temperature, friction, coupling,
+                         Int(remove_CM_motion), vel_scale, noise_scale)
+end
+
+function mts_interaction_groups(sys, sim::AbstractMTSIntegrator{<:Any, NP, NS, NG}) where {NP, NS, NG}
     if length(sys.pairwise_inters) != NP
         throw(ArgumentError("the system has $(length(sys.pairwise_inters)) pairwise " *
                             "interactions but there are $NP in the MTSIntegrator"))
@@ -1554,15 +1588,25 @@ function mts_interaction_groups(sys, sim::MTSIntegrator{<:Any, <:Any, NP, NS, NG
     return fraction_inters
 end
 
-function mts_coordinate_update!(sys, sim::MTSIntegrator, dt_frac_x)
+function mts_coordinate_update!(sys, noise, sim::MTSIntegrator, dt_frac_x, rng)
     sys.coords .+= sys.velocities .* dt_frac_x
     return sys
 end
 
-# Can modify sys, forces_t, accels_t, buffers, cons_coord_storage and cons_vel_storage
-function mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
-                       sim, ordered_fractions, fraction_inters, neighbors, dt, step_n, n_threads,
-                       using_constraints, n_parent_substeps, recompute_forces_in)
+function mts_coordinate_update!(sys, noise, sim::MTSLangevinIntegrator, dt_frac_x, rng)
+    dt_half = dt_frac_x / 2
+    sys.coords .+= sys.velocities .* dt_half
+    random_velocities!(noise, sys, sim.temperature; rng=rng)
+    sys.velocities .= sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
+    sys.coords .+= sys.velocities .* dt_half
+    return sys
+end
+
+# Can modify sys, forces_t, accels_t, buffers, noise, cons_coord_storage and cons_vel_storage
+function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
+                       cons_vel_storage, sim, ordered_fractions, fraction_inters, neighbors, dt,
+                       step_n, n_threads, rng, using_constraints, n_parent_substeps,
+                       recompute_forces_in)
     n_substeps = first(ordered_fractions)
     n_steps_per_parent_step = n_substeps ÷ n_parent_substeps
     pis, sis, gis = first(fraction_inters)
@@ -1582,7 +1626,7 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, con
             if using_constraints
                 cons_coord_storage .= sys.coords
             end
-            mts_coordinate_update!(sys, sim, dt_frac_x)
+            mts_coordinate_update!(sys, noise, sim, dt_frac_x, rng)
 
             if using_constraints
                 apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
@@ -1592,9 +1636,10 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, con
             sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
             place_virtual_sites!(sys)
         else
-            mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
-                          sim, Base.tail(ordered_fractions), Base.tail(fraction_inters),
-                          neighbors, dt, step_n, n_threads, using_constraints, n_substeps, true)
+            mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
+                          cons_vel_storage, sim, Base.tail(ordered_fractions),
+                          Base.tail(fraction_inters), neighbors, dt, step_n, n_threads, rng,
+                          using_constraints, n_substeps, true)
         end
 
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
@@ -1607,8 +1652,11 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, con
     return sys
 end
 
+mts_generate_noise(sys, ::MTSIntegrator) = nothing
+mts_generate_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
+
 @inline function simulate!(sys,
-                           sim::MTSIntegrator,
+                           sim::AbstractMTSIntegrator,
                            n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
@@ -1629,6 +1677,7 @@ end
     buffers = init_buffers!(sys, n_threads)
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
+    noise = mts_generate_noise(sys, sim)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
@@ -1641,9 +1690,9 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        mts_substeps!(sys, forces_t, accels_t, buffers, cons_coord_storage, cons_vel_storage,
-                      sim, sim.ordered_fractions, fraction_inters, neighbors, sim.dt, step_n,
-                      n_threads, using_constraints, 1, recompute_forces)
+        mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
+                      cons_vel_storage, sim, sim.ordered_fractions, fraction_inters, neighbors,
+                      sim.dt, step_n, n_threads, rng, using_constraints, 1, recompute_forces)
         if step_n % needs_vir_steps == 0
             # Virial calculated with all interactions
             forces!(forces_t, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
