@@ -280,7 +280,7 @@ end
 function logger_due_on_step(logger_interval, step_n::Integer, run_loggers)
     run_loggers == false && return false
     run_loggers == :skipstart && step_n == 0 && return false
-    return !isinf(logger_interval) && step_n % logger_interval == 0
+    return !isinf(logger_interval) && (step_n % logger_interval == 0)
 end
 
 function virial_logger_due_on_step(loggers, step_n::Integer, run_loggers)
@@ -297,21 +297,22 @@ function needs_virial_schedule(coupling, loggers, run_loggers)
     steps = Int[]
     coupling_needs_virial, coupling_steps = needs_virial_schedule(coupling)
     if coupling_needs_virial
-        push!(steps, Int(coupling_steps))
+        push!(steps, coupling_steps)
     end
     if run_loggers != false
         for logger in loggers
             logger_steps = logger_virial_interval(logger)
             if !isinf(logger_steps)
-                push!(steps, Int(logger_steps))
+                push!(steps, logger_steps)
             end
         end
     end
     return virial_schedule_from_steps(steps)
 end
 
-needs_virial_on_step(needs_virial::Bool, steps, step_n::Integer) =
-    needs_virial && step_n % steps == 0
+function needs_virial_on_step(needs_virial::Bool, steps, step_n::Integer)
+    return needs_virial && (step_n % steps == 0)
+end
 
 may_recompute_forces_after_coupling(coupler) = true
 may_recompute_forces_after_coupling(::Nothing) = false
@@ -795,6 +796,7 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
+        accels_t .= calc_accels.(forces_t, masses(sys))
         merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads)
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
@@ -835,7 +837,7 @@ end
         place_virtual_sites!(sys)
 
         # Remove drift after the step velocity is finalized and before
-        # coupling/loggers observe the state.
+        #   coupling/loggers observe the state
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -861,8 +863,7 @@ end
 
 The Störmer-Verlet integrator.
 
-Position constraints are supported. Coupling methods are intentionally
-unsupported.
+Coupling methods are not supported.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
@@ -894,6 +895,7 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
+        accels_t .= calc_accels.(forces_t, masses(sys))
         merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads)
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
@@ -1013,6 +1015,7 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
+        accels_t .= calc_accels.(forces_t, masses(sys))
         merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads)
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
@@ -1064,8 +1067,6 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
-        # Remove drift after the step velocity is finalized and before
-        # coupling/loggers observe the state.
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -1403,7 +1404,7 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        needs_vir = (step_n % needs_vir_steps == 0)
+        needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         v_half .= sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* dt_div2
 
         sys.coords .+= v_half .* sim.dt
@@ -1416,7 +1417,8 @@ end
         T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
-        forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir); n_threads=n_threads)
+        forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
+                n_threads=n_threads)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .= (v_half .+ accels_t_dt .* dt_div2) ./
@@ -1433,7 +1435,7 @@ end
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                     n_threads=n_threads)
         if recompute_forces
-            forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir);
+            forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                     n_threads=n_threads)
             forces_t .= forces_t_dt
             accels_t .= calc_accels.(forces_t, masses(sys))
@@ -1672,9 +1674,20 @@ mts_generate_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
-    buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
+    buffers = init_buffers!(sys, n_threads)
+    needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    if needs_vir_init
+        forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads)
+        accels_t .= calc_accels.(forces_t, masses(sys))
+        merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
+                                         n_threads=n_threads)
+        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
+                       n_threads=n_threads, current_forces=forces_t)
+    else
+        apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
+                       n_threads=n_threads)
+    end
     noise = mts_generate_noise(sys, sim)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
@@ -1691,15 +1704,17 @@ mts_generate_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
                       cons_vel_storage, sim, sim.ordered_fractions, fraction_inters, neighbors,
                       sim.dt, step_n, n_threads, rng, using_constraints, 1, recompute_forces)
-        if step_n % needs_vir_steps == 0
+        if using_constraints
+            apply_velocity_constraints!(sys; n_threads=n_threads)
+        end
+
+        needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
+        if needs_vir_step
             # Virial calculated with all interactions
             forces!(forces_t, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
             accels_t .= calc_accels.(forces_t, masses(sys))
             merge_initial_constraint_virial!(buffers, sys, step_n, true, accels_t;
                                              n_threads=n_threads)
-        end
-        if using_constraints
-            apply_velocity_constraints!(sys; n_threads=n_threads)
         end
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -1989,6 +2004,9 @@ end
 
 A Monte Carlo simulator that uses the Metropolis algorithm to sample the configuration space.
 
+Not currently compatible with constraints, will print a warning and continue
+without applying constraints.
+
 # Arguments
 - `temperature::T`: the temperature of the system.
 - `trial_moves::M`: a function that performs the trial moves.
@@ -2015,6 +2033,11 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
+    if length(sys.constraints) > 0
+        err_str = "MetropolisMonteCarlo is not currently compatible with constraints, " *
+                  "constraints will be ignored"
+        report_issue(err_str, strictness)
+    end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
