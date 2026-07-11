@@ -325,26 +325,92 @@ def print_aev_summary(model):
 
 # -------------------------------------------------------------------------
 
+def timing_benchmark(model, device="cpu", sizes=(500, 1000, 2000), samples=20,
+                     pdb_path="data/6mrr_equil.pdb"):
+    """Time TorchANI energy and forces on 6mrr slices, for comparison against Molly.
+
+    Warms up, then takes the min over `samples` runs with device synchronisation, matching
+    Molly's `benchmark/ani_gpu_compare.jl`. Writes data/ani_reference/6mrr_timing_torchani_<device>.json.
+    device: "cpu", "cuda", or "mps" (Apple Metal via PyTorch — may fall back / error on ops).
+    """
+    import time, ase.io
+    ALLOWED = {1, 6, 7, 8, 9, 16, 17}   # ANI-2x: H,C,N,O,F,S,Cl
+    atoms_ase = ase.io.read(pdb_path)
+    Z_all, pos_all = atoms_ase.numbers, atoms_ase.get_positions()
+    keep = [i for i, z in enumerate(Z_all) if z in ALLOWED]
+    model = model.to(device)
+
+    def sync():
+        if device == "cuda": torch.cuda.synchronize()
+        elif device == "mps": torch.mps.synchronize()
+
+    def time_call(fn, n_warmup=3):
+        for _ in range(n_warmup):
+            fn(); sync()
+        best = float("inf")
+        for _ in range(samples):
+            t0 = time.perf_counter(); fn(); sync()
+            best = min(best, time.perf_counter() - t0)
+        return best * 1e3   # ms
+
+    print(f"\n=== TorchANI timing (device={device}, samples={samples}) ===")
+    results = {"device": device, "torchani_version": torchani.__version__, "sizes": {}}
+    for n in sizes:
+        idx    = keep[:n]
+        Z      = torch.tensor([[int(Z_all[i]) for i in idx]], dtype=torch.long, device=device)
+        pos_np = [[float(v) for v in pos_all[i]] for i in idx]
+        pos_e  = torch.tensor([pos_np], dtype=torch.float32, device=device)
+
+        def energy_fn():
+            return model((Z, pos_e)).energies
+        def forces_fn():
+            c = torch.tensor([pos_np], dtype=torch.float32, device=device, requires_grad=True)
+            e = model((Z, c)).energies
+            return torch.autograd.grad(e.sum(), c)[0]
+
+        t_e = time_call(energy_fn)
+        t_f = time_call(forces_fn)
+        results["sizes"][str(len(idx))] = {"energy_ms": t_e, "forces_ms": t_f}
+        print(f"  n={len(idx):5d}   energy {t_e:8.2f} ms    forces {t_f:8.2f} ms")
+
+    out = f"data/ani_reference/6mrr_timing_torchani_{device}.json"
+    with open(out, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"  wrote {out}")
+    return results
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate TorchANI reference data")
     parser.add_argument("--skip-protein", action="store_true")
     parser.add_argument("--skip-weights", action="store_true")
+    parser.add_argument("--benchmark", action="store_true",
+                        help="Time energy/forces on 6mrr slices instead of generating reference data")
+    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda", "mps"])
+    parser.add_argument("--sizes", default="500,1000,2000", help="comma list of atom counts")
+    parser.add_argument("--samples", type=int, default=20)
     args = parser.parse_args()
 
     model = get_model()
 
-    n2_dimer_reference(model)
-    water_reference(model)
-    print_aev_summary(model)
-
-    if not args.skip_protein:
-        protein_reference(model)
+    if args.benchmark:
+        timing_benchmark(model, device=args.device,
+                         sizes=[int(s) for s in args.sizes.split(",")],
+                         samples=args.samples)
+        print("\nDone. Timing in data/ani_reference/")
     else:
-        print("\nSkipping protein (--skip-protein)")
+        n2_dimer_reference(model)
+        water_reference(model)
+        print_aev_summary(model)
 
-    if not args.skip_weights:
-        export_weights_h5(model)
-    else:
-        print("\nSkipping weight export (--skip-weights)")
+        if not args.skip_protein:
+            protein_reference(model)
+        else:
+            print("\nSkipping protein (--skip-protein)")
 
-    print("\nDone. Files in data/ani_reference/")
+        if not args.skip_weights:
+            export_weights_h5(model)
+        else:
+            print("\nSkipping weight export (--skip-weights)")
+
+        print("\nDone. Files in data/ani_reference/")

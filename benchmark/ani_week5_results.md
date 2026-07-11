@@ -175,3 +175,55 @@ per-atom serialization-bound, so the workgroup rewrite helps substantially.)
 All **17/17** ANI tests pass (added Test 16 finder-`NeighborList` → KA kernel, Test 17
 end-to-end `compute_ani_energy_ka` on the CPU backend). Run with
 `julia --project -t8 -e 'using Molly, Lux, HDF5, Enzyme, KernelAbstractions; include("test/ml_potentials.jl")'`.
+
+---
+
+# ANI-2x Week 7 results
+
+## Minimum-image in the GPU kernels
+
+The KA AEV kernels now compute displacements with `Molly.vector(ci, coords[j], boundary)`,
+so they apply the minimum-image convention. Both `CubicBoundary` and `TriclinicBoundary`
+work (the boundary is only ever touched via `vector`). Verified (Test 18) bit-identical to
+the CPU `compute_aevs` for Cubic and Triclinic on the CPU backend, and matching on Metal
+(all-pairs 1.4e-6, write-reduce 1.5e-6). Replaces the previous "gas-phase only" caveat.
+
+## 6mrr NVE trajectory (TrajectoryWriter → DCD)
+
+`benchmark/ani_trajectory.jl` runs an NVE trajectory with real element masses and writes a
+DCD via `TrajectoryWriter`. A 300-atom slice, 3000 steps at 0.5 fs (single ensemble member,
+8 threads):
+
+- wall clock: 1508 s (**502 ms/step**), 100 frames written (363 KiB DCD)
+- **relative energy drift |ΔE|/|E0| = 1.5e-7** over the full run — excellent NVE conservation
+
+(Full-6mrr MD is compute-bound by the CPU Enzyme forces at ~0.5 s/step for 300 atoms;
+on-device GPU forces would make full-system ANI MD practical.)
+
+## Molly energy: CPU vs Apple Metal
+
+`benchmark/ani_gpu_compare.jl` — single ensemble member; Metal times the on-device
+`compute_ani_energy_ka` (GPU AEV + on-device NN):
+
+| N atoms | CPU (8 threads) | Metal  |
+|---------|-----------------|--------|
+| 500     | 16.8 ms         | 68.5 ms |
+| 1000    | 30.5 ms         | 76.8 ms |
+| 2000    | 48.6 ms         | 82.4 ms |
+| 5000    | 112.7 ms        | **86.6 ms** |
+| 8000    | 192.5 ms        | **92.6 ms** |
+
+Metal is **flat** (~68→93 ms) — launch/transfer/per-call param-move bound — while the
+threaded CPU grows linearly. Crossover ≈ 4000 atoms; at 8000 Metal is ~2× the CPU, and
+extrapolating to full 6mrr (CPU ~1490 ms, Week 6) Metal would be ~14×. Caching device params
+would lower the Metal floor further (follow-up).
+
+## TorchANI comparison
+
+`test/torchani_reference.py --benchmark --device {cpu,mps} --sizes 500,1000,2000` times
+TorchANI energy+forces on the same 6mrr slices (warmup + min-of-N with device sync), writing
+`data/ani_reference/6mrr_timing_torchani_<device>.json`. Requires `pip install torchani==2.2.4
+torch ase h5py`. TorchANI's "GPU" is normally CUDA; on this Mac it would run via PyTorch-MPS
+(may fall back on some ops). CPU-to-CPU is the definitive comparison; run the script and join
+its JSON against the Molly numbers above. (Molly GPU **forces** don't exist yet — energy only
+on Metal.)
