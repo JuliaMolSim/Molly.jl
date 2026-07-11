@@ -17,12 +17,13 @@ using Distances
 using Distributions
 using EzXML
 using FFTW
+using FillArrays: Fill
 using GPUArrays
 using Graphs
 using KernelAbstractions
 using NearestNeighbors
-using PhiloxRNG: randn_f64, randn_f32, philox4x32_10
 import PeriodicTable
+using PhiloxRNG: randn_f64, randn_f32, philox4x32_10
 using ProgressMeter
 using SimpleCrystals
 using SpecialFunctions

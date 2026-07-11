@@ -733,73 +733,55 @@ end
 end
 
 # Fused inner part of a Langevin step
-@kernel function langevin_per_atom_inner_kernel!(
-        coords::AbstractVector{SVector{D, C}},
-        vels::AbstractVector{SVector{D, V}},
-        dt_div2,
-        vel_scale,
+@kernel function langevin_o_step_kernel!(
+        vels::AbstractVector{SVector{D, C}},
+        @Const(vel_scales::AbstractVector),
         @Const(noise_scales::AbstractVector),
         philox_ctr1::UInt64,
         philox_key::UInt64,
         ::Val{FT},
-    ) where {D, C, V, FT}
+    ) where {D, C, FT}
     i = @index(Global, Linear)
     natoms = length(vels)%UInt64
     philox_ctr0 = i%UInt64
     @inbounds if i<= length(vels)
         noise = @inline(randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms))
-        coord = coords[i]
-        vel = vels[i]
-        coord += vel*dt_div2
-        vel = vel*vel_scale + noise*noise_scales[i]
-        coord += vel*dt_div2
-        coords[i] = coord
-        vels[i] = vel
+        vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
     end
 end
 # host
-function langevin_per_atom_inner!(
-        coords::AbstractVector{SVector{D, C}},
-        vels::AbstractVector{SVector{D, V}},
-        dt_div2,
-        vel_scale,
+function langevin_o_step!(
+        vels::AbstractVector{SVector{D, C}},
+        vel_scales::AbstractVector,
         noise_scales::AbstractVector,
         philox_ctr1::UInt64,
         philox_key::UInt64,
         ::Type{FT},
-    ) where {D, C, V, FT}
-    @assert eachindex(coords) == eachindex(vels)
-    @assert eachindex(coords) == eachindex(noise_scales)
+    ) where {D, C, FT}
+    @assert eachindex(noise_scales) == eachindex(vels)
+    @assert eachindex(noise_scales) == eachindex(vel_scales)
     natoms = UInt64(length(vels))
     @inbounds @simd ivdep for i in eachindex(vels)
         philox_ctr0 = i%UInt64
         noise = @inline(randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms))
-        coord = coords[i]
-        vel = vels[i]
-        coord += vel*dt_div2
-        vel = vel*vel_scale + noise*noise_scales[i]
-        coord += vel*dt_div2
-        coords[i] = coord
-        vels[i] = vel
+        vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
     end
     nothing
 end
 # device
-function langevin_per_atom_inner!(
-            coords::AbstractGPUArray,
+function langevin_o_step!(
             vels::AbstractGPUArray,
-            dt_div2,
-            vel_scale,
-            noise_scales::AbstractGPUArray,
+            vel_scales::AbstractVector,
+            noise_scales::AbstractVector,
             philox_ctr1::UInt64,
             philox_key::UInt64,
             ::Type{FT},
         ) where {FT}
-    @assert axes(coords) == axes(vels)
-    @assert axes(coords) == axes(noise_scales)
+    @assert eachindex(noise_scales) == eachindex(vels)
+    @assert eachindex(noise_scales) == eachindex(vel_scales)
     backend = get_backend(vels)
-    kernel! = langevin_per_atom_inner_kernel!(backend)
-    kernel!(coords, vels, dt_div2, vel_scale, noise_scales, philox_ctr1, philox_key,
+    kernel! = langevin_o_step_kernel!(backend)
+    kernel!(vels, vel_scales, noise_scales, philox_ctr1, philox_key,
             Val{FT}(); ndrange=length(vels))
     nothing
 end
