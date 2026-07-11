@@ -741,7 +741,7 @@ end
         @Const(noise_scales::AbstractVector),
         philox_ctr1::UInt64,
         philox_key::UInt64,
-        ::Type{FT},
+        ::Val{FT},
     ) where {D, C, V, FT}
     i = @index(Global, Linear)
     natoms = length(vels)%UInt64

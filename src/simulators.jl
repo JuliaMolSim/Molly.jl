@@ -1037,15 +1037,12 @@ end
         apply_loggers!(sys, neighbors, init_step, buffers, initial_loggers; n_threads=n_threads)
     end
     accels_t = calc_accels.(forces_t, masses(sys))
-    noise = zero(sys.velocities)
-    vel_zero = zero(eltype(eltype(sys.velocities)))
+    vel_el_zero = zero(eltype(eltype(sys.velocities)))
     kT = sim.temperature*sys.k
     noise_scale = sim.noise_scale
     # precompute to avoid the sqrt and division at each step
-    # capture value-typed locals (not the velocity element Type, which is not
-    # isbits) so this map compiles into a GPU kernel
     noise_scales = map(sys.masses, sys.virtual_site_flags) do m, vsf
-        ifelse(vsf, vel_zero, oftype(vel_zero, noise_scale * sqrt(kT/m)))
+        ifelse(vsf, vel_el_zero, oftype(vel_el_zero, noise_scale * sqrt(kT/m)))
     end
     # Seed the per step noise
     philox_key = rand(rng, UInt64)
@@ -1077,7 +1074,7 @@ end
         end
         # On GPU fuse the thread per atom work into one kernel
         # coords[i] = coords[i] + vels[i]*dt/2
-        # vels[i] = vels[i]*vel_scale + noise[i]*noise_scales[i]
+        # vels[i] = vels[i]*vel_scale + Z*noise_scales[i]
         # coords[i] = coords[i] + vels[i]*dt/2
         langevin_per_atom_inner!(
             sys.coords,
