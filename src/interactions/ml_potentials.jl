@@ -62,6 +62,19 @@ function ani_force_to_units(fi::SVector{D,T}, force_units, ::Type{AT}) where {D,
     return to_device(f_unit, AT)
 end
 
+# Strip length units from a boundary so it is consistent with unit-stripped coords (Å).
+# The AEV paths (CPU and GPU kernels) pass the stripped boundary to `vector(...)` for the
+# minimum-image convention; keeping a shared definition means Cubic and Triclinic boundaries
+# are handled identically on both paths.
+strip_boundary(b::CubicBoundary) =
+    unit(b.side_lengths[1]) == NoUnits ? b : CubicBoundary(ustrip.(u"Å", b.side_lengths))
+
+function strip_boundary(b::TriclinicBoundary{D, T, C, A}) where {D, T, C, A}
+    unit(b.basis_vectors[1][1]) == NoUnits && return b
+    bv = SVector(ntuple(i -> ustrip.(u"Å", b.basis_vectors[i]), 3))
+    return TriclinicBoundary(bv; approx_images=A)
+end
+
 """
     ANIPotential(path; force_units, energy_units, T, ensemble_idx)
 

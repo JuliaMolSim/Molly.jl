@@ -818,3 +818,48 @@ if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
         end
     end
 end
+
+# ============================================================================
+# Test 18: KA kernels apply the minimum-image convention via Molly.vector, for both
+#          CubicBoundary and TriclinicBoundary. Two water molecules are placed near
+#          opposite faces of a small periodic box so they are neighbours only through
+#          the boundary. The KA kernels (CPU backend) must match the CPU compute_aevs
+#          (which already uses vector), and the boundary must change the AEV vs an
+#          infinite box. Runs on the KA CPU backend; the same kernels run on Metal/CUDA.
+# ============================================================================
+if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
+    @testset "ANIPotential: KA kernels apply minimum-image (Cubic + Triclinic)" begin
+        h5_path = joinpath(REF_DIR, "ani2x.h5")
+        if !isfile(h5_path)
+            @warn "ani2x.h5 not found — skipping"
+            @test_broken false
+        else
+            pot  = ANIPotential(h5_path; ensemble_idx=0)
+            p    = pot.aev_params
+            n_sp = length(pot.species_map)
+            cpu  = KernelAbstractions.CPU()
+
+            L = 6.0
+            coords = SVector{3,Float64}[
+                SVector(0.30,3.0,3.0), SVector(0.30,3.0,3.96), SVector(1.20,3.0,3.0),
+                SVector(5.70,3.0,3.0), SVector(5.70,3.0,3.96), SVector(4.80,3.0,3.0)]
+            species = [pot.species_map[e] for e in ["O","H","H","O","H","H"]]
+            n = length(coords)
+            cub = CubicBoundary(L)
+            tri = TriclinicBoundary(SVector(SVector(L,0.0,0.0), SVector(0.0,L,0.0),
+                                            SVector(0.0,0.0,L)))
+
+            for (name, bdy) in (("Cubic", cub), ("Triclinic", tri))
+                ref = Molly.compute_aevs(coords, species, nothing, bdy, p, n_sp)
+                ka  = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu, boundary=bdy)
+                @test ka ≈ ref atol=1e-4
+                println("Test18 $name: KA-vs-CPU max dev = ", maximum(abs.(ka .- ref)))
+            end
+
+            # The boundary must actually change the AEV vs an infinite (non-periodic) box.
+            ka_box = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu, boundary=cub)
+            ka_inf = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu)
+            @test maximum(abs.(ka_box .- ka_inf)) > 0.1
+        end
+    end
+end

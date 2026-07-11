@@ -3,11 +3,12 @@
 # Provides GPU-portable @kernel implementations of the radial/angular AEV so the same
 # code runs on CPU (via KA CPU backend) and CUDA/ROCm/Metal GPUs.
 #
-# BOUNDARY NOTE: these kernels compute neighbour displacements as raw coordinate
-# differences (coords[j] - coords[i]); they do NOT apply the minimum-image convention.
-# They are intended for non-periodic (gas-phase) systems, or where neighbour coordinates
-# are already imaged. For periodic systems use the CPU path (potential_energy /
-# compute_aevs), which applies vector(...) with the boundary.
+# BOUNDARY NOTE: these kernels compute neighbour displacements with `Molly.vector(ci,
+# coords[j], boundary)`, so they apply the minimum-image convention. Both `CubicBoundary`
+# and `TriclinicBoundary` work (the boundary is only ever touched via `vector`). Pass the
+# system boundary via the `boundary` kwarg of compute_aevs_ka/compute_ani_energy_ka; it is
+# unit-stripped and converted to the coord element type. Omitting it (nothing) uses an
+# infinite box, i.e. no minimum image (non-periodic / gas-phase).
 
 module MollyKALuxExt
 
@@ -20,6 +21,18 @@ using StaticArrays, LinearAlgebra
 # The smooth cosine cutoff f_C ([ANI-1] Eq. 2) is `Molly.cosine_cutoff` (defined in core
 # Molly, no Lux/HDF5 dependency) — a plain inlineable scalar function, device-compatible,
 # reused by these kernels via `using Molly`.
+
+# Produce an isbits boundary with element type T (matching the kernel's coords) for the
+# minimum-image `vector(...)` calls. `nothing` → an infinite (non-periodic) box, which makes
+# `vector` return the raw displacement. Metal is Float32-only, so the element type must match.
+boundary_for_kernel(::Nothing, ::Val{D}, ::Type{T}) where {D, T} =
+    CubicBoundary(SVector{D, T}(ntuple(_ -> T(Inf), D)))
+boundary_for_kernel(b, ::Val{D}, ::Type{T}) where {D, T} =
+    convert_boundary_eltype(Molly.strip_boundary(b), T)
+convert_boundary_eltype(b::CubicBoundary, ::Type{T}) where T =
+    CubicBoundary(SVector{3, T}(T.(b.side_lengths)))
+convert_boundary_eltype(b::TriclinicBoundary{D, T2, C, A}, ::Type{T}) where {D, T2, C, A, T} =
+    TriclinicBoundary(SVector(ntuple(i -> SVector{3, T}(T.(b.basis_vectors[i])), 3)); approx_images=A)
 
 # ============================================================================
 # KernelAbstractions AEV kernel — one thread per central atom
@@ -34,6 +47,7 @@ using StaticArrays, LinearAlgebra
     aevs,               # (n_atoms, aev_len) output matrix
     @Const(coords),     # (n_atoms,) SVector coordinates (Å)
     @Const(species),    # (n_atoms,) 1-based species index
+    boundary,           # unit-stripped boundary (Cubic/Triclinic) for minimum image
     @Const(η_R),        # AEV radial params
     @Const(r_s_R),
     r_c_R,
@@ -62,7 +76,7 @@ using StaticArrays, LinearAlgebra
     # --- Radial AEV G^R, [ANI-1] Eq. (3) ---
     for j in 1:n_atoms
         j == atom_i && continue
-        dr = coords[j] - ci
+        dr = Molly.vector(ci, coords[j], boundary)   # minimum-image displacement
         r  = norm(dr)
         r >= r_c_R && continue
         fc   = cosine_cutoff(r, r_c_R)
@@ -79,7 +93,7 @@ using StaticArrays, LinearAlgebra
     # --- Angular AEV G^A, [ANI-1] Eq. (4) ---
     for j in 1:n_atoms
         j == atom_i && continue
-        drj = coords[j] - ci
+        drj = Molly.vector(ci, coords[j], boundary)
         rj  = norm(drj)
         rj >= r_c_A && continue
         fcj = cosine_cutoff(rj, r_c_A)
@@ -87,7 +101,7 @@ using StaticArrays, LinearAlgebra
 
         for k in (j+1):n_atoms
             k == atom_i && continue
-            drk = coords[k] - ci
+            drk = Molly.vector(ci, coords[k], boundary)
             rk  = norm(drk)
             rk >= r_c_A && continue
             fck = cosine_cutoff(rk, r_c_A)
@@ -128,6 +142,7 @@ end
     aevs,
     @Const(coords),
     @Const(species),
+    boundary,           # unit-stripped boundary (Cubic/Triclinic) for minimum image
     @Const(nbr_off),    # (n_atoms+1,) CSR offsets
     @Const(nbr_idx),    # (n_nbr_total,) flattened neighbour atom indices
     @Const(η_R),
@@ -159,7 +174,7 @@ end
     # --- Radial AEV G^R, [ANI-1] Eq. (3) (over neighbours only) ---
     for jj in lo:hi
         j  = nbr_idx[jj]
-        dr = coords[j] - ci
+        dr = Molly.vector(ci, coords[j], boundary)
         r  = norm(dr)
         r >= r_c_R && continue
         fc   = cosine_cutoff(r, r_c_R)
@@ -176,7 +191,7 @@ end
     # --- Angular AEV G^A, [ANI-1] Eq. (4) (over neighbour pairs only) ---
     for jj in lo:hi
         j   = nbr_idx[jj]
-        drj = coords[j] - ci
+        drj = Molly.vector(ci, coords[j], boundary)
         rj  = norm(drj)
         rj >= r_c_A && continue
         fcj = cosine_cutoff(rj, r_c_A)
@@ -184,7 +199,7 @@ end
 
         for kk in (jj+1):hi
             k   = nbr_idx[kk]
-            drk = coords[k] - ci
+            drk = Molly.vector(ci, coords[k], boundary)
             rk  = norm(drk)
             rk >= r_c_A && continue
             fck = cosine_cutoff(rk, r_c_A)
@@ -226,6 +241,7 @@ end
     aevs,
     @Const(coords),
     @Const(species),
+    boundary,           # unit-stripped boundary (Cubic/Triclinic) for minimum image
     @Const(nbr_off),
     @Const(nbr_idx),
     @Const(η_R),
@@ -274,7 +290,7 @@ end
         jj = lo + (lt - 1)
         while jj <= hi
             j  = nbr_idx[jj]
-            dr = coords[j] - ci
+            dr = Molly.vector(ci, coords[j], boundary)
             r  = norm(dr)
             if r < r_c_R
                 fc   = cosine_cutoff(r, r_c_R)
@@ -294,14 +310,14 @@ end
         jj = lo + (lt - 1)
         while jj <= hi
             j   = nbr_idx[jj]
-            drj = coords[j] - ci
+            drj = Molly.vector(ci, coords[j], boundary)
             rj  = norm(drj)
             if rj < r_c_A
                 fcj = cosine_cutoff(rj, r_c_A)
                 sj  = species[j]
                 for kk in (jj + 1):hi
                     k   = nbr_idx[kk]
-                    drk = coords[k] - ci
+                    drk = Molly.vector(ci, coords[k], boundary)
                     rk  = norm(drk)
                     if rk < r_c_A
                         fck = cosine_cutoff(rk, r_c_A)
@@ -376,10 +392,11 @@ function nl_to_csr(neighbors, n_atoms::Int)
     return off, idx
 end
 
-# Build a CSR neighbour list (offsets, indices) within `r_c_max` on the host.
-# O(N²) scan — benchmarking fallback only (`neighbors=:auto`); production code should
-# pass the system's NeighborList so Molly's neighbour finders drive the neighbour search.
-function build_neighbor_csr(coords::AbstractVector{SVector{D,T}}, r_c_max::T) where {D,T}
+# Build a CSR neighbour list (offsets, indices) within `r_c_max` on the host, using the
+# minimum-image distance so it is correct under periodic boundaries. O(N²) scan —
+# benchmarking fallback only (`neighbors=:auto`); production code should pass the system's
+# NeighborList so Molly's neighbour finders drive the neighbour search.
+function build_neighbor_csr(coords::AbstractVector{SVector{D,T}}, r_c_max::T, boundary) where {D,T}
     n   = length(coords)
     rc2 = r_c_max^2
     off = Vector{Int32}(undef, n + 1)
@@ -388,7 +405,7 @@ function build_neighbor_csr(coords::AbstractVector{SVector{D,T}}, r_c_max::T) wh
         ci = coords[i]; c = 0
         for j in 1:n
             j == i && continue
-            sum(abs2, coords[j] - ci) < rc2 && (c += 1)
+            sum(abs2, Molly.vector(ci, coords[j], boundary)) < rc2 && (c += 1)
         end
         off[i+1] = off[i] + Int32(c)
     end
@@ -397,7 +414,7 @@ function build_neighbor_csr(coords::AbstractVector{SVector{D,T}}, r_c_max::T) wh
         ci = coords[i]; pos = off[i]
         for j in 1:n
             j == i && continue
-            if sum(abs2, coords[j] - ci) < rc2
+            if sum(abs2, Molly.vector(ci, coords[j], boundary)) < rc2
                 pos += 1
                 idx[pos] = Int32(j)
             end
@@ -445,6 +462,7 @@ function Molly.compute_aevs_ka(
     neighbors    = nothing,
     workgroup    = 256,
     write_reduce = false,
+    boundary     = nothing,
 ) where {D,T}
     n_atoms   = length(coords)
     n_eta_R   = length(p.η_R)
@@ -461,6 +479,7 @@ function Molly.compute_aevs_ka(
     r_c_R = T(p.r_c_R)
     r_c_A = T(p.r_c_A)
     ζ     = T(p.ζ)
+    bdy   = boundary_for_kernel(boundary, Val(D), T)   # isbits, eltype T, for minimum image
 
     # Allocate output on the same backend as coords
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
@@ -476,7 +495,7 @@ function Molly.compute_aevs_ka(
     if isnothing(neighbors)
         kernel! = aev_kernel!(ka_backend, workgroup)
         kernel!(
-            aevs, coords, species,
+            aevs, coords, species, bdy,
             η_R_d, r_s_R_d, r_c_R,
             η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A,
             n_species, n_atoms,
@@ -489,7 +508,7 @@ function Molly.compute_aevs_ka(
         #   :auto         → O(N²) host build from coords (benchmarking fallback)
         #   (off, idx)    → caller-supplied CSR
         off_h, idx_h = if neighbors === :auto
-            build_neighbor_csr(coords, max(r_c_R, r_c_A))
+            build_neighbor_csr(coords, max(r_c_R, r_c_A), bdy)
         elseif neighbors isa Tuple
             neighbors
         else
@@ -501,7 +520,7 @@ function Molly.compute_aevs_ka(
             # One workgroup per atom; accumulate into a shared row, one global write per column.
             kernel! = aev_kernel_wg!(ka_backend, workgroup)
             kernel!(
-                aevs, coords, species, off_d, idx_d,
+                aevs, coords, species, bdy, off_d, idx_d,
                 η_R_d, r_s_R_d, r_c_R,
                 η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A,
                 n_species, n_atoms,
@@ -511,7 +530,7 @@ function Molly.compute_aevs_ka(
         else
             kernel! = aev_kernel_nl!(ka_backend, workgroup)
             kernel!(
-                aevs, coords, species, off_d, idx_d,
+                aevs, coords, species, bdy, off_d, idx_d,
                 η_R_d, r_s_R_d, r_c_R,
                 η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A,
                 n_species, n_atoms,
@@ -532,11 +551,12 @@ end
 # ============================================================================
 function Molly.compute_ani_energy_ka(
     coords, species, pot, n_species::Int;
-    backend = nothing, neighbors = nothing,
+    backend = nothing, neighbors = nothing, boundary = nothing,
 )
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
     aevs = Molly.compute_aevs_ka(coords, species, pot.aev_params, n_species;
-                                 backend = backend, neighbors = neighbors)   # (n_atoms, aev_len)
+                                 backend = backend, neighbors = neighbors,
+                                 boundary = boundary)   # (n_atoms, aev_len)
     on_gpu = !(aevs isa Array)
     dev    = on_gpu ? Lux.gpu_device() : Lux.cpu_device()
 

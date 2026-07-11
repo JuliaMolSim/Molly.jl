@@ -61,11 +61,8 @@ function strip_coords_into!(out::AbstractVector{SVector{D,TF}},
     end
 end
 
-# Strip length units from a CubicBoundary so it is consistent with unit-stripped coords (Å).
-function strip_boundary(b::CubicBoundary)
-    unit(b.side_lengths[1]) == NoUnits ? b :
-        CubicBoundary(ustrip.(u"Å", b.side_lengths))
-end
+# strip_boundary (Cubic + Triclinic) is defined in core Molly (src/interactions/ml_potentials.jl)
+# and shared by the CPU and GPU AEV paths — use Molly.strip_boundary.
 
 # ============================================================================
 # AEV computation — zero-allocation in-place implementation
@@ -609,7 +606,7 @@ function ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
                          boundary, inter::ANIPotential,
                          neighbors) where {D,T}
     n_species = length(inter.species_map)
-    bdy_strip = strip_boundary(boundary)
+    bdy_strip = Molly.strip_boundary(boundary)
     n_atoms   = length(coords_strip)
 
     # Use cached buffers (lazily allocated on first call, 0 allocs on subsequent).
