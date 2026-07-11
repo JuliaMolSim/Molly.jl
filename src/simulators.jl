@@ -1038,6 +1038,18 @@ end
     end
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
+    vel_zero = zero(eltype(eltype(sys.velocities)))
+    kT = sim.temperature*sys.k
+    noise_scale = sim.noise_scale
+    # precompute to avoid the sqrt and division at each step
+    # capture value-typed locals (not the velocity element Type, which is not
+    # isbits) so this map compiles into a GPU kernel
+    noise_scales = map(sys.masses, sys.virtual_site_flags) do m, vsf
+        ifelse(vsf, vel_zero, oftype(vel_zero, noise_scale * sqrt(kT/m)))
+    end
+    # Seed the per step noise
+    philox_key = rand(rng, UInt64)
+    philox_ctr1 = rand(rng, UInt64)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
@@ -1063,12 +1075,21 @@ end
         if using_constraints
             cons_coord_storage .= sys.coords
         end
-        sys.coords .+= sys.velocities .* dt_div2
-
-        random_velocities!(noise, sys, sim.temperature; rng=rng)
-        sys.velocities .= sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
-
-        sys.coords .+= sys.velocities .* dt_div2
+        # On GPU fuse the thread per atom work into one kernel
+        # coords[i] = coords[i] + vels[i]*dt/2
+        # vels[i] = vels[i]*vel_scale + noise[i]*noise_scales[i]
+        # coords[i] = coords[i] + vels[i]*dt/2
+        langevin_per_atom_inner!(
+            sys.coords,
+            sys.velocities,
+            dt_div2,
+            sim.vel_scale,
+            noise_scales,
+            philox_ctr1,
+            philox_key,
+            float_type(sys),
+        )
+        philox_ctr1 += UInt64(1)
 
         if using_constraints
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,

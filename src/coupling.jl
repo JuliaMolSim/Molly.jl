@@ -201,8 +201,15 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng()) where {AT <: AbstractGPUArray, T}
     backend = get_backend(sys.velocities)
+    ctr1 = rand(rng, UInt64)
+    key = rand(rng, UInt64)
+    prob_val = clamp(Float64(sim.dt / thermostat.coupling_const), 0.0, prevfloat(1.0))
+    prob_val_u64 = round(UInt64, prob_val*2.0^64)
     kernel! = apply_Andersen_coupling_kernel!(backend)
-    kernel!(sys.velocities,sys.masses,  sys.k*thermostat.temperature,sim.dt / thermostat.coupling_const , sys.virtual_site_flags,ndrange=length(sys.velocities))
+    kernel!(
+        sys.velocities, sys.masses,
+        sys.k*thermostat.temperature, prob_val_u64, sys.virtual_site_flags, ctr1, key, Val{T}(), ndrange=length(sys.velocities)
+    )
     return false
 end
 

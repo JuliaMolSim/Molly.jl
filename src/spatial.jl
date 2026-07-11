@@ -839,16 +839,8 @@ for a [`System`](@ref).
 
 Virtual sites are given a velocity of zero.
 """
-function random_velocities(sys::System{3, AT}, temp; rng=Random.default_rng()) where AT
-    vels = random_velocity_3D.(from_device(masses(sys)), from_device(sys.virtual_site_flags),
-                               temp, sys.k, rng)
-    return to_device(vels, AT)
-end
-
-function random_velocities(sys::System{2, AT}, temp; rng=Random.default_rng()) where AT
-    vels = random_velocity_2D.(from_device(masses(sys)), from_device(sys.virtual_site_flags),
-                               temp, sys.k, rng)
-    return to_device(vels, AT)
+function random_velocities(sys::System, temp; rng=Random.default_rng())
+    random_velocities!(similar(sys.velocities), sys, temp; rng=rng)
 end
 
 """
@@ -861,13 +853,44 @@ generated from the Maxwell-Boltzmann distribution.
 Virtual sites are given a velocity of zero.
 """
 function random_velocities!(sys, temp; rng=Random.default_rng())
-    sys.velocities .= random_velocities(sys, temp; rng=rng)
-    return sys
+    random_velocities!(sys.velocities, sys, temp; rng=rng)
+    sys
 end
 
-function random_velocities!(vels, sys::AbstractSystem, temp; rng=Random.default_rng())
-    vels .= random_velocities(sys, temp; rng=rng)
-    return vels
+# vels on host, do sampling on host
+function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::AbstractSystem, temp; rng=Random.default_rng()) where {D, C}
+    FT = float_type(sys)
+    ms = from_device(masses(sys))
+    @assert eachindex(ms) == eachindex(vels)
+    vsf = from_device(sys.virtual_site_flags)
+    @assert eachindex(vsf) == eachindex(ms)
+    kT = sys.k * temp
+    ctr1 = rand(rng, UInt64)
+    key = rand(rng, UInt64)
+    natoms = UInt64(length(ms))
+    @inbounds @simd ivdep for i in eachindex(vels)
+        scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
+        vels[i] = @inline(randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms)) * scale
+    end
+    vels
+end
+
+# vels on device, do sampling on device
+function random_velocities!(vels::AbstractGPUArray, sys::AbstractSystem, temp; rng=Random.default_rng())
+    FT = float_type(sys)
+    AT = array_type(vels)
+    ms = to_device(sys.masses, AT)
+    @assert eachindex(ms) == eachindex(vels)
+    vsf = to_device(sys.virtual_site_flags, AT)
+    @assert eachindex(vsf) == eachindex(ms)
+    kT = sys.k * temp
+    ctr1 = rand(rng, UInt64)
+    key = rand(rng, UInt64)
+    backend = get_backend(vels)
+    kernel! = random_velocities_kernel!(backend)
+    kernel!(vels, ms, kT, vsf, ctr1, key,
+            Val(FT); ndrange=length(vels))
+    vels
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0

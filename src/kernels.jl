@@ -662,29 +662,144 @@ end
     end
 end
 
-@kernel function random_velocities_kernel!(vels::AbstractVector{SVector{D, C}},@Const(masses::AbstractVector{M}), units, @Const(virtual_sites))  where {D,C,M}
+# `D` standard normals as an SVector of float type `FT`, from the Philox counter-based RNG.
+# Using a generated function to unroll for arbitrary dimension D. `Float32` gets a dedicated
+# method; any other `AbstractFloat` (including `Float64`) falls back to
+# drawing in `Float64` and converting.
+# After calling this advance ctr0 by num_philox_calls*natoms
+@generated function randn_svec(::Type{SVector{D, Float32}}, ctr0::UInt64, ctr1::UInt64,
+                               key::UInt64, natoms::UInt64) where {D}
+    num_philox_calls = cld(D, 4)
+    calls = Expr[
+        :(($(Symbol(:c_, 1+4*j)), $(Symbol(:c_, 2+4*j)), $(Symbol(:c_, 3+4*j)), $(Symbol(:c_, 4+4*j)))
+          = randn_f32(ctr0, ctr1, key); ctr0 += natoms;)
+        for j in 0:(num_philox_calls - 1)
+    ]
+    args  = [:($(Symbol(:c_, d))) for d in 1:D]
+    return quote
+        $(calls...)
+        SVector{D, Float32}($(args...))
+    end
+end
+@generated function randn_svec(::Type{SVector{D, FT}}, ctr0::UInt64, ctr1::UInt64,
+                               key::UInt64, natoms::UInt64) where {D, FT <: AbstractFloat}
+    num_philox_calls = cld(D, 2)
+    calls = Expr[
+        :(($(Symbol(:c_, 1+2*j)), $(Symbol(:c_, 2+2*j)))
+          = randn_f64(ctr0, ctr1, key); ctr0 += natoms;)
+        for j in 0:(num_philox_calls - 1)
+    ]
+    args  = [:($(Symbol(:c_, d))) for d in 1:D]
+    return quote
+        $(calls...)
+        SVector{D, FT}($(args...))
+    end
+end
+
+# units is kT
+@kernel function random_velocities_kernel!(
+        vels::AbstractVector{SVector{D, C}}, @Const(masses::AbstractVector),
+        units, @Const(virtual_sites), ctr1::UInt64, key::UInt64, ::Val{FT}
+    ) where {D, C, FT}
     i = @index(Global, Linear)
-    if i<= length(vels) 
-        @inbounds if !virtual_sites[i]
-            @inbounds scale = C(sqrt(units/masses[i]))
-            @inbounds vels[i] = SVector{D, C}(ntuple(i -> randn()* scale, Val(D)))
+    natoms = length(vels)%UInt64
+    ctr0 = i%UInt64
+    @inbounds if i <= length(vels)
+        if !virtual_sites[i]
+            scale = C(Base.FastMath.sqrt_fast(units / masses[i]))
+            vels[i] = @inline(randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms)) * scale
         else
-            @inbounds velocities[i] = SVector{D, C}(ntuple(i -> 0.0, Val(D)))
+            vels[i] = zero(SVector{D, C})
         end
     end
 end
 
-function random_velocities!(vels::AbstractGPUArray, sys::Molly.AbstractSystem, temp; rng)
-    backend = get_backend(vels)
-    kernel! = random_velocities_kernel!(backend)
-    kernel!(vels,sys.masses,  sys.k*temp, sys.virtual_site_flags,ndrange=length(vels))
-    return vels 
+@kernel function apply_Andersen_coupling_kernel!(
+        vels::AbstractVector{SVector{D, C}}, @Const(masses::AbstractVector),
+        units, prob_val_u64::UInt64, @Const(virtual_sites), ctr1::UInt64, key::UInt64, ::Val{FT}
+    ) where {D, C, FT}
+    i = @index(Global, Linear)
+    natoms = length(vels)%UInt64
+    ctr0 = i%UInt64
+    @inbounds if i<= length(vels) && !virtual_sites[i]
+        u0, u1 = philox4x32_10(ctr0, ctr1, key)
+        rand_u64 = (UInt64(u0) | UInt64(u1)<<Int32(32))
+        if rand_u64 < prob_val_u64
+            ctr0 += natoms # advance the rng natoms
+            scale = C(Base.FastMath.sqrt_fast(units/masses[i]))
+            vels[i] = @inline(randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms)) * scale
+        end
+    end
 end
 
-@kernel function apply_Andersen_coupling_kernel!(velocities::AbstractVector{SVector{D, C}}, @Const(masses::AbstractVector{M}), units,val,@Const(virtual_sites)) where {D,C,M}
+# Fused inner part of a Langevin step
+@kernel function langevin_per_atom_inner_kernel!(
+        coords::AbstractVector{SVector{D, C}},
+        vels::AbstractVector{SVector{D, V}},
+        dt_div2,
+        vel_scale,
+        @Const(noise_scales::AbstractVector),
+        philox_ctr1::UInt64,
+        philox_key::UInt64,
+        ::Type{FT},
+    ) where {D, C, V, FT}
     i = @index(Global, Linear)
-    @inbounds if i<= length(velocities) && !virtual_sites[i] && rand() < val
-        @inbounds scale = C(sqrt(units/masses[i]))
-        @inbounds velocities[i] = SVector{D, C}(ntuple(i -> randn() * scale, Val(D)))
+    natoms = length(vels)%UInt64
+    philox_ctr0 = i%UInt64
+    @inbounds if i<= length(vels)
+        noise = @inline(randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms))
+        coord = coords[i]
+        vel = vels[i]
+        coord += vel*dt_div2
+        vel = vel*vel_scale + noise*noise_scales[i]
+        coord += vel*dt_div2
+        coords[i] = coord
+        vels[i] = vel
     end
+end
+# host
+function langevin_per_atom_inner!(
+        coords::AbstractVector{SVector{D, C}},
+        vels::AbstractVector{SVector{D, V}},
+        dt_div2,
+        vel_scale,
+        noise_scales::AbstractVector,
+        philox_ctr1::UInt64,
+        philox_key::UInt64,
+        ::Type{FT},
+    ) where {D, C, V, FT}
+    @assert eachindex(coords) == eachindex(vels)
+    @assert eachindex(coords) == eachindex(noise_scales)
+    natoms = UInt64(length(vels))
+    @inbounds @simd ivdep for i in eachindex(vels)
+        philox_ctr0 = i%UInt64
+        noise = @inline(randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms))
+        coord = coords[i]
+        vel = vels[i]
+        coord += vel*dt_div2
+        vel = vel*vel_scale + noise*noise_scales[i]
+        coord += vel*dt_div2
+        coords[i] = coord
+        vels[i] = vel
+    end
+    nothing
+end
+# device
+function langevin_per_atom_inner!(
+            coords::AbstractGPUArray,
+            vels::AbstractGPUArray,
+            dt_div2,
+            vel_scale,
+            noise_scales::AbstractGPUArray,
+            philox_ctr1::UInt64,
+            philox_key::UInt64,
+            ::Type{FT},
+        ) where {FT}
+    @assert axes(coords) == axes(vels)
+    @assert axes(coords) == axes(noise_scales)
+    backend = get_backend(vels)
+    kernel! = langevin_per_atom_inner_kernel!(backend)
+    kernel!(coords, vels, dt_div2, vel_scale, noise_scales, philox_ctr1, philox_key,
+            Val{FT}(); ndrange=length(vels))
+    nothing
 end
