@@ -96,17 +96,20 @@ further 1.8–4.4× on top. Metal supports atomic float-add on threadgroup memor
 
 Metal times the on-device path (`compute_ani_energy_ka`: GPU AEV + on-device NN):
 
-| N atoms | CPU (t8) | Metal  |
-|---------|----------|--------|
-| 500     | 16.8 ms  | 68.5 ms |
-| 1000    | 30.5 ms  | 76.8 ms |
-| 2000    | 48.6 ms  | 82.4 ms |
-| 5000    | 112.7 ms | **86.6 ms** |
-| 8000    | 192.5 ms | **92.6 ms** |
+| N atoms      | CPU (t8) | Metal   | Metal speedup |
+|--------------|----------|---------|---------------|
+| 500          | 16.8 ms  | 68.5 ms | 0.25×         |
+| 1000         | 30.5 ms  | 76.8 ms | 0.40×         |
+| 2000         | 48.6 ms  | 82.4 ms | 0.59×         |
+| 5000         | 112.7 ms | 86.6 ms | **1.30×**     |
+| 8000         | 198.9 ms | 91.0 ms | **2.19×**     |
+| 12000        | 283.1 ms | 113.3 ms| **2.50×**     |
+| **15,954 (full 6mrr)** | 400.3 ms | **158.1 ms** | **2.53×** |
 
-Metal is **flat** (~68→93 ms — launch/transfer/per-call param-move bound) while the threaded CPU
-grows linearly. Crossover ≈ 4000 atoms; ~2× at 8000, and ~14× extrapolated to full 6mrr
-(CPU ~1490 ms). Caching device params would lower the Metal floor further.
+Below ~4000 atoms Metal is dominated by launch/transfer/per-call param-move overhead (nearly
+flat ~68–92 ms), so the threaded CPU wins. Above the ~4000-atom crossover Metal pulls ahead as
+the CPU grows linearly: at the full 6mrr system (15,954 atoms) Metal is **2.5× the CPU**
+(158 vs 400 ms). Caching device params and running forces on-GPU would widen this further.
 
 ---
 
@@ -151,7 +154,8 @@ fall back).
 | N atoms | Molly CPU | Molly Metal | TorchANI CPU | TorchANI MPS |
 |---------|-----------|-------------|--------------|--------------|
 | 1000    | 30.5 ms   | 76.8 ms     | *(run script)* | *(run script)* |
-| 8000    | 192.5 ms  | 92.6 ms     | *(run script)* | *(run script)* |
+| 8000    | 198.9 ms  | 91.0 ms     | *(run script)* | *(run script)* |
+| 15,954  | 400.3 ms  | 158.1 ms    | *(run script)* | *(run script)* |
 
 ---
 
