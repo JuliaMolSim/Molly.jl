@@ -50,6 +50,22 @@
     @test 0.35              < std(vels_nounits_1)  < 0.55
     @test 0.35              < std(vels_nounits_2)  < 0.55
 
+    for D in 2:3
+        for FT in (Float32, Float64)
+            local natoms = UInt64(1_000)
+            local vel = SVector{D,FT}[
+                [Molly.randn_svec(SVector{D,FT}, i, UInt64(0), UInt64(0), natoms) for i in UInt64(1):natoms];
+                [Molly.randn_svec(SVector{D,FT}, i+2natoms, UInt64(0), UInt64(0), natoms) for i in UInt64(1):natoms];
+                [Molly.randn_svec(SVector{D,FT}, i, UInt64(1), UInt64(0), natoms) for i in UInt64(1):natoms];
+                [Molly.randn_svec(SVector{D,FT}, i, UInt64(0), UInt64(1), natoms) for i in UInt64(1):natoms];
+            ]
+            local vel_flat = collect(Iterators.flatten(vel))
+            @test allunique(vel_flat)
+            @test 0.9  < std(vel_flat)  < 1.1
+            @test -0.1 < mean(vel_flat) < 0.1
+        end
+    end
+
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"nm")
