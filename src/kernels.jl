@@ -662,38 +662,27 @@ end
     end
 end
 
-# `D` standard normals as an SVector of float type `FT`, from the Philox counter-based RNG.
-# Using a generated function to unroll for arbitrary dimension D. `Float32` gets a dedicated
+# `Float32` gets a dedicated
 # method; any other `AbstractFloat` (including `Float64`) falls back to
 # drawing in `Float64` and converting.
-# After calling this advance ctr0 by num_philox_calls*natoms
-@generated function randn_svec(::Type{SVector{D, Float32}}, ctr0::UInt64, ctr1::UInt64,
-                               key::UInt64, natoms::UInt64) where {D}
-    num_philox_calls = cld(D, 4)
-    calls = Expr[
-        :(($(Symbol(:c_, 1+4*j)), $(Symbol(:c_, 2+4*j)), $(Symbol(:c_, 3+4*j)), $(Symbol(:c_, 4+4*j)))
-          = randn_f32(ctr0, ctr1, key); ctr0 += natoms;)
-        for j in 0:(num_philox_calls - 1)
-    ]
-    args  = [:($(Symbol(:c_, d))) for d in 1:D]
-    return quote
-        $(calls...)
-        SVector{D, Float32}($(args...))
-    end
+# After calling this advance ctr0 by at least 2*natoms
+@inline function randn_svec(::Type{SVector{2, Float32}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64)
+    c1, c2, c3, c4 = randn_f32(ctr0, ctr1, key)
+    SVector{2, Float32}(c1, c2)
 end
-@generated function randn_svec(::Type{SVector{D, FT}}, ctr0::UInt64, ctr1::UInt64,
-                               key::UInt64, natoms::UInt64) where {D, FT <: AbstractFloat}
-    num_philox_calls = cld(D, 2)
-    calls = Expr[
-        :(($(Symbol(:c_, 1+2*j)), $(Symbol(:c_, 2+2*j)))
-          = randn_f64(ctr0, ctr1, key); ctr0 += natoms;)
-        for j in 0:(num_philox_calls - 1)
-    ]
-    args  = [:($(Symbol(:c_, d))) for d in 1:D]
-    return quote
-        $(calls...)
-        SVector{D, FT}($(args...))
-    end
+@inline function randn_svec(::Type{SVector{3, Float32}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64)
+    c1, c2, c3, c4 = randn_f32(ctr0, ctr1, key)
+    SVector{3, Float32}(c1, c2, c3)
+end
+@inline function randn_svec(::Type{SVector{2, FT}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
+    c1, c2 = randn_f64(ctr0, ctr1, key)
+    SVector{2, FT}(c1, c2)
+end
+@inline function randn_svec(::Type{SVector{3, FT}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
+    c1, c2 = randn_f64(ctr0, ctr1, key)
+    ctr0 += natoms
+    c3, c4 = randn_f64(ctr0, ctr1, key)
+    SVector{3, FT}(c1, c2, c3)
 end
 
 # units is kT
@@ -707,7 +696,7 @@ end
     @inbounds if i <= length(vels)
         if !virtual_sites[i]
             scale = C(Base.FastMath.sqrt_fast(units / masses[i]))
-            vels[i] = @inline(randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms)) * scale
+            vels[i] = randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms) * scale
         else
             vels[i] = zero(SVector{D, C})
         end
@@ -727,7 +716,7 @@ end
         if rand_u64 < prob_val_u64
             ctr0 += natoms # advance the rng natoms
             scale = C(Base.FastMath.sqrt_fast(units/masses[i]))
-            vels[i] = @inline(randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms)) * scale
+            vels[i] = randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms) * scale
         end
     end
 end
@@ -745,7 +734,7 @@ end
     natoms = length(vels)%UInt64
     philox_ctr0 = i%UInt64
     @inbounds if i<= length(vels)
-        noise = @inline(randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms))
+        noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
         vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
     end
 end
@@ -763,7 +752,7 @@ function langevin_o_step!(
     natoms = UInt64(length(vels))
     @inbounds @simd ivdep for i in eachindex(vels)
         philox_ctr0 = i%UInt64
-        noise = @inline(randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms))
+        noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
         vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
     end
     nothing
