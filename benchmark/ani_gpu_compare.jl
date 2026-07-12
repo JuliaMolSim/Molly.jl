@@ -5,9 +5,11 @@
 #
 # Produces a per-size table of Molly energy time (ms) on CPU and on Metal, so the numbers
 # line up with test/torchani_reference.py --device {cpu,mps}. Metal times the on-device
-# path compute_ani_energy_ka (GPU AEV + on-device NN). Molly GPU forces don't exist yet.
+# path compute_ani_energy_ka (GPU AEV + on-device NN). For on-device forces see
+# benchmark/ani_forces_gpu.jl (compute_ani_forces_ka). Writes benchmark/results/ani_energy.json.
 
 using Molly, Lux, HDF5, KernelAbstractions, Metal, BenchmarkTools, StaticArrays, Unitful, LinearAlgebra
+using JSON3
 
 const H5_PATH  = joinpath(@__DIR__, "..", "data", "ani_reference", "ani2x.h5")
 const PDB_PATH = joinpath(@__DIR__, "..", "data", "6mrr_equil.pdb")
@@ -43,6 +45,7 @@ end
 println("Molly ANI energy timing (single ensemble member) | Metal functional: ", Metal.functional())
 println(rpad("N atoms", 10), rpad("CPU energy (ms)", 18), "Metal energy (ms)")
 
+results = Dict{String,Any}("cpu" => Dict{String,Any}(), "metal" => Dict{String,Any}())
 for n in SIZES
     coords, elems = load(n)
     nn = length(coords)
@@ -63,5 +66,13 @@ for n in SIZES
     t_mtl  = bench_ms(() -> Molly.compute_ani_energy_ka(c32, s32, pot, n_sp;
                           backend=MetalBackend(), neighbors=nbrs, boundary=bdy32))
 
+    results["cpu"][string(nn)]   = Dict("min" => t_cpu)
+    results["metal"][string(nn)] = Dict("min" => t_mtl)
     println(rpad(nn, 10), rpad(round(t_cpu, digits=2), 18), round(t_mtl, digits=2))
+end
+
+let path = joinpath(@__DIR__, "results", "ani_energy.json")
+    mkpath(dirname(path))
+    open(path, "w") do io; JSON3.pretty(io, results); end
+    println("wrote ", path)
 end

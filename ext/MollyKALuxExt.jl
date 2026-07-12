@@ -360,6 +360,184 @@ end
     end
 end
 
+# ============================================================================
+# Backward (adjoint) AEV kernels — one thread per central atom i. Given the AEV adjoint
+# adj = ∂E/∂G, accumulate ∂E/∂r into `dcoords` (3, n_atoms) via atomic scatter to both
+# endpoints of each neighbour pair. Displacements use vector(...) (minimum image), and the
+# derivatives d/dr of f_C, the Gaussians and the angular term are analytic. Force = -∂E/∂r.
+# ============================================================================
+
+# Derivative of the cosine cutoff f_C wrt r: -0.5·(π/r_c)·sin(π·r/r_c) for r < r_c, else 0.
+@inline cosine_cutoff_deriv(r::T, r_c::T) where T =
+    r < r_c ? -T(0.5) * (T(π) / r_c) * sin(T(π) * r / r_c) : zero(T)
+
+@kernel inbounds=true function aev_backward_radial!(
+    dcoords,            # (3, n_atoms) accumulator for ∂E/∂r
+    @Const(adj),        # (n_atoms, aev_len) AEV adjoint ∂E/∂G
+    @Const(coords),
+    @Const(species),
+    boundary,
+    @Const(nbr_off),
+    @Const(nbr_idx),
+    @Const(η_R),
+    @Const(r_s_R),
+    r_c_R,
+    n_eta_R :: Int,
+    n_shf_R :: Int,
+    n_atoms :: Int,
+)
+    i = @index(Global, Linear)
+    if i <= n_atoms
+        T  = eltype(coords[1])
+        ci = coords[i]
+        lo = nbr_off[i] + 1
+        hi = nbr_off[i + 1]
+        for jj in lo:hi
+            j  = nbr_idx[jj]
+            dr = Molly.vector(ci, coords[j], boundary)
+            r  = norm(dr)
+            r >= r_c_R && continue
+            u    = dr / r                       # unit vector along coords[j]-ci
+            fc   = cosine_cutoff(r, r_c_R)
+            fcp  = cosine_cutoff_deriv(r, r_c_R)
+            sj   = species[j]
+            base = (sj - 1) * n_eta_R * n_shf_R
+            coeff = zero(T)                     # Σ adj·dG/dr for this pair's radial block
+            for ki in 1:n_eta_R
+                for kj in 1:n_shf_R
+                    d     = r - r_s_R[kj]
+                    e     = exp(-η_R[ki] * d * d)
+                    dg_dr = T(0.25) * e * (fcp - T(2) * η_R[ki] * d * fc)
+                    coeff += adj[i, base + (ki-1)*n_shf_R + kj] * dg_dr
+                end
+            end
+            f1 = coeff * u[1]; f2 = coeff * u[2]; f3 = coeff * u[3]
+            KernelAbstractions.@atomic dcoords[1, j] += f1
+            KernelAbstractions.@atomic dcoords[2, j] += f2
+            KernelAbstractions.@atomic dcoords[3, j] += f3
+            KernelAbstractions.@atomic dcoords[1, i] += -f1
+            KernelAbstractions.@atomic dcoords[2, i] += -f2
+            KernelAbstractions.@atomic dcoords[3, i] += -f3
+        end
+    end
+end
+
+# Backward angular kernel. The angular term of atom i for neighbour pair (j,k) is
+#   T = 2^(1-ζ)·f_C(r_ij)·f_C(r_ik)·exp(-η((r_avg-r_s)²))·(1+cos(θ-θ_s))^ζ,  [ANI-1] Eq. (4)
+# a function of the displacements drj = r_j-r_i, drk = r_k-r_i only through r_avg=(rj+rk)/2,
+# fc_jk = f_C(rj)f_C(rk) and θ = acos(0.95·cosθ). We accumulate ∂E/∂r into all three atoms by
+# multivariate chain rule (∂θ/∂dr from ∂cosθ/∂dr; ∂r_avg/∂dr; ∂f_C/∂dr), atomic-scattering the
+# equal-and-opposite reaction into atom i. Mirrors the forward aev_kernel_nl! angular loop.
+@kernel inbounds=true function aev_backward_angular!(
+    dcoords,            # (3, n_atoms) accumulator for ∂E/∂r (radial already added)
+    @Const(adj),        # (n_atoms, aev_len) AEV adjoint ∂E/∂G
+    @Const(coords),
+    @Const(species),
+    boundary,
+    @Const(nbr_off),
+    @Const(nbr_idx),
+    @Const(η_A),
+    @Const(r_s_A),
+    @Const(θ_s),
+    ζ,
+    r_c_A,
+    n_species :: Int,
+    n_eta_A   :: Int,
+    n_shf_r   :: Int,
+    n_th      :: Int,
+    split     :: Int,
+    n_atoms   :: Int,
+)
+    i = @index(Global, Linear)
+    if i <= n_atoms
+        T       = eltype(coords[1])
+        ci      = coords[i]
+        prefac0 = T(2)^(one(T) - ζ)
+        lo      = nbr_off[i] + 1
+        hi      = nbr_off[i + 1]
+        for jj in lo:hi
+            j   = nbr_idx[jj]
+            drj = Molly.vector(ci, coords[j], boundary)
+            rj  = norm(drj)
+            rj >= r_c_A && continue
+            fcj   = cosine_cutoff(rj, r_c_A)
+            fcj_p = cosine_cutoff_deriv(rj, r_c_A)
+            sj    = species[j]
+            uj    = drj / rj
+            for kk in (jj + 1):hi
+                k   = nbr_idx[kk]
+                drk = Molly.vector(ci, coords[k], boundary)
+                rk  = norm(drk)
+                rk >= r_c_A && continue
+                fck   = cosine_cutoff(rk, r_c_A)
+                fck_p = cosine_cutoff_deriv(rk, r_c_A)
+                sk    = species[k]
+                uk    = drk / rk
+
+                s1, s2   = sj <= sk ? (sj, sk) : (sk, sj)
+                pair_idx = (s1-1)*n_species - (s1-1)*(s1-2)÷2 + (s2-s1+1)
+                r_avg = (rj + rk) * T(0.5)
+                fc_jk = fcj * fck
+                c     = clamp(dot(drj, drk) / (rj * rk), T(-1), T(1))
+                theta = acos(T(0.95) * c)
+                base  = split + (pair_idx-1) * n_eta_A * n_shf_r * n_th
+
+                # Reduce over (η_A, r_s_A, θ_s) into scalar sensitivities to r_avg / fc_jk / θ.
+                SB = zero(T); SB_ravg = zero(T); SB_th = zero(T)
+                for p in 1:n_eta_A
+                    for q in 1:n_shf_r
+                        d    = r_avg - r_s_A[q]
+                        E_pq = exp(-η_A[p] * d * d)
+                        coef = -T(2) * η_A[p] * d          # ∂E_pq/∂r_avg = E_pq·coef
+                        B = zero(T); Bth = zero(T)
+                        colbase = base + ((p-1)*n_shf_r + (q-1)) * n_th
+                        for l in 1:n_th
+                            A    = adj[i, colbase + l]
+                            phi  = theta - θ_s[l]
+                            ba   = one(T) + cos(phi)
+                            ANG  = ba^ζ
+                            dANG = ζ * ba^(ζ - one(T)) * (-sin(phi))
+                            B   += A * ANG
+                            Bth += A * dANG
+                        end
+                        SB      += E_pq * B
+                        SB_ravg += E_pq * coef * B
+                        SB_th   += E_pq * Bth
+                    end
+                end
+
+                E_ravg = prefac0 * fc_jk * SB_ravg         # ∂E/∂r_avg
+                E_fc   = prefac0 * SB                      # ∂E/∂fc_jk
+                E_th   = prefac0 * fc_jk * SB_th           # ∂E/∂θ
+                denom  = sqrt(max(one(T) - (T(0.95) * c)^2, T(1e-12)))
+                tfac   = -T(0.95) / denom                  # ∂θ/∂(cosθ)
+
+                a_rj = E_ravg * T(0.5) + E_fc * (fcj_p * fck)   # scalar coeff on uj
+                a_rk = E_ravg * T(0.5) + E_fc * (fcj * fck_p)   # scalar coeff on uk
+                tj   = E_th * tfac / rj                         # coeff on (uk - c·uj)
+                tk   = E_th * tfac / rk                         # coeff on (uj - c·uk)
+
+                dj1 = a_rj*uj[1] + tj*(uk[1] - c*uj[1])
+                dj2 = a_rj*uj[2] + tj*(uk[2] - c*uj[2])
+                dj3 = a_rj*uj[3] + tj*(uk[3] - c*uj[3])
+                dk1 = a_rk*uk[1] + tk*(uj[1] - c*uk[1])
+                dk2 = a_rk*uk[2] + tk*(uj[2] - c*uk[2])
+                dk3 = a_rk*uk[3] + tk*(uj[3] - c*uk[3])
+
+                KernelAbstractions.@atomic dcoords[1, j] += dj1
+                KernelAbstractions.@atomic dcoords[2, j] += dj2
+                KernelAbstractions.@atomic dcoords[3, j] += dj3
+                KernelAbstractions.@atomic dcoords[1, k] += dk1
+                KernelAbstractions.@atomic dcoords[2, k] += dk2
+                KernelAbstractions.@atomic dcoords[3, k] += dk3
+                KernelAbstractions.@atomic dcoords[1, i] += -(dj1 + dk1)
+                KernelAbstractions.@atomic dcoords[2, i] += -(dj2 + dk2)
+                KernelAbstractions.@atomic dcoords[3, i] += -(dj3 + dk3)
+            end
+        end
+    end
+end
+
 # Convert a Molly NeighborList (flat half-pairs (i,j,special)) into a host CSR
 # (offsets, symmetrised indices). This is the production path: it *consumes the
 # neighbours produced by the system's neighbour finder* (CellListMapNeighborFinder on
@@ -586,6 +764,136 @@ function Molly.compute_ani_energy_ka(
         end
     end
     return (E / n_ens) * Ha_to_eV
+end
+
+# ============================================================================
+# On-device forces: reverse pass. F_k = -Σ_i (∂E_i/∂G_i)·(∂G_i/∂r_k). This part computes
+# ∂E/∂G (the AEV adjoint) by a manual VJP through the element MLPs, all on-device (no
+# Zygote/Enzyme on the GPU). The backward AEV kernels then turn ∂E/∂G into ∂E/∂r.
+# ============================================================================
+
+# Derivative of celu01 (α=0.1): 1 for z ≥ 0, else exp(z/0.1).
+@inline celu01_deriv(z::T) where T = z >= zero(T) ? one(T) : exp(z / T(0.1))
+
+# Manual forward + backward through one element's Lux.Chain of Dense layers (celu01 between,
+# identity last). x is (in_dims, n_batch) on the compute device. Returns (Σ outputs, ∂E/∂x)
+# where the loss is the sum of the scalar outputs over the batch.
+function nn_energy_and_grad(model, ps, x)
+    layers = values(model.layers)          # Dense layers, in order
+    L = length(layers)
+    zs = Vector{Any}(undef, L)             # pre-activations
+    a  = x
+    for k in 1:L
+        W = ps[k].weight; b = ps[k].bias
+        z = W * a .+ b
+        zs[k] = z
+        a = layers[k].activation === identity ? z : layers[k].activation.(z)
+    end
+    E = sum(a)                             # a is (1, n_batch)
+    da = fill!(similar(a), one(eltype(a))) # ∂E/∂output = 1
+    for k in L:-1:1
+        W = ps[k].weight
+        dz = layers[k].activation === identity ? da : da .* celu01_deriv.(zs[k])
+        da = W' * dz                       # ∂E/∂a_{k-1}
+    end
+    return E, da                           # da is (in_dims, n_batch) = ∂E/∂x
+end
+
+# Ensemble-averaged energy (Hartree) and its gradient w.r.t. the AEVs, on-device.
+# Returns (E_hartree, dE/dAEV) with dE/dAEV a (n_atoms, aev_len) array on the same backend.
+function ani_energy_aev_grad_ka(aevs, species, pot, n_species::Int; backend=nothing)
+    ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(aevs) : backend
+    on_gpu = !(aevs isa Array)
+    dev    = on_gpu ? Lux.gpu_device() : Lux.cpu_device()
+    n_atoms, aev_len = size(aevs)
+    sp_host     = Array(species)
+    idx_to_elem = Dict(v => k for (k, v) in pot.species_map)
+
+    groups  = [Int32.(findall(==(s), sp_host)) for s in 1:n_species]
+    idx_dev = map(groups) do g
+        (on_gpu && !isempty(g)) || return g
+        d = KernelAbstractions.allocate(ka_backend, Int32, length(g)); copyto!(d, g); d
+    end
+
+    dEdAEV = KernelAbstractions.zeros(ka_backend, eltype(aevs), n_atoms, aev_len)
+    n_ens  = length(pot.ps_vec)
+    E = 0.0
+    for ens_i in 1:n_ens
+        for s in 1:n_species
+            g = groups[s]; isempty(g) && continue
+            sym   = Symbol(idx_to_elem[s])
+            batch = permutedims(aevs[idx_dev[s], :])          # (aev_len, n_s)
+            ps_d  = dev(getfield(pot.ps_vec[ens_i], sym))
+            E_s, dEdbatch = nn_energy_and_grad(getfield(pot.model, sym), ps_d, batch)
+            E += Float64(E_s) + Float64(pot.self_energies[s]) * length(g)
+            @views dEdAEV[idx_dev[s], :] .+= permutedims(dEdbatch)   # scatter (unique rows)
+        end
+    end
+    dEdAEV ./= n_ens
+    return (E / n_ens), dEdAEV
+end
+
+# Given the AEV adjoint `adj` (n_atoms, aev_len) = ∂E/∂G, compute ∂E/∂r (3, n_atoms) on the
+# backend by running the backward AEV kernels. Radial + angular. `neighbors`: NeighborList /
+# :auto / (off,idx). `boundary` for the minimum image (matches the forward pass).
+function aev_vjp_ka(adj, coords::AbstractVector{SVector{D,T}}, species, p, n_species::Int;
+                    backend=nothing, neighbors=:auto, boundary=nothing, which=:both) where {D,T}
+    ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
+    n_atoms = length(coords)
+    n_eta_R = length(p.η_R); n_shf_R = length(p.r_s_R)
+    n_eta_A = length(p.η_A); n_shf_r = length(p.r_s_A); n_th = length(p.θ_s)
+    n_rad_per = n_eta_R * n_shf_R
+    split     = n_species * n_rad_per
+    r_c_R = T(p.r_c_R); r_c_A = T(p.r_c_A); ζ = T(p.ζ)
+    bdy   = boundary_for_kernel(boundary, Val(D), T)
+
+    off_h, idx_h = neighbors === :auto ? build_neighbor_csr(coords, max(r_c_R, r_c_A), bdy) :
+                   neighbors isa Tuple ? neighbors : nl_to_csr(neighbors, n_atoms)
+    off_d = KernelAbstractions.allocate(ka_backend, Int32, length(off_h)); copyto!(off_d, off_h)
+    idx_d = KernelAbstractions.allocate(ka_backend, Int32, length(idx_h)); copyto!(idx_d, idx_h)
+
+    η_R_d   = KernelAbstractions.allocate(ka_backend, T, n_eta_R); copyto!(η_R_d,  p.η_R)
+    r_s_R_d = KernelAbstractions.allocate(ka_backend, T, n_shf_R); copyto!(r_s_R_d, p.r_s_R)
+    η_A_d   = KernelAbstractions.allocate(ka_backend, T, n_eta_A); copyto!(η_A_d,  p.η_A)
+    r_s_A_d = KernelAbstractions.allocate(ka_backend, T, n_shf_r); copyto!(r_s_A_d, p.r_s_A)
+    θ_s_d   = KernelAbstractions.allocate(ka_backend, T, n_th);    copyto!(θ_s_d,  p.θ_s)
+
+    dcoords = KernelAbstractions.zeros(ka_backend, T, 3, n_atoms)
+
+    if which === :radial || which === :both
+        rad! = aev_backward_radial!(ka_backend, 256)
+        rad!(dcoords, adj, coords, species, bdy, off_d, idx_d,
+             η_R_d, r_s_R_d, r_c_R, n_eta_R, n_shf_R, n_atoms; ndrange = n_atoms)
+        KernelAbstractions.synchronize(ka_backend)
+    end
+
+    if which === :angular || which === :both
+        ang! = aev_backward_angular!(ka_backend, 256)
+        ang!(dcoords, adj, coords, species, bdy, off_d, idx_d,
+             η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A, n_species,
+             n_eta_A, n_shf_r, n_th, split, n_atoms; ndrange = n_atoms)
+        KernelAbstractions.synchronize(ka_backend)
+    end
+
+    return dcoords
+end
+
+# End-to-end on-device ANI forces (eV/Å). Forward AEV → NN VJP (∂E/∂G) → backward AEV kernels
+# (∂E/∂r) → F = -∂E/∂r · Ha→eV, ensemble-averaged. Mirrors compute_ani_energy_ka's design as a
+# standalone entry point (not routed through AtomsCalculators.forces!, which stays CPU/Enzyme).
+function Molly.compute_ani_forces_ka(coords, species, pot, n_species::Int;
+        backend=nothing, neighbors=nothing, boundary=nothing)
+    ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
+    aevs = Molly.compute_aevs_ka(coords, species, pot.aev_params, n_species;
+        backend=backend, neighbors=neighbors, boundary=boundary)
+    _, dEdAEV = ani_energy_aev_grad_ka(aevs, species, pot, n_species; backend=ka_backend)
+    bwd_nb  = isnothing(neighbors) ? :auto : neighbors
+    dcoords = aev_vjp_ka(dEdAEV, coords, species, pot.aev_params, n_species;
+        backend=ka_backend, neighbors=bwd_nb, boundary=boundary)   # ∂E_Ha/∂r, (3, n_atoms)
+    T    = eltype(eltype(coords))
+    Ha   = T(Molly.HARTREE_TO_EV)
+    fmat = Array(dcoords)
+    return [SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha) for i in 1:length(coords)]
 end
 
 end # module MollyKALuxExt

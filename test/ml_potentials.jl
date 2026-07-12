@@ -863,3 +863,52 @@ if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
         end
     end
 end
+
+# ============================================================================
+# Test 19: end-to-end on-device ANI forces (compute_ani_forces_ka) — GPU AEV +
+#          NN VJP (∂E/∂G) + backward radial/angular kernels (∂E/∂r). Runs on the KA
+#          CPU backend (no GPU needed); the same kernels run on Metal/CUDA. Validated
+#          against the CPU Enzyme forces (ground truth) and the TorchANI reference on
+#          N₂ and H₂O, plus Newton's 3rd law ΣF ≈ 0. Needs Enzyme for the reference.
+# ============================================================================
+if (@isdefined(KernelAbstractions)) && (@isdefined(Enzyme))
+    @testset "ANIPotential: on-device forces (compute_ani_forces_ka, CPU backend)" begin
+        h5_path = joinpath(REF_DIR, "ani2x.h5")
+        if !isfile(h5_path)
+            @warn "ani2x.h5 not found — skipping"
+            @test_broken false
+        else
+            pot  = ANIPotential(h5_path)          # full ensemble (matches TorchANI reference)
+            n_sp = length(pot.species_map)
+            cpu  = KernelAbstractions.CPU()
+            bx   = CubicBoundary(100.0u"Å")
+            M = Dict("H"=>1.008, "C"=>12.011, "N"=>14.007, "O"=>15.999,
+                     "F"=>18.998, "S"=>32.06, "Cl"=>35.45)
+
+            for jf in ("n2_dimer_ani2x.json", "water_ani2x.json")
+                ref   = JSON3.read(read(joinpath(REF_DIR, jf), String))
+                elems = String.(ref.species)
+                crd   = [SVector{3,Float64}(r...) for r in ref.coordinates_A]
+                f_ref = [SVector{3,Float64}(r...) for r in ref.forces_eV_per_A]
+                sp    = [pot.species_map[e] for e in elems]
+
+                sys = System(atoms=[Atom(mass=M[e]*u"u") for e in elems],
+                    coords=[c*u"Å" for c in crd], boundary=bx,
+                    atoms_data=[AtomData(element=e) for e in elems],
+                    general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV")
+                f_enz = [ustrip.(u"eV/Å", f) for f in forces(sys)]         # Enzyme ground truth
+
+                f_ka = Molly.compute_ani_forces_ka(crd, sp, pot, n_sp; backend=cpu, boundary=bx)
+
+                @test maximum(maximum(abs.(f_ka[i] .- f_enz[i])) for i in eachindex(f_ka)) < 1e-3
+                @test maximum(maximum(abs.(f_ka[i] .- f_ref[i])) for i in eachindex(f_ka)) < 3e-3
+                @test isapprox(sum(f_ka), zeros(SVector{3}); atol=1e-6)   # Newton's 3rd law
+                println("Test19 $jf: max|KA-Enzyme|=",
+                    maximum(maximum(abs.(f_ka[i] .- f_enz[i])) for i in eachindex(f_ka)),
+                    " max|KA-TorchANI|=",
+                    maximum(maximum(abs.(f_ka[i] .- f_ref[i])) for i in eachindex(f_ka)),
+                    " |ΣF|=", maximum(abs.(sum(f_ka))))
+            end
+        end
+    end
+end

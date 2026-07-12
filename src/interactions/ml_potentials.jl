@@ -139,3 +139,17 @@ function compute_ani_energy_ka(args...; kwargs...)
     error("compute_ani_energy_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
           "`using KernelAbstractions, Lux, HDF5`")
 end
+
+"""
+    compute_ani_forces_ka(coords, species_indices, pot, n_species; backend=nothing, neighbors=nothing, boundary=nothing)
+
+On-device ANI forces (eV/Å), the analytic counterpart of [`compute_ani_energy_ka`]. Runs the
+GPU AEV forward, a manual VJP through the per-element neural networks for `∂E/∂G`, then the
+backward radial/angular AEV kernels for `∂E/∂r`, giving `F = -∂E/∂r` averaged over the
+ensemble. Returns a `Vector{SVector{3}}`. Obeys the minimum-image convention via `boundary`.
+Requires `KernelAbstractions`, `Lux`, and `HDF5`.
+"""
+function compute_ani_forces_ka(args...; kwargs...)
+    error("compute_ani_forces_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
+          "`using KernelAbstractions, Lux, HDF5`")
+end

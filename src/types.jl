@@ -29,6 +29,7 @@ export
     compute_aevs,
     compute_aevs_ka,
     compute_ani_energy_ka,
+    compute_ani_forces_ka,
     cosine_cutoff,
     celu01
 
