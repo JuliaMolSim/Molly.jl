@@ -831,13 +831,13 @@ end
 end
 
 @testset "Temperature REMD" begin
-    rng = MersenneTwister(1)
+    Random.seed!(1234)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm")
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 
     pairwise_inters = (LennardJones(use_neighbors=true),)
 
@@ -901,8 +901,8 @@ end
     # Use the unified simulator
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1, rng=rng)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1, rng=rng)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
     @test repsys.current_step == 2n_steps
     @test all(
@@ -925,12 +925,12 @@ end
 end
 
 @testset "Hamiltonian REMD" begin
-    rng = MersenneTwister(2)
+    Random.seed!(1234)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(2.0u"nm")
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     temp = 100.0u"K"
 
     neighbor_finder = DistanceNeighborFinder(
@@ -973,8 +973,8 @@ end
     # Use the unified simulator (implicitly handles Hamiltonian REMD based on the ThermoStates)
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1, rng=rng)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1, rng=rng)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
     @test efficiency > 0.1 # This is a fairly arbitrary threshold, but it's a good test for very bad cases
