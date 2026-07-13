@@ -901,8 +901,8 @@ end
     # Use the unified simulator
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1, rng=rng)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1, rng=rng)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
     @test repsys.current_step == 2n_steps
     @test all(
@@ -973,8 +973,8 @@ end
     # Use the unified simulator (implicitly handles Hamiltonian REMD based on the ThermoStates)
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1, rng=rng)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1, rng=rng)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
     @test efficiency > 0.1 # This is a fairly arbitrary threshold, but it's a good test for very bad cases

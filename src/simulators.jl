@@ -647,6 +647,7 @@ The `λ` parameter controls this prediction: `v_predicted = v(t) + λ * dt * a(t
 A value of 0.65 is commonly used.
 
 Should be used with [`DPDInteraction`](@ref) as the pairwise interaction.
+Does not use the provided `rng` during simulation.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
@@ -1959,16 +1960,20 @@ The simulation divides the total `n_steps` into cycles based on the time step an
 
 # Arguments
 - `sys::ReplicaSystem`: the partitioned system containing the replicas and thermodynamic states.
-- `remd_sim::ReplicaExchangeMD`: the simulator containing the specific time step and exchange time interval.
+- `remd_sim::ReplicaExchangeMD`: the simulator containing the specific time step and exchange
+    time interval.
 - `n_steps::Integer` or `sim_time`: the total number of steps or time to simulate for each replica.
-- `n_threads::Integer=Threads.nthreads()`: the total number of threads to use, which are equally partitioned among the individual replicas.
+- `n_threads::Integer=Threads.nthreads()`: the total number of threads to use, which are
+    equally partitioned among the individual replicas.
 - `run_loggers=true`: whether to run the loggers during the simulation, including the exchange logger.
 - `init_step=sys.current_step`: absolute step before the first MD step. By default a repeated
     call resumes from the step stored in `sys`.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
     the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
     environmental variable `MOLLY_SHOW_PROGRESS`.
-- `rng=Random.default_rng()`: the random number generator used for the exchange accept/reject criteria and any stochastic dynamics.
+- `rng=Random.default_rng()`: the random number generator used for the exchange accept/reject
+    criteria and any stochastic dynamics. Currently must be `Random.default_rng()` to avoid
+    race conditions.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
@@ -1984,6 +1989,10 @@ function simulate_remd!(sys::ReplicaSystem,
                         rng=Random.default_rng(),
                         strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
+    if rng != Random.default_rng()
+        throw(ArgumentError("rng for simulate_remd! must be Random.default_rng() " *
+                            "to avoid race conditions"))
+    end
     sys.current_step = init_step
     n_steps = calc_n_steps(n_steps_or_time, remd_sim.dt)
     thread_div = equal_parts(n_threads, sys.n_replicas)
