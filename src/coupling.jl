@@ -200,10 +200,34 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng()) where {AT <: AbstractGPUArray, T}
-    backend = get_backend(sys.velocities)
-    kernel! = apply_Andersen_coupling_kernel!(backend)
-    kernel!(sys.velocities,sys.masses,  sys.k*thermostat.temperature,sim.dt / thermostat.coupling_const , sys.virtual_site_flags,ndrange=length(sys.velocities))
+    if isnothing(rng)
+        backend = get_backend(sys.velocities)
+        kernel! = andersen_coupling_kernel!(backend)
+        kernel!(sys.velocities, sys.masses, sys.k * thermostat.temperature,
+                sim.dt / thermostat.coupling_const, sys.virtual_site_flags;
+                ndrange=length(sys.velocities))
+        KernelAbstractions.synchronize(backend)
+    else
+        rand_vec_dev = to_device(rand(rng, length(sys)), AT)
+        atoms_to_bump_dev = andersen_atoms_bump.(rand_vec_dev, sim.dt / thermostat.coupling_const,
+                                                                sys.virtual_site_flags)
+        atoms_to_leave_dev = one(T) .- atoms_to_bump_dev
+        vs = random_velocities(sys, thermostat.temperature; rng=rng)
+        sys.velocities .= sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
+    end
     return false
+end
+
+@kernel function andersen_coupling_kernel!(velocities::AbstractVector{SVector{D, V}},
+                                           @Const(masses),
+                                           kT,
+                                           val,
+                                           @Const(virtual_sites)) where {D, V}
+    i = @index(Global, Linear)
+    @inbounds if i <= length(velocities) && !virtual_sites[i] && rand() < val
+        scale = sqrt(kT / masses[i])
+        velocities[i] = SVector{D, V}(ntuple(i -> randn() * scale, Val(D)))
+    end
 end
 
 @doc raw"""

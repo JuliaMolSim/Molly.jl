@@ -183,7 +183,7 @@
                 coords=coords,
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_cpu,
-                neighbor_finder=Molly.NoNeighborFinder(),
+                neighbor_finder=NoNeighborFinder(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
             )
@@ -194,7 +194,7 @@
                 velocities=CuArray(velocities),
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_gpu,
-                neighbor_finder=Molly.GPUNeighborFinder(
+                neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=3.0u"nm",
                     device_vector_type=CuArray{Int32, 1},
@@ -228,7 +228,7 @@
                 velocities=CuArray(velocities),
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_gpu_overflow,
-                neighbor_finder=Molly.GPUNeighborFinder(
+                neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=20.0u"nm",
                     device_vector_type=CuArray{Int32, 1},
@@ -587,22 +587,21 @@
         @testset "Langevin random numbers" begin
             n_atoms = 50_000
             boundary = CubicBoundary(50.0u"nm")
-
             atom_mass = 10.0u"g/mol"
-            Q = Quantity{Float32, u"𝐋", typeof(u"nm")}
             temp = 298.0u"K"
             AT = CuArray
-            atoms = [Atom(mass=10.0f0u"g/mol", charge=0.0f0, σ=0.3f0u"nm", ϵ=0.1f0u"kJ * mol^-1") for i in 1:n_atoms]
-            coords = [SVector{3, Q}(1.0f0u"nm", 1.0f0u"nm", 1.0f0u"nm") for _ in 1:n_atoms]
+            atoms = [Atom(mass=10.0f0u"g/mol", charge=0.0f0, σ=0.3f0u"nm", ϵ=0.1f0u"kJ * mol^-1")
+                     for i in 1:n_atoms]
+            coords = [SVector(1.0f0u"nm", 1.0f0u"nm", 1.0f0u"nm") for _ in 1:n_atoms]
             velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-            pairwise_inters = Tuple([LennardJones(;cutoff=Molly.DistanceCutoff(0.9f0u"nm"),use_neighbors=false)])
+            pis = (LennardJones(cutoff=DistanceCutoff(0.9f0u"nm"), use_neighbors=false),)
 
             sys = System(
-                atoms=deepcopy(atoms),
-                coords=deepcopy(coords),
+                atoms=copy(atoms),
+                coords=copy(coords),
                 boundary=boundary,
-                velocities=deepcopy(velocities),
-                pairwise_inters=pairwise_inters,
+                velocities=copy(velocities),
+                pairwise_inters=pis,
                 loggers=(temp=TemperatureLogger(100),)
             )
 
@@ -611,30 +610,33 @@
                 coords=AT(coords),
                 boundary=boundary,
                 velocities=AT(velocities),
-                pairwise_inters=pairwise_inters,
+                pairwise_inters=pis,
                 loggers=(temp=TemperatureLogger(100),),
-                #neighbor_finder=neighbor_finder,
             )
-
             velocities_gpu = AT(velocities)
 
-            ### benchmark against cpu version
-            for temp in [200.0u"K",250.0u"K",298.0u"K"] 
-                vel=deepcopy(velocities)
-                Molly.random_velocities!(vel, sys, temp)
-                mean_cpu = mean(mean(vel))
-                std_cpu = mean( std(vel))
+            for (temp, mean_vel) in (
+                    (200.0u"K", 0.65u"nm/ps"),
+                    (250.0u"K", 0.73u"nm/ps"),
+                    (298.0u"K", 0.79u"nm/ps"),
+                )
+                vels_cpu = copy(velocities)
+                random_velocities!(vels_cpu, sys, temp)
+                mean_cpu = mean(mean(vels_cpu))
+                std_cpu = mean(std(vels_cpu))
+                mean_norm_cpu = mean(norm, vels_cpu)
 
-                vel= Molly.random_velocities!(velocities_gpu, sys2, temp;rng=Random.TaskLocalRNG())
-                mean_gpu = mean(mean(vel))
-                std_gpu = mean( std(vel))
+                vels_gpu = random_velocities!(velocities_gpu, sys2, temp)
+                mean_gpu = mean(mean(vels_gpu))
+                std_gpu = mean(std(vels_gpu))
+                mean_norm_gpu = mean(norm, vels_gpu)
 
                 @test -0.005u"nm * ps^-1" <= mean_cpu <= 0.005u"nm * ps^-1"
                 @test -0.005u"nm * ps^-1" <= mean_gpu <= 0.005u"nm * ps^-1"
-                
-                @test 0.99 < abs(std_cpu/std_gpu) < 1.01
+                @test (mean_vel - 0.02u"nm/ps") <= mean_norm_cpu <= (mean_vel + 0.02u"nm/ps")
+                @test (mean_vel - 0.02u"nm/ps") <= mean_norm_gpu <= (mean_vel + 0.02u"nm/ps")
+                @test 0.99 < abs(std_cpu / std_gpu) < 1.01
             end
-
         end
     else
         @warn "CUDA not functional, skipping GPU consistency tests"
