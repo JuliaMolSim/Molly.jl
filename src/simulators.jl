@@ -12,6 +12,7 @@ export
     OverdampedLangevin,
     NoseHoover,
     MTSIntegrator,
+    MTSLangevinIntegrator,
     ReplicaExchangeMD,
     simulate_remd!,
     remd_exchange!,
@@ -963,13 +964,13 @@ end
 The Langevin integrator, based on the Langevin Middle Integrator in OpenMM.
 
 See [Zhang et al. 2019](https://doi.org/10.1021/acs.jpca.9b02771).
-This is a leapfrog integrator, so the velocities are offset by half a time step
+This is a leapfrog-like integrator, so the velocities are offset by half a time step
 behind the positions.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
-- `friction::F`: the friction coefficient of the simulation.
+- `friction::F`: the friction coefficient of the simulation, e.g. 1.0u"ps^-1".
 - `coupling::C=nothing`: the coupling which applies during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
@@ -1262,7 +1263,7 @@ without applying constraints.
 # Arguments
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
-- `friction::F`: the friction coefficient of the simulation.
+- `friction::F`: the friction coefficient of the simulation, e.g. 1.0u"ps^-1".
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
@@ -1501,6 +1502,40 @@ struct MTSIntegrator{NF, NP, NS, NG, S, C} <: AbstractMTSIntegrator{NF, NP, NS, 
 end
 
 """
+    MTSLangevinIntegrator(; <keyword arguments>)
+
+The BAOAB-RESPA multiple time step algorithm for constant temperature dynamics.
+
+See [Tuckerman et al. 1992](https://doi.org/10.1063/1.463137) and
+[Lagardère et al. 2019](https://doi.org/10.1021/acs.jpclett.9b00901).
+This integrator allows different interactions to be evaluated at different frequencies,
+so more expensive interactions can be calculated less frequently.
+
+The fraction arguments correspond to the number of times each interaction is applied
+per outer step.
+For example, if your system had two pairwise interactions and three specific interactions
+you could pass `pi_fractions=(1, 1)` and `si_fractions=(2, 4)`.
+With a `dt` of 4 fs this means that the pairwise interactions are evaluated once per outer
+time step (every 4 fs), the first specific interaction twice (every 2 fs), and the second
+specific interaction four times (every 1 fs).
+All fractions should be multiples of previous fractions, and at least one fraction must
+be 1.
+When simulating, `n_steps` is the number of outer steps.
+Coupling, removing the center of mass motion and running loggers applies per outer time step.
+
+# Arguments
+- `dt::T`: the outer time step of the simulation.
+- `temperature::K`: the equilibrium temperature of the simulation.
+- `friction::F`: the friction coefficient of the simulation, e.g. 1.0u"ps^-1".
+- `pi_fractions`: the number of times each pairwise interaction is evaluated per outer
+    timestep, should be a tuple of integers with the same length as `sys.pairwise_inters`.
+- `si_fractions`: the number of times each specific interaction is evaluated per outer
+    timestep, should be a tuple of integers with the same length as `sys.specific_inter_lists`.
+- `gi_fractions`: the number of times each general interaction is evaluated per outer
+    timestep, should be a tuple of integers with the same length as `sys.general_inters`.
+- `coupling::C=nothing`: the coupling which applies each outer step during the simulation.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of outer steps,
+    set to `false` or `0` to not remove center of mass motion.
 """
 struct MTSLangevinIntegrator{NF, NP, NS, NG, S, K, F, C, T} <: AbstractMTSIntegrator{NF, NP, NS, NG}
     ordered_fractions::NTuple{NF, Int}
@@ -1558,9 +1593,9 @@ function MTSLangevinIntegrator(; dt, temperature, friction, pi_fractions=(), si_
     total_substeps = last(ordered_fractions)
     vel_scale = exp(-dt * friction / total_substeps)
     noise_scale = sqrt(1 - vel_scale^2)
-    return MTSIntegrator(ordered_fractions, Tuple(pi_fractions), Tuple(si_fractions),
-                         Tuple(gi_fractions), dt, temperature, friction, coupling,
-                         Int(remove_CM_motion), vel_scale, noise_scale)
+    return MTSLangevinIntegrator(ordered_fractions, Tuple(pi_fractions), Tuple(si_fractions),
+                                 Tuple(gi_fractions), dt, temperature, friction, coupling,
+                                 Int(remove_CM_motion), vel_scale, noise_scale)
 end
 
 function mts_interaction_groups(sys, sim::AbstractMTSIntegrator{<:Any, NP, NS, NG}) where {NP, NS, NG}
@@ -1652,8 +1687,8 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
     return sys
 end
 
-mts_generate_noise(sys, ::MTSIntegrator) = nothing
-mts_generate_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
+mts_initialize_noise(sys, ::MTSIntegrator) = nothing
+mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
 
 @inline function simulate!(sys,
                            sim::AbstractMTSIntegrator,
@@ -1688,13 +1723,16 @@ mts_generate_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                        n_threads=n_threads)
     end
-    noise = mts_generate_noise(sys, sim)
+    noise = mts_initialize_noise(sys, sim)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
         cons_vel_storage = zero(sys.velocities)
+        vir_coord_storage = zero(sys.coords)
+        vir_vel_storage = zero(sys.velocities)
     else
         cons_coord_storage, cons_vel_storage = nothing, nothing
+        vir_coord_storage, vir_vel_storage = nothing, nothing
     end
     fraction_inters = mts_interaction_groups(sys, sim)
     recompute_forces = true # Forces re-used between steps
@@ -1711,10 +1749,13 @@ mts_generate_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         if needs_vir_step
             # Virial calculated with all interactions
+            # The constraint contribution is evaluated at the current configuration
             forces!(forces_t, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads)
             accels_t .= calc_accels.(forces_t, masses(sys))
-            merge_initial_constraint_virial!(buffers, sys, step_n, true, accels_t;
-                                             n_threads=n_threads)
+            merge_step_constraint_virial!(buffers, sys, step_n, true, accels_t, sim, sim.dt,
+                                          vir_coord_storage, vir_vel_storage,
+                                          cons_coord_storage, cons_vel_storage;
+                                          n_threads=n_threads)
         end
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -1904,7 +1945,7 @@ function simulate_remd!(sys::ReplicaSystem,
     progress = setup_progress(n_steps, show_progress)
     for cycle in 1:n_cycles
         cycle_start_step = init_step + (cycle - 1) * cycle_length
-        log_initial_state = sys.initial_log_pending
+        run_loggers_used = (run_loggers == false ? false : (sys.initial_log_pending ? true : :skipstart))
         @sync for i in 1:sys.n_replicas
             state_idx = sys.state_indices[i]
             integrator = sys.integrators[state_idx]
@@ -1924,10 +1965,8 @@ function simulate_remd!(sys::ReplicaSystem,
             
             # Enforce n_threads >= 1 to prevent buffer chunk crashes
             Threads.@spawn simulate!(active_sys, integrator, cycle_length;
-                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers,
-                                     init_step=cycle_start_step,
-                                     log_initial_state=log_initial_state,
-                                     rng=rng, strictness=strictness)
+                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers_used,
+                                     init_step=cycle_start_step, rng=rng, strictness=strictness)
         end
         sys.initial_log_pending = false
 
@@ -1948,7 +1987,7 @@ function simulate_remd!(sys::ReplicaSystem,
 
     if remaining_steps > 0
         remainder_start_step = init_step + n_cycles * cycle_length
-        log_initial_state = sys.initial_log_pending
+        run_loggers_used = (run_loggers == false ? false : (sys.initial_log_pending ? true : :skipstart))
         @sync for i in 1:sys.n_replicas
             state_idx = sys.state_indices[i]
             integrator = sys.integrators[state_idx]
@@ -1966,10 +2005,8 @@ function simulate_remd!(sys::ReplicaSystem,
             )
             
             Threads.@spawn simulate!(active_sys, integrator, remaining_steps;
-                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers,
-                                     init_step=remainder_start_step,
-                                     log_initial_state=log_initial_state,
-                                     rng=rng, strictness=strictness)
+                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers_used,
+                                     init_step=remainder_start_step, rng=rng, strictness=strictness)
         end
         sys.initial_log_pending = false
     end

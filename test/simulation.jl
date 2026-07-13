@@ -1301,14 +1301,16 @@ end
 
 @testset "MTSIntegrator" begin
     ff = MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))
+    constraint_options = ((:none, SHAKE_RATTLE), (:hbonds, SHAKE_RATTLE), (:hbonds, LINCS))
 
     for AT in array_list
-        for constraints in (:none, :hbonds)
+        for (constraints, constraint_algorithm) in constraint_options
             sys = System(
                 joinpath(data_dir, "tip4pew.pdb"),
                 ff;
                 array_type=AT,
                 constraints=constraints,
+                constraint_algorithm=constraint_algorithm,
                 nonbonded_method=:cutoff,
                 center_coords=false,
             )
@@ -1355,6 +1357,31 @@ end
             vels_diff = from_device(sys.velocities) .- vels_openmm
             @test maximum(norm.(coords_diff)) < 1e-3u"nm"
             @test maximum(norm.(vels_diff  )) < 0.1u"nm * ps^-1"
+
+            temp = 300.0u"K"
+            coupling = (CRescaleBarostat(1.0u"bar", 1.0u"fs"; max_scale_frac=0.01, n_steps=1),)
+            sim_lang = MTSLangevinIntegrator(
+                dt=1.0u"fs",
+                temperature=temp,
+                friction=10.0u"ps^-1",
+                pi_fractions=(1, 1),
+                si_fractions=si_fractions,
+                gi_fractions=(1,),
+                coupling=coupling,
+                remove_CM_motion=false,
+            )
+
+            sys = System(
+                sys;
+                loggers=(
+                    TemperatureLogger(10),
+                    BoxLogger(10),
+                ),
+            )
+            simulate!(sys, sim_lang, 1_000)
+
+            @test 290u"K" < mean(values(sys.loggers[1])[81:end]) < 310u"K"
+            @test 2.95u"nm" < mean(values(sys.loggers[2])[81:end])[1, 1] < 3.05u"nm"
         end
     end
 end

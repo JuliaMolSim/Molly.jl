@@ -1184,6 +1184,8 @@ The available simulators are:
 - [`LangevinSplitting`](@ref)
 - [`OverdampedLangevin`](@ref)
 - [`NoseHoover`](@ref)
+- [`MTSIntegrator`](@ref)
+- [`MTSLangevinIntegrator`](@ref)
 - [`ReplicaExchangeMD`](@ref)
 - [`MetropolisMonteCarlo`](@ref)
 
@@ -1626,8 +1628,9 @@ Currently, constraints are supported by the following simulators:
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
 - [`MTSIntegrator`](@ref)
+- [`MTSLangevinIntegrator`](@ref)
 
-Due to the nature of the velocity treatment in each integrator, the velocities stored in the system are expected to satisfy the constraints only for [`VelocityVerlet`](@ref), [`DPDVelocityVerlet`](@ref) and [`MTSIntegrator`](@ref) (in other cases the simulator behaviour is correct).
+Due to the nature of the velocity treatment in each integrator, the velocities stored in the system are expected to satisfy the constraints only for [`VelocityVerlet`](@ref), [`DPDVelocityVerlet`](@ref), [`MTSIntegrator`](@ref) and [`MTSLangevinIntegrator`](@ref) (in other cases the simulator behaviour is still correct).
 
 The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
 - [`SteepestDescentMinimizer`](@ref)
