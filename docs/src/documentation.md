@@ -1811,6 +1811,7 @@ julia> random_velocity(10.0u"g/mol", 300.0u"K"; rng=Xoshiro(10))
 ```
 This may not apply across Julia versions, though you can use [StableRNGs.jl](https://github.com/JuliaRandom/StableRNGs.jl).
 It also does not apply across different backends such as CPU and GPU.
+Some functions require `Random.default_rng()` for thread safety, and will error if given a different `rng`.
 
 ## Performance tips
 
