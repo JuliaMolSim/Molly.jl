@@ -76,15 +76,16 @@ end
 
 # Deterministic per-pair Gaussian noise via hash-based Box-Muller transform.
 # Symmetric in (i, j) to ensure momentum conservation.
-@inline function dpd_gaussian(idx_i::Integer, idx_j::Integer, step_n::Integer)
+@inline function dpd_gaussian(idx_i::Integer, idx_j::Integer, step_n::Integer,
+                              ::Val{T}=Val(Float64)) where T
     a, b = minmax(idx_i, idx_j)
     h = hash((a, b, step_n))
-    u1 = (h & 0xFFFFFFFF) / 4294967296.0
-    u2 = ((h >> 32) & 0xFFFFFFFF) / 4294967296.0
-    return sqrt(-2 * log(u1 + 1e-30)) * cos(2π * u2)
+    u1 = (h & 0xFFFFFFFF) / T(4294967296.0)
+    u2 = ((h >> 32) & 0xFFFFFFFF) / T(4294967296.0)
+    return sqrt(-2 * log(u1 + T(1e-30))) * cos(2 * T(π) * u2)
 end
 
-@inline function force(inter::DPDInteraction,
+@inline function force(inter::DPDInteraction{A},
                        dr,
                        atom_i,
                        atom_j,
@@ -95,7 +96,7 @@ end
                        boundary,
                        velocity_i,
                        velocity_j,
-                       step_n)
+                       step_n) where A
     r = sqrt(sum(abs2, dr))
     r_c = inter.r_c
 
@@ -116,7 +117,7 @@ end
     f_D = inter.γ * w_D * rdotv
 
     # Random: pairwise-correlated stochastic force
-    ξ = dpd_gaussian(atom_i.index, atom_j.index, step_n)
+    ξ = dpd_gaussian(atom_i.index, atom_j.index, step_n, Val(A))
     f_R = inter.σ * w_R * ξ * inv(sqrt(inter.dt)) * inv_r
 
     return (f_C + f_D + f_R) * dr
