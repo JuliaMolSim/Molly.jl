@@ -20,7 +20,6 @@ module MollyCUDAExt
 using Molly
 using Molly: from_device, box_sides, sorted_morton_seq!, sum_pairwise_forces_gpu,
              sum_pairwise_forces_nonl, sum_pairwise_potentials_gpu, volume
-
 using CUDA
 using Atomix
 using KernelAbstractions
