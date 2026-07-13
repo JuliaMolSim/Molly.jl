@@ -1088,6 +1088,40 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
     )
 end
 
+function _rebuild_system_like(sys::System;
+                              atoms=sys.atoms,
+                              coords=sys.coords,
+                              boundary=sys.boundary,
+                              pairwise_inters=sys.pairwise_inters,
+                              specific_inter_lists=sys.specific_inter_lists,
+                              general_inters=sys.general_inters)
+    return typeof(sys)(
+        atoms,
+        coords,
+        boundary,
+        sys.velocities,
+        sys.atoms_data,
+        sys.topology,
+        pairwise_inters,
+        specific_inter_lists,
+        general_inters,
+        sys.constraints,
+        sys.virtual_sites,
+        sys.virtual_site_flags,
+        sys.neighbor_finder,
+        sys.loggers,
+        sys.df,
+        sys.force_units,
+        sys.energy_units,
+        sys.k,
+        sys.masses,
+        sys.total_mass,
+        sys.data,
+        sys.nonbonded_energy_type,
+        sys.launch_config,
+    )
+end
+
 # ==============================================================================
 # ENZYME-SAFE PARAMETER INJECTION
 # ==============================================================================
@@ -1276,7 +1310,7 @@ function inject_gradients(sys::System{<:Any, AT}, params::AbstractVector,
 
     # 4. Update General Interactions
     general_ctx = if any(_requires_updated_system_context, values(sys.general_inters))
-        System(
+        _rebuild_system_like(
             sys;
             atoms=atoms_grad,
             pairwise_inters=pis_grad,

@@ -289,11 +289,12 @@ is based on the smooth PME algorithm from
 Only compatible with 3D systems.
 Not compatible with infinite boundaries.
 """
-struct PME{T, D, A, I, M, BM, C, CB, RB, VB, P, F, B, SCH} <: AbstractEwald
+struct PME{T, D, EP, A, I, M, BM, C, CB, EFB, EEB, RB, VB, P, F, B, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     order::Int
     ϵr::T
+    excluded_pairs::EP
     α::A
     mesh_dims::SVector{3, Int}
     grid_indices::I
@@ -305,6 +306,8 @@ struct PME{T, D, A, I, M, BM, C, CB, RB, VB, P, F, B, SCH} <: AbstractEwald
     bsplines_moduli_z::BM
     charge_grid::C
     charge_grid_buffer::CB
+    excluded_buffer_Fs::EFB
+    excluded_buffer_Es::EEB
     recip_conv_buffer::RB
     virial_buffer::VB
     pc_sum::P
@@ -390,13 +393,17 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     if AT <: AbstractGPUArray
         charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)
         recip_conv_buffer  = to_device(zeros(T, mesh_dims...), AT)
+        excluded_buffer_Fs = to_device(zeros(T, 3, n_atoms), AT)
+        excluded_buffer_Es = to_device(zeros(T, length(excluded_pairs)), AT)
         virial_buffer      = to_device(zeros(T, 3, 3), AT)
     elseif n_threads > 1
         charge_grid_buffer = [zeros(T, size(charge_grid)) for _ in 1:n_threads]
         recip_conv_buffer = zeros(T, n_threads)
+        excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
         virial_buffer = [zeros(T, 3, 3) for _ in 1:n_threads]
     else
         charge_grid_buffer, recip_conv_buffer = nothing, nothing
+        excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
         virial_buffer = [zeros(T, 3, 3)]
     end
 
@@ -415,10 +422,10 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     bsm_y = to_device(bsplines_moduli[2], AT)
     bsm_z = to_device(bsplines_moduli[3], AT)
 
-    return PME(dist_cutoff, error_tol_T, order, T(ϵr), α, mesh_dims, grid_indices, grid_fractions,
+    return PME(dist_cutoff, error_tol_T, order, T(ϵr), excluded_pairs, α, mesh_dims, grid_indices, grid_fractions,
                bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z, charge_grid, charge_grid_buffer,
-               recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan,
-               scheduler, grad_safe)
+               excluded_buffer_Fs, excluded_buffer_Es, recip_conv_buffer, virial_buffer,
+               pc_sum, pc_abs2_sum, fft_plan, bfft_plan, scheduler, grad_safe)
 end
 
 Unitful.ustrip(inter::PME) = PME(
@@ -461,6 +468,7 @@ function Base.zero(pme::PME)
         zero(pme.error_tol),
         pme.order,
         zero(pme.ϵr),
+        pme.excluded_pairs,
         zero(pme.α),
         pme.mesh_dims,
         zero(pme.grid_indices),
@@ -472,6 +480,8 @@ function Base.zero(pme::PME)
         zero(pme.bsplines_moduli_z),
         zero(pme.charge_grid),
         charge_grid_buffer,
+        zero_or_nothing(pme.excluded_buffer_Fs),
+        zero_or_nothing(pme.excluded_buffer_Es),
         zero_or_nothing(pme.recip_conv_buffer),
         zero_or_nothing(pme.virial_buffer),
         zero_or_nothing(pme.pc_sum),

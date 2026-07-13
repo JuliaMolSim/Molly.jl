@@ -182,6 +182,15 @@ end
         )
     end
 
+    function pme_grad_safe_injection_value(params, sys, idx_bundle)
+        atom_idxs, pairwise_idxs, specific_idxs, general_idxs = idx_bundle
+        atoms, _, _, gis = Molly.inject_gradients(
+            sys, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
+        )
+        pme = only(gis)
+        return sum(charge, from_device(atoms)) + zero(params[1]) * pme.error_tol
+    end
+
     @testset "atom parameter helpers" begin
         sys = reaction_field_system(Array)
         atom_params, atom_idxs, atom_names = Molly.extract_atom_parameters(sys)
@@ -293,6 +302,50 @@ end
         end
     end
 
+    @testset "PME grad-safe injection is Enzyme-safe" begin
+        sys = pme_system(Array)
+        pme = only(sys.general_inters)
+        sys = System(sys; general_inters=(PME(rc, sys.atoms, sys.boundary;
+                                             scheduler=pme.scheduler,
+                                             grad_safe=true,
+                                             n_threads=1),))
+        params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
+            Molly.extract_parameters(sys)
+        idx_bundle = (atom_idxs, pairwise_idxs, specific_idxs, general_idxs)
+        dparams = zero(params)
+
+        _, primal = autodiff(
+            ReverseWithPrimal,
+            pme_grad_safe_injection_value,
+            Active,
+            Duplicated(params, dparams),
+            Const(sys),
+            Const(idx_bundle),
+        )
+
+        @test isfinite(primal)
+        @test dparams[atom_idxs[2][1]] ≈ 1
+        @test isnothing(only(sys.general_inters).pc_sum)
+    end
+
+    @testset "PME construction helpers expose injection fields" begin
+        sys = pme_system(Array)
+        pme = only(sys.general_inters)
+        @test pme.excluded_pairs == Tuple{Int32, Int32}[]
+        @test isnothing(pme.excluded_buffer_Fs)
+        @test isnothing(pme.excluded_buffer_Es)
+        @test ustrip(pme).excluded_pairs == pme.excluded_pairs
+        @test zero(pme).excluded_pairs == pme.excluded_pairs
+        @test from_device(to_device(pme, Array)).excluded_pairs == pme.excluded_pairs
+
+        params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
+            Molly.extract_parameters(sys)
+        _, _, _, gis = Molly.inject_gradients(
+            sys, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
+        )
+        @test only(gis).excluded_pairs == pme.excluded_pairs
+    end
+
     @testset "PME cached sums respect effective charges" begin
         sys = pme_system(Array; scheduler=Molly.EleScaledLambdaScheduler(), pairwise=false)
         params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
@@ -320,6 +373,44 @@ end
         @test pme_mod.pc_sum ≈ sum(expected_partial_charges) atol=1e-10
         @test pme_mod.pc_abs2_sum ≈ sum(abs2, expected_partial_charges) atol=1e-10
     end
+end
+
+struct ConstructorBypassPairwise <: PairwiseInteraction
+    use_neighbors::Bool
+end
+
+Molly.use_neighbors(inter::ConstructorBypassPairwise) = inter.use_neighbors
+Molly.inject_interaction(::ConstructorBypassPairwise, params::AbstractVector, idx::Int) =
+    ConstructorBypassPairwise(true)
+
+struct ConstructorBypassGeneral end
+
+Molly._requires_updated_system_context(::ConstructorBypassGeneral) = true
+Molly.inject_interaction(::ConstructorBypassGeneral, params::AbstractVector, idx::Int, sys::System) =
+    only(sys.pairwise_inters)
+
+@testset "General injection context bypasses System constructor" begin
+    sys = System(
+        atoms=[Atom(mass=1.0, charge=0.0, σ=0.1, ϵ=0.0)],
+        coords=[SVector(0.1, 0.1, 0.1)],
+        boundary=CubicBoundary(1.0),
+        pairwise_inters=(ConstructorBypassPairwise(false),),
+        general_inters=(ConstructorBypassGeneral(),),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+
+    _, _, _, gis = Molly.inject_gradients(
+        sys,
+        [1.0],
+        ([0], [0], [0], [0]),
+        ((1,),),
+        (),
+        ((1,),),
+    )
+
+    @test only(gis) == ConstructorBypassPairwise(true)
+    @test_throws ArgumentError System(sys; pairwise_inters=(ConstructorBypassPairwise(true),))
 end
 
 @testset "Differentiable charge parameters" begin

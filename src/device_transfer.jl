@@ -189,7 +189,7 @@ function _transfer_pme(inter::PME, ::Type{AT}, ::Type{T}) where {AT, T}
     grid_fractions = to_device(zeros(T, 3, n_atoms), AT)
     bsplines_θ = to_device(zeros(T, inter.order * n_atoms, 3), AT)
     bsplines_dθ = zero(bsplines_θ)
-    bsplines_moduli = _pme_bspline_moduli(T, inter.order, inter.mesh_dims)
+    bsplines_moduli = pme_bspline_moduli(T, inter.order, inter.mesh_dims)
     bsplines_moduli_x = to_device(bsplines_moduli[1], AT)
     bsplines_moduli_y = to_device(bsplines_moduli[2], AT)
     bsplines_moduli_z = to_device(bsplines_moduli[3], AT)
