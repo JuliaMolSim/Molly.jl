@@ -370,6 +370,7 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_coords_buffer::Base.RefValue{Any}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
+    constraint_preview_velocities_buffer::Base.RefValue{Any}
     fs_mat::FM
     validity::BufferValidity
 end
@@ -387,7 +388,8 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      constraint_scratch_ref(), fs_mat, BufferValidity())
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      fs_mat, BufferValidity())
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
@@ -398,7 +400,8 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      constraint_scratch_ref(), fs_mat, BufferValidity())
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      fs_mat, BufferValidity())
 end
 
 function init_buffers!(sys::System{D}, n_threads) where D
@@ -426,6 +429,7 @@ function init_buffers!(sys::System{D}, n_threads) where D
         pres,
         pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
         constraint_scratch_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
+        constraint_scratch_ref(),
         fs_mat,
         BufferValidity(),
     )
@@ -451,8 +455,8 @@ energy calculations.
 - `pre_coupling_virial`, `pre_coupling_kin_tensor`, `pre_coupling_volume`:
   Optional state used by pressure/virial loggers after coordinate-scaling coupling.
 - `constraint_coords_buffer`, `constraint_velocities_buffer`,
-  `constraint_preview_coords_buffer`: Reusable scratch arrays for constraint virial
-  snapshots and initial-step previews.
+  `constraint_preview_coords_buffer`, `constraint_preview_velocities_buffer`:
+  Reusable scratch arrays for constraint virial snapshots and initial-step previews.
 - `validity`: Step metadata describing which tensor buffers are current.
 - `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
 - `morton_seq`, `morton_seq_buffer_1`, `morton_seq_buffer_2`, `morton_seq_inv`:
@@ -491,6 +495,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     constraint_coords_buffer::Base.RefValue{Any}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
+    constraint_preview_velocities_buffer::Base.RefValue{Any}
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -528,7 +533,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       constraint_virial, constraint_virial_nounits, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      constraint_scratch_ref(), BufferValidity(), box_mins, box_maxs, morton_seq,
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      BufferValidity(), box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
@@ -648,7 +654,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
-                      constraint_scratch_ref(), BufferValidity(), box_mins, box_maxs, morton_seq,
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      BufferValidity(), box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,

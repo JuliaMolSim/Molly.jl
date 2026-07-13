@@ -428,21 +428,72 @@ function default_constraint_preview_dt(sys)
     return sys.energy_units == NoUnits ? T(0.0005) : T(0.0005)u"ps"
 end
 
+# Evaluate the constraint contribution to the virial when there is no running dynamics
+# step to accumulate it from (the initial state of a simulation and the public virial and
+# pressure functions). Both the position (SHAKE) and velocity (RATTLE) contributions are
+# captured using the same constraint solves a full dynamics step applies, so the result is
+# consistent with the per-step virial the integrators accumulate and independent of the
+# (arbitrary) preview time step. The velocities are first projected onto the constraint
+# manifold so the velocity contribution is well-defined even if the input velocities do not
+# satisfy the constraints. The system is advanced through a trial step and restored, leaving
+# only the accumulated constraint virial merged into buffers.virial. The generic constraint
+# interface means this works for any constraint algorithm.
 function merge_initial_constraint_virial!(buffers, sys, step_n::Integer, needs_virial::Bool,
                                           accels; n_threads::Integer=Threads.nthreads(),
                                           dt=default_constraint_preview_dt(sys))
     if needs_virial && length(sys.constraints) > 0
         coords = copyto_constraint_scratch!(buffers.constraint_preview_coords_buffer, sys.coords)
-        velocities = copyto_constraint_scratch!(buffers.constraint_velocities_buffer, sys.velocities)
+        velocities = copyto_constraint_scratch!(buffers.constraint_preview_velocities_buffer,
+                                                sys.velocities)
+
+        # Project onto the constraint manifold so the RATTLE contribution reflects only the
+        # force-induced velocity component rather than any pre-existing constraint violation
+        apply_velocity_constraints!(sys; n_threads=n_threads)
 
         clear_constraint_virial!(buffers, sys, step_n)
-        sys.coords .+= sys.velocities .* dt .+ (accels .* dt^2) ./ 2
+        sys.velocities .+= accels .* dt
+        vel_context = velocity_constraint_context(buffers, sys, step_n, dt, true)
+        apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
+
+        sys.coords .+= sys.velocities .* dt
         pos_context = position_constraint_context(buffers, sys, step_n, dt, true)
         apply_position_constraints!(sys, coords; context=pos_context, n_threads=n_threads)
         merge_constraint_virial!(buffers, sys, step_n)
 
         sys.coords .= coords
         sys.velocities .= velocities
+    end
+    return buffers
+end
+
+# Evaluate the constraint contribution to the virial at the current configuration using
+# the same position (SHAKE) and velocity (RATTLE) constraint solves that a full dynamics
+# step applies, so the barostat sees a constraint virial consistent with the integrator.
+# The system is advanced through a trial step and restored, leaving only the accumulated
+# constraint virial merged into buffers.virial. Unlike merge_initial_constraint_virial!,
+# this captures both the position and velocity constraint contributions.
+function merge_step_constraint_virial!(buffers, sys, step_n::Integer, needs_virial::Bool,
+                                       accels, sim, dt, coord_save, vel_save,
+                                       cons_coord_storage, cons_vel_storage;
+                                       n_threads::Integer=Threads.nthreads())
+    if needs_virial && length(sys.constraints) > 0
+        coord_save .= sys.coords
+        vel_save .= sys.velocities
+
+        sys.velocities .+= accels .* dt
+        prepare_constraint_virial!(buffers, sys, step_n, true)
+        vel_context = velocity_constraint_context(buffers, sys, step_n, dt, true, sim)
+        apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads)
+
+        cons_coord_storage .= sys.coords
+        sys.coords .+= sys.velocities .* dt
+        pos_context = position_constraint_context(buffers, sys, step_n, dt, true, sim)
+        apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, dt;
+                                    context=pos_context, n_threads=n_threads)
+        merge_constraint_virial!(buffers, sys, step_n)
+
+        sys.coords .= coord_save
+        sys.velocities .= vel_save
     end
     return buffers
 end
