@@ -35,15 +35,15 @@ distances(coords, boundary) = norm.(displacements(coords, boundary))
 #   of input coordinates and translating the second set of input coordinates
 # Assumes the coordinates do not cross the bounding box, i.e. all
 #   coordinates in each set correspond to the same periodic image
-function kabsch(coords_1::AbstractArray{SVector{D, T}},
-                coords_2::AbstractArray{SVector{D, T}}) where {D, T}
+function kabsch(coords_1::AbstractArray{SVector{3, T}},
+                coords_2::AbstractArray{SVector{3, T}}) where T
     n_atoms = length(coords_1)
     trans_1 = mean(coords_1)
     trans_2 = mean(coords_2)
 
-    p = from_device(reshape(reinterpret(T, coords_1), D, n_atoms)) .-
+    p = from_device(reshape(reinterpret(T, coords_1), 3, n_atoms)) .-
                                 repeat(reinterpret(T, trans_1), 1, n_atoms)
-    q = from_device(reshape(reinterpret(T, coords_2), D, n_atoms)) .-
+    q = from_device(reshape(reinterpret(T, coords_2), 3, n_atoms)) .-
                                 repeat(reinterpret(T, trans_2), 1, n_atoms)
 
     cov = p * transpose(q)
@@ -54,8 +54,8 @@ function kabsch(coords_1::AbstractArray{SVector{D, T}},
     rot = svd_res.V * dmat * Ut
 
     p_rot = rot * p
-    p_rot_reshaped = SArray[SVector{D, T}(p_rot[i:(i+2)]) for i in 1:3:(length(p_rot)-2)]
-    q_reshaped = SArray[SVector{D, T}(q[i:(i+2)]) for i in 1:3:(length(q)-2)]
+    p_rot_reshaped = SArray[SVector{3, T}(p_rot[i:(i+2)]) for i in 1:3:(length(p_rot)-2)]
+    q_reshaped = SArray[SVector{3, T}(q[i:(i+2)]) for i in 1:3:(length(q)-2)]
 
     return p_rot_reshaped, q_reshaped
 end
@@ -74,13 +74,14 @@ sum_abs2(x) = sum(abs2, x)
     rmsd(coords_1, coords_2)
 
 Calculate the root-mean-square deviation (RMSD) of two sets of
-3D coordinates after superimposition by the Kabsch algorithm.
+coordinates after superimposition by the Kabsch algorithm.
 
 Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates in each set correspond to the same periodic image.
+Only compatible with 3D systems.
 """
-function rmsd(coords_1::AbstractArray{SVector{D, T}},
-              coords_2::AbstractArray{SVector{D, T}}) where {D, T}
+function rmsd(coords_1::AbstractArray{SVector{3, T}},
+              coords_2::AbstractArray{SVector{3, T}}) where T
     p_rot, q = kabsch(coords_1, coords_2)
     diffs = p_rot .- q
     msd = mean(sum_abs2, diffs)

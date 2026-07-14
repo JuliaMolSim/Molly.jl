@@ -661,30 +661,3 @@ end
         end
     end
 end
-
-@kernel function random_velocities_kernel!(vels::AbstractVector{SVector{D, C}},@Const(masses::AbstractVector{M}), units, @Const(virtual_sites))  where {D,C,M}
-    i = @index(Global, Linear)
-    if i<= length(vels) 
-        @inbounds if !virtual_sites[i]
-            @inbounds scale = C(sqrt(units/masses[i]))
-            @inbounds vels[i] = SVector{D, C}(ntuple(i -> randn()* scale, Val(D)))
-        else
-            @inbounds velocities[i] = SVector{D, C}(ntuple(i -> 0.0, Val(D)))
-        end
-    end
-end
-
-function random_velocities!(vels::AbstractGPUArray, sys::Molly.AbstractSystem, temp; rng)
-    backend = get_backend(vels)
-    kernel! = random_velocities_kernel!(backend)
-    kernel!(vels,sys.masses,  sys.k*temp, sys.virtual_site_flags,ndrange=length(vels))
-    return vels 
-end
-
-@kernel function apply_Andersen_coupling_kernel!(velocities::AbstractVector{SVector{D, C}}, @Const(masses::AbstractVector{M}), units,val,@Const(virtual_sites)) where {D,C,M}
-    i = @index(Global, Linear)
-    @inbounds if i<= length(velocities) && !virtual_sites[i] && rand() < val
-        @inbounds scale = C(sqrt(units/masses[i]))
-        @inbounds velocities[i] = SVector{D, C}(ntuple(i -> randn() * scale, Val(D)))
-    end
-end
