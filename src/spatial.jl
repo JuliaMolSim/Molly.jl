@@ -733,67 +733,6 @@ function random_velocity(atom_mass::Real, temp::Real,
     return SVector([maxwell_boltzmann(atom_mass, temp, k; rng=rng) for i in 1:dims]...)
 end
 
-function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
-                            temp::Unitful.Temperature, rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
-                            temp::Unitful.Temperature,
-                            k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits},
-                            rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_3D(atom_mass::Real, virtual_site_flag, temp::Real, k::Real,
-                            rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
-                            temp::Unitful.Temperature, rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
-                            temp::Unitful.Temperature,
-                            k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits},
-                            rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_2D(atom_mass::Real, virtual_site_flag, temp::Real, k::Real,
-                            rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
 """
     maxwell_boltzmann(atom_mass::Unitful.Mass, temp::Unitful.Temperature,
                       k::BoltzmannConstUnits=Unitful.k; rng=Random.default_rng())
@@ -870,7 +809,7 @@ function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::AbstractSy
     natoms = UInt64(length(ms))
     @inbounds @simd ivdep for i in eachindex(vels)
         scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
-        vels[i] = @inline(randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms)) * scale
+        vels[i] = randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms) * scale
     end
     vels
 end

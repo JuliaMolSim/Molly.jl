@@ -1209,6 +1209,30 @@ end
         report_issue(err_str, strictness)
     end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
+    # virtual particles should get inv mass of 0 AND mass of 0
+    # This way the O step doesn't change virtual site velocity
+    M_inv = map(masses(sys), sys.virtual_site_flags) do m, vsf
+        local x = inv(m)
+        ifelse(vsf, zero(x), x)
+    end
+    if !all(op -> op in ('A', 'B', 'O'), sim.splitting)
+        throw(ArgumentError("splitting must contain only A, B, and O steps"))
+    end
+    n_o_steps = count('O', sim.splitting)
+    if n_o_steps > 0
+        # These local variables are only needed in the O step
+        vel_scales = exp.((-sim.friction * sim.dt / n_o_steps) .* M_inv)
+        kT = sim.temperature*sys.k
+        vel_el_zero = zero(eltype(eltype(sys.velocities)))
+        vel_scale_one_sq = abs2(oneunit(eltype(vel_scales)))
+        noise_scales = oftype.(
+            vel_el_zero,
+            sqrt.(kT .* M_inv .* (vel_scale_one_sq .- (abs2.(vel_scales))))
+        )
+        # Seed the per step noise
+        philox_key = rand(rng, UInt64)
+        philox_ctr1 = rand(rng, UInt64)
+    end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -1219,23 +1243,6 @@ end
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(false); n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
-    # virtual particles should get inv mass of 0 AND mass of 0
-    # This way the O step doesn't change virtual site velocity
-    M_inv = map(sys.masses, sys.virtual_site_flags) do m, vsf
-        local x = inv(m)
-        ifelse(vsf, zero(x), x)
-    end
-    vel_scales = exp.((-sim.friction * sim.dt / count('O', sim.splitting)) .* M_inv)
-    kT = sim.temperature*sys.k
-    vel_el_zero = zero(eltype(eltype(sys.velocities)))
-    vel_scale_one_sq = abs2(oneunit(eltype(vel_scales)))
-    noise_scales = oftype.(
-        vel_el_zero,
-        sqrt.(kT .* M_inv .* (vel_scale_one_sq .- (abs2.(vel_scales))))
-    )
-    # Seed the per step noise
-    philox_key = rand(rng, UInt64)
-    philox_ctr1 = rand(rng, UInt64)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
 
