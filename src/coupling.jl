@@ -213,6 +213,18 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
     return false
 end
 
+@kernel function andersen_coupling_kernel!(velocities::AbstractVector{SVector{D, V}},
+                                           @Const(masses),
+                                           kT,
+                                           val,
+                                           @Const(virtual_sites)) where {D, V}
+    i = @index(Global, Linear)
+    @inbounds if i <= length(velocities) && !virtual_sites[i] && rand() < val
+        scale = sqrt(kT / masses[i])
+        velocities[i] = SVector{D, V}(ntuple(i -> randn() * scale, Val(D)))
+    end
+end
+
 @doc raw"""
     BerendsenThermostat(temperature, coupling_const) <: AbstractThermostat
 
@@ -281,21 +293,21 @@ function BerendsenBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
                            max_scale_frac=0.1, n_steps=1) where {PT}
     if !(coupling_type in (:isotropic, :semiisotropic, :anisotropic))
-        throw(ArgumentError(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic")))
+        throw(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic"))
     end
 
     if coupling_type == :isotropic
         if press isa AbstractArray
-            throw(ArgumentError("isotropic: press must be a scalar"))
+            throw(ArgumentError("isotropic pressure must be a scalar"))
         end
         if compressibility isa AbstractArray
-            throw(ArgumentError("isotropic: compressibility must be a scalar"))
+            throw(ArgumentError("isotropic compressibility must be a scalar"))
         end
         if !isbar(press)
-            throw(ArgumentError("isotropic: press must have press units"))
+            throw(ArgumentError("isotropic pressure must have pressure units"))
         end
         if !isibar(compressibility)
-            throw(ArgumentError("isotropic: compressibility must have 1/press units"))
+            throw(ArgumentError("isotropic compressibility must have 1/pressure units"))
         end
 
         # Use the caller's units, but convert internal scalars consistently
@@ -313,16 +325,16 @@ function BerendsenBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
 
     if coupling_type == :semiisotropic
         if !(press isa AbstractArray && length(press) == 2)
-            throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
+            throw(ArgumentError("semiisotropic pressure must be a 2-vector (xy, z)"))
         end
         if !(compressibility isa AbstractArray && length(compressibility) == 2)
-            throw(ArgumentError("semiisotropic: compressibility must be a 2-vector (xy, z)"))
+            throw(ArgumentError("semiisotropic compressibility must be a 2-vector (xy, z)"))
         end
         if !all(isbar, press)
-            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+            throw(ArgumentError("semiisotropic pressure must have pressure units"))
         end
         if !all(isibar, compressibility)
-            throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
+            throw(ArgumentError("semiisotropic compressibility must have 1/pressure units"))
         end
 
         P_units = unit(press[1])
@@ -343,16 +355,16 @@ function BerendsenBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
 
     if coupling_type == :anisotropic
         if !(press isa  AbstractArray && length(press) == 6)
-            throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
+            throw(ArgumentError("anisotropic pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
-        if !(compressibility isa  AbstractArray && length(press) == 6)
-            throw(ArgumentError("semiisotropic: compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
+        if !(compressibility isa  AbstractArray && length(compressibility) == 6)
+            throw(ArgumentError("anisotropic compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
         if !all(isbar, press)
-            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+            throw(ArgumentError("anisotropic pressure must have pressure units"))
         end
         if !all(isibar, compressibility)
-            throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
+            throw(ArgumentError("anisotropic compressibility must have 1/pressure units"))
         end
 
         P_units = unit(press[1])
@@ -458,7 +470,8 @@ function apply_coupling!(sys::System{D},
         μ[2,1], μ[3,1], μ[3,2] = 0, 0, 0
     end
 
-    scale_coords!(sys, SMatrix{D,D,FT}(μ))
+    rotate = (barostat.coupling_type != :isotropic)
+    scale_coords!(sys, SMatrix{D,D,FT}(μ); rotate=rotate)
     return true
 end
 
@@ -504,16 +517,16 @@ function CRescaleBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
 
     if coupling_type == :isotropic
         if press isa AbstractArray
-            throw(ArgumentError("isotropic: pressure must be a scalar"))
+            throw(ArgumentError("isotropic pressure must be a scalar"))
         end
         if compressibility isa AbstractArray
-            throw(ArgumentError("isotropic: compressibility must be a scalar"))
+            throw(ArgumentError("isotropic compressibility must be a scalar"))
         end
         if !isbar(press)
-            throw(ArgumentError("isotropic: pressure must have pressure units"))
+            throw(ArgumentError("isotropic pressure must have pressure units"))
         end
         if !isibar(compressibility)
-            throw(ArgumentError("isotropic: compressibility must have 1/pressure units"))
+            throw(ArgumentError("isotropic compressibility must have 1/pressure units"))
         end
 
         # Use the caller's units, but convert internal scalars consistently
@@ -531,16 +544,16 @@ function CRescaleBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
 
     if coupling_type == :semiisotropic
         if !(press isa AbstractArray && length(press) == 2)
-            throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
+            throw(ArgumentError("semiisotropic pressure must be a 2-vector (xy, z)"))
         end
         if !(compressibility isa AbstractArray && length(compressibility) == 2)
-            throw(ArgumentError("semiisotropic: compressibility must be a 2-vector (xy, z)"))
+            throw(ArgumentError("semiisotropic compressibility must be a 2-vector (xy, z)"))
         end
         if !all(isbar, press)
-            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+            throw(ArgumentError("semiisotropic pressure must have pressure units"))
         end
         if !all(isibar, compressibility)
-            throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
+            throw(ArgumentError("semiisotropic compressibility must have 1/pressure units"))
         end
 
         P_units = unit(press[1])
@@ -560,16 +573,16 @@ function CRescaleBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
 
     if coupling_type == :anisotropic
         if !(press isa  AbstractArray && length(press) == 6)
-            throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
+            throw(ArgumentError("anisotropic pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
-        if !(compressibility isa  AbstractArray && length(press) == 6)
-            throw(ArgumentError("semiisotropic: compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
+        if !(compressibility isa  AbstractArray && length(compressibility) == 6)
+            throw(ArgumentError("anisotropic compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
         if !all(isbar, press)
-            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+            throw(ArgumentError("anisotropic pressure must have pressure units"))
         end
         if !all(isibar, compressibility)
-            throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
+            throw(ArgumentError("anisotropic compressibility must have 1/pressure units"))
         end
 
         P_units = unit(press[1])
@@ -706,7 +719,8 @@ function apply_coupling!(sys::System{D},
         μ[2,1], μ[3,1], μ[3,2] = 0, 0, 0
     end
 
-    scale_coords!(sys, SMatrix{3,3,FT}(μ); scale_velocities=true)
+    rotate = (barostat.coupling_type != :isotropic)
+    scale_coords!(sys, SMatrix{3, 3, FT}(μ); rotate=rotate, scale_velocities=true)
     return true
 end
 
@@ -791,10 +805,10 @@ function MonteCarloBarostat(press::Union{PT, AbstractArray{PT}}, temp,
 
     if coupling_type == :isotropic
         if press isa AbstractArray
-            throw(ArgumentError("isotropic: pressure must be a scalar"))
+            throw(ArgumentError("isotropic pressure must be a scalar"))
         end
         if !isbar(press)
-            throw(ArgumentError("isotropic: pressure must have pressure units"))
+            throw(ArgumentError("isotropic pressure must have pressure units"))
         end
 
         # Use the caller's units, but convert internal scalars consistently
@@ -811,10 +825,10 @@ function MonteCarloBarostat(press::Union{PT, AbstractArray{PT}}, temp,
 
     if coupling_type == :semiisotropic
         if !(press isa AbstractArray && length(press) == 2)
-            throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
+            throw(ArgumentError("semiisotropic pressure must be a 2-vector (xy, z)"))
         end
         if !all(isbar, press)
-            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+            throw(ArgumentError("semiisotropic pressure must have pressure units"))
         end
 
         P_units = unit(press[1])
@@ -831,10 +845,10 @@ function MonteCarloBarostat(press::Union{PT, AbstractArray{PT}}, temp,
 
     if coupling_type == :anisotropic
         if !(press isa  AbstractArray && length(press) == 6)
-            throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
+            throw(ArgumentError("anisotropic pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
         if !all(isbar, press)
-            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+            throw(ArgumentError("anisotropic pressure must have pressure units"))
         end
 
         P_units = unit(press[1])
@@ -865,9 +879,8 @@ function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarlo
         return false
     end
 
-    # Separate function avoids Enzyme error
     recompute_forces = apply_coupling_mc!(sys, barostat, Val(barostat.coupling_type), neighbors,
-                                          step_n; n_threads=n_threads, rng=rng)
+                                          buffers, step_n; n_threads=n_threads, rng=rng)
 
     if barostat.n_attempted >= 10
         V_now = volume(sys.boundary)
@@ -884,15 +897,16 @@ function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarlo
     return recompute_forces
 end
 
-function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic}, neighbors, step_n::Integer;
-                            n_threads::Integer=Threads.nthreads(), rng=Random.default_rng()) where {D, T}
+function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic}, neighbors,
+                            buffers, step_n::Integer; n_threads::Integer=Threads.nthreads(),
+                            rng=Random.default_rng()) where {D, T}
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
-        E  = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+        E  = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
         V  = volume(sys.boundary)
         dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
 
@@ -914,7 +928,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
             neighbors_trial = neighbors
         end
 
-        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
 
         dW = dE + uconvert(unit(dE), tr(barostat.pressure) * dV / 3) -
@@ -932,8 +946,9 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
     return recompute_forces
 end
 
-function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotropic}, neighbors, step_n::Integer;
-                            n_threads::Integer=Threads.nthreads(), rng=Random.default_rng()) where {D, T}
+function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotropic}, neighbors,
+                            buffers, step_n::Integer; n_threads::Integer=Threads.nthreads(),
+                            rng=Random.default_rng()) where {D, T}
     Pxx, Pyy, Pzz = barostat.pressure[1,1], barostat.pressure[2,2], barostat.pressure[3,3]
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
@@ -941,7 +956,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
     old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
-        E         = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+        E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
         V         = volume(sys.boundary)
         dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
         V_plus_dV = V + dV
@@ -972,7 +987,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
             neighbors_trial = neighbors
         end
 
-        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
 
         work = ((w1/2)*Pxx + (w1/2)*Pyy + w2*Pzz) * V_plus_dV * log(v_scale)
@@ -991,8 +1006,9 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
     return recompute_forces
 end
 
-function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotropic}, neighbors, step_n::Integer;
-                            n_threads::Integer=Threads.nthreads(), rng=Random.default_rng()) where {D, T}
+function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotropic}, neighbors,
+                            buffers, step_n::Integer; n_threads::Integer=Threads.nthreads(),
+                            rng=Random.default_rng()) where {D, T}
     Pxx, Pyy, Pzz = barostat.pressure[1,1], barostat.pressure[2,2], barostat.pressure[3,3]
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
@@ -1000,7 +1016,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
     old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
-        E         = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+        E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
         V         = volume(sys.boundary)
         dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
         V_plus_dV = V + dV
@@ -1033,7 +1049,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
             neighbors_trial = neighbors
         end
 
-        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
 
         work = (w1*Pxx + w2*Pyy + w3*Pzz) * V_plus_dV * log(v_scale)

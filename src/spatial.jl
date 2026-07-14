@@ -551,7 +551,7 @@ function vector(c1, c2, boundary::TriclinicBoundary{3, T, <:Any, false}) where T
 end
 
 # Pad a vector to 3D to allow operations such as the cross product
-function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, boundary::RectangularBoundary{T}) where T
+function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, boundary::RectangularBoundary{2}) where T
     SVector{3, T}(
         vector_1D(c1[1], c2[1], boundary[1]),
         vector_1D(c1[2], c2[2], boundary[2]),
@@ -562,7 +562,7 @@ end
 vector_pad3D(c1::SVector{3}, c2::SVector{3}, boundary) = vector(c1, c2, boundary)
 
 # Trim a vector back to 2D if required
-trim3D(v::SVector{3, T}, boundary::RectangularBoundary{T}) where T = SVector{2, T}(v[1], v[2])
+trim3D(v::SVector{3, T}, boundary::RectangularBoundary{2}) where T = SVector{2, T}(v[1], v[2])
 trim3D(v::SVector{3}, boundary) = v
 
 """
@@ -893,6 +893,33 @@ function random_velocities!(vels::AbstractGPUArray, sys::AbstractSystem, temp; r
     vels
 end
 
+function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.default_rng())
+    if isnothing(rng)
+        backend = get_backend(vels)
+        kernel! = random_velocities_kernel!(backend)
+        kernel!(vels, sys.masses,  sys.k*temp, sys.virtual_site_flags, ndrange=length(vels))
+        KernelAbstractions.synchronize(backend)
+    else
+        vels .= random_velocities(sys, temp; rng=rng)
+    end
+    return vels
+end
+
+@kernel function random_velocities_kernel!(velocities::AbstractVector{SVector{D, V}},
+                                           @Const(masses),
+                                           kT,
+                                           @Const(virtual_sites)) where {D, V}
+    i = @index(Global, Linear)
+    if i <= length(velocities)
+        @inbounds if !virtual_sites[i]
+            scale = sqrt(kT / masses[i])
+            velocities[i] = SVector{D, V}(ntuple(i -> randn() * scale, Val(D)))
+        else
+            velocities[i] = SVector{D, V}(ntuple(i -> zero(V), Val(D)))
+        end
+    end
+end
+
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
 acosbound(x::Real) = acos(clamp(x, -1, 1))
 
@@ -979,10 +1006,15 @@ end
 
 update_vel(v, cm_v, vsf) = (vsf ? zero(v) : v - cm_v)
 
+# The CUDA extension has a fast 3D CUDA path
 function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
     cm_momentum = mapreduce((v, m) -> v .* m, +, sys.velocities, masses(sys))
     cm_velocity = cm_momentum / sys.total_mass
-    sys.velocities .= update_vel.(sys.velocities, (cm_velocity,), sys.virtual_site_flags)
+    if isempty(sys.virtual_sites)
+        sys.velocities .-= (cm_velocity,)
+    else
+        sys.velocities .= update_vel.(sys.velocities, (cm_velocity,), sys.virtual_site_flags)
+    end
     return sys
 end
 
@@ -1017,19 +1049,26 @@ function pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
 end
 
 function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial, vol) where D
-    K = energy_remove_mol.(kin_tensor) # (1/2) Σ m v⊗v
-    W = energy_remove_mol.(virial)     # Σ r⊗f
-
-    P = (2 .* K .+ W) ./ vol
     if sys.energy_units == NoUnits || D != 3
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
         #   for 3 dimensions and (u * ps^-2) for 2 dimensions
-        pres_tensor .= P
+        @inbounds for col in 1:D
+            for row in 1:D
+                K = energy_remove_mol(kin_tensor[row, col]) # (1/2) Σ m v⊗v
+                W = energy_remove_mol(virial[row, col]) # Σ r⊗f
+                pres_tensor[row, col] = (2 * K + W) / vol
+            end
+        end
     else
         # Sensible unit to return by default for 3 dimensions
-        P_bar = uconvert.(u"bar", P)
-        pres_tensor .= P_bar
+        @inbounds for col in 1:D
+            for row in 1:D
+                K = energy_remove_mol(kin_tensor[row, col])
+                W = energy_remove_mol(virial[row, col])
+                pres_tensor[row, col] = uconvert(u"bar", (2 * K + W) / vol) # Σ r⊗f
+            end
+        end
     end
     return pres_tensor
 end
@@ -1055,7 +1094,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     end
 
     if isnothing(kin_tensor)
-        # Always evaluate K in case velocities were rescaled by a thermostat.
+        # Always evaluate K in case velocities were rescaled by a thermostat
         kinetic_energy_tensor!(buffers.kin_tensor, sys)
     else
         buffers.kin_tensor .= kin_tensor
@@ -1097,7 +1136,7 @@ function scalar_pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers=n
 end
 
 # Center of geometry per molecule using unwrapped fractional coordinates
-function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topology) where {D,C}
+function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topology) where {D, C}
     if isnothing(topology)
         return coords
     end
@@ -1154,6 +1193,8 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
     u = Vector{eltype(f)}(undef, N)
 
     centers = Vector{SVector{D, eltype(x[1][1])}}(undef, n_mol)
+    visited = falses(N)
+    stack = Vector{Int}(undef, N)
     for m in 1:n_mol
         atoms = atoms_by_mol[m]
         if isempty(atoms)
@@ -1161,16 +1202,16 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
             continue
         end
 
-        visited = falses(N)
-
         # Search over each connected component within the molecule
         for seed in atoms
             visited[seed] && continue
             u[seed] = f[seed]
             visited[seed] = true
-            stack = [seed]
-            while !isempty(stack)
-                i = pop!(stack)
+            stack_len = 1
+            stack[stack_len] = seed
+            while stack_len > 0
+                i = stack[stack_len]
+                stack_len -= 1
                 @inbounds for j in nbrs[i]
                     # stay within molecule
                     if atom_mol[j] != m || visited[j]
@@ -1179,7 +1220,8 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
                     Δ = f[j] - f[i] - round.(f[j] - f[i])
                     u[j] = u[i] + Δ
                     visited[j] = true
-                    push!(stack, j)
+                    stack_len += 1
+                    stack[stack_len] = j
                 end
             end
         end
@@ -1273,18 +1315,15 @@ function scale_coords!(sys::System{<:Any, AT},
         c_box   = box_center(b_old)
 
         # center molecules into same image
-        Δcenter = [c_box - centers[m] for m in eachindex(centers)]
         @inbounds for i in eachindex(coords)
-            coords[i] = wrap_coords(coords[i] + Δcenter[mol_of[i]], b_old)
+            coords[i] = wrap_coords(coords[i] + c_box - centers[mol_of[i]], b_old)
         end
 
-        # new COMs
+        # new COMs, stored back in centers
         invB = inv(B)
-        centers′ = similar(centers)
         @inbounds for m in eachindex(centers)
             s    = invB * centers[m]
-            rcom = B′ * s                  # = μ * centers[m]
-            centers′[m] = rcom
+            centers[m] = B′ * s # = μ * centers[m]
         end
 
         # rotation from right polar decomposition
@@ -1305,12 +1344,19 @@ function scale_coords!(sys::System{<:Any, AT},
         b_new   = ustrip(coord_u, b_new_u)
 
         # place atoms
-        @inbounds for i in eachindex(coords)
-            m  = mol_of[i]
-            δ  = coords[i] - c_box
-            δ′ = R * δ
-            r′ = δ′ + centers′[m]
-            coords[i] = wrap_coords(r′, b_new)
+        if rotate
+            @inbounds for i in eachindex(coords)
+                m  = mol_of[i]
+                δ  = coords[i] - c_box
+                δ′ = R * δ
+                r′ = δ′ + centers[m]
+                coords[i] = wrap_coords(r′, b_new)
+            end
+        else
+            @inbounds for i in eachindex(coords)
+                m = mol_of[i]
+                coords[i] = wrap_coords(coords[i] - c_box + centers[m], b_new)
+            end
         end
 
         # write back

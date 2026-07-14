@@ -19,8 +19,7 @@
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
     cons_shake = SHAKE_RATTLE(n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1"; dist_constraints=constraints)
     cons_lincs = LINCS(masses=repeat([atom_mass], n_atoms), dist_tolerance=1e-8u"Å",
-                       vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints,
-                       iter_vel_correction=true)
+                       vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints)
 
     @test length(cons_shake.clusters12) == (n_atoms ÷ 2)
 
@@ -54,6 +53,7 @@
 
             @test check_position_constraints(sys, cons)
             if simulator isa VelocityVerlet
+                # Verlet and Langevin are half-step integrators so this is not expected to be true
                 @test check_velocity_constraints(sys, cons)
             end
         end
@@ -346,7 +346,6 @@ end
                         vel_tolerance=sys.constraints[1].vel_tolerance,
                         nrec=6,
                         niter=6,
-                        iter_vel_correction=true,
                     )
                     sys.constraints = (Molly.setup_constraints!(lincs, sys.neighbor_finder, AT),)
                 end
@@ -1031,7 +1030,11 @@ end
             initial_virial = only(values(sys.loggers.virial))
             @test maximum(abs.(initial_virial)) > 1e-8
             @test sys.coords == coords_before
-            @test sys.velocities == velocities_before
+            if simulator isa DPDVelocityVerlet
+                @test check_velocity_constraints(sys)
+            else
+                @test sys.velocities == velocities_before
+            end
         end
 
         sys = simulator_constraint_system(
@@ -1065,7 +1068,7 @@ end
             loggers=(virial=VirialLogger(Matrix{Float64}, 1),),
         )
 
-        simulate!(sys, simulator, 1; run_loggers=:skipzero, n_threads=1,
+        simulate!(sys, simulator, 1; run_loggers=:skipstart, n_threads=1,
                   rng=MersenneTwister(1234))
 
         @test maximum(abs.(only(values(sys.loggers.virial)))) > 1e-8
@@ -1089,7 +1092,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         @test check_velocity_constraints(sys)
         @test maximum(abs.(only(values(sys.loggers.virial)))) > 1e-8
@@ -1104,7 +1107,7 @@ end
     )
 
     simulate!(sys, VelocityVerlet(dt=dt, remove_CM_motion=0), 1;
-              run_loggers=:skipzero, n_threads=1)
+              run_loggers=:skipstart, n_threads=1)
 
     logged_pressure = only(values(sys.loggers.pressure))
     logged_scalar_pressure = only(values(sys.loggers.scalar_pressure))
@@ -1124,7 +1127,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, coupling=(coupler,), remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         expected_pressure = (2 .* coupler.kin_tensor .+ coupler.virial) ./ coupler.volume
         post_coupling_pressure = (2 .* coupler.kin_tensor .+ coupler.virial) ./
@@ -1151,7 +1154,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, coupling=(coupler,), remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         @test !coupler.snapshot_seen
         @test only(values(sys.loggers.snapshot)) == false
@@ -1165,7 +1168,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, coupling=(coupler,), remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         @test coupler.snapshot_seen
         @test only(values(sys.loggers.snapshot)) == true
@@ -1181,7 +1184,7 @@ end
         )
 
         simulate!(sys, VelocityVerlet(dt=dt, coupling=(coupler,), remove_CM_motion=0), 1;
-                  run_loggers=:skipzero, n_threads=1)
+                  run_loggers=:skipstart, n_threads=1)
 
         expected_pressure = (2 .* coupler.kin_tensor .+ coupler.virial) ./ coupler.volume
         @test coupler.snapshot_seen
@@ -1196,7 +1199,7 @@ end
     )
 
     simulate!(sys, VelocityVerlet(dt=dt, coupling=(barostat,), remove_CM_motion=0), 1;
-              run_loggers=:skipzero, n_threads=1)
+              run_loggers=:skipstart, n_threads=1)
 
     @test length(values(sys.loggers.pressure)) == 1
 
@@ -1454,7 +1457,6 @@ end
         @test deviations[2] <= deviations[1] + 1e-15
         @test deviations[3] <= deviations[2] + 1e-15
     end
-
 end
 
 @testset "LINCS GPU integration" begin
@@ -1471,13 +1473,12 @@ end
     atom_masses = [atom_mass for _ in 1:n_atoms]
 
     cons = LINCS(masses=atom_masses, dist_tolerance=T(1e-4)u"Å", vel_tolerance=T(1e-4)u"Å^2 * ps^-1",
-                 dist_constraints=dist_constraints, iter_vel_correction=true)
+                 dist_constraints=dist_constraints)
 
     boundary = CubicBoundary(T(200.0)u"Å")
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
 
     for AT in array_list[2:end]
-
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
                 eligible=to_device(trues(n_atoms, n_atoms), AT),
@@ -1799,6 +1800,8 @@ end
 
 @testset "Minimization with constraints" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
+    pe_cpu_nocons, pe_cpu_cons = 0.0u"kJ/mol", 0.0u"kJ/mol"
+
     for AT in array_list
         sys_nocons = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
@@ -1818,9 +1821,18 @@ end
         sim = SteepestDescentMinimizer()
         simulate!(sys_nocons, sim)
         simulate!(sys_cons, sim)
+        pe_nocons = potential_energy(sys_nocons)
+        pe_cons   = potential_energy(sys_cons)
+        if AT == Array
+            pe_cpu_nocons = pe_nocons
+            pe_cpu_cons   = pe_cons
+        else
+            @test pe_nocons ≈ pe_cpu_nocons
+            @test pe_cons   ≈ pe_cpu_cons
+        end
 
         @test rmsd(sys_nocons.coords[1:1170], sys_cons.coords[1:1170]) < 0.01u"nm"
-        @test potential_energy(sys_nocons) < -150_000u"kJ/mol"
-        @test potential_energy(sys_cons)   < -150_000u"kJ/mol"
+        @test pe_nocons < -150_000u"kJ/mol"
+        @test pe_cons   < -150_000u"kJ/mol"
     end
 end

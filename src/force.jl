@@ -370,6 +370,7 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_coords_buffer::Base.RefValue{Any}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
+    constraint_preview_velocities_buffer::Base.RefValue{Any}
     fs_mat::FM
     validity::BufferValidity
 end
@@ -387,7 +388,8 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      constraint_scratch_ref(), fs_mat, BufferValidity())
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      fs_mat, BufferValidity())
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
@@ -398,7 +400,8 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      constraint_scratch_ref(), fs_mat, BufferValidity())
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      fs_mat, BufferValidity())
 end
 
 function init_buffers!(sys::System{D}, n_threads) where D
@@ -426,6 +429,7 @@ function init_buffers!(sys::System{D}, n_threads) where D
         pres,
         pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
         constraint_scratch_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
+        constraint_scratch_ref(),
         fs_mat,
         BufferValidity(),
     )
@@ -451,8 +455,8 @@ energy calculations.
 - `pre_coupling_virial`, `pre_coupling_kin_tensor`, `pre_coupling_volume`:
   Optional state used by pressure/virial loggers after coordinate-scaling coupling.
 - `constraint_coords_buffer`, `constraint_velocities_buffer`,
-  `constraint_preview_coords_buffer`: Reusable scratch arrays for constraint virial
-  snapshots and initial-step previews.
+  `constraint_preview_coords_buffer`, `constraint_preview_velocities_buffer`:
+  Reusable scratch arrays for constraint virial snapshots and initial-step previews.
 - `validity`: Step metadata describing which tensor buffers are current.
 - `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
 - `morton_seq`, `morton_seq_buffer_1`, `morton_seq_buffer_2`, `morton_seq_inv`:
@@ -491,6 +495,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     constraint_coords_buffer::Base.RefValue{Any}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
+    constraint_preview_velocities_buffer::Base.RefValue{Any}
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -528,7 +533,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       constraint_virial, constraint_virial_nounits, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      constraint_scratch_ref(), BufferValidity(), box_mins, box_maxs, morton_seq,
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      BufferValidity(), box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
@@ -648,7 +654,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
-                      constraint_scratch_ref(), BufferValidity(), box_mins, box_maxs, morton_seq,
+                      constraint_scratch_ref(), constraint_scratch_ref(),
+                      BufferValidity(), box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
@@ -703,10 +710,11 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
         fs, _ = compute_initial_total_virial!(buffers, sys, neighbors, step_n;
                                               n_threads=n_threads, kwargs...)
         return fs, buffers.virial
+    else
+        fs = zero_forces(sys)
+        forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
+        return fs, buffers.virial
     end
-    fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
-    return fs, buffers.virial
 end
 
 function forces!(fs,
@@ -749,10 +757,11 @@ function forces!(fs,
     if length(pairwise_inters) > 0
         pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
         pairwise_inters_nl   = filter( use_neighbors, values(pairwise_inters))
+        use_vel = any_uses_velocity(pairwise_inters)
         pairwise_forces_loop!(buffers.fs_nounits, buffers.fs_chunks, buffers.vir_nounits,
                 buffers.vir_chunks, sys.atoms, sys.coords, sys.velocities, sys.boundary,
                 neighbors, sys.force_units, length(sys), pairwise_inters_nonl,
-                pairwise_inters_nl, step_n, Val(n_threads), Val(needs_vir))
+                pairwise_inters_nl, step_n, Val(n_threads), Val(needs_vir), Val(use_vel))
     end
 
     if length(specific_inter_lists) > 0
@@ -817,16 +826,16 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{1},
-                               ::Val{needs_vir}) where needs_vir
+                               ::Val{needs_vir}, ::Val{use_vel}) where {needs_vir, use_vel}
     @inbounds if length(pairwise_inters_nonl) > 0
         for i in 1:n_atoms
             coord_i = coords[i]
             atom_i = atoms[i]
-            vel_i = velocities[i]
+            vel_i = maybe_velocity(velocities, i, Val(use_vel))
             for j in (i + 1):n_atoms
                 coord_j = coords[j]
                 atom_j = atoms[j]
-                vel_j = velocities[j]
+                vel_j = maybe_velocity(velocities, j, Val(use_vel))
                 dr = vector(coord_i, coord_j, boundary)
                 f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
                                         false, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
@@ -853,8 +862,8 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
             coord_j = coords[j]
             atom_i = atoms[i]
             atom_j = atoms[j]
-            vel_i = velocities[i]
-            vel_j = velocities[j]
+            vel_i = maybe_velocity(velocities, i, Val(use_vel))
+            vel_j = maybe_velocity(velocities, j, Val(use_vel))
             dr = vector(coord_i, coord_j, boundary)
             f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
                                     special, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
@@ -875,7 +884,7 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{n_threads},
-                               ::Val{needs_vir}) where {n_threads, needs_vir}
+                               ::Val{needs_vir}, ::Val{use_vel}) where {n_threads, needs_vir, use_vel}
     if isnothing(fs_chunks) || (needs_vir && isnothing(vir_chunks))
         throw(ArgumentError("fs_chunks / vir_chunks is not set but n_threads is > 1"))
     end
@@ -891,11 +900,11 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
             for i in chunk_i:n_threads:n_atoms
                 coord_i = coords[i]
                 atom_i = atoms[i]
-                vel_i = velocities[i]
+                vel_i = maybe_velocity(velocities, i, Val(use_vel))
                 for j in (i + 1):n_atoms
                     coord_j = coords[j]
                     atom_j = atoms[j]
-                    vel_j = velocities[j]
+                    vel_j = maybe_velocity(velocities, j, Val(use_vel))
                     dr = vector(coord_i, coord_j, boundary)
                     f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
                                             false, coord_i, coord_j, boundary, vel_i, vel_j,
@@ -934,8 +943,8 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                         coord_j = coords[j]
                         atom_i = atoms[i]
                         atom_j = atoms[j]
-                        vel_i = velocities[i]
-                        vel_j = velocities[j]
+                        vel_i = maybe_velocity(velocities, i, Val(use_vel))
+                        vel_j = maybe_velocity(velocities, j, Val(use_vel))
                         dr = vector(coord_i, coord_j, boundary)
                         f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
                                                 special, coord_i, coord_j, boundary, vel_i, vel_j,

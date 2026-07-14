@@ -1,8 +1,8 @@
-const AlchemicalRole = Int
+const AlchemicalRole = Int32
 
-const CoreRole::AlchemicalRole   = 0
-const InsertRole::AlchemicalRole = 1
-const DeleteRole::AlchemicalRole = 2
+const CoreRole::AlchemicalRole   = Int32(0)
+const InsertRole::AlchemicalRole = Int32(1)
+const DeleteRole::AlchemicalRole = Int32(2)
 
 #= 
 The logic found in this file is a reinterpretation of how OpenFE deals

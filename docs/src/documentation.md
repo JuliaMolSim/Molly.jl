@@ -883,6 +883,7 @@ You can use `args...` to indicate unused further arguments, e.g. `Molly.force(in
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 `force_units` can be useful for returning a zero force under certain conditions.
+If you want to use `velocity_i` and `velocity_j` you should set `Molly.pairwise_uses_velocity(::MyPairwiseInter) = true`, otherwise the velocities are passed as `nothing` for speed.
 `step_n` is the step number in the simulator, allowing time-dependent interactions.
 Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called unless you give the `init_step` argument, and can also be 0 to calculate forces before the first step.
 It also doesn't work with [`simulate_remd!`](@ref).
@@ -1183,6 +1184,8 @@ The available simulators are:
 - [`LangevinSplitting`](@ref)
 - [`OverdampedLangevin`](@ref)
 - [`NoseHoover`](@ref)
+- [`MTSIntegrator`](@ref)
+- [`MTSLangevinIntegrator`](@ref)
 - [`ReplicaExchangeMD`](@ref)
 - [`MetropolisMonteCarlo`](@ref)
 
@@ -1442,12 +1445,12 @@ loggers = (mylogger=MyLogger(10, []),) # Don't forget the trailing comma!
 ```
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
-Running loggers before the first step can be disabled by giving `run_loggers=:skipzero` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
+Running loggers before the first step can be disabled by giving `run_loggers=:skipstart` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
 For example, this runs the loggers 301 times:
 ```julia
 simulate!(sys, simulator, 100) # Default run_loggers=true
-simulate!(sys, simulator, 100; run_loggers=:skipzero)
-simulate!(sys, simulator, 100; run_loggers=:skipzero)
+simulate!(sys, simulator, 100; run_loggers=:skipstart)
+simulate!(sys, simulator, 100; run_loggers=:skipstart)
 ```
 Running loggers can be disabled entirely with `run_loggers=false`, which is the default for [`SteepestDescentMinimizer`](@ref).
 Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
@@ -1624,6 +1627,10 @@ Currently, constraints are supported by the following simulators:
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
+- [`MTSIntegrator`](@ref)
+- [`MTSLangevinIntegrator`](@ref)
+
+Due to the nature of the velocity treatment in each integrator, the velocities stored in the system are expected to satisfy the constraints only for [`VelocityVerlet`](@ref), [`DPDVelocityVerlet`](@ref), [`MTSIntegrator`](@ref) and [`MTSLangevinIntegrator`](@ref) (in other cases the simulator behaviour is still correct).
 
 The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
 - [`SteepestDescentMinimizer`](@ref)
@@ -1804,6 +1811,7 @@ julia> random_velocity(10.0u"g/mol", 300.0u"K"; rng=Xoshiro(10))
 ```
 This may not apply across Julia versions, though you can use [StableRNGs.jl](https://github.com/JuliaRandom/StableRNGs.jl).
 It also does not apply across different backends such as CPU and GPU.
+Some functions require `Random.default_rng()` for thread safety, and will error if given a different `rng`.
 
 ## Performance tips
 
