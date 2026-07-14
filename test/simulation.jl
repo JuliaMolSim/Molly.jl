@@ -831,13 +831,13 @@ end
 end
 
 @testset "Temperature REMD" begin
-    Random.seed!(1234)
+    rng = MersenneTwister(1)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm")
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
 
     pairwise_inters = (LennardJones(use_neighbors=true),)
 
@@ -925,12 +925,12 @@ end
 end
 
 @testset "Hamiltonian REMD" begin
-    Random.seed!(1234)
+    rng = MersenneTwister(2)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(2.0u"nm")
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
     temp = 100.0u"K"
 
     neighbor_finder = DistanceNeighborFinder(

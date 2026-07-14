@@ -1446,7 +1446,6 @@ from_device(x::Array) = x
 from_device(x) = Array(x)
 from_device(x::StructArray) = replace_storage(Array, x)
 
-to_device(x::Array, ::Type{<:Array}) = x
 to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
 to_device(x, ::Type{AT}) where AT = AT(x)
 
