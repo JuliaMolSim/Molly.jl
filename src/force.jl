@@ -420,7 +420,9 @@ function init_buffers!(sys::System{D}, n_threads) where D
     vir_chunks        = [zero(vir_nounits) for _ in 1:n_copies]
     constr_vir_chunks = [zero(vir_nounits) for _ in 1:n_copies]
     # fs_mat is only used for virtual sites to do atomic addition
-    fs_mat = (length(sys.virtual_sites) > 0 ? zeros(CT, D, length(sys)) : nothing)
+    # Use an empty matrix if no virtual sites to keep this function type stable
+    n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
+    fs_mat = zeros(CT, D, n_fs_mat_cols)
     return BuffersCPU(
         fs_nounits, fs_chunks,
         vir, vir_nounits, vir_chunks,
