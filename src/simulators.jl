@@ -1077,7 +1077,6 @@ end
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                        n_threads=n_threads)
     end
-    accels_t = calc_accels.(forces_t, masses(sys))
     vel_scales = Fill(sim.vel_scale, length(masses(sys)))
     vel_el_zero = zero(eltype(eltype(sys.velocities)))
     kT = sim.temperature*sys.k
