@@ -828,33 +828,6 @@ function random_velocities!(vels::AbstractGPUArray, sys::AbstractSystem, temp; r
     vels
 end
 
-function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.default_rng())
-    if isnothing(rng)
-        backend = get_backend(vels)
-        kernel! = random_velocities_kernel!(backend)
-        kernel!(vels, sys.masses,  sys.k*temp, sys.virtual_site_flags, ndrange=length(vels))
-        KernelAbstractions.synchronize(backend)
-    else
-        vels .= random_velocities(sys, temp; rng=rng)
-    end
-    return vels
-end
-
-@kernel function random_velocities_kernel!(velocities::AbstractVector{SVector{D, V}},
-                                           @Const(masses),
-                                           kT,
-                                           @Const(virtual_sites)) where {D, V}
-    i = @index(Global, Linear)
-    if i <= length(velocities)
-        @inbounds if !virtual_sites[i]
-            scale = sqrt(kT / masses[i])
-            velocities[i] = SVector{D, V}(ntuple(i -> randn() * scale, Val(D)))
-        else
-            velocities[i] = SVector{D, V}(ntuple(i -> zero(V), Val(D)))
-        end
-    end
-end
-
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
 acosbound(x::Real) = acos(clamp(x, -1, 1))
 
