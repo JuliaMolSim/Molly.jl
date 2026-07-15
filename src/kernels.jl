@@ -685,17 +685,16 @@ end
     SVector{3, FT}(c1, c2, c3)
 end
 
-# units is kT
 @kernel function random_velocities_kernel!(
         vels::AbstractVector{SVector{D, C}}, @Const(masses::AbstractVector),
-        units, @Const(virtual_sites), ctr1::UInt64, key::UInt64, ::Val{FT}
+        kT, @Const(virtual_sites), ctr1::UInt64, key::UInt64, ::Val{FT}
     ) where {D, C, FT}
     i = @index(Global, Linear)
     natoms = length(vels)%UInt64
     ctr0 = i%UInt64
     @inbounds if i <= length(vels)
         if !virtual_sites[i]
-            scale = C(Base.FastMath.sqrt_fast(units / masses[i]))
+            scale = C(Base.FastMath.sqrt_fast(kT / masses[i]))
             vels[i] = randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms) * scale
         else
             vels[i] = zero(SVector{D, C})
@@ -705,7 +704,7 @@ end
 
 @kernel function apply_Andersen_coupling_kernel!(
         vels::AbstractVector{SVector{D, C}}, @Const(masses::AbstractVector),
-        units, prob_val_u64::UInt64, @Const(virtual_sites), ctr1::UInt64, key::UInt64, ::Val{FT}
+        kT, prob_val_u64::UInt64, @Const(virtual_sites), ctr1::UInt64, key::UInt64, ::Val{FT}
     ) where {D, C, FT}
     i = @index(Global, Linear)
     natoms = length(vels)%UInt64
@@ -715,7 +714,7 @@ end
         rand_u64 = (UInt64(u0) | UInt64(u1)<<Int32(32))
         if rand_u64 < prob_val_u64
             ctr0 += natoms # advance the rng natoms
-            scale = C(Base.FastMath.sqrt_fast(units/masses[i]))
+            scale = C(Base.FastMath.sqrt_fast(kT/masses[i]))
             vels[i] = randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms) * scale
         end
     end
@@ -747,8 +746,6 @@ function langevin_o_step!(
         philox_key::UInt64,
         ::Type{FT},
     ) where {D, C, FT}
-    @assert eachindex(noise_scales) == eachindex(vels)
-    @assert eachindex(noise_scales) == eachindex(vel_scales)
     natoms = UInt64(length(vels))
     @inbounds @simd ivdep for i in eachindex(vels)
         philox_ctr0 = i%UInt64
@@ -766,8 +763,6 @@ function langevin_o_step!(
             philox_key::UInt64,
             ::Type{FT},
         ) where {FT}
-    @assert eachindex(noise_scales) == eachindex(vels)
-    @assert eachindex(noise_scales) == eachindex(vel_scales)
     backend = get_backend(vels)
     kernel! = langevin_o_step_kernel!(backend)
     kernel!(vels, vel_scales, noise_scales, philox_ctr1, philox_key,

@@ -800,9 +800,7 @@ end
 function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::AbstractSystem, temp; rng=Random.default_rng()) where {D, C}
     FT = float_type(sys)
     ms = from_device(masses(sys))
-    @assert eachindex(ms) == eachindex(vels)
     vsf = from_device(sys.virtual_site_flags)
-    @assert eachindex(vsf) == eachindex(ms)
     kT = sys.k * temp
     ctr1 = rand(rng, UInt64)
     key = rand(rng, UInt64)
@@ -819,9 +817,7 @@ function random_velocities!(vels::AbstractGPUArray, sys::AbstractSystem, temp; r
     FT = float_type(sys)
     AT = array_type(vels)
     ms = to_device(sys.masses, AT)
-    @assert eachindex(ms) == eachindex(vels)
     vsf = to_device(sys.virtual_site_flags, AT)
-    @assert eachindex(vsf) == eachindex(ms)
     kT = sys.k * temp
     ctr1 = rand(rng, UInt64)
     key = rand(rng, UInt64)
