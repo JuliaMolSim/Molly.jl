@@ -694,7 +694,7 @@ end
     ctr0 = i%UInt64
     @inbounds if i <= length(vels)
         if !virtual_sites[i]
-            scale = C(Base.FastMath.sqrt_fast(kT / masses[i]))
+            scale = C(sqrt(kT / masses[i]))
             vels[i] = randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms) * scale
         else
             vels[i] = zero(SVector{D, C})
@@ -714,7 +714,7 @@ end
         rand_u64 = (UInt64(u0) | UInt64(u1)<<Int32(32))
         if rand_u64 < prob_val_u64
             ctr0 += natoms # advance the rng natoms
-            scale = C(Base.FastMath.sqrt_fast(kT/masses[i]))
+            scale = C(sqrt(kT/masses[i]))
             vels[i] = randn_svec(SVector{D, FT}, ctr0, ctr1, key, natoms) * scale
         end
     end
