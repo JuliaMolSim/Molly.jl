@@ -53,16 +53,45 @@
     for D in 2:3
         for FT in (Float32, Float64)
             local natoms = UInt64(1_000)
-            local vel = SVector{D,FT}[
+            local vel_flat = collect(Iterators.flatten(SVector{D,FT}[
                 [Molly.randn_svec(SVector{D,FT}, i, UInt64(0), UInt64(0), natoms) for i in UInt64(1):natoms];
                 [Molly.randn_svec(SVector{D,FT}, i+2natoms, UInt64(0), UInt64(0), natoms) for i in UInt64(1):natoms];
                 [Molly.randn_svec(SVector{D,FT}, i, UInt64(1), UInt64(0), natoms) for i in UInt64(1):natoms];
                 [Molly.randn_svec(SVector{D,FT}, i, UInt64(0), UInt64(1), natoms) for i in UInt64(1):natoms];
-            ]
-            local vel_flat = collect(Iterators.flatten(vel))
-            @test allunique(vel_flat)
+            ]))
             @test 0.9  < std(vel_flat)  < 1.1
-            @test -0.1 < mean(vel_flat) < 0.1
+            @test abs(mean(vel_flat)) < 0.1
+            local n_repeated = length(vel_flat) - length(unique(vel_flat))
+            if FT === Float32
+                # Birthday paradox means this is not that unlikely
+                @test n_repeated < 2
+            else
+                @test n_repeated == 0
+            end
+        end
+    end
+
+    @testset "random_velocities FT=$FT" for FT in (Float32, Float64)
+        local n_atoms = 1_000
+        local atom_mass = FT(12.0)u"g/mol"
+        local temp = FT(300.0)u"K"
+        local boundary = CubicBoundary(FT(10.0)u"nm")
+        local atoms = [Atom(mass=atom_mass) for _ in 1:n_atoms]
+        local coords = [zero(SVector{3, FT})u"nm" for _ in 1:n_atoms]
+        local velocities = [random_velocity(atom_mass, temp) for _ in 1:n_atoms]
+        local sys = System(atoms=atoms, coords=coords, boundary=boundary, velocities=velocities)
+        local vel_flat = collect(Iterators.flatten([
+            random_velocities(sys, temp; rng=Xoshiro(10));
+            random_velocities(sys, temp; rng=Xoshiro(1234));
+        ]))
+        local σ = sqrt(sys.k * temp / atom_mass)
+        @test 0.9σ < std(vel_flat) < 1.1σ
+        @test abs(mean(vel_flat)) < 0.1σ
+        local n_repeated = length(vel_flat) - length(unique(vel_flat))
+        if FT === Float32
+            @test n_repeated < 2
+        else
+            @test n_repeated == 0
         end
     end
 

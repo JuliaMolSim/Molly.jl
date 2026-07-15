@@ -1809,8 +1809,13 @@ julia> random_velocity(10.0u"g/mol", 300.0u"K"; rng=Xoshiro(10))
    0.23543457751795477 nm ps^-1
 
 ```
-This may not apply across Julia versions, though you can use [StableRNGs.jl](https://github.com/JuliaRandom/StableRNGs.jl).
-It also does not apply across different backends such as CPU and GPU.
+This may not apply across Julia versions or across different backends such as CPU and GPU.
+
+Functions that generate randomness for many atoms at once may use the [Philox4x32-10](https://doi.org/10.1145/2063384.2063405) algorithm from [PhiloxRNG.jl](https://github.com/medyan-dev/PhiloxRNG.jl) internally, with the given `rng` only being used to seed Philox.
+Philox generates the same raw random numbers on all backends for the same `rng` state.
+Still, whole simulations are not expected to match bit for bit across backends due to floating point rounding differences.
+
+Other functions, such as [`random_velocity`](@ref) and the Monte Carlo methods, draw from the given `rng` directly.
 Some functions require `Random.default_rng()` for thread safety, and will error if given a different `rng`.
 
 ## Performance tips
