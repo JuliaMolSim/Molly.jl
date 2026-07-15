@@ -902,6 +902,7 @@ end
     # Use the unified simulator
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
+    @test_throws ArgumentError simulate!(repsys, simulator, n_steps; rng=rng)
     @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
     @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
@@ -975,6 +976,7 @@ end
     # Use the unified simulator (implicitly handles Hamiltonian REMD based on the ThermoStates)
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
+    @test_throws ArgumentError simulate!(repsys, simulator, n_steps; rng=rng)
     @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
     @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 

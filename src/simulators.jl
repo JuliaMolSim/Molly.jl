@@ -88,6 +88,24 @@ next_nograd!(::Nothing) = nothing
 update_nograd!(progress, val) = ProgressMeter.update!(progress, val)
 update_nograd!(::Nothing, val) = nothing
 
+default_check_nans(sys, sim) = true
+default_check_nans(::System{<:Any, <:Any, <:AbstractGPUArray}, sim) = false
+
+isnan_svec(sv) = any(isnan, sv)
+isnan_svec_array(svs) = any(isnan_svec, svs) # On CPU this is faster than AcceleratedKernels
+isnan_svec_array(svs::AbstractGPUArray) = AcceleratedKernels.any(isnan_svec, svs)
+
+function check_array_nans(svec_arrays, labels, step_n)
+    if any(isnan_svec_array, svec_arrays)
+        err_msg = "NaNs found at the end of step $step_n:"
+        for (svec_array, label) in zip(svec_arrays, labels)
+            c = count(isnan_svec, svec_array)
+            err_msg *= "\n    $label - $c out of $(length(svec_array)) contain a NaN"
+        end
+        error(err_msg)
+    end
+end
+
 """
     SteepestDescentMinimizer(; <keyword arguments>)
 
@@ -139,6 +157,8 @@ Constraints are applied during minimization, which can lead to issues.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
     the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
     environmental variable `MOLLY_SHOW_PROGRESS`.
+- `check_nans`: whether to check each step for NaNs and print a useful error message.
+    `true` by default on CPU, `false` by default on GPU as it slows down simulation.
 - `rng=Random.default_rng()`: the random number generator used for the simulation. Setting
     this allows reproducible stochastic simulations.
 - `strictness=:warn`: determines behavior when encountering possible problems,
@@ -163,6 +183,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     # @inline needed to avoid Enzyme error
@@ -200,6 +221,8 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
     hn = sim.step_size
     coords_copy = zero(sys.coords)
     F = zero_forces(sys)
+    check_nan_labels = ("coordinates", "forces")
+    check_nans && check_array_nans((sys.coords, F), check_nan_labels, init_step)
 
     progress = setup_progress_minimizer(ustrip(sim.tol), show_progress)
     for step_n in (init_step + 1):(init_step + sim.max_steps)
@@ -236,6 +259,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         if max_force < sim.tol
             break
         end
+        check_nans && check_array_nans((sys.coords, F), check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_potential_energy=E)
             break
@@ -524,6 +548,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -552,6 +577,9 @@ end
     end
     dt_div2 = sim.dt / 2
     pressure_kin_tensor = zero(buffers.kin_tensor)
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -624,6 +652,8 @@ end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
             break
@@ -677,6 +707,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -709,6 +740,9 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     dt_div2 = sim.dt / 2
     λ_shift_dt = (sim.λ - 1//2) * sim.dt
     pressure_kin_tensor = zero(buffers.kin_tensor)
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -792,6 +826,8 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
             break
@@ -833,6 +869,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -862,6 +899,9 @@ end
     if using_constraints
         cons_coord_storage = zero(sys.coords)
     end
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -902,6 +942,8 @@ end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
             break
@@ -933,6 +975,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -960,6 +1003,9 @@ end
     coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
     using_constraints = (length(sys.constraints) > 0)
     dt_sq = sim.dt^2
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1001,6 +1047,8 @@ end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
             break
@@ -1052,6 +1100,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -1094,6 +1143,9 @@ end
         cons_vel_storage = zero(sys.velocities)
     end
     dt_div2 = sim.dt / 2
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations", "noise")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1142,6 +1194,8 @@ end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
             break
@@ -1199,6 +1253,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -1263,6 +1318,9 @@ end
             end
         end
     end
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations", "noise")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1308,6 +1366,8 @@ end
                                    n_threads=n_threads)
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads)
             break
         end
@@ -1367,6 +1427,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -1387,6 +1448,9 @@ end
     accels_t = calc_accels.(forces_t, masses(sys))
     noise = zero(sys.velocities)
     noise_prefac = sqrt((2 / sim.friction) * sim.dt)
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations", "noise")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1409,6 +1473,8 @@ end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
             break
@@ -1458,6 +1524,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -1483,6 +1550,9 @@ end
     v_half = zero(sys.velocities)
     zeta = zero(inv(sim.dt))
     dt_div2 = sim.dt / 2
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1528,6 +1598,8 @@ end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
             break
@@ -1779,6 +1851,7 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -1817,6 +1890,9 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
     end
     fraction_inters = mts_interaction_groups(sys, sim)
     recompute_forces = true # Forces re-used between steps
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                   check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1849,6 +1925,8 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
                                    n_threads=n_threads)
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
+                                       check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads)
             break
         end
@@ -1889,6 +1967,7 @@ function simulate!(sys::ReplicaSystem,
                    shortcut=nothing,
                    init_step::Integer=sys.current_step,
                    show_progress=default_show_progress(),
+                   check_nans=default_check_nans(sys, sim),
                    rng=Random.default_rng(),
                    strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -1916,7 +1995,7 @@ function simulate!(sys::ReplicaSystem,
 
     return simulate_remd!(sys, sim, n_steps_or_time; n_threads=n_threads, run_loggers=run_loggers,
                           shortcut=shortcut, init_step=init_step, show_progress=show_progress,
-                          rng=rng, strictness=strictness)
+                          check_nans=check_nans, rng=rng, strictness=strictness)
 end
 
 @doc raw"""
@@ -2000,6 +2079,8 @@ The simulation divides the total `n_steps` into cycles based on the time step an
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
     the REPL/IJulia/Pluto, otherwise `false` by default. Can be set globally with the
     environmental variable `MOLLY_SHOW_PROGRESS`.
+- `check_nans`: whether to check each step for NaNs and print a useful error message.
+    `true` by default on CPU, `false` by default on GPU as it slows down simulation.
 - `rng=Random.default_rng()`: the random number generator used for the exchange accept/reject
     criteria and any stochastic dynamics. Currently must be `Random.default_rng()` to avoid
     race conditions.
@@ -2015,6 +2096,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         shortcut=nothing, # Unused
                         init_step::Integer=sys.current_step,
                         show_progress=default_show_progress(),
+                        check_nans=default_check_nans(sys, remd_sim),
                         rng=Random.default_rng(),
                         strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -2055,7 +2137,8 @@ function simulate_remd!(sys::ReplicaSystem,
             # Enforce n_threads >= 1 to prevent buffer chunk crashes
             Threads.@spawn simulate!(active_sys, integrator, cycle_length;
                                      n_threads=max(1, thread_div[i]), run_loggers=run_loggers_used,
-                                     init_step=cycle_start_step, rng=rng, strictness=strictness)
+                                     init_step=cycle_start_step, check_nans=check_nans,
+                                     rng=rng, strictness=strictness)
         end
         sys.initial_log_pending = false
 
@@ -2095,7 +2178,8 @@ function simulate_remd!(sys::ReplicaSystem,
             
             Threads.@spawn simulate!(active_sys, integrator, remaining_steps;
                                      n_threads=max(1, thread_div[i]), run_loggers=run_loggers_used,
-                                     init_step=remainder_start_step, rng=rng, strictness=strictness)
+                                     init_step=remainder_start_step, check_nans=check_nans,
+                                     rng=rng, strictness=strictness)
         end
         sys.initial_log_pending = false
     end
@@ -2106,7 +2190,7 @@ function simulate_remd!(sys::ReplicaSystem,
                 sys.exchange_logger;
                 n_steps=n_steps,
                 n_attempts=n_attempts,
-                end_step=init_step + n_steps,
+                end_step=(init_step + n_steps),
             )
         else
             finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts)
@@ -2156,6 +2240,7 @@ end
                            shortcut=nothing,
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
+                           check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
@@ -2171,6 +2256,8 @@ end
     buffers = init_buffers!(sys, n_threads)
     E_old = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads)
     coords_old = zero(sys.coords)
+    check_nan_labels = ("coordinates",)
+    check_nans && check_array_nans((sys.coords,), check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -2194,6 +2281,7 @@ end
                            current_potential_energy=E_old, success=false,
                            energy_rate=(E_old / (sys.k * sim.temperature)))
         end
+        check_nans && check_array_nans((sys.coords,), check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, nothing, neighbors, step_n; n_threads=n_threads)
             break
         end

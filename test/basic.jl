@@ -317,7 +317,16 @@
         coords_diff = from_device(sys.coords) .- from_device(coords_start)
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
     end
+
+    for AT in array_list
+        a1 = to_device([SVector(1.0, 2.0)u"nm"   , SVector(3.0, 4.0)u"nm"   ], AT)
+        a2 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(7.0, 8.0)u"nm/ps"], AT)
+        a3 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(NaN, 8.0)u"nm/ps"], AT)
+        Molly.check_array_nans((a1, a2), ("a1", "a2"), 10)
+        @test_throws ErrorException Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
+    end
 end
+
 @testset "Device conversion" begin
     cpu = collect(1:5)
     # to_device on a CPU array with an Array target is a no-op that avoids copying
@@ -337,6 +346,7 @@ end
         @test back == cpu
     end
 end
+
 @testset "Trajectory" begin
     trj_path = joinpath(data_dir, "water_frames", "water_trj.dcd")
     ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=true)
