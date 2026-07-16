@@ -432,25 +432,18 @@ end
     end
 end
 
-@testset "Monte Carlo isotropic barostat" begin
+function get_argon_sys(AT)
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
     rng = Xoshiro(10)
     n_atoms = 25
-    n_steps = 100_000
     atom_mass = 39.947u"g/mol"
     boundary = CubicBoundary(8.0u"nm")
-    temp = 288.15u"K"
-    press = 1.0u"bar"
-    dt = 0.0005u"ps"
-    friction = 1.0u"ps^-1"
-    lang = Langevin(dt=dt, temperature=temp, friction=friction)
     atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm", rng=rng)
     n_log_steps = 500
-
     sys = System(
-        atoms=atoms,
-        coords=copy(coords),
+        atoms=to_device(atoms, AT),
+        coords=to_device(coords, AT),
         boundary=boundary,
         pairwise_inters=(LennardJones(),),
         loggers=(
@@ -465,6 +458,17 @@ end
             volume=VolumeLogger(n_log_steps),
         ),
     )
+    (sys, rng)
+end
+
+@testset "25 Argon atoms NVT baseline" begin
+    sys, rng = get_argon_sys(Array)
+    temp = 288.15u"K"
+    random_velocities!(sys, temp; rng=rng)
+    n_steps = 100_000
+    dt = 0.0005u"ps"
+    friction = 1.0u"ps^-1"
+    lang = Langevin(dt=dt, temperature=temp, friction=friction)
 
     simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
     @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
@@ -481,8 +485,17 @@ end
     @test 0.1u"bar" < std(P_iso) < 0.5u"bar"
     @test all(values(sys.loggers.volume) .== 512.0u"nm^3")
     @test sys.boundary == CubicBoundary(8.0u"nm")
+end
 
-    barostat = MonteCarloBarostat(press, temp, boundary; coupling_type = :isotropic)
+@testset "Monte Carlo isotropic barostat" begin
+    press = 1.0u"bar"
+    temp = 288.15u"K"
+    n_steps = 100_000
+    dt = 0.0005u"ps"
+    friction = 1.0u"ps^-1"
+    init_boundary = CubicBoundary(8.0u"nm")
+
+    barostat = MonteCarloBarostat(press, temp, init_boundary; coupling_type = :isotropic)
     lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=(barostat,))
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
@@ -491,24 +504,8 @@ end
             if AT <: AbstractGPUArray && sim == vvand_baro
                 continue
             end
-
-            sys = System(
-                atoms=to_device(atoms, AT),
-                coords=to_device(copy(coords), AT),
-                boundary=boundary,
-                pairwise_inters=(LennardJones(),),
-                loggers=(
-                    temperature=TemperatureLogger(n_log_steps),
-                    total_energy=TotalEnergyLogger(n_log_steps),
-                    kinetic_energy=KineticEnergyLogger(n_log_steps),
-                    potential_energy=PotentialEnergyLogger(n_log_steps),
-                    virial=VirialLogger(n_log_steps),
-                    scalar_virial=ScalarVirialLogger(n_log_steps),
-                    pressure=PressureLogger(n_log_steps),
-                    scalar_pressure=ScalarPressureLogger(n_log_steps),
-                    volume=VolumeLogger(n_log_steps),
-                ),
-            )
+            sys, rng = get_argon_sys(AT)
+            random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
             @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
@@ -525,64 +522,20 @@ end
             @test 0.1u"bar" < std(P_iso) < 0.5u"bar"
             @test 857.0u"nm^3" < mean(values(sys.loggers.volume)) < 1157.0u"nm^3"
             @test std(values(sys.loggers.volume)) < 300u"nm^3"
-            @test sys.boundary != CubicBoundary(8.0u"nm")
+            @test sys.boundary != init_boundary
         end
     end
 end
 
 @testset "Monte Carlo semiisotropic barostat" begin
-    # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
-    rng = Xoshiro(10)
-    n_atoms = 25
-    n_steps = 100_000
-    atom_mass = 39.947u"g/mol"
-    boundary = CubicBoundary(8.0u"nm")
+    press = [1.0u"bar", 1.0u"bar"]
     temp = 288.15u"K"
-    press = 1.0u"bar"
+    n_steps = 100_000
     dt = 0.0005u"ps"
     friction = 1.0u"ps^-1"
-    lang = Langevin(dt=dt, temperature=temp, friction=friction)
-    atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
-    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm", rng=rng)
-    n_log_steps = 500
+    init_boundary = CubicBoundary(8.0u"nm")
 
-    sys = System(
-        atoms=atoms,
-        coords=copy(coords),
-        boundary=boundary,
-        pairwise_inters=(LennardJones(),),
-        loggers=(
-            temperature=TemperatureLogger(n_log_steps),
-            total_energy=TotalEnergyLogger(n_log_steps),
-            kinetic_energy=KineticEnergyLogger(n_log_steps),
-            potential_energy=PotentialEnergyLogger(n_log_steps),
-            virial=VirialLogger(n_log_steps),
-            scalar_virial=ScalarVirialLogger(n_log_steps),
-            pressure=PressureLogger(n_log_steps),
-            scalar_pressure=ScalarPressureLogger(n_log_steps),
-            volume=VolumeLogger(n_log_steps),
-        ),
-    )
-
-    simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
-    @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
-
-    P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
-    Vir   = [tr(V) for V in values(sys.loggers.virial)]
-
-    @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
-    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
-    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
-    @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
-    @test -5.0u"kJ * mol^-1" < mean(Vir) < 5.0u"kJ * mol^-1"
-    @test 1.7u"bar" < mean(P_iso) < 2.2u"bar"
-    @test 0.1u"bar" < std(P_iso) < 0.5u"bar"
-    @test all(values(sys.loggers.volume) .== 512.0u"nm^3")
-    @test sys.boundary == CubicBoundary(8.0u"nm")
-
-    P = [1.0u"bar", 1.0u"bar"]
-
-    barostat = MonteCarloBarostat(P, temp, boundary; coupling_type = :semiisotropic)
+    barostat = MonteCarloBarostat(press, temp, init_boundary; coupling_type = :semiisotropic)
     lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=(barostat,))
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
@@ -591,24 +544,8 @@ end
             if AT <: AbstractGPUArray && sim == vvand_baro
                 continue
             end
-
-            sys = System(
-                atoms=to_device(atoms, AT),
-                coords=to_device(copy(coords), AT),
-                boundary=boundary,
-                pairwise_inters=(LennardJones(),),
-                loggers=(
-                    temperature=TemperatureLogger(n_log_steps),
-                    total_energy=TotalEnergyLogger(n_log_steps),
-                    kinetic_energy=KineticEnergyLogger(n_log_steps),
-                    potential_energy=PotentialEnergyLogger(n_log_steps),
-                    virial=VirialLogger(n_log_steps),
-                    scalar_virial=ScalarVirialLogger(n_log_steps),
-                    pressure=PressureLogger(n_log_steps),
-                    scalar_pressure=ScalarPressureLogger(n_log_steps),
-                    volume=VolumeLogger(n_log_steps),
-                ),
-            )
+            sys, rng = get_argon_sys(AT)
+            random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
             @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
@@ -629,64 +566,20 @@ end
             @test 0.1u"bar" < std(P_z) < 0.5u"bar"
             @test 857.0u"nm^3" < mean(values(sys.loggers.volume)) < 1157.0u"nm^3"
             @test std(values(sys.loggers.volume)) < 300u"nm^3"
-            @test sys.boundary != CubicBoundary(8.0u"nm")
+            @test sys.boundary != init_boundary
         end
     end
 end
 
 @testset "Monte Carlo anisotropic barostat" begin
-    # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
-    rng = Xoshiro(10)
-    n_atoms = 25
-    n_steps = 100_000
-    atom_mass = 39.947u"g/mol"
-    boundary = CubicBoundary(8.0u"nm")
+    press = [1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar"]
     temp = 288.15u"K"
-    press = 1.0u"bar"
+    n_steps = 100_000
     dt = 0.0005u"ps"
     friction = 1.0u"ps^-1"
-    lang = Langevin(dt=dt, temperature=temp, friction=friction)
-    atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
-    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm", rng=rng)
-    n_log_steps = 500
+    init_boundary = CubicBoundary(8.0u"nm")
 
-    sys = System(
-        atoms=atoms,
-        coords=copy(coords),
-        boundary=boundary,
-        pairwise_inters=(LennardJones(),),
-        loggers=(
-            temperature=TemperatureLogger(n_log_steps),
-            total_energy=TotalEnergyLogger(n_log_steps),
-            kinetic_energy=KineticEnergyLogger(n_log_steps),
-            potential_energy=PotentialEnergyLogger(n_log_steps),
-            virial=VirialLogger(n_log_steps),
-            scalar_virial=ScalarVirialLogger(n_log_steps),
-            pressure=PressureLogger(n_log_steps),
-            scalar_pressure=ScalarPressureLogger(n_log_steps),
-            volume=VolumeLogger(n_log_steps),
-        ),
-    )
-
-    simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
-    @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
-
-    P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
-    Vir   = [tr(V) for V in values(sys.loggers.virial)]
-
-    @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
-    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
-    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
-    @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
-    @test -5.0u"kJ * mol^-1" < mean(Vir) < 5.0u"kJ * mol^-1"
-    @test 1.7u"bar" < mean(P_iso) < 2.2u"bar"
-    @test 0.1u"bar" < std(P_iso) < 0.5u"bar"
-    @test all(values(sys.loggers.volume) .== 512.0u"nm^3")
-    @test sys.boundary == CubicBoundary(8.0u"nm")
-
-    P = [1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar"]
-
-    barostat = MonteCarloBarostat(P, temp, boundary; coupling_type = :anisotropic)
+    barostat = MonteCarloBarostat(press, temp, init_boundary; coupling_type = :anisotropic)
     lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=(barostat,))
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
@@ -695,24 +588,8 @@ end
             if AT <: AbstractGPUArray && sim == vvand_baro
                 continue
             end
-
-            sys = System(
-                atoms=to_device(atoms, AT),
-                coords=to_device(copy(coords), AT),
-                boundary=boundary,
-                pairwise_inters=(LennardJones(),),
-                loggers=(
-                    temperature=TemperatureLogger(n_log_steps),
-                    total_energy=TotalEnergyLogger(n_log_steps),
-                    kinetic_energy=KineticEnergyLogger(n_log_steps),
-                    potential_energy=PotentialEnergyLogger(n_log_steps),
-                    virial=VirialLogger(n_log_steps),
-                    scalar_virial=ScalarVirialLogger(n_log_steps),
-                    pressure=PressureLogger(n_log_steps),
-                    scalar_pressure=ScalarPressureLogger(n_log_steps),
-                    volume=VolumeLogger(n_log_steps),
-                ),
-            )
+            sys, rng = get_argon_sys(AT)
+            random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
             @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
@@ -736,7 +613,7 @@ end
             @test 0.1u"bar" < std(P_z) < 0.5u"bar"
             @test 857.0u"nm^3" < mean(values(sys.loggers.volume)) < 1157.0u"nm^3"
             @test std(values(sys.loggers.volume)) < 300u"nm^3"
-            @test sys.boundary != CubicBoundary(8.0u"nm")
+            @test sys.boundary != init_boundary
         end
     end
 end
