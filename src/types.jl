@@ -1166,7 +1166,22 @@ extract_parameter_indices!(buf::ParamBuffer, inter, ::System) = extract_paramete
 @inline _collect_general_parameter_indices!(buf::ParamBuffer, inters::NamedTuple, sys::System) =
     map(inter -> extract_parameter_indices!(buf, inter, sys), values(inters))
 
-function _extract_atom_parameter_indices!(buf::ParamBuffer, sys::System, ff)
+function _push_shared_param!(buf::ParamBuffer{T}, name::AbstractString, value) where {T}
+    idx = findfirst(==(name), buf.names)
+    converted = T(_strip_param(value))
+    if isnothing(idx)
+        push!(buf.names, String(name))
+        push!(buf.values, converted)
+        return length(buf.values)
+    end
+    buf.values[idx] == converted || throw(ArgumentError(
+        "shared parameter $(name) has inconsistent values $(buf.values[idx]) and $(converted)",
+    ))
+    return idx
+end
+
+function _extract_atom_parameter_indices!(buf::ParamBuffer, sys::System, ff;
+                                          atom_charge_keys=nothing)
     atoms_cpu = from_device(sys.atoms)
     n_atoms = length(atoms_cpu)
     idx_mass = Vector{Int}(undef, n_atoms)
@@ -1177,6 +1192,13 @@ function _extract_atom_parameter_indices!(buf::ParamBuffer, sys::System, ff)
     has_atom_data = !isempty(sys.atoms_data) && length(sys.atoms_data) == n_atoms
     atoms_data_cpu = has_atom_data ? from_device(sys.atoms_data) : nothing
     has_ff_types = !isnothing(ff) && hasproperty(ff, :atom_types)
+    if !isnothing(atom_charge_keys)
+        length(atom_charge_keys) == n_atoms || throw(ArgumentError(
+            "atom_charge_keys must contain one key per atom, got $(length(atom_charge_keys)) for $(n_atoms) atoms",
+        ))
+        all(key -> key isa AbstractString, atom_charge_keys) ||
+            throw(ArgumentError("atom_charge_keys must contain strings"))
+    end
 
     for i in 1:n_atoms
         atom = atoms_cpu[i]
@@ -1189,7 +1211,11 @@ function _extract_atom_parameter_indices!(buf::ParamBuffer, sys::System, ff)
 
         key_prefix = "atom_$(atom_type)_"
         idx_mass[i] = _push_param!(buf, key_prefix * "mass", ref_atom.mass)
-        idx_charge[i] = _push_unique_param!(buf, key_prefix * "charge_" * string(i), atom.charge)
+        idx_charge[i] = if isnothing(atom_charge_keys)
+            _push_unique_param!(buf, key_prefix * "charge_" * string(i), atom.charge)
+        else
+            _push_shared_param!(buf, "atom_charge_" * atom_charge_keys[i], atom.charge)
+        end
         idx_σ[i]    = _push_param!(buf, key_prefix * "σ", ref_atom.σ)
         idx_ϵ[i]    = _push_param!(buf, key_prefix * "ϵ", ref_atom.ϵ)
     end
@@ -1202,15 +1228,16 @@ inject_interaction(inter, params::AbstractVector, args...) = inter
 _requires_updated_system_context(inter) = false
 
 """
-    extract_atom_parameters(sys, ff=nothing)
+    extract_atom_parameters(sys, ff=nothing; atom_charge_keys=nothing)
 
 Builds a flat atom-parameter vector and index metadata for atom injection.
 Returns `(params, atom_idxs, param_names)`, where `atom_idxs` is
-`(idx_mass, idx_charge, idx_σ, idx_ϵ)`.
+`(idx_mass, idx_charge, idx_σ, idx_ϵ)`. Equal `atom_charge_keys` share one charge
+parameter; charges remain atom-specific when the keyword is omitted.
 """
-function extract_atom_parameters(sys::System, ff=nothing)
+function extract_atom_parameters(sys::System, ff=nothing; atom_charge_keys=nothing)
     buffer = ParamBuffer(float_type(sys))
-    atom_idxs = _extract_atom_parameter_indices!(buffer, sys, ff)
+    atom_idxs = _extract_atom_parameter_indices!(buffer, sys, ff; atom_charge_keys)
     return buffer.values, atom_idxs, buffer.names
 end
 
@@ -1325,16 +1352,17 @@ function inject_gradients(sys::System{<:Any, AT}, params::AbstractVector,
 end
 
 """
-    extract_parameters(sys, ff=nothing)
+    extract_parameters(sys, ff=nothing; atom_charge_keys=nothing)
 
 Builds a flat parameter vector and index metadata for `inject_gradients`.
 Returns `(params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, param_names)`.
+Equal `atom_charge_keys` share one charge parameter.
 """
-function extract_parameters(sys::System, ff=nothing)
+function extract_parameters(sys::System, ff=nothing; atom_charge_keys=nothing)
     T = float_type(sys)
     buffer = ParamBuffer(T)
 
-    atom_idxs = _extract_atom_parameter_indices!(buffer, sys, ff)
+    atom_idxs = _extract_atom_parameter_indices!(buffer, sys, ff; atom_charge_keys)
     pairwise_idxs = _collect_parameter_indices!(buffer, sys.pairwise_inters)
     specific_idxs = _collect_parameter_indices!(buffer, sys.specific_inter_lists)
     general_idxs = _collect_general_parameter_indices!(buffer, sys.general_inters, sys)

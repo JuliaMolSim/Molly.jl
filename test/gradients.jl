@@ -207,6 +207,34 @@ end
         @test charge(atom_injected) == 0.6
         @test atom_injected.σ == 0.4
         @test atom_injected.ϵ == 0.3
+
+        atoms = copy(from_device(sys.atoms))
+        atoms[2] = charge_updated_atom(atoms[2], charge(atoms[1]))
+        shared_sys = System(sys; atoms=atoms)
+        shared_params, shared_idxs, shared_names = Molly.extract_atom_parameters(
+            shared_sys; atom_charge_keys=["site", "site"],
+        )
+        @test only(unique(shared_idxs[2])) > 0
+        @test shared_names[shared_idxs[2][1]] == "atom_charge_site"
+        shared_mod = copy(shared_params)
+        shared_mod[shared_idxs[2][1]] += 0.2
+        shared_atoms, _, _, _ = Molly.inject_gradients(
+            shared_sys,
+            shared_mod,
+            shared_idxs,
+            (),
+            (),
+            (),
+        )
+        @test charge.(from_device(shared_atoms)) ==
+              charge.(from_device(shared_sys.atoms)) .+ 0.2
+        @test_throws ArgumentError Molly.extract_atom_parameters(
+            sys; atom_charge_keys=["site"],
+        )
+
+        @test_throws ArgumentError Molly.extract_atom_parameters(
+            sys; atom_charge_keys=["site", "site"],
+        )
     end
 
     @testset "reaction field charge replay and legacy tuples" begin
