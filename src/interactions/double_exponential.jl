@@ -2,6 +2,33 @@ export
     DoubleExponential,
     DoubleExponentialSoftCore
 
+@doc raw"""
+    DoubleExponential(; cutoff, use_neighbors, α, β, shortcut, σ_mixing, ϵ_mixing,
+                      weight_special)
+
+The double exponential interaction between two atoms.
+
+The potential energy is defined as
+```math
+V(r_{ij}) = \varepsilon_{ij} \left[
+    \frac{\beta e^\alpha}{\alpha - \beta} e^{-\alpha r_{ij} / r_m}
+    - \frac{\alpha e^\beta}{\alpha - \beta} e^{-\beta r_{ij} / r_m}
+\right]
+```
+and the force on each atom by
+```math
+\vec{F}_i = \frac{\varepsilon_{ij}}{r_m} \left[
+    \frac{\alpha\beta e^\alpha}{\alpha - \beta} e^{-\alpha r_{ij} / r_m}
+    - \frac{\alpha\beta e^\beta}{\alpha - \beta} e^{-\beta r_{ij} / r_m}
+\right] \frac{\vec{r}_{ij}}{r_{ij}}
+```
+where
+```math
+r_m = 2^{1/6}\sigma_{ij}
+```
+
+The default ``\alpha`` and ``\beta`` values are those predicted by Garnet.
+"""
 @kwdef struct DoubleExponential{C, T, SC, S, E, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
@@ -126,6 +153,43 @@ end
     return ϵ * (α * (β * exp(α) / (α - β)) * exp(-α * r / rm) - β * (α * exp(β) / (α - β)) * exp(-β * r / rm)) / rm
 end
 
+@doc raw"""
+    DoubleExponentialSoftCore(; cutoff, use_neighbors, α, β, shortcut, σ_mixing,
+                              ϵ_mixing, λ_mixing, scheduler, weight_special)
+
+The double exponential interaction between two atoms with a soft core, used for
+the appearing and disappearing of atoms.
+
+The potential energy is defined as
+```math
+V(r_{ij}) = \lambda\varepsilon_{ij} \left[
+    \frac{\beta_s e^{\alpha_s}}{\alpha_s - \beta_s} e^{-\alpha_s r_{ij} / r_m}
+    - \frac{\alpha_s e^{\beta_s}}{\alpha_s - \beta_s} e^{-\beta_s r_{ij} / r_m}
+\right]
+```
+and the force on each atom by
+```math
+\vec{F}_i = \frac{\varepsilon_{ij}}{r_m} \left[
+    \frac{\alpha_s\beta_s e^{\alpha_s}}{\alpha_s - \beta_s} e^{-\alpha_s r_{ij} / r_m}
+    - \frac{\alpha_s\beta_s e^{\beta_s}}{\alpha_s - \beta_s} e^{-\beta_s r_{ij} / r_m}
+\right] \frac{\vec{r}_{ij}}{r_{ij}}
+```
+where
+```math
+r_m = 2^{1/6}\sigma_{ij}
+```
+```math
+\alpha_s = 1.1 + \lambda(\alpha - 1.1)
+```
+```math
+\beta_s = 1 + \lambda(\beta - 1)
+```
+
+If ``\lambda`` is 1.0, this gives the standard [`DoubleExponential`](@ref) potential and
+means the atom is fully turned on.
+If ``\lambda`` is zero the interaction is turned off.
+``\alpha`` and ``\beta`` determine the shape of the double exponential potential.
+"""
 @kwdef struct DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
