@@ -1157,7 +1157,7 @@ function System(coord_file::AbstractString,
     end
 
     return System(T, AT, atoms, coords, boundary_used, velocities,
-                  atoms_data, virtual_sites_type, loggers, data, bonds_il, bonds_ub_flags,
+                  atoms_data, virtual_sites_type, loggers, data, force_field.global_params, bonds_il, bonds_ub_flags,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
@@ -1657,7 +1657,7 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
 end
 
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
-                loggers, data, bonds_all, bonds_ub_flags, angles_all, torsions, impropers,
+                loggers, data, global_params, bonds_all, bonds_ub_flags, angles_all, torsions, impropers,
                 torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
@@ -1819,14 +1819,34 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
 
     # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
     #   to zero for the pairwise interaction
+
+    # Count number of atoms that have epsilon active
+    nonzero_epsilon_count = count(a -> !iszero(a.ϵ), atoms)
     pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
-    lj = LennardJones(
-        cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=using_neighbors,
-        σ_mixing=σ_mix,
-        ϵ_mixing=ϵ_mix,
-        weight_special=pi_weight_14_lj,
-    )
+    lj = if global_params[1] == zero(T)
+        LennardJones(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            σ_mixing=σ_mix,
+            ϵ_mixing=ϵ_mix,
+            weight_special=pi_weight_14_lj,
+        )
+    elseif nonzero_epsilon_count != 0
+        DoubleExponential(
+            cutoff = DistanceCutoff(T(dist_cutoff)),
+            use_neighbors = using_neighbors,
+            α = T(global_params[1]),
+            β = T(global_params[2]),
+            σ_mixing = σ_mix,
+            ϵ_mixing = ϵ_mix,
+            weight_special = pi_weight_14_lj
+        )
+    else
+        error(
+            "$(nonzero_epsilon_count) atoms have non-zero ϵ, but cannot be assigned "*
+            "neither to Lennard-Jones or Double Exponential potentials."
+        )
+    end
 
     if nonbonded_method == :none
         coul = Coulomb(

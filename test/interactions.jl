@@ -52,6 +52,10 @@
 
     @test !use_neighbors(LennardJones())
     @test  use_neighbors(LennardJones(use_neighbors=true))
+    @test !use_neighbors(DoubleExponential())
+    @test  use_neighbors(DoubleExponential(use_neighbors=true))
+    @test !use_neighbors(DoubleExponentialSoftCore())
+    @test  use_neighbors(DoubleExponentialSoftCore(use_neighbors=true))
 
     for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCoreBeutler(α=1), LennardJonesSoftCoreGapsys(α=1))
         @test isapprox(
@@ -75,6 +79,41 @@
             atol=1e-9u"kJ * mol^-1",
         )
     end
+
+    for inter in (DoubleExponential(), DoubleExponentialSoftCore())
+        @test isapprox(
+            force(inter, dr12, a1, a1),
+            SVector(8.635969842730873, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+            atol=1e-9u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            force(inter, dr13, a1, a1),
+            SVector(-1.3633017400293386, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+            atol=1e-9u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr12, a1, a1),
+            -0.08148402650292114u"kJ * mol^-1";
+            atol=1e-9u"kJ * mol^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr13, a1, a1),
+            -0.12648034169670871u"kJ * mol^-1";
+            atol=1e-9u"kJ * mol^-1",
+        )
+    end
+
+    inter = DoubleExponential(weight_special=0.5)
+    @test isapprox(
+        force(inter, dr13, a1, a1, u"kJ * mol^-1 * nm^-1", true),
+        SVector(-0.5 * 1.3633017400293386, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr13, a1, a1, u"kJ * mol^-1", true),
+        -0.5 * 0.12648034169670871u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
 
     inter = Molly.LennardJones14(0.3u"nm", 0.2u"kJ * mol^-1", 1)
     @test isapprox(
@@ -220,6 +259,32 @@
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
+    inter = DoubleExponentialSoftCore(weight_special=0.5)
+    @test isapprox(
+        force(inter, dr13, AH_a1, AH_a1),
+        SVector(-0.8421368684324054, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr13, AH_a1, AH_a1),
+        -0.08202077553076385u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        force(inter, dr13, AH_a1, AH_a1, u"kJ * mol^-1 * nm^-1", true),
+        SVector(-0.5 * 0.8421368684324054, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr13, AH_a1, AH_a1, u"kJ * mol^-1", true),
+        -0.5 * 0.08202077553076385u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    AH_off = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0)
+    @test all(iszero, force(inter, dr13, AH_off, AH_a1))
+    @test iszero(potential_energy(inter, dr13, AH_off, AH_a1))
+
+    inter = AshbaughHatch(weight_special=0.5)
     c5 = SVector(1.28, 1.0, 1.0)u"nm"
     dr15 = vector(c1, c5, boundary)
     @test isapprox(
