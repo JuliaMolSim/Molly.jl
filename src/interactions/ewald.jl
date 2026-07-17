@@ -668,14 +668,6 @@ end
     end
 end
 
-@inline function ustrip_recip_box(recip_box)
-    return SVector(
-        ustrip.(recip_box[1]),
-        ustrip.(recip_box[2]),
-        ustrip.(recip_box[3]),
-    )
-end
-
 # Unit-stripped CPU kernel: avoids Unitful overhead on every grid point.
 @inline function recip_conv_inner_nou!(vir_nou, charge_grid::Array{Complex{T}, 3}, bsm_x, bsm_y, bsm_z,
                                        recip_box, mesh_dims, f_div_ϵr, factor, boxfactor,
@@ -788,7 +780,7 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
     α_u = ustrip(α)
     factor = T(π)^2 / α_u^2
     boxfactor = T(π) * ustrip(volume(boundary))
-    recip_box_u = ustrip_recip_box(recip_box)
+    recip_box_u = ustrip_vec.(recip_box)
     length_unit = unit(box_sides(boundary, 1))
     f_u = ustrip(energy_units * length_unit, f_div_ϵr)
     esum = zero(T)
@@ -810,7 +802,7 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
     α_u = ustrip(α)
     factor = T(π)^2 / α_u^2
     boxfactor = T(π) * ustrip(volume(boundary))
-    recip_box_u = ustrip_recip_box(recip_box)
+    recip_box_u = ustrip_vec.(recip_box)
     length_unit = unit(box_sides(boundary, 1))
     f_u = ustrip(energy_units * length_unit, f_div_ϵr)
     buffer .= zero(T)
