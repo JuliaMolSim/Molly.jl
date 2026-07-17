@@ -118,7 +118,8 @@ end
 end
 
 @inline function pairwise_pe(::DoubleExponential, r, (α, β, rm, ϵ))
-    return ϵ * ((β * exp(α) / (α - β)) * exp(-α * r / rm) - (α * exp(β) / (α - β)) * exp(-β * r / rm))
+    x = 1 - r / rm
+    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
 end
 
 @inline function force(
@@ -141,7 +142,7 @@ end
     α, β = inter.α, inter.β
     params = (α, β, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = (f/r) * dr
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -150,7 +151,8 @@ end
 end
 
 @inline function pairwise_force(::DoubleExponential, r, (α, β, rm, ϵ))
-    return ϵ * (α * (β * exp(α) / (α - β)) * exp(-α * r / rm) - β * (α * exp(β) / (α - β)) * exp(-β * r / rm)) / rm
+    x = 1 - r / rm
+    return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
 end
 
 @doc raw"""
@@ -169,7 +171,7 @@ V(r_{ij}) = \lambda\varepsilon_{ij} \left[
 ```
 and the force on each atom by
 ```math
-\vec{F}_i = \frac{\varepsilon_{ij}}{r_m} \left[
+\vec{F}_i = \frac{\lambda\varepsilon_{ij}}{r_m} \left[
     \frac{\alpha_s\beta_s e^{\alpha_s}}{\alpha_s - \beta_s} e^{-\alpha_s r_{ij} / r_m}
     - \frac{\alpha_s\beta_s e^{\beta_s}}{\alpha_s - \beta_s} e^{-\beta_s r_{ij} / r_m}
 \right] \frac{\vec{r}_{ij}}{r_{ij}}
@@ -296,7 +298,8 @@ end
 end
 
 @inline function pairwise_pe(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
-    return ϵ * ((β * exp(α) / (α - β)) * exp(-α * r / rm) - (α * exp(β) / (α - β)) * exp(-β * r / rm))
+    x = 1 - r / rm
+    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
 end
 
 @inline function force(
@@ -331,7 +334,7 @@ end
     β_s = T(1 + λ * (inter.β - 1))
     params = (α_s, β_s, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = (f/r) * dr
+    fdr = (λ * f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -340,5 +343,6 @@ end
 end
 
 @inline function pairwise_force(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
-    return ϵ * (α * (β * exp(α) / (α - β)) * exp(-α * r / rm) - β * (α * exp(β) / (α - β)) * exp(-β * r / rm)) / rm
+    x = 1 - r / rm
+    return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
 end
