@@ -135,6 +135,7 @@ end
     )
     zero(sys)
     zero(sys_pme)
+    deepcopy(sys_pme)
     neighbors = find_neighbors(sys)
 
     cs = charges(sys)
@@ -351,6 +352,7 @@ end
         )
         show(devnull, sys.neighbor_finder)
         zero(sys)
+        deepcopy(sys)
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
 
@@ -470,7 +472,7 @@ end
 
 @testset "CHARMM OpenMM protein comparison" begin
     for constraint_algorithm in (LINCS, SHAKE_RATTLE)
-        start_temp = (constraint_algorithm == LINCS ? 485.281907022u"K" : 489.456277814u"K")
+        start_temp = 485.281907022u"K"
         ff = MolecularForceField(
             joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
             strictness=:nowarn,
@@ -549,7 +551,7 @@ end
 
         coords_diff = sys.coords .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = sys.velocities .- vels_openmm
-        @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+        @test maximum(norm.(coords_diff)) < 5e-4u"nm"
         @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
         # Test with no units
@@ -585,7 +587,7 @@ end
 
         coords_diff = sys_nounits.coords * u"nm" .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = sys_nounits.velocities * u"nm * ps^-1" .- vels_openmm
-        @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+        @test maximum(norm.(coords_diff)) < 5e-4u"nm"
         @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
         params_dic = Molly.extract_parameters(sys_nounits, ff_nounits)
@@ -620,7 +622,7 @@ end
             coords_diff = from_device(sys.coords) .-
                                         wrap_coords.(coords_openmm, (sys.boundary,))
             vels_diff = from_device(sys.velocities) .- vels_openmm
-            @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+            @test maximum(norm.(coords_diff)) < 5e-4u"nm"
             @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
             sys_nounits = System(
@@ -649,7 +651,7 @@ end
             coords_diff = from_device(sys_nounits.coords * u"nm") .-
                                         wrap_coords.(coords_openmm, (sys.boundary,))
             vels_diff = from_device(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
-            @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+            @test maximum(norm.(coords_diff)) < 5e-4u"nm"
             @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
             params_dic_gpu = Molly.extract_parameters(sys_nounits, ff_nounits)

@@ -100,7 +100,7 @@ for the original LINCS paper.
 - `niter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
 - `iter_vel_correction=false`: whether to use iterative velocity constraint solving.
-    When `false` (the default), velocity correction uses one LINCS projection as in
+    When `false`, velocity correction uses one LINCS projection as in
     GROMACS. When `true`, additional iterative velocity corrections are performed.
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 """
@@ -489,7 +489,9 @@ end
     rhs[i] = val
     sol[i] = val
 
-    @synchronize
+    if nrec > 0
+        @synchronize
+    end
 
     nc = n_coupled_arr[i]
     for rec in 1:nrec
@@ -508,7 +510,9 @@ end
             rhs[i] = mvb
         end
         sol[i] += mvb
-        @synchronize
+        if rec < nrec
+            @synchronize
+        end
     end
 
     factor = sdiag[i] * sol[i]
@@ -545,7 +549,9 @@ end
 
     B_i = B[i]
 
-    @synchronize
+    if nrec > 0
+        @synchronize
+    end
 
     nc = n_coupled_arr[i]
     for rec in 1:nrec
@@ -564,7 +570,9 @@ end
             rhs[i] = mvb
         end
         sol[i] += mvb
-        @synchronize
+        if rec < nrec
+            @synchronize
+        end
     end
 
     factor = sdiag[i] * sol[i]
@@ -600,7 +608,9 @@ end
     rhs[i] = val
     sol[i] = val
 
-    @synchronize
+    if nrec > 0
+        @synchronize
+    end
 
     nc = n_coupled_arr[i]
     for rec in 1:nrec
@@ -619,7 +629,9 @@ end
             rhs[i] = mvb
         end
         sol[i] += mvb
-        @synchronize
+        if rec < nrec
+            @synchronize
+        end
     end
 
     factor = sdiag[i] * sol[i]
@@ -652,7 +664,9 @@ end
     rhs[i] = val
     sol[i] = val
 
-    @synchronize
+    if nrec > 0
+        @synchronize
+    end
 
     nc = n_coupled_arr[i]
     for rec in 1:nrec
@@ -671,7 +685,9 @@ end
             rhs[i] = mvb
         end
         sol[i] += mvb
-        @synchronize
+        if rec < nrec
+            @synchronize
+        end
     end
 
     factor = sdiag[i] * sol[i]
@@ -1020,21 +1036,22 @@ function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
                 ndrange=n_ca)
 
     # Correction iterations (rotational lengthening)
-    for _ in 1:data.niter
+    if data.niter > 0
         corr_kern! = lincs_fused_correction_kernel!(backend, block_size)
-        corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
-                   coords,
-                   data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
-                   coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
-                   coupling.max_coupled, data.nrec, boundary, ws.factor_sum,
-                   context.needs_virial;
-                   ndrange=K_padded)
-        apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
-                    ndrange=n_ca)
+        for _ in 1:data.niter
+            corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+                       coords,
+                       data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
+                       coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
+                       coupling.max_coupled, data.nrec, boundary, ws.factor_sum,
+                       context.needs_virial;
+                       ndrange=K_padded)
+            apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
+                        ndrange=n_ca)
+        end
     end
 
     accumulate_lincs_position_virial_gpu!(data, ws, context, backend, block_size)
-    KernelAbstractions.synchronize(backend)
     return coords
 end
 
@@ -1064,21 +1081,22 @@ function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
                 ndrange=n_ca)
 
     # Iterative correction: re-evaluate velocity residual and solve again
-    for _ in 1:niter_velocity
+    if niter_velocity > 0
         corr_kern! = lincs_fused_velocity_correction_kernel!(backend, block_size)
-        corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
-                   velocities,
-                   data.atom1, data.atom2, data.invmass, data.sdiag,
-                   coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
-                   coupling.max_coupled, data.nrec, ws.factor_sum,
-                   context.needs_virial;
-                   ndrange=K_padded)
-        apply_kern!(velocities, delta_buf, constrained_atoms, unit_vel_scale;
-                    ndrange=n_ca)
+        for _ in 1:niter_velocity
+            corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+                       velocities,
+                       data.atom1, data.atom2, data.invmass, data.sdiag,
+                       coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
+                       coupling.max_coupled, data.nrec, ws.factor_sum,
+                       context.needs_virial;
+                       ndrange=K_padded)
+            apply_kern!(velocities, delta_buf, constrained_atoms, unit_vel_scale;
+                        ndrange=n_ca)
+        end
     end
 
     accumulate_lincs_velocity_virial_gpu!(data, ws, context, backend, block_size)
-    KernelAbstractions.synchronize(backend)
     return velocities
 end
 
@@ -1100,8 +1118,8 @@ function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained
 end
 
 function apply_velocity_constraints!(sys::System, ca::LINCS; context=nothing, kwargs...)
-    context = isnothing(context) ? default_velocity_constraint_context() : context
-    niter_velocity = ca.iter_vel_correction ? ca.lincs_data.niter : 0
+    context = (isnothing(context) ? default_velocity_constraint_context() : context)
+    niter_velocity = (ca.iter_vel_correction ? ca.lincs_data.niter : 0)
     if !isnothing(ca.delta_buf)
         lincs_vel_apply_gpu!(sys.velocities, sys.coords,
                              ca.lincs_data, ca.workspace, sys.boundary,

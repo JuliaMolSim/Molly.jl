@@ -54,7 +54,6 @@ for inter in inters:
         nonbondedCutoff=1*nanometer,
         constraints=None,
         rigidWater=False,
-        switchDistance=None,
     )
     integrator = VelocityVerletIntegrator(time_step)
     simulation = Simulation(pdb.topology, system, integrator, platform)
@@ -117,7 +116,6 @@ system = force_field.createSystem(
     nonbondedCutoff=1*nanometer,
     constraints=HBonds,
     rigidWater=True,
-    switchDistance=None,
 )
 integrator = VelocityVerletIntegrator(time_step)
 simulation = Simulation(pdb.topology, system, integrator, platform)

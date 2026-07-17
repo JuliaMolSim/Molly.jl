@@ -80,8 +80,7 @@ end
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
-    σ_r = σ / r
-    params = (m, n, σ_r, const_mn)
+    params = (m, n, σ, const_mn)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -92,7 +91,8 @@ end
     end
 end
 
-function pairwise_force(::Mie, r, (m, n, σ_r, const_mn))
+function pairwise_force(::Mie, r, (m, n, σ, const_mn))
+    σ_r = σ / r
     return -(const_mn / r) * (m * σ_r ^ m - n * σ_r ^ n)
 end
 

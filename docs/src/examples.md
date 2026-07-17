@@ -39,7 +39,7 @@ for temp in temps
         temperature=temp,
         friction=1.0u"ps^-1",
     )
-    simulate!(sys, simulator, 5_000; run_loggers=:skipzero)
+    simulate!(sys, simulator, 5_000; run_loggers=:skipstart)
 end
 
 f = Figure(size=(600, 400))

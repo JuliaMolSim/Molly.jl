@@ -788,9 +788,8 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
             n_md_steps;
             n_threads = n_threads,
             rng = workspace.rng,
-            init_step = step_start,
-            log_initial_state = log_initial_state && substep == 1,
-            shortcut = replay_shortcut,
+            init_step = initial_step + (substep - 1) * n_md_steps,
+            run_loggers = (log_initial_state && substep == 1 ? true : :skipstart),
         )
 
         sample = process_tss_sample!(workspace, estimator, replica.active_state)
@@ -1098,7 +1097,7 @@ function run_windowed_tss_cycle!(state::TSSState,
             n_threads = n_threads,
             rng = rng,
             init_step = initial_step + (substep - 1) * n_md_steps,
-            log_initial_state = log_initial_state && substep == 1,
+            run_loggers = (log_initial_state && substep == 1 ? true : :skipstart)
         )
 
         check_windowed_tss_cycle_window!(state, cycle_window, substep)

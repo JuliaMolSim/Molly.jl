@@ -273,6 +273,25 @@
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
     end
 end
+@testset "Device conversion" begin
+    cpu = collect(1:5)
+    # to_device on a CPU array with an Array target is a no-op that avoids copying
+    @test to_device(cpu, Array) === cpu
+    # from_device on a CPU array is a no-op that avoids copying
+    @test from_device(cpu) === cpu
+
+    for AT in array_list
+        dev = to_device(cpu, AT)
+        @test dev isa AT
+        @test Array(dev) == cpu
+        # A device array already of the target type is returned unchanged, no copy
+        @test to_device(dev, AT) === dev
+        # from_device round-trips back to a plain Array
+        back = from_device(dev)
+        @test back isa Array
+        @test back == cpu
+    end
+end
 @testset "Trajectory" begin
     trj_path = joinpath(data_dir, "water_frames", "water_trj.dcd")
     ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=true)

@@ -629,7 +629,7 @@ function simulate!(awh_sim::AWHSimulation{T},
             awh_sim.active_state.active_integrator,
             awh_sim.n_md_steps;
             init_step = awh_sim.current_step,
-            log_initial_state = awh_sim.initial_log_pending,
+            run_loggers = (awh_sim.initial_log_pending ? true : :skipstart),
         )
         awh_sim.current_step += awh_sim.n_md_steps
         awh_sim.initial_log_pending = false

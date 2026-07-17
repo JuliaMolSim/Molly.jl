@@ -53,10 +53,18 @@ function kinetic_energy_tensor(sys::System{D}; kin_tensor=nothing) where D
     return kin_tensor_used
 end
 
-function kinetic_energy_tensor!(kin_tensor, sys::System{<:Any, <:Any, T}) where T
+function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, T}) where {D, T}
     fill!(kin_tensor, zero(T) * sys.energy_units)
-    for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
-        kin_tensor .+= uconvert.(sys.energy_units, m .* (v * transpose(v))) ./ 2
+    masses_cpu = from_device(sys.masses)
+    velocities_cpu = from_device(sys.velocities)
+    @inbounds for i in eachindex(sys)
+        m_half = masses_cpu[i] / 2
+        v = velocities_cpu[i]
+        for col in 1:D
+            for row in 1:D
+                kin_tensor[row, col] += uconvert(sys.energy_units, m_half * v[row] * v[col])
+            end
+        end
     end
     return kin_tensor
 end
@@ -116,9 +124,10 @@ function virial(sys, neighbors, step_n::Integer=0;
         compute_initial_total_virial!(buffers, sys, neighbors, step_n;
                                       n_threads=n_threads, kwargs...)
         return buffers.virial
+    else
+        _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
+        return v
     end
-    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
-    return v
 end
 
 """

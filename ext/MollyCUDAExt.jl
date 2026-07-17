@@ -832,13 +832,13 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray}, pai
 end
 
 @inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder, step_n)
-    first_preprocess = buffers.step_n_preprocessed == -1
-    step_changed = step_n != buffers.step_n_preprocessed
-    needs_morton_refresh = first_preprocess || (step_changed && step_n % nf.n_steps_reorder == 0)
-    sparse_changed = buffers.sparse_pair_generation != nf.cache_generation
-    needs_reorder = first_preprocess || step_changed
-    needs_sparse_refresh = needs_morton_refresh || !nf.initialized || sparse_changed
-    needs_tile_refresh = needs_morton_refresh || !nf.initialized || sparse_changed
+    first_preprocess = (buffers.step_n_preprocessed == -1)
+    step_changed = (step_n != buffers.step_n_preprocessed)
+    needs_morton_refresh = (first_preprocess || (step_changed && step_n % nf.n_steps_reorder == 0))
+    sparse_changed = (buffers.sparse_pair_generation != nf.cache_generation)
+    needs_reorder = true # Coordinates can be changed at any point
+    needs_sparse_refresh = (needs_morton_refresh || !nf.initialized || sparse_changed)
+    needs_tile_refresh = (needs_morton_refresh || !nf.initialized || sparse_changed)
     return needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh
 end
 
@@ -2439,4 +2439,87 @@ end
 
 @inline Molly._float_precision_convert(x::CUDA.CuContext, ::Type{T}) where {T <: AbstractFloat} = x
 @inline Molly._float_precision_convert(x::CUDA.CUFFT.CuFFTPlan, ::Type{T}) where {T <: AbstractFloat} = x
+function Molly.remove_CM_motion!(sys::System{3, <:CuArray, T}) where T
+    M = unit(zero(eltype(eltype(sys.velocities))) * zero(sys.total_mass))
+    n_atoms = length(sys)
+    momentum = CUDA.zeros(T, 3)
+    n_threads = 256
+    n_blocks = cld(n_atoms, n_threads)
+    shmem = 3 * n_threads * sizeof(T)
+
+    @cuda threads=n_threads blocks=n_blocks shmem=shmem cm_momentum_kernel_3d!(
+                    momentum, sys.velocities, masses(sys), Val(n_atoms))
+    @cuda threads=n_threads blocks=n_blocks remove_cm_velocity_kernel_3d!(
+                    sys.velocities, momentum, sys.virtual_site_flags, sys.total_mass,
+                    Val(M), Val(n_atoms), Val(!isempty(sys.virtual_sites)))
+    return sys
+end
+
+function cm_momentum_kernel_3d!(momentum::CuDeviceVector{T}, velocities, atom_masses,
+                                ::Val{n_atoms}) where {T, n_atoms}
+    tid = threadIdx().x
+    block_size = blockDim().x
+    idx = (blockIdx().x - 1) * block_size + tid
+    stride = block_size * gridDim().x
+    shmem = CuDynamicSharedArray(T, 3 * block_size)
+
+    mx = zero(T)
+    my = zero(T)
+    mz = zero(T)
+    @inbounds while idx <= n_atoms
+        p = velocities[idx] * atom_masses[idx]
+        mx += ustrip(p[1])
+        my += ustrip(p[2])
+        mz += ustrip(p[3])
+        idx += stride
+    end
+
+    @inbounds begin
+        shmem[tid] = mx
+        shmem[block_size + tid] = my
+        shmem[2 * block_size + tid] = mz
+    end
+    sync_threads()
+
+    offset = block_size >>> 1
+    while offset > 0
+        if tid <= offset
+            @inbounds begin
+                shmem[tid] += shmem[tid + offset]
+                shmem[block_size + tid] += shmem[block_size + tid + offset]
+                shmem[2 * block_size + tid] += shmem[2 * block_size + tid + offset]
+            end
+        end
+        sync_threads()
+        offset >>>= 1
+    end
+
+    if tid == 1
+        CUDA.atomic_add!(pointer(momentum, 1), shmem[1])
+        CUDA.atomic_add!(pointer(momentum, 2), shmem[block_size + 1])
+        CUDA.atomic_add!(pointer(momentum, 3), shmem[2 * block_size + 1])
+    end
+    return nothing
+end
+
+function remove_cm_velocity_kernel_3d!(velocities, momentum::CuDeviceVector{T},
+                            virtual_site_flags, total_mass, ::Val{momentum_unit}, ::Val{n_atoms},
+                            ::Val{has_vs}) where {T, momentum_unit, n_atoms, has_vs}
+    idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    @inbounds if idx <= n_atoms
+        cm_velocity = SVector(
+            momentum[1] * momentum_unit / total_mass,
+            momentum[2] * momentum_unit / total_mass,
+            momentum[3] * momentum_unit / total_mass,
+        )
+        v = velocities[idx]
+        if has_vs && virtual_site_flags[idx]
+            velocities[idx] = zero(v)
+        else
+            velocities[idx] = v - cm_velocity
+        end
+    end
+    return nothing
+end
+
 end

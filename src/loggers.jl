@@ -37,7 +37,7 @@ export
 
 Run the loggers associated with a system.
 
-`run_loggers` can be `true`, `false` or `:skipzero`, in which case the loggers
+`run_loggers` can be `true`, `false` or `:skipstart`, in which case the loggers
 are not run before the first step.
 Additional keyword arguments can be passed to the loggers if required.
 Ignored for gradient calculation during automatic differentiation.
@@ -45,10 +45,10 @@ Ignored for gradient calculation during automatic differentiation.
 function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, buffers=nothing,
                         run_loggers=true;
                         n_threads::Integer=Threads.nthreads(), kwargs...)
-    if !(run_loggers in (true, false, :skipzero))
-        throw(ArgumentError("run_loggers must be true, false or :skipzero, found $run_loggers"))
+    if !(run_loggers in (true, false, :skipstart))
+        throw(ArgumentError("run_loggers must be true, false or :skipstart, found $run_loggers"))
     end
-    if run_loggers == true || (run_loggers == :skipzero && step_n != 0)
+    if run_loggers == true || (run_loggers == :skipstart && step_n != 0)
         for logger in values(sys.loggers)
             log_property!(logger, sys, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
         end

@@ -113,6 +113,49 @@
             @test isapprox(pe_gpu, pe_cpu, rtol=1e-8, atol=1e-10)
         end
 
+        @testset "GPU remove_CM_motion!" begin
+            n_atoms = 8
+            T = Float32
+            boundary = CubicBoundary(T(10.0)u"nm")
+            coords = [SVector(T(i), T(i + 1), T(i + 2)) * u"nm" for i in 1:n_atoms]
+            velocities = [SVector(T(0.1 * i), T(-0.2 * i), T(0.05 * (i - 3))) * u"nm/ps"
+                          for i in 1:n_atoms]
+            atoms = [Atom(
+                index=i,
+                mass=T(i + 1)u"g/mol",
+                charge=T(0.0),
+                σ=T(0.3)u"nm",
+                ϵ=T(1.0)u"kJ * mol^-1",
+            ) for i in 1:n_atoms]
+
+            cpu_sys = System(
+                atoms=atoms,
+                coords=coords,
+                velocities=velocities,
+                boundary=boundary,
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
+            )
+            gpu_sys = System(
+                atoms=CuArray(atoms),
+                coords=CuArray(coords),
+                velocities=CuArray(velocities),
+                boundary=boundary,
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
+            )
+
+            remove_CM_motion!(cpu_sys)
+            remove_CM_motion!(gpu_sys)
+            gpu_velocities = Array(gpu_sys.velocities)
+
+            for i in 1:n_atoms
+                @test isapprox(gpu_velocities[i], cpu_sys.velocities[i], atol=T(1e-6)u"nm/ps")
+            end
+            cm_velocity = mapreduce((v, m) -> v * m, +, gpu_velocities, mass.(atoms)) / sum(mass.(atoms))
+            @test isapprox(cm_velocity, zero(cm_velocity), atol=T(1e-6)u"nm/ps")
+        end
+
         @testset "GPU tile lists (Units & Overflow)" begin
             n_atoms = 100
             atom_mass = 10.0u"g/mol"
@@ -140,7 +183,7 @@
                 coords=coords,
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_cpu,
-                neighbor_finder=Molly.NoNeighborFinder(),
+                neighbor_finder=NoNeighborFinder(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
             )
@@ -151,7 +194,7 @@
                 velocities=CuArray(velocities),
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_gpu,
-                neighbor_finder=Molly.GPUNeighborFinder(
+                neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=3.0u"nm",
                     device_vector_type=CuArray{Int32, 1},
@@ -185,7 +228,7 @@
                 velocities=CuArray(velocities),
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_gpu_overflow,
-                neighbor_finder=Molly.GPUNeighborFinder(
+                neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=20.0u"nm",
                     device_vector_type=CuArray{Int32, 1},
@@ -538,6 +581,61 @@
                 @test isfinite(ustrip(energies[1])) && isfinite(ustrip(energies[2]))
                 @test isapprox(energies[1], direct[1], rtol=1e-8, atol=1e-10u"kJ * mol^-1")
                 @test isapprox(energies[2], direct[2], rtol=1e-8, atol=1e-10u"kJ * mol^-1")
+            end
+        end
+
+        @testset "Langevin random numbers" begin
+            n_atoms = 50_000
+            boundary = CubicBoundary(50.0u"nm")
+            atom_mass = 10.0u"g/mol"
+            temp = 298.0u"K"
+            AT = CuArray
+            atoms = [Atom(mass=10.0f0u"g/mol", charge=0.0f0, σ=0.3f0u"nm", ϵ=0.1f0u"kJ * mol^-1")
+                     for i in 1:n_atoms]
+            coords = [SVector(1.0f0u"nm", 1.0f0u"nm", 1.0f0u"nm") for _ in 1:n_atoms]
+            velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+            pis = (LennardJones(cutoff=DistanceCutoff(0.9f0u"nm"), use_neighbors=false),)
+
+            sys = System(
+                atoms=copy(atoms),
+                coords=copy(coords),
+                boundary=boundary,
+                velocities=copy(velocities),
+                pairwise_inters=pis,
+                loggers=(temp=TemperatureLogger(100),)
+            )
+
+            sys2 = System(
+                atoms=AT(atoms),
+                coords=AT(coords),
+                boundary=boundary,
+                velocities=AT(velocities),
+                pairwise_inters=pis,
+                loggers=(temp=TemperatureLogger(100),),
+            )
+            velocities_gpu = AT(velocities)
+
+            for (temp, mean_vel) in (
+                    (200.0u"K", 0.65u"nm/ps"),
+                    (250.0u"K", 0.73u"nm/ps"),
+                    (298.0u"K", 0.79u"nm/ps"),
+                )
+                vels_cpu = copy(velocities)
+                random_velocities!(vels_cpu, sys, temp)
+                mean_cpu = mean(mean(vels_cpu))
+                std_cpu = mean(std(vels_cpu))
+                mean_norm_cpu = mean(norm, vels_cpu)
+
+                vels_gpu = random_velocities!(velocities_gpu, sys2, temp)
+                mean_gpu = mean(mean(vels_gpu))
+                std_gpu = mean(std(vels_gpu))
+                mean_norm_gpu = mean(norm, vels_gpu)
+
+                @test -0.005u"nm * ps^-1" <= mean_cpu <= 0.005u"nm * ps^-1"
+                @test -0.005u"nm * ps^-1" <= mean_gpu <= 0.005u"nm * ps^-1"
+                @test (mean_vel - 0.02u"nm/ps") <= mean_norm_cpu <= (mean_vel + 0.02u"nm/ps")
+                @test (mean_vel - 0.02u"nm/ps") <= mean_norm_gpu <= (mean_vel + 0.02u"nm/ps")
+                @test 0.99 < abs(std_cpu / std_gpu) < 1.01
             end
         end
     else

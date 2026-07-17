@@ -1050,6 +1050,7 @@ in the `data` field of the [`InteractionList2Atoms`](@ref) with `EwaldExclusionD
 Only compatible with 3D systems.
 """
 @kwdef struct EwaldExclusion null::UInt8 = 0 end
+# Due to a CuArray error with empty structs (https://github.com/JuliaGPU/CUDA.jl/issues/3181)
 
 Base.zero(::EwaldExclusion) = EwaldExclusion()
 Base.:+(::EwaldExclusion, ::EwaldExclusion) = EwaldExclusion()
