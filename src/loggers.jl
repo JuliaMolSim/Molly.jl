@@ -48,8 +48,10 @@ function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, buffe
         throw(ArgumentError("run_loggers must be true, false or :skipstart, found $run_loggers"))
     end
     if run_loggers == true || (run_loggers == :skipstart && step_n != 0)
-        for logger in values(sys.loggers)
-            log_property!(logger, sys, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
+        @sim_section :Loggers begin
+            for logger in values(sys.loggers)
+                log_property!(logger, sys, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
+            end
         end
     end
     return sys

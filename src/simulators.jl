@@ -141,6 +141,10 @@ Constraints are applied during minimization, which can lead to issues.
     environmental variable `MOLLY_SHOW_PROGRESS`.
 - `rng=Random.default_rng()`: the random number generator used for the simulation. Setting
     this allows reproducible stochastic simulations.
+- `timing=false`: if `true`, print a timing breakdown at the end of the run
+    (Pair / Specific / General / Neigh / Constraints / Loggers / Other; Specific always
+    lists 1-Body…5-Body). Times that `simulate!` call only; REMD replica MD does not
+    accumulate into the report.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
@@ -164,9 +168,11 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     # @inline needed to avoid Enzyme error
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     if length(sys.constraints) > 0
         if isnothing(sim.constraint_bond_constant)
             err_str = "System has constraints but constraint_bond_constant is nothing, " *
@@ -188,7 +194,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
     E = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads,
@@ -213,7 +219,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         place_virtual_sites!(sys)
 
         neighbors_copy = neighbors
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                     n_threads=n_threads)
         E_trial = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                                                             specific_inter_lists=sis)
@@ -242,6 +248,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         end
         update_nograd!(progress, ustrip(max_force))
     end
+    stop_timing!(sys, sim.max_steps, Val(timing); n_threads=n_threads)
     return sys
 end
 
@@ -525,14 +532,16 @@ end
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
@@ -610,7 +619,7 @@ end
             pressure_kin_tensor_valid ? pressure_kin_tensor : nothing; n_threads=n_threads,
             rng=rng)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
         if recompute_forces
             recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
@@ -630,6 +639,7 @@ end
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -678,14 +688,16 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
@@ -778,7 +790,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
             pressure_kin_tensor_valid ? pressure_kin_tensor : nothing; n_threads=n_threads,
             rng=rng)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
         if recompute_forces
             recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
@@ -798,6 +810,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -834,14 +847,16 @@ end
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -897,7 +912,7 @@ end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
@@ -908,6 +923,7 @@ end
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -934,13 +950,15 @@ end
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(nothing, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -995,7 +1013,7 @@ end
             sys.virtual_site_flags,
         )
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, false;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, false;
                                    n_threads=n_threads)
         coords_last .= coords_copy
 
@@ -1007,6 +1025,7 @@ end
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -1053,14 +1072,16 @@ end
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -1127,7 +1148,7 @@ end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
@@ -1138,6 +1159,7 @@ end
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -1190,8 +1212,10 @@ end
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     if length(sys.constraints) > 0
         err_str = "LangevinSplitting is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -1214,7 +1238,7 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
@@ -1269,7 +1293,7 @@ end
             remove_CM_motion!(sys)
         end
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
@@ -1278,6 +1302,7 @@ end
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -1339,8 +1364,10 @@ end
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     if length(sys.constraints) > 0
         err_str = "OverdampedLangevin is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -1350,7 +1377,7 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
@@ -1375,7 +1402,7 @@ end
             remove_CM_motion!(sys)
         end
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
@@ -1386,6 +1413,7 @@ end
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -1430,8 +1458,10 @@ end
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     if length(sys.constraints) > 0
         err_str = "NoseHoover is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -1442,7 +1472,7 @@ end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
@@ -1485,7 +1515,7 @@ end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                     n_threads=n_threads)
         if recompute_forces
             forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
@@ -1505,6 +1535,7 @@ end
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -1751,14 +1782,16 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -1816,7 +1849,7 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
@@ -1825,6 +1858,7 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         end
         next_nograd!(progress)
     end
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=sim.dt)
     return sys
 end
 
@@ -1861,7 +1895,8 @@ function simulate!(sys::ReplicaSystem,
                    init_step::Integer=sys.current_step,
                    show_progress=default_show_progress(),
                    rng=Random.default_rng(),
-                   strictness=default_strictness())
+                   strictness=default_strictness(),
+                   timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
     if assign_velocities
         master_sys = sys.partition.master_sys
@@ -1887,7 +1922,7 @@ function simulate!(sys::ReplicaSystem,
 
     return simulate_remd!(sys, sim, n_steps_or_time; n_threads=n_threads, run_loggers=run_loggers,
                           shortcut=shortcut, init_step=init_step, show_progress=show_progress,
-                          rng=rng, strictness=strictness)
+                          rng=rng, strictness=strictness, timing=timing)
 end
 
 @doc raw"""
@@ -1987,8 +2022,15 @@ function simulate_remd!(sys::ReplicaSystem,
                         init_step::Integer=sys.current_step,
                         show_progress=default_show_progress(),
                         rng=Random.default_rng(),
-                        strictness=default_strictness())
+                        strictness=default_strictness(),
+                        timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
+    # Replica MD uses nested simulate!(...; timing=false) and must not see active.
+    # Timing REMD still reports wall-clock Loop time; section timers stay empty/Other.
+    if timing
+        SIM_TIMING.active = false
+    end
     if rng != Random.default_rng()
         throw(ArgumentError("rng for simulate_remd! must be Random.default_rng() " *
                             "to avoid race conditions"))
@@ -2085,6 +2127,7 @@ function simulate_remd!(sys::ReplicaSystem,
     end
     sys.current_step = init_step + n_steps
 
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads, dt=remd_sim.dt)
     return sys
 end
 
@@ -2128,8 +2171,10 @@ end
                            init_step::Integer=0,
                            show_progress=default_show_progress(),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           timing::Bool=false)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    timing = start_timing!(Val(timing))
     if length(sys.constraints) > 0
         err_str = "MetropolisMonteCarlo is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -2137,7 +2182,7 @@ end
     end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
+    neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
     E_old = potential_energy(sys, neighbors, init_step, buffers; n_threads=n_threads)
@@ -2149,7 +2194,7 @@ end
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
-        neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+        neighbors = @sim_section :Neigh find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
         E_new = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
 
         ΔE = E_new - E_old
@@ -2171,6 +2216,7 @@ end
         next_nograd!(progress)
     end
 
+    stop_timing!(sys, n_steps, Val(timing); n_threads=n_threads)
     return sys
 end
 
