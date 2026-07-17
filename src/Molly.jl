@@ -30,6 +30,7 @@ using UnitfulAtomic
 using StructArrays
 
 using LinearAlgebra
+using Printf
 using Random
 using SparseArrays
 using Statistics
@@ -43,6 +44,7 @@ include("cutoffs.jl")
 include("mixing.jl")
 include("virtual.jl")
 include("kernels.jl")
+include("timing.jl")
 include("force.jl")
 include("energy.jl")
 include("free_energy/alchemy.jl")
