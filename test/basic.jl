@@ -407,6 +407,32 @@ end
     end
 end
 
+@testset "Double exponential force field setup" begin
+    ff = MolecularForceField(
+        joinpath(ff_dir, "ethanol_garnet.xml");
+        custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
+    )
+    sys = System(
+        joinpath(data_dir, "ethanol_garnet.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        dist_cutoff=1.0u"nm",
+        dispersion_correction=false,
+    )
+
+    dexp = only(inter for inter in sys.pairwise_inters if inter isa DoubleExponential)
+    coul = only(inter for inter in sys.pairwise_inters if inter isa CoulombReactionField)
+    @test dexp.α == 12.159626
+    @test dexp.β == 4.326311
+    @test iszero(dexp.weight_special)
+    @test coul.weight_special == 0.5705855
+    @test isapprox(
+        potential_energy(sys),
+        -62495.02042543085u"kJ * mol^-1";
+        atol=1.0u"kJ * mol^-1",
+    )
+end
+
 @testset "Neighbor lists" begin
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 

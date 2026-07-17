@@ -305,6 +305,12 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             "tag, found $(ff.name)"))
     end
 
+    has_lj_force = any(entry -> entry.name == "LennardJonesForce", eachelement(ff))
+    has_custom_nb_force = any(entry -> entry.name == "CustomNonbondedForce", eachelement(ff))
+    if has_lj_force && has_custom_nb_force
+        error("LennardJonesForce and CustomNonbondedForce cannot be used in the same file")
+    end
+
     for entry in eachelement(ff)
         entry_name = entry.name
         if entry_name == "Include"
@@ -733,7 +739,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
         
         elseif entry_name == "CustomNonbondedForce"
 
-            if entry["energy"] == "sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))"
+            if entry["energy"] == "sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))" && entry["bondCutoff"] == "3"
                 for element in eachelement(entry)
 
                     if element.name == "GlobalParameter"
@@ -772,9 +778,11 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
                 end
             else
-                report_issue("CustomNonbondedForce without "*
-                             "energy=sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2))))) "*
-                             "not currently supported, ignoring", strictness)
+                err_str = "CustomNonbondedForce without "*
+                          "energy=\"sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))\" "*
+                          "and bondCutoff=\"3\" "
+                          "not currently supported, ignoring."
+                report_issue(err_str, strictness)
             end
 
         elseif entry_name == "AmoebaUreyBradleyForce"
@@ -906,8 +914,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     weight_14_lj = (ff_param_array[7] ? ff_param_array[6] : ff_param_array[4])
     dispersion_correction = (isnothing(ff_param_array[12]) ? true : ff_param_array[12])
 
-    double_exp_alpha = (ff_param_array[9] ? ff_param_array[8] : zero(T))
-    double_exp_beta  = (ff_param_array[11] ? ff_param_array[10] : zero(T))
+    has_double_exp_params = ff_param_array[9] && ff_param_array[11]
+    double_exp_alpha = (has_double_exp_params ? ff_param_array[8] : zero(T))
+    double_exp_beta  = (has_double_exp_params ? ff_param_array[10] : zero(T))
 
     global_params = [double_exp_alpha, double_exp_beta]
     G = typeof(global_params)

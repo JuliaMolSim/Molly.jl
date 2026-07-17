@@ -1493,9 +1493,10 @@ function System(T::Type,
     separate_lj14 = false
     dispersion_correction = true
     hydrogen_mass = false
+    global_params = [zero(T), zero(T)]
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
-                  loggers, data, bonds, bonds_ub_flags, angles, torsions, impropers,
+                  loggers, data, global_params, bonds, bonds_ub_flags, angles, torsions, impropers,
                   torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
@@ -1822,7 +1823,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
 
     # Count number of atoms that have epsilon active
     nonzero_epsilon_count = count(a -> !iszero(a.ϵ), atoms)
-    pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
+    pi_weight_14_lj = (separate_lj14 || global_params[1] != zero(T) ? zero(T) : weight_14_lj)
     lj = if global_params[1] == zero(T)
         LennardJones(
             cutoff=DistanceCutoff(T(dist_cutoff)),

@@ -262,7 +262,7 @@
     inter = DoubleExponentialSoftCore(weight_special=0.5)
     @test isapprox(
         force(inter, dr13, AH_a1, AH_a1),
-        SVector(-0.8421368684324054, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(-0.4210684342162027, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
@@ -272,7 +272,7 @@
     )
     @test isapprox(
         force(inter, dr13, AH_a1, AH_a1, u"kJ * mol^-1 * nm^-1", true),
-        SVector(-0.5 * 0.8421368684324054, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        SVector(-0.5 * 0.4210684342162027, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(

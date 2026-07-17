@@ -27,17 +27,23 @@ where
 r_m = 2^{1/6}\sigma_{ij}
 ```
 
-The default ``\alpha`` and ``\beta`` values are those predicted by Garnet.
 """
-@kwdef struct DoubleExponential{C, T, SC, S, E, W} <: PairwiseInteraction
-    cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
-    α::T = 12.159626 # These are the parameters predicted by Garnet
-    β::T = 4.326311
-    shortcut::SC = LJZeroShortcut()
-    σ_mixing::S = LorentzMixing()
-    ϵ_mixing::E = GeometricMixing()
-    weight_special::W = 1
+struct DoubleExponential{C, T, SC, S, E, W} <: PairwiseInteraction
+    cutoff::C
+    use_neighbors::Bool
+    α::T
+    β::T
+    shortcut::SC
+    σ_mixing::S
+    ϵ_mixing::E
+    weight_special::W
+end
+
+function DoubleExponential(; cutoff=NoCutoff(), use_neighbors=false, α, β,
+                           shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
+                           ϵ_mixing=GeometricMixing(), weight_special=1)
+    return DoubleExponential(cutoff, use_neighbors, α, β, shortcut, σ_mixing, ϵ_mixing,
+                             weight_special)
 end
 
 use_neighbors(inter::DoubleExponential) = inter.use_neighbors
@@ -101,7 +107,7 @@ end
 ) where {C, T}
 
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
     r = sqrt(sum(abs2, dr))
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
@@ -192,17 +198,25 @@ means the atom is fully turned on.
 If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` and ``\beta`` determine the shape of the double exponential potential.
 """
-@kwdef struct DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W} <: PairwiseInteraction
-    cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
-    α::T = 12.159626 # These are the parameters predicted by Garnet
-    β::T = 4.326311
-    shortcut::SC = LJZeroShortcut()
-    σ_mixing::S = LorentzMixing()
-    ϵ_mixing::E = GeometricMixing()
-    λ_mixing::LM = MinimumMixing()
-    scheduler::SCH = DefaultLambdaScheduler()
-    weight_special::W = 1
+struct DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W} <: PairwiseInteraction
+    cutoff::C
+    use_neighbors::Bool
+    α::T
+    β::T
+    shortcut::SC
+    σ_mixing::S
+    ϵ_mixing::E
+    λ_mixing::LM
+    scheduler::SCH
+    weight_special::W
+end
+
+function DoubleExponentialSoftCore(; cutoff=NoCutoff(), use_neighbors=false, α, β,
+                                   shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
+                                   ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
+                                   scheduler=DefaultLambdaScheduler(), weight_special=1)
+    return DoubleExponentialSoftCore(cutoff, use_neighbors, α, β, shortcut, σ_mixing,
+                                     ϵ_mixing, λ_mixing, scheduler, weight_special)
 end
 
 use_neighbors(inter::DoubleExponentialSoftCore) = inter.use_neighbors
@@ -278,7 +292,7 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
     r = sqrt(sum(abs2, dr))
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)

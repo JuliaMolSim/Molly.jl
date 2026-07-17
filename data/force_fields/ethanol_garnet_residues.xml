@@ -1,0 +1,16 @@
+<Residues>
+  <Residue name="M1">
+    <Bond from="C1" to="C2"/>
+    <Bond from="C1" to="H1"/>
+    <Bond from="C1" to="H2"/>
+    <Bond from="C1" to="H3"/>
+    <Bond from="C2" to="O1"/>
+    <Bond from="C2" to="H4"/>
+    <Bond from="C2" to="H5"/>
+    <Bond from="O1" to="H6"/>
+  </Residue>
+  <Residue name="M2">
+    <Bond from="O2" to="H7"/>
+    <Bond from="O2" to="H8"/>
+  </Residue>
+</Residues>
