@@ -604,12 +604,16 @@ end
     @inbounds x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
     @inbounds for ix in 0:(order-1)
         xindex = (x0index + ix) % mesh_dims[1]
+        θx = bsplines_θ[(i-1)*order+ix+1, 1]
+        qx = q * θx
         for iy in 0:(order-1)
             yindex = (y0index + iy) % mesh_dims[2]
+            θy = bsplines_θ[(i-1)*order+iy+1, 2]
+            qxy = qx * θy
             for iz in 0:(order-1)
                 zindex = (z0index + iz) % mesh_dims[3]
-                cb = q * bsplines_θ[(i-1)*order+ix+1, 1] *
-                            bsplines_θ[(i-1)*order+iy+1, 2] * bsplines_θ[(i-1)*order+iz+1, 3]
+                θz = bsplines_θ[(i-1)*order+iz+1, 3]
+                cb = qxy * θz
                 add_charge_grid!(charge_grid, zindex + 1, yindex + 1, xindex + 1, cb, Val(atomic))
             end
         end
@@ -661,6 +665,59 @@ end
     if i <= length(atoms)
         spread_charge_inner!(charge_grid_real, grid_indices, bsplines_θ, mesh_dims, order, atoms,
                              scheduler, i, Val(T), Val(true))
+    end
+end
+
+@inline function ustrip_recip_box(recip_box)
+    return SVector(
+        ustrip.(recip_box[1]),
+        ustrip.(recip_box[2]),
+        ustrip.(recip_box[3]),
+    )
+end
+
+# Unit-stripped CPU kernel: avoids Unitful overhead on every grid point.
+@inline function recip_conv_inner_nou!(vir_nou, charge_grid::Array{Complex{T}, 3}, bsm_x, bsm_y, bsm_z,
+                                       recip_box, mesh_dims, f_div_ϵr, factor, boxfactor,
+                                       kx, ky, kz, ::Val{needs_vir}) where {T, needs_vir}
+    if iszero(kx) && iszero(ky) && iszero(kz)
+        return zero(T)
+    end
+    nx, ny, nz = mesh_dims
+    maxkx, maxky, maxkz = T(0.5)*(nx+1), T(0.5)*(ny+1), T(0.5)*(nz+1)
+    @inbounds begin
+        mx = (kx < maxkx ? kx : kx - nx)
+        mhx = mx * recip_box[1][1]
+        bx = boxfactor * bsm_x[kx+1]
+        my = (ky < maxky ? ky : ky - ny)
+        mhy = mx * recip_box[2][1] + my * recip_box[2][2]
+        by = bsm_y[ky+1]
+        mz = (kz < maxkz ? kz : kz - nz)
+        mhz = mx * recip_box[3][1] + my * recip_box[3][2] + mz * recip_box[3][3]
+        d1, d2 = reim(charge_grid[kz+1, ky+1, kx+1])
+        m2 = mhx^2 + mhy^2 + mhz^2
+        bz = bsm_z[kz+1]
+        denom = m2 * bx * by * bz
+        eterm = f_div_ϵr * exp(-factor * m2) / denom
+        charge_grid[kz+1, ky+1, kx+1] = Complex(d1*eterm, d2*eterm)
+        struct2 = d1^2 + d2^2
+
+        if needs_vir
+            Ek = eterm * struct2
+            invm2 = one(T) / m2
+            coeff = 2*one(T) * (one(T) + factor*m2) * invm2
+            gxx = 1 - coeff*mhx*mhx
+            gxy =   - coeff*mhx*mhy
+            gxz =   - coeff*mhx*mhz
+            gyy = 1 - coeff*mhy*mhy
+            gyz =   - coeff*mhy*mhz
+            gzz = 1 - coeff*mhz*mhz
+            G = SMatrix{3, 3, T}(gxx, gxy, gxz,
+                                 gxy, gyy, gyz,
+                                 gxz, gyz, gzz)
+            vir_nou .+= Ek .* G
+        end
+        return eterm * struct2
     end
 end
 
@@ -727,27 +784,35 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
     if needs_vir
         buffer_virial[1] .= zero(T)
     end
-    factor = T(π)^2 / α^2
-    boxfactor = T(π) * volume(boundary)
-    esum = zero(T) * energy_units
+    # Strip units once; length unit cancels between α, recip_box, and volume.
+    α_u = ustrip(α)
+    factor = T(π)^2 / α_u^2
+    boxfactor = T(π) * ustrip(volume(boundary))
+    recip_box_u = ustrip_recip_box(recip_box)
+    length_unit = unit(box_sides(boundary, 1))
+    f_u = ustrip(energy_units * length_unit, f_div_ϵr)
+    esum = zero(T)
     for kx in 0:(mesh_dims[1]-1), ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
-        esum_val = recip_conv_inner!(buffer_virial[1], charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
-                            mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, kx, ky, kz,
-                            Val(needs_vir), Val(false))
-        esum += esum_val
+        esum += recip_conv_inner_nou!(buffer_virial[1], charge_grid, bsm_x, bsm_y, bsm_z,
+                            recip_box_u, mesh_dims, f_u, factor, boxfactor, kx, ky, kz,
+                            Val(needs_vir))
     end
     if needs_vir
         # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
         vir .+= buffer_virial[1] .* energy_units / 2
     end
-    return esum / 2
+    return esum * energy_units / 2
 end
 
 function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buffer,
                      bsm_x, bsm_y, bsm_z, recip_box, f_div_ϵr, α, mesh_dims, boundary, energy_units,
                      ::Val{n_threads}, ::Val{needs_vir}) where {T, n_threads, needs_vir}
-    factor = T(π)^2 / α^2
-    boxfactor = T(π) * volume(boundary)
+    α_u = ustrip(α)
+    factor = T(π)^2 / α_u^2
+    boxfactor = T(π) * ustrip(volume(boundary))
+    recip_box_u = ustrip_recip_box(recip_box)
+    length_unit = unit(box_sides(boundary, 1))
+    f_u = ustrip(energy_units * length_unit, f_div_ϵr)
     buffer .= zero(T)
     Threads.@threads for chunk_i in 1:n_threads
         if needs_vir
@@ -755,10 +820,9 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
         end
         for kx in (chunk_i-1):n_threads:(mesh_dims[1]-1)
             for ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
-                esum_val = recip_conv_inner!(buffer_virial[chunk_i], charge_grid, bsm_x, bsm_y,
-                            bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
-                            kx, ky, kz, Val(needs_vir), Val(false))
-                buffer[chunk_i] += ustrip(energy_units, esum_val)
+                buffer[chunk_i] += recip_conv_inner_nou!(buffer_virial[chunk_i], charge_grid,
+                            bsm_x, bsm_y, bsm_z, recip_box_u, mesh_dims, f_u, factor, boxfactor,
+                            kx, ky, kz, Val(needs_vir))
             end
         end
     end
@@ -820,13 +884,16 @@ function interpolate_force_inner!(Fs, charge_grid, grid_indices, bsplines_θ,
             for iy in 0:(order-1)
                 yindex = (y0index + iy) % mesh_dims[2]
                 ty, dty = bsplines_θ[(i-1)*order+iy+1, 2], bsplines_dθ[(i-1)*order+iy+1, 2]
+                dtx_ty = dtx * ty
+                tx_dty = tx * dty
+                txy = tx * ty
                 for iz in 0:(order-1)
                     zindex = (z0index + iz) % mesh_dims[3]
                     tz, dtz = bsplines_θ[(i-1)*order+iz+1, 3], bsplines_dθ[(i-1)*order+iz+1, 3]
                     gridvalue = real(charge_grid[zindex+1, yindex+1, xindex+1])
-                    fx += dtx * ty * tz * gridvalue
-                    fy += tx * dty * tz * gridvalue
-                    fz += tx * ty * dtz * gridvalue
+                    fx += dtx_ty * tz * gridvalue
+                    fy += tx_dty * tz * gridvalue
+                    fz += txy * dtz * gridvalue
                 end
             end
         end
