@@ -1,10 +1,11 @@
-# High-level simulation timing (LAMMPS-style report)
+# High-level simulation timing report
 #
 # Activated only by `simulate!(...; timing=true)`. Section timers wrap Molly
 # categories: Pair, Specific1–5, General, Neigh, Constraints, Loggers (plus
-# derived Other). When printing, Specific1–5 appear as 1-Body…5-Body under a
-# Specific header row (no summed totals on the parent). Pair and General are
-# section-only. Report columns: min/avg/max time [s] / %total, then Performance.
+# derived Other). When printing, Specific1–5 always appear as 1-Body…5-Body under
+# a Specific header row (no summed totals on the parent), including unused
+# arities as zeros. Pair and General are section-only. Report columns:
+# min/avg/max time [ms] / %total, then Performance. Loop time is in seconds.
 # min/avg/max are per `@sim_section` invocation (not MPI ranks).
 
 const SIM_SPECIFIC_SECTIONS = (:Specific1, :Specific2, :Specific3, :Specific4, :Specific5)
@@ -125,7 +126,9 @@ function get_sim_timings()
     return out
 end
 
-function _format_seconds(t::Real)
+# Format a duration for the report (seconds for Loop time, milliseconds for
+# section columns). Trailing zeros after the decimal are stripped.
+function _format_time(t::Real)
     t = Float64(t)
     iszero(t) && return "0"
     s = @sprintf("%.5f", t)
@@ -153,17 +156,17 @@ function _print_sim_timing_row(io::IO, name::AbstractString, stats::SectionStats
                 label, "-", "-", "-", "-")
         return nothing
     end
-    total_s = stats.total_ns / 1e9
-    pct = loop_s > 0 ? 100 * total_s / loop_s : 0.0
+    total_ms = stats.total_ns / 1e6
+    pct = loop_s > 0 ? 100 * (stats.total_ns / 1e9) / loop_s : 0.0
     if blank_extrema
         # Other: residual in avg/%total; min/max not meaningful.
-        min_str, avg_str, max_str = "-", _format_seconds(total_s), "-"
+        min_str, avg_str, max_str = "-", _format_time(total_ms), "-"
     elseif iszero(stats.count)
-        min_str = avg_str = max_str = _format_seconds(0.0)
+        min_str = avg_str = max_str = _format_time(0.0)
     else
-        min_str = _format_seconds(stats.min_ns / 1e9)
-        avg_str = _format_seconds((stats.total_ns / stats.count) / 1e9)
-        max_str = _format_seconds(stats.max_ns / 1e9)
+        min_str = _format_time(stats.min_ns / 1e6)
+        avg_str = _format_time((stats.total_ns / stats.count) / 1e6)
+        max_str = _format_time(stats.max_ns / 1e6)
     end
     @printf(io, "%-16s | %-12s | %-12s | %-12s | %6s\n",
             label, min_str, avg_str, max_str, _format_pct(pct))
@@ -171,11 +174,11 @@ function _print_sim_timing_row(io::IO, name::AbstractString, stats::SectionStats
 end
 
 function _print_specific_children(io::IO, loop_s::Float64)
-    # Arity order 1–5; skip arities with no recorded time.
+    # Always emit 1-Body…5-Body in order so the Specific layout is stable
+    # even when an arity (e.g. CMAP / 5-body) is unused in this system.
+    empty_stats = SectionStats()
     for (name, label) in zip(SIM_SPECIFIC_SECTIONS, SIM_SPECIFIC_PRINT_NAMES)
-        stats = _section_stats(name)
-        stats === nothing && continue
-        stats.total_ns > 0 || continue
+        stats = something(_section_stats(name), empty_stats)
         _print_sim_timing_row(io, label, stats, loop_s; indent=2)
     end
     return nothing
@@ -209,7 +212,7 @@ function sim_timing_report(sys, n_steps::Integer, loop_ns::Integer;
         length(sys)
     end
     n_replicas = hasproperty(sys, :n_replicas) ? sys.n_replicas : 1
-    print(io, "Loop time of ", _format_seconds(loop_s), " on ", n_procs,
+    print(io, "Loop time of ", _format_time(loop_s), " s on ", n_procs,
           " procs for ", n_steps, " steps with ", n_atoms, " atoms")
     n_replicas > 1 && print(io, " ($n_replicas replicas)")
     println(io)
@@ -232,7 +235,7 @@ function sim_timing_report(sys, n_steps::Integer, loop_ns::Integer;
     other_stats = SectionStats(other_ns, typemax(Int64), Int64(0), Int64(0))
 
     @printf(io, "%-16s | %-12s | %-12s | %-12s | %6s\n",
-            "Section", "min time [s]", "avg time [s]", "max time [s]", "%total")
+            "Section", "min time [ms]", "avg time [ms]", "max time [ms]", "%total")
     println(io, "-"^70)
 
     _print_sim_timing_row(io, "Pair", pair_stats, loop_s)

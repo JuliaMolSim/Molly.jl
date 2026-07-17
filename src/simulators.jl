@@ -141,10 +141,10 @@ Constraints are applied during minimization, which can lead to issues.
     environmental variable `MOLLY_SHOW_PROGRESS`.
 - `rng=Random.default_rng()`: the random number generator used for the simulation. Setting
     this allows reproducible stochastic simulations.
-- `timing=false`: if `true`, print a LAMMPS-style timing breakdown at the end of the run
-    (Pair / Specific / General / Neigh / Constraints / Loggers / Other; Specific lists
-    1-Body…4-Body children when present). Times that `simulate!` call only; REMD
-    replica MD does not accumulate into the report.
+- `timing=false`: if `true`, print a timing breakdown at the end of the run
+    (Pair / Specific / General / Neigh / Constraints / Loggers / Other; Specific always
+    lists 1-Body…5-Body). Times that `simulate!` call only; REMD replica MD does not
+    accumulate into the report.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
