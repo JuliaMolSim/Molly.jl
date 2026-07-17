@@ -5,6 +5,7 @@
 from_device(x::Array) = x
 from_device(x) = Array(x)
 
+to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
 to_device(x::Array, ::Type{<:Array}) = x
 to_device(x::Array, ::Type{AT}) where {AT <: AbstractGPUArray} =
     (isbitstype(eltype(x)) ? AT(x) : x)

@@ -136,19 +136,18 @@ function inject_interaction(inter::PeriodicTorsion{N, T, E}, params::AbstractVec
 end
 
 function extract_parameter_indices!(buf::ParamBuffer,
-                                    inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:PeriodicTorsion}})
+                                    inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:PeriodicTorsion{N}}}) where N
     torsions = from_device(inter.inters)
     types = from_device(inter.types)
 
-    idx_phases = Vector{Any}(undef, length(torsions))
-    idx_ks = Vector{Any}(undef, length(torsions))
+    idx_phases = Vector{NTuple{N, Int}}(undef, length(torsions))
+    idx_ks = Vector{NTuple{N, Int}}(undef, length(torsions))
 
     for i in eachindex(torsions)
         torsion = torsions[i]
         key_prefix = torsion.proper ? "inter_PT_$(types[i])_" : "inter_IT_$(types[i])_"
-        n = length(torsion.periodicities)
-        idx_phases[i] = ntuple(j -> _push_param!(buf, key_prefix * "phase_$j", torsion.phases[j]), n)
-        idx_ks[i] = ntuple(j -> _push_param!(buf, key_prefix * "k_$j", torsion.ks[j]), n)
+        idx_phases[i] = ntuple(j -> _push_param!(buf, key_prefix * "phase_$j", torsion.phases[j]), Val(N))
+        idx_ks[i] = ntuple(j -> _push_param!(buf, key_prefix * "k_$j", torsion.ks[j]), Val(N))
     end
 
     return (idx_phases, idx_ks)

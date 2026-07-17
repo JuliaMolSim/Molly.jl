@@ -15,6 +15,7 @@ export
     MolecularTopology,
     NeighborList,
     System,
+    ParameterSet,
     ThermoState,
     ReplicaSystem,
     array_type,
@@ -1155,6 +1156,69 @@ end
 
 ParamBuffer(::Type{T}) where {T} = ParamBuffer{T}(T[], String[])
 
+struct ParameterLayout{A, P, S, G}
+    atom::A
+    pairwise::P
+    specific::S
+    general::G
+end
+
+"""
+    ParameterSet
+
+A fixed-key dictionary of differentiable system parameters. Values are stored in a
+homogeneous vector and parameter-injection metadata is kept alongside them, allowing
+dictionary-style editing without dictionary lookups in the differentiated code.
+Existing values can be changed by name, but keys cannot be added or removed.
+"""
+mutable struct ParameterSet{T, L} <: AbstractDict{String, T}
+    names::Vector{String}
+    values::Vector{T}
+    layout::L
+end
+
+Base.length(params::ParameterSet) = length(params.values)
+Base.keys(params::ParameterSet) = Base.KeySet(params)
+Base.values(params::ParameterSet) = params.values
+Base.haskey(params::ParameterSet, key) =
+    key isa AbstractString && !isnothing(findfirst(==(key), params.names))
+Base.get(params::ParameterSet, key, default) = haskey(params, key) ? params[key] : default
+
+function Base.getindex(params::ParameterSet, key::AbstractString)
+    idx = findfirst(==(key), params.names)
+    isnothing(idx) && throw(KeyError(key))
+    return params.values[idx]
+end
+
+Base.getindex(params::ParameterSet, idx::Integer) = params.values[idx]
+
+function Base.setindex!(params::ParameterSet{T}, value, key::AbstractString) where {T}
+    idx = findfirst(==(key), params.names)
+    isnothing(idx) && throw(KeyError(key))
+    params.values[idx] = T(_strip_param(value))
+    return value
+end
+
+function Base.setindex!(params::ParameterSet{T}, value, idx::Integer) where {T}
+    params.values[idx] = T(_strip_param(value))
+    return value
+end
+
+function Base.iterate(params::ParameterSet, state::Int=1)
+    state > length(params) && return nothing
+    return params.names[state] => params.values[state], state + 1
+end
+
+Base.copy(params::ParameterSet) =
+    ParameterSet(copy(params.names), copy(params.values), deepcopy(params.layout))
+Base.zero(params::ParameterSet) =
+    ParameterSet(copy(params.names), zero(params.values), deepcopy(params.layout))
+
+Base.delete!(::ParameterSet, key) =
+    throw(ArgumentError("ParameterSet keys are fixed; cannot delete $(repr(key))"))
+Base.empty!(::ParameterSet) =
+    throw(ArgumentError("ParameterSet keys are fixed and cannot be emptied"))
+
 @inline _strip_param(x) = ustrip(x)
 @inline _strip_param(x::Real) = x
 
@@ -1373,12 +1437,37 @@ function inject_gradients(sys::System{<:Any, AT}, params::AbstractVector,
     return atoms_grad, pis_grad, sis_grad, gis_grad
 end
 
+_parameter_layout(params::ParameterSet) = params.layout
+
+"""
+    inject_gradients(sys, params::ParameterSet)
+
+Inject the values in `params` into the atoms and interactions of `sys`. Returns
+`(atoms, pairwise_inters, specific_inter_lists, general_inters)`.
+"""
+function inject_gradients(sys::System, params::ParameterSet)
+    layout = _parameter_layout(params)
+    return inject_gradients(
+        sys,
+        params.values,
+        layout.atom,
+        layout.pairwise,
+        layout.specific,
+        layout.general,
+    )
+end
+
+inject_gradients(sys::System, params::ParameterSet, atom_idxs::Tuple,
+                 pairwise_idxs::Tuple, specific_idxs::Tuple, general_idxs::Tuple) =
+    inject_gradients(sys, params.values, atom_idxs, pairwise_idxs, specific_idxs, general_idxs)
+
 """
     extract_parameters(sys, ff=nothing; atom_charge_keys=nothing)
 
-Builds a flat parameter vector and index metadata for `inject_gradients`.
-Returns `(params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, param_names)`.
-Equal `atom_charge_keys` share one charge parameter.
+Builds a fixed-key [`ParameterSet`](@ref) for `inject_gradients`. It supports the
+usual dictionary lookup and iteration interface while storing its values and
+injection metadata in type-stable forms. Equal `atom_charge_keys` share one charge
+parameter.
 """
 function extract_parameters(sys::System, ff=nothing; atom_charge_keys=nothing)
     T = float_type(sys)
@@ -1389,7 +1478,8 @@ function extract_parameters(sys::System, ff=nothing; atom_charge_keys=nothing)
     specific_idxs = _collect_parameter_indices!(buffer, sys.specific_inter_lists)
     general_idxs = _collect_general_parameter_indices!(buffer, sys.general_inters, sys)
 
-    return buffer.values, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, buffer.names
+    layout = ParameterLayout(atom_idxs, pairwise_idxs, specific_idxs, general_idxs)
+    return ParameterSet(buffer.names, buffer.values, layout)
 end
 
 @doc raw"""
@@ -1653,9 +1743,6 @@ function AtomsBase.atomic_number(s::ReplicaSystem)
     end
 end
 
-
-to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
-to_device(x, ::Type{AT}) where AT = AT(x)
 
 """
     array_type(sys)

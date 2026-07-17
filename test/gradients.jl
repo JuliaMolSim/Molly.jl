@@ -100,11 +100,8 @@ end
     @test charge(d_sys.atoms[1]) ≈ charge_grad atol=1e-6
 end
 
-function injected_charge_energy(params, sys_ref, idx_bundle, coords, neighbor_finder, n_threads)
-    atom_idxs, pairwise_idxs, specific_idxs, general_idxs = idx_bundle
-    atoms, pis, sis, gis = Molly.inject_gradients(
-        sys_ref, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-    )
+function injected_charge_energy(params, sys_ref, coords, neighbor_finder, n_threads)
+    atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params)
     sys = System(
         atoms=atoms,
         coords=coords,
@@ -182,13 +179,32 @@ end
         )
     end
 
-    function pme_grad_safe_injection_value(params, sys, idx_bundle)
-        atom_idxs, pairwise_idxs, specific_idxs, general_idxs = idx_bundle
-        atoms, _, _, gis = Molly.inject_gradients(
-            sys, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-        )
+    function pme_grad_safe_injection_value(params, sys)
+        atoms, _, _, gis = Molly.inject_gradients(sys, params)
         pme = only(gis)
         return sum(charge, from_device(atoms)) + zero(params[1]) * pme.error_tol
+    end
+
+    @testset "parameter dictionary interface" begin
+        sys = reaction_field_system(Array)
+        params = Molly.extract_parameters(sys)
+        charge_key = "atom_1_charge_1"
+
+        @test params isa ParameterSet
+        @test keytype(params) == String
+        @test valtype(params) == Float64
+        @test haskey(params, charge_key)
+        @test params[charge_key] == charge(sys.atoms[1])
+        @test Dict(params)[charge_key] == params[charge_key]
+        @test keys(copy(params)) == keys(params)
+        @test all(iszero, values(zero(params)))
+        @test_throws KeyError params["unknown"]
+        @test_throws KeyError setindex!(params, 1.0, "unknown")
+        @test_throws ArgumentError delete!(params, charge_key)
+
+        params[charge_key] += 0.1
+        atoms, _, _, _ = @inferred Molly.inject_gradients(sys, params)
+        @test charge(atoms[1]) == params[charge_key]
     end
 
     @testset "atom parameter helpers" begin
@@ -240,16 +256,17 @@ end
     @testset "reaction field charge replay and legacy tuples" begin
         for AT in array_list
             sys = reaction_field_system(AT)
-            params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
-                Molly.extract_parameters(sys)
+            params = Molly.extract_parameters(sys)
+            atom_idxs = params.layout.atom
+            pairwise_idxs = params.layout.pairwise
+            specific_idxs = params.layout.specific
+            general_idxs = params.layout.general
             idx_charge = atom_idxs[2]
             new_charge = charge(from_device(sys.atoms)[1]) + 0.35
             params_mod = copy(params)
             params_mod[idx_charge[1]] = new_charge
 
-            atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(
-                sys, params_mod, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-            )
+            atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(sys, params_mod)
             sys_mod = System(
                 sys;
                 atoms=atoms_mod,
@@ -286,16 +303,17 @@ end
     @testset "PME charge replay refreshes cached sums" begin
         for AT in array_list
             sys = pme_system(AT)
-            params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
-                Molly.extract_parameters(sys)
+            params = Molly.extract_parameters(sys)
+            atom_idxs = params.layout.atom
+            pairwise_idxs = params.layout.pairwise
+            specific_idxs = params.layout.specific
+            general_idxs = params.layout.general
             idx_charge = atom_idxs[2]
             new_charge = charge(from_device(sys.atoms)[1]) + 0.4
             params_mod = copy(params)
             params_mod[idx_charge[1]] = new_charge
 
-            atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(
-                sys, params_mod, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-            )
+            atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(sys, params_mod)
             sys_mod = System(
                 sys;
                 atoms=atoms_mod,
@@ -337,22 +355,19 @@ end
                                              scheduler=pme.scheduler,
                                              grad_safe=true,
                                              n_threads=1),))
-        params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
-            Molly.extract_parameters(sys)
-        idx_bundle = (atom_idxs, pairwise_idxs, specific_idxs, general_idxs)
+        params = Molly.extract_parameters(sys)
         dparams = zero(params)
 
         _, primal = autodiff(
-            ReverseWithPrimal,
+            set_runtime_activity(ReverseWithPrimal),
             pme_grad_safe_injection_value,
             Active,
             Duplicated(params, dparams),
             Const(sys),
-            Const(idx_bundle),
         )
 
         @test isfinite(primal)
-        @test dparams[atom_idxs[2][1]] ≈ 1
+        @test dparams["atom_1_charge_1"] ≈ 1
         @test isnothing(only(sys.general_inters).pc_sum)
     end
 
@@ -366,25 +381,23 @@ end
         @test zero(pme).excluded_pairs == pme.excluded_pairs
         @test from_device(to_device(pme, Array)).excluded_pairs == pme.excluded_pairs
 
-        params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
-            Molly.extract_parameters(sys)
-        _, _, _, gis = Molly.inject_gradients(
-            sys, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-        )
+        params = Molly.extract_parameters(sys)
+        _, _, _, gis = Molly.inject_gradients(sys, params)
         @test only(gis).excluded_pairs == pme.excluded_pairs
     end
 
     @testset "PME cached sums respect effective charges" begin
         sys = pme_system(Array; scheduler=Molly.EleScaledLambdaScheduler(), pairwise=false)
-        params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
-            Molly.extract_parameters(sys)
+        params = Molly.extract_parameters(sys)
+        atom_idxs = params.layout.atom
+        pairwise_idxs = params.layout.pairwise
+        specific_idxs = params.layout.specific
+        general_idxs = params.layout.general
         idx_charge = atom_idxs[2]
         params_mod = copy(params)
         params_mod[idx_charge[1]] += 0.2
 
-        atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(
-            sys, params_mod, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-        )
+        atoms_mod, pis_mod, sis_mod, gis_mod = Molly.inject_gradients(sys, params_mod)
         sys_mod = System(
             sys;
             atoms=atoms_mod,
@@ -467,30 +480,106 @@ end
         energy_units=NoUnits,
     )
 
-    params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, _ =
-        Molly.extract_parameters(sys_ref)
-    idx_bundle = (atom_idxs, pairwise_idxs, specific_idxs, general_idxs)
+    params = Molly.extract_parameters(sys_ref)
+    atom_idxs = params.layout.atom
+    pairwise_idxs = params.layout.pairwise
+    specific_idxs = params.layout.specific
+    general_idxs = params.layout.general
     charge_idx = atom_idxs[2][1]
     sigma_idx = atom_idxs[3][1]
     coords_ref = copy(sys_ref.coords)
     neighbor_finder_ref = sys_ref.neighbor_finder
 
-    base_energy = injected_charge_energy(params, sys_ref, idx_bundle, coords_ref, neighbor_finder_ref, 1)
+    base_energy = injected_charge_energy(params, sys_ref, coords_ref, neighbor_finder_ref, 1)
     @test isfinite(base_energy)
 
     charge_grad_fdm = central_fdm(5, 1)(params[charge_idx]) do value
         params_mod = copy(params)
         params_mod[charge_idx] = value
-        injected_charge_energy(params_mod, sys_ref, idx_bundle, coords_ref, neighbor_finder_ref, 1)
+        injected_charge_energy(params_mod, sys_ref, coords_ref, neighbor_finder_ref, 1)
     end
     sigma_grad_fdm = central_fdm(5, 1)(params[sigma_idx]) do value
         params_mod = copy(params)
         params_mod[sigma_idx] = value
-        injected_charge_energy(params_mod, sys_ref, idx_bundle, coords_ref, neighbor_finder_ref, 1)
+        injected_charge_energy(params_mod, sys_ref, coords_ref, neighbor_finder_ref, 1)
     end
 
     @test isfinite(charge_grad_fdm)
     @test isfinite(sigma_grad_fdm)
+end
+
+function injected_dexp_energy(params, sys, dr, atom_i, atom_j)
+    inter = only(Molly.inject_gradients(sys, params)[2])
+    return potential_energy(inter, dr, atom_i, atom_j, NoUnits, true)
+end
+
+@testset "Double exponential parameter injection" begin
+    atom_i = Atom(mass=1.0, σ=0.3, ϵ=0.4, λ=0.5)
+    atom_j = Atom(mass=1.0, σ=0.32, ϵ=0.35, λ=0.5)
+    dr = SVector(0.42, 0.0, 0.0)
+
+    interactions = (
+        (DoubleExponential(α=10.0, β=5.0, weight_special=0.7), "inter_DEXP_"),
+        (DoubleExponentialSoftCore(α=10.0, β=5.0, weight_special=0.7),
+         "inter_DEXPSC_"),
+    )
+
+    for (inter, prefix) in interactions
+        sys = System(
+            atoms=[atom_i, atom_j],
+            coords=[zero(dr), dr],
+            boundary=CubicBoundary(2.0),
+            pairwise_inters=(inter,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+        params = Molly.extract_parameters(sys)
+        keys_dexp = prefix .* ("alpha", "beta", "weight_14")
+
+        @test params[keys_dexp[1]] == inter.α
+        @test params[keys_dexp[2]] == inter.β
+        @test params[keys_dexp[3]] == inter.weight_special
+        @test all(idx -> idx isa Int, only(params.layout.pairwise))
+        @test only((@inferred Molly.inject_gradients(sys, params))[2]) == inter
+
+        params_mod = copy(params)
+        params_mod[keys_dexp[1]] = 11.0
+        params_mod[keys_dexp[2]] = 4.5
+        params_mod[keys_dexp[3]] = 0.6
+        inter_mod = only(Molly.inject_gradients(sys, params_mod)[2])
+        @test inter_mod.α == 11.0
+        @test inter_mod.β == 4.5
+        @test inter_mod.weight_special == 0.6
+        @test inter_mod.cutoff == inter.cutoff
+        @test inter_mod.use_neighbors == inter.use_neighbors
+        @test inter_mod.shortcut == inter.shortcut
+        @test inter_mod.σ_mixing == inter.σ_mixing
+        @test inter_mod.ϵ_mixing == inter.ϵ_mixing
+        if inter isa DoubleExponentialSoftCore
+            @test inter_mod.λ_mixing == inter.λ_mixing
+            @test inter_mod.scheduler == inter.scheduler
+        end
+
+        grads = zero(params)
+        autodiff(
+            set_runtime_activity(Reverse),
+            injected_dexp_energy,
+            Active,
+            Duplicated(params, grads),
+            Const(sys),
+            Const(dr),
+            Const(atom_i),
+            Const(atom_j),
+        )
+        for key in keys_dexp
+            grad_fdm = central_fdm(5, 1)(params[key]) do value
+                params_perturbed = copy(params)
+                params_perturbed[key] = value
+                injected_dexp_energy(params_perturbed, sys, dr, atom_i, atom_j)
+            end
+            @test grads[key] ≈ grad_fdm rtol=1e-7 atol=1e-9
+        end
+    end
 end
 
 if get(ENV, "RUN_DIFFERENTIABLE_SIM_TESTS", "0") == "1"
@@ -1058,11 +1147,8 @@ if get(ENV, "RUN_DIFFERENTIABLE_PROTEIN_TESTS", "0") == "1"
         )
     end
 
-    function test_energy_grad(params, sys_ref, idx_bundle, coords, neighbor_finder, n_threads)
-        atom_idxs, pairwise_idxs, specific_idxs, general_idxs = idx_bundle
-        atoms, pis, sis, gis = Molly.inject_gradients(
-            sys_ref, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-        )
+    function test_energy_grad(params, sys_ref, coords, neighbor_finder, n_threads)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params)
 
         sys = System(
             atoms=atoms,
@@ -1079,11 +1165,8 @@ if get(ENV, "RUN_DIFFERENTIABLE_PROTEIN_TESTS", "0") == "1"
         return potential_energy(sys; n_threads=n_threads)
     end
 
-    function test_forces_grad(params, sys_ref, idx_bundle, coords, neighbor_finder, n_threads)
-        atom_idxs, pairwise_idxs, specific_idxs, general_idxs = idx_bundle
-        atoms, pis, sis, gis = Molly.inject_gradients(
-            sys_ref, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-        )
+    function test_forces_grad(params, sys_ref, coords, neighbor_finder, n_threads)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params)
 
         sys = System(
             atoms=atoms,
@@ -1101,11 +1184,8 @@ if get(ENV, "RUN_DIFFERENTIABLE_PROTEIN_TESTS", "0") == "1"
         return sum(sum.(abs, fs))
     end
 
-    function test_sim_grad(params, sys_ref, idx_bundle, coords, neighbor_finder, n_threads)
-        atom_idxs, pairwise_idxs, specific_idxs, general_idxs = idx_bundle
-        atoms, pis, sis, gis = Molly.inject_gradients(
-            sys_ref, params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs
-        )
+    function test_sim_grad(params, sys_ref, coords, neighbor_finder, n_threads)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params)
 
         sys = System(
             atoms=atoms,
@@ -1149,9 +1229,7 @@ if get(ENV, "RUN_DIFFERENTIABLE_PROTEIN_TESTS", "0") == "1"
     for (test_name, test_fn, test_tol) in test_runs
         for (platform, AT, parallel) in platform_runs
             sys_ref = create_sys(AT)
-            params, atom_idxs, pairwise_idxs, specific_idxs, general_idxs, param_names =
-                Molly.extract_parameters(sys_ref)
-            idx_bundle = (atom_idxs, pairwise_idxs, specific_idxs, general_idxs)
+            params = Molly.extract_parameters(sys_ref)
             n_threads = (parallel ? Threads.nthreads() : 1)
             grads_enzyme = zero(params)
             autodiff(
@@ -1160,23 +1238,18 @@ if get(ENV, "RUN_DIFFERENTIABLE_PROTEIN_TESTS", "0") == "1"
                 Active,
                 Duplicated(params, grads_enzyme),
                 Const(sys_ref),
-                Const(idx_bundle),
                 Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
                 Duplicated(sys_ref.neighbor_finder, sys_ref.neighbor_finder),
                 Const(n_threads),
             )
             for param in params_to_test
-                param_idx = findfirst(==(param), param_names)
-                @test !isnothing(param_idx)
-                idx = Int(param_idx)
-                genz = grads_enzyme[idx]
-                gfd = central_fdm(6, 1)(params[idx]) do val
+                genz = grads_enzyme[param]
+                gfd = central_fdm(6, 1)(params[param]) do val
                     params_perturbed = copy(params)
-                    params_perturbed[idx] = val
+                    params_perturbed[param] = val
                     test_fn(
                         params_perturbed,
                         sys_ref,
-                        idx_bundle,
                         copy(sys_ref.coords),
                         sys_ref.neighbor_finder,
                         n_threads,

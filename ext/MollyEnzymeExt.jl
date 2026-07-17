@@ -19,6 +19,7 @@ EnzymeRules.inactive(::typeof(Molly.check_force_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_energy_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.atoms_bonded_to_N), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.lookup_table), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly._parameter_layout), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_show_progress), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.setup_progress), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.setup_progress_minimizer), args...) = nothing

@@ -68,26 +68,26 @@ function Base.:+(i1::DoubleExponential, i2::DoubleExponential)
     )
 end
 
-function inject_interaction(inter::DoubleExponential, params_dic)
-    key_prefix = "inter_DEXP_"
+function inject_interaction(inter::DoubleExponential, params::AbstractVector,
+                            idx_α::Int, idx_β::Int, idx_weight::Int)
+    α = idx_α > 0 ? typeof(inter.α)(params[idx_α]) : inter.α
+    β = idx_β > 0 ? typeof(inter.β)(params[idx_β]) : inter.β
+    weight = idx_weight > 0 ? typeof(inter.weight_special)(params[idx_weight]) :
+                              inter.weight_special
+
     return DoubleExponential(
-        inter.cutoff,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "alpha", inter.α),
-        dict_get(params_dic, key_prefix * "beta", inter.β),
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        inter.cutoff, inter.use_neighbors, α, β, inter.shortcut, inter.σ_mixing,
+        inter.ϵ_mixing, weight,
     )
 end
 
-function extract_parameters!(params_dic, inter::DoubleExponential, ff)
+function extract_parameter_indices!(buf::ParamBuffer, inter::DoubleExponential)
     key_prefix = "inter_DEXP_"
-    params_dic[key_prefix * "alpha"] = inter.α
-    params_dic[key_prefix * "beta"] = inter.β
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
+    return (
+        _push_param!(buf, key_prefix * "alpha", inter.α),
+        _push_param!(buf, key_prefix * "beta", inter.β),
+        _push_param!(buf, key_prefix * "weight_14", inter.weight_special),
+    )
 end
 
 @inline function potential_energy(
@@ -118,7 +118,8 @@ end
 end
 
 @inline function pairwise_pe(::DoubleExponential, r, (α, β, rm, ϵ))
-    return ϵ * ((β * exp(α) / (α - β)) * exp(-α * r / rm) - (α * exp(β) / (α - β)) * exp(-β * r / rm))
+    x = 1 - r / rm
+    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
 end
 
 @inline function force(
@@ -141,7 +142,7 @@ end
     α, β = inter.α, inter.β
     params = (α, β, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = (f/r) * dr
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -150,7 +151,8 @@ end
 end
 
 @inline function pairwise_force(::DoubleExponential, r, (α, β, rm, ϵ))
-    return ϵ * (α * (β * exp(α) / (α - β)) * exp(-α * r / rm) - β * (α * exp(β) / (α - β)) * exp(-β * r / rm)) / rm
+    x = 1 - r / rm
+    return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
 end
 
 @doc raw"""
@@ -169,7 +171,7 @@ V(r_{ij}) = \lambda\varepsilon_{ij} \left[
 ```
 and the force on each atom by
 ```math
-\vec{F}_i = \frac{\varepsilon_{ij}}{r_m} \left[
+\vec{F}_i = \frac{\lambda\varepsilon_{ij}}{r_m} \left[
     \frac{\alpha_s\beta_s e^{\alpha_s}}{\alpha_s - \beta_s} e^{-\alpha_s r_{ij} / r_m}
     - \frac{\alpha_s\beta_s e^{\beta_s}}{\alpha_s - \beta_s} e^{-\beta_s r_{ij} / r_m}
 \right] \frac{\vec{r}_{ij}}{r_{ij}}
@@ -235,28 +237,26 @@ function Base.:+(i1::DoubleExponentialSoftCore, i2::DoubleExponentialSoftCore)
     )
 end
 
-function inject_interaction(inter::DoubleExponentialSoftCore, params_dic)
-    key_prefix = "inter_DEXPSC_"
+function inject_interaction(inter::DoubleExponentialSoftCore, params::AbstractVector,
+                            idx_α::Int, idx_β::Int, idx_weight::Int)
+    α = idx_α > 0 ? typeof(inter.α)(params[idx_α]) : inter.α
+    β = idx_β > 0 ? typeof(inter.β)(params[idx_β]) : inter.β
+    weight = idx_weight > 0 ? typeof(inter.weight_special)(params[idx_weight]) :
+                              inter.weight_special
+
     return DoubleExponentialSoftCore(
-        inter.cutoff,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "alpha", inter.α),
-        dict_get(params_dic, key_prefix * "beta", inter.β),
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        inter.cutoff, inter.use_neighbors, α, β, inter.shortcut, inter.σ_mixing,
+        inter.ϵ_mixing, inter.λ_mixing, inter.scheduler, weight,
     )
 end
 
-function extract_parameters!(params_dic, inter::DoubleExponentialSoftCore, ff)
+function extract_parameter_indices!(buf::ParamBuffer, inter::DoubleExponentialSoftCore)
     key_prefix = "inter_DEXPSC_"
-    params_dic[key_prefix * "alpha"] = inter.α
-    params_dic[key_prefix * "beta"] = inter.β
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
+    return (
+        _push_param!(buf, key_prefix * "alpha", inter.α),
+        _push_param!(buf, key_prefix * "beta", inter.β),
+        _push_param!(buf, key_prefix * "weight_14", inter.weight_special),
+    )
 end
 
 @inline function potential_energy(
@@ -296,7 +296,8 @@ end
 end
 
 @inline function pairwise_pe(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
-    return ϵ * ((β * exp(α) / (α - β)) * exp(-α * r / rm) - (α * exp(β) / (α - β)) * exp(-β * r / rm))
+    x = 1 - r / rm
+    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
 end
 
 @inline function force(
@@ -331,7 +332,7 @@ end
     β_s = T(1 + λ * (inter.β - 1))
     params = (α_s, β_s, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = (f/r) * dr
+    fdr = (λ * f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -340,5 +341,6 @@ end
 end
 
 @inline function pairwise_force(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
-    return ϵ * (α * (β * exp(α) / (α - β)) * exp(-α * r / rm) - β * (α * exp(β) / (α - β)) * exp(-β * r / rm)) / rm
+    x = 1 - r / rm
+    return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
 end
