@@ -5,7 +5,7 @@
 # derived Other). When printing, Specific1–5 always appear as 1-Body…5-Body under
 # a Specific header row (no summed totals on the parent), including unused
 # arities as zeros. Pair and General are section-only. Report columns:
-# min/avg/max time [ms] / %total, then Performance. Loop time is in seconds.
+# min/avg/max [ms] / %total, then Performance. Loop time is in seconds.
 # min/avg/max are per `@sim_section` invocation (not MPI ranks).
 
 const SIM_SPECIFIC_SECTIONS = (:Specific1, :Specific2, :Specific3, :Specific4, :Specific5)
@@ -235,7 +235,7 @@ function sim_timing_report(sys, n_steps::Integer, loop_ns::Integer;
     other_stats = SectionStats(other_ns, typemax(Int64), Int64(0), Int64(0))
 
     @printf(io, "%-16s | %-12s | %-12s | %-12s | %6s\n",
-            "Section", "min time [ms]", "avg time [ms]", "max time [ms]", "%total")
+            "Section", "min [ms]", "avg [ms]", "max [ms]", "%total")
     println(io, "-"^70)
 
     _print_sim_timing_row(io, "Pair", pair_stats, loop_s)
