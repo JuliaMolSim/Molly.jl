@@ -1,13 +1,13 @@
 # High-level simulation timing (LAMMPS-style report)
 #
 # Activated only by `simulate!(...; timing=true)`. Section timers wrap Molly
-# categories: Pair, Specific1–4, General, Neigh, Constraints, Loggers (plus
-# derived Other). When printing, Specific1–4 appear as 1-Body…4-Body under a
+# categories: Pair, Specific1–5, General, Neigh, Constraints, Loggers (plus
+# derived Other). When printing, Specific1–5 appear as 1-Body…5-Body under a
 # Specific header row (no summed totals on the parent). Pair and General are
 # section-only. Report columns: min/avg/max time [s] / %total, then Performance.
 # min/avg/max are per `@sim_section` invocation (not MPI ranks).
 
-const SIM_SPECIFIC_SECTIONS = (:Specific1, :Specific2, :Specific3, :Specific4)
+const SIM_SPECIFIC_SECTIONS = (:Specific1, :Specific2, :Specific3, :Specific4, :Specific5)
 
 mutable struct SectionStats
     total_ns::Int64
@@ -61,7 +61,7 @@ end
     return total
 end
 
-# Sum of Specific1–4 totals (for Other residual / get_sim_timings); not printed
+# Sum of Specific1–5 totals (for Other residual / get_sim_timings); not printed
 # on the Specific parent row.
 function _specific_stats()
     total = Int64(0)
@@ -80,14 +80,14 @@ function _specific_stats()
     return SectionStats(total, count > 0 ? min_ns : typemax(Int64), max_ns, count)
 end
 
-# Print labels for Specific1–4 (internal symbols unchanged).
-const SIM_SPECIFIC_PRINT_NAMES = ("1-Body", "2-Body", "3-Body", "4-Body")
+# Print labels for Specific1–5 (internal symbols unchanged).
+const SIM_SPECIFIC_PRINT_NAMES = ("1-Body", "2-Body", "3-Body", "4-Body", "5-Body")
 
 """
     @sim_section section expr
 
 Accumulate wall time for a high-level simulation section when timing is active.
-`section` is `:Pair`, `:Specific1`–`:Specific4`, `:General`, `:Neigh`,
+`section` is `:Pair`, `:Specific1`–`:Specific5`, `:General`, `:Neigh`,
 `:Constraints`, or `:Loggers`.
 
 `expr` is evaluated once. Timing is gated by a cheap runtime check of
@@ -171,7 +171,7 @@ function _print_sim_timing_row(io::IO, name::AbstractString, stats::SectionStats
 end
 
 function _print_specific_children(io::IO, loop_s::Float64)
-    # Arity order 1–4; skip arities with no recorded time.
+    # Arity order 1–5; skip arities with no recorded time.
     for (name, label) in zip(SIM_SPECIFIC_SECTIONS, SIM_SPECIFIC_PRINT_NAMES)
         stats = _section_stats(name)
         stats === nothing && continue

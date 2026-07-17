@@ -1151,9 +1151,13 @@ function specific_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         end
     end
 
-    for inter_list in sils_5_atoms
-        specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
-                    force_units, step_n, inter_list, eachindex(inter_list.inters), Val(needs_vir))
+    if length(sils_5_atoms) > 0
+        @sim_section :Specific5 begin
+            for inter_list in sils_5_atoms
+                specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
+                            force_units, step_n, inter_list, eachindex(inter_list.inters), Val(needs_vir))
+            end
+        end
     end
 
     return fs_nounits
@@ -1239,14 +1243,16 @@ function specific_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         end
     end
     if length(sils_5_atoms) > 0
-        @sync for chunk_i in 1:n_threads
-            Threads.@spawn begin
-                fs_chunk = fs_chunks[chunk_i]
-                vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
-                for inter_list in sils_5_atoms
-                    cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-                    specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                                boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
+        @sim_section :Specific5 begin
+            @sync for chunk_i in 1:n_threads
+                Threads.@spawn begin
+                    fs_chunk = fs_chunks[chunk_i]
+                    vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
+                    for inter_list in sils_5_atoms
+                        cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
+                        specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
+                                    boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
+                    end
                 end
             end
         end
@@ -1297,8 +1303,10 @@ function forces!(fs,
     sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(specific_inter_lists))
     sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(specific_inter_lists))
     sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(specific_inter_lists))
+    sils_5_atoms = filter(il -> il isa InteractionList5Atoms, values(specific_inter_lists))
     sils_other = filter(il -> !(il isa InteractionList1Atoms || il isa InteractionList2Atoms ||
-                                il isa InteractionList3Atoms || il isa InteractionList4Atoms),
+                                il isa InteractionList3Atoms || il isa InteractionList4Atoms ||
+                                il isa InteractionList5Atoms),
                         values(specific_inter_lists))
     if length(sils_1_atoms) > 0
         @sim_section :Specific1 begin
@@ -1330,6 +1338,15 @@ function forces!(fs,
     if length(sils_4_atoms) > 0
         @sim_section :Specific4 begin
             for inter_list in sils_4_atoms
+                specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
+                                    inter_list, sys.coords, sys.velocities, sys.atoms,
+                                    sys.boundary, Val(needs_vir), step_n, sys.force_units, Val(T))
+            end
+        end
+    end
+    if length(sils_5_atoms) > 0
+        @sim_section :Specific5 begin
+            for inter_list in sils_5_atoms
                 specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
                                     inter_list, sys.coords, sys.velocities, sys.atoms,
                                     sys.boundary, Val(needs_vir), step_n, sys.force_units, Val(T))
