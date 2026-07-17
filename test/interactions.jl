@@ -10,6 +10,7 @@
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
     dr14 = vector(c1, c4, boundary)
+    dexp_kwargs = (α=12.159626, β=4.326311)
 
     @test Molly.σ_mixing(Molly.LorentzMixing(), a1, a2)       ≈ 0.25u"nm"
     @test Molly.ϵ_mixing(Molly.LorentzMixing(), a1, a2)       ≈ 0.15u"kJ * mol^-1"
@@ -52,10 +53,10 @@
 
     @test !use_neighbors(LennardJones())
     @test  use_neighbors(LennardJones(use_neighbors=true))
-    @test !use_neighbors(DoubleExponential())
-    @test  use_neighbors(DoubleExponential(use_neighbors=true))
-    @test !use_neighbors(DoubleExponentialSoftCore())
-    @test  use_neighbors(DoubleExponentialSoftCore(use_neighbors=true))
+    @test !use_neighbors(DoubleExponential(; dexp_kwargs...))
+    @test  use_neighbors(DoubleExponential(; dexp_kwargs..., use_neighbors=true))
+    @test !use_neighbors(DoubleExponentialSoftCore(; dexp_kwargs...))
+    @test  use_neighbors(DoubleExponentialSoftCore(; dexp_kwargs..., use_neighbors=true))
 
     for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCoreBeutler(α=1), LennardJonesSoftCoreGapsys(α=1))
         @test isapprox(
@@ -80,7 +81,7 @@
         )
     end
 
-    for inter in (DoubleExponential(), DoubleExponentialSoftCore())
+    for inter in (DoubleExponential(; dexp_kwargs...), DoubleExponentialSoftCore(; dexp_kwargs...))
         @test isapprox(
             force(inter, dr12, a1, a1),
             SVector(8.635969842730873, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
@@ -103,7 +104,7 @@
         )
     end
 
-    inter = DoubleExponential(weight_special=0.5)
+    inter = DoubleExponential(; dexp_kwargs..., weight_special=0.5)
     @test isapprox(
         force(inter, dr13, a1, a1, u"kJ * mol^-1 * nm^-1", true),
         SVector(-0.5 * 1.3633017400293386, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
@@ -259,7 +260,7 @@
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
-    inter = DoubleExponentialSoftCore(weight_special=0.5)
+    inter = DoubleExponentialSoftCore(; dexp_kwargs..., weight_special=0.5)
     @test isapprox(
         force(inter, dr13, AH_a1, AH_a1),
         SVector(-0.4210684342162027, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
