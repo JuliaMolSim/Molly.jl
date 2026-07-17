@@ -402,8 +402,14 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         pc_sum, pc_abs2_sum = nothing, nothing
     end
 
-    fft_plan  = plan_fft!(charge_grid; num_threads = n_threads)
-    bfft_plan = plan_bfft!(charge_grid; num_threads = n_threads)
+    if AT <: AbstractGPUArray
+        fft_plan  = plan_fft!(charge_grid)
+        bfft_plan = plan_bfft!(charge_grid)
+    else
+        fft_plan  = plan_fft!(charge_grid; num_threads=n_threads)
+        bfft_plan = plan_bfft!(charge_grid; num_threads=n_threads)
+    end
+    
     bsm_x = to_device(bsplines_moduli[1], AT)
     bsm_y = to_device(bsplines_moduli[2], AT)
     bsm_z = to_device(bsplines_moduli[3], AT)
