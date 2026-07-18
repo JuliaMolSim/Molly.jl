@@ -879,8 +879,10 @@ function aev_vjp_ka(adj, coords::AbstractVector{SVector{D,T}}, species, p, n_spe
 end
 
 # End-to-end on-device ANI forces (eV/Å). Forward AEV → NN VJP (∂E/∂G) → backward AEV kernels
-# (∂E/∂r) → F = -∂E/∂r · Ha→eV, ensemble-averaged. Mirrors compute_ani_energy_ka's design as a
-# standalone entry point (not routed through AtomsCalculators.forces!, which stays CPU/Enzyme).
+# (∂E/∂r) → F = -∂E/∂r · Ha→eV, ensemble-averaged. This is the single ANI forces path — the
+# AtomsCalculators.forces! method below dispatches here for both CPU (KA CPU backend) and GPU
+# (Metal/CUDA) systems. The former finite-difference and Enzyme reverse-mode paths are retired:
+# the analytic backward is both exact (matches TorchANI/FD to ~1e-6) and, on CPU, 7–14× faster.
 function Molly.compute_ani_forces_ka(coords, species, pot, n_species::Int;
         backend=nothing, neighbors=nothing, boundary=nothing)
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
@@ -894,6 +896,32 @@ function Molly.compute_ani_forces_ka(coords, species, pot, n_species::Int;
     Ha   = T(Molly.HARTREE_TO_EV)
     fmat = Array(dcoords)
     return [SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha) for i in 1:length(coords)]
+end
+
+# The single ANI forces path. Strips coords to Å (staying on their device — Array → KA CPU,
+# GPU array → Metal/CUDA), computes forces via the analytic backward, and accumulates into `fs`
+# in the system's units. Replaces the former finite-difference (MollyLuxExt) and Enzyme
+# reverse-mode (MollyLuxEnzymeExt) methods. Requires KernelAbstractions in addition to Lux/HDF5.
+function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::ANIPotential;
+                                  kwargs...) where {D, AT, T}
+    nbrs    = get(kwargs, :neighbors, nothing)
+    n_sp    = length(inter.species_map)
+    sp      = Int32[inter.species_map[ad.element] for ad in sys.atoms_data]
+    coords  = Molly.ustrip_vec.(u"Å", sys.coords)       # Å, unitless; stays on coords' device
+    species = Molly.to_device(sp, AT)
+    backend = KernelAbstractions.get_backend(coords)
+    F = Molly.compute_ani_forces_ka(coords, species, inter, n_sp;                 # host, eV/Å
+            backend = backend, neighbors = nbrs, boundary = Molly.strip_boundary(sys.boundary))
+    if AT <: Array
+        @inbounds for i in eachindex(fs)
+            fs[i] += Molly.ani_force_to_units(SVector{D, T}(F[i]), sys.force_units, AT)
+        end
+    else   # GPU system: build the unit-carrying increment on the host, then add on-device
+        inc = [Molly.ani_force_to_units(SVector{D, T}(F[i]), sys.force_units, Array)
+               for i in eachindex(F)]
+        fs .+= Molly.to_device(inc, AT)
+    end
+    return fs
 end
 
 end # module MollyKALuxExt

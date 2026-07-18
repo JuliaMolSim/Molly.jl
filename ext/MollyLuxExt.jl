@@ -646,31 +646,7 @@ function AtomsCalculators.potential_energy(sys::System{D, AT, T},
     return Molly.ani_energy_to_units(E_ha * T(Molly.HARTREE_TO_EV), sys.energy_units)
 end
 
-# Forces via finite differences (fallback when Enzyme is not loaded).
-function AtomsCalculators.forces!(fs,
-                                  sys::System{D, AT, T},
-                                  inter::ANIPotential;
-                                  kwargs...) where {D, AT, T}
-    h = T(1e-4)   # Å — must be T (Float64) for numerical precision
-
-    coords_strip = strip_coords(sys.coords)
-    species_idx  = [inter.species_map[ad.element] for ad in sys.atoms_data]
-    nbrs = get(kwargs, :neighbors, nothing)
-
-    for atom_i in eachindex(coords_strip)
-        fi = zero(SVector{D, T})
-        for dim in 1:D
-            cp = copy(coords_strip)
-            cm = copy(coords_strip)
-            cp[atom_i] = setcomp(cp[atom_i], dim, cp[atom_i][dim] + h)
-            cm[atom_i] = setcomp(cm[atom_i], dim, cm[atom_i][dim] - h)
-            Ep = ani_raw_energy(cp, species_idx, sys.boundary, inter, nbrs)
-            Em = ani_raw_energy(cm, species_idx, sys.boundary, inter, nbrs)
-            fi = setcomp(fi, dim, T(-(Ep - Em) / (2h) * Molly.HARTREE_TO_EV))
-        end
-        fs[atom_i] += Molly.ani_force_to_units(fi, sys.force_units, AT)
-    end
-    return fs
-end
+# Forces are provided by the analytic on-device path in MollyKALuxExt
+# (AtomsCalculators.forces! → compute_ani_forces_ka), which needs KernelAbstractions.
 
 end # module MollyLuxExt

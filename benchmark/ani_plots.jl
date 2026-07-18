@@ -28,21 +28,18 @@ if !isnothing(forces)
     fig = Figure(size = (760, 520))
     ax  = Axis(fig[1, 1], xscale = log10, yscale = log10,
                xlabel = "number of atoms", ylabel = "forces time (ms)",
-               title = "ANI-2x forces: Molly CPU (Enzyme) vs Apple Metal (on-device)")
-    xc, yc = series(get(forces, "cpu_enzyme", nothing))
+               title = "ANI-2x forces: Molly analytic (CPU + Metal) vs TorchANI CPU")
+    xc, yc = series(get(forces, "cpu", nothing))
     xm, ym = series(get(forces, "metal", nothing))
-    !isempty(xc) && scatterlines!(ax, xc, yc, label = "Molly CPU (Enzyme, t8)", markersize = 10)
+    !isempty(xc) && scatterlines!(ax, xc, yc, label = "Molly CPU (analytic, t8)", markersize = 10)
     !isempty(xm) && scatterlines!(ax, xm, ym, label = "Molly Metal (analytic)", markersize = 10)
-    # TorchANI forces timing, if the user ran the reference script.
+    # TorchANI forces timing, if the reference script was run. Format: {"sizes": {"<n>": {"forces_ms"}}}.
     for (dev, lbl) in (("cpu", "TorchANI CPU"), ("mps", "TorchANI MPS"))
         tj = load_json(joinpath(REF, "6mrr_timing_torchani_$(dev).json"))
-        isnothing(tj) && continue
-        xs = Int[]; ys = Float64[]
-        for e in tj
-            (haskey(e, "n_atoms") && haskey(e, "forces_ms")) || continue
-            push!(xs, Int(e["n_atoms"])); push!(ys, Float64(e["forces_ms"]))
-        end
-        !isempty(xs) && scatterlines!(ax, xs, ys, label = lbl, linestyle = :dash, markersize = 8)
+        (isnothing(tj) || !haskey(tj, "sizes")) && continue
+        ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
+        ys = [Float64(tj["sizes"][string(k)]["forces_ms"]) for k in ks]
+        !isempty(ks) && scatterlines!(ax, ks, ys, label = lbl, linestyle = :dash, markersize = 8)
     end
     axislegend(ax, position = :lt)
     save(joinpath(IMG, "forces_vs_N.png"), fig, px_per_unit = 2)
@@ -59,6 +56,12 @@ if !isnothing(energy)
     for (key, lbl) in (("cpu", "Molly CPU (t8)"), ("metal", "Molly Metal"))
         xs, ys = series(get(energy, key, nothing))
         !isempty(xs) && scatterlines!(ax, xs, ys, label = lbl, markersize = 10)
+    end
+    tj = load_json(joinpath(REF, "6mrr_timing_torchani_cpu.json"))
+    if !isnothing(tj) && haskey(tj, "sizes")
+        ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
+        ys = [Float64(tj["sizes"][string(k)]["energy_ms"]) for k in ks]
+        scatterlines!(ax, ks, ys, label = "TorchANI CPU", linestyle = :dash, markersize = 8)
     end
     axislegend(ax, position = :lt)
     save(joinpath(IMG, "energy_vs_N.png"), fig, px_per_unit = 2)
@@ -82,7 +85,7 @@ function speedup_plot(data, cpukey, gpukey, title, out)
     save(joinpath(IMG, out), fig, px_per_unit = 2)
     println("wrote images/", out)
 end
-speedup_plot(forces, "cpu_enzyme", "metal", "ANI-2x forces: CPU→Metal speedup", "forces_speedup.png")
+speedup_plot(forces, "cpu", "metal", "ANI-2x forces: CPU→Metal speedup", "forces_speedup.png")
 speedup_plot(energy, "cpu", "metal", "ANI-2x energy: CPU→Metal speedup", "energy_speedup.png")
 
 println("done — images in ", IMG)

@@ -52,7 +52,6 @@ MollyEnzymeExt = "Enzyme"
 MollyGLMakieExt = ["GLMakie", "Colors"]
 MollyKernelDensityExt = "KernelDensity"
 MollyKALuxExt = ["KernelAbstractions", "Lux", "HDF5"]
-MollyLuxEnzymeExt = ["Enzyme", "Lux", "HDF5"]
 MollyLuxExt = ["Lux", "HDF5"]
 MollyPythonCallExt = "PythonCall"
 

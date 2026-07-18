@@ -2,10 +2,12 @@
 # Run after generating reference data:
 #   python test/torchani_reference.py --skip-protein
 # Then:
-#   julia --project -e 'using Molly, Lux, HDF5; include("test/ml_potentials.jl")'
+#   julia --project -e 'using Molly, Lux, HDF5, KernelAbstractions; include("test/ml_potentials.jl")'
+# KernelAbstractions is required: the ANI forces path (AtomsCalculators.forces! →
+# compute_ani_forces_ka) is the KA analytic backward pass (no Enzyme/finite-difference paths).
 
 using Molly
-using Lux, HDF5
+using Lux, HDF5, KernelAbstractions
 using StaticArrays, Unitful, LinearAlgebra
 using Test, JSON3, Random
 
@@ -343,44 +345,9 @@ end
     end
 end
 
-# ============================================================================
-# Test 9: Enzyme+Zygote two-stage AD forces (only when Enzyme is loaded)
-# ============================================================================
-
-if isdefined(@__MODULE__, :Enzyme) || @isdefined(Enzyme)
-    @testset "ANIPotential: Enzyme AD forces vs TorchANI (N₂, single-pass)" begin
-        ref_path = joinpath(REF_DIR, "n2_dimer_ani2x.json")
-        h5_path  = joinpath(REF_DIR, "ani2x.h5")
-        if !isfile(ref_path) || !isfile(h5_path)
-            @warn "Reference files not found — skipping"
-            @test_broken false
-        else
-            ref = JSON3.read(read(ref_path, String))
-            f_ref1 = SVector{3,Float64}(ref.forces_eV_per_A[1]...)
-
-            pot = ANIPotential(h5_path; ensemble_idx=0)
-            atoms      = [Atom(mass=14.0u"u"), Atom(mass=14.0u"u")]
-            coords     = [SVector(0.0, 0.0, 0.0)u"Å", SVector(1.1, 0.0, 0.0)u"Å"]
-            atoms_data = [AtomData(element="N"), AtomData(element="N")]
-            boundary   = CubicBoundary(100.0u"Å")
-
-            sys = System(
-                atoms=atoms, coords=coords, boundary=boundary, atoms_data=atoms_data,
-                general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV",
-            )
-
-            fs = forces(sys)
-            fs_val = [ustrip.(u"eV/Å", f) for f in fs]
-
-            # Tighter tolerance than finite-diff: AD gives exact gradient
-            @test isapprox(fs_val[1], f_ref1; atol=1e-4)
-            @test isapprox(fs_val[1] + fs_val[2], zeros(3); atol=1e-10)
-
-            println("Enzyme AD force on N1: ", round.(fs_val[1], sigdigits=7), " eV/Å")
-            println("Max deviation: ", maximum(abs.(fs_val[1] .- f_ref1)), " eV/Å")
-        end
-    end
-end
+# (Former Test 9 "Enzyme AD forces vs TorchANI" removed: forces now come from the single
+#  analytic path — see Test 5 for the N₂ forces-vs-TorchANI check and Test 19 for the
+#  direct compute_ani_forces_ka check with a finite-difference cross-validation.)
 
 # ============================================================================
 # Test 10: H₂O AEV validation against TorchANI (multi-element system)
@@ -865,13 +832,14 @@ if isdefined(@__MODULE__, :KernelAbstractions) || @isdefined(KernelAbstractions)
 end
 
 # ============================================================================
-# Test 19: end-to-end on-device ANI forces (compute_ani_forces_ka) — GPU AEV +
-#          NN VJP (∂E/∂G) + backward radial/angular kernels (∂E/∂r). Runs on the KA
-#          CPU backend (no GPU needed); the same kernels run on Metal/CUDA. Validated
-#          against the CPU Enzyme forces (ground truth) and the TorchANI reference on
-#          N₂ and H₂O, plus Newton's 3rd law ΣF ≈ 0. Needs Enzyme for the reference.
+# Test 19: on-device ANI forces (the single forces path) — GPU AEV + NN VJP (∂E/∂G) +
+#          backward radial/angular kernels (∂E/∂r). Runs on the KA CPU backend (no GPU
+#          needed); the same kernels run on Metal/CUDA. Validated three ways on N₂ and H₂O:
+#          (1) vs the TorchANI reference (canonical), (2) a finite-difference cross-check on
+#          the energy (independent, replaces the former Enzyme cross-check), and (3) that
+#          forces(sys) (the AtomsCalculators path) matches the direct call; plus ΣF ≈ 0.
 # ============================================================================
-if (@isdefined(KernelAbstractions)) && (@isdefined(Enzyme))
+if @isdefined(KernelAbstractions)
     @testset "ANIPotential: on-device forces (compute_ani_forces_ka, CPU backend)" begin
         h5_path = joinpath(REF_DIR, "ani2x.h5")
         if !isfile(h5_path)
@@ -896,17 +864,32 @@ if (@isdefined(KernelAbstractions)) && (@isdefined(Enzyme))
                     coords=[c*u"Å" for c in crd], boundary=bx,
                     atoms_data=[AtomData(element=e) for e in elems],
                     general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV")
-                f_enz = [ustrip.(u"eV/Å", f) for f in forces(sys)]         # Enzyme ground truth
 
-                f_ka = Molly.compute_ani_forces_ka(crd, sp, pot, n_sp; backend=cpu, boundary=bx)
+                f_ka  = Molly.compute_ani_forces_ka(crd, sp, pot, n_sp; backend=cpu, boundary=bx)
+                f_sys = [ustrip.(u"eV/Å", f) for f in forces(sys)]   # AtomsCalculators path
 
-                @test maximum(maximum(abs.(f_ka[i] .- f_enz[i])) for i in eachindex(f_ka)) < 1e-3
-                @test maximum(maximum(abs.(f_ka[i] .- f_ref[i])) for i in eachindex(f_ka)) < 3e-3
+                # Independent finite-difference forces from the energy: F = -dE/dr.
+                E(c) = ustrip(u"eV", potential_energy(System(sys; coords=[x*u"Å" for x in c])))
+                h = 1e-4
+                f_fd = map(eachindex(crd)) do a
+                    SVector{3,Float64}(ntuple(3) do d
+                        cp = copy(crd); cm = copy(crd)
+                        cp[a] = setindex(cp[a], cp[a][d] + h, d)
+                        cm[a] = setindex(cm[a], cm[a][d] - h, d)
+                        -(E(cp) - E(cm)) / (2h)
+                    end)
+                end
+
+                @test maximum(maximum(abs.(f_ka[i]  .- f_ref[i])) for i in eachindex(f_ka)) < 3e-3
+                @test maximum(maximum(abs.(f_ka[i]  .- f_fd[i]))  for i in eachindex(f_ka)) < 1e-2
+                @test maximum(maximum(abs.(f_sys[i] .- f_ka[i]))  for i in eachindex(f_ka)) < 1e-4
                 @test isapprox(sum(f_ka), zeros(SVector{3}); atol=1e-6)   # Newton's 3rd law
-                println("Test19 $jf: max|KA-Enzyme|=",
-                    maximum(maximum(abs.(f_ka[i] .- f_enz[i])) for i in eachindex(f_ka)),
-                    " max|KA-TorchANI|=",
+                println("Test19 $jf: max|KA-TorchANI|=",
                     maximum(maximum(abs.(f_ka[i] .- f_ref[i])) for i in eachindex(f_ka)),
+                    " max|KA-FD|=",
+                    maximum(maximum(abs.(f_ka[i] .- f_fd[i])) for i in eachindex(f_ka)),
+                    " max|forces(sys)-KA|=",
+                    maximum(maximum(abs.(f_sys[i] .- f_ka[i])) for i in eachindex(f_ka)),
                     " |ΣF|=", maximum(abs.(sum(f_ka))))
             end
         end

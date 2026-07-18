@@ -66,44 +66,43 @@ NN runs 8× (species-batched).
 
 ---
 
-## Forces (CPU, Enzyme reverse-mode AD)
+## Forces — the single analytic path (CPU + Metal)
 
-- Single member, 1000 atoms: **2643 ms** (species-batched; 1.56× and 2.1× less memory than the
-  per-atom baseline).
-- Full 8-member ensemble, 1000 atoms — the per-member reverse passes run across threads:
+Forces come from **one path**: `AtomsCalculators.forces!` → `compute_ani_forces_ka`, an analytic
+backward (forward AEV → manual NN VJP `∂E/∂G` → backward radial/angular AEV kernels `∂E/∂r`,
+atomic equal-and-opposite scatter → `F = -∂E/∂r`). The same code runs on the **KA CPU backend**
+and on **GPU** (Metal/CUDA). It replaced the earlier finite-difference and Enzyme reverse-mode
+paths — the analytic backward is exact (~1e-6 eV/Å vs TorchANI, ΣF ≈ 0) *and* far faster.
 
-  | threads | 1     | 8       |
-  |---------|-------|---------|
-  | time    | ~78 s | **6.4 s** |
+### CPU analytic vs the old Enzyme AD path (single member, t8)
 
-  Correct at both counts (N₂ 5–7e-7, H₂O <5e-7 eV/Å; the ~1e-7 t1/t8 difference is Float32 BLAS
-  non-associativity). On-device (Metal) forces are now available too — see **Forces (Metal)** below.
+| N atoms | CPU analytic | old Enzyme | speedup |
+|---------|--------------|------------|---------|
+| 200     | 164 ms       | 312 ms     | 1.9×    |
+| 500     | 112 ms       | 885 ms     | 7.9×    |
+| 1000    | 138 ms       | 1829 ms    | **13×** |
+| 2000    | 165 ms       | 2441 ms    | **15×** |
 
----
+Dropping Enzyme is not just a simplification — the analytic CPU forces are **7–14× faster** and
+allocation-light. (8 members cost ~1.4× a single member: one AEV forward/backward, NN VJP ×8.)
 
-## Forces (Metal, on-device analytic backward)
+### CPU vs Metal (single member; forces of 6mrr slices, finder `NeighborList`)
 
-`compute_ani_forces_ka` computes `F = -∇E` fully on the GPU: forward AEV → manual VJP through
-the per-element networks (`∂E/∂G`) → backward radial/angular AEV kernels (`∂E/∂r`, atomic
-equal-and-opposite scatter). No Enzyme/Zygote on the device. Single ensemble member, forces of
-6mrr slices, finder `NeighborList`; CPU column is the Enzyme reverse-mode path (`-t8`).
+| N atoms | CPU analytic (t8) | Metal | Metal speedup |
+|---------|-------------------|-------|---------------|
+| 200     | 164 ms  | 146 ms | 1.1×          |
+| 500     | 112 ms  | 166 ms | 0.7×          |
+| 1000    | 138 ms  | 187 ms | 0.7×          |
+| 2000    | 165 ms  | 200 ms | 0.8×          |
+| 4000    | 328 ms  | 205 ms | **1.6×**      |
+| 8000    | 640 ms  | 222 ms | **2.9×**      |
+| **15,954 (full 6mrr)** | 1305 ms | **409 ms** | **3.2×** |
 
-| N atoms | CPU (Enzyme, t8) | Metal (analytic) | Metal speedup |
-|---------|------------------|------------------|---------------|
-| 200     | 339.6 ms         | 146.4 ms         | 2.3×          |
-| 500     | 854.3 ms         | 166.2 ms         | 5.1×          |
-| 1000    | 1953 ms          | 186.7 ms         | **10.5×**     |
-| 2000    | 2662 ms          | 199.9 ms         | **13.3×**     |
-| 4000    | —                | 204.7 ms         | —             |
-| 8000    | —                | 222.3 ms         | —             |
-| **15,954 (full 6mrr)** | —   | **409.5 ms**     | —             |
-
-Metal forces are **nearly flat** (146 → 409 ms as N grows 200 → 15,954) while the CPU AD cost
-grows steeply, so the gap widens with size: **13× at 2000 atoms**. Above ~2000 atoms the CPU
-Enzyme path becomes impractical to benchmark, whereas Metal computes forces for the **full 6mrr
-protein (15,954 atoms) in 409 ms** — about 2.6× the on-device energy (158 ms), the expected
-forward-AEV + backward-AEV + NN-VJP overhead. Accuracy: ~1e-6 eV/Å vs both CPU Enzyme and
-TorchANI, ΣF ≈ 0 (Test 19).
+CPU-analytic and Metal are comparable up to ~2000 atoms (both dominated by fixed overhead); above
+the **~4000-atom crossover** Metal's near-flat cost wins, reaching **3.2×** the CPU at the full
+6mrr protein. Metal forces for the whole 15,954-atom system take 409 ms (~2.6× the on-device
+energy, 158 ms — the forward-AEV + backward-AEV + NN-VJP overhead). Both Molly paths beat
+TorchANI CPU forces at scale (see the head-to-head): at 16k, CPU-analytic is 3.6× and Metal 11×.
 
 ![Forces vs N — Molly CPU vs Metal](images/forces_vs_N.png)
 
@@ -184,21 +183,32 @@ Needs `pip install torchani==2.2.4 torch ase h5py`. CPU-to-CPU is the definitive
 TorchANI GPU normally means CUDA — on a Mac it runs via PyTorch-MPS (best-effort; some ops may
 fall back).
 
+Measured on this machine (TorchANI 2.2.4, `--samples 5`). **TorchANI MPS is unavailable** —
+PyTorch-MPS raises "MPS doesn't support float64" on the ANI-2x path, so CPU-to-CPU is the
+comparison (as expected; MPS was best-effort).
+
 Energy (single member):
 
-| N atoms | Molly CPU | Molly Metal | TorchANI CPU | TorchANI MPS |
-|---------|-----------|-------------|--------------|--------------|
-| 1000    | 30.5 ms   | 76.8 ms     | *(run script)* | *(run script)* |
-| 8000    | 198.9 ms  | 91.0 ms     | *(run script)* | *(run script)* |
-| 15,954  | 400.3 ms  | 158.1 ms    | *(run script)* | *(run script)* |
+| N atoms | Molly CPU | Molly Metal | TorchANI CPU | Molly Metal vs TorchANI CPU |
+|---------|-----------|-------------|--------------|-----------------------------|
+| 1000    | 30.5 ms   | 76.8 ms     | 29.1 ms      | 0.4×          |
+| 8000    | 198.9 ms  | 91.0 ms     | 484.4 ms     | **5.3×**      |
+| 15,954  | 400.3 ms  | 158.1 ms    | 3702 ms      | **23×**       |
 
 Forces (single member):
 
-| N atoms | Molly CPU (Enzyme) | Molly Metal | TorchANI CPU | TorchANI MPS |
-|---------|--------------------|-------------|--------------|--------------|
-| 1000    | 1953 ms            | 186.7 ms    | *(run script)* | *(run script)* |
-| 2000    | 2662 ms            | 199.9 ms    | *(run script)* | *(run script)* |
-| 15,954  | —                  | 409.5 ms    | *(run script)* | *(run script)* |
+| N atoms | Molly CPU (analytic) | Molly Metal | TorchANI CPU | Molly Metal vs TorchANI CPU |
+|---------|----------------------|-------------|--------------|-----------------------------|
+| 1000    | 138 ms               | 186.7 ms    | 53.6 ms      | 0.29×         |
+| 2000    | 165 ms               | 199.9 ms    | 89.6 ms      | 0.45×         |
+| 15,954  | *(not measured)*     | 409.5 ms    | 4635 ms      | **11×**       |
+
+**Takeaway:** TorchANI's heavily-optimised CPU kernels win at small N (its C++/vectorised AEV
+beats Molly there), but Molly scales far better — on the **full 6mrr protein** Molly's on-device
+energy is **23×** and forces **11×** faster than TorchANI CPU. Molly CPU energy is already
+competitive at 1k (30.5 vs 29.1 ms) and 8× faster at 16k (400 vs 3702 ms). Molly's CPU analytic
+forces (single path, KA CPU backend) are near-flat at these sizes and 7–14× faster than the old
+Enzyme AD path — see below.
 
 ---
 

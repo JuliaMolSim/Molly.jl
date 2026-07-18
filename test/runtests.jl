@@ -145,7 +145,7 @@ end
 
 const ani_h5 = joinpath(@__DIR__, "..", "data", "ani_reference", "ani2x.h5")
 if GROUP in ("All", "NotGradients") && isfile(ani_h5)
-    using Lux, HDF5
+    using Lux, HDF5, KernelAbstractions
     include("ml_potentials.jl")
 elseif GROUP in ("All", "NotGradients")
     @warn "Skipping ML potential tests — ani2x.h5 not found. " *

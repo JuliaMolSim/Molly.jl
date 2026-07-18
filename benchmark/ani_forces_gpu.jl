@@ -1,13 +1,13 @@
-# ANI forces timing: CPU (Enzyme reverse-mode AD, the production CPU path) vs Apple Metal
-# (on-device analytic backward, `compute_ani_forces_ka`). This is the GPU-forces counterpart of
-# ani_gpu_compare.jl (which does energy). Metal times the fully on-device path: GPU AEV → NN VJP
-# → backward radial/angular kernels → F = -∂E/∂r. Both consume the finder's NeighborList.
+# ANI forces timing: CPU vs Apple Metal, both via the single analytic path
+# (`AtomsCalculators.forces!` → `compute_ani_forces_ka`: forward AEV → NN VJP → backward
+# radial/angular kernels → F = -∂E/∂r). The KA CPU backend and Metal run the same code; only the
+# device differs. Both consume the finder's NeighborList. Counterpart of ani_gpu_compare.jl (energy).
 #
 #   julia --project=<env> -t8 benchmark/ani_forces_gpu.jl
-# Env: ANI_FSIZES (Metal sizes, comma list), ANI_ENZYME_SIZES (CPU-Enzyme sizes; slow),
-#      ANI_ENSEMBLE (0|full). Writes benchmark/results/ani_forces.json.
+# Env: ANI_FSIZES (Metal sizes, comma list), ANI_CPU_SIZES (CPU sizes), ANI_ENSEMBLE (0|full).
+# Writes benchmark/results/ani_forces.json.
 
-using Molly, Lux, HDF5, KernelAbstractions, Enzyme, Metal, StaticArrays, Unitful, LinearAlgebra
+using Molly, Lux, HDF5, KernelAbstractions, Metal, StaticArrays, Unitful, LinearAlgebra
 using JSON3
 include(joinpath(@__DIR__, "ani_bench_common.jl"))
 
@@ -18,7 +18,7 @@ n_sp  = length(pot.species_map)
 valid = Set(keys(pot.species_map))
 
 msizes = parse.(Int, split(get(ENV, "ANI_FSIZES", "200,500,1000,2000,4000,8000,15954"), ","))
-esizes = parse.(Int, split(get(ENV, "ANI_ENZYME_SIZES", "200,500,1000,2000"), ","))
+csizes = parse.(Int, split(get(ENV, "ANI_CPU_SIZES", "200,500,1000,2000,4000,8000,15954"), ","))
 
 function load(nmax)
     coords = SVector{3,Float64}[]; elems = String[]
@@ -47,24 +47,24 @@ build_sys(coords, elems) = System(
 println("ANI forces timing | ensemble=", ens_full ? "8-member" : "single",
         " | Metal functional: ", Metal.functional())
 println(run_header())
-println(rpad("N atoms", 10), rpad("CPU-Enzyme (ms)", 18), "Metal (ms)")
+println(rpad("N atoms", 10), rpad("CPU analytic (ms)", 18), "Metal (ms)")
 
 results = Dict{String,Any}("env" => run_env(), "ensemble" => ens_full ? "full" : "single",
-                           "cpu_enzyme" => Dict{String,Any}(), "metal" => Dict{String,Any}())
+                           "cpu" => Dict{String,Any}(), "metal" => Dict{String,Any}())
 
-allsizes = sort(unique(vcat(msizes, esizes)))
+allsizes = sort(unique(vcat(msizes, csizes)))
 for n in allsizes
     coords, elems = load(n)
     nn  = length(coords)
     sys = build_sys(coords, elems)
     nbrs = Molly.find_neighbors(sys)
 
-    # CPU Enzyme forces (production path) — slow, so fewer samples and only the requested sizes.
+    # CPU analytic forces via the single path (forces(sys) → compute_ani_forces_ka, KA CPU backend).
     t_cpu = NaN
-    if n in esizes
-        r = bench(() -> forces(sys); repeats=3, samples=3, seconds=60.0)
+    if n in csizes
+        r = bench(() -> forces(sys); repeats=3, samples=5, seconds=60.0)
         t_cpu = r.min
-        results["cpu_enzyme"][string(nn)] = Dict("min"=>r.min, "median"=>r.median, "iqr"=>r.iqr)
+        results["cpu"][string(nn)] = Dict("min"=>r.min, "median"=>r.median, "iqr"=>r.iqr)
     end
 
     # Metal on-device analytic forces.

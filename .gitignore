@@ -6,4 +6,5 @@ docs/build
 benchmark/tune.json
 benchmark/results
 benchmark/*.dcd
+data/ani_reference/*timing*.json
 .vscode/settings.json
