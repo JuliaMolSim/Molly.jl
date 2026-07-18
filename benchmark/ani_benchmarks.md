@@ -183,9 +183,14 @@ Needs `pip install torchani==2.2.4 torch ase h5py`. CPU-to-CPU is the definitive
 TorchANI GPU normally means CUDA — on a Mac it runs via PyTorch-MPS (best-effort; some ops may
 fall back).
 
-Measured on this machine (TorchANI 2.2.4, `--samples 5`). **TorchANI MPS is unavailable** —
-PyTorch-MPS raises "MPS doesn't support float64" on the ANI-2x path, so CPU-to-CPU is the
-comparison (as expected; MPS was best-effort).
+Measured on this machine (TorchANI 2.2.4, `--samples 5`). **TorchANI has no GPU number on Apple
+Silicon.** Getting it onto PyTorch-MPS clears two blockers (float64 params → cast to float32;
+`EnergyShifter.sae()`'s hardcoded float64 → patched) but then dies inside MetalPerformanceShaders
+with `MPSNDArrayScan … Axis = 5` — the angular-AEV cumulative sum is 5-dimensional and MPS only
+implements scans over axes 0–3. TorchANI GPU therefore means **CUDA**, which needs NVIDIA hardware
+(not available here). So the head-to-head is **Molly Metal vs TorchANI CPU** — and note that
+Molly's native-Julia Metal path runs the whole ANI-2x model on the Apple GPU, exactly where
+TorchANI's GPU path cannot.
 
 Energy (single member):
 

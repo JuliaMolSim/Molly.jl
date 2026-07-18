@@ -338,7 +338,22 @@ def timing_benchmark(model, device="cpu", sizes=(500, 1000, 2000), samples=20,
     atoms_ase = ase.io.read(pdb_path)
     Z_all, pos_all = atoms_ase.numbers, atoms_ase.get_positions()
     keep = [i for i, z in enumerate(Z_all) if z in ALLOWED]
-    model = model.to(device)
+    if device == "mps":
+        # NOTE: TorchANI does not run end-to-end on Apple GPU (MPS). Two blockers, in order:
+        #   1. MPS can't store float64 → cast the model to float32 (fair vs Molly's Float32 GPU).
+        #   2. EnergyShifter.sae() hardcodes a float64 tensor for padding masking → patched below.
+        # After both, the angular-AEV path still fails inside MetalPerformanceShaders with
+        # "MPSNDArrayScan ... Axis = 5" (a 5-D cumulative sum MPS does not implement). So a
+        # TorchANI GPU number on Apple Silicon is not obtainable; TorchANI GPU means CUDA. The
+        # float32/sae fixes are kept so this path works if PyTorch-MPS gains the op, or on CUDA.
+        import types
+        def _sae_f32(self, species):
+            se = self.self_energies[species].sum(dim=1)
+            return se + (self.self_energies[-1] if self.fit_intercept else 0.0)
+        model.energy_shifter.sae = types.MethodType(_sae_f32, model.energy_shifter)
+        model = model.float().to(device)
+    else:
+        model = model.to(device)
 
     def sync():
         if device == "cuda": torch.cuda.synchronize()
