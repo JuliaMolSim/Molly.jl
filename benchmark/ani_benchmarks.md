@@ -176,12 +176,13 @@ Species branching is essentially free — no need to sort atoms by species.
 
 ## TorchANI comparison
 
-`test/torchani_reference.py --benchmark --device {cpu,mps} --sizes 500,1000,2000,5000,8000` times
+`test/torchani_reference.py --benchmark --device cpu --sizes 500,1000,2000,5000,8000` times
 TorchANI energy+forces on the same slices (warmup + min-of-N with device sync), writing
-`data/ani_reference/6mrr_timing_torchani_<device>.json` to join against the Molly numbers above.
-Needs `pip install torchani==2.2.4 torch ase h5py`. CPU-to-CPU is the definitive comparison;
-TorchANI GPU normally means CUDA — on a Mac it runs via PyTorch-MPS (best-effort; some ops may
-fall back).
+`data/ani_reference/6mrr_timing_torchani_cpu.json` to join against the Molly numbers above.
+Needs `pip install torchani==2.2.4 torch ase h5py`. This project is **Metal-only** on the GPU
+side, and TorchANI cannot run on the Apple GPU anyway (see the next paragraph), so the GPU
+comparison is Molly Metal vs TorchANI CPU. (`--device cuda` is wired for both should an NVIDIA
+GPU ever be used, but CUDA is out of scope here.)
 
 Measured on this machine (TorchANI 2.2.4, `--samples 5`). **TorchANI has no GPU number on Apple
 Silicon.** Getting it onto PyTorch-MPS clears two blockers (float64 params → cast to float32;
