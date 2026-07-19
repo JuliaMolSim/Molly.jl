@@ -575,6 +575,7 @@ end
 # benchmarking fallback only (`neighbors=:auto`); production code should pass the system's
 # NeighborList so Molly's neighbour finders drive the neighbour search.
 function build_neighbor_csr(coords::AbstractVector{SVector{D,T}}, r_c_max::T, boundary) where {D,T}
+    coords = coords isa Array ? coords : Array(coords)   # this O(N²) host build can't index a GPU array
     n   = length(coords)
     rc2 = r_c_max^2
     off = Vector{Int32}(undef, n + 1)
@@ -721,10 +722,19 @@ function Molly.compute_aevs_ka(
     return aevs
 end
 
+# Device-resident NN parameter cache. Uploading the per-element weights to the GPU dominates the
+# small-N Metal cost, and the weights never change, so cache (ps_dev, st_dev) per potential and
+# device type. A trajectory or repeated call then reuses the on-device weights — no re-upload.
+const ANI_NN_DEV_CACHE = IdDict{Any, Dict{Any, Any}}()
+function ani_nn_dev_params(pot, dev)
+    sub = get!(() -> Dict{Any, Any}(), ANI_NN_DEV_CACHE, pot)
+    get!(() -> (map(dev, pot.ps_vec), map(dev, pot.st_vec)), sub, typeof(dev))
+end
+
 # ============================================================================
 # End-to-end on-device ANI energy: GPU AEV + on-device element networks.
 # The AEV matrix stays on the compute backend; the per-element Lux networks run on the
-# same device (params moved once per (member, element)), so a full energy evaluation
+# same device (params cached on-device, see ani_nn_dev_params), so a full energy evaluation
 # needs no host round-trip for the AEVs. Returns the ensemble-averaged energy in eV.
 # ============================================================================
 function Molly.compute_ani_energy_ka(
@@ -750,6 +760,7 @@ function Molly.compute_ani_energy_ka(
     end
 
     n_ens = length(pot.ps_vec)
+    ps_dev_all, st_dev_all = ani_nn_dev_params(pot, dev)             # cached on-device weights
     E = 0.0
     for ens_i in 1:n_ens
         for s in 1:n_species
@@ -757,8 +768,8 @@ function Molly.compute_ani_energy_ka(
             isempty(g) && continue
             sym   = Symbol(idx_to_elem[s])
             batch = permutedims(aevs[idx_dev[s], :])                  # (aev_len, n_s) on device
-            ps_d  = dev(getfield(pot.ps_vec[ens_i], sym))
-            st_d  = dev(getfield(pot.st_vec[ens_i], sym))
+            ps_d  = getfield(ps_dev_all[ens_i], sym)
+            st_d  = getfield(st_dev_all[ens_i], sym)
             out, _ = Lux.apply(getfield(pot.model, sym), batch, ps_d, st_d)  # (1, n_s) on device
             E += Float64(sum(out)) + Float64(pot.self_energies[s]) * length(g)
         end
@@ -817,13 +828,14 @@ function ani_energy_aev_grad_ka(aevs, species, pot, n_species::Int; backend=noth
 
     dEdAEV = KernelAbstractions.zeros(ka_backend, eltype(aevs), n_atoms, aev_len)
     n_ens  = length(pot.ps_vec)
+    ps_dev_all, _ = ani_nn_dev_params(pot, dev)               # cached on-device weights
     E = 0.0
     for ens_i in 1:n_ens
         for s in 1:n_species
             g = groups[s]; isempty(g) && continue
             sym   = Symbol(idx_to_elem[s])
             batch = permutedims(aevs[idx_dev[s], :])          # (aev_len, n_s)
-            ps_d  = dev(getfield(pot.ps_vec[ens_i], sym))
+            ps_d  = getfield(ps_dev_all[ens_i], sym)
             E_s, dEdbatch = nn_energy_and_grad(getfield(pot.model, sym), ps_d, batch)
             E += Float64(E_s) + Float64(pot.self_energies[s]) * length(g)
             @views dEdAEV[idx_dev[s], :] .+= permutedims(dEdbatch)   # scatter (unique rows)
@@ -916,9 +928,15 @@ function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::ANIPotential
         @inbounds for i in eachindex(fs)
             fs[i] += Molly.ani_force_to_units(SVector{D, T}(F[i]), sys.force_units, AT)
         end
-    else   # GPU system: build the unit-carrying increment on the host, then add on-device
-        inc = [Molly.ani_force_to_units(SVector{D, T}(F[i]), sys.force_units, Array)
-               for i in eachindex(F)]
+    else   # GPU system: build the unit-carrying increment on the host as concrete SVectors matching
+        # the force buffer's element type (ani_force_to_units(..., Array) yields a plain Vector, so
+        # rebuild an inline SVector explicitly), then add on-device.
+        FU  = eltype(eltype(fs))                       # unit-carrying scalar type of `fs`
+        inc = Vector{SVector{D, FU}}(undef, length(F))
+        @inbounds for i in eachindex(F)
+            fui = Molly.ani_force_to_units(SVector{D, T}(F[i]), sys.force_units, Array)
+            inc[i] = SVector{D, FU}(ntuple(k -> fui[k], D))
+        end
         fs .+= Molly.to_device(inc, AT)
     end
     return fs

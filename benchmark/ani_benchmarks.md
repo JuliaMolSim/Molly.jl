@@ -106,6 +106,21 @@ TorchANI CPU forces at scale (see the head-to-head): at 16k, CPU-analytic is 3.6
 
 ![Forces vs N — Molly CPU vs Metal](images/forces_vs_N.png)
 
+**Full ensemble.** The 8-member ensemble forces on Metal cost **~1.7×** a single member (256 vs
+151 ms at 1000 atoms; 273 vs 155 at 2000): the AEV forward/backward runs once and only the NN VJP
+repeats per member. (Energy is ~1.4× since it does the NN forward-only.)
+
+**`forces(sys)` on a GPU system.** The single `forces!` path dispatches to the on-device kernels
+for a Metal-backed `System` too — `forces(sys)` on a GPU system matches the CPU forces to ~1e-6
+eV/Å. (Full on-device `simulate!` additionally needs Molly's GPU velocity-Verlet integrator, which
+currently doesn't compile the unitful-SVector update on Metal; the `benchmark/ani_trajectory_metal.jl`
+wrapper drives full-system Metal MD in the meantime.)
+
+**Device-parameter cache.** The per-call upload of the NN weights to the GPU is cached per
+potential + device (`ani_nn_dev_params`), so repeated calls (MD, benchmarks) reuse the on-device
+weights. This is the small-N win: **Metal energy at 1000 atoms drops 77 → 56 ms (~27%)**; forces
+improve less (their cost is dominated by the backward AEV kernels, not the NN upload).
+
 ## GPU (Apple Metal)
 
 ### AEV kernels (AEV only, ms)
