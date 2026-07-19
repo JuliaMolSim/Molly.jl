@@ -27,7 +27,8 @@
 #   angular_aev!   → [ANI-1] Eq. (4)  angular symmetry function G^A
 #   ani_energy_single / ani_raw_energy → [ANI-1] Eq. (1) energy sum + ensemble average
 # The element NN architecture is in build_element_model; per-atom self-energies are an
-# additive reference shift (Hartree). Forces are −∇E (Enzyme reverse-mode AD).
+# additive reference shift (Hartree). This extension provides the AEV + energy; forces are the
+# analytic on-device backward in MollyKALuxExt (AtomsCalculators.forces! → compute_ani_forces_ka).
 
 module MollyLuxExt
 
@@ -291,7 +292,6 @@ end
 # Fill a CSR per-atom adjacency (off, idx) from a NeighborList in a single counting-sort
 # pass. Each half-pair (i,j) contributes j to atom i and i to atom j (the NeighborList
 # stores each pair once). `cur` is an n_atoms scatter-cursor scratch. O(total_pairs).
-# All integer work — Enzyme-inactive, so it is safe inside the AD energy function.
 function fill_csr!(off, cur, idx, neighbors, n_atoms::Int, npairs::Int)
     @inbounds for a in 1:(n_atoms + 1)
         off[a] = zero(Int32)
@@ -378,7 +378,7 @@ function compute_aevs_buf!(buf::AEVBuffers{D,T},
     return @view buf.aevs[1:n_atoms, :]
 end
 
-# Public interface: allocating version (for Enzyme AD path and standalone use).
+# Public interface: allocating version (used by potential_energy and for standalone use).
 # Same AEV equations as the buffered path: radial block = [ANI-1] Eq. 3 (G^R),
 # angular block = [ANI-1] Eq. 4 (G^A), both using the f_C cutoff of [ANI-1] Eq. 2.
 function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
@@ -405,8 +405,8 @@ function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
     drj_buf     = Vector{SVector{D,T}}(undef, n_atoms)
     ok_buf      = Vector{Bool}(undef, n_atoms)
 
-    # Build the per-atom CSR adjacency once from the passed-in NeighborList (integer-only,
-    # Enzyme-inactive) so each atom reads its own slice rather than rescanning the list.
+    # Build the per-atom CSR adjacency once from the passed-in NeighborList (integer-only)
+    # so each atom reads its own slice rather than rescanning the list.
     use_nl = !isnothing(neighbors)
     csr_off = Vector{Int32}(undef, use_nl ? n_atoms + 1 : 0)
     csr_idx = Vector{Int32}(undef, use_nl ? 2 * length(neighbors) : 0)
@@ -451,8 +451,8 @@ end
 # HDF5 weight loader
 # ============================================================================
 
-# The element networks use the public `Molly.celu01` activation (imported via `using
-# Molly`) so AD backends (Enzyme) can register rules against a single shared function.
+# The element networks use the public `Molly.celu01` activation (imported via `using Molly`),
+# a single shared definition also differentiated analytically by the on-device backward.
 
 # Build one element's Lux.Chain from the HDF5 group at /ensemble_idx/element/.
 # Dense layer indices 0, 2, 4, ... in the group; activations implicit between them.
