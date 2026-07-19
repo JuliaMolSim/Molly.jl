@@ -331,29 +331,19 @@ def timing_benchmark(model, device="cpu", sizes=(500, 1000, 2000), samples=20,
 
     Warms up, then takes the min over `samples` runs with device synchronisation, matching
     Molly's `benchmark/ani_gpu_compare.jl`. Writes data/ani_reference/6mrr_timing_torchani_<device>.json.
-    device: "cpu", "cuda", or "mps" (Apple Metal via PyTorch — may fall back / error on ops).
+    device: "cpu" or "cuda". (Apple MPS is not supported by TorchANI; see the note below.)
     """
     import time, ase.io
     ALLOWED = {1, 6, 7, 8, 9, 16, 17}   # ANI-2x: H,C,N,O,F,S,Cl
     atoms_ase = ase.io.read(pdb_path)
     Z_all, pos_all = atoms_ase.numbers, atoms_ase.get_positions()
     keep = [i for i, z in enumerate(Z_all) if z in ALLOWED]
-    if device == "mps":
-        # NOTE: TorchANI does not run end-to-end on Apple GPU (MPS). Two blockers, in order:
-        #   1. MPS can't store float64 → cast the model to float32 (fair vs Molly's Float32 GPU).
-        #   2. EnergyShifter.sae() hardcodes a float64 tensor for padding masking → patched below.
-        # After both, the angular-AEV path still fails inside MetalPerformanceShaders with
-        # "MPSNDArrayScan ... Axis = 5" (a 5-D cumulative sum MPS does not implement). So a
-        # TorchANI GPU number on Apple Silicon is not obtainable; TorchANI GPU means CUDA. The
-        # float32/sae fixes are kept so this path works if PyTorch-MPS gains the op, or on CUDA.
-        import types
-        def _sae_f32(self, species):
-            se = self.self_energies[species].sum(dim=1)
-            return se + (self.self_energies[-1] if self.fit_intercept else 0.0)
-        model.energy_shifter.sae = types.MethodType(_sae_f32, model.energy_shifter)
-        model = model.float().to(device)
-    else:
-        model = model.to(device)
+    # NOTE: TorchANI has no usable Apple-GPU (MPS) path. Its forward needs float64 (which MPS
+    # cannot store) and the angular AEV uses a 5-D cumulative sum that MetalPerformanceShaders
+    # does not implement ("MPSNDArrayScan Axis = 5"). Forcing it onto MPS only runs via CPU
+    # fallback, which is slower than plain CPU and not a meaningful GPU number, so it is not
+    # benchmarked. TorchANI GPU means CUDA; use --device cuda on an NVIDIA machine.
+    model = model.to(device)
 
     def sync():
         if device == "cuda": torch.cuda.synchronize()
@@ -384,16 +374,9 @@ def timing_benchmark(model, device="cpu", sizes=(500, 1000, 2000), samples=20,
             return torch.autograd.grad(e.sum(), c)[0]
 
         t_e = time_call(energy_fn)
-        # On MPS the autograd backward aborts above ~100 atoms (a 5-D MPSNDArrayScan the Apple
-        # kernel does not implement — an uncatchable C++ assertion). Energy (forward) is fine, so
-        # time energy on MPS and skip forces. CPU/CUDA time both.
-        t_f = float("nan") if device == "mps" else time_call(forces_fn)
-        rec = {"energy_ms": t_e}
-        if not (t_f != t_f):   # not NaN
-            rec["forces_ms"] = t_f
-        results["sizes"][str(len(idx))] = rec
-        fstr = "  (forces skipped: MPS backend)" if device == "mps" else f"    forces {t_f:8.2f} ms"
-        print(f"  n={len(idx):5d}   energy {t_e:8.2f} ms{fstr}")
+        t_f = time_call(forces_fn)
+        results["sizes"][str(len(idx))] = {"energy_ms": t_e, "forces_ms": t_f}
+        print(f"  n={len(idx):5d}   energy {t_e:8.2f} ms    forces {t_f:8.2f} ms")
 
     out = f"data/ani_reference/6mrr_timing_torchani_{device}.json"
     with open(out, "w") as f:
@@ -408,7 +391,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip-weights", action="store_true")
     parser.add_argument("--benchmark", action="store_true",
                         help="Time energy/forces on 6mrr slices instead of generating reference data")
-    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda", "mps"])
+    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])  # MPS unusable (see note)
     parser.add_argument("--sizes", default="500,1000,2000", help="comma list of atom counts")
     parser.add_argument("--samples", type=int, default=20)
     args = parser.parse_args()

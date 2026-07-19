@@ -34,14 +34,12 @@ if !isnothing(forces)
     !isempty(xc) && scatterlines!(ax, xc, yc, label = "Molly CPU (analytic, t8)", markersize = 10)
     !isempty(xm) && scatterlines!(ax, xm, ym, label = "Molly Metal (analytic)", markersize = 10)
     # TorchANI forces timing, if the reference script was run. Format: {"sizes": {"<n>": {"forces_ms"}}}.
-    for (dev, lbl) in (("cpu", "TorchANI CPU"), ("mps", "TorchANI MPS"))
-        tj = load_json(joinpath(REF, "6mrr_timing_torchani_$(dev).json"))
-        (isnothing(tj) || !haskey(tj, "sizes")) && continue
-        ks = [k for k in sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
-              if haskey(tj["sizes"][string(k)], "forces_ms")]   # MPS has no forces (backward aborts)
-        isempty(ks) && continue
-        ys = [Float64(tj["sizes"][string(k)]["forces_ms"]) for k in ks]
-        scatterlines!(ax, ks, ys, label = lbl, linestyle = :dash, markersize = 8)
+    let tj = load_json(joinpath(REF, "6mrr_timing_torchani_cpu.json"))   # TorchANI CPU (MPS unusable)
+        if !isnothing(tj) && haskey(tj, "sizes")
+            ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
+            ys = [Float64(tj["sizes"][string(k)]["forces_ms"]) for k in ks]
+            scatterlines!(ax, ks, ys, label = "TorchANI CPU", linestyle = :dash, markersize = 8)
+        end
     end
     axislegend(ax, position = :lt)
     save(joinpath(IMG, "forces_vs_N.png"), fig, px_per_unit = 2)
@@ -59,12 +57,12 @@ if !isnothing(energy)
         xs, ys = series(get(energy, key, nothing))
         !isempty(xs) && scatterlines!(ax, xs, ys, label = lbl, markersize = 10)
     end
-    for (dev, lbl) in (("cpu", "TorchANI CPU"), ("mps", "TorchANI MPS (fallback)"))
-        tj = load_json(joinpath(REF, "6mrr_timing_torchani_$(dev).json"))
-        (isnothing(tj) || !haskey(tj, "sizes")) && continue
-        ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
-        ys = [Float64(tj["sizes"][string(k)]["energy_ms"]) for k in ks]
-        scatterlines!(ax, ks, ys, label = lbl, linestyle = :dash, markersize = 8)
+    let tj = load_json(joinpath(REF, "6mrr_timing_torchani_cpu.json"))   # TorchANI CPU (MPS unusable)
+        if !isnothing(tj) && haskey(tj, "sizes")
+            ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
+            ys = [Float64(tj["sizes"][string(k)]["energy_ms"]) for k in ks]
+            scatterlines!(ax, ks, ys, label = "TorchANI CPU", linestyle = :dash, markersize = 8)
+        end
     end
     axislegend(ax, position = :lt)
     save(joinpath(IMG, "energy_vs_N.png"), fig, px_per_unit = 2)

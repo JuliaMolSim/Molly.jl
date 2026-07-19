@@ -199,24 +199,22 @@ side, and TorchANI cannot run on the Apple GPU anyway (see the next paragraph), 
 comparison is Molly Metal vs TorchANI CPU. (`--device cuda` is wired for both should an NVIDIA
 GPU ever be used, but CUDA is out of scope here.)
 
-Measured on this machine (TorchANI 2.2.4, `--samples 5`; MPS with `PYTORCH_ENABLE_MPS_FALLBACK=1`).
-**TorchANI has no *viable* GPU path on Apple Silicon.** Energy *does* run on MPS after two fixes
-(float64 params → float32; `EnergyShifter.sae()`'s hardcoded float64 → patched), but only because
-the ops MPS can't do (float64, a 5-D `MPSNDArrayScan`) fall back to CPU — and the constant MPS↔CPU
-transfers make TorchANI-MPS **~10× slower than TorchANI's own CPU path**. TorchANI **forces** don't
-run on MPS at all: the autograd backward aborts (uncatchable C++ assertion `MPSNDArrayScan Axis=5`)
-above ~100 atoms. A real GPU TorchANI would need CUDA (no NVIDIA hardware here). So on Apple GPU
-only Molly runs the whole ANI-2x model natively and usably.
+Measured on this machine (TorchANI 2.2.4, `--samples 5`). **TorchANI has no usable Apple-GPU
+path**: its forward needs float64 (which PyTorch-MPS cannot store) and the angular AEV uses a 5-D
+`MPSNDArrayScan` that MetalPerformanceShaders does not implement, so it only limps along on MPS via
+CPU fallback (slower than plain CPU, not a real GPU number). We therefore do not benchmark TorchANI
+on MPS; the GPU comparison is Molly Metal vs TorchANI CPU. On the Apple GPU specifically, only Molly
+runs the whole ANI-2x model natively.
 
 Energy (single member):
 
-| N atoms | Molly CPU | Molly Metal | TorchANI CPU | TorchANI MPS | Molly Metal vs TorchANI (CPU / MPS) |
-|---------|-----------|-------------|--------------|--------------|-------------------------------------|
-| 1000    | 30.5 ms   | 76.8 ms     | 29.1 ms      | 2665 ms      | 0.4× / 35×    |
-| 8000    | 198.9 ms  | 91.0 ms     | 484.4 ms     | 7933 ms      | 5.3× / 87×    |
-| 15,954  | 400.3 ms  | 158.1 ms    | 3702 ms      | 31719 ms     | **23× / 200×** |
+| N atoms | Molly CPU | Molly Metal | TorchANI CPU | Molly Metal vs TorchANI CPU |
+|---------|-----------|-------------|--------------|-----------------------------|
+| 1000    | 30.5 ms   | 76.8 ms     | 29.1 ms      | 0.4×          |
+| 8000    | 198.9 ms  | 91.0 ms     | 484.4 ms     | **5.3×**      |
+| 15,954  | 400.3 ms  | 158.1 ms    | 3702 ms      | **23×**       |
 
-Forces (single member) — *TorchANI MPS forces abort (see above), so only CPU is comparable:*
+Forces (single member):
 
 | N atoms | Molly CPU (analytic) | Molly Metal | TorchANI CPU | Molly Metal vs TorchANI CPU |
 |---------|----------------------|-------------|--------------|-----------------------------|
@@ -225,22 +223,21 @@ Forces (single member) — *TorchANI MPS forces abort (see above), so only CPU i
 | 15,954  | *(not measured)*     | 409.5 ms    | 4635 ms      | **11×**       |
 
 **Takeaway:** TorchANI's heavily-optimised CPU kernels win at small N (its C++/vectorised AEV
-beats Molly there), but Molly scales far better — on the **full 6mrr protein** Molly's on-device
-energy is **23×** faster than TorchANI CPU and **200×** faster than TorchANI MPS, and forces are
-**11×** faster than TorchANI CPU. Molly CPU energy is already competitive at 1k (30.5 vs 29.1 ms)
-and 8× faster at 16k (400 vs 3702 ms). On the Apple GPU specifically, TorchANI has no usable path
-at all, so Molly's native Metal implementation stands alone. Molly's CPU analytic
-forces (single path, KA CPU backend) are near-flat at these sizes and 7–14× faster than the old
-Enzyme AD path — see below.
+beats Molly there), but Molly scales far better: on the **full 6mrr protein** Molly's on-device
+energy is **23×** faster than TorchANI CPU and forces are **11×** faster. Molly CPU energy is
+already competitive at 1k (30.5 vs 29.1 ms) and 8× faster at 16k (400 vs 3702 ms). On the Apple GPU
+specifically, TorchANI has no usable path, so Molly's native Metal implementation stands alone.
+Molly's CPU analytic forces (single path, KA CPU backend) are near-flat at these sizes and 7–14×
+faster than the old Enzyme AD path, see below.
 
 ---
 
 ## Gaps & caveats
 
-- **TorchANI head-to-head** cells above are placeholders until `test/torchani_reference.py
-  --benchmark` is run locally (needs a `pip install`); the compare-report/plots then join the
-  reference JSON automatically. CPU-to-CPU is definitive; Metal↔MPS is best-effort (PyTorch-MPS
-  may fall back on some ops).
+- **TorchANI head-to-head** uses `test/torchani_reference.py --benchmark --device cpu` (needs a
+  `pip install`); the compare-report/plots then join the reference JSON automatically. CPU-to-CPU
+  is the definitive comparison; TorchANI has no usable Apple-GPU path (see above), so a GPU
+  TorchANI number would need CUDA.
 - **Metal forces** are timed for a **single ensemble member**. The full 8-member ensemble reuses
   one AEV forward/backward and runs only the NN VJP 8× (species-batched), so expect ~1.4× like
   energy — not yet measured on Metal.
@@ -266,4 +263,4 @@ Enzyme AD path — see below.
 
 Outputs land in `benchmark/results/*.json` (machine-readable, with an env/version header) and
 `benchmark/images/*.png` (figures). The TorchANI head-to-head columns/series fill in once
-`test/torchani_reference.py --benchmark --device {cpu,mps}` has written its reference JSON.
+`test/torchani_reference.py --benchmark --device cpu` has written its reference JSON.
