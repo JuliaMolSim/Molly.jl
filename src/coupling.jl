@@ -211,18 +211,6 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
     return false
 end
 
-@kernel function andersen_coupling_kernel!(velocities::AbstractVector{SVector{D, V}},
-                                           @Const(masses),
-                                           kT,
-                                           val,
-                                           @Const(virtual_sites)) where {D, V}
-    i = @index(Global, Linear)
-    @inbounds if i <= length(velocities) && !virtual_sites[i] && rand() < val
-        scale = sqrt(kT / masses[i])
-        velocities[i] = SVector{D, V}(ntuple(i -> randn() * scale, Val(D)))
-    end
-end
-
 @doc raw"""
     BerendsenThermostat(temperature, coupling_const) <: AbstractThermostat
 
