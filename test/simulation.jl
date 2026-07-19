@@ -979,7 +979,7 @@ end
     @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
-    @test efficiency > 0.07 # This is a fairly arbitrary threshold, but it's a good test for very bad cases
+    @test efficiency > 0.1 # This is a fairly arbitrary threshold, but it's a good test for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
     @info "Exchange Efficiency: $efficiency"
 

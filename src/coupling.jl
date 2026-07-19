@@ -194,8 +194,6 @@ function apply_coupling!(sys::System, buffers, thermostat::AndersenThermostat, s
     return false
 end
 
-andersen_atoms_bump(r::T, dr_div_cc, vsf) where {T} = (vsf ? zero(T) : T(r < dr_div_cc))
-
 function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),

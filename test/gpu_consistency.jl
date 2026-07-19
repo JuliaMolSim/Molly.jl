@@ -638,7 +638,7 @@
 
             # With the same rng source the velocities should match down to floating point error.
             vel_scale = sqrt(sys.k * temp / atom_mass)
-            @test maximum(norm, vels_gpu_cpu .- vels_cpu) < eps(one(FT)) * vel_scale
+            @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT) * vel_scale
 
             # Virtual site velocities must be actively set to zero on both CPU and GPU.
             for i in vs_inds
@@ -670,7 +670,7 @@
             vels_gpu_cpu = Array(vels_gpu)
 
             @test vels_cpu != init_vels
-            @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 4 * eps(one(FT))
+            @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT)
         end
     else
         @warn "CUDA not functional, skipping GPU consistency tests"

@@ -747,7 +747,7 @@ function langevin_o_step!(
         ::Type{FT},
     ) where {D, C, FT}
     natoms = UInt64(length(vels))
-    @inbounds @simd ivdep for i in eachindex(vels)
+    @inbounds @simd ivdep for i in eachindex(vels, vel_scales, noise_scales)
         philox_ctr0 = i%UInt64
         noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
         vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])

@@ -805,7 +805,7 @@ function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::AbstractSy
     ctr1 = rand(rng, UInt64)
     key = rand(rng, UInt64)
     natoms = UInt64(length(ms))
-    @inbounds @simd ivdep for i in eachindex(vels)
+    @inbounds @simd ivdep for i in eachindex(vels, vsf, ms)
         scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
         vels[i] = randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms) * scale
     end
