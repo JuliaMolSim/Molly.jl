@@ -384,9 +384,16 @@ def timing_benchmark(model, device="cpu", sizes=(500, 1000, 2000), samples=20,
             return torch.autograd.grad(e.sum(), c)[0]
 
         t_e = time_call(energy_fn)
-        t_f = time_call(forces_fn)
-        results["sizes"][str(len(idx))] = {"energy_ms": t_e, "forces_ms": t_f}
-        print(f"  n={len(idx):5d}   energy {t_e:8.2f} ms    forces {t_f:8.2f} ms")
+        # On MPS the autograd backward aborts above ~100 atoms (a 5-D MPSNDArrayScan the Apple
+        # kernel does not implement — an uncatchable C++ assertion). Energy (forward) is fine, so
+        # time energy on MPS and skip forces. CPU/CUDA time both.
+        t_f = float("nan") if device == "mps" else time_call(forces_fn)
+        rec = {"energy_ms": t_e}
+        if not (t_f != t_f):   # not NaN
+            rec["forces_ms"] = t_f
+        results["sizes"][str(len(idx))] = rec
+        fstr = "  (forces skipped: MPS backend)" if device == "mps" else f"    forces {t_f:8.2f} ms"
+        print(f"  n={len(idx):5d}   energy {t_e:8.2f} ms{fstr}")
 
     out = f"data/ani_reference/6mrr_timing_torchani_{device}.json"
     with open(out, "w") as f:

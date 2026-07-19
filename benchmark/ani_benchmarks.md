@@ -184,24 +184,24 @@ side, and TorchANI cannot run on the Apple GPU anyway (see the next paragraph), 
 comparison is Molly Metal vs TorchANI CPU. (`--device cuda` is wired for both should an NVIDIA
 GPU ever be used, but CUDA is out of scope here.)
 
-Measured on this machine (TorchANI 2.2.4, `--samples 5`). **TorchANI has no GPU number on Apple
-Silicon.** Getting it onto PyTorch-MPS clears two blockers (float64 params → cast to float32;
-`EnergyShifter.sae()`'s hardcoded float64 → patched) but then dies inside MetalPerformanceShaders
-with `MPSNDArrayScan … Axis = 5` — the angular-AEV cumulative sum is 5-dimensional and MPS only
-implements scans over axes 0–3. TorchANI GPU therefore means **CUDA**, which needs NVIDIA hardware
-(not available here). So the head-to-head is **Molly Metal vs TorchANI CPU** — and note that
-Molly's native-Julia Metal path runs the whole ANI-2x model on the Apple GPU, exactly where
-TorchANI's GPU path cannot.
+Measured on this machine (TorchANI 2.2.4, `--samples 5`; MPS with `PYTORCH_ENABLE_MPS_FALLBACK=1`).
+**TorchANI has no *viable* GPU path on Apple Silicon.** Energy *does* run on MPS after two fixes
+(float64 params → float32; `EnergyShifter.sae()`'s hardcoded float64 → patched), but only because
+the ops MPS can't do (float64, a 5-D `MPSNDArrayScan`) fall back to CPU — and the constant MPS↔CPU
+transfers make TorchANI-MPS **~10× slower than TorchANI's own CPU path**. TorchANI **forces** don't
+run on MPS at all: the autograd backward aborts (uncatchable C++ assertion `MPSNDArrayScan Axis=5`)
+above ~100 atoms. A real GPU TorchANI would need CUDA (no NVIDIA hardware here). So on Apple GPU
+only Molly runs the whole ANI-2x model natively and usably.
 
 Energy (single member):
 
-| N atoms | Molly CPU | Molly Metal | TorchANI CPU | Molly Metal vs TorchANI CPU |
-|---------|-----------|-------------|--------------|-----------------------------|
-| 1000    | 30.5 ms   | 76.8 ms     | 29.1 ms      | 0.4×          |
-| 8000    | 198.9 ms  | 91.0 ms     | 484.4 ms     | **5.3×**      |
-| 15,954  | 400.3 ms  | 158.1 ms    | 3702 ms      | **23×**       |
+| N atoms | Molly CPU | Molly Metal | TorchANI CPU | TorchANI MPS | Molly Metal vs TorchANI (CPU / MPS) |
+|---------|-----------|-------------|--------------|--------------|-------------------------------------|
+| 1000    | 30.5 ms   | 76.8 ms     | 29.1 ms      | 2665 ms      | 0.4× / 35×    |
+| 8000    | 198.9 ms  | 91.0 ms     | 484.4 ms     | 7933 ms      | 5.3× / 87×    |
+| 15,954  | 400.3 ms  | 158.1 ms    | 3702 ms      | 31719 ms     | **23× / 200×** |
 
-Forces (single member):
+Forces (single member) — *TorchANI MPS forces abort (see above), so only CPU is comparable:*
 
 | N atoms | Molly CPU (analytic) | Molly Metal | TorchANI CPU | Molly Metal vs TorchANI CPU |
 |---------|----------------------|-------------|--------------|-----------------------------|
@@ -211,8 +211,10 @@ Forces (single member):
 
 **Takeaway:** TorchANI's heavily-optimised CPU kernels win at small N (its C++/vectorised AEV
 beats Molly there), but Molly scales far better — on the **full 6mrr protein** Molly's on-device
-energy is **23×** and forces **11×** faster than TorchANI CPU. Molly CPU energy is already
-competitive at 1k (30.5 vs 29.1 ms) and 8× faster at 16k (400 vs 3702 ms). Molly's CPU analytic
+energy is **23×** faster than TorchANI CPU and **200×** faster than TorchANI MPS, and forces are
+**11×** faster than TorchANI CPU. Molly CPU energy is already competitive at 1k (30.5 vs 29.1 ms)
+and 8× faster at 16k (400 vs 3702 ms). On the Apple GPU specifically, TorchANI has no usable path
+at all, so Molly's native Metal implementation stands alone. Molly's CPU analytic
 forces (single path, KA CPU backend) are near-flat at these sizes and 7–14× faster than the old
 Enzyme AD path — see below.
 
