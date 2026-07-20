@@ -37,6 +37,11 @@
         pairwise_inters = (
             coul = CoulombEwald(dist_cutoff=rc, use_neighbors=true),
             lj = LennardJones(cutoff=DistanceCutoff(rc), use_neighbors=true),
+            dexp = DoubleExponential(cutoff=DistanceCutoff(rc), use_neighbors=true),
+            dexp_softcore = DoubleExponentialSoftCore(
+                cutoff=DistanceCutoff(rc),
+                use_neighbors=true,
+            ),
         ),
         specific_inter_lists = (bonds = bonds,),
         general_inters = (
@@ -93,6 +98,8 @@
         @test sys_host.constraints[1].clusters12.k1 isa Vector{Int32}
         @test sys_host.neighbor_finder isa DistanceNeighborFinder
         @test sys_host.pairwise_inters.coul isa CoulombEwald
+        @test sys_host.pairwise_inters.dexp isa DoubleExponential
+        @test sys_host.pairwise_inters.dexp_softcore isa DoubleExponentialSoftCore
         @test sys_host.general_inters.ljdc isa LJDispersionCorrection
         @test sys_host.general_inters.bias isa BiasPotential
         @test sys_host.loggers.mc isa MonteCarloLogger

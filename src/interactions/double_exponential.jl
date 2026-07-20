@@ -344,3 +344,27 @@ end
     x = 1 - r / rm
     return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
 end
+
+Unitful.ustrip(inter::DoubleExponential) = DoubleExponential(
+    cutoff = ustrip(inter.cutoff),
+    use_neighbors = inter.use_neighbors,
+    α = ustrip(inter.α),
+    β = ustrip(inter.β),
+    shortcut = inter.shortcut,
+    σ_mixing = inter.σ_mixing,
+    ϵ_mixing = inter.ϵ_mixing,
+    weight_special = ustrip(inter.weight_special),
+)
+
+Unitful.ustrip(inter::DoubleExponentialSoftCore) = DoubleExponentialSoftCore(
+    cutoff = ustrip(inter.cutoff),
+    use_neighbors = inter.use_neighbors,
+    α = ustrip(inter.α),
+    β = ustrip(inter.β),
+    shortcut = inter.shortcut,
+    σ_mixing = inter.σ_mixing,
+    ϵ_mixing = inter.ϵ_mixing,
+    λ_mixing = inter.λ_mixing,
+    scheduler = inter.scheduler,
+    weight_special = ustrip(inter.weight_special),
+)

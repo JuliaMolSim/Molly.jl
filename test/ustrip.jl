@@ -25,6 +25,20 @@
     @test mie_nounits.cutoff.dist_cutoff == 1.1
     @test mie_nounits.weight_special == 0.25
 
+    dexp = DoubleExponential(cutoff=DistanceCutoff(1.1u"nm"), weight_special=0.25)
+    dexp_nounits = ustrip(dexp)
+    @test dexp_nounits.cutoff.dist_cutoff == 1.1
+    @test dexp_nounits.weight_special == 0.25
+
+    dexp_softcore = DoubleExponentialSoftCore(
+        cutoff=DistanceCutoff(1.1u"nm"),
+        weight_special=0.25,
+    )
+    dexp_softcore_nounits = ustrip(dexp_softcore)
+    @test dexp_softcore_nounits.cutoff.dist_cutoff == 1.1
+    @test dexp_softcore_nounits.weight_special == 0.25
+    @test dexp_softcore_nounits.scheduler == dexp_softcore.scheduler
+
     soft = SoftSphere(cutoff=DistanceCutoff(0.9u"nm"))
     @test ustrip(soft).cutoff.dist_cutoff == 0.9
 

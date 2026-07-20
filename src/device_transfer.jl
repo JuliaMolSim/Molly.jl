@@ -161,6 +161,9 @@ to_device(nf::CellListMapNeighborFinder, ::Type{AT}) where {AT} = nf
 from_device(inter::Ewald) = inter
 to_device(inter::Ewald, ::Type{AT}) where {AT} = inter
 
+from_device(inter::Union{DoubleExponential, DoubleExponentialSoftCore}) = inter
+to_device(inter::Union{DoubleExponential, DoubleExponentialSoftCore}, ::Type{AT}) where {AT} = inter
+
 function _pme_buffers(::Type{AT}, ::Type{T}, mesh_dims, charge_grid, excluded_pairs,
                       n_atoms) where {AT, T}
     if AT <: AbstractGPUArray
