@@ -7,9 +7,11 @@ using Molly
 using Enzyme
 using FFTW
 
+EnzymeRules.inactive(::typeof(is_on_gpu), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_strictness), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_strictness), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_units), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.has_infinite_boundary), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.n_infinite_dims), args...) = nothing
 EnzymeRules.inactive(::typeof(random_coord), args...) = nothing
 EnzymeRules.inactive(::typeof(random_velocity), args...) = nothing
@@ -27,8 +29,14 @@ EnzymeRules.inactive(::typeof(Molly.setup_progress_minimizer), args...) = nothin
 EnzymeRules.inactive(::typeof(Molly.next_nograd!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.update_nograd!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.needs_virial_schedule), args...) = nothing
+EnzymeRules.inactive(::typeof(use_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(find_neighbors), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.uses_gpu_neighbor_finder), args...) = nothing
+EnzymeRules.inactive_type(::Type{NoNeighborFinder}) = nothing
+EnzymeRules.inactive_type(::Type{GPUNeighborFinder}) = nothing
 EnzymeRules.inactive_type(::Type{DistanceNeighborFinder}) = nothing
+EnzymeRules.inactive_type(::Type{TreeNeighborFinder}) = nothing
+EnzymeRules.inactive_type(::Type{CellListMapNeighborFinder}) = nothing
 EnzymeRules.inactive(::typeof(visualize), args...) = nothing
 EnzymeRules.inactive(::typeof(place_atoms), args...) = nothing
 EnzymeRules.inactive(::typeof(place_diatomics), args...) = nothing
