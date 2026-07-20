@@ -674,51 +674,6 @@ end
     end
 end
 
-# Unit-stripped CPU kernel: avoids Unitful overhead on every grid point.
-@inline function recip_conv_inner_nou!(vir_nou, charge_grid::Array{Complex{T}, 3}, bsm_x, bsm_y, bsm_z,
-                                       recip_box, mesh_dims, f_div_ϵr, factor, boxfactor,
-                                       kx, ky, kz, ::Val{needs_vir}) where {T, needs_vir}
-    if iszero(kx) && iszero(ky) && iszero(kz)
-        return zero(T)
-    end
-    nx, ny, nz = mesh_dims
-    maxkx, maxky, maxkz = T(0.5)*(nx+1), T(0.5)*(ny+1), T(0.5)*(nz+1)
-    @inbounds begin
-        mx = (kx < maxkx ? kx : kx - nx)
-        mhx = mx * recip_box[1][1]
-        bx = boxfactor * bsm_x[kx+1]
-        my = (ky < maxky ? ky : ky - ny)
-        mhy = mx * recip_box[2][1] + my * recip_box[2][2]
-        by = bsm_y[ky+1]
-        mz = (kz < maxkz ? kz : kz - nz)
-        mhz = mx * recip_box[3][1] + my * recip_box[3][2] + mz * recip_box[3][3]
-        d1, d2 = reim(charge_grid[kz+1, ky+1, kx+1])
-        m2 = mhx^2 + mhy^2 + mhz^2
-        bz = bsm_z[kz+1]
-        denom = m2 * bx * by * bz
-        eterm = f_div_ϵr * exp(-factor * m2) / denom
-        charge_grid[kz+1, ky+1, kx+1] = Complex(d1*eterm, d2*eterm)
-        struct2 = d1^2 + d2^2
-
-        if needs_vir
-            Ek = eterm * struct2
-            invm2 = one(T) / m2
-            coeff = 2*one(T) * (one(T) + factor*m2) * invm2
-            gxx = 1 - coeff*mhx*mhx
-            gxy =   - coeff*mhx*mhy
-            gxz =   - coeff*mhx*mhz
-            gyy = 1 - coeff*mhy*mhy
-            gyz =   - coeff*mhy*mhz
-            gzz = 1 - coeff*mhz*mhz
-            G = SMatrix{3, 3, T}(gxx, gxy, gxz,
-                                 gxy, gyy, gyz,
-                                 gxz, gyz, gzz)
-            vir_nou .+= Ek .* G
-        end
-        return eterm * struct2
-    end
-end
-
 function recip_conv_inner!(vir_nou, charge_grid::AbstractArray{Complex{T}, 3}, bsm_x, bsm_y, bsm_z,
                            recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
                            kx, ky, kz, ::Val{needs_vir},
@@ -782,35 +737,27 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
     if needs_vir
         buffer_virial[1] .= zero(T)
     end
-    # Strip units once; length unit cancels between α, recip_box, and volume.
-    α_u = ustrip(α)
-    factor = T(π)^2 / α_u^2
-    boxfactor = T(π) * ustrip(volume(boundary))
-    recip_box_u = ustrip_vec.(recip_box)
-    length_unit = unit(box_sides(boundary, 1))
-    f_u = ustrip(energy_units * length_unit, f_div_ϵr)
-    esum = zero(T)
+    factor = T(π)^2 / α^2
+    boxfactor = T(π) * volume(boundary)
+    esum = zero(T) * energy_units
     for kx in 0:(mesh_dims[1]-1), ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
-        esum += recip_conv_inner_nou!(buffer_virial[1], charge_grid, bsm_x, bsm_y, bsm_z,
-                            recip_box_u, mesh_dims, f_u, factor, boxfactor, kx, ky, kz,
-                            Val(needs_vir))
+        esum_val = recip_conv_inner!(buffer_virial[1], charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
+                            mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, kx, ky, kz,
+                            Val(needs_vir), Val(false))
+        esum += esum_val
     end
     if needs_vir
         # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
         vir .+= buffer_virial[1] .* energy_units / 2
     end
-    return esum * energy_units / 2
+    return esum / 2
 end
 
 function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buffer,
                      bsm_x, bsm_y, bsm_z, recip_box, f_div_ϵr, α, mesh_dims, boundary, energy_units,
                      ::Val{n_threads}, ::Val{needs_vir}) where {T, n_threads, needs_vir}
-    α_u = ustrip(α)
-    factor = T(π)^2 / α_u^2
-    boxfactor = T(π) * ustrip(volume(boundary))
-    recip_box_u = ustrip_vec.(recip_box)
-    length_unit = unit(box_sides(boundary, 1))
-    f_u = ustrip(energy_units * length_unit, f_div_ϵr)
+    factor = T(π)^2 / α^2
+    boxfactor = T(π) * volume(boundary)
     buffer .= zero(T)
     Threads.@threads for chunk_i in 1:n_threads
         if needs_vir
@@ -818,9 +765,10 @@ function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buff
         end
         for kx in (chunk_i-1):n_threads:(mesh_dims[1]-1)
             for ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
-                buffer[chunk_i] += recip_conv_inner_nou!(buffer_virial[chunk_i], charge_grid,
-                            bsm_x, bsm_y, bsm_z, recip_box_u, mesh_dims, f_u, factor, boxfactor,
-                            kx, ky, kz, Val(needs_vir))
+                esum_val = recip_conv_inner!(buffer_virial[chunk_i], charge_grid, bsm_x, bsm_y,
+                            bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                            kx, ky, kz, Val(needs_vir), Val(false))
+                buffer[chunk_i] += ustrip(energy_units, esum_val)
             end
         end
     end
