@@ -181,14 +181,14 @@ struct AndersenThermostat{T, C} <: AbstractThermostat
     coupling_const::C
 end
 
-function apply_coupling!(sys::System, buffers, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System{D}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng())
+                         rng=Random.default_rng()) where D
     for i in eachindex(sys)
         if rand(rng) < (sim.dt / thermostat.coupling_const) && !sys.virtual_site_flags[i]
-            sys.velocities[i] = random_velocity(mass(sys.atoms[i]), thermostat.temperature, sys.k;
-                                                dims=AtomsBase.n_dimensions(sys), rng=rng)
+            sys.velocities[i] = random_velocity_svector(Val(D), mass(sys.atoms[i]),
+                                                        thermostat.temperature, sys.k; rng=rng)
         end
     end
     return false
@@ -203,7 +203,7 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
     key = rand(rng, UInt64)
     prob_val = clamp(Float64(sim.dt / thermostat.coupling_const), 0.0, prevfloat(1.0))
     prob_val_u64 = round(UInt64, prob_val*2.0^64)
-    kernel! = apply_Andersen_coupling_kernel!(backend)
+    kernel! = apply_andersen_coupling_kernel!(backend)
     kernel!(
         sys.velocities, sys.masses,
         sys.k*thermostat.temperature, prob_val_u64, sys.virtual_site_flags, ctr1, key, Val{T}(), ndrange=length(sys.velocities)

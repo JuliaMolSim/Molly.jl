@@ -702,7 +702,7 @@ end
     end
 end
 
-@kernel function apply_Andersen_coupling_kernel!(
+@kernel function apply_andersen_coupling_kernel!(
         vels::AbstractVector{SVector{D, C}}, @Const(masses::AbstractVector),
         kT, prob_val_u64::UInt64, @Const(virtual_sites), ctr1::UInt64, key::UInt64, ::Val{FT}
     ) where {D, C, FT}

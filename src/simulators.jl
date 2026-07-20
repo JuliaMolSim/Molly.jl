@@ -96,6 +96,10 @@ isnan_svec_array(svs) = any(isnan_svec, svs) # On CPU this is faster than Accele
 isnan_svec_array(svs::AbstractGPUArray) = AcceleratedKernels.any(isnan_svec, svs)
 
 function check_array_nans(svec_arrays, labels, step_n)
+    if length(svec_arrays) != length(labels)
+        throw(ArgumentError("check_array_nans should be given the same number of arrays "
+                            "($(length(svec_arrays))) as labels ($(length(labels)))"))
+    end
     if any(isnan_svec_array, svec_arrays)
         err_msg = "NaNs found at the end of step $step_n:"
         for (svec_array, label) in zip(svec_arrays, labels)
@@ -1092,7 +1096,7 @@ function Langevin(; dt, temperature, friction, coupling=nothing, remove_CM_motio
                     vel_scale, noise_scale)
 end
 
-@inline function simulate!(sys,
+@inline function simulate!(sys::System{<:Any, <:Any, T},
                            sim::Langevin,
                            n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
@@ -1102,7 +1106,7 @@ end
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness()) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
@@ -1143,8 +1147,8 @@ end
         cons_vel_storage = zero(sys.velocities)
     end
     dt_div2 = sim.dt / 2
-    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations", "noise")
-    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
@@ -1167,7 +1171,7 @@ end
         end
         sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
 
-        langevin_o_step!(sys.velocities, vel_scales, noise_scales, philox_ctr1, philox_key, float_type(sys))
+        langevin_o_step!(sys.velocities, vel_scales, noise_scales, philox_ctr1, philox_key, T)
         philox_ctr1 += UInt64(1)
 
         sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
@@ -1194,7 +1198,7 @@ end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
-        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                        check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads,
                         current_forces=forces_t)
@@ -1245,7 +1249,7 @@ function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_mot
                     dt, temperature, friction, splitting, Int(remove_CM_motion))
 end
 
-@inline function simulate!(sys,
+@inline function simulate!(sys::System{<:Any, <:Any, T},
                            sim::LangevinSplitting,
                            n_steps_or_time;
                            n_threads::Integer=Threads.nthreads(),
@@ -1255,7 +1259,7 @@ end
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness()) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
         err_str = "LangevinSplitting is not currently compatible with constraints, " *
@@ -1318,8 +1322,8 @@ end
             end
         end
     end
-    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations", "noise")
-    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+    check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
+    check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
@@ -1346,7 +1350,7 @@ end
                     noise_scales,
                     philox_ctr1,
                     philox_key,
-                    float_type(sys),
+                    T,
                 )
                 philox_ctr1 += UInt64(1)
             else
@@ -1366,7 +1370,7 @@ end
                                    n_threads=n_threads)
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
-        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
+        check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                        check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, buffers, neighbors, step_n; n_threads=n_threads)
             break

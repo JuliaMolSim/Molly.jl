@@ -704,6 +704,10 @@ function check_correction_arg(correction)
     end
 end
 
+@inline function random_velocity_svector(::Val{D}, args...; rng=Random.default_rng()) where D
+    return SVector(ntuple(_ -> maxwell_boltzmann(args...; rng=rng), Val(D)))
+end
+
 """
     random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature;
                     dims=3, rng=Random.default_rng())
@@ -718,19 +722,19 @@ optional custom Boltzmann constant.
 """
 function random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature;
                          dims::Integer=3, rng=Random.default_rng())
-    return SVector([maxwell_boltzmann(atom_mass, temp; rng=rng) for i in 1:dims]...)
+    return random_velocity_svector(Val(dims), atom_mass, temp; rng=rng)
 end
 
 function random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
                          k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits};
                          dims::Integer=3, rng=Random.default_rng())
-    return SVector([maxwell_boltzmann(atom_mass, temp, k; rng=rng) for i in 1:dims]...)
+    return random_velocity_svector(Val(dims), atom_mass, temp, k; rng=rng)
 end
 
 function random_velocity(atom_mass::Real, temp::Real,
                          k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
                          dims::Integer=3, rng=Random.default_rng())
-    return SVector([maxwell_boltzmann(atom_mass, temp, k; rng=rng) for i in 1:dims]...)
+    return random_velocity_svector(Val(dims), atom_mass, temp, k; rng=rng)
 end
 
 """
@@ -793,11 +797,11 @@ Virtual sites are given a velocity of zero.
 """
 function random_velocities!(sys, temp; rng=Random.default_rng())
     random_velocities!(sys.velocities, sys, temp; rng=rng)
-    sys
+    return sys
 end
 
-# vels on host, do sampling on host
-function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::AbstractSystem, temp; rng=Random.default_rng()) where {D, C}
+function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys, temp;
+                            rng=Random.default_rng()) where {D, C}
     FT = float_type(sys)
     ms = from_device(masses(sys))
     vsf = from_device(sys.virtual_site_flags)
@@ -809,11 +813,10 @@ function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::AbstractSy
         scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
         vels[i] = randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms) * scale
     end
-    vels
+    return vels
 end
 
-# vels on device, do sampling on device
-function random_velocities!(vels::AbstractGPUArray, sys::AbstractSystem, temp; rng=Random.default_rng())
+function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.default_rng())
     FT = float_type(sys)
     AT = array_type(vels)
     ms = to_device(sys.masses, AT)
@@ -823,13 +826,12 @@ function random_velocities!(vels::AbstractGPUArray, sys::AbstractSystem, temp; r
     key = rand(rng, UInt64)
     backend = get_backend(vels)
     kernel! = random_velocities_kernel!(backend)
-    kernel!(vels, ms, kT, vsf, ctr1, key,
-            Val(FT); ndrange=length(vels))
-    vels
+    kernel!(vels, ms, kT, vsf, ctr1, key, Val(FT); ndrange=length(vels))
+    return vels
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
-acosbound(x::Real) = acos(clamp(x, -1, 1))
+acos_bound(x::Real) = acos(clamp(x, -1, 1))
 
 """
     bond_angle(coord_i, coord_j, coord_k, boundary)
@@ -847,7 +849,7 @@ function bond_angle(coords_i, coords_j, coords_k, boundary)
 end
 
 function bond_angle(vec_ji, vec_jk)
-    acosbound(dot(vec_ji, vec_jk) / (norm(vec_ji) * norm(vec_jk)))
+    acos_bound(dot(vec_ji, vec_jk) / (norm(vec_ji) * norm(vec_jk)))
 end
 
 """
