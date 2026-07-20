@@ -305,6 +305,12 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             "tag, found $(ff.name)"))
     end
 
+    has_lj_force = any(entry -> entry.name == "LennardJonesForce", eachelement(ff))
+    has_custom_nb_force = any(entry -> entry.name == "CustomNonbondedForce", eachelement(ff))
+    if has_lj_force && has_custom_nb_force
+        error("LennardJonesForce and CustomNonbondedForce cannot be used in the same file")
+    end
+
     for entry in eachelement(ff)
         entry_name = entry.name
         if entry_name == "Include"
@@ -677,11 +683,11 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
         elseif entry_name == "LennardJonesForce"
             if haskey(entry, "useDispersionCorrection")
                 dispersion_correction = parse(Bool, lowercase(entry["useDispersionCorrection"]))
-                if !isnothing(ff_param_array[8]) && dispersion_correction != ff_param_array[8]
+                if !isnothing(ff_param_array[12]) && dispersion_correction != ff_param_array[12]
                     error("multiple NonbondedForce/LennardJonesForce entries with " *
                           "different useDispersionCorrection")
                 end
-                ff_param_array[8] = dispersion_correction
+                ff_param_array[12] = dispersion_correction
             end
             if haskey(entry, "lj14scale")
                 w = parse(T, entry["lj14scale"])
@@ -730,6 +736,54 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     push!(nbfix_pairs, NBFixPair(type1, type2, class1, class2, σ, ϵ))
                 end
             end
+        
+        elseif entry_name == "CustomNonbondedForce"
+
+            if entry["energy"] == "sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))" && entry["bondCutoff"] == "3"
+                for element in eachelement(entry)
+
+                    if element.name == "GlobalParameter"
+                        if element["name"] == "alpha"
+                            ff_param_array[9] && error("Multiple alpha values for double exponential alpha")
+                            ff_param_array[8] = parse(T, element["defaultValue"])
+                            ff_param_array[9] = true
+                        elseif element["name"] == "beta"
+                            ff_param_array[11] && error("Multiple alpha values for double exponential beta")
+                            ff_param_array[10] = parse(T, element["defaultValue"])
+                            ff_param_array[11] = true
+                        else
+                            report_issue(
+                                "CustomNonbondedForce with global parameters other than \"alpha\" or \"beta\" not supported",
+                                strictness
+                            )
+                        end
+                    elseif element.name == "Atom"
+
+                        σ = add_units(parse(T, element["sigma"]), u"nm", units)
+                        ϵ = add_units(parse(T, element["epsilon"]), u"kJ * mol^-1", units)
+                        if haskey(element, "class")
+                            push!(ljforce_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
+                                    "", element["class"], "", zero(T), zero(T), σ, ϵ, missing, missing))
+                        else
+                            atom_type = element["type"]
+                            if haskey(atom_types, atom_type)
+                                at = atom_types[atom_type]
+                                # Re-use charge from NonbondedForce entry if present
+                                atom_types[atom_type] = AtomType{T, typeof(at.mass), typeof(σ), typeof(ϵ)}(
+                                    at.type, at.class, at.element, at.charge, at.mass, σ, ϵ, missing, missing)
+                            end
+                        end
+                        
+                    end
+
+                end
+            else
+                err_str = "CustomNonbondedForce without "*
+                          "energy=\"sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))\" "*
+                          "and bondCutoff=\"3\" "
+                          "not currently supported, ignoring."
+                report_issue(err_str, strictness)
+            end
 
         elseif entry_name == "AmoebaUreyBradleyForce"
             for ang in eachelement(entry)
@@ -743,7 +797,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name in (
                     "RBTorsionForce", "GBSAOBCForce", "CustomBondForce", "CustomAngleForce",
-                    "CustomNonbondedForce", "CustomGBForce", "CustomHbondForce",
+                    "CustomGBForce", "CustomHbondForce",
                     "CustomManyParticleForce", "DrudeForce", "HippoNonbondedForce",
                     "AmoebaBondForce", "AmoebaAngleForce", "AmoebaOutOfPlaneBendForce",
                     "AmoebaTorsionForce", "AmoebaPiTorsionForce", "AmoebaStretchTorsionForce",
@@ -784,13 +838,14 @@ custom template file to the `custom_residue_templates` keyword argument.
 Behavior with unsupported files is determined by the `strictness` keyword argument.
 This can be `:warn` to emit warnings, `:nowarn` to suppress warnings or `:error` to error.
 """
-struct MolecularForceField{T, NB, M, D, DA, E, K, KA, C}
+struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
     atom_type_order::Vector{String}
     residues::Dict{String, ResidueTemplate{T, C}}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
+    global_params::G
     dispersion_correction::Bool
     nbfix_pairs::NB
     attributes_from_residue::Vector{String}
@@ -823,9 +878,16 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     atom_types = Dict{String, AtomType}()
 
     # Array to allow mutation in read_ff_xml!
-    # Torsion order, weight_14_coulomb, weight_14_coulomb_set, weight_14_lj, weight_14_lj_set,
-    #   weight_14_lj_ljforce, weight_14_lj_ljforce_set, dispersion_correction
-    ff_param_array = ["", one(T), false, one(T), false, one(T), false, nothing]
+    # Torsion order, 
+    # weight_14_coulomb, weight_14_coulomb_set, weight_14_lj, weight_14_lj_set,
+    # weight_14_lj_ljforce, weight_14_lj_ljforce_set, 
+    # double_exp_alpha, dexp_alpha_set, double_exp_beta, dexp_beta_set, 
+    # dispersion_correction
+    ff_param_array = ["",
+                      one(T), false, one(T), false, 
+                      one(T), false, 
+                      zero(T), false, zero(T), false,
+                      nothing]
     attributes_from_residue = String[]
     residues = Dict{String, ResidueTemplate}()
     patches = Dict{String, ResiduePatchTemplate}()
@@ -850,7 +912,14 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     weight_14_coulomb = ff_param_array[2]
     # Use LennardJonesForce 1-4 weighting if present
     weight_14_lj = (ff_param_array[7] ? ff_param_array[6] : ff_param_array[4])
-    dispersion_correction = (isnothing(ff_param_array[8]) ? true : ff_param_array[8])
+    dispersion_correction = (isnothing(ff_param_array[12]) ? true : ff_param_array[12])
+
+    has_double_exp_params = ff_param_array[9] && ff_param_array[11]
+    double_exp_alpha = (has_double_exp_params ? ff_param_array[8] : zero(T))
+    double_exp_beta  = (has_double_exp_params ? ff_param_array[10] : zero(T))
+
+    global_params = [double_exp_alpha, double_exp_beta]
+    G = typeof(global_params)
 
     # Apply residue patches
     for res_name in collect(keys(residues)) # Collect required since residues changes
@@ -1079,8 +1148,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         Dict{Tuple{String,String,String,String,String}, CMAPTorsionType{E}}(),
     )
 
-    return MolecularForceField{T, NB, M, D, DA, E, K, KA, IC}(
+    return MolecularForceField{T, G, NB, M, D, DA, E, K, KA, IC}(
         atom_types, atom_type_order, residues, torsion_order, weight_14_coulomb, weight_14_lj,
+        global_params,
         dispersion_correction, nbfix_pairs_conc, attributes_from_residue, resname_replacements,
         atomname_replacements, standard_bonds, type_to_class, class_to_types, bond_resolver,
         angle_resolver, torsion_resolver, cmap_resolver,

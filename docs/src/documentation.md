@@ -435,6 +435,7 @@ The following tags are supported:
 - `<CMAPTorsionForce>`
 - `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
 - `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
+- `<CustomNonbondedForce>`: the double-exponential potential is supported with `bondCutoff="3"`, global parameters `alpha` and `beta`, and per-particle parameters `sigma` and `epsilon`
 - `<AmoebaUreyBradleyForce>`: this defines the bond-like part of a general Urey-Bradley interaction and is not specific to the AMOEBA force field, note that `k` is equivalent to the `k/2` harmonic bond factor
 - `<Include>`
 
@@ -444,7 +445,7 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<CustomBondForce>`
 - `<CustomAngleForce>`
 - `<CustomTorsionForce>`: the special case where `energy="k*(theta-theta0)^2"` is supported as it is used to define improper torsions in some force fields
-- `<CustomNonbondedForce>`
+- Other `<CustomNonbondedForce>` expressions
 - `<CustomGBForce>`
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
