@@ -733,67 +733,6 @@ function random_velocity(atom_mass::Real, temp::Real,
     return SVector([maxwell_boltzmann(atom_mass, temp, k; rng=rng) for i in 1:dims]...)
 end
 
-function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
-                            temp::Unitful.Temperature, rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
-                            temp::Unitful.Temperature,
-                            k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits},
-                            rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_3D(atom_mass::Real, virtual_site_flag, temp::Real, k::Real,
-                            rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
-                            temp::Unitful.Temperature, rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-        maxwell_boltzmann(atom_mass, temp; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, virtual_site_flag,
-                            temp::Unitful.Temperature,
-                            k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits},
-                            rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
-function random_velocity_2D(atom_mass::Real, virtual_site_flag, temp::Real, k::Real,
-                            rng=Random.default_rng())
-    v = SVector(
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-        maxwell_boltzmann(atom_mass, temp, k; rng=rng),
-    )
-    return v * !virtual_site_flag
-end
-
 """
     maxwell_boltzmann(atom_mass::Unitful.Mass, temp::Unitful.Temperature,
                       k::BoltzmannConstUnits=Unitful.k; rng=Random.default_rng())
@@ -839,16 +778,8 @@ for a [`System`](@ref).
 
 Virtual sites are given a velocity of zero.
 """
-function random_velocities(sys::System{3, AT}, temp; rng=Random.default_rng()) where AT
-    vels = random_velocity_3D.(from_device(masses(sys)), from_device(sys.virtual_site_flags),
-                               temp, sys.k, rng)
-    return to_device(vels, AT)
-end
-
-function random_velocities(sys::System{2, AT}, temp; rng=Random.default_rng()) where AT
-    vels = random_velocity_2D.(from_device(masses(sys)), from_device(sys.virtual_site_flags),
-                               temp, sys.k, rng)
-    return to_device(vels, AT)
+function random_velocities(sys::System, temp; rng=Random.default_rng())
+    random_velocities!(similar(sys.velocities), sys, temp; rng=rng)
 end
 
 """
@@ -862,39 +793,39 @@ Virtual sites are given a velocity of zero.
 """
 function random_velocities!(sys, temp; rng=Random.default_rng())
     random_velocities!(sys.velocities, sys, temp; rng=rng)
-    return sys
+    sys
 end
 
-function random_velocities!(vels, sys, temp; rng=Random.default_rng())
-    vels .= random_velocities(sys, temp; rng=rng)
-    return vels
-end
-
-function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.default_rng())
-    if isnothing(rng)
-        backend = get_backend(vels)
-        kernel! = random_velocities_kernel!(backend)
-        kernel!(vels, sys.masses,  sys.k*temp, sys.virtual_site_flags, ndrange=length(vels))
-        KernelAbstractions.synchronize(backend)
-    else
-        vels .= random_velocities(sys, temp; rng=rng)
+# vels on host, do sampling on host
+function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::AbstractSystem, temp; rng=Random.default_rng()) where {D, C}
+    FT = float_type(sys)
+    ms = from_device(masses(sys))
+    vsf = from_device(sys.virtual_site_flags)
+    kT = sys.k * temp
+    ctr1 = rand(rng, UInt64)
+    key = rand(rng, UInt64)
+    natoms = UInt64(length(ms))
+    @inbounds @simd ivdep for i in eachindex(vels, vsf, ms)
+        scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
+        vels[i] = randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms) * scale
     end
-    return vels
+    vels
 end
 
-@kernel function random_velocities_kernel!(velocities::AbstractVector{SVector{D, V}},
-                                           @Const(masses),
-                                           kT,
-                                           @Const(virtual_sites)) where {D, V}
-    i = @index(Global, Linear)
-    if i <= length(velocities)
-        @inbounds if !virtual_sites[i]
-            scale = sqrt(kT / masses[i])
-            velocities[i] = SVector{D, V}(ntuple(i -> randn() * scale, Val(D)))
-        else
-            velocities[i] = SVector{D, V}(ntuple(i -> zero(V), Val(D)))
-        end
-    end
+# vels on device, do sampling on device
+function random_velocities!(vels::AbstractGPUArray, sys::AbstractSystem, temp; rng=Random.default_rng())
+    FT = float_type(sys)
+    AT = array_type(vels)
+    ms = to_device(sys.masses, AT)
+    vsf = to_device(sys.virtual_site_flags, AT)
+    kT = sys.k * temp
+    ctr1 = rand(rng, UInt64)
+    key = rand(rng, UInt64)
+    backend = get_backend(vels)
+    kernel! = random_velocities_kernel!(backend)
+    kernel!(vels, ms, kT, vsf, ctr1, key,
+            Val(FT); ndrange=length(vels))
+    vels
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0

@@ -831,7 +831,8 @@ end
 end
 
 @testset "Temperature REMD" begin
-    rng = MersenneTwister(1)
+    Random.seed!(1234)
+    rng = Xoshiro(10)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
@@ -925,7 +926,8 @@ end
 end
 
 @testset "Hamiltonian REMD" begin
-    rng = MersenneTwister(2)
+    Random.seed!(1234)
+    rng = Xoshiro(10)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"

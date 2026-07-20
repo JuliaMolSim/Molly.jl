@@ -584,25 +584,32 @@
             end
         end
 
-        @testset "Langevin random numbers" begin
+        @testset "Langevin random numbers FT=$FT" for FT in (Float32, Float64)
             n_atoms = 50_000
-            boundary = CubicBoundary(50.0u"nm")
-            atom_mass = 10.0u"g/mol"
-            temp = 298.0u"K"
+            boundary = CubicBoundary(FT(50.0)u"nm")
+            atom_mass = FT(10.0)u"g/mol"
+            temp = FT(298.0)u"K"
             AT = CuArray
-            atoms = [Atom(mass=10.0f0u"g/mol", charge=0.0f0, σ=0.3f0u"nm", ϵ=0.1f0u"kJ * mol^-1")
+            # Some atoms are virtual sites, which must have their velocities
+            #   actively set to zero by random_velocities!.
+            vs_inds = [2, 4, 7]
+            virtual_sites = [
+                OneParticleSite(2, 1, zero(FT)u"nm^-1"),
+                TwoParticleAverageSite(4, 3, 5, FT(0.5), FT(0.5)),
+                ThreeParticleAverageSite(7, 6, 8, 9, FT(0.2), FT(0.3), FT(0.5)),
+            ]
+            atoms = [Atom(mass=(i in vs_inds ? FT(0.0) : FT(10.0))u"g/mol")
                      for i in 1:n_atoms]
-            coords = [SVector(1.0f0u"nm", 1.0f0u"nm", 1.0f0u"nm") for _ in 1:n_atoms]
-            velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-            pis = (LennardJones(cutoff=DistanceCutoff(0.9f0u"nm"), use_neighbors=false),)
+            coords = [SVector(FT(1.0)u"nm", FT(1.0)u"nm", FT(1.0)u"nm") for _ in 1:n_atoms]
+            vel_unit = unit(random_velocity(atom_mass, temp)[1])
+            velocities = [zero(SVector{3, FT}) * vel_unit for _ in 1:n_atoms]
 
             sys = System(
                 atoms=copy(atoms),
                 coords=copy(coords),
                 boundary=boundary,
                 velocities=copy(velocities),
-                pairwise_inters=pis,
-                loggers=(temp=TemperatureLogger(100),)
+                virtual_sites=copy(virtual_sites),
             )
 
             sys2 = System(
@@ -610,33 +617,60 @@
                 coords=AT(coords),
                 boundary=boundary,
                 velocities=AT(velocities),
-                pairwise_inters=pis,
-                loggers=(temp=TemperatureLogger(100),),
+                virtual_sites=AT(virtual_sites),
             )
-            velocities_gpu = AT(velocities)
+            # Start the output buffers filled with non-zero velocities so we test
+            #   that virtual site velocities are actively set to zero, not just
+            #   left as they were.
+            ones_vels = fill(SVector(FT(1), FT(1), FT(1)) * vel_unit, n_atoms)
+            vels_gpu = AT(ones_vels)
 
-            for (temp, mean_vel) in (
-                    (200.0u"K", 0.65u"nm/ps"),
-                    (250.0u"K", 0.73u"nm/ps"),
-                    (298.0u"K", 0.79u"nm/ps"),
-                )
-                vels_cpu = copy(velocities)
-                random_velocities!(vels_cpu, sys, temp)
-                mean_cpu = mean(mean(vels_cpu))
-                std_cpu = mean(std(vels_cpu))
-                mean_norm_cpu = mean(norm, vels_cpu)
+            vels_cpu_inplace = copy(ones_vels)
+            random_velocities!(vels_cpu_inplace, sys, temp; rng=Xoshiro(10))
+            vels_cpu = random_velocities(sys, temp; rng=Xoshiro(10))
+            random_velocities!(sys, temp; rng=Xoshiro(10))
+            # These should match exactly
+            @test vels_cpu_inplace == vels_cpu
+            @test sys.velocities == vels_cpu
 
-                vels_gpu = random_velocities!(velocities_gpu, sys2, temp)
-                mean_gpu = mean(mean(vels_gpu))
-                std_gpu = mean(std(vels_gpu))
-                mean_norm_gpu = mean(norm, vels_gpu)
+            random_velocities!(vels_gpu, sys2, temp; rng=Xoshiro(10))
+            vels_gpu_cpu = Array(vels_gpu)
 
-                @test -0.005u"nm * ps^-1" <= mean_cpu <= 0.005u"nm * ps^-1"
-                @test -0.005u"nm * ps^-1" <= mean_gpu <= 0.005u"nm * ps^-1"
-                @test (mean_vel - 0.02u"nm/ps") <= mean_norm_cpu <= (mean_vel + 0.02u"nm/ps")
-                @test (mean_vel - 0.02u"nm/ps") <= mean_norm_gpu <= (mean_vel + 0.02u"nm/ps")
-                @test 0.99 < abs(std_cpu / std_gpu) < 1.01
+            # With the same rng source the velocities should match down to floating point error.
+            vel_scale = sqrt(sys.k * temp / atom_mass)
+            @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT) * vel_scale
+
+            # Virtual site velocities must be actively set to zero on both CPU and GPU.
+            for i in vs_inds
+                @test iszero(vels_cpu[i])
+                @test iszero(vels_gpu_cpu[i])
             end
+        end
+
+        @testset "langevin_o_step! FT=$FT" for FT in (Float32, Float64)
+            n_atoms = 50_000
+            AT = CuArray
+
+            rng = Xoshiro(15)
+            init_vels = [randn(rng, SVector{3, FT}) for _ in 1:n_atoms]
+
+            vel_scales = fill(FT(0.8), n_atoms)
+            noise_scales = fill(FT(0.3), n_atoms)
+
+            philox_key = 0x1234567890abcdef
+            philox_ctr1 = 0xfedcba0987654321
+
+            vels_cpu = copy(init_vels)
+            vels_gpu = AT(init_vels)
+
+            Molly.langevin_o_step!(vels_cpu, vel_scales, noise_scales,
+                                   philox_ctr1, philox_key, FT)
+            Molly.langevin_o_step!(vels_gpu, AT(vel_scales), AT(noise_scales),
+                                   philox_ctr1, philox_key, FT)
+            vels_gpu_cpu = Array(vels_gpu)
+
+            @test vels_cpu != init_vels
+            @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT)
         end
     else
         @warn "CUDA not functional, skipping GPU consistency tests"

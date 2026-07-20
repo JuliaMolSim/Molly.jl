@@ -1077,7 +1077,17 @@ end
         apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                        n_threads=n_threads)
     end
-    noise = zero(sys.velocities)
+    vel_scales = Fill(sim.vel_scale, length(masses(sys)))
+    vel_el_zero = zero(eltype(eltype(sys.velocities)))
+    kT = sim.temperature*sys.k
+    noise_scale = sim.noise_scale
+    # precompute to avoid the sqrt and division at each step
+    noise_scales = map(sys.masses, sys.virtual_site_flags) do m, vsf
+        ifelse(vsf, vel_el_zero, oftype(vel_el_zero, noise_scale * sqrt(kT/m)))
+    end
+    # Seed the per step noise
+    philox_key = rand(rng, UInt64)
+    philox_ctr1 = rand(rng, UInt64)
     using_constraints = (length(sys.constraints) > 0)
     if using_constraints
         cons_coord_storage = zero(sys.coords)
@@ -1103,12 +1113,12 @@ end
         if using_constraints
             cons_coord_storage .= sys.coords
         end
-        sys.coords .+= sys.velocities .* dt_div2
+        sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
 
-        random_velocities!(noise, sys, sim.temperature; rng=rng)
-        sys.velocities .= sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
+        langevin_o_step!(sys.velocities, vel_scales, noise_scales, philox_ctr1, philox_key, float_type(sys))
+        philox_ctr1 += UInt64(1)
 
-        sys.coords .+= sys.velocities .* dt_div2
+        sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
 
         if using_constraints
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
@@ -1161,7 +1171,7 @@ without applying constraints.
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient. If units are used, it should have a
-    dimensionality of mass per time.
+    dimensionality of mass per time. Note this is a different friction from `Langevin` which has dimensionality of inverse time.
 - `splitting::W`: the splitting specifier. Should be a string consisting of the
     characters `A`, `B` and `O`. Strings with no `O`s reduce to deterministic
     symplectic schemes.
@@ -1198,19 +1208,30 @@ end
         report_issue(err_str, strictness)
     end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
-    M_inv = inv.(masses(sys))
+    # virtual particles should get inv mass of 0 AND mass of 0
+    # This way the O step doesn't change virtual site velocity
+    M_inv = map(masses(sys), sys.virtual_site_flags) do m, vsf
+        local x = inv(m)
+        ifelse(vsf, zero(x), x)
+    end
     if !all(op -> op in ('A', 'B', 'O'), sim.splitting)
         throw(ArgumentError("splitting must contain only A, B, and O steps"))
     end
     n_o_steps = count('O', sim.splitting)
     if n_o_steps > 0
-        α_eff = exp.(-sim.friction * sim.dt .* M_inv / n_o_steps)
-        σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
-    else
-        α_eff = nothing
-        σ_eff = nothing
+        # These local variables are only needed in the O step
+        vel_scales = exp.((-sim.friction * sim.dt / n_o_steps) .* M_inv)
+        kT = sim.temperature*sys.k
+        vel_el_zero = zero(eltype(eltype(sys.velocities)))
+        vel_scale_one_sq = abs2(oneunit(eltype(vel_scales)))
+        noise_scales = oftype.(
+            vel_el_zero,
+            sqrt.(kT .* M_inv .* (vel_scale_one_sq .- (abs2.(vel_scales))))
+        )
+        # Seed the per step noise
+        philox_key = rand(rng, UInt64)
+        philox_ctr1 = rand(rng, UInt64)
     end
-
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -1221,7 +1242,6 @@ end
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(false); n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
-    noise = zero(sys.velocities)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
 
@@ -1244,21 +1264,36 @@ end
         end
     end
 
-    step_arg_pairs = map(enumerate(sim.splitting)) do (j, op)
-        if op == 'A'
-            return (A_step!, (sys, effective_dts[j]))
-        elseif op == 'B'
-            return (B_step!, (sys, forces_t, buffers, accels_t, effective_dts[j],
-                              force_computation_steps[j], n_threads))
-        elseif op == 'O'
-            return (O_step!, (sys, noise, α_eff, σ_eff, rng, sim.temperature))
-        end
-    end
-
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        for (step!, args) in step_arg_pairs
-            step!(args..., neighbors, step_n)
+        for (j, op) in enumerate(sim.splitting)
+            if op == 'A'
+                A_step!(sys, effective_dts[j])
+            elseif op == 'B'
+                B_step!(
+                    sys,
+                    forces_t,
+                    buffers,
+                    accels_t,
+                    effective_dts[j],
+                    force_computation_steps[j],
+                    n_threads,
+                    neighbors,
+                    step_n,
+                )
+            elseif op == 'O'
+                langevin_o_step!(
+                    sys.velocities,
+                    vel_scales,
+                    noise_scales,
+                    philox_ctr1,
+                    philox_key,
+                    float_type(sys),
+                )
+                philox_ctr1 += UInt64(1)
+            else
+                error("Unexpected op $(repr(op))")
+            end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -1281,7 +1316,7 @@ end
     return sys
 end
 
-function A_step!(sys, dt_eff, neighbors, step_n)
+function A_step!(sys, dt_eff)
     sys.coords .+= sys.velocities .* dt_eff
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
@@ -1295,12 +1330,6 @@ function B_step!(sys, forces_t, buffers, accels_t, dt_eff,
         accels_t .= calc_accels.(forces_t, masses(sys))
     end
     sys.velocities .+= dt_eff .* accels_t
-    return sys
-end
-
-function O_step!(sys, noise, α_eff, σ_eff, rng, temperature, neighbors, step_n)
-    random_velocities!(noise, sys, temperature; rng=rng)
-    sys.velocities .= α_eff .* sys.velocities .+ σ_eff .* noise
     return sys
 end
 
