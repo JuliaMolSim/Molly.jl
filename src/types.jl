@@ -25,13 +25,7 @@ export
     MollyCalculator,
     ASECalculator,
     AbstractMLPotential,
-    ANIPotential,
-    compute_aevs,
-    compute_aevs_ka,
-    compute_ani_energy_ka,
-    compute_ani_forces_ka,
-    cosine_cutoff,
-    celu01
+    ANIPotential
 
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64

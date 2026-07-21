@@ -8,7 +8,7 @@ Package extensions are used in order to reduce the number of dependencies:
 - To use [`visualize`](@ref), call `using GLMakie`.
 - To use [`ASECalculator`](@ref), call `using PythonCall`.
 - To use [`rdf`](@ref), call `using KernelDensity`.
-- To use [`ANIPotential`](@ref), call `using Lux, HDF5`. Energy and forces both work with just those two packages: forces use a single analytic path (`AtomsCalculators.forces!` → [`compute_ani_forces_ka`](@ref)) that runs on CPU or GPU, built on KernelAbstractions (a core Molly dependency, so no extra `using` is needed). The on-device functions [`compute_aevs_ka`](@ref) / [`compute_ani_energy_ka`](@ref) / [`compute_ani_forces_ka`](@ref) are available under the same `using Lux, HDF5`. (There is no Enzyme or finite-difference forces path.)
+- To use [`ANIPotential`](@ref), call `using Lux, HDF5`. Energy and forces both work with just those two packages: forces use an analytic path that runs on CPU or GPU, built on KernelAbstractions (a core Molly dependency, so no extra `using` is needed).
 
 ## Exported names
 

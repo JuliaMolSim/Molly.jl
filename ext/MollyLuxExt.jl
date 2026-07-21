@@ -33,7 +33,9 @@
 module MollyLuxExt
 
 using Molly
-using Molly: from_device, to_device, vector
+# celu01 / cosine_cutoff are internal (unexported) Molly helpers; import them explicitly so this
+# extension can use them by bare name without them cluttering the public Molly namespace.
+using Molly: from_device, to_device, vector, celu01, cosine_cutoff
 import AtomsCalculators
 using Lux, HDF5
 using KernelAbstractions   # strong Molly dependency; the ANI GPU kernels live in molly_lux_ka.jl
@@ -716,6 +718,8 @@ convert_boundary_eltype(b::TriclinicBoundary{D, T2, C, A}, ::Type{T}) where {D, 
 )
     atom_i = @index(Global, Linear)
 
+    # KA rounds the launch up to a whole number of workgroups, so the last group can spawn
+    # threads with atom_i > n_atoms; they must no-op (bounds guard).
     if atom_i <= n_atoms
     T       = eltype(coords[1])
     ci      = coords[atom_i]
@@ -1191,11 +1195,11 @@ end
 # (offsets, symmetrised indices). This is the production path: it *consumes the
 # neighbours produced by the system's neighbour finder* (CellListMapNeighborFinder on
 # CPU, DistanceNeighborFinder on GPU) rather than building its own list. `neighbors.list`
-# may be device-resident (GPU finder) — `Array(...)` brings the pairs to the host for the
+# may be device-resident (GPU finder) — `Molly.from_device` brings the pairs to the host for the
 # O(total_pairs) counting sort; offsets/indices are then uploaded to the compute backend.
 function nl_to_csr(neighbors, n_atoms::Int)
     npairs = length(neighbors)                 # = neighbors.n
-    host   = Array(neighbors.list)             # host copy (no-op if already on CPU)
+    host   = Molly.from_device(neighbors.list)  # host copy (no-op if already on CPU)
     off = zeros(Int32, n_atoms + 1)
     cur = Vector{Int32}(undef, n_atoms)
     idx = Vector{Int32}(undef, 2 * npairs)
@@ -1410,6 +1414,10 @@ function Molly.compute_ani_energy_ka(
 
     n_ens = length(pot.ps_vec)
     ps_dev_all, st_dev_all = ani_nn_dev_params(pot, dev)             # cached on-device weights
+    # The per-element NN outputs are Float32, but the total energy sums O(10^4) per-atom terms of
+    # similar magnitude plus large self-energies, so a Float32 running sum loses precision. We
+    # accumulate the reduction in Float64 (the summands stay Float32); this keeps the full-protein
+    # energy within <0.001% of the TorchANI reference. It does not change the model precision.
     E = 0.0
     for ens_i in 1:n_ens
         for s in 1:n_species
@@ -1540,10 +1548,9 @@ function aev_vjp_ka(adj, coords::AbstractVector{SVector{D,T}}, species, p, n_spe
 end
 
 # End-to-end on-device ANI forces (eV/Å). Forward AEV → NN VJP (∂E/∂G) → backward AEV kernels
-# (∂E/∂r) → F = -∂E/∂r · Ha→eV, ensemble-averaged. This is the single ANI forces path — the
+# (∂E/∂r) → F = -∂E/∂r · Ha→eV, ensemble-averaged. This is the ANI forces path — the
 # AtomsCalculators.forces! method below dispatches here for both CPU (KA CPU backend) and GPU
-# (Metal/CUDA) systems. The former finite-difference and Enzyme reverse-mode paths are retired:
-# the analytic backward is both exact (matches TorchANI/FD to ~1e-6) and, on CPU, 7–14× faster.
+# (Metal/CUDA) systems. The analytic backward matches TorchANI/finite differences to ~1e-6 eV/Å.
 function Molly.compute_ani_forces_ka(coords, species, pot, n_species::Int;
         backend=nothing, neighbors=nothing, boundary=nothing)
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
