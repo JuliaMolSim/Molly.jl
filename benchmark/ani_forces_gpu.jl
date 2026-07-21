@@ -74,7 +74,7 @@ for n in allsizes
         cM   = MtlArray([SVector{3,Float32}(c) for c in coords])
         sM   = MtlArray(sp)
         bdy  = CubicBoundary(200.0f0)
-        r = bench(() -> compute_ani_forces_ka(cM, sM, pot, n_sp; backend=MetalBackend(),
+        r = bench(() -> Molly.compute_ani_forces_ka(cM, sM, pot, n_sp; backend=MetalBackend(),
                                               neighbors=nbrs, boundary=bdy); repeats=5, samples=15)
         t_mtl = r.min
         results["metal"][string(nn)] = Dict("min"=>r.min, "median"=>r.median, "iqr"=>r.iqr)
