@@ -402,8 +402,14 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         pc_sum, pc_abs2_sum = nothing, nothing
     end
 
-    fft_plan  = plan_fft!(charge_grid)
-    bfft_plan = plan_bfft!(charge_grid)
+    if AT <: AbstractGPUArray
+        fft_plan  = plan_fft!(charge_grid)
+        bfft_plan = plan_bfft!(charge_grid)
+    else
+        fft_plan  = plan_fft!(charge_grid; num_threads=n_threads)
+        bfft_plan = plan_bfft!(charge_grid; num_threads=n_threads)
+    end
+    
     bsm_x = to_device(bsplines_moduli[1], AT)
     bsm_y = to_device(bsplines_moduli[2], AT)
     bsm_z = to_device(bsplines_moduli[3], AT)
@@ -604,12 +610,16 @@ end
     @inbounds x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
     @inbounds for ix in 0:(order-1)
         xindex = (x0index + ix) % mesh_dims[1]
+        θx = bsplines_θ[(i-1)*order+ix+1, 1]
+        qx = q * θx
         for iy in 0:(order-1)
             yindex = (y0index + iy) % mesh_dims[2]
+            θy = bsplines_θ[(i-1)*order+iy+1, 2]
+            qxy = qx * θy
             for iz in 0:(order-1)
                 zindex = (z0index + iz) % mesh_dims[3]
-                cb = q * bsplines_θ[(i-1)*order+ix+1, 1] *
-                            bsplines_θ[(i-1)*order+iy+1, 2] * bsplines_θ[(i-1)*order+iz+1, 3]
+                θz = bsplines_θ[(i-1)*order+iz+1, 3]
+                cb = qxy * θz
                 add_charge_grid!(charge_grid, zindex + 1, yindex + 1, xindex + 1, cb, Val(atomic))
             end
         end
@@ -820,13 +830,16 @@ function interpolate_force_inner!(Fs, charge_grid, grid_indices, bsplines_θ,
             for iy in 0:(order-1)
                 yindex = (y0index + iy) % mesh_dims[2]
                 ty, dty = bsplines_θ[(i-1)*order+iy+1, 2], bsplines_dθ[(i-1)*order+iy+1, 2]
+                dtx_ty = dtx * ty
+                tx_dty = tx * dty
+                txy = tx * ty
                 for iz in 0:(order-1)
                     zindex = (z0index + iz) % mesh_dims[3]
                     tz, dtz = bsplines_θ[(i-1)*order+iz+1, 3], bsplines_dθ[(i-1)*order+iz+1, 3]
                     gridvalue = real(charge_grid[zindex+1, yindex+1, xindex+1])
-                    fx += dtx * ty * tz * gridvalue
-                    fy += tx * dty * tz * gridvalue
-                    fz += tx * ty * dtz * gridvalue
+                    fx += dtx_ty * tz * gridvalue
+                    fy += tx_dty * tz * gridvalue
+                    fz += txy * dtz * gridvalue
                 end
             end
         end
