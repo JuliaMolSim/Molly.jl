@@ -3,10 +3,10 @@
 # The abstract type, the ANIPotential struct, the scalar AEV helpers (cosine_cutoff,
 # celu01) and the public function stubs live here in core Molly (no Lux/HDF5/KA
 # dependency). The implementations that need those packages are in the extensions:
-#   ext/MollyLuxExt.jl        — AEV + energy + HDF5 loader; also includes ext/molly_lux_ka.jl
-#                               (GPU-portable AEV kernels, on-device energy, the single analytic
-#                               forces path / forces!). Triggered by Lux + HDF5; KernelAbstractions
-#                               is a strong Molly dependency so needs no separate extension.
+#   ext/MollyLuxExt.jl        — AEV + energy + HDF5 loader, plus the GPU-portable AEV kernels,
+#                               on-device energy, and the single analytic forces path / forces!.
+#                               Triggered by Lux + HDF5; KernelAbstractions is a strong Molly
+#                               dependency so the GPU code needs no separate extension.
 #
 # See ext/MollyLuxExt.jl for the ANI method overview and per-equation references
 # (ANI-1: Smith et al., Chem. Sci. 2017; ANI-2x: Devereux et al., JCTC 2020).
