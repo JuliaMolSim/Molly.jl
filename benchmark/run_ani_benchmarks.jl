@@ -24,7 +24,7 @@ function phase(name, path)
 end
 
 phase("energy (CPU + Metal)", joinpath(@__DIR__, "ani_gpu_compare.jl"))
-phase("forces (CPU Enzyme + Metal)", joinpath(@__DIR__, "ani_forces_gpu.jl"))
+phase("forces (CPU analytic + Metal)", joinpath(@__DIR__, "ani_forces_gpu.jl"))
 
 if !haskey(ENV, "ANI_SKIP_PLOTS")
     phase("figures (CairoMakie)", joinpath(@__DIR__, "ani_plots.jl"))

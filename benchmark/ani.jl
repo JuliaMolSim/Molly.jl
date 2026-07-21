@@ -15,18 +15,11 @@
 #
 # BenchmarkTools SUITE (for CI tracking) is still exported as `SUITE`.
 
-using BenchmarkTools, Molly, Lux, HDF5
+using BenchmarkTools, Molly, Lux, HDF5, KernelAbstractions
 using StaticArrays, Unitful
 
-# Load Enzyme so the single-pass reverse-mode AD forces! path is active.
-# Without it, forces!() silently falls back to finite differences (2·D·N energy
-# evaluations — orders of magnitude slower), which is NOT what we want to measure.
-try
-    @eval using Enzyme
-    @info "Enzyme loaded — forces use single-pass reverse-mode AD"
-catch
-    @warn "Enzyme not available — forces will use the finite-difference fallback"
-end
+# Forces use the analytic path (AtomsCalculators.forces! → compute_ani_forces_ka), available
+# whenever Lux + HDF5 are loaded (KernelAbstractions is a core Molly dependency).
 
 const H5_PATH  = joinpath(@__DIR__, "..", "data", "ani_reference", "ani2x.h5")
 const PDB_PATH = joinpath(@__DIR__, "..", "data", "6mrr_equil.pdb")

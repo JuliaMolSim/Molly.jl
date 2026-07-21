@@ -10,17 +10,11 @@
 #   ANI_TRAJ_LOG     log/write interval in steps          (default 20)
 #   ANI_TRAJ_TEMP    initial temperature in K             (default 300)
 #
-# Note on cost: ANI forces run through single-pass Enzyme reverse-mode AD (seconds/step at
-# ~1000+ atoms on CPU), so a full-6mrr multi-thousand-step run is hours. This script targets a
-# tractable slice to demonstrate a stable end-to-end ANI NVE trajectory; on-device GPU forces
-# (future) would make full-system ANI MD practical.
+# Note on cost: on CPU the analytic ANI forces are ~0.1 s/step at a few-hundred atoms, so this
+# script targets a tractable slice to demonstrate a stable end-to-end ANI NVE trajectory.
+# Full-system runs are practical with the on-device (Metal) forces (see ani_trajectory_metal.jl).
 
-using Molly, Lux, HDF5, StaticArrays, Unitful, Random, LinearAlgebra
-try
-    @eval using Enzyme   # single-pass AD forces (else forces! falls back to finite differences)
-catch
-    @warn "Enzyme not loaded — forces use the slow finite-difference fallback"
-end
+using Molly, Lux, HDF5, KernelAbstractions, StaticArrays, Unitful, Random, LinearAlgebra
 
 # Standard atomic masses for the 7 ANI-2x elements (u). Real masses matter for dynamics —
 # the energy/force benchmarks use a placeholder 1 u, which is fine for timing but not MD.

@@ -1566,10 +1566,9 @@ function Molly.compute_ani_forces_ka(coords, species, pot, n_species::Int;
     return [SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha) for i in 1:length(coords)]
 end
 
-# The single ANI forces path. Strips coords to Å (staying on their device — Array → KA CPU,
+# The ANI forces path. Strips coords to Å (staying on their device — Array → KA CPU,
 # GPU array → Metal/CUDA), computes forces via the analytic backward, and accumulates into `fs`
-# in the system's units. Replaces the former finite-difference (MollyLuxExt) and Enzyme
-# reverse-mode (MollyLuxEnzymeExt) methods. Requires KernelAbstractions in addition to Lux/HDF5.
+# in the system's units.
 function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::ANIPotential;
                                   kwargs...) where {D, AT, T}
     nbrs    = get(kwargs, :neighbors, nothing)
