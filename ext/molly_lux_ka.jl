@@ -1,5 +1,10 @@
+# ANI KernelAbstractions AEV/energy/forces implementation.
+# Included directly into MollyLuxExt (KernelAbstractions is a strong Molly dependency,
+# so this GPU-portable code does not need its own extension). All `using`/`import`
+# statements are inherited from MollyLuxExt's module scope.
+
 # KernelAbstractions-based AEV computation for ANI ML potentials.
-# Loaded when KernelAbstractions, Lux, and HDF5 are all in the environment.
+# Active whenever Lux and HDF5 are loaded (KernelAbstractions is a strong Molly dependency).
 # Provides GPU-portable @kernel implementations of the radial/angular AEV so the same
 # code runs on CPU (via KA CPU backend) and CUDA/ROCm/Metal GPUs.
 #
@@ -10,13 +15,7 @@
 # unit-stripped and converted to the coord element type. Omitting it (nothing) uses an
 # infinite box, i.e. no minimum image (non-periodic / gas-phase).
 
-module MollyKALuxExt
 
-using Molly
-import AtomsCalculators
-using KernelAbstractions
-using Lux, HDF5
-using StaticArrays, LinearAlgebra
 
 # The smooth cosine cutoff f_C ([ANI-1] Eq. 2) is `Molly.cosine_cutoff` (defined in core
 # Molly, no Lux/HDF5 dependency) — a plain inlineable scalar function, device-compatible,
@@ -942,4 +941,3 @@ function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::ANIPotential
     return fs
 end
 
-end # module MollyKALuxExt

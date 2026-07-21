@@ -27,8 +27,9 @@
 #   angular_aev!   → [ANI-1] Eq. (4)  angular symmetry function G^A
 #   ani_energy_single / ani_raw_energy → [ANI-1] Eq. (1) energy sum + ensemble average
 # The element NN architecture is in build_element_model; per-atom self-energies are an
-# additive reference shift (Hartree). This extension provides the AEV + energy; forces are the
-# analytic on-device backward in MollyKALuxExt (AtomsCalculators.forces! → compute_ani_forces_ka).
+# additive reference shift (Hartree). This extension provides the AEV + energy, and (via the
+# included molly_lux_ka.jl) the analytic on-device forces (AtomsCalculators.forces! →
+# compute_ani_forces_ka).
 
 module MollyLuxExt
 
@@ -36,6 +37,7 @@ using Molly
 using Molly: from_device, to_device, vector
 import AtomsCalculators
 using Lux, HDF5
+using KernelAbstractions   # strong Molly dependency; the ANI GPU kernels live in molly_lux_ka.jl
 using StaticArrays, Unitful, Random, LinearAlgebra
 
 # ============================================================================
@@ -646,7 +648,9 @@ function AtomsCalculators.potential_energy(sys::System{D, AT, T},
     return Molly.ani_energy_to_units(E_ha * T(Molly.HARTREE_TO_EV), sys.energy_units)
 end
 
-# Forces are provided by the analytic on-device path in MollyKALuxExt
-# (AtomsCalculators.forces! → compute_ani_forces_ka), which needs KernelAbstractions.
+# GPU-portable AEV kernels, on-device energy (compute_ani_energy_ka), the analytic forces
+# (compute_ani_forces_ka) and the single AtomsCalculators.forces! live here. KernelAbstractions
+# is a strong dependency, so this is a plain include rather than a separate extension.
+include("molly_lux_ka.jl")
 
 end # module MollyLuxExt
