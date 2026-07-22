@@ -1828,11 +1828,28 @@ end
 
     # Random noise symmetry: dpd_gaussian is symmetric in particle indices
     for step in 1:10
-        @test Molly.dpd_gaussian(1, 2, step) == Molly.dpd_gaussian(2, 1, step)
-        @test Molly.dpd_gaussian(5, 13, step) == Molly.dpd_gaussian(13, 5, step)
+        @test Molly.dpd_gaussian(1%UInt32, 2%UInt32, step%UInt64, 1%UInt64) == Molly.dpd_gaussian(2%UInt32, 1%UInt32, step%UInt64, 1%UInt64)
+        @test Molly.dpd_gaussian(5%UInt32, 13%UInt32, step%UInt64, 1%UInt64) == Molly.dpd_gaussian(13%UInt32, 5%UInt32, step%UInt64, 1%UInt64)
     end
 
-    # Random noise varies with step number
-    vals = [Molly.dpd_gaussian(1, 2, s) for s in 1:100]
-    @test std(vals) > 0.5
+    # Random noise has the correct covariance
+    N = 100000
+    covar = cov([
+        [Molly.dpd_gaussian(1%UInt32, 2%UInt32, s%UInt64, 1%UInt64) for s in 1:N];;
+        [Molly.dpd_gaussian(1%UInt32, 3%UInt32, s%UInt64, 1%UInt64) for s in 1:N];;
+        [Molly.dpd_gaussian(1%UInt32, 2%UInt32, s%UInt64, 2%UInt64) for s in 1:N];;
+        [Molly.dpd_gaussian(s%UInt32, 1%UInt32, 1%UInt64, 2%UInt64) for s in 5:N+4];;
+        [Molly.dpd_gaussian(s%UInt32, 2%UInt32, 1%UInt64, 2%UInt64) for s in 5:N+4];;
+        [Molly.dpd_gaussian(s%UInt32, 10000000%UInt32, 1%UInt64, 2%UInt64) for s in 1:N];;
+        [Molly.dpd_gaussian(s%UInt32, 10000001%UInt32, 1%UInt64, 2%UInt64) for s in 1:N];;
+    ])
+    for i in 1:size(covar, 1)
+        for j in 1:size(covar, 2)
+            if i == j
+                @test abs(covar[i, j] - 1.0) < 0.02
+            else
+                @test abs(covar[i, j]) < 0.02
+            end
+        end
+    end
 end
