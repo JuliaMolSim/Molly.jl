@@ -1761,14 +1761,14 @@ end
 end
 
 @testset "DPD interaction" begin
-    r_c = 1.0
+    r_c = 2.5
     a_param = 25.0
     γ_param = 4.5
     dt = 0.01
     σ_param = 3.0
-    boundary = CubicBoundary(5.0)
+    boundary = CubicBoundary(10.0)
 
-    inter = DPDInteraction(a=a_param, γ=γ_param, σ=σ_param, r_c=r_c, dt=dt)
+    inter = DPDInteraction(a=a_param, γ=γ_param, σ=σ_param, r_c=r_c, dt=dt, key=UInt64(1))
 
     @test !use_neighbors(inter)
     @test use_neighbors(DPDInteraction(use_neighbors=true))
@@ -1782,31 +1782,32 @@ end
     dr = vector(c1, c2, boundary)
     r = norm(dr)
 
-    # Conservative force only (zero velocities, deterministic random from hash)
-    f = force(inter, dr, a1, a2, NoUnits, false, c1, c2, boundary, v1, v2, 0)
+    # Conservative force only (zero velocities and σ = 0 so no random force)
+    inter_cons = DPDInteraction(a=a_param, γ=γ_param, σ=0.0, r_c=r_c, dt=dt)
+    f = force(inter_cons, dr, a1, a2, NoUnits, false, c1, c2, boundary, v1, v2, 0)
     w_R = 1 - r / r_c
     f_C_expected = a_param * w_R / r
     # The force should be in the +x direction (repulsive, pushing j away from i)
+    @test isapprox(f, f_C_expected * dr; atol=1e-10)
     @test f[1] > 0.0
-    @test isapprox(f[2], 0.0; atol=1e-10)
-    @test isapprox(f[3], 0.0; atol=1e-10)
 
     # Conservative potential energy
-    pe = potential_energy(inter, dr, a1, a2, NoUnits)
+    pe = potential_energy(inter_cons, dr, a1, a2, NoUnits)
     pe_expected = (a_param / 2) * r_c * w_R^2
     @test isapprox(pe, pe_expected; atol=1e-10)
 
     # Force is zero at and beyond cutoff
-    c3 = SVector(2.0, 1.0, 1.0)
+    c3 = SVector(3.5, 1.0, 1.0)
     dr_cutoff = vector(c1, c3, boundary)
     f_cutoff = force(inter, dr_cutoff, a1, a2, NoUnits, false, c1, c3, boundary, v1, v2, 0)
-    @test all(isapprox.(f_cutoff, 0.0; atol=1e-10))
-    @test isapprox(potential_energy(inter, dr_cutoff, a1, a2, NoUnits), 0.0; atol=1e-10)
+    @test iszero(f_cutoff)
+    @test iszero(potential_energy(inter, dr_cutoff, a1, a2, NoUnits))
 
-    c4 = SVector(2.5, 1.0, 1.0)
+    c4 = SVector(4.0, 1.0, 1.0)
     dr_beyond = vector(c1, c4, boundary)
     f_beyond = force(inter, dr_beyond, a1, a2, NoUnits, false, c1, c4, boundary, v1, v2, 0)
-    @test all(isapprox.(f_beyond, 0.0; atol=1e-10))
+    @test iszero(f_beyond)
+    @test iszero(potential_energy(inter, dr_beyond, a1, a2, NoUnits))
 
     # Dissipative force: approaching particles should experience damping
     v1_approach = SVector(1.0, 0.0, 0.0)
@@ -1825,6 +1826,18 @@ end
     f_diss_recede = force(inter_nodiss, dr, a1, a2, NoUnits, false, c1, c2, boundary,
                           v1_recede, v2_still, 0)
     @test f_diss_recede[1] < 0.0
+
+    # With all terms included the pair forces are equal and opposite and act
+    # along the line of centers, conserving linear and angular momentum
+    c5 = SVector(1.2, 1.3, 1.6)
+    v5 = SVector(0.5, -0.2, 0.1)
+    v6 = SVector(-0.3, 0.4, 0.2)
+    dr_gen = vector(c1, c5, boundary)
+    f_ij = force(inter, dr_gen , a1, a2, NoUnits, false, c1, c5, boundary, v5, v6, 7)
+    f_ji = force(inter, -dr_gen, a2, a1, NoUnits, false, c5, c1, boundary, v6, v5, 7)
+    @test f_ij == -f_ji
+    @test !iszero(f_ij)
+    @test isapprox(abs(dot(f_ij, dr_gen)), norm(f_ij)*norm(dr_gen); atol=1e-10)
 
     # Random noise symmetry: dpd_gaussian is symmetric in particle indices
     for step in 1:10
