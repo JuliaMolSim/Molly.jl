@@ -615,11 +615,11 @@ end
         if recompute_forces
             recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
                                              needs_vir_step; n_threads=n_threads)
-            forces_t .= forces_t_dt
+            forces_t, forces_t_dt = forces_t_dt, forces_t
             accels_t .= calc_accels.(forces_t, masses(sys))
         else
-            forces_t .= forces_t_dt
-            accels_t .= accels_t_dt
+            forces_t, forces_t_dt = forces_t_dt, forces_t
+            accels_t, accels_t_dt = accels_t_dt, accels_t
         end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
@@ -783,11 +783,11 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
         if recompute_forces
             recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
                                              needs_vir_step; n_threads=n_threads)
-            forces_t .= forces_t_dt
+            forces_t, forces_t_dt = forces_t_dt, forces_t
             accels_t .= calc_accels.(forces_t, masses(sys))
         else
-            forces_t .= forces_t_dt
-            accels_t .= accels_t_dt
+            forces_t, forces_t_dt = forces_t_dt, forces_t
+            accels_t, accels_t_dt = accels_t_dt, accels_t
         end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
@@ -997,7 +997,7 @@ end
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, false;
                                    n_threads=n_threads)
-        coords_last .= coords_copy
+        coords_last, coords_copy = coords_copy, coords_last
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        current_forces=forces_t)
@@ -1519,11 +1519,11 @@ end
         if recompute_forces
             forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                     n_threads=n_threads)
-            forces_t .= forces_t_dt
+            forces_t, forces_t_dt = forces_t_dt, forces_t
             accels_t .= calc_accels.(forces_t, masses(sys))
         else
-            forces_t .= forces_t_dt
-            accels_t .= accels_t_dt
+            forces_t, forces_t_dt = forces_t_dt, forces_t
+            accels_t, accels_t_dt = accels_t_dt, accels_t
         end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
