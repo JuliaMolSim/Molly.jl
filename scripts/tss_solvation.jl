@@ -222,7 +222,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
         neighbor_finder_type=neighbor_finder_type,
         nonbonded_method=nonbonded_method,
         constraints=:hbonds,
-        constraint_algorithm=LINCS,
+        constraint_algorithm=SetupLINCS(),
         rigid_water=true,
         hydrogen_mass=3
     )

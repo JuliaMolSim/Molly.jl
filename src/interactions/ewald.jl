@@ -273,7 +273,7 @@ interaction, which provides the exclusions for bonded atoms.
 for example when using a polarizable force field.
 `grad_safe` should be set to `true` if gradients are going to be calculated
 with Enzyme.jl.
-`n_threads` is used to pre-allocate memory on CPU.
+`n_threads` is used to pre-allocate memory on CPU and plan the FFTs.
 
 This implementation is based on the implementation in OpenMM, which
 is based on the smooth PME algorithm from
@@ -409,7 +409,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         fft_plan  = plan_fft!(charge_grid; num_threads=n_threads)
         bfft_plan = plan_bfft!(charge_grid; num_threads=n_threads)
     end
-    
+
     bsm_x = to_device(bsplines_moduli[1], AT)
     bsm_y = to_device(bsplines_moduli[2], AT)
     bsm_z = to_device(bsplines_moduli[3], AT)

@@ -457,7 +457,7 @@ end
 end
 
 @testset "CHARMM OpenMM protein comparison" begin
-    for constraint_algorithm in (LINCS, SHAKE_RATTLE)
+    for constraint_algorithm in (SetupLINCS(), SetupSHAKE_RATTLE())
         start_temp = 485.281907022u"K"
         ff = MolecularForceField(
             joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
@@ -476,6 +476,7 @@ end
             constraints=:hbonds,
             rigid_water=true,
             constraint_algorithm=constraint_algorithm,
+            n_threads=1,
         )
         neighbors = find_neighbors(sys)
         @test length(sys.specific_inter_lists) == 7
@@ -499,6 +500,16 @@ end
         @test bench_result.allocs <= 15
         @test bench_result.memory <= 1100
 
+        # Use all threads
+        sys = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            nonbonded_method=:pme,
+            center_coords=false,
+            constraints=:hbonds,
+            rigid_water=true,
+            constraint_algorithm=constraint_algorithm,
+        )
         scalar_vir = scalar_virial(sys)
         @test scalar_vir ≈ tr(virial(sys))
         @test scalar_vir ≈ scalar_virial(sys; n_threads=1)

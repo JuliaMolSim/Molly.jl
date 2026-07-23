@@ -1,4 +1,6 @@
-export LINCS
+export
+    LINCS,
+    SetupLINCS
 
 # Internal types for LINCS algorithm
 
@@ -22,8 +24,8 @@ struct LincsData{A1, A2, L, IM, SD, CM}
     invmass::IM
     sdiag::SD
     coupling::CM
-    nrec::Int
-    niter::Int
+    n_rec::Int
+    n_iter::Int
 end
 
 struct LincsWorkspace{BV, R, S, TM, BL, FS}
@@ -36,8 +38,8 @@ struct LincsWorkspace{BV, R, S, TM, BL, FS}
 end
 
 """
-    LINCS(masses, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
-          dist_constraints=nothing, angle_constraints=nothing, nrec=4, niter=1,
+    LINCS(; masses, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1",
+          dist_constraints=nothing, angle_constraints=nothing, n_rec=4, n_iter=1,
           iter_vel_correction=false, gpu_block_size=128)
 
 Constrain bond distances during a simulation using the LINCS (LINear Constraint Solver)
@@ -62,9 +64,9 @@ for the original LINCS paper.
     is converted into 3 distance constraints internally. LINCS requires that angle
     constraints are isolated: none of their atoms may participate in distance constraints
     or in other angle constraints.
-- `nrec=4`: order of the matrix expansion for coupling matrix inversion. Higher values
+- `n_rec=4`: order of the matrix expansion for coupling matrix inversion. Higher values
     improve accuracy for coupled constraints at the cost of performance.
-- `niter=1`: number of outer correction iterations for rotational lengthening. Higher
+- `n_iter=1`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
 - `iter_vel_correction=false`: whether to use iterative velocity constraint solving.
     When `false`, velocity correction uses one LINCS projection as in
@@ -117,17 +119,19 @@ function validate_angle_constraints(dist_constraints, angle_constraints)
     end
 end
 
-function LINCS(;masses,
+function LINCS(; masses,
                dist_tolerance=1e-8u"nm",
                vel_tolerance=1e-8u"nm^2 * ps^-1",
                dist_constraints=nothing,
                angle_constraints=nothing,
-               nrec::Integer=4,
-               niter::Integer=1,
+               n_rec::Integer=4,
+               n_iter::Integer=1,
                iter_vel_correction::Bool=false,
                gpu_block_size::Integer=128)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
-    ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero"))
+    ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
+    n_rec  < 0 && throw(ArgumentError("n_rec cannot be negative" ))
+    n_iter < 0 && throw(ArgumentError("n_iter cannot be negative"))
 
     dc_present = !isnothing(dist_constraints) && length(dist_constraints) > 0
     ac_present = !isnothing(angle_constraints) && length(angle_constraints) > 0
@@ -153,7 +157,7 @@ function LINCS(;masses,
     clusters = StructArray([Cluster12Data(Int32(dc.i), Int32(dc.j), dc.dist)
                             for dc in all_dist_constraints])
 
-    lincs_data = build_lincs_data(all_dist_constraints, masses; nrec=Int(nrec), niter=Int(niter))
+    lincs_data = build_lincs_data(all_dist_constraints, masses; n_rec=Int(n_rec), n_iter=Int(n_iter))
     workspace = create_lincs_workspace(lincs_data)
 
     stored_angle_constraints = ac_present ? collect(angle_constraints) : nothing
@@ -166,9 +170,32 @@ end
 function Base.show(io::IO, lincs::LINCS)
     n_ac = isnothing(lincs.angle_constraints) ? 0 : length(lincs.angle_constraints)
     n_dc = length(lincs.dist_constraints) - 3 * n_ac # avoid counting angle constraints as distance constraints
-    print(io, "LINCS with ", n_dc, " distance and ", n_ac, " angle constraints (nrec=",
-          lincs.lincs_data.nrec, ", niter=", lincs.lincs_data.niter,
+    print(io, "LINCS with ", n_dc, " distance and ", n_ac, " angle constraints (n_rec=",
+          lincs.lincs_data.n_rec, ", n_iter=", lincs.lincs_data.n_iter,
           ", iter_vel_correction=", lincs.iter_vel_correction, ")")
+end
+
+struct SetupLINCS{D, V}
+    dist_tolerance::D
+    vel_tolerance::V
+    n_rec::Int
+    n_iter::Int
+    iter_vel_correction::Bool
+    gpu_block_size::Int
+end
+
+function SetupLINCS(; dist_tolerance=1e-6u"nm",
+                    vel_tolerance=1e-6u"nm^2 * ps^-1",
+                    n_rec::Integer=4,
+                    n_iter::Integer=1,
+                    iter_vel_correction::Bool=false,
+                    gpu_block_size::Integer=128)
+    ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
+    ustrip(vel_tolerance)  > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
+    n_rec  < 0 && throw(ArgumentError("n_rec cannot be negative" ))
+    n_iter < 0 && throw(ArgumentError("n_iter cannot be negative"))
+    return SetupLINCS(dist_tolerance, vel_tolerance, n_rec, n_iter,
+                      iter_vel_correction, gpu_block_size)
 end
 
 function constrained_atom_inds(lincs::LINCS)
@@ -266,7 +293,7 @@ end
 
 function build_lincs_data(dist_constraints::AbstractVector{<:DistanceConstraint},
                           masses::AbstractVector;
-                          nrec::Int=4, niter::Int=1)
+                          n_rec::Integer=4, n_iter::Integer=1)
     T = typeof(float(ustrip(masses[1])))
     K = length(dist_constraints)
 
@@ -283,7 +310,7 @@ function build_lincs_data(dist_constraints::AbstractVector{<:DistanceConstraint}
     end
 
     coupling = build_lincs_coupling_matrix(atom1, atom2, invmass, sdiag, T)
-    return LincsData(atom1, atom2, lengths, invmass, sdiag, coupling, nrec, niter)
+    return LincsData(atom1, atom2, lengths, invmass, sdiag, coupling, n_rec, n_iter)
 end
 
 function create_lincs_workspace(data::LincsData)
@@ -425,7 +452,7 @@ end
         @Const(coords), @Const(old_coords),
         @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
-        max_coupled, nrec, boundary, factor_sum, needs_virial)
+        max_coupled, n_rec, boundary, factor_sum, needs_virial)
     i = @index(Global, Linear)
     @uniform T = eltype(lengths)
 
@@ -442,12 +469,12 @@ end
     rhs[i] = val
     sol[i] = val
 
-    if nrec > 0
+    if n_rec > 0
         @synchronize
     end
 
     nc = n_coupled_arr[i]
-    for rec in 1:nrec
+    for rec in 1:n_rec
         mvb = zero(T)
         for j in 1:max_coupled
             if j <= nc
@@ -463,7 +490,7 @@ end
             rhs[i] = mvb
         end
         sol[i] += mvb
-        if rec < nrec
+        if rec < n_rec
             @synchronize
         end
     end
@@ -486,7 +513,7 @@ end
         @Const(coords),
         @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
-        max_coupled, nrec, boundary, factor_sum, needs_virial)
+        max_coupled, n_rec, boundary, factor_sum, needs_virial)
     i = @index(Global, Linear)
     @uniform T = eltype(lengths)
 
@@ -502,12 +529,12 @@ end
 
     B_i = B[i]
 
-    if nrec > 0
+    if n_rec > 0
         @synchronize
     end
 
     nc = n_coupled_arr[i]
-    for rec in 1:nrec
+    for rec in 1:n_rec
         mvb = zero(T)
         for j in 1:max_coupled
             if j <= nc
@@ -523,7 +550,7 @@ end
             rhs[i] = mvb
         end
         sol[i] += mvb
-        if rec < nrec
+        if rec < n_rec
             @synchronize
         end
     end
@@ -546,7 +573,7 @@ end
         @Const(coords), @Const(velocities),
         @Const(atom1), @Const(atom2), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
-        max_coupled, nrec, boundary, factor_sum, needs_virial)
+        max_coupled, n_rec, boundary, factor_sum, needs_virial)
     i = @index(Global, Linear)
     @uniform T = eltype(sdiag)
 
@@ -561,12 +588,12 @@ end
     rhs[i] = val
     sol[i] = val
 
-    if nrec > 0
+    if n_rec > 0
         @synchronize
     end
 
     nc = n_coupled_arr[i]
-    for rec in 1:nrec
+    for rec in 1:n_rec
         mvb = zero(T)
         for j in 1:max_coupled
             if j <= nc
@@ -582,7 +609,7 @@ end
             rhs[i] = mvb
         end
         sol[i] += mvb
-        if rec < nrec
+        if rec < n_rec
             @synchronize
         end
     end
@@ -605,7 +632,7 @@ end
         @Const(velocities),
         @Const(atom1), @Const(atom2), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
-        max_coupled, nrec, factor_sum, needs_virial)
+        max_coupled, n_rec, factor_sum, needs_virial)
     i = @index(Global, Linear)
     @uniform T = eltype(sdiag)
 
@@ -617,12 +644,12 @@ end
     rhs[i] = val
     sol[i] = val
 
-    if nrec > 0
+    if n_rec > 0
         @synchronize
     end
 
     nc = n_coupled_arr[i]
-    for rec in 1:nrec
+    for rec in 1:n_rec
         mvb = zero(T)
         for j in 1:max_coupled
             if j <= nc
@@ -638,7 +665,7 @@ end
             rhs[i] = mvb
         end
         sol[i] += mvb
-        if rec < nrec
+        if rec < n_rec
             @synchronize
         end
     end
@@ -717,8 +744,8 @@ function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale,
     rhs = ws.rhs
     tmp = ws.tmp
 
-    # Matrix expansion: nrec iterations
-    for rec in 1:data.nrec
+    # Matrix expansion: n_rec iterations
+    for rec in 1:data.n_rec
         @inbounds for i in eachindex(atom1)
             mvb = zero(T)
             for n in crange[i]:(crange[i + 1] - 1)
@@ -788,7 +815,7 @@ function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
     lincs_solve!(coords, data, ws, unit_scale, factor_sum)
 
     # Outer correction iterations (rotational lengthening)
-    for _ in 1:data.niter
+    for _ in 1:data.n_iter
         @inbounds for i in 1:K
             a1 = atom1[i]
             a2 = atom2[i]
@@ -841,7 +868,7 @@ default_position_constraint_context() = ConstraintApplicationContext(
 )
 
 function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace,
-                          boundary, context, niter_velocity::Integer=data.niter)
+                          boundary, context, n_iter_velocity::Integer=data.n_iter)
     atom1 = data.atom1
     atom2 = data.atom2
     sdiag = data.sdiag
@@ -880,7 +907,7 @@ function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspac
     lincs_solve!(velocities, data, ws, unit_vel_scale, factor_sum)
 
     # Iterative correction: re-evaluate velocity residual and solve again
-    for _ in 1:niter_velocity
+    for _ in 1:n_iter_velocity
         @inbounds for i in 1:K
             a1, a2 = atom1[i], atom2[i]
             dv = ustrip.(velocities[a2] - velocities[a1])
@@ -980,7 +1007,7 @@ function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
                 coords, old_coords,
                 data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
                 coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
-                coupling.max_coupled, data.nrec, boundary, ws.factor_sum,
+                coupling.max_coupled, data.n_rec, boundary, ws.factor_sum,
                 context.needs_virial;
                 ndrange=K_padded)
 
@@ -989,14 +1016,14 @@ function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
                 ndrange=n_ca)
 
     # Correction iterations (rotational lengthening)
-    if data.niter > 0
+    if data.n_iter > 0
         corr_kern! = lincs_fused_correction_kernel!(backend, block_size)
-        for _ in 1:data.niter
+        for _ in 1:data.n_iter
             corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
                        coords,
                        data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
                        coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
-                       coupling.max_coupled, data.nrec, boundary, ws.factor_sum,
+                       coupling.max_coupled, data.n_rec, boundary, ws.factor_sum,
                        context.needs_virial;
                        ndrange=K_padded)
             apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
@@ -1010,7 +1037,7 @@ end
 
 function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
                               delta_buf, constrained_atoms, block_size, context,
-                              niter_velocity::Integer=data.niter)
+                              n_iter_velocity::Integer=data.n_iter)
     K_padded = length(data.atom1)
     backend = get_backend(velocities)
     unit_vel_scale = oneunit(eltype(eltype(velocities)))
@@ -1025,7 +1052,7 @@ function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
                 coords, velocities,
                 data.atom1, data.atom2, data.invmass, data.sdiag,
                 coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
-                coupling.max_coupled, data.nrec, boundary, ws.factor_sum,
+                coupling.max_coupled, data.n_rec, boundary, ws.factor_sum,
                 context.needs_virial;
                 ndrange=K_padded)
 
@@ -1034,14 +1061,14 @@ function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
                 ndrange=n_ca)
 
     # Iterative correction: re-evaluate velocity residual and solve again
-    if niter_velocity > 0
+    if n_iter_velocity > 0
         corr_kern! = lincs_fused_velocity_correction_kernel!(backend, block_size)
-        for _ in 1:niter_velocity
+        for _ in 1:n_iter_velocity
             corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
                        velocities,
                        data.atom1, data.atom2, data.invmass, data.sdiag,
                        coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
-                       coupling.max_coupled, data.nrec, ws.factor_sum,
+                       coupling.max_coupled, data.n_rec, ws.factor_sum,
                        context.needs_virial;
                        ndrange=K_padded)
             apply_kern!(velocities, delta_buf, constrained_atoms, unit_vel_scale;
@@ -1072,15 +1099,15 @@ end
 
 function apply_velocity_constraints!(sys::System, ca::LINCS; context=nothing, kwargs...)
     context = (isnothing(context) ? default_velocity_constraint_context() : context)
-    niter_velocity = (ca.iter_vel_correction ? ca.lincs_data.niter : 0)
+    n_iter_velocity = (ca.iter_vel_correction ? ca.lincs_data.n_iter : 0)
     if !isnothing(ca.delta_buf)
         lincs_vel_apply_gpu!(sys.velocities, sys.coords,
                              ca.lincs_data, ca.workspace, sys.boundary,
                              ca.delta_buf, ca.constrained_atoms, ca.gpu_block_size, context,
-                             niter_velocity)
+                             n_iter_velocity)
     else
         lincs_vel_apply!(sys.velocities, sys.coords,
-                         ca.lincs_data, ca.workspace, sys.boundary, context, niter_velocity)
+                         ca.lincs_data, ca.workspace, sys.boundary, context, n_iter_velocity)
     end
     return sys
 end
@@ -1207,7 +1234,7 @@ function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms, block_size)
                                       n_coupled_gpu, dense_coupling.max_coupled)
 
     data_gpu = LincsData(atom1_gpu, atom2_gpu, lengths_gpu, invmass_gpu,
-                         sdiag_gpu, coupling_gpu, data.nrec, data.niter)
+                         sdiag_gpu, coupling_gpu, data.n_rec, data.n_iter)
 
     # Workspace sized for padded constraint count
     backend = get_backend(atom1_gpu)

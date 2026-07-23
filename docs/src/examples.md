@@ -1285,9 +1285,9 @@ for j in 1:n_atoms_half
 end
 
 shake = SHAKE_RATTLE(
-    length(atoms),
-    1e-8u"Å",
-    1e-8u"Å^2 * ps^-1";
+    n_atoms=length(atoms),
+    dist_tolerance=1e-8u"Å",
+    vel_tolerance=1e-8u"Å^2 * ps^-1",
     dist_constraints=[constraints...],
 )
 

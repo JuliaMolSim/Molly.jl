@@ -1305,7 +1305,11 @@ end
 
 @testset "MTSIntegrator" begin
     ff = MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))
-    constraint_options = ((:none, SHAKE_RATTLE), (:hbonds, SHAKE_RATTLE), (:hbonds, LINCS))
+    constraint_options = (
+        (:none  , SetupSHAKE_RATTLE()),
+        (:hbonds, SetupSHAKE_RATTLE()),
+        (:hbonds, SetupLINCS()       ),
+    )
 
     for AT in array_list
         for (constraints, constraint_algorithm) in constraint_options

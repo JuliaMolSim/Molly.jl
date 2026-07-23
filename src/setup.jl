@@ -467,7 +467,7 @@ Gromacs file reading should be considered experimental.
     molecules. Applied on top of `constraints`, so `constraints=:hangles` and
     `rigid_water=false` gives rigid water.
 - `constraint_algorithm`: Constraint algorithm to use for enforcing the constraints.
-    Can be [`LINCS`](@ref) or [`SHAKE_RATTLE`](@ref), defaults to LINCS.
+    Can be an instance of `SetupLINCS` or `SetupSHAKE_RATTLE`, defaults to `SetupLINCS()`.
 - `nonbonded_method=:none`: method for long range interaction summation,
     options are `:none` (short range only), `:cutoff` (reaction field method),
     `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
@@ -501,6 +501,8 @@ Gromacs file reading should be considered experimental.
 - `disulfide_bonds=true`: whether or not to look for disulfide bonds between CYS
     residues in the structure file and add them to the topology. Uses geometric
     arguments to assign them.
+- `n_threads=Threads.nthreads()`: the number of threads the simulation will likely
+    be run on, used for example when setting up PME. Only relevant when running on CPU.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
     with Enzyme.jl and `nonbonded_method` is `:pme` or `array_type` is `CuArray`.
 - `strictness=:warn`: determines behavior when encountering possible problems,
@@ -518,7 +520,7 @@ function System(coord_file::AbstractString,
                 dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,
                 rigid_water=false,
-                constraint_algorithm=LINCS,
+                constraint_algorithm=SetupLINCS(),
                 nonbonded_method=:none,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
@@ -532,6 +534,7 @@ function System(coord_file::AbstractString,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
                 disulfide_bonds=true,
+                n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
                 force_separate_lj14=false) where {AT <: AbstractArray}
@@ -1163,7 +1166,7 @@ function System(coord_file::AbstractString,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
                   dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr, hydrogen_mass,
-                  strictness, launch_config, autotune_launch, constraint_algorithm)
+                  strictness, launch_config, autotune_launch, constraint_algorithm, n_threads)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1200,8 +1203,9 @@ function System(T::Type,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
+                n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
-                constraint_algorithm=LINCS) where AT <: AbstractArray
+                constraint_algorithm=SetupLINCS()) where AT <: AbstractArray
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
@@ -1502,7 +1506,8 @@ function System(T::Type,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
                   dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
-                  hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
+                  hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
+                  n_threads)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1526,26 +1531,45 @@ function find_bond_r0(bonds_all, i, j)
     error("atoms $i and $j are in an angle constraint but the bond cannot be found")
 end
 
+# Allow setup structs to have unitful defaults
+function convert_setup_quantity(x, units, T)
+    if units
+        return T(x)
+    else
+        if unit(x) == NoUnits
+            return T(x)
+        else
+            return T(ustrip(x))
+        end
+    end
+end
+
 function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
-                                    units, strictness, masses, ::Type{SHAKE_RATTLE})
+                                    units, strictness, masses, ca::SetupSHAKE_RATTLE)
     return SHAKE_RATTLE(
-        length(atoms_data),
-        add_units(T(1e-6), u"nm", units),
-        add_units(T(1e-6), u"nm^2 * ps^-1", units);
+        n_atoms=length(atoms_data),
+        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
+        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
         dist_constraints=[dist_constraints...],
         angle_constraints=[angle_constraints...],
+        gpu_block_size=ca.gpu_block_size,
+        max_iters=ca.max_iters,
         strictness=strictness,
     )
 end
 
 function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
-                                    units, strictness, masses, ::Type{LINCS})
+                                    units, strictness, masses, ca::SetupLINCS)
     return LINCS(
         masses=masses,
-        dist_tolerance=add_units(T(1e-6), u"nm", units),
-        vel_tolerance=add_units(T(1e-6), u"nm^2 * ps^-1", units),
+        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
+        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
         dist_constraints=[dist_constraints...],
         angle_constraints=[angle_constraints...],
+        n_rec=ca.n_rec,
+        n_iter=ca.n_iter,
+        iter_vel_correction=ca.iter_vel_correction,
+        gpu_block_size=ca.gpu_block_size,
     )
 end
 
@@ -1664,7 +1688,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
                 ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent, kappa,
                 grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
-                hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
+                hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
+                n_threads)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
 
@@ -1896,6 +1921,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 boundary_used;
                 error_tol=T(ewald_error_tol),
                 grad_safe=grad_safe,
+                n_threads=n_threads,
             )
         end
         general_inters_ewald = (ewald,)

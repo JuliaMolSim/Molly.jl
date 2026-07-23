@@ -97,7 +97,7 @@ isnan_svec_array(svs::AbstractGPUArray) = AcceleratedKernels.any(isnan_svec, svs
 
 function check_array_nans(svec_arrays, labels, step_n)
     if length(svec_arrays) != length(labels)
-        throw(ArgumentError("check_array_nans should be given the same number of arrays "
+        throw(ArgumentError("check_array_nans should be given the same number of arrays " *
                             "($(length(svec_arrays))) as labels ($(length(labels)))"))
     end
     if any(isnan_svec_array, svec_arrays)

@@ -17,7 +17,8 @@
     bond_length = 0.74u"Å"
     constraints = [DistanceConstraint(j, j + 1, bond_length) for j in 1:2:n_atoms]
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
-    cons_shake = SHAKE_RATTLE(n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1"; dist_constraints=constraints)
+    cons_shake = SHAKE_RATTLE(n_atoms=n_atoms, dist_tolerance=1e-8u"Å",
+                              vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints)
     cons_lincs = LINCS(masses=repeat([atom_mass], n_atoms), dist_tolerance=1e-8u"Å",
                        vel_tolerance=1e-8u"Å^2 * ps^-1", dist_constraints=constraints)
 
@@ -87,7 +88,7 @@ end
     is = collect(1:(2 * (n_atoms ÷ 3)))
     js = collect(((n_atoms ÷ 3) + 1):n_atoms)
     constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps"; dist_constraints=constraints)
+    cons = SHAKE_RATTLE(n_atoms=n_atoms, dist_constraints=constraints)
 
     @test length(cons.clusters23) == (n_atoms ÷ 3)
 
@@ -146,7 +147,7 @@ end
     is = repeat(1:(n_atoms ÷ 4), 3) # Central atom in each cluster
     js = collect(((n_atoms ÷ 4) + 1):n_atoms)
     constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm", 1e-8u"nm^2/ps"; dist_constraints=constraints)
+    cons = SHAKE_RATTLE(n_atoms=n_atoms, dist_constraints=constraints)
 
     @test length(cons.clusters34) == (n_atoms ÷ 4)
 
@@ -205,7 +206,7 @@ end
     ks = collect((2 * (n_atoms ÷ 3) + 1):n_atoms)
     angle_constraints = [AngleConstraint(is[idx], js[idx], ks[idx], θ, bond_length, bond_length)
                          for idx in eachindex(is)]
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm", 1e-8u"nm^2/ps"; angle_constraints=angle_constraints)
+    cons = SHAKE_RATTLE(n_atoms=n_atoms, angle_constraints=angle_constraints)
 
     @test length(cons.angle_clusters) == (n_atoms ÷ 3)
 
@@ -280,7 +281,7 @@ end
     distance_constraints = [DistanceConstraint(is[idx], js[idx], bond_length)
                             for idx in eachindex(is)]
 
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm", 1e-8u"nm^2/ps"; dist_constraints=distance_constraints,
+    cons = SHAKE_RATTLE(n_atoms=n_atoms, dist_constraints=distance_constraints,
                         angle_constraints=angle_constraints)
 
     @test length(cons.angle_clusters) == length(angle_constraints)
@@ -322,7 +323,7 @@ end
     minimizer = SteepestDescentMinimizer()
     simulator = VelocityVerlet(dt=T(0.001)u"ps")
 
-    constraint_algorithms = [SHAKE_RATTLE, LINCS]
+    constraint_algorithms = (SetupSHAKE_RATTLE(), SetupLINCS(n_rec=6, n_iter=6))
 
     for AT in array_list
         for constraint_algorithm in constraint_algorithms
@@ -336,19 +337,6 @@ end
                     rigid_water=rigid_water, # No water present
                     constraint_algorithm=constraint_algorithm,    
                 )
-                if constraint_algorithm == LINCS
-                    # Increase tolerances from default
-                    lincs = LINCS(
-                        masses=Array(masses(sys)),
-                        dist_constraints=sys.constraints[1].dist_constraints,
-                        angle_constraints=sys.constraints[1].angle_constraints,
-                        dist_tolerance=sys.constraints[1].dist_tolerance,
-                        vel_tolerance=sys.constraints[1].vel_tolerance,
-                        nrec=6,
-                        niter=6,
-                    )
-                    sys.constraints = (Molly.setup_constraints!(lincs, sys.neighbor_finder, AT),)
-                end
 
                 simulate!(sys, minimizer)
                 random_velocities!(sys, temp)
@@ -401,8 +389,8 @@ end
         pairwise_inters = (LennardJones(use_neighbors=true),)
 
         constraints = (
-            SHAKE_RATTLE(n_atoms, T(1e-6)u"nm", T(1e-6)u"nm^2/ps";
-                         dist_constraints=dist_constraints),
+            SHAKE_RATTLE(n_atoms=n_atoms, dist_tolerance=T(1e-6)u"nm",
+                         vel_tolerance=T(1e-6)u"nm^2/ps", dist_constraints=dist_constraints),
             LINCS(masses=fill(atom_mass, n_atoms), dist_tolerance=T(1e-6)u"nm",
                   vel_tolerance=T(1e-6)u"nm^2/ps", dist_constraints=dist_constraints),
         )
@@ -433,18 +421,18 @@ end
 
 function make_lincs_diatomic(; mass1=12.0, mass2=12.0, bond_length=0.15,
                                v1=SVector(0.0, 0.0, 0.0), v2=SVector(0.0, 0.0, 0.0),
-                               nrec=4, niter=1)
+                               n_rec=4, n_iter=1)
     dc = [DistanceConstraint(1, 2, bond_length)]
     masses = [mass1, mass2]
     x = [SVector(0.0, 0.0, 0.0), SVector(bond_length, 0.0, 0.0)]
     v = [v1, v2]
-    data = Molly.build_lincs_data(dc, masses; nrec, niter)
+    data = Molly.build_lincs_data(dc, masses; n_rec, n_iter)
     ws = Molly.create_lincs_workspace(data)
     return x, v, data, ws
 end
 
 function make_lincs_triatomic(; masses_val=[12.0, 12.0, 12.0], bond_length=0.15,
-                                x=nothing, v=nothing, nrec=4, niter=1)
+                                x=nothing, v=nothing, n_rec=4, n_iter=1)
     if x === nothing
         x = [SVector(0.0, 0.0, 0.0), SVector(0.15, 0.0, 0.0), SVector(0.30, 0.0, 0.0)]
     end
@@ -452,7 +440,7 @@ function make_lincs_triatomic(; masses_val=[12.0, 12.0, 12.0], bond_length=0.15,
         v = [SVector(0.0, 0.0, 0.0) for _ in 1:3]
     end
     dc = [DistanceConstraint(1, 2, bond_length), DistanceConstraint(2, 3, bond_length)]
-    data = Molly.build_lincs_data(dc, masses_val; nrec, niter)
+    data = Molly.build_lincs_data(dc, masses_val; n_rec, n_iter)
     ws = Molly.create_lincs_workspace(data)
     return x, v, data, ws
 end
@@ -617,7 +605,9 @@ end
                                dist_constraints=nothing, angle_constraints=nothing)
         atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
         cons = SHAKE_RATTLE(
-            length(coords), 1e-10, 1e-10;
+            n_atoms=length(coords),
+            dist_tolerance=1e-10,
+            vel_tolerance=1e-10,
             dist_constraints=dist_constraints,
             angle_constraints=angle_constraints,
             max_iters=50,
@@ -769,9 +759,11 @@ end
     boundary = CubicBoundary(T(5.0))
     dt = T(0.5)
 
-    function make_shake(dist_constraints, angle_constraints, natoms)
+    function make_shake(dist_constraints, angle_constraints, n_atoms)
         return SHAKE_RATTLE(
-            natoms, T(1e-5), T(1e-5);
+            n_atoms=n_atoms,
+            dist_tolerance=T(1e-5),
+            vel_tolerance=T(1e-5),
             dist_constraints=dist_constraints,
             angle_constraints=angle_constraints,
             max_iters=50,
@@ -982,7 +974,13 @@ end
 
     function simulator_constraint(kind)
         if kind == :shake
-            return SHAKE_RATTLE(2, 1e-10, 1e-10; dist_constraints=dc, max_iters=50)
+            return SHAKE_RATTLE(
+                n_atoms=2,
+                dist_tolerance=1e-10,
+                vel_tolerance=1e-10,
+                dist_constraints=dc,
+                max_iters=50,
+            )
         elseif kind == :lincs
             return LINCS(
                 masses=masses_val,
@@ -1218,245 +1216,227 @@ end
 end
 
 @testset "LINCS solver" begin
-    # increasing nrec improves constraint satisfaction
-    @testset begin
-        x, v, _, _ = make_lincs_triatomic(;
-            v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.01, 0.0), SVector(0.01, -0.02, 0.0)]
-        )
-        dt = 0.002
-        deviations = Float64[]
+    # Increasing n_rec improves constraint satisfaction
+    x, v, _, _ = make_lincs_triatomic(;
+        v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.01, 0.0), SVector(0.01, -0.02, 0.0)]
+    )
+    dt = 0.002
+    deviations = Float64[]
 
-        for nrec in [0, 1, 2, 4, 8]
-            dc = [DistanceConstraint(1, 2, 0.15), DistanceConstraint(2, 3, 0.15)]
-            masses_val = [12.0, 12.0, 12.0]
-            data = Molly.build_lincs_data(dc, masses_val; nrec, niter=1)
-            ws = Molly.create_lincs_workspace(data)
-            xp = x .+ v .* dt
-            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
-                               lincs_no_virial_context())
+    for n_rec in [0, 1, 2, 4, 8]
+        dc = [DistanceConstraint(1, 2, 0.15), DistanceConstraint(2, 3, 0.15)]
+        masses_val = [12.0, 12.0, 12.0]
+        data = Molly.build_lincs_data(dc, masses_val; n_rec, n_iter=1)
+        ws = Molly.create_lincs_workspace(data)
+        xp = x .+ v .* dt
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                            lincs_no_virial_context())
 
-            max_dev = maximum(abs(norm(xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
-                              for i in eachindex(data.atom1))
-            push!(deviations, max_dev)
-        end
+        max_dev = maximum(abs(norm(xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
+                            for i in eachindex(data.atom1))
+        push!(deviations, max_dev)
+    end
 
-        for i in 2:length(deviations)
-            @test deviations[i] <= deviations[i-1] + 1e-15
-        end
+    for i in 2:length(deviations)
+        @test deviations[i] <= deviations[i-1] + 1e-15
     end
 end
 
 @testset "LINCS algorithm" begin
-    # diatomic unequal mass - constraint + CoM conservation
-    @testset begin
-        x, v, data, ws = make_lincs_diatomic(;
-            mass1=1.0, mass2=16.0,
-            v1=SVector(0.2, 0.1, 0.0), v2=SVector(-0.05, 0.02, 0.0)
-        )
-        masses_val = [1.0, 16.0]
-        dt = 0.002
-        xp = x .+ v .* dt
+    # Diatomic unequal mass - constraint + CoM conservation
+    x, v, data, ws = make_lincs_diatomic(;
+        mass1=1.0, mass2=16.0,
+        v1=SVector(0.2, 0.1, 0.0), v2=SVector(-0.05, 0.02, 0.0)
+    )
+    masses_val = [1.0, 16.0]
+    dt = 0.002
+    xp = x .+ v .* dt
 
-        com_before = lincs_center_of_mass(xp, masses_val)
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
-                           lincs_no_virial_context())
-        com_after = lincs_center_of_mass(xp, masses_val)
+    com_before = lincs_center_of_mass(xp, masses_val)
+    Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                        lincs_no_virial_context())
+    com_after = lincs_center_of_mass(xp, masses_val)
 
-        d = norm(xp[1] - xp[2])
-        @test d ≈ 0.15 atol=1e-10
-        @test com_after ≈ com_before atol=1e-12
-    end
+    d = norm(xp[1] - xp[2])
+    @test d ≈ 0.15 atol=1e-10
+    @test com_after ≈ com_before atol=1e-12
 
-    # triatomic chain
-    @testset begin
-        x, v, data, ws = make_lincs_triatomic(;
-            v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.01, 0.0), SVector(0.01, -0.02, 0.0)]
-        )
-        dt = 0.002
-        xp = x .+ v .* dt
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
-                           lincs_no_virial_context())
+    # Triatomic chain
+    x, v, data, ws = make_lincs_triatomic(;
+        v=[SVector(0.05, 0.02, 0.0), SVector(-0.03, 0.01, 0.0), SVector(0.01, -0.02, 0.0)]
+    )
+    dt = 0.002
+    xp = x .+ v .* dt
+    Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                        lincs_no_virial_context())
 
-        @test lincs_check_constraints(xp, data; atol=1e-6)
-    end
+    @test lincs_check_constraints(xp, data; atol=1e-6)
 
-    # position constraint virial for a stretched diatomic
-    @testset begin
-        bond_length = 0.15
-        x, _, data, ws = make_lincs_diatomic(; bond_length, nrec=0, niter=0)
-        xp = [x[1], x[2] + SVector(0.001, 0.0, 0.0)]
-        sys, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
-        step_n = 7
-        Molly.clear_constraint_virial!(buffers, sys, step_n)
-        context = lincs_position_context(buffers; step_n)
+    # Position constraint virial for a stretched diatomic
+    bond_length = 0.15
+    x, _, data, ws = make_lincs_diatomic(; bond_length, n_rec=0, n_iter=0)
+    xp = [x[1], x[2] + SVector(0.001, 0.0, 0.0)]
+    sys, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
+    step_n = 7
+    Molly.clear_constraint_virial!(buffers, sys, step_n)
+    context = lincs_position_context(buffers; step_n)
 
-        B = normalize(x[1] - x[2])
-        factor = data.sdiag[1]^2 * (dot(B, xp[1] - xp[2]) - bond_length)
-        expected = -bond_length * factor * (B * transpose(B))
+    B = normalize(x[1] - x[2])
+    factor = data.sdiag[1]^2 * (dot(B, xp[1] - xp[2]) - bond_length)
+    expected = -bond_length * factor * (B * transpose(B))
 
-        Molly.lincs_apply!(xp, x, data, ws, sys.boundary, context)
+    Molly.lincs_apply!(xp, x, data, ws, sys.boundary, context)
 
-        @test norm(xp[1] - xp[2]) ≈ bond_length atol=1e-14
-        @test ws.factor_sum[1] ≈ factor atol=1e-14
-        @test buffers.constraint_virial_nounits ≈ Matrix(expected) atol=1e-14
-        @test Molly.has_constraint_virial(buffers, step_n)
-    end
+    @test norm(xp[1] - xp[2]) ≈ bond_length atol=1e-14
+    @test ws.factor_sum[1] ≈ factor atol=1e-14
+    @test buffers.constraint_virial_nounits ≈ Matrix(expected) atol=1e-14
+    @test Molly.has_constraint_virial(buffers, step_n)
 
-    # unitful position virial is independent of the timestep unit spelling
-    @testset begin
-        function lincs_unitful_position_virial(dt)
-            bond_length = 0.15f0u"nm"
-            masses_val = [12.0f0u"g/mol", 12.0f0u"g/mol"]
-            dc = [DistanceConstraint(1, 2, bond_length)]
-            lincs = LINCS(masses=masses_val, dist_constraints=dc,
-                          dist_tolerance=1.0f-8u"nm",
-                          vel_tolerance=1.0f-8u"nm^2 * ps^-1",
-                          nrec=0, niter=0)
-            old_coords = [
-                SVector(0.0f0, 0.0f0, 0.0f0)u"nm",
-                SVector(0.15f0, 0.0f0, 0.0f0)u"nm",
-            ]
-            coords = [
-                old_coords[1],
-                old_coords[2] + SVector(0.001f0, 0.0f0, 0.0f0)u"nm",
-            ]
-            atoms = [Atom(mass=m, σ=0.0f0u"nm", ϵ=0.0f0u"kJ/mol")
-                     for m in masses_val]
-            sys = System(
-                atoms=atoms,
-                coords=copy(coords),
-                velocities=zero.(coords) ./ 1.0f0u"ps",
-                boundary=CubicBoundary(5.0f0u"nm"),
-                constraints=(lincs,),
-                force_units=u"kJ * mol^-1 * nm^-1",
-                energy_units=u"kJ * mol^-1",
-            )
-            buffers = Molly.init_buffers!(sys, 1)
-            step_n = 9
-            Molly.clear_constraint_virial!(buffers, sys, step_n)
-            context = Molly.position_constraint_context(buffers, sys, step_n, dt, true)
-
-            apply_position_constraints!(sys, lincs, old_coords; context)
-
-            return copy(buffers.constraint_virial_nounits) .* u"kJ/mol"
-        end
-
-        virial_fs = lincs_unitful_position_virial(4.0f0u"fs")
-        virial_ps = lincs_unitful_position_virial(0.004f0u"ps")
-
-        @test virial_fs ≈ virial_ps rtol=1e-6
-        @test virial_ps[1, 1] ≈ -56.25f0u"kJ/mol" rtol=1e-5
-        @test all(iszero, virial_ps[2:3, :])
-        @test all(iszero, virial_ps[:, 2:3])
-    end
-
-    # velocity constraint virial for a separating diatomic
-    @testset begin
-        bond_length = 0.15
-        x, _, data, ws = make_lincs_diatomic(; bond_length, nrec=0, niter=0)
-        velocities = [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0)]
-        sys, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
-        step_n = 10
-        Molly.clear_constraint_virial!(buffers, sys, step_n)
-        context = lincs_velocity_context(buffers; step_n)
-
-        B = normalize(x[1] - x[2])
-        factor = data.sdiag[1]^2 * dot(B, velocities[1] - velocities[2])
-        expected = -bond_length * factor * (B * transpose(B))
-
-        Molly.lincs_vel_apply!(velocities, x, data, ws, sys.boundary, context)
-
-        @test dot(B, velocities[2] - velocities[1]) ≈ 0.0 atol=1e-14
-        @test ws.factor_sum[1] ≈ factor atol=1e-14
-        @test buffers.constraint_virial_nounits ≈ Matrix(expected) atol=1e-14
-        @test Molly.has_constraint_virial(buffers, step_n)
-    end
-
-    # needs_virial=false leaves the velocity constraint virial buffer untouched
-    @testset begin
-        x, _, data, ws = make_lincs_diatomic(; nrec=0, niter=0)
-        velocities = [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0)]
-        _, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
-        fill!(buffers.constraint_virial_nounits, 3.0)
-        context = lincs_velocity_context(buffers; needs_virial=false)
-
-        Molly.lincs_vel_apply!(velocities, x, data, ws, CubicBoundary(5.0), context)
-
-        @test all(==(3.0), buffers.constraint_virial_nounits)
-    end
-
-    # high-level position constraint application computes and merges scaled virial
-    @testset begin
-        bond_length = 0.15
-        masses_val = [12.0, 12.0]
+    # Unitful position virial is independent of the timestep unit spelling
+    function lincs_unitful_position_virial(dt)
+        bond_length = 0.15f0u"nm"
+        masses_val = [12.0f0u"g/mol", 12.0f0u"g/mol"]
         dc = [DistanceConstraint(1, 2, bond_length)]
         lincs = LINCS(masses=masses_val, dist_constraints=dc,
-                      dist_tolerance=1e-8, vel_tolerance=1e-8,
-                      nrec=0, niter=0)
-        old_coords = [SVector(0.0, 0.0, 0.0), SVector(bond_length, 0.0, 0.0)]
-        coords = [old_coords[1], old_coords[2] + SVector(0.001, 0.0, 0.0)]
-        atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
+                        dist_tolerance=1.0f-8u"nm",
+                        vel_tolerance=1.0f-8u"nm^2 * ps^-1",
+                        n_rec=0, n_iter=0)
+        old_coords = [
+            SVector(0.0f0, 0.0f0, 0.0f0)u"nm",
+            SVector(0.15f0, 0.0f0, 0.0f0)u"nm",
+        ]
+        coords = [
+            old_coords[1],
+            old_coords[2] + SVector(0.001f0, 0.0f0, 0.0f0)u"nm",
+        ]
+        atoms = [Atom(mass=m, σ=0.0f0u"nm", ϵ=0.0f0u"kJ/mol")
+                    for m in masses_val]
         sys = System(
             atoms=atoms,
             coords=copy(coords),
-            velocities=zero.(coords),
-            boundary=CubicBoundary(5.0),
+            velocities=zero.(coords) ./ 1.0f0u"ps",
+            boundary=CubicBoundary(5.0f0u"nm"),
             constraints=(lincs,),
-            force_units=NoUnits,
-            energy_units=NoUnits,
+            force_units=u"kJ * mol^-1 * nm^-1",
+            energy_units=u"kJ * mol^-1",
         )
         buffers = Molly.init_buffers!(sys, 1)
-        step_n = 12
-        scale = 2.0
-        interaction_virial = [
-            1.0 0.2 0.0
-            0.2 0.5 0.1
-            0.0 0.1 0.25
-        ]
-
+        step_n = 9
         Molly.clear_constraint_virial!(buffers, sys, step_n)
-        buffers.virial .= interaction_virial
-        Molly.mark_interaction_virial!(buffers.validity, step_n)
-        context = lincs_position_context(buffers; step_n, virial_scale=scale)
-
-        B = normalize(old_coords[1] - old_coords[2])
-        factor = lincs.lincs_data.sdiag[1]^2 *
-                 (dot(B, coords[1] - coords[2]) - bond_length)
-        expected_constraint = scale * (-bond_length * factor * (B * transpose(B)))
+        context = Molly.position_constraint_context(buffers, sys, step_n, dt, true)
 
         apply_position_constraints!(sys, lincs, old_coords; context)
-        Molly.merge_constraint_virial!(buffers, sys, step_n)
 
-        @test norm(sys.coords[1] - sys.coords[2]) ≈ bond_length atol=1e-14
-        @test buffers.constraint_virial_nounits ≈ Matrix(expected_constraint) atol=1e-14
-        @test buffers.constraint_virial ≈ Matrix(expected_constraint) atol=1e-14
-        @test buffers.virial ≈ interaction_virial + Matrix(expected_constraint) atol=1e-14
-        @test Molly.has_total_virial(buffers, step_n)
+        return copy(buffers.constraint_virial_nounits) .* u"kJ/mol"
     end
 
-    # niter > 1 improves accuracy
-    @testset begin
-        v = [
-            SVector(0.5, 0.2, 0.0),
-            SVector(-0.3, 0.1, 0.0),
-            SVector(0.1, -0.2, 0.0),
-        ]
-        dt = 0.002
+    virial_fs = lincs_unitful_position_virial(4.0f0u"fs")
+    virial_ps = lincs_unitful_position_virial(0.004f0u"ps")
 
-        deviations = Float64[]
-        for niter in [1, 2, 4]
-            x, _, data, ws = make_lincs_triatomic(; v, niter)
-            xp = x .+ v .* dt
-            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
-                               lincs_no_virial_context())
-            max_dev = maximum(abs(norm(xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
-                              for i in eachindex(data.atom1))
-            push!(deviations, max_dev)
-        end
+    @test virial_fs ≈ virial_ps rtol=1e-6
+    @test virial_ps[1, 1] ≈ -56.25f0u"kJ/mol" rtol=1e-5
+    @test all(iszero, virial_ps[2:3, :])
+    @test all(iszero, virial_ps[:, 2:3])
 
-        @test deviations[2] <= deviations[1] + 1e-15
-        @test deviations[3] <= deviations[2] + 1e-15
+    # Velocity constraint virial for a separating diatomic
+    bond_length = 0.15
+    x, _, data, ws = make_lincs_diatomic(; bond_length, n_rec=0, n_iter=0)
+    velocities = [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0)]
+    sys, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
+    step_n = 10
+    Molly.clear_constraint_virial!(buffers, sys, step_n)
+    context = lincs_velocity_context(buffers; step_n)
+
+    B = normalize(x[1] - x[2])
+    factor = data.sdiag[1]^2 * dot(B, velocities[1] - velocities[2])
+    expected = -bond_length * factor * (B * transpose(B))
+
+    Molly.lincs_vel_apply!(velocities, x, data, ws, sys.boundary, context)
+
+    @test dot(B, velocities[2] - velocities[1]) ≈ 0.0 atol=1e-14
+    @test ws.factor_sum[1] ≈ factor atol=1e-14
+    @test buffers.constraint_virial_nounits ≈ Matrix(expected) atol=1e-14
+    @test Molly.has_constraint_virial(buffers, step_n)
+
+    # needs_virial=false leaves the velocity constraint virial buffer untouched
+    x, _, data, ws = make_lincs_diatomic(; n_rec=0, n_iter=0)
+    velocities = [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0)]
+    _, buffers = make_lincs_no_unit_buffer_system(x, [12.0, 12.0])
+    fill!(buffers.constraint_virial_nounits, 3.0)
+    context = lincs_velocity_context(buffers; needs_virial=false)
+
+    Molly.lincs_vel_apply!(velocities, x, data, ws, CubicBoundary(5.0), context)
+
+    @test all(==(3.0), buffers.constraint_virial_nounits)
+
+    # High-level position constraint application computes and merges scaled virial
+    bond_length = 0.15
+    masses_val = [12.0, 12.0]
+    dc = [DistanceConstraint(1, 2, bond_length)]
+    lincs = LINCS(masses=masses_val, dist_constraints=dc,
+                    dist_tolerance=1e-8, vel_tolerance=1e-8,
+                    n_rec=0, n_iter=0)
+    old_coords = [SVector(0.0, 0.0, 0.0), SVector(bond_length, 0.0, 0.0)]
+    coords = [old_coords[1], old_coords[2] + SVector(0.001, 0.0, 0.0)]
+    atoms = [Atom(mass=m, σ=0.0, ϵ=0.0) for m in masses_val]
+    sys = System(
+        atoms=atoms,
+        coords=copy(coords),
+        velocities=zero.(coords),
+        boundary=CubicBoundary(5.0),
+        constraints=(lincs,),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+    buffers = Molly.init_buffers!(sys, 1)
+    step_n = 12
+    scale = 2.0
+    interaction_virial = [
+        1.0 0.2 0.0
+        0.2 0.5 0.1
+        0.0 0.1 0.25
+    ]
+
+    Molly.clear_constraint_virial!(buffers, sys, step_n)
+    buffers.virial .= interaction_virial
+    Molly.mark_interaction_virial!(buffers.validity, step_n)
+    context = lincs_position_context(buffers; step_n, virial_scale=scale)
+
+    B = normalize(old_coords[1] - old_coords[2])
+    factor = lincs.lincs_data.sdiag[1]^2 *
+                (dot(B, coords[1] - coords[2]) - bond_length)
+    expected_constraint = scale * (-bond_length * factor * (B * transpose(B)))
+
+    apply_position_constraints!(sys, lincs, old_coords; context)
+    Molly.merge_constraint_virial!(buffers, sys, step_n)
+
+    @test norm(sys.coords[1] - sys.coords[2]) ≈ bond_length atol=1e-14
+    @test buffers.constraint_virial_nounits ≈ Matrix(expected_constraint) atol=1e-14
+    @test buffers.constraint_virial ≈ Matrix(expected_constraint) atol=1e-14
+    @test buffers.virial ≈ interaction_virial + Matrix(expected_constraint) atol=1e-14
+    @test Molly.has_total_virial(buffers, step_n)
+
+    # n_iter > 1 improves accuracy
+    v = [
+        SVector(0.5, 0.2, 0.0),
+        SVector(-0.3, 0.1, 0.0),
+        SVector(0.1, -0.2, 0.0),
+    ]
+    dt = 0.002
+
+    deviations = Float64[]
+    for n_iter in [1, 2, 4]
+        x, _, data, ws = make_lincs_triatomic(; v, n_iter)
+        xp = x .+ v .* dt
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0),
+                            lincs_no_virial_context())
+        max_dev = maximum(abs(norm(xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
+                            for i in eachindex(data.atom1))
+        push!(deviations, max_dev)
     end
+
+    @test deviations[2] <= deviations[1] + 1e-15
+    @test deviations[3] <= deviations[2] + 1e-15
 end
 
 @testset "LINCS GPU integration" begin
@@ -1472,8 +1452,8 @@ end
              for j in 1:n_atoms]
     atom_masses = [atom_mass for _ in 1:n_atoms]
 
-    cons = LINCS(masses=atom_masses, dist_tolerance=T(1e-4)u"Å", vel_tolerance=T(1e-4)u"Å^2 * ps^-1",
-                 dist_constraints=dist_constraints)
+    cons = LINCS(masses=atom_masses, dist_tolerance=T(1e-4)u"Å",
+                 vel_tolerance=T(1e-4)u"Å^2 * ps^-1", dist_constraints=dist_constraints)
 
     boundary = CubicBoundary(T(200.0)u"Å")
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
@@ -1546,7 +1526,7 @@ end
     function make_lincs()
         return LINCS(masses=masses_val, dist_constraints=dist_constraints,
                      dist_tolerance=T(1e-5), vel_tolerance=T(1e-5),
-                     nrec=4, niter=2, iter_vel_correction=true)
+                     n_rec=4, n_iter=2, iter_vel_correction=true)
     end
 
     function make_cpu_system(coords, velocities)
@@ -1690,7 +1670,7 @@ end
                          for i in 1:n_molecules]
 
     cons = LINCS(masses=atom_masses, dist_tolerance=1e-5u"nm", vel_tolerance=1e-5u"nm^2 * ps^-1",
-                 angle_constraints=angle_constraints, nrec=8, niter=2)
+                 angle_constraints=angle_constraints, n_rec=8, n_iter=2)
 
     @test !isnothing(cons.angle_constraints)
     @test length(cons.angle_constraints) == n_molecules
@@ -1717,24 +1697,19 @@ end
     @test check_position_constraints(sys, cons)
 
     # isolation validation
-    @testset begin
-        dc = [DistanceConstraint(1, 4, 0.15u"nm")]
-        ac = [AngleConstraint(1, 2, 3, θ, bond_length, bond_length)]
-        @test_throws ArgumentError LINCS(masses=atom_masses, dist_constraints=dc, angle_constraints=ac)
+    dc = [DistanceConstraint(1, 4, 0.15u"nm")]
+    ac = [AngleConstraint(1, 2, 3, θ, bond_length, bond_length)]
+    @test_throws ArgumentError LINCS(masses=atom_masses, dist_constraints=dc, angle_constraints=ac)
 
-        ac_overlap = [
-            AngleConstraint(1, 2, 3, θ, bond_length, bond_length),
-            AngleConstraint(3, 4, 5, θ, bond_length, bond_length),
-        ]
-        @test_throws ArgumentError LINCS(masses=atom_masses, angle_constraints=ac_overlap)
-    end
+    ac_overlap = [
+        AngleConstraint(1, 2, 3, θ, bond_length, bond_length),
+        AngleConstraint(3, 4, 5, θ, bond_length, bond_length),
+    ]
+    @test_throws ArgumentError LINCS(masses=atom_masses, angle_constraints=ac_overlap)
 
-    # show method
-    @testset begin
-        s = sprint(show, cons)
-        @test occursin("distance", s)
-        @test occursin("angle", s)
-    end
+    s = sprint(show, cons)
+    @test occursin("distance", s)
+    @test occursin("angle", s)
 end
 
 @testset "LINCS benchmarks" begin
@@ -1746,56 +1721,52 @@ end
     Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0))
 
     # apply_lincs! zero allocations
-    @testset begin
-        for (label, nbackbone, nbranch) in [
-            ("small (7 constraints)", 2, 3),
-            ("medium (399 constraints)", 100, 3),
-        ]
-            x, v, c, m = make_lincs_branched(nbackbone; nbranch)
-            data = Molly.build_lincs_data(c, m)
-            ws = Molly.create_lincs_workspace(data)
-            xp = x .+ v .* 0.002
-
-            # Warmup
-            Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
-            xp .= x .+ v .* 0.002
-
-            allocs = @allocated Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
-            @test allocs == 0
-        end
-    end
-
-    # solve! zero allocations
-    @testset begin
-        x, v, c, m = make_lincs_branched(100; nbranch=3)
+    for (label, nbackbone, nbranch) in [
+        ("small (7 constraints)", 2, 3),
+        ("medium (399 constraints)", 100, 3),
+    ]
+        x, v, c, m = make_lincs_branched(nbackbone; nbranch)
         data = Molly.build_lincs_data(c, m)
         ws = Molly.create_lincs_workspace(data)
         xp = x .+ v .* 0.002
 
-        K = length(data.atom1)
-        for i in 1:K
-            ws.B[i] = normalize(x[data.atom1[i]] - x[data.atom2[i]])
-        end
-        coupling = data.coupling
-        for i in 1:K
-            for n in coupling.range[i]:(coupling.range[i+1]-1)
-                j = coupling.neighbors[n]
-                ws.blcc[n] = coupling.coef[n] * dot(ws.B[i], ws.B[j])
-            end
-        end
-        for i in 1:K
-            ws.rhs[i] = data.sdiag[i] * (dot(ws.B[i], xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
-        end
-        ws.sol .= ws.rhs
-
         # Warmup
-        Molly.lincs_solve!(xp, data, ws, 1.0)
-        ws.sol .= ws.rhs
+        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
         xp .= x .+ v .* 0.002
 
-        allocs = @allocated Molly.lincs_solve!(xp, data, ws, 1.0)
+        allocs = @allocated Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
         @test allocs == 0
     end
+
+    # solve! zero allocations
+    x, v, c, m = make_lincs_branched(100; nbranch=3)
+    data = Molly.build_lincs_data(c, m)
+    ws = Molly.create_lincs_workspace(data)
+    xp = x .+ v .* 0.002
+
+    K = length(data.atom1)
+    for i in 1:K
+        ws.B[i] = normalize(x[data.atom1[i]] - x[data.atom2[i]])
+    end
+    coupling = data.coupling
+    for i in 1:K
+        for n in coupling.range[i]:(coupling.range[i+1]-1)
+            j = coupling.neighbors[n]
+            ws.blcc[n] = coupling.coef[n] * dot(ws.B[i], ws.B[j])
+        end
+    end
+    for i in 1:K
+        ws.rhs[i] = data.sdiag[i] * (dot(ws.B[i], xp[data.atom1[i]] - xp[data.atom2[i]]) - data.lengths[i])
+    end
+    ws.sol .= ws.rhs
+
+    # Warmup
+    Molly.lincs_solve!(xp, data, ws, 1.0)
+    ws.sol .= ws.rhs
+    xp .= x .+ v .* 0.002
+
+    allocs = @allocated Molly.lincs_solve!(xp, data, ws, 1.0)
+    @test allocs == 0
 end
 
 @testset "Minimization with constraints" begin

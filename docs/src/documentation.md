@@ -1616,7 +1616,7 @@ SHAKE was originally derived for the Verlet integration scheme ([Ryckaert et al.
 LINCS (LINear Constraint Solver) is a non-iterative constraint algorithm that uses matrix expansion to approximate the inverse of the constraint coupling matrix ([Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)).
 It is typically faster than SHAKE/RATTLE for large systems.
 The implementation in Molly includes explicit velocity constraints.
-The key parameters controlling accuracy are `nrec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `niter`, the number of outer correction iterations for rotational lengthening (default 1).
+The key parameters controlling accuracy are `n_rec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `n_iter`, the number of outer correction iterations for rotational lengthening (default 1).
 Higher values of either improve accuracy at the cost of performance.
 
 !!! note
@@ -1652,7 +1652,7 @@ dist_constraints = [
 angle_constraints = [AngleConstraint(4, 5, 6, deg2rad(104.5), 0.1u"nm", 0.1u"nm")]
 
 shake = SHAKE_RATTLE(
-    6;
+    n_atoms=6,
     dist_constraints=dist_constraints,
     angle_constraints=angle_constraints,
 )
@@ -1669,7 +1669,7 @@ lincs = LINCS(
     dist_constraints=dist_constraints,
     angle_constraints=angle_constraints,
 )
-# LINCS with 2 distance and 1 angle constraints (nrec=4, niter=1) (implicitly 5 distance constraints)
+# LINCS with 2 distance and 1 angle constraints (n_rec=4, n_iter=1) (implicitly 5 distance constraints)
 ```
 `constraints=(lincs,)` can then be given when setting up a [`System`](@ref).
 
