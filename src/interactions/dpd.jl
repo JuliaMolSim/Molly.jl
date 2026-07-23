@@ -1,7 +1,7 @@
 export DPDInteraction
 
 @doc raw"""
-    DPDInteraction(; a, γ, σ, r_c, dt, use_neighbors)
+    DPDInteraction(; a, γ, σ, r_c, dt, use_neighbors, key)
 
 The dissipative particle dynamics (DPD) interaction between two particles.
 
@@ -39,8 +39,8 @@ The conservative potential energy is
 V(r_{ij}) = \frac{a}{2} r_c \left(1 - \frac{r_{ij}}{r_c}\right)^2
 ```
 
-Deterministic pairwise random numbers are generated from a hash of the particle
-indices and the step number, ensuring momentum conservation and reproducibility.
+Pairwise random numbers are generated from a hash of the `key`,
+the particle indices, and the step number, ensuring momentum conservation.
 
 When using a neighbor list, set `dist_cutoff` to at least `1.5 * r_c` to provide a
 skin distance that accounts for particle movement between neighbor list rebuilds.
@@ -52,6 +52,7 @@ skin distance that accounts for particle movement between neighbor list rebuilds
 - `r_c`: the cutoff distance beyond which all forces are zero.
 - `dt`: the simulation timestep (needed for random force scaling as Δt⁻¹ᐟ²).
 - `use_neighbors::Bool=true`: whether to use the neighbor list.
+- `key::UInt64=rand(UInt64)`: the seed for the random forces.
 """
 @kwdef struct DPDInteraction{A, G, S, R, D} <: PairwiseInteraction
     a::A = 25.0
@@ -60,6 +61,7 @@ skin distance that accounts for particle movement between neighbor list rebuilds
     r_c::R = 1.0
     dt::D = 0.01
     use_neighbors::Bool = false
+    key::UInt64 = rand(UInt64)
 end
 
 use_neighbors(inter::DPDInteraction) = inter.use_neighbors
@@ -76,13 +78,11 @@ end
 
 # Deterministic per-pair Gaussian noise via hash-based Box-Muller transform.
 # Symmetric in (i, j) to ensure momentum conservation.
-@inline function dpd_gaussian(idx_i::Integer, idx_j::Integer, step_n::Integer,
-                              ::Val{T}=Val(Float64)) where T
-    a, b = minmax(idx_i, idx_j)
-    h = hash((a, b, step_n))
-    u1 = (h & 0xFFFFFFFF) / T(4294967296.0)
-    u2 = ((h >> 32) & 0xFFFFFFFF) / T(4294967296.0)
-    return sqrt(-2 * log(u1 + T(1e-30))) * cos(2 * T(π) * u2)
+@inline function dpd_gaussian(idx_i::Integer, idx_j::Integer, step_n::Integer, key::Integer)::Float32
+    a, b = minmax(idx_i%UInt32, idx_j%UInt32)
+    # Assuming < 2^30 atoms this should not conflict with the Langevin stream
+    # To be extra safe a different key can be used.
+    randn_f32(UInt64(b)<<32 | UInt64(a), step_n%UInt64, key%UInt64)[1]
 end
 
 @inline function force(inter::DPDInteraction{A},
@@ -117,7 +117,7 @@ end
     f_D = inter.γ * w_D * rdotv
 
     # Random: pairwise-correlated stochastic force
-    ξ = dpd_gaussian(atom_i.index, atom_j.index, step_n, Val(A))
+    ξ = A(dpd_gaussian(atom_i.index, atom_j.index, step_n, inter.key))
     f_R = inter.σ * w_R * ξ * inv(sqrt(inter.dt)) * inv_r
 
     return (f_C + f_D + f_R) * dr
