@@ -968,6 +968,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     return fs_nounits
 end
 
+# Unclear virial contribution in periodic space as only one coordinate is available
 @inline function specific_force!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
                                  force_units, step_n, inter_list::InteractionList1Atoms, inter_i,
                                  ::Val{needs_vir}) where needs_vir
@@ -976,13 +977,6 @@ end
     sf = force(inter, coords[i], boundary, atoms[i], force_units, velocities[i], step_n,
                inter_list.data)
     fs_nounits[i] += checked_ustrip(sf.f1, force_units)
-
-    if needs_vir
-        r_i = coords[i]
-        λ = λ_mixing(MinimumMixing(), atoms[i], atoms[i])
-        v = λ * r_i * transpose(sf.f1)
-        vir_nounits .+= ustrip.(v)
-    end
     return fs_nounits
 end
 

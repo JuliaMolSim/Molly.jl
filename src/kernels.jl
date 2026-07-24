@@ -204,6 +204,7 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList5Atoms,
     return fs_mat
 end
 
+# Unclear virial contribution in periodic space as only one coordinate is available
 @kernel inbounds=true function specific_force_1_atoms_kernel!(fs_mat, vir, @Const(coords),
                                         @Const(velocities), @Const(atoms), boundary, step_n,
                                         @Const(is), @Const(inters), @Const(data), ::Val{needs_vir},
@@ -220,12 +221,6 @@ end
         for dim in 1:D
             fval = ustrip(fs.f1[dim])
             Atomix.@atomic fs_mat[dim, i] += fval
-            if needs_vir
-                λ = λ_mixing(MinimumMixing(), atoms[i], atoms[i])
-                @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += λ * ustrip(coords[i][alpha]) * fval
-                end
-            end
         end
     end
 end
