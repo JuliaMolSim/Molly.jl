@@ -115,17 +115,24 @@ function speedup_pairs(pairs, title, out)
     save(joinpath(IMG, out), fig, px_per_unit = 2)
     println("wrote images/", out)
 end
-# bio-mlff CUDA speedup uses the cyclops bio-mlff CPU-t8 baseline (its own host); MPS uses the M3 one.
+# GPU speedups use each backend's OWN host CPU-t8 baseline: MPS/Metal → Apple M3, CUDA → RTX 5080
+# host (cyclops). Molly solid, TorchANI dashed, bio-mlff dotted (matching the vs-N figures).
 bm_cpu_mac = "biomlff_cpu_t8.json"; bm_cpu_cyc = "biomlff_cpu_cyclops_t8.json"
+# TorchANI CUDA speedup wants its CPU-t8 baseline on the CUDA host (cyclops); fall back to the M3
+# baseline if the cyclops run isn't present yet (then it is cross-machine — understates the ratio).
+ta_cpu_cyc = isfile(joinpath(REF, "6mrr_timing_torchani_cpu_cyclops_t8.json")) ?
+             "6mrr_timing_torchani_cpu_cyclops_t8.json" : "6mrr_timing_torchani_cpu_t8.json"
 speedup_pairs([
     ("Molly Metal / CPU",    :solid, series(getk(forces, "cpu")),      series(getk(forces, "metal"))),
     ("Molly CUDA / CPU",     :solid, series(getk(cuda_forces, "cpu")), series(getk(cuda_forces, "cuda"))),
+    ("TorchANI CUDA / CPU",  :dash,  series_ref(joinpath(REF, ta_cpu_cyc), "forces_ms"), series_ref(joinpath(REF, "6mrr_timing_torchani_cuda.json"), "forces_ms")),
     ("bio-mlff MPS / CPU",   :dot,   series_ref(joinpath(REF, bm_cpu_mac), "forces_ms"), series_ref(joinpath(REF, "biomlff_mps.json"), "forces_ms")),
     ("bio-mlff CUDA / CPU",  :dot,   series_ref(joinpath(REF, bm_cpu_cyc), "forces_ms"), series_ref(joinpath(REF, "biomlff_cuda.json"), "forces_ms")),
 ], "ANI-2x forces: GPU speedup over host CPU (t8)", "forces_speedup.png")
 speedup_pairs([
     ("Molly Metal / CPU",    :solid, series(getk(energy, "cpu")),      series(getk(energy, "metal"))),
     ("Molly CUDA / CPU",     :solid, series(getk(cuda_energy, "cpu")), series(getk(cuda_energy, "cuda"))),
+    ("TorchANI CUDA / CPU",  :dash,  series_ref(joinpath(REF, ta_cpu_cyc), "energy_ms"), series_ref(joinpath(REF, "6mrr_timing_torchani_cuda.json"), "energy_ms")),
     ("bio-mlff MPS / CPU",   :dot,   series_ref(joinpath(REF, bm_cpu_mac), "energy_ms"), series_ref(joinpath(REF, "biomlff_mps.json"), "energy_ms")),
     ("bio-mlff CUDA / CPU",  :dot,   series_ref(joinpath(REF, bm_cpu_cyc), "energy_ms"), series_ref(joinpath(REF, "biomlff_cuda.json"), "energy_ms")),
 ], "ANI-2x energy: GPU speedup over host CPU (t8)", "energy_speedup.png")
