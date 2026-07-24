@@ -23,7 +23,9 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator
+    ASECalculator,
+    AbstractMLPotential,
+    ANIPotential
 
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64
@@ -1905,6 +1907,7 @@ struct ASECalculator{T}
 end
 
 function update_ase_calc! end
+
 
 # ForwardDiff.jl checks both value and derivative
 # This could be extended to only check the value for Duals
