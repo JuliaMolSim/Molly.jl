@@ -92,23 +92,21 @@ end
 vs_N_plot("forces", "forces_ms", "forces_vs_N.png")
 vs_N_plot("energy", "energy_ms", "energy_vs_N.png")
 
-# --- Figure: GPU speedup over host CPU (t8) vs N — Metal + CUDA in one plot ---------
-# Each device's speedup over its own host CPU-t8. NB the Metal series' CPU baseline is Apple
-# Silicon and the CUDA series' is the cyclops host; compare the scaling shape, not the absolute CPU.
-function speedup_multi(specs, title, out)
-    fig = Figure(size = (760, 520))
-    ax  = Axis(fig[1, 1], xscale = log10, xlabel = "number of atoms",
+# --- Figure: GPU speedup over host CPU-t8 vs N — Molly + bio-mlff, Metal/MPS + CUDA ---
+# Each line is a GPU backend's speedup over its OWN host CPU-t8 (Metal/MPS host = Apple M3;
+# CUDA host = the RTX 5080 box), so the y-value is a within-machine GPU-vs-CPU ratio and the
+# scaling shape is the point. Molly solid, bio-mlff dotted (matching the vs-N figures).
+function speedup_pairs(pairs, title, out)
+    fig = Figure(size = (780, 540))
+    ax  = Axis(fig[1, 1], xscale = log10, yscale = log10, xlabel = "number of atoms",
                ylabel = "GPU speedup over host CPU-t8 (×)", title = title)
     plotted = false
-    for (data, cpukey, gpukey, lbl) in specs
-        isnothing(data) && continue
-        xc, yc = series(getk(data, cpukey))
-        xg, yg = series(getk(data, gpukey))
-        common = intersect(xc, xg)
-        isempty(common) && continue
+    for (lbl, ls, (xc, yc), (xg, yg)) in pairs
+        (isempty(xc) || isempty(xg)) && continue
+        common = intersect(xc, xg); isempty(common) && continue
         cpu = Dict(xc .=> yc); gpu = Dict(xg .=> yg)
         xs = sort(collect(common)); sp = [cpu[x] / gpu[x] for x in xs]
-        scatterlines!(ax, xs, sp, label = lbl, markersize = 10)
+        scatterlines!(ax, xs, sp, label = lbl, markersize = 10, linestyle = ls)
         plotted = true
     end
     plotted || return
@@ -117,9 +115,19 @@ function speedup_multi(specs, title, out)
     save(joinpath(IMG, out), fig, px_per_unit = 2)
     println("wrote images/", out)
 end
-speedup_multi([(forces, "cpu", "metal", "Metal / CPU"), (cuda_forces, "cpu", "cuda", "CUDA / CPU")],
-              "ANI-2x forces: GPU speedup over host CPU (t8)", "forces_speedup.png")
-speedup_multi([(energy, "cpu", "metal", "Metal / CPU"), (cuda_energy, "cpu", "cuda", "CUDA / CPU")],
-              "ANI-2x energy: GPU speedup over host CPU (t8)", "energy_speedup.png")
+# bio-mlff CUDA speedup uses the cyclops bio-mlff CPU-t8 baseline (its own host); MPS uses the M3 one.
+bm_cpu_mac = "biomlff_cpu_t8.json"; bm_cpu_cyc = "biomlff_cpu_cyclops_t8.json"
+speedup_pairs([
+    ("Molly Metal / CPU",    :solid, series(getk(forces, "cpu")),      series(getk(forces, "metal"))),
+    ("Molly CUDA / CPU",     :solid, series(getk(cuda_forces, "cpu")), series(getk(cuda_forces, "cuda"))),
+    ("bio-mlff MPS / CPU",   :dot,   series_ref(joinpath(REF, bm_cpu_mac), "forces_ms"), series_ref(joinpath(REF, "biomlff_mps.json"), "forces_ms")),
+    ("bio-mlff CUDA / CPU",  :dot,   series_ref(joinpath(REF, bm_cpu_cyc), "forces_ms"), series_ref(joinpath(REF, "biomlff_cuda.json"), "forces_ms")),
+], "ANI-2x forces: GPU speedup over host CPU (t8)", "forces_speedup.png")
+speedup_pairs([
+    ("Molly Metal / CPU",    :solid, series(getk(energy, "cpu")),      series(getk(energy, "metal"))),
+    ("Molly CUDA / CPU",     :solid, series(getk(cuda_energy, "cpu")), series(getk(cuda_energy, "cuda"))),
+    ("bio-mlff MPS / CPU",   :dot,   series_ref(joinpath(REF, bm_cpu_mac), "energy_ms"), series_ref(joinpath(REF, "biomlff_mps.json"), "energy_ms")),
+    ("bio-mlff CUDA / CPU",  :dot,   series_ref(joinpath(REF, bm_cpu_cyc), "energy_ms"), series_ref(joinpath(REF, "biomlff_cuda.json"), "energy_ms")),
+], "ANI-2x energy: GPU speedup over host CPU (t8)", "energy_speedup.png")
 
 println("done — images in ", IMG)

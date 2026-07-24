@@ -200,11 +200,14 @@ above overlay all five series (Molly CPU/Metal/CUDA + TorchANI CPU/CUDA) on one 
 CPU/Metal + TorchANI CPU are Apple Silicon while Molly CUDA + TorchANI CUDA are the RTX 5080 host, so
 read the scaling shape rather than the absolute cross-machine level.
 
-**GPU speedup over host CPU-t8, both backends in one view** (Metal's baseline is Apple Silicon,
-CUDA's is the cyclops host — each line is GPU-vs-its-own-host, so compare the scaling shape):
+**GPU speedup over host CPU-t8** (Molly Metal/CUDA + bio-mlff MPS/CUDA, log y-axis). Each line is a
+backend's speedup over its OWN host CPU-t8 — Metal/MPS baseline is the Apple M3, CUDA baseline is the
+RTX 5080 box — so it is a within-machine GPU-vs-CPU ratio; compare scaling shape, not cross-machine.
+bio-mlff CUDA's very large ratio (~300×) is partly that its XLA-CPU baseline on the broadwell host is
+slow, not GPU brilliance alone.
 
-![Energy speedup — Metal + CUDA](images/energy_speedup.png)
-![Forces speedup — Metal + CUDA](images/forces_speedup.png)
+![Energy speedup — Molly + bio-mlff, Metal/MPS + CUDA](images/energy_speedup.png)
+![Forces speedup — Molly + bio-mlff, Metal/MPS + CUDA](images/forces_speedup.png)
 
 ---
 
