@@ -369,8 +369,11 @@ function n_dof_lost(D::Integer,
     return length(constraint_clusters) * n_constraints(C)
 end
 
-function n_dof(D::Integer, n_atoms::Integer, boundary)
-    return D * n_atoms - (D - n_infinite_dims(boundary))
+# This assumes that the center of mass motion is being removed
+# For infinite boundary systems the rotation around the center of mass is not currently
+#   removed, so this also applies
+function calculate_n_dof(D::Integer, n_atoms::Integer, boundary)
+    return D * (n_atoms - 1)
 end
 
 """

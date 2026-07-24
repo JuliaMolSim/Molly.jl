@@ -956,7 +956,7 @@ function System(;
     VF = typeof(virtual_site_flags)
     n_virtual_sites = sum(virtual_site_flags)
 
-    df = n_dof(D, n_atoms - n_virtual_sites, boundary)
+    df = calculate_n_dof(D, n_atoms - n_virtual_sites, boundary)
     if length(constraints) > 0
         for ca in constraints
             for cluster_type in cluster_keys(ca)

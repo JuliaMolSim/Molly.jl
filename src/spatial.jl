@@ -897,6 +897,15 @@ end
     remove_CM_motion!(system)
 
 Remove the center of mass motion from a [`System`](@ref).
+
+This assumes a periodic system and only removes the translational component
+of the motion.
+Systems with infinite boundaries should also remove the rotation around the
+center of mass, which is not currently done.
+
+Simulators should in general call this function regularly, since the number
+of degrees of freedom that is used to calculate temperature assumes that the
+center of mass motion is removed.
 """
 function remove_CM_motion!(sys)
     masses_cpu = from_device(masses(sys))

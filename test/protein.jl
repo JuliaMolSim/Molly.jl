@@ -458,7 +458,7 @@ end
 
 @testset "CHARMM OpenMM protein comparison" begin
     for constraint_algorithm in (SetupLINCS(), SetupSHAKE_RATTLE())
-        start_temp = 485.281907022u"K"
+        start_temp = 485.281907022u"K" # High since it does not take into account constraints
         ff = MolecularForceField(
             joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
             strictness=:nowarn,
