@@ -195,8 +195,10 @@ Julia path is within **~1.25×** on energy at every size, and competitive on for
 at 500 atoms), widening to ~2.3× slower at 16k — a solid result for a first native implementation
 against a mature, hand-optimised CUDA library.
 
-![Energy vs N — Molly CPU vs CUDA vs TorchANI](images/cuda_energy_vs_N.png)
-![Forces vs N — Molly CPU vs CUDA vs TorchANI](images/cuda_forces_vs_N.png)
+**All backends in one figure** (energy + forces; Molly CPU/Metal are Apple Silicon, CUDA is the
+RTX 5080 host, so read the scaling shape rather than the absolute cross-machine level):
+
+![ANI-2x all backends — Molly CPU/Metal/CUDA + TorchANI CPU/CUDA](images/all_backends.png)
 
 **GPU speedup over host CPU-t8, both backends in one view** (Metal's baseline is Apple Silicon,
 CUDA's is the cyclops host — each line is GPU-vs-its-own-host, so compare the scaling shape):
