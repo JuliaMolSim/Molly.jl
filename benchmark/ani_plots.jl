@@ -69,24 +69,64 @@ if !isnothing(energy)
     println("wrote images/energy_vs_N.png")
 end
 
-# --- Figure: CPU→Metal speedup vs N (forces + energy) ------------------------------
-function speedup_plot(data, cpukey, gpukey, title, out)
-    isnothing(data) && return
-    xc, yc = series(get(data, cpukey, nothing))
-    xm, ym = series(get(data, gpukey, nothing))
-    common = intersect(xc, xm)
-    isempty(common) && return
-    cpu = Dict(xc .=> yc); gpu = Dict(xm .=> ym)
-    xs = sort(collect(common)); sp = [cpu[x] / gpu[x] for x in xs]
-    fig = Figure(size = (720, 480))
+# --- Figure: GPU speedup over host CPU (t8) vs N — every backend in one plot --------
+# One figure per quantity, overlaying each device's speedup over its own host CPU-t8. NB the
+# Metal series' CPU baseline is Apple Silicon and the CUDA series' is the cyclops host, so each
+# line is GPU-vs-its-own-host; compare the scaling shape, not the absolute CPU.
+cuda_energy = load_json(joinpath(RES, "ani_cuda_energy.json"))
+cuda_forces = load_json(joinpath(RES, "ani_cuda_forces.json"))
+function speedup_multi(specs, title, out)
+    fig = Figure(size = (760, 520))
     ax  = Axis(fig[1, 1], xscale = log10, xlabel = "number of atoms",
-               ylabel = "CPU / Metal speedup (×)", title = title)
-    scatterlines!(ax, xs, sp, markersize = 10)
+               ylabel = "GPU speedup over host CPU-t8 (×)", title = title)
+    plotted = false
+    for (data, cpukey, gpukey, lbl) in specs
+        isnothing(data) && continue
+        xc, yc = series(get(data, cpukey, nothing))
+        xg, yg = series(get(data, gpukey, nothing))
+        common = intersect(xc, xg)
+        isempty(common) && continue
+        cpu = Dict(xc .=> yc); gpu = Dict(xg .=> yg)
+        xs = sort(collect(common)); sp = [cpu[x] / gpu[x] for x in xs]
+        scatterlines!(ax, xs, sp, label = lbl, markersize = 10)
+        plotted = true
+    end
+    plotted || return
     hlines!(ax, [1.0], color = :gray, linestyle = :dash)
+    axislegend(ax, position = :lt)
     save(joinpath(IMG, out), fig, px_per_unit = 2)
     println("wrote images/", out)
 end
-speedup_plot(forces, "cpu", "metal", "ANI-2x forces: CPU→Metal speedup", "forces_speedup.png")
-speedup_plot(energy, "cpu", "metal", "ANI-2x energy: CPU→Metal speedup", "energy_speedup.png")
+speedup_multi([(forces, "cpu", "metal", "Metal / CPU"), (cuda_forces, "cpu", "cuda", "CUDA / CPU")],
+              "ANI-2x forces: GPU speedup over host CPU (t8)", "forces_speedup.png")
+speedup_multi([(energy, "cpu", "metal", "Metal / CPU"), (cuda_energy, "cpu", "cuda", "CUDA / CPU")],
+              "ANI-2x energy: GPU speedup over host CPU (t8)", "energy_speedup.png")
+
+# --- Figures: NVIDIA CUDA (RTX 5080) — Molly CPU vs CUDA vs TorchANI CUDA -----------
+# From benchmark/ani_cuda_compare.jl ({"cpu","cuda"}) + the TorchANI CUDA reference JSON. The CPU
+# column here is the cyclops host (broadwell, t8), not the Apple numbers used elsewhere in the doc.
+function cuda_plot(res, torch_key, quantity, out)
+    isnothing(res) && return
+    fig = Figure(size = (760, 520))
+    ax  = Axis(fig[1, 1], xscale = log10, yscale = log10,
+               xlabel = "number of atoms", ylabel = "$quantity time (ms)",
+               title = "ANI-2x $quantity: Molly CPU vs CUDA vs TorchANI (RTX 5080)")
+    xc, yc = series(get(res, "cpu", nothing))
+    xg, yg = series(get(res, "cuda", nothing))
+    !isempty(xc) && scatterlines!(ax, xc, yc, label = "Molly CPU (t8)", markersize = 10)
+    !isempty(xg) && scatterlines!(ax, xg, yg, label = "Molly CUDA", markersize = 10)
+    let tj = load_json(joinpath(REF, "6mrr_timing_torchani_cuda.json"))
+        if !isnothing(tj) && haskey(tj, "sizes")
+            ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
+            ys = [Float64(tj["sizes"][string(k)][torch_key]) for k in ks]
+            scatterlines!(ax, ks, ys, label = "TorchANI CUDA", linestyle = :dash, markersize = 8)
+        end
+    end
+    axislegend(ax, position = :lt)
+    save(joinpath(IMG, out), fig, px_per_unit = 2)
+    println("wrote images/", out)
+end
+cuda_plot(cuda_energy, "energy_ms", "energy", "cuda_energy_vs_N.png")
+cuda_plot(cuda_forces, "forces_ms", "forces", "cuda_forces_vs_N.png")
 
 println("done — images in ", IMG)

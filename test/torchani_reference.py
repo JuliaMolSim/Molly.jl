@@ -326,7 +326,7 @@ def print_aev_summary(model):
 # -------------------------------------------------------------------------
 
 def timing_benchmark(model, device="cpu", sizes=(500, 1000, 2000), samples=20,
-                     pdb_path="data/6mrr_equil.pdb"):
+                     pdb_path="data/6mrr_equil.pdb", threads=0):
     """Time TorchANI energy and forces on 6mrr slices, for comparison against Molly.
 
     Warms up, then takes the min over `samples` runs with device synchronisation, matching
@@ -378,7 +378,8 @@ def timing_benchmark(model, device="cpu", sizes=(500, 1000, 2000), samples=20,
         results["sizes"][str(len(idx))] = {"energy_ms": t_e, "forces_ms": t_f}
         print(f"  n={len(idx):5d}   energy {t_e:8.2f} ms    forces {t_f:8.2f} ms")
 
-    out = f"data/ani_reference/6mrr_timing_torchani_{device}.json"
+    tsuf = f"_t{threads}" if (device == "cpu" and threads > 0) else ""
+    out = f"data/ani_reference/6mrr_timing_torchani_{device}{tsuf}.json"
     with open(out, "w") as f:
         json.dump(results, f, indent=2)
     print(f"  wrote {out}")
@@ -394,14 +395,21 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])  # MPS unusable (see note)
     parser.add_argument("--sizes", default="500,1000,2000", help="comma list of atom counts")
     parser.add_argument("--samples", type=int, default=20)
+    parser.add_argument("--threads", type=int, default=0,
+                        help="CPU threads for PyTorch (0 = library default); use 1 or 8 for a matched comparison")
     args = parser.parse_args()
+
+    if args.threads > 0:
+        torch.set_num_threads(args.threads)
+        try: torch.set_num_interop_threads(1)
+        except Exception: pass
 
     model = get_model()
 
     if args.benchmark:
         timing_benchmark(model, device=args.device,
                          sizes=[int(s) for s in args.sizes.split(",")],
-                         samples=args.samples)
+                         samples=args.samples, threads=args.threads)
         print("\nDone. Timing in data/ani_reference/")
     else:
         n2_dimer_reference(model)

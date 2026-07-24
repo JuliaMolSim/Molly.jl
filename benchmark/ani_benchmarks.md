@@ -5,7 +5,8 @@ Consolidated performance and correctness results for Molly's native ANI-2x imple
 **Setup:** Apple Silicon (12 cores: 8P + 4E), Julia 1.12, ANI-2x, Float32 AEVs. Systems are
 slices of `data/6mrr_equil.pdb` with a `DistanceNeighborFinder` (cutoff `max(r_c_R,r_c_A)+1 = 6.1 Å`),
 single ensemble member (`ensemble_idx=0`) unless noted. "CPU" numbers use `-t8` unless a thread
-count is given.
+count is given. The **NVIDIA CUDA section** is measured on a separate RTX 5080 host (its CPU column
+is that host, not Apple Silicon) — see that section.
 
 **Reproduce:**
 ```
@@ -14,8 +15,11 @@ julia --project=<env> -t 8  benchmark/ani_gpu_compare.jl   # CPU vs Apple Metal 
 julia --project=<env> -t 8  benchmark/ani_forces_gpu.jl    # CPU (analytic) vs Metal forces → results/ani_forces.json
 julia --project=<env> -t 8  benchmark/ani_trajectory.jl    # 6mrr NVE trajectory (DCD)
 julia --project=<env> -t 8  benchmark/run_ani_benchmarks.jl  # driver: energy+forces JSON + CairoMakie figures
-python  test/torchani_reference.py --benchmark --device cpu   # TorchANI reference timing
+julia --project=<env> -t 8  benchmark/ani_cuda_compare.jl  # CPU vs NVIDIA CUDA energy+forces → results/ani_cuda_*.json
+python  test/torchani_reference.py --benchmark --device cpu   # TorchANI reference timing (or --device cuda)
 ```
+The CUDA script needs `CUDA` + `cuDNN` added to the env (`cuDNN` is the trigger that makes
+`Lux.gpu_device()` select CUDA). Set `ANI_SIZES` to pick the atom counts.
 Env vars: `ANI_SIZES`, `ANI_FSIZES`, `ANI_CPU_SIZES`, `ANI_FORCES`, `ANI_ENSEMBLE` (`0`|`full`),
 `ANI_SAMESPECIES`, `ANI_SKIP_PLOTS`; `ANI_TRAJ_{N,STEPS,DT_FS,LOG,TEMP}`.
 
@@ -149,6 +153,59 @@ contrast, run on-GPU and cross over similarly — see above.)
 
 ---
 
+## GPU (NVIDIA CUDA — RTX 5080)
+
+Measured on an **RTX 5080** (16 GB, Blackwell sm_120, driver 610) via `benchmark/ani_cuda_compare.jl`.
+The KA kernels are backend-portable, so this is the same analytic energy/forces path as Metal, just
+`CuArray` + `CUDABackend()`. Julia 1.10.10, CUDA 13.3, single ensemble member. **The CPU column in
+this section is the CUDA host (broadwell, `-t8`), not the Apple Silicon numbers used elsewhere**, so
+read the GPU/CPU ratios as GPU-vs-its-own-host.
+
+> `Lux.gpu_device()` needs `cuDNN` loaded to select CUDA — CUDA.jl alone leaves the NN weights on the
+> CPU (on Metal, Metal.jl is the trigger). The benchmark script loads `cuDNN` for this reason.
+
+**Correctness (CUDA vs CPU, 1000-atom slice):** energy relative diff **1.1e-10**; forces max abs diff
+**2.7e-4 eV/Å**; ΣF ≈ (6e-6, −2e-5, −2e-5) — momentum conserved. Same analytic path as Metal.
+
+Energy (single member, ms):
+
+| N atoms | CPU (t8) | Molly CUDA | TorchANI CUDA | Molly / TorchANI |
+|---------|----------|------------|---------------|------------------|
+| 500     | 50.5   | 33.5  | 32.5 | 1.03× |
+| 1000    | 113.8  | 37.6  | 32.4 | 1.16× |
+| 2000    | 157.6  | 41.4  | 32.6 | 1.27× |
+| 5000    | 428.1  | 42.8  | 35.1 | 1.22× |
+| 8000    | 735.3  | 48.3  | 38.8 | 1.24× |
+| **15,954** | 1572.4 | **73.7** | 58.2 | 1.27× |
+
+Forces (single member, ms):
+
+| N atoms | CPU (t8) | Molly CUDA | TorchANI CUDA | Molly / TorchANI |
+|---------|----------|------------|---------------|------------------|
+| 500     | 303.7  | 55.9  | 62.5 | **0.89×** |
+| 1000    | 352.8  | 67.0  | 62.5 | 1.07× |
+| 2000    | 453.7  | 78.2  | 63.3 | 1.24× |
+| 5000    | 1303.4 | 99.2  | 67.0 | 1.48× |
+| 8000    | 2113.9 | 130.1 | 72.6 | 1.79× |
+| **15,954** | 4295.5 | **230.5** | 98.9 | 2.33× |
+
+CUDA stays nearly flat while the host CPU grows linearly: at the full 6mrr protein Molly-CUDA is
+**21× the host CPU on energy and 19× on forces**. Against TorchANI on the *same* GPU, Molly's native
+Julia path is within **~1.25×** on energy at every size, and competitive on forces at small N (faster
+at 500 atoms), widening to ~2.3× slower at 16k — a solid result for a first native implementation
+against a mature, hand-optimised CUDA library.
+
+![Energy vs N — Molly CPU vs CUDA vs TorchANI](images/cuda_energy_vs_N.png)
+![Forces vs N — Molly CPU vs CUDA vs TorchANI](images/cuda_forces_vs_N.png)
+
+**GPU speedup over host CPU-t8, both backends in one view** (Metal's baseline is Apple Silicon,
+CUDA's is the cyclops host — each line is GPU-vs-its-own-host, so compare the scaling shape):
+
+![Energy speedup — Metal + CUDA](images/energy_speedup.png)
+![Forces speedup — Metal + CUDA](images/forces_speedup.png)
+
+---
+
 ## Periodic boundaries (minimum image)
 
 The CPU path and all three GPU kernels compute displacements via `Molly.vector(ci, coords[j],
@@ -184,9 +241,10 @@ Species branching is essentially free — no need to sort atoms by species.
 TorchANI energy+forces on the same slices (warmup + min-of-N with device sync), writing
 `data/ani_reference/6mrr_timing_torchani_cpu.json` to join against the Molly numbers above.
 Needs `pip install torchani==2.2.4 torch ase h5py`. This project is **Metal-only** on the GPU
-side, and TorchANI cannot run on the Apple GPU anyway (see the next paragraph), so the GPU
-comparison is Molly Metal vs TorchANI CPU. (`--device cuda` is wired for both should an NVIDIA
-GPU ever be used, but CUDA is out of scope here.)
+side, and TorchANI cannot run on the Apple GPU anyway (see the next paragraph), so the *Apple* GPU
+comparison is Molly Metal vs TorchANI CPU. A **direct GPU-vs-GPU head-to-head on the same NVIDIA
+RTX 5080** (Molly CUDA vs TorchANI CUDA) is in the [NVIDIA CUDA section](#gpu-nvidia-cuda--rtx-5080)
+above: Molly is within ~1.25× of TorchANI on energy and ~0.9–2.3× on forces across 500–15,954 atoms.
 
 Measured on this machine (TorchANI 2.2.4, `--samples 5`). **TorchANI has no usable Apple-GPU
 path**: its forward needs float64 (which PyTorch-MPS cannot store) and the angular AEV uses a 5-D
@@ -225,8 +283,9 @@ alone.
 
 - **TorchANI head-to-head** uses `test/torchani_reference.py --benchmark --device cpu` (needs a
   `pip install`); the compare-report/plots then join the reference JSON automatically. CPU-to-CPU
-  is the definitive comparison; TorchANI has no usable Apple-GPU path (see above), so a GPU
-  TorchANI number would need CUDA.
+  is the definitive comparison; TorchANI has no usable Apple-GPU path (see above). The **NVIDIA
+  GPU-vs-GPU** comparison (Molly CUDA vs TorchANI CUDA on the same RTX 5080) is now measured — see
+  the CUDA section. Both GPU sections are single-machine snapshots, not cross-machine claims.
 - **Metal forces** are timed for a **single ensemble member**. The full 8-member ensemble reuses
   one AEV forward/backward and runs only the NN VJP 8× (species-batched), so expect ~1.4× like
   energy — not yet measured on Metal.
@@ -244,6 +303,7 @@ alone.
 | `benchmark/ani.jl`               | CPU energy/forces, thread sweep, same-species diagnostic |
 | `benchmark/ani_gpu_compare.jl`   | Molly energy: CPU vs Apple Metal → `results/ani_energy.json` |
 | `benchmark/ani_forces_gpu.jl`    | Molly forces: CPU (analytic) vs Metal → `results/ani_forces.json` |
+| `benchmark/ani_cuda_compare.jl`  | Molly energy+forces: CPU vs NVIDIA CUDA → `results/ani_cuda_*.json` |
 | `benchmark/ani_trajectory.jl`    | 6mrr NVE trajectory + energy drift, DCD output |
 | `benchmark/run_ani_benchmarks.jl`| driver: energy + forces JSON, then CairoMakie figures |
 | `benchmark/ani_plots.jl`         | CairoMakie figures from `results/*.json` → `images/*.png` |
