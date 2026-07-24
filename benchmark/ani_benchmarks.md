@@ -98,7 +98,7 @@ the **~4000-atom crossover** Metal's near-flat cost wins, reaching **3.3×** the
 energy, 146 ms — the forward-AEV + backward-AEV + NN-VJP overhead). Both Molly paths beat
 TorchANI CPU forces at scale (see the head-to-head): at 16k, CPU-analytic is 3.0× and Metal 9.7×.
 
-![Forces vs N — all backends: Molly CPU/Metal/CUDA + TorchANI CPU/CUDA](images/forces_vs_N.png)
+![Forces vs N — all implementations: Molly/TorchANI/bio-mlff, CPU t1/t8 + Metal/MPS/CUDA](images/forces_vs_N.png)
 
 **Full ensemble.** The 8-member ensemble forces on Metal cost **~1.7×** a single member (256 vs
 151 ms at 1000 atoms; 273 vs 155 at 2000): the AEV forward/backward runs once and only the NN VJP
@@ -149,7 +149,7 @@ threaded CPU wins. Above the ~4000-atom crossover Metal pulls ahead as the CPU g
 the full 6mrr system (15,954 atoms) Metal is **2.8× the CPU** (146 vs 404 ms). (Forces, in
 contrast, run on-GPU and cross over similarly — see above.)
 
-![Energy vs N — all backends: Molly CPU/Metal/CUDA + TorchANI CPU/CUDA](images/energy_vs_N.png)
+![Energy vs N — all implementations: Molly/TorchANI/bio-mlff, CPU t1/t8 + Metal/MPS/CUDA](images/energy_vs_N.png)
 
 ---
 
@@ -205,6 +205,41 @@ CUDA's is the cyclops host — each line is GPU-vs-its-own-host, so compare the 
 
 ![Energy speedup — Metal + CUDA](images/energy_speedup.png)
 ![Forces speedup — Metal + CUDA](images/forces_speedup.png)
+
+---
+
+## Cross-implementation comparison (Molly vs TorchANI vs bio-mlff)
+
+All three native ANI-2x implementations, at matched CPU thread counts (t1 and t8) plus each GPU
+backend, on 6mrr slices (min-of-N). **CPU / Metal / MPS = Apple M3; CUDA = RTX 5080** (cross-machine
+on the GPU columns, so compare scaling shape, not absolute cross-device level). bio-mlff is Mit
+Kotak's JAX implementation (CPU/MPS via `jax-mps`, CUDA via `jax[cuda12]`); timings exclude
+neighbour-list construction for every implementation.
+
+Energy (ms):
+
+| N atoms | Molly t1 | Molly t8 | Molly Metal | Molly CUDA | TorchANI t1 | TorchANI t8 | TorchANI CUDA | bio-mlff t1 | bio-mlff t8 | bio-mlff MPS | bio-mlff CUDA |
+|---------|----------|----------|-------------|------------|-------------|-------------|---------------|-------------|-------------|--------------|---------------|
+| 1000    | 101.4 | 25.9  | 71.1  | 37.6 | 50.1  | 32.7  | 32.4 | 45.7  | 45.9  | 12.0  | 0.9  |
+| 8000    | 409.1 | 186.3 | 86.8  | 48.3 | 799.4 | 524.1 | 38.8 | 636.5 | 618.6 | 263.3 | 5.9  |
+| 15,954  | 1550  | 411.4 | 146.9 | 73.7 | 3629  | 2753  | 58.2 | 3663  | 4011  | 1205  | 24.4 |
+
+Forces (ms):
+
+| N atoms | Molly t1 | Molly t8 | Molly Metal | Molly CUDA | TorchANI t1 | TorchANI t8 | TorchANI CUDA | bio-mlff t1 | bio-mlff t8 | bio-mlff MPS | bio-mlff CUDA |
+|---------|----------|----------|-------------|------------|-------------|-------------|---------------|-------------|-------------|--------------|---------------|
+| 1000    | 389.5 | 137.9 | 179.9 | 67.0  | 97.4   | 62.8  | 62.5 | 84.4  | 89.5  | 29.2   | 2.4  |
+| 8000    | 1452  | 662.1 | 215.9 | 130.1 | 1017   | 665.8 | 72.6 | 1315  | 1756  | 419.3  | 15.4 |
+| 15,954  | 5049  | 1308  | 365.4 | 230.5 | 5641   | 4424  | 98.9 | 8343  | 9709  | 1810   | 42.7 |
+
+**Threading** (the interesting part): Molly scales well with threads (energy ~3.5× t1→t8, forces
+~3.8× at 16k); TorchANI scales modestly (~1.3× energy, ~1.3× forces); bio-mlff (JAX/XLA on CPU) is
+essentially thread-insensitive (t1 ≈ t8 — XLA's CPU threadpool did not respond to
+`intra_op_parallelism_threads`). **At t8, Molly is the fastest CPU implementation at scale** on both
+energy (411 vs 2753 vs 4011 ms at 16k) and forces (1308 vs 4424 vs 9709). **On GPU**, bio-mlff's
+XLA-fused CUDA path is the fastest overall, with TorchANI CUDA and Molly CUDA next; Molly Metal and
+bio-mlff MPS give Apple-GPU coverage (Molly Metal is flattest — 147 ms energy / 365 ms forces at the
+full protein). See the energy/forces vs-N figures above for all eleven series.
 
 ---
 

@@ -1,6 +1,6 @@
 # Publication figures for the ANI benchmarks. Reads the JSON written by the timing scripts
-# (benchmark/results/*.json) and the TorchANI reference JSON, and writes ~150 dpi PNGs to
-# benchmark/images/. Self-contained: skips any figure whose input JSON is missing.
+# (benchmark/results/*.json) and the TorchANI / bio-mlff reference JSON, and writes ~150 dpi PNGs
+# to benchmark/images/. Self-contained: skips any series whose input JSON is missing.
 #
 #   julia --project=<env> benchmark/ani_plots.jl
 # Needs CairoMakie + JSON3 in the environment.
@@ -14,6 +14,7 @@ const REF = joinpath(@__DIR__, "..", "data", "ani_reference")
 mkpath(IMG)
 
 load_json(p) = isfile(p) ? JSON3.read(read(p, String)) : nothing
+getk(d, k) = isnothing(d) ? nothing : get(d, k, nothing)
 
 # Pull (sizes, mins) sorted by size from a {"<n>": {"min":..}} sub-dict.
 function series(d)
@@ -22,48 +23,78 @@ function series(d)
     (ks, [Float64(d[string(k)]["min"]) for k in ks])
 end
 
-# Pull (sizes, times) from a TorchANI reference JSON: {"sizes": {"<n>": {"energy_ms"/"forces_ms"}}}.
-function series_torch(path, key)
+# Pull (sizes, times) from a TorchANI/bio-mlff JSON: {"sizes": {"<n>": {"energy_ms"/"forces_ms"}}}.
+function series_ref(path, key)
     tj = load_json(path); (isnothing(tj) || !haskey(tj, "sizes")) && return (Int[], Float64[])
     ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
     (ks, [Float64(tj["sizes"][string(k)][key]) for k in ks])
 end
 
+energy      = load_json(joinpath(RES, "ani_energy.json"))       # Molly t8 CPU + Metal
 forces      = load_json(joinpath(RES, "ani_forces.json"))
-energy      = load_json(joinpath(RES, "ani_energy.json"))
-cuda_energy = load_json(joinpath(RES, "ani_cuda_energy.json"))
+energy_t1   = load_json(joinpath(RES, "ani_energy_t1.json"))    # Molly t1 CPU
+forces_t1   = load_json(joinpath(RES, "ani_forces_t1.json"))
+cuda_energy = load_json(joinpath(RES, "ani_cuda_energy.json"))  # Molly CUDA (RTX 5080)
 cuda_forces = load_json(joinpath(RES, "ani_cuda_forces.json"))
 
-# --- Figures: energy / forces vs N — every backend on one chart --------------------
-# Molly CPU/Metal/CUDA + TorchANI CPU/CUDA. NB Molly CPU/Metal + TorchANI CPU are Apple Silicon,
-# while Molly CUDA + TorchANI CUDA are the RTX 5080 host — cross-machine, so read the scaling shape
-# rather than the absolute cross-device level. TorchANI series are dashed.
-function vs_N_plot(mj, cj, tkey, quantity, out)
-    isnothing(mj) && isnothing(cj) && return
-    fig = Figure(size = (820, 560))
+# --- Figures: energy / forces vs N — all implementations on one chart --------------
+# Molly / TorchANI / bio-mlff, each CPU (t1 + t8) and GPU. Framework encoded by linestyle
+# (Molly solid, TorchANI dashed, bio-mlff dotted). NB the CPU + Apple-Metal series are Apple
+# Silicon (M3) while the CUDA series are the RTX 5080 host — cross-machine, so read the scaling
+# shape rather than the absolute cross-device level.
+const STYLE = Dict(
+    "Molly CPU (t1)"    => (:royalblue,   :solid),
+    "Molly CPU (t8)"    => (:navy,        :solid),
+    "Molly Metal"       => (:darkorange,  :solid),
+    "Molly CUDA"        => (:seagreen,    :solid),
+    "TorchANI CPU (t1)" => (:orchid,      :dash),
+    "TorchANI CPU (t8)" => (:crimson,     :dash),
+    "TorchANI CUDA"     => (:deepskyblue, :dash),
+    "bio-mlff CPU (t1)" => (:mediumpurple,:dot),
+    "bio-mlff CPU (t8)" => (:purple,      :dot),
+    "bio-mlff MPS"      => (:sienna,      :dot),
+    "bio-mlff CUDA"     => (:teal,        :dot),
+)
+
+function vs_N_plot(quantity, tkey, out)
+    mj    = quantity == "energy" ? energy      : forces
+    mj_t1 = quantity == "energy" ? energy_t1   : forces_t1
+    cj    = quantity == "energy" ? cuda_energy : cuda_forces
+    specs = [
+        ("Molly CPU (t1)",    series(getk(mj_t1, "cpu"))),
+        ("Molly CPU (t8)",    series(getk(mj, "cpu"))),
+        ("Molly Metal",       series(getk(mj, "metal"))),
+        ("Molly CUDA",        series(getk(cj, "cuda"))),
+        ("TorchANI CPU (t1)", series_ref(joinpath(REF, "6mrr_timing_torchani_cpu_t1.json"), tkey)),
+        ("TorchANI CPU (t8)", series_ref(joinpath(REF, "6mrr_timing_torchani_cpu_t8.json"), tkey)),
+        ("TorchANI CUDA",     series_ref(joinpath(REF, "6mrr_timing_torchani_cuda.json"), tkey)),
+        ("bio-mlff CPU (t1)", series_ref(joinpath(REF, "biomlff_cpu_t1.json"), tkey)),
+        ("bio-mlff CPU (t8)", series_ref(joinpath(REF, "biomlff_cpu_t8.json"), tkey)),
+        ("bio-mlff MPS",      series_ref(joinpath(REF, "biomlff_mps.json"), tkey)),
+        ("bio-mlff CUDA",     series_ref(joinpath(REF, "biomlff_cuda.json"), tkey)),
+    ]
+    fig = Figure(size = (900, 640))
     ax  = Axis(fig[1, 1], xscale = log10, yscale = log10, xlabel = "number of atoms",
                ylabel = "$quantity time (ms)",
-               title = "ANI-2x $quantity: Molly CPU/Metal/CUDA vs TorchANI CPU/CUDA")
-    for (lbl, xy) in (("Molly CPU (t8)",  series(get(mj, "cpu", nothing))),
-                      ("Molly Metal",     series(get(mj, "metal", nothing))),
-                      ("Molly CUDA",      series(get(cj, "cuda", nothing))),
-                      ("TorchANI CPU",    series_torch(joinpath(REF, "6mrr_timing_torchani_cpu.json"), tkey)),
-                      ("TorchANI CUDA",   series_torch(joinpath(REF, "6mrr_timing_torchani_cuda.json"), tkey)))
-        xs, ys = xy; isempty(xs) && continue
-        scatterlines!(ax, xs, ys, label = lbl, markersize = 10,
-                      linestyle = startswith(lbl, "TorchANI") ? :dash : :solid)
+               title = "ANI-2x $quantity: Molly vs TorchANI vs bio-mlff (CPU t1/t8 + GPU)")
+    plotted = false
+    for (lbl, (xs, ys)) in specs
+        isempty(xs) && continue
+        col, ls = STYLE[lbl]
+        scatterlines!(ax, xs, ys, label = lbl, markersize = 8, color = col, linestyle = ls)
+        plotted = true
     end
-    axislegend(ax, position = :lt)
+    plotted || return
+    axislegend(ax, position = :lt, labelsize = 10, nbanks = 2)
     save(joinpath(IMG, out), fig, px_per_unit = 2)
     println("wrote images/", out)
 end
-vs_N_plot(forces, cuda_forces, "forces_ms", "forces", "forces_vs_N.png")
-vs_N_plot(energy, cuda_energy, "energy_ms", "energy", "energy_vs_N.png")
+vs_N_plot("forces", "forces_ms", "forces_vs_N.png")
+vs_N_plot("energy", "energy_ms", "energy_vs_N.png")
 
-# --- Figure: GPU speedup over host CPU (t8) vs N — every backend in one plot --------
-# One figure per quantity, overlaying each device's speedup over its own host CPU-t8. NB the
-# Metal series' CPU baseline is Apple Silicon and the CUDA series' is the cyclops host, so each
-# line is GPU-vs-its-own-host; compare the scaling shape, not the absolute CPU.
+# --- Figure: GPU speedup over host CPU (t8) vs N — Metal + CUDA in one plot ---------
+# Each device's speedup over its own host CPU-t8. NB the Metal series' CPU baseline is Apple
+# Silicon and the CUDA series' is the cyclops host; compare the scaling shape, not the absolute CPU.
 function speedup_multi(specs, title, out)
     fig = Figure(size = (760, 520))
     ax  = Axis(fig[1, 1], xscale = log10, xlabel = "number of atoms",
@@ -71,8 +102,8 @@ function speedup_multi(specs, title, out)
     plotted = false
     for (data, cpukey, gpukey, lbl) in specs
         isnothing(data) && continue
-        xc, yc = series(get(data, cpukey, nothing))
-        xg, yg = series(get(data, gpukey, nothing))
+        xc, yc = series(getk(data, cpukey))
+        xg, yg = series(getk(data, gpukey))
         common = intersect(xc, xg)
         isempty(common) && continue
         cpu = Dict(xc .=> yc); gpu = Dict(xg .=> yg)

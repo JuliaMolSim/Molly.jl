@@ -8,3 +8,4 @@ benchmark/results
 benchmark/*.dcd
 data/ani_reference/*timing*.json
 .vscode/settings.json
+data/ani_reference/biomlff_*.json
