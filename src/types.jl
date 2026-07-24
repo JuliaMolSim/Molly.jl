@@ -407,6 +407,10 @@ function hash(a::InteractionList5Atoms, h::UInt)
     return hash(is, hash(js, hash(ks, hash(ls, hash(ms, hash(inters, hash(types, hash(a.data, h))))))))
 end
 
+function Base.show(io::IO, sil::T) where T <: SpecificInteractionList
+    print(io, nameof(T), " with ", length(sil.is), " interactions of type ", eltype(sil.inters))
+end
+
 function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
     inters_grad = to_device(inject_interaction.(from_device(inter.inters),
                                 inter.types, (params_dic,)), AT)

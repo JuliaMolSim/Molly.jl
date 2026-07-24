@@ -482,6 +482,9 @@ end
         @test length(sys.specific_inter_lists) == 7
         @test length(sys.specific_inter_lists[1]) == 1691
         @test length(sys.specific_inter_lists[2]) == 2137
+        for sil in sys.specific_inter_lists
+            show(devnull, sil)
+        end
 
         constrained_inds = Molly.constrained_atom_inds(sys)
         @test length(constrained_inds) == 15747
