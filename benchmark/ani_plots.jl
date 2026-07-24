@@ -22,59 +22,48 @@ function series(d)
     (ks, [Float64(d[string(k)]["min"]) for k in ks])
 end
 
-# --- Figure: forces vs N, Molly CPU (Enzyme) vs Metal (on-device) ------------------
-forces = load_json(joinpath(RES, "ani_forces.json"))
-if !isnothing(forces)
-    fig = Figure(size = (760, 520))
-    ax  = Axis(fig[1, 1], xscale = log10, yscale = log10,
-               xlabel = "number of atoms", ylabel = "forces time (ms)",
-               title = "ANI-2x forces: Molly analytic (CPU + Metal) vs TorchANI CPU")
-    xc, yc = series(get(forces, "cpu", nothing))
-    xm, ym = series(get(forces, "metal", nothing))
-    !isempty(xc) && scatterlines!(ax, xc, yc, label = "Molly CPU (analytic, t8)", markersize = 10)
-    !isempty(xm) && scatterlines!(ax, xm, ym, label = "Molly Metal (analytic)", markersize = 10)
-    # TorchANI forces timing, if the reference script was run. Format: {"sizes": {"<n>": {"forces_ms"}}}.
-    let tj = load_json(joinpath(REF, "6mrr_timing_torchani_cpu.json"))   # TorchANI CPU (MPS unusable)
-        if !isnothing(tj) && haskey(tj, "sizes")
-            ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
-            ys = [Float64(tj["sizes"][string(k)]["forces_ms"]) for k in ks]
-            scatterlines!(ax, ks, ys, label = "TorchANI CPU", linestyle = :dash, markersize = 8)
-        end
-    end
-    axislegend(ax, position = :lt)
-    save(joinpath(IMG, "forces_vs_N.png"), fig, px_per_unit = 2)
-    println("wrote images/forces_vs_N.png")
+# Pull (sizes, times) from a TorchANI reference JSON: {"sizes": {"<n>": {"energy_ms"/"forces_ms"}}}.
+function series_torch(path, key)
+    tj = load_json(path); (isnothing(tj) || !haskey(tj, "sizes")) && return (Int[], Float64[])
+    ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
+    (ks, [Float64(tj["sizes"][string(k)][key]) for k in ks])
 end
 
-# --- Figure: energy vs N, CPU vs Metal ---------------------------------------------
-energy = load_json(joinpath(RES, "ani_energy.json"))
-if !isnothing(energy)
-    fig = Figure(size = (760, 520))
-    ax  = Axis(fig[1, 1], xscale = log10, yscale = log10,
-               xlabel = "number of atoms", ylabel = "energy time (ms)",
-               title = "ANI-2x energy: Molly CPU vs Apple Metal")
-    for (key, lbl) in (("cpu", "Molly CPU (t8)"), ("metal", "Molly Metal"))
-        xs, ys = series(get(energy, key, nothing))
-        !isempty(xs) && scatterlines!(ax, xs, ys, label = lbl, markersize = 10)
-    end
-    let tj = load_json(joinpath(REF, "6mrr_timing_torchani_cpu.json"))   # TorchANI CPU (MPS unusable)
-        if !isnothing(tj) && haskey(tj, "sizes")
-            ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
-            ys = [Float64(tj["sizes"][string(k)]["energy_ms"]) for k in ks]
-            scatterlines!(ax, ks, ys, label = "TorchANI CPU", linestyle = :dash, markersize = 8)
-        end
+forces      = load_json(joinpath(RES, "ani_forces.json"))
+energy      = load_json(joinpath(RES, "ani_energy.json"))
+cuda_energy = load_json(joinpath(RES, "ani_cuda_energy.json"))
+cuda_forces = load_json(joinpath(RES, "ani_cuda_forces.json"))
+
+# --- Figures: energy / forces vs N — every backend on one chart --------------------
+# Molly CPU/Metal/CUDA + TorchANI CPU/CUDA. NB Molly CPU/Metal + TorchANI CPU are Apple Silicon,
+# while Molly CUDA + TorchANI CUDA are the RTX 5080 host — cross-machine, so read the scaling shape
+# rather than the absolute cross-device level. TorchANI series are dashed.
+function vs_N_plot(mj, cj, tkey, quantity, out)
+    isnothing(mj) && isnothing(cj) && return
+    fig = Figure(size = (820, 560))
+    ax  = Axis(fig[1, 1], xscale = log10, yscale = log10, xlabel = "number of atoms",
+               ylabel = "$quantity time (ms)",
+               title = "ANI-2x $quantity: Molly CPU/Metal/CUDA vs TorchANI CPU/CUDA")
+    for (lbl, xy) in (("Molly CPU (t8)",  series(get(mj, "cpu", nothing))),
+                      ("Molly Metal",     series(get(mj, "metal", nothing))),
+                      ("Molly CUDA",      series(get(cj, "cuda", nothing))),
+                      ("TorchANI CPU",    series_torch(joinpath(REF, "6mrr_timing_torchani_cpu.json"), tkey)),
+                      ("TorchANI CUDA",   series_torch(joinpath(REF, "6mrr_timing_torchani_cuda.json"), tkey)))
+        xs, ys = xy; isempty(xs) && continue
+        scatterlines!(ax, xs, ys, label = lbl, markersize = 10,
+                      linestyle = startswith(lbl, "TorchANI") ? :dash : :solid)
     end
     axislegend(ax, position = :lt)
-    save(joinpath(IMG, "energy_vs_N.png"), fig, px_per_unit = 2)
-    println("wrote images/energy_vs_N.png")
+    save(joinpath(IMG, out), fig, px_per_unit = 2)
+    println("wrote images/", out)
 end
+vs_N_plot(forces, cuda_forces, "forces_ms", "forces", "forces_vs_N.png")
+vs_N_plot(energy, cuda_energy, "energy_ms", "energy", "energy_vs_N.png")
 
 # --- Figure: GPU speedup over host CPU (t8) vs N — every backend in one plot --------
 # One figure per quantity, overlaying each device's speedup over its own host CPU-t8. NB the
 # Metal series' CPU baseline is Apple Silicon and the CUDA series' is the cyclops host, so each
 # line is GPU-vs-its-own-host; compare the scaling shape, not the absolute CPU.
-cuda_energy = load_json(joinpath(RES, "ani_cuda_energy.json"))
-cuda_forces = load_json(joinpath(RES, "ani_cuda_forces.json"))
 function speedup_multi(specs, title, out)
     fig = Figure(size = (760, 520))
     ax  = Axis(fig[1, 1], xscale = log10, xlabel = "number of atoms",
@@ -101,37 +90,5 @@ speedup_multi([(forces, "cpu", "metal", "Metal / CPU"), (cuda_forces, "cpu", "cu
               "ANI-2x forces: GPU speedup over host CPU (t8)", "forces_speedup.png")
 speedup_multi([(energy, "cpu", "metal", "Metal / CPU"), (cuda_energy, "cpu", "cuda", "CUDA / CPU")],
               "ANI-2x energy: GPU speedup over host CPU (t8)", "energy_speedup.png")
-
-# --- Figure: ALL backends in one plot (energy + forces panels) ---------------------
-# Every implementation on one figure: Molly CPU/Metal/CUDA + TorchANI CPU/CUDA. NB CPU/Metal are
-# Apple Silicon and CUDA is the RTX 5080 host — cross-machine, so the scaling shape is the point,
-# not the absolute cross-device level.
-function series_torch(path, key)
-    tj = load_json(path); (isnothing(tj) || !haskey(tj, "sizes")) && return (Int[], Float64[])
-    ks = sort(parse.(Int, collect(string.(keys(tj["sizes"])))))
-    (ks, [Float64(tj["sizes"][string(k)][key]) for k in ks])
-end
-let
-    fig = Figure(size = (1200, 540))
-    for (col, quantity, mj, cj, tkey) in ((1, "energy", energy, cuda_energy, "energy_ms"),
-                                          (2, "forces", forces, cuda_forces, "forces_ms"))
-        ax = Axis(fig[2, col], xscale = log10, yscale = log10, xlabel = "number of atoms",
-                  ylabel = "$quantity time (ms)", title = "ANI-2x $quantity")
-        for (lbl, xy) in (("Molly CPU",     series(get(mj, "cpu", nothing))),
-                          ("Molly Metal",   series(get(mj, "metal", nothing))),
-                          ("Molly CUDA",    series(get(cj, "cuda", nothing))),
-                          ("TorchANI CPU",  series_torch(joinpath(REF, "6mrr_timing_torchani_cpu.json"), tkey)),
-                          ("TorchANI CUDA", series_torch(joinpath(REF, "6mrr_timing_torchani_cuda.json"), tkey)))
-            xs, ys = xy; isempty(xs) && continue
-            scatterlines!(ax, xs, ys, label = lbl, markersize = 9,
-                          linestyle = startswith(lbl, "TorchANI") ? :dash : :solid)
-        end
-        col == 1 && axislegend(ax, position = :lt)
-    end
-    Label(fig[1, :], "ANI-2x: all backends (Molly CPU/Metal = Apple Silicon; CUDA = RTX 5080)",
-          fontsize = 16, font = :bold)
-    save(joinpath(IMG, "all_backends.png"), fig, px_per_unit = 2)
-    println("wrote images/all_backends.png")
-end
 
 println("done — images in ", IMG)

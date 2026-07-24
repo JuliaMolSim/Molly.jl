@@ -98,7 +98,7 @@ the **~4000-atom crossover** Metal's near-flat cost wins, reaching **3.3×** the
 energy, 146 ms — the forward-AEV + backward-AEV + NN-VJP overhead). Both Molly paths beat
 TorchANI CPU forces at scale (see the head-to-head): at 16k, CPU-analytic is 3.0× and Metal 9.7×.
 
-![Forces vs N — Molly CPU vs Metal](images/forces_vs_N.png)
+![Forces vs N — all backends: Molly CPU/Metal/CUDA + TorchANI CPU/CUDA](images/forces_vs_N.png)
 
 **Full ensemble.** The 8-member ensemble forces on Metal cost **~1.7×** a single member (256 vs
 151 ms at 1000 atoms; 273 vs 155 at 2000): the AEV forward/backward runs once and only the NN VJP
@@ -149,7 +149,7 @@ threaded CPU wins. Above the ~4000-atom crossover Metal pulls ahead as the CPU g
 the full 6mrr system (15,954 atoms) Metal is **2.8× the CPU** (146 vs 404 ms). (Forces, in
 contrast, run on-GPU and cross over similarly — see above.)
 
-![Energy vs N — Molly CPU vs Metal](images/energy_vs_N.png)
+![Energy vs N — all backends: Molly CPU/Metal/CUDA + TorchANI CPU/CUDA](images/energy_vs_N.png)
 
 ---
 
@@ -195,10 +195,10 @@ Julia path is within **~1.25×** on energy at every size, and competitive on for
 at 500 atoms), widening to ~2.3× slower at 16k — a solid result for a first native implementation
 against a mature, hand-optimised CUDA library.
 
-**All backends in one figure** (energy + forces; Molly CPU/Metal are Apple Silicon, CUDA is the
-RTX 5080 host, so read the scaling shape rather than the absolute cross-machine level):
-
-![ANI-2x all backends — Molly CPU/Metal/CUDA + TorchANI CPU/CUDA](images/all_backends.png)
+The [energy](#energy-cpu) and [forces](#forces--the-single-analytic-path-cpu--metal) vs-N figures
+above overlay all five series (Molly CPU/Metal/CUDA + TorchANI CPU/CUDA) on one chart each. NB Molly
+CPU/Metal + TorchANI CPU are Apple Silicon while Molly CUDA + TorchANI CUDA are the RTX 5080 host, so
+read the scaling shape rather than the absolute cross-machine level.
 
 **GPU speedup over host CPU-t8, both backends in one view** (Metal's baseline is Apple Silicon,
 CUDA's is the cyclops host — each line is GPU-vs-its-own-host, so compare the scaling shape):
