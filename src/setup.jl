@@ -1843,14 +1843,13 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         end
     end
 
-    # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
-    #   to zero for the pairwise interaction
-
     # Count number of atoms that have epsilon active
     nonzero_epsilon_count = count(a -> !iszero(a.ϵ), atoms)
-    pi_weight_14_lj = (separate_lj14 || global_params[1] != zero(T) ? zero(T) : weight_14_lj)
-    lj = if global_params[1] == zero(T)
-        LennardJones(
+    if global_params[1] == zero(T)
+        # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
+        #   to zero for the pairwise interaction
+        pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
+        lj = LennardJones(
             cutoff=DistanceCutoff(T(dist_cutoff)),
             use_neighbors=using_neighbors,
             σ_mixing=σ_mix,
@@ -1858,14 +1857,14 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             weight_special=pi_weight_14_lj,
         )
     elseif nonzero_epsilon_count != 0
-        DoubleExponential(
-            cutoff = DistanceCutoff(T(dist_cutoff)),
-            use_neighbors = using_neighbors,
-            α = T(global_params[1]),
-            β = T(global_params[2]),
-            σ_mixing = σ_mix,
-            ϵ_mixing = ϵ_mix,
-            weight_special = pi_weight_14_lj
+        lj = DoubleExponential(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            α=T(global_params[1]),
+            β=T(global_params[2]),
+            σ_mixing=σ_mix,
+            ϵ_mixing=ϵ_mix,
+            weight_special=zero(T),
         )
     else
         error(

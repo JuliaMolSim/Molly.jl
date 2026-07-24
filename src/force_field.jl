@@ -736,12 +736,11 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     push!(nbfix_pairs, NBFixPair(type1, type2, class1, class2, σ, ϵ))
                 end
             end
-        
+
         elseif entry_name == "CustomNonbondedForce"
-
-            if entry["energy"] == "sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))" && entry["bondCutoff"] == "3"
+            dexp_definition = "sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))"
+            if entry["energy"] == dexp_definition && entry["bondCutoff"] == "3"
                 for element in eachelement(entry)
-
                     if element.name == "GlobalParameter"
                         if element["name"] == "alpha"
                             ff_param_array[9] && error("Multiple alpha values for double exponential alpha")
@@ -752,13 +751,11 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             ff_param_array[10] = parse(T, element["defaultValue"])
                             ff_param_array[11] = true
                         else
-                            report_issue(
-                                "CustomNonbondedForce with global parameters other than \"alpha\" or \"beta\" not supported",
-                                strictness
-                            )
+                            err_str = "CustomNonbondedForce with global parameters other than " *
+                                      "\"alpha\" and \"beta\" not supported, ignoring parameter"
+                            report_issue(err_str, strictness)
                         end
                     elseif element.name == "Atom"
-
                         σ = add_units(parse(T, element["sigma"]), u"nm", units)
                         ϵ = add_units(parse(T, element["epsilon"]), u"kJ * mol^-1", units)
                         if haskey(element, "class")
@@ -773,15 +770,11 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                                     at.type, at.class, at.element, at.charge, at.mass, σ, ϵ, missing, missing)
                             end
                         end
-                        
                     end
-
                 end
             else
-                err_str = "CustomNonbondedForce without "*
-                          "energy=\"sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))\" "*
-                          "and bondCutoff=\"3\" "
-                          "not currently supported, ignoring."
+                err_str = "CustomNonbondedForce without energy=\"$dexp_definition\" " *
+                          "and bondCutoff=\"3\" not supported, ignoring"
                 report_issue(err_str, strictness)
             end
 
