@@ -308,7 +308,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
     has_lj_force = any(entry -> entry.name == "LennardJonesForce", eachelement(ff))
     has_custom_nb_force = any(entry -> entry.name == "CustomNonbondedForce", eachelement(ff))
     if has_lj_force && has_custom_nb_force
-        error("LennardJonesForce and CustomNonbondedForce cannot be used in the same file")
+        error("file $ff_file contains both LennardJonesForce and CustomNonbondedForce tags " *
+              "which is not supported")
     end
 
     for entry in eachelement(ff)
@@ -760,6 +761,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         σ = add_units(parse(T, element["sigma"]), u"nm", units)
                         ϵ = add_units(parse(T, element["epsilon"]), u"kJ * mol^-1", units)
                         if haskey(element, "class")
+                            # This array can be used since CustomNonbondedForce and
+                            #   LennardJonesForce cannot both be present
                             push!(ljforce_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
                                     "", element["class"], "", zero(T), zero(T), σ, ϵ, missing, missing))
                         else
@@ -918,6 +921,10 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     global_params = [double_exp_alpha, double_exp_beta]
     G = typeof(global_params)
+    if has_double_exp_params && count(at -> at.ϵ > zero(at.ϵ), nb_atom_classes) > 0
+        error("if CustomNonbondedForce is used, all atoms must have a NonbondedForce " *
+              "ϵ of zero since the Lennard-Jones potential is not used")
+    end
 
     # Apply residue patches
     for res_name in collect(keys(residues)) # Collect required since residues changes

@@ -1848,8 +1848,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         end
     end
 
-    # Count number of atoms that have epsilon active
-    nonzero_epsilon_count = count(a -> !iszero(a.ϵ), atoms)
     if global_params[1] == zero(T)
         # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
         #   to zero for the pairwise interaction
@@ -1861,7 +1859,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             ϵ_mixing=ϵ_mix,
             weight_special=pi_weight_14_lj,
         )
-    elseif nonzero_epsilon_count != 0
+    else
         lj = DoubleExponential(
             cutoff=DistanceCutoff(T(dist_cutoff)),
             use_neighbors=using_neighbors,
@@ -1870,11 +1868,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             σ_mixing=σ_mix,
             ϵ_mixing=ϵ_mix,
             weight_special=zero(T),
-        )
-    else
-        error(
-            "$(nonzero_epsilon_count) atoms have non-zero ϵ, but cannot be assigned "*
-            "neither to Lennard-Jones or Double Exponential potentials."
         )
     end
 
