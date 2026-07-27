@@ -34,6 +34,8 @@ when the long-range correction to the potential energy is required.
     weight_special::W = 1
 end
 
+needed_atom_fields(::LennardJones) = (:σ, :ϵ)
+
 use_neighbors(inter::LennardJones) = inter.use_neighbors
 
 function Base.zero(lj::LennardJones{C, H, S, E, W}) where {C, H, S, E, W}
@@ -325,7 +327,7 @@ If ``\lambda`` is zero the interaction is turned off.
     cutoff::C = NoCutoff()
     α::A = 1.0
     use_neighbors::Bool = false
-    shortcut::H = LJZeroShortcut()
+    shortcut::H = LJZeroShortcutAdvanced()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
     λ_mixing::LM = MinimumMixing()
@@ -556,7 +558,7 @@ If ``\lambda`` is zero the interaction is turned off.
     cutoff::C = NoCutoff()
     α::A = 0.85
     use_neighbors::Bool = false
-    shortcut::H = LJZeroShortcut()
+    shortcut::H = LJZeroShortcutAdvanced()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
     λ_mixing::LM = MinimumMixing()
@@ -784,7 +786,7 @@ If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
 @kwdef struct AshbaughHatch{C, H, S, E, L, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
-    shortcut::H = LJZeroShortcut()
+    shortcut::H = LJZeroShortcutAdvanced()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = LorentzMixing()
     λ_mixing::L = LorentzMixing()

@@ -324,7 +324,7 @@ function GPUNeighborFinder(;
                             excluded_pairs=(),
                             special_pairs=(),
                             special=nothing,
-                            n_steps_reorder=25,
+                            n_steps_reorder=250,
                             initialized=false,
                             device_vector_type=nothing)
     if !isnothing(n_atoms)

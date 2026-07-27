@@ -874,7 +874,11 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         end
         buffers.step_n_preprocessed = step_n
     end
-    
+
+    ### check which atom fielded are needed for force calculation
+    REQUIRED_FIELDS = Molly.needed_fields_from_tuple(pairwise_inters)
+    NeedsVelocity = false ### @TODO implement force specific parameter
+
     # Execute Force Kernel over the list of interacting tiles
     auto_kernel = @cuda launch=false always_inline=true force_kernel!(
         buffers.fs_mat_reordered,
@@ -884,7 +888,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         sys.boundary, step_n, buffers.compressed_masks,
         Val(needs_vir), Val(T), Val(D),
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(NeedsVelocity))
     block_y, maxregs = force_launch_params(sys, auto_kernel)
     
     num_pairs = buffers.num_pairs
@@ -901,7 +905,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(NeedsVelocity))
     end
 
     if num_pairs > 0
@@ -913,7 +917,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(NeedsVelocity);
             threads=(32, block_y), blocks=n_blocks_launch
         )
     end
@@ -1465,6 +1469,7 @@ function compress_sparse!(buffers, nf::GPUNeighborFinder, ::Val{N}) where N
     @cuda threads=256 blocks=cld(N, 256) update_inv_morton_kernel!(
         buffers.morton_seq_inv, buffers.morton_seq, Val(N))
     
+    ### TODO: Measure time and optimise?
     # Stage B: Optimistic Initialization
     @cuda blocks=n_upper_tiles threads=32 init_compressed_masks_kernel!(
         buffers.compressed_masks, buffers.tile_is_clean, Val(N), Val(n_upper_tiles))
@@ -1568,6 +1573,16 @@ function find_interacting_blocks_kernel!(
     return nothing
 end
 
+### generate a function that returns flat tuple from the required 
+@generated function atom_to_flat_tuple(atom_full, ::Val{Fields}) where {Fields}
+    value_exprs = [:(getproperty(atom_full, $(QuoteNode(f)))) for f in Fields]
+    
+    return quote
+        Base.@_inline_meta
+        NamedTuple{$Fields}(($(value_exprs...),))
+    end
+end
+
 """
     force_kernel!(fs_mat, global_virial, coords, velocities, atoms, N, r_cut2, force_units,
                   inters_tuple, boundary, step_n, compressed_masks, needs_vir, T, D,
@@ -1610,8 +1625,7 @@ function force_kernel!(
     ::Val{T},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-    num_interacting_tiles, interacting_tiles_overflow) where {N, r_cut2, A, force_units,
-                                                              needs_vir, T, D}
+    num_interacting_tiles, interacting_tiles_overflow, ::Val{REQUIRED_FIELDS}, ::Val{NeedsVel}) where {N, r_cut2, A, force_units, needs_vir, T, D,REQUIRED_FIELDS,NeedsVel}
 
     a = Int32(1)
     b = Int32(D)
@@ -1667,25 +1681,39 @@ function force_kernel!(
     j_0_tile = (j - a) * warpsize()
     index_j = j_0_tile + lane
 
+    if !NeedsVel
+        vel_i = SVector{3,T}(zeros(T,3))
+        vel_j = SVector{3,T}(zeros(T,3))
+    end
+
+    #@TODO precompute reduces atoms before hand?
+
     # Part 1: Standard non-diagonal tiles
     if j < n_blocks && i < j
         @inbounds coords_i = coords[index_i]
-        @inbounds vel_i = velocities[index_i]
-        @inbounds atoms_i = atoms[index_i]
-        
         @inbounds coords_j = coords[index_j]
-        @inbounds vel_j = velocities[index_j]
+        if NeedsVel
+            @inbounds vel_i = velocities[index_i]
+            @inbounds vel_j = velocities[index_j]
+        end
+    
         shuffle_idx = lane
-        @inbounds atoms_j = atoms[index_j]
-        atom_fields = getfield.((atoms_j,), fieldnames(A))
+        @inbounds atoms_i = atoms[index_i]
+        @inbounds atoms_j_full = atoms[index_j]
+
+        flat_j = atom_to_flat_tuple(atoms_j_full, Val(REQUIRED_FIELDS))
+        atom_fields_to_shuffle = Tuple(flat_j)
         
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                if NeedsVel
+                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                atoms_j_shuffle = A(atom_fields...)
+                atom_fields_shffld = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields_to_shuffle, lane + a, warpsize())
+                named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(atom_fields_shffld)
+                atoms_j_shuffle = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
@@ -1725,14 +1753,17 @@ function force_kernel!(
             end
         else # EXCLUDED
             @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-            @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+            @inbounds special_bitmask  = compressed_masks_ro[lane, 2, mask_idx]
 
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                if NeedsVel
+                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                atoms_j_shuffle = A(atom_fields...)
+                atom_fields_shffld = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields_to_shuffle, lane + a, warpsize())
+                named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(atom_fields_shffld)
+                atoms_j_shuffle = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
@@ -1789,7 +1820,9 @@ function force_kernel!(
     # Part 2: Boundary column tiles
     if j == n_blocks && i < n_blocks
         @inbounds coords_i = coords[index_i]
-        @inbounds vel_i = velocities[index_i]
+        if NeedsVel
+            @inbounds vel_i = velocities[index_i]
+        end
         @inbounds atoms_i = atoms[index_i]
         
         @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
@@ -1798,8 +1831,10 @@ function force_kernel!(
         @inbounds for m in a:r
             idx_j = j_0_tile + m
             @inbounds coords_j = coords[idx_j]
-            @inbounds vel_j = velocities[idx_j]
-            @inbounds atoms_j = atoms[idx_j]
+            if NeedsVel
+                @inbounds vel_j = velocities[idx_j]
+            end
+            @inbounds atoms_j = atoms[idx_j]            
             
             dr = vector(coords_i, coords_j, boundary)
             r2 = @fastmath sum(abs2, dr)
@@ -1851,7 +1886,9 @@ function force_kernel!(
     # Part 3: Diagonal tiles
     if i == j && i < n_blocks
         @inbounds coords_i = coords[index_i]
-        @inbounds vel_i = velocities[index_i]
+        if NeedsVel
+            @inbounds vel_i = velocities[index_i]
+        end
         @inbounds atoms_i = atoms[index_i]
         
         @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
@@ -1860,7 +1897,9 @@ function force_kernel!(
         @inbounds for m in (lane + a) : warpsize()
             idx_j = j_0_tile + m
             @inbounds coords_j = coords[idx_j]
-            @inbounds vel_j = velocities[idx_j]
+            if NeedsVel
+                @inbounds vel_j = velocities[idx_j]
+            end
             @inbounds atoms_j = atoms[idx_j]
             
             dr = vector(coords_i, coords_j, boundary)
@@ -1917,7 +1956,9 @@ function force_kernel!(
     if i == n_blocks && j == n_blocks
         if lane <= r
             @inbounds coords_i = coords[index_i]
-            @inbounds vel_i = velocities[index_i]
+            if NeedsVel
+                @inbounds vel_i = velocities[index_i]
+            end
             @inbounds atoms_i = atoms[index_i]
             
             @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
@@ -1926,9 +1967,11 @@ function force_kernel!(
             @inbounds for m in (lane + a) : r
                 idx_j = j_0_tile + m
                 @inbounds coords_j = coords[idx_j]
-                @inbounds vel_j = velocities[idx_j]
+                if NeedsVel
+                    @inbounds vel_j = velocities[idx_j]
+                end
                 @inbounds atoms_j = atoms[idx_j]
-                
+            
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
@@ -2119,6 +2162,7 @@ function energy_kernel!(
     j_0_tile = (j - a) * warpsize()
     index_j = j_0_tile + lane
 
+    ### @TODO add shuffle improvesments as in force_kernel
     if j < n_blocks && i < j
         @inbounds coords_i = coords[index_i]
         @inbounds vel_i = velocities[index_i]

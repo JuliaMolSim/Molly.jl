@@ -463,6 +463,32 @@ The types used should be bits types if the GPU is going to be used.
     alch_role::Int = CoreRole
 end
 
+
+@inline needed_fields_from_tuple(::Tuple{}) = ()
+@inline function needed_fields_from_tuple(inters::Tuple)
+    fields_first = needed_atom_fields(first(inters))
+    fields_rest  = needed_fields_from_tuple(Base.tail(inters))
+    return Tuple(unique((fields_first..., fields_rest...)))
+end
+
+### mimics actual atoms for the evaluation in the CUDA extension
+struct ReducedAtom{Fields, TData}
+    data::TData
+end
+
+@inline function Base.getproperty(ra::ReducedAtom{Fields}, s::Symbol) where {Fields}
+    return getproperty(getfield(ra, :data), s)
+end
+
+# construct a minimal atom for the required fields
+@generated function make_reduced_atom(atom_full, ::Val{Fields}) where {Fields}
+    # Fields is tuple of symbols, eg. (:σ, :ϵ) for LJ
+    exprs = [:(getproperty(atom_full, $(QuoteNode(f)))) for f in Fields]
+    return quote
+        ReducedAtom{Fields, typeof(($(exprs...),))}(NamedTuple{Fields}(($(exprs...),)))
+    end
+end
+
 function Base.zero(::Atom{T, M, C, S, E, L}) where {T, M, C, S, E, L}
     return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), CoreRole)
 end

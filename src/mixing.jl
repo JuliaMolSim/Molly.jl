@@ -3,11 +3,15 @@
 shortcut_pair(::Nothing, args...) = false
 
 struct LJZeroShortcut end
+struct LJZeroShortcutAdvanced end
 
-function shortcut_pair(::LJZeroShortcut, atom_i, atom_j, args...)
+@inline function shortcut_pair(::LJZeroShortcutAdvanced, atom_i, atom_j, args...)
+    return shortcut_pair(LJZeroShortcut) || iszero_value(atom_i.λ) || iszero_value(atom_j.λ)
+end
+
+@inline function shortcut_pair(::LJZeroShortcut, atom_i, atom_j, args...)
     return iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-           iszero_value(atom_i.σ) || iszero_value(atom_j.σ) ||
-           iszero_value(atom_i.λ) || iszero_value(atom_j.λ)
+           iszero_value(atom_i.σ) || iszero_value(atom_j.σ)
 end
 
 struct BuckinghamZeroShortcut end

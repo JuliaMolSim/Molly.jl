@@ -36,6 +36,8 @@ V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}}
     coulomb_const::T = coulomb_const
 end
 
+needed_atom_fields(::Coulomb)      = (:charge,)
+
 use_neighbors(inter::Coulomb) = inter.use_neighbors
 
 function Base.zero(coul::Coulomb{C, W, T}) where {C, W, T}
