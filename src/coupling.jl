@@ -13,7 +13,7 @@ export
 """
     apply_coupling!(system, buffers, coupling, simulator, neighbors=nothing, step_n=0;
                     n_threads=Threads.nthreads(), rng=Random.default_rng(),
-                    strictness=default_strictness())
+                    strictness=:warn)
 
 Apply a coupler to modify a simulation.
 
@@ -185,10 +185,19 @@ struct AndersenThermostat{T, C} <: AbstractThermostat
     coupling_const::C
 end
 
+function andersen_warn(sys, strictness)
+    if length(sys.constraints) > 0
+        err_str = "Using the AndersenThermostat on a system with constraints can " *
+                  "lead to velocities that violate the constraints"
+        report_issue(err_str, strictness; maxlog=1)
+    end
+end
+
 function apply_coupling!(sys::System{D}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng(), kwargs...) where D
+                         rng=Random.default_rng(), strictness=default_strictness()) where D
+    andersen_warn(sys, strictness)
     for i in eachindex(sys)
         if rand(rng) < (sim.dt / thermostat.coupling_const) && !sys.virtual_site_flags[i]
             sys.velocities[i] = random_velocity_svector(Val(D), mass(sys.atoms[i]),
@@ -202,6 +211,7 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng(), kwargs...) where {AT <: AbstractGPUArray, T}
+    andersen_warn(sys, strictness)
     backend = get_backend(sys.velocities)
     ctr1 = rand(rng, UInt64)
     key = rand(rng, UInt64)
