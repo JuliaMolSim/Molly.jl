@@ -106,7 +106,7 @@ end
     r = sqrt(sum(abs2, dr))
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
-    rm = σ * T(2^(1/6))
+    rm = σ * 2^(one(T)/6)
     α, β = inter.α, inter.β
     params = (α, β, rm, ϵ)
     pe = pe_cutoff(inter.cutoff, inter, r, params)
@@ -138,7 +138,7 @@ end
     r = sqrt(sum(abs2, dr))
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
-    rm = σ * T(2^(1/6))
+    rm = σ * 2^(one(T)/6)
     α, β = inter.α, inter.β
     params = (α, β, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
@@ -281,11 +281,11 @@ end
     r = sqrt(sum(abs2, dr))
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
-    rm = σ * T(2^(1/6))
+    rm = σ * 2^(one(T)/6)
     # Following  https://doi.org/10.1039/d3dd00070b
     # αs = (1.1 + λ(α − 1.1)) and βs = (1 + λ(β − 1))
-    α_s = T(1.1 + λ * (inter.α - 1.1))
-    β_s = T(1 + λ * (inter.β - 1))
+    α_s = T(1.1) + λ * (inter.α - T(1.1))
+    β_s = one(T) + λ * (inter.β - one(T))
     params = (α_s, β_s, rm, ϵ)
     pe = pe_cutoff(inter.cutoff, inter, r, params)
     if special
@@ -325,11 +325,11 @@ end
 
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
-    rm = σ * T(2^(1/6))
+    rm = σ * 2^(one(T)/6)
     # Following  https://doi.org/10.1039/d3dd00070b
     # αs = (1.1 + λ(α − 1.1)) and βs = (1 + λ(β − 1))
-    α_s = T(1.1 + λ * (inter.α - 1.1))
-    β_s = T(1 + λ * (inter.β - 1))
+    α_s = T(1.1) + λ * (inter.α - T(1.1))
+    β_s = one(T) + λ * (inter.β - one(T))
     params = (α_s, β_s, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = (λ * f / r) * dr

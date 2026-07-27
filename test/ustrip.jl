@@ -129,7 +129,7 @@
     ewald_nounits = ustrip(ewald)
     @test ewald_nounits.dist_cutoff == 1.0
     @test ewald_nounits.error_tol == ewald.error_tol
-    @test ewald_nounits.excluded_pairs == ewald.excluded_pairs
+    @test ewald_nounits.scheduler === ewald.scheduler
 
     coul_ewald_scaled = CoulombEwaldScaled(
         dist_cutoff=1.4u"nm",

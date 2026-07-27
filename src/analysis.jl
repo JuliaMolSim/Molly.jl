@@ -178,3 +178,47 @@ Returns a list of distance bin centers and a list of the corresponding
 densities.
 """
 function rdf end
+
+"""
+    rdf(coords, boundary, pairs, bin_edges)
+
+Calculate a fixed-bin radial distribution function for the supplied eligible
+atom `pairs`. Pair distances use the minimum image convention. The result is
+normalized by the number of eligible pairs and the instantaneous boundary
+volume, so callers can exclude intramolecular or otherwise unwanted pairs.
+The boundary and bin edges may use different compatible length units.
+"""
+function rdf(coords, boundary::AbstractBoundary{D, T}, pairs,
+             bin_edges::AbstractVector) where {D, T}
+    D in (2, 3) || throw(ArgumentError("RDF is only defined in 2 or 3 dimensions"))
+    length(bin_edges) >= 2 || throw(ArgumentError("RDF needs at least two bin edges"))
+    all(diff(bin_edges) .> zero(eltype(bin_edges))) ||
+        throw(ArgumentError("RDF bin edges must be strictly increasing"))
+    first(bin_edges) >= zero(first(bin_edges)) ||
+        throw(ArgumentError("RDF bin edges must be non-negative"))
+    last(bin_edges) <= minimum(box_sides(boundary)) / T(2) ||
+        throw(ArgumentError("RDF range exceeds half the shortest box side"))
+
+    eligible = pairs isa AbstractVector ? pairs : collect(pairs)
+    isempty(eligible) && throw(ArgumentError("RDF needs at least one eligible pair"))
+    coords_host = from_device(coords)
+    counts = zeros(Int, length(bin_edges) - 1)
+    for pair in eligible
+        i, j = pair
+        i != j || throw(ArgumentError("RDF pairs cannot contain self-pairs"))
+        1 <= i <= length(coords_host) && 1 <= j <= length(coords_host) ||
+            throw(BoundsError(coords_host, (i, j)))
+        r = norm(vector(coords_host[i], coords_host[j], boundary))
+        bin = searchsortedlast(bin_edges, r)
+        1 <= bin < length(bin_edges) && (counts[bin] += 1)
+    end
+
+    lo, hi = @views bin_edges[1:end-1], bin_edges[2:end]
+    shell_volumes = D == 3 ?
+        (T(4π / 3) .* (hi .^ 3 .- lo .^ 3)) :
+        (T(π) .* (hi .^ 2 .- lo .^ 2))
+    centers = (lo .+ hi) ./ T(2)
+    distribution = counts .* volume(boundary) ./
+                   (length(eligible) .* shell_volumes)
+    return collect(centers), T.(ustrip.(NoUnits, distribution))
+end

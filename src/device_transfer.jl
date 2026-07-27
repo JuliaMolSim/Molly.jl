@@ -25,15 +25,31 @@ end
 
 @inline _rebuild_structarray(x, ::Type{AT}) where {AT} = x
 
-from_device(il::InteractionList1Atoms) = InteractionList1Atoms(from_device(il.is), from_device(il.inters), il.types)
-from_device(il::InteractionList2Atoms) = InteractionList2Atoms(from_device(il.is), from_device(il.js), from_device(il.inters), il.types)
-from_device(il::InteractionList3Atoms) = InteractionList3Atoms(from_device(il.is), from_device(il.js), from_device(il.ks), from_device(il.inters), il.types)
-from_device(il::InteractionList4Atoms) = InteractionList4Atoms(from_device(il.is), from_device(il.js), from_device(il.ks), from_device(il.ls), from_device(il.inters), il.types)
+from_device(il::InteractionList1Atoms) = InteractionList1Atoms(
+    from_device(il.is), from_device(il.inters), il.types,
+    _from_device_system_fields(il.data))
+from_device(il::InteractionList2Atoms) = InteractionList2Atoms(
+    from_device(il.is), from_device(il.js), from_device(il.inters), il.types,
+    _from_device_system_fields(il.data))
+from_device(il::InteractionList3Atoms) = InteractionList3Atoms(
+    from_device(il.is), from_device(il.js), from_device(il.ks), from_device(il.inters), il.types,
+    _from_device_system_fields(il.data))
+from_device(il::InteractionList4Atoms) = InteractionList4Atoms(
+    from_device(il.is), from_device(il.js), from_device(il.ks), from_device(il.ls),
+    from_device(il.inters), il.types, _from_device_system_fields(il.data))
 
-to_device(il::InteractionList1Atoms, ::Type{AT}) where {AT} = InteractionList1Atoms(to_device(il.is, AT), to_device(il.inters, AT), il.types)
-to_device(il::InteractionList2Atoms, ::Type{AT}) where {AT} = InteractionList2Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.inters, AT), il.types)
-to_device(il::InteractionList3Atoms, ::Type{AT}) where {AT} = InteractionList3Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.ks, AT), to_device(il.inters, AT), il.types)
-to_device(il::InteractionList4Atoms, ::Type{AT}) where {AT} = InteractionList4Atoms(to_device(il.is, AT), to_device(il.js, AT), to_device(il.ks, AT), to_device(il.ls, AT), to_device(il.inters, AT), il.types)
+to_device(il::InteractionList1Atoms, ::Type{AT}) where {AT} = InteractionList1Atoms(
+    to_device(il.is, AT), to_device(il.inters, AT), il.types,
+    _to_device_system_fields(il.data, AT))
+to_device(il::InteractionList2Atoms, ::Type{AT}) where {AT} = InteractionList2Atoms(
+    to_device(il.is, AT), to_device(il.js, AT), to_device(il.inters, AT), il.types,
+    _to_device_system_fields(il.data, AT))
+to_device(il::InteractionList3Atoms, ::Type{AT}) where {AT} = InteractionList3Atoms(
+    to_device(il.is, AT), to_device(il.js, AT), to_device(il.ks, AT),
+    to_device(il.inters, AT), il.types, _to_device_system_fields(il.data, AT))
+to_device(il::InteractionList4Atoms, ::Type{AT}) where {AT} = InteractionList4Atoms(
+    to_device(il.is, AT), to_device(il.js, AT), to_device(il.ks, AT), to_device(il.ls, AT),
+    to_device(il.inters, AT), il.types, _to_device_system_fields(il.data, AT))
 
 _from_device_inter_lists(x::Tuple) = map(from_device, x)
 _from_device_inter_lists(x::NamedTuple) = map(from_device, x)
@@ -173,7 +189,7 @@ function _pme_buffers(::Type{AT}, ::Type{T}, mesh_dims, charge_grid, excluded_pa
         excluded_buffer_Es = to_device(zeros(T, length(excluded_pairs)), AT)
         virial_buffer      = to_device(zeros(T, 3, 3), AT)
     elseif Threads.nthreads() > 1
-        charge_grid_buffer = [zero(charge_grid) for _ in 1:Threads.nthreads()]
+        charge_grid_buffer = [zeros(T, size(charge_grid)) for _ in 1:Threads.nthreads()]
         recip_conv_buffer = zeros(T, Threads.nthreads())
         excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
         virial_buffer = [zeros(T, 3, 3) for _ in 1:Threads.nthreads()]
@@ -240,6 +256,13 @@ _transfer_pme(inter::PME{T}, ::Type{AT}) where {T, AT} = _transfer_pme(inter, AT
 
 from_device(inter::PME) = _transfer_pme(inter, Array)
 to_device(inter::PME, ::Type{AT}) where {AT} = _transfer_pme(inter, AT)
+
+function Base.deepcopy_internal(inter::PME{T}, stackdict::IdDict) where T
+    haskey(stackdict, inter) && return stackdict[inter]
+    copied = _transfer_pme(inter, array_type(inter.charge_grid), T)
+    stackdict[inter] = copied
+    return copied
+end
 
 function _transfer_obc(inter::ImplicitSolventOBC, ::Type{AT}) where {AT}
     offset_radii = _transfer_storage(inter.offset_radii, AT)

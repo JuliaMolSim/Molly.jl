@@ -414,7 +414,9 @@ end
 function calc_pe_list(inter_list::InteractionList2Atoms, atoms, coords, velocities, boundary, energy_units, step_n, ::Val{T}) where T
     pe_il = zero(T) * energy_units
     @inbounds for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
-        pe_inter = potential_energy(inter, coords[i], coords[j], boundary, atoms[i], atoms[j], energy_units, velocities[i], velocities[j], step_n)
+        pe_inter = potential_energy(inter, coords[i], coords[j], boundary, atoms[i], atoms[j],
+                                   energy_units, velocities[i], velocities[j], step_n,
+                                   inter_list.data)
         check_energy_units(pe_inter, energy_units)
         pe_il += pe_inter
     end

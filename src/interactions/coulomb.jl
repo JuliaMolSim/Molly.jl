@@ -2211,6 +2211,26 @@ function inject_interaction(inter::CoulombEwald, params::AbstractVector, idx_dis
     )
 end
 
+function inject_interaction(inter::CoulombEwaldScaled, params::AbstractVector,
+                            idx_dist_cutoff::Int, idx_weight_14::Int,
+                            idx_coulomb_const::Int)
+    new_d = idx_dist_cutoff > 0 ? typeof(inter.dist_cutoff)(params[idx_dist_cutoff]) :
+            inter.dist_cutoff
+    new_w = idx_weight_14 > 0 ? typeof(inter.weight_special)(params[idx_weight_14]) :
+            inter.weight_special
+    new_c = idx_coulomb_const > 0 ? typeof(inter.coulomb_const)(params[idx_coulomb_const]) :
+            inter.coulomb_const
+    return CoulombEwaldScaled(
+        dist_cutoff=new_d,
+        error_tol=inter.error_tol,
+        use_neighbors=inter.use_neighbors,
+        scheduler=inter.scheduler,
+        weight_special=new_w,
+        coulomb_const=new_c,
+        approximate_erfc=inter.approximate_erfc,
+    )
+end
+
 function inject_interaction(inter::CoulombSoftCoreBeutlerEwald, params::AbstractVector,
                             idx_dist_cutoff::Int, idx_weight_14::Int, idx_coulomb_const::Int)
     new_d = idx_dist_cutoff > 0 ? typeof(inter.dist_cutoff)(params[idx_dist_cutoff]) : inter.dist_cutoff
@@ -2309,6 +2329,14 @@ function extract_parameter_indices!(buf::ParamBuffer, inter::CoulombReactionFiel
 end
 
 function extract_parameter_indices!(buf::ParamBuffer, inter::CoulombEwald)
+    key_prefix = "inter_CE_"
+    idx_cutoff = _push_param!(buf, key_prefix * "dist_cutoff", inter.dist_cutoff)
+    idx_weight = _push_param!(buf, key_prefix * "weight_14", inter.weight_special)
+    idx_coulomb = _push_param!(buf, key_prefix * "coulomb_const", inter.coulomb_const)
+    return (idx_cutoff, idx_weight, idx_coulomb)
+end
+
+function extract_parameter_indices!(buf::ParamBuffer, inter::CoulombEwaldScaled)
     key_prefix = "inter_CE_"
     idx_cutoff = _push_param!(buf, key_prefix * "dist_cutoff", inter.dist_cutoff)
     idx_weight = _push_param!(buf, key_prefix * "weight_14", inter.weight_special)

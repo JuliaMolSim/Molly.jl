@@ -12,7 +12,7 @@ const LOG_FLOATMAX   = log(floatmax(Float64)) # ≈ 709
 @inline function calc_energy!(sys::System, buffers, coords, boundary)
     sys.coords .= coords
     sys.boundary = boundary
-    return potential_energy(sys, find_neighbors(sys), 0, buffers; n_threads=1)
+    return potential_energy(sys, find_neighbors(sys), buffers, 0; n_threads=1)
 end
 
 struct MBARInput{U, UT, N, W, S}
@@ -451,6 +451,33 @@ function iterate_mbar(u, win_of, N_counts; rtol=1e-8, max_iter::Integer=10_000)
     return f_new, logN
 end
 
+function check_mbar_reduced_potentials(u::AbstractMatrix; label="sampled")
+    invalid = findfirst(x -> !isfinite(x) && x != Inf, u)
+    isnothing(invalid) || throw(DomainError(
+        u[invalid], "$label reduced potential contains NaN or -Inf at $invalid"))
+
+    unsupported_row = findfirst(
+        n -> !any(isfinite, @view(u[n, :])), axes(u, 1))
+    isnothing(unsupported_row) || throw(DomainError(
+        unsupported_row, "$label reduced potential has no finite state at frame $unsupported_row"))
+
+    unsupported_column = findfirst(
+        k -> !any(isfinite, @view(u[:, k])), axes(u, 2))
+    isnothing(unsupported_column) || throw(DomainError(
+        unsupported_column,
+        "$label reduced potential has no finite frames for state $unsupported_column"))
+    return nothing
+end
+
+function check_mbar_reduced_potentials(u::AbstractVector; label="target")
+    invalid = findfirst(x -> !isfinite(x) && x != Inf, u)
+    isnothing(invalid) || throw(DomainError(
+        u[invalid], "$label reduced potential contains NaN or -Inf at index $invalid"))
+    any(isfinite, u) || throw(DomainError(
+        u, "$label reduced potential has no finite frames"))
+    return nothing
+end
+
 # Compute log Dₙ = log ∑_k N_k exp(f_k − u[n,k]) for each frame n (log-sum-exp stable)
 # `u` is N×K: rows = frames n, cols = states k, `logN = log.(N_counts)`
 function mbar_logD(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector)
@@ -498,7 +525,7 @@ function mbar_weights_sampled(u::AbstractMatrix, f::AbstractVector, logN::Abstra
     min_i, max_i, min_n, max_n = 0, 0, 0, 0
     @inbounds for k in 1:K, n in 1:N
         x = f[k] - Float64(u[n,k]) - logD[n]
-        if x < min_x
+        if isfinite(x) && x < min_x
             min_x = x
             min_i = k
             min_n = n
@@ -564,7 +591,7 @@ function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector;
     min_x, max_x, min_n, max_n = Inf, -Inf, 0, 0
     @inbounds for n in eachindex(logw)
         x = logw[n]
-        if x < min_x
+        if isfinite(x) && x < min_x
             min_x = x
             min_n = n
         end
@@ -590,8 +617,10 @@ Compute MBAR weights for sampled states and for a target state, see
 [Shirts and Chodera 2008](https://doi.org/10.1063/1.2978177) Eq 13.
 
 # Arguments
-- `u::AbstractMatrix` - `N×K` reduced potentials for sampled states.
-- `u_target::AbstractVector` - length-`N` reduced potential for the target state.
+- `u::AbstractMatrix` - `N×K` reduced potentials for sampled states; `+Inf`
+    entries represent zero support.
+- `u_target::AbstractVector` - length-`N` reduced potential for the target state;
+    `+Inf` entries represent zero support.
 - `f::AbstractVector` - length-`K` relative free energies.
 - `N_counts::AbstractVector` - length-`K` sample counts per state.
 - `logN::AbstractVector` - `log.(N_counts)`.
@@ -613,12 +642,8 @@ function mbar_weights(u::AbstractMatrix,
                       logN::AbstractVector;
                       shifts::Union{Nothing, AbstractVector}=nothing,
                       check::Bool=true)
-    if !all(isfinite, u)
-        throw(DomainError(u, "infinite value found in reduced potential"))
-    end
-    if !all(isfinite, u_target)
-        throw(DomainError(u_target, "infinite value found in target system reduced potential"))
-    end
+    check_mbar_reduced_potentials(u)
+    check_mbar_reduced_potentials(u_target)
     if !all(isfinite, f)
         throw(DomainError(f, "infinite value found in free energies"))
     end
@@ -642,8 +667,10 @@ function mbar_weights(u::AbstractMatrix,
         throw(DomainError(w, "infinite value found in w_target"))
     end
 
-    any(iszero_value, W) && @warn "W_samp contains zeros, possible underflow"
-    any(iszero_value, w) && @warn "w_target contains zeros, possible underflow"
+    any(iszero_value(W[i]) && isfinite(u[i]) for i in eachindex(W)) &&
+        @warn "W_samp contains zeros, possible underflow"
+    any(iszero_value(w[i]) && isfinite(u_target[i]) for i in eachindex(w)) &&
+        @warn "w_target contains zeros, possible underflow"
 
     if check
         N, K = size(u)
@@ -730,12 +757,8 @@ function mbar_pmf(u::AbstractMatrix,
     if !all(>(0), N_counts)
         throw(DomainError(N_counts, "all N_counts must be > 0"))
     end
-    if !all(isfinite, u)
-        throw(DomainError(u, "infinite value found in reduced potential"))
-    end
-    if !all(isfinite, u_target)
-        throw(DomainError(u_target, "infinite value found in target system reduced potential"))
-    end
+    check_mbar_reduced_potentials(u)
+    check_mbar_reduced_potentials(u_target)
     if !all(isfinite, f)
         throw(DomainError(f, "infinite value found in free energies"))
     end

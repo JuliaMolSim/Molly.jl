@@ -80,3 +80,51 @@
     coords_wrap = wrap_coords.(coords, (boundary,))
     @test isapprox(hydrodynamic_radius(coords_wrap, boundary), 21.00006825680275u"Å"; atol=1e-6u"nm")
 end
+@testset "Fixed-bin RDF" begin
+    boundary = CubicBoundary(2.0u"nm")
+    coords = [SVector(0.0, 0.0, 0.0), SVector(0.25, 0.0, 0.0),
+              SVector(1.9, 0.0, 0.0)]u"nm"
+    edges = collect(0.0:0.1:0.4)u"nm"
+    centers, distribution = rdf(coords, boundary, [(1, 2), (1, 3)], edges)
+    expected_shell = 4π * (0.3^3 - 0.2^3) / 3
+
+    @test centers ≈ collect(0.05:0.1:0.35)u"nm"
+    @test distribution[2] ≈ 8 / (2 * (4π * (0.2^3 - 0.1^3) / 3))
+    @test distribution[3] ≈ 8 / (2 * expected_shell)
+    @test count(!iszero, distribution) == 2
+
+    edges_angstrom = uconvert.(u"Å", edges)
+    centers_angstrom, distribution_angstrom =
+        rdf(coords, boundary, [(1, 2), (1, 3)], edges_angstrom)
+    @test centers_angstrom ≈ uconvert.(u"Å", centers)
+    @test distribution_angstrom ≈ distribution
+
+    coords_nounits = ustrip.(coords)
+    boundary_nounits = ustrip(u"nm", boundary)
+    centers_nounits, distribution_nounits =
+        rdf(coords_nounits, boundary_nounits, [(1, 2), (1, 3)], ustrip.(u"nm", edges))
+    @test centers_nounits ≈ ustrip.(u"nm", centers)
+    @test distribution_nounits ≈ distribution
+
+    coords_f32 = SVector{3, Float32}.(coords_nounits)u"nm"
+    _, distribution_f32 = rdf(coords_f32, CubicBoundary(2.0f0u"nm"),
+                              [(1, 2), (1, 3)], Float32.(edges_angstrom))
+    @test eltype(distribution_f32) == Float32
+    @test distribution_f32 ≈ distribution
+    for AT in array_list[2:end]
+        @test last(rdf(to_device(coords, AT), boundary, [(1, 2), (1, 3)], edges)) ≈
+              distribution
+    end
+    @test_throws ArgumentError rdf(coords, boundary, Tuple{Int,Int}[], edges)
+    @test_throws ArgumentError rdf(coords, boundary, [(1, 1)], edges)
+    @test_throws ArgumentError rdf(coords, boundary, [(1, 2)], reverse(edges))
+    @test_throws ArgumentError rdf(coords, boundary, [(1, 2)], [0.0, 1.1]u"nm")
+
+    logger = RDFLogger([(1, 2)], edges_angstrom, 2)
+    system = System(atoms=fill(Atom(), 3), coords=coords, boundary=boundary,
+                    loggers=(; rdf=logger), energy_units=u"kJ/mol", force_units=u"kJ/mol/nm")
+    apply_loggers!(system, nothing, 1)
+    apply_loggers!(system, nothing, 2)
+    @test length(values(logger)) == 1
+    @test values(logger)[1] == last(rdf(coords, boundary, [(1, 2)], edges_angstrom))
+end

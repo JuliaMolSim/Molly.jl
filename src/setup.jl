@@ -2013,6 +2013,8 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
 
     # Virtual sites are in the structure file but not necessarily in the correct place
     place_virtual_sites!(sys)
+    nonbonded_method in (:pme, :ewald) &&
+        validate_ewald_components(sys; require_complete=true)
     maybe_optimize_cuda_launch_config!(sys; enabled=autotune_launch)
     return sys
 end

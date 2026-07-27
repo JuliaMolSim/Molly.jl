@@ -41,25 +41,28 @@ Unitful.ustrip(a::Atom) = Atom(
 function Unitful.ustrip(il::InteractionList1Atoms)
     AT = array_type(il.inters)
     unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
-    return InteractionList1Atoms(il.is, unitless_inters, il.types)
+    return InteractionList1Atoms(il.is, unitless_inters, il.types, _maybe_strip_units(il.data))
 end
 
 function Unitful.ustrip(il::InteractionList2Atoms)
     AT = array_type(il.inters)
     unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
-    return InteractionList2Atoms(il.is, il.js, unitless_inters, il.types)
+    return InteractionList2Atoms(il.is, il.js, unitless_inters, il.types,
+                                 _maybe_strip_units(il.data))
 end
 
 function Unitful.ustrip(il::InteractionList3Atoms)
     AT = array_type(il.inters)
     unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
-    return InteractionList3Atoms(il.is, il.js, il.ks, unitless_inters, il.types)
+    return InteractionList3Atoms(il.is, il.js, il.ks, unitless_inters, il.types,
+                                 _maybe_strip_units(il.data))
 end
 
 function Unitful.ustrip(il::InteractionList4Atoms)
     AT = array_type(il.inters)
     unitless_inters = to_device(ustrip.(from_device(il.inters)), AT)
-    return InteractionList4Atoms(il.is, il.js, il.ks, il.ls, unitless_inters, il.types)
+    return InteractionList4Atoms(il.is, il.js, il.ks, il.ls, unitless_inters, il.types,
+                                 _maybe_strip_units(il.data))
 end
 
 function Unitful.ustrip(logger::GeneralObservableLogger)

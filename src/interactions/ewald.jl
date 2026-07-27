@@ -5,7 +5,8 @@ import Base: ==, hash
 export
     Ewald,
     PME,
-    EwaldExclusion
+    EwaldExclusion,
+    validate_ewald_components
 
 abstract type AbstractEwald end
 
@@ -88,7 +89,6 @@ end
 Unitful.ustrip(inter::Ewald) = Ewald(
     ustrip(inter.dist_cutoff),
     inter.error_tol,
-    inter.excluded_pairs,
     inter.scheduler,
 )
 
@@ -1054,6 +1054,7 @@ Only compatible with 3D systems.
 
 Base.zero(::EwaldExclusion) = EwaldExclusion()
 Base.:+(::EwaldExclusion, ::EwaldExclusion) = EwaldExclusion()
+Unitful.ustrip(inter::EwaldExclusion) = inter
 
 struct EwaldExclusionData{T, D, A, F, S}
     dist_cutoff::D
@@ -1062,6 +1063,64 @@ struct EwaldExclusionData{T, D, A, F, S}
     α::A
     f_div_ϵr::F
     scheduler::S
+end
+
+const EwaldPairwise = Union{
+    CoulombEwald,
+    CoulombEwaldScaled,
+    CoulombSoftCoreBeutlerEwald,
+    CoulombSoftCoreGapsysEwald,
+}
+
+"""
+    validate_ewald_components(sys; require_complete=false)
+
+Check that the short-range, reciprocal-space and exclusion parts of an Ewald
+electrostatics stack use compatible cutoff, tolerance and scheduler settings.
+"""
+function validate_ewald_components(sys::System; require_complete=false)
+    pairwise = filter(inter -> inter isa EwaldPairwise, values(sys.pairwise_inters))
+    general = filter(inter -> inter isa AbstractEwald, values(sys.general_inters))
+    exclusions = filter(
+        list -> list isa InteractionList2Atoms && list.data isa EwaldExclusionData,
+        values(sys.specific_inter_lists),
+    )
+    components = (pairwise=pairwise, general=general, exclusions=exclusions)
+    any(values(components)) do inters
+        length(inters) > 1
+    end && throw(ArgumentError("an Ewald stack must contain at most one component of each kind"))
+    if require_complete
+        all(inters -> length(inters) == 1, values(components)) ||
+            throw(ArgumentError("an Ewald stack requires one pairwise, general and exclusion component"))
+    end
+    isempty(pairwise) && return true
+
+    pair = only(pairwise)
+    for component in (general..., (list.data for list in exclusions)...)
+        component.dist_cutoff == pair.dist_cutoff ||
+            throw(ArgumentError("Ewald components have different distance cutoffs"))
+        component.error_tol == pair.error_tol ||
+            throw(ArgumentError("Ewald components have different error tolerances"))
+    end
+
+    scheduled = (general..., (list.data for list in exclusions)...)
+    if !isempty(scheduled)
+        scheduler = first(scheduled).scheduler
+        all(component -> component.scheduler == scheduler, scheduled) ||
+            throw(ArgumentError("Ewald components have different electrostatic schedulers"))
+        if hasproperty(pair, :scheduler)
+            pair.scheduler == scheduler ||
+                throw(ArgumentError("Ewald components have different electrostatic schedulers"))
+        elseif scheduler != DefaultLambdaScheduler()
+            throw(ArgumentError(
+                "ordinary Ewald pairwise electrostatics require the default scheduler"))
+        end
+    end
+    if !isempty(general) && !isempty(exclusions) && hasproperty(only(general), :ϵr)
+        only(general).ϵr == only(exclusions).data.ϵr ||
+            throw(ArgumentError("Ewald components have different relative permittivities"))
+    end
+    return true
 end
 
 function EwaldExclusionData(dist_cutoff; error_tol=0.0005, ϵr=1.0,
@@ -1074,6 +1133,15 @@ function EwaldExclusionData(dist_cutoff; error_tol=0.0005, ϵr=1.0,
     f_div_ϵr = f / ϵr_T
     return EwaldExclusionData(dist_cutoff, error_tol_T, ϵr_T, α, f_div_ϵr, scheduler)
 end
+
+Unitful.ustrip(data::EwaldExclusionData) = EwaldExclusionData(
+    ustrip(data.dist_cutoff),
+    data.error_tol,
+    data.ϵr,
+    ustrip(data.α),
+    ustrip(data.f_div_ϵr),
+    data.scheduler,
+)
 
 function Base.zero(inter::EwaldExclusionData{T, D, A, F}) where {T, D, A, F}
     return EwaldExclusionData(zero(D), zero(T), zero(T), zero(A), zero(F), inter.scheduler)

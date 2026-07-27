@@ -212,13 +212,18 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     master_nf = build_neighbor_finder(ref_nfinder, master_eligible, special_mask;
                                       reuse_neighbors=reuse_neighbors, boundary=ref_sys.boundary)
 
-    master_sys = System(deepcopy(ref_sys);
-        pairwise_inters      = (master_pils...,),
-        general_inters       = (master_gils...,),
-        specific_inter_lists = (master_sils_1a...,
-                                master_sils_2a...,
-                                master_sils_3a...,
-                                master_sils_4a...),
+    master_pairwise = deepcopy((master_pils...,))
+    master_general = deepcopy((master_gils...,))
+    master_specific = deepcopy((
+        master_sils_1a...,
+        master_sils_2a...,
+        master_sils_3a...,
+        master_sils_4a...,
+    ))
+    master_sys = System(ref_sys;
+        pairwise_inters      = master_pairwise,
+        general_inters       = master_general,
+        specific_inter_lists = master_specific,
         neighbor_finder      = master_nf,
         loggers              = (),
     )
@@ -226,17 +231,18 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     hamiltonians = LambdaHamiltonian[]
     λ_systems = Any[]
     for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
-        ham = LambdaHamiltonian(λ_p, λ_s, λ_g)
+        λ_p_owned, λ_s_owned, λ_g_owned = deepcopy((λ_p, λ_s, λ_g))
+        ham = LambdaHamiltonian(λ_p_owned, λ_s_owned, λ_g_owned)
         push!(hamiltonians, ham)
 
         λ_nf = build_neighbor_finder(ref_nfinder, λ_eligible, special_mask;
                                      reuse_neighbors=reuse_neighbors,
                                      boundary=ref_sys.boundary)
-        λ_sys = System(deepcopy(ref_sys);
+        λ_sys = System(ref_sys;
             atoms                = λ_atoms[length(λ_systems) + 1],
-            pairwise_inters      = (λ_p...,),
-            general_inters       = (λ_g...,),
-            specific_inter_lists = (λ_s...,),
+            pairwise_inters      = λ_p_owned,
+            general_inters       = λ_g_owned,
+            specific_inter_lists = λ_s_owned,
             neighbor_finder      = λ_nf,
             loggers              = (),
         )

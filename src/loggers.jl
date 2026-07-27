@@ -17,6 +17,7 @@ export
     ForcesLogger,
     VolumeLogger,
     DensityLogger,
+    RDFLogger,
     VirialLogger,
     ScalarVirialLogger,
     PressureLogger,
@@ -347,6 +348,20 @@ Not compatible with infinite boundaries.
 """
 DensityLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(density_wrapper, T, n_steps)
 DensityLogger(n_steps::Integer) = DensityLogger(typeof(one(DefaultFloat)u"kg * m^-3"), n_steps)
+
+"""
+    RDFLogger(pairs, bin_edges, n_steps)
+
+Log a fixed-bin radial distribution function for a collection of eligible atom
+pairs. See [`rdf`](@ref) for the normalization convention.
+"""
+function RDFLogger(pairs, bin_edges::AbstractVector, n_steps::Integer)
+    edges = collect(bin_edges)
+    T = typeof(float(ustrip(first(edges))))
+    observable = (sys, args...; kwargs...) ->
+        last(rdf(sys.coords, sys.boundary, pairs, edges))
+    return GeneralObservableLogger(observable, Vector{T}, n_steps)
+end
 
 function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper)}) where T
     print(io, "DensityLogger{", eltype(values(dl)), "} with n_steps ",
