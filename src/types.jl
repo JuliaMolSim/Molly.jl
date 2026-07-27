@@ -64,6 +64,9 @@ maybe_velocity(velocities, i, ::Val{false}) = nothing
     InteractionList1Atoms(inter_type)
 
 A list of specific interactions that involve one atom such as position restraints.
+
+Note that the virial contribution from these interactions is treated as zero, since only
+one coordinate is available and the virial in periodic space requires displacements.
 """
 struct InteractionList1Atoms{I, T, D} <: SpecificInteractionList{1}
     is::I

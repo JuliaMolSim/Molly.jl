@@ -32,24 +32,24 @@ export
 
 """
     apply_loggers!(system, neighbors=nothing, step_n=0, buffers=nothing, run_loggers=true;
-                   n_threads=Threads.nthreads(), kwargs...)
+                   n_threads=Threads.nthreads(), strictness=:warn, kwargs...)
 
 Run the loggers associated with a system.
 
 `run_loggers` can be `true`, `false` or `:skipstart`, in which case the loggers
 are not run before the first step.
 Additional keyword arguments can be passed to the loggers if required.
-Ignored for gradient calculation during automatic differentiation.
 """
 function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, buffers=nothing,
-                        run_loggers=true;
-                        n_threads::Integer=Threads.nthreads(), kwargs...)
+                        run_loggers=true; n_threads::Integer=Threads.nthreads(),
+                        strictness=default_strictness(), kwargs...)
     if !(run_loggers in (true, false, :skipstart))
         throw(ArgumentError("run_loggers must be true, false or :skipstart, found $run_loggers"))
     end
     if run_loggers == true || (run_loggers == :skipstart && step_n != 0)
         for logger in values(sys.loggers)
-            log_property!(logger, sys, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
+            log_property!(logger, sys, neighbors, step_n, buffers; n_threads=n_threads,
+                          strictness=strictness, kwargs...)
         end
     end
     return sys
@@ -86,7 +86,7 @@ Base.values(logger::GeneralObservableLogger) = logger.history
 
 """
     log_property!(logger, system, neighbors=nothing, step_n=0, buffers=nothing;
-                  n_threads=Threads.nthreads(), kwargs...)
+                  n_threads=Threads.nthreads(), strictness=:warn, kwargs...)
 
 Log a property of a system throughout a simulation.
 

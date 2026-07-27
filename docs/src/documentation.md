@@ -1342,7 +1342,7 @@ end
 Then, define the function that implements the coupling every time step:
 ```julia
 function Molly.apply_coupling!(sys, buffers, coupling::MyCoupler, sim, neighbors, step_n;
-                               n_threads=Threads.nthreads(), rng=Random.default_rng())
+                               n_threads=Threads.nthreads(), rng=Random.default_rng(), kwargs...)
     # Do something to the simulation, e.g. scale the velocities
     # Return whether the coupling has invalidated the currently stored forces,
     #   for example by changing the coordinates

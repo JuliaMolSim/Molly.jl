@@ -12,7 +12,8 @@ export
 
 """
     apply_coupling!(system, buffers, coupling, simulator, neighbors=nothing, step_n=0;
-                    n_threads=Threads.nthreads(), rng=Random.default_rng())
+                    n_threads=Threads.nthreads(), rng=Random.default_rng(),
+                    strictness=default_strictness())
 
 Apply a coupler to modify a simulation.
 
@@ -123,7 +124,7 @@ end
 
 function apply_coupling!(sys::System{<:Any, AT}, buffers, thermostat::VelocityRescaleThermostat,
                          sim, neighbors, step_n; n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where AT
+                         rng=Random.default_rng(), kwargs...) where AT
     if step_n % thermostat.n_steps != 0
         return false
     end
@@ -187,7 +188,7 @@ end
 function apply_coupling!(sys::System{D}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where D
+                         rng=Random.default_rng(), kwargs...) where D
     for i in eachindex(sys)
         if rand(rng) < (sim.dt / thermostat.coupling_const) && !sys.virtual_site_flags[i]
             sys.velocities[i] = random_velocity_svector(Val(D), mass(sys.atoms[i]),
@@ -200,7 +201,7 @@ end
 function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {AT <: AbstractGPUArray, T}
+                         rng=Random.default_rng(), kwargs...) where {AT <: AbstractGPUArray, T}
     backend = get_backend(sys.velocities)
     ctr1 = rand(rng, UInt64)
     key = rand(rng, UInt64)
@@ -614,7 +615,8 @@ function apply_coupling!(sys::System{D},
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng(),
-                         pressure_kin_tensor=nothing) where {D, PT, CT, ST, ICT, FT}
+                         pressure_kin_tensor=nothing,
+                         kwargs...) where {D, PT, CT, ST, ICT, FT}
     if step_n % barostat.n_steps != 0
         return false
     end
