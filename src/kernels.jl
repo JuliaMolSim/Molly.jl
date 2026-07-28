@@ -50,8 +50,8 @@ end
                                        coord_i, coord_j, boundary, vel_i, vel_j, step_n)
 end
 
-@inline function sum_pairwise_potentials_nonl(inters, atom_i, atom_j, ::Val{E}, special, coord_i,
-                                              coord_j, boundary, vel_i, vel_j, step_n) where E
+@inline function sum_pairwise_potentials_kernel(inters, atom_i, atom_j, ::Val{E}, special, coord_i,
+                                                coord_j, boundary, vel_i, vel_j, step_n) where E
     dr = vector(coord_i, coord_j, boundary)
     pe = sum_pairwise_potentials_gpu(inters, dr, atom_i, atom_j, Val(E), special, coord_i,
                                      coord_j, boundary, vel_i, vel_j, step_n)
@@ -421,8 +421,8 @@ end
         i, j, special = neighbors[inter_i]
         vel_i = kernel_maybe_velocity(velocities, i)
         vel_j = kernel_maybe_velocity(velocities, j)
-        pe = sum_pairwise_potentials_nonl(inters, atoms[i], atoms[j], Val(E), special, coords[i],
-                                coords[j], boundary, vel_i, vel_j, step_n)[1]
+        pe = sum_pairwise_potentials_kernel(inters, atoms[i], atoms[j], Val(E), special, coords[i],
+                                            coords[j], boundary, vel_i, vel_j, step_n)[1]
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
