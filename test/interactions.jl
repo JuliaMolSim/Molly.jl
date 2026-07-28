@@ -1809,11 +1809,11 @@ end
     for inter in interactions
         REQUIRED_FIELDS = Molly.needed_atom_fields(inter)
 
-        flat_i = Molly.atom_to_flat_tuple(atom_full_i, Val(REQUIRED_FIELDS))
+        flat_i = Molly.atom_to_flat_named_tuple(atom_full_i, Val(REQUIRED_FIELDS))
         named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(flat_i)
         atoms_i_red = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
 
-        flat_j = Molly.atom_to_flat_tuple(atom_full_j, Val(REQUIRED_FIELDS))
+        flat_j = Molly.atom_to_flat_named_tuple(atom_full_j, Val(REQUIRED_FIELDS))
         named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(flat_j)
         atoms_j_red = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
 

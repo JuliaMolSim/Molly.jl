@@ -639,7 +639,13 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
 
     coords_reordered = zero(sys.coords)
     velocities_reordered = zero(sys.velocities)
-    atoms_reordered = zero(sys.atoms)
+
+    ### reduce the atoms to the necessary information for the force/energy kernels
+    REQUIRED_FIELDS = Molly.needed_fields_from_tuple(sys.pairwise_inters)
+    first_atom = Array(sys.atoms[1:1])[1] 
+    sample = Molly.atom_to_flat_named_tuple(first_atom, Val(REQUIRED_FIELDS))
+    ReducedAtomType = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(sample)}
+    atoms_reordered = KernelAbstractions.allocate(backend, ReducedAtomType, length(sys.atoms))
 
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false

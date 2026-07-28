@@ -1058,16 +1058,21 @@ function reorder_system_gpu!(buffers, sys, ::Val{reorder_atoms}) where reorder_a
     n_threads = 256
     n_blocks = cld(N, n_threads)
 
+    REQUIRED_FIELDS = Molly.needed_fields_from_tuple(sys.pairwise_inters)
+    first_atom = Array(sys.atoms[1:1])[1] 
+    sample = Molly.atom_to_flat_named_tuple(first_atom, Val(REQUIRED_FIELDS))
+    ReducedAtomType = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(sample)}
+
     @cuda threads=n_threads blocks=n_blocks reorder_system_kernel!(
         buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-        sys.coords, sys.velocities, sys.atoms, buffers.morton_seq, Val(N), Val(reorder_atoms))
+        sys.coords, sys.velocities, sys.atoms, buffers.morton_seq, Val(N), Val(reorder_atoms), Val(REQUIRED_FIELDS), Val(ReducedAtomType))
 
     return nothing
 end
 
 function reorder_system_kernel!(coords_reordered, velocities_reordered, atoms_reordered,
                                 coords_var, velocities_var, atoms_var, seq_var,
-                                ::Val{N}, ::Val{reorder_atoms}) where {N, reorder_atoms}
+                                ::Val{N}, ::Val{reorder_atoms},::Val{REQUIRED_FIELDS},::Val{REDUCED_ATOM_TYPE}) where {N, reorder_atoms,REQUIRED_FIELDS,REDUCED_ATOM_TYPE}
     i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     coords = CUDA_CORE.Const(coords_var)
     velocities = CUDA_CORE.Const(velocities_var)
@@ -1079,7 +1084,8 @@ function reorder_system_kernel!(coords_reordered, velocities_reordered, atoms_re
         coords_reordered[i] = coords[original_i]
         velocities_reordered[i] = velocities[original_i]
         if reorder_atoms
-            atoms_reordered[i] = atoms[original_i]
+            tmp = Tuple(Molly.atom_to_flat_named_tuple(atoms[original_i], Val(REQUIRED_FIELDS)))
+            atoms_reordered[i] = REDUCED_ATOM_TYPE(tmp)
         end
     end
     return nothing
@@ -1691,8 +1697,6 @@ function force_kernel!(
         vel_j = SVector{3,T}(zeros(T,3))
     end
 
-    #@TODO precompute reduces atoms before hand?
-
     # Part 1: Standard non-diagonal tiles
     if j < n_blocks && i < j
         @inbounds coords_i = coords[index_i]
@@ -1704,10 +1708,8 @@ function force_kernel!(
     
         shuffle_idx = lane
         @inbounds atoms_i = atoms[index_i]
-        @inbounds atoms_j_full = atoms[index_j]
-
-        flat_j = Molly.atom_to_flat_tuple(atoms_j_full, Val(REQUIRED_FIELDS))
-        atom_fields_to_shuffle = Tuple(flat_j) ### @TODO can that be removed/ be one step?
+        @inbounds atoms_j = atoms[index_j]
+        atom_fields = Tuple(Molly.atom_to_flat_named_tuple(atoms_j, Val(REQUIRED_FIELDS)))
         
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
@@ -1716,9 +1718,8 @@ function force_kernel!(
                     vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields_shffld = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields_to_shuffle, lane + a, warpsize())
-                named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(atom_fields_shffld)
-                atoms_j_shuffle = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
+                atoms_j_shuffle = A(atom_fields)
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
@@ -1766,9 +1767,8 @@ function force_kernel!(
                     vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields_shffld = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields_to_shuffle, lane + a, warpsize())
-                named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(atom_fields_shffld)
-                atoms_j_shuffle = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
+                atoms_j_shuffle = A(atom_fields)
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
@@ -2182,8 +2182,7 @@ function energy_kernel!(
         end
         shuffle_idx = lane
         @inbounds atoms_j_full = atoms[index_j]
-        flat_j = Molly.atom_to_flat_tuple(atoms_j_full, Val(REQUIRED_FIELDS))
-        atom_fields_to_shuffle = Tuple(flat_j)
+        atom_fields = Tuple(Molly.atom_to_flat_named_tuple(atoms_j_full, Val(REQUIRED_FIELDS)))
 
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
@@ -2192,9 +2191,8 @@ function energy_kernel!(
                     vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields_to_shuffle, lane + a, warpsize())
-                named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(atom_fields)
-                atoms_j_shuffle = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
+                atoms_j_shuffle = A(atom_fields)
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
@@ -2223,9 +2221,8 @@ function energy_kernel!(
                     vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields_to_shuffle, lane + a, warpsize())
-                named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(atom_fields)
-                atoms_j_shuffle = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
+                atoms_j_shuffle = A(atom_fields)
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)

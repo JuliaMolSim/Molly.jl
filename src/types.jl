@@ -479,7 +479,7 @@ struct ReducedAtom{Fields, TData}
 end
 
 ### generate a function that returns flat tuple from the required 
-@generated function atom_to_flat_tuple(atom_full, ::Val{Fields}) where {Fields}
+@generated function atom_to_flat_named_tuple(atom_full, ::Val{Fields}) where {Fields}
     value_exprs = [:(getproperty(atom_full, $(QuoteNode(f)))) for f in Fields]
     
     return quote
