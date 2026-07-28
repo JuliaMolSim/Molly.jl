@@ -555,12 +555,17 @@ function System(coord_file::AbstractString,
     if isnothing(dispersion_correction)
         disp_corr = force_field.dispersion_correction
     else
+        disp_corr = dispersion_correction
+    end
+    if disp_corr && force_field.custom_nonbonded
+        throw(ArgumentError("dispersion_correction=true is not supported with CustomNonbondedForce"))
+    end
+    if !isnothing(dispersion_correction)
         if dispersion_correction != force_field.dispersion_correction
             err_str = "dispersion_correction is $dispersion_correction but value in the force " *
                       "field is $(force_field.dispersion_correction), using $dispersion_correction"
             report_issue(err_str, strictness)
         end
-        disp_corr = dispersion_correction
     end
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)

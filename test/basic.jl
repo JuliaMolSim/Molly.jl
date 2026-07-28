@@ -462,6 +462,22 @@ end
     end
 end
 
+@testset "Force field XML options" begin
+    ff_garnet = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml"); units=false)
+    @test ff_garnet.dispersion_correction == false
+    @test ff_garnet.custom_nonbonded == true
+    @test ff_garnet.global_params == [12.159626, 4.326311]
+    @test_throws ArgumentError System(
+        joinpath(data_dir, "ethanol_garnet.pdb"),
+        ff_garnet;
+        units=false,
+        dispersion_correction=true,
+    )
+
+    ff_tip3p = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=false)
+    @test ff_tip3p.custom_nonbonded == false
+end
+
 @testset "Double exponential force field setup" begin
     ff = MolecularForceField(
         joinpath(ff_dir, "ethanol_garnet.xml");
@@ -472,7 +488,6 @@ end
         ff;
         nonbonded_method=:cutoff,
         dist_cutoff=1.0u"nm",
-        dispersion_correction=false,
     )
 
     dexp = only(inter for inter in sys.pairwise_inters if inter isa DoubleExponential)
