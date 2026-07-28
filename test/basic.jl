@@ -476,6 +476,9 @@ end
 
     ff_tip3p = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=false)
     @test ff_tip3p.custom_nonbonded == false
+
+    ff_fp = joinpath(ff_dir, "tip4pfb.xml")
+    @test_throws ErrorException MolecularForceField(ff_fp, ff_fp)
 end
 
 @testset "Double exponential force field setup" begin
