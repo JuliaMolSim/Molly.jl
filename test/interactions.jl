@@ -1820,6 +1820,7 @@ end
         @test begin
             try
                 Molly.sum_pairwise_forces_gpu((inter,), dr, atoms_i_red, atoms_j_red, Val(force_units), false, coords_i, coords_j, boundary, vel_i, vel_j, 1) 
+                Molly.sum_pairwise_potentials_gpu((inter,), dr, atoms_i_red, atoms_j_red, Val(force_units), false, coords_i, coords_j, boundary, vel_i, vel_j, 1) 
                 true 
             catch e
                 println("\n\n Interaction: $inter")
