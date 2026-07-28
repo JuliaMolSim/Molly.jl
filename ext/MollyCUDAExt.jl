@@ -368,7 +368,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
                                N::Int, force_maxregs_override) where {D, T}
 
     REQUIRED_FIELDS = Molly.needed_fields_from_tuple(pairwise_inters)
-    NeedsVelocity = any(Molly.needs_velocity.(pairwise_inters)) 
+    use_vel = Molly.any_uses_velocity(pairwise_inters)
 
     if force_maxregs_override === nothing
         return @cuda launch=false always_inline=true force_kernel!(
@@ -392,7 +392,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow,
-            Val(REQUIRED_FIELDS),Val(NeedsVelocity),
+            Val(REQUIRED_FIELDS),Val(use_vel),
         )
     end
 
@@ -417,7 +417,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
         buffers.interacting_tiles_type,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
-        Val(REQUIRED_FIELDS),Val(NeedsVelocity),
+        Val(REQUIRED_FIELDS),Val(use_vel),
     )
 end
 
@@ -498,7 +498,7 @@ Returns the `block_y` configuration that achieves the minimum execution time.
 function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                                   N::Int) where {D, T}
     REQUIRED_FIELDS = Molly.needed_fields_from_tuple(pairwise_inters)
-    NeedsVelocity = any(Molly.needs_velocity.(pairwise_inters)) 
+    use_vel = Molly.any_uses_velocity(pairwise_inters)
 
     kernel = @cuda launch=false always_inline=true energy_kernel!(
         buffers.pe_vec_nounits,
@@ -519,7 +519,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
         buffers.interacting_tiles_type,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
-        Val(REQUIRED_FIELDS), Val(NeedsVelocity),
+        Val(REQUIRED_FIELDS), Val(use_vel),
     )
     candidates = autotune_block_y_candidates(kernel, 4, AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES)
     num_pairs = buffers.num_pairs
@@ -550,7 +550,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
                 buffers.interacting_tiles_type,
                 buffers.num_interacting_tiles,
                 buffers.interacting_tiles_overflow,
-                Val(REQUIRED_FIELDS), Val(NeedsVelocity);
+                Val(REQUIRED_FIELDS), Val(use_vel);
                 blocks=n_blocks_launch,
                 threads=(32, block_y),
             ),
@@ -888,7 +888,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
 
     ### check which atom fielded are needed for force calculation
     REQUIRED_FIELDS = Molly.needed_fields_from_tuple(pairwise_inters)
-    NeedsVelocity = any(Molly.needs_velocity.(pairwise_inters)) 
+    use_vel = Molly.any_uses_velocity(pairwise_inters)
 
     # Execute Force Kernel over the list of interacting tiles
     auto_kernel = @cuda launch=false always_inline=true force_kernel!(
@@ -899,7 +899,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         sys.boundary, step_n, buffers.compressed_masks,
         Val(needs_vir), Val(T), Val(D),
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(NeedsVelocity))
+        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(use_vel))
     block_y, maxregs = force_launch_params(sys, auto_kernel)
     
     num_pairs = buffers.num_pairs
@@ -916,7 +916,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(NeedsVelocity))
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(use_vel))
     end
 
     if num_pairs > 0
@@ -928,7 +928,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(NeedsVelocity);
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(use_vel);
             threads=(32, block_y), blocks=n_blocks_launch
         )
     end
@@ -987,7 +987,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     end
 
     REQUIRED_FIELDS = Molly.needed_fields_from_tuple(pairwise_inters)
-    NeedsVelocity = any(Molly.needs_velocity.(pairwise_inters)) 
+    use_vel = Molly.any_uses_velocity(pairwise_inters)
 
     kernel = @cuda launch=false always_inline=true energy_kernel!(
             pe_vec_nounits, buffers.coords_reordered,
@@ -995,7 +995,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             sys.boundary, step_n, buffers.compressed_masks,
             Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(NeedsVelocity))
+            buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(use_vel))
     block_y = energy_launch_params(sys, kernel)
     
     num_pairs = buffers.num_pairs
@@ -1008,7 +1008,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
                 sys.boundary, step_n, buffers.compressed_masks,
                 Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type, buffers.num_interacting_tiles,
-                buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(NeedsVelocity);
+                buffers.interacting_tiles_overflow, Val(REQUIRED_FIELDS), Val(use_vel);
                 blocks=n_blocks_launch, threads=(32, block_y))
     end
      return pe_vec_nounits
@@ -1636,7 +1636,7 @@ function force_kernel!(
     ::Val{T},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-    num_interacting_tiles, interacting_tiles_overflow, ::Val{REQUIRED_FIELDS}, ::Val{NeedsVel}) where {N, r_cut2, A, force_units, needs_vir, T, D,REQUIRED_FIELDS,NeedsVel}
+    num_interacting_tiles, interacting_tiles_overflow, ::Val{REQUIRED_FIELDS}, ::Val{use_vel}) where {N, r_cut2, A, force_units, needs_vir, T, D,REQUIRED_FIELDS,use_vel}
 
     a = Int32(1)
     b = Int32(D)
@@ -1692,19 +1692,12 @@ function force_kernel!(
     j_0_tile = (j - a) * warpsize()
     index_j = j_0_tile + lane
 
-    if !NeedsVel
-        vel_i = SVector{3,T}(zeros(T,3))
-        vel_j = SVector{3,T}(zeros(T,3))
-    end
-
     # Part 1: Standard non-diagonal tiles
     if j < n_blocks && i < j
         @inbounds coords_i = coords[index_i]
         @inbounds coords_j = coords[index_j]
-        if NeedsVel
-            @inbounds vel_i = velocities[index_i]
-            @inbounds vel_j = velocities[index_j]
-        end
+        @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
+        @inbounds vel_j = Molly.maybe_velocity(velocities, j, Val(use_vel))
     
         shuffle_idx = lane
         @inbounds atoms_i = atoms[index_i]
@@ -1714,7 +1707,7 @@ function force_kernel!(
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                if NeedsVel
+                if use_vel
                     vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
@@ -1763,7 +1756,7 @@ function force_kernel!(
 
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                if NeedsVel
+                if use_vel
                     vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
@@ -1825,9 +1818,7 @@ function force_kernel!(
     # Part 2: Boundary column tiles
     if j == n_blocks && i < n_blocks
         @inbounds coords_i = coords[index_i]
-        if NeedsVel
-            @inbounds vel_i = velocities[index_i]
-        end
+        @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
         @inbounds atoms_i = atoms[index_i]
         
         @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
@@ -1836,9 +1827,7 @@ function force_kernel!(
         @inbounds for m in a:r
             idx_j = j_0_tile + m
             @inbounds coords_j = coords[idx_j]
-            if NeedsVel
-                @inbounds vel_j = velocities[idx_j]
-            end
+            @inbounds vel_j = Molly.maybe_velocity(velocities, j, Val(use_vel))
             @inbounds atoms_j = atoms[idx_j]            
             
             dr = vector(coords_i, coords_j, boundary)
@@ -1891,9 +1880,7 @@ function force_kernel!(
     # Part 3: Diagonal tiles
     if i == j && i < n_blocks
         @inbounds coords_i = coords[index_i]
-        if NeedsVel
-            @inbounds vel_i = velocities[index_i]
-        end
+        @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
         @inbounds atoms_i = atoms[index_i]
         
         @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
@@ -1902,9 +1889,7 @@ function force_kernel!(
         @inbounds for m in (lane + a) : warpsize()
             idx_j = j_0_tile + m
             @inbounds coords_j = coords[idx_j]
-            if NeedsVel
-                @inbounds vel_j = velocities[idx_j]
-            end
+            @inbounds vel_j = Molly.maybe_velocity(velocities, j, Val(use_vel))
             @inbounds atoms_j = atoms[idx_j]
             
             dr = vector(coords_i, coords_j, boundary)
@@ -1961,9 +1946,7 @@ function force_kernel!(
     if i == n_blocks && j == n_blocks
         if lane <= r
             @inbounds coords_i = coords[index_i]
-            if NeedsVel
-                @inbounds vel_i = velocities[index_i]
-            end
+            @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
             @inbounds atoms_i = atoms[index_i]
             
             @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
@@ -1972,9 +1955,7 @@ function force_kernel!(
             @inbounds for m in (lane + a) : r
                 idx_j = j_0_tile + m
                 @inbounds coords_j = coords[idx_j]
-                if NeedsVel
-                    @inbounds vel_j = velocities[idx_j]
-                end
+                @inbounds vel_j = Molly.maybe_velocity(velocities, j, Val(use_vel))
                 @inbounds atoms_j = atoms[idx_j]
             
                 dr = vector(coords_i, coords_j, boundary)
@@ -2123,7 +2104,7 @@ function energy_kernel!(
     ::Val{T},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-    num_interacting_tiles, interacting_tiles_overflow,::Val{REQUIRED_FIELDS},::Val{NeedsVel}) where {N, r_cut2, A, energy_units, T, D,REQUIRED_FIELDS,NeedsVel}
+    num_interacting_tiles, interacting_tiles_overflow,::Val{REQUIRED_FIELDS},::Val{use_vel}) where {N, r_cut2, A, energy_units, T, D,REQUIRED_FIELDS,use_vel}
 
     a = Int32(1)
     b = Int32(D)
@@ -2167,18 +2148,14 @@ function energy_kernel!(
     j_0_tile = (j - a) * warpsize()
     index_j = j_0_tile + lane
 
-    if !NeedsVel
-        vel_i = SVector{3,T}(zeros(T,3))
-        vel_j = SVector{3,T}(zeros(T,3))
-    end
 
     if j < n_blocks && i < j
         @inbounds coords_i = coords[index_i]
         @inbounds atoms_i = atoms[index_i]
         @inbounds coords_j = coords[index_j]
-        if NeedsVel
-            @inbounds vel_i = velocities[index_i]
-            @inbounds vel_j = velocities[index_j]
+        if use_vel
+            @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
+            @inbounds vel_j = Molly.maybe_velocity(velocities, j, Val(use_vel))
         end
         shuffle_idx = lane
         @inbounds atoms_j_full = atoms[index_j]
@@ -2187,7 +2164,7 @@ function energy_kernel!(
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                if NeedsVel
+                if use_vel
                     vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
@@ -2217,7 +2194,7 @@ function energy_kernel!(
 
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                if NeedsVel
+                if use_vel
                     vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
                 end
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
@@ -2246,9 +2223,7 @@ function energy_kernel!(
         end
     elseif j == n_blocks && i < n_blocks
         @inbounds coords_i = coords[index_i]
-        if NeedsVel
-            @inbounds vel_i = velocities[index_i]
-        end
+        @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
         @inbounds atoms_i = atoms[index_i]
         @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
         @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
@@ -2256,9 +2231,7 @@ function energy_kernel!(
         @inbounds for m in a:r
             idx_j = j_0_tile + m
             @inbounds coords_j = coords[idx_j]
-            if NeedsVel
-                @inbounds vel_j = velocities[idx_j]
-            end
+            @inbounds vel_j = Molly.maybe_velocity(velocities,j, Val(use_vel))
             @inbounds atoms_j = atoms[idx_j]
             dr = vector(coords_i, coords_j, boundary)
             r2 = @fastmath sum(abs2, dr)
@@ -2280,9 +2253,7 @@ function energy_kernel!(
         end
     elseif i == j && i < n_blocks
         @inbounds coords_i = coords[index_i]
-        if NeedsVel
-            @inbounds vel_i = velocities[index_i]
-        end
+        @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
         @inbounds atoms_i = atoms[index_i]
         @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
         @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
@@ -2313,9 +2284,7 @@ function energy_kernel!(
     elseif i == n_blocks && j == n_blocks
         if lane <= r
             @inbounds coords_i = coords[index_i]
-            if NeedsVel
-                @inbounds vel_i = velocities[index_i]
-            end
+            @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
             @inbounds atoms_i = atoms[index_i]
             @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
@@ -2323,9 +2292,7 @@ function energy_kernel!(
             @inbounds for m in (lane + a) : r
                 idx_j = j_0_tile + m
                 @inbounds coords_j = coords[idx_j]
-                if NeedsVel
-                    @inbounds vel_j = velocities[idx_j]
-                end
+                @inbounds vel_j = Molly.maybe_velocity(velocities, j, Val(use_vel))
                 @inbounds atoms_j = atoms[idx_j]
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)

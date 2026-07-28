@@ -1809,13 +1809,11 @@ end
     for inter in interactions
         REQUIRED_FIELDS = Molly.needed_atom_fields(inter)
 
-        flat_i = Molly.atom_to_flat_named_tuple(atom_full_i, Val(REQUIRED_FIELDS))
-        named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(flat_i)
-        atoms_i_red = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
+        named_tuple = Molly.atom_to_flat_named_tuple(atom_full_i, Val(REQUIRED_FIELDS))
+        atoms_i_red = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple)}(named_tuple)
 
-        flat_j = Molly.atom_to_flat_named_tuple(atom_full_j, Val(REQUIRED_FIELDS))
-        named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(flat_j)
-        atoms_j_red = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
+        named_tuple = Molly.atom_to_flat_named_tuple(atom_full_j, Val(REQUIRED_FIELDS))
+        atoms_j_red = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple)}(named_tuple)
 
         @test begin
             try
@@ -1838,6 +1836,5 @@ end
     @test all((:A, :B, :C, :charge, :λ, :alch_role) .== Molly.needed_fields_from_tuple(inters))
 
     ### proper test with CUDA force kernel would be better but requires a lot of setup
-    @test all( (typeof.(interactions) .<: DPDInteraction) .== Molly.needs_velocity.(interactions)) 
-
+    @test all( (typeof.(interactions) .<: DPDInteraction) .== Molly.pairwise_uses_velocity.(interactions)) 
 end
