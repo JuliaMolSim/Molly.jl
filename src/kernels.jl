@@ -1,5 +1,8 @@
 # KernelAbstractions.jl kernels, CUDA kernels are in an extension
 
+kernel_maybe_velocity(velocities, i) = velocities[i]
+kernel_maybe_velocity(::Nothing, i) = nothing
+
 @inline function sum_pairwise_forces_gpu(inters::Tuple{T}, dr, atom_i, atom_j, ::Val{F},
                                          special, coord_i, coord_j, boundary, vel_i, vel_j,
                                          step_n) where {T, F}
@@ -104,7 +107,8 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
         backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
-        kernel!(buffers.fs_mat, buffers.virial_nounits, sys.coords, sys.velocities, sys.atoms,
+        vels = (any_uses_velocity(pairwise_inters) ? sys.velocities : nothing)
+        kernel!(buffers.fs_mat, buffers.virial_nounits, sys.coords, vels, sys.atoms,
                 sys.boundary, pairwise_inters, nbs, step_n, Val(needs_vir), Val(D),
                 Val(sys.force_units); ndrange=length(nbs))
     end
@@ -122,10 +126,11 @@ end
         i, j, special = neighbors[inter_i]
         coord_i = coords[i]
         coord_j = coords[j]
+        vel_i = kernel_maybe_velocity(velocities, i)
+        vel_j = kernel_maybe_velocity(velocities, j)
         dr = vector(coord_i, coord_j, boundary)
         f = sum_pairwise_forces_gpu(inters, dr, atoms[i], atoms[j], Val(F), special,
-                                    coord_i, coord_j, boundary, velocities[i], velocities[j],
-                                    step_n)
+                                    coord_i, coord_j, boundary, vel_i, vel_j, step_n)
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic fs_mat[dim, i] += -fval
@@ -400,7 +405,8 @@ function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:Abs
         backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
-        kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
+        vels = (any_uses_velocity(pairwise_inters) ? sys.velocities : nothing)
+        kernel!(pe_vec_nounits, sys.coords, vels, sys.atoms, sys.boundary,
                 pairwise_inters, nbs, step_n, Val(sys.energy_units); ndrange=length(nbs))
     end
     return pe_vec_nounits
@@ -413,8 +419,10 @@ end
 
     if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
+        vel_i = kernel_maybe_velocity(velocities, i)
+        vel_j = kernel_maybe_velocity(velocities, j)
         pe = sum_pairwise_potentials_nonl(inters, atoms[i], atoms[j], Val(E), special, coords[i],
-                                coords[j], boundary, velocities[i], velocities[j], step_n)[1]
+                                coords[j], boundary, vel_i, vel_j, step_n)[1]
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
