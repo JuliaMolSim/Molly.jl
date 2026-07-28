@@ -830,15 +830,17 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{1},
                                ::Val{needs_vir}, ::Val{use_vel}) where {needs_vir, use_vel}
     @inbounds if length(pairwise_inters_nonl) > 0
+        sqdist_cutoff = max_zero_beyond(pairwise_inters_nonl)
         for i in 1:n_atoms
             coord_i = coords[i]
             atom_i = atoms[i]
             vel_i = maybe_velocity(velocities, i, Val(use_vel))
             for j in (i + 1):n_atoms
                 coord_j = coords[j]
+                dr = vector(coord_i, coord_j, boundary)
+                skip_pair_cutoff(sqdist_cutoff, sum(abs2, dr)) && continue
                 atom_j = atoms[j]
                 vel_j = maybe_velocity(velocities, j, Val(use_vel))
-                dr = vector(coord_i, coord_j, boundary)
                 f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
                                         false, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
                 f_ustrip = checked_ustrip(f, force_units)
@@ -858,15 +860,17 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         if isnothing(neighbors)
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
+        sqdist_cutoff = max_zero_beyond(pairwise_inters_nl)
         for ni in eachindex(neighbors)
             i, j, special = neighbors[ni]
             coord_i = coords[i]
             coord_j = coords[j]
+            dr = vector(coord_i, coord_j, boundary)
+            skip_pair_cutoff(sqdist_cutoff, sum(abs2, dr)) && continue
             atom_i = atoms[i]
             atom_j = atoms[j]
             vel_i = maybe_velocity(velocities, i, Val(use_vel))
             vel_j = maybe_velocity(velocities, j, Val(use_vel))
-            dr = vector(coord_i, coord_j, boundary)
             f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
                                     special, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
             f_ustrip = checked_ustrip(f, force_units)
@@ -896,6 +900,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     end
 
     @inbounds if length(pairwise_inters_nonl) > 0
+        sqdist_cutoff = max_zero_beyond(pairwise_inters_nonl)
         Threads.@threads for chunk_i in 1:n_threads
             fs_chunk = fs_chunks[chunk_i]
             vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
@@ -905,9 +910,10 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 vel_i = maybe_velocity(velocities, i, Val(use_vel))
                 for j in (i + 1):n_atoms
                     coord_j = coords[j]
+                    dr = vector(coord_i, coord_j, boundary)
+                    skip_pair_cutoff(sqdist_cutoff, sum(abs2, dr)) && continue
                     atom_j = atoms[j]
                     vel_j = maybe_velocity(velocities, j, Val(use_vel))
-                    dr = vector(coord_i, coord_j, boundary)
                     f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
                                             false, coord_i, coord_j, boundary, vel_i, vel_j,
                                             step_n)
@@ -931,6 +937,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         n_neighbors = length(neighbors)
         block_size = 512
         next_block_start = Threads.Atomic{Int}(1)
+        sqdist_cutoff = max_zero_beyond(pairwise_inters_nl)
         @sync for chunk_i in 1:n_threads
             Threads.@spawn begin
                 fs_chunk = fs_chunks[chunk_i]
@@ -943,11 +950,12 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                         i, j, special = neighbors[ni]
                         coord_i = coords[i]
                         coord_j = coords[j]
+                        dr = vector(coord_i, coord_j, boundary)
+                        skip_pair_cutoff(sqdist_cutoff, sum(abs2, dr)) && continue
                         atom_i = atoms[i]
                         atom_j = atoms[j]
                         vel_i = maybe_velocity(velocities, i, Val(use_vel))
                         vel_j = maybe_velocity(velocities, j, Val(use_vel))
-                        dr = vector(coord_i, coord_j, boundary)
                         f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
                                                 special, coord_i, coord_j, boundary, vel_i, vel_j,
                                                 step_n)

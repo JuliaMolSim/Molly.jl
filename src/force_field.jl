@@ -1021,11 +1021,10 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         end
     end
 
-    for t in keys(atom_types)
-        if atom_types[t].σ < zero(atom_types[t].σ)
-            error("atom type $t has not had σ and ϵ set in a " *
-                  "NonbondedForce/LennardJonesForce/CustomNonbondedForce entry")
-        end
+    at_missing_params = filter(t -> atom_types[t].σ < zero(atom_types[t].σ), keys(atom_types))
+    if length(at_missing_params) > 0
+        error("atom types $(sort(collect(at_missing_params))) have not had σ and ϵ set in a " *
+              "NonbondedForce/LennardJonesForce/CustomNonbondedForce entry")
     end
 
     # Bonds resolver

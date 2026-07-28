@@ -12,6 +12,32 @@ abstract type AbstractCutoff{P} end
 
 Base.:+(c1::T, ::T) where {T <: AbstractCutoff} = c1
 
+cutoff_sqdist(::AbstractCutoff{0}) = nothing
+cutoff_sqdist(cutoff::AbstractCutoff) = cutoff.dist_cutoff^2
+
+# Squared distance beyond which a pairwise interaction is zero, or nothing if unknown
+@inline function pairwise_zero_beyond(inter)
+    if hasproperty(inter, :cutoff)
+        return cutoff_sqdist(inter.cutoff)
+    elseif hasproperty(inter, :dist_cutoff)
+        return inter.dist_cutoff^2
+    else
+        return nothing
+    end
+end
+
+@inline max_zero_beyond(inters) = mzb(map(pairwise_zero_beyond, inters))
+@inline mzb(t::Union{Tuple, NamedTuple}) = mzb(first(t), Base.tail(t))
+@inline mzb(acc, ::Union{Tuple{}, @NamedTuple{}}) = acc
+@inline mzb(acc, t::Union{Tuple, NamedTuple}) = mzb(combine_cutoff(acc, first(t)), Base.tail(t))
+@inline combine_cutoff(::Nothing, x) = nothing
+@inline combine_cutoff(x, ::Nothing) = nothing
+@inline combine_cutoff(::Nothing, ::Nothing) = nothing
+@inline combine_cutoff(a, b) = max(a, b)
+
+@inline skip_pair_cutoff(::Nothing, r2) = false
+@inline skip_pair_cutoff(sqdist_cutoff, r2) = r2 > sqdist_cutoff
+
 function pe_cutoff(cutoff::AbstractCutoff{0}, inter, r, params)
     return pairwise_pe(inter, r, params)
 end

@@ -706,7 +706,6 @@ end
 end
 
 @testset "a99SB-disp Gromacs/OpenMM protein comparison" begin
-
     FT = Float64
     AT = Array
 

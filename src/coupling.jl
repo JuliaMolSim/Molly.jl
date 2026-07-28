@@ -209,8 +209,8 @@ end
 
 function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng(), kwargs...) where {AT <: AbstractGPUArray, T}
+                         n_threads::Integer=Threads.nthreads(), rng=Random.default_rng(),
+                         strictness=default_strictness()) where {AT <: AbstractGPUArray, T}
     andersen_warn(sys, strictness)
     backend = get_backend(sys.velocities)
     ctr1 = rand(rng, UInt64)
