@@ -34,6 +34,8 @@ so atoms that use this interaction should have fields `A`, `B` and `C` available
     weight_special::W = 1
 end
 
+needed_atom_fields(::Buckingham) = (:A, :B, :C)
+
 use_neighbors(inter::Buckingham) = inter.use_neighbors
 
 function Base.zero(b::Buckingham{C, W}) where {C, W}

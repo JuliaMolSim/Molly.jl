@@ -62,6 +62,10 @@ skin distance that accounts for particle movement between neighbor list rebuilds
     use_neighbors::Bool = false
 end
 
+needs_velocity(::DPDInteraction) = true
+
+needed_atom_fields(::DPDInteraction) = (:index,)
+
 use_neighbors(inter::DPDInteraction) = inter.use_neighbors
 
 function Base.zero(d::DPDInteraction)

@@ -335,6 +335,8 @@ If ``\lambda`` is zero the interaction is turned off.
     weight_special::W = 1
 end
 
+needed_atom_fields(::LennardJonesSoftCoreBeutler) = (:σ, :ϵ,:λ,:alch_role)
+
 use_neighbors(inter::LennardJonesSoftCoreBeutler) = inter.use_neighbors
 
 function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W}) where {C, A, H, S, E, LM, SCH, W}
@@ -566,6 +568,8 @@ If ``\lambda`` is zero the interaction is turned off.
     weight_special::W = 1
 end
 
+needed_atom_fields(::LennardJonesSoftCoreGapsys) = (:σ, :ϵ,:λ, :alch_role)
+
 use_neighbors(inter::LennardJonesSoftCoreGapsys) = inter.use_neighbors
 
 function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, W}) where {C, A, H, S, E, LM, SCH, W}
@@ -792,6 +796,8 @@ If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
     λ_mixing::L = LorentzMixing()
     weight_special::W = 1
 end
+
+needed_atom_fields(::AshbaughHatch) = (:σ, :ϵ,:λ)
 
 use_neighbors(inter::AshbaughHatch) = inter.use_neighbors
 

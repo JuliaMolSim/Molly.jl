@@ -18,6 +18,8 @@ V(r_{ij}) = 4\varepsilon_{ij} \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12}
     ϵ_mixing::E = GeometricMixing()
 end
 
+needed_atom_fields(::SoftSphere) = (:σ, :ϵ)
+
 use_neighbors(inter::SoftSphere) = inter.use_neighbors
 
 function Base.zero(ss::SoftSphere)

@@ -16,6 +16,8 @@ V(r_{ij}) = -\frac{G m_i m_j}{r_{ij}}
     use_neighbors::Bool = false
 end
 
+needed_atom_fields(::Gravity) = (:mass,)
+
 use_neighbors(inter::Gravity) = inter.use_neighbors
 
 function Base.zero(gr::Gravity{T}) where T

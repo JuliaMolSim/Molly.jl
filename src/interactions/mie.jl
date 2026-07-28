@@ -41,6 +41,8 @@ function Mie(;
                weight_special, mn_fac)
 end
 
+needed_atom_fields(::Mie) = (:σ, :ϵ)
+
 use_neighbors(inter::Mie) = inter.use_neighbors
 
 function Base.zero(m::Mie{T, W}) where {T, W}

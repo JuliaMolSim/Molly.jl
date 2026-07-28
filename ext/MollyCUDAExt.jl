@@ -366,6 +366,10 @@ end
 
 function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                                N::Int, force_maxregs_override) where {D, T}
+
+    REQUIRED_FIELDS = Molly.needed_fields_from_tuple(pairwise_inters)
+    NeedsVelocity = any(Molly.needs_velocity.(pairwise_inters)) 
+
     if force_maxregs_override === nothing
         return @cuda launch=false always_inline=true force_kernel!(
             buffers.fs_mat_reordered,
@@ -388,6 +392,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
             buffers.interacting_tiles_type,
             buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow,
+            Val(REQUIRED_FIELDS),Val(NeedsVelocity),
         )
     end
 
@@ -412,6 +417,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
         buffers.interacting_tiles_type,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
+        Val(REQUIRED_FIELDS),Val(NeedsVelocity),
     )
 end
 
@@ -877,7 +883,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
 
     ### check which atom fielded are needed for force calculation
     REQUIRED_FIELDS = Molly.needed_fields_from_tuple(pairwise_inters)
-    NeedsVelocity = false ### @TODO implement force specific parameter
+    NeedsVelocity = any(Molly.needs_velocity.(pairwise_inters)) 
 
     # Execute Force Kernel over the list of interacting tiles
     auto_kernel = @cuda launch=false always_inline=true force_kernel!(
@@ -1573,15 +1579,6 @@ function find_interacting_blocks_kernel!(
     return nothing
 end
 
-### generate a function that returns flat tuple from the required 
-@generated function atom_to_flat_tuple(atom_full, ::Val{Fields}) where {Fields}
-    value_exprs = [:(getproperty(atom_full, $(QuoteNode(f)))) for f in Fields]
-    
-    return quote
-        Base.@_inline_meta
-        NamedTuple{$Fields}(($(value_exprs...),))
-    end
-end
 
 """
     force_kernel!(fs_mat, global_virial, coords, velocities, atoms, N, r_cut2, force_units,
@@ -1701,7 +1698,7 @@ function force_kernel!(
         @inbounds atoms_i = atoms[index_i]
         @inbounds atoms_j_full = atoms[index_j]
 
-        flat_j = atom_to_flat_tuple(atoms_j_full, Val(REQUIRED_FIELDS))
+        flat_j = Molly.atom_to_flat_tuple(atoms_j_full, Val(REQUIRED_FIELDS))
         atom_fields_to_shuffle = Tuple(flat_j)
         
         if type == UInt8(0) # CLEAN

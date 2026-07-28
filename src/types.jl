@@ -47,6 +47,8 @@ Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
 
+needs_velocity(::PairwiseInteraction) = false
+
 """
     InteractionList1Atoms(is, inters)
     InteractionList1Atoms(is, inters, types, data=nothing)
@@ -474,6 +476,16 @@ end
 ### mimics actual atoms for the evaluation in the CUDA extension
 struct ReducedAtom{Fields, TData}
     data::TData
+end
+
+### generate a function that returns flat tuple from the required 
+@generated function atom_to_flat_tuple(atom_full, ::Val{Fields}) where {Fields}
+    value_exprs = [:(getproperty(atom_full, $(QuoteNode(f)))) for f in Fields]
+    
+    return quote
+        Base.@_inline_meta
+        NamedTuple{$Fields}(($(value_exprs...),))
+    end
 end
 
 @inline function Base.getproperty(ra::ReducedAtom{Fields}, s::Symbol) where {Fields}

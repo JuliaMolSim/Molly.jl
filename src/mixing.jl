@@ -6,7 +6,7 @@ struct LJZeroShortcut end
 struct LJZeroShortcutAdvanced end
 
 @inline function shortcut_pair(::LJZeroShortcutAdvanced, atom_i, atom_j, args...)
-    return shortcut_pair(LJZeroShortcut) || iszero_value(atom_i.λ) || iszero_value(atom_j.λ)
+    return shortcut_pair(LJZeroShortcut(), atom_i, atom_j, args) || iszero_value(atom_i.λ) || iszero_value(atom_j.λ)
 end
 
 @inline function shortcut_pair(::LJZeroShortcut, atom_i, atom_j, args...)

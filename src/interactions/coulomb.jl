@@ -135,6 +135,8 @@ electrostatic scheduler.
     coulomb_const::T = coulomb_const
 end
 
+needed_atom_fields(::CoulombScaled)      = (:charge,:λ, :alch_role)
+
 use_neighbors(inter::CoulombScaled) = inter.use_neighbors
 
 function Base.zero(coul::CoulombScaled{C, SCH, W, T}) where {C, SCH, W, T}
@@ -313,6 +315,8 @@ If ``\lambda`` is zero the interaction is turned off.
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
+
+needed_atom_fields(::CoulombSoftCoreBeutler) = (:charge,:σ, :ϵ, :λ, :alch_role)
 
 use_neighbors(inter::CoulombSoftCoreBeutler) = inter.use_neighbors
 
@@ -516,6 +520,8 @@ If ``\lambda`` is zero the interaction is turned off.
     coulomb_const::T = coulomb_const
 end
 
+needed_atom_fields(::CoulombSoftCoreGapsys) = (:charge, :λ, :alch_role)
+
 use_neighbors(inter::CoulombSoftCoreGapsys) = inter.use_neighbors
 
 function Base.zero(coul::CoulombSoftCoreGapsys{C, A, S, LM, SCH, W, T}) where {C, A, S, LM, SCH, W, T}
@@ -705,6 +711,8 @@ Setting `solvent_dielectric=Inf` gives conducting boundary conditions
     coulomb_const::T = coulomb_const
 end
 
+needed_atom_fields(::CoulombReactionField) = (:charge,)
+
 use_neighbors(inter::CoulombReactionField) = inter.use_neighbors
 
 function Base.zero(coul::CoulombReactionField{D, S, W, T}) where {D, S, W, T}
@@ -831,6 +839,8 @@ electrostatic scheduler.
     coulomb_const::T = coulomb_const
 end
 
+needed_atom_fields(::CoulombReactionFieldScaled) = (:charge,:λ, :alch_role)
+
 use_neighbors(inter::CoulombReactionFieldScaled) = inter.use_neighbors
 
 function Base.zero(coul::CoulombReactionFieldScaled{D, S, SCH, W, T}) where {D, S, SCH, W, T}
@@ -951,6 +961,8 @@ scaled by `weight_special`.
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
+
+needed_atom_fields(::CoulombSoftCoreBeutlerReactionField) = (:charge,:λ, :alch_role)
 
 use_neighbors(inter::CoulombSoftCoreBeutlerReactionField) = inter.use_neighbors
 
@@ -1146,6 +1158,8 @@ polynomial scaled by `weight_special`.
     coulomb_const::T = coulomb_const
 end
 
+needed_atom_fields(::CoulombSoftCoreGapsysReactionField) = (:charge, :λ, :alch_role)
+
 use_neighbors(inter::CoulombSoftCoreGapsysReactionField) = inter.use_neighbors
 
 function Base.zero(coul::CoulombSoftCoreGapsysReactionField{D, S, A, SQ, LM, SCH, W, T}) where {D, S, A, SQ, LM, SCH, W, T}
@@ -1336,6 +1350,8 @@ function CoulombEwald(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
                         α, approximate_erfc)
 end
 
+needed_atom_fields(::CoulombEwald) = (:charge,)
+
 use_neighbors(inter::CoulombEwald) = inter.use_neighbors
 
 function Base.zero(coul::CoulombEwald{T, D, W, C, A}) where {T, D, W, C, A}
@@ -1468,6 +1484,8 @@ function CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=false
     return CoulombEwaldScaled(dist_cutoff, error_tol, use_neighbors, scheduler,
                               weight_special, coulomb_const, α, approximate_erfc)
 end
+
+needed_atom_fields(::CoulombEwaldScaled) = (:charge, :λ, :alch_role)
 
 use_neighbors(inter::CoulombEwaldScaled) = inter.use_neighbors
 
@@ -1637,6 +1655,8 @@ function CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=1.0,
     )
 end
 
+needed_atom_fields(::CoulombSoftCoreBeutlerEwald) = (:charge, :λ,:alch_role)
+
 use_neighbors(inter::CoulombSoftCoreBeutlerEwald) = inter.use_neighbors
 
 function Base.zero(coul::CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA}) where {ET, D, A, SM, EM, LM, SCH, W, C, EA}
@@ -1805,6 +1825,8 @@ function CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
     )
 end
 
+needed_atom_fields(::CoulombSoftCoreGapsysEwald) = (:charge, :λ, :alch_role)
+
 use_neighbors(inter::CoulombSoftCoreGapsysEwald) = inter.use_neighbors
 
 function Base.zero(coul::CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA}) where {ET, D, A, SQ, LM, SCH, W, C, EA}
@@ -1952,6 +1974,8 @@ F(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}^2} \exp(-\kappa r_{ij})\le
     coulomb_const::T = coulomb_const
     kappa::K = 1.0*u"nm^-1"
 end
+
+needed_atom_fields(::Yukawa) = (:charge,)
 
 use_neighbors(inter::Yukawa) = inter.use_neighbors
 

@@ -1770,3 +1770,73 @@ end
     vals = [Molly.dpd_gaussian(1, 2, s) for s in 1:100]
     @test std(vals) > 0.5
 end
+
+@testset "Reduced Atoms" begin
+    ### test whether the reduced atoms contain all necessary atom information by checking which are failing; accurate force evaluation should be tested elsewhere
+    ### => units etc are nonsense
+
+    interactions = [Buckingham(),Coulomb(),CoulombScaled(),CoulombSoftCoreBeutler(), CoulombSoftCoreGapsys(), CoulombReactionField(;dist_cutoff=1.0u"nm"),CoulombReactionFieldScaled(;dist_cutoff=1.0u"nm"),CoulombSoftCoreBeutlerReactionField(;dist_cutoff=1.0u"nm"),CoulombSoftCoreGapsysReactionField(;dist_cutoff=1.0u"nm"),CoulombEwald(;dist_cutoff=1.0u"nm"),CoulombEwaldScaled(;dist_cutoff=1.0u"nm"),CoulombSoftCoreBeutlerEwald(;dist_cutoff=1.0u"nm"),CoulombSoftCoreGapsysEwald(;dist_cutoff=1.0u"nm"), Yukawa(),DPDInteraction(;a =25.0f0u"kJ * mol^-1 * nm^-1", γ=4.5u"kJ * mol^-1 * ns * nm^-2",σ= 3.0u"kJ * mol^-1 * nm^-1 * ns^0.5", r_c=1.0u"nm", dt=0.01u"ns"), Gravity(),LennardJones(),LennardJonesSoftCoreBeutler(),LennardJonesSoftCoreGapsys(), AshbaughHatch(),Mie(;m=10,n=6),SoftSphere()]
+
+    @kwdef struct TestAtom{T, M, Q, S, E, L,A_T,B_T,C_T}
+        index::Int = 1
+        atom_type::T = 1
+        mass::M = 1.0u"g/mol"
+        charge::Q = 1.602e-19u"C"
+        σ::S = 1.0u"nm"
+        ϵ::E = 1.0u"kJ * mol^-1"
+        λ::L = 1.0
+        alch_role::Int = Molly.CoreRole
+        A::A_T = 1.0u"kJ/mol"
+        B::B_T = 1.0u"nm^-1"
+        C::C_T = 1.0u"kJ/mol * nm^6"
+    end
+
+    atom_full_i = TestAtom()
+    atom_full_j = TestAtom()
+
+    force_units =typeof(0.1f0u"kJ * mol^-1 * nm^-1")
+    L = typeof(1.0f0u"nm")
+    V = typeof(1.0f0u"nm * ns^-1")
+    dr = SVector{3,L}(L.(ones(3).*0.3))
+    coords_i = SVector{3,L}(L.(ones(3)))
+    coords_j = SVector{3,L}(L.(ones(3)))
+    vel_i = SVector{3, V}(V.(ones(3)))
+    vel_j = SVector{3, V}(V.(zeros(3)))
+    step_n = 1
+    boundary = boundary = CubicBoundary(10f0u"nm")
+
+
+    for inter in interactions
+        REQUIRED_FIELDS = Molly.needed_atom_fields(inter)
+
+        flat_i = Molly.atom_to_flat_tuple(atom_full_i, Val(REQUIRED_FIELDS))
+        named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(flat_i)
+        atoms_i_red = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
+
+        flat_j = Molly.atom_to_flat_tuple(atom_full_j, Val(REQUIRED_FIELDS))
+        named_tuple_shffld = NamedTuple{REQUIRED_FIELDS}(flat_j)
+        atoms_j_red = Molly.ReducedAtom{REQUIRED_FIELDS, typeof(named_tuple_shffld)}(named_tuple_shffld)
+
+        @test begin
+            try
+                Molly.sum_pairwise_forces_gpu((inter,), dr, atoms_i_red, atoms_j_red, Val(force_units), false, coords_i, coords_j, boundary, vel_i, vel_j, 1) 
+                true 
+            catch e
+                println("\n\n Interaction: $inter")
+                Base.showerror(stdout, e); println(stdout)
+                Base.show_backtrace(stdout, catch_backtrace())
+                false 
+            end
+        end
+    end
+
+    inters = (DPDInteraction(;a =25.0f0u"kJ * mol^-1 * nm^-1", γ=4.5u"kJ * mol^-1 * ns * nm^-2",σ= 3.0u"kJ * mol^-1 * nm^-1 * ns^0.5", r_c=1.0u"nm", dt=0.01u"ns"), LennardJones())
+    @test all((:index, :σ, :ϵ) .== Molly.needed_fields_from_tuple(inters))
+
+    inters = (Buckingham(), CoulombSoftCoreGapsysReactionField(;dist_cutoff=1.0u"nm"))
+    @test all((:A, :B, :C, :charge, :λ, :alch_role) .== Molly.needed_fields_from_tuple(inters))
+
+    ### proper test with CUDA force kernel would be better but requires a lot of setup
+    @test all( (typeof.(interactions) .<: DPDInteraction) .== Molly.needs_velocity.(interactions)) 
+
+end
