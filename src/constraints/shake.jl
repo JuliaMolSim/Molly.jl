@@ -1,7 +1,9 @@
-export SHAKE_RATTLE
+export
+    SHAKE_RATTLE,
+    SetupSHAKE_RATTLE
 
 """
-    SHAKE_RATTLE(n_atoms, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
+    SHAKE_RATTLE(; n_atoms, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1",
                  dist_constraints=nothing, angle_constraints=nothing,
                  gpu_block_size=128, max_iters=25, strictness=:warn)
 
@@ -33,7 +35,7 @@ for the M-SHAKE algorithm.
     number if iterations is reached, some constraints may not be satisfied.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
-    `:error` to error.
+    `:error` to error. Note that this only applies to constraint setup.
 """
 struct SHAKE_RATTLE{D, A, B, C, E, V}
     clusters12::A
@@ -46,13 +48,13 @@ struct SHAKE_RATTLE{D, A, B, C, E, V}
     max_iters::Int
 end
 
-function SHAKE_RATTLE(n_atoms,
+function SHAKE_RATTLE(; n_atoms,
                       dist_tolerance=1e-8u"nm",
-                      vel_tolerance=1e-8u"nm^2 * ps^-1";
+                      vel_tolerance=1e-8u"nm^2 * ps^-1",
                       dist_constraints=nothing,
                       angle_constraints=nothing,
-                      gpu_block_size=128,
-                      max_iters=25,
+                      gpu_block_size::Integer=128,
+                      max_iters::Integer=25,
                       strictness=default_strictness())
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance ) > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
@@ -98,6 +100,22 @@ function Base.show(io::IO, sr::SHAKE_RATTLE)
     print(io, "SHAKE_RATTLE with ", length(sr.clusters12), " 2-atom clusters, ",
           length(sr.clusters23), " 3-atom clusters, ", length(sr.clusters34),
           " 4-atom clusters and ", length(sr.angle_clusters), " angle clusters")
+end
+
+struct SetupSHAKE_RATTLE{D, V}
+    dist_tolerance::D
+    vel_tolerance::V
+    gpu_block_size::Int
+    max_iters::Int
+end
+
+function SetupSHAKE_RATTLE(; dist_tolerance=1e-6u"nm",
+                           vel_tolerance=1e-6u"nm^2 * ps^-1",
+                           gpu_block_size::Integer=128,
+                           max_iters::Integer=25)
+    ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
+    ustrip(vel_tolerance ) > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
+    return SetupSHAKE_RATTLE(dist_tolerance, vel_tolerance, gpu_block_size, max_iters)
 end
 
 cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_clusters)

@@ -39,7 +39,7 @@ for temp in temps
         temperature=temp,
         friction=1.0u"ps^-1",
     )
-    simulate!(sys, simulator, 5_000; run_loggers=:skipzero)
+    simulate!(sys, simulator, 5_000; run_loggers=:skipstart)
 end
 
 f = Figure(size=(600, 400))
@@ -1285,9 +1285,9 @@ for j in 1:n_atoms_half
 end
 
 shake = SHAKE_RATTLE(
-    length(atoms),
-    1e-8u"Å",
-    1e-8u"Å^2 * ps^-1";
+    n_atoms=length(atoms),
+    dist_tolerance=1e-8u"Å",
+    vel_tolerance=1e-8u"Å^2 * ps^-1",
     dist_constraints=[constraints...],
 )
 

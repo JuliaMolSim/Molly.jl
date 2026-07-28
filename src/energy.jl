@@ -53,10 +53,18 @@ function kinetic_energy_tensor(sys::System{D}; kin_tensor=nothing) where D
     return kin_tensor_used
 end
 
-function kinetic_energy_tensor!(kin_tensor, sys::System{<:Any, <:Any, T}) where T
+function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, T}) where {D, T}
     fill!(kin_tensor, zero(T) * sys.energy_units)
-    for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
-        kin_tensor .+= uconvert.(sys.energy_units, m .* (v * transpose(v))) ./ 2
+    masses_cpu = from_device(sys.masses)
+    velocities_cpu = from_device(sys.velocities)
+    @inbounds for i in eachindex(sys)
+        m_half = masses_cpu[i] / 2
+        v = velocities_cpu[i]
+        for col in 1:D
+            for row in 1:D
+                kin_tensor[row, col] += uconvert(sys.energy_units, m_half * v[row] * v[col])
+            end
+        end
     end
     return kin_tensor
 end
@@ -116,9 +124,10 @@ function virial(sys, neighbors, step_n::Integer=0;
         compute_initial_total_virial!(buffers, sys, neighbors, step_n;
                                       n_threads=n_threads, kwargs...)
         return buffers.virial
+    else
+        _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
+        return v
     end
-    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
-    return v
 end
 
 """
@@ -141,12 +150,21 @@ function scalar_virial(sys, neighbors, step_n::Integer=0;
     return tr(virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...))
 end
 
-"""
-    temperature(system; kin_tensor=nothing, recompute=true)
+@doc raw"""
+    temperature(system; kin_tensor=nothing, n_dof=system.df,
+                k=system.k, recompute=true)
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
+
+The temperature is defined as
+```math
+T = \frac{2 E_\mathrm{kin}}{N_\mathrm{df} k}
+```
+where ``E_\mathrm{kin}`` is the kinetic energy, ``N_\mathrm{df}`` is the number of
+degrees of freedom in the system (`n_dof`) and ``k`` is the Boltzmann constant (`k`).
 """
-function temperature(sys::System{D}; kin_tensor=nothing, recompute=true) where D
+function temperature(sys::System{D}; kin_tensor=nothing, n_dof=sys.df, k=sys.k,
+                     recompute=true) where D
     if isnothing(kin_tensor)
         # Allows propagation of uncertainties to tensors
         CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
@@ -157,7 +175,7 @@ function temperature(sys::System{D}; kin_tensor=nothing, recompute=true) where D
     else
         ke = tr(kin_tensor)
     end
-    temp = 2 * ke / (sys.df * sys.k)
+    temp = 2 * ke / (n_dof * k)
     if sys.energy_units == NoUnits
         return temp
     else

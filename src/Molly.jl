@@ -17,11 +17,13 @@ using Distances
 using Distributions
 using EzXML
 using FFTW
+using FillArrays: Fill
 using GPUArrays
 using Graphs
 using KernelAbstractions
 using NearestNeighbors
 import PeriodicTable
+using PhiloxRNG: randn_f64, randn_f32, philox4x32_10
 using ProgressMeter
 using SimpleCrystals
 using SpecialFunctions
@@ -50,6 +52,7 @@ include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
 include("interactions/mie.jl")
 include("interactions/buckingham.jl")
+include("interactions/double_exponential.jl")
 include("interactions/coulomb.jl")
 include("interactions/gravity.jl")
 include("interactions/harmonic_position_restraint.jl")

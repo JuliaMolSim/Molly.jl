@@ -435,6 +435,7 @@ The following tags are supported:
 - `<CMAPTorsionForce>`
 - `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
 - `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
+- `<CustomNonbondedForce>`: the double-exponential potential is supported with `bondCutoff="3"`, global parameters `alpha` and `beta`, and per-particle parameters `sigma` and `epsilon`
 - `<AmoebaUreyBradleyForce>`: this defines the bond-like part of a general Urey-Bradley interaction and is not specific to the AMOEBA force field, note that `k` is equivalent to the `k/2` harmonic bond factor
 - `<Include>`
 
@@ -444,7 +445,7 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<CustomBondForce>`
 - `<CustomAngleForce>`
 - `<CustomTorsionForce>`: the special case where `energy="k*(theta-theta0)^2"` is supported as it is used to define improper torsions in some force fields
-- `<CustomNonbondedForce>`
+- Other `<CustomNonbondedForce>` expressions
 - `<CustomGBForce>`
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
@@ -883,6 +884,7 @@ You can use `args...` to indicate unused further arguments, e.g. `Molly.force(in
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 `force_units` can be useful for returning a zero force under certain conditions.
+If you want to use `velocity_i` and `velocity_j` you should set `Molly.pairwise_uses_velocity(::MyPairwiseInter) = true`, otherwise the velocities are passed as `nothing` for speed.
 `step_n` is the step number in the simulator, allowing time-dependent interactions.
 Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called unless you give the `init_step` argument, and can also be 0 to calculate forces before the first step.
 It also doesn't work with [`simulate_remd!`](@ref).
@@ -1183,6 +1185,8 @@ The available simulators are:
 - [`LangevinSplitting`](@ref)
 - [`OverdampedLangevin`](@ref)
 - [`NoseHoover`](@ref)
+- [`MTSIntegrator`](@ref)
+- [`MTSLangevinIntegrator`](@ref)
 - [`ReplicaExchangeMD`](@ref)
 - [`MetropolisMonteCarlo`](@ref)
 
@@ -1442,12 +1446,12 @@ loggers = (mylogger=MyLogger(10, []),) # Don't forget the trailing comma!
 ```
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
-Running loggers before the first step can be disabled by giving `run_loggers=:skipzero` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
+Running loggers before the first step can be disabled by giving `run_loggers=:skipstart` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
 For example, this runs the loggers 301 times:
 ```julia
 simulate!(sys, simulator, 100) # Default run_loggers=true
-simulate!(sys, simulator, 100; run_loggers=:skipzero)
-simulate!(sys, simulator, 100; run_loggers=:skipzero)
+simulate!(sys, simulator, 100; run_loggers=:skipstart)
+simulate!(sys, simulator, 100; run_loggers=:skipstart)
 ```
 Running loggers can be disabled entirely with `run_loggers=false`, which is the default for [`SteepestDescentMinimizer`](@ref).
 Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
@@ -1612,7 +1616,7 @@ SHAKE was originally derived for the Verlet integration scheme ([Ryckaert et al.
 LINCS (LINear Constraint Solver) is a non-iterative constraint algorithm that uses matrix expansion to approximate the inverse of the constraint coupling matrix ([Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)).
 It is typically faster than SHAKE/RATTLE for large systems.
 The implementation in Molly includes explicit velocity constraints.
-The key parameters controlling accuracy are `nrec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `niter`, the number of outer correction iterations for rotational lengthening (default 1).
+The key parameters controlling accuracy are `n_rec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `n_iter`, the number of outer correction iterations for rotational lengthening (default 1).
 Higher values of either improve accuracy at the cost of performance.
 
 !!! note
@@ -1624,6 +1628,10 @@ Currently, constraints are supported by the following simulators:
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
+- [`MTSIntegrator`](@ref)
+- [`MTSLangevinIntegrator`](@ref)
+
+Due to the nature of the velocity treatment in each integrator, the velocities stored in the system are expected to satisfy the constraints only for [`VelocityVerlet`](@ref), [`DPDVelocityVerlet`](@ref), [`MTSIntegrator`](@ref) and [`MTSLangevinIntegrator`](@ref) (in other cases the simulator behaviour is still correct).
 
 The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
 - [`SteepestDescentMinimizer`](@ref)
@@ -1644,7 +1652,7 @@ dist_constraints = [
 angle_constraints = [AngleConstraint(4, 5, 6, deg2rad(104.5), 0.1u"nm", 0.1u"nm")]
 
 shake = SHAKE_RATTLE(
-    6;
+    n_atoms=6,
     dist_constraints=dist_constraints,
     angle_constraints=angle_constraints,
 )
@@ -1661,7 +1669,7 @@ lincs = LINCS(
     dist_constraints=dist_constraints,
     angle_constraints=angle_constraints,
 )
-# LINCS with 2 distance and 1 angle constraints (nrec=4, niter=1) (implicitly 5 distance constraints)
+# LINCS with 2 distance and 1 angle constraints (n_rec=4, n_iter=1) (implicitly 5 distance constraints)
 ```
 `constraints=(lincs,)` can then be given when setting up a [`System`](@ref).
 
@@ -1802,8 +1810,14 @@ julia> random_velocity(10.0u"g/mol", 300.0u"K"; rng=Xoshiro(10))
    0.23543457751795477 nm ps^-1
 
 ```
-This may not apply across Julia versions, though you can use [StableRNGs.jl](https://github.com/JuliaRandom/StableRNGs.jl).
-It also does not apply across different backends such as CPU and GPU.
+This may not apply across Julia versions or across different backends such as CPU and GPU.
+
+Functions that generate randomness for many atoms at once may use the [Philox4x32-10](https://doi.org/10.1145/2063384.2063405) algorithm from [PhiloxRNG.jl](https://github.com/medyan-dev/PhiloxRNG.jl) internally, with the given `rng` only being used to seed Philox.
+Philox generates the same raw random numbers on all backends for the same `rng` state.
+Still, whole simulations are not expected to match bit for bit across backends due to floating point rounding differences.
+
+Other functions, such as [`random_velocity`](@ref) and the Monte Carlo methods, draw from the given `rng` directly.
+Some functions require `Random.default_rng()` for thread safety, and will error if given a different `rng`.
 
 ## Performance tips
 

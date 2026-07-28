@@ -605,11 +605,19 @@ end
 
 # Add a pair to the pair list
 # If the buffer size is large enough update the element, otherwise push a new element
-#   to `neighbor.list`
-function push_pair!(pair, neighbors::NeighborList, eligible, special)
-    (; i, j) = pair
-    if eligible[i, j]
-        push!(neighbors, (Int32(i), Int32(j), special[i, j]))
+#   to `neighbors.list`
+@inline function push_pair!(pair, neighbors::NeighborList, eligible, special)
+    i, j = pair.i, pair.j
+    @inbounds if eligible[i, j]
+        n = neighbors.n + 1
+        neighbors.n = n
+        list = neighbors.list
+        element = (i, j, special[i, j])
+        if n > length(list)
+            push!(list, element)
+        else
+            @inbounds list[n] = element
+        end
     end
     return neighbors
 end

@@ -1,4 +1,6 @@
 @testset "Agent-based modelling" begin
+    Random.seed!(1234)
+
     @enum Status susceptible infected recovered
 
     # Custom atom type

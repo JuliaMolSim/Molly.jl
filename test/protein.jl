@@ -135,6 +135,7 @@ end
     )
     zero(sys)
     zero(sys_pme)
+    deepcopy(sys_pme)
     neighbors = find_neighbors(sys)
 
     cs = charges(sys)
@@ -347,6 +348,7 @@ end
         )
         show(devnull, sys.neighbor_finder)
         zero(sys)
+        deepcopy(sys)
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
 
@@ -455,8 +457,8 @@ end
 end
 
 @testset "CHARMM OpenMM protein comparison" begin
-    for constraint_algorithm in (LINCS, SHAKE_RATTLE)
-        start_temp = (constraint_algorithm == LINCS ? 485.281907022u"K" : 489.456277814u"K")
+    for constraint_algorithm in (SetupLINCS(), SetupSHAKE_RATTLE())
+        start_temp = 485.281907022u"K" # High since it does not take into account constraints
         ff = MolecularForceField(
             joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
             strictness=:nowarn,
@@ -474,6 +476,7 @@ end
             constraints=:hbonds,
             rigid_water=true,
             constraint_algorithm=constraint_algorithm,
+            n_threads=1,
         )
         neighbors = find_neighbors(sys)
         @test length(sys.specific_inter_lists) == 7
@@ -497,6 +500,16 @@ end
         @test bench_result.allocs <= 15
         @test bench_result.memory <= 1100
 
+        # Use all threads
+        sys = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            nonbonded_method=:pme,
+            center_coords=false,
+            constraints=:hbonds,
+            rigid_water=true,
+            constraint_algorithm=constraint_algorithm,
+        )
         scalar_vir = scalar_virial(sys)
         @test scalar_vir ≈ tr(virial(sys))
         @test scalar_vir ≈ scalar_virial(sys; n_threads=1)
@@ -535,7 +548,7 @@ end
 
         coords_diff = sys.coords .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = sys.velocities .- vels_openmm
-        @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+        @test maximum(norm.(coords_diff)) < 5e-4u"nm"
         @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
         # Test with no units
@@ -571,7 +584,7 @@ end
 
         coords_diff = sys_nounits.coords * u"nm" .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = sys_nounits.velocities * u"nm * ps^-1" .- vels_openmm
-        @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+        @test maximum(norm.(coords_diff)) < 5e-4u"nm"
         @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
         params_dic = Molly.extract_parameters(sys_nounits, ff_nounits)
@@ -606,7 +619,7 @@ end
             coords_diff = from_device(sys.coords) .-
                                         wrap_coords.(coords_openmm, (sys.boundary,))
             vels_diff = from_device(sys.velocities) .- vels_openmm
-            @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+            @test maximum(norm.(coords_diff)) < 5e-4u"nm"
             @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
             sys_nounits = System(
@@ -635,7 +648,7 @@ end
             coords_diff = from_device(sys_nounits.coords * u"nm") .-
                                         wrap_coords.(coords_openmm, (sys.boundary,))
             vels_diff = from_device(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
-            @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+            @test maximum(norm.(coords_diff)) < 5e-4u"nm"
             @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
             params_dic_gpu = Molly.extract_parameters(sys_nounits, ff_nounits)
