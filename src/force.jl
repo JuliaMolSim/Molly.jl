@@ -904,29 +904,9 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         Threads.@threads for chunk_i in 1:n_threads
             fs_chunk = fs_chunks[chunk_i]
             vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
-            for i in chunk_i:n_threads:n_atoms
-                coord_i = coords[i]
-                atom_i = atoms[i]
-                vel_i = maybe_velocity(velocities, i, Val(use_vel))
-                for j in (i + 1):n_atoms
-                    coord_j = coords[j]
-                    dr = vector(coord_i, coord_j, boundary)
-                    skip_pair_cutoff(sqdist_cutoff, sum(abs2, dr)) && continue
-                    atom_j = atoms[j]
-                    vel_j = maybe_velocity(velocities, j, Val(use_vel))
-                    f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
-                                            false, coord_i, coord_j, boundary, vel_i, vel_j,
-                                            step_n)
-                    f_ustrip = checked_ustrip(f, force_units)
-                    fs_chunk[i] -= f_ustrip
-                    fs_chunk[j] += f_ustrip
-
-                    if needs_vir
-                        v = dr * transpose(f)
-                        vir_chunk .+= ustrip.(v)
-                    end
-                end
-            end
+            pairwise_forces_nonl_range!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,
+                            force_units, pairwise_inters_nonl, step_n, chunk_i, n_threads, n_atoms,
+                            sqdist_cutoff, Val(needs_vir), Val(use_vel))
         end
     end
 
@@ -946,34 +926,73 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                     block_start = Threads.atomic_add!(next_block_start, block_size)
                     block_start > n_neighbors && break
                     block_stop = min(block_start + block_size - 1, n_neighbors)
-                    for ni in block_start:block_stop
-                        i, j, special = neighbors[ni]
-                        coord_i = coords[i]
-                        coord_j = coords[j]
-                        dr = vector(coord_i, coord_j, boundary)
-                        skip_pair_cutoff(sqdist_cutoff, sum(abs2, dr)) && continue
-                        atom_i = atoms[i]
-                        atom_j = atoms[j]
-                        vel_i = maybe_velocity(velocities, i, Val(use_vel))
-                        vel_j = maybe_velocity(velocities, j, Val(use_vel))
-                        f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
-                                                special, coord_i, coord_j, boundary, vel_i, vel_j,
-                                                step_n)
-                        f_ustrip = checked_ustrip(f, force_units)
-                        fs_chunk[i] -= f_ustrip
-                        fs_chunk[j] += f_ustrip
-
-                        if needs_vir
-                            v = dr * transpose(f)
-                            vir_chunk .+= ustrip.(v)
-                        end
-                    end
+                    pairwise_forces_nl_block!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,
+                                    force_units, neighbors, pairwise_inters_nl, step_n, block_start,
+                                    block_stop, sqdist_cutoff, Val(needs_vir), Val(use_vel))
                 end
             end
         end
     end
 
     return fs_nounits
+end
+
+@noinline function pairwise_forces_nonl_range!(fs_chunk, vir_chunk, atoms, coords, velocities,
+                                               boundary, force_units, pairwise_inters_nonl, step_n,
+                                               chunk_i, n_threads, n_atoms, sqdist_cutoff,
+                                               ::Val{needs_vir}, ::Val{use_vel}) where {needs_vir, use_vel}
+    @inbounds for i in chunk_i:n_threads:n_atoms
+        coord_i = coords[i]
+        atom_i = atoms[i]
+        vel_i = maybe_velocity(velocities, i, Val(use_vel))
+        for j in (i + 1):n_atoms
+            coord_j = coords[j]
+            dr = vector(coord_i, coord_j, boundary)
+            skip_pair_cutoff(sqdist_cutoff, sum(abs2, dr)) && continue
+            atom_j = atoms[j]
+            vel_j = maybe_velocity(velocities, j, Val(use_vel))
+            f = sum_pairwise_forces(pairwise_inters_nonl, dr, atom_i, atom_j, force_units,
+                                    false, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+            f_ustrip = checked_ustrip(f, force_units)
+            fs_chunk[i] -= f_ustrip
+            fs_chunk[j] += f_ustrip
+
+            if needs_vir
+                v = dr * transpose(f)
+                vir_chunk .+= ustrip.(v)
+            end
+        end
+    end
+    return nothing
+end
+
+# A separate function reduced allocations by preventing closures
+@noinline function pairwise_forces_nl_block!(fs_chunk, vir_chunk, atoms, coords, velocities,
+                                             boundary, force_units, neighbors, pairwise_inters_nl,
+                                             step_n, block_start, block_stop, sqdist_cutoff,
+                                             ::Val{needs_vir}, ::Val{use_vel}) where {needs_vir, use_vel}
+    @inbounds for ni in block_start:block_stop
+        i, j, special = neighbors[ni]
+        coord_i = coords[i]
+        coord_j = coords[j]
+        dr = vector(coord_i, coord_j, boundary)
+        skip_pair_cutoff(sqdist_cutoff, sum(abs2, dr)) && continue
+        atom_i = atoms[i]
+        atom_j = atoms[j]
+        vel_i = maybe_velocity(velocities, i, Val(use_vel))
+        vel_j = maybe_velocity(velocities, j, Val(use_vel))
+        f = sum_pairwise_forces(pairwise_inters_nl, dr, atom_i, atom_j, force_units,
+                                special, coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+        f_ustrip = checked_ustrip(f, force_units)
+        fs_chunk[i] -= f_ustrip
+        fs_chunk[j] += f_ustrip
+
+        if needs_vir
+            v = dr * transpose(f)
+            vir_chunk .+= ustrip.(v)
+        end
+    end
+    return nothing
 end
 
 # Unclear virial contribution in periodic space as only one coordinate is available
