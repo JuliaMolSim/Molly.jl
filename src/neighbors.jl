@@ -5,6 +5,7 @@ export
     NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
+    GPUCellListNeighborFinder,
     DistanceNeighborFinder,
     TreeNeighborFinder,
     CellListMapNeighborFinder
@@ -362,6 +363,34 @@ end
 
 # The interacting tile list is constructed within the CUDA pairwise kernels.
 find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
+
+"""
+    GPUCellListNeighborFinder(;
+        dist_cutoff,
+        n_steps=10,
+        max_neighbors=640,
+    )
+
+GPU cell-list neighbor finder that materializes a per-atom geometric
+neighbor list on the GPU.
+"""
+struct GPUCellListNeighborFinder{D}
+    dist_cutoff::D
+    n_steps::Int
+    max_neighbors::Int
+end
+
+function GPUCellListNeighborFinder(;
+    dist_cutoff,
+    n_steps=10,
+    max_neighbors=640,
+)
+    return GPUCellListNeighborFinder(
+        dist_cutoff,
+        Int(n_steps),
+        Int(max_neighbors),
+    )
+end
 
 """
     DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
