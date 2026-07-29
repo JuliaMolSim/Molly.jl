@@ -103,6 +103,63 @@ function inclusive_to_offsets_gpu!(
     return nothing
 end
 
+function count_geometric_half_pairs_gpu!(
+    pair_counts,
+    neighbour_counts,
+    neighbours,
+    n_atoms,
+)
+    atom_i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if atom_i <= n_atoms
+        count = Int32(0)
+        n_neighbours = neighbour_counts[atom_i]
+
+        for slot in Int32(1):n_neighbours
+            atom_j = neighbours[slot, atom_i]
+
+            if atom_i > atom_j
+                count += Int32(1)
+            end
+        end
+
+        pair_counts[atom_i] = count
+    end
+
+    return nothing
+end
+
+function write_geometric_half_pairs_gpu!(
+    pair_list,
+    pair_offsets,
+    neighbour_counts,
+    neighbours,
+    n_atoms,
+)
+    atom_i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if atom_i <= n_atoms
+        write_position = pair_offsets[atom_i]
+        n_neighbours = neighbour_counts[atom_i]
+
+        for slot in Int32(1):n_neighbours
+            atom_j = neighbours[slot, atom_i]
+
+            if atom_i > atom_j
+                pair_list[write_position] = (
+                    Int32(atom_i),
+                    Int32(atom_j),
+                    false,
+                )
+
+                write_position += Int32(1)
+            end
+        end
+    end
+
+    return nothing
+end
+
 
 function get_neighbours_cell_shared_contiguous_gpu!(
     neighbour_counts,
@@ -262,6 +319,7 @@ function allocate_optimised_gpu_state(
     box_Lz,
     cutoff;
     max_neighbours=Int32(128),
+    allocate_pairs=false,
 )
     n_atoms = length(x_gpu)
 
@@ -274,6 +332,8 @@ function allocate_optimised_gpu_state(
     cell_Lz = box_Lz / num_cell_z
 
     n_cells = Int(num_cell_x * num_cell_y * num_cell_z)
+
+    pair_capacity = cld(n_atoms * Int(max_neighbours), 2)
 
     return (
         x=x_gpu,
@@ -294,6 +354,13 @@ function allocate_optimised_gpu_state(
             Int(max_neighbours),
             n_atoms,
         ),
+        pair_counts=allocate_pairs ? CUDA.zeros(Int32, n_atoms) : nothing,
+        pair_inclusive_counts=allocate_pairs ? CUDA.zeros(Int32, n_atoms) : nothing,
+        pair_offsets=allocate_pairs ? CUDA.zeros(Int32, n_atoms) : nothing,
+        pair_list=allocate_pairs ? CuArray{
+            Tuple{Int32,Int32,Bool},
+        }(undef, pair_capacity) : nothing,
+        pair_capacity=pair_capacity,
         n_atoms=n_atoms,
         n_cells=n_cells,
         num_cell_x=num_cell_x,
@@ -398,4 +465,67 @@ function query_gpu_cell_list!(state)
         )
 
     return nothing
+end
+
+function build_geometric_pair_list!(state)
+    state.pair_list === nothing && error(
+        "pair buffers were not allocated for this GPU cell-list state",
+    )
+
+    maximum_neighbours = maximum(state.neighbour_counts)
+
+    maximum_neighbours <= size(state.neighbours, 1) || error(
+        "neighbor capacity exceeded: " *
+        "$maximum_neighbours > $(size(state.neighbours, 1))",
+    )
+
+    n_threads = 256
+    n_blocks = cld(state.n_atoms, n_threads)
+
+    @cuda threads=n_threads blocks=n_blocks count_geometric_half_pairs_gpu!(
+        state.pair_counts,
+        state.neighbour_counts,
+        state.neighbours,
+        state.n_atoms,
+    )
+
+    accumulate!(
+        +,
+        state.pair_inclusive_counts,
+        state.pair_counts,
+    )
+
+    @cuda threads=n_threads blocks=n_blocks inclusive_to_offsets_gpu!(
+        state.pair_offsets,
+        state.pair_inclusive_counts,
+        state.n_atoms,
+    )
+
+    @cuda threads=n_threads blocks=n_blocks write_geometric_half_pairs_gpu!(
+        state.pair_list,
+        state.pair_offsets,
+        state.neighbour_counts,
+        state.neighbours,
+        state.n_atoms,
+    )
+
+    n_pairs = Int(
+        only(
+            Array(
+                state.pair_inclusive_counts[
+                    state.n_atoms:state.n_atoms
+                ],
+            ),
+        ),
+    )
+
+    n_pairs <= state.pair_capacity || error(
+        "geometric pair capacity exceeded: " *
+        "$n_pairs > $(state.pair_capacity)",
+    )
+
+    return Molly.NeighborList(
+        n_pairs,
+        state.pair_list,
+    )
 end
