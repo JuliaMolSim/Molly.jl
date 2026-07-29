@@ -89,7 +89,7 @@ update_nograd!(progress, val) = ProgressMeter.update!(progress, val)
 update_nograd!(::Nothing, val) = nothing
 
 default_check_nans(sys, sim) = true
-default_check_nans(::System{<:Any, <:Any, <:AbstractGPUArray}, sim) = false
+default_check_nans(::System{<:Any, <:AbstractGPUArray}, sim) = false
 
 isnan_svec(sv) = any(isnan, sv)
 isnan_svec_array(svs) = any(isnan_svec, svs) # On CPU this is faster than AcceleratedKernels
