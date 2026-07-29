@@ -14,7 +14,6 @@ export
     AtomData,
     MolecularTopology,
     NeighborList,
-    GPUCellListNeighborList,
     System,
     ThermoState,
     ReplicaSystem,
@@ -609,39 +608,6 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
     bonded_atoms = collect(zip(bond_is, bond_js))
     return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
 end
-
-"""
-    GPUCellListNeighborList(counts, neighbors)
-
-Per-atom GPU neighbor list stored as a fixed-capacity matrix.
-
-For atom `i`, the valid neighbor indices are stored in
-`neighbors[1:counts[i], i]`.
-"""
-struct GPUCellListNeighborList{C,N,S}
-    counts::C
-    neighbors::N
-    state::S
-
-    function GPUCellListNeighborList(
-        counts::C,
-        neighbors::N,
-        state::S,
-    ) where {C,N,S}
-        size(neighbors, 2) == length(counts) || throw(
-            ArgumentError(
-                "the second dimension of neighbors must equal " *
-                "the number of atoms",
-            ),
-        )
-
-        return new{C,N,S}(counts, neighbors, state)
-    end
-end
-
-GPUCellListNeighborList(counts, neighbors) =
-    GPUCellListNeighborList(counts, neighbors, nothing)
-
 
 """
     NeighborList(n, list)
