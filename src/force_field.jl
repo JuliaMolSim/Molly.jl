@@ -933,7 +933,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
     global_params = [double_exp_alpha, double_exp_beta]
     G = typeof(global_params)
-    if has_double_exp_params && count(at -> at.ϵ > zero(at.ϵ), nb_atom_classes) > 0
+    if ff_param_array[13] && count(at -> at.ϵ > zero(at.ϵ), nb_atom_classes) > 0
         error("if CustomNonbondedForce is used, all atoms must have a NonbondedForce " *
               "ϵ of zero since the Lennard-Jones potential is not used")
     end
