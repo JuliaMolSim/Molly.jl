@@ -1624,6 +1624,7 @@ function force_kernel!(
     tiles_type_ro = CUDA_CORE.Const(interacting_tiles_type)
     num_interacting_tiles_ro = CUDA_CORE.Const(num_interacting_tiles)
     interacting_tiles_overflow_ro = CUDA_CORE.Const(interacting_tiles_overflow)
+    uses_vel = Molly.any_uses_velocity(inters_tuple)
     
     idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
 
@@ -1674,17 +1675,20 @@ function force_kernel!(
         
         @inbounds coords_j = coords[index_j]
         @inbounds vel_j = velocities[index_j]
-        shuffle_idx = lane
         @inbounds atoms_j = atoms[index_j]
-        atom_fields = getfield.((atoms_j,), fieldnames(A))
-        
+        # Only shuffle the Atom fields the interactions actually use, safe default
+        shuf_syms = Val(Molly.resolve_atom_fields(Molly.combine_atom_fields(inters_tuple), A))
+        atom_payload = Molly.atom_shuffle_payload(atoms_j, shuf_syms)
+
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                atoms_j_shuffle = A(atom_fields...)
+                if uses_vel
+                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                end
+                atom_payload = CUDA.shfl_sync.(0xFFFFFFFF, atom_payload, lane + a, warpsize())
+                atoms_j_shuffle = Molly.rebuild_shuffled_atom(A, atoms_i, atom_payload, shuf_syms)
+                shuffle_idx = ((lane - a + m) & Int32(31)) + a
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
@@ -1728,10 +1732,12 @@ function force_kernel!(
 
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                atoms_j_shuffle = A(atom_fields...)
+                if uses_vel
+                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                end
+                atom_payload = CUDA.shfl_sync.(0xFFFFFFFF, atom_payload, lane + a, warpsize())
+                atoms_j_shuffle = Molly.rebuild_shuffled_atom(A, atoms_i, atom_payload, shuf_syms)
+                shuffle_idx = ((lane - a + m) & Int32(31)) + a
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
@@ -2088,6 +2094,7 @@ function energy_kernel!(
     tiles_type_ro = CUDA_CORE.Const(interacting_tiles_type)
     num_interacting_tiles_ro = CUDA_CORE.Const(num_interacting_tiles)
     interacting_tiles_overflow_ro = CUDA_CORE.Const(interacting_tiles_overflow)
+    uses_vel = Molly.any_uses_velocity(inters_tuple)
 
     idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
 
@@ -2124,17 +2131,20 @@ function energy_kernel!(
         @inbounds atoms_i = atoms[index_i]
         @inbounds coords_j = coords[index_j]
         @inbounds vel_j = velocities[index_j]
-        shuffle_idx = lane
         @inbounds atoms_j = atoms[index_j]
-        atom_fields = getfield.((atoms_j,), fieldnames(A))
+        # Only shuffle the Atom fields the interactions actually use, safe default
+        shuf_syms = Val(Molly.resolve_atom_fields(Molly.combine_atom_fields(inters_tuple), A))
+        atom_payload = Molly.atom_shuffle_payload(atoms_j, shuf_syms)
 
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                atoms_j_shuffle = A(atom_fields...)
+                if uses_vel
+                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                end
+                atom_payload = CUDA.shfl_sync.(0xFFFFFFFF, atom_payload, lane + a, warpsize())
+                atoms_j_shuffle = Molly.rebuild_shuffled_atom(A, atoms_i, atom_payload, shuf_syms)
+                shuffle_idx = ((lane - a + m) & Int32(31)) + a
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
@@ -2159,10 +2169,12 @@ function energy_kernel!(
 
             @inbounds for m in a:warpsize()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, lane + a, warpsize())
-                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, lane + a, warpsize())
-                atoms_j_shuffle = A(atom_fields...)
+                if uses_vel
+                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
+                end
+                atom_payload = CUDA.shfl_sync.(0xFFFFFFFF, atom_payload, lane + a, warpsize())
+                atoms_j_shuffle = Molly.rebuild_shuffled_atom(A, atoms_i, atom_payload, shuf_syms)
+                shuffle_idx = ((lane - a + m) & Int32(31)) + a
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)

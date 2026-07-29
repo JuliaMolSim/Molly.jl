@@ -36,6 +36,9 @@ end
 
 use_neighbors(inter::LennardJones) = inter.use_neighbors
 
+required_atom_fields(inter::LennardJones) = (:σ, :ϵ, :λ,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...)
+
 function Base.zero(lj::LennardJones{C, H, S, E, W}) where {C, H, S, E, W}
     return LennardJones(
         lj.cutoff,
@@ -335,6 +338,10 @@ end
 
 use_neighbors(inter::LennardJonesSoftCoreBeutler) = inter.use_neighbors
 
+required_atom_fields(inter::LennardJonesSoftCoreBeutler) = (:σ, :ϵ, :λ, :alch_role,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...,
+            mixing_atom_fields(inter.λ_mixing)...)
+
 function Base.zero(lj::LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W}) where {C, A, H, S, E, LM, SCH, W}
     return LennardJonesSoftCoreBeutler(
         lj.cutoff,
@@ -566,6 +573,10 @@ end
 
 use_neighbors(inter::LennardJonesSoftCoreGapsys) = inter.use_neighbors
 
+required_atom_fields(inter::LennardJonesSoftCoreGapsys) = (:σ, :ϵ, :λ, :alch_role,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...,
+            mixing_atom_fields(inter.λ_mixing)...)
+
 function Base.zero(lj::LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, W}) where {C, A, H, S, E, LM, SCH, W}
     return LennardJonesSoftCoreGapsys(
         lj.cutoff,
@@ -792,6 +803,10 @@ If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
 end
 
 use_neighbors(inter::AshbaughHatch) = inter.use_neighbors
+
+required_atom_fields(inter::AshbaughHatch) = (:σ, :ϵ, :λ,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...,
+            mixing_atom_fields(inter.λ_mixing)...)
 
 function Base.zero(lj::AshbaughHatch{C, H, S, E, L, W}) where {C, H, S, E, L, W}
     return AshbaughHatch(

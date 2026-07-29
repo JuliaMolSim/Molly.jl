@@ -66,6 +66,8 @@ end
 
 use_neighbors(inter::DPDInteraction) = inter.use_neighbors
 
+required_atom_fields(inter::DPDInteraction) = (:index,)
+
 pairwise_uses_velocity(::DPDInteraction) = true
 
 function Base.zero(d::DPDInteraction)

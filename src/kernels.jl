@@ -61,6 +61,44 @@ end
     return pe
 end
 
+# Atom fields read by a pairwise interaction in its force/energy calculation,
+# as a tuple of field name Symbols. Returning `nothing` (the default) conservatively
+# shuffles all Atom fields in the tiled GPU pairwise kernel. Narrowing this to the
+# fields actually used cuts warp-shuffle traffic (the dominant cost of that kernel),
+# but must list every field read or forces/energies will be silently wrong, so the
+# default is safe.
+required_atom_fields(inter) = nothing
+
+@inline merge_atom_fields(::Nothing, _) = nothing
+@inline merge_atom_fields(_, ::Nothing) = nothing
+@inline merge_atom_fields(::Nothing, ::Nothing) = nothing
+@inline merge_atom_fields(a::Tuple, b::Tuple) = (a..., b...)
+@inline combine_atom_fields(::Tuple{}) = ()
+
+@inline function combine_atom_fields(inters::Tuple)
+    return merge_atom_fields(
+        required_atom_fields(first(inters)),
+        combine_atom_fields(Base.tail(inters)),
+    )
+end
+
+@inline resolve_atom_fields(::Nothing, ::Type{A}) where {A} = fieldnames(A)
+@inline resolve_atom_fields(syms::Tuple, ::Type{A}) where {A} = syms
+
+# Extract the values of `syms` from an atom as a tuple (the warp-shuffle payload)
+@inline atom_shuffle_payload(atom, ::Val{syms}) where {syms} = map(s -> getfield(atom, s), syms)
+
+# Rebuild an Atom from `base` (lane-local atom), overwriting the fields in `syms`
+# with the shuffled `payload` values. Fields not in `syms` keep `base`'s values;
+# they are guaranteed unused by the active interactions so the placeholder is safe.
+@generated function rebuild_shuffled_atom(::Type{A}, base, payload, ::Val{syms}) where {A, syms}
+    args = map(fieldnames(A)) do f
+        i = findfirst(==(f), syms)
+        i === nothing ? :(getfield(base, $(QuoteNode(f)))) : :(payload[$i])
+    end
+    return :($A($(args...)))
+end
+
 function gpu_threads_env(name, default)
     return haskey(ENV, name) ? parse(Int, ENV[name]) : default
 end

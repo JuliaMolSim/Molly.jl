@@ -43,6 +43,9 @@ end
 
 use_neighbors(inter::Mie) = inter.use_neighbors
 
+required_atom_fields(inter::Mie) = (:σ, :ϵ, :λ,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...)
+
 function Base.zero(m::Mie{T, W}) where {T, W}
     return Mie(zero(T), zero(T), m.cutoff, m.use_neighbors, m.shortcut, m.σ_mixing,
                m.ϵ_mixing, zero(W), zero(T))

@@ -20,6 +20,9 @@ end
 
 use_neighbors(inter::SoftSphere) = inter.use_neighbors
 
+required_atom_fields(inter::SoftSphere) = (:σ, :ϵ, :λ,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...)
+
 function Base.zero(ss::SoftSphere)
     return SoftSphere(ss.cutoff, ss.use_neighbors, ss.shortcut, ss.σ_mixing, ss.ϵ_mixing)
 end

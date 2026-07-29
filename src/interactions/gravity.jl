@@ -18,6 +18,8 @@ end
 
 use_neighbors(inter::Gravity) = inter.use_neighbors
 
+required_atom_fields(inter::Gravity) = (:mass,)
+
 function Base.zero(gr::Gravity{T}) where T
     return Gravity(gr.cutoff, zero(T), gr.use_neighbors)
 end

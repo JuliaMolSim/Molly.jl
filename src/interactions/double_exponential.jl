@@ -47,6 +47,9 @@ end
 
 use_neighbors(inter::DoubleExponential) = inter.use_neighbors
 
+required_atom_fields(inter::DoubleExponential) = (:σ, :ϵ, :λ,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...)
+
 function Base.zero(i::DoubleExponential{C, T, SC, S, E, W}) where {C, T, SC, S, E, W}
     return DoubleExponential(
         i.cutoff,
@@ -221,6 +224,10 @@ function DoubleExponentialSoftCore(; cutoff=NoCutoff(), use_neighbors=false, α,
 end
 
 use_neighbors(inter::DoubleExponentialSoftCore) = inter.use_neighbors
+
+required_atom_fields(inter::DoubleExponentialSoftCore) = (:σ, :ϵ, :λ, :alch_role,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...,
+            mixing_atom_fields(inter.λ_mixing)...)
 
 function Base.zero(i::DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W}) where {C, T, SC, S, E, LM, SCH, W}
     return DoubleExponentialSoftCore(

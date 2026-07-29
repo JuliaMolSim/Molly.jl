@@ -36,6 +36,10 @@ end
 
 use_neighbors(inter::Buckingham) = inter.use_neighbors
 
+required_atom_fields(inter::Buckingham) = (:A, :B, :C,
+            mixing_atom_fields(inter.A_mixing)..., mixing_atom_fields(inter.B_mixing)...,
+            mixing_atom_fields(inter.C_mixing)...)
+
 function Base.zero(b::Buckingham{C, W}) where {C, W}
     return Buckingham(b.cutoff, b.use_neighbors, b.shortcut, b.A_mixing,
                       b.B_mixing, b.C_mixing, zero(W))
