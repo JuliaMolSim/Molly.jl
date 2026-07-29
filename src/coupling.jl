@@ -875,7 +875,7 @@ end
 
 function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarloBarostat, sim,
                          neighbors=nothing, step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, T}
+                         rng=Random.default_rng(), kwargs...) where {D, T}
     if !iszero(step_n % barostat.n_steps)
         return false
     end
