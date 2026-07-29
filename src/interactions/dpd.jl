@@ -120,9 +120,11 @@ end
 
     # Random: pairwise-correlated stochastic force
     ξ = A(dpd_gaussian(atom_i.index, atom_j.index, step_n, inter.key))
-    f_R = inter.σ * w_R * ξ * inv(sqrt(inter.dt)) * inv_r
+    f_R = inter.σ * w_R * ξ * inv(sqrt(inter.dt)) #* inv_r
 
-    return (f_C + f_D + f_R) * dr
+    tmp = f_C + f_D
+    tmp += f_R
+    return tmp * dr#(f_C + f_D + f_R) * dr
 end
 
 @inline function potential_energy(inter::DPDInteraction,

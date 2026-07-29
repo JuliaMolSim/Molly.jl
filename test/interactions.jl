@@ -1871,7 +1871,7 @@ end
     ### test whether the reduced atoms contain all necessary atom information by checking which are failing; accurate force evaluation should be tested elsewhere
     ### => units etc are nonsense
 
-    interactions = [Buckingham(),Coulomb(),CoulombScaled(),CoulombSoftCoreBeutler(), CoulombSoftCoreGapsys(), CoulombReactionField(;dist_cutoff=1.0u"nm"),CoulombReactionFieldScaled(;dist_cutoff=1.0u"nm"),CoulombSoftCoreBeutlerReactionField(;dist_cutoff=1.0u"nm"),CoulombSoftCoreGapsysReactionField(;dist_cutoff=1.0u"nm"),CoulombEwald(;dist_cutoff=1.0u"nm"),CoulombEwaldScaled(;dist_cutoff=1.0u"nm"),CoulombSoftCoreBeutlerEwald(;dist_cutoff=1.0u"nm"),CoulombSoftCoreGapsysEwald(;dist_cutoff=1.0u"nm"), Yukawa(),DPDInteraction(;a =25.0f0u"kJ * mol^-1 * nm^-1", γ=4.5u"kJ * mol^-1 * ns * nm^-2",σ= 3.0u"kJ * mol^-1 * nm^-1 * ns^0.5", r_c=1.0u"nm", dt=0.01u"ns"), Gravity(),LennardJones(),LennardJonesSoftCoreBeutler(),LennardJonesSoftCoreGapsys(), AshbaughHatch(),Mie(;m=10,n=6),SoftSphere()]
+    interactions = [Buckingham(),Coulomb(),CoulombScaled(),CoulombSoftCoreBeutler(), CoulombSoftCoreGapsys(), CoulombReactionField(;dist_cutoff=1.0u"nm"),CoulombReactionFieldScaled(;dist_cutoff=1.0u"nm"),CoulombSoftCoreBeutlerReactionField(;dist_cutoff=1.0u"nm"),CoulombSoftCoreGapsysReactionField(;dist_cutoff=1.0u"nm"),CoulombEwald(;dist_cutoff=1.0u"nm"),CoulombEwaldScaled(;dist_cutoff=1.0u"nm"),CoulombSoftCoreBeutlerEwald(;dist_cutoff=1.0u"nm"),CoulombSoftCoreGapsysEwald(;dist_cutoff=1.0u"nm"), Yukawa(),DPDInteraction(;a =25.0f0u"kJ * mol^-1 * nm^-1", γ=4.5u"kJ * mol^-1 * ns * nm^-2",σ= 3.0u" nm^-1 * ns^0.5", r_c=1.0u"nm", dt=0.01u"ns"), Gravity(),LennardJones(),LennardJonesSoftCoreBeutler(),LennardJonesSoftCoreGapsys(), AshbaughHatch(),Mie(;m=10,n=6),SoftSphere()]
 
     @kwdef struct TestAtom{T, M, Q, S, E, L,A_T,B_T,C_T}
         index::Int = 1
@@ -1881,7 +1881,7 @@ end
         σ::S = 1.0u"nm"
         ϵ::E = 1.0u"kJ * mol^-1"
         λ::L = 1.0
-        alch_role::Int = Molly.CoreRole
+        alch_role::Int32 = Molly.CoreRole
         A::A_T = 1.0u"kJ/mol"
         B::B_T = 1.0u"nm^-1"
         C::C_T = 1.0u"kJ/mol * nm^6"
