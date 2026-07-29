@@ -2836,4 +2836,7 @@ function remove_cm_velocity_kernel_3d!(velocities, cm_momentum::CuDeviceVector{T
     return nothing
 end
 
+include("gpu_cell_list_kernels.jl")
+include("gpu_cell_list_neighbor_finder.jl")
+
 end

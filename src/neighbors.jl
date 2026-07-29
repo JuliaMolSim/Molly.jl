@@ -5,6 +5,7 @@ export
     NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
+    GPUCellListNeighborFinder,
     DistanceNeighborFinder,
     TreeNeighborFinder,
     CellListMapNeighborFinder
@@ -401,6 +402,34 @@ invalidate_cached_neighbors!(buffers, neighbor_finder) = buffers
 function invalidate_cached_neighbors!(buffers::BuffersGPU, nf::GPUNeighborFinder)
     buffers.step_n_preprocessed = -1
     return buffers
+end
+
+"""
+    GPUCellListNeighborFinder(;
+        dist_cutoff,
+        n_steps=10,
+        max_neighbors=640,
+    )
+
+GPU cell-list neighbor finder that materializes a per-atom geometric
+neighbor list on the GPU.
+"""
+struct GPUCellListNeighborFinder{D}
+    dist_cutoff::D
+    n_steps::Int
+    max_neighbors::Int
+end
+
+function GPUCellListNeighborFinder(;
+    dist_cutoff,
+    n_steps=10,
+    max_neighbors=640,
+)
+    return GPUCellListNeighborFinder(
+        dist_cutoff,
+        Int(n_steps),
+        Int(max_neighbors),
+    )
 end
 
 """
