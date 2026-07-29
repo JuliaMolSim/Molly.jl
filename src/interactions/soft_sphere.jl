@@ -61,7 +61,7 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)

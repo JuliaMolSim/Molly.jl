@@ -133,7 +133,7 @@ end
     r_c = inter.r_c
 
     if r >= r_c || iszero(r)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
 
     # Only the conservative part has a well-defined potential energy

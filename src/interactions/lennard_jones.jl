@@ -116,7 +116,7 @@ end
                                   special=false,
                                   args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
@@ -817,16 +817,6 @@ function Base.:+(l1::AshbaughHatch, l2::AshbaughHatch)
     )
 end
 
-@kwdef struct AshbaughHatchAtom{T, M, C, S, E, L}
-    index::Int = 1
-    atom_type::T = 1
-    mass::M = 1.0u"g/mol"
-    charge::C = 0.0
-    σ::S = 0.0u"nm"
-    ϵ::E = 0.0u"kJ * mol^-1"
-    λ::L = 1.0
-end
-
 @inline function force(inter::AshbaughHatch,
                        dr,
                        atom_i,
@@ -875,7 +865,7 @@ end
                                   special::Bool=false,
                                   args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)

@@ -26,7 +26,6 @@ where
 ```math
 r_m = 2^{1/6}\sigma_{ij}
 ```
-
 """
 struct DoubleExponential{C, T, SC, S, E, W} <: PairwiseInteraction
     cutoff::C
@@ -98,38 +97,6 @@ end
 
 const two_power_sixth = 2 ^ (1 / 6)
 
-@inline function potential_energy(
-    inter::DoubleExponential{C, T},
-    dr, 
-    atom_i,
-    atom_j,
-    energy_units=u"kJ * mol^-1", 
-    special=false,
-    args...
-) where {C, T}
-
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return zero_pairwise_energy(dr, energy_units)
-    end
-    r = sqrt(sum(abs2, dr))
-    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
-    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
-    rm = σ * T(two_power_sixth)
-    α, β = inter.α, inter.β
-    params = (α, β, rm, ϵ)
-    pe = pe_cutoff(inter.cutoff, inter, r, params)
-    if special
-        return pe * inter.weight_special
-    else
-        return pe
-    end
-end
-
-@inline function pairwise_pe(::DoubleExponential, r, (α, β, rm, ϵ))
-    x = 1 - r / rm
-    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
-end
-
 @inline function force(
     inter::DoubleExponential{C, T},
     dr,
@@ -161,6 +128,38 @@ end
 @inline function pairwise_force(::DoubleExponential, r, (α, β, rm, ϵ))
     x = 1 - r / rm
     return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
+end
+
+@inline function potential_energy(
+    inter::DoubleExponential{C, T},
+    dr, 
+    atom_i,
+    atom_j,
+    energy_units=u"kJ * mol^-1", 
+    special=false,
+    args...
+) where {C, T}
+
+    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    r = sqrt(sum(abs2, dr))
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+    rm = σ * T(two_power_sixth)
+    α, β = inter.α, inter.β
+    params = (α, β, rm, ϵ)
+    pe = pe_cutoff(inter.cutoff, inter, r, params)
+    if special
+        return pe * inter.weight_special
+    else
+        return pe
+    end
+end
+
+@inline function pairwise_pe(::DoubleExponential, r, (α, β, rm, ϵ))
+    x = 1 - r / rm
+    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
 end
 
 @doc raw"""
@@ -277,47 +276,6 @@ function extract_parameters!(params_dic, inter::DoubleExponentialSoftCore, ff)
     return params_dic
 end
 
-@inline function potential_energy(
-    inter::DoubleExponentialSoftCore{C, T},
-    dr,
-    atom_i,
-    atom_j,
-    energy_units=u"kJ * mol^-1",
-    special=false,
-    args...
-) where {C, T}
-
-    # Mix Lambda
-    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
-    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
-    if λ <= 0
-        return zero_pairwise_energy(dr, energy_units)
-    end
-    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
-        return zero_pairwise_energy(dr, energy_units)
-    end
-    r = sqrt(sum(abs2, dr))
-    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
-    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
-    rm = σ * T(two_power_sixth)
-    # Following  https://doi.org/10.1039/d3dd00070b
-    # αs = (1.1 + λ(α − 1.1)) and βs = (1 + λ(β − 1))
-    α_s = T(1.1 + λ * (inter.α - 1.1))
-    β_s = T(1 + λ * (inter.β - 1))
-    params = (α_s, β_s, rm, ϵ)
-    pe = pe_cutoff(inter.cutoff, inter, r, params)
-    if special
-        return λ * pe * inter.weight_special
-    else
-        return λ * pe
-    end
-end
-
-@inline function pairwise_pe(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
-    x = 1 - r / rm
-    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
-end
-
 @inline function force(
     inter::DoubleExponentialSoftCore{C, T},
     dr,
@@ -361,4 +319,45 @@ end
 @inline function pairwise_force(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
     x = 1 - r / rm
     return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
+end
+
+@inline function potential_energy(
+    inter::DoubleExponentialSoftCore{C, T},
+    dr,
+    atom_i,
+    atom_j,
+    energy_units=u"kJ * mol^-1",
+    special=false,
+    args...
+) where {C, T}
+
+    # Mix Lambda
+    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
+    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
+    if λ <= 0
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+    r = sqrt(sum(abs2, dr))
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
+    rm = σ * T(two_power_sixth)
+    # Following  https://doi.org/10.1039/d3dd00070b
+    # αs = (1.1 + λ(α − 1.1)) and βs = (1 + λ(β − 1))
+    α_s = T(1.1 + λ * (inter.α - 1.1))
+    β_s = T(1 + λ * (inter.β - 1))
+    params = (α_s, β_s, rm, ϵ)
+    pe = pe_cutoff(inter.cutoff, inter, r, params)
+    if special
+        return λ * pe * inter.weight_special
+    else
+        return λ * pe
+    end
+end
+
+@inline function pairwise_pe(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
+    x = 1 - r / rm
+    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
 end
