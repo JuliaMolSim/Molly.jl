@@ -64,8 +64,6 @@ skin distance that accounts for particle movement between neighbor list rebuilds
     key::UInt64 = rand(UInt64)
 end
 
-pairwise_uses_velocity(::DPDInteraction) = true
-
 needed_atom_fields(::DPDInteraction) = (:index,)
 
 use_neighbors(inter::DPDInteraction) = inter.use_neighbors
