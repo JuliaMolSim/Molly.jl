@@ -2152,10 +2152,9 @@ function energy_kernel!(
         @inbounds coords_i = coords[index_i]
         @inbounds atoms_i = atoms[index_i]
         @inbounds coords_j = coords[index_j]
-        if use_vel
-            @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
-            @inbounds vel_j = Molly.maybe_velocity(velocities, j, Val(use_vel))
-        end
+        @inbounds vel_i = Molly.maybe_velocity(velocities, i, Val(use_vel))
+        @inbounds vel_j = Molly.maybe_velocity(velocities, j, Val(use_vel))
+        
         shuffle_idx = lane
         @inbounds atoms_j_full = atoms[index_j]
         atom_fields = Tuple(Molly.atom_to_flat_named_tuple(atoms_j_full, Val(REQUIRED_FIELDS)))

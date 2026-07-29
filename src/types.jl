@@ -50,6 +50,7 @@ const PairwiseInteraction = NBodyInteraction{2}
 # Whether a pairwise interaction uses velocities in its force/potential energy calculation
 pairwise_uses_velocity(inter) = false
 
+@inline any_uses_velocity(inters::NamedTuple) = any_uses_velocity(values(inters))
 @inline any_uses_velocity(::Tuple{}) = false
 @inline function any_uses_velocity(inters::Tuple)
     return pairwise_uses_velocity(first(inters)) || any_uses_velocity(Base.tail(inters))
