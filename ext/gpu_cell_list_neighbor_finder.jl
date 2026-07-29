@@ -73,9 +73,12 @@ function Molly.find_neighbors(
     box_Lz = Float32(ustrip(dist_unit, box[3]))
     cutoff = Float32(ustrip(dist_unit, nf.dist_cutoff))
 
+    build_pairs = nf.output === :ragged_and_pairs
+
     can_reuse_state = (
         current_neighbors isa Molly.GPUCellListNeighborList &&
         current_neighbors.state !== nothing &&
+        (!build_pairs || current_neighbors.state.pair_list !== nothing) &&
         current_neighbors.state.n_atoms == length(sys) &&
         current_neighbors.state.box_Lx == box_Lx &&
         current_neighbors.state.box_Ly == box_Ly &&
@@ -105,15 +108,23 @@ function Molly.find_neighbors(
             box_Lz,
             cutoff;
             max_neighbours=Int32(nf.max_neighbors),
+            allocate_pairs=build_pairs,
         )
     end
 
     build_optimised_cell_list!(state)
     query_gpu_cell_list!(state)
 
+    pairs = if build_pairs
+        build_geometric_pair_list!(state)
+    else
+        nothing
+    end
+
     return Molly.GPUCellListNeighborList(
         state.neighbour_counts,
         state.neighbours,
+        pairs,
         state,
     )
 end

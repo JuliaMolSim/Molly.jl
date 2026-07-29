@@ -611,23 +611,29 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
 end
 
 """
-    GPUCellListNeighborList(counts, neighbors)
+    GPUCellListNeighborList(counts, neighbors, state)
+    GPUCellListNeighborList(counts, neighbors, pairs, state)
 
 Per-atom GPU neighbor list stored as a fixed-capacity matrix.
 
 For atom `i`, the valid neighbor indices are stored in
 `neighbors[1:counts[i], i]`.
+
+When geometric pair output was requested, `pairs` contains a flat
+[`NeighborList`](@ref). Otherwise, `pairs` is `nothing`.
 """
-struct GPUCellListNeighborList{C,N,S}
+struct GPUCellListNeighborList{C,N,P,S}
     counts::C
     neighbors::N
+    pairs::P
     state::S
 
     function GPUCellListNeighborList(
         counts::C,
         neighbors::N,
+        pairs::P,
         state::S,
-    ) where {C,N,S}
+    ) where {C,N,P,S}
         size(neighbors, 2) == length(counts) || throw(
             ArgumentError(
                 "the second dimension of neighbors must equal " *
@@ -635,13 +641,30 @@ struct GPUCellListNeighborList{C,N,S}
             ),
         )
 
-        return new{C,N,S}(counts, neighbors, state)
+        return new{C,N,P,S}(
+            counts,
+            neighbors,
+            pairs,
+            state,
+        )
     end
 end
 
-GPUCellListNeighborList(counts, neighbors) =
-    GPUCellListNeighborList(counts, neighbors, nothing)
+GPUCellListNeighborList(counts, neighbors, state) =
+    GPUCellListNeighborList(
+        counts,
+        neighbors,
+        nothing,
+        state,
+    )
 
+GPUCellListNeighborList(counts, neighbors) =
+    GPUCellListNeighborList(
+        counts,
+        neighbors,
+        nothing,
+        nothing,
+    )
 
 """
     NeighborList(n, list)

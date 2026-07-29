@@ -369,26 +369,41 @@ find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
         dist_cutoff,
         n_steps=10,
         max_neighbors=640,
+        output=:ragged,
     )
 
 GPU cell-list neighbor finder that materializes a per-atom geometric
 neighbor list on the GPU.
+
+`output=:ragged` returns only the per-atom padded ragged representation.
+`output=:ragged_and_pairs` additionally constructs a flat geometric
+half-pair list. Geometric pairs do not include force-field exclusions
+or special-pair flags.
 """
 struct GPUCellListNeighborFinder{D}
     dist_cutoff::D
     n_steps::Int
     max_neighbors::Int
+    output::Symbol
 end
 
 function GPUCellListNeighborFinder(;
     dist_cutoff,
     n_steps=10,
     max_neighbors=640,
+    output::Symbol=:ragged,
 )
+    output in (:ragged, :ragged_and_pairs) || throw(
+        ArgumentError(
+            "output must be :ragged or :ragged_and_pairs, got $output",
+        ),
+    )
+
     return GPUCellListNeighborFinder(
         dist_cutoff,
         Int(n_steps),
         Int(max_neighbors),
+        output,
     )
 end
 
