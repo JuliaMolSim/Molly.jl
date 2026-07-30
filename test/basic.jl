@@ -884,6 +884,27 @@ end
 
                 @test Array(result.counts) == fill(Int32(39), n_atoms)
                 @test result.n == n_atoms * (n_atoms - 1) ÷ 2
+
+                                cell_counts = Array(result.state.cell_counts)
+                expected_host_tiles = sum(
+                    cld(Int(count), 32)
+                    for count in cell_counts
+                )
+
+                @test result.state.n_host_tiles[] == expected_host_tiles
+                @test result.state.n_host_tiles[] == 2
+
+                n_host_tiles = result.state.n_host_tiles[]
+
+                @test Array(
+                    result.state.host_tile_starts[1:n_host_tiles],
+                ) == Int32[0, 32]
+
+                scheduled_cells = Array(
+                    result.state.host_tile_cells[1:n_host_tiles],
+                )
+
+                @test length(unique(scheduled_cells)) == 1
             end
 
             @testset "State reuse" begin

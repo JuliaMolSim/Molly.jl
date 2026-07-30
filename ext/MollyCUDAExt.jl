@@ -2570,6 +2570,51 @@ function inclusive_to_offsets_gpu!(
     return nothing
 end
 
+function count_host_tiles_gpu!(
+    cell_tile_counts,
+    cell_counts,
+    n_cells,
+)
+    cell = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if cell <= n_cells
+        cell_tile_counts[cell] = cld(
+            cell_counts[cell],
+            Int32(CELL_BLOCK_SIZE),
+        )
+    end
+
+    return nothing
+end
+
+function write_host_tiles_gpu!(
+    host_tile_cells,
+    host_tile_starts,
+    cell_tile_counts,
+    cell_tile_offsets,
+    n_cells,
+)
+    cell = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if cell <= n_cells
+        n_tiles = cell_tile_counts[cell]
+
+        if n_tiles > Int32(0)
+            first_tile = cell_tile_offsets[cell]
+
+            for local_tile in Int32(0):(n_tiles - Int32(1))
+                tile = first_tile + local_tile
+
+                host_tile_cells[tile] = cell
+                host_tile_starts[tile] =
+                    local_tile * Int32(CELL_BLOCK_SIZE)
+            end
+        end
+    end
+
+    return nothing
+end
+
 @inline include_half_pair(
     ::Val{:geometric},
     eligible,
@@ -2667,10 +2712,11 @@ function get_neighbours_cell_shared_contiguous_gpu!(
     cell_counts,
     cell_offsets,
     cell_particles,
+    host_tile_cells,
+    host_tile_starts,
     cell_x,
     cell_y,
     cell_z,
-    n_atoms,
     num_cell_x,
     num_cell_y,
     num_cell_z,
@@ -2678,134 +2724,138 @@ function get_neighbours_cell_shared_contiguous_gpu!(
     box_Ly,
     box_Lz,
     cutoff2,
-    max_neighbours
+    max_neighbours,
 )
-    # Block and thread ID - dont care about global IDs anymore
-    host_cell = blockIdx().x
+    host_tile = blockIdx().x
     lane = threadIdx().x
 
-    # Where host cell atom data starts and host cell atom counts
+    host_cell = host_tile_cells[host_tile]
+    host_tile_start = host_tile_starts[host_tile]
+
     host_start = cell_offsets[host_cell]
     n_host = cell_counts[host_cell]
 
-    # Make sure every block knows the 3D position of its host cell
+    host_local = host_tile_start + lane - Int32(1)
+    host_active = host_local < n_host
+
+    atom_i = Int32(0)
+    x_i = 0.0f0
+    y_i = 0.0f0
+    z_i = 0.0f0
+    count = Int32(0)
+
+    if host_active
+        host_index = host_start + host_local
+
+        atom_i = cell_particles[host_index]
+        x_i = cell_x[host_index]
+        y_i = cell_y[host_index]
+        z_i = cell_z[host_index]
+    end
+
     cell0 = host_cell - Int32(1)
     cx = cell0 % num_cell_x
     tmp = cell0 ÷ num_cell_x
     cy = tmp % num_cell_y
     cz = tmp ÷ num_cell_y
 
-    # Arrays to hold one tile of candidate atoms
-    # These are not for host atoms or neighbour lists
     shared_x = CuStaticSharedArray(Float32, CELL_BLOCK_SIZE)
     shared_y = CuStaticSharedArray(Float32, CELL_BLOCK_SIZE)
     shared_z = CuStaticSharedArray(Float32, CELL_BLOCK_SIZE)
     shared_ids = CuStaticSharedArray(Int32, CELL_BLOCK_SIZE)
 
-    # Outer loop incase a cell contains more than 32 atoms, but so all threads are firing
-    for host_tile_start in Int32(0):Int32(CELL_BLOCK_SIZE):n_host-Int32(1)
-        host_local = host_tile_start + lane - Int32(1)
-        host_active = host_local < n_host # check if it is a real atom
+    for dz in Int32(-1):Int32(1)
+        nz = (cz + dz + num_cell_z) % num_cell_z
 
-        # Initialise values for all lanes incase of inactive lanes
-        atom_i = Int32(0)
-        x_i = 0.0f0
-        y_i = 0.0f0
-        z_i = 0.0f0
-        count = Int32(0)
+        for dy in Int32(-1):Int32(1)
+            ny = (cy + dy + num_cell_y) % num_cell_y
 
-        if host_active
-            host_index = host_start + host_local
+            for dx in Int32(-1):Int32(1)
+                nx = (cx + dx + num_cell_x) % num_cell_x
 
-            atom_i = cell_particles[host_index]
-            x_i = cell_x[host_index]
-            y_i = cell_y[host_index]
-            z_i = cell_z[host_index]
-        end
+                candidate_cell =
+                    Int32(1) +
+                    nx +
+                    num_cell_x * (ny + num_cell_y * nz)
 
-        for dz in Int32(-1):Int32(1)
-            nz = (cz + dz + num_cell_z) % num_cell_z
+                candidate_start = cell_offsets[candidate_cell]
+                n_candidates = cell_counts[candidate_cell]
+                candidate_tile_start = Int32(0)
 
-            for dy in Int32(-1):Int32(1)
-                ny = (cy + dy + num_cell_y) % num_cell_y
+                while candidate_tile_start < n_candidates
+                    candidate_local =
+                        candidate_tile_start + lane - Int32(1)
 
-                for dx in Int32(-1):Int32(1)
-                    nx = (cx + dx + num_cell_x) % num_cell_x
+                    tile_count = min(
+                        Int32(CELL_BLOCK_SIZE),
+                        n_candidates - candidate_tile_start,
+                    )
 
-                    candidate_cell = Int32(1) + nx + num_cell_x * (ny + num_cell_y * nz)
-                    candidate_start = cell_offsets[candidate_cell]
-                    n_candidates = cell_counts[candidate_cell]
+                    if candidate_local < n_candidates
+                        candidate_index =
+                            candidate_start + candidate_local
 
-                    # Candidate tiling here now
-                    candidate_tile_start = Int32(0)
+                        shared_ids[lane] =
+                            cell_particles[candidate_index]
+                        shared_x[lane] = cell_x[candidate_index]
+                        shared_y[lane] = cell_y[candidate_index]
+                        shared_z[lane] = cell_z[candidate_index]
+                    end
 
-                    while candidate_tile_start < n_candidates
-                        candidate_local = candidate_tile_start + lane - Int32(1)
+                    sync_threads()
 
-                        tile_count = min(Int32(CELL_BLOCK_SIZE), n_candidates
-                            - candidate_tile_start)
+                    if host_active
+                        for candidate_lane in Int32(1):tile_count
+                            atom_j = shared_ids[candidate_lane]
 
-                        if candidate_local < n_candidates
-                            candidate_index = candidate_start + candidate_local
+                            if atom_j != atom_i
+                                dx_ij =
+                                    shared_x[candidate_lane] - x_i
+                                dy_ij =
+                                    shared_y[candidate_lane] - y_i
+                                dz_ij =
+                                    shared_z[candidate_lane] - z_i
 
-                            shared_ids[lane] = cell_particles[candidate_index]
-                            shared_x[lane] = cell_x[candidate_index]
-                            shared_y[lane] = cell_y[candidate_index]
-                            shared_z[lane] = cell_z[candidate_index]
-                        end
+                                dx_ij -= box_Lx * floor(
+                                    dx_ij / box_Lx + 0.5f0,
+                                )
+                                dy_ij -= box_Ly * floor(
+                                    dy_ij / box_Ly + 0.5f0,
+                                )
+                                dz_ij -= box_Lz * floor(
+                                    dz_ij / box_Lz + 0.5f0,
+                                )
 
-                        sync_threads()
+                                r2 = (
+                                    dx_ij * dx_ij +
+                                    dy_ij * dy_ij +
+                                    dz_ij * dz_ij
+                                )
 
-                        # Compare active host atoms against the tile
-                        if host_active
+                                if r2 <= cutoff2
+                                    count += Int32(1)
 
-                            for candidate_lane in Int32(1):tile_count
-                                atom_j = shared_ids[candidate_lane]
-
-                                if atom_j != atom_i
-                                    dx_ij = shared_x[candidate_lane] - x_i
-                                    dy_ij = shared_y[candidate_lane] - y_i
-                                    dz_ij = shared_z[candidate_lane] - z_i
-
-                                    dx_ij -= box_Lx * floor(dx_ij / box_Lx + 0.5f0)
-                                    dy_ij -= box_Ly * floor(dy_ij / box_Ly + 0.5f0)
-                                    dz_ij -= box_Lz * floor(dz_ij / box_Lz + 0.5f0)
-
-                                    r2 = (
-                                        dx_ij * dx_ij +
-                                        dy_ij * dy_ij +
-                                        dz_ij * dz_ij
-                                    )
-
-                                    if r2 <= cutoff2
-                                        count += Int32(1)
-
-                                        if count <= max_neighbours
-                                            neighbours[count, atom_i] = atom_j
-                                            # global write each time
-                                        end
+                                    if count <= max_neighbours
+                                        neighbours[count, atom_i] =
+                                            atom_j
                                     end
-
                                 end
                             end
                         end
-
-                        sync_threads()
-
-                        candidate_tile_start += Int32(CELL_BLOCK_SIZE)
-
                     end
+
+                    sync_threads()
+
+                    candidate_tile_start +=
+                        Int32(CELL_BLOCK_SIZE)
                 end
             end
         end
-
-        if host_active
-            neighbour_counts[atom_i] = count
-        end
-
-        # Every thread must still participate in all sync_threads() calls
     end
 
+    if host_active
+        neighbour_counts[atom_i] = count
+    end
 
     return nothing
 end
@@ -2845,6 +2895,12 @@ function allocate_optimised_gpu_state(
         cell_offsets=CUDA.zeros(Int32, n_cells),
         cell_write_counts=CUDA.zeros(Int32, n_cells),
         cell_particles=CUDA.zeros(Int32, n_atoms),
+        cell_tile_counts=CUDA.zeros(Int32, n_cells),
+        cell_tile_inclusive_counts=CUDA.zeros(Int32, n_cells),
+        cell_tile_offsets=CUDA.zeros(Int32, n_cells),
+        host_tile_cells=CUDA.zeros(Int32, n_atoms),
+        host_tile_starts=CUDA.zeros(Int32, n_atoms),
+        n_host_tiles=Ref(0),
         cell_x=CUDA.zeros(Float32, n_atoms),
         cell_y=CUDA.zeros(Float32, n_atoms),
         cell_z=CUDA.zeros(Float32, n_atoms),
@@ -2919,6 +2975,42 @@ function build_optimised_cell_list!(state)
         state.n_cells,
     )
 
+        @cuda threads=offset_threads blocks=offset_blocks count_host_tiles_gpu!(
+        state.cell_tile_counts,
+        state.cell_counts,
+        state.n_cells,
+    )
+
+    accumulate!(
+        +,
+        state.cell_tile_inclusive_counts,
+        state.cell_tile_counts,
+    )
+
+    @cuda threads=offset_threads blocks=offset_blocks inclusive_to_offsets_gpu!(
+        state.cell_tile_offsets,
+        state.cell_tile_inclusive_counts,
+        state.n_cells,
+    )
+
+    state.n_host_tiles[] = Int(
+        only(
+            Array(
+                state.cell_tile_inclusive_counts[
+                    state.n_cells:state.n_cells
+                ],
+            ),
+        ),
+    )
+
+    @cuda threads=offset_threads blocks=offset_blocks write_host_tiles_gpu!(
+        state.host_tile_cells,
+        state.host_tile_starts,
+        state.cell_tile_counts,
+        state.cell_tile_offsets,
+        state.n_cells,
+    )
+
     @cuda threads=n_threads blocks=n_blocks get_cell_particles_gpu!(
         state.cell_particles,
         state.cell_write_counts,
@@ -2944,25 +3036,26 @@ end
 function query_gpu_cell_list!(state)
     fill!(state.neighbour_counts, Int32(0))
 
-    @cuda threads=CELL_BLOCK_SIZE blocks=state.n_cells get_neighbours_cell_shared_contiguous_gpu!(
-            state.neighbour_counts,
-            state.neighbours,
-            state.cell_counts,
-            state.cell_offsets,
-            state.cell_particles,
-            state.cell_x,
-            state.cell_y,
-            state.cell_z,
-            state.n_atoms,
-            state.num_cell_x,
-            state.num_cell_y,
-            state.num_cell_z,
-            state.box_Lx,
-            state.box_Ly,
-            state.box_Lz,
-            state.cutoff2,
-            state.max_neighbours,
-        )
+    @cuda threads=CELL_BLOCK_SIZE blocks=state.n_host_tiles[] get_neighbours_cell_shared_contiguous_gpu!(
+        state.neighbour_counts,
+        state.neighbours,
+        state.cell_counts,
+        state.cell_offsets,
+        state.cell_particles,
+        state.host_tile_cells,
+        state.host_tile_starts,
+        state.cell_x,
+        state.cell_y,
+        state.cell_z,
+        state.num_cell_x,
+        state.num_cell_y,
+        state.num_cell_z,
+        state.box_Lx,
+        state.box_Ly,
+        state.box_Lz,
+        state.cutoff2,
+        state.max_neighbours,
+    )
 
     return nothing
 end
