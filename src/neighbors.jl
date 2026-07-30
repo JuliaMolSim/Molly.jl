@@ -369,7 +369,7 @@ find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
         dist_cutoff,
         n_steps=10,
         max_neighbors=640,
-        output=:ragged,
+        output=:molly_pairs,
         eligible=nothing,
         special=nothing,
     )
@@ -397,7 +397,7 @@ function GPUCellListNeighborFinder(;
     dist_cutoff,
     n_steps=10,
     max_neighbors=640,
-    output::Symbol=:ragged,
+    output::Symbol=:molly_pairs,
     eligible=nothing,
     special=nothing,
 )
