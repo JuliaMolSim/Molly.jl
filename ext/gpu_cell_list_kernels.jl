@@ -530,8 +530,5 @@ function build_geometric_pair_list!(state)
         "$n_pairs > $(state.pair_capacity)",
     )
 
-    return Molly.NeighborList(
-        n_pairs,
-        state.pair_list,
-    )
+    return n_pairs
 end
