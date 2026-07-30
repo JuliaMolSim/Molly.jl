@@ -467,16 +467,22 @@ function query_gpu_cell_list!(state)
     return nothing
 end
 
+function check_gpu_cell_list_capacity(state)
+    maximum_neighbours = maximum(state.neighbour_counts)
+    capacity = size(state.neighbours, 1)
+
+    maximum_neighbours <= capacity || error(
+        "GPU cell-list neighbor capacity exceeded: " *
+        "$maximum_neighbours > $capacity. " *
+        "Increase max_neighbors.",
+    )
+
+    return maximum_neighbours
+end
+
 function build_geometric_pair_list!(state)
     state.pair_list === nothing && error(
         "pair buffers were not allocated for this GPU cell-list state",
-    )
-
-    maximum_neighbours = maximum(state.neighbour_counts)
-
-    maximum_neighbours <= size(state.neighbours, 1) || error(
-        "neighbor capacity exceeded: " *
-        "$maximum_neighbours > $(size(state.neighbours, 1))",
     )
 
     n_threads = 256
