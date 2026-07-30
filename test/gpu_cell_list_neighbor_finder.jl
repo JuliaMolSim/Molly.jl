@@ -50,7 +50,7 @@
         @test matrix[1:counts[1], 1] == Int32[2]
         @test matrix[1:counts[2], 2] == Int32[1]
         @test isempty(matrix[1:counts[3], 3])
-        @test result.pairs === nothing
+        @test result.list === nothing
     end
 
     @testset "Geometric pair output" begin
@@ -62,15 +62,15 @@
 
         sys, _ = gpu_cell_list_test_system(
             coords;
-            output=:ragged_and_pairs,
+            output=:geometric_pairs,
         )
 
         result = find_neighbors(sys)
         CUDA.synchronize()
 
-        pairs = Array(result.pairs.list[1:result.pairs.n])
+        pairs = Array(result.list[1:result.n])
 
-        @test result.pairs.n == 1
+        @test result.n == 1
         @test pairs == [(Int32(2), Int32(1), false)]
     end
 
@@ -83,7 +83,7 @@
 
         sys, _ = gpu_cell_list_test_system(
             coords;
-            output=:ragged_and_pairs,
+            output=:geometric_pairs,
             cutoff=0.5f0,
         )
 
@@ -91,8 +91,8 @@
         CUDA.synchronize()
 
         @test Array(result.counts) == Int32[1, 1, 0]
-        @test result.pairs.n == 1
-        @test Array(result.pairs.list[1:1]) ==
+        @test result.n == 1
+        @test Array(result.list[1:1]) ==
               [(Int32(2), Int32(1), false)]
     end
 
@@ -110,7 +110,7 @@
 
         sys, _ = gpu_cell_list_test_system(
             coords;
-            output=:ragged_and_pairs,
+            output=:geometric_pairs,
             cutoff=1.0f0,
             max_neighbors=64,
         )
@@ -119,7 +119,7 @@
         CUDA.synchronize()
 
         @test Array(result.counts) == fill(Int32(39), n_atoms)
-        @test result.pairs.n == n_atoms * (n_atoms - 1) ÷ 2
+        @test result.n == n_atoms * (n_atoms - 1) ÷ 2
     end
 
     @testset "State reuse" begin
@@ -131,7 +131,7 @@
 
         sys, finder = gpu_cell_list_test_system(
             coords;
-            output=:ragged_and_pairs,
+            output=:geometric_pairs,
         )
 
         first_result = find_neighbors(sys)
@@ -153,11 +153,11 @@
         CUDA.synchronize()
 
         @test Array(second_result.counts) == Int32[0, 0, 0]
-        @test second_result.pairs.n == 0
+        @test second_result.n == 0
         @test second_result.state.x === first_result.state.x
         @test second_result.neighbors === first_result.neighbors
         @test second_result.counts === first_result.counts
-        @test second_result.pairs.list === first_result.pairs.list
+        @test second_result.list === first_result.list
 
         cached_result = find_neighbors(
             sys,
@@ -177,7 +177,7 @@
             SVector{3,Float32}(1.2, 2.0, 3.0),
         ]
 
-        for output in (:ragged, :ragged_and_pairs)
+        for output in (:ragged, :geometric_pairs)
             sys, _ = gpu_cell_list_test_system(
                 coords;
                 output=output,
