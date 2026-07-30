@@ -393,6 +393,33 @@ function GPUCellListNeighborFinder(;
     max_neighbors=640,
     output::Symbol=:ragged,
 )
+    n_steps_int = Int(n_steps)
+    max_neighbors_int = Int(max_neighbors)
+
+    dist_cutoff > zero(dist_cutoff) || throw(
+        ArgumentError(
+            "dist_cutoff must be positive, got $dist_cutoff",
+        ),
+    )
+
+    isfinite(ustrip(dist_cutoff)) || throw(
+        ArgumentError(
+            "dist_cutoff must be finite, got $dist_cutoff",
+        ),
+    )
+
+    n_steps_int > 0 || throw(
+        ArgumentError(
+            "n_steps must be positive, got $n_steps",
+        ),
+    )
+
+    max_neighbors_int > 0 || throw(
+        ArgumentError(
+            "max_neighbors must be positive, got $max_neighbors",
+        ),
+    )
+
     output in (:ragged, :ragged_and_pairs) || throw(
         ArgumentError(
             "output must be :ragged or :ragged_and_pairs, got $output",
@@ -401,8 +428,8 @@ function GPUCellListNeighborFinder(;
 
     return GPUCellListNeighborFinder(
         dist_cutoff,
-        Int(n_steps),
-        Int(max_neighbors),
+        n_steps_int,
+        max_neighbors_int,
         output,
     )
 end
