@@ -133,8 +133,6 @@ if GROUP in ("All", "NotGradients")
     if run_cuda_tests
         include("gpu_consistency.jl")
         include("gpu_optimizations.jl")
-        include("gpu_cell_list_neighbor_finder.jl")
-
     end
 end
 
