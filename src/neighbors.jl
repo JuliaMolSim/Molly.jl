@@ -376,7 +376,7 @@ GPU cell-list neighbor finder that materializes a per-atom geometric
 neighbor list on the GPU.
 
 `output=:ragged` returns only the per-atom padded ragged representation.
-`output=:ragged_and_pairs` additionally constructs a flat geometric
+`output=:geometric_pairs` additionally constructs a flat geometric
 half-pair list. Geometric pairs do not include force-field exclusions
 or special-pair flags.
 """
@@ -420,9 +420,9 @@ function GPUCellListNeighborFinder(;
         ),
     )
 
-    output in (:ragged, :ragged_and_pairs) || throw(
+    output in (:ragged, :geometric_pairs) || throw(
         ArgumentError(
-            "output must be :ragged or :ragged_and_pairs, got $output",
+            "output must be :ragged or :geometric_pairs, got $output",
         ),
     )
 

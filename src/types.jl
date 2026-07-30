@@ -611,29 +611,28 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
 end
 
 """
-    GPUCellListNeighborList(counts, neighbors, state)
-    GPUCellListNeighborList(counts, neighbors, pairs, state)
+    GPUCellListNeighborList(counts, neighbors, n, list, state)
 
-Per-atom GPU neighbor list stored as a fixed-capacity matrix.
+GPU cell-list result containing a padded per-atom neighbor matrix and,
+when requested, a flat half-pair list.
 
-For atom `i`, the valid neighbor indices are stored in
+For atom `i`, valid ragged entries are stored in
 `neighbors[1:counts[i], i]`.
-
-When geometric pair output was requested, `pairs` contains a flat
-[`NeighborList`](@ref). Otherwise, `pairs` is `nothing`.
 """
-struct GPUCellListNeighborList{C,N,P,S}
+struct GPUCellListNeighborList{C,R,L,S}
     counts::C
-    neighbors::N
-    pairs::P
+    neighbors::R
+    n::Int
+    list::L
     state::S
 
     function GPUCellListNeighborList(
         counts::C,
-        neighbors::N,
-        pairs::P,
+        neighbors::R,
+        n::Integer,
+        list::L,
         state::S,
-    ) where {C,N,P,S}
+    ) where {C,R,L,S}
         size(neighbors, 2) == length(counts) || throw(
             ArgumentError(
                 "the second dimension of neighbors must equal " *
@@ -641,31 +640,50 @@ struct GPUCellListNeighborList{C,N,P,S}
             ),
         )
 
-        return new{C,N,P,S}(
+        n_int = Int(n)
+
+        if list === nothing
+            iszero(n_int) || throw(
+                ArgumentError("n must be zero when list is nothing"),
+            )
+        else
+            0 <= n_int <= length(list) || throw(
+                ArgumentError(
+                    "n must be between zero and the pair-list capacity",
+                ),
+            )
+        end
+
+        return new{C,R,L,S}(
             counts,
             neighbors,
-            pairs,
+            n_int,
+            list,
             state,
         )
     end
 end
 
-GPUCellListNeighborList(counts, neighbors, state) =
-    GPUCellListNeighborList(
-        counts,
-        neighbors,
-        nothing,
-        state,
+function Base.length(neighbors::GPUCellListNeighborList)
+    neighbors.list === nothing && throw(
+        ArgumentError(
+            "ragged-only GPU neighbor output has no flat pair list",
+        ),
     )
 
-GPUCellListNeighborList(counts, neighbors) =
-    GPUCellListNeighborList(
-        counts,
-        neighbors,
-        nothing,
-        nothing,
-    )
+    return neighbors.n
+end
 
+Base.getindex(neighbors::GPUCellListNeighborList, i::Integer) =
+    neighbors.list[i]
+
+Base.firstindex(::GPUCellListNeighborList) = 1
+
+Base.lastindex(neighbors::GPUCellListNeighborList) =
+    length(neighbors)
+
+Base.eachindex(neighbors::GPUCellListNeighborList) =
+    Base.OneTo(length(neighbors))
 """
     NeighborList(n, list)
     NeighborList()

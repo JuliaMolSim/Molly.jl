@@ -99,7 +99,7 @@ function Molly.find_neighbors(
         ),
     )
 
-    build_pairs = nf.output === :ragged_and_pairs
+    build_pairs = nf.output === :geometric_pairs
 
     can_reuse_state = (
         current_neighbors isa Molly.GPUCellListNeighborList &&
@@ -142,16 +142,19 @@ function Molly.find_neighbors(
     query_gpu_cell_list!(state)
     check_gpu_cell_list_capacity(state)
 
-    pairs = if build_pairs
+    n_pairs = if build_pairs
         build_geometric_pair_list!(state)
     else
-        nothing
+        0
     end
+
+    pair_list = build_pairs ? state.pair_list : nothing
 
     return Molly.GPUCellListNeighborList(
         state.neighbour_counts,
         state.neighbours,
-        pairs,
+        n_pairs,
+        pair_list,
         state,
     )
 end
