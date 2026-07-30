@@ -5,6 +5,8 @@
         cutoff=1.0f0,
         max_neighbors=64,
         boundary=CubicBoundary(10.0f0),
+        eligible=nothing,
+        special=nothing,
     )
         n_atoms = length(coords_cpu)
 
@@ -18,6 +20,8 @@
             n_steps=10,
             max_neighbors=max_neighbors,
             output=output,
+            eligible=eligible,
+            special=special,
         )
 
         sys = System(
@@ -72,6 +76,49 @@
 
         @test result.n == 1
         @test pairs == [(Int32(2), Int32(1), false)]
+    end
+
+    @testset "Molly pair output" begin
+        coords = [
+            SVector{3,Float32}(1.0, 2.0, 3.0),
+            SVector{3,Float32}(1.2, 2.0, 3.0),
+            SVector{3,Float32}(1.4, 2.0, 3.0),
+        ]
+
+        eligible = trues(3, 3)
+
+        for atom_i in 1:3
+            eligible[atom_i, atom_i] = false
+        end
+
+        # Exclude pair 1-2.
+        eligible[1, 2] = false
+        eligible[2, 1] = false
+
+        special = falses(3, 3)
+
+        # Mark pair 1-3 as special.
+        special[1, 3] = true
+        special[3, 1] = true
+
+        sys, _ = gpu_cell_list_test_system(
+            coords;
+            output=:molly_pairs,
+            eligible=CuArray(eligible),
+            special=CuArray(special),
+        )
+
+        result = find_neighbors(sys)
+        CUDA.synchronize()
+
+        pairs = sort(Array(result.list[1:result.n]))
+
+        @test Array(result.counts) == Int32[2, 2, 2]
+        @test result.n == 2
+        @test pairs == [
+            (Int32(3), Int32(1), true),
+            (Int32(3), Int32(2), false),
+        ]
     end
 
     @testset "Periodic boundary" begin
@@ -250,6 +297,17 @@
         @test_throws ArgumentError GPUCellListNeighborFinder(
             dist_cutoff=1.0f0,
             output=:invalid,
+        )
+
+        @test_throws ArgumentError GPUCellListNeighborFinder(
+            dist_cutoff=1.0f0,
+            output=:molly_pairs,
+        )
+
+        @test_throws ArgumentError GPUCellListNeighborFinder(
+            dist_cutoff=1.0f0,
+            output=:molly_pairs,
+            eligible=trues(3, 3),
         )
     end
 end

@@ -103,10 +103,40 @@ function inclusive_to_offsets_gpu!(
     return nothing
 end
 
-function count_geometric_half_pairs_gpu!(
+@inline include_half_pair(
+    ::Val{:geometric},
+    eligible,
+    atom_i,
+    atom_j,
+) = atom_i > atom_j
+
+@inline include_half_pair(
+    ::Val{:molly},
+    eligible,
+    atom_i,
+    atom_j,
+) = atom_i > atom_j && eligible[atom_j, atom_i]
+
+@inline pair_special(
+    ::Val{:geometric},
+    special,
+    atom_i,
+    atom_j,
+) = false
+
+@inline pair_special(
+    ::Val{:molly},
+    special,
+    atom_i,
+    atom_j,
+) = special[atom_j, atom_i]
+
+function count_half_pairs_gpu!(
     pair_counts,
     neighbour_counts,
     neighbours,
+    eligible,
+    mode,
     n_atoms,
 )
     atom_i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
@@ -118,7 +148,7 @@ function count_geometric_half_pairs_gpu!(
         for slot in Int32(1):n_neighbours
             atom_j = neighbours[slot, atom_i]
 
-            if atom_i > atom_j
+            if include_half_pair(mode, eligible, atom_i, atom_j)
                 count += Int32(1)
             end
         end
@@ -129,11 +159,14 @@ function count_geometric_half_pairs_gpu!(
     return nothing
 end
 
-function write_geometric_half_pairs_gpu!(
+function write_half_pairs_gpu!(
     pair_list,
     pair_offsets,
     neighbour_counts,
     neighbours,
+    eligible,
+    special,
+    mode,
     n_atoms,
 )
     atom_i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
@@ -145,11 +178,11 @@ function write_geometric_half_pairs_gpu!(
         for slot in Int32(1):n_neighbours
             atom_j = neighbours[slot, atom_i]
 
-            if atom_i > atom_j
+            if include_half_pair(mode, eligible, atom_i, atom_j)
                 pair_list[write_position] = (
                     Int32(atom_i),
                     Int32(atom_j),
-                    false,
+                    pair_special(mode, special, atom_i, atom_j),
                 )
 
                 write_position += Int32(1)
@@ -480,7 +513,12 @@ function check_gpu_cell_list_capacity(state)
     return maximum_neighbours
 end
 
-function build_geometric_pair_list!(state)
+function build_pair_list!(
+    state,
+    mode,
+    eligible,
+    special,
+)
     state.pair_list === nothing && error(
         "pair buffers were not allocated for this GPU cell-list state",
     )
@@ -488,10 +526,12 @@ function build_geometric_pair_list!(state)
     n_threads = 256
     n_blocks = cld(state.n_atoms, n_threads)
 
-    @cuda threads=n_threads blocks=n_blocks count_geometric_half_pairs_gpu!(
+    @cuda threads=n_threads blocks=n_blocks count_half_pairs_gpu!(
         state.pair_counts,
         state.neighbour_counts,
         state.neighbours,
+        eligible,
+        mode,
         state.n_atoms,
     )
 
@@ -507,11 +547,14 @@ function build_geometric_pair_list!(state)
         state.n_atoms,
     )
 
-    @cuda threads=n_threads blocks=n_blocks write_geometric_half_pairs_gpu!(
+    @cuda threads=n_threads blocks=n_blocks write_half_pairs_gpu!(
         state.pair_list,
         state.pair_offsets,
         state.neighbour_counts,
         state.neighbours,
+        eligible,
+        special,
+        mode,
         state.n_atoms,
     )
 
@@ -526,7 +569,7 @@ function build_geometric_pair_list!(state)
     )
 
     n_pairs <= state.pair_capacity || error(
-        "geometric pair capacity exceeded: " *
+        "pair capacity exceeded: " *
         "$n_pairs > $(state.pair_capacity)",
     )
 
