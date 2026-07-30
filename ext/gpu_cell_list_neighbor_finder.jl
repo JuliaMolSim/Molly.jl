@@ -65,6 +65,20 @@ function Molly.find_neighbors(
         return current_neighbors
     end
 
+    sys.boundary isa Molly.CubicBoundary || throw(
+        ArgumentError(
+            "GPUCellListNeighborFinder currently supports only " *
+            "three-dimensional CubicBoundary systems, got " *
+            "$(typeof(sys.boundary))",
+        ),
+    )
+
+    Molly.has_infinite_boundary(sys.boundary) && throw(
+        ArgumentError(
+            "GPUCellListNeighborFinder does not support infinite boundaries",
+        ),
+    )
+
     dist_unit = unit(zero(eltype(eltype(sys.coords))))
 
     box = box_sides(sys.boundary)
@@ -72,6 +86,18 @@ function Molly.find_neighbors(
     box_Ly = Float32(ustrip(dist_unit, box[2]))
     box_Lz = Float32(ustrip(dist_unit, box[3]))
     cutoff = Float32(ustrip(dist_unit, nf.dist_cutoff))
+
+    num_cell_x = floor(Int, box_Lx / cutoff)
+    num_cell_y = floor(Int, box_Ly / cutoff)
+    num_cell_z = floor(Int, box_Lz / cutoff)
+
+    minimum((num_cell_x, num_cell_y, num_cell_z)) >= 3 || throw(
+        ArgumentError(
+            "GPUCellListNeighborFinder requires at least three cells " *
+            "along every box axis; box sides are " *
+            "($box_Lx, $box_Ly, $box_Lz) and cutoff is $cutoff",
+        ),
+    )
 
     build_pairs = nf.output === :ragged_and_pairs
 
@@ -114,6 +140,7 @@ function Molly.find_neighbors(
 
     build_optimised_cell_list!(state)
     query_gpu_cell_list!(state)
+    check_gpu_cell_list_capacity(state)
 
     pairs = if build_pairs
         build_geometric_pair_list!(state)
