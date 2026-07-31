@@ -89,30 +89,19 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
         vel_units, mass_units, energy_units, force_units))
 end
 
-function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
-    atoms = from_device(atoms_dev)
-    box_units = unit(length_type(boundary))
-
-    if !all(sys_units[:length] .== box_units)
-        throw(ArgumentError("simulation box constructed with $box_units but length unit " *
-                            "on coords was $(sys_units[:length])"))
+function check_other_units(atoms, boundary, sys_units::NamedTuple)
+    if unit(length_type(boundary)) != sys_units[:length]
+        throw(ArgumentError("simulation box constructed with $(unit(length_type(boundary))) " *
+                            "but length unit of coords was $(sys_units[:length])"))
     end
 
-    sigmas   = getproperty.(atoms[hasproperty.(atoms, :σ)], :σ)
-    epsilons = getproperty.(atoms[hasproperty.(atoms, :ϵ)], :ϵ)
-
-    if !all(sigmas .== 0.0u"nm")
-        σ_units = unit.(sigmas)
-        if !all(sys_units[:length] .== σ_units)
-            throw(ArgumentError("Atom σ has $(σ_units[1]) units but length unit on coords " *
+    for at in from_device(atoms)
+        if hasproperty(at, :σ) && at.σ != 0.0u"nm" && unit(at.σ) != sys_units[:length]
+            throw(ArgumentError("Atom σ has $(unit(at.σ)) units but length unit of coords " *
                                 "was $(sys_units[:length])"))
         end
-    end
-
-    if !all(epsilons .== 0.0u"kJ * mol^-1")
-        ϵ_units = unit.(epsilons)
-        if !all(sys_units[:energy] .== ϵ_units)
-            throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit " *
+        if hasproperty(at, :ϵ) && at.ϵ != 0.0u"kJ * mol^-1" && unit(at.ϵ) != sys_units[:energy]
+            throw(ArgumentError("Atom ϵ has $(unit(at.ϵ)) units but system energy unit " *
                                 "was $(sys_units[:energy])"))
         end
     end
