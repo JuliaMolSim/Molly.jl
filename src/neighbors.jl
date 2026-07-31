@@ -59,10 +59,10 @@ uses_gpu_neighbor_finder(AT) = false
 
 """
     GPUNeighborFinder(; n_atoms, dist_cutoff,
-                      excluded_pairs=(), special_pairs=(), n_steps_reorder=25,
+                      excluded_pairs=(), special_pairs=(), n_steps_reorder=10,
                       initialized=false, device_vector_type)
     GPUNeighborFinder(; eligible, dist_cutoff,
-                      special=nothing, n_steps_reorder=25,
+                      special=nothing, n_steps_reorder=10,
                       initialized=false, device_vector_type=nothing)
 
 Neighbor finder for CUDA systems that uses Molly's tiled pairwise kernels.
@@ -324,7 +324,7 @@ function GPUNeighborFinder(;
                             excluded_pairs=(),
                             special_pairs=(),
                             special=nothing,
-                            n_steps_reorder=25,
+                            n_steps_reorder=10,
                             initialized=false,
                             device_vector_type=nothing)
     if !isnothing(n_atoms)
