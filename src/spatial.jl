@@ -490,12 +490,10 @@ version of the coordinate accounting for the periodic boundaries.
 """
 function vector_1D(c1, c2, side_length)
     v12 = c2 - c1
-    v12_p_sl = v12 + side_length
-    v12_m_sl = v12 - side_length
+    half_sl = side_length / 2
     return ifelse(
-        v12 > zero(c1),
-        ifelse( v12 < -v12_m_sl, v12, v12_m_sl),
-        ifelse(-v12 <  v12_p_sl, v12, v12_p_sl),
+        v12 >  half_sl, v12 - side_length,
+        ifelse(v12 < -half_sl, v12 + side_length, v12),
     )
 end
 

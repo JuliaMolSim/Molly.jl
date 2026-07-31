@@ -470,6 +470,9 @@ energy calculations.
 - `interacting_tiles_i`, `interacting_tiles_j`, `interacting_tiles_type`:
   parallel 1D vectors describing the compact list of tiles currently inside the
   interaction cutoff.
+- `interacting_tiles_diag`: per-tile bitmask of which of the 32 inner-loop
+  iterations of the pairwise kernels contain at least one in-range atom pair,
+  so the rest can be skipped.
 - `num_interacting_tiles`: device-side atomic counter for the number of valid
   entries in the interacting-tile vectors.
 - `interacting_tiles_overflow`: device-side overflow flag set when the compact
@@ -486,7 +489,8 @@ energy calculations.
   the previous sparse scatter dirtied instead of rewriting the whole
   `O(n_blocks^2)` array.
 =#
-mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR, fs_re, TIC}
+mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, ITD, NIT, OIT, CR, VR, AR,
+                          fs_re, TIC}
     fs_mat::F
     pe_vec_nounits::P
     virial::V
@@ -514,6 +518,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     interacting_tiles_i::IT
     interacting_tiles_j::IT
     interacting_tiles_type::ITT
+    interacting_tiles_diag::ITD
     num_interacting_tiles::NIT
     interacting_tiles_overflow::OIT
     coords_reordered::CR
@@ -530,7 +535,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                     box_mins, box_maxs, morton_seq, morton_seq_buffer_1,
                     morton_seq_buffer_2, morton_seq_inv, compressed_masks, tile_is_clean,
                     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-                    num_interacting_tiles, interacting_tiles_overflow, coords_reordered,
+                    interacting_tiles_diag, num_interacting_tiles,
+                    interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
                     step_n_preprocessed, sparse_pair_generation, num_pairs,
                     masks_initialized::Bool=false)
@@ -545,7 +551,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       BufferValidity(), box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
-                      interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+                      interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
+                      num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, step_n_preprocessed,
                       sparse_pair_generation, num_pairs, masks_initialized)
@@ -648,6 +655,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
     interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
     interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks)
+    interacting_tiles_diag = KernelAbstractions.zeros(backend, UInt32, max_interacting_blocks)
     num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
     interacting_tiles_overflow = KernelAbstractions.zeros(backend, Int32, 1)
 
@@ -666,7 +674,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
                       BufferValidity(), box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
-                      interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+                      interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
+                      num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, -1, UInt64(0), 0, false)
 end

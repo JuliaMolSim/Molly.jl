@@ -45,6 +45,10 @@ end
 @inline atom_payload_type(::Type{A}, ::Val{syms}) where {A, syms} = Tuple{map(s -> fieldtype(A, s), syms)...}
 
 const WARPSIZE = UInt32(32)
+# Values stored in `interacting_tiles_type`: a tile is either free of exclusions and
+# special pairs (0), mask-backed (1), or known to hold no in-cutoff atom pair at all
+# and skipped entirely by the force/energy kernels (`TILE_DEAD`)
+const TILE_DEAD = UInt8(2)
 const MAX_BLOCK_Y = 32
 const AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES = (1, 2, 4, 8, 16)
 const AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES = (1, 2, 4, 8, 16)
@@ -386,7 +390,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
             buffers.velocities_reordered,
             buffers.atoms_reordered,
             Val(N),
-            Val(sys.neighbor_finder.dist_cutoff_2),
+            Val(kernel_pair_cutoff_2(sys, pairwise_inters)),
             Val(sys.force_units),
             pairwise_inters,
             sys.boundary,
@@ -398,6 +402,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
             buffers.interacting_tiles_i,
             buffers.interacting_tiles_j,
             buffers.interacting_tiles_type,
+            buffers.interacting_tiles_diag,
             buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow,
         )
@@ -410,7 +415,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
         buffers.velocities_reordered,
         buffers.atoms_reordered,
         Val(N),
-        Val(sys.neighbor_finder.dist_cutoff_2),
+        Val(kernel_pair_cutoff_2(sys, pairwise_inters)),
         Val(sys.force_units),
         pairwise_inters,
         sys.boundary,
@@ -422,6 +427,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
         buffers.interacting_tiles_i,
         buffers.interacting_tiles_j,
         buffers.interacting_tiles_type,
+        buffers.interacting_tiles_diag,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
     )
@@ -516,7 +522,7 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise
                 buffers.velocities_reordered,
                 buffers.atoms_reordered,
                 Val(N),
-                Val(sys.neighbor_finder.dist_cutoff_2),
+                Val(kernel_pair_cutoff_2(sys, pairwise_inters)),
                 Val(sys.force_units),
                 pairwise_inters,
                 sys.boundary,
@@ -528,6 +534,7 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise
                 buffers.interacting_tiles_i,
                 buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type,
+                buffers.interacting_tiles_diag,
                 buffers.num_interacting_tiles,
                 buffers.interacting_tiles_overflow;
                 threads=(32, block_y),
@@ -563,7 +570,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
         buffers.velocities_reordered,
         buffers.atoms_reordered,
         Val(N),
-        Val(sys.neighbor_finder.dist_cutoff_2),
+        Val(kernel_pair_cutoff_2(sys, pairwise_inters)),
         Val(sys.energy_units),
         pairwise_inters,
         sys.boundary,
@@ -574,6 +581,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
         buffers.interacting_tiles_i,
         buffers.interacting_tiles_j,
         buffers.interacting_tiles_type,
+        buffers.interacting_tiles_diag,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
     )
@@ -596,7 +604,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
                 buffers.velocities_reordered,
                 buffers.atoms_reordered,
                 Val(N),
-                Val(sys.neighbor_finder.dist_cutoff_2),
+                Val(kernel_pair_cutoff_2(sys, pairwise_inters)),
                 Val(sys.energy_units),
                 pairwise_inters,
                 sys.boundary,
@@ -607,6 +615,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
                 buffers.interacting_tiles_i,
                 buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type,
+                buffers.interacting_tiles_diag,
                 buffers.num_interacting_tiles,
                 buffers.interacting_tiles_overflow;
                 blocks=n_blocks_launch,
@@ -795,6 +804,19 @@ function tile_launch_params(sys, kernel)
     return choose_tile_threads(actual_threads)
 end
 
+#=
+Squared distance past which `force_kernel!`/`energy_kernel!` can skip a pair.
+The tile list is built with the neighbor finder's buffered cutoff so that it stays
+valid between rebuilds, but a pair only needs evaluating out to the largest cutoff
+of the active interactions.
+=#
+function kernel_pair_cutoff_2(sys, pairwise_inters)
+    nf_cutoff_2 = sys.neighbor_finder.dist_cutoff_2
+    inter_cutoff_2 = Molly.max_zero_beyond(pairwise_inters)
+    isnothing(inter_cutoff_2) && return nf_cutoff_2
+    return min(inter_cutoff_2, nf_cutoff_2)
+end
+
 function reset_interacting_tile_state!(buffers)
     fill!(buffers.num_interacting_tiles, 0)
     fill!(buffers.interacting_tiles_overflow, 0)
@@ -887,6 +909,17 @@ function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray, T}, N::In
 
     buffers.num_pairs = only(from_device(buffers.num_interacting_tiles))
     throw_if_interacting_tiles_overflowed(buffers)
+
+    # Refine the bounding-box candidates with an exact atom-pair test
+    if buffers.num_pairs > 0
+        prune_y = 4
+        @cuda threads=(32, prune_y) blocks=cld(buffers.num_pairs, prune_y) always_inline=true prune_interacting_tiles_kernel!(
+            buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+            buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
+            buffers.num_interacting_tiles,
+            buffers.coords_reordered, Val(N), Val(sys.neighbor_finder.dist_cutoff_2),
+            Val(n_blocks), sys.boundary)
+    end
     return nothing
 end
 
@@ -916,7 +949,7 @@ Cache contract:
 function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                          nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, needs_vir}
     N = length(sys.coords)
-    r_cut2 = sys.neighbor_finder.dist_cutoff_2
+    r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
     nf = sys.neighbor_finder
 
     needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh =
@@ -954,7 +987,8 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         sys.boundary, step_n, buffers.compressed_masks,
         Val(needs_vir), Val(T), Val(D),
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+        buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
+        buffers.interacting_tiles_overflow)
     block_y, maxregs = force_launch_params(sys, auto_kernel)
     
     num_pairs = buffers.num_pairs
@@ -971,7 +1005,8 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+            buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
+            buffers.interacting_tiles_overflow)
     end
 
     uses_vel = Molly.any_uses_velocity(pairwise_inters)
@@ -987,7 +1022,8 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             sys.boundary, step_n, buffers.compressed_masks,
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
+            buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
+            buffers.interacting_tiles_overflow;
             threads=(32, block_y), blocks=n_blocks_launch, shmem=shmem
         )
     end
@@ -1014,7 +1050,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     # The ordering is usually recomputed for potential energy, but we can reuse it
     #   if it was already computed for this step
     N = length(sys.coords)
-    r_cut2 = sys.neighbor_finder.dist_cutoff_2
+    r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
     backend = get_backend(sys.coords)
     nf = sys.neighbor_finder
 
@@ -1050,8 +1086,8 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
             Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type, buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow)
+            buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
     block_y = energy_launch_params(sys, kernel)
 
     uses_vel = Molly.any_uses_velocity(pairwise_inters)
@@ -1067,8 +1103,8 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
                 buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
                 sys.boundary, step_n, buffers.compressed_masks,
                 Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
-                buffers.interacting_tiles_type, buffers.num_interacting_tiles,
-                buffers.interacting_tiles_overflow;
+                buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
+                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
                 blocks=n_blocks_launch, threads=(32, block_y), shmem=shmem)
     end
      return pe_vec_nounits
@@ -1740,11 +1776,87 @@ function find_interacting_blocks_kernel!(
     return nothing
 end
 
+#=
+Second pruning pass over the candidate tiles emitted by
+`find_interacting_blocks_kernel!`.
+
+The bounding-box test in that kernel is loose: with 32 atoms per block the boxes are
+comparable in size to the cutoff, so most tiles it emits are largely empty. This pass
+runs one warp per candidate tile and performs the exact 32x32 atom-pair distance test,
+recording which of the 32 inner-loop iterations of `force_kernel!`/`energy_kernel!`
+contain at least one in-range pair. Iteration `m` of those kernels evaluates the pairs
+`(lane, slot)` with `slot - lane == m (mod 32)`, so a hit between the `l`-th atom of
+block `i` and the `s`-th atom of block `j` sets bit `(s - l) & 31`. Tiles with no
+in-range pair at all get an empty mask and are marked `TILE_DEAD` so the kernels drop
+them immediately.
+
+This only runs on a neighbor list rebuild, so its cost is amortised over
+`n_steps_reorder` steps. Only full off-diagonal tiles (`i < j < n_blocks`) are
+analysed; the diagonal and the final partial block make up a vanishing fraction of the
+list and keep a fully populated mask.
+=#
+function prune_interacting_tiles_kernel!(
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
+    interacting_tiles_diag, num_interacting_tiles, coords_var, ::Val{N}, ::Val{r_cut2},
+    ::Val{n_blocks}, boundary) where {N, r_cut2, n_blocks}
+    coords = CUDA_CORE.Const(coords_var)
+    tiles_i_ro = CUDA_CORE.Const(interacting_tiles_i)
+    tiles_j_ro = CUDA_CORE.Const(interacting_tiles_j)
+    num_interacting_tiles_ro = CUDA_CORE.Const(num_interacting_tiles)
+
+    a = Int32(1)
+    idx = (blockIdx().x - a) * blockDim().y + threadIdx().y
+
+    @inbounds num_pairs = num_interacting_tiles_ro[1]
+    if idx > num_pairs
+        return nothing
+    end
+
+    lane = threadIdx().x
+    @inbounds i = tiles_i_ro[idx]
+    @inbounds j = tiles_j_ro[idx]
+    if i >= j || j >= Int32(n_blocks)
+        if lane == a
+            @inbounds interacting_tiles_diag[idx] = typemax(UInt32)
+        end
+        return nothing
+    end
+
+    @inbounds coords_j = coords[(j - a) * warpsize() + lane]
+    i_0_tile = (i - a) * warpsize()
+
+    # This lane holds the `lane`-th atom of block j, so a hit against the m-th atom of
+    # block i lands on inner-loop iteration `(lane - m) & 31`
+    lane_mask = UInt32(0)
+    @inbounds for m in a:warpsize()
+        coords_i = coords[i_0_tile + m]
+        dr = vector(coords_i, coords_j, boundary)
+        r2 = @fastmath sum(abs2, dr)
+        if r2 <= r_cut2
+            lane_mask |= UInt32(1) << ((lane - m) & Int32(31))
+        end
+    end
+
+    offset = Int32(16)
+    while offset > 0
+        lane_mask |= CUDA.shfl_xor_sync(0xFFFFFFFF, lane_mask, offset)
+        offset ÷= Int32(2)
+    end
+
+    if lane == a
+        @inbounds interacting_tiles_diag[idx] = lane_mask
+        if lane_mask == UInt32(0)
+            @inbounds interacting_tiles_type[idx] = TILE_DEAD
+        end
+    end
+    return nothing
+end
+
 """
     force_kernel!(fs_mat, global_virial, coords, velocities, atoms, N, r_cut2, force_units,
                   inters_tuple, boundary, step_n, compressed_masks, needs_vir, T, D,
                   interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-                  num_interacting_tiles)
+                  interacting_tiles_diag, num_interacting_tiles)
 
 Compute pairwise forces for the compact list of interacting 32x32 tiles produced
 by `find_interacting_blocks_kernel!`.
@@ -1782,8 +1894,8 @@ function force_kernel!(
     ::Val{T},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-    num_interacting_tiles, interacting_tiles_overflow) where {N, r_cut2, A, force_units,
-                                                              needs_vir, T, D}
+    interacting_tiles_diag, num_interacting_tiles,
+    interacting_tiles_overflow) where {N, r_cut2, A, force_units, needs_vir, T, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -1795,6 +1907,7 @@ function force_kernel!(
     tiles_i_ro = CUDA_CORE.Const(interacting_tiles_i)
     tiles_j_ro = CUDA_CORE.Const(interacting_tiles_j)
     tiles_type_ro = CUDA_CORE.Const(interacting_tiles_type)
+    tiles_diag_ro = CUDA_CORE.Const(interacting_tiles_diag)
     num_interacting_tiles_ro = CUDA_CORE.Const(num_interacting_tiles)
     interacting_tiles_overflow_ro = CUDA_CORE.Const(interacting_tiles_overflow)
     uses_vel = Molly.any_uses_velocity(inters_tuple)
@@ -1816,6 +1929,12 @@ function force_kernel!(
     @inbounds i = tiles_i_ro[idx]
     @inbounds j = tiles_j_ro[idx]
     @inbounds type = tiles_type_ro[idx]
+
+    # `prune_interacting_tiles_kernel!` proved this tile holds no in-cutoff pair
+    if type == TILE_DEAD
+        return nothing
+    end
+    @inbounds diag_mask = tiles_diag_ro[idx]
 
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
@@ -1877,6 +1996,11 @@ function force_kernel!(
 
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
+                # `prune_interacting_tiles_kernel!` recorded which iterations can hold an
+                # in-range pair; the rest are skipped before any distance work
+                if (diag_mask >> (m & Int32(31))) & UInt32(1) == UInt32(0)
+                    continue
+                end
                 slot = ((lane - a + m) & Int32(31)) + a
                 js = sh_stage[slot, warpid]
                 coords_j = js.coords
@@ -1892,7 +2016,7 @@ function force_kernel!(
                     f = condition ? sum_pairwise_forces_gpu(
                         inters_tuple, dr, atoms_i, atoms_j_stage, Val(force_units),
                         false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                    ) : zero(SVector{D, T})
+                    ) : Molly.zero_pairwise_force(dr, force_units)
 
                     @fastmath force_i_x += ustrip(f[1])
                     @fastmath opposites_sum[slot, 1, warpid] -= ustrip(f[1])
@@ -1924,6 +2048,9 @@ function force_kernel!(
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
 
             @inbounds for m in a:warpsize()
+                if (diag_mask >> (m & Int32(31))) & UInt32(1) == UInt32(0)
+                    continue
+                end
                 slot = ((lane - a + m) & Int32(31)) + a
                 js = sh_stage[slot, warpid]
                 coords_j = js.coords
@@ -1942,7 +2069,7 @@ function force_kernel!(
                     f = condition ? sum_pairwise_forces_gpu(
                         inters_tuple, dr, atoms_i, atoms_j_stage, Val(force_units),
                         (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                    ) : zero(SVector{D, T})
+                    ) : Molly.zero_pairwise_force(dr, force_units)
 
                     @fastmath force_i_x += ustrip(f[1])
                     @fastmath opposites_sum[slot, 1, warpid] -= ustrip(f[1])
@@ -2009,7 +2136,7 @@ function force_kernel!(
                 f = condition ? sum_pairwise_forces_gpu(
                     inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                ) : zero(SVector{D, T})
+                ) : Molly.zero_pairwise_force(dr, force_units)
 
                 @fastmath force_i_x += ustrip(f[1])
                 if ustrip(f[1]) != zero(T)
@@ -2069,7 +2196,7 @@ function force_kernel!(
             f = condition ? sum_pairwise_forces_gpu(
                 inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                 (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-            ) : zero(SVector{D, T})
+            ) : Molly.zero_pairwise_force(dr, force_units)
 
             @fastmath force_i_x += ustrip(f[1])
             @fastmath opposites_sum[m, 1, warpid] -= ustrip(f[1])
@@ -2135,7 +2262,7 @@ function force_kernel!(
                 f = condition ? sum_pairwise_forces_gpu(
                     inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                ) : zero(SVector{D, T})
+                ) : Molly.zero_pairwise_force(dr, force_units)
 
                 @fastmath force_i_x += ustrip(f[1])
                 @fastmath opposites_sum[m, 1, warpid] -= ustrip(f[1])
@@ -2245,7 +2372,7 @@ end
     energy_kernel!(energy_nounits, coords, velocities, atoms, N, r_cut2, energy_units,
                    inters_tuple, boundary, step_n, compressed_masks, T, D,
                    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-                   num_interacting_tiles)
+                   interacting_tiles_diag, num_interacting_tiles)
 
 Compute pairwise potential energies for the compact list of interacting 32x32
 tiles produced by `find_interacting_blocks_kernel!`.
@@ -2271,7 +2398,8 @@ function energy_kernel!(
     ::Val{T},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-    num_interacting_tiles, interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, D}
+    interacting_tiles_diag, num_interacting_tiles,
+    interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -2283,6 +2411,7 @@ function energy_kernel!(
     tiles_i_ro = CUDA_CORE.Const(interacting_tiles_i)
     tiles_j_ro = CUDA_CORE.Const(interacting_tiles_j)
     tiles_type_ro = CUDA_CORE.Const(interacting_tiles_type)
+    tiles_diag_ro = CUDA_CORE.Const(interacting_tiles_diag)
     num_interacting_tiles_ro = CUDA_CORE.Const(num_interacting_tiles)
     interacting_tiles_overflow_ro = CUDA_CORE.Const(interacting_tiles_overflow)
     uses_vel = Molly.any_uses_velocity(inters_tuple)
@@ -2304,6 +2433,12 @@ function energy_kernel!(
     @inbounds i = tiles_i_ro[idx]
     @inbounds j = tiles_j_ro[idx]
     @inbounds type = tiles_type_ro[idx]
+
+    # `prune_interacting_tiles_kernel!` proved this tile holds no in-cutoff pair
+    if type == TILE_DEAD
+        return nothing
+    end
+    @inbounds diag_mask = tiles_diag_ro[idx]
 
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
@@ -2348,6 +2483,11 @@ function energy_kernel!(
 
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
+                # `prune_interacting_tiles_kernel!` recorded which iterations can hold an
+                # in-range pair; the rest are skipped before any distance work
+                if (diag_mask >> (m & Int32(31))) & UInt32(1) == UInt32(0)
+                    continue
+                end
                 slot = ((lane - a + m) & Int32(31)) + a
                 js = sh_stage[slot, warpid]
                 coords_j = js.coords
@@ -2369,7 +2509,7 @@ function energy_kernel!(
                         coords_i, coords_j,
                         boundary,
                         vel_i, vel_j,
-                        step_n) : zero(SVector{1, T})
+                        step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
 
                     @fastmath sum_E += ustrip(pe[1])
                 end
@@ -2379,6 +2519,9 @@ function energy_kernel!(
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
 
             @inbounds for m in a:warpsize()
+                if (diag_mask >> (m & Int32(31))) & UInt32(1) == UInt32(0)
+                    continue
+                end
                 slot = ((lane - a + m) & Int32(31)) + a
                 js = sh_stage[slot, warpid]
                 coords_j = js.coords
@@ -2402,7 +2545,7 @@ function energy_kernel!(
                         coords_i, coords_j,
                         boundary,
                         vel_i, vel_j,
-                        step_n) : zero(SVector{1, T})
+                        step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
 
                     @fastmath sum_E += ustrip(pe[1])
                 end
@@ -2435,7 +2578,7 @@ function energy_kernel!(
                 coords_i, coords_j,
                 boundary,
                 vel_i, vel_j,
-                step_n) : zero(SVector{1, T})
+                step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
             @fastmath sum_E += ustrip(pe[1])
         end
     elseif i == j && i < n_blocks
@@ -2465,7 +2608,7 @@ function energy_kernel!(
                 coords_i, coords_j,
                 boundary,
                 vel_i, vel_j,
-                step_n) : zero(SVector{1, T})
+                step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
             @fastmath sum_E += ustrip(pe[1])
         end
     elseif i == n_blocks && j == n_blocks
@@ -2496,7 +2639,7 @@ function energy_kernel!(
                     coords_i, coords_j,
                     boundary,
                     vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
+                    step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
                 @fastmath sum_E += ustrip(pe[1])
             end
         end

@@ -257,6 +257,7 @@
                     CUDA.zeros(Int32, tiny_capacity),
                     CUDA.zeros(Int32, tiny_capacity),
                     CUDA.zeros(UInt8, tiny_capacity),
+                    CUDA.zeros(UInt32, tiny_capacity),
                     CUDA.zeros(Int32, 1),
                     CUDA.zeros(Int32, 1),
                     buffers.coords_reordered,
