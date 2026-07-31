@@ -481,6 +481,10 @@ energy calculations.
   and tile metadata.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
+- `masks_initialized`: whether `compressed_masks`/`tile_is_clean` hold a full
+  exception-free initialization. Once set, later refreshes only restore the tiles
+  the previous sparse scatter dirtied instead of rewriting the whole
+  `O(n_blocks^2)` array.
 =#
 mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, VR, AR, fs_re, TIC}
     fs_mat::F
@@ -519,6 +523,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, NIT, OIT, CR, V
     step_n_preprocessed::Int
     sparse_pair_generation::UInt64
     num_pairs::Int
+    masks_initialized::Bool
 end
 
 function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, pres_tensor,
@@ -527,7 +532,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
                     num_interacting_tiles, interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
-                    step_n_preprocessed, sparse_pair_generation, num_pairs)
+                    step_n_preprocessed, sparse_pair_generation, num_pairs,
+                    masks_initialized::Bool=false)
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
     fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
@@ -542,7 +548,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, step_n_preprocessed,
-                      sparse_pair_generation, num_pairs)
+                      sparse_pair_generation, num_pairs, masks_initialized)
 end
 
 function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
@@ -662,7 +668,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
-                      atoms_reordered, fs_mat_reordered, -1, UInt64(0), 0)
+                      atoms_reordered, fs_mat_reordered, -1, UInt64(0), 0, false)
 end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 

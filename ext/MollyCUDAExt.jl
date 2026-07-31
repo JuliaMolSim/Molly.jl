@@ -31,6 +31,19 @@ using KernelAbstractions
 #   for this, we have to wait until it is available in the stable release.
 const CUDA_CORE = isdefined(CUDA, :CUDACore) ? CUDACore : CUDA
 
+# Per-j-atom data staged in shared memory by force_kernel!'s Part 1 inner loop.
+# Only the Atom fields the active interactions actually read are staged (`P` is the
+# narrow payload tuple type from `atom_shuffle_payload`/`resolve_atom_fields`)
+struct JStage{V, P}
+    coords::V
+    atom_payload::P
+end
+
+# Compile-time-only: the Tuple type produced by `atom_shuffle_payload(atom::A, Val(syms))`,
+# without needing an atom instance. Must be kept in sync with that function so that
+# host-side shared memory sizing and the device-side staged layout agree byte-for-byte.
+@inline atom_payload_type(::Type{A}, ::Val{syms}) where {A, syms} = Tuple{map(s -> fieldtype(A, s), syms)...}
+
 const WARPSIZE = UInt32(32)
 const MAX_BLOCK_Y = 32
 const AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES = (1, 2, 4, 8, 16)
@@ -414,6 +427,56 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
     )
 end
 
+# The Val(syms) of Atom fields the active interactions actually read, resolved once
+# and shared between host-side shmem sizing and the device kernels so they can never
+# drift apart (both call this same function on the same `pairwise_inters`/`A`).
+@inline function resolved_atom_shuffle_syms(pairwise_inters, ::Type{A}) where {A}
+    return Val(Molly.resolve_atom_fields(Molly.combine_atom_fields(pairwise_inters), A))
+end
+
+# Dynamic shared memory (bytes) for force_kernel!: must match the device-side
+# CuDynamicSharedArray layout (opposites_sum + staged j coords/atoms/velocities)
+function force_kernel_dynamic_shmem(buffers, ::Val{D}, ::Type{T}, uses_vel::Bool,
+                                    block_y::Integer, pairwise_inters) where {D, T}
+    nslot = 32 * block_y
+    A = eltype(buffers.atoms_reordered)
+    shuf_syms = resolved_atom_shuffle_syms(pairwise_inters, A)
+    P = atom_payload_type(A, shuf_syms)
+    JT = JStage{eltype(buffers.coords_reordered), P}
+    bytes = nslot * D * sizeof(T) + nslot * sizeof(JT)
+    if uses_vel
+        bytes += nslot * sizeof(eltype(buffers.velocities_reordered))
+    end
+    return bytes
+end
+
+# Dynamic shared memory (bytes) for energy_kernel!: staged j coords/atoms (and
+# velocities when an interaction uses them). Unlike force_kernel! there is no
+# opposites_sum, since energy accumulates only the per-warp scalar `sum_E`.
+function energy_kernel_dynamic_shmem(buffers, uses_vel::Bool, block_y::Integer, pairwise_inters)
+    nslot = 32 * block_y
+    A = eltype(buffers.atoms_reordered)
+    shuf_syms = resolved_atom_shuffle_syms(pairwise_inters, A)
+    P = atom_payload_type(A, shuf_syms)
+    JT = JStage{eltype(buffers.coords_reordered), P}
+    bytes = nslot * sizeof(JT)
+    if uses_vel
+        bytes += nslot * sizeof(eltype(buffers.velocities_reordered))
+    end
+    return bytes
+end
+
+# Dynamic shared memory above the default static per-block limit (48 KiB on
+# current hardware) is only available if a kernel explicitly opts in; otherwise
+# the launch fails with "invalid argument" even though the device supports much
+# more (opt-in max is ~100 KiB on Ampere+). The j-atom staging in force_kernel!/
+# energy_kernel! routinely needs more than 48 KiB for large `block_y` in Float64,
+# so every launch site using dynamic shmem must opt in before calling the kernel.
+function set_max_dynamic_shmem!(kernel, shmem::Integer)
+    CUDA.attributes(kernel.fun)[CUDA.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = shmem
+    return nothing
+end
+
 """
     autotune_force_block_y!(buffers, sys, pairwise_inters, N, force_maxregs_override)
 
@@ -434,10 +497,13 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise
     num_pairs = buffers.num_pairs
     num_pairs == 0 && return first(candidates)
 
+    uses_vel = Molly.any_uses_velocity(pairwise_inters)
     best_block_y = first(candidates)
     best_ms = Inf
     for block_y in candidates
         n_blocks_launch = cld(num_pairs, block_y)
+        shmem = force_kernel_dynamic_shmem(buffers, Val(D), T, uses_vel, block_y, pairwise_inters)
+        set_max_dynamic_shmem!(kernel, shmem)
         ms = autotune_benchmark_ms!(
             () -> begin
                 fill!(buffers.fs_mat_reordered, zero(T))
@@ -466,6 +532,7 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise
                 buffers.interacting_tiles_overflow;
                 threads=(32, block_y),
                 blocks=n_blocks_launch,
+                shmem=shmem,
             ),
         )
         if ms < best_ms
@@ -514,10 +581,13 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
     num_pairs = buffers.num_pairs
     num_pairs == 0 && return first(candidates)
 
+    uses_vel = Molly.any_uses_velocity(pairwise_inters)
     best_block_y = first(candidates)
     best_ms = Inf
     for block_y in candidates
         n_blocks_launch = cld(num_pairs, block_y)
+        shmem = energy_kernel_dynamic_shmem(buffers, uses_vel, block_y, pairwise_inters)
+        set_max_dynamic_shmem!(kernel, shmem)
         ms = autotune_benchmark_ms!(
             () -> fill!(buffers.pe_vec_nounits, zero(T)),
             () -> kernel(
@@ -541,6 +611,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
                 buffers.interacting_tiles_overflow;
                 blocks=n_blocks_launch,
                 threads=(32, block_y),
+                shmem=shmem,
             ),
         )
         if ms < best_ms
@@ -903,6 +974,10 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
     end
 
+    uses_vel = Molly.any_uses_velocity(pairwise_inters)
+    shmem = force_kernel_dynamic_shmem(buffers, Val(D), T, uses_vel, block_y, pairwise_inters)
+    set_max_dynamic_shmem!(kernel, shmem)
+
     if num_pairs > 0
         kernel(
             buffers.fs_mat_reordered,
@@ -913,7 +988,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             Val(needs_vir), Val(T), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
             buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
-            threads=(32, block_y), blocks=n_blocks_launch
+            threads=(32, block_y), blocks=n_blocks_launch, shmem=shmem
         )
     end
 
@@ -978,10 +1053,14 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             buffers.interacting_tiles_type, buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow)
     block_y = energy_launch_params(sys, kernel)
-    
+
+    uses_vel = Molly.any_uses_velocity(pairwise_inters)
+    shmem = energy_kernel_dynamic_shmem(buffers, uses_vel, block_y, pairwise_inters)
+    set_max_dynamic_shmem!(kernel, shmem)
+
     num_pairs = buffers.num_pairs
     n_blocks_launch = num_pairs > 0 ? cld(num_pairs, block_y) : 1
-    
+
     if num_pairs > 0
         kernel(
                 pe_vec_nounits, buffers.coords_reordered,
@@ -990,7 +1069,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
                 Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type, buffers.num_interacting_tiles,
                 buffers.interacting_tiles_overflow;
-                blocks=n_blocks_launch, threads=(32, block_y))
+                blocks=n_blocks_launch, threads=(32, block_y), shmem=shmem)
     end
      return pe_vec_nounits
  end
@@ -1307,6 +1386,42 @@ function update_inv_morton_kernel!(inv_morton_seq, morton_seq, ::Val{N}) where N
     return nothing
 end
 
+# Mask state of tile `(i, j)` before any exclusions or special pairs are applied:
+# everything eligible apart from diagonal self-interactions and out-of-bounds
+# boundary masking, and nothing special. Shared by the full initialization and the
+# incremental restore in `reset_sparse_exceptions_kernel!` so the two cannot drift.
+@inline function pristine_tile_masks(i, j, lane, n_blocks, r)
+    eligible_bitmask = UInt32(0xFFFFFFFF)
+
+    # Boundary Masking
+    if j == n_blocks
+        mask = ifelse(r == Int32(32), UInt32(0xFFFFFFFF), (UInt32(1) << r) - UInt32(1))
+        eligible_bitmask = (mask << (Int32(32) - r))
+    end
+
+    # Diagonal Self-Interactions
+    if i == j
+        eligible_bitmask &= ~(UInt32(1) << (Int32(32) - lane))
+    end
+
+    return eligible_bitmask, UInt32(0x00000000)
+end
+
+# Write tile `(i, j)`'s pristine mask row for `lane`, plus its clean flag
+@inline function store_pristine_tile!(compressed_masks, tile_is_clean, tile_idx, i, j, lane,
+                                      n_blocks, r)
+    eligible_bitmask, special_bitmask = pristine_tile_masks(i, j, lane, n_blocks, r)
+    @inbounds compressed_masks[lane, 1, tile_idx] = eligible_bitmask
+    @inbounds compressed_masks[lane, 2, tile_idx] = special_bitmask
+    if lane == 1
+        @inbounds tile_is_clean[tile_idx] = pristine_tile_is_clean(i, j, n_blocks)
+    end
+    return nothing
+end
+
+# Whether tile `(i, j)` is clean when no exception touches it
+@inline pristine_tile_is_clean(i, j, n_blocks) = (i < j) && (j < n_blocks)
+
 """
     init_compressed_masks_kernel!(compressed_masks, tile_is_clean, N, n_upper_tiles)
 
@@ -1315,6 +1430,9 @@ upper-triangular space.
 All interactions within a tile are initially marked as eligible (`0xFFFFFFFF`),
 except for diagonal self-interactions and out-of-bounds boundary masking.
 Tiles are also initially tagged as clean.
+
+This touches every one of the `O(n_blocks^2)` tiles, so it runs once per buffer set;
+subsequent refreshes use `reset_sparse_exceptions_kernel!` instead.
 """
 function init_compressed_masks_kernel!(compressed_masks, tile_is_clean, ::Val{N}, ::Val{n_upper_tiles}) where {N, n_upper_tiles}
     lane = laneid()
@@ -1346,26 +1464,7 @@ function init_compressed_masks_kernel!(compressed_masks, tile_is_clean, ::Val{N}
 
     r = Int32((N - 1) % 32 + 1)
 
-    eligible_bitmask = UInt32(0xFFFFFFFF)
-    special_bitmask = UInt32(0x00000000)
-
-    # Boundary Masking
-    if j == n_blocks
-        mask = ifelse(r == Int32(32), UInt32(0xFFFFFFFF), (UInt32(1) << r) - UInt32(1))
-        eligible_bitmask = (mask << (Int32(32) - r))
-    end
-
-    # Diagonal Self-Interactions
-    if i == j
-        eligible_bitmask &= ~(UInt32(1) << (Int32(32) - lane))
-    end
-
-    @inbounds compressed_masks[lane, 1, tile_idx] = eligible_bitmask
-    @inbounds compressed_masks[lane, 2, tile_idx] = special_bitmask
-
-    if lane == 1
-        @inbounds tile_is_clean[tile_idx] = (i < j) && (j < n_blocks)
-    end
+    store_pristine_tile!(compressed_masks, tile_is_clean, tile_idx, i, j, lane, n_blocks, r)
 
     return nothing
 end
@@ -1450,6 +1549,62 @@ function apply_sparse_exceptions_kernel!(
     return nothing
 end
 
+# Undo a previous `apply_sparse_exceptions_kernel!` pass by restoring the mask words it
+# modified to their pristine, exception-free state.
+# This is that pass's exact inverse: it repeats the same index arithmetic, one thread
+# per exception pair, and overwrites the single word each pair touched instead of
+# clearing or setting a bit in it. It therefore has to be given the same
+# `inv_morton_seq` and exception pairs the pass used. Threads landing on the same word
+# write identical values, which is harmless.
+function reset_sparse_exceptions_kernel!(
+    excluded_i, excluded_j, special_i, special_j,
+    inv_morton_seq, compressed_masks, tile_is_clean,
+    ::Val{N}, ::Val{n_blocks}, ::Val{n_excluded}, ::Val{n_special}
+) where {N, n_blocks, n_excluded, n_special}
+    excluded_i_ro = CUDA_CORE.Const(excluded_i)
+    excluded_j_ro = CUDA_CORE.Const(excluded_j)
+    special_i_ro =  CUDA_CORE.Const(special_i)
+    special_j_ro =  CUDA_CORE.Const(special_j)
+    inv_morton_seq_ro = CUDA_CORE.Const(inv_morton_seq)
+
+    idx = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    r = Int32((N - 1) % 32 + 1)
+
+    if idx <= n_excluded
+        @inbounds p_i = inv_morton_seq_ro[excluded_i_ro[idx]]
+        @inbounds p_j = inv_morton_seq_ro[excluded_j_ro[idx]]
+        t_i, t_j, tile_idx, lane_i = exception_tile_location(p_i, p_j, Int32(n_blocks))
+        eligible_bitmask, _ = pristine_tile_masks(t_i, t_j, lane_i, Int32(n_blocks), r)
+        @inbounds compressed_masks[lane_i, 1, tile_idx] = eligible_bitmask
+        @inbounds tile_is_clean[tile_idx] = pristine_tile_is_clean(t_i, t_j, Int32(n_blocks))
+    end
+
+    if idx <= n_special
+        @inbounds p_i = inv_morton_seq_ro[special_i_ro[idx]]
+        @inbounds p_j = inv_morton_seq_ro[special_j_ro[idx]]
+        t_i, t_j, tile_idx, lane_i = exception_tile_location(p_i, p_j, Int32(n_blocks))
+        @inbounds compressed_masks[lane_i, 2, tile_idx] = UInt32(0x00000000)
+        @inbounds tile_is_clean[tile_idx] = pristine_tile_is_clean(t_i, t_j, Int32(n_blocks))
+    end
+
+    return nothing
+end
+
+# Locate the tile and mask row an exception pair at Morton positions `p_i`/`p_j` writes
+# to, matching `apply_sparse_exceptions_kernel!`
+@inline function exception_tile_location(p_i, p_j, n_blocks)
+    if p_i > p_j
+        p_i, p_j = p_j, p_i
+    end
+
+    t_i = (p_i - Int32(1)) ÷ Int32(32) + Int32(1)
+    t_j = (p_j - Int32(1)) ÷ Int32(32) + Int32(1)
+    tile_idx = upper_tile_index(t_i, t_j, n_blocks)
+    lane_i = (p_i - Int32(1)) % Int32(32) + Int32(1)
+
+    return t_i, t_j, tile_idx, lane_i
+end
+
 """
     compress_sparse!(buffers, nf, N)
 
@@ -1459,19 +1614,37 @@ Morton-ordered tile masks consumed by the tiled CUDA pairwise kernels.
 function compress_sparse!(buffers, nf::GPUNeighborFinder, ::Val{N}) where N
     n_blocks = ceil(Int32, N / 32)
     n_upper_tiles = upper_tile_count(n_blocks)
-    
-    # Stage A: Inverse Morton Mapping
-    @cuda threads=256 blocks=cld(N, 256) update_inv_morton_kernel!(
-        buffers.morton_seq_inv, buffers.morton_seq, Val(N))
-    
-    # Stage B: Optimistic Initialization
-    @cuda blocks=n_upper_tiles threads=32 init_compressed_masks_kernel!(
-        buffers.compressed_masks, buffers.tile_is_clean, Val(N), Val(n_upper_tiles))
-    
-    # Stage C: Atomic Scatter
     n_exc = length(nf.excluded_i)
     n_spec = length(nf.special_i)
     n_max = max(n_exc, n_spec)
+
+    # Stage B: get the masks back to their exception-free state. Rewriting all
+    # `n_upper_tiles` of them costs O(n_blocks^2) and dominates the neighbour-list
+    # refresh, but only the words the previous scatter dirtied are ever stale, and
+    # there is at most one per exception pair. So initialize in full once and
+    # afterwards restore just those words. Recovering them means repeating the
+    # previous scatter's index arithmetic, which needs the inverse Morton map from
+    # that refresh -- hence this runs before Stage A overwrites it. A changed
+    # exception set makes those indices unrecoverable, so it falls back to a full
+    # initialization (the masks are stale for the new pairs either way).
+    if buffers.masks_initialized && buffers.sparse_pair_generation == nf.cache_generation
+        if n_max > 0
+            @cuda threads=256 blocks=cld(Int32(n_max), Int32(256)) reset_sparse_exceptions_kernel!(
+                nf.excluded_i, nf.excluded_j, nf.special_i, nf.special_j,
+                buffers.morton_seq_inv, buffers.compressed_masks, buffers.tile_is_clean,
+                Val(N), Val(n_blocks), Val(Int32(n_exc)), Val(Int32(n_spec)))
+        end
+    else
+        @cuda blocks=n_upper_tiles threads=32 init_compressed_masks_kernel!(
+            buffers.compressed_masks, buffers.tile_is_clean, Val(N), Val(n_upper_tiles))
+        buffers.masks_initialized = true
+    end
+
+    # Stage A: Inverse Morton Mapping
+    @cuda threads=256 blocks=cld(N, 256) update_inv_morton_kernel!(
+        buffers.morton_seq_inv, buffers.morton_seq, Val(N))
+
+    # Stage C: Atomic Scatter
     if n_max > 0
         @cuda threads=256 blocks=cld(Int32(n_max), Int32(256)) apply_sparse_exceptions_kernel!(
             nf.excluded_i, nf.excluded_j, nf.special_i, nf.special_j,
@@ -1647,7 +1820,24 @@ function force_kernel!(
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
 
-    opposites_sum = CuStaticSharedArray(T, (32, D, MAX_BLOCK_Y))
+    # Dynamic shared memory sized to the actual block_y (not MAX_BLOCK_Y): the
+    # j-force accumulator plus staged j-atom data (coords/atoms/velocities). The
+    # Part 1 inner loop indexes this shared data by slot instead of rotating it
+    # around the warp with serial shuffles. Host must pass a matching `shmem`.
+    # @inbounds elides CuDynamicSharedArray's size check: the host allocates a
+    # matching `shmem`, and sh_vel (unallocated when no interaction uses velocity)
+    # is never dereferenced in that case
+    # Only the Atom fields the active interactions actually read are staged (not the
+    # full Atom), matching what the old warp-shuffle path sent per lane.
+    shuf_syms = resolved_atom_shuffle_syms(inters_tuple, A)
+    P = atom_payload_type(A, shuf_syms)
+    by = Int(blockDim().y)
+    JT = JStage{eltype(coords_var), P}
+    opposites_sum = @inbounds CuDynamicSharedArray(T, (32, D, by))
+    stage_off = 32 * D * by * sizeof(T)
+    sh_stage = @inbounds CuDynamicSharedArray(JT, (32, by), stage_off)
+    stage_off_v = stage_off + 32 * by * sizeof(JT)
+    sh_vel = @inbounds CuDynamicSharedArray(eltype(velocities_var), (32, by), stage_off_v)
 
     r = Int32((N - 1) % 32 + 1)
     
@@ -1673,43 +1863,46 @@ function force_kernel!(
         @inbounds vel_i = velocities[index_i]
         @inbounds atoms_i = atoms[index_i]
         
-        @inbounds coords_j = coords[index_j]
-        @inbounds vel_j = velocities[index_j]
-        @inbounds atoms_j = atoms[index_j]
-        # Only shuffle the Atom fields the interactions actually use, safe default
-        shuf_syms = Val(Molly.resolve_atom_fields(Molly.combine_atom_fields(inters_tuple), A))
-        atom_payload = Molly.atom_shuffle_payload(atoms_j, shuf_syms)
+        # Stage this tile's j-atom data into shared memory once, then index it by
+        # slot each iteration. Replaces the per-iteration serial warp shuffles; the
+        # staged reads are independent so the latency pipelines. Only the Atom fields
+        # the active interactions read are staged (`shuf_syms`/`P` above), matching
+        # the old shuffle path's payload rather than the full 32 B Atom. sync_warp()
+        # also publishes the opposites_sum zeroing above.
+        @inbounds sh_stage[lane, warpid] = JStage(coords[index_j], Molly.atom_shuffle_payload(atoms[index_j], shuf_syms))
+        if uses_vel
+            @inbounds sh_vel[lane, warpid] = velocities[index_j]
+        end
+        sync_warp()
 
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
-                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                if uses_vel
-                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                end
-                atom_payload = CUDA.shfl_sync.(0xFFFFFFFF, atom_payload, lane + a, warpsize())
-                atoms_j_shuffle = Molly.rebuild_shuffled_atom(A, atoms_i, atom_payload, shuf_syms)
-                shuffle_idx = ((lane - a + m) & Int32(31)) + a
+                slot = ((lane - a + m) & Int32(31)) + a
+                js = sh_stage[slot, warpid]
+                coords_j = js.coords
+                atoms_j_stage = Molly.rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
+                vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
                 condition = r2 <= r_cut2
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
-                
+
                 if any_active
                     f = condition ? sum_pairwise_forces_gpu(
-                        inters_tuple, dr, atoms_i, atoms_j_shuffle, Val(force_units),
+                        inters_tuple, dr, atoms_i, atoms_j_stage, Val(force_units),
                         false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
 
                     @fastmath force_i_x += ustrip(f[1])
-                    @fastmath opposites_sum[shuffle_idx, 1, warpid] -= ustrip(f[1])
+                    @fastmath opposites_sum[slot, 1, warpid] -= ustrip(f[1])
                     if D >= 2
                         @fastmath force_i_y += ustrip(f[2])
-                        @fastmath opposites_sum[shuffle_idx, 2, warpid] -= ustrip(f[2])
+                        @fastmath opposites_sum[slot, 2, warpid] -= ustrip(f[2])
                     end
                     if D >= 3
                         @fastmath force_i_z += ustrip(f[3])
-                        @fastmath opposites_sum[shuffle_idx, 3, warpid] -= ustrip(f[3])
+                        @fastmath opposites_sum[slot, 3, warpid] -= ustrip(f[3])
                     end
 
                     if needs_vir
@@ -1731,37 +1924,35 @@ function force_kernel!(
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
 
             @inbounds for m in a:warpsize()
-                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                if uses_vel
-                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                end
-                atom_payload = CUDA.shfl_sync.(0xFFFFFFFF, atom_payload, lane + a, warpsize())
-                atoms_j_shuffle = Molly.rebuild_shuffled_atom(A, atoms_i, atom_payload, shuf_syms)
-                shuffle_idx = ((lane - a + m) & Int32(31)) + a
+                slot = ((lane - a + m) & Int32(31)) + a
+                js = sh_stage[slot, warpid]
+                coords_j = js.coords
+                atoms_j_stage = Molly.rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
+                vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
-                spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
-                
+                excl = (eligible_bitmask >> (warpsize() - slot)) | (eligible_bitmask << slot)
+                spec = (special_bitmask >> (warpsize() - slot)) | (special_bitmask << slot)
+
                 condition = (excl & 0x1) == true && r2 <= r_cut2
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
-                
+
                 if any_active
                     f = condition ? sum_pairwise_forces_gpu(
-                        inters_tuple, dr, atoms_i, atoms_j_shuffle, Val(force_units),
+                        inters_tuple, dr, atoms_i, atoms_j_stage, Val(force_units),
                         (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : zero(SVector{D, T})
 
                     @fastmath force_i_x += ustrip(f[1])
-                    @fastmath opposites_sum[shuffle_idx, 1, warpid] -= ustrip(f[1])
+                    @fastmath opposites_sum[slot, 1, warpid] -= ustrip(f[1])
                     if D >= 2
                         @fastmath force_i_y += ustrip(f[2])
-                        @fastmath opposites_sum[shuffle_idx, 2, warpid] -= ustrip(f[2])
+                        @fastmath opposites_sum[slot, 2, warpid] -= ustrip(f[2])
                     end
                     if D >= 3
                         @fastmath force_i_z += ustrip(f[3])
-                        @fastmath opposites_sum[shuffle_idx, 3, warpid] -= ustrip(f[3])
+                        @fastmath opposites_sum[slot, 3, warpid] -= ustrip(f[3])
                     end
 
                     if needs_vir
@@ -2108,6 +2299,7 @@ function energy_kernel!(
     end
 
     lane = threadIdx().x
+    warpid = threadIdx().y
 
     @inbounds i = tiles_i_ro[idx]
     @inbounds j = tiles_j_ro[idx]
@@ -2117,6 +2309,20 @@ function energy_kernel!(
     index_i = i_0_tile + lane
 
     sum_E = zero(T)
+
+    # Dynamic shared memory for staging this tile's j-atom data (coords/atoms and,
+    # when an interaction uses them, velocities), mirroring force_kernel!'s Part 1.
+    # Only the Atom fields the active interactions read are staged (`shuf_syms`/`P`).
+    # Energy needs no opposites_sum accumulator. @inbounds elides the size check;
+    # the host passes a matching `shmem`, and sh_vel (unallocated when no
+    # interaction uses velocity) is never dereferenced in that case.
+    shuf_syms = resolved_atom_shuffle_syms(inters_tuple, A)
+    P = atom_payload_type(A, shuf_syms)
+    by = Int(blockDim().y)
+    JT = JStage{eltype(coords_var), P}
+    sh_stage = @inbounds CuDynamicSharedArray(JT, (32, by))
+    stage_off_v = 32 * by * sizeof(JT)
+    sh_vel = @inbounds CuDynamicSharedArray(eltype(velocities_var), (32, by), stage_off_v)
 
     r = Int32((N - 1) % 32 + 1)
 
@@ -2129,71 +2335,77 @@ function energy_kernel!(
         @inbounds coords_i = coords[index_i]
         @inbounds vel_i = velocities[index_i]
         @inbounds atoms_i = atoms[index_i]
-        @inbounds coords_j = coords[index_j]
-        @inbounds vel_j = velocities[index_j]
-        @inbounds atoms_j = atoms[index_j]
-        # Only shuffle the Atom fields the interactions actually use, safe default
-        shuf_syms = Val(Molly.resolve_atom_fields(Molly.combine_atom_fields(inters_tuple), A))
-        atom_payload = Molly.atom_shuffle_payload(atoms_j, shuf_syms)
+        # Stage this tile's j-atom data into shared memory once, then index it by
+        # slot each iteration instead of rotating it around the warp with serial
+        # shuffles. The staged reads are independent so their latency pipelines.
+        # Only the Atom fields the active interactions read are staged (`shuf_syms`),
+        # matching the old shuffle path's payload rather than the full Atom.
+        @inbounds sh_stage[lane, warpid] = JStage(coords[index_j], Molly.atom_shuffle_payload(atoms[index_j], shuf_syms))
+        if uses_vel
+            @inbounds sh_vel[lane, warpid] = velocities[index_j]
+        end
+        sync_warp()
 
         if type == UInt8(0) # CLEAN
             @inbounds for m in a:warpsize()
-                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                if uses_vel
-                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                end
-                atom_payload = CUDA.shfl_sync.(0xFFFFFFFF, atom_payload, lane + a, warpsize())
-                atoms_j_shuffle = Molly.rebuild_shuffled_atom(A, atoms_i, atom_payload, shuf_syms)
-                shuffle_idx = ((lane - a + m) & Int32(31)) + a
+                slot = ((lane - a + m) & Int32(31)) + a
+                js = sh_stage[slot, warpid]
+                coords_j = js.coords
+                atoms_j_stage = Molly.rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
+                vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
                 condition = r2 <= r_cut2
+                any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
 
-                pe = condition ? sum_pairwise_potentials_gpu(
-                    inters_tuple,
-                    dr,
-                    atoms_i, atoms_j_shuffle,
-                    Val(energy_units),
-                    false,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
+                if any_active
+                    pe = condition ? sum_pairwise_potentials_gpu(
+                        inters_tuple,
+                        dr,
+                        atoms_i, atoms_j_stage,
+                        Val(energy_units),
+                        false,
+                        coords_i, coords_j,
+                        boundary,
+                        vel_i, vel_j,
+                        step_n) : zero(SVector{1, T})
 
-                @fastmath sum_E += ustrip(pe[1])
+                    @fastmath sum_E += ustrip(pe[1])
+                end
             end
         else # EXCLUDED
             @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
 
             @inbounds for m in a:warpsize()
-                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, lane + a, warpsize())
-                if uses_vel
-                    vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, lane + a, warpsize())
-                end
-                atom_payload = CUDA.shfl_sync.(0xFFFFFFFF, atom_payload, lane + a, warpsize())
-                atoms_j_shuffle = Molly.rebuild_shuffled_atom(A, atoms_i, atom_payload, shuf_syms)
-                shuffle_idx = ((lane - a + m) & Int32(31)) + a
+                slot = ((lane - a + m) & Int32(31)) + a
+                js = sh_stage[slot, warpid]
+                coords_j = js.coords
+                atoms_j_stage = Molly.rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
+                vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
 
                 dr = vector(coords_i, coords_j, boundary)
                 r2 = @fastmath sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
-                spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
+                excl = (eligible_bitmask >> (warpsize() - slot)) | (eligible_bitmask << slot)
+                spec = (special_bitmask >> (warpsize() - slot)) | (special_bitmask << slot)
                 condition = (excl & 0x1) == true && r2 <= r_cut2
+                any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
 
-                pe = condition ? sum_pairwise_potentials_gpu(
-                    inters_tuple,
-                    dr,
-                    atoms_i, atoms_j_shuffle,
-                    Val(energy_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
+                if any_active
+                    pe = condition ? sum_pairwise_potentials_gpu(
+                        inters_tuple,
+                        dr,
+                        atoms_i, atoms_j_stage,
+                        Val(energy_units),
+                        (spec & 0x1) == true,
+                        coords_i, coords_j,
+                        boundary,
+                        vel_i, vel_j,
+                        step_n) : zero(SVector{1, T})
 
-                @fastmath sum_E += ustrip(pe[1])
+                    @fastmath sum_E += ustrip(pe[1])
+                end
             end
         end
     elseif j == n_blocks && i < n_blocks
