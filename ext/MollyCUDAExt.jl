@@ -2466,65 +2466,85 @@ function remove_cm_velocity_kernel_3d!(velocities, momentum::CuDeviceVector{T},
 end
 
 
-const CELL_BLOCK_SIZE = 32
+cconst CELL_BLOCK_SIZE = 32
 
-# GPU kernel for getting CELL IDs
-function get_cell_id!(cell_ids, x, y, z, n_atoms, num_cell_x, num_cell_y, num_cell_z, cell_Lx, cell_Ly, cell_Lz)
+function get_cell_id!(
+    cell_ids,
+    x,
+    y,
+    z,
+    n_atoms,
+    num_cell_x,
+    num_cell_y,
+    num_cell_z,
+    cell_Lx,
+    cell_Ly,
+    cell_Lz,
+)
+    atom_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    global_id = (blockIdx().x - 1) * blockDim().x + threadIdx().x # define global thread ID
+    if atom_i <= n_atoms
+        cell_id_x = floor(Int32, x[atom_i] / cell_Lx)
+        cell_id_y = floor(Int32, y[atom_i] / cell_Ly)
+        cell_id_z = floor(Int32, z[atom_i] / cell_Lz)
 
-    if global_id <= n_atoms
-        atom_i_x = x[global_id] # global read of atom i's coords
-        atom_i_y = y[global_id]
-        atom_i_z = z[global_id]
+        cell_id_x = min(
+            max(cell_id_x, Int32(0)),
+            num_cell_x - Int32(1),
+        )
+        cell_id_y = min(
+            max(cell_id_y, Int32(0)),
+            num_cell_y - Int32(1),
+        )
+        cell_id_z = min(
+            max(cell_id_z, Int32(0)),
+            num_cell_z - Int32(1),
+        )
 
-        cell_id_x = floor(Int32, atom_i_x / cell_Lx) # calculate cell id / dim, 0-based index
-        cell_id_y = floor(Int32, atom_i_y / cell_Ly)
-        cell_id_z = floor(Int32, atom_i_z / cell_Lz)
-
-        cell_id_x = min(max(cell_id_x, Int32(0)), num_cell_x - Int32(1)) # protect cell id / dim against edge case
-        cell_id_y = min(max(cell_id_y, Int32(0)), num_cell_y - Int32(1))
-        cell_id_z = min(max(cell_id_z, Int32(0)), num_cell_z - Int32(1))
-
-        cell_id_flat = (Int32(1) + cell_id_x # calculate global cell id converting from 0 to 1-based
-                    + (cell_id_y * num_cell_x) # move in iy jumps by a whole ix, iz jumps by whole ix and iy
-                    + (cell_id_z * num_cell_x * num_cell_y))
-
-        cell_ids[global_id] = cell_id_flat # global write
+        cell_ids[atom_i] = (
+            Int32(1) +
+            cell_id_x +
+            cell_id_y * num_cell_x +
+            cell_id_z * num_cell_x * num_cell_y
+        )
     end
 
     return nothing
 end
 
-# GPU kernel for taking cell IDs and ouputting cell counts
-function get_cell_counts_gpu!(cell_counts, cell_ids, n_atoms)
+function get_cell_counts_gpu!(
+    cell_counts,
+    cell_ids,
+    n_atoms,
+)
+    atom_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    global_id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    if global_id <= n_atoms
-        cell = cell_ids[global_id]
-        CUDA.@atomic cell_counts[cell] += Int32(1)
+    if atom_i <= n_atoms
+        CUDA.@atomic cell_counts[cell_ids[atom_i]] += Int32(1)
     end
 
     return nothing
 end
 
-# GPU kernel
-function get_cell_particles_gpu!(cell_particles, cell_write_counts, cell_ids, cell_offsets, n_atoms)
-    # output: cell_particles, length n_atoms where atom indices are arranged by cell
+function get_cell_particles_gpu!(
+    cell_particles,
+    cell_write_counts,
+    cell_ids,
+    cell_offsets,
+    n_atoms,
+)
+    atom_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    global_id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if atom_i <= n_atoms
+        cell = cell_ids[atom_i]
+        slot = CUDA.atomic_add!(
+            pointer(cell_write_counts, cell),
+            Int32(1),
+        )
 
-    if global_id <= n_atoms
-        cell = cell_ids[global_id]
-
-        slot = CUDA.atomic_add!(pointer(cell_write_counts, cell), Int32(1)) # atomic increment the writing slot for the thread
-
-        write_pos = cell_offsets[cell] + slot
-
-        cell_particles[write_pos] = global_id # write id based on position
-
+        cell_particles[cell_offsets[cell] + slot] = atom_i
     end
+
     return nothing
 end
 
@@ -2704,7 +2724,6 @@ function write_half_pairs_gpu!(
 
     return nothing
 end
-
 
 function get_neighbours_cell_shared_contiguous_gpu!(
     neighbour_counts,
@@ -3036,7 +3055,9 @@ end
 function query_gpu_cell_list!(state)
     fill!(state.neighbour_counts, Int32(0))
 
-    @cuda threads=CELL_BLOCK_SIZE blocks=state.n_host_tiles[] get_neighbours_cell_shared_contiguous_gpu!(
+    n_blocks = state.n_host_tiles[]
+
+    @cuda threads=CELL_BLOCK_SIZE blocks=n_blocks get_neighbours_cell_shared_contiguous_gpu!(
         state.neighbour_counts,
         state.neighbours,
         state.cell_counts,
@@ -3136,11 +3157,10 @@ function build_pair_list!(
     return n_pairs
 end
 
-# CUDA implementation of GPUCellListNeighborFinder
-
-# CUDA kernel
 function split_gpu_cell_list_coordinates!(
-    x, y, z,
+    x, 
+    y, 
+    z,
     coords,
     n_atoms,
 )
@@ -3178,7 +3198,6 @@ function split_gpu_cell_list_coordinates!(
     return nothing
 end
 
-# Allocates three arrays then launches CUDA kernel
 function split_gpu_cell_list_coordinates(coords)
     n_atoms = length(coords)
 
