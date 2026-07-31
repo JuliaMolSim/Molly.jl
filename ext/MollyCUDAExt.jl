@@ -1964,6 +1964,7 @@ function force_kernel!(
     force_i_y = zero(T)
     force_i_z = zero(T)
 
+    # One warp handles exactly one tile, so the accumulator only needs clearing here
     @inbounds for k in a:b
         opposites_sum[lane, k, warpid] = zero(T)
     end
@@ -1995,12 +1996,15 @@ function force_kernel!(
         sync_warp()
 
         if type == UInt8(0) # CLEAN
-            @inbounds for m in a:warpsize()
-                # `prune_interacting_tiles_kernel!` recorded which iterations can hold an
-                # in-range pair; the rest are skipped before any distance work
-                if (diag_mask >> (m & Int32(31))) & UInt32(1) == UInt32(0)
-                    continue
-                end
+            # Walk only the iterations `prune_interacting_tiles_kernel!` marked as holding
+            # an in-range pair. Bit b covers the pairs with `slot - lane == b (mod 32)`, so
+            # it selects the same slot permutation as `m == b`. Testing all 32 bits with a
+            # branch instead costs a loop header and a divergent branch per skipped
+            # iteration, which the SASS shows dominating the loop.
+            active = diag_mask
+            @inbounds while active != UInt32(0)
+                m = Int32(trailing_zeros(active))
+                active &= active - UInt32(1)
                 slot = ((lane - a + m) & Int32(31)) + a
                 js = sh_stage[slot, warpid]
                 coords_j = js.coords
@@ -2047,10 +2051,10 @@ function force_kernel!(
             @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
 
-            @inbounds for m in a:warpsize()
-                if (diag_mask >> (m & Int32(31))) & UInt32(1) == UInt32(0)
-                    continue
-                end
+            active = diag_mask
+            @inbounds while active != UInt32(0)
+                m = Int32(trailing_zeros(active))
+                active &= active - UInt32(1)
                 slot = ((lane - a + m) & Int32(31)) + a
                 js = sh_stage[slot, warpid]
                 coords_j = js.coords
@@ -2104,7 +2108,6 @@ function force_kernel!(
                 if opposites_sum[lane, k, warpid] != zero(T)
                     CUDA.atomic_add!(pointer(fs_mat, Int64(index_j) * b - (b - k)), -opposites_sum[lane, k, warpid])
                 end
-                opposites_sum[lane, k, warpid] = zero(T)
             end
         end
     end
@@ -2225,14 +2228,11 @@ function force_kernel!(
 
         sync_warp()
         @fastmath force_i_x += opposites_sum[lane, 1, warpid]
-        opposites_sum[lane, 1, warpid] = zero(T)
         if D >= 2
             @fastmath force_i_y += opposites_sum[lane, 2, warpid]
-            opposites_sum[lane, 2, warpid] = zero(T)
         end
         if D >= 3
             @fastmath force_i_z += opposites_sum[lane, 3, warpid]
-            opposites_sum[lane, 3, warpid] = zero(T)
         end
     end
 
@@ -2294,14 +2294,11 @@ function force_kernel!(
 
         if lane <= r
             @fastmath force_i_x += opposites_sum[lane, 1, warpid]
-            opposites_sum[lane, 1, warpid] = zero(T)
             if D >= 2
                 @fastmath force_i_y += opposites_sum[lane, 2, warpid]
-                opposites_sum[lane, 2, warpid] = zero(T)
             end
             if D >= 3
                 @fastmath force_i_z += opposites_sum[lane, 3, warpid]
-                opposites_sum[lane, 3, warpid] = zero(T)
             end
         end
     end
@@ -2482,12 +2479,15 @@ function energy_kernel!(
         sync_warp()
 
         if type == UInt8(0) # CLEAN
-            @inbounds for m in a:warpsize()
-                # `prune_interacting_tiles_kernel!` recorded which iterations can hold an
-                # in-range pair; the rest are skipped before any distance work
-                if (diag_mask >> (m & Int32(31))) & UInt32(1) == UInt32(0)
-                    continue
-                end
+            # Walk only the iterations `prune_interacting_tiles_kernel!` marked as holding
+            # an in-range pair. Bit b covers the pairs with `slot - lane == b (mod 32)`, so
+            # it selects the same slot permutation as `m == b`. Testing all 32 bits with a
+            # branch instead costs a loop header and a divergent branch per skipped
+            # iteration, which the SASS shows dominating the loop.
+            active = diag_mask
+            @inbounds while active != UInt32(0)
+                m = Int32(trailing_zeros(active))
+                active &= active - UInt32(1)
                 slot = ((lane - a + m) & Int32(31)) + a
                 js = sh_stage[slot, warpid]
                 coords_j = js.coords
@@ -2518,10 +2518,10 @@ function energy_kernel!(
             @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
             @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
 
-            @inbounds for m in a:warpsize()
-                if (diag_mask >> (m & Int32(31))) & UInt32(1) == UInt32(0)
-                    continue
-                end
+            active = diag_mask
+            @inbounds while active != UInt32(0)
+                m = Int32(trailing_zeros(active))
+                active &= active - UInt32(1)
                 slot = ((lane - a + m) & Int32(31)) + a
                 js = sh_stage[slot, warpid]
                 coords_j = js.coords
