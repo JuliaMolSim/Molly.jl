@@ -2466,7 +2466,7 @@ function remove_cm_velocity_kernel_3d!(velocities, momentum::CuDeviceVector{T},
 end
 
 
-cconst CELL_BLOCK_SIZE = 32
+const CELL_BLOCK_SIZE = 32
 
 function get_cell_id!(
     cell_ids,
