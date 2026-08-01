@@ -18,6 +18,8 @@ end
 
 use_neighbors(inter::Gravity) = inter.use_neighbors
 
+required_atom_fields(inter::Gravity) = (:mass,)
+
 function Base.zero(gr::Gravity{T}) where T
     return Gravity(gr.cutoff, zero(T), gr.use_neighbors)
 end
@@ -30,7 +32,7 @@ Base.:+(g1::Gravity, g2::Gravity) = Gravity(g1.cutoff, g1.G + g2.G, g1.use_neigh
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
                        args...)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     params = (inter.G, mass(atom_i), mass(atom_j))
     f = force_cutoff(inter.cutoff, inter, r, params)
     return (f / r) * dr
@@ -46,7 +48,7 @@ end
                                   atom_j,
                                   energy_units=u"kJ * mol^-1",
                                   args...)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     params = (inter.G, mass(atom_i), mass(atom_j))
     return pe_cutoff(inter.cutoff, inter, r, params)
 end

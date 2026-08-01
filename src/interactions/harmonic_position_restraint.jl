@@ -9,6 +9,8 @@ The potential energy is defined as
 ```math
 V(\boldsymbol{x}) = \frac{1}{2} k |\boldsymbol{x} - \boldsymbol{x}_0|^2
 ```
+
+Does not contribute to the virial.
 """
 @kwdef struct HarmonicPositionRestraint{K, C}
     k::K

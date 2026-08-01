@@ -384,7 +384,7 @@ To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the ar
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
-Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`.
+Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`, and is applied before constraints are generated.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
 The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -434,8 +434,10 @@ The following tags are supported:
 - `<PeriodicTorsionForce>`: both `<Proper>` and `<Improper>` tags are supported
 - `<CMAPTorsionForce>`
 - `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
+- `<CustomTorsionForce>`: the special case where `energy="k*(theta-theta0)^2"` is supported as it is used to define improper torsions in some force fields
+- `<CustomNonbondedForce>`: the special case of the double exponential potential is supported with `bondCutoff="3"`, global parameters `alpha` and `beta`, and per-particle parameters `sigma` and `epsilon`
 - `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
-- `<AmoebaUreyBradleyForce>`: note that this defines the bond-like part of a general Urey-Bradley interaction and is not specific to the AMOEBA force field
+- `<AmoebaUreyBradleyForce>`: this defines the bond-like part of a general Urey-Bradley interaction and is not specific to the AMOEBA force field, note that `k` is equivalent to the `k/2` harmonic bond factor
 - `<Include>`
 
 The following tags are not yet supported and in general will be ignored rather than throwing an error when reading in a [`MolecularForceField`](@ref):
@@ -443,8 +445,8 @@ The following tags are not yet supported and in general will be ignored rather t
 - `<GBSAOBCForce>`
 - `<CustomBondForce>`
 - `<CustomAngleForce>`
-- `<CustomTorsionForce>`: the special case where `energy="k*(theta-theta0)^2"` is supported as it is used to define improper torsions in some force fields
-- `<CustomNonbondedForce>`
+- `<CustomTorsionForce>`: apart from the special case described above
+- `<CustomNonbondedForce>`: apart from the special case described above
 - `<CustomGBForce>`
 - `<CustomHbondForce>`
 - `<CustomManyParticleForce>`
@@ -527,6 +529,10 @@ end
 # 314.0608014652237 K
 # 362.86427110336984 K
 ```
+
+`ReplicaSystem` records the absolute MD step, and subsequent `simulate!` calls resume from
+`rep_sys.current_step`. Set `initial_step` in the constructor when restoring replica
+coordinates and velocities from a checkpoint.
 
 The accelerated weight histogram method ([`AWHState`](@ref) and [`AWHSimulation`](@ref)) has also been implemented in Molly.jl, allowing enhanced sampling and on-the-fly estimation of free energies along arbitrary collective variables and alchemical transformations. A more detailed overview of this can be found in the [Free energy calculation](@ref) section.
 
@@ -766,6 +772,7 @@ The available specific interactions (1-5 atoms) are:
 - [`HarmonicBond`](@ref) - 2 atoms
 - [`MorseBond`](@ref) - 2 atoms
 - [`FENEBond`](@ref) - 2 atoms
+- [`EwaldExclusion`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
 - [`UreyBradley`](@ref) - 3 atoms
@@ -782,7 +789,23 @@ The available general interactions are:
 - [`ASECalculator`](@ref)
 
 Some interactions combine instances of the above.
-For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
+For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction, the [`EwaldExclusion`](@ref) specific interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
+
+By default, functions like [`potential_energy`](@ref) and [`forces`](@ref) use the interactions in the system.
+However, different interactions can be passed as keyword arguments.
+This can be useful for isolating the contribution of individual interactions:
+```julia
+# Evaluate the potential energy of the system using the interactions in the system
+potential_energy(sys)
+
+# Evaluate the potential energy of the system using only the Lennard-Jones potential
+potential_energy(
+    sys;
+    pairwise_inters=(LennardJones(),),
+    specific_inter_lists=(),
+    general_inters=(),
+)
+```
 
 ### Pairwise interactions
 
@@ -862,6 +885,7 @@ You can use `args...` to indicate unused further arguments, e.g. `Molly.force(in
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 `force_units` can be useful for returning a zero force under certain conditions.
+If you want to use `velocity_i` and `velocity_j` you should set `Molly.pairwise_uses_velocity(::MyPairwiseInter) = true`, otherwise the velocities are passed as `nothing` for speed.
 `step_n` is the step number in the simulator, allowing time-dependent interactions.
 Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called unless you give the `init_step` argument, and can also be 0 to calculate forces before the first step.
 It also doesn't work with [`simulate_remd!`](@ref).
@@ -935,7 +959,9 @@ function Molly.force(inter::MySpecificInter,
                      atom_j,
                      force_units,
                      velocity_i,
-                     velocity_j)
+                     velocity_j,
+                     step_n,
+                     data)
     dr = vector(coords_i, coords_j, boundary)
 
     # Replace this with your force calculation
@@ -947,7 +973,7 @@ function Molly.force(inter::MySpecificInter,
 end
 ```
 Again, most of these arguments are rarely used and can be replaced with `args...`.
-The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k)` and return `SpecificForce3Atoms(f1, f2, f3)`.
+The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k, step_n, data)` and return `SpecificForce3Atoms(f1, f2, f3)`.
 Virial computation is done automatically when required using the force function.
 
 To use your custom interaction, add it to the specific interaction lists along with the atom indices:
@@ -957,9 +983,12 @@ specific_inter_lists = (
         [1, 3],
         [2, 4],
         [MySpecificInter(), MySpecificInter()],
+        ["", ""], # Interaction type information, optional
+        nothing,  # Interaction data, optional
     ), # Don't forget the trailing comma!
 )
 ```
+Giving interaction data, including arrays, as the last argument to the interaction list means that it can be accessed in the [`force`](@ref) and [`potential_energy`](@ref) functions via the `data` argument.
 For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of indices.
 If using the GPU, the inner list of indices and interactions should be moved to the GPU with `CuArray`.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
@@ -974,7 +1003,9 @@ function Molly.potential_energy(inter::MySpecificInter,
                                 atom_j,
                                 energy_units,
                                 velocity_i,
-                                velocity_j)
+                                velocity_j,
+                                step_n,
+                                data)
     # Example harmonic bond interaction
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
@@ -1155,6 +1186,8 @@ The available simulators are:
 - [`LangevinSplitting`](@ref)
 - [`OverdampedLangevin`](@ref)
 - [`NoseHoover`](@ref)
+- [`MTSIntegrator`](@ref)
+- [`MTSLangevinIntegrator`](@ref)
 - [`ReplicaExchangeMD`](@ref)
 - [`MetropolisMonteCarlo`](@ref)
 
@@ -1206,7 +1239,7 @@ function Molly.simulate!(sys,
 
         # Apply the loggers like this
         # Computed quantities can also be given as keyword arguments to apply_loggers!
-        apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
@@ -1278,7 +1311,8 @@ The available couplers are:
 - [`BerendsenBarostat`](@ref)
 - [`CRescaleBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
-Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
+Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being `nothing`.
+[`StormerVerlet`](@ref) does not support coupling methods because its recurrence stores coordinate history rather than advancing velocities as primary state.
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
 temp = 300.0u"K"
@@ -1308,7 +1342,7 @@ end
 Then, define the function that implements the coupling every time step:
 ```julia
 function Molly.apply_coupling!(sys, buffers, coupling::MyCoupler, sim, neighbors, step_n;
-                               n_threads=Threads.nthreads(), rng=Random.default_rng())
+                               n_threads=Threads.nthreads(), rng=Random.default_rng(), kwargs...)
     # Do something to the simulation, e.g. scale the velocities
     # Return whether the coupling has invalidated the currently stored forces,
     #   for example by changing the coordinates
@@ -1331,7 +1365,11 @@ Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
-Contributions from constraints, implicit solvent methods and bias potentials are ignored.
+Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods and bias potentials are ignored.
+During supported constrained simulations, Molly can add constraint contributions to the total virial for steps where a barostat or virial/pressure logger requests it.
+For the initial simulation step, the same preview convention is used so that interactions and constraints both contribute to the logged virial/pressure.
+If a coordinate-scaling coupling method changes the box on a constrained step, virial and pressure loggers record the pre-coupling virial/pressure for that step, matching the state used by the coupling method.
+Other state loggers, such as [`BoxLogger`](@ref), continue to record the current post-coupling state.
 The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
 As described previously, custom general interactions should implement virial calculation if required.
 
@@ -1379,29 +1417,42 @@ Base.values(logger::MyLogger) = logger.history
 Then, define the logging function that is called every step by the simulator:
 ```julia
 function Molly.log_property!(logger::MyLogger,
-                                sys,
-                                neighbors,
-                                step_n;
-                                n_threads=Threads.nthreads(),
-                                kwargs...)
+                             sys,
+                             neighbors,
+                             step_n,
+                             buffers;
+                             n_threads=Threads.nthreads(),
+                             kwargs...)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
 end
 ```
 The use of `n_steps` is optional and is an example of how to record a property periodically throughout the simulation.
+If a custom logger needs the total virial for constrained simulations, define
+[`logger_virial_interval`](@ref) so the simulator can compute the virial on the
+same interval:
+```julia
+Molly.logger_virial_interval(logger::MyLogger) = logger.n_steps
+```
+If it specifically logs pressure, also define [`logger_pressure_interval`](@ref):
+```julia
+Molly.logger_pressure_interval(logger::MyLogger) = logger.n_steps
+```
+Both functions return `Inf` by default, meaning no virial or pressure state is
+needed.
 To use your custom logger, add it to the named tuple of loggers given when creating the [`System`](@ref):
 ```julia
 loggers = (mylogger=MyLogger(10, []),) # Don't forget the trailing comma!
 ```
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
-Running loggers before the first step can be disabled by giving `run_loggers=:skipzero` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
+Running loggers before the first step can be disabled by giving `run_loggers=:skipstart` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
 For example, this runs the loggers 301 times:
 ```julia
 simulate!(sys, simulator, 100) # Default run_loggers=true
-simulate!(sys, simulator, 100; run_loggers=:skipzero)
-simulate!(sys, simulator, 100; run_loggers=:skipzero)
+simulate!(sys, simulator, 100; run_loggers=:skipstart)
+simulate!(sys, simulator, 100; run_loggers=:skipstart)
 ```
 Running loggers can be disabled entirely with `run_loggers=false`, which is the default for [`SteepestDescentMinimizer`](@ref).
 Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
@@ -1410,14 +1461,14 @@ Many times, a logger will just record an observation to an `Array` containing a 
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
 Define your observation function as
 ```julia
-function my_observable(sys::System, neighbors, step_n; n_threads::Integer, kwargs...)
+function my_observable(sys::System, neighbors, step_n, buffers; n_threads::Integer, kwargs...)
     # Probe the system for some desired property
     return observation
 end
 ```
 Keyword arguments `current_forces` and `current_potential_energy` can also be used here to avoid recomputing values that are passed from the simulator:
 ```julia
-function my_pe_observable(sys::System, neighbors; n_threads::Integer,
+function my_pe_observable(sys::System, neighbors, step_n, buffers; n_threads::Integer,
                           current_potential_energy=nothing, kwargs...)
     if isnothing(current_potential_energy)
         # Compute potential energy
@@ -1566,18 +1617,26 @@ SHAKE was originally derived for the Verlet integration scheme ([Ryckaert et al.
 LINCS (LINear Constraint Solver) is a non-iterative constraint algorithm that uses matrix expansion to approximate the inverse of the constraint coupling matrix ([Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)).
 It is typically faster than SHAKE/RATTLE for large systems.
 The implementation in Molly includes explicit velocity constraints.
-The key parameters controlling accuracy are `nrec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `niter`, the number of outer correction iterations for rotational lengthening (default 1).
+The key parameters controlling accuracy are `n_rec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `n_iter`, the number of outer correction iterations for rotational lengthening (default 1).
 Higher values of either improve accuracy at the cost of performance.
 
 !!! note
     LINCS requires that angle constraints are isolated: none of their atoms may participate in distance constraints or in other angle constraints. This is because internally angle constraints are treated as a triangle of distance constraints, so interactions with other constraints may violate the constrained angle.
 
 Currently, constraints are supported by the following simulators:
-- [`SteepestDescentMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
+- [`DPDVelocityVerlet`](@ref)
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
+- [`MTSIntegrator`](@ref)
+- [`MTSLangevinIntegrator`](@ref)
+
+Due to the nature of the velocity treatment in each integrator, the velocities stored in the system are expected to satisfy the constraints only for [`VelocityVerlet`](@ref), [`DPDVelocityVerlet`](@ref), [`MTSIntegrator`](@ref) and [`MTSLangevinIntegrator`](@ref) (in other cases the simulator behaviour is still correct).
+
+The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
+- [`SteepestDescentMinimizer`](@ref)
+
 Simulators incompatible with constraints will print a warning and continue without applying constraints when used with systems containing constraints.
 
 Molly supports [`DistanceConstraint`](@ref) and [`AngleConstraint`](@ref) on CPU and GPU.
@@ -1594,7 +1653,7 @@ dist_constraints = [
 angle_constraints = [AngleConstraint(4, 5, 6, deg2rad(104.5), 0.1u"nm", 0.1u"nm")]
 
 shake = SHAKE_RATTLE(
-    6;
+    n_atoms=6,
     dist_constraints=dist_constraints,
     angle_constraints=angle_constraints,
 )
@@ -1611,7 +1670,7 @@ lincs = LINCS(
     dist_constraints=dist_constraints,
     angle_constraints=angle_constraints,
 )
-# LINCS with 2 distance and 1 angle constraints (nrec=4, niter=1) (implicitly 5 distance constraints)
+# LINCS with 2 distance and 1 angle constraints (n_rec=4, n_iter=1) (implicitly 5 distance constraints)
 ```
 `constraints=(lincs,)` can then be given when setting up a [`System`](@ref).
 
@@ -1752,8 +1811,14 @@ julia> random_velocity(10.0u"g/mol", 300.0u"K"; rng=Xoshiro(10))
    0.23543457751795477 nm ps^-1
 
 ```
-This may not apply across Julia versions, though you can use [StableRNGs.jl](https://github.com/JuliaRandom/StableRNGs.jl).
-It also does not apply across different backends such as CPU and GPU.
+This may not apply across Julia versions or across different backends such as CPU and GPU.
+
+Functions that generate randomness for many atoms at once may use the [Philox4x32-10](https://doi.org/10.1145/2063384.2063405) algorithm from [PhiloxRNG.jl](https://github.com/medyan-dev/PhiloxRNG.jl) internally, with the given `rng` only being used to seed Philox.
+Philox generates the same raw random numbers on all backends for the same `rng` state.
+Still, whole simulations are not expected to match bit for bit across backends due to floating point rounding differences.
+
+Other functions, such as [`random_velocity`](@ref) and the Monte Carlo methods, draw from the given `rng` directly.
+Some functions require `Random.default_rng()` for thread safety, and will error if given a different `rng`.
 
 ## Performance tips
 

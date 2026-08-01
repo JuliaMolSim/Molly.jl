@@ -59,10 +59,10 @@ uses_gpu_neighbor_finder(AT) = false
 
 """
     GPUNeighborFinder(; n_atoms, dist_cutoff,
-                      excluded_pairs=(), special_pairs=(), n_steps_reorder=25,
+                      excluded_pairs=(), special_pairs=(), n_steps_reorder=10,
                       initialized=false, device_vector_type)
     GPUNeighborFinder(; eligible, dist_cutoff,
-                      special=nothing, n_steps_reorder=25,
+                      special=nothing, n_steps_reorder=10,
                       initialized=false, device_vector_type=nothing)
 
 Neighbor finder for CUDA systems that uses Molly's tiled pairwise kernels.
@@ -324,7 +324,7 @@ function GPUNeighborFinder(;
                             excluded_pairs=(),
                             special_pairs=(),
                             special=nothing,
-                            n_steps_reorder=25,
+                            n_steps_reorder=10,
                             initialized=false,
                             device_vector_type=nothing)
     if !isnothing(n_atoms)
@@ -605,11 +605,19 @@ end
 
 # Add a pair to the pair list
 # If the buffer size is large enough update the element, otherwise push a new element
-#   to `neighbor.list`
-function push_pair!(pair, neighbors::NeighborList, eligible, special)
-    (; i, j) = pair
-    if eligible[i, j]
-        push!(neighbors, (Int32(i), Int32(j), special[i, j]))
+#   to `neighbors.list`
+@inline function push_pair!(pair, neighbors::NeighborList, eligible, special)
+    i, j = pair.i, pair.j
+    @inbounds if eligible[i, j]
+        n = neighbors.n + 1
+        neighbors.n = n
+        list = neighbors.list
+        element = (i, j, special[i, j])
+        if n > length(list)
+            push!(list, element)
+        else
+            @inbounds list[n] = element
+        end
     end
     return neighbors
 end
@@ -619,13 +627,47 @@ CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list))
 CellListMap.reset_output!(nl::NeighborList) = empty!(nl)
 CellListMap.reducer(nl1::NeighborList, nl2::NeighborList) = append!(nl1, nl2)
 
+function CellListMap.reduce_output!(output::NeighborList, output_threaded::Vector{<:NeighborList})
+    n_start = output.n
+    n_tot = n_start
+    for nb in output_threaded
+        n_tot += nb.n
+    end
+    if length(output.list) < n_tot
+        resize!(output.list, n_tot)
+    end
+
+    if (n_tot - n_start) > 100_000 && length(output_threaded) > 1 && Threads.nthreads() > 1
+        Threads.@threads for i in eachindex(output_threaded)
+            offset = n_start
+            @inbounds for jb in 1:(i - 1)
+                offset += output_threaded[jb].n
+            end
+            nb = output_threaded[i]
+            if nb.n > 0
+                copyto!(output.list, offset + 1, nb.list, 1, nb.n)
+            end
+        end
+    else
+        offset = n_start
+        for nb in output_threaded
+            if nb.n > 0
+                copyto!(output.list, offset + 1, nb.list, 1, nb.n)
+                offset += nb.n
+            end
+        end
+    end
+
+    output.n = n_tot
+    return output
+end
+
 function find_neighbors(sys::System{D, AT},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=sys.neighbor_finder.clm_particlesystem.neighbors, 
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where {D, AT}
-
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
@@ -634,13 +676,13 @@ function find_neighbors(sys::System{D, AT},
     CellListMap.update!(nf.clm_particlesystem; 
         positions=from_device(sys.coords),
         unitcell=first(clm_unitcell_arg(sys.boundary)), 
-        parallel=n_threads > 1,
+        parallel=(n_threads > 1),
     )
 
-    # Update the neighborlist
+    # Update the neighbor list
     neighbors = CellListMap.pairwise!(
         (p, neighbors) -> push_pair!(p, neighbors, nf.eligible, nf.special), 
-        nf.clm_particlesystem
+        nf.clm_particlesystem,
     )
 
     if AT <: AbstractGPUArray

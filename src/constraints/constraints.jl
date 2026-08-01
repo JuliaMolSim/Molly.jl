@@ -53,6 +53,69 @@ struct AngleConstraint{D, I}
     end
 end
 
+abstract type AbstractConstraintApplication end
+
+struct PositionConstraintApplication <: AbstractConstraintApplication end
+
+struct VelocityConstraintApplication <: AbstractConstraintApplication end
+
+Base.@kwdef struct ConstraintApplicationContext{
+    K <: AbstractConstraintApplication, B, A, DT, S, CB, VB,
+}
+    kind::K
+    needs_virial::Bool = false
+    step_n::Int = 0
+    atoms::A = nothing
+    dt::DT = nothing
+    virial_scale::S = 1
+    buffers::B = nothing
+    coords_buffer::CB = nothing
+    velocities_buffer::VB = nothing
+end
+
+function copyto_constraint_scratch!(scratch, values)
+    if isnothing(scratch)
+        return copy(values)
+    elseif scratch isa Base.RefValue
+        if isnothing(scratch[])
+            scratch[] = similar(values)
+        end
+        scratch[] .= values
+        return scratch[]
+    else
+        scratch .= values
+        return scratch
+    end
+end
+
+# These types will enable coalesced memory access via StructArray{ConstraintKernelData}
+abstract type ConstraintKernelData{D, N, M} end
+
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer) = 1
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer) = 1
+@inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer, l::Integer) = 1
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer)
+    return λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+end
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer)
+    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    return λ
+end
+
+@inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer, l::Integer)
+    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[l]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[l]))
+    λ = min(λ, λ_mixing(MinimumMixing(), atoms[k], atoms[l]))
+    return λ
+end
+
 to_distance_constraints(ac::AngleConstraint) = (
     DistanceConstraint(ac.i, ac.j, ac.dist_ij), # i-j bond
     DistanceConstraint(ac.j, ac.k, ac.dist_jk), # j-k bond
@@ -132,7 +195,7 @@ end
 
 function constrained_pairs(constraint_clusters)
     pairs = Tuple{Int32, Int32}[]
-    for interaction_list in cluster_interactions.(constraint_clusters)
+    for interaction_list in cluster_interactions.(host_constraint_clusters(constraint_clusters))
         for (i, j, _) in interaction_list
             i32 = Int32(i)
             j32 = Int32(j)
@@ -148,11 +211,11 @@ function constrained_pairs(constraint_clusters)
 end
 
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
-    atom_interactions = cluster_interactions.(constraint_clusters)
     if neighbor_finder isa GPUNeighborFinder
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
+    atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))
     if isa(neighbor_finder.eligible, AbstractGPUArray)
         i_idx, j_idx = Int[], Int[]
 
@@ -286,71 +349,78 @@ end
 
 Calculate the number of degrees of freedom lost from the system due to the constraints.
 
-All constrained molecules with 3 or more atoms are assumed to be non-linear.
-The table below shows the degrees of freedom for different types of structures in the
-system where D is the dimensionality.
-When using constraint algorithms the vibrational degrees of freedom are removed from a molecule.
-
-| DoF           | Monoatomic | Linear Molecule | Non-Linear Molecule |
-| ------------- | ---------- | --------------- | ------------------- |
-| Translational |     D      |       D         |        D            |
-| Rotational    |     0      |     D - 1       |        D            |
-| Vibrational   |     0      |  D*N - (2D - 1) |    D*N - 2D         |
-| Total         |     D      |      D*N        |       D*N           |
-
+Each independent holonomic distance constraint removes exactly one degree of freedom,
+independent of the dimensionality D, so the number of degrees of freedom lost by a cluster
+is the number of distance constraints it applies. This does not assume the cluster is a rigid
+body: for example a 3-atom cluster with two bond constraints (such as a flexible-angle water)
+removes two degrees of freedom, not three.
 =#
 function n_dof_lost(D::Integer, constraint_clusters::AbstractVector)
-    # Bond constraints remove vibrational DoFs
-    vibrational_dof_lost = 0
-    # Assumes constraints are a non-linear chain
+    # Each cluster removes one degree of freedom per distance constraint it applies
+    dof_lost = 0
     for cluster in constraint_clusters
-        N = n_atoms_cluster(cluster)
-        # If N > 2 assume non-linear (e.g. breaks for CO2)
-        vibrational_dof_lost += ((N == 2) ? D*N - (2*D - 1) : D*(N - 2))
+        dof_lost += n_constraints(cluster)
     end
-    return vibrational_dof_lost
+    return dof_lost
 end
 
-function n_dof(D::Integer, n_atoms::Integer, boundary)
-    return D * n_atoms - (D - n_infinite_dims(boundary))
+function n_dof_lost(D::Integer,
+                    constraint_clusters::AbstractVector{C}) where {C <: ConstraintKernelData}
+    return length(constraint_clusters) * n_constraints(C)
+end
+
+# This assumes that the center of mass motion is being removed
+# For infinite boundary systems the rotation around the center of mass is not currently
+#   removed, so this also applies
+function calculate_n_dof(D::Integer, n_atoms::Integer, boundary)
+    return D * (n_atoms - 1)
 end
 
 """
-    apply_position_constraints!(sys, coord_storage)
-    apply_position_constraints!(sys, coord_storage, vel_storage, dt)
+    apply_position_constraints!(sys, coord_storage; context=nothing, n_threads=Threads.nthreads(),
+                                strictness=:warn)
+    apply_position_constraints!(sys, coord_storage, vel_storage, dt; context=nothing,
+                                n_threads=Threads.nthreads(), strictness=:warn)
 
 Apply the coordinate constraints to the system.
 
 If `vel_storage` and `dt` are provided then velocity constraints are applied as well.
 """
-function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys, coord_storage; context=nothing,
+                                     n_threads::Integer=Threads.nthreads(),
+                                     strictness=default_strictness())
     for ca in sys.constraints
-        apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+        apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads,
+                                    strictness=strictness)
     end
     return sys
 end
 
 function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
-                                     n_threads::Integer=Threads.nthreads())
+                                     context=nothing, n_threads::Integer=Threads.nthreads(),
+                                     strictness=default_strictness())
     if length(sys.constraints) > 0
         vel_storage .= -sys.coords ./ dt
         for ca in sys.constraints
-            apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
+            apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads,
+                                        strictness=strictness)
         end
-        vel_storage .+= sys.coords ./ dt
-        sys.velocities .+= vel_storage
+        sys.velocities .+= vel_storage .+ sys.coords ./ dt
     end
     return sys
 end
 
 """
-    apply_velocity_constraints!(sys)
+    apply_velocity_constraints!(sys; context=nothing, n_threads=Threads.nthreads(),
+                                strictness=:warn)
 
 Apply the velocity constraints to the system.
 """
-function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+function apply_velocity_constraints!(sys; context=nothing, n_threads::Integer=Threads.nthreads(),
+                                     strictness=default_strictness())
     for ca in sys.constraints
-        apply_velocity_constraints!(sys, ca)
+        apply_velocity_constraints!(sys, ca; context=context, n_threads=n_threads,
+                                    strictness=strictness)
     end
     return sys
 end
@@ -428,11 +498,14 @@ function to_backend(arr, old::A, new::B) where {A <: Backend, B <: Backend}
     return out
 end
 
-# These types will enable coalesced memory access via StructArray{ConstraintKernelData}
-abstract type ConstraintKernelData{D, N, M} end
-
 n_constraints(::ConstraintKernelData{<:Any, N}) where {N} = N
+n_constraints(::Type{<:ConstraintKernelData{<:Any, N}}) where {N} = N
 n_atoms_cluster(::ConstraintKernelData{<:Any, <:Any, M}) where {M} = M
+n_atoms_cluster(::Type{<:ConstraintKernelData{<:Any, <:Any, M}}) where {M} = M
+
+host_constraint_clusters(constraint_clusters) = constraint_clusters
+host_constraint_clusters(constraint_clusters::StructArray) =
+    replace_storage(Array, constraint_clusters)
 
 struct NoClusterData <: ConstraintKernelData{Nothing, 0, 0} end
 
@@ -520,10 +593,54 @@ cluster_interactions(kd::AngleClusterData) = (
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
 
+unique_ind_list(l) = sort(collect(Set(l)))
+
+constrained_atom_inds(sys::System) = constrained_atom_inds(sys.constraints)
+
 function constrained_atom_inds(constraints::Union{Tuple, NamedTuple})
     inds_constrained = Int[]
     for ca in constraints
         append!(inds_constrained, constrained_atom_inds(ca))
     end
-    return inds_constrained
+    return unique_ind_list(inds_constrained)
+end
+
+sort_pair(i, j, d) = (min(i, j), max(i, j), d)
+
+unique_pair_list(l) = sort(
+    collect(Set(l));
+    lt=((p1, p2) -> p1[1] < p2[1] || (p1[1] == p2[1] && p1[2] < p2[2])),
+)
+
+constrained_atom_pairs(sys::System) = constrained_atom_pairs(sys.constraints)
+
+function constrained_atom_pairs(constraints::Union{Tuple, NamedTuple})
+    if iszero(length(constraints))
+        return []
+    else
+        pairs_constrained = constrained_atom_pairs(first(constraints))
+        for ca in constraints[2:end]
+            append!(pairs_constrained, constrained_atom_pairs(ca))
+        end
+        return unique_pair_list(pairs_constrained)
+    end
+end
+
+function constraints_to_bonds(sys::System{<:Any, AT, T}, k_in) where {AT, T}
+    cons_pairs = constrained_atom_pairs(sys)
+    if length(cons_pairs) > 0
+        bond_is, bond_js = Int32[], Int32[]
+        D = typeof(first(cons_pairs)[3])
+        k = T(k_in)
+        bond_inters = HarmonicBond{typeof(k), D}[]
+        for (i, j, d) in cons_pairs
+            push!(bond_is, i)
+            push!(bond_js, j)
+            push!(bond_inters, HarmonicBond(k, d))
+        end
+        return InteractionList2Atoms(to_device(bond_is, AT), to_device(bond_js, AT),
+                                     to_device(bond_inters, AT))
+    else
+        return InteractionList2Atoms(Any)
+    end
 end

@@ -50,6 +50,51 @@
     @test 0.35              < std(vels_nounits_1)  < 0.55
     @test 0.35              < std(vels_nounits_2)  < 0.55
 
+    for D in 2:3
+        for FT in (Float32, Float64)
+            local natoms = UInt64(1_000)
+            local vel_flat = collect(Iterators.flatten(SVector{D,FT}[
+                [Molly.randn_svec(SVector{D,FT}, i, UInt64(0), UInt64(0), natoms) for i in UInt64(1):natoms];
+                [Molly.randn_svec(SVector{D,FT}, i+2natoms, UInt64(0), UInt64(0), natoms) for i in UInt64(1):natoms];
+                [Molly.randn_svec(SVector{D,FT}, i, UInt64(1), UInt64(0), natoms) for i in UInt64(1):natoms];
+                [Molly.randn_svec(SVector{D,FT}, i, UInt64(0), UInt64(1), natoms) for i in UInt64(1):natoms];
+            ]))
+            @test 0.9  < std(vel_flat)  < 1.1
+            @test abs(mean(vel_flat)) < 0.1
+            local n_repeated = length(vel_flat) - length(unique(vel_flat))
+            if FT === Float32
+                # Birthday paradox means this is not that unlikely
+                @test n_repeated < 2
+            else
+                @test n_repeated == 0
+            end
+        end
+    end
+
+    @testset "random_velocities FT=$FT" for FT in (Float32, Float64)
+        local n_atoms = 1_000
+        local atom_mass = FT(12.0)u"g/mol"
+        local temp = FT(300.0)u"K"
+        local boundary = CubicBoundary(FT(10.0)u"nm")
+        local atoms = [Atom(mass=atom_mass) for _ in 1:n_atoms]
+        local coords = [zero(SVector{3, FT})u"nm" for _ in 1:n_atoms]
+        local velocities = [random_velocity(atom_mass, temp) for _ in 1:n_atoms]
+        local sys = System(atoms=atoms, coords=coords, boundary=boundary, velocities=velocities)
+        local vel_flat = collect(Iterators.flatten([
+            random_velocities(sys, temp; rng=Xoshiro(10));
+            random_velocities(sys, temp; rng=Xoshiro(1234));
+        ]))
+        local σ = sqrt(sys.k * temp / atom_mass)
+        @test 0.9σ < std(vel_flat) < 1.1σ
+        @test abs(mean(vel_flat)) < 0.1σ
+        local n_repeated = length(vel_flat) - length(unique(vel_flat))
+        if FT === Float32
+            @test n_repeated < 2
+        else
+            @test n_repeated == 0
+        end
+    end
+
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"nm")
@@ -90,6 +135,57 @@
     @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm"; atol=1e-6u"nm")
     @test TriclinicBoundary(b.basis_vectors) == b
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
+    triclinic_cache(b) = (
+        b.cot_bprojyz_cprojyz,
+        b.cprojxy_x_over_z,
+        b.cprojxy_y_over_z,
+        b.cot_a_b,
+    )
+    @test all(isfinite, triclinic_cache(b))
+
+    for T in (Float32, Float64)
+        H = @SMatrix [
+            T(5.2)  zero(T)  zero(T)
+            zero(T) T(5.1)   zero(T)
+            zero(T) zero(T)  T(5.8)
+        ]
+        b_ortho = TriclinicBoundary(H)
+
+        @test all(isfinite, triclinic_cache(b_ortho))
+        @test all(iszero, triclinic_cache(b_ortho))
+    end
+
+    lengths = SVector(5.2, 5.1, 5.8)
+    b_cubic = CubicBoundary(lengths)
+    b_triclinic = TriclinicBoundary(@SMatrix [
+        lengths[1] 0.0        0.0
+        0.0        lengths[2] 0.0
+        0.0        0.0        lengths[3]
+    ])
+    for coord in (
+        SVector(1.0, 2.0, 3.0),
+        SVector(6.1, -0.2, 12.0),
+        SVector(-5.3, 10.4, -0.1),
+    )
+        @test wrap_coords(coord, b_triclinic) ≈ wrap_coords(coord, b_cubic)
+    end
+
+    H_skewed = @SMatrix [
+        4.0 0.8 0.4
+        0.0 3.5 0.6
+        0.0 0.0 3.0
+    ]
+    b_skewed = TriclinicBoundary(H_skewed)
+    @test all(isfinite, triclinic_cache(b_skewed))
+    for coord in (
+        SVector(1.0, 2.0, 3.0),
+        SVector(5.5, -1.0, 7.2),
+        SVector(-3.0, 8.0, -2.0),
+    )
+        fractional = H_skewed \ coord
+        expected = H_skewed * (fractional .- floor.(fractional))
+        @test wrap_coords(coord, b_skewed) ≈ expected
+    end
 
     @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
@@ -221,6 +317,34 @@
         coords_diff = from_device(sys.coords) .- from_device(coords_start)
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
     end
+
+    for AT in array_list
+        a1 = to_device([SVector(1.0, 2.0)u"nm"   , SVector(3.0, 4.0)u"nm"   ], AT)
+        a2 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(7.0, 8.0)u"nm/ps"], AT)
+        a3 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(NaN, 8.0)u"nm/ps"], AT)
+        Molly.check_array_nans((a1, a2), ("a1", "a2"), 10)
+        @test_throws ErrorException Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
+    end
+end
+
+@testset "Device conversion" begin
+    cpu = collect(1:5)
+    # to_device on a CPU array with an Array target is a no-op that avoids copying
+    @test to_device(cpu, Array) === cpu
+    # from_device on a CPU array is a no-op that avoids copying
+    @test from_device(cpu) === cpu
+
+    for AT in array_list
+        dev = to_device(cpu, AT)
+        @test dev isa AT
+        @test Array(dev) == cpu
+        # A device array already of the target type is returned unchanged, no copy
+        @test to_device(dev, AT) === dev
+        # from_device round-trips back to a plain Array
+        back = from_device(dev)
+        @test back isa Array
+        @test back == cpu
+    end
 end
 
 @testset "Trajectory" begin
@@ -336,6 +460,50 @@ end
         diff = mean(norm.(forces(sys) .- fs_openmm))
         @test diff < FT(0.15)u"kJ * mol^-1 * nm^-1"
     end
+end
+
+@testset "Force field XML options" begin
+    ff_garnet = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml"); units=false)
+    @test ff_garnet.dispersion_correction == false
+    @test ff_garnet.custom_nonbonded == true
+    @test ff_garnet.global_params == [12.159626, 4.326311]
+    @test_throws ArgumentError System(
+        joinpath(data_dir, "ethanol_garnet.pdb"),
+        ff_garnet;
+        units=false,
+        dispersion_correction=true,
+    )
+
+    ff_tip3p = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=false)
+    @test ff_tip3p.custom_nonbonded == false
+
+    ff_fp = joinpath(ff_dir, "tip4pfb.xml")
+    @test_throws ErrorException MolecularForceField(ff_fp, ff_fp)
+end
+
+@testset "Double exponential force field setup" begin
+    ff = MolecularForceField(
+        joinpath(ff_dir, "ethanol_garnet.xml");
+        custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
+    )
+    sys = System(
+        joinpath(data_dir, "ethanol_garnet.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        dist_cutoff=1.0u"nm",
+    )
+
+    dexp = only(inter for inter in sys.pairwise_inters if inter isa DoubleExponential)
+    coul = only(inter for inter in sys.pairwise_inters if inter isa CoulombReactionField)
+    @test dexp.α == 12.159626
+    @test dexp.β == 4.326311
+    @test iszero(dexp.weight_special)
+    @test coul.weight_special == 0.5705855
+    @test isapprox(
+        potential_energy(sys),
+        -62495.02042543085u"kJ * mol^-1";
+        atol=1.0u"kJ * mol^-1",
+    )
 end
 
 @testset "Neighbor lists" begin
@@ -499,6 +667,14 @@ end
         strictness=:nowarn,
     )
     gpu_neighbors_ref = find_neighbors(gpu_ref_sys)
+    @test_throws ErrorException System(
+        joinpath(data_dir, "water_3mol_cubic.pdb"),
+        ff;
+        dist_cutoff=dist_cutoff,
+        dist_buffer=0.0u"nm",
+        neighbor_finder_type=DistanceNeighborFinder,
+        strictness=:error,
+    )
 
     for AT in array_list[2:end]
         sys_gpu = System(
@@ -630,14 +806,48 @@ end
         @test repsys.state_pairwise_inters[i] == sys.pairwise_inters
     end
 
-    # Test initialization with loggers and extra data
+    # Test initialization with replica-system-owned loggers and extra data
     replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)) for i in 1:n_replicas]
 
     repsys2 = ReplicaSystem(
         thermo_states,
         [copy(coords) for _ in 1:n_replicas];
         replica_loggers=replica_loggers,
+        initial_step=12,
         data="test_data_repsys",
+    )
+    remd_sim = ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps",
+    )
+    @test_throws MethodError ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps";
+        replica_loggers=replica_loggers,
+    )
+    @test_throws MethodError ReplicaExchangeMD(
+        dt=0.002u"ps",
+        exchange_time=0.02u"ps";
+        exchange_logger=ReplicaExchangeLogger(Float64, n_replicas),
+    )
+    @test repsys.current_step == 0
+    @test repsys2.current_step == 12
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        initial_step=-1,
+    )
+    shared_writer = TrajectoryWriter(10, tempname() * ".dcd")
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        replica_loggers=[(trj=shared_writer,) for _ in 1:n_replicas],
+    )
+    shared_path = tempname() * ".dcd"
+    @test_throws ArgumentError ReplicaSystem(
+        thermo_states,
+        [copy(coords) for _ in 1:n_replicas];
+        replica_loggers=[(trj=TrajectoryWriter(10, shared_path),) for _ in 1:n_replicas],
     )
 
     sys2 = System(

@@ -129,6 +129,7 @@ if GROUP in ("All", "NotGradients")
     include("bias.jl")
     include("coupling.jl")
     include("constraints.jl")
+    include("tss.jl")
     include("analysis.jl")
     if run_cuda_tests
         include("gpu_consistency.jl")

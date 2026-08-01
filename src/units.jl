@@ -17,6 +17,31 @@ Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)
 """
 ustrip_vec(x...) = ustrip.(x...)
 
+function check_force_units(F, force_units)
+    if unit(F) != force_units
+        error("system force units are ", force_units, " but encountered force units ", unit(F))
+    end
+end
+
+check_force_units(F::SVector, force_units) = @inbounds check_force_units(F[1], force_units)
+
+function check_energy_units(E, energy_units)
+    if unit(E) != energy_units
+        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
+    end
+end
+
+@inline function checked_ustrip(x, force_units)
+    check_force_units(x, force_units)
+    return ustrip.(x)
+end
+
+@inline function checked_ustrip(x::SVector{N, <:Unitful.Quantity{T, D, U}}, ::U) where {N, T, D, U}
+    return SVector{N, T}(ntuple(i -> ustrip(x[i]), Val(N)))
+end
+
+@inline checked_ustrip(x::SVector{<:Any, <:AbstractFloat}, ::typeof(NoUnits)) = x
+
 # Parses the length, mass, velocity, energy and force units and verifies they are
 #   correct and consistent with other parameters passed to the system
 function check_units(atoms, coords, velocities, energy_units, force_units,
@@ -64,30 +89,19 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
         vel_units, mass_units, energy_units, force_units))
 end
 
-function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
-    atoms = from_device(atoms_dev)
-    box_units = unit(length_type(boundary))
-
-    if !all(sys_units[:length] .== box_units)
-        throw(ArgumentError("simulation box constructed with $box_units but length unit " *
-                            "on coords was $(sys_units[:length])"))
+function check_other_units(atoms, boundary, sys_units::NamedTuple)
+    if unit(length_type(boundary)) != sys_units[:length]
+        throw(ArgumentError("simulation box constructed with $(unit(length_type(boundary))) " *
+                            "but length unit of coords was $(sys_units[:length])"))
     end
 
-    sigmas   = getproperty.(atoms[hasproperty.(atoms, :σ)], :σ)
-    epsilons = getproperty.(atoms[hasproperty.(atoms, :ϵ)], :ϵ)
-
-    if !all(sigmas .== 0.0u"nm")
-        σ_units = unit.(sigmas)
-        if !all(sys_units[:length] .== σ_units)
-            throw(ArgumentError("Atom σ has $(σ_units[1]) units but length unit on coords " *
+    for at in from_device(atoms)
+        if hasproperty(at, :σ) && at.σ != 0.0u"nm" && unit(at.σ) != sys_units[:length]
+            throw(ArgumentError("Atom σ has $(unit(at.σ)) units but length unit of coords " *
                                 "was $(sys_units[:length])"))
         end
-    end
-
-    if !all(epsilons .== 0.0u"kJ * mol^-1")
-        ϵ_units = unit.(epsilons)
-        if !all(sys_units[:energy] .== ϵ_units)
-            throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit " *
+        if hasproperty(at, :ϵ) && at.ϵ != 0.0u"kJ * mol^-1" && unit(at.ϵ) != sys_units[:energy]
+            throw(ArgumentError("Atom ϵ has $(unit(at.ϵ)) units but system energy unit " *
                                 "was $(sys_units[:energy])"))
         end
     end
@@ -195,20 +209,6 @@ function convert_k_units(T, k, energy_units, strictness)
         throw(ArgumentError("energy units do not have dimensions of energy: $energy_units"))
     end
     return k_converted
-end
-
-function check_force_units(F, force_units)
-    if unit(F) != force_units
-        error("system force units are ", force_units, " but encountered force units ", unit(F))
-    end
-end
-
-check_force_units(F::SVector, force_units) = @inbounds check_force_units(F[1], force_units)
-
-function check_energy_units(E, energy_units)
-    if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
-    end
 end
 
 function energy_remove_mol(x)

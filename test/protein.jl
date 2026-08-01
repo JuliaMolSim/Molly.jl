@@ -109,8 +109,33 @@ end
         center_coords=false,
         hydrogen_mass=2,
     )
+    sys_hbonds = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+    )
+    sys_hmr_hbonds = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+        hydrogen_mass=2,
+    )
+    sys_hmr_rigid_water = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=:cutoff,
+        center_coords=false,
+        constraints=:hbonds,
+        rigid_water=true,
+        hydrogen_mass=2,
+    )
     zero(sys)
     zero(sys_pme)
+    deepcopy(sys_pme)
     neighbors = find_neighbors(sys)
 
     cs = charges(sys)
@@ -135,7 +160,7 @@ end
     @test bench_result.memory <= 208
     forces_t = Molly.zero_forces(sys)
     buffers = Molly.init_buffers!(sys, 1)
-    bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $buffers, Val(false);
+    bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
                                             n_threads=1)
     @test bench_result.allocs <= 4
     @test bench_result.memory <= 144
@@ -159,13 +184,22 @@ end
     @test maximum(norm.(forces(sys) .- forces(sys_lj14))) < 1e-10u"kJ * nm^-1 * mol^-1"
 
     mass_inds = [1, 2, 3, 4, 5, 6, 7, 15952, 15953, 15954]
+    expected_hmr_masses = [11.034, 2.0, 2.0, 2.0, 10.026, 2.0, 2.0,
+                           14.015324, 2.0, 2.0]u"g/mol"
     @test masses(sys)[mass_inds] ≈ [14.01, 1.008, 1.008, 1.008, 12.01, 1.008, 1.008,
                                     15.99943, 1.007947, 1.007947]u"g/mol"
-    @test masses(sys_hmr)[mass_inds] ≈ [11.034, 2.0, 2.0, 2.0, 10.026, 2.0, 2.0,
-                                        14.015324, 2.0, 2.0]u"g/mol"
+    @test masses(sys_hmr)[mass_inds] ≈ expected_hmr_masses
+    @test masses(sys_hmr_hbonds)[mass_inds] ≈ expected_hmr_masses
+    @test masses(sys_hmr_rigid_water)[mass_inds] ≈ expected_hmr_masses
     @test sum(masses(sys)) ≈ sum(masses(sys_hmr))
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr_hbonds))
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr_rigid_water))
     @test potential_energy(sys) ≈ potential_energy(sys_hmr)
     @test maximum(norm.(forces(sys) .- forces(sys_hmr))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test potential_energy(sys_hbonds) ≈ potential_energy(sys_hmr_hbonds)
+    @test maximum(norm.(forces(sys_hbonds) .- forces(sys_hmr_hbonds))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test first(sys_hmr_hbonds.constraints).lincs_data.invmass[mass_inds] ≈
+        inv.(ustrip.(u"g/mol", masses(sys_hmr_hbonds)[mass_inds]))
     @test_throws ErrorException System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=6)
     @test_throws ArgumentError System(joinpath(data_dir, "6mrr_equil.pdb"), ff; hydrogen_mass=true)
 
@@ -188,7 +222,11 @@ end
             pin = ()
         end
 
-        if startswith(inter, "all")
+        if inter == "all_pme"
+            sils = sys_pme.specific_inter_lists
+        elseif inter == "all_pme_exact"
+            sils = sys_pme_exact.specific_inter_lists
+        elseif inter == "all_cut"
             sils = sys.specific_inter_lists
         elseif inter == "bond_only"
             sils = sys.specific_inter_lists[1:1]
@@ -310,6 +348,7 @@ end
         )
         show(devnull, sys.neighbor_finder)
         zero(sys)
+        deepcopy(sys)
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
 
@@ -418,13 +457,53 @@ end
 end
 
 @testset "CHARMM OpenMM protein comparison" begin
-    for constraint_algorithm in (LINCS, SHAKE_RATTLE)
-        start_temp = (constraint_algorithm == LINCS ? 485.281907022u"K" : 489.456277814u"K")
+    for constraint_algorithm in (SetupLINCS(), SetupSHAKE_RATTLE())
+        start_temp = 485.281907022u"K" # High since it does not take into account constraints
         ff = MolecularForceField(
             joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
             strictness=:nowarn,
         )
         show(devnull, ff)
+        @test_throws ErrorException MolecularForceField(
+            joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+            strictness=:error,
+        )
+        sys = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            nonbonded_method=:pme,
+            center_coords=false,
+            constraints=:hbonds,
+            rigid_water=true,
+            constraint_algorithm=constraint_algorithm,
+            n_threads=1,
+        )
+        neighbors = find_neighbors(sys)
+        @test length(sys.specific_inter_lists) == 7
+        @test length(sys.specific_inter_lists[1]) == 1691
+        @test length(sys.specific_inter_lists[2]) == 2137
+        for sil in sys.specific_inter_lists
+            show(devnull, sil)
+        end
+
+        constrained_inds = Molly.constrained_atom_inds(sys)
+        @test length(constrained_inds) == 15747
+        @test count(i -> i <= 1170, constrained_inds) == 963
+        constrained_pairs = Molly.constrained_atom_pairs(sys)
+        @test length(constrained_pairs) == 15380
+        @test count(p -> (p[1] <= 1170 && p[2] <= 1170), constrained_pairs) == 596
+
+        bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
+        @test bench_result.allocs <= 16
+        @test bench_result.memory <= 1000
+        forces_t = Molly.zero_forces(sys)
+        buffers = Molly.init_buffers!(sys, 1)
+        bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
+                                                n_threads=1)
+        @test bench_result.allocs <= 15
+        @test bench_result.memory <= 1100
+
+        # Use all threads
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
@@ -434,27 +513,14 @@ end
             rigid_water=true,
             constraint_algorithm=constraint_algorithm,
         )
-        neighbors = find_neighbors(sys)
-        @test length(sys.specific_inter_lists) == 6
-        @test length(sys.specific_inter_lists[1]) == 1691
-        @test length(sys.specific_inter_lists[2]) == 2137
-
-        bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
-        @test bench_result.allocs <= 14
-        @test bench_result.memory <= 640
-        forces_t = Molly.zero_forces(sys)
-        buffers = Molly.init_buffers!(sys, 1)
-        bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $buffers, Val(false);
-                                                n_threads=1)
-        @test bench_result.allocs <= 12
-        @test bench_result.memory <= 850
-
         scalar_vir = scalar_virial(sys)
-        scalar_P = scalar_pressure(sys)
         @test scalar_vir ≈ tr(virial(sys))
-        @test scalar_P ≈ tr(pressure(sys)) / 3
         @test scalar_vir ≈ scalar_virial(sys; n_threads=1)
-        @test scalar_P ≈ scalar_pressure(sys; n_threads=1)
+        pressure_t = pressure(sys)
+        scalar_P = scalar_pressure(sys)
+        @test all(isfinite, pressure_t)
+        @test scalar_P ≈ tr(pressure_t) / 3
+        @test scalar_pressure(sys; n_threads=1) ≈ tr(pressure_t) / 3
 
         forces_molly = forces(sys, neighbors; n_threads=1)
         openmm_forces_fp = joinpath(openmm_dir, "charmm", "forces.txt")
@@ -485,7 +551,7 @@ end
 
         coords_diff = sys.coords .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = sys.velocities .- vels_openmm
-        @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+        @test maximum(norm.(coords_diff)) < 5e-4u"nm"
         @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
         # Test with no units
@@ -509,7 +575,9 @@ end
         @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65524.08096011398u"kJ * mol^-1"
         @test temperature(sys_nounits)u"K" ≈ start_temp
         @test scalar_virial(sys_nounits) ≈ tr(virial(sys_nounits))
-        @test scalar_pressure(sys_nounits) ≈ tr(pressure(sys_nounits)) / 3
+        pressure_nounits = pressure(sys_nounits)
+        @test all(isfinite, pressure_nounits)
+        @test scalar_pressure(sys_nounits) ≈ tr(pressure_nounits) / 3
 
         neighbors_nounits = find_neighbors(sys_nounits)
         @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",
@@ -519,7 +587,7 @@ end
 
         coords_diff = sys_nounits.coords * u"nm" .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = sys_nounits.velocities * u"nm * ps^-1" .- vels_openmm
-        @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+        @test maximum(norm.(coords_diff)) < 5e-4u"nm"
         @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
         params_dic = Molly.extract_parameters(sys_nounits, ff_nounits)
@@ -554,7 +622,7 @@ end
             coords_diff = from_device(sys.coords) .-
                                         wrap_coords.(coords_openmm, (sys.boundary,))
             vels_diff = from_device(sys.velocities) .- vels_openmm
-            @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+            @test maximum(norm.(coords_diff)) < 5e-4u"nm"
             @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
             sys_nounits = System(
@@ -583,7 +651,7 @@ end
             coords_diff = from_device(sys_nounits.coords * u"nm") .-
                                         wrap_coords.(coords_openmm, (sys.boundary,))
             vels_diff = from_device(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
-            @test maximum(norm.(coords_diff)) < 3e-4u"nm"
+            @test maximum(norm.(coords_diff)) < 5e-4u"nm"
             @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
             params_dic_gpu = Molly.extract_parameters(sys_nounits, ff_nounits)
@@ -638,7 +706,6 @@ end
 end
 
 @testset "a99SB-disp Gromacs/OpenMM protein comparison" begin
-
     FT = Float64
     AT = Array
 

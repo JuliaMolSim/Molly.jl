@@ -28,14 +28,9 @@ jobs:
         test:
           - NotGradients
           - Gradients
-        exclude:
-          - version: '1'
-            os: ubuntu-latest
-            arch: x64
-            test: Gradients
     steps:
       - run: export UCX_ERROR_SIGNALS="SIGILL,SIGBUS,SIGFPE"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
@@ -57,7 +52,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'

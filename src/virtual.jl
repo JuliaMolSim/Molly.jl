@@ -227,7 +227,7 @@ function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
                             virtual_sites=sys.virtual_sites) where {D, T}
     # Assumes that each virtual site is only defined once
     if length(virtual_sites) > 0
-        buffers.fs_mat .= reshape(reinterpret(T, ustrip_vec.(fs)), D, length(sys))
+        copy_forces_to_matrix!(buffers.fs_mat, fs, Val(D))
         backend = get_backend(sys.coords)
         n_threads_dev = 128
         kernel! = distribute_forces_kernel!(backend, n_threads_dev)
@@ -237,6 +237,35 @@ function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
         fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* sys.force_units
     end
     return fs
+end
+
+function copy_forces_to_matrix!(fs_mat::AbstractMatrix{T}, fs, ::Val{D}) where {T, D}
+    @inbounds for atom_i in eachindex(fs)
+        f = ustrip_vec(fs[atom_i])
+        for dim in 1:D
+            fs_mat[dim, atom_i] = f[dim]
+        end
+    end
+    return fs_mat
+end
+
+function copy_forces_to_matrix!(fs_mat::AbstractGPUArray{T, 2}, fs::AbstractGPUArray,
+                                ::Val{D}) where {T, D}
+    backend = get_backend(fs)
+    n_threads_gpu = gpu_threads_copy(length(fs))
+    kernel! = copy_forces_to_matrix_kernel!(backend, n_threads_gpu)
+    kernel!(fs_mat, fs, Val(D); ndrange=length(fs))
+    return fs_mat
+end
+
+@kernel inbounds=true function copy_forces_to_matrix_kernel!(fs_mat, @Const(fs), ::Val{D}) where D
+    atom_i = @index(Global, Linear)
+    if atom_i <= length(fs)
+        f = ustrip_vec(fs[atom_i])
+        for dim in 1:D
+            fs_mat[dim, atom_i] = f[dim]
+        end
+    end
 end
 
 @kernel function distribute_forces_kernel!(fs_mat::AbstractMatrix{T}, @Const(coords),

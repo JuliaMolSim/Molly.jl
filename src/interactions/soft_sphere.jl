@@ -20,6 +20,9 @@ end
 
 use_neighbors(inter::SoftSphere) = inter.use_neighbors
 
+required_atom_fields(inter::SoftSphere) = (:σ, :ϵ, :λ,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...)
+
 function Base.zero(ss::SoftSphere)
     return SoftSphere(ss.cutoff, ss.use_neighbors, ss.shortcut, ss.σ_mixing, ss.ϵ_mixing)
 end
@@ -35,13 +38,13 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip.(zero(dr)) * force_units
+        return zero_pairwise_force(dr, force_units)
     end
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 
@@ -61,13 +64,13 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   args...)
     if shortcut_pair(inter.shortcut, atom_i, atom_j)
-        return ustrip(zero(dr[1])) * energy_units
+        return zero_pairwise_energy(dr, energy_units)
     end
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 

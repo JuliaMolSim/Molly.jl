@@ -22,7 +22,7 @@ end
     bc = vector_pad3D(coords_j, coords_k, boundary)
     cross_ba_bc = ba × bc
     if iszero_value(cross_ba_bc)
-        zf = zero(a.k ./ ba)
+        zf = zero(a.k ./ trim3D(ba, boundary))
         return SpecificForce3Atoms(zf, zf, zf)
     end
     pa = normalize(trim3D( ba × cross_ba_bc, boundary))

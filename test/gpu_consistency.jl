@@ -113,6 +113,49 @@
             @test isapprox(pe_gpu, pe_cpu, rtol=1e-8, atol=1e-10)
         end
 
+        @testset "GPU remove_CM_motion!" begin
+            n_atoms = 8
+            T = Float32
+            boundary = CubicBoundary(T(10.0)u"nm")
+            coords = [SVector(T(i), T(i + 1), T(i + 2)) * u"nm" for i in 1:n_atoms]
+            velocities = [SVector(T(0.1 * i), T(-0.2 * i), T(0.05 * (i - 3))) * u"nm/ps"
+                          for i in 1:n_atoms]
+            atoms = [Atom(
+                index=i,
+                mass=T(i + 1)u"g/mol",
+                charge=T(0.0),
+                σ=T(0.3)u"nm",
+                ϵ=T(1.0)u"kJ * mol^-1",
+            ) for i in 1:n_atoms]
+
+            cpu_sys = System(
+                atoms=atoms,
+                coords=coords,
+                velocities=velocities,
+                boundary=boundary,
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
+            )
+            gpu_sys = System(
+                atoms=CuArray(atoms),
+                coords=CuArray(coords),
+                velocities=CuArray(velocities),
+                boundary=boundary,
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
+            )
+
+            remove_CM_motion!(cpu_sys)
+            remove_CM_motion!(gpu_sys)
+            gpu_velocities = Array(gpu_sys.velocities)
+
+            for i in 1:n_atoms
+                @test isapprox(gpu_velocities[i], cpu_sys.velocities[i], atol=T(1e-6)u"nm/ps")
+            end
+            cm_velocity = mapreduce((v, m) -> v * m, +, gpu_velocities, mass.(atoms)) / sum(mass.(atoms))
+            @test isapprox(cm_velocity, zero(cm_velocity), atol=T(1e-6)u"nm/ps")
+        end
+
         @testset "GPU tile lists (Units & Overflow)" begin
             n_atoms = 100
             atom_mass = 10.0u"g/mol"
@@ -140,7 +183,7 @@
                 coords=coords,
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_cpu,
-                neighbor_finder=Molly.NoNeighborFinder(),
+                neighbor_finder=NoNeighborFinder(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
             )
@@ -151,7 +194,7 @@
                 velocities=CuArray(velocities),
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_gpu,
-                neighbor_finder=Molly.GPUNeighborFinder(
+                neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=3.0u"nm",
                     device_vector_type=CuArray{Int32, 1},
@@ -165,7 +208,7 @@
             f_gpu_host = Array(f_gpu)
             
             for i in 1:n_atoms
-                @test isapprox(f_cpu[i], f_gpu_host[i], atol=1e-10u"kJ * mol^-1 * nm^-1")
+                @test isapprox(f_cpu[i], f_gpu_host[i], rtol=1e-8, atol=1e-10u"kJ * mol^-1 * nm^-1")
             end
 
             pe_cpu = potential_energy(sys_cpu)
@@ -185,7 +228,7 @@
                 velocities=CuArray(velocities),
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_gpu_overflow,
-                neighbor_finder=Molly.GPUNeighborFinder(
+                neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=20.0u"nm",
                     device_vector_type=CuArray{Int32, 1},
@@ -214,6 +257,7 @@
                     CUDA.zeros(Int32, tiny_capacity),
                     CUDA.zeros(Int32, tiny_capacity),
                     CUDA.zeros(UInt8, tiny_capacity),
+                    CUDA.zeros(UInt32, tiny_capacity),
                     CUDA.zeros(Int32, 1),
                     CUDA.zeros(Int32, 1),
                     buffers.coords_reordered,
@@ -233,11 +277,12 @@
                 Molly.zero_forces(sys_gpu_overflow),
                 sys_gpu_overflow,
                 nothing,
+                0,
                 overflow_force_buffers,
                 Val(false),
-                0,
             )
-            @test_throws ErrorException potential_energy(sys_gpu_overflow, nothing, overflow_energy_buffers, 0)
+            @test_throws ErrorException potential_energy(sys_gpu_overflow, nothing, 0,
+                                                         overflow_energy_buffers)
         end
 
         @testset "Triclinic Boundary" begin
@@ -423,7 +468,6 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    n_steps_reorder=25,
                     device_vector_type=CuArray{Int32, 1},
                 ),
                 force_units=NoUnits,
@@ -434,9 +478,9 @@
             buffers = Molly.init_buffers!(sys, 256)
             fs_reused = Molly.zero_forces(sys)
 
-            Molly.forces!(fs_reused, sys, neighbors, buffers, Val(false), 0; n_threads=1)
+            Molly.forces!(fs_reused, sys, neighbors, 0, buffers, Val(false); n_threads=1)
             sys.coords .+= sys.velocities .* T(0.5)
-            Molly.forces!(fs_reused, sys, neighbors, buffers, Val(false), 1; n_threads=1)
+            Molly.forces!(fs_reused, sys, neighbors, 1, buffers, Val(false); n_threads=1)
 
             fs_fresh = forces(sys, neighbors, 1; n_threads=1)
             fs_reused_host = Array(fs_reused)
@@ -471,12 +515,12 @@
             )
 
             buffers = Molly.init_buffers!(sys, 1, true)
-            pe_before = potential_energy(sys, nothing, buffers, 0)
+            pe_before = potential_energy(sys, nothing, 0, buffers)
 
             Molly.append_excluded_pairs!(sys.neighbor_finder, ((1, 2),))
 
-            pe_reused = potential_energy(sys, nothing, buffers, 0)
-            pe_fresh = potential_energy(sys, nothing, Molly.init_buffers!(sys, 1, true), 0)
+            pe_reused = potential_energy(sys, nothing, 0, buffers)
+            pe_fresh = potential_energy(sys, nothing, 0, Molly.init_buffers!(sys, 1, true))
 
             @test pe_before != pe_reused
             @test isapprox(pe_reused, pe_fresh, rtol=1e-8, atol=1e-10)
@@ -520,8 +564,12 @@
             thermo_states = [gpu_state(atoms_ref), gpu_state(atoms_pert)]
 
             for reuse_neighbors in (true, false)
-                partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
-                energies = evaluate_energy_all!(partition, thermo_states[1].system.coords, boundary)
+                partition = Molly.AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
+                energies = Molly.evaluate_energy_all!(
+                    partition,
+                    thermo_states[1].system.coords,
+                    boundary,
+                )
                 direct = [potential_energy(ts.system) for ts in thermo_states]
 
                 @test length(energies) == length(thermo_states)
@@ -534,6 +582,95 @@
                 @test isapprox(energies[1], direct[1], rtol=1e-8, atol=1e-10u"kJ * mol^-1")
                 @test isapprox(energies[2], direct[2], rtol=1e-8, atol=1e-10u"kJ * mol^-1")
             end
+        end
+
+        @testset "Langevin random numbers FT=$FT" for FT in (Float32, Float64)
+            n_atoms = 50_000
+            boundary = CubicBoundary(FT(50.0)u"nm")
+            atom_mass = FT(10.0)u"g/mol"
+            temp = FT(298.0)u"K"
+            AT = CuArray
+            # Some atoms are virtual sites, which must have their velocities
+            #   actively set to zero by random_velocities!.
+            vs_inds = [2, 4, 7]
+            virtual_sites = [
+                OneParticleSite(2, 1, zero(FT)u"nm^-1"),
+                TwoParticleAverageSite(4, 3, 5, FT(0.5), FT(0.5)),
+                ThreeParticleAverageSite(7, 6, 8, 9, FT(0.2), FT(0.3), FT(0.5)),
+            ]
+            atoms = [Atom(mass=(i in vs_inds ? FT(0.0) : FT(10.0))u"g/mol")
+                     for i in 1:n_atoms]
+            coords = [SVector(FT(1.0)u"nm", FT(1.0)u"nm", FT(1.0)u"nm") for _ in 1:n_atoms]
+            vel_unit = unit(random_velocity(atom_mass, temp)[1])
+            velocities = [zero(SVector{3, FT}) * vel_unit for _ in 1:n_atoms]
+
+            sys = System(
+                atoms=copy(atoms),
+                coords=copy(coords),
+                boundary=boundary,
+                velocities=copy(velocities),
+                virtual_sites=copy(virtual_sites),
+            )
+
+            sys2 = System(
+                atoms=AT(atoms),
+                coords=AT(coords),
+                boundary=boundary,
+                velocities=AT(velocities),
+                virtual_sites=AT(virtual_sites),
+            )
+            # Start the output buffers filled with non-zero velocities so we test
+            #   that virtual site velocities are actively set to zero, not just
+            #   left as they were.
+            ones_vels = fill(SVector(FT(1), FT(1), FT(1)) * vel_unit, n_atoms)
+            vels_gpu = AT(ones_vels)
+
+            vels_cpu_inplace = copy(ones_vels)
+            random_velocities!(vels_cpu_inplace, sys, temp; rng=Xoshiro(10))
+            vels_cpu = random_velocities(sys, temp; rng=Xoshiro(10))
+            random_velocities!(sys, temp; rng=Xoshiro(10))
+            # These should match exactly
+            @test vels_cpu_inplace == vels_cpu
+            @test sys.velocities == vels_cpu
+
+            random_velocities!(vels_gpu, sys2, temp; rng=Xoshiro(10))
+            vels_gpu_cpu = Array(vels_gpu)
+
+            # With the same rng source the velocities should match down to floating point error.
+            vel_scale = sqrt(sys.k * temp / atom_mass)
+            @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT) * vel_scale
+
+            # Virtual site velocities must be actively set to zero on both CPU and GPU.
+            for i in vs_inds
+                @test iszero(vels_cpu[i])
+                @test iszero(vels_gpu_cpu[i])
+            end
+        end
+
+        @testset "langevin_o_step! FT=$FT" for FT in (Float32, Float64)
+            n_atoms = 50_000
+            AT = CuArray
+
+            rng = Xoshiro(15)
+            init_vels = [randn(rng, SVector{3, FT}) for _ in 1:n_atoms]
+
+            vel_scales = fill(FT(0.8), n_atoms)
+            noise_scales = fill(FT(0.3), n_atoms)
+
+            philox_key = 0x1234567890abcdef
+            philox_ctr1 = 0xfedcba0987654321
+
+            vels_cpu = copy(init_vels)
+            vels_gpu = AT(init_vels)
+
+            Molly.langevin_o_step!(vels_cpu, vel_scales, noise_scales,
+                                   philox_ctr1, philox_key, FT)
+            Molly.langevin_o_step!(vels_gpu, AT(vel_scales), AT(noise_scales),
+                                   philox_ctr1, philox_key, FT)
+            vels_gpu_cpu = Array(vels_gpu)
+
+            @test vels_cpu != init_vels
+            @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT)
         end
     else
         @warn "CUDA not functional, skipping GPU consistency tests"

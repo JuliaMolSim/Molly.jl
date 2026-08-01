@@ -8,24 +8,17 @@
     <Type element="C" name="C1" class="C1" mass="12.01"/>
     <Type element="C" name="C8" class="C8" mass="12.01"/>
     <Type element="C" name="C9" class="C9" mass="12.01"/>
-    <Type element="C" name="C10" class="C10" mass="12.01"/>
     <Type element="O" name="O3" class="O3" mass="16.0"/>
     <Type element="C" name="C" class="C" mass="12.01"/>
     <Type element="C" name="CA" class="CA" mass="12.01"/>
     <Type element="C" name="CB" class="CB" mass="12.01"/>
     <Type element="C" name="CC" class="CC" mass="12.01"/>
-    <Type element="C" name="CD" class="CD" mass="12.01"/>
-    <Type element="C" name="CK" class="CK" mass="12.01"/>
-    <Type element="C" name="CM" class="CM" mass="12.01"/>
     <Type element="C" name="CN" class="CN" mass="12.01"/>
-    <Type element="C" name="CQ" class="CQ" mass="12.01"/>
     <Type element="C" name="CR" class="CR" mass="12.01"/>
     <Type element="C" name="CT" class="CT" mass="12.01"/>
     <Type element="C" name="CV" class="CV" mass="12.01"/>
     <Type element="C" name="CW" class="CW" mass="12.01"/>
     <Type element="C" name="C*" class="C*" mass="12.01"/>
-    <Type element="C" name="CY" class="CY" mass="12.01"/>
-    <Type element="C" name="CZ" class="CZ" mass="12.01"/>
     <Type element="Ca" name="C0" class="C0" mass="40.08"/>
     <Type element="H" name="H" class="H" mass="1.008"/>
     <Type element="H" name="HB" class="HB" mass="1.008"/>
@@ -50,12 +43,8 @@
     <Type element="N" name="N" class="N" mass="14.01"/>
     <Type element="N" name="NA" class="NA" mass="14.01"/>
     <Type element="N" name="NB" class="NB" mass="14.01"/>
-    <Type element="N" name="NC" class="NC" mass="14.01"/>
     <Type element="N" name="N2" class="N2" mass="14.01"/>
     <Type element="N" name="N3" class="N3" mass="14.01"/>
-    <Type element="N" name="NT" class="NT" mass="14.01"/>
-    <Type element="N" name="N*" class="N*" mass="14.01"/>
-    <Type element="N" name="NY" class="NY" mass="14.01"/>
     <Type element="O" name="O" class="O" mass="16.0"/>
     <Type element="O" name="OB" class="OB" mass="16.0"/>
     <Type element="O" name="O2" class="O2" mass="16.0"/>
@@ -64,8 +53,6 @@
     <Type element="P" name="P" class="P" mass="30.97"/>
     <Type element="S" name="S" class="S" mass="32.06"/>
     <Type element="S" name="SH" class="SH" mass="32.06"/>
-    <Type element="Cu" name="CU" class="CU" mass="63.55"/>
-    <Type element="Fe" name="FE" class="FE" mass="55.0"/>
     <Type element="Li" name="Li" class="Li" mass="6.94"/>
     <Type element="Na" name="IP" class="IP" mass="22.99"/>
     <Type element="Na" name="Na" class="Na" mass="22.99"/>

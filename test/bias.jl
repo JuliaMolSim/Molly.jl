@@ -1,3 +1,7 @@
+struct BiasNaNGradient end
+
+Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
+
 @testset "Collective variables" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
@@ -240,11 +244,56 @@
     coords_tor = [c_t1, c_t2, c_t3, c_t4]
     # Atoms and boundary are already defined in the existing testset context
     tor_cv = CalcTorsion([1, 2, 3, 4])
+    @test tor_cv.gradient_singularity_tol == 1e-6
     
     @test isapprox(
         calculate_cv(tor_cv, coords_tor, atoms, boundary),
         1.5707963267948966; # pi/2 radians
         atol=1e-9
+    )
+
+    coords_tor_near = SVector{3, Float32}[
+        SVector(0.0f0, 0.0f0, 0.0f0),
+        SVector(1.0f0, 0.0f0, 0.0f0),
+        SVector(2.0f0, 1.0f-7, 0.0f0),
+        SVector(3.0f0, 1.0f0, 0.0f0),
+    ]
+    grad_near, phi_near = Molly.cv_gradient(
+        tor_cv,
+        coords_tor_near,
+        atoms,
+        CubicBoundary(100.0f0),
+    )
+    @test isfinite(phi_near)
+    @test all(v -> all(isfinite, v), grad_near)
+    @test maximum(norm, grad_near) < 2.0f6
+
+    coords_tor_near_units = [
+        SVector(0.0, 0.0, 0.0)u"nm",
+        SVector(1.0, 0.0, 0.0)u"nm",
+        SVector(2.0, 1.0e-7, 0.0)u"nm",
+        SVector(3.0, 1.0, 0.0)u"nm",
+    ]
+    grad_near_units, phi_near_units = Molly.cv_gradient(
+        tor_cv,
+        coords_tor_near_units,
+        atoms,
+        CubicBoundary(100.0u"nm"),
+    )
+    @test isfinite(phi_near_units)
+    @test all(v -> all(x -> isfinite(ustrip(x)), v), grad_near_units)
+
+    coords_tor_zero_bond = SVector{3, Float64}[
+        SVector(0.0, 0.0, 0.0),
+        SVector(0.0, 0.0, 0.0),
+        SVector(1.0, 0.0, 0.0),
+        SVector(2.0, 0.0, 0.0),
+    ]
+    @test_throws ArgumentError Molly.cv_gradient(
+        tor_cv,
+        coords_tor_zero_bond,
+        atoms,
+        CubicBoundary(100.0),
     )
 
 end
@@ -307,6 +356,9 @@ end
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
+    cv_sim = 0.5u"nm"
+    @test Molly.bias_gradient(lb, cv_sim) == 0u"kJ * mol^-1 * nm^-1"
+
     sb = SquareBias(3000u"kJ * mol^-1 * nm^-2", 0.75u"nm")
 
     cv_sim = 1u"nm"
@@ -345,6 +397,16 @@ end
     )
 
     fb = FlatBottomSquareBias(3000u"kJ * mol^-1 * nm^-2", 0.5u"nm", 0.75u"nm")
+    @test_throws ArgumentError FlatBottomSquareBias(
+        3000u"kJ * mol^-1 * nm^-2",
+        -0.5u"nm",
+        0.75u"nm",
+    )
+    @test_throws ArgumentError FlatBottomSquareBias(
+        3000u"kJ * mol^-1 * nm^-2",
+        NaN * u"nm",
+        0.75u"nm",
+    )
 
     cv_sim = 1.5u"nm"
     @test isapprox(
@@ -373,6 +435,9 @@ end
         0u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
+
+    cv_sim = 0.75u"nm"
+    @test Molly.bias_gradient(fb, cv_sim) == 0u"kJ * mol^-1 * nm^-1"
 
     calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
 
@@ -420,8 +485,18 @@ end
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
+    fs_bad = Molly.zero_forces(sys)
+    @test_throws ErrorException AtomsCalculators.forces!(
+        fs_bad,
+        sys,
+        BiasPotential(calc_dist, BiasNaNGradient()),
+    )
+
     # PeriodicFlatBottomBias tests (Target: 0, Flat bottom width: 0.1)
     pb = PeriodicFlatBottomBias(1000.0u"kJ * mol^-1", 0.1, 0.0)
+    @test pb.r_fb == 0.1
+    @test_throws ArgumentError PeriodicFlatBottomBias(1000.0u"kJ * mol^-1", -0.1, 0.0)
+    @test_throws ArgumentError PeriodicFlatBottomBias(1000.0u"kJ * mol^-1", NaN, 0.0)
     
     # Inside flat region (no penalty)
     cv_sim_in = 0.05
@@ -430,13 +505,13 @@ end
     
     # Outside region (harmonic penalty)
     cv_sim_out = 0.2
-    # Energy: 0.5 * k * (dist - r_bf)^2 = 0.5 * 1000 * (0.2 - 0.1)^2 = 5.0
+    # Energy: 0.5 * k * (dist - r_fb)^2 = 0.5 * 1000 * (0.2 - 0.1)^2 = 5.0
     @test isapprox(
         potential_energy(pb, cv_sim_out), 
         5.0u"kJ * mol^-1"; 
         atol=1e-9u"kJ * mol^-1"
     )
-    # Gradient: k * (dist - r_bf) * sign(d_wrapped) = 1000 * 0.1 * 1 = 100.0
+    # Gradient: k * (dist - r_fb) * sign(d_wrapped) = 1000 * 0.1 * 1 = 100.0
     @test isapprox(
         Molly.bias_gradient(pb, cv_sim_out), 
         100.0u"kJ * mol^-1"; 
@@ -457,6 +532,14 @@ end
         -100.0u"kJ * mol^-1"; 
         atol=1e-9u"kJ * mol^-1"
     )
+
+    @test isapprox(
+        potential_energy(pb, π),
+        potential_energy(pb, -π);
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test Molly.bias_gradient(pb, π) == Molly.bias_gradient(pb, -π)
+    @test Molly.bias_gradient(pb, π) < 0u"kJ * mol^-1"
 
 end
 
