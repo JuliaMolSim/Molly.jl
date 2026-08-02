@@ -720,15 +720,16 @@ end
                 coords_cpu;
                 output=:ragged,
                 cutoff=1.0f0,
-                max_neighbors=64,
+                max_neighbors=nothing,
                 boundary=CubicBoundary(10.0f0),
                 eligible=nothing,
                 special=nothing,
             )
                 n_atoms = length(coords_cpu)
+                T = eltype(eltype(coords_cpu))
 
                 atoms = CuArray([
-                    Molly.Atom(index=i, mass=1.0f0)
+                    Molly.Atom(index=i, mass=one(T))
                     for i in 1:n_atoms
                 ])
 
@@ -772,6 +773,34 @@ end
                 @test matrix[1:counts[2], 2] == Int32[1]
                 @test isempty(matrix[1:counts[3], 3])
                 @test result.list === nothing
+                @test result.state.max_neighbours == Int32(32)
+            end
+
+            @testset "Float64 ragged output" begin
+                coords = [
+                    SVector{3,Float64}(1.0, 2.0, 3.0),
+                    SVector{3,Float64}(1.5, 2.0, 3.0),
+                    SVector{3,Float64}(4.0, 2.0, 3.0),
+                ]
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    cutoff=1.0,
+                    boundary=CubicBoundary(10.0),
+                )
+
+                result = find_neighbors(sys)
+                CUDA.synchronize()
+
+                counts = Array(result.counts)
+                matrix = Array(result.neighbors)
+
+                @test eltype(result.state.x) === Float64
+                @test eltype(result.state.cell_x) === Float64
+                @test counts == Int32[1, 1, 0]
+                @test matrix[1:counts[1], 1] == Int32[2]
+                @test matrix[1:counts[2], 2] == Int32[1]
+                @test isempty(matrix[1:counts[3], 3])
             end
 
             @testset "Geometric pair output" begin
@@ -1014,6 +1043,20 @@ end
             end
 
             @testset "Finder validation" begin
+                automatic_finder = GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:ragged,
+                )
+
+                explicit_finder = GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    max_neighbors=96,
+                    output=:ragged,
+                )
+
+                @test automatic_finder.max_neighbors === nothing
+                @test explicit_finder.max_neighbors == 96
+
                 @test_throws ArgumentError GPUCellListNeighborFinder(
                     dist_cutoff=0.0f0,
                 )

@@ -2468,6 +2468,31 @@ end
 
 const CELL_BLOCK_SIZE = 32
 
+function estimate_gpu_cell_list_max_neighbors(
+    n_atoms,
+    box_Lx::T,
+    box_Ly::T,
+    box_Lz::T,
+    cutoff::T,
+) where {T}
+    volume = box_Lx * box_Ly * box_Lz
+    density = T(n_atoms) / volume
+
+    expected_neighbors = (
+        T(1.5) *
+        density *
+        T(4π / 3) *
+        cutoff^3
+    )
+
+    estimated_neighbors = ceil(Int, expected_neighbors)
+
+    return max(
+        CELL_BLOCK_SIZE,
+        cld(estimated_neighbors, CELL_BLOCK_SIZE) * CELL_BLOCK_SIZE,
+    )
+end
+
 function get_cell_id!(
     cell_ids,
     x,
@@ -2733,9 +2758,9 @@ function get_neighbours_cell_shared_contiguous_gpu!(
     cell_particles,
     host_tile_cells,
     host_tile_starts,
-    cell_x,
-    cell_y,
-    cell_z,
+    cell_x::CuDeviceVector{T},
+    cell_y::CuDeviceVector{T},
+    cell_z::CuDeviceVector{T},
     num_cell_x,
     num_cell_y,
     num_cell_z,
@@ -2744,7 +2769,7 @@ function get_neighbours_cell_shared_contiguous_gpu!(
     box_Lz,
     cutoff2,
     max_neighbours,
-)
+) where {T}
     host_tile = blockIdx().x
     lane = threadIdx().x
 
@@ -2758,9 +2783,9 @@ function get_neighbours_cell_shared_contiguous_gpu!(
     host_active = host_local < n_host
 
     atom_i = Int32(0)
-    x_i = 0.0f0
-    y_i = 0.0f0
-    z_i = 0.0f0
+    x_i = zero(T)
+    y_i = zero(T)
+    z_i = zero(T)
     count = Int32(0)
 
     if host_active
@@ -2778,9 +2803,9 @@ function get_neighbours_cell_shared_contiguous_gpu!(
     cy = tmp % num_cell_y
     cz = tmp ÷ num_cell_y
 
-    shared_x = CuStaticSharedArray(Float32, CELL_BLOCK_SIZE)
-    shared_y = CuStaticSharedArray(Float32, CELL_BLOCK_SIZE)
-    shared_z = CuStaticSharedArray(Float32, CELL_BLOCK_SIZE)
+    shared_x = CuStaticSharedArray(T, CELL_BLOCK_SIZE)
+    shared_y = CuStaticSharedArray(T, CELL_BLOCK_SIZE)
+    shared_z = CuStaticSharedArray(T, CELL_BLOCK_SIZE)
     shared_ids = CuStaticSharedArray(Int32, CELL_BLOCK_SIZE)
 
     for dz in Int32(-1):Int32(1)
@@ -2836,13 +2861,13 @@ function get_neighbours_cell_shared_contiguous_gpu!(
                                     shared_z[candidate_lane] - z_i
 
                                 dx_ij -= box_Lx * floor(
-                                    dx_ij / box_Lx + 0.5f0,
+                                    dx_ij / box_Lx + T(0.5),
                                 )
                                 dy_ij -= box_Ly * floor(
-                                    dy_ij / box_Ly + 0.5f0,
+                                    dy_ij / box_Ly + T(0.5),
                                 )
                                 dz_ij -= box_Lz * floor(
-                                    dz_ij / box_Lz + 0.5f0,
+                                    dz_ij / box_Lz + T(0.5),
                                 )
 
                                 r2 = (
@@ -2920,9 +2945,9 @@ function allocate_optimised_gpu_state(
         host_tile_cells=CUDA.zeros(Int32, n_atoms),
         host_tile_starts=CUDA.zeros(Int32, n_atoms),
         n_host_tiles=Ref(0),
-        cell_x=CUDA.zeros(Float32, n_atoms),
-        cell_y=CUDA.zeros(Float32, n_atoms),
-        cell_z=CUDA.zeros(Float32, n_atoms),
+        cell_x=similar(x_gpu),
+        cell_y=similar(y_gpu),
+        cell_z=similar(z_gpu),
         neighbour_counts=CUDA.zeros(Int32, n_atoms),
         neighbours=CUDA.zeros(
             Int32,
@@ -3158,20 +3183,20 @@ function build_pair_list!(
 end
 
 function split_gpu_cell_list_coordinates!(
-    x, 
-    y, 
-    z,
+    x::CuDeviceVector{T},
+    y::CuDeviceVector{T},
+    z::CuDeviceVector{T},
     coords,
     n_atoms,
-)
+) where {T}
     atom_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if atom_i <= n_atoms
         coord = ustrip_vec(coords[atom_i])
 
-        x[atom_i] = Float32(coord[1])
-        y[atom_i] = Float32(coord[2])
-        z[atom_i] = Float32(coord[3])
+        x[atom_i] = T(coord[1])
+        y[atom_i] = T(coord[2])
+        z[atom_i] = T(coord[3])
     end
 
     return nothing
@@ -3198,12 +3223,12 @@ function split_gpu_cell_list_coordinates!(
     return nothing
 end
 
-function split_gpu_cell_list_coordinates(coords)
+function split_gpu_cell_list_coordinates(coords, ::Type{T}) where {T}
     n_atoms = length(coords)
 
-    x = CUDA.zeros(Float32, n_atoms)
-    y = CUDA.zeros(Float32, n_atoms)
-    z = CUDA.zeros(Float32, n_atoms)
+    x = CUDA.zeros(T, n_atoms)
+    y = CUDA.zeros(T, n_atoms)
+    z = CUDA.zeros(T, n_atoms)
 
     split_gpu_cell_list_coordinates!(x, y, z, coords)
 
@@ -3237,12 +3262,25 @@ function Molly.find_neighbors(
     )
 
     dist_unit = unit(zero(eltype(eltype(sys.coords))))
+    T = Molly.float_type(sys)
 
     box = box_sides(sys.boundary)
-    box_Lx = Float32(ustrip(dist_unit, box[1]))
-    box_Ly = Float32(ustrip(dist_unit, box[2]))
-    box_Lz = Float32(ustrip(dist_unit, box[3]))
-    cutoff = Float32(ustrip(dist_unit, nf.dist_cutoff))
+    box_Lx = T(ustrip(dist_unit, box[1]))
+    box_Ly = T(ustrip(dist_unit, box[2]))
+    box_Lz = T(ustrip(dist_unit, box[3]))
+    cutoff = T(ustrip(dist_unit, nf.dist_cutoff))
+
+    max_neighbors = if isnothing(nf.max_neighbors)
+        estimate_gpu_cell_list_max_neighbors(
+            length(sys),
+            box_Lx,
+            box_Ly,
+            box_Lz,
+            cutoff,
+        )
+    else
+        nf.max_neighbors
+    end
 
     num_cell_x = floor(Int, box_Lx / cutoff)
     num_cell_y = floor(Int, box_Ly / cutoff)
@@ -3270,7 +3308,7 @@ function Molly.find_neighbors(
         current_neighbors.state.box_Ly == box_Ly &&
         current_neighbors.state.box_Lz == box_Lz &&
         current_neighbors.state.cutoff2 == cutoff * cutoff &&
-        current_neighbors.state.max_neighbours == Int32(nf.max_neighbors)
+        current_neighbors.state.max_neighbours == Int32(max_neighbors)
     )
 
     if can_reuse_state
@@ -3283,7 +3321,7 @@ function Molly.find_neighbors(
             sys.coords,
         )
     else
-        x, y, z = split_gpu_cell_list_coordinates(sys.coords)
+        x, y, z = split_gpu_cell_list_coordinates(sys.coords, T)
 
         state = allocate_optimised_gpu_state(
             x,
@@ -3293,7 +3331,7 @@ function Molly.find_neighbors(
             box_Ly,
             box_Lz,
             cutoff;
-            max_neighbours=Int32(nf.max_neighbors),
+            max_neighbours=Int32(max_neighbors),
             allocate_pairs=build_pairs,
         )
     end

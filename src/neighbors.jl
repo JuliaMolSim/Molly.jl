@@ -368,7 +368,7 @@ find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
     GPUCellListNeighborFinder(;
         dist_cutoff,
         n_steps=10,
-        max_neighbors=640,
+        max_neighbors=nothing,
         output=:molly_pairs,
         eligible=nothing,
         special=nothing,
@@ -383,11 +383,15 @@ Output modes:
 - `:geometric_pairs`: geometric half-pair list with all special flags false.
 - `:molly_pairs`: half-pair list filtered by `eligible`, with flags read
   from `special`.
+
+When `max_neighbors` is `nothing`, the initial per-atom capacity is estimated from the global
+number density and neighbor cutoff, with a safety factor of 1.5, and rounded up to a multiple of 32.
+An explicit positive integer overrides this estimate. Capacity overflow is always checked.
 """
 struct GPUCellListNeighborFinder{D,E,S}
     dist_cutoff::D
     n_steps::Int
-    max_neighbors::Int
+    max_neighbors::Union{Nothing, Int}
     output::Symbol
     eligible::E
     special::S
@@ -396,13 +400,13 @@ end
 function GPUCellListNeighborFinder(;
     dist_cutoff,
     n_steps=10,
-    max_neighbors=640,
+    max_neighbors=nothing,
     output::Symbol=:molly_pairs,
     eligible=nothing,
     special=nothing,
 )
     n_steps_int = Int(n_steps)
-    max_neighbors_int = Int(max_neighbors)
+    max_neighbors_int = isnothing(max_neighbors) ? nothing : Int(max_neighbors)
 
     dist_cutoff > zero(dist_cutoff) || throw(
         ArgumentError("dist_cutoff must be positive, got $dist_cutoff"),
@@ -416,11 +420,13 @@ function GPUCellListNeighborFinder(;
         ArgumentError("n_steps must be positive, got $n_steps"),
     )
 
-    max_neighbors_int > 0 || throw(
-        ArgumentError(
-            "max_neighbors must be positive, got $max_neighbors",
-        ),
-    )
+    if !isnothing(max_neighbors_int)
+        max_neighbors_int > 0 || throw(
+            ArgumentError(
+                "max_neighbors must be positive, got $max_neighbors",
+            ),
+        )
+    end
 
     output in (:ragged, :geometric_pairs, :molly_pairs) || throw(
         ArgumentError(
