@@ -392,6 +392,13 @@ end
                 dist_cutoff=T(1.0)u"nm",
                 array_type=AT,
             )
+        elseif nft == GPUCellListNeighborFinder
+            neighbor_finder = GPUCellListNeighborFinder(
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                special=to_device(falses(n_atoms, n_atoms), AT),
+                n_steps=10,
+                dist_cutoff=T(1.5)u"nm",
+            )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(
                 n_atoms=n_atoms,
@@ -448,8 +455,10 @@ end
     end
     if run_cuda_tests
         AT = CuArray
-        push!(runs, ("$AT GPU NL"    , [GPUNeighborFinder, false, false, AT]))
-        push!(runs, ("$AT f32 GPU NL", [GPUNeighborFinder, false, true , AT]))
+        push!(runs, ("$AT GPU NL"         , [GPUNeighborFinder        , false, false, AT]))
+        push!(runs, ("$AT f32 GPU NL"     , [GPUNeighborFinder        , false, true , AT]))
+        push!(runs, ("$AT GPU cell NL"    , [GPUCellListNeighborFinder, false, false, AT]))
+        push!(runs, ("$AT f32 GPU cell NL", [GPUCellListNeighborFinder, false, true , AT]))
     end
     if run_metal_tests
         AT = MtlArray
@@ -461,6 +470,9 @@ end
     for triclinic in (false, true)
         final_coords_ref, E_start_ref = test_sim(runs[1][2]..., triclinic)
         for (name, args) in runs
+            if triclinic && args[1] == GPUCellListNeighborFinder
+                continue
+            end
             final_coords, E_start = test_sim(args..., triclinic)
             final_coords_f64 = [Float64.(c) for c in from_device(final_coords)]
             coord_diff = final_coords_f64 .- final_coords_ref
