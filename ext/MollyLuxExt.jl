@@ -1557,14 +1557,13 @@ end
 # (∂E/∂r) → F = -∂E/∂r · Ha→eV, ensemble-averaged. This is the ANI forces path — the
 # AtomsCalculators.forces! method below dispatches here for both CPU (KA CPU backend) and GPU
 # (Metal/CUDA) systems. The analytic backward matches TorchANI/finite differences to ~1e-6 eV/Å.
-function Molly.compute_ani_forces_ka(coords, species, pot, n_species::Int;
-        backend=nothing, neighbors=nothing, boundary=nothing)
+function Molly.compute_ani_forces_ka(coords::AbstractVector{SVector{D,T}}, species, pot,
+        n_species::Int; backend=nothing, neighbors=nothing, boundary=nothing) where {D,T}
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
     # Build the CSR neighbour list once and share it between the forward AEV and the backward VJP.
     # `nl_to_csr` is a host-side pass over every pair, so having each stage rebuild it duplicated
-    # ~20% of the forces time. `nothing` keeps the all-pairs forward + `:auto` backward behaviour;
-    # a NeighborList is converted once; an already-CSR tuple passes straight through. Results are
-    # identical either way (each stage would have produced the same CSR internally).
+    # work. `nothing` keeps the all-pairs forward + `:auto` backward behaviour; a NeighborList is
+    # converted once; an already-CSR tuple passes straight through. Results are identical either way.
     csr = (isnothing(neighbors) || neighbors isa Tuple) ? neighbors :
           nl_to_csr(neighbors, length(coords))
     aevs = Molly.compute_aevs_ka(coords, species, pot.aev_params, n_species;
@@ -1573,10 +1572,13 @@ function Molly.compute_ani_forces_ka(coords, species, pot, n_species::Int;
     bwd_nb  = isnothing(csr) ? :auto : csr
     dcoords = aev_vjp_ka(dEdAEV, coords, species, pot.aev_params, n_species;
         backend=ka_backend, neighbors=bwd_nb, boundary=boundary)   # ∂E_Ha/∂r, (3, n_atoms)
-    T    = eltype(eltype(coords))
+    # F = -∂E/∂r · (Ha→eV). `T` is a static type parameter from the coords signature, so the
+    # per-atom SVector build is type-stable. (Deriving it as `eltype(eltype(coords))` — a runtime
+    # value — made this loop dynamically dispatched, ~100 ms for 16k atoms on its own.)
     Ha   = T(Molly.HARTREE_TO_EV)
     fmat = Array(dcoords)
-    return [SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha) for i in 1:length(coords)]
+    na   = size(fmat, 2)
+    return [SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha) for i in 1:na]
 end
 
 # The ANI forces path. Strips coords to Å (staying on their device — Array → KA CPU,
