@@ -1223,6 +1223,75 @@ function nl_to_csr(neighbors, n_atoms::Int)
     return off, idx
 end
 
+# Count each atom's degree: every pair (i,j) adds one neighbour to both i and j.
+@kernel inbounds=true function csr_degree_kernel!(deg, @Const(pairs))
+    n = @index(Global, Linear)
+    if n <= length(pairs)
+        p = pairs[n]
+        KernelAbstractions.@atomic deg[p[1]] += one(Int32)
+        KernelAbstractions.@atomic deg[p[2]] += one(Int32)
+    end
+end
+
+# Scatter neighbours into the CSR `idx` array. `cur[a]` starts at atom a's offset; the atomic
+# add returns the (new) running position, so each of atom a's neighbours lands in a distinct slot
+# within [off[a]+1, off[a+1]]. Order within an atom is nondeterministic, which is fine — the AEV
+# radial sum and angular pair loop are order-independent.
+@kernel inbounds=true function csr_scatter_kernel!(idx, cur, @Const(pairs))
+    n = @index(Global, Linear)
+    if n <= length(pairs)
+        p = pairs[n]; i = p[1]; j = p[2]
+        pi = KernelAbstractions.@atomic cur[i] += one(Int32)
+        idx[pi] = j
+        pj = KernelAbstractions.@atomic cur[j] += one(Int32)
+        idx[pj] = i
+    end
+end
+
+# Device-side counterpart of `nl_to_csr`: build the CSR (offsets, indices) entirely on the compute
+# backend so no host-side O(total_pairs) counting sort is needed (that host loop was the largest
+# single cost of a GPU energy/forces call — ~21 ms at 15,954 atoms on the RTX 5080 host). Bulk-upload
+# the pair list, then histogram + prefix-sum + atomic scatter on device.
+function nl_to_csr_device(neighbors, n_atoms::Int, ka_backend)
+    list   = neighbors.list
+    pairs  = list isa Array ?
+             (d = KernelAbstractions.allocate(ka_backend, eltype(list), length(list));
+              copyto!(d, list); d) : list                      # device pair list
+    npairs = length(pairs)
+    deg = KernelAbstractions.zeros(ka_backend, Int32, n_atoms)
+    csr_degree_kernel!(ka_backend, 256)(deg, pairs; ndrange = npairs)
+    KernelAbstractions.synchronize(ka_backend)
+    off_d = KernelAbstractions.zeros(ka_backend, Int32, n_atoms + 1)
+    @views off_d[2:end] .= cumsum(deg)                          # off[a+1] = Σ_{b≤a} deg[b]
+    cur   = copy(@view off_d[1:n_atoms])                        # cursor per atom, starts at its offset
+    idx_d = KernelAbstractions.allocate(ka_backend, Int32, 2 * npairs)
+    csr_scatter_kernel!(ka_backend, 256)(idx_d, cur, pairs; ndrange = npairs)
+    KernelAbstractions.synchronize(ka_backend)
+    return off_d, idx_d
+end
+
+_upload_i32(be, h) = (d = KernelAbstractions.allocate(be, Int32, length(h)); copyto!(d, h); d)
+
+# Resolve `neighbors` (a NeighborList / `:auto` / a CSR tuple) to device CSR arrays (off_d, idx_d)
+# on `ka_backend`. On a GPU backend a NeighborList is converted with `nl_to_csr_device` (no host
+# counting sort); a CSR tuple may already be device-resident (shared between forward and backward),
+# in which case it is used as-is. `:auto` and the CPU backend use the host builders.
+function csr_device_arrays(neighbors, n_atoms, coords, r_c_max, bdy, ka_backend)
+    if neighbors isa Tuple
+        oh, ih = neighbors
+        return (oh isa Array ? _upload_i32(ka_backend, oh) : oh),
+               (ih isa Array ? _upload_i32(ka_backend, ih) : ih)
+    elseif neighbors === :auto
+        oh, ih = build_neighbor_csr(coords, r_c_max, bdy)
+        return _upload_i32(ka_backend, oh), _upload_i32(ka_backend, ih)
+    elseif !(ka_backend isa KernelAbstractions.CPU)
+        return nl_to_csr_device(neighbors, n_atoms, ka_backend)
+    else
+        oh, ih = nl_to_csr(neighbors, n_atoms)
+        return _upload_i32(ka_backend, oh), _upload_i32(ka_backend, ih)
+    end
+end
+
 # Build a CSR neighbour list (offsets, indices) within `r_c_max` on the host, using the
 # minimum-image distance so it is correct under periodic boundaries. O(N²) scan —
 # benchmarking fallback only (`neighbors=:auto`); production code should pass the system's
@@ -1341,19 +1410,11 @@ function Molly.compute_aevs_ka(
             ndrange = n_atoms,
         )
     else
-        # Obtain a CSR neighbour list and move it to the compute backend.
+        # Obtain CSR neighbour arrays on the compute backend (device-built on GPU, host on CPU).
         #   NeighborList  → consume the finder's neighbours (production path)
         #   :auto         → O(N²) host build from coords (benchmarking fallback)
-        #   (off, idx)    → caller-supplied CSR
-        off_h, idx_h = if neighbors === :auto
-            build_neighbor_csr(coords, max(r_c_R, r_c_A), bdy)
-        elseif neighbors isa Tuple
-            neighbors
-        else
-            nl_to_csr(neighbors, n_atoms)
-        end
-        off_d = KernelAbstractions.allocate(ka_backend, Int32, length(off_h)); copyto!(off_d, off_h)
-        idx_d = KernelAbstractions.allocate(ka_backend, Int32, length(idx_h)); copyto!(idx_d, idx_h)
+        #   (off, idx)    → caller-supplied CSR (may already be device-resident)
+        off_d, idx_d = csr_device_arrays(neighbors, n_atoms, coords, max(r_c_R, r_c_A), bdy, ka_backend)
         if wr
             # One workgroup per atom; accumulate into a shared row, one global write per column.
             kernel! = aev_kernel_wg!(ka_backend, wg_workgroup)
@@ -1522,10 +1583,7 @@ function aev_vjp_ka(adj, coords::AbstractVector{SVector{D,T}}, species, p, n_spe
     r_c_R = T(p.r_c_R); r_c_A = T(p.r_c_A); ζ = T(p.ζ)
     bdy   = boundary_for_kernel(boundary, Val(D), T)
 
-    off_h, idx_h = neighbors === :auto ? build_neighbor_csr(coords, max(r_c_R, r_c_A), bdy) :
-                   neighbors isa Tuple ? neighbors : nl_to_csr(neighbors, n_atoms)
-    off_d = KernelAbstractions.allocate(ka_backend, Int32, length(off_h)); copyto!(off_d, off_h)
-    idx_d = KernelAbstractions.allocate(ka_backend, Int32, length(idx_h)); copyto!(idx_d, idx_h)
+    off_d, idx_d = csr_device_arrays(neighbors, n_atoms, coords, max(r_c_R, r_c_A), bdy, ka_backend)
 
     η_R_d   = KernelAbstractions.allocate(ka_backend, T, n_eta_R); copyto!(η_R_d,  p.η_R)
     r_s_R_d = KernelAbstractions.allocate(ka_backend, T, n_shf_R); copyto!(r_s_R_d, p.r_s_R)
@@ -1561,11 +1619,16 @@ function Molly.compute_ani_forces_ka(coords::AbstractVector{SVector{D,T}}, speci
         n_species::Int; backend=nothing, neighbors=nothing, boundary=nothing) where {D,T}
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
     # Build the CSR neighbour list once and share it between the forward AEV and the backward VJP.
-    # `nl_to_csr` is a host-side pass over every pair, so having each stage rebuild it duplicated
-    # work. `nothing` keeps the all-pairs forward + `:auto` backward behaviour; a NeighborList is
-    # converted once; an already-CSR tuple passes straight through. Results are identical either way.
-    csr = (isnothing(neighbors) || neighbors isa Tuple) ? neighbors :
-          nl_to_csr(neighbors, length(coords))
+    # On GPU it is built on-device (no host counting sort); on CPU, host-side. `nothing` keeps the
+    # all-pairs forward + `:auto` backward behaviour; a tuple passes straight through. The shared
+    # device arrays are reused directly by both stages (no re-upload).
+    csr = if isnothing(neighbors) || neighbors isa Tuple
+        neighbors
+    elseif !(ka_backend isa KernelAbstractions.CPU)
+        nl_to_csr_device(neighbors, length(coords), ka_backend)
+    else
+        nl_to_csr(neighbors, length(coords))
+    end
     aevs = Molly.compute_aevs_ka(coords, species, pot.aev_params, n_species;
         backend=backend, neighbors=csr, boundary=boundary)
     _, dEdAEV = ani_energy_aev_grad_ka(aevs, species, pot, n_species; backend=ka_backend)
