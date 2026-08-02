@@ -1293,7 +1293,8 @@ function Molly.compute_aevs_ka(
     backend      = nothing,
     neighbors    = nothing,
     workgroup    = 256,
-    write_reduce = false,
+    write_reduce = :auto,   # :auto → write-reduced (workgroup-per-atom) on GPU, one-thread on CPU
+    wg_workgroup = 64,      # workgroup size for the write-reduced kernel (64 is fastest on CUDA/Metal)
     boundary     = nothing,
 ) where {D,T}
     n_atoms   = length(coords)
@@ -1315,6 +1316,11 @@ function Molly.compute_aevs_ka(
 
     # Allocate output on the same backend as coords
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
+    # The write-reduced kernel (one workgroup per atom, shared-row @atomic accumulation) is far
+    # faster on GPU — 2-23x over one-thread-per-atom on an RTX 5080 (22.7x at 1k, 2.3x at 16k),
+    # since it spreads each atom's O(neighbours²) angular work across the group. On the KA CPU
+    # backend the plain one-thread kernel wins, so :auto picks per backend (override with a Bool).
+    wr = write_reduce === :auto ? !(ka_backend isa KernelAbstractions.CPU) : write_reduce
     aevs = KernelAbstractions.zeros(ka_backend, T, n_atoms, aev_len)
 
     # Move parameter arrays to the same backend
@@ -1348,16 +1354,16 @@ function Molly.compute_aevs_ka(
         end
         off_d = KernelAbstractions.allocate(ka_backend, Int32, length(off_h)); copyto!(off_d, off_h)
         idx_d = KernelAbstractions.allocate(ka_backend, Int32, length(idx_h)); copyto!(idx_d, idx_h)
-        if write_reduce
+        if wr
             # One workgroup per atom; accumulate into a shared row, one global write per column.
-            kernel! = aev_kernel_wg!(ka_backend, workgroup)
+            kernel! = aev_kernel_wg!(ka_backend, wg_workgroup)
             kernel!(
                 aevs, coords, species, bdy, off_d, idx_d,
                 η_R_d, r_s_R_d, r_c_R,
                 η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A,
                 n_species, n_atoms,
                 n_eta_R, n_shf_R, n_eta_A, n_shf_r, n_th, split, Val(aev_len);
-                ndrange = n_atoms * workgroup,
+                ndrange = n_atoms * wg_workgroup,
             )
         else
             kernel! = aev_kernel_nl!(ka_backend, workgroup)
@@ -1554,10 +1560,17 @@ end
 function Molly.compute_ani_forces_ka(coords, species, pot, n_species::Int;
         backend=nothing, neighbors=nothing, boundary=nothing)
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
+    # Build the CSR neighbour list once and share it between the forward AEV and the backward VJP.
+    # `nl_to_csr` is a host-side pass over every pair, so having each stage rebuild it duplicated
+    # ~20% of the forces time. `nothing` keeps the all-pairs forward + `:auto` backward behaviour;
+    # a NeighborList is converted once; an already-CSR tuple passes straight through. Results are
+    # identical either way (each stage would have produced the same CSR internally).
+    csr = (isnothing(neighbors) || neighbors isa Tuple) ? neighbors :
+          nl_to_csr(neighbors, length(coords))
     aevs = Molly.compute_aevs_ka(coords, species, pot.aev_params, n_species;
-        backend=backend, neighbors=neighbors, boundary=boundary)
+        backend=backend, neighbors=csr, boundary=boundary)
     _, dEdAEV = ani_energy_aev_grad_ka(aevs, species, pot, n_species; backend=ka_backend)
-    bwd_nb  = isnothing(neighbors) ? :auto : neighbors
+    bwd_nb  = isnothing(csr) ? :auto : csr
     dcoords = aev_vjp_ka(dEdAEV, coords, species, pot.aev_params, n_species;
         backend=ka_backend, neighbors=bwd_nb, boundary=boundary)   # ∂E_Ha/∂r, (3, n_atoms)
     T    = eltype(eltype(coords))
