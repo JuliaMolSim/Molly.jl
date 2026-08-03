@@ -18,26 +18,22 @@ abstract type AbstractMLPotential end
 # ANI energies are produced in Hartree; MD in Molly is typically in eV.
 const HARTREE_TO_EV = 27.211396132
 
-"""
-    cosine_cutoff(r, r_c)
-
-Smooth cutoff function: `0.5*(1+cos(π*r/r_c))` for `r < r_c`, else `0`.
-Used by the ANI AEV (radial/angular symmetry functions, [ANI-1] Eq. 2). A plain scalar
-function with no Lux/HDF5 dependency, so the CPU and GPU (KA) AEV paths share one
-definition.
-"""
+# cosine_cutoff(r, r_c)
+#
+# Smooth cutoff function: `0.5*(1+cos(π*r/r_c))` for `r < r_c`, else `0`.
+# Used by the ANI AEV (radial/angular symmetry functions, [ANI-1] Eq. 2). A plain scalar
+# function with no Lux/HDF5 dependency, so the CPU and GPU (KA) AEV paths share one
+# definition. Internal helper (not part of the public API).
 @inline function cosine_cutoff(r::T, r_c::T) where T
     r < r_c ? T(0.5) * (one(T) + cos(T(π) * r / r_c)) : zero(T)
 end
 
-"""
-    celu01(x)
-
-CELU activation with α=0.1 — the nonlinearity between Dense layers of each ANI element
-network (matches the TorchANI ANI-2x architecture). `celu01(x) = x` for `x ≥ 0`,
-`0.1*(exp(x/0.1) - 1)` otherwise. Exported so AD backends can register rules without
-depending on MollyLuxExt.
-"""
+# celu01(x)
+#
+# CELU activation with α=0.1 — the nonlinearity between Dense layers of each ANI element
+# network (matches the TorchANI ANI-2x architecture). `celu01(x) = x` for `x ≥ 0`,
+# `0.1*(exp(x/0.1) - 1)` otherwise. A core-Molly function (Molly.celu01) so AD backends can
+# register rules without depending on MollyLuxExt. Internal helper (not part of the public API).
 @noinline celu01(x::T) where T = x >= zero(T) ? x : T(0.1) * (exp(x / T(0.1)) - one(T))
 
 # Convert an ANI energy (eV, unitless) to the system's energy units.
@@ -108,48 +104,44 @@ function ANIPotential(path::AbstractString; kwargs...)
     error("ANIPotential requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
 end
 
-"""
-    compute_aevs(coords, species_indices, neighbors, boundary, aev_params, n_species)
-
-Compute atomic environment vectors (AEVs) for all atoms.
-Returns a `(n_atoms, aev_length)` matrix. Implementation is in ext/MollyLuxExt.jl.
-"""
+# compute_aevs(coords, species_indices, neighbors, boundary, aev_params, n_species)
+#
+# Compute atomic environment vectors (AEVs) for all atoms.
+# Returns a `(n_atoms, aev_length)` matrix. Implementation is in ext/MollyLuxExt.jl.
+# Internal helper (not part of the public API).
 function compute_aevs end
 
-"""
-    compute_aevs_ka(coords, species_indices, aev_params, n_species; backend=nothing, neighbors=nothing)
-
-GPU-portable AEV computation using KernelAbstractions — one thread per atom (or one
-workgroup per atom with `write_reduce=true`). `coords`/`species` must already live on the
-target device; `backend` defaults to `KernelAbstractions.get_backend(coords)`. Requires
-`KernelAbstractions`, `Lux`, and `HDF5` to be loaded.
-"""
+# compute_aevs_ka(coords, species_indices, aev_params, n_species; backend=nothing, neighbors=nothing)
+#
+# GPU-portable AEV computation using KernelAbstractions — one thread per atom (or one
+# workgroup per atom with `write_reduce=true`). `coords`/`species` must already live on the
+# target device; `backend` defaults to `KernelAbstractions.get_backend(coords)`. Requires
+# `KernelAbstractions`, `Lux`, and `HDF5` to be loaded.
+# Internal helper (not part of the public API).
 function compute_aevs_ka(args...; kwargs...)
     error("compute_aevs_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
           "`using KernelAbstractions, Lux, HDF5`")
 end
 
-"""
-    compute_ani_energy_ka(coords, species_indices, pot, n_species; backend=nothing, neighbors=nothing)
-
-End-to-end ANI energy (eV) computed on-device: GPU AEV (`compute_aevs_ka`) followed by
-the per-element neural networks run on the same backend, summed over atoms and averaged
-over ensemble members. Requires `KernelAbstractions`, `Lux`, and `HDF5`.
-"""
+# compute_ani_energy_ka(coords, species_indices, pot, n_species; backend=nothing, neighbors=nothing)
+#
+# End-to-end ANI energy (eV) computed on-device: GPU AEV (`compute_aevs_ka`) followed by
+# the per-element neural networks run on the same backend, summed over atoms and averaged
+# over ensemble members. Requires `KernelAbstractions`, `Lux`, and `HDF5`.
+# Internal helper (not part of the public API).
 function compute_ani_energy_ka(args...; kwargs...)
     error("compute_ani_energy_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
           "`using KernelAbstractions, Lux, HDF5`")
 end
 
-"""
-    compute_ani_forces_ka(coords, species_indices, pot, n_species; backend=nothing, neighbors=nothing, boundary=nothing)
-
-On-device ANI forces (eV/Å), the analytic counterpart of [`compute_ani_energy_ka`]. Runs the
-GPU AEV forward, a manual VJP through the per-element neural networks for `∂E/∂G`, then the
-backward radial/angular AEV kernels for `∂E/∂r`, giving `F = -∂E/∂r` averaged over the
-ensemble. Returns a `Vector{SVector{3}}`. Obeys the minimum-image convention via `boundary`.
-Requires `KernelAbstractions`, `Lux`, and `HDF5`.
-"""
+# compute_ani_forces_ka(coords, species_indices, pot, n_species; backend=nothing, neighbors=nothing, boundary=nothing)
+#
+# On-device ANI forces (eV/Å), the analytic counterpart of `compute_ani_energy_ka`. Runs the
+# GPU AEV forward, a manual VJP through the per-element neural networks for `∂E/∂G`, then the
+# backward radial/angular AEV kernels for `∂E/∂r`, giving `F = -∂E/∂r` averaged over the
+# ensemble. Returns a `Vector{SVector{3}}`. Obeys the minimum-image convention via `boundary`.
+# Requires `KernelAbstractions`, `Lux`, and `HDF5`.
+# Internal helper (not part of the public API).
 function compute_ani_forces_ka(args...; kwargs...)
     error("compute_ani_forces_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
           "`using KernelAbstractions, Lux, HDF5`")
