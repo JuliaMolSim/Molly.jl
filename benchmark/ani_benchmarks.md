@@ -171,25 +171,39 @@ equals the CPU/reference value; ΣF ≈ 1e-4 eV/Å (Float32, momentum conserved)
 
 Energy (single member, ms; **lower is better**):
 
-| N atoms | CPU (t8) | **Molly CUDA** | TorchANI CUDA | bio-mlff CUDA |
-|---------|----------|------------|---------------|---------------|
-| 500     | 39.5   | **4.0**  | 32.5 | 0.5 |
-| 1000    | 100.5  | **4.1**  | 32.4 | 0.9 |
-| 2000    | 151.7  | **4.4**  | 32.6 | 1.4 |
-| 5000    | 388.3  | **5.2**  | 35.1 | 3.5 |
-| 8000    | 688.5  | **6.2**  | 38.8 | 5.9 |
-| **15,954** | 1492.1 | **12.0** | 58.2 | 24.4 |
+| N atoms | CPU (t8) | **Molly CUDA** | TorchANI CUDA | NNPOps CUDA | bio-mlff CUDA |
+|---------|----------|------------|---------------|-------------|---------------|
+| 500     | 39.5   | **4.0**  | 32.5 | 25.4 | 0.5 |
+| 1000    | 100.5  | **4.1**  | 32.4 | 25.2 | 0.9 |
+| 2000    | 151.7  | **4.4**  | 32.6 | 24.7 | 1.4 |
+| 5000    | 388.3  | **5.2**  | 35.1 | 25.8 | 3.5 |
+| 8000    | 688.5  | **6.2**  | 38.8 | 26.2 | 5.9 |
+| **15,954** | 1492.1 | **12.0** | 58.2 | 27.2 | 24.4 |
 
 Forces (single member, ms):
 
-| N atoms | CPU (t8) | **Molly CUDA** | TorchANI CUDA | bio-mlff CUDA |
-|---------|----------|------------|---------------|---------------|
-| 500     | 285.2  | **10.1** | 62.5 | 1.4 |
-| 1000    | 337.7  | **10.8** | 62.5 | 2.5 |
-| 2000    | 410.8  | **12.1** | 63.3 | 4.0 |
-| 5000    | 1304.7 | **14.1** | 67.0 | 9.7 |
-| 8000    | 1951.0 | **15.5** | 72.6 | 15.4 |
-| **15,954** | 3905.3 | **31.3** | 98.9 | 42.7 |
+| N atoms | CPU (t8) | **Molly CUDA** | TorchANI CUDA | NNPOps CUDA | bio-mlff CUDA |
+|---------|----------|------------|---------------|-------------|---------------|
+| 500     | 285.2  | **10.1** | 62.5 | 48.6 | 1.4 |
+| 1000    | 337.7  | **10.8** | 62.5 | 48.5 | 2.5 |
+| 2000    | 410.8  | **12.1** | 63.3 | 47.3 | 4.0 |
+| 5000    | 1304.7 | **14.1** | 67.0 | 48.1 | 9.7 |
+| 8000    | 1951.0 | **15.5** | 72.6 | 48.0 | 15.4 |
+| **15,954** | 3905.3 | **31.3** | 98.9 | 51.2 | 42.7 |
+
+**NNPOps baseline (optimized-CUDA AEV).** The [openmm/NNPOps](https://github.com/openmm/NNPOps)
+library ([J. Phys. Chem. B 2023](https://doi.org/10.1021/acs.jpcb.3c06662)) provides hand-written
+CUDA symmetry-function kernels for ANI. On this stack (conda-forge NNPOps 0.7 + TorchANI 2.8.4 +
+RTX 5080) NNPOps 0.7 ships **only** `ANISymmetryFunctions` (the AEV) — the `BatchedNN` /
+`OptimizedTorchANI` wrappers were dropped — so it accelerates the AEV but leaves TorchANI's eager
+NN + Python framework overhead in place. I validated the NNPOps AEV against TorchANI 2.8.4's own
+AEV (max abs diff 1.2e-6, i.e. float32-exact after concatenating its radial+angular outputs into
+the 1008-length layout) and the resulting energies match stock TorchANI exactly. The effect is a
+**flat ~25 ms energy / ~48 ms forces floor** (NN-bound): NNPOps roughly halves TorchANI-CUDA at
+16k (energy 58→27 ms, forces 99→51 ms) by flattening the AEV cost, but it stays **well above Molly
+CUDA at every size** (16k: 12 vs 27 ms energy, 31 vs 51 ms forces). Molly's staged path — device
+CSR + write-reduced AEV + batched Lux NN — beats the AEV-only NNPOps acceleration because Molly
+also runs the NN on-device without per-call framework overhead.
 
 At the full 6mrr protein (15,954 atoms) Molly-CUDA is **123× the host CPU on energy and 125× on
 forces**. Against the two reference GPU implementations on the *same* RTX 5080: Molly is **faster than
@@ -200,9 +214,10 @@ still wins below that (its fixed overhead is tiny). Both the forward AEV and the
 kernel use the write-reduced (workgroup-per-atom) scheme.
 
 The [energy](#energy-cpu) and [forces](#forces--the-single-analytic-path-cpu--metal) vs-N figures
-above overlay all five series (Molly CPU/Metal/CUDA + TorchANI CPU/CUDA) on one chart each. NB Molly
-CPU/Metal + TorchANI CPU are Apple Silicon while Molly CUDA + TorchANI CUDA are the RTX 5080 host, so
-read the scaling shape rather than the absolute cross-machine level.
+above overlay every series (Molly CPU/Metal/CUDA + TorchANI CPU/CUDA + NNPOps CUDA + bio-mlff
+CPU/MPS/CUDA) on one chart each. NB Molly CPU/Metal + TorchANI CPU are Apple Silicon while the CUDA
+series (Molly/TorchANI/NNPOps + bio-mlff) are the RTX 5080 host, so read the scaling shape rather
+than the absolute cross-machine level.
 
 **GPU speedup over host CPU-t8** (Molly Metal/CUDA, TorchANI CUDA, bio-mlff MPS/CUDA; log y-axis).
 Each line is a backend's speedup over its OWN host CPU-t8 — Metal/MPS baseline is the Apple M3, CUDA
@@ -342,6 +357,11 @@ alone.
   is the definitive comparison; TorchANI has no usable Apple-GPU path (see above). The **NVIDIA
   GPU-vs-GPU** comparison (Molly CUDA vs TorchANI CUDA on the same RTX 5080) is now measured — see
   the CUDA section. Both GPU sections are single-machine snapshots, not cross-machine claims.
+- **NNPOps optimized-CUDA baseline** is now included (see the CUDA section). Caveat: conda-forge
+  NNPOps 0.7 ships only the symmetry-function (AEV) kernels — its `BatchedNN`/`OptimizedTorchANI`
+  wrappers were removed — so the measured NNPOps path is TorchANI's eager NN on top of NNPOps' AEV
+  and is NN-bound (~25 ms energy / ~48 ms forces floor). It halves TorchANI-CUDA at scale but stays
+  above Molly CUDA. A future NNPOps release that restores batched-NN fusion would lower this floor.
 - **Metal forces** are timed for a **single ensemble member**. The full 8-member ensemble reuses
   one AEV forward/backward and runs only the NN VJP 8× (species-batched), so expect ~1.4× like
   energy — not yet measured on Metal.
