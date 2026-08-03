@@ -1191,6 +1191,111 @@ end
     end
 end
 
+# Write-reduced backward angular kernel: ONE WORKGROUP per central atom, the W threads striding
+# over the outer neighbour `jj` (each doing the full inner `kk` loop) exactly like the forward
+# `aev_kernel_wg!`. The per-pair derivative body is identical to `aev_backward_angular!` and all
+# force contributions (to i, j, k) are already global `@atomic` scatters, so no shared memory or
+# barrier is needed. This spreads each atom's O(neighbours²·bins) derivative work across the group
+# instead of a single thread, which is the backward-pass analogue of the forward write-reduction.
+@kernel inbounds=true function aev_backward_angular_wg!(
+    dcoords, @Const(adj), @Const(coords), @Const(species), boundary,
+    @Const(nbr_off), @Const(nbr_idx), @Const(η_A), @Const(r_s_A), @Const(θ_s), ζ, r_c_A,
+    n_species :: Int, n_eta_A :: Int, n_shf_r :: Int, n_th :: Int, split :: Int, n_atoms :: Int,
+)
+    i  = @index(Group, Linear)
+    lt = @index(Local, Linear)
+    W  = @groupsize()[1]
+    if i <= n_atoms
+        T       = eltype(coords[1])
+        ci      = coords[i]
+        prefac0 = T(2)^(one(T) - ζ)
+        lo      = nbr_off[i] + 1
+        hi      = nbr_off[i + 1]
+        jj = lo + (lt - 1)
+        while jj <= hi
+            j   = nbr_idx[jj]
+            drj = Molly.vector(ci, coords[j], boundary)
+            rj  = norm(drj)
+            if rj < r_c_A
+                fcj   = cosine_cutoff(rj, r_c_A)
+                fcj_p = cosine_cutoff_deriv(rj, r_c_A)
+                sj    = species[j]
+                uj    = drj / rj
+                for kk in (jj + 1):hi
+                    k   = nbr_idx[kk]
+                    drk = Molly.vector(ci, coords[k], boundary)
+                    rk  = norm(drk)
+                    rk >= r_c_A && continue
+                    fck   = cosine_cutoff(rk, r_c_A)
+                    fck_p = cosine_cutoff_deriv(rk, r_c_A)
+                    sk    = species[k]
+                    uk    = drk / rk
+
+                    s1, s2   = sj <= sk ? (sj, sk) : (sk, sj)
+                    pair_idx = (s1-1)*n_species - (s1-1)*(s1-2)÷2 + (s2-s1+1)
+                    r_avg = (rj + rk) * T(0.5)
+                    fc_jk = fcj * fck
+                    c     = clamp(dot(drj, drk) / (rj * rk), T(-1), T(1))
+                    theta = acos(T(0.95) * c)
+                    base  = split + (pair_idx-1) * n_eta_A * n_shf_r * n_th
+
+                    SB = zero(T); SB_ravg = zero(T); SB_th = zero(T)
+                    for p in 1:n_eta_A
+                        for q in 1:n_shf_r
+                            d    = r_avg - r_s_A[q]
+                            E_pq = exp(-η_A[p] * d * d)
+                            coef = -T(2) * η_A[p] * d
+                            B = zero(T); Bth = zero(T)
+                            colbase = base + ((p-1)*n_shf_r + (q-1)) * n_th
+                            for l in 1:n_th
+                                A    = adj[i, colbase + l]
+                                phi  = theta - θ_s[l]
+                                ba   = one(T) + cos(phi)
+                                ANG  = ba^ζ
+                                dANG = ζ * ba^(ζ - one(T)) * (-sin(phi))
+                                B   += A * ANG
+                                Bth += A * dANG
+                            end
+                            SB      += E_pq * B
+                            SB_ravg += E_pq * coef * B
+                            SB_th   += E_pq * Bth
+                        end
+                    end
+
+                    E_ravg = prefac0 * fc_jk * SB_ravg
+                    E_fc   = prefac0 * SB
+                    E_th   = prefac0 * fc_jk * SB_th
+                    denom  = sqrt(max(one(T) - (T(0.95) * c)^2, T(1e-12)))
+                    tfac   = -T(0.95) / denom
+
+                    a_rj = E_ravg * T(0.5) + E_fc * (fcj_p * fck)
+                    a_rk = E_ravg * T(0.5) + E_fc * (fcj * fck_p)
+                    tj   = E_th * tfac / rj
+                    tk   = E_th * tfac / rk
+
+                    dj1 = a_rj*uj[1] + tj*(uk[1] - c*uj[1])
+                    dj2 = a_rj*uj[2] + tj*(uk[2] - c*uj[2])
+                    dj3 = a_rj*uj[3] + tj*(uk[3] - c*uj[3])
+                    dk1 = a_rk*uk[1] + tk*(uj[1] - c*uk[1])
+                    dk2 = a_rk*uk[2] + tk*(uj[2] - c*uk[2])
+                    dk3 = a_rk*uk[3] + tk*(uj[3] - c*uk[3])
+
+                    KernelAbstractions.@atomic dcoords[1, j] += dj1
+                    KernelAbstractions.@atomic dcoords[2, j] += dj2
+                    KernelAbstractions.@atomic dcoords[3, j] += dj3
+                    KernelAbstractions.@atomic dcoords[1, k] += dk1
+                    KernelAbstractions.@atomic dcoords[2, k] += dk2
+                    KernelAbstractions.@atomic dcoords[3, k] += dk3
+                    KernelAbstractions.@atomic dcoords[1, i] += -(dj1 + dk1)
+                    KernelAbstractions.@atomic dcoords[2, i] += -(dj2 + dk2)
+                    KernelAbstractions.@atomic dcoords[3, i] += -(dj3 + dk3)
+                end
+            end
+            jj += W
+        end
+    end
+end
+
 # Convert a Molly NeighborList (flat half-pairs (i,j,special)) into a host CSR
 # (offsets, symmetrised indices). This is the production path: it *consumes the
 # neighbours produced by the system's neighbour finder* (CellListMapNeighborFinder on
@@ -1605,10 +1710,20 @@ function aev_vjp_ka(adj, coords::AbstractVector{SVector{D,T}}, species, p, n_spe
     end
 
     if which === :angular || which === :both
-        ang! = aev_backward_angular!(ka_backend, 256)
-        ang!(dcoords, adj, coords, species, bdy, off_d, idx_d,
-             η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A, n_species,
-             n_eta_A, n_shf_r, n_th, split, n_atoms; ndrange = n_atoms)
+        # GPU: write-reduced (workgroup per atom) — spreads each atom's O(neighbours²) derivative
+        # work across the group, the backward analogue of the forward wg AEV. CPU: one thread/atom.
+        if ka_backend isa KernelAbstractions.CPU
+            ang! = aev_backward_angular!(ka_backend, 256)
+            ang!(dcoords, adj, coords, species, bdy, off_d, idx_d,
+                 η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A, n_species,
+                 n_eta_A, n_shf_r, n_th, split, n_atoms; ndrange = n_atoms)
+        else
+            wg = 64
+            ang! = aev_backward_angular_wg!(ka_backend, wg)
+            ang!(dcoords, adj, coords, species, bdy, off_d, idx_d,
+                 η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A, n_species,
+                 n_eta_A, n_shf_r, n_th, split, n_atoms; ndrange = n_atoms * wg)
+        end
     end
 
     return dcoords
