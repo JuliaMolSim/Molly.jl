@@ -17,6 +17,9 @@ function shortcut_pair(::BuckinghamZeroShortcut, atom_i, atom_j, args...)
            (iszero_value(atom_i.C) || iszero_value(atom_j.C))
 end
 
+# Extra Atom fields that a mixing rule reads
+mixing_atom_fields(mr) = ()
+
 struct LorentzMixing end
 
 xy_mixing(::LorentzMixing, x, y, args...) = (x + y) / 2
@@ -77,7 +80,7 @@ struct ExceptionList{N, K, V}
     values::SVector{N, V}
 end
 
-function ExceptionList(d::AbstractDict)
+function ExceptionList(d)
     n = length(d)
     ks = SVector{n}(collect(keys(d)))
     vs = SVector{n}(d[k] for k in ks)
@@ -102,6 +105,8 @@ struct MixingException{M, E}
     mixing::M
     exceptions::E
 end
+
+mixing_atom_fields(::MixingException) = (:atom_type,)
 
 function σ_mixing(me::MixingException, atom_i, atom_j, args...)
     default = σ_mixing(me.mixing, atom_i, atom_j, args...)

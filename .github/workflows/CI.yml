@@ -28,14 +28,9 @@ jobs:
         test:
           - NotGradients
           - Gradients
-        exclude:
-          - version: '1'
-            os: ubuntu-latest
-            arch: x64
-            test: Gradients
     steps:
       - run: export UCX_ERROR_SIGNALS="SIGILL,SIGBUS,SIGFPE"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
@@ -50,14 +45,14 @@ jobs:
         with:
           prefix: "xvfb-run -s '-screen 0 1024x768x24'"
       - uses: julia-actions/julia-processcoverage@v1
-      - uses: codecov/codecov-action@v6
+      - uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
   docs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'

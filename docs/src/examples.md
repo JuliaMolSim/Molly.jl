@@ -39,7 +39,7 @@ for temp in temps
         temperature=temp,
         friction=1.0u"ps^-1",
     )
-    simulate!(sys, simulator, 5_000; run_loggers=:skipzero)
+    simulate!(sys, simulator, 5_000; run_loggers=:skipstart)
 end
 
 f = Figure(size=(600, 400))
@@ -642,6 +642,70 @@ sys = System(
 )
 
 potential_energy(sys) # -2080.2391023908813 eV
+```
+
+## Lux.jl machine learning potential
+
+[Lux.jl](https://lux.csail.mit.edu) models can be integrated into Molly simulations as explicit-parameter neural network potentials. This approach separates the network architecture from its parameters and state (`model`, `ps`, `st`), which ensures type-stability and facilitates high-performance scientific machine learning.
+
+```julia
+using Molly
+using Lux
+using Random
+using StaticArrays
+using Zygote
+
+# 1. Define the custom interaction struct
+struct MachineLearningPotential{M, P, S}
+    model::M      
+    ps::P         
+    st::S         
+end
+
+# 2. Implement the potential energy function
+function Molly.potential_energy(s::System, inter::MachineLearningPotential, neighbors=nothing)
+    flat_coords = Float32.(reduce(vcat, s.coords)) 
+    energy, _ = inter.model(flat_coords, inter.ps, inter.st)
+    return energy[1] 
+end
+
+# 3. Implement analytical forces via Zygote
+function Molly.forces(s::System, inter::MachineLearningPotential, neighbors=nothing)
+    flat_coords = Float32.(reduce(vcat, s.coords))
+    grad = Zygote.gradient(c -> first(inter.model(c, inter.ps, inter.st)[1]), flat_coords)[1]
+    
+    n_atoms = length(s.coords)
+    neg_grad = -grad
+    return [SVector{3}(neg_grad[3i-2], neg_grad[3i-1], neg_grad[3i]) for i in 1:n_atoms]
+end
+
+# Setup a dummy 3-atom system
+coords = [SVector(1.0, 2.0, -1.0), SVector(0.5, 0.0, 1.1), SVector(0.0, -0.5, 0.2)]
+velocities = [SVector(0.0, 0.0, 0.0) for _ in 1:3]
+atoms = [Atom(mass=1.0, σ=0.3, ϵ=0.2), Atom(mass=1.0, σ=0.3, ϵ=0.2), Atom(mass=1.0, σ=0.3, ϵ=0.2)]
+boundary = CubicBoundary(10.0, 10.0, 10.0)
+
+# Setup the Lux Neural Network
+rng = Random.default_rng()
+model = Chain(Dense(9 => 16, tanh), Dense(16 => 1))
+ps, st = Lux.setup(rng, model)
+
+# Wrap the model in our custom potential
+inter = MachineLearningPotential(model, ps, st)
+
+# Create the Molly System
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    velocities=velocities,
+    boundary=boundary,
+    general_inters=(inter,),
+    energy_units=NoUnits,
+    force_units=NoUnits
+)
+
+println("System Energy: ", Molly.potential_energy(sys, inter))
+println("System Forces: ", Molly.forces(sys, inter))
 ```
 
 ## Density functional theory
@@ -1257,9 +1321,9 @@ for j in 1:n_atoms_half
 end
 
 shake = SHAKE_RATTLE(
-    length(atoms),
-    1e-8u"Å",
-    1e-8u"Å^2 * ps^-1";
+    n_atoms=length(atoms),
+    dist_tolerance=1e-8u"Å",
+    vel_tolerance=1e-8u"Å^2 * ps^-1",
     dist_constraints=[constraints...],
 )
 

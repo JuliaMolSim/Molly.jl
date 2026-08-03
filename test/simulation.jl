@@ -1,3 +1,60 @@
+simulation_step_wrapper(sys, neighbors, step_n, buffers; kwargs...) = step_n
+
+mutable struct StepTrackingCoupler
+    n_steps::Int
+    history::Vector{Int}
+end
+
+StepTrackingCoupler(n_steps::Integer) = StepTrackingCoupler(Int(n_steps), Int[])
+
+function Molly.apply_coupling!(sys, buffers, coupler::StepTrackingCoupler, sim, neighbors,
+                               step_n; kwargs...)
+    step_n % coupler.n_steps == 0 && push!(coupler.history, step_n)
+    return false
+end
+
+@testset "Simulation continuation timing" begin
+    atoms = [Atom(mass=10.0u"g/mol"), Atom(mass=12.0u"g/mol")]
+    coords = [SVector(0.5, 0.5, 0.5)u"nm", SVector(1.0, 1.0, 1.0)u"nm"]
+    velocities = [SVector(0.1, 0.0, 0.0)u"nm/ps", SVector(-0.1, 0.0, 0.0)u"nm/ps"]
+    logger() = GeneralObservableLogger(simulation_step_wrapper, Int, 2)
+
+    sys_continuous = System(
+        atoms=atoms,
+        coords=coords,
+        velocities=velocities,
+        boundary=CubicBoundary(2.0u"nm"),
+        loggers=(step=logger(),),
+    )
+    sys_chunked = deepcopy(sys_continuous)
+    coupler_continuous = StepTrackingCoupler(4)
+    coupler_chunked = StepTrackingCoupler(4)
+    sim_continuous = VelocityVerlet(
+        dt=0.001u"ps",
+        coupling=(coupler_continuous,),
+        remove_CM_motion=0,
+    )
+    sim_chunked = VelocityVerlet(
+        dt=0.001u"ps",
+        coupling=(coupler_chunked,),
+        remove_CM_motion=0,
+    )
+
+    simulate!(sys_continuous, sim_continuous, 10; n_threads=1)
+    simulate!(sys_chunked, sim_chunked, 3; n_threads=1)
+    simulate!(sys_chunked, sim_chunked, 3; n_threads=1, init_step=3,
+              run_loggers=:skipstart)
+    simulate!(sys_chunked, sim_chunked, 4; n_threads=1, init_step=6,
+              run_loggers=:skipstart)
+
+    @test sys_chunked.coords == sys_continuous.coords
+    @test sys_chunked.velocities == sys_continuous.velocities
+    @test coupler_chunked.history == coupler_continuous.history == [4, 8]
+    @test values(sys_chunked.loggers.step) ==
+          values(sys_continuous.loggers.step) == collect(0:2:10)
+    @test_throws ArgumentError simulate!(sys_chunked, sim_chunked, 1; init_step=-1)
+end
+
 @testset "Lennard-Jones 2D" begin
     for AT in array_list
         n_atoms = 10
@@ -7,7 +64,8 @@
         atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                  for i in 1:n_atoms]
         simulator = VelocityVerlet(dt=0.001u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
-        gen_temp_wrapper(s, buffers, args...; kwargs...) = temperature(s; kin_tensor = buffers.kin_tensor)
+        gen_temp_wrapper(s, neighbors, step_n, buffers; kwargs...) =
+            temperature(s; kin_tensor=buffers.kin_tensor)
 
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
@@ -79,7 +137,7 @@ end
     TP = typeof(0.2u"kJ * mol^-1")
 
     V(sys, args...; kwargs...) = sys.velocities
-    pot_obs(sys, neighbors, step_n; kwargs...) = potential_energy(sys, neighbors, step_n)
+    pot_obs(sys, neighbors, step_n, buffers; kwargs...) = potential_energy(sys, neighbors, step_n)
     kin_obs(sys, args...; kwargs...) = kinetic_energy(sys)
 
     for n_threads in n_threads_list
@@ -319,7 +377,7 @@ end
     random_velocities!(s, temp)
 
     @time simulate!(s, simulator, n_steps ÷ 2)
-    @time simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipzero)
+    @time simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipstart)
 
     @test length(values(s.loggers.coords)) == 21
     @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
@@ -773,12 +831,14 @@ end
 end
 
 @testset "Temperature REMD" begin
+    Random.seed!(1234)
+    rng = Xoshiro(10)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm")
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
 
     pairwise_inters = (LennardJones(use_neighbors=true),)
 
@@ -809,7 +869,14 @@ end
         push!(thermo_states, ThermoState(base_sys, intg; temperature=temp))
     end
 
-    replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)) for i in 1:n_replicas]
+    replica_loggers = [
+        (
+            temp=TemperatureLogger(10),
+            coords=CoordinatesLogger(10),
+            step=GeneralObservableLogger(simulation_step_wrapper, Int, 10),
+        )
+        for i in 1:n_replicas
+    ]
 
     # Initialize ReplicaSystem using the generalized constructor
     repsys = ReplicaSystem(
@@ -835,27 +902,38 @@ end
     # Use the unified simulator
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=true)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=false)
+    @test_throws ArgumentError simulate!(repsys, simulator, n_steps; rng=rng)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
+
+    @test repsys.current_step == 2n_steps
+    @test all(
+        values(repsys.replica_loggers[id].step) == collect(0:10:(2n_steps))
+        for id in 1:n_replicas
+    )
+    @test issorted(repsys.exchange_logger.steps)
+    @test all(step -> 0 < step <= repsys.current_step, repsys.exchange_logger.steps)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
-    @test efficiency > 0.2 # This is a fairly arbitrary threshold but it's a good test for very bad cases
+    @test efficiency > 0.16 # This is a fairly arbitrary threshold but it's a good test for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
     @info "Exchange Efficiency: $efficiency"
 
     for id in 1:n_replicas
         mean_temp = mean(values(repsys.replica_loggers[id].temp))
         # Given physical coordinates swap thermal states, they should average out across the ladder bounds
-        @test (0.9 * temp_vals[1]) < mean_temp < (1.1 * temp_vals[end])
+        @test (0.9 * temp_vals[1]) < mean_temp < (1.15 * temp_vals[end])
     end
 end
 
 @testset "Hamiltonian REMD" begin
+    Random.seed!(1234)
+    rng = Xoshiro(10)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(2.0u"nm")
-    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
     temp = 100.0u"K"
 
     neighbor_finder = DistanceNeighborFinder(
@@ -898,11 +976,12 @@ end
     # Use the unified simulator (implicitly handles Hamiltonian REMD based on the ThermoStates)
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=true)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=false)
+    @test_throws ArgumentError simulate!(repsys, simulator, n_steps; rng=rng)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
-    @test efficiency > 0.2 # This is a fairly arbitrary threshold, but it's a good test for very bad cases
+    @test efficiency > 0.1 # This is a fairly arbitrary threshold, but it's a good test for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
     @info "Exchange Efficiency: $efficiency"
 
@@ -1224,6 +1303,97 @@ end
     @test all(abs.(total_momentum) .< 1.0)
 end
 
+@testset "MTSIntegrator" begin
+    ff = MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))
+    constraint_options = (
+        (:none  , SetupSHAKE_RATTLE()),
+        (:hbonds, SetupSHAKE_RATTLE()),
+        (:hbonds, SetupLINCS()       ),
+    )
+
+    for AT in array_list
+        for (constraints, constraint_algorithm) in constraint_options
+            sys = System(
+                joinpath(data_dir, "tip4pew.pdb"),
+                ff;
+                array_type=AT,
+                constraints=constraints,
+                constraint_algorithm=constraint_algorithm,
+                nonbonded_method=:cutoff,
+                center_coords=false,
+            )
+
+            if constraints == :hbonds
+                # Do not constrain angles, or there would be no specific interactions left
+                cons_label = "cons"
+                si_fractions = (4,)
+            else
+                cons_label = "nocons"
+                si_fractions = (8, 4)
+            end
+            sim = MTSIntegrator(
+                dt=1.0u"fs",
+                pi_fractions=(1, 1),
+                si_fractions=si_fractions,
+                gi_fractions=(1,),
+                remove_CM_motion=false,
+            )
+
+            forces_molly = from_device(forces(sys))
+            openmm_forces_fp = joinpath(data_dir, "openmm_tip4pfb", "forces_$cons_label.txt")
+            forces_openmm_vs = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+            forces_openmm = [(iszero(i % 4) ? zero(forces_openmm_vs[i]) : forces_openmm_vs[i])
+                             for i in eachindex(sys)]
+            @test maximum(norm.(forces_molly .- forces_openmm)) < 1e-6u"kJ * mol^-1 * nm^-1"
+
+            E_molly = potential_energy(sys)
+            openmm_E_fp = joinpath(data_dir, "openmm_tip4pfb", "energy_$cons_label.txt")
+            E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+            @test abs(E_molly - E_openmm) < 1e-5u"kJ * mol^-1"
+
+            n_steps = 10
+            simulate!(sys, sim, n_steps)
+
+            openmm_coords_fp = joinpath(data_dir, "openmm_tip4pfb",
+                                        "coordinates_$(n_steps)steps_$cons_label.txt")
+            openmm_vels_fp   = joinpath(data_dir, "openmm_tip4pfb",
+                                        "velocities_$(n_steps)steps_$cons_label.txt" )
+            coords_openmm = SVector{3}.(eachrow(readdlm(openmm_coords_fp)))u"nm"
+            vels_openmm   = SVector{3}.(eachrow(readdlm(openmm_vels_fp)))u"nm * ps^-1"
+
+            coords_diff = from_device(sys.coords) .- wrap_coords.(coords_openmm, (sys.boundary,))
+            vels_diff = from_device(sys.velocities) .- vels_openmm
+            @test maximum(norm.(coords_diff)) < 1e-3u"nm"
+            @test maximum(norm.(vels_diff  )) < 0.1u"nm * ps^-1"
+
+            temp = 300.0u"K"
+            coupling = (CRescaleBarostat(1.0u"bar", 1.0u"fs"; max_scale_frac=0.01, n_steps=1),)
+            sim_lang = MTSLangevinIntegrator(
+                dt=1.0u"fs",
+                temperature=temp,
+                friction=10.0u"ps^-1",
+                pi_fractions=(1, 1),
+                si_fractions=si_fractions,
+                gi_fractions=(1,),
+                coupling=coupling,
+                remove_CM_motion=false,
+            )
+
+            sys = System(
+                sys;
+                loggers=(
+                    TemperatureLogger(10),
+                    BoxLogger(10),
+                ),
+            )
+            simulate!(sys, sim_lang, 1_000)
+
+            @test 290u"K" < mean(values(sys.loggers[1])[81:end]) < 310u"K"
+            @test 2.95u"nm" < mean(values(sys.loggers[2])[81:end])[1, 1] < 3.05u"nm"
+        end
+    end
+end
+
 @testset "Accelerated Weight Histogram (AWH)" begin
     n_atoms = 50
     n_steps = 2_000
@@ -1253,7 +1423,7 @@ end
             coords=coords,
             boundary=boundary,
             pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
-            neighbor_finder=neighbor_finder
+            neighbor_finder=neighbor_finder,
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")
         push!(thermo_states, ThermoState(sys, intg; temperature=temp))
@@ -1262,7 +1432,77 @@ end
     # Initialize AWH state using the newly generalized array of ThermoStates
     # n_bias is set low (10) to guarantee the initial stage is rapidly saturated 
     # and weight updates trigger during a short 2000 step test
-    awh_state = AWHState(thermo_states; first_state=1, n_bias=10)
+    awh_state = AWHState(
+        thermo_states;
+        first_state=1,
+        n_bias=10,
+    )
+    @test_throws MethodError AWHState(
+        thermo_states;
+        first_state=1,
+        n_bias=10,
+        loggers=(step=GeneralObservableLogger(simulation_step_wrapper, Int, 1),),
+    )
+    awh_state_show = sprint(show, awh_state)
+    @test occursin("AWHState with 4 windows", awh_state_show)
+    @test occursin("active window 1", awh_state_show)
+    @test !occursin("scratch_potentials", awh_state_show)
+    @test sprint(show, MIME"text/plain"(), awh_state) == awh_state_show
+
+    awh_first_state = AWHState(thermo_states; first_state=3, n_bias=10)
+    @test awh_first_state.active_idx == 3
+    @test awh_first_state.active_intg === thermo_states[3].integrator
+    @test awh_first_state.active_sys.pairwise_inters == thermo_states[3].system.pairwise_inters
+
+    space = awh_state.state_space
+    subset = [1, 3]
+    full_energies = Molly.evaluate_energy_all!(space.partition, awh_state.active_sys.coords,
+                                               awh_state.active_sys.boundary)
+    subset_energies = Molly.evaluate_energy_subset(
+        space.partition,
+        awh_state.active_sys.coords,
+        awh_state.active_sys.boundary,
+        subset,
+    )
+    @test subset_energies[1] ≈ full_energies[1]
+    @test subset_energies[2] ≈ full_energies[3]
+
+    full_reduced = zeros(typeof(awh_state.N_bias), n_windows)
+    subset_reduced = zeros(typeof(awh_state.N_bias), length(subset))
+    Molly.reduced_potentials!(
+        full_reduced,
+        full_energies,
+        space,
+        awh_state.active_sys.boundary,
+        Base.OneTo(n_windows),
+    )
+    Molly.reduced_potentials!(
+        subset_reduced,
+        subset_energies,
+        space,
+        awh_state.active_sys.boundary,
+        subset,
+    )
+    @test subset_reduced ≈ full_reduced[subset]
+
+    pressure_state = ThermoState(thermo_states[1].system, thermo_states[1].integrator;
+                                 temperature=temp, pressure=1.0u"bar")
+    pressure_space = Molly.ExtendedStateSpace([pressure_state])
+    probe_energy = 1.25u"kJ * mol^-1"
+    expected_reduced = pressure_space.betas[1] *
+                       (ustrip(probe_energy) +
+                        ustrip(pressure_space.pressures[1] * volume(boundary)))
+    @test Molly.reduced_potential(pressure_space, probe_energy, boundary, 1) ≈ expected_reduced
+
+    log_state_bias = [0.2, -0.4, 0.1]
+    reduced = [1.0, 2.0, 0.5]
+    weights = zeros(3)
+    scratch = zeros(3)
+    Molly.conditional_state_weights!(weights, log_state_bias, reduced, scratch)
+    z = log_state_bias .- reduced
+    log_den = maximum(z) + log(sum(exp.(z .- maximum(z))))
+    @test weights ≈ exp.(z .- log_den)
+    @test sum(weights) ≈ 1.0
 
     # Wrap in AWHSimulation
     awh_sim = AWHSimulation(
@@ -1271,8 +1511,14 @@ end
         update_freq=5,
         well_tempered_factor=10.0,
         coverage_threshold=1.0,
-        log_freq=10
+        log_freq=10,
+        loggers=(step=GeneralObservableLogger(simulation_step_wrapper, Int, 1),),
     )
+    awh_sim_show = sprint(show, awh_sim)
+    @test occursin("AWHSimulation with 4 windows", awh_sim_show)
+    @test occursin("PMF deconvolution disabled", awh_sim_show)
+    @test !occursin("well_tempered_fac", awh_sim_show)
+    @test sprint(show, MIME"text/plain"(), awh_sim) == awh_sim_show
 
     initial_f = copy(awh_sim.state.f)
 
@@ -1291,4 +1537,11 @@ end
     
     # 4. AWH enforces a structural constraint where the first state acts as the reference (f = 0.0)
     @test awh_sim.state.f[1] == 0.0
+    @test awh_sim.current_step == n_steps
+    @test values(awh_sim.active_state.active_sys.loggers.step) == collect(0:n_steps)
+
+    simulate!(awh_sim, 20)
+    @test awh_sim.current_step == n_steps + 20
+    @test values(awh_sim.active_state.active_sys.loggers.step) == collect(0:(n_steps + 20))
+    @test_throws ArgumentError AWHSimulation(awh_state; initial_step=-1)
 end

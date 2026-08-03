@@ -622,7 +622,7 @@ end
 
 function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)
     I = zero(coord_i[1] / unit(dist_cutoff)^2)
-    r = norm(vector(coord_i, coord_j, boundary))
+    r = sqrt(sum(abs2, vector(coord_i, coord_j, boundary)))
     if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         return I
     end
@@ -640,6 +640,11 @@ end
 
 get_i1(x) = @inbounds x[1]
 get_i2(x) = @inbounds x[2]
+
+struct EmptyIgrads end
+
+Base.getindex(::EmptyIgrads, i, j) = EmptyIgrads()
+Base.:-(x, ::EmptyIgrads) = x
 
 function born_radii_sum(or, offset, I, α, β, γ)
     radius = or + offset
@@ -665,13 +670,11 @@ function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, boundary) whe
         end
         Is[i] = I
     end
-    I_grads = zeros(eltype(Is), length(Is), length(Is)) ./ unit(inter.dist_cutoff)
-
     Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
                                  inter.α, inter.β, inter.γ)
     Bs      = get_i1.(Bs_B_grads)
     B_grads = get_i2.(Bs_B_grads)
-    return Bs, B_grads, I_grads
+    return Bs, B_grads, EmptyIgrads()
 end
 
 function born_radii_and_grad(inter::ImplicitSolventOBC, coords::AbstractGPUArray, boundary)
@@ -680,20 +683,19 @@ function born_radii_and_grad(inter::ImplicitSolventOBC, coords::AbstractGPUArray
     loop_res = born_radii_loop_OBC.(coords_i, coords_j, inter.oris, inter.srjs,
                                     inter.dist_cutoff, (boundary,))
     Is = dropdims(sum(loop_res; dims=2); dims=2)
-    I_grads = zero(loop_res) ./ unit(inter.dist_cutoff)
 
     Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
                                  inter.α, inter.β, inter.γ)
     Bs      = get_i1.(Bs_B_grads)
     B_grads = get_i2.(Bs_B_grads)
-    return Bs, B_grads, I_grads
+    return Bs, B_grads, EmptyIgrads()
 end
 
 function born_radii_loop_GBN2(coord_i::SVector{D, C}, coord_j, ori, orj, srj, dist_cutoff,
                                 offset, neck_scale, neck_cut, d0, m0, boundary) where {D, C}
     I = zero(coord_i[1] / unit(dist_cutoff)^2)
     I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
-    r = norm(vector(coord_i, coord_j, boundary))
+    r = sqrt(sum(abs2, vector(coord_i, coord_j, boundary)))
     if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         return I, I_grad
     end
@@ -798,7 +800,7 @@ end
         j = (inter_i - 1) % n_atoms + 1
         if i != j
             coord_i, coord_j = coords[i], coords[j]
-            r = norm(vector(coord_i, coord_j, boundary))
+            r = sqrt(sum(abs2, vector(coord_i, coord_j, boundary)))
             if iszero_value(dist_cutoff) || r <= dist_cutoff
                 I = zero(coord_i[1] / unit(dist_cutoff)^2)
                 I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
@@ -875,7 +877,7 @@ end
 
 function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, boundary)
     dr = vector(coord_i, coord_j, boundary)
-    r = norm(dr)
+    r = sqrt(sum(abs2, dr))
     if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         return zero(bi ./ coord_i .^ 2)
     end
@@ -894,6 +896,7 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
         return zero(bi ./ coord_i .^ 2)
     end
 end
+
 
 function forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
     coords, boundary = sys.coords, sys.boundary
@@ -914,7 +917,8 @@ function forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_ch
     born_forces_2 = born_forces_1 .* (Bs .^ 2) .* B_grads
     @inbounds for i in eachindex(sys)
         for j in eachindex(sys)
-            f = gb_force_loop_2(coords[i], coords[j], born_forces_2[i], I_grads[i, j],
+            f = gb_force_loop_2(coords[i], coords[j], born_forces_2[i],
+                                I_grads[i, j],
                                 inter.oris[i], inter.srjs[j], inter.dist_cutoff, boundary)
             fs[i] = fs[i] .- f
             fs[j] = fs[j] .+ f
@@ -1032,7 +1036,7 @@ end
 @kernel function gbsa_force_2_kernel!(forces, born_forces, @Const(coords),
                                       boundary, dist_cutoff, @Const(or),
                                       @Const(sor), @Const(Bs),
-                                      @Const(B_grads), @Const(I_grads),
+                                      @Const(B_grads), I_grads,
                                       ::Val{D}, ::Val{F}) where {D, F}
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
@@ -1043,7 +1047,7 @@ end
         j = (inter_i - 1) % n_atoms + 1
         if i != j
             dr = vector(coords[i], coords[j], boundary)
-            r = norm(dr)
+            r = sqrt(sum(abs2, dr))
 
             if iszero_value(dist_cutoff) || r <= dist_cutoff
                 ori, srj = or[i], sor[j]

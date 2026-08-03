@@ -466,6 +466,8 @@ Gromacs file reading should be considered experimental.
 - `rigid_water=false`: whether to constrain the bonds and angle in water
     molecules. Applied on top of `constraints`, so `constraints=:hangles` and
     `rigid_water=false` gives rigid water.
+- `constraint_algorithm`: Constraint algorithm to use for enforcing the constraints.
+    Can be an instance of `SetupLINCS` or `SetupSHAKE_RATTLE`, defaults to `SetupLINCS()`.
 - `nonbonded_method=:none`: method for long range interaction summation,
     options are `:none` (short range only), `:cutoff` (reaction field method),
     `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
@@ -478,7 +480,7 @@ Gromacs file reading should be considered experimental.
     to `true`.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
-    atom they are bonded to. Hydrogens in a constraint are not modified.
+    atom they are bonded to. This is applied before constraints are generated.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -499,13 +501,13 @@ Gromacs file reading should be considered experimental.
 - `disulfide_bonds=true`: whether or not to look for disulfide bonds between CYS
     residues in the structure file and add them to the topology. Uses geometric
     arguments to assign them.
+- `n_threads=Threads.nthreads()`: the number of threads the simulation will likely
+    be run on, used for example when setting up PME. Only relevant when running on CPU.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
     with Enzyme.jl and `nonbonded_method` is `:pme` or `array_type` is `CuArray`.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
-- `constraint_algorithm`: Constraint algorithm to use for enforcing the
-    constraints. Can be [`LINCS`](@ref) or [`SHAKE_RATTLE`](@ref), defaults to LINCS.
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
@@ -518,6 +520,7 @@ function System(coord_file::AbstractString,
                 dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,
                 rigid_water=false,
+                constraint_algorithm=SetupLINCS(),
                 nonbonded_method=:none,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
@@ -531,9 +534,9 @@ function System(coord_file::AbstractString,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
                 disulfide_bonds=true,
+                n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                constraint_algorithm=LINCS,
                 force_separate_lj14=false) where {AT <: AbstractArray}
     check_strictness(strictness)
     if dist_buffer < zero(dist_buffer)
@@ -544,8 +547,7 @@ function System(coord_file::AbstractString,
                             "(e.g. `2` or `2u\"g/mol\"`)"))
     end
     if !isa(hydrogen_mass, Bool) && !(hydrogen_mass > zero(hydrogen_mass))
-        throw(ArgumentError("hydrogen_mass should be greater than zero, constrained atoms" *
-                            "are automatically given a mass of zero"))
+        throw(ArgumentError("hydrogen_mass should be greater than zero"))
     end
     if grad_safe && neighbor_finder_type == GPUNeighborFinder
         throw(ArgumentError("GPUNeighborFinder is not compatible with grad_safe"))
@@ -553,12 +555,17 @@ function System(coord_file::AbstractString,
     if isnothing(dispersion_correction)
         disp_corr = force_field.dispersion_correction
     else
+        disp_corr = dispersion_correction
+    end
+    if disp_corr && force_field.custom_nonbonded
+        throw(ArgumentError("dispersion_correction=true is not supported with CustomNonbondedForce"))
+    end
+    if !isnothing(dispersion_correction)
         if dispersion_correction != force_field.dispersion_correction
             err_str = "dispersion_correction is $dispersion_correction but value in the force " *
                       "field is $(force_field.dispersion_correction), using $dispersion_correction"
             report_issue(err_str, strictness)
         end
-        disp_corr = dispersion_correction
     end
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
@@ -736,7 +743,8 @@ function System(coord_file::AbstractString,
                 error("atom $ai type $atype has charge missing")
             end
         end
-        push!(atoms_abst, Atom(index=ai, atom_type=ati, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ, λ=T(1.0)))
+        push!(atoms_abst, Atom(index=Int32(ai), atom_type=Int32(ati), mass=at.mass, charge=ch,
+                               σ=at.σ, ϵ=at.ϵ, λ=T(1.0)))
 
         if !ismissing(at.σ14)
             push!(σs_14, at.σ14)
@@ -1157,13 +1165,13 @@ function System(coord_file::AbstractString,
     end
 
     return System(T, AT, atoms, coords, boundary_used, velocities,
-                  atoms_data, virtual_sites_type, loggers, data, bonds_il, bonds_ub_flags,
+                  atoms_data, virtual_sites_type, loggers, data, force_field.global_params, bonds_il, bonds_ub_flags,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
                   dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr, hydrogen_mass,
-                  strictness, launch_config, autotune_launch, constraint_algorithm)
+                  strictness, launch_config, autotune_launch, constraint_algorithm, n_threads)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1200,8 +1208,9 @@ function System(T::Type,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
+                n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
-                constraint_algorithm=LINCS) where AT <: AbstractArray
+                constraint_algorithm=SetupLINCS()) where AT <: AbstractArray
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
@@ -1244,7 +1253,7 @@ function System(T::Type,
             continue
         end
         if startswith(sl, '[') && endswith(sl, ']')
-            current_field = strip(sl[2:end-1])
+            current_field = strip(sl[2:(end - 1)])
             continue
         end
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
@@ -1404,7 +1413,7 @@ function System(T::Type,
     end
 
     coords_abst = SArray[]
-    for (i, l) in enumerate(lines[3:end-1])
+    for (i, l) in enumerate(lines[3:(end - 1)])
         coord = SVector(parse(T, l[21:28]), parse(T, l[29:36]), parse(T, l[37:44]))
         if units
             push!(coords_abst, (coord)u"nm")
@@ -1493,15 +1502,17 @@ function System(T::Type,
     separate_lj14 = false
     dispersion_correction = true
     hydrogen_mass = false
+    global_params = [zero(T), zero(T)]
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
-                  loggers, data, bonds, bonds_ub_flags, angles, torsions, impropers,
+                  loggers, data, global_params, bonds, bonds_ub_flags, angles, torsions, impropers,
                   torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
                   approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
                   dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
-                  hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
+                  hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
+                  n_threads)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1525,26 +1536,45 @@ function find_bond_r0(bonds_all, i, j)
     error("atoms $i and $j are in an angle constraint but the bond cannot be found")
 end
 
+# Allow setup structs to have unitful defaults
+function convert_setup_quantity(x, units, T)
+    if units
+        return T(x)
+    else
+        if unit(x) == NoUnits
+            return T(x)
+        else
+            return T(ustrip(x))
+        end
+    end
+end
+
 function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
-                                    units, strictness, masses, ::Type{SHAKE_RATTLE})
+                                    units, strictness, masses, ca::SetupSHAKE_RATTLE)
     return SHAKE_RATTLE(
-        length(atoms_data),
-        add_units(T(1e-6), u"nm", units),
-        add_units(T(1e-6), u"nm^2 * ps^-1", units);
+        n_atoms=length(atoms_data),
+        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
+        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
         dist_constraints=[dist_constraints...],
         angle_constraints=[angle_constraints...],
+        gpu_block_size=ca.gpu_block_size,
+        max_iters=ca.max_iters,
         strictness=strictness,
     )
 end
 
 function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
-                                    units, strictness, masses, ::Type{LINCS})
+                                    units, strictness, masses, ca::SetupLINCS)
     return LINCS(
         masses=masses,
-        dist_tolerance=add_units(T(1e-6), u"nm", units),
-        vel_tolerance=add_units(T(1e-6), u"nm^2 * ps^-1", units),
+        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
+        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
         dist_constraints=[dist_constraints...],
         angle_constraints=[angle_constraints...],
+        n_rec=ca.n_rec,
+        n_iter=ca.n_iter,
+        iter_vel_correction=ca.iter_vel_correction,
+        gpu_block_size=ca.gpu_block_size,
     )
 end
 
@@ -1606,9 +1636,8 @@ function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_da
     return constraints, bonds, angles
 end
 
-function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constraints,
+function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
                                    hydrogen_mass, units, T)
-    inds_constrained = constrained_atom_inds(constraints)
     atoms_cpu = from_device(atoms)
     modified_masses = mass.(atoms_cpu)
     if units
@@ -1626,7 +1655,7 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constrai
     end
 
     for i in eachindex(atoms_cpu)
-        if !(i in inds_constrained) && !is_heavy_atom(atoms_cpu[i], atoms_data[i])
+        if !is_heavy_atom(atoms_cpu[i], atoms_data[i])
             mass_change = new_h_mass - modified_masses[i]
             modified_masses[i] = new_h_mass
 
@@ -1658,13 +1687,14 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, constrai
 end
 
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
-                loggers, data, bonds_all, bonds_ub_flags, angles_all, torsions, impropers,
+                loggers, data, global_params, bonds_all, bonds_ub_flags, angles_all, torsions, impropers,
                 torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
                 ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent, kappa,
                 grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
-                hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm)
+                hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
+                n_threads)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
 
@@ -1678,67 +1708,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     else
         ϵ_mix = GeometricMixing()
     end
-    # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
-    #   to zero for the pairwise interaction
-    pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
-    lj = LennardJones(
-        cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=using_neighbors,
-        σ_mixing=σ_mix,
-        ϵ_mixing=ϵ_mix,
-        weight_special=pi_weight_14_lj,
-    )
-
-    if nonbonded_method == :none
-        coul = Coulomb(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method == :cutoff
-        coul = CoulombReactionField(
-            dist_cutoff=T(dist_cutoff),
-            solvent_dielectric=T(crf_solvent_dielectric),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method in (:ewald, :pme)
-        coul = CoulombEwald(
-            dist_cutoff=T(dist_cutoff),
-            error_tol=T(ewald_error_tol),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-            approximate_erfc=approximate_pme,
-        )
-        if nonbonded_method == :ewald
-            ewald = Ewald(
-                T(dist_cutoff);
-                error_tol=T(ewald_error_tol),
-                eligible=eligible,
-                special=special,
-            )
-        else
-            ewald = PME(
-                T(dist_cutoff),
-                atoms,
-                boundary_used;
-                error_tol=T(ewald_error_tol),
-                eligible=eligible,
-                special=special,
-                grad_safe=grad_safe,
-            )
-        end
-        general_inters_ewald = (ewald,)
-    else
-        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
-                            ":none, :cutoff, :pme and :ewald"))
-    end
-    pairwise_inters = (lj, coul)
 
     # For the purposes of assigning molecules, add connections from atoms to virtual sites
     bonds_all_vs_is, bonds_all_vs_js = copy(bonds_all.is), copy(bonds_all.js)
@@ -1754,6 +1723,11 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         topology = MolecularTopology(bonds_all_vs_is, bonds_all_vs_js, length(coords_dev))
     else
         topology = nothing
+    end
+
+    if hydrogen_mass != false # false, number or unitful mass
+        atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds_all.is, bonds_all.js,
+                                          hydrogen_mass, units, T)
     end
 
     masses = mass.(from_device(atoms))
@@ -1873,6 +1847,87 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
             ))
         end
     end
+
+    if global_params[1] == zero(T)
+        # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
+        #   to zero for the pairwise interaction
+        pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
+        lj = LennardJones(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            σ_mixing=σ_mix,
+            ϵ_mixing=ϵ_mix,
+            weight_special=pi_weight_14_lj,
+        )
+    else
+        lj = DoubleExponential(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            α=T(global_params[1]),
+            β=T(global_params[2]),
+            σ_mixing=σ_mix,
+            ϵ_mixing=ϵ_mix,
+            weight_special=zero(T),
+        )
+    end
+
+    if nonbonded_method == :none
+        coul = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters_ewald = ()
+    elseif nonbonded_method == :cutoff
+        coul = CoulombReactionField(
+            dist_cutoff=T(dist_cutoff),
+            solvent_dielectric=T(crf_solvent_dielectric),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters_ewald = ()
+    elseif nonbonded_method in (:ewald, :pme)
+        coul = CoulombEwald(
+            dist_cutoff=T(dist_cutoff),
+            error_tol=T(ewald_error_tol),
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+            approximate_erfc=approximate_pme,
+        )
+
+        excluded_pairs = find_excluded_pairs(eligible, special)
+        exclusion_data = EwaldExclusionData(T(dist_cutoff); error_tol=T(ewald_error_tol))
+        ewald_exclusions = InteractionList2Atoms(
+            to_device([ep[1] for ep in excluded_pairs], AT),
+            to_device([ep[2] for ep in excluded_pairs], AT),
+            to_device(fill(EwaldExclusion(), length(excluded_pairs)), AT),
+            fill("", length(excluded_pairs)),
+            exclusion_data,
+        )
+        push!(specific_inter_array, ewald_exclusions)
+
+        if nonbonded_method == :ewald
+            ewald = Ewald(T(dist_cutoff); error_tol=T(ewald_error_tol))
+        else
+            ewald = PME(
+                T(dist_cutoff),
+                atoms,
+                boundary_used;
+                error_tol=T(ewald_error_tol),
+                grad_safe=grad_safe,
+                n_threads=n_threads,
+            )
+        end
+        general_inters_ewald = (ewald,)
+    else
+        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
+                            ":none, :cutoff, :pme and :ewald"))
+    end
+
+    pairwise_inters = (lj, coul)
     specific_inter_lists = tuple(specific_inter_array...)
 
     if neighbor_finder_type == NoNeighborFinder
@@ -1946,11 +2001,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
     end
     general_inters = (general_inters_ewald..., general_inters_is..., general_inters_disp...)
 
-    if hydrogen_mass != false # false, number or unitful mass
-        atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds.is, bonds.js, constraints,
-                                          hydrogen_mass, units, T)
-    end
-
     k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     virtual_sites_dev = (length(virtual_sites) > 0 ? to_device(virtual_sites, AT) : virtual_sites)
 
@@ -1975,6 +2025,9 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         launch_config=launch_config,
         strictness=strictness,
     )
+
+    # Virtual sites are in the structure file but not necessarily in the correct place
+    place_virtual_sites!(sys)
     maybe_optimize_cuda_launch_config!(sys; enabled=autotune_launch)
     return sys
 end

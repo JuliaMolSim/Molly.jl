@@ -1,8 +1,8 @@
-const AlchemicalRole = Int
+const AlchemicalRole = Int32
 
-const CoreRole::AlchemicalRole   = 0
-const InsertRole::AlchemicalRole = 1
-const DeleteRole::AlchemicalRole = 2
+const CoreRole::AlchemicalRole   = Int32(0)
+const InsertRole::AlchemicalRole = Int32(1)
+const DeleteRole::AlchemicalRole = Int32(2)
 
 #= 
 The logic found in this file is a reinterpretation of how OpenFE deals
@@ -22,6 +22,15 @@ https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_r
     else
         return CoreRole
     end
+end
+
+@inline function sterics_lambda(scheduler, atom_i, atom_j, λ::T) where T
+    role_i = atom_i.alch_role
+    role_j = atom_j.alch_role
+    if role_i == role_j && role_i != CoreRole
+        return one(T)
+    end
+    return T(scale_sterics(scheduler, λ, mix_roles(scheduler, role_i, role_j)))
 end
 
 struct DefaultLambdaScheduler end

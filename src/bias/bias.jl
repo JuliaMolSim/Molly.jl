@@ -46,7 +46,9 @@ collective variable.
     the coordinates of a simulation.
 """
 function bias_gradient(lb::LinearBias, cv_sim)
-    return lb.k * (cv_sim - lb.cv_target) / abs(cv_sim - lb.cv_target)
+    d = cv_sim - lb.cv_target
+    iszero(d) && return zero(lb.k)
+    return lb.k * d / abs(d)
 end
 
 @doc raw"""
@@ -76,6 +78,14 @@ end
 
 function bias_gradient(sb::SquareBias, cv_sim)
     return sb.k * (cv_sim - sb.cv_target)
+end
+
+
+ function validate_flat_bottom_width(r_fb, label::AbstractString)
+    if !isfinite(ustrip(r_fb)) || r_fb < zero(r_fb)
+        throw(ArgumentError("$(label) flat-bottom width must be finite and non-negative, got $(r_fb)."))
+    end
+    return r_fb
 end
 
 @doc raw"""
@@ -109,6 +119,11 @@ struct FlatBottomSquareBias{K, R, C}
     k::K
     r_fb::R
     cv_target::C
+
+    function FlatBottomSquareBias(k::K, r_fb::R, cv_target::C) where {K, R, C}
+        validate_flat_bottom_width(r_fb, "FlatBottomSquareBias")
+        return new{K, R, C}(k, r_fb, cv_target)
+    end
 end
 
 function potential_energy(fb::FlatBottomSquareBias, cv_sim; kwargs...)
@@ -120,12 +135,12 @@ end
 function bias_gradient(fb::FlatBottomSquareBias, cv_sim)
     d = cv_sim - fb.cv_target
     d_abs = abs(d)
-    H = (d_abs < fb.r_fb ? 0 : 1)
-    return H * fb.k * (d_abs - fb.r_fb) * d / d_abs
+    d_abs <= fb.r_fb && return zero(fb.k * fb.r_fb)
+    return fb.k * (d_abs - fb.r_fb) * d / d_abs
 end
 
 @doc raw"""
-    PeriodicFlatBottomBias(k, cv_target, width)
+    PeriodicFlatBottomBias(k, r_fb, cv_target)
 
 A flat-bottomed square (harmonic) bias on a collective variable (CV) towards a target value.
 
@@ -155,38 +170,46 @@ H = \left\{ \begin{array}{cl}
 """
 struct PeriodicFlatBottomBias{K, R, T}
     k::K
-    r_bf::R
+    r_fb::R
     cv_target::T
+
+    function PeriodicFlatBottomBias(k::K, r_fb::R, cv_target::T) where {K, R, T}
+        validate_flat_bottom_width(r_fb, "PeriodicFlatBottomBias")
+        return new{K, R, T}(k, r_fb, cv_target)
+    end
+end
+
+ function periodic_flat_bottom_displacement(cv_sim, cv_target)
+    d = cv_sim - cv_target
+    FT = typeof(float(ustrip(d)))
+    twopi = FT(2π) * oneunit(d)
+    half_period = twopi / FT(2)
+    return mod(d + half_period, twopi) - half_period
 end
 
 function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
-    # Calculate signed distance in periodic bounds [-π, π] with inferred units
-    FT = typeof(ustrip(pb.cv_target))
-    d = cv_sim - pb.cv_target
-    twopi = 2 * pi * oneunit(d)
-    d_wrapped = d - twopi * round(d / twopi)
+    FT = typeof(float(ustrip(cv_sim - pb.cv_target)))
+    d_wrapped = periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
     
     dist = abs(d_wrapped)
     
-    if dist <= pb.r_bf
-        return zero(pb.k * pb.r_bf^2)
+    if dist <= pb.r_fb
+        return zero(pb.k * pb.r_fb^2)
     else
-        disp = dist - pb.r_bf
+        disp = dist - pb.r_fb
         return FT(0.5) * pb.k * disp^2
     end
 end
 
 function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
-    d = cv_sim - pb.cv_target
-    twopi = 2 * pi * oneunit(d)
-    d_wrapped = d - twopi * round(d / twopi)
+    d_wrapped = periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
     
     dist = abs(d_wrapped)
     
-    if dist <= pb.r_bf
-        return zero(pb.k * pb.r_bf)
+    if dist <= pb.r_fb
+        return zero(pb.k * pb.r_fb)
     else
-        disp = dist - pb.r_bf
+        disp = dist - pb.r_fb
         return pb.k * disp * sign(d_wrapped)
     end
 end
@@ -215,6 +238,30 @@ struct BiasPotential{C, B}
     bias_type::B
 end
 
+bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)
+bias_all_finite(value) = isfinite(ustrip(value))
+
+ function bias_max_abs_ustrip(values::AbstractArray)
+    isempty(values) && return 0.0
+    return mapreduce(bias_max_abs_ustrip, max, values)
+end
+
+bias_max_abs_ustrip(value) = abs(ustrip(value))
+
+ function check_bias_finite(value, label::AbstractString, bias::BiasPotential;
+                            cv_sim=nothing, max_abs_component=nothing)
+    bias_all_finite(value) && return value
+    msg = "BiasPotential with CV $(typeof(bias.cv_type)) and bias " *
+          "$(typeof(bias.bias_type)) produced non-finite $(label)"
+    if !isnothing(cv_sim)
+        msg *= ", cv_sim=$(cv_sim)"
+    end
+    if !isnothing(max_abs_component)
+        msg *= ", max_abs_component=$(max_abs_component)"
+    end
+    error(msg * ".")
+end
+
 function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
     if bias.cv_type.correction == :pbc
         coords = unwrap_molecules(sys)
@@ -230,8 +277,10 @@ function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
         from_device(sys.velocities);
         kwargs...,
     )
+    check_bias_finite(cv_sim, "collective variable", bias)
 
-    return potential_energy(bias.bias_type, cv_sim; kwargs...)
+    pe = potential_energy(bias.bias_type, cv_sim; kwargs...)
+    return check_bias_finite(pe, "potential energy", bias; cv_sim=cv_sim)
 end
 
 function AtomsCalculators.forces!(
@@ -254,11 +303,21 @@ function AtomsCalculators.forces!(
         sys.boundary,
         from_device(sys.velocities),
     )
+    check_bias_finite(cv_sim, "collective variable", bias)
+    check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
 
     # Gradient of bias function with respect to CV
     d_bias = bias_gradient(bias.bias_type, cv_sim)
+    check_bias_finite(d_bias, "bias gradient", bias; cv_sim=cv_sim)
 
     fs_svec = d_bias .* d_coords
+    check_bias_finite(
+        fs_svec,
+        "bias force",
+        bias;
+        cv_sim=cv_sim,
+        max_abs_component = bias_max_abs_ustrip(fs_svec),
+    )
     
     if needs_vir && bias.cv_type.has_virial
         calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec, from_device(sys.atoms), sys.boundary)

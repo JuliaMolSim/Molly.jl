@@ -53,7 +53,7 @@ end
     end
     pa = normalize(trim3D( ba × cross_ba_bc, boundary))
     pc = normalize(trim3D(-bc × cross_ba_bc, boundary))
-    angle_term = -a.k * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.θ0)
+    angle_term = -a.k * (acos_bound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.θ0)
     fa = (angle_term / norm(ba)) * pa
     fc = (angle_term / norm(bc)) * pc
     fb = -fa - fc
