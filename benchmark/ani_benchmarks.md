@@ -329,6 +329,14 @@ alone.
 
 ## Gaps & caveats
 
+- **Small-N energy vs bio-mlff.** Below ~8000 atoms bio-mlff's whole-graph XLA kernel (neighbours →
+  AEV → NN fused into ~one launch) is faster on energy (0.9 vs 4.1 ms at 1000). Molly runs the AEV,
+  on-device CSR, and per-species NN as separate launches, whose fixed overhead dominates at small N.
+  Fusing them into a single per-atom AEV+NN+reduction "mini-XLA" kernel was prototyped: it roughly
+  halves small-N energy (4.0→1.6 ms at 500) but **regresses at scale** — per-atom weight re-reads and
+  an O(N²) in-kernel neighbour scan make it 19.5 vs 11.2 ms at 16k — and still trails bio-mlff at small
+  N. So the production path stays the **staged** one, which is fastest at scale (the regime that
+  matters for large-system MD, where Molly leads both reference implementations).
 - **TorchANI head-to-head** uses `test/torchani_reference.py --benchmark --device cpu` (needs a
   `pip install`); the compare-report/plots then join the reference JSON automatically. CPU-to-CPU
   is the definitive comparison; TorchANI has no usable Apple-GPU path (see above). The **NVIDIA
@@ -337,8 +345,8 @@ alone.
 - **Metal forces** are timed for a **single ensemble member**. The full 8-member ensemble reuses
   one AEV forward/backward and runs only the NN VJP 8× (species-batched), so expect ~1.4× like
   energy — not yet measured on Metal.
-- **CPU analytic forces** are measured up to the full protein (1288 ms at 15,954 atoms); above the
-  ~4000-atom crossover the Metal path is faster, which is the regime it is meant for.
+- **CPU analytic forces** are measured up to the full protein (1275 ms at 15,954 atoms); above the
+  ~2000-atom crossover the Metal path is faster, which is the regime it is meant for.
 - **Laptop variance**: numbers are min-of-N over repeats; the JSON records the run-to-run IQR
   (typically ≤3 ms on Metal). Thermal state can shift absolute CPU numbers a few percent.
 
