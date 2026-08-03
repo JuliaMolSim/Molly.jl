@@ -1556,184 +1556,6 @@ function ani_nn_dev_params(pot, dev)
     get!(() -> (map(dev, pot.ps_vec), map(dev, pot.st_vec)), sub, typeof(dev))
 end
 
-# --- Fused per-atom NN (energy) --------------------------------------------------------------
-# The per-element MLPs share the 4-layer architecture (Dense+celu01 ×3, Dense identity) but have
-# different hidden dims. Pad each layer to the max hidden dim across species and stack along a
-# species axis so one kernel can evaluate any atom's network by indexing its species. Zero-padding
-# is exact: celu01(0)=0 and the padded next-layer weights are zero, so padded neurons contribute 0.
-const ANI_NN_STACK_CACHE = IdDict{Any, Any}()
-# Atom-count threshold below which the fused per-atom NN kernel is used on GPU (it beats the batched
-# cuBLAS path only while launch-bound; above this the per-atom weight re-reads make it slower).
-const ANI_FUSED_NN_MAX = Ref(4000)
-function ani_nn_stacked(pot, ka_backend)
-    get!(ANI_NN_STACK_CACHE, (objectid(pot), nameof(typeof(ka_backend)))) do
-        n_sp = length(pot.species_map)
-        elem = Dict(v => k for (k, v) in pot.species_map)
-        ps1  = pot.ps_vec[1]
-        lw(s, l) = getfield(getfield(ps1, Symbol(elem[s])), Symbol("layer_$l")).weight
-        H1  = maximum(size(lw(s, 1), 1) for s in 1:n_sp)
-        H2  = maximum(size(lw(s, 2), 1) for s in 1:n_sp)
-        H3  = maximum(size(lw(s, 3), 1) for s in 1:n_sp)
-        AEV = size(lw(1, 1), 2)
-        W1 = zeros(Float32, H1, AEV, n_sp); b1 = zeros(Float32, H1, n_sp)
-        W2 = zeros(Float32, H2, H1, n_sp);  b2 = zeros(Float32, H2, n_sp)
-        W3 = zeros(Float32, H3, H2, n_sp);  b3 = zeros(Float32, H3, n_sp)
-        W4 = zeros(Float32, H3, n_sp);      b4 = zeros(Float32, n_sp)
-        for s in 1:n_sp
-            pss = getfield(ps1, Symbol(elem[s]))
-            w1 = pss.layer_1.weight; W1[1:size(w1,1), 1:size(w1,2), s] .= w1; b1[1:length(pss.layer_1.bias), s] .= pss.layer_1.bias
-            w2 = pss.layer_2.weight; W2[1:size(w2,1), 1:size(w2,2), s] .= w2; b2[1:length(pss.layer_2.bias), s] .= pss.layer_2.bias
-            w3 = pss.layer_3.weight; W3[1:size(w3,1), 1:size(w3,2), s] .= w3; b3[1:length(pss.layer_3.bias), s] .= pss.layer_3.bias
-            w4 = pss.layer_4.weight; W4[1:size(w4,2), s] .= vec(w4);          b4[s] = pss.layer_4.bias[1]
-        end
-        up(x) = (d = KernelAbstractions.allocate(ka_backend, Float32, size(x)...); copyto!(d, x); d)
-        (W1=up(W1), b1=up(b1), W2=up(W2), b2=up(b2), W3=up(W3), b3=up(b3), W4=up(W4), b4=up(b4),
-         AEV=AEV, H1=H1, H2=H2, H3=H3)
-    end
-end
-
-# Whole-graph fused energy: ONE workgroup per atom computes its AEV into threadgroup memory
-# (write-reduced, never written to global — no separate AEV kernel, no global AEV round-trip), then
-# a barrier, then evaluates its element MLP directly on that shared AEV → E_atom[i]. Fuses the
-# forward AEV and the NN into a single launch. GPU-only (uses @localmem + @synchronize with scalar
-# locals persisting across barriers, which holds on GPU); used below the small-N threshold.
-@kernel function ani_energy_mega_kernel!(
-        E_atom, @Const(coords), @Const(species), boundary, @Const(nbr_off), @Const(nbr_idx),
-        @Const(η_R), @Const(r_s_R), r_c_R, @Const(η_A), @Const(r_s_A), @Const(θ_s), ζ, r_c_A,
-        @Const(W1), @Const(b1), @Const(W2), @Const(b2), @Const(W3), @Const(b3), @Const(W4), @Const(b4),
-        n_species::Int, n_atoms::Int, n_eta_R::Int, n_shf_R::Int, n_eta_A::Int, n_shf_r::Int,
-        n_th::Int, split::Int, ::Val{AEV}, ::Val{H1}, ::Val{H2}, ::Val{H3}) where {AEV, H1, H2, H3}
-    aev = @localmem Float32 (AEV,)
-    a1  = @localmem Float32 (H1,)
-    a2  = @localmem Float32 (H2,)
-    a3  = @localmem Float32 (H3,)
-    i  = @index(Group, Linear)
-    lt = @index(Local, Linear)
-    W  = @groupsize()[1]
-    k = lt
-    while k <= AEV; @inbounds aev[k] = 0f0; k += W; end
-    @synchronize
-
-    if i <= n_atoms
-        T       = Float32
-        ci      = coords[i]
-        prefac0 = T(2)^(one(T) - ζ)
-        lo      = nbr_off[i] + 1
-        hi      = nbr_off[i + 1]
-        # Radial AEV into shared.
-        jj = lo + (lt - 1)
-        while jj <= hi
-            @inbounds j = nbr_idx[jj]
-            dr = Molly.vector(ci, coords[j], boundary); r = norm(dr)
-            if r < r_c_R
-                fc = cosine_cutoff(r, r_c_R); @inbounds sj = species[j]
-                base = (sj - 1) * n_eta_R * n_shf_R
-                @inbounds for ki in 1:n_eta_R, kj in 1:n_shf_R
-                    KernelAbstractions.@atomic aev[base + (ki-1)*n_shf_R + kj] +=
-                        T(0.25) * exp(-η_R[ki] * (r - r_s_R[kj])^2) * fc
-                end
-            end
-            jj += W
-        end
-        # Angular AEV into shared.
-        jj = lo + (lt - 1)
-        while jj <= hi
-            @inbounds j = nbr_idx[jj]
-            drj = Molly.vector(ci, coords[j], boundary); rj = norm(drj)
-            if rj < r_c_A
-                fcj = cosine_cutoff(rj, r_c_A); @inbounds sj = species[j]
-                for kk in (jj + 1):hi
-                    @inbounds k2 = nbr_idx[kk]
-                    drk = Molly.vector(ci, coords[k2], boundary); rk = norm(drk)
-                    if rk < r_c_A
-                        fck = cosine_cutoff(rk, r_c_A); @inbounds sk = species[k2]
-                        s1, s2 = sj <= sk ? (sj, sk) : (sk, sj)
-                        pair_idx = (s1-1)*n_species - (s1-1)*(s1-2)÷2 + (s2-s1+1)
-                        r_avg  = (rj + rk) * T(0.5); fc_jk = fcj * fck
-                        cos_th = clamp(dot(drj, drk) / (rj * rk), T(-1), T(1))
-                        theta  = acos(T(0.95) * cos_th)
-                        base = split + (pair_idx-1) * n_eta_A * n_shf_r * n_th
-                        @inbounds for p in 1:n_eta_A, q in 1:n_shf_r
-                            r_factor = prefac0 * fc_jk * exp(-η_A[p] * (r_avg - r_s_A[q])^2)
-                            for l in 1:n_th
-                                ang = (one(T) + cos(theta - θ_s[l]))^ζ
-                                KernelAbstractions.@atomic aev[base + ((p-1)*n_shf_r + (q-1))*n_th + l] += r_factor * ang
-                            end
-                        end
-                    end
-                end
-            end
-            jj += W
-        end
-    end
-    @synchronize
-
-    # NN phase: evaluate atom i's element MLP on the shared AEV.
-    if i <= n_atoms
-        @inbounds s = species[i]
-        o = lt
-        while o <= H1
-            z = @inbounds b1[o, s]
-            @inbounds for kk in 1:AEV; z += W1[o, kk, s] * aev[kk]; end
-            @inbounds a1[o] = celu01(z); o += W
-        end
-        @synchronize
-        o = lt
-        while o <= H2
-            z = @inbounds b2[o, s]
-            @inbounds for kk in 1:H1; z += W2[o, kk, s] * a1[kk]; end
-            @inbounds a2[o] = celu01(z); o += W
-        end
-        @synchronize
-        o = lt
-        while o <= H3
-            z = @inbounds b3[o, s]
-            @inbounds for kk in 1:H2; z += W3[o, kk, s] * a2[kk]; end
-            @inbounds a3[o] = celu01(z); o += W
-        end
-        @synchronize
-        if lt == 1
-            z = @inbounds b4[s]
-            @inbounds for kk in 1:H3; z += W4[kk, s] * a3[kk]; end
-            @inbounds E_atom[i] = z
-        end
-    end
-end
-
-# Set up and launch the whole-graph fused energy kernel: build the CSR neighbour list, upload the
-# AEV params, fetch the stacked NN weights, run one kernel, and reduce the per-atom energies (Ha) to
-# eV with the self-energies. GPU + single ensemble member only.
-function ani_energy_mega(coords::AbstractVector{SVector{D,Tc}}, species, pot, n_species,
-                         ka_backend, neighbors, boundary) where {D, Tc}
-    T = Float32
-    p = pot.aev_params
-    n_eta_R = length(p.η_R); n_shf_R = length(p.r_s_R)
-    n_eta_A = length(p.η_A); n_shf_r = length(p.r_s_A); n_th = length(p.θ_s)
-    n_pairs = n_species * (n_species + 1) ÷ 2
-    n_rad_per = n_eta_R * n_shf_R; n_ang_per = n_eta_A * n_shf_r * n_th
-    aev_len = n_species * n_rad_per + n_pairs * n_ang_per
-    split   = n_species * n_rad_per
-    r_c_R = T(p.r_c_R); r_c_A = T(p.r_c_A); ζ = T(p.ζ)
-    bdy = boundary_for_kernel(boundary, Val(D), T)
-    na  = length(coords)
-    off_d, idx_d = csr_device_arrays(neighbors, na, coords, max(r_c_R, r_c_A), bdy, ka_backend)
-    up(x) = (d = KernelAbstractions.allocate(ka_backend, T, length(x)); copyto!(d, x); d)
-    η_R_d = up(p.η_R); r_s_R_d = up(p.r_s_R); η_A_d = up(p.η_A); r_s_A_d = up(p.r_s_A); θ_s_d = up(p.θ_s)
-    st = ani_nn_stacked(pot, ka_backend)
-    E_atom = KernelAbstractions.zeros(ka_backend, T, na)
-    wg = 64
-    k! = ani_energy_mega_kernel!(ka_backend, wg)
-    k!(E_atom, coords, species, bdy, off_d, idx_d, η_R_d, r_s_R_d, r_c_R, η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A,
-       st.W1, st.b1, st.W2, st.b2, st.W3, st.b3, st.W4, st.b4,
-       n_species, na, n_eta_R, n_shf_R, n_eta_A, n_shf_r, n_th, split,
-       Val(aev_len), Val(st.H1), Val(st.H2), Val(st.H3); ndrange = na * wg)
-    KernelAbstractions.synchronize(ka_backend)
-    sp_host = Array(species)
-    E_model = Float64(sum(E_atom))
-    E_self  = sum(Float64(pot.self_energies[s]) * count(==(s), sp_host) for s in 1:n_species)
-    return (E_model + E_self) * Molly.HARTREE_TO_EV
-end
-
 # ============================================================================
 # End-to-end on-device ANI energy: GPU AEV + on-device element networks.
 # The AEV matrix stays on the compute backend; the per-element Lux networks run on the
@@ -1745,15 +1567,6 @@ function Molly.compute_ani_energy_ka(
     backend = nothing, neighbors = nothing, boundary = nothing,
 )
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
-    # Whole-graph fused path (CUDA, single ensemble, small/mid N): compute AEV + NN in one kernel with
-    # the AEV held in threadgroup memory (no separate AEV kernel, no global AEV round-trip). Wins
-    # while launch-bound (below ANI_FUSED_NN_MAX); the staged path below serves large N, Metal and CPU.
-    # CUDA-only: the kernel's ~32 array args exceed Metal's 31-buffer limit (would need arg packing).
-    _fe = get(ENV, "ANI_FUSED_NN", "auto")
-    if nameof(typeof(ka_backend)) === :CUDABackend && length(pot.ps_vec) == 1 && _fe != "0" &&
-       (_fe == "1" || length(coords) <= ANI_FUSED_NN_MAX[])
-        return ani_energy_mega(coords, species, pot, n_species, ka_backend, neighbors, boundary)
-    end
     aevs = Molly.compute_aevs_ka(coords, species, pot.aev_params, n_species;
                                  backend = backend, neighbors = neighbors,
                                  boundary = boundary)   # (n_atoms, aev_len)
@@ -1772,7 +1585,6 @@ function Molly.compute_ani_energy_ka(
     end
 
     n_ens = length(pot.ps_vec)
-
     ps_dev_all, st_dev_all = ani_nn_dev_params(pot, dev)             # cached on-device weights
     # The per-element NN outputs are Float32, but the total energy sums O(10^4) per-atom terms of
     # similar magnitude plus large self-energies, so a Float32 running sum loses precision. We
