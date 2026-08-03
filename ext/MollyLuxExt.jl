@@ -1513,10 +1513,10 @@ end
 # Manual forward + backward through one element's Lux.Chain of Dense layers (celu01 between,
 # identity last). x is (in_dims, n_batch) on the compute device. Returns (Σ outputs, ∂E/∂x)
 # where the loss is the sum of the scalar outputs over the batch.
-function nn_energy_and_grad(model, ps, x)
+function nn_energy_and_grad(model, ps, x; energy::Bool=true)
     layers = values(model.layers)          # Dense layers, in order
     L = length(layers)
-    zs = Vector{Any}(undef, L)             # pre-activations
+    zs = Vector{typeof(x)}(undef, L)       # pre-activations (typed → no dynamic dispatch)
     a  = x
     for k in 1:L
         W = ps[k].weight; b = ps[k].bias
@@ -1524,7 +1524,10 @@ function nn_energy_and_grad(model, ps, x)
         zs[k] = z
         a = layers[k].activation === identity ? z : layers[k].activation.(z)
     end
-    E = sum(a)                             # a is (1, n_batch)
+    # The energy (sum of the last layer) is only needed when the caller wants it; in the forces path
+    # it is discarded, and `sum` + the host read of the scalar would force a device synchronisation
+    # per species. Skip it there.
+    E = energy ? sum(a) : nothing          # a is (1, n_batch)
     da = fill!(similar(a), one(eltype(a))) # ∂E/∂output = 1
     for k in L:-1:1
         W = ps[k].weight
@@ -1536,7 +1539,7 @@ end
 
 # Ensemble-averaged energy (Hartree) and its gradient w.r.t. the AEVs, on-device.
 # Returns (E_hartree, dE/dAEV) with dE/dAEV a (n_atoms, aev_len) array on the same backend.
-function ani_energy_aev_grad_ka(aevs, species, pot, n_species::Int; backend=nothing)
+function ani_energy_aev_grad_ka(aevs, species, pot, n_species::Int; backend=nothing, need_energy::Bool=true)
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(aevs) : backend
     on_gpu = !(aevs isa Array)
     dev    = on_gpu ? Lux.gpu_device() : Lux.cpu_device()
@@ -1560,13 +1563,13 @@ function ani_energy_aev_grad_ka(aevs, species, pot, n_species::Int; backend=noth
             sym   = Symbol(idx_to_elem[s])
             batch = permutedims(aevs[idx_dev[s], :])          # (aev_len, n_s)
             ps_d  = getfield(ps_dev_all[ens_i], sym)
-            E_s, dEdbatch = nn_energy_and_grad(getfield(pot.model, sym), ps_d, batch)
-            E += Float64(E_s) + Float64(pot.self_energies[s]) * length(g)
+            E_s, dEdbatch = nn_energy_and_grad(getfield(pot.model, sym), ps_d, batch; energy=need_energy)
+            need_energy && (E += Float64(E_s) + Float64(pot.self_energies[s]) * length(g))
             @views dEdAEV[idx_dev[s], :] .+= permutedims(dEdbatch)   # scatter (unique rows)
         end
     end
     dEdAEV ./= n_ens
-    return (E / n_ens), dEdAEV
+    return (need_energy ? E / n_ens : 0.0), dEdAEV
 end
 
 # Given the AEV adjoint `adj` (n_atoms, aev_len) = ∂E/∂G, compute ∂E/∂r (3, n_atoms) on the
@@ -1593,11 +1596,12 @@ function aev_vjp_ka(adj, coords::AbstractVector{SVector{D,T}}, species, p, n_spe
 
     dcoords = KernelAbstractions.zeros(ka_backend, T, 3, n_atoms)
 
+    # No synchronize between/after these: both accumulate into dcoords on the same backend queue
+    # (so they are ordered), and the caller's `Array(dcoords)` copy provides the one needed host sync.
     if which === :radial || which === :both
         rad! = aev_backward_radial!(ka_backend, 256)
         rad!(dcoords, adj, coords, species, bdy, off_d, idx_d,
              η_R_d, r_s_R_d, r_c_R, n_eta_R, n_shf_R, n_atoms; ndrange = n_atoms)
-        KernelAbstractions.synchronize(ka_backend)
     end
 
     if which === :angular || which === :both
@@ -1605,7 +1609,6 @@ function aev_vjp_ka(adj, coords::AbstractVector{SVector{D,T}}, species, p, n_spe
         ang!(dcoords, adj, coords, species, bdy, off_d, idx_d,
              η_A_d, r_s_A_d, θ_s_d, ζ, r_c_A, n_species,
              n_eta_A, n_shf_r, n_th, split, n_atoms; ndrange = n_atoms)
-        KernelAbstractions.synchronize(ka_backend)
     end
 
     return dcoords
@@ -1631,7 +1634,7 @@ function Molly.compute_ani_forces_ka(coords::AbstractVector{SVector{D,T}}, speci
     end
     aevs = Molly.compute_aevs_ka(coords, species, pot.aev_params, n_species;
         backend=backend, neighbors=csr, boundary=boundary)
-    _, dEdAEV = ani_energy_aev_grad_ka(aevs, species, pot, n_species; backend=ka_backend)
+    _, dEdAEV = ani_energy_aev_grad_ka(aevs, species, pot, n_species; backend=ka_backend, need_energy=false)
     bwd_nb  = isnothing(csr) ? :auto : csr
     dcoords = aev_vjp_ka(dEdAEV, coords, species, pot.aev_params, n_species;
         backend=ka_backend, neighbors=bwd_nb, boundary=boundary)   # ∂E_Ha/∂r, (3, n_atoms)
