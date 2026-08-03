@@ -1556,6 +1556,90 @@ function ani_nn_dev_params(pot, dev)
     get!(() -> (map(dev, pot.ps_vec), map(dev, pot.st_vec)), sub, typeof(dev))
 end
 
+# --- Fused per-atom NN (energy) --------------------------------------------------------------
+# The per-element MLPs share the 4-layer architecture (Dense+celu01 ×3, Dense identity) but have
+# different hidden dims. Pad each layer to the max hidden dim across species and stack along a
+# species axis so one kernel can evaluate any atom's network by indexing its species. Zero-padding
+# is exact: celu01(0)=0 and the padded next-layer weights are zero, so padded neurons contribute 0.
+const ANI_NN_STACK_CACHE = IdDict{Any, Any}()
+# Atom-count threshold below which the fused per-atom NN kernel is used on GPU (it beats the batched
+# cuBLAS path only while launch-bound; above this the per-atom weight re-reads make it slower).
+const ANI_FUSED_NN_MAX = Ref(4000)
+function ani_nn_stacked(pot, ka_backend)
+    get!(ANI_NN_STACK_CACHE, (objectid(pot), nameof(typeof(ka_backend)))) do
+        n_sp = length(pot.species_map)
+        elem = Dict(v => k for (k, v) in pot.species_map)
+        ps1  = pot.ps_vec[1]
+        lw(s, l) = getfield(getfield(ps1, Symbol(elem[s])), Symbol("layer_$l")).weight
+        H1  = maximum(size(lw(s, 1), 1) for s in 1:n_sp)
+        H2  = maximum(size(lw(s, 2), 1) for s in 1:n_sp)
+        H3  = maximum(size(lw(s, 3), 1) for s in 1:n_sp)
+        AEV = size(lw(1, 1), 2)
+        W1 = zeros(Float32, H1, AEV, n_sp); b1 = zeros(Float32, H1, n_sp)
+        W2 = zeros(Float32, H2, H1, n_sp);  b2 = zeros(Float32, H2, n_sp)
+        W3 = zeros(Float32, H3, H2, n_sp);  b3 = zeros(Float32, H3, n_sp)
+        W4 = zeros(Float32, H3, n_sp);      b4 = zeros(Float32, n_sp)
+        for s in 1:n_sp
+            pss = getfield(ps1, Symbol(elem[s]))
+            w1 = pss.layer_1.weight; W1[1:size(w1,1), 1:size(w1,2), s] .= w1; b1[1:length(pss.layer_1.bias), s] .= pss.layer_1.bias
+            w2 = pss.layer_2.weight; W2[1:size(w2,1), 1:size(w2,2), s] .= w2; b2[1:length(pss.layer_2.bias), s] .= pss.layer_2.bias
+            w3 = pss.layer_3.weight; W3[1:size(w3,1), 1:size(w3,2), s] .= w3; b3[1:length(pss.layer_3.bias), s] .= pss.layer_3.bias
+            w4 = pss.layer_4.weight; W4[1:size(w4,2), s] .= vec(w4);          b4[s] = pss.layer_4.bias[1]
+        end
+        up(x) = (d = KernelAbstractions.allocate(ka_backend, Float32, size(x)...); copyto!(d, x); d)
+        (W1=up(W1), b1=up(b1), W2=up(W2), b2=up(b2), W3=up(W3), b3=up(b3), W4=up(W4), b4=up(b4),
+         AEV=AEV, H1=H1, H2=H2, H3=H3)
+    end
+end
+
+# One workgroup per atom: cooperatively evaluate its element MLP forward, writing the per-atom
+# energy (Hartree, model part) to E_atom[i]. Activations live in threadgroup memory; threads stride
+# over each layer's outputs and each computes a full dot product over the previous activation.
+@kernel function ani_nn_energy_kernel!(
+        E_atom, @Const(aevs), @Const(species),
+        @Const(W1), @Const(b1), @Const(W2), @Const(b2), @Const(W3), @Const(b3), @Const(W4), @Const(b4),
+        n_atoms, ::Val{AEV}, ::Val{H1}, ::Val{H2}, ::Val{H3}) where {AEV, H1, H2, H3}
+    a0 = @localmem Float32 (AEV,)
+    a1 = @localmem Float32 (H1,)
+    a2 = @localmem Float32 (H2,)
+    a3 = @localmem Float32 (H3,)
+    i  = @index(Group, Linear)
+    lt = @index(Local, Linear)
+    W  = @groupsize()[1]
+    if i <= n_atoms
+        s = species[i]
+        k = lt
+        while k <= AEV; @inbounds a0[k] = aevs[i, k]; k += W; end
+        @synchronize
+        o = lt
+        while o <= H1
+            z = @inbounds b1[o, s]
+            @inbounds for kk in 1:AEV; z += W1[o, kk, s] * a0[kk]; end
+            @inbounds a1[o] = celu01(z); o += W
+        end
+        @synchronize
+        o = lt
+        while o <= H2
+            z = @inbounds b2[o, s]
+            @inbounds for kk in 1:H1; z += W2[o, kk, s] * a1[kk]; end
+            @inbounds a2[o] = celu01(z); o += W
+        end
+        @synchronize
+        o = lt
+        while o <= H3
+            z = @inbounds b3[o, s]
+            @inbounds for kk in 1:H2; z += W3[o, kk, s] * a2[kk]; end
+            @inbounds a3[o] = celu01(z); o += W
+        end
+        @synchronize
+        if lt == 1
+            z = @inbounds b4[s]
+            @inbounds for kk in 1:H3; z += W4[kk, s] * a3[kk]; end
+            @inbounds E_atom[i] = z
+        end
+    end
+end
+
 # ============================================================================
 # End-to-end on-device ANI energy: GPU AEV + on-device element networks.
 # The AEV matrix stays on the compute backend; the per-element Lux networks run on the
@@ -1585,6 +1669,29 @@ function Molly.compute_ani_energy_ka(
     end
 
     n_ens = length(pot.ps_vec)
+
+    # Fused per-atom NN on GPU (single ensemble member): one kernel evaluates every atom's element
+    # network, replacing the per-species Lux matmuls + permutedims gathers. This removes ~7×4 cuBLAS
+    # launches — the small-N floor — at the cost of re-reading weights per atom. Measured on an RTX
+    # 5080 it wins below ~4000 atoms (energy 2.4 vs 4.3 ms at 500) and loses above (weight re-read
+    # dominates: 21 vs 12 ms at 16k), so it is used only up to a size threshold; the batched Lux path
+    # below serves large N and the CPU. `ANI_FUSED_NN` = "0"/"1"/"auto" forces off/on/threshold.
+    _fused_env = get(ENV, "ANI_FUSED_NN", "auto")
+    _na = size(aevs, 1)
+    if !(ka_backend isa KernelAbstractions.CPU) && n_ens == 1 && _fused_env != "0" &&
+       (_fused_env == "1" || _na <= ANI_FUSED_NN_MAX[])
+        na = _na
+        st = ani_nn_stacked(pot, ka_backend)
+        E_atom = KernelAbstractions.zeros(ka_backend, Float32, na)
+        k! = ani_nn_energy_kernel!(ka_backend, 64)
+        k!(E_atom, aevs, species, st.W1, st.b1, st.W2, st.b2, st.W3, st.b3, st.W4, st.b4,
+           na, Val(st.AEV), Val(st.H1), Val(st.H2), Val(st.H3); ndrange = na * 64)
+        KernelAbstractions.synchronize(ka_backend)
+        E_model = Float64(sum(E_atom))
+        E_self  = sum(Float64(pot.self_energies[s]) * count(==(s), sp_host) for s in 1:n_species)
+        return (E_model + E_self) * Ha_to_eV
+    end
+
     ps_dev_all, st_dev_all = ani_nn_dev_params(pot, dev)             # cached on-device weights
     # The per-element NN outputs are Float32, but the total energy sums O(10^4) per-atom terms of
     # similar magnitude plus large self-energies, so a Float32 running sum loses precision. We
