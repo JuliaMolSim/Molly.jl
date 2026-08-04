@@ -46,32 +46,47 @@ EnzymeRules.inactive(::typeof(Molly.kabsch_nograd), args...) = nothing
 # Differentiable PME
 
 # See https://github.com/EnzymeAD/Enzyme.jl/issues/2298
-EnzymeRules.inactive(::typeof(plan_fft ), args...) = nothing
-EnzymeRules.inactive(::typeof(plan_bfft), args...) = nothing
+EnzymeRules.inactive(::typeof(plan_rfft ), args...) = nothing
+EnzymeRules.inactive(::typeof(plan_brfft), args...) = nothing
 
-# See fft and bfft rrules in AbstractFFTs.jl
+# See rfft and brfft rrules in AbstractFFTs.jl
+
+# The modes of the half spectrum that are not their own conjugate each stand for two modes
+# of the full mesh. The real transforms fold that factor of two in, so the adjoints have to
+# take it back out.
+function hermitian_scale(charge_grid::AbstractArray{T, 3}, recip_grid) where T
+    n = size(charge_grid, 1)
+    return reshape([(isone(i) || 2*(i-1) == n ? one(T) : T(2))
+                    for i in 1:size(recip_grid, 1)], :, 1, 1)
+end
+
 function EnzymeRules.augmented_primal(config, ::Const{typeof(Molly.grad_safe_fft!)}, t,
-                                      charge_grid, fft_plan)
-    fft_plan.val * charge_grid.val
+                                      charge_grid, recip_grid, fft_plan)
+    Molly.grad_safe_fft!(charge_grid.val, recip_grid.val, fft_plan.val)
     return EnzymeRules.AugmentedReturn(nothing, nothing, nothing)
 end
 
 function EnzymeRules.reverse(config, ::Const{typeof(Molly.grad_safe_fft!)}, dret, tape,
-                             charge_grid, fft_plan)
-    charge_grid.dval .= bfft(charge_grid.dval)
-    return (nothing, nothing)
+                             charge_grid, recip_grid, fft_plan)
+    scale = hermitian_scale(charge_grid.val, recip_grid.val)
+    # The real grid is read but not written, so its shadow is added to
+    charge_grid.dval .+= brfft(recip_grid.dval ./ scale, size(charge_grid.val, 1))
+    return (nothing, nothing, nothing)
 end
 
 function EnzymeRules.augmented_primal(config, ::Const{typeof(Molly.grad_safe_bfft!)}, t,
-                                      charge_grid, bfft_plan)
-    bfft_plan.val * charge_grid.val
+                                      charge_grid, recip_grid, bfft_plan)
+    Molly.grad_safe_bfft!(charge_grid.val, recip_grid.val, bfft_plan.val)
     return EnzymeRules.AugmentedReturn(nothing, nothing, nothing)
 end
 
 function EnzymeRules.reverse(config, ::Const{typeof(Molly.grad_safe_bfft!)}, dret, tape,
-                             charge_grid, bfft_plan)
-    charge_grid.dval .= fft(charge_grid.dval)
-    return (nothing, nothing)
+                             charge_grid, recip_grid, bfft_plan)
+    scale = hermitian_scale(charge_grid.val, recip_grid.val)
+    # The real grid is overwritten, so its shadow is consumed here
+    recip_grid.dval .= scale .* rfft(charge_grid.dval)
+    charge_grid.dval .= zero(eltype(charge_grid.dval))
+    return (nothing, nothing, nothing)
 end
 
 # Calculate the gradient of a CV with respect to the input coordinates

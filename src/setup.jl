@@ -475,6 +475,9 @@ Gromacs file reading should be considered experimental.
     `nonbonded_method` is `:pme` or `:ewald`.
 - `approximate_pme=true`: whether to use a fast approximation to the erfc
     function, used when `nonbonded_method` is `:pme`.
+- `pme_mesh_dims=nothing`: the number of particle mesh Ewald grid points in each
+    dimension, used when `nonbonded_method` is `:pme`. Defaults to a value
+    chosen from `ewald_error_tol`.
 - `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
     dispersion correction. Defaults to the force field setting, which defaults
     to `true`.
@@ -524,6 +527,7 @@ function System(coord_file::AbstractString,
                 nonbonded_method=:none,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
+                pme_mesh_dims=nothing,
                 dispersion_correction=nothing,
                 hydrogen_mass::Union{Bool, Number}=false,
                 center_coords::Bool=true,
@@ -1169,9 +1173,10 @@ function System(coord_file::AbstractString,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
-                  approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
-                  dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr, hydrogen_mass,
-                  strictness, launch_config, autotune_launch, constraint_algorithm, n_threads)
+                  approximate_pme, pme_mesh_dims, neighbor_finder_type, implicit_solvent,
+                  kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
+                  hydrogen_mass, strictness, launch_config, autotune_launch,
+                  constraint_algorithm, n_threads)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -1201,6 +1206,7 @@ function System(T::Type,
                 nonbonded_method=:none,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
+                pme_mesh_dims=nothing,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 launch_config=CUDALaunchConfig(),
@@ -1509,10 +1515,10 @@ function System(T::Type,
                   torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
-                  approximate_pme, neighbor_finder_type, implicit_solvent, kappa, grad_safe,
-                  dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
-                  hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
-                  n_threads)
+                  approximate_pme, pme_mesh_dims, neighbor_finder_type, implicit_solvent,
+                  kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb,
+                  dispersion_correction, hydrogen_mass, strictness, launch_config,
+                  autotune_launch, constraint_algorithm, n_threads)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
@@ -1691,8 +1697,9 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
-                ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent, kappa,
-                grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, dispersion_correction,
+                ewald_error_tol, approximate_pme, pme_mesh_dims, neighbor_finder_type,
+                implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
+                weight_14_coulomb, dispersion_correction,
                 hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
                 n_threads)
     coords_dev = to_device(coords, AT)
@@ -1917,6 +1924,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
                 atoms,
                 boundary_used;
                 error_tol=T(ewald_error_tol),
+                mesh_dims=pme_mesh_dims,
                 grad_safe=grad_safe,
                 n_threads=n_threads,
             )

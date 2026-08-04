@@ -83,6 +83,7 @@ end
 @testset "Amber OpenMM protein comparison" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     show(devnull, ff)
+    pme_mesh_dims = (46, 46, 51)
     sys = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
@@ -93,6 +94,7 @@ end
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
         nonbonded_method=:pme,
+        pme_mesh_dims=pme_mesh_dims,
         center_coords=false,
     )
     sys_pme_exact = System(
@@ -100,6 +102,7 @@ end
         ff;
         nonbonded_method=:pme,
         approximate_pme=false,
+        pme_mesh_dims=pme_mesh_dims,
         center_coords=false,
     )
     sys_hmr = System(
@@ -310,6 +313,7 @@ end
         units=false,
         nonbonded_method=:pme,
         approximate_pme=false,
+        pme_mesh_dims=pme_mesh_dims,
         center_coords=false,
     )
     zero(sys_nounits)
@@ -365,6 +369,7 @@ end
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
             nonbonded_method=:pme,
+            pme_mesh_dims=pme_mesh_dims,
             center_coords=false,
         )
         zero(sys_pme)
@@ -386,6 +391,7 @@ end
             array_type=AT,
             nonbonded_method=:pme,
             approximate_pme=false,
+            pme_mesh_dims=pme_mesh_dims,
             center_coords=false,
         )
 
@@ -421,6 +427,7 @@ end
             array_type=AT,
             nonbonded_method=:pme,
             approximate_pme=false,
+            pme_mesh_dims=pme_mesh_dims,
             center_coords=false,
         )
         zero(sys_nounits)
@@ -457,6 +464,7 @@ end
 end
 
 @testset "CHARMM OpenMM protein comparison" begin
+    pme_mesh_dims = (46, 46, 51)
     for constraint_algorithm in (SetupLINCS(), SetupSHAKE_RATTLE())
         start_temp = 485.281907022u"K" # High since it does not take into account constraints
         ff = MolecularForceField(
@@ -472,6 +480,7 @@ end
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             nonbonded_method=:pme,
+            pme_mesh_dims=pme_mesh_dims,
             center_coords=false,
             constraints=:hbonds,
             rigid_water=true,
@@ -508,6 +517,7 @@ end
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             nonbonded_method=:pme,
+            pme_mesh_dims=pme_mesh_dims,
             center_coords=false,
             constraints=:hbonds,
             rigid_water=true,
@@ -566,6 +576,7 @@ end
             velocities=copy(ustrip_vec.(velocities_start)),
             units=false,
             nonbonded_method=:pme,
+            pme_mesh_dims=pme_mesh_dims,
             center_coords=false,
             constraints=:hbonds,
             rigid_water=true,
@@ -602,6 +613,7 @@ end
                 ff;
                 array_type=AT,
                 nonbonded_method=:pme,
+                pme_mesh_dims=pme_mesh_dims,
                 center_coords=false,
                 constraints=:hbonds,
                 rigid_water=true,
@@ -632,6 +644,7 @@ end
                 units=false,
                 array_type=AT,
                 nonbonded_method=:pme,
+                pme_mesh_dims=pme_mesh_dims,
                 center_coords=false,
                 constraints=:hbonds,
                 rigid_water=true,

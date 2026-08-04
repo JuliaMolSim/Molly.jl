@@ -1681,11 +1681,13 @@ end
                 E_gi2, fs_gi2 = AtomsCalculators.energy_forces!(fs_gi2, sys,
                                                 sys.general_inters[1]; n_threads=n_threads)
                 @test E_gi == E_gi2
-                @test fs_gi == fs_gi2
+                # Not guaranteed to be exact on GPU
+                @test maximum(norm.(fs_gi .- fs_gi2)) < 1e-4u"kJ * mol^-1 * nm^-1"
             end
         end
     end
 
+    pme_mesh_dims = (18, 19, 20)
     pme_data = (
         (
             "water_3mol_cubic.pdb",
@@ -1734,6 +1736,7 @@ end
                         dist_cutoff=T(dist_cutoff),
                         dist_buffer=zero(T(dist_cutoff)),
                         nonbonded_method=:pme,
+                        pme_mesh_dims=pme_mesh_dims,
                         dispersion_correction=false,
                         center_coords=false,
                         strictness=:nowarn,
@@ -1753,7 +1756,7 @@ end
                     E_gi2, fs_gi2 = AtomsCalculators.energy_forces!(fs_gi2, sys,
                                                     sys.general_inters[1]; n_threads=n_threads)
                     @test E_gi == E_gi2
-                    @test fs_gi == fs_gi2
+                    @test maximum(norm.(fs_gi .- fs_gi2)) < 1e-4u"kJ * mol^-1 * nm^-1"
                 end
             end
         end
