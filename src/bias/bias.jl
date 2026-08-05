@@ -320,7 +320,8 @@ function AtomsCalculators.forces!(
     )
     
     if needs_vir && bias.cv_type.has_virial
-        calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec, from_device(sys.atoms), sys.boundary)
+        calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec,
+                          from_device(sys.atoms), sys.boundary)
     end
 
     fs .-= to_device(fs_svec, typeof(fs))

@@ -14,7 +14,6 @@ const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
     T = (f32 ? Float32 : Float64)
     ff = MolecularForceField(
-        T,
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
         units=units,
     )
@@ -29,6 +28,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
         velocities=AT(velocities),
         units=units,
         array_type=AT,
+        float_type=T,
         dist_cutoff=Molly.add_units(dist_cutoff, u"nm", units),
         nonbonded_method=:cutoff,
     )

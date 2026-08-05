@@ -406,7 +406,8 @@ function atom_name_to_global_i(atom_name, template_atoms, rgraph_atom_inds, matc
     return rgraph_atom_inds[findfirst(isequal(atom_name_ind), matches)]
 end
 
-function add_virtual_sites!(virtual_sites, template, rgraph, matches)
+function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T}}, template, rgraph,
+                            matches) where T
     for vst in template.virtual_sites
         atom_ind = atom_name_to_global_i(vst.name       , template.atoms, rgraph.atom_inds, matches)
         atom_1   = atom_name_to_global_i(vst.atom_name_1, template.atoms, rgraph.atom_inds, matches)
@@ -420,8 +421,9 @@ function add_virtual_sites!(virtual_sites, template, rgraph, matches)
         else
             atom_3 = atom_name_to_global_i(vst.atom_name_3, template.atoms, rgraph.atom_inds, matches)
         end
-        vs = VirtualSite(vst.type, atom_ind, atom_1, atom_2, atom_3, vst.weight_1, vst.weight_2,
-                         vst.weight_3, vst.weight_12, vst.weight_13, vst.weight_cross)
+        vs = VirtualSite(vst.type, atom_ind, atom_1, atom_2, atom_3, T(vst.weight_1),
+                         T(vst.weight_2), T(vst.weight_3), T(vst.weight_12), T(vst.weight_13),
+                         T(vst.weight_cross))
         push!(virtual_sites, vs)
     end
     return virtual_sites
@@ -454,6 +456,10 @@ Gromacs file reading should be considered experimental.
 - `units::Bool=true`: whether to use Unitful quantities.
 - `array_type=Array`: the array type for the simulation, for example
     use `CuArray` or `ROCArray` for GPU support.
+- `float_type`: the floating point type of the system, defaults to `Float64` on CPU
+    and `Float32` on GPU.
+- `float_type_high=Float64`: the floating point type used for accumulation where
+    higher precision is useful, such as the potential energy and the virial.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
     classical neighbor lists every few steps. Not used by
@@ -519,6 +525,8 @@ function System(coord_file::AbstractString,
                 loggers=(),
                 units::Bool=true,
                 array_type::Type{AT}=Array,
+                float_type=(array_type <: AbstractGPUArray ? Float32 : Float64),
+                float_type_high=Float64,
                 dist_cutoff=add_units(1.0, u"nm", units),
                 dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,
@@ -572,7 +580,7 @@ function System(coord_file::AbstractString,
         end
     end
     dist_neighbors = dist_cutoff + dist_buffer
-    T = typeof(force_field.weight_14_coulomb)
+    T, TH = float_type, float_type_high
     if units
         E  = typeof(zero(T) * u"kJ * mol^-1")
         IC = typeof(zero(T) * u"nm^-1")
@@ -722,7 +730,7 @@ function System(coord_file::AbstractString,
     eligible = trues(n_atoms, n_atoms)
     special  = falses(n_atoms, n_atoms)
     torsion_n_terms = 6
-    weight_14_coulomb, weight_14_lj = force_field.weight_14_coulomb, force_field.weight_14_lj
+    weight_14_coulomb, weight_14_lj = T(force_field.weight_14_coulomb), T(force_field.weight_14_lj)
     σs_14 = (units ? typeof(one(T) * u"nm")[] : T[])
     ϵs_14 = (units ? typeof(one(T) * u"kJ * mol^-1")[] : T[])
     separate_lj14 = force_separate_lj14
@@ -733,7 +741,7 @@ function System(coord_file::AbstractString,
         at = force_field.atom_types[atype]
         # Convert atom type to an index
         ati = findfirst(isequal(atype), force_field.atom_type_order)
-        if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
+        if (units && T(at.σ) < zero(T)u"nm") || (!units && T(at.σ) < zero(T))
             error("atom $ai type $atype has unset σ or ϵ")
         end
         if use_charge_from_residue
@@ -742,25 +750,25 @@ function System(coord_file::AbstractString,
                 error("atom $ai type $atype has charge missing from residue template")
             end
         else
-            ch = force_field.atom_types[atype].charge
+            ch = T(force_field.atom_types[atype].charge)
             if ismissing(ch)
                 error("atom $ai type $atype has charge missing")
             end
         end
-        push!(atoms_abst, Atom(index=Int32(ai), atom_type=Int32(ati), mass=at.mass, charge=ch,
-                               σ=at.σ, ϵ=at.ϵ, λ=T(1.0)))
+        push!(atoms_abst, Atom(index=Int32(ai), atom_type=Int32(ati), mass=T(at.mass), charge=ch,
+                               σ=T(at.σ), ϵ=T(at.ϵ), λ=T(1.0)))
 
         if !ismissing(at.σ14)
-            push!(σs_14, at.σ14)
+            push!(σs_14, T(at.σ14))
             separate_lj14 = true
         else
-            push!(σs_14, at.σ)
+            push!(σs_14, T(at.σ))
         end
         if !ismissing(at.ϵ14)
-            push!(ϵs_14, at.ϵ14)
+            push!(ϵs_14, T(at.ϵ14))
             separate_lj14 = true
         else
-            push!(ϵs_14, at.ϵ)
+            push!(ϵs_14, T(at.ϵ))
         end
 
         res = residue_from_atom_idx(ai, canonical_system)
@@ -774,9 +782,15 @@ function System(coord_file::AbstractString,
                 hetero = false
             end
         end
-        push!(atoms_data, AtomData(atom_type=atype, atom_name=atom_name_from_index(ai, canonical_system),
-                                   res_number=resnum_from_atom_idx(ai, canonical_system), res_name=res.res_name,
-                                   chain_id=chain_from_atom_idx(ai, canonical_system), element=element_of[ai], hetero_atom=hetero))
+        push!(atoms_data, AtomData(
+            atom_type=atype,
+            atom_name=atom_name_from_index(ai, canonical_system),
+            res_number=resnum_from_atom_idx(ai, canonical_system),
+            res_name=res.res_name,
+            chain_id=chain_from_atom_idx(ai, canonical_system),
+            element=element_of[ai],
+            hetero_atom=hetero,
+        ))
         eligible[ai, ai] = false
     end
     atoms = to_device([atoms_abst...], AT)
@@ -791,7 +805,7 @@ function System(coord_file::AbstractString,
         push!(bonds_il.is, i)
         push!(bonds_il.js, j)
         push!(bonds_il.types, atom_types_to_string(t1,t2))
-        push!(bonds_il.inters, hb)
+        push!(bonds_il.inters, HarmonicBond(T(hb.k), T(hb.r0)))
         push!(bonds_ub_flags, false)
         eligible[i, j] = false
         eligible[j, i] = false
@@ -809,7 +823,7 @@ function System(coord_file::AbstractString,
             push!(angles_il.js, j)
             push!(angles_il.ks, k)
             push!(angles_il.types, atom_types_to_string(t1, t2, t3))
-            push!(angles_il.inters, ha)
+            push!(angles_il.inters, HarmonicAngle(T(ha.k), T(ha.θ0)))
             eligible[i, k] = false
             eligible[k, i] = false
         end
@@ -817,7 +831,7 @@ function System(coord_file::AbstractString,
             push!(bonds_il.is, i)
             push!(bonds_il.js, k)
             push!(bonds_il.types, atom_types_to_string(t1, t3))
-            push!(bonds_il.inters, hb)
+            push!(bonds_il.inters, HarmonicBond(T(hb.k), T(hb.r0)))
             push!(bonds_ub_flags, true)
             eligible[i, k] = false
             eligible[k, i] = false
@@ -856,8 +870,12 @@ function System(coord_file::AbstractString,
             push!(tors_il.ks, k)
             push!(tors_il.ls, l)
             push!(tors_il.types, atom_types_to_string(key...))
-            push!(tors_il.inters, PeriodicTorsion(periodicities=tt.periodicities[s:e],
-                                                phases=tt.phases[s:e], ks=tt.ks[s:e], proper=true))
+            push!(tors_il.inters, PeriodicTorsion(
+                periodicities=tt.periodicities[s:e],
+                phases=T.(tt.phases[s:e]),
+                ks=T.(tt.ks[s:e]),
+                proper=true,
+            ))
         end
         special[i, l] = true
         special[l, i] = true
@@ -967,8 +985,12 @@ function System(coord_file::AbstractString,
                 push!(imps_il.ks, cen)
                 push!(imps_il.ls, p3)
                 push!(imps_il.types, atom_types_to_string(key...))
-                push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
-                                            phases=tt.phases, ks=tt.ks, proper=false))
+                push!(imps_il.inters, PeriodicTorsion(
+                    periodicities=tt.periodicities,
+                    phases=T.(tt.phases),
+                    ks=T.(tt.ks),
+                    proper=false,
+                ))
             end
             continue # Skip the single-add fallback below
         else
@@ -987,8 +1009,8 @@ function System(coord_file::AbstractString,
                 # Elements and masses for tie-break
                 e_a1 = Symbol(element_of[a1])
                 e_a2 = Symbol(element_of[a2])
-                m_a1 = force_field.atom_types[atom_type_of[a1]].mass
-                m_a2 = force_field.atom_types[atom_type_of[a2]].mass
+                m_a1 = T(force_field.atom_types[atom_type_of[a1]].mass)
+                m_a2 = T(force_field.atom_types[atom_type_of[a2]].mass)
 
                 # 1) If same element, lower atom index first
                 # 2) Else, prefer carbon; else heavier mass first
@@ -1011,8 +1033,12 @@ function System(coord_file::AbstractString,
         push!(imps_il.ks, c)
         push!(imps_il.ls, l)
         push!(imps_il.types, atom_types_to_string(key...))
-        push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
-                                              phases=tt.phases, ks=tt.ks, proper=false))
+        push!(imps_il.inters, PeriodicTorsion(
+            periodicities=tt.periodicities,
+            phases=T.(tt.phases),
+            ks=T.(tt.ks),
+            proper=false,
+        ))
     end
     empty!(force_field.torsion_resolver.improper_cache)
 
@@ -1075,8 +1101,8 @@ function System(coord_file::AbstractString,
             # Elements and masses for tie-break
             e_a1 = Symbol(element_of[a1])
             e_a2 = Symbol(element_of[a2])
-            m_a1 = force_field.atom_types[atom_type_of[a1]].mass
-            m_a2 = force_field.atom_types[atom_type_of[a2]].mass
+            m_a1 = T(force_field.atom_types[atom_type_of[a1]].mass)
+            m_a2 = T(force_field.atom_types[atom_type_of[a2]].mass)
 
             # 1) If same element, lower atom index first
             # 2) Else, prefer carbon; else heavier mass first
@@ -1098,7 +1124,7 @@ function System(coord_file::AbstractString,
         push!(htors_il.ks, k)
         push!(htors_il.ls, l)
         push!(htors_il.types, atom_types_to_string(key...))
-        push!(htors_il.inters, HarmonicTorsion(k=tt.k, θ0=tt.θ0))
+        push!(htors_il.inters, HarmonicTorsion(k=T(tt.k), θ0=T(tt.θ0)))
     end
 
     # CMAP corrections
@@ -1125,7 +1151,7 @@ function System(coord_file::AbstractString,
         end
         push!(cmaps_il.inters, CMAPTorsion(index, cmap.size))
         index += 4*cmap.size*cmap.size
-        push!(cmaps_maps_vec, cmap_coefficients(cmap.size, cmap.energy))
+        push!(cmaps_maps_vec, cmap_coefficients(cmap.size, T.(cmap.energy)))
     end
     cmaps_maps = vcat(cmaps_maps_vec...)
 
@@ -1150,8 +1176,8 @@ function System(coord_file::AbstractString,
                     ati1 = findfirst(isequal(type1), force_field.atom_type_order)
                     ati2 = findfirst(isequal(type2), force_field.atom_type_order)
                     if ati1 in atis_present && ati2 in atis_present
-                        lj_exceptions_σ[(ati1, ati2)] = nbfix_pair.σ
-                        lj_exceptions_ϵ[(ati1, ati2)] = nbfix_pair.ϵ
+                        lj_exceptions_σ[(ati1, ati2)] = T(nbfix_pair.σ)
+                        lj_exceptions_ϵ[(ati1, ati2)] = T(nbfix_pair.ϵ)
                     end
                 end
             end
@@ -1162,13 +1188,13 @@ function System(coord_file::AbstractString,
             ati1 = findfirst(isequal(nbfix_pair.type1), force_field.atom_type_order)
             ati2 = findfirst(isequal(nbfix_pair.type2), force_field.atom_type_order)
             if ati1 in atis_present && ati2 in atis_present
-                lj_exceptions_σ[(ati1, ati2)] = nbfix_pair.σ
-                lj_exceptions_ϵ[(ati1, ati2)] = nbfix_pair.ϵ
+                lj_exceptions_σ[(ati1, ati2)] = T(nbfix_pair.σ)
+                lj_exceptions_ϵ[(ati1, ati2)] = T(nbfix_pair.ϵ)
             end
         end
     end
 
-    return System(T, AT, atoms, coords, boundary_used, velocities,
+    return System(T, TH, AT, atoms, coords, boundary_used, velocities,
                   atoms_data, virtual_sites_type, loggers, data, force_field.global_params, bonds_il, bonds_ub_flags,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
@@ -1510,7 +1536,7 @@ function System(T::Type,
     hydrogen_mass = false
     global_params = [zero(T), zero(T)]
 
-    return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
+    return System(T, T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                   loggers, data, global_params, bonds, bonds_ub_flags, angles, torsions, impropers,
                   torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
@@ -1522,7 +1548,7 @@ function System(T::Type,
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
-    return System(DefaultFloat, coord_file, top_file; kwargs...)
+    return System(Float64, coord_file, top_file; kwargs...)
 end
 
 const water_residue_names = ("SOL", "WAT", "HOH", "H2O")
@@ -1692,7 +1718,7 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
     return to_device(atoms_new_mass, array_type(atoms))
 end
 
-function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
+function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
                 loggers, data, global_params, bonds_all, bonds_ub_flags, angles_all, torsions, impropers,
                 torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
@@ -2029,6 +2055,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data, vir
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
         energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
+        float_type_high=TH,
         data=data,
         launch_config=launch_config,
         strictness=strictness,

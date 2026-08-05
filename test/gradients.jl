@@ -38,7 +38,6 @@ end
     T = Float64
     AT = Array
     ff = MolecularForceField(
-        T,
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...,
         units=false,
     )
@@ -47,6 +46,7 @@ end
         ff;
         units=false,
         array_type=AT,
+        float_type=T,
         nonbonded_method=:pme,
         grad_safe=true,
     )
@@ -229,7 +229,6 @@ end
     end
 
     ff = MolecularForceField(
-        FT,
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
         units=false,
         strictness=:nowarn,
@@ -240,6 +239,7 @@ end
         ff;
         units=false,
         array_type=AT,
+        float_type=FT,
         nonbonded_method=:cutoff,
     )
 
@@ -651,6 +651,7 @@ end
             ff;
             units=false,
             array_type=AT,
+            float_type=Float64,
             nonbonded_method=:cutoff,
             dispersion_correction=false,
             implicit_solvent=:gbn2,

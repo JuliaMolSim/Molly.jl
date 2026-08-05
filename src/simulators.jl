@@ -451,9 +451,8 @@ function merge_constraint_virial_if_needed!(buffers, sys, step_n::Integer,
     return buffers
 end
 
-function default_constraint_preview_dt(sys)
-    T = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-    return sys.energy_units == NoUnits ? T(0.0005) : T(0.0005)u"ps"
+function default_constraint_preview_dt(sys::System{<:Any, <:Any, T}) where T
+    return (sys.energy_units == NoUnits ? T(0.0005) : T(0.0005)u"ps")
 end
 
 # Evaluate the constraint contribution to the virial when there is no running dynamics

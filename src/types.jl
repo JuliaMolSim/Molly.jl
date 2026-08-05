@@ -25,10 +25,6 @@ export
     MollyCalculator,
     ASECalculator
 
-# This is not the only place that the default float is set, for example
-#   some function argument defaults are Float64
-const DefaultFloat = Float64
-
 # Base type for Molly interaction types
 abstract type AbstractInteraction end
 
@@ -746,6 +742,13 @@ end
     return iszero(value) ? nothing : value
 end
 
+function check_float_types(T, TH)
+    if promote_type(T, TH) != TH
+        throw(ArgumentError("Float type is $T and float_type_high is $TH, which appears " *
+                            "to be a lower precision type"))
+    end
+end
+
 """
     System(; <keyword arguments>)
 
@@ -794,12 +797,14 @@ interface described there.
     be set to `NoUnits` if units are not being used.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
+- `float_type_high::TH=Float64`: the floating point type used for accumulation where
+    higher precision is useful, such as the potential energy and the virial.
 - `data::DA=nothing`: arbitrary data associated with the system.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
 """
-mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
+mutable struct System{D, AT, T, TH, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
                       L, F, E, K, M, TM, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
@@ -842,6 +847,7 @@ function System(;
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
+                float_type_high=Float64,
                 data=nothing,
                 launch_config=CUDALaunchConfig(),
                 strictness=default_strictness())
@@ -849,6 +855,7 @@ function System(;
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)
+    TH = float_type_high
     A = typeof(atoms)
     C = typeof(coords)
     B = typeof(boundary)
@@ -864,6 +871,7 @@ function System(;
     E = typeof(energy_units)
     DA = typeof(data)
     n_atoms = length(atoms)
+    check_float_types(T, TH)
 
     if isnothing(velocities)
         if force_units == NoUnits
@@ -978,7 +986,8 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}(
+    return System{D, AT, T, TH, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF,
+                  L, F, E, K, M, TM, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, virtual_sites,
                     virtual_site_flags, neighbor_finder, loggers, df, force_units, energy_units,
@@ -993,7 +1002,7 @@ Convenience constructor for changing properties in a `System`.
 The `System` is returned with the provided keyword arguments modified.
 Give `deepcopy(sys)` as the argument to make a new copy of the system.
 """
-function System(sys::System;
+function System(sys::System{<:Any, <:Any, <:Any, TH};
                 atoms=sys.atoms,
                 coords=sys.coords,
                 boundary=sys.boundary,
@@ -1010,9 +1019,10 @@ function System(sys::System;
                 force_units=sys.force_units,
                 energy_units=sys.energy_units,
                 k=sys.k,
+                float_type_high=TH,
                 data=sys.data,
                 launch_config=sys.launch_config,
-                strictness=default_strictness())
+                strictness=default_strictness()) where TH
     return System(
         atoms=atoms,
         coords=coords,
@@ -1030,6 +1040,7 @@ function System(sys::System;
         force_units=force_units,
         energy_units=energy_units,
         k=k,
+        float_type_high=float_type_high,
         data=data,
         launch_config=launch_config,
         strictness=strictness,
@@ -1060,6 +1071,7 @@ function System(crystal::Crystal{D};
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
+                float_type_high=Float64,
                 data=nothing,
                 launch_config=CUDALaunchConfig()) where D
     atoms = [Atom(index=i, charge=ustrip(uconvert(u"C", charge(a)) / Unitful.q), mass=AtomsBase.mass(a))
@@ -1099,15 +1111,17 @@ function System(crystal::Crystal{D};
         force_units=force_units,
         energy_units=energy_units,
         k=k,
+        float_type_high=float_type_high,
         data=data,
         launch_config=launch_config,
     )
 end
 
-function Base.zero(sys::System{D, AT, T, A, C, B, V,
-                   AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}) where {D, AT, T,
+function Base.zero(sys::System{D, AT, T, TH, A, C, B, V,
+                   AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}) where {D, AT, T, TH,
                             A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, NF, L, F, E, K, M, TM, DA}(
+    return System{D, AT, T, TH, A, C, B, V, AD, TO, PI, SI, GI, CN, VS,
+                  VF, NF, L, F, E, K, M, TM, DA}(
         zero.(sys.atoms),
         zero(sys.coords),
         zero(sys.boundary),
@@ -1323,11 +1337,13 @@ construction where `n` is the number of threads to be used per replica.
 - `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
     a default [`ReplicaExchangeLogger`](@ref) is used.
 - `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
+- `float_type_high=Float64`: the floating point type used for accumulation where
+    higher precision is useful, such as the potential energy and the virial.
 - `data::DA=nothing`: Arbitrary data associated with the replica system.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for perturbed state differences. Generally improves performance.
 """
-mutable struct ReplicaSystem{D, AT, T, P, B, I, C, V, BO, NF, RL, SPI, SSI, SGI, EL, DA} <: AtomsBase.AbstractSystem{D}
+mutable struct ReplicaSystem{D, AT, T, TH, P, B, I, C, V, BO, NF, RL, SPI, SSI, SGI, EL, DA} <: AtomsBase.AbstractSystem{D}
     partition::P
     n_replicas::Int
     betas::B
@@ -1355,6 +1371,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        replica_loggers=nothing,
                        exchange_logger=nothing,
                        initial_step::Integer=0,
+                       float_type_high=Float64,
                        data=nothing,
                        reuse_neighbors::Bool=true)
     
@@ -1369,6 +1386,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
     ref_sys = thermo_states[1].system
     D = AtomsBase.n_dimensions(ref_sys.boundary)
     T = float_type(ref_sys.boundary)
+    check_float_types(T, float_type_high)
     AT = array_type(replica_coords[1])
 
     if isnothing(replica_boundaries)
@@ -1417,11 +1435,10 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
     state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states]
     state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states]
     state_general_inters = [ts.system.general_inters for ts in thermo_states]
-
     state_indices = collect(1:n_replicas)
 
-    return ReplicaSystem{D, AT, T, typeof(partition), typeof(betas), typeof(integrators), 
-                         typeof(replica_coords), typeof(replica_velocities), 
+    return ReplicaSystem{D, AT, T, float_type_high, typeof(partition), typeof(betas),
+                         typeof(integrators), typeof(replica_coords), typeof(replica_velocities), 
                          typeof(replica_boundaries), typeof(replica_neighbor_finders), 
                          typeof(replica_loggers), typeof(state_pairwise_inters), 
                          typeof(state_specific_inter_lists), typeof(state_general_inters),
@@ -1432,7 +1449,6 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         state_indices, exchange_logger, Int(initial_step), true, data
     )
 end
-
 
 function AtomsBase.atomic_number(s::ReplicaSystem)
     if length(s.partition.master_sys.atoms_data) > 0
@@ -1483,6 +1499,8 @@ end
 The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
 """
 float_type(::Union{System{<:Any, <:Any, T}, ReplicaSystem{<:Any, <:Any, T}}) where {T} = T
+
+float_type_accum(::Union{System{<:Any, <:Any, <:Any, TH}, ReplicaSystem{<:Any, <:Any, <:Any, TH}}) where {TH} = TH
 
 """
     masses(sys)
@@ -1670,6 +1688,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
+                float_type_high=Float64,
                 data=nothing,
                 launch_config=CUDALaunchConfig()) where D
     bb = AtomsBase.cell_vectors(sys)
@@ -1755,6 +1774,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
         force_units=force_units,
         energy_units=energy_units,
         k=k,
+        float_type_high=float_type_high,
         data=data,
         launch_config=launch_config,
     )

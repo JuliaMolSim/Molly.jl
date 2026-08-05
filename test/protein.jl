@@ -347,6 +347,7 @@ end
             ff;
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
+            float_type=Float64,
             nonbonded_method=:cutoff,
             center_coords=false,
         )
@@ -368,6 +369,7 @@ end
             ff;
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
+            float_type=Float64,
             nonbonded_method=:pme,
             pme_mesh_dims=pme_mesh_dims,
             center_coords=false,
@@ -389,6 +391,7 @@ end
             ff;
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
+            float_type=Float64,
             nonbonded_method=:pme,
             approximate_pme=false,
             pme_mesh_dims=pme_mesh_dims,
@@ -425,6 +428,7 @@ end
             velocities=to_device(copy(ustrip_vec.(velocities_start)), AT),
             units=false,
             array_type=AT,
+            float_type=Float64,
             nonbonded_method=:pme,
             approximate_pme=false,
             pme_mesh_dims=pme_mesh_dims,
@@ -612,6 +616,7 @@ end
                 joinpath(data_dir, "6mrr_equil.pdb"),
                 ff;
                 array_type=AT,
+                float_type=Float64,
                 nonbonded_method=:pme,
                 pme_mesh_dims=pme_mesh_dims,
                 center_coords=false,
@@ -643,6 +648,7 @@ end
                 velocities=to_device(copy(ustrip_vec.(velocities_start)), AT),
                 units=false,
                 array_type=AT,
+                float_type=Float64,
                 nonbonded_method=:pme,
                 pme_mesh_dims=pme_mesh_dims,
                 center_coords=false,
@@ -686,6 +692,7 @@ end
                 ff;
                 boundary=CubicBoundary(100.0u"nm"),
                 array_type=AT,
+                float_type=Float64,
                 dist_cutoff=5.0u"nm",
                 nonbonded_method=:none,
                 dispersion_correction=false,
@@ -723,7 +730,6 @@ end
     AT = Array
 
     ff = MolecularForceField(
-        FT,
         joinpath.(ff_dir, ["a99SB-disp.xml", "a99SB-disp_water.xml"])...;
         units=true,
     )
@@ -745,7 +751,6 @@ end
     ]
 
     for struc_name in struc_names
-
         dat_file = joinpath(data_dir, "a99SB-disp_refs", "$struc_name.dat")
         pdb_file = joinpath(data_dir, "a99SB-disp_refs", "$struc_name.pdb")
 
@@ -753,6 +758,7 @@ end
             pdb_file,
             ff;
             array_type=AT,
+            float_type=FT,
             dist_cutoff=1.0u"nm",
             nonbonded_method=:pme,
             approximate_pme=false,

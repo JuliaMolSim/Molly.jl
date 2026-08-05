@@ -798,9 +798,8 @@ function random_velocities!(sys, temp; rng=Random.default_rng())
     return sys
 end
 
-function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys, temp;
-                            rng=Random.default_rng()) where {D, C}
-    FT = float_type(sys)
+function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::System{<:Any, <:Any, T},
+                            temp; rng=Random.default_rng()) where {D, C, T}
     ms = from_device(masses(sys))
     vsf = from_device(sys.virtual_site_flags)
     kT = sys.k * temp
@@ -809,13 +808,13 @@ function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys, temp;
     natoms = UInt64(length(ms))
     @inbounds @simd ivdep for i in eachindex(vels, vsf, ms)
         scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
-        vels[i] = randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms) * scale
+        vels[i] = randn_svec(SVector{D, T}, i%UInt64, ctr1, key, natoms) * scale
     end
     return vels
 end
 
-function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.default_rng())
-    FT = float_type(sys)
+function random_velocities!(vels::AbstractGPUArray, sys::System{<:Any, <:Any, T},
+                            temp; rng=Random.default_rng()) where T
     AT = array_type(vels)
     ms = to_device(sys.masses, AT)
     vsf = to_device(sys.virtual_site_flags, AT)
@@ -824,7 +823,7 @@ function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.defaul
     key = rand(rng, UInt64)
     backend = get_backend(vels)
     kernel! = random_velocities_kernel!(backend)
-    kernel!(vels, ms, kT, vsf, ctr1, key, Val(FT); ndrange=length(vels))
+    kernel!(vels, ms, kT, vsf, ctr1, key, Val(T); ndrange=length(vels))
     return vels
 end
 

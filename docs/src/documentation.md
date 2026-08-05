@@ -331,7 +331,6 @@ Here we carry out an energy minimization, simulate with a Langevin integrator in
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 T = Float32 # Float32 is much faster on GPU
 ff = MolecularForceField(
-    T,
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
 )
@@ -345,6 +344,7 @@ sys = System(
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
     ),
     array_type=Array, # CuArray for CUDA GPU
+    float_type=T,
 )
 
 minimizer = SteepestDescentMinimizer()

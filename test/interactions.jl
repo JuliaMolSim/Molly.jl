@@ -1654,11 +1654,12 @@ end
                 if (n_threads > 1 && AT != Array) || (T == Float64 && AT == MtlArray)
                     continue
                 end
-                ff = MolecularForceField(T, joinpath(ff_dir, "tip3p_standard.xml"))
+                ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
                 sys_init = System(
                     joinpath(data_dir, "water_3mol_cubic.pdb"),
                     ff;
                     array_type=AT,
+                    float_type=T,
                     dist_cutoff=T(dist_cutoff),
                     dist_buffer=zero(T(dist_cutoff)),
                     nonbonded_method=:ewald,
@@ -1728,11 +1729,12 @@ end
                     if (n_threads > 1 && AT != Array) || (T == Float64 && AT == MtlArray)
                         continue
                     end
-                    ff = MolecularForceField(T, joinpath(ff_dir, "tip3p_standard.xml"))
+                    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
                     sys_init = System(
                         joinpath(data_dir, pdb_fp),
                         ff;
                         array_type=AT,
+                        float_type=T,
                         dist_cutoff=T(dist_cutoff),
                         dist_buffer=zero(T(dist_cutoff)),
                         nonbonded_method=:pme,

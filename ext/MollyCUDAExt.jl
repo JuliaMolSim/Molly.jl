@@ -1897,6 +1897,7 @@ function force_kernel!(
     interacting_tiles_diag, num_interacting_tiles,
     interacting_tiles_overflow) where {N, r_cut2, A, force_units, needs_vir, T, D}
 
+    TH = Float64
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
@@ -2106,7 +2107,10 @@ function force_kernel!(
         if index_j <= N
             @inbounds for k in a:b
                 if opposites_sum[lane, k, warpid] != zero(T)
-                    CUDA.atomic_add!(pointer(fs_mat, Int64(index_j) * b - (b - k)), -opposites_sum[lane, k, warpid])
+                    CUDA.atomic_add!(
+                        pointer(fs_mat, Int64(index_j) * b - (b - k)),
+                        -opposites_sum[lane, k, warpid],
+                    )
                 end
             end
         end
@@ -2321,28 +2325,28 @@ function force_kernel!(
 
         if lane == 1
             if vir_xx != zero(T)
-                CUDA.atomic_add!(pointer(global_virial, 1), vir_xx)
+                CUDA.atomic_add!(pointer(global_virial, 1), TH(vir_xx))
             end
             if D >= 2
                 if vir_yy != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, D + 2), vir_yy)
+                    CUDA.atomic_add!(pointer(global_virial, D + 2), TH(vir_yy))
                 end
                 if vir_xy != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 2), vir_xy)
-                    CUDA.atomic_add!(pointer(global_virial, D + 1), vir_xy)
+                    CUDA.atomic_add!(pointer(global_virial, 2), TH(vir_xy))
+                    CUDA.atomic_add!(pointer(global_virial, D + 1), TH(vir_xy))
                 end
             end
             if D >= 3
                 if vir_zz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 9), vir_zz)
+                    CUDA.atomic_add!(pointer(global_virial, 9), TH(vir_zz))
                 end
                 if vir_xz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 3), vir_xz)
-                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 1), vir_xz)
+                    CUDA.atomic_add!(pointer(global_virial, 3), TH(vir_xz))
+                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 1), TH(vir_xz))
                 end
                 if vir_yz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 6), vir_yz)
-                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 2), vir_yz)
+                    CUDA.atomic_add!(pointer(global_virial, 6), TH(vir_yz))
+                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 2), TH(vir_yz))
                 end
             end
         end
@@ -2398,6 +2402,7 @@ function energy_kernel!(
     interacting_tiles_diag, num_interacting_tiles,
     interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, D}
 
+    TH = Float64
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
@@ -2654,7 +2659,7 @@ function energy_kernel!(
     end
 
     if lane == a && sum_E != zero(T)
-        CUDA.atomic_add!(pointer(energy_nounits), sum_E)
+        CUDA.atomic_add!(pointer(energy_nounits), TH(sum_E))
     end
 
     return nothing

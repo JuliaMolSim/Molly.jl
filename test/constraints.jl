@@ -314,10 +314,7 @@ end
 @testset "Constraints protein CPU/GPU" begin
     pdb_fp = joinpath(data_dir, "1ubq.pdb") # No solvent
     T = Float32
-    ff = MolecularForceField(
-        T,
-        joinpath(ff_dir, "ff99SBildn.xml"),
-    )
+    ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"))
     boundary = CubicBoundary(T(10.0)u"nm")
     temp = T(100.0)u"K"
     minimizer = SteepestDescentMinimizer()
@@ -333,6 +330,7 @@ end
                     ff;
                     boundary=boundary,
                     array_type=AT,
+                    float_type=T,
                     constraints=:hbonds,
                     rigid_water=rigid_water, # No water present
                     constraint_algorithm=constraint_algorithm,    
@@ -1778,12 +1776,14 @@ end
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             array_type=AT,
+            float_type=Float64,
             nonbonded_method=:pme,
         )
         sys_cons = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             array_type=AT,
+            float_type=Float64,
             nonbonded_method=:pme,
             constraints=:hbonds,
             rigid_water=true,

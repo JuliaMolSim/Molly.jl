@@ -277,6 +277,7 @@
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             array_type=AT,
+            float_type=Float64,
             nonbonded_method=:cutoff,
             dispersion_correction=false,
             neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
@@ -402,7 +403,6 @@ end
     AT = Array
 
     ff = MolecularForceField(
-        FT,
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
         units=true,
     )
@@ -430,6 +430,7 @@ end
             pdb_file,
             ff;
             array_type=AT,
+            float_type=FT,
             nonbonded_method=:pme,
             approximate_pme=false,
             disulfide_bonds=true,
@@ -440,7 +441,8 @@ end
             @test_throws ErrorException System(
                 pdb_file,
                 ff;
-                array_type = AT,
+                array_type=AT,
+                float_type=FT,
                 nonbonded_method=:pme,
                 approximate_pme=false,
                 disulfide_bonds=false,
@@ -681,6 +683,7 @@ end
             joinpath(data_dir, "water_3mol_cubic.pdb"),
             ff;
             array_type=AT,
+            float_type=Float64,
             dist_cutoff=dist_cutoff,
             dist_buffer=0.0u"nm",
             strictness=:nowarn,

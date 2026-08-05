@@ -404,11 +404,11 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       fs_mat, BufferValidity())
 end
 
-function init_buffers!(sys::System{D}, n_threads) where D
+function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH}
     # Allows propagation of uncertainties to tensors
-    CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
+    TU = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     fs_nounits    = ustrip_vec.(zero(sys.coords))
-    vir           = zeros(CT, D, D) .* sys.energy_units
+    vir           = zeros(TH, D, D) .* sys.energy_units
     vir_nounits   = ustrip_vec.(zero(vir))
     constr_vir    = zero(vir)
     constr_vir_nu = zero(vir_nounits)
@@ -416,13 +416,13 @@ function init_buffers!(sys::System{D}, n_threads) where D
     pres          = zero(vir_nounits) .* (sys.energy_units == NoUnits ? NoUnits : u"bar")
     # Enzyme errors with nothing when n_threads is 1
     n_copies = (n_threads == 1 ? 0 : n_threads)
-    fs_chunks         = [zero(fs_nounits) for _ in 1:n_copies]
+    fs_chunks         = [zero(fs_nounits)  for _ in 1:n_copies]
     vir_chunks        = [zero(vir_nounits) for _ in 1:n_copies]
     constr_vir_chunks = [zero(vir_nounits) for _ in 1:n_copies]
     # fs_mat is only used for virtual sites to do atomic addition
     # Use an empty matrix if no virtual sites to keep this function type stable
     n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
-    fs_mat = zeros(CT, D, n_fs_mat_cols)
+    fs_mat = zeros(TU, D, n_fs_mat_cols)
     return BuffersCPU(
         fs_nounits, fs_chunks,
         vir, vir_nounits, vir_chunks,
@@ -624,22 +624,21 @@ Allocates the necessary arrays on the GPU using the system's backend. If `for_pe
 is `true`, the neighbor finder initialization state is preserved; otherwise, it
 is reset if it is a [`GPUNeighborFinder`](@ref).
 =#
-function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
-                   for_pe::Bool=false) where {D, T}
+function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
+                       for_pe::Bool=false) where {D, T, TH}
     N = length(sys)
     C = eltype(eltype(sys.coords))
-    CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     n_blocks = cld(N, 32)
     n_upper_tiles = upper_tile_count(n_blocks)
     backend = get_backend(sys.coords)
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
     fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N)
-    pe_vec_noun  = KernelAbstractions.zeros(backend, T, 1)
-    virial       = zeros(CT, D, D) .* sys.energy_units
-    virial_nu    = KernelAbstractions.zeros(backend, T, D, D)
+    pe_vec_noun  = KernelAbstractions.zeros(backend, TH, 1)
+    virial       = zeros(TH, D, D) .* sys.energy_units
+    virial_nu    = KernelAbstractions.zeros(backend, TH, D, D)
     constr_vir   = zero(virial)
-    constr_vir_nu = KernelAbstractions.zeros(backend, T, D, D)
+    constr_vir_nu = KernelAbstractions.zeros(backend, TH, D, D)
     kin          = zero(virial)
     pres         = ustrip_vec.(zero(virial)) * (sys.energy_units == NoUnits ? NoUnits : u"bar")
     box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
@@ -651,7 +650,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     compressed_masks = KernelAbstractions.zeros(backend, UInt32, 32, 2, n_upper_tiles)
     tile_is_clean = KernelAbstractions.zeros(backend, Bool, n_upper_tiles)
 
-    max_interacting_blocks = min(n_upper_tiles, 1024 * n_blocks) # TODO: Implement dynamic resizing for this buffer
+    max_interacting_blocks = min(n_upper_tiles, 1024 * n_blocks)
     interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
     interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
     interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks)
@@ -679,6 +678,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, -1, UInt64(0), 0, false)
 end
+
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
 """
@@ -735,7 +735,7 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
 end
 
 function forces!(fs,
-                 sys::System{<:Any, <:Any, T},
+                 sys::System{<:Any, <:Any, T, TH},
                  neighbors,
                  step_n::Integer,
                  buffers::BuffersCPU,
@@ -743,22 +743,22 @@ function forces!(fs,
                  n_threads::Integer=Threads.nthreads(),
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
-                 general_inters=sys.general_inters) where {T, needs_vir}
+                 general_inters=sys.general_inters) where {T, TH, needs_vir}
     if needs_vir
-        fill!(buffers.virial, zero(T) * sys.energy_units)
+        fill!(buffers.virial, zero(TH) * sys.energy_units)
     else
         invalidate_interaction_virial!(buffers.validity)
         invalidate_total_virial!(buffers.validity)
     end
     invalidate_pressure!(buffers.validity)
-    fill!(buffers.kin_tensor,  zero(T) * sys.energy_units)
-    fill!(buffers.pres_tensor, zero(T) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
+    fill!(buffers.kin_tensor,  zero(TH) * sys.energy_units)
+    fill!(buffers.pres_tensor, zero(TH) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
 
     FT = eltype(buffers.fs_nounits)
     if n_threads == 1
         fill!(buffers.fs_nounits, zero(FT))
         if needs_vir
-            fill!(buffers.vir_nounits, zero(eltype(buffers.vir_nounits)))
+            fill!(buffers.vir_nounits, zero(TH))
         end
     else
         Threads.@threads for chunk_i in 1:n_threads
@@ -766,7 +766,7 @@ function forces!(fs,
         end
         if needs_vir
             Threads.@threads for chunk_i in 1:n_threads
-                fill!(buffers.vir_chunks[chunk_i], zero(eltype(buffers.vir_nounits)))
+                fill!(buffers.vir_chunks[chunk_i], zero(TH))
             end
         end
     end
@@ -1230,7 +1230,7 @@ function specific_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 end
 
 function forces!(fs,
-                 sys::System{D, <:AbstractGPUArray, T},
+                 sys::System{D, <:AbstractGPUArray, T, TH},
                  neighbors,
                  step_n::Integer,
                  buffers::BuffersGPU,
@@ -1238,17 +1238,17 @@ function forces!(fs,
                  n_threads::Integer=Threads.nthreads(),
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
-                 general_inters=sys.general_inters) where {D, T, needs_vir}
+                 general_inters=sys.general_inters) where {D, T, TH, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
-        fill!(buffers.virial_nounits, zero(T))
+        fill!(buffers.virial_nounits, zero(TH))
     else
         invalidate_interaction_virial!(buffers.validity)
         invalidate_total_virial!(buffers.validity)
     end
     invalidate_pressure!(buffers.validity)
-    fill!(buffers.kin_tensor, zero(T) * sys.energy_units)
-    fill!(buffers.pres_tensor, zero(T) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
+    fill!(buffers.kin_tensor, zero(TH) * sys.energy_units)
+    fill!(buffers.pres_tensor, zero(TH) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
     fill!(buffers.fs_mat, zero(T))
     fill!(buffers.fs_mat_reordered, zero(T))
 

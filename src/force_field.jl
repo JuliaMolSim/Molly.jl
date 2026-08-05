@@ -824,9 +824,8 @@ end
 
 """
     MolecularForceField(ff_files...; units=true, custom_residue_templates=nothing,
-                        custom_renaming_scheme=nothing, strictness=:warn)
-    MolecularForceField(T, ff_files...; units=true, custom_residue_templates=nothing,
-                        custom_renaming_scheme=nothing, strictness=:warn)
+                        custom_renaming_scheme=nothing, float_type=Float64,
+                        strictness=:warn)
 
 A molecular force field.
 
@@ -844,6 +843,8 @@ If the system to be simulated contains other molecules, their template topologie
 defined either through `CONECT` records in the PDB file or by providing an extra
 custom template file to the `custom_residue_templates` keyword argument.
 
+`float_type` should generally be `Float64` since the float type of a [`System`](@ref)
+is determined later when creating the [`System`](@ref).
 Behavior with unsupported files is determined by the `strictness` keyword argument.
 This can be `:warn` to emit warnings, `:nowarn` to suppress warnings or `:error` to error.
 """
@@ -870,10 +871,11 @@ struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     cmap_resolver::CMAPResolver{E}           
 end
 
-function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true,
+function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
                              custom_residue_templates=nothing, custom_renaming_scheme=nothing,
-                             strictness=default_strictness())
+                             float_type=Float64, strictness=default_strictness())
     check_strictness(strictness)
+    T = float_type
     if units
         M  = typeof(T(1u"g/mol"))
         D  = typeof(T(1u"nm"))
@@ -1178,10 +1180,6 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         atomname_replacements, standard_bonds, type_to_class, class_to_types, bond_resolver,
         angle_resolver, torsion_resolver, cmap_resolver,
     )
-end
-
-function MolecularForceField(ff_files::AbstractString...; kwargs...)
-    return MolecularForceField(DefaultFloat, ff_files...; kwargs...)
 end
 
 function Base.show(io::IO, ff::MolecularForceField)

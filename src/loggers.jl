@@ -140,7 +140,7 @@ function TemperatureLogger(T::DataType, n_steps::Integer)
     return GeneralObservableLogger(temperature_wrapper, T, n_steps)
 end
 
-TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(DefaultFloat)u"K"), n_steps)
+TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(Float64)u"K"), n_steps)
 
 function Base.show(io::IO, tl::GeneralObservableLogger{T, typeof(temperature_wrapper)}) where T
     print(io, "TemperatureLogger{", eltype(values(tl)), "} with n_steps ",
@@ -163,7 +163,7 @@ function CoordinatesLogger(T, n_steps::Integer; dims::Integer=3)
     )
 end
 
-CoordinatesLogger(n_steps::Integer; dims::Integer=3) = CoordinatesLogger(typeof(one(DefaultFloat)u"nm"), n_steps; dims=dims)
+CoordinatesLogger(n_steps::Integer; dims::Integer=3) = CoordinatesLogger(typeof(one(Float64)u"nm"), n_steps; dims=dims)
 
 function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wrapper)}) where T
     print(io, "CoordinatesLogger{", eltype(eltype(values(cl))), "} with n_steps ",
@@ -188,7 +188,7 @@ function BoxLogger(T::Type, n_steps::Integer)
     )
 end
 
-BoxLogger(n_steps::Integer; dims::Integer=3) = BoxLogger(typeof(Matrix{DefaultFloat}(undef, dims, dims)*u"nm"), n_steps)
+BoxLogger(n_steps::Integer; dims::Integer=3) = BoxLogger(typeof(Matrix{Float64}(undef, dims, dims)*u"nm"), n_steps)
 
 function Base.show(io::IO, bl::GeneralObservableLogger{T, typeof(box_wrapper)}) where T
     print(io, "BoxLogger{", eltype(values(bl)), "} with n_steps ",
@@ -211,7 +211,7 @@ function VelocitiesLogger(T, n_steps::Integer; dims::Integer=3)
     )
 end
 
-VelocitiesLogger(n_steps::Integer; dims::Integer=3) = VelocitiesLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
+VelocitiesLogger(n_steps::Integer; dims::Integer=3) = VelocitiesLogger(typeof(one(Float64)u"nm * ps^-1"), n_steps; dims=dims)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrapper)}) where T
     print(io, "VelocitiesLogger{", eltype(eltype(values(vl))), "} with n_steps ",
@@ -231,7 +231,7 @@ function KineticEnergyLogger(T::Type, n_steps::Integer)
     return GeneralObservableLogger(kinetic_energy_wrapper, T, n_steps)
 end
 
-KineticEnergyLogger(n_steps::Integer) = KineticEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+KineticEnergyLogger(n_steps::Integer) = KineticEnergyLogger(typeof(one(Float64)u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(kinetic_energy_wrapper)}) where T
     print(io, "KineticEnergyLogger{", eltype(values(el)), "} with n_steps ",
@@ -257,7 +257,7 @@ function PotentialEnergyLogger(T::Type, n_steps::Integer)
     return GeneralObservableLogger(potential_energy_wrapper, T, n_steps)
 end
 
-PotentialEnergyLogger(n_steps::Integer) = PotentialEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+PotentialEnergyLogger(n_steps::Integer) = PotentialEnergyLogger(typeof(one(Float64)u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(potential_energy_wrapper)}) where T
     print(io, "PotentialEnergyLogger{", eltype(values(el)), "} with n_steps ",
@@ -275,7 +275,7 @@ end
 Log the [`total_energy`](@ref) of a system throughout a simulation.
 """
 TotalEnergyLogger(T::DataType, n_steps) = GeneralObservableLogger(total_energy_wrapper, T, n_steps)
-TotalEnergyLogger(n_steps) = TotalEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+TotalEnergyLogger(n_steps) = TotalEnergyLogger(typeof(one(Float64)u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy_wrapper)}) where T
     print(io, "TotalEnergyLogger{", eltype(values(el)), "} with n_steps ",
@@ -308,7 +308,7 @@ function ForcesLogger(T, n_steps::Integer; dims::Integer=3)
     )
 end
 
-ForcesLogger(n_steps::Integer; dims::Integer=3) = ForcesLogger(typeof(one(DefaultFloat)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
+ForcesLogger(n_steps::Integer; dims::Integer=3) = ForcesLogger(typeof(one(Float64)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
 
 function Base.show(io::IO, fl::GeneralObservableLogger{T, typeof(forces_wrapper)}) where T
     print(io, "ForcesLogger{", eltype(eltype(values(fl))), "} with n_steps ",
@@ -327,7 +327,7 @@ Log the [`volume`](@ref) of a system throughout a simulation.
 Not compatible with infinite boundaries.
 """
 VolumeLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(volume_wrapper, T, n_steps)
-VolumeLogger(n_steps::Integer) = VolumeLogger(typeof(one(DefaultFloat)u"nm^3"), n_steps)
+VolumeLogger(n_steps::Integer) = VolumeLogger(typeof(one(Float64)u"nm^3"), n_steps)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(volume_wrapper)}) where T
     print(io, "VolumeLogger{", eltype(values(vl)), "} with n_steps ",
@@ -345,7 +345,7 @@ Log the [`density`](@ref) of a system throughout a simulation.
 Not compatible with infinite boundaries.
 """
 DensityLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(density_wrapper, T, n_steps)
-DensityLogger(n_steps::Integer) = DensityLogger(typeof(one(DefaultFloat)u"kg * m^-3"), n_steps)
+DensityLogger(n_steps::Integer) = DensityLogger(typeof(one(Float64)u"kg * m^-3"), n_steps)
 
 function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper)}) where T
     print(io, "DensityLogger{", eltype(values(dl)), "} with n_steps ",
@@ -402,7 +402,7 @@ For constrained systems on coordinate-scaling coupling steps, this records the
 pre-coupling virial for that step.
 """
 VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
-VirialLogger(n_steps::Integer) = VirialLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"kJ * mol^-1"), n_steps)
+VirialLogger(n_steps::Integer) = VirialLogger(typeof(Matrix{Float64}(undef, 3, 3).*u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
     print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
@@ -431,7 +431,7 @@ For constrained systems on coordinate-scaling coupling steps, this records the
 pre-coupling scalar virial for that step.
 """
 ScalarVirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_virial_wrapper, T, n_steps)
-ScalarVirialLogger(n_steps::Integer) = ScalarVirialLogger(typeof(one(DefaultFloat)*u"kJ * mol^-1"), n_steps)
+ScalarVirialLogger(n_steps::Integer) = ScalarVirialLogger(typeof(one(Float64)*u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(scalar_virial_wrapper)}) where T
     print(io, "ScalarVirialLogger{", eltype(values(vl)), "} with n_steps ",
@@ -467,7 +467,7 @@ post-coupling box.
 This should only be used on 3-dimensional systems.
 """
 PressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(pressure_wrapper, T, n_steps)
-PressureLogger(n_steps::Integer) = PressureLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"bar"), n_steps)
+PressureLogger(n_steps::Integer) = PressureLogger(typeof(Matrix{Float64}(undef, 3, 3).*u"bar"), n_steps)
 
 function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrapper)}) where T
     print(io, "PressureLogger{", eltype(values(pl)), "} with n_steps ",
@@ -503,7 +503,7 @@ post-coupling box.
 This should only be used on 3-dimensional systems.
 """
 ScalarPressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_pressure_wrapper, T, n_steps)
-ScalarPressureLogger(n_steps::Integer) = ScalarPressureLogger(typeof(one(DefaultFloat)*u"bar"), n_steps)
+ScalarPressureLogger(n_steps::Integer) = ScalarPressureLogger(typeof(one(Float64)*u"bar"), n_steps)
 
 function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(scalar_pressure_wrapper)}) where T
     print(io, "ScalarPressureLogger{", eltype(values(pl)), "} with n_steps ",
@@ -1192,7 +1192,7 @@ function ReplicaExchangeLogger(T::DataType, n_replicas::Integer)
     return ReplicaExchangeLogger{T}(n_replicas, 0, 0, Tuple{Int, Int}[], Int[], T[], 0)
 end
 
-ReplicaExchangeLogger(n_replicas::Integer) = ReplicaExchangeLogger(DefaultFloat, n_replicas)
+ReplicaExchangeLogger(n_replicas::Integer) = ReplicaExchangeLogger(Float64, n_replicas)
 
 function log_property!(rexl::ReplicaExchangeLogger,
                        sys::ReplicaSystem,
@@ -1236,7 +1236,7 @@ mutable struct MonteCarloLogger{T}
     state_changed::BitVector
 end
 
-MonteCarloLogger(T::DataType=DefaultFloat) = MonteCarloLogger{T}(0, 0, T[], BitVector())
+MonteCarloLogger(T::DataType=Float64) = MonteCarloLogger{T}(0, 0, T[], BitVector())
 
 function log_property!(mcl::MonteCarloLogger{T},
                         sys::System,

@@ -703,23 +703,29 @@ end
     end
 end
 
-# `Float32` gets a dedicated
-# method; any other `AbstractFloat` (including `Float64`) falls back to
-# drawing in `Float64` and converting.
+# `Float32` gets a dedicated method, any other `AbstractFloat` (including `Float64`)
+#   falls back to drawing in `Float64` and converting
 # After calling this advance ctr0 by at least 2*natoms
-@inline function randn_svec(::Type{SVector{2, Float32}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64)
+@inline function randn_svec(::Type{SVector{2, Float32}}, ctr0::UInt64, ctr1::UInt64,
+                            key::UInt64, natoms::UInt64)
     c1, c2, c3, c4 = randn_f32(ctr0, ctr1, key)
     SVector{2, Float32}(c1, c2)
 end
-@inline function randn_svec(::Type{SVector{3, Float32}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64)
+
+@inline function randn_svec(::Type{SVector{3, Float32}}, ctr0::UInt64, ctr1::UInt64,
+                            key::UInt64, natoms::UInt64)
     c1, c2, c3, c4 = randn_f32(ctr0, ctr1, key)
     SVector{3, Float32}(c1, c2, c3)
 end
-@inline function randn_svec(::Type{SVector{2, FT}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
+
+@inline function randn_svec(::Type{SVector{2, FT}}, ctr0::UInt64, ctr1::UInt64,
+                            key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
     c1, c2 = randn_f64(ctr0, ctr1, key)
     SVector{2, FT}(c1, c2)
 end
-@inline function randn_svec(::Type{SVector{3, FT}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
+
+@inline function randn_svec(::Type{SVector{3, FT}}, ctr0::UInt64, ctr1::UInt64,
+                            key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
     c1, c2 = randn_f64(ctr0, ctr1, key)
     ctr0 += natoms
     c3, c4 = randn_f64(ctr0, ctr1, key)
@@ -762,6 +768,38 @@ end
 end
 
 # Fused inner part of a Langevin step
+function langevin_o_step!(
+        vels::AbstractVector{SVector{D, C}},
+        vel_scales::AbstractVector,
+        noise_scales::AbstractVector,
+        philox_ctr1::UInt64,
+        philox_key::UInt64,
+        ::Type{FT},
+    ) where {D, C, FT}
+    natoms = UInt64(length(vels))
+    @inbounds @simd ivdep for i in eachindex(vels, vel_scales, noise_scales)
+        philox_ctr0 = i%UInt64
+        noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
+        vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
+    end
+    return vels
+end
+
+function langevin_o_step!(
+            vels::AbstractGPUArray,
+            vel_scales::AbstractVector,
+            noise_scales::AbstractVector,
+            philox_ctr1::UInt64,
+            philox_key::UInt64,
+            ::Type{FT},
+        ) where {FT}
+    backend = get_backend(vels)
+    kernel! = langevin_o_step_kernel!(backend)
+    kernel!(vels, vel_scales, noise_scales, philox_ctr1, philox_key,
+            Val{FT}(); ndrange=length(vels))
+    return vels
+end
+
 @kernel function langevin_o_step_kernel!(
         vels::AbstractVector{SVector{D, C}},
         @Const(vel_scales::AbstractVector),
@@ -777,36 +815,4 @@ end
         noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
         vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
     end
-end
-# host
-function langevin_o_step!(
-        vels::AbstractVector{SVector{D, C}},
-        vel_scales::AbstractVector,
-        noise_scales::AbstractVector,
-        philox_ctr1::UInt64,
-        philox_key::UInt64,
-        ::Type{FT},
-    ) where {D, C, FT}
-    natoms = UInt64(length(vels))
-    @inbounds @simd ivdep for i in eachindex(vels, vel_scales, noise_scales)
-        philox_ctr0 = i%UInt64
-        noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
-        vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
-    end
-    nothing
-end
-# device
-function langevin_o_step!(
-            vels::AbstractGPUArray,
-            vel_scales::AbstractVector,
-            noise_scales::AbstractVector,
-            philox_ctr1::UInt64,
-            philox_key::UInt64,
-            ::Type{FT},
-        ) where {FT}
-    backend = get_backend(vels)
-    kernel! = langevin_o_step_kernel!(backend)
-    kernel!(vels, vel_scales, noise_scales, philox_ctr1, philox_key,
-            Val{FT}(); ndrange=length(vels))
-    nothing
 end

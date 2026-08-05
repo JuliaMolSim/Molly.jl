@@ -1317,6 +1317,7 @@ end
                 joinpath(data_dir, "tip4pew.pdb"),
                 ff;
                 array_type=AT,
+                float_type=Float64,
                 constraints=constraints,
                 constraint_algorithm=constraint_algorithm,
                 nonbonded_method=:cutoff,

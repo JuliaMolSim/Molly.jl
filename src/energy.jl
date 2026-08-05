@@ -41,11 +41,9 @@ bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 ```
 where ``m_i`` is the mass and ``\bf{v_i}`` is the velocity vector of atom ``i``.
 """
-function kinetic_energy_tensor(sys::System{D}; kin_tensor=nothing) where D
+function kinetic_energy_tensor(sys::System{D, <:Any, <:Any, TH}; kin_tensor=nothing) where {D, TH}
     if isnothing(kin_tensor)
-        # Allows propagation of uncertainties to tensors
-        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-        kin_tensor_used = zeros(CT, D, D) * sys.energy_units
+        kin_tensor_used = zeros(TH, D, D) * sys.energy_units
     else
         kin_tensor_used = kin_tensor
     end
@@ -53,8 +51,8 @@ function kinetic_energy_tensor(sys::System{D}; kin_tensor=nothing) where D
     return kin_tensor_used
 end
 
-function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, T}) where {D, T}
-    fill!(kin_tensor, zero(T) * sys.energy_units)
+function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, <:Any, TH}) where {D, TH}
+    fill!(kin_tensor, zero(TH) * sys.energy_units)
     masses_cpu = from_device(sys.masses)
     velocities_cpu = from_device(sys.velocities)
     @inbounds for i in eachindex(sys)
@@ -62,7 +60,7 @@ function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, T}) where {D, 
         v = velocities_cpu[i]
         for col in 1:D
             for row in 1:D
-                kin_tensor[row, col] += uconvert(sys.energy_units, m_half * v[row] * v[col])
+                kin_tensor[row, col] += TH(uconvert(sys.energy_units, m_half * v[row] * v[col]))
             end
         end
     end
@@ -163,17 +161,17 @@ T = \frac{2 E_\mathrm{kin}}{N_\mathrm{df} k}
 where ``E_\mathrm{kin}`` is the kinetic energy, ``N_\mathrm{df}`` is the number of
 degrees of freedom in the system (`n_dof`) and ``k`` is the Boltzmann constant (`k`).
 """
-function temperature(sys::System{D}; kin_tensor=nothing, n_dof=sys.df, k=sys.k,
-                     recompute=true) where D
+function temperature(sys::System{D, <:Any, <:Any, TH}; kin_tensor=nothing, n_dof=sys.df,
+                     k=sys.k, recompute=true) where {D, TH}
     if isnothing(kin_tensor)
-        # Allows propagation of uncertainties to tensors
-        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-        kin_tensor = zeros(CT, D, D) * sys.energy_units
+        kin_tensor_used = zeros(TH, D, D) * sys.energy_units
+    else
+        kin_tensor_used = kin_tensor
     end
     if recompute
-        ke = kinetic_energy(sys; kin_tensor=kin_tensor)
+        ke = kinetic_energy(sys; kin_tensor=kin_tensor_used)
     else
-        ke = tr(kin_tensor)
+        ke = tr(kin_tensor_used)
     end
     temp = 2 * ke / (n_dof * k)
     if sys.energy_units == NoUnits
@@ -228,26 +226,23 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
                             n_threads=n_threads, kwargs...)
 end
 
-function potential_energy(sys::System,
+function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           neighbors,
                           step_n::Integer=0,
                           buffers=nothing;
                           n_threads::Integer=Threads.nthreads(),
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
-                          general_inters=sys.general_inters)
-    # Allow types like those from Measurements.jl, T from System is different
-    T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
-
+                          general_inters=sys.general_inters) where TH
     if length(pairwise_inters) > 0
         pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
         pairwise_inters_nl   = filter( use_neighbors, values(pairwise_inters))
         use_vel = any_uses_velocity(pairwise_inters)
         pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
                               neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
-                              pairwise_inters_nl, step_n, Val(T), Val(n_threads), Val(use_vel))
+                              pairwise_inters_nl, step_n, Val(TH), Val(n_threads), Val(use_vel))
     else
-        pe = zero(T) * sys.energy_units
+        pe = zero(TH) * sys.energy_units
     end
 
     if length(specific_inter_lists) > 0
@@ -258,7 +253,7 @@ function potential_energy(sys::System,
         sils_5_atoms = filter(il -> il isa InteractionList5Atoms, values(specific_inter_lists))
         pe += specific_pe(sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms,
-                          Val(T), step_n)
+                          Val(TH), step_n)
     end
 
     for inter in values(general_inters)
@@ -273,9 +268,9 @@ function potential_energy(sys::System,
 end
 
 function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
-                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{T},
-                          ::Val{1}, ::Val{use_vel}) where {T, use_vel}
-    pe = zero(T) * energy_units
+                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{TH},
+                          ::Val{1}, ::Val{use_vel}) where {TH, use_vel}
+    pe = zero(TH) * energy_units
 
     @inbounds if length(pairwise_inters_nonl) > 0
         for i in 1:n_atoms
@@ -319,15 +314,15 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
 end
 
 function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
-                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{T},
-                          ::Val{n_threads}, ::Val{use_vel}) where {T, n_threads, use_vel}
-    pe_chunks_nounits = zeros(T, n_threads)
+                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{TH},
+                          ::Val{n_threads}, ::Val{use_vel}) where {TH, n_threads, use_vel}
+    pe_chunks_nounits = zeros(TH, n_threads)
 
     @inbounds if length(pairwise_inters_nonl) > 0
         Threads.@threads for chunk_i in 1:n_threads
             pe_chunks_nounits[chunk_i] = pairwise_pe_nonl_range(atoms, coords, velocities, boundary,
                             energy_units, pairwise_inters_nonl, step_n, chunk_i, n_threads, n_atoms,
-                            Val(T), Val(use_vel))
+                            Val(TH), Val(use_vel))
         end
     end
 
@@ -340,14 +335,14 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
         next_block_start = Threads.Atomic{Int}(1)
         @sync for chunk_i in 1:n_threads
             Threads.@spawn begin
-                pe_chunk = zero(T)
+                pe_chunk = zero(TH)
                 while true
                     block_start = Threads.atomic_add!(next_block_start, block_size)
                     block_start > n_neighbors && break
                     block_stop = min(block_start + block_size - 1, n_neighbors)
                     pe_chunk += pairwise_pe_nl_block(atoms, coords, velocities, boundary, neighbors,
                                     energy_units, pairwise_inters_nl, step_n, block_start, block_stop,
-                                    Val(T), Val(use_vel))
+                                    Val(TH), Val(use_vel))
                 end
                 pe_chunks_nounits[chunk_i] += pe_chunk
             end
@@ -359,8 +354,8 @@ end
 
 @noinline function pairwise_pe_nonl_range(atoms, coords, velocities, boundary, energy_units,
                                           pairwise_inters_nonl, step_n, chunk_i, n_threads, n_atoms,
-                                          ::Val{T}, ::Val{use_vel}) where {T, use_vel}
-    pe_chunk = zero(T)
+                                          ::Val{TH}, ::Val{use_vel}) where {TH, use_vel}
+    pe_chunk = zero(TH)
     @inbounds for i in chunk_i:n_threads:n_atoms
         coord_i = coords[i]
         atom_i = atoms[i]
@@ -381,8 +376,8 @@ end
 
 @noinline function pairwise_pe_nl_block(atoms, coords, velocities, boundary, neighbors, energy_units,
                                       pairwise_inters_nl, step_n, block_start, block_stop,
-                                      ::Val{T}, ::Val{use_vel}) where {T, use_vel}
-    pe_chunk = zero(T)
+                                      ::Val{TH}, ::Val{use_vel}) where {TH, use_vel}
+    pe_chunk = zero(TH)
     @inbounds for ni in block_start:block_stop
         i, j, special = neighbors[ni]
         coord_i = coords[i]
@@ -401,9 +396,9 @@ end
 end
 
 function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_atoms,
-                     sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms, ::Val{T},
-                     step_n=0) where T
-    pe = zero(T) * energy_units
+                     sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms, ::Val{TH},
+                     step_n=0) where TH
+    pe = zero(TH) * energy_units
 
     @inbounds for inter_list in sils_1_atoms
         for (i, inter) in zip(inter_list.is, inter_list.inters)
@@ -468,15 +463,15 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray}, neighbors,
     return potential_energy(sys, neighbors, step_n, buffers; kwargs...)
 end
 
-function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T},
+function potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH},
                           neighbors,
                           step_n::Integer,
                           buffers::BuffersGPU;
                           n_threads::Integer=Threads.nthreads(),
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
-                          general_inters=sys.general_inters) where T
-    fill!(buffers.pe_vec_nounits, zero(T))
+                          general_inters=sys.general_inters) where TH
+    fill!(buffers.pe_vec_nounits, zero(TH))
 
     pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
     if length(pairwise_inters_nonl) > 0
@@ -486,12 +481,13 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T},
 
     pairwise_inters_nl = filter(use_neighbors, values(pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)
+        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nl,
+                              neighbors, step_n)
     end
 
     for inter_list in values(specific_inter_lists)
         specific_pe_gpu!(buffers.pe_vec_nounits, inter_list, sys.coords, sys.velocities, sys.atoms,
-                         sys.boundary, step_n, sys.energy_units, Val(T))
+                         sys.boundary, step_n, sys.energy_units, Val(TH))
     end
 
     pe = only(from_device(buffers.pe_vec_nounits)) * sys.energy_units

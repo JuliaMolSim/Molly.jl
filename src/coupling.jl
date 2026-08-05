@@ -219,8 +219,8 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
     prob_val_u64 = round(UInt64, prob_val*2.0^64)
     kernel! = apply_andersen_coupling_kernel!(backend)
     kernel!(
-        sys.velocities, sys.masses,
-        sys.k*thermostat.temperature, prob_val_u64, sys.virtual_site_flags, ctr1, key, Val{T}(), ndrange=length(sys.velocities)
+        sys.velocities, sys.masses, sys.k*thermostat.temperature, prob_val_u64,
+        sys.virtual_site_flags, ctr1, key, Val{T}(); ndrange=length(sys.velocities),
     )
     return false
 end
@@ -250,8 +250,6 @@ function apply_coupling!(sys, buffers, thermostat::BerendsenThermostat, sim, nei
     sys.velocities .*= sqrt(λ2)
     return false
 end
-
-
 
 @doc raw"""
     BerendsenBarostat(pressure, coupling_const;

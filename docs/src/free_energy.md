@@ -234,7 +234,6 @@ data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir = joinpath(data_dir, "force_fields")
 
 ff = MolecularForceField(
-    FT,
     joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
@@ -243,6 +242,7 @@ sys_0 = System(
     joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
     array_type=AT,
+    float_type=FT,
     nonbonded_method=:cutoff,
 )
 
@@ -354,7 +354,6 @@ data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir = joinpath(data_dir, "force_fields")
 
 ff = MolecularForceField(
-    FT,
     joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
@@ -363,6 +362,7 @@ sys = System(
     "pull_$(SIM_N).pdb", # Now we load the final structure for a given pull simulation
     ff;
     array_type=AT,
+    float_type=FT,
     nonbonded_method=:cutoff,
 )
 
@@ -448,7 +448,6 @@ ff_dir = joinpath(data_dir, "force_fields")
 trajs_dir = "./" # Or wherever you have saved the umbrella simulations
 
 ff = MolecularForceField(
-    FT,
     joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
@@ -457,6 +456,7 @@ sys_nobias = System(
     joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
     array_type=AT,
+    float_type=FT,
     nonbonded_method=:cutoff,
 )
 
@@ -950,6 +950,7 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false, rng =
         pdb_file,
         ff;
         array_type = AT,
+        float_type = FT,
         boundary = boundary,
         dist_cutoff = dist_cutoff,
         dist_buffer = dist_buffer,
@@ -1524,6 +1525,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum = false, rng =
         pdb_file,
         ff;
         array_type = AT,
+        float_type = FT,
         boundary = boundary,
         dist_cutoff = dist_cutoff,
         dist_buffer = dist_buffer,
