@@ -31,6 +31,11 @@ using KernelAbstractions
 #   for this, we have to wait until it is available in the stable release.
 const CUDA_CORE = isdefined(CUDA, :CUDACore) ? CUDACore : CUDA
 
+# Whether to compile the pairwise kernels with fast math
+# Restricted to Float32, where the extra error is not observable
+pairwise_fastmath(::Type{Float32}) = true
+pairwise_fastmath(::Type) = false
+
 # Per-j-atom data staged in shared memory by force_kernel!'s Part 1 inner loop.
 # Only the Atom fields the active interactions actually read are staged (`P` is the
 # narrow payload tuple type from `atom_shuffle_payload`/`resolve_atom_fields`)
@@ -383,7 +388,7 @@ end
 function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                                N::Int, force_maxregs_override) where {D, T}
     if force_maxregs_override === nothing
-        return @cuda launch=false always_inline=true force_kernel!(
+        return @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
             buffers.fs_mat_reordered,
             buffers.virial_nounits,
             buffers.coords_reordered,
@@ -408,7 +413,8 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
         )
     end
 
-    return @cuda launch=false maxregs=force_maxregs_override always_inline=true force_kernel!(
+    fm = pairwise_fastmath(T)
+    return @cuda launch=false maxregs=force_maxregs_override always_inline=true fastmath=fm force_kernel!(
         buffers.fs_mat_reordered,
         buffers.virial_nounits,
         buffers.coords_reordered,
@@ -564,7 +570,7 @@ Returns the `block_y` configuration that achieves the minimum execution time.
 """
 function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
                                   N::Int) where {D, T}
-    kernel = @cuda launch=false always_inline=true energy_kernel!(
+    kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) energy_kernel!(
         buffers.pe_vec_nounits,
         buffers.coords_reordered,
         buffers.velocities_reordered,
@@ -847,9 +853,9 @@ CUDA_CORE.shfl_recurse(op, x::SVector{1, C}) where C = SVector{1, C}(op(x[1]))
 CUDA_CORE.shfl_recurse(op, x::SVector{2, C}) where C = SVector{2, C}(op(x[1]), op(x[2]))
 CUDA_CORE.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2]), op(x[3]))
 
-function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray}, pairwise_inters,
-                            nbs::Molly.NoNeighborList, step_n) where D
-    kernel = @cuda launch=false pairwise_force_kernel_nonl!(
+function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
+                            nbs::Molly.NoNeighborList, step_n) where {D, T}
+    kernel = @cuda launch=false fastmath=pairwise_fastmath(T) pairwise_force_kernel_nonl!(
             buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n,
             Val(D), Val(sys.force_units))
     conf = launch_configuration(kernel.fun)
@@ -979,7 +985,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     end
     
     # Execute Force Kernel over the list of interacting tiles
-    auto_kernel = @cuda launch=false always_inline=true force_kernel!(
+    auto_kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
         buffers.fs_mat_reordered,
         buffers.virial_nounits,
         buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
@@ -997,7 +1003,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     kernel = if maxregs === nothing
         auto_kernel
     else
-        @cuda launch=false maxregs=maxregs always_inline=true force_kernel!(
+        @cuda launch=false maxregs=maxregs always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
             buffers.fs_mat_reordered,
             buffers.virial_nounits,
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
@@ -1081,7 +1087,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         buffers.step_n_preprocessed = step_n
     end
 
-    kernel = @cuda launch=false always_inline=true energy_kernel!(
+    kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) energy_kernel!(
             pe_vec_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
@@ -1333,7 +1339,7 @@ function kernel_min_max_triclinic!(
         @inbounds for k in a:b
             val = zero(C)
             for j in a:b
-                @fastmath val += Hinv[k,j]*r_i[j]
+                val += Hinv[k,j]*r_i[j]
             end
             @inbounds mins_smem[local_i, k] = val
             @inbounds maxs_smem[local_i, k] = val
@@ -1371,7 +1377,7 @@ function kernel_min_max_triclinic!(
         for k in a:b
             val = zero(C)
             @inbounds for j in a:b
-                @fastmath val += Hinv[k,j]*r_i[j]
+                val += Hinv[k,j]*r_i[j]
             end
             @inbounds r_smem[local_i, k] = val # Transform to fractional space: s = Hinv * r
         end
@@ -1831,7 +1837,7 @@ function prune_interacting_tiles_kernel!(
     @inbounds for m in a:warpsize()
         coords_i = coords[i_0_tile + m]
         dr = vector(coords_i, coords_j, boundary)
-        r2 = @fastmath sum(abs2, dr)
+        r2 = sum(abs2, dr)
         if r2 <= r_cut2
             lane_mask |= UInt32(1) << ((lane - m) & Int32(31))
         end
@@ -2013,7 +2019,7 @@ function force_kernel!(
                 vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
 
                 dr = vector(coords_i, coords_j, boundary)
-                r2 = @fastmath sum(abs2, dr)
+                r2 = sum(abs2, dr)
                 condition = r2 <= r_cut2
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
 
@@ -2023,27 +2029,27 @@ function force_kernel!(
                         false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : Molly.zero_pairwise_force(dr, force_units)
 
-                    @fastmath force_i_x += ustrip(f[1])
-                    @fastmath opposites_sum[slot, 1, warpid] -= ustrip(f[1])
+                    force_i_x += ustrip(f[1])
+                    opposites_sum[slot, 1, warpid] -= ustrip(f[1])
                     if D >= 2
-                        @fastmath force_i_y += ustrip(f[2])
-                        @fastmath opposites_sum[slot, 2, warpid] -= ustrip(f[2])
+                        force_i_y += ustrip(f[2])
+                        opposites_sum[slot, 2, warpid] -= ustrip(f[2])
                     end
                     if D >= 3
-                        @fastmath force_i_z += ustrip(f[3])
-                        @fastmath opposites_sum[slot, 3, warpid] -= ustrip(f[3])
+                        force_i_z += ustrip(f[3])
+                        opposites_sum[slot, 3, warpid] -= ustrip(f[3])
                     end
 
                     if needs_vir
-                        @fastmath vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                        vir_xx += ustrip(f[1]) * ustrip(dr[1])
                         if D >= 2
-                            @fastmath vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                            @fastmath vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                            vir_yy += ustrip(f[2]) * ustrip(dr[2])
+                            vir_xy += ustrip(f[1]) * ustrip(dr[2])
                         end
                         if D >= 3
-                            @fastmath vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                            @fastmath vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                            @fastmath vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                            vir_zz += ustrip(f[3]) * ustrip(dr[3])
+                            vir_xz += ustrip(f[1]) * ustrip(dr[3])
+                            vir_yz += ustrip(f[2]) * ustrip(dr[3])
                         end
                     end
                 end
@@ -2063,7 +2069,7 @@ function force_kernel!(
                 vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
 
                 dr = vector(coords_i, coords_j, boundary)
-                r2 = @fastmath sum(abs2, dr)
+                r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - slot)) | (eligible_bitmask << slot)
                 spec = (special_bitmask >> (warpsize() - slot)) | (special_bitmask << slot)
 
@@ -2076,27 +2082,27 @@ function force_kernel!(
                         (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                     ) : Molly.zero_pairwise_force(dr, force_units)
 
-                    @fastmath force_i_x += ustrip(f[1])
-                    @fastmath opposites_sum[slot, 1, warpid] -= ustrip(f[1])
+                    force_i_x += ustrip(f[1])
+                    opposites_sum[slot, 1, warpid] -= ustrip(f[1])
                     if D >= 2
-                        @fastmath force_i_y += ustrip(f[2])
-                        @fastmath opposites_sum[slot, 2, warpid] -= ustrip(f[2])
+                        force_i_y += ustrip(f[2])
+                        opposites_sum[slot, 2, warpid] -= ustrip(f[2])
                     end
                     if D >= 3
-                        @fastmath force_i_z += ustrip(f[3])
-                        @fastmath opposites_sum[slot, 3, warpid] -= ustrip(f[3])
+                        force_i_z += ustrip(f[3])
+                        opposites_sum[slot, 3, warpid] -= ustrip(f[3])
                     end
 
                     if needs_vir
-                        @fastmath vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                        vir_xx += ustrip(f[1]) * ustrip(dr[1])
                         if D >= 2
-                            @fastmath vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                            @fastmath vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                            vir_yy += ustrip(f[2]) * ustrip(dr[2])
+                            vir_xy += ustrip(f[1]) * ustrip(dr[2])
                         end
                         if D >= 3
-                            @fastmath vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                            @fastmath vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                            @fastmath vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                            vir_zz += ustrip(f[3]) * ustrip(dr[3])
+                            vir_xz += ustrip(f[1]) * ustrip(dr[3])
+                            vir_yz += ustrip(f[2]) * ustrip(dr[3])
                         end
                     end
                 end
@@ -2132,7 +2138,7 @@ function force_kernel!(
             @inbounds atoms_j = atoms[idx_j]
             
             dr = vector(coords_i, coords_j, boundary)
-            r2 = @fastmath sum(abs2, dr)
+            r2 = sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             
@@ -2145,33 +2151,33 @@ function force_kernel!(
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                 ) : Molly.zero_pairwise_force(dr, force_units)
 
-                @fastmath force_i_x += ustrip(f[1])
+                force_i_x += ustrip(f[1])
                 if ustrip(f[1]) != zero(T)
                     CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - 1)), ustrip(f[1]))
                 end
                 if D >= 2
-                    @fastmath force_i_y += ustrip(f[2])
+                    force_i_y += ustrip(f[2])
                     if ustrip(f[2]) != zero(T)
                         CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - 2)), ustrip(f[2]))
                     end
                 end
                 if D >= 3
-                    @fastmath force_i_z += ustrip(f[3])
+                    force_i_z += ustrip(f[3])
                     if ustrip(f[3]) != zero(T)
                         CUDA.atomic_add!(pointer(fs_mat, Int64(idx_j) * b - (b - 3)), ustrip(f[3]))
                     end
                 end
                 
                 if needs_vir
-                    @fastmath vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                    vir_xx += ustrip(f[1]) * ustrip(dr[1])
                     if D >= 2
-                        @fastmath vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                        @fastmath vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                        vir_yy += ustrip(f[2]) * ustrip(dr[2])
+                        vir_xy += ustrip(f[1]) * ustrip(dr[2])
                     end
                     if D >= 3
-                        @fastmath vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                        @fastmath vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                        @fastmath vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                        vir_zz += ustrip(f[3]) * ustrip(dr[3])
+                        vir_xz += ustrip(f[1]) * ustrip(dr[3])
+                        vir_yz += ustrip(f[2]) * ustrip(dr[3])
                     end
                 end
             end
@@ -2194,7 +2200,7 @@ function force_kernel!(
             @inbounds atoms_j = atoms[idx_j]
             
             dr = vector(coords_i, coords_j, boundary)
-            r2 = @fastmath sum(abs2, dr)
+            r2 = sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut2
@@ -2205,38 +2211,38 @@ function force_kernel!(
                 (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
             ) : Molly.zero_pairwise_force(dr, force_units)
 
-            @fastmath force_i_x += ustrip(f[1])
-            @fastmath opposites_sum[m, 1, warpid] -= ustrip(f[1])
+            force_i_x += ustrip(f[1])
+            opposites_sum[m, 1, warpid] -= ustrip(f[1])
             if D >= 2
-                @fastmath force_i_y += ustrip(f[2])
-                @fastmath opposites_sum[m, 2, warpid] -= ustrip(f[2])
+                force_i_y += ustrip(f[2])
+                opposites_sum[m, 2, warpid] -= ustrip(f[2])
             end
             if D >= 3
-                @fastmath force_i_z += ustrip(f[3])
-                @fastmath opposites_sum[m, 3, warpid] -= ustrip(f[3])
+                force_i_z += ustrip(f[3])
+                opposites_sum[m, 3, warpid] -= ustrip(f[3])
             end
             
             if needs_vir
-                @fastmath vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                vir_xx += ustrip(f[1]) * ustrip(dr[1])
                 if D >= 2
-                    @fastmath vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                    @fastmath vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                    vir_yy += ustrip(f[2]) * ustrip(dr[2])
+                    vir_xy += ustrip(f[1]) * ustrip(dr[2])
                 end
                 if D >= 3
-                    @fastmath vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                    @fastmath vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                    @fastmath vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                    vir_zz += ustrip(f[3]) * ustrip(dr[3])
+                    vir_xz += ustrip(f[1]) * ustrip(dr[3])
+                    vir_yz += ustrip(f[2]) * ustrip(dr[3])
                 end
             end
         end
 
         sync_warp()
-        @fastmath force_i_x += opposites_sum[lane, 1, warpid]
+        force_i_x += opposites_sum[lane, 1, warpid]
         if D >= 2
-            @fastmath force_i_y += opposites_sum[lane, 2, warpid]
+            force_i_y += opposites_sum[lane, 2, warpid]
         end
         if D >= 3
-            @fastmath force_i_z += opposites_sum[lane, 3, warpid]
+            force_i_z += opposites_sum[lane, 3, warpid]
         end
     end
 
@@ -2257,7 +2263,7 @@ function force_kernel!(
                 @inbounds atoms_j = atoms[idx_j]
                 
                 dr = vector(coords_i, coords_j, boundary)
-                r2 = @fastmath sum(abs2, dr)
+                r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut2
@@ -2268,27 +2274,27 @@ function force_kernel!(
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
                 ) : Molly.zero_pairwise_force(dr, force_units)
 
-                @fastmath force_i_x += ustrip(f[1])
-                @fastmath opposites_sum[m, 1, warpid] -= ustrip(f[1])
+                force_i_x += ustrip(f[1])
+                opposites_sum[m, 1, warpid] -= ustrip(f[1])
                 if D >= 2
-                    @fastmath force_i_y += ustrip(f[2])
-                    @fastmath opposites_sum[m, 2, warpid] -= ustrip(f[2])
+                    force_i_y += ustrip(f[2])
+                    opposites_sum[m, 2, warpid] -= ustrip(f[2])
                 end
                 if D >= 3
-                    @fastmath force_i_z += ustrip(f[3])
-                    @fastmath opposites_sum[m, 3, warpid] -= ustrip(f[3])
+                    force_i_z += ustrip(f[3])
+                    opposites_sum[m, 3, warpid] -= ustrip(f[3])
                 end
                 
                 if needs_vir
-                    @fastmath vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                    vir_xx += ustrip(f[1]) * ustrip(dr[1])
                     if D >= 2
-                        @fastmath vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                        @fastmath vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                        vir_yy += ustrip(f[2]) * ustrip(dr[2])
+                        vir_xy += ustrip(f[1]) * ustrip(dr[2])
                     end
                     if D >= 3
-                        @fastmath vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                        @fastmath vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                        @fastmath vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                        vir_zz += ustrip(f[3]) * ustrip(dr[3])
+                        vir_xz += ustrip(f[1]) * ustrip(dr[3])
+                        vir_yz += ustrip(f[2]) * ustrip(dr[3])
                     end
                 end
             end
@@ -2297,12 +2303,12 @@ function force_kernel!(
         sync_warp()
 
         if lane <= r
-            @fastmath force_i_x += opposites_sum[lane, 1, warpid]
+            force_i_x += opposites_sum[lane, 1, warpid]
             if D >= 2
-                @fastmath force_i_y += opposites_sum[lane, 2, warpid]
+                force_i_y += opposites_sum[lane, 2, warpid]
             end
             if D >= 3
-                @fastmath force_i_z += opposites_sum[lane, 3, warpid]
+                force_i_z += opposites_sum[lane, 3, warpid]
             end
         end
     end
@@ -2310,15 +2316,15 @@ function force_kernel!(
     if needs_vir
         offset_val = Int32(16)
         while offset_val > 0
-            @fastmath vir_xx += CUDA.shfl_down_sync(0xFFFFFFFF, vir_xx, offset_val)
+            vir_xx += CUDA.shfl_down_sync(0xFFFFFFFF, vir_xx, offset_val)
             if D >= 2
-                @fastmath vir_yy += CUDA.shfl_down_sync(0xFFFFFFFF, vir_yy, offset_val)
-                @fastmath vir_xy += CUDA.shfl_down_sync(0xFFFFFFFF, vir_xy, offset_val)
+                vir_yy += CUDA.shfl_down_sync(0xFFFFFFFF, vir_yy, offset_val)
+                vir_xy += CUDA.shfl_down_sync(0xFFFFFFFF, vir_xy, offset_val)
             end
             if D >= 3
-                @fastmath vir_zz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_zz, offset_val)
-                @fastmath vir_xz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_xz, offset_val)
-                @fastmath vir_yz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_yz, offset_val)
+                vir_zz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_zz, offset_val)
+                vir_xz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_xz, offset_val)
+                vir_yz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_yz, offset_val)
             end
             offset_val ÷= 2
         end
@@ -2500,7 +2506,7 @@ function energy_kernel!(
                 vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
 
                 dr = vector(coords_i, coords_j, boundary)
-                r2 = @fastmath sum(abs2, dr)
+                r2 = sum(abs2, dr)
                 condition = r2 <= r_cut2
                 any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
 
@@ -2516,7 +2522,7 @@ function energy_kernel!(
                         vel_i, vel_j,
                         step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
 
-                    @fastmath sum_E += ustrip(pe[1])
+                    sum_E += ustrip(pe[1])
                 end
             end
         else # EXCLUDED
@@ -2534,7 +2540,7 @@ function energy_kernel!(
                 vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
 
                 dr = vector(coords_i, coords_j, boundary)
-                r2 = @fastmath sum(abs2, dr)
+                r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - slot)) | (eligible_bitmask << slot)
                 spec = (special_bitmask >> (warpsize() - slot)) | (special_bitmask << slot)
                 condition = (excl & 0x1) == true && r2 <= r_cut2
@@ -2552,7 +2558,7 @@ function energy_kernel!(
                         vel_i, vel_j,
                         step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
 
-                    @fastmath sum_E += ustrip(pe[1])
+                    sum_E += ustrip(pe[1])
                 end
             end
         end
@@ -2569,7 +2575,7 @@ function energy_kernel!(
             @inbounds vel_j = velocities[idx_j]
             @inbounds atoms_j = atoms[idx_j]
             dr = vector(coords_i, coords_j, boundary)
-            r2 = @fastmath sum(abs2, dr)
+            r2 = sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut2
@@ -2584,7 +2590,7 @@ function energy_kernel!(
                 boundary,
                 vel_i, vel_j,
                 step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
-            @fastmath sum_E += ustrip(pe[1])
+            sum_E += ustrip(pe[1])
         end
     elseif i == j && i < n_blocks
         @inbounds coords_i = coords[index_i]
@@ -2599,7 +2605,7 @@ function energy_kernel!(
             @inbounds vel_j = velocities[idx_j]
             @inbounds atoms_j = atoms[idx_j]
             dr = vector(coords_i, coords_j, boundary)
-            r2 = @fastmath sum(abs2, dr)
+            r2 = sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut2
@@ -2614,7 +2620,7 @@ function energy_kernel!(
                 boundary,
                 vel_i, vel_j,
                 step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
-            @fastmath sum_E += ustrip(pe[1])
+            sum_E += ustrip(pe[1])
         end
     elseif i == n_blocks && j == n_blocks
         if lane <= r
@@ -2630,7 +2636,7 @@ function energy_kernel!(
                 @inbounds vel_j = velocities[idx_j]
                 @inbounds atoms_j = atoms[idx_j]
                 dr = vector(coords_i, coords_j, boundary)
-                r2 = @fastmath sum(abs2, dr)
+                r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut2
@@ -2645,7 +2651,7 @@ function energy_kernel!(
                     boundary,
                     vel_i, vel_j,
                     step_n) : SVector(Molly.zero_pairwise_energy(dr, energy_units))
-                @fastmath sum_E += ustrip(pe[1])
+                sum_E += ustrip(pe[1])
             end
         end
     end
@@ -2654,7 +2660,7 @@ function energy_kernel!(
     # Warp reduction
     offset = Int32(16)
     while offset > 0
-        @fastmath sum_E += CUDA.shfl_down_sync(0xFFFFFFFF, sum_E, offset)
+        sum_E += CUDA.shfl_down_sync(0xFFFFFFFF, sum_E, offset)
         offset ÷= 2
     end
 
