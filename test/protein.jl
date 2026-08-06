@@ -136,10 +136,53 @@ end
         rigid_water=true,
         hydrogen_mass=2,
     )
+    sys_f32 = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        float_type=Float32,
+        nonbonded_method=:cutoff,
+        center_coords=false,
+    )
+    sys_f32h = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        float_type=Float32,
+        float_type_high=Float32,
+        nonbonded_method=:cutoff,
+        center_coords=false,
+    )
+    @test_throws ArgumentError System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        float_type=Float64,
+        float_type_high=Float32,
+        nonbonded_method=:cutoff,
+        center_coords=false,
+    )
     zero(sys)
     zero(sys_pme)
     deepcopy(sys_pme)
     neighbors = find_neighbors(sys)
+
+    for (sys_float, T, TH) in ((sys, Float64, Float64), (sys_f32, Float32, Float64),
+                               (sys_f32h, Float32, Float32))
+        @test typeof(ustrip(sys_float.coords[1][1])) == T
+        @test typeof(ustrip(sys_float.velocities[1][1])) == T
+        @test typeof(ustrip(masses(sys_float)[1])) == T
+        @test typeof(ustrip(sys_float.total_mass)) == T
+        @test typeof(ustrip(sys_float.k)) == T
+        @test typeof(ustrip(forces(sys_float, neighbors)[1][1])) == T
+        @test float_type(sys_float.boundary) == T
+        @test typeof(ustrip(potential_energy(sys_float))) == TH
+        @test typeof(ustrip(total_energy(sys_float))) == TH
+        @test typeof(ustrip(kinetic_energy_tensor(sys_float)[1][1])) == TH
+        @test typeof(ustrip(kinetic_energy(sys_float))) == TH
+        @test typeof(ustrip(temperature(sys_float))) == TH
+        @test typeof(ustrip(pressure(sys_float)[1][1])) == TH
+        @test typeof(ustrip(scalar_pressure(sys_float))) == TH
+        @test typeof(ustrip(virial(sys_float)[1][1])) == TH
+        @test typeof(ustrip(scalar_virial(sys_float))) == TH
+    end
 
     cs = charges(sys)
     @test charge(sys, 2) == cs[2] == 0.1642
@@ -351,11 +394,50 @@ end
             nonbonded_method=:cutoff,
             center_coords=false,
         )
+        sys_f32 = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            array_type=AT,
+            float_type=Float32,
+            nonbonded_method=:cutoff,
+            center_coords=false,
+        )
+        sys_f32h = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            array_type=AT,
+            float_type=Float32,
+            float_type_high=Float32,
+            nonbonded_method=:cutoff,
+            center_coords=false,
+        )
         show(devnull, sys.neighbor_finder)
         zero(sys)
         deepcopy(sys)
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
+
+        GPUArrays.allowscalar() do
+            for (sys_float, T, TH) in ((sys, Float64, Float64), (sys_f32, Float32, Float64),
+                                       (sys_f32h, Float32, Float32))
+                @test typeof(ustrip(sys_float.coords[1][1])) == T
+                @test typeof(ustrip(sys_float.velocities[1][1])) == T
+                @test typeof(ustrip(masses(sys_float)[1])) == T
+                @test typeof(ustrip(sys_float.total_mass)) == T
+                @test typeof(ustrip(sys_float.k)) == T
+                @test typeof(ustrip(forces(sys_float)[1][1])) == T
+                @test float_type(sys_float.boundary) == T
+                @test typeof(ustrip(potential_energy(sys_float))) == TH
+                @test typeof(ustrip(total_energy(sys_float))) == TH
+                @test typeof(ustrip(kinetic_energy_tensor(sys_float)[1][1])) == TH
+                @test typeof(ustrip(kinetic_energy(sys_float))) == TH
+                @test typeof(ustrip(temperature(sys_float))) == TH
+                @test typeof(ustrip(pressure(sys_float)[1][1])) == TH
+                @test typeof(ustrip(scalar_pressure(sys_float))) == TH
+                @test typeof(ustrip(virial(sys_float)[1][1])) == TH
+                @test typeof(ustrip(scalar_virial(sys_float))) == TH
+            end
+        end
 
         neighbors = find_neighbors(sys)
         openmm_forces_fp = joinpath(openmm_dir, "amber", "forces_all_cut.txt")
