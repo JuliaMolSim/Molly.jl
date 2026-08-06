@@ -385,8 +385,8 @@ function autotune_tile_threads!(buffers, sys::System{D, <:CuArray}, N::Int) wher
     return best_threads
 end
 
-function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
-                               N::Int, force_maxregs_override) where {D, T}
+function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
+                               N::Int, force_maxregs_override) where {D, T, TH}
     if force_maxregs_override === nothing
         return @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
             buffers.fs_mat_reordered,
@@ -403,6 +403,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
             buffers.compressed_masks,
             Val(false),
             Val(T),
+            Val(TH),
             Val(D),
             buffers.interacting_tiles_i,
             buffers.interacting_tiles_j,
@@ -429,6 +430,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T}, pairwise_i
         buffers.compressed_masks,
         Val(false),
         Val(T),
+        Val(TH),
         Val(D),
         buffers.interacting_tiles_i,
         buffers.interacting_tiles_j,
@@ -502,8 +504,8 @@ Returns the `block_y` configuration that achieves the minimum execution time.
 - `N`: Number of atoms.
 - `force_maxregs_override`: Maximum number of registers per thread (or `nothing`).
 """
-function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
-                                 N::Int, force_maxregs_override) where {D, T}
+function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
+                                 N::Int, force_maxregs_override) where {D, T, TH}
     kernel = autotune_force_kernel(buffers, sys, pairwise_inters, N, force_maxregs_override)
     candidates = autotune_block_y_candidates(kernel, 4, AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES)
     num_pairs = buffers.num_pairs
@@ -536,6 +538,7 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise
                 buffers.compressed_masks,
                 Val(false),
                 Val(T),
+                Val(TH),
                 Val(D),
                 buffers.interacting_tiles_i,
                 buffers.interacting_tiles_j,
@@ -568,8 +571,8 @@ Returns the `block_y` configuration that achieves the minimum execution time.
 - `pairwise_inters`: Pairwise interactions to calculate.
 - `N`: Number of atoms.
 """
-function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
-                                  N::Int) where {D, T}
+function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
+                                  N::Int) where {D, T, TH}
     kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) energy_kernel!(
         buffers.pe_vec_nounits,
         buffers.coords_reordered,
@@ -583,6 +586,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
         0,
         buffers.compressed_masks,
         Val(T),
+        Val(TH),
         Val(D),
         buffers.interacting_tiles_i,
         buffers.interacting_tiles_j,
@@ -617,6 +621,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T}, pairwis
                 0,
                 buffers.compressed_masks,
                 Val(T),
+                Val(TH),
                 Val(D),
                 buffers.interacting_tiles_i,
                 buffers.interacting_tiles_j,
@@ -952,8 +957,8 @@ Cache contract:
   masks are current. The interacting-tile list still depends on
   `n_steps_reorder` and `dist_cutoff`.
 """
-function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
-                         nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, needs_vir}
+function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
+                         nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, TH, needs_vir}
     N = length(sys.coords)
     r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
     nf = sys.neighbor_finder
@@ -984,14 +989,14 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
         buffers.step_n_preprocessed = step_n
     end
     
-    # Execute Force Kernel over the list of interacting tiles
+    # Execute force kernel over the list of interacting tiles
     auto_kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
         buffers.fs_mat_reordered,
         buffers.virial_nounits,
         buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
         Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
         sys.boundary, step_n, buffers.compressed_masks,
-        Val(needs_vir), Val(T), Val(D),
+        Val(needs_vir), Val(T), Val(TH), Val(D),
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
         buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow)
@@ -1009,7 +1014,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
             Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
-            Val(needs_vir), Val(T), Val(D),
+            Val(needs_vir), Val(T), Val(TH), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
             buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow)
@@ -1026,7 +1031,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
             Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
-            Val(needs_vir), Val(T), Val(D),
+            Val(needs_vir), Val(T), Val(TH), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
             buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow;
@@ -1050,9 +1055,9 @@ of the force kernel. The key difference is that energy evaluation reuses any
 preprocessing already performed for the current step so forces and energies can
 share the same cached tile metadata.
 """
-function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T},
+function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T, TH},
                                       pairwise_inters, nbs::Nothing,
-                                      step_n) where {D, T}
+                                      step_n) where {D, T, TH}
     # The ordering is usually recomputed for potential energy, but we can reuse it
     #   if it was already computed for this step
     N = length(sys.coords)
@@ -1091,7 +1096,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
             pe_vec_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_masks,
-            Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+            Val(T), Val(TH), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
             buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
     block_y = energy_launch_params(sys, kernel)
@@ -1108,7 +1113,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
                 pe_vec_nounits, buffers.coords_reordered,
                 buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
                 sys.boundary, step_n, buffers.compressed_masks,
-                Val(T), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+                Val(T), Val(TH), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
                 buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
                 blocks=n_blocks_launch, threads=(32, block_y), shmem=shmem)
@@ -1898,12 +1903,12 @@ function force_kernel!(
     compressed_masks,
     ::Val{needs_vir},
     ::Val{T},
+    ::Val{TH},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
     interacting_tiles_diag, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, r_cut2, A, force_units, needs_vir, T, D}
+    interacting_tiles_overflow) where {N, r_cut2, A, force_units, needs_vir, T, TH, D}
 
-    TH = Float64
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
@@ -2403,12 +2408,12 @@ function energy_kernel!(
     step_n,
     compressed_masks,
     ::Val{T},
+    ::Val{TH},
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
     interacting_tiles_diag, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, D}
+    interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, TH, D}
 
-    TH = Float64
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
