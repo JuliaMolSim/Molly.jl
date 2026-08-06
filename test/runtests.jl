@@ -145,10 +145,10 @@ if GROUP in ("All", "Gradients")
 end
 
 const ani_h5 = joinpath(@__DIR__, "..", "data", "ani_reference", "ani2x.h5")
-if GROUP in ("All", "NotGradients") && isfile(ani_h5)
-    using Lux, HDF5, KernelAbstractions
+if GROUP in ("All", "NotGradients")
+    if !isfile(ani_h5)
+        error("ani2x.h5 not found at $ani_h5 — run test/torchani_reference.py to generate it.")
+    end
+    using Lux, HDF5, KernelAbstractions, JSON3
     include("ml_potentials.jl")
-elseif GROUP in ("All", "NotGradients")
-    @warn "Skipping ML potential tests — ani2x.h5 not found. " *
-          "Run test/torchani_reference.py to generate it."
 end

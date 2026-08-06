@@ -23,9 +23,7 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator,
-    AbstractMLPotential,
-    ANIPotential
+    ASECalculator
 
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64

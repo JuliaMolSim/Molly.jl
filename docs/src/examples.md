@@ -545,14 +545,30 @@ sys = System(
 potential_energy(sys)
 forces(sys)
 ```
-For larger or periodic systems, attach a neighbour finder such as [`DistanceNeighborFinder`](@ref) (or `CellListMapNeighborFinder`) — the AEV then uses the minimum-image convention and only the passed-in neighbours.
+For larger or periodic systems, attach a neighbour finder so the AEV uses the minimum-image convention and only the passed-in neighbours. When all pairs are eligible, set `eligible` to all true:
+```julia
+n = length(coords)
+neighbor_finder = DistanceNeighborFinder(
+    eligible    = trues(n, n),
+    dist_cutoff = (Float64(pot.cutoff) + 1.0)u"Å",
+)
+sys = System(sys; neighbor_finder=neighbor_finder)
+```
+(`CellListMapNeighborFinder` works too.)
 An NVE trajectory can be written to a DCD file with a [`TrajectoryWriter`](@ref):
 ```julia
 sys = System(sys; loggers=(writer=TrajectoryWriter(10, "water_ani.dcd"),))
 random_velocities!(sys, 300.0u"K")
 simulate!(sys, VelocityVerlet(dt=0.5u"fs"), 1000)
 ```
-The atomic environment vectors can also be computed on the GPU (Metal, CUDA, ROCm) with `compute_aevs_ka`, and a full energy evaluation kept on-device with `compute_ani_energy_ka`, when [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) is loaded.
+The same energy and forces run on the GPU: build the system with a GPU array type for the coordinates (`CuArray` for CUDA, `MtlArray` for Metal, `ROCArray` for ROCm) and the KernelAbstractions kernels run on that device.
+```julia
+using CUDA
+sys_gpu = System(sys; coords=CuArray(sys.coords))
+potential_energy(sys_gpu)
+forces(sys_gpu)
+```
+The atomic environment vectors can also be computed directly with `compute_aevs_ka`, and a full energy evaluation kept on-device with `compute_ani_energy_ka`, when [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) is loaded.
 
 ## Python ASE calculator
 

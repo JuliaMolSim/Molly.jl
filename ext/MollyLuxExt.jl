@@ -33,30 +33,26 @@
 module MollyLuxExt
 
 using Molly
-# celu01 / cosine_cutoff are internal (unexported) Molly helpers; import them explicitly so this
-# extension can use them by bare name without them cluttering the public Molly namespace.
 using Molly: from_device, to_device, vector, celu01, cosine_cutoff
 import AtomsCalculators
 using Lux, HDF5
-using KernelAbstractions   # strong Molly dependency; the ANI GPU kernels live in molly_lux_ka.jl
+using KernelAbstractions
 using StaticArrays, Unitful, Random, LinearAlgebra
 
 # ============================================================================
-# Shared infrastructure
+# Shared infrastructure: unit handling
 # ============================================================================
+# The ANI parameters are in Å, so coordinates and boundaries are converted to unitless Å
+# before the kernels. Following the Molly convention, unitless input is treated as nm.
 
-# Strip units from a coordinate SVector array and return plain Float SVectors.
-function strip_coords(coords::AbstractVector{SVector{D,T}}) where {D,T}
-    unit(first(coords)[1]) == NoUnits ? collect(coords) :
-        ustrip_vec.(u"Å", from_device(coords))   # returns SVector{D, Float64/32}
-end
+const NM_TO_ANGSTROM = 10
 
-# In-place coordinate stripping into a pre-allocated buffer — zero allocations.
-function strip_coords_into!(out::AbstractVector{SVector{D,TF}},
-                              coords::AbstractVector{SVector{D,T}}) where {D, TF, T}
-    if unit(first(coords)[1]) == NoUnits
+# In-place conversion of coordinates to unitless Å in a pre-allocated buffer (zero allocations).
+function coords_to_angstrom_into!(out::AbstractVector{SVector{D,TF}},
+                                  coords::AbstractVector{SVector{D,T}}) where {D, TF, T}
+    if unit(first(coords)[1]) == NoUnits   # unitless Molly coords are nm
         @inbounds for i in eachindex(coords)
-            out[i] = SVector{D,TF}(coords[i])
+            out[i] = SVector{D,TF}(coords[i]) * TF(NM_TO_ANGSTROM)
         end
     else
         @inbounds for i in eachindex(coords)
@@ -65,8 +61,49 @@ function strip_coords_into!(out::AbstractVector{SVector{D,TF}},
     end
 end
 
-# strip_boundary (Cubic + Triclinic) is defined in core Molly (src/interactions/ml_potentials.jl)
-# and shared by the CPU and GPU AEV paths — use Molly.strip_boundary.
+# Non-mutating conversion of coordinates to unitless Å, staying on the coords' device.
+# Unitless Molly coords are treated as nm.
+function coords_to_angstrom(coords)
+    unit(first(coords)[1]) == NoUnits ? coords .* NM_TO_ANGSTROM : ustrip_vec.(u"Å", coords)
+end
+
+# Convert a boundary to unitless Å (unitless side lengths are treated as nm).
+strip_boundary(b::CubicBoundary) =
+    unit(b.side_lengths[1]) == NoUnits ? CubicBoundary(b.side_lengths .* NM_TO_ANGSTROM) :
+                                         CubicBoundary(ustrip.(u"Å", b.side_lengths))
+
+function strip_boundary(b::TriclinicBoundary{D, T, C, A}) where {D, T, C, A}
+    if unit(b.basis_vectors[1][1]) == NoUnits
+        bv = SVector(ntuple(i -> b.basis_vectors[i] .* NM_TO_ANGSTROM, 3))
+    else
+        bv = SVector(ntuple(i -> ustrip.(u"Å", b.basis_vectors[i]), 3))
+    end
+    return TriclinicBoundary(bv; approx_images=A)
+end
+
+# Convert an ANI energy (eV, unitless) to the system's energy units.
+function ani_energy_to_units(E_eV, energy_units)
+    if energy_units == NoUnits
+        return E_eV
+    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        return uconvert(energy_units, E_eV * Unitful.Na * u"eV")
+    else
+        return uconvert(energy_units, E_eV * u"eV")
+    end
+end
+
+# Convert an ANI force SVector (eV/Å, unitless) to the system's force units. In the unitless
+# case coordinates are nm (the Molly convention), so the force is returned as -dE/d(r_nm) =
+# 10·(eV/Å) to stay consistent with the nm coordinates (F·dr has energy units).
+function ani_force_to_units(fi::SVector{D,T}, force_units) where {D, T}
+    if force_units == NoUnits
+        return fi .* T(NM_TO_ANGSTROM)
+    elseif dimension(force_units) == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        return uconvert.(force_units, fi .* (Unitful.Na * u"eV/Å"))
+    else
+        return uconvert.(force_units, fi .* u"eV/Å")
+    end
+end
 
 # ============================================================================
 # AEV computation — zero-allocation in-place implementation
@@ -205,39 +242,44 @@ mutable struct AEVBuffers{D, T}
     nbr_cursor   :: Vector{Int32}             # (n_atoms,) scatter cursor scratch
 end
 
+# Allocate an AEVBuffers set for `n_atoms` and the given AEV params / species count. Shared by
+# the cached energy path (get_aev_buf) and the allocating reference AEV path (compute_aevs).
+function make_aev_buffers(::Type{T}, ::Val{D}, n_atoms::Int, p, n_species::Int,
+                          idx_to_elem::Dict{Int,String}) where {T, D}
+    n_rad_per = length(p.η_R) * length(p.r_s_R)
+    n_ang_per = length(p.η_A) * length(p.r_s_A) * length(p.θ_s)
+    n_pairs   = n_species * (n_species + 1) ÷ 2
+    aev_len   = n_species * n_rad_per + n_pairs * n_ang_per
+    max_nbrs  = n_atoms
+    # One scratch set per thread so the central-atom loop can run with Threads.@threads :static
+    # and no shared mutable state.
+    scratch     = AEVScratch{D, T}[AEVScratch{D, T}(max_nbrs) for _ in 1:max(1, Threads.nthreads())]
+    # Per-species index buckets for batched NN evaluation (one Lux.apply per element).
+    group_atoms = Vector{Int}[Vector{Int}(undef, n_atoms) for _ in 1:n_species]
+    return AEVBuffers{D, T}(
+        n_atoms,
+        zeros(T, n_atoms, aev_len),
+        zeros(Float32, aev_len, n_atoms),
+        scratch,
+        Vector{Int}(undef, n_atoms),
+        idx_to_elem,
+        Vector{SVector{D,T}}(undef, n_atoms),
+        group_atoms,
+        zeros(Int, n_species),
+        Vector{Int32}(undef, n_atoms + 1),
+        Int32[],                       # nbr_idx grows to 2·total_pairs on first neighbour call
+        Vector{Int32}(undef, n_atoms),
+    )
+end
+
 # Return (lazily allocated) AEVBuffers for this potential + system size.
 # Reallocates if n_atoms or T changes (e.g. first call on a new system size).
 function get_aev_buf(inter::ANIPotential, n_atoms::Int, ::Val{D}, ::Type{T}) where {D, T}
     buf = inter.buffers[]
     if buf === nothing || buf.n_atoms < n_atoms || eltype(buf.aevs) != T
-        p = inter.aev_params
-        n_species = length(inter.species_map)
-        n_rad_per = length(p.η_R) * length(p.r_s_R)
-        n_ang_per = length(p.η_A) * length(p.r_s_A) * length(p.θ_s)
-        n_pairs   = n_species * (n_species + 1) ÷ 2
-        aev_len   = n_species * n_rad_per + n_pairs * n_ang_per
-        max_nbrs  = n_atoms
         idx_to_elem = Dict{Int,String}(v => k for (k, v) in inter.species_map)
-        # One scratch set per thread so the central-atom loop can run with
-        # Threads.@threads :static and no shared mutable state.
-        nchunks = max(1, Threads.nthreads())
-        scratch = AEVScratch{D, T}[AEVScratch{D, T}(max_nbrs) for _ in 1:nchunks]
-        # Per-species index buckets for batched NN evaluation (one Lux.apply per element).
-        group_atoms = Vector{Int}[Vector{Int}(undef, n_atoms) for _ in 1:n_species]
-        buf = AEVBuffers{D, T}(
-            n_atoms,
-            zeros(T, n_atoms, aev_len),
-            zeros(Float32, aev_len, n_atoms),
-            scratch,
-            Vector{Int}(undef, n_atoms),
-            idx_to_elem,
-            Vector{SVector{D,T}}(undef, n_atoms),
-            group_atoms,
-            zeros(Int, n_species),
-            Vector{Int32}(undef, n_atoms + 1),
-            Int32[],                       # nbr_idx grows to 2·total_pairs on first neighbour call
-            Vector{Int32}(undef, n_atoms),
-        )
+        buf = make_aev_buffers(T, Val(D), n_atoms, inter.aev_params,
+                               length(inter.species_map), idx_to_elem)
         inter.buffers[] = buf
     end
     return buf::AEVBuffers{D, T}
@@ -344,7 +386,8 @@ function compute_aevs_buf!(buf::AEVBuffers{D,T},
                              neighbors,
                              boundary,
                              p,
-                             n_species::Int) where {D,T}
+                             n_species::Int;
+                             n_threads::Integer = length(buf.scratch)) where {D,T}
     n_atoms = length(coords)
     r_c_R   = T(p.r_c_R)
     r_c_A   = T(p.r_c_A)
@@ -358,7 +401,7 @@ function compute_aevs_buf!(buf::AEVBuffers{D,T},
     use_nl = !isnothing(neighbors)
     use_nl && neighbors_to_csr!(buf, neighbors, n_atoms)
 
-    nchunks = clamp(length(buf.scratch), 1, max(n_atoms, 1))
+    nchunks = clamp(n_threads, 1, min(length(buf.scratch), max(n_atoms, 1)))
     if nchunks == 1
         aev_chunk!(buf, 1:n_atoms, buf.scratch[1], coords, species_indices,
                     use_nl, boundary, p, n_species, r_c_R, r_c_A, r_c_max, split, aev_len)
@@ -366,9 +409,9 @@ function compute_aevs_buf!(buf::AEVBuffers{D,T},
         base = n_atoms ÷ nchunks
         rem  = n_atoms % nchunks
         # `:static` fixes the chunk→iteration mapping so chunk c always uses scratch[c]
-        # (its own buffer, no sharing). It is not about load balancing — the chunks are
-        # equal-sized and nchunks == length(buf.scratch) == nthreads, so one chunk runs per
-        # thread. (Plain @threads would also be correct since the scratch is per-chunk, but
+        # (its own buffer, no sharing). `nchunks <= length(buf.scratch) == nthreads`, so each
+        # chunk has a private scratch. It is not about load balancing — the chunks are
+        # equal-sized. (Plain @threads would also be correct since the scratch is per-chunk, but
         # :static avoids the dynamic-scheduler overhead for this fixed, uniform partition.)
         Threads.@threads :static for c in 1:nchunks
             lo = (c - 1) * base + min(c - 1, rem) + 1
@@ -381,73 +424,18 @@ function compute_aevs_buf!(buf::AEVBuffers{D,T},
     return @view buf.aevs[1:n_atoms, :]
 end
 
-# Public interface: allocating version (used by potential_energy and for standalone use).
-# Same AEV equations as the buffered path: radial block = [ANI-1] Eq. 3 (G^R),
-# angular block = [ANI-1] Eq. 4 (G^A), both using the f_C cutoff of [ANI-1] Eq. 2.
+# Public interface: allocating version (used as the reference AEV in tests and for standalone
+# use). Delegates to the buffered path (serial, n_threads=1) so the per-atom AEV loop lives in
+# one place. Radial block = [ANI-1] Eq. 3 (G^R), angular block = [ANI-1] Eq. 4 (G^A).
 function Molly.compute_aevs(coords::AbstractVector{SVector{D,T}},
                              species_indices::AbstractVector{<:Integer},
                              neighbors,
                              boundary,
                              p,
                              n_species::Int) where {D,T}
-    n_atoms   = length(coords)
-    n_rad_per = length(p.η_R) * length(p.r_s_R)
-    n_ang_per = length(p.η_A) * length(p.r_s_A) * length(p.θ_s)
-    n_pairs   = n_species * (n_species + 1) ÷ 2
-    aev_len   = n_species * n_rad_per + n_pairs * n_ang_per
-    split     = n_species * n_rad_per
-    r_c_R     = T(p.r_c_R)
-    r_c_A     = T(p.r_c_A)
-    r_c_max   = max(r_c_R, r_c_A)
-
-    aevs        = zeros(T, n_atoms, aev_len)
-    nbr_coords  = Vector{SVector{D,T}}(undef, n_atoms)
-    nbr_species = Vector{Int}(undef, n_atoms)
-    rj_buf      = Vector{T}(undef, n_atoms)
-    fcj_buf     = Vector{T}(undef, n_atoms)
-    drj_buf     = Vector{SVector{D,T}}(undef, n_atoms)
-    ok_buf      = Vector{Bool}(undef, n_atoms)
-
-    # Build the per-atom CSR adjacency once from the passed-in NeighborList (integer-only)
-    # so each atom reads its own slice rather than rescanning the list.
-    use_nl = !isnothing(neighbors)
-    csr_off = Vector{Int32}(undef, use_nl ? n_atoms + 1 : 0)
-    csr_idx = Vector{Int32}(undef, use_nl ? 2 * length(neighbors) : 0)
-    if use_nl
-        fill_csr!(csr_off, Vector{Int32}(undef, n_atoms), csr_idx,
-                   neighbors, n_atoms, length(neighbors))
-    end
-
-    for atom_i in 1:n_atoms
-        n_nbrs = 0
-        if !use_nl
-            # All-pairs scan with minimum-image displacement (see aev_chunk!).
-            for j in 1:n_atoms
-                j == atom_i && continue
-                dr = vector(coords[atom_i], coords[j], boundary)
-                norm(dr) < r_c_max || continue
-                n_nbrs += 1
-                nbr_coords[n_nbrs]  = coords[atom_i] + dr
-                nbr_species[n_nbrs] = Int(species_indices[j])
-            end
-        else
-            for jj in (csr_off[atom_i] + 1):csr_off[atom_i + 1]
-                nbr_idx = Int(csr_idx[jj])
-                dr = vector(coords[atom_i], coords[nbr_idx], boundary)
-                n_nbrs += 1
-                nbr_coords[n_nbrs]  = coords[atom_i] + dr
-                nbr_species[n_nbrs] = Int(species_indices[nbr_idx])
-            end
-        end
-        radial_aev!(@view(aevs[atom_i, 1:split]),
-                     coords[atom_i], nbr_coords, nbr_species, n_nbrs,
-                     p.η_R, p.r_s_R, r_c_R, n_species)
-        angular_aev!(@view(aevs[atom_i, split+1:aev_len]),
-                      coords[atom_i], nbr_coords, nbr_species, n_nbrs,
-                      p.η_A, p.r_s_A, p.θ_s, T(p.ζ), r_c_A, n_species,
-                      rj_buf, fcj_buf, drj_buf, ok_buf)
-    end
-    return aevs
+    buf = make_aev_buffers(T, Val(D), length(coords), p, n_species, Dict{Int,String}())
+    return copy(compute_aevs_buf!(buf, coords, species_indices, neighbors, boundary,
+                                  p, n_species; n_threads=1))
 end
 
 # ============================================================================
@@ -489,9 +477,7 @@ end
 # Read an HDF5 dataset as a Vector{T}, handling scalar datasets gracefully.
 h5vec(grp, name, T) = T.(vcat(read(grp[name])))
 
-function Molly.ANIPotential(path::String;
-                           force_units  = u"eV/Å",
-                           energy_units = u"eV",
+function Molly.ANIPotential(path::AbstractString;
                            T            = Float32,
                            ensemble_idx = nothing)
     h5open(path, "r") do h5
@@ -515,12 +501,16 @@ function Molly.ANIPotential(path::String;
         species_map   = Dict{String,Int}(s => i for (i, s) in enumerate(species_list))
         self_energies = h5vec(ag, "self_energies", T)   # (n_species,) Hartree
 
-        # Determine which ensemble members to load.
-        # All integer-keyed top-level groups are ensemble members.
+        # Determine which ensemble members to load. All integer-keyed top-level groups are
+        # ensemble members (keyed 0-based in the HDF5 file). `ensemble_idx` is one-indexed to
+        # match Julia, so member `i` maps to HDF5 key `i - 1`.
+        all_members = sort([parse(Int, k) for k in keys(h5) if tryparse(Int, k) !== nothing])
         ens_indices = if isnothing(ensemble_idx)
-            sort([parse(Int, k) for k in keys(h5) if tryparse(Int, k) !== nothing])
+            all_members
         else
-            [ensemble_idx]
+            1 <= ensemble_idx <= length(all_members) ||
+                throw(ArgumentError("ensemble_idx must be in 1:$(length(all_members))"))
+            [all_members[ensemble_idx]]
         end
 
         # Build shared model architecture from the first ensemble member.
@@ -549,8 +539,7 @@ function Molly.ANIPotential(path::String;
 
         cutoff = T(max(r_c_R, r_c_A))
         return ANIPotential(model_nt, ps_list, st_list, species_map,
-                            aev_params, self_energies, cutoff, force_units, energy_units,
-                            Ref{Any}(nothing))
+                            aev_params, self_energies, cutoff, Ref{Any}(nothing))
     end
 end
 
@@ -575,9 +564,11 @@ end
 # mapped by its element network to E_i (plus an additive self-energy reference shift).
 # Batched by species: one Lux.apply per element (an (aev_len, n_s) matmul) instead of
 # one tiny matmul per atom. nn_batch is a reusable (aev_len, n_atoms) Float32 scratch.
+# Energy summed in Float64: the reduction adds O(10^4) similar-magnitude Float32 terms plus
+# large self-energies, so a Float32 running sum loses precision (this matches the GPU path).
 function ani_energy_single(aevs, idx_to_elem, model, self_energies, ps, st,
-                            nn_batch::Matrix{Float32}, group_atoms, group_count, ::Type{T}) where T
-    E = zero(T)
+                            nn_batch::Matrix{Float32}, group_atoms, group_count)
+    E = 0.0
     n_species = length(group_count)
     for s in 1:n_species
         ns = group_count[s]
@@ -591,9 +582,9 @@ function ani_energy_single(aevs, idx_to_elem, model, self_energies, ps, st,
         batch  = @view nn_batch[:, 1:ns]
         out, _ = Lux.apply(getfield(model, sym), batch, getfield(ps, sym), getfield(st, sym))
         # out is (1, ns); add per-atom NN output plus this species' self-energy.
-        s_e = self_energies[s]
+        s_e = Float64(self_energies[s])
         @inbounds for k in 1:ns
-            E += T(out[1, k]) + s_e
+            E += Float64(out[1, k]) + s_e
         end
     end
     return E
@@ -607,25 +598,25 @@ end
 function ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
                          species_idx::AbstractVector{Int},
                          boundary, inter::ANIPotential,
-                         neighbors) where {D,T}
+                         neighbors; n_threads::Integer = Threads.nthreads()) where {D,T}
     n_species = length(inter.species_map)
-    bdy_strip = Molly.strip_boundary(boundary)
+    bdy_strip = strip_boundary(boundary)
     n_atoms   = length(coords_strip)
 
     # Use cached buffers (lazily allocated on first call, 0 allocs on subsequent).
     buf  = get_aev_buf(inter, n_atoms, Val(D), T)
     aevs = compute_aevs_buf!(buf, coords_strip, species_idx, neighbors, bdy_strip,
-                               inter.aev_params, n_species)
+                               inter.aev_params, n_species; n_threads=n_threads)
 
     # Bucket atoms by species once (shared across ensemble members).
     bucket_species!(buf.group_atoms, buf.group_count, species_idx)
 
     n_ens = length(inter.ps_vec)
-    E = zero(T)
+    E = 0.0
     for i in 1:n_ens
         E += ani_energy_single(aevs, buf.idx_to_elem, inter.model,
                                 inter.self_energies, inter.ps_vec[i], inter.st_vec[i],
-                                buf.nn_batch, buf.group_atoms, buf.group_count, T)
+                                buf.nn_batch, buf.group_atoms, buf.group_count)
     end
     return E / n_ens
 end
@@ -635,18 +626,19 @@ function AtomsCalculators.potential_energy(sys::System{D, AT, T},
                                            kwargs...) where {D, AT, T}
     n_atoms = length(sys.coords)
     nbrs    = get(kwargs, :neighbors, nothing)
+    n_thr   = get(kwargs, :n_threads, Threads.nthreads())
 
     # Use cached buffers — all pre-allocated, zero heap allocations after first call.
     buf = get_aev_buf(inter, n_atoms, Val(D), T)
-    strip_coords_into!(buf.coords_strip, sys.coords)
+    coords_to_angstrom_into!(buf.coords_strip, sys.coords)
     @inbounds for i in 1:n_atoms
         buf.species_idx[i] = inter.species_map[sys.atoms_data[i].element]
     end
     coords_strip = @view buf.coords_strip[1:n_atoms]
     species_idx  = @view buf.species_idx[1:n_atoms]
 
-    E_ha = ani_raw_energy(coords_strip, species_idx, sys.boundary, inter, nbrs)
-    return Molly.ani_energy_to_units(E_ha * T(Molly.HARTREE_TO_EV), sys.energy_units)
+    E_ha = ani_raw_energy(coords_strip, species_idx, sys.boundary, inter, nbrs; n_threads=n_thr)
+    return ani_energy_to_units(E_ha * Molly.HARTREE_TO_EV, sys.energy_units)
 end
 
 # ============================================================================
@@ -679,7 +671,18 @@ end
 boundary_for_kernel(::Nothing, ::Val{D}, ::Type{T}) where {D, T} =
     CubicBoundary(SVector{D, T}(ntuple(_ -> T(Inf), D)))
 boundary_for_kernel(b, ::Val{D}, ::Type{T}) where {D, T} =
-    convert_boundary_eltype(Molly.strip_boundary(b), T)
+    convert_boundary_eltype(ustrip_boundary(b), T)
+
+# Low-level unit stripping: convert a unit-carrying boundary to Å; a unitless boundary is
+# assumed to already be in Å. (The nm→Å convention for unitless input is applied only at the
+# high-level entry points via `strip_boundary`, so the kernels always receive Å.)
+ustrip_boundary(b::CubicBoundary) =
+    unit(b.side_lengths[1]) == NoUnits ? b : CubicBoundary(ustrip.(u"Å", b.side_lengths))
+function ustrip_boundary(b::TriclinicBoundary{D, T, C, A}) where {D, T, C, A}
+    unit(b.basis_vectors[1][1]) == NoUnits && return b
+    bv = SVector(ntuple(i -> ustrip.(u"Å", b.basis_vectors[i]), 3))
+    return TriclinicBoundary(bv; approx_images=A)
+end
 convert_boundary_eltype(b::CubicBoundary, ::Type{T}) where T =
     CubicBoundary(SVector{3, T}(T.(b.side_lengths)))
 convert_boundary_eltype(b::TriclinicBoundary{D, T2, C, A}, ::Type{T}) where {D, T2, C, A, T} =
@@ -1358,11 +1361,12 @@ end
 # single cost of a GPU energy/forces call — ~21 ms at 15,954 atoms on the RTX 5080 host). Bulk-upload
 # the pair list, then histogram + prefix-sum + atomic scatter on device.
 function nl_to_csr_device(neighbors, n_atoms::Int, ka_backend)
-    list   = neighbors.list
-    pairs  = list isa Array ?
-             (d = KernelAbstractions.allocate(ka_backend, eltype(list), length(list));
-              copyto!(d, list); d) : list                      # device pair list
-    npairs = length(pairs)
+    # `neighbors.list` is a preallocated buffer that may be longer than the valid pair count;
+    # only the first `length(neighbors)` (= neighbors.n) entries are live, so copy just those
+    # onto the compute backend.
+    npairs = length(neighbors)
+    pairs  = KernelAbstractions.allocate(ka_backend, eltype(neighbors.list), npairs)
+    copyto!(pairs, @view neighbors.list[1:npairs])              # device pair list (valid prefix)
     deg = KernelAbstractions.zeros(ka_backend, Int32, n_atoms)
     csr_degree_kernel!(ka_backend, 256)(deg, pairs; ndrange = npairs)
     KernelAbstractions.synchronize(ka_backend)
@@ -1734,7 +1738,8 @@ end
 # AtomsCalculators.forces! method below dispatches here for both CPU (KA CPU backend) and GPU
 # (Metal/CUDA) systems. The analytic backward matches TorchANI/finite differences to ~1e-6 eV/Å.
 function Molly.compute_ani_forces_ka(coords::AbstractVector{SVector{D,T}}, species, pot,
-        n_species::Int; backend=nothing, neighbors=nothing, boundary=nothing) where {D,T}
+        n_species::Int; backend=nothing, neighbors=nothing, boundary=nothing,
+        n_threads::Integer=Threads.nthreads()) where {D,T}
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(coords) : backend
     # Build the CSR neighbour list once and share it between the forward AEV and the backward VJP.
     # On GPU it is built on-device (no host counting sort); on CPU, host-side. `nothing` keeps the
@@ -1756,36 +1761,50 @@ function Molly.compute_ani_forces_ka(coords::AbstractVector{SVector{D,T}}, speci
     # F = -∂E/∂r · (Ha→eV). `T` is a static type parameter from the coords signature, so the
     # per-atom SVector build is type-stable. (Deriving it as `eltype(eltype(coords))` — a runtime
     # value — made this loop dynamically dispatched, ~100 ms for 16k atoms on its own.)
+    # The heavy backward work runs in the KA kernels above (parallelised by the backend) and the
+    # Lux matmuls (BLAS). `n_threads` parallelises the host-side per-atom SVector assembly.
     Ha   = T(Molly.HARTREE_TO_EV)
     fmat = Array(dcoords)
     na   = size(fmat, 2)
-    return [SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha) for i in 1:na]
+    F    = Vector{SVector{3,T}}(undef, na)
+    if n_threads > 1 && na > 1
+        Threads.@threads for i in 1:na
+            @inbounds F[i] = SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha)
+        end
+    else
+        @inbounds for i in 1:na
+            F[i] = SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha)
+        end
+    end
+    return F
 end
 
-# The ANI forces path. Strips coords to Å (staying on their device — Array → KA CPU,
+# The ANI forces path. Converts coords to unitless Å (staying on their device — Array → KA CPU,
 # GPU array → Metal/CUDA), computes forces via the analytic backward, and accumulates into `fs`
 # in the system's units.
 function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::ANIPotential;
                                   kwargs...) where {D, AT, T}
     nbrs    = get(kwargs, :neighbors, nothing)
+    n_thr   = get(kwargs, :n_threads, Threads.nthreads())
     n_sp    = length(inter.species_map)
     sp      = Int32[inter.species_map[ad.element] for ad in sys.atoms_data]
-    coords  = Molly.ustrip_vec.(u"Å", sys.coords)       # Å, unitless; stays on coords' device
+    coords  = coords_to_angstrom(sys.coords)            # Å, unitless; stays on coords' device
     species = Molly.to_device(sp, AT)
     backend = KernelAbstractions.get_backend(coords)
+    # Apply the nm→Å convention once here; the kernels then receive an Å boundary.
     F = Molly.compute_ani_forces_ka(coords, species, inter, n_sp;                 # host, eV/Å
-            backend = backend, neighbors = nbrs, boundary = Molly.strip_boundary(sys.boundary))
+            backend = backend, neighbors = nbrs, boundary = strip_boundary(sys.boundary),
+            n_threads = n_thr)
     if AT <: Array
         @inbounds for i in eachindex(fs)
-            fs[i] += Molly.ani_force_to_units(SVector{D, T}(F[i]), sys.force_units, AT)
+            fs[i] += ani_force_to_units(SVector{D, T}(F[i]), sys.force_units)
         end
-    else   # GPU system: build the unit-carrying increment on the host as concrete SVectors matching
-        # the force buffer's element type (ani_force_to_units(..., Array) yields a plain Vector, so
-        # rebuild an inline SVector explicitly), then add on-device.
+    else   # GPU system: build the unit-carrying increment on the host matching the force buffer's
+        # element type, then add on-device.
         FU  = eltype(eltype(fs))                       # unit-carrying scalar type of `fs`
         inc = Vector{SVector{D, FU}}(undef, length(F))
         @inbounds for i in eachindex(F)
-            fui = Molly.ani_force_to_units(SVector{D, T}(F[i]), sys.force_units, Array)
+            fui = ani_force_to_units(SVector{D, T}(F[i]), sys.force_units)
             inc[i] = SVector{D, FU}(ntuple(k -> fui[k], D))
         end
         fs .+= Molly.to_device(inc, AT)
