@@ -144,11 +144,9 @@ if GROUP in ("All", "Gradients")
     include("gradients.jl")
 end
 
-const ani_h5 = joinpath(@__DIR__, "..", "data", "ani_reference", "ani2x.h5")
 if GROUP in ("All", "NotGradients")
-    if !isfile(ani_h5)
-        error("ani2x.h5 not found at $ani_h5 — run test/torchani_reference.py to generate it.")
-    end
+    # ani2x.h5 and 6mrr_ani2x.json come from the lazily-downloaded ANI-2x artifact
+    # (Molly.ani2x_data_dir()); loading the extension makes that available.
     using Lux, HDF5, KernelAbstractions, JSON3
     include("ml_potentials.jl")
 end

@@ -37,7 +37,11 @@ using Molly: from_device, to_device, vector, celu01, cosine_cutoff
 import AtomsCalculators
 using Lux, HDF5
 using KernelAbstractions
+using LazyArtifacts
 using StaticArrays, Unitful, Random, LinearAlgebra
+
+# Path to the ANI-2x data artifact (ani2x.h5 + 6mrr_ani2x.json), downloaded lazily on first use.
+Molly.ani2x_data_dir() = artifact"ani2x"
 
 # ============================================================================
 # Shared infrastructure: unit handling

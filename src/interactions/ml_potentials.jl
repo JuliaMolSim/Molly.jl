@@ -6,6 +6,7 @@
 
 export
     ANIPotential,
+    ani2x_data_dir,
     compute_aevs
 
 # Base type for ML interatomic potentials, a shared supertype for current and future ones.
@@ -59,6 +60,15 @@ end
 function ANIPotential(path; kwargs...)
     error("ANIPotential requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
 end
+
+"""
+    ani2x_data_dir()
+
+Path to the ANI-2x data directory: a lazily-downloaded artifact holding `ani2x.h5` (the model
+weights) and `6mrr_ani2x.json` (TorchANI reference energies). Requires `Lux` and `HDF5`. Load
+the potential with `ANIPotential(joinpath(ani2x_data_dir(), "ani2x.h5"))`.
+"""
+function ani2x_data_dir end
 
 # Compute atomic environment vectors (AEVs) for all atoms, returning an
 # (n_atoms, aev_length) matrix. Implementation is in ext/MollyLuxExt.jl.
