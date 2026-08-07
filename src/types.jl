@@ -1679,7 +1679,7 @@ end
 AtomsBase.cell(sys::ReplicaSystem) = AtomsBase.cell(sys.partition.master_sys)
 
 function Base.show(io::IO, sys::System{D, AT, T, TH}) where {D, AT, T, TH}
-    n_mols = (isnothing(sys.topology) ? "-" : length(sys.topology.molecule_atom_counts))
+    n_mols = (isnothing(sys.topology) ? "-" : string(length(sys.topology.molecule_atom_counts)))
     time_unit = unit(oneunit(eltype(eltype(sys.coords))) / oneunit(eltype(eltype(sys.velocities))))
     println(io, "Molly System")
     println(io, "  n atoms: ", length(sys))

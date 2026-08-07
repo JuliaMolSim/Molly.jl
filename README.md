@@ -19,7 +19,7 @@ Implemented features include:
 - Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints, FENE bonds.
 - Ewald and particle mesh Ewald (PME) electrostatic summation.
 - Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
-- Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also experimental support for Gromacs files.
+- Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl).
 - Write out trajectory files in formats supported by Chemfiles.jl, including DCD and XTC.
 - Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin and Nosé-Hoover integrators.
 - Andersen, Berendsen and velocity rescaling thermostats.

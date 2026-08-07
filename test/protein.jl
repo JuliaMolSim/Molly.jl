@@ -1,85 +1,3 @@
-@testset "Peptide" begin
-    n_steps = 100
-    temp = 298.0u"K"
-    s = System(
-        joinpath(data_dir, "5XER", "gmx_coords.gro"),
-        joinpath(data_dir, "5XER", "gmx_top_ff.top");
-        loggers=(
-            temp=TemperatureLogger(10),
-            coords=CoordinatesLogger(10),
-            energy=TotalEnergyLogger(10),
-            dcd_writer=TrajectoryWriter(10, temp_fp_dcd; atom_inds=1001:2000),
-            pdb_writer=TrajectoryWriter(10, temp_fp_pdb),
-            density=DensityLogger(10),
-        ),
-        nonbonded_method=:cutoff,
-        data="test_data_peptide",
-    )
-    simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-
-    true_n_atoms = 5191
-    @test length(s.atoms) == true_n_atoms
-    @test length(s.coords) == true_n_atoms
-    neighbor_finder_n_atoms(nf::GPUNeighborFinder) = nf.n_atoms
-    neighbor_finder_n_atoms(nf) = size(nf.eligible, 1)
-    @test neighbor_finder_n_atoms(s.neighbor_finder) == true_n_atoms
-    @test length(s.pairwise_inters) == 2
-    @test length(s.specific_inter_lists) == 3
-    @test s.boundary == CubicBoundary(3.7146u"nm")
-    show(devnull, first(s.atoms))
-    @test s.data == "test_data_peptide"
-
-    @test length(s.topology.atom_molecule_inds) == length(s) == 5191
-    @test s.topology.atom_molecule_inds[10] == 1
-    @test length(s.topology.molecule_atom_counts) == 1678
-    @test s.topology.molecule_atom_counts[1] == 164
-
-    s.velocities = [random_velocity(mass(a), temp) .* 0.01 for a in s.atoms]
-    @time simulate!(s, simulator, n_steps; n_threads=1)
-
-    @test all(isapprox(1016.0870493u"kg * m^-3"), values(s.loggers.density))
-    traj = Chemfiles.Trajectory(temp_fp_dcd)
-    rm(temp_fp_dcd)
-    @test Int(length(traj)) == 11
-    frame = read(traj)
-    @test length(frame) == 1000
-    @test size(Chemfiles.positions(frame)) == (3, 1000)
-    @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [37.146, 37.146, 37.146]
-    boundary = Molly.boundary_from_chemfiles(Chemfiles.UnitCell(frame))
-    @test boundary.side_lengths ≈ SVector(3.7146, 3.7146, 3.7146)u"nm"
-
-    @test readlines(temp_fp_pdb)[1] == "CRYST1   37.146   37.146   37.146  90.00  90.00  90.00 P 1           1"
-    traj = read(temp_fp_pdb, BioStructures.PDBFormat)
-    rm(temp_fp_pdb)
-    @test BioStructures.countmodels(traj) == 11
-    @test BioStructures.countatoms(first(traj)) == 5191
-
-    n_steps = 1_000
-    temp = 298.0f0
-    press = Float32(ustrip(u"u * nm^-1 * ps^-2", 1.0f0u"bar"))
-    s = System(
-        Float32,
-        joinpath(data_dir, "5XER", "gmx_coords.gro"),
-        joinpath(data_dir, "5XER", "gmx_top_ff.top");
-        loggers=(
-            temp=TemperatureLogger(Float32, 10),
-            coords=CoordinatesLogger(Float32, 10),
-            energy=TotalEnergyLogger(Float32, 10),
-        ),
-        units=false,
-        nonbonded_method=:cutoff,
-    )
-    thermostat = AndersenThermostat(temp, 10.0f0)
-    barostat = MonteCarloBarostat(press, temp, s.boundary; n_steps=20)
-    simulator = VelocityVerlet(dt=0.0002f0, coupling=(thermostat, barostat))
-
-    s.velocities = [random_velocity(mass(a), temp) .* 0.01f0 for a in s.atoms]
-    simulate!(deepcopy(s), simulator, 100; n_threads=1)
-    @time simulate!(s, simulator, n_steps; n_threads=1)
-    @test s.boundary != CubicBoundary(3.7146f0)
-    @test 3.6f0 < s.boundary.side_lengths[1] < 3.8f0
-end
-
 @testset "Amber OpenMM protein comparison" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     show(devnull, ff)
@@ -89,6 +7,7 @@ end
         ff;
         nonbonded_method=:cutoff,
         center_coords=false,
+        data="data_string",
     )
     sys_pme = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
@@ -159,6 +78,8 @@ end
         nonbonded_method=:cutoff,
         center_coords=false,
     )
+    show(devnull, sys)
+    show(devnull, first(sys.atoms))
     zero(sys)
     zero(sys_pme)
     deepcopy(sys_pme)
@@ -193,13 +114,19 @@ end
     @test Molly.interaction_type(sys.specific_inter_lists[2]) <: HarmonicAngle
     @test Molly.interaction_type(sys.specific_inter_lists[3]) <: PeriodicTorsion
     @test Molly.interaction_type(sys.specific_inter_lists[4]) <: PeriodicTorsion
+    @test sys.data == "data_string"
 
+    @test length(sys) == length(sys.atoms) == length(sys.coords) == length(sys.velocities) == 15954
     @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
     @test count(i -> is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
     @test length(sys.topology.atom_molecule_inds) == length(sys) == 15954
     @test sys.topology.atom_molecule_inds[10] == 1
     @test length(sys.topology.molecule_atom_counts) == 4929
     @test sys.topology.molecule_atom_counts[1] == 1170
+    @test size(sys.neighbor_finder.eligible) == (15954, 15954)
+    @test size(sys.neighbor_finder.special) == (15954, 15954)
+    @test sum(sys.neighbor_finder.eligible) == 254477970
+    @test sum(sys.neighbor_finder.special) == 6208
 
     bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
     @test bench_result.allocs <= 8
@@ -810,7 +737,7 @@ end
     end
 end
 
-@testset "a99SB-disp Gromacs/OpenMM protein comparison" begin
+@testset "a99SB-disp protein comparison" begin
     FT = Float64
     AT = Array
 

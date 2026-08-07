@@ -395,27 +395,6 @@ Other options detailed in the docstring for [`System`](@ref) include overriding 
 The `strictness` keyword argument determines behavior when encountering possible problems and can be set to `:error` or `:nowarn` rather than the default `:warn`.
 It can be set globally with the `MOLLY_STRICTNESS` environmental variable.
 
-Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files, which should be considered experimental. For example:
-```julia
-sys = System(
-    joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
-    joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
-    nonbonded_method=:pme,
-    loggers=(
-        temp=TemperatureLogger(10),
-        writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
-    ),
-)
-
-temp = 298.0u"K"
-random_velocities!(sys, temp)
-simulator = Verlet(
-    dt=0.0002u"ps",
-    coupling=BerendsenThermostat(temp, 1.0u"ps"),
-)
-
-simulate!(sys, simulator, 5_000)
-```
 Harmonic position restraints can be added to a [`System`](@ref) for equilibration using [`add_position_restraints`](@ref):
 ```julia
 sys_res = add_position_restraints(

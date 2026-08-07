@@ -277,6 +277,8 @@ end
         @test size(Chemfiles.positions(frame)) == (3, 100)
         @test !iszero(sum(Array(Chemfiles.positions(frame))))
         @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [20.0, 20.0, 20.0]
+        boundary_dcd = Molly.boundary_from_chemfiles(Chemfiles.UnitCell(frame))
+        @test boundary_dcd.side_lengths ≈ SVector(2.0, 2.0, 2.0)u"nm"
 
         traj = Chemfiles.Trajectory(temp_fp_trr)
         rm(temp_fp_trr)
