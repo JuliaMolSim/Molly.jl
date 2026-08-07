@@ -1225,6 +1225,7 @@ function System(T::Type,
                 loggers=(),
                 units::Bool=true,
                 array_type::Type{AT}=Array,
+                float_type_high=Float64,
                 dist_cutoff=add_units(1.0, u"nm", units),
                 dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,
@@ -1536,7 +1537,8 @@ function System(T::Type,
     hydrogen_mass = false
     global_params = [zero(T), zero(T)]
 
-    return System(T, T, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
+    return System(T, float_type_high, AT, atoms, coords, boundary_used, velocities, atoms_data,
+                  virtual_sites,
                   loggers, data, global_params, bonds, bonds_ub_flags, angles, torsions, impropers,
                   torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
@@ -2055,6 +2057,7 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
         energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
+        float_type=T,
         float_type_high=TH,
         data=data,
         launch_config=launch_config,
@@ -2099,10 +2102,10 @@ The `atom_selector` function takes in each atom and atom data and determines whe
 that atom.
 For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
 """
-function add_position_restraints(sys::System{<:Any, AT},
+function add_position_restraints(sys::System{<:Any, AT, T, TH},
                                  k;
                                  atom_selector::Function=is_any_atom,
-                                 restrain_coords=sys.coords) where AT
+                                 restrain_coords=sys.coords) where {AT, T, TH}
     k_array = isa(k, AbstractArray) ? k : fill(k, length(sys))
     if length(k_array) != length(sys)
         throw(ArgumentError("the system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
@@ -2138,6 +2141,8 @@ function add_position_restraints(sys::System{<:Any, AT},
         force_units=sys.force_units,
         energy_units=sys.energy_units,
         k=sys.k,
+        float_type=T,
+        float_type_high=TH,
         data=sys.data,
         launch_config=sys.launch_config,
     )

@@ -328,6 +328,7 @@ end
                 potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
                 velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
             ),
+            float_type_high=Measurement{Float64},
             strictness=:nowarn
         )
         for n_threads in n_threads_list

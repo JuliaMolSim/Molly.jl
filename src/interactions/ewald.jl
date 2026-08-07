@@ -117,19 +117,23 @@ function ewald_params(side_length, α, error_tol)
     return k
 end
 
-function ewald_pe_forces!(Fs, vir, sys::System{3}, inter::AbstractEwald, ::Val{needs_vir},
-                          ::Val{needs_pe}=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {needs_vir, needs_pe}
+function ewald_pe_forces!(Fs, vir, sys::System{3, <:Any, <:Any, TH}, inter::AbstractEwald,
+                          ::Val{needs_vir}, ::Val{needs_pe}=Val(true);
+                          n_threads::Integer=Threads.nthreads()) where {TH, needs_vir, needs_pe}
     calculate_forces = !isnothing(Fs)
     return ewald_pe_forces!(Fs, vir, inter, sys.atoms, sys.coords, sys.boundary, sys.force_units,
-                            sys.energy_units, Val(needs_vir), calculate_forces, Val(needs_pe);
-                            n_threads=n_threads)
+                            sys.energy_units, Val(needs_vir), calculate_forces, Val(needs_pe),
+                            Val(TH); n_threads=n_threads)
 end
+
+@inline sum_float_type(f, ::Type{T}, v::AbstractVector{T}) where {T} = sum(f, v)
+@inline sum_float_type(f, ::Type{T}, v) where {T} = sum(f ∘ T, v)
 
 # The Ewald sum shares its loop between the energy and the forces, so `needs_pe` is ignored
 function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, force_units,
-                          energy_units, ::Val{needs_vir}, calculate_forces=true, ::Val=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
+                          energy_units, ::Val{needs_vir}, calculate_forces=true, ::Val=Val(true),
+                          ::Val{TH}=Val(Float64);
+                          n_threads::Integer=Threads.nthreads()) where {T, TH, needs_vir}
     AT = array_type(atoms)
     n_atoms = length(atoms)
     atoms_cpu, coords_cpu = from_device(atoms), from_device(coords)
@@ -231,13 +235,16 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
         end
     end
 
-    charge_E = -f * T(π) * sum(partial_charges_cpu)^2 / (2 * V * α^2)
-    self_E = f * -sum(abs2, partial_charges_cpu) * α / sqrt(T(π)) + charge_E
+    f_h, α_h, V_h = TH(f), TH(α), TH(V)
+    pc_sum      = sum_float_type(identity, TH, partial_charges_cpu)
+    pc_abs2_sum = sum_float_type(abs2    , TH, partial_charges_cpu)
+    charge_E = -f_h * TH(π) * pc_sum^2 / (2 * V_h * α_h^2)
+    self_E = -f_h * pc_abs2_sum * α_h / sqrt(TH(π)) + charge_E
     total_E = reciprocal_space_E + self_E
 
     if needs_vir
-        # E_charge = -A/V with A = f*π*Q^2/(2α^2) ⇒ W_charge = -E_charge * I
-        vir .+= (-charge_E) .* I(3)
+        # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I
+        vir .+= charge_E .* I(3)
     end
 
     if calculate_forces && AT <: AbstractGPUArray
@@ -261,8 +268,8 @@ end
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
-        scheduler=DefaultLambdaScheduler(), grad_safe=false,
-        n_threads=Threads.nthreads())
+        scheduler=DefaultLambdaScheduler(), float_type_high=Float64,
+        grad_safe=false, n_threads=Threads.nthreads())
 
 Particle mesh Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -373,9 +380,10 @@ end
 
 function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
              ϵr=1.0, fixed_charges=true, mesh_dims=nothing, eligible=nothing, special=nothing,
-             scheduler=DefaultLambdaScheduler(), grad_safe=false,
+             scheduler=DefaultLambdaScheduler(), float_type_high=Float64, grad_safe=false,
              n_threads::Integer=Threads.nthreads())
     T = typeof(ustrip(dist_cutoff))
+    TH = float_type_high
     AT = array_type(atoms)
     n_atoms = length(atoms)
     error_tol_T = T(error_tol)
@@ -427,8 +435,8 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     if fixed_charges && !grad_safe
         atoms_cpu = from_device(atoms)
         partial_charges = [effective_charge(scheduler, atom, Val(T)) for atom in atoms_cpu]
-        pc_sum = sum(partial_charges)
-        pc_abs2_sum = sum(abs2, partial_charges)
+        pc_sum = sum(TH, partial_charges)
+        pc_abs2_sum = sum(abs2 ∘ TH, partial_charges)
     else
         pc_sum, pc_abs2_sum = nothing, nothing
     end
@@ -1042,8 +1050,8 @@ grad_safe_bfft!(charge_grid, recip_grid, bfft_plan) = mul!(charge_grid, bfft_pla
 
 function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force_units,
                           energy_units, ::Val{needs_vir}, calculate_forces=true,
-                          ::Val{needs_pe}=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir, needs_pe}
+                          ::Val{needs_pe}=Val(true), ::Val{TH}=Val(Float64);
+                          n_threads::Integer=Threads.nthreads()) where {T, TH, needs_vir, needs_pe}
     if !is_on_gpu(coords) && n_threads > 1 &&
             (isnothing(inter.charge_grid_buffer) || length(inter.virial_buffer) != n_threads)
         ntc = (isnothing(inter.charge_grid_buffer) ? 1 : length(inter.virial_buffer))
@@ -1079,15 +1087,16 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
         if isnothing(inter.pc_sum) || inter.grad_safe
             partial_charges = [effective_charge(inter.scheduler, atom, Val(T))
                                for atom in from_device(atoms)]
-            pc_sum = sum(partial_charges)
-            pc_abs2_sum = sum(abs2, partial_charges)
+            pc_sum      = sum_float_type(identity, TH, partial_charges)
+            pc_abs2_sum = sum_float_type(abs2    , TH, partial_charges)
         else
-            pc_sum, pc_abs2_sum = inter.pc_sum, inter.pc_abs2_sum
+            pc_sum, pc_abs2_sum = TH(inter.pc_sum), TH(inter.pc_abs2_sum)
         end
-        charge_E = -f_div_ϵr * T(π) * pc_sum^2 / (2 * V * α^2)
-        self_E = f_div_ϵr * -pc_abs2_sum * α / sqrt(T(π)) + charge_E
+        f_h, α_h, V_h = TH(f_div_ϵr), TH(α), TH(V)
+        charge_E = -f_h * TH(π) * pc_sum^2 / (2 * V_h * α_h^2)
+        self_E = -f_h * pc_abs2_sum * α_h / sqrt(TH(π)) + charge_E
         if needs_vir
-            # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I.
+            # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I
             vir .+= charge_E .* I(3)
         end
         if needs_pe

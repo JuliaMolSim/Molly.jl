@@ -1633,7 +1633,7 @@ end
     end
 end
 
-@testset "Ewald" begin
+@testset "Ewald and PME" begin
     dist_cutoff = 0.9u"nm"
     E_openmm = -5.465127432466375u"kJ/mol"
     Fs_openmm = [
@@ -1762,6 +1762,39 @@ end
                 end
             end
         end
+    end
+
+    # The net charge correction contributes to the virial, so check the long range virial
+    #   against a finite difference of the energy under affine box scaling for a system
+    #   that is not neutral: tr(W) = -dU/dλ where coords -> λ*coords and boundary -> λ*boundary
+    n_atoms = 40
+    L = 2.0
+    rng = Xoshiro(3)
+    qs = randn(rng, n_atoms)
+    qs .+= (4.0 - sum(qs)) / n_atoms # Net charge of 4
+    atoms = [Atom(index=i, mass=1.0, charge=qs[i], σ=0.3, ϵ=0.2) for i in 1:n_atoms]
+    coords_start = [SVector{3}(rand(rng, 3) .* L) for _ in 1:n_atoms]
+
+    function scaled_system(method, λ)
+        boundary = CubicBoundary(λ * L)
+        inter = (method === :ewald ? Ewald(0.7) :
+                    PME(0.7, atoms, boundary; mesh_dims=(16, 16, 16)))
+        return System(
+            atoms=atoms,
+            coords=[λ .* c for c in coords_start],
+            boundary=boundary,
+            general_inters=(inter,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+            strictness=:nowarn,
+        )
+    end
+
+    for method in (:ewald, :pme)
+        h = 1e-6
+        dU_dλ = (potential_energy(scaled_system(method, 1 + h), nothing) -
+                    potential_energy(scaled_system(method, 1 - h), nothing)) / (2h)
+        @test tr(virial(scaled_system(method, 1.0), nothing; n_threads=1)) ≈ -dU_dλ rtol=1e-5
     end
 end
 

@@ -292,6 +292,8 @@ end
 Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 
 AtomsBase.n_dimensions(::AbstractBoundary{D}) where {D} = D
+AtomsBase.n_dimensions(::Union{System{D}, ReplicaSystem{D}}) where {D} = D
+
 float_type(::AbstractBoundary{<:Any, T}) where {T} = T
 length_type(b::AbstractBoundary{<:Any, <:Any, C}) where {C} = C
 

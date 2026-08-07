@@ -20,6 +20,7 @@ export
     array_type,
     is_on_gpu,
     float_type,
+    float_type_high,
     masses,
     charges,
     MollyCalculator,
@@ -797,6 +798,8 @@ interface described there.
     be set to `NoUnits` if units are not being used.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
+- `float_type::T`: the floating point type of the system, read from the boundary
+    by default.
 - `float_type_high::TH=Float64`: the floating point type used for accumulation where
     higher precision is useful, such as the potential energy and the virial.
 - `data::DA=nothing`: arbitrary data associated with the system.
@@ -847,6 +850,7 @@ function System(;
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
+                float_type=float_type(boundary),
                 float_type_high=Float64,
                 data=nothing,
                 launch_config=CUDALaunchConfig(),
@@ -854,7 +858,7 @@ function System(;
     check_strictness(strictness)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
-    T = float_type(boundary)
+    T = float_type
     TH = float_type_high
     A = typeof(atoms)
     C = typeof(coords)
@@ -1002,7 +1006,7 @@ Convenience constructor for changing properties in a `System`.
 The `System` is returned with the provided keyword arguments modified.
 Give `deepcopy(sys)` as the argument to make a new copy of the system.
 """
-function System(sys::System{<:Any, <:Any, <:Any, TH};
+function System(sys::System{<:Any, <:Any, T, TH};
                 atoms=sys.atoms,
                 coords=sys.coords,
                 boundary=sys.boundary,
@@ -1019,10 +1023,11 @@ function System(sys::System{<:Any, <:Any, <:Any, TH};
                 force_units=sys.force_units,
                 energy_units=sys.energy_units,
                 k=sys.k,
+                float_type=T,
                 float_type_high=TH,
                 data=sys.data,
                 launch_config=sys.launch_config,
-                strictness=default_strictness()) where TH
+                strictness=default_strictness()) where {T, TH}
     return System(
         atoms=atoms,
         coords=coords,
@@ -1040,6 +1045,7 @@ function System(sys::System{<:Any, <:Any, <:Any, TH};
         force_units=force_units,
         energy_units=energy_units,
         k=k,
+        float_type=float_type,
         float_type_high=float_type_high,
         data=data,
         launch_config=launch_config,
@@ -1229,9 +1235,9 @@ struct ThermoState{S, I, B, P}
     name::String
 end
 
-function ThermoState(sys::System{D, AT, FT}, integrator; 
+function ThermoState(sys::System{<:Any, <:Any, <:Any, TH}, integrator;
                      temperature=nothing, pressure=nothing,
-                     name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
+                     name::Union{Nothing, AbstractString}=nothing) where TH
     if !isempty(values(sys.loggers))
         @warn "ThermoState was constructed with a system that has loggers. " *
               "Generalized ensemble methods ignore ThermoState system loggers; " *
@@ -1276,7 +1282,7 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
     end
 
     kBT = uconvert(sys.energy_units, kBT_raw)
-    beta_val = FT(ustrip(1 / kBT))
+    beta_val = TH(ustrip(1 / kBT))
 
     # Calculate isotropic pressure in internal units (Energy / Volume) if applicable
     p_val = nothing
@@ -1290,7 +1296,7 @@ function ThermoState(sys::System{D, AT, FT}, integrator;
 
         # Convert macroscopic pressure (e.g., bar) to internal molar pressure
         p_molar = p_raw * Unitful.Na
-        p_val = FT(ustrip(uconvert(p_unit, p_molar)))
+        p_val = TH(ustrip(uconvert(p_unit, p_molar)))
     end
 
     final_name = isnothing(name) ? "state_T$(temp_source)" * (isnothing(p_val) ? "" : "_P$(press_source)") : String(name)
@@ -1337,8 +1343,6 @@ construction where `n` is the number of threads to be used per replica.
 - `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
     a default [`ReplicaExchangeLogger`](@ref) is used.
 - `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
-- `float_type_high=Float64`: the floating point type used for accumulation where
-    higher precision is useful, such as the potential energy and the virial.
 - `data::DA=nothing`: Arbitrary data associated with the replica system.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for perturbed state differences. Generally improves performance.
@@ -1371,10 +1375,8 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        replica_loggers=nothing,
                        exchange_logger=nothing,
                        initial_step::Integer=0,
-                       float_type_high=Float64,
                        data=nothing,
                        reuse_neighbors::Bool=true)
-    
     n_replicas = length(thermo_states)
     initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
     
@@ -1384,9 +1386,10 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
     end
 
     ref_sys = thermo_states[1].system
-    D = AtomsBase.n_dimensions(ref_sys.boundary)
-    T = float_type(ref_sys.boundary)
-    check_float_types(T, float_type_high)
+    D = AtomsBase.n_dimensions(ref_sys)
+    T = float_type(ref_sys)
+    TH = float_type_high(ref_sys)
+    check_float_types(T, TH)
     AT = array_type(replica_coords[1])
 
     if isnothing(replica_boundaries)
@@ -1423,7 +1426,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
     validate_replica_loggers(replica_loggers)
 
     if isnothing(exchange_logger)
-        exchange_logger = ReplicaExchangeLogger(T, n_replicas)
+        exchange_logger = ReplicaExchangeLogger(TH, n_replicas)
     end
 
     partition = AlchemicalPartition(thermo_states; reuse_neighbors=reuse_neighbors)
@@ -1437,7 +1440,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
     state_general_inters = [ts.system.general_inters for ts in thermo_states]
     state_indices = collect(1:n_replicas)
 
-    return ReplicaSystem{D, AT, T, float_type_high, typeof(partition), typeof(betas),
+    return ReplicaSystem{D, AT, T, TH, typeof(partition), typeof(betas),
                          typeof(integrators), typeof(replica_coords), typeof(replica_velocities), 
                          typeof(replica_boundaries), typeof(replica_neighbor_finders), 
                          typeof(replica_loggers), typeof(state_pairwise_inters), 
@@ -1497,10 +1500,28 @@ end
     float_type(boundary)
 
 The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
+
+Set with the `float_type` argument when constructing a system.
+When setting up a system from a file, the default is `Float64` on CPU and `Float32` on GPU.
+When setting up a system directly, the default is the float type of the boundary.
+See [`float_type_high`](@ref) for the higher precision accumulation type.
 """
 float_type(::Union{System{<:Any, <:Any, T}, ReplicaSystem{<:Any, <:Any, T}}) where {T} = T
 
-float_type_accum(::Union{System{<:Any, <:Any, <:Any, TH}, ReplicaSystem{<:Any, <:Any, <:Any, TH}}) where {TH} = TH
+"""
+    float_type_high(sys)
+
+The float type a [`System`](@ref) or [`ReplicaSystem`](@ref) uses for accumulation
+where higher precision is useful, such as the [`potential_energy`](@ref) and the
+[`virial`](@ref).
+
+Set with the `float_type_high` argument when constructing a system, `Float64` by
+default.
+See [`float_type`](@ref) for the type used for the coordinates, velocities
+and interaction parameters.
+"""
+float_type_high(::Union{System{<:Any, <:Any, <:Any, TH},
+                        ReplicaSystem{<:Any, <:Any, <:Any, TH}}) where {TH} = TH
 
 """
     masses(sys)
