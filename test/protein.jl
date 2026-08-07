@@ -577,6 +577,7 @@ end
         @test length(sys.specific_inter_lists) == 7
         @test length(sys.specific_inter_lists[1]) == 1691
         @test length(sys.specific_inter_lists[2]) == 2137
+        show(devnull, sys)
         for sil in sys.specific_inter_lists
             show(devnull, sil)
         end
@@ -668,6 +669,7 @@ end
             rigid_water=true,
             constraint_algorithm=constraint_algorithm,
         )
+        show(devnull, sys_nounits)
         simulator_nounits = VelocityVerlet(dt=0.0005)
         @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65524.08096011398u"kJ * mol^-1"
         @test temperature(sys_nounits)u"K" ≈ start_temp
@@ -706,6 +708,7 @@ end
                 rigid_water=true,
                 constraint_algorithm=constraint_algorithm,
             )
+            show(devnull, sys)
             @test scalar_virial(sys) ≈ scalar_vir
             @test scalar_pressure(sys) ≈ scalar_P
             sys.velocities = to_device(copy(velocities_start), AT)

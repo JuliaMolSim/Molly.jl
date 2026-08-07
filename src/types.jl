@@ -1678,17 +1678,41 @@ end
 
 AtomsBase.cell(sys::ReplicaSystem) = AtomsBase.cell(sys.partition.master_sys)
 
-function Base.show(io::IO, s::System)
-    print(io, "System with ", length(s), " atoms, boundary ", s.boundary)
+function Base.show(io::IO, sys::System{D, AT, T, TH}) where {D, AT, T, TH}
+    n_mols = (isnothing(sys.topology) ? "-" : length(sys.topology.molecule_atom_counts))
+    time_unit = unit(oneunit(eltype(eltype(sys.coords))) / oneunit(eltype(eltype(sys.velocities))))
+    println(io, "Molly System")
+    println(io, "  n atoms: ", length(sys))
+    println(io, "  n molecules: ", n_mols)
+    println(io, "  n dimensions: ", D)
+    println(io, "  n pairwise interactions: ", length(sys.pairwise_inters))
+    println(io, "  n specific interaction lists: ", length(sys.specific_inter_lists))
+    println(io, "  n general interactions: ", length(sys.general_inters))
+    println(io, "  n constrained atoms: ", length(constrained_atom_inds(sys)))
+    println(io, "  n virtual sites: ", sum(sys.virtual_site_flags))
+    println(io, "  n loggers: ", length(sys.loggers))
+    println(io, "  neighbor finder: ", typeof(sys.neighbor_finder).name.wrapper)
+    println(io, "  total mass: ", sys.total_mass)
+    println(io, "  Degrees of freedom: ", sys.df)
+    println(io, "  Array type: ", AT)
+    println(io, "  Float type: general ", T, ", high ", TH)
+    if sys.energy_units == NoUnits
+        println(io, "  Units: NoUnits")
+    else
+        println(io, "  Units: energy ", sys.energy_units, ", force ", sys.force_units,
+                ", length ", unit(length_type(sys.boundary)), ", time ", time_unit,
+                ", mass ", unit(sys.total_mass))
+    end
+    print(  io, "  Boundary: ", sys.boundary)
 end
 
-function Base.show(io::IO, s::ReplicaSystem)
-    print(io, "ReplicaSystem containing ",  s.n_replicas, " replicas with ", length(s),
+function Base.show(io::IO, sys::ReplicaSystem)
+    print(io, "ReplicaSystem containing ",  sys.n_replicas, " replicas with ", length(sys),
           " atoms each")
 end
 
 # Take precedence over AtomsBase.jl show function
-Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
+Base.show(io::IO, ::MIME"text/plain", sys::Union{System, ReplicaSystem}) = show(io, sys)
 
 """
     System(abstract_system; <keyword arguments>)
