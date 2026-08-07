@@ -60,7 +60,7 @@ function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, <:Any, TH}) wh
         v = velocities_cpu[i]
         for col in 1:D
             for row in 1:D
-                kin_tensor[row, col] += TH(uconvert(sys.energy_units, m_half * v[row] * v[col]))
+                kin_tensor[row, col] += uconvert(sys.energy_units, m_half * v[row] * v[col])
             end
         end
     end

@@ -53,8 +53,7 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
                                   history_forgetting = nothing,
                                   adaptive_gamma = nothing,
                                   require_active_state::Bool = false)
-
-    FT = typeof(ustrip(active_state.active_sys.total_mass))
+    TH = float_type_high(active_state.active_sys)
     EU = active_state.active_sys.energy_units
     K  = n_states(state_space)
 
@@ -114,7 +113,7 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
     local_K = length(state_indices)
 
     if isnothing(gamma)
-        gamma = fill(inv(FT(local_K)), local_K)
+        gamma = fill(inv(TH(local_K)), local_K)
     else
         if !(length(gamma) == local_K)
             throw(ArgumentError("gamma must be of length $(local_K)."))
@@ -123,19 +122,19 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
         if !all(isfinite, gamma)
             throw(ArgumentError("All gamma values must be finite."))
         end
-        if !all(>(zero(FT)), gamma)
+        if !all(>(zero(TH)), gamma)
             throw(ArgumentError("All gamma values must be stictly positive."))
         end
         if sum(gamma) <= 0
             throw(ArgumentError("sum(gamma) must be strictly positive."))
         end
-        gamma = FT.(gamma)
+        gamma = TH.(gamma)
         s = sum(gamma)
         gamma ./= s
     end
 
     if isnothing(initial_f)
-        initial_f = zeros(FT, local_K)
+        initial_f = zeros(TH, local_K)
     else
         if !(length(initial_f) == local_K)
             throw(ArgumentError("initial_f must be of length $(local_K)."))
@@ -146,33 +145,33 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
         if !all(isfinite, initial_f)
             throw(ArgumentError("All values of initial_f mus be finite."))
         end
-        initial_f = FT.(initial_f)
+        initial_f = TH.(initial_f)
         initial_f .-= initial_f[1]
     end
 
-    tilts = ones(FT, local_K)
+    tilts = ones(TH, local_K)
 
     density     = copy(gamma)
     log_density = log.(density)
 
-    weights = zeros(FT, local_K)
-    reduced_potentials = zeros(FT, local_K)
-    energies = zeros(FT, local_K) .* EU
-    evaluation_reduced_potentials = zeros(FT, length(evaluation_state_indices))
-    evaluation_energies = zeros(FT, length(evaluation_state_indices)) .* EU
-    scratch = zeros(FT, local_K)
-    log_state_bias = zeros(FT, local_K)
+    weights = zeros(TH, local_K)
+    reduced_potentials = zeros(TH, local_K)
+    energies = zeros(TH, local_K) .* EU
+    evaluation_reduced_potentials = zeros(TH, length(evaluation_state_indices))
+    evaluation_energies = zeros(TH, length(evaluation_state_indices)) .* EU
+    scratch = zeros(TH, local_K)
+    log_state_bias = zeros(TH, local_K)
 
-    stats = TSSStats(FT)
+    stats = TSSStats(TH)
     history = isnothing(history_forgetting) ?
               nothing :
-              TSSEpochHistory(history_forgetting, FT, local_K)
+              TSSEpochHistory(history_forgetting, TH, local_K)
 
     adaptive_gamma = validate_tss_local_adaptive_gamma(adaptive_gamma)
     adaptive_moments = nothing
 
     return TSSLocalEstimator{
-        FT,
+        TH,
         typeof(state_space),
         typeof(active_state),
         eltype(energies),
@@ -198,8 +197,8 @@ function make_tss_local_estimator(state_space::ExtendedStateSpace,
         scratch,
         log_state_bias,
         0,
-        FT(ETA),
-        FT(dens_reg),
+        TH(ETA),
+        TH(dens_reg),
         stats,
         history,
         adaptive_gamma,
@@ -231,7 +230,7 @@ function tss_sample_global_state(rng::AbstractRNG, state::TSSLocalEstimator)
     return tss_global_index(state, idx)
 end
 
-function process_tss_sample!(state::TSSLocalEstimator{FT}, active_state::ActiveThermoState) where {FT}
+function process_tss_sample!(state::TSSLocalEstimator, active_state::ActiveThermoState)
     coords = active_state.active_sys.coords
     boundary = active_state.active_sys.boundary
 
@@ -274,7 +273,7 @@ function process_tss_sample!(state::TSSLocalEstimator{FT}, active_state::ActiveT
 
 end
 
-function process_tss_sample!(state::TSSLocalEstimator{FT}) where {FT}
+function process_tss_sample!(state::TSSLocalEstimator)
     return process_tss_sample!(state, state.active_state)
 end
 
@@ -442,5 +441,4 @@ function log_tss_stats!(
     push!(stats.tilt_history, copy(state.tilts))
 
     return stats
-
 end

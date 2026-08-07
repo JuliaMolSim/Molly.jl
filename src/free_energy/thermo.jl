@@ -74,7 +74,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                              reuse_neighbors::Bool=true)
     n_λ = length(thermo_states)
     ref_sys = thermo_states[1].system
-    FT = typeof(ustrip(ref_sys.total_mass))
+    TH = float_type_high(ref_sys)
 
     # 1. Identify Global Solute Indices (Perturbed Atoms)
     solute_indices = Set{Int}()
@@ -208,7 +208,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     end
 
     # Initialize cache values with safe defaults
-    initial_pe = zero(FT) * master_sys.energy_units
+    initial_pe = zero(TH) * master_sys.energy_units
 
     return AlchemicalPartition(
         master_sys,
