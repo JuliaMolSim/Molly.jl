@@ -187,8 +187,8 @@ def export_weights_h5(model, output="data/ani_reference/ani2x.h5"):
         ag.create_dataset("ShfR",    data=aev.ShfR.squeeze().numpy())
         ag.create_dataset("EtaA",    data=aev.EtaA.squeeze().numpy())
         ag.create_dataset("Zeta",    data=float(aev.Zeta.item()))
-        ag.create_dataset("ShfA",    data=aev.ShfA.squeeze().numpy())   # angular shift (θ_s)
-        ag.create_dataset("ShfZ",    data=aev.ShfZ.squeeze().numpy())   # radial shift for angular (r_s_A)
+        ag.create_dataset("ShfA",    data=aev.ShfA.squeeze().numpy())   # radial shift for angular (r_s_A)
+        ag.create_dataset("ShfZ",    data=aev.ShfZ.squeeze().numpy())   # angular shift (θ_s)
         ag.create_dataset("species", data=[e.encode() for e in ELEMENTS])
         # Atomic self-energies (Hartree) — same order as ELEMENTS
         ag.create_dataset("self_energies",

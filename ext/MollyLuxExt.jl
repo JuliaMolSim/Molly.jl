@@ -85,10 +85,11 @@ function strip_boundary(b::TriclinicBoundary{D, T, C, A}) where {D, T, C, A}
     return TriclinicBoundary(bv; approx_images=A)
 end
 
-# Convert an ANI energy (eV, unitless) to the system's energy units.
+# Convert an ANI energy (eV, unitless) to the system's energy units. In the no-units case the
+# Molly convention is kJ/mol.
 function ani_energy_to_units(E_eV, energy_units)
     if energy_units == NoUnits
-        return E_eV
+        return ustrip(u"kJ * mol^-1", E_eV * Unitful.Na * u"eV")
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         return uconvert(energy_units, E_eV * Unitful.Na * u"eV")
     else
@@ -96,12 +97,11 @@ function ani_energy_to_units(E_eV, energy_units)
     end
 end
 
-# Convert an ANI force SVector (eV/Å, unitless) to the system's force units. In the unitless
-# case coordinates are nm (the Molly convention), so the force is returned as -dE/d(r_nm) =
-# 10·(eV/Å) to stay consistent with the nm coordinates (F·dr has energy units).
+# Convert an ANI force SVector (eV/Å, unitless) to the system's force units. In the no-units
+# case the Molly convention is kJ/mol/nm.
 function ani_force_to_units(fi::SVector{D,T}, force_units) where {D, T}
     if force_units == NoUnits
-        return fi .* T(NM_TO_ANGSTROM)
+        return ustrip.(u"kJ * mol^-1 * nm^-1", fi .* (Unitful.Na * u"eV/Å"))
     elseif dimension(force_units) == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         return uconvert.(force_units, fi .* (Unitful.Na * u"eV/Å"))
     else
@@ -130,7 +130,7 @@ end
 # nbr_coords/nbr_species hold the first n_nbr neighbours.
 function radial_aev!(G::AbstractVector{T}, coord_i::SVector{D,T},
                       nbr_coords, nbr_species, n_nbr::Int,
-                      η_R, r_s_R, r_c_R::T, n_species::Int) where {D,T}
+                      η_R, r_s_R, r_c_R::T) where {D,T}
     fill!(G, zero(T))
     n_eta = length(η_R)
     n_shf = length(r_s_R)
@@ -255,7 +255,7 @@ function make_aev_buffers(::Type{T}, ::Val{D}, n_atoms::Int, p, n_species::Int,
     n_pairs   = n_species * (n_species + 1) ÷ 2
     aev_len   = n_species * n_rad_per + n_pairs * n_ang_per
     max_nbrs  = n_atoms
-    # One scratch set per thread so the central-atom loop can run with Threads.@threads :static
+    # One scratch set per thread so the central-atom loop can run with Threads.@threads
     # and no shared mutable state.
     scratch     = AEVScratch{D, T}[AEVScratch{D, T}(max_nbrs) for _ in 1:max(1, Threads.nthreads())]
     # Per-species index buckets for batched NN evaluation (one Lux.apply per element).
@@ -329,7 +329,7 @@ function aev_chunk!(buf::AEVBuffers{D,T}, atom_range, sc::AEVScratch{D,T},
         # Write AEV components directly into pre-allocated output rows.
         radial_aev!(@view(buf.aevs[atom_i, 1:split]),
                      coords[atom_i], sc.nbr_coords, sc.nbr_species, n_nbrs,
-                     p.η_R, p.r_s_R, r_c_R, n_species)
+                     p.η_R, p.r_s_R, r_c_R)
         angular_aev!(@view(buf.aevs[atom_i, split+1:aev_len]),
                       coords[atom_i], sc.nbr_coords, sc.nbr_species, n_nbrs,
                       p.η_A, p.r_s_A, p.θ_s, T(p.ζ), r_c_A, n_species,
@@ -381,9 +381,9 @@ end
 # Compute AEVs for all atoms, writing into buf.aevs (zero allocations after buf is warm).
 # Returns a view of buf.aevs — callers must not hold onto it across calls.
 # When a NeighborList is passed in, its per-atom adjacency is built once (CSR) and each
-# chunk reads only its atoms' slices. Partitions the central-atom loop into
-# `length(buf.scratch)` contiguous chunks with Threads.@threads :static (chunk c → thread
-# c → scratch c). With one thread it is a plain serial loop (bit-identical, zero allocs).
+# chunk reads only its atoms' slices. Partitions the central-atom loop into up to
+# `length(buf.scratch)` contiguous chunks with Threads.@threads (chunk c uses scratch c).
+# With one thread it is a plain serial loop (bit-identical, zero allocs).
 function compute_aevs_buf!(buf::AEVBuffers{D,T},
                              coords::AbstractVector{SVector{D,T}},
                              species_indices::AbstractVector{<:Integer},
@@ -412,12 +412,9 @@ function compute_aevs_buf!(buf::AEVBuffers{D,T},
     else
         base = n_atoms ÷ nchunks
         rem  = n_atoms % nchunks
-        # `:static` fixes the chunk→iteration mapping so chunk c always uses scratch[c]
-        # (its own buffer, no sharing). `nchunks <= length(buf.scratch) == nthreads`, so each
-        # chunk has a private scratch. It is not about load balancing — the chunks are
-        # equal-sized. (Plain @threads would also be correct since the scratch is per-chunk, but
-        # :static avoids the dynamic-scheduler overhead for this fixed, uniform partition.)
-        Threads.@threads :static for c in 1:nchunks
+        # Each chunk c uses its own scratch[c] (no sharing), and `nchunks <= length(buf.scratch)
+        # == nthreads`, so the loop is race-free regardless of the thread→iteration mapping.
+        Threads.@threads for c in 1:nchunks
             lo = (c - 1) * base + min(c - 1, rem) + 1
             hi = c * base + min(c, rem)
             lo <= hi && aev_chunk!(buf, lo:hi, buf.scratch[c], coords, species_indices,
@@ -628,21 +625,29 @@ end
 function AtomsCalculators.potential_energy(sys::System{D, AT, T},
                                            inter::ANIPotential;
                                            kwargs...) where {D, AT, T}
-    n_atoms = length(sys.coords)
-    nbrs    = get(kwargs, :neighbors, nothing)
-    n_thr   = get(kwargs, :n_threads, Threads.nthreads())
-
-    # Use cached buffers — all pre-allocated, zero heap allocations after first call.
-    buf = get_aev_buf(inter, n_atoms, Val(D), T)
-    coords_to_angstrom_into!(buf.coords_strip, sys.coords)
-    @inbounds for i in 1:n_atoms
-        buf.species_idx[i] = inter.species_map[sys.atoms_data[i].element]
+    nbrs = get(kwargs, :neighbors, nothing)
+    n_sp = length(inter.species_map)
+    # ANI-2x is a Float32 model, so the AEV + energy run in Float32 on both CPU and GPU.
+    if AT <: Array
+        n_atoms = length(sys.coords)
+        n_thr   = get(kwargs, :n_threads, Threads.nthreads())
+        buf = get_aev_buf(inter, n_atoms, Val(D), Float32)   # cached, zero allocs after warmup
+        coords_to_angstrom_into!(buf.coords_strip, sys.coords)
+        @inbounds for i in 1:n_atoms
+            buf.species_idx[i] = inter.species_map[sys.atoms_data[i].element]
+        end
+        coords_strip = @view buf.coords_strip[1:n_atoms]
+        species_idx  = @view buf.species_idx[1:n_atoms]
+        E_ha = ani_raw_energy(coords_strip, species_idx, sys.boundary, inter, nbrs; n_threads=n_thr)
+        return ani_energy_to_units(E_ha * Molly.HARTREE_TO_EV, sys.energy_units)
+    else
+        # GPU system: keep the AEV + energy on-device (no host scalar indexing of the coords).
+        coords  = coords_to_angstrom(sys.coords)             # nm→Å, stays on device
+        species = Molly.to_device(Int32[inter.species_map[ad.element] for ad in sys.atoms_data], AT)
+        E_eV = Molly.compute_ani_energy_ka(coords, species, inter, n_sp;
+                    neighbors=nbrs, boundary=strip_boundary(sys.boundary))
+        return ani_energy_to_units(E_eV, sys.energy_units)
     end
-    coords_strip = @view buf.coords_strip[1:n_atoms]
-    species_idx  = @view buf.species_idx[1:n_atoms]
-
-    E_ha = ani_raw_energy(coords_strip, species_idx, sys.boundary, inter, nbrs; n_threads=n_thr)
-    return ani_energy_to_units(E_ha * Molly.HARTREE_TO_EV, sys.energy_units)
 end
 
 # ============================================================================
@@ -674,19 +679,10 @@ end
 # `vector` return the raw displacement. Metal is Float32-only, so the element type must match.
 boundary_for_kernel(::Nothing, ::Val{D}, ::Type{T}) where {D, T} =
     CubicBoundary(SVector{D, T}(ntuple(_ -> T(Inf), D)))
+# The boundary here is already unitless Å (`strip_boundary` runs once at the entry points, and
+# the direct kernel callers pass unitless Å), so only the element type needs matching to the kernel.
 boundary_for_kernel(b, ::Val{D}, ::Type{T}) where {D, T} =
-    convert_boundary_eltype(ustrip_boundary(b), T)
-
-# Low-level unit stripping: convert a unit-carrying boundary to Å; a unitless boundary is
-# assumed to already be in Å. (The nm→Å convention for unitless input is applied only at the
-# high-level entry points via `strip_boundary`, so the kernels always receive Å.)
-ustrip_boundary(b::CubicBoundary) =
-    unit(b.side_lengths[1]) == NoUnits ? b : CubicBoundary(ustrip.(u"Å", b.side_lengths))
-function ustrip_boundary(b::TriclinicBoundary{D, T, C, A}) where {D, T, C, A}
-    unit(b.basis_vectors[1][1]) == NoUnits && return b
-    bv = SVector(ntuple(i -> ustrip.(u"Å", b.basis_vectors[i]), 3))
-    return TriclinicBoundary(bv; approx_images=A)
-end
+    convert_boundary_eltype(b, T)
 convert_boundary_eltype(b::CubicBoundary, ::Type{T}) where T =
     CubicBoundary(SVector{3, T}(T.(b.side_lengths)))
 convert_boundary_eltype(b::TriclinicBoundary{D, T2, C, A}, ::Type{T}) where {D, T2, C, A, T} =
@@ -1310,28 +1306,12 @@ end
 # may be device-resident (GPU finder) — `Molly.from_device` brings the pairs to the host for the
 # O(total_pairs) counting sort; offsets/indices are then uploaded to the compute backend.
 function nl_to_csr(neighbors, n_atoms::Int)
-    npairs = length(neighbors)                 # = neighbors.n
-    host   = Molly.from_device(neighbors.list)  # host copy (no-op if already on CPU)
-    off = zeros(Int32, n_atoms + 1)
+    npairs = length(neighbors)                  # = neighbors.n (valid pairs)
+    host   = Molly.from_device(neighbors.list)   # host copy (no-op if already on CPU)
+    off = Vector{Int32}(undef, n_atoms + 1)
     cur = Vector{Int32}(undef, n_atoms)
     idx = Vector{Int32}(undef, 2 * npairs)
-    @inbounds for ni in 1:npairs
-        i, j, _ = host[ni]
-        off[Int(i) + 1] += one(Int32)
-        off[Int(j) + 1] += one(Int32)
-    end
-    @inbounds for a in 1:n_atoms
-        off[a + 1] += off[a]
-    end
-    @inbounds for a in 1:n_atoms
-        cur[a] = off[a]
-    end
-    @inbounds for ni in 1:npairs
-        i, j, _ = host[ni]
-        ii = Int(i); jj = Int(j)
-        cur[ii] += one(Int32); idx[cur[ii]] = Int32(jj)
-        cur[jj] += one(Int32); idx[cur[jj]] = Int32(ii)
-    end
+    fill_csr!(off, cur, idx, host, n_atoms, npairs)  # shared host CSR build
     return off, idx
 end
 

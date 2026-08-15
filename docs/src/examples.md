@@ -560,10 +560,11 @@ sys = System(sys; loggers=(writer=TrajectoryWriter(10, "water_ani.dcd"),))
 random_velocities!(sys, 300.0u"K")
 simulate!(sys, VelocityVerlet(dt=0.5u"fs"), 1000)
 ```
-The same energy and forces run on the GPU: build the system with a GPU array type for the coordinates (`CuArray` for CUDA, `MtlArray` for Metal, `ROCArray` for ROCm) and the KernelAbstractions kernels run on that device.
+The same energy and forces run on the GPU: put the system's device arrays on a GPU array type (`CuArray` for CUDA, `MtlArray` for Metal, `ROCArray` for ROCm) and the KernelAbstractions kernels run on that device.
 ```julia
 using CUDA
-sys_gpu = System(sys; coords=CuArray(sys.coords))
+sys_gpu = System(sys; atoms=CuArray(sys.atoms), coords=CuArray(sys.coords),
+                 velocities=CuArray(sys.velocities))
 potential_energy(sys_gpu)
 forces(sys_gpu)
 ```

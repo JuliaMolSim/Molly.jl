@@ -70,24 +70,28 @@ the potential with `ANIPotential(joinpath(ani2x_data_dir(), "ani2x.h5"))`.
 """
 function ani2x_data_dir end
 
-# Compute atomic environment vectors (AEVs) for all atoms, returning an
-# (n_atoms, aev_length) matrix. Implementation is in ext/MollyLuxExt.jl.
+"""
+    compute_aevs(coords, species_indices, neighbors, boundary, aev_params, n_species)
+
+Compute the Atomic Environment Vectors (AEVs) for all atoms, returning an
+`(n_atoms, aev_length)` matrix. `neighbors` is a `NeighborList` (or `nothing` for an all-pairs
+build). This is the reference AEV path; the GPU-portable kernel version is `compute_aevs_ka`.
+Requires `Lux` and `HDF5`. Implementation is in ext/MollyLuxExt.jl.
+"""
 function compute_aevs end
 
-# GPU-portable AEV computation with KernelAbstractions (implementation in ext/MollyLuxExt.jl).
+# GPU-portable AEV computation (implementation in ext/MollyLuxExt.jl). KernelAbstractions is a
+# strong Molly dependency, so only Lux and HDF5 gate the extension.
 function compute_aevs_ka(args...; kwargs...)
-    error("compute_aevs_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
-          "`using KernelAbstractions, Lux, HDF5`")
+    error("compute_aevs_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
 end
 
 # End-to-end on-device ANI energy (implementation in ext/MollyLuxExt.jl).
 function compute_ani_energy_ka(args...; kwargs...)
-    error("compute_ani_energy_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
-          "`using KernelAbstractions, Lux, HDF5`")
+    error("compute_ani_energy_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
 end
 
 # On-device analytic ANI forces (implementation in ext/MollyLuxExt.jl).
 function compute_ani_forces_ka(args...; kwargs...)
-    error("compute_ani_forces_ka requires KernelAbstractions, Lux, and HDF5 to be loaded: " *
-          "`using KernelAbstractions, Lux, HDF5`")
+    error("compute_ani_forces_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
 end

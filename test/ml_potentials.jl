@@ -7,6 +7,24 @@
 # come from the lazily-downloaded ANI-2x artifact.
 const REF_DIR = joinpath(@__DIR__, "..", "data", "ani_reference")
 const ANI_DIR = Molly.ani2x_data_dir()
+const ANI_H5  = joinpath(ANI_DIR, "ani2x.h5")
+
+# Parse the 6mrr PDB with BioStructures, keeping only ANI-supported elements (optionally the
+# first `limit` of them). Returns (coords in Å as SVector{3,Float64}, element strings).
+function load_6mrr_atoms(valid_elements; limit=nothing)
+    pdb   = joinpath(@__DIR__, "..", "data", "6mrr_equil.pdb")
+    struc = read(pdb, BioStructures.PDBFormat)
+    coords_list = SVector{3,Float64}[]
+    elem_list   = String[]
+    for at in BioStructures.collectatoms(struc)
+        el = strip(BioStructures.element(at))
+        el in valid_elements || continue
+        push!(coords_list, SVector{3,Float64}(BioStructures.coords(at)...))
+        push!(elem_list, el)
+        limit !== nothing && length(elem_list) == limit && break
+    end
+    return coords_list, elem_list
+end
 
 # ============================================================================
 # Test 1: AEV validation against TorchANI for N₂ dimer
@@ -45,7 +63,6 @@ const ANI_DIR = Molly.ani2x_data_dir()
 
             @test size(aevs) == size(aev_ref)
             @test aevs ≈ aev_ref atol=1e-4
-            println("Max AEV deviation: ", maximum(abs.(aevs .- aev_ref)))
         end
     end
 end
@@ -82,7 +99,6 @@ end
         aev_len = n_sp * length(pot.aev_params.η_R) * length(pot.aev_params.r_s_R) +
                   n_pair * length(pot.aev_params.η_A) * length(pot.aev_params.r_s_A) * length(pot.aev_params.θ_s)
         @test aev_len == 1008
-        println("ANI-2x: r_c_R=", pot.aev_params.r_c_R, " Å, AEV length = ", aev_len)
     end
 end
 
@@ -115,7 +131,6 @@ end
             y, _  = Lux.apply(model, x, ps, st)
             @test size(y) == (1, 1)
         end
-        println("All element sub-networks produce shape (1,1) output ✓")
     end
 end
 
@@ -188,10 +203,6 @@ end
         # Newton's 3rd law: forces must sum to zero
         @test isapprox(fs_val[1] + fs_val[2], zeros(3); atol=1e-10)
 
-        println("Force on N1: ", round.(fs_val[1], sigdigits=6), " eV/Å")
-        println("Force on N2: ", round.(fs_val[2], sigdigits=6), " eV/Å")
-        println("Max force deviation: ",
-            maximum(abs.(reduce(vcat, fs_val) .- reduce(vcat, f_ref))), " eV/Å")
     end
 end
 
@@ -215,13 +226,14 @@ end
                        CubicBoundary(100.0u"Å"), u"eV/Å", u"eV", 14.0u"u")
         sys_nm = mksys([SVector(0.0,0.0,0.0), SVector(0.11,0.0,0.0)],
                        CubicBoundary(10.0), NoUnits, NoUnits, 14.0)
-        E_A  = ustrip(u"eV", potential_energy(sys_A))
-        E_nm = potential_energy(sys_nm)
-        @test E_nm ≈ E_A rtol=1e-4        # unitless-nm geometry gives the same energy
-        # Unitless forces are eV/nm = 10·(eV/Å), consistent with the nm coordinates.
-        F_A  = [ustrip.(u"eV/Å", f) for f in Molly.forces(sys_A)]
-        F_nm = Molly.forces(sys_nm)
-        @test F_nm[1] ≈ F_A[1] .* 10 rtol=1e-3
+        # Same physical energy; no-units convention returns kJ/mol, the u"eV" system returns eV.
+        E_A_kJ = ustrip(u"kJ * mol^-1", potential_energy(sys_A) * Unitful.Na)
+        E_nm   = potential_energy(sys_nm)                                    # kJ/mol
+        @test E_nm ≈ E_A_kJ rtol=1e-4
+        # Same physical force; no-units convention returns kJ/mol/nm.
+        F_A_kJ = [ustrip.(u"kJ * mol^-1 * nm^-1", f * Unitful.Na) for f in Molly.forces(sys_A)]
+        F_nm   = Molly.forces(sys_nm)                                        # kJ/mol/nm
+        @test F_nm[1] ≈ F_A_kJ[1] rtol=1e-3
     end
 end
 
@@ -262,8 +274,6 @@ end
         @test E_full < 0u"eV"
         # Ensemble mean and single member should agree within ~0.1 eV
         @test isapprox(ustrip(u"eV", E_full), ustrip(u"eV", E_0); atol=0.1)
-        println("Ensemble-averaged energy: ", round(typeof(E_full), E_full, sigdigits=8))
-        println("Single-member  energy:    ", round(typeof(E_0),    E_0,    sigdigits=8))
     end
 end
 
@@ -305,9 +315,6 @@ end
         E_full = potential_energy(sys_full)  # O(N²) fallback path
 
         @test isapprox(ustrip(u"eV", E_nbr), ustrip(u"eV", E_full); atol=1e-6)
-        println("Energy via neighbor list: ", E_nbr)
-        println("Energy via O(N²) path:   ", E_full)
-        println("Δ = ", abs(ustrip(u"eV", E_nbr) - ustrip(u"eV", E_full)), " eV")
     end
 end
 
@@ -345,15 +352,10 @@ end
         simulate!(sys, VelocityVerlet(dt=0.1u"fs"), 50)
         E_final = total_energy(sys)
 
-        # NVE: total energy should be approximately conserved. This is a fast in-suite smoke test
-        # (a stringent, longer conservation test lives in benchmark/ani_trajectory.jl: 3000 steps
-        # at 0.5 fs on a 300-atom 6mrr slice conserves to |ΔE|/|E0| ≈ 1.5e-7).
+        # NVE: total energy should be approximately conserved. This is a fast in-suite smoke test.
         drift = abs(ustrip(u"eV", E_final - E0)) / abs(ustrip(u"eV", E0))
         @test drift < 0.05   # < 5% relative drift over 50 steps at 0.1 fs
         @test norm(sys.coords[1] - sys.coords[2]) > 0.5u"Å"  # no explosion
-        println("Initial total energy: ", round(typeof(E0),      E0,      sigdigits=8))
-        println("Final   total energy: ", round(typeof(E_final), E_final, sigdigits=8))
-        println("Relative energy drift: ", round(drift * 100, sigdigits=3), " %")
     end
 end
 
@@ -387,7 +389,6 @@ end
 
         @test size(aevs) == size(aev_ref)
         @test aevs ≈ aev_ref atol=1e-4
-        println("H₂O AEV max deviation: ", maximum(abs.(aevs .- aev_ref)))
     end
 end
 
@@ -433,11 +434,7 @@ end
         # (O ≠ H) have no symmetry cancellation, so Float32 FD residual is ~1e-2.
         @test isapprox(sum(fs_val), zeros(3); atol=1e-2)
 
-        println("H₂O force on O:  ", round.(fs_val[1], sigdigits=6), " eV/Å")
-        println("H₂O force on H1: ", round.(fs_val[2], sigdigits=6), " eV/Å")
-        println("H₂O force on H2: ", round.(fs_val[3], sigdigits=6), " eV/Å")
         dev = maximum(maximum(abs.(fs_val[i] .- f_ref[i])) for i in 1:3)
-        println("Max force deviation: ", round(dev, sigdigits=4), " eV/Å")
     end
 end
 
@@ -446,67 +443,31 @@ end
 # ============================================================================
 
 @testset "ANIPotential: 6mrr full protein energy (all atoms)" begin
-    pdb_path = joinpath(@__DIR__, "..", "data", "6mrr_equil.pdb")
-    ref_path = joinpath(ANI_DIR, "6mrr_ani2x.json")
-    h5_path  = joinpath(ANI_DIR, "ani2x.h5")
-    if !isfile(pdb_path) || !isfile(h5_path)
-        @warn "6mrr_equil.pdb or ani2x.h5 not found — skipping"
-        @test_broken false
-    else
-        pot = ANIPotential(h5_path; ensemble_idx=1)
-        valid_elements = Set(keys(pot.species_map))
+    pot = ANIPotential(ANI_H5; ensemble_idx=1)
+    valid_elements = Set(keys(pot.species_map))
+    coords_list, elem_list = load_6mrr_atoms(valid_elements)
+    n = length(elem_list)
 
-        # Parse all atoms from PDB
-        coords_list = SVector{3,Float64}[]
-        elem_list   = String[]
-        open(pdb_path) do f
-            for line in eachline(f)
-                (startswith(line, "ATOM") || startswith(line, "HETATM")) || continue
-                length(line) < 78 && continue
-                elem = strip(line[77:78])
-                elem in valid_elements || continue
-                x = parse(Float64, line[31:38])
-                y = parse(Float64, line[39:46])
-                z = parse(Float64, line[47:54])
-                push!(coords_list, SVector(x, y, z))
-                push!(elem_list, elem)
-            end
-        end
+    nf = DistanceNeighborFinder(
+        eligible    = trues(n, n),
+        dist_cutoff = (Float64(pot.cutoff) + 1.0) * u"Å",
+    )
+    sys = System(
+        atoms           = [Atom(mass=1.0u"u") for _ in 1:n],
+        coords          = [c * u"Å" for c in coords_list],
+        boundary        = CubicBoundary(100.0u"Å"),
+        atoms_data      = [AtomData(element=e) for e in elem_list],
+        general_inters  = (ani=pot,),
+        neighbor_finder = nf,
+        force_units     = u"eV/Å",
+        energy_units    = u"eV",
+    )
 
-        n = length(elem_list)
-        println("6mrr: loaded $n valid ANI-2x atoms")
-
-        nf = DistanceNeighborFinder(
-            eligible    = trues(n, n),
-            dist_cutoff = (Float64(pot.cutoff) + 1.0) * u"Å",
-        )
-        sys = System(
-            atoms          = [Atom(mass=1.0u"u") for _ in 1:n],
-            coords         = [c * u"Å" for c in coords_list],
-            boundary       = CubicBoundary(100.0u"Å"),
-            atoms_data     = [AtomData(element=e) for e in elem_list],
-            general_inters = (ani=pot,),
-            neighbor_finder = nf,
-            force_units    = u"eV/Å",
-            energy_units   = u"eV",
-        )
-
-        E = potential_energy(sys)
-        @test E < 0u"eV"
-
-        # Cross-validate against TorchANI if reference is available
-        if isfile(ref_path)
-            ref = JSON3.read(read(ref_path, String))
-            E_ref = Float64(ref.energy_eV) * u"eV"
-            # Ensemble member 0 vs ensemble average: allow 1% relative tolerance
-            @test isapprox(ustrip(u"eV", E), ustrip(u"eV", E_ref); rtol=0.01)
-            println("  Julia E = $(round(typeof(E), E, sigdigits=8))")
-            println("  TorchANI E = $(round(typeof(E_ref), E_ref, sigdigits=8))")
-        end
-
-        t = @elapsed potential_energy(sys)
-        println("  time (warm):  $(round(t, sigdigits=3)) s  ($n atoms)")
-    end
+    E = potential_energy(sys)
+    @test E < 0u"eV"
+    # Cross-validate against TorchANI (single member vs ensemble: 1% tolerance)
+    ref = JSON3.read(read(joinpath(ANI_DIR, "6mrr_ani2x.json"), String))
+    @test isapprox(ustrip(u"eV", E), Float64(ref.energy_eV); rtol=0.01)
 end
 
 # ============================================================================
@@ -591,8 +552,6 @@ end
             buf      = lux.get_aev_buf(pot, n, Val(3), Float64)
             aevs_buf = lux.compute_aevs_buf!(buf, coords, species, nothing, bdy, p, n_sp)
             @test aevs_buf == aevs_serial   # bit-identical: per-atom rows are independent
-            println("Test15: threads=", Threads.nthreads(), " scratch_sets=", length(buf.scratch),
-                    " max|buffered-serial| AEV = ", maximum(abs.(aevs_buf .- aevs_serial)))
 
             # Batched-by-species NN energy matches the per-atom reference.
             sys = System(atoms=[Atom(mass=1.0u"u") for _ in 1:n],
@@ -612,8 +571,6 @@ end
             end
             E_ref = E_ha * Molly.HARTREE_TO_EV
             @test E_batched ≈ E_ref atol=1e-3
-            println("Test15: batched energy = ", E_batched, " | per-atom ref = ", E_ref,
-                    " | diff = ", abs(E_batched - E_ref))
         end
     end
 end
@@ -676,13 +633,11 @@ end
         nbrs   = Molly.find_neighbors(sys_nl)
         ka_fnl = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu, neighbors=nbrs)
         @test ka_fnl ≈ ref atol=1e-4
-        println("KA NL(finder) vs scalar max dev: ", maximum(abs.(ka_fnl .- ref)))
 
         # Write-reduced kernel (one workgroup per atom, shared-row accumulation).
         ka_wr = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu,
                                       neighbors=nbrs, write_reduce=true, workgroup=16)
         @test ka_wr ≈ ref atol=1e-4
-        println("KA write-reduce vs scalar max dev: ", maximum(abs.(ka_wr .- ref)))
     end
 end
 
@@ -725,7 +680,6 @@ end
         E_ka  = Molly.compute_ani_energy_ka(coords, species, pot, n_sp;
                                             backend=KernelAbstractions.CPU())
         @test isapprox(E_ref, E_ka; atol=0.05)   # ≤ ~5e-4 eV/atom (Float32 AEV gap)
-        println("Test17: E_ref=", E_ref, " E_ka=", E_ka, " diff=", abs(E_ref - E_ka))
     end
 end
 
@@ -762,7 +716,6 @@ end
             ref = Molly.compute_aevs(coords, species, nothing, bdy, p, n_sp)
             ka  = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu, boundary=bdy)
             @test ka ≈ ref atol=1e-4
-            println("Test18 $name: KA-vs-CPU max dev = ", maximum(abs.(ka .- ref)))
         end
 
         # The boundary must actually change the AEV vs an infinite (non-periodic) box.
@@ -788,8 +741,9 @@ end
     else
         pot  = ANIPotential(h5_path)          # full ensemble (matches TorchANI reference)
         n_sp = length(pot.species_map)
-        cpu  = KernelAbstractions.CPU()
-        bx   = CubicBoundary(100.0u"Å")
+        cpu   = KernelAbstractions.CPU()
+        bx    = CubicBoundary(100.0u"Å")   # for the System (high-level, unit-carrying)
+        bx_ul = CubicBoundary(100.0)       # unitless Å for the direct low-level kernel call
         M = Dict("H"=>1.008, "C"=>12.011, "N"=>14.007, "O"=>15.999,
                  "F"=>18.998, "S"=>32.06, "Cl"=>35.45)
 
@@ -805,7 +759,7 @@ end
                 atoms_data=[AtomData(element=e) for e in elems],
                 general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV")
 
-            f_ka  = Molly.compute_ani_forces_ka(crd, sp, pot, n_sp; backend=cpu, boundary=bx)
+            f_ka  = Molly.compute_ani_forces_ka(crd, sp, pot, n_sp; backend=cpu, boundary=bx_ul)
             f_sys = [ustrip.(u"eV/Å", f) for f in forces(sys)]   # AtomsCalculators path
 
             # Independent finite-difference forces from the energy: F = -dE/dr.
@@ -824,13 +778,45 @@ end
             @test maximum(maximum(abs.(f_ka[i]  .- f_fd[i]))  for i in eachindex(f_ka)) < 1e-2
             @test maximum(maximum(abs.(f_sys[i] .- f_ka[i]))  for i in eachindex(f_ka)) < 1e-4
             @test isapprox(sum(f_ka), zeros(SVector{3}); atol=1e-6)   # Newton's 3rd law
-            println("Test19 $jf: max|KA-TorchANI|=",
-                maximum(maximum(abs.(f_ka[i] .- f_ref[i])) for i in eachindex(f_ka)),
-                " max|KA-FD|=",
-                maximum(maximum(abs.(f_ka[i] .- f_fd[i])) for i in eachindex(f_ka)),
-                " max|forces(sys)-KA|=",
-                maximum(maximum(abs.(f_sys[i] .- f_ka[i])) for i in eachindex(f_ka)),
-                " |ΣF|=", maximum(abs.(sum(f_ka))))
         end
+    end
+end
+
+# ============================================================================
+# Test 20: GPU path from setup — build the System with GPU coordinates + the ANI interaction,
+#          then check that energy, forces and a short simulation match the CPU path. Runs over
+#          array_list (each GPU backend on CI); on a CPU-only machine it exercises Array.
+# ============================================================================
+@testset "ANIPotential: GPU path from setup matches CPU" begin
+    pot   = ANIPotential(ANI_H5; ensemble_idx=1)
+    valid = Set(keys(pot.species_map))
+    coords_list, elem_list = load_6mrr_atoms(valid; limit=200)
+    n = length(elem_list)
+    mksys(AT) = System(
+        atoms          = to_device([Atom(mass=1.0f0u"u") for _ in 1:n], AT),
+        coords         = to_device([SVector{3,Float32}(c...)u"Å" for c in coords_list], AT),
+        velocities     = to_device([zero(SVector{3,Float32})u"Å/ps" for _ in 1:n], AT),
+        boundary       = CubicBoundary(100.0f0u"Å"),
+        atoms_data     = [AtomData(element=e) for e in elem_list],
+        general_inters = (ani=pot,),
+        force_units    = u"eV/Å",
+        energy_units   = u"eV",
+    )
+    sys_cpu = mksys(Array)
+    E_cpu = ustrip(u"eV", potential_energy(sys_cpu))
+    F_cpu = [ustrip.(u"eV/Å", f) for f in forces(sys_cpu)]
+    for AT in array_list
+        sys = mksys(AT)
+        @test isapprox(ustrip(u"eV", potential_energy(sys)), E_cpu; rtol=1e-3)
+        F = [ustrip.(u"eV/Å", f) for f in from_device(forces(sys))]
+        @test maximum(norm.(F .- F_cpu)) < 1e-2
+    end
+    # Short simulation: CPU and each backend should reach the same coordinates.
+    sim_ref = mksys(Array); simulate!(sim_ref, VelocityVerlet(dt=0.1u"fs"), 10)
+    c_ref = [ustrip.(u"Å", c) for c in from_device(sim_ref.coords)]
+    for AT in array_list
+        sim = mksys(AT); simulate!(sim, VelocityVerlet(dt=0.1u"fs"), 10)
+        c = [ustrip.(u"Å", c) for c in from_device(sim.coords)]
+        @test maximum(norm.(c .- c_ref)) < 1e-2
     end
 end
