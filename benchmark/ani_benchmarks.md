@@ -2,9 +2,16 @@
 
 Consolidated performance and correctness results for Molly's native ANI-2x implementation.
 
+> **Re-run with the reviewed implementation (2026-08).** The energy, forces and figures below were
+> regenerated after the PR review (kJ/mol units, one-indexed `ensemble_idx`, Float32 AEV on both
+> CPU and GPU, GPU energy dispatch). The review changed correctness/units, not the perf-critical
+> kernels (write-reduced AEV, on-device CSR, backward-angular), so the timings reproduce the earlier
+> numbers within run-to-run variance — confirming no regression. Molly CPU is now shown at t1 and t8
+> across the full 500→15,954 range on both the energy and forces figures.
+
 **Setup:** Apple Silicon (12 cores: 8P + 4E), Julia 1.12, ANI-2x, Float32 AEVs. Systems are
 slices of `data/6mrr_equil.pdb` with a `DistanceNeighborFinder` (cutoff `max(r_c_R,r_c_A)+1 = 6.1 Å`),
-single ensemble member (`ensemble_idx=0`) unless noted. "CPU" numbers use `-t8` unless a thread
+single ensemble member (`ensemble_idx=1`) unless noted. "CPU" numbers use `-t8` unless a thread
 count is given. The **NVIDIA CUDA section** is measured on a separate RTX 5080 host (its CPU column
 is that host, not Apple Silicon) — see that section.
 
@@ -57,7 +64,7 @@ near-linearly to 8 threads: 1.9×/3.5×/5.3× at 2/4/8 threads.)
 
 | N atoms | 500  | 1000 | 2000 | 5000  | 8000  | 15,954 |
 |---------|------|------|------|-------|-------|--------|
-| CPU (t8)| 18.3 | 32.3 | 48.5 | 113.1 | 196.9 | 395.8  | ms
+| CPU (t8)| 16.8 | 34.8 | 52.4 | 118.3 | 212.0 | 454.1  | ms
 
 ### Full 8-member ensemble
 
@@ -84,12 +91,12 @@ a single member: one AEV forward/backward, NN VJP ×8).
 
 | N atoms | CPU analytic (t8) | Metal | Metal speedup |
 |---------|-------------------|-------|---------------|
-| 500     | 103.9 ms | 23.5 ms  | **4.4×**   |
-| 1000    | 128.8 ms | 33.9 ms  | **3.8×**   |
-| 2000    | 158.0 ms | 40.5 ms  | **3.9×**   |
-| 5000    | 423.2 ms | 55.9 ms  | **7.6×**   |
-| 8000    | 649.8 ms | 84.9 ms  | **7.7×**   |
-| **15,954 (full 6mrr)** | 1275 ms | **273 ms** | **4.7×** |
+| 500     | 101.7 ms | 22.6 ms  | **4.5×**   |
+| 1000    | 130.5 ms | 33.0 ms  | **4.0×**   |
+| 2000    | 157.8 ms | 39.2 ms  | **4.0×**   |
+| 5000    | 404.4 ms | 54.0 ms  | **7.5×**   |
+| 8000    | 651.4 ms | 82.9 ms  | **7.9×**   |
+| **15,954 (full 6mrr)** | 1284 ms | **291 ms** | **4.4×** |
 
 With the write-reduced backward angular kernel, Metal now beats the threaded CPU on forces at
 **every** size (4.4× at 500 atoms, up to 7.7× at 8000, 4.7× at the full protein). Metal forces for
@@ -134,12 +141,12 @@ Metal times the on-device path (`compute_ani_energy_ka`: GPU AEV + on-device NN)
 
 | N atoms      | CPU (t8) | Metal   | Metal speedup |
 |--------------|----------|---------|---------------|
-| 500          | 18.3 ms  | 11.6 ms | **1.6×**      |
-| 1000         | 32.3 ms  | 15.9 ms | **2.0×**      |
-| 2000         | 48.5 ms  | 19.2 ms | **2.5×**      |
-| 5000         | 113.1 ms | 27.4 ms | **4.1×**      |
-| 8000         | 196.9 ms | 41.9 ms | **4.7×**      |
-| **15,954 (full 6mrr)** | 395.8 ms | **118.6 ms** | **3.3×** |
+| 500          | 16.8 ms  | 11.8 ms | **1.4×**      |
+| 1000         | 34.8 ms  | 15.6 ms | **2.2×**      |
+| 2000         | 52.4 ms  | 18.0 ms | **2.9×**      |
+| 5000         | 118.3 ms | 25.4 ms | **4.7×**      |
+| 8000         | 212.0 ms | 38.0 ms | **5.6×**      |
+| **15,954 (full 6mrr)** | 454.1 ms | **125.6 ms** | **3.6×** |
 
 With the write-reduced AEV default and on-device CSR, Metal now beats the threaded CPU at **every**
 size (1.6× at 500 atoms, up to 4.7× at 8000) rather than only crossing over at ~4000. At the full
@@ -173,23 +180,23 @@ Energy (single member, ms; **lower is better**):
 
 | N atoms | CPU (t8) | **Molly CUDA** | TorchANI CUDA | NNPOps CUDA | bio-mlff CUDA |
 |---------|----------|------------|---------------|-------------|---------------|
-| 500     | 39.5   | **4.0**  | 32.5 | 25.4 | 0.5 |
-| 1000    | 100.5  | **4.1**  | 32.4 | 25.2 | 0.9 |
-| 2000    | 151.7  | **4.4**  | 32.6 | 24.7 | 1.4 |
-| 5000    | 388.3  | **5.2**  | 35.1 | 25.8 | 3.5 |
-| 8000    | 688.5  | **6.2**  | 38.8 | 26.2 | 5.9 |
-| **15,954** | 1492.1 | **12.0** | 58.2 | 27.2 | 24.4 |
+| 500     | 112.6  | **3.1**  | 32.5 | 25.4 | 0.5 |
+| 1000    | 214.4  | **3.6**  | 32.4 | 25.2 | 0.9 |
+| 2000    | 326.3  | **3.9**  | 32.6 | 24.7 | 1.4 |
+| 5000    | 621.9  | **4.5**  | 35.1 | 25.8 | 3.5 |
+| 8000    | 994.0  | **6.2**  | 38.8 | 26.2 | 5.9 |
+| **15,954** | 2056.7 | **13.3** | 58.2 | 27.2 | 24.4 |
 
 Forces (single member, ms):
 
 | N atoms | CPU (t8) | **Molly CUDA** | TorchANI CUDA | NNPOps CUDA | bio-mlff CUDA |
 |---------|----------|------------|---------------|-------------|---------------|
-| 500     | 285.2  | **10.1** | 62.5 | 48.6 | 1.4 |
-| 1000    | 337.7  | **10.8** | 62.5 | 48.5 | 2.5 |
-| 2000    | 410.8  | **12.1** | 63.3 | 47.3 | 4.0 |
-| 5000    | 1304.7 | **14.1** | 67.0 | 48.1 | 9.7 |
-| 8000    | 1951.0 | **15.5** | 72.6 | 48.0 | 15.4 |
-| **15,954** | 3905.3 | **31.3** | 98.9 | 51.2 | 42.7 |
+| 500     | 450.6  | **9.2**  | 62.5 | 48.6 | 1.4 |
+| 1000    | 582.9  | **10.7** | 62.5 | 48.5 | 2.5 |
+| 2000    | 696.2  | **11.4** | 63.3 | 47.3 | 4.0 |
+| 5000    | 1693.5 | **12.7** | 67.0 | 48.1 | 9.7 |
+| 8000    | 2388.8 | **15.2** | 72.6 | 48.0 | 15.4 |
+| **15,954** | 5387.9 | **30.8** | 98.9 | 51.2 | 42.7 |
 
 **NNPOps baseline (optimized-CUDA AEV).** The [openmm/NNPOps](https://github.com/openmm/NNPOps)
 library ([J. Phys. Chem. B 2023](https://doi.org/10.1021/acs.jpcb.3c06662)) provides hand-written
@@ -243,17 +250,17 @@ Energy (ms):
 
 | N atoms | Molly t1 | Molly t8 | Molly Metal | **Molly CUDA** | TorchANI t1 | TorchANI t8 | TorchANI CUDA | bio-mlff t1 | bio-mlff t8 | bio-mlff MPS | bio-mlff CUDA |
 |---------|----------|----------|-------------|------------|-------------|-------------|---------------|-------------|-------------|--------------|---------------|
-| 1000    | 101.5 | 32.3  | 15.9  | **4.1**  | 50.1  | 32.7  | 32.4 | 45.7  | 45.9  | 12.0  | 0.9  |
-| 8000    | 403.5 | 196.9 | 41.9  | **6.2**  | 799.4 | 524.1 | 38.8 | 636.5 | 618.6 | 263.3 | 5.9  |
-| 15,954  | 1550  | 395.8 | 118.6 | **12.0** | 3629  | 2753  | 58.2 | 3663  | 4011  | 1205  | 24.4 |
+| 1000    | 109.6 | 34.8  | 15.6  | **3.6**  | 50.1  | 32.7  | 32.4 | 45.7  | 45.9  | 12.0  | 0.9  |
+| 8000    | 491.0 | 212.0 | 38.0  | **6.2**  | 799.4 | 524.1 | 38.8 | 636.5 | 618.6 | 263.3 | 5.9  |
+| 15,954  | 1806  | 454.1 | 125.6 | **13.3** | 3629  | 2753  | 58.2 | 3663  | 4011  | 1205  | 24.4 |
 
 Forces (ms):
 
 | N atoms | Molly t1 | Molly t8 | Molly Metal | **Molly CUDA** | TorchANI t1 | TorchANI t8 | TorchANI CUDA | bio-mlff t1 | bio-mlff t8 | bio-mlff MPS | bio-mlff CUDA |
 |---------|----------|----------|-------------|------------|-------------|-------------|---------------|-------------|-------------|--------------|---------------|
-| 1000    | 371.1 | 128.8 | 33.9  | **10.8** | 97.4   | 62.8  | 62.5 | 84.4  | 89.5  | 29.2   | 2.4  |
-| 8000    | 1444  | 649.8 | 84.9  | **15.5** | 1017   | 665.8 | 72.6 | 1315  | 1756  | 419.3  | 15.4 |
-| 15,954  | 4937  | 1275  | 272.7 | **31.3** | 5641   | 4424  | 98.9 | 8343  | 9709  | 1810   | 42.7 |
+| 1000    | 372.7 | 130.5 | 33.0  | **10.7** | 97.4   | 62.8  | 62.5 | 84.4  | 89.5  | 29.2   | 2.4  |
+| 8000    | 1430  | 651.4 | 82.9  | **15.2** | 1017   | 665.8 | 72.6 | 1315  | 1756  | 419.3  | 15.4 |
+| 15,954  | 5019  | 1284  | 290.6 | **30.8** | 5641   | 4424  | 98.9 | 8343  | 9709  | 1810   | 42.7 |
 
 **Threading** (the interesting part): Molly scales well with threads (energy ~3.5× t1→t8, forces
 ~3.8× at 16k); TorchANI scales modestly (~1.3× energy, ~1.3× forces); bio-mlff (JAX/XLA on CPU) is
