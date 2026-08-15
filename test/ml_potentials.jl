@@ -349,7 +349,7 @@ end
         random_velocities!(sys, 300.0u"K"; rng=MersenneTwister(42))
 
         E0     = total_energy(sys)
-        simulate!(sys, VelocityVerlet(dt=0.1u"fs"), 50)
+        simulate!(sys, VelocityVerlet(dt=0.1f0u"fs"), 50)
         E_final = total_energy(sys)
 
         # NVE: total energy should be approximately conserved. This is a fast in-suite smoke test.
@@ -608,17 +608,19 @@ end
         bdy     = CubicBoundary(200.0)
         cpu     = KernelAbstractions.CPU()
 
-        ref = Molly.compute_aevs(coords, species, nothing, bdy, p, n_sp)
+        ref      = Molly.compute_aevs(coords, species, nothing, bdy, p, n_sp)
+        coords32 = [SVector{3,Float32}(c) for c in coords]   # Metal is Float32-only
 
         # All-pairs and neighbour-list KA kernels must match the scalar CPU path on every
-        # backend — CPU and each GPU in array_list (kernels can diverge on GPU).
+        # backend — CPU and each GPU in array_list (kernels can diverge on GPU). Float32 coords
+        # so the same test runs on Metal; the tolerance absorbs the Float32-vs-Float64 difference.
         for AT in array_list
-            cd = AT(coords); sp = AT(species)
+            cd = AT(coords32); sp = AT(species)
             be = KernelAbstractions.get_backend(cd)
             ka_ap = Array(Molly.compute_aevs_ka(cd, sp, p, n_sp; backend=be))
             ka_nl = Array(Molly.compute_aevs_ka(cd, sp, p, n_sp; backend=be, neighbors=:auto))
-            @test ka_ap ≈ ref atol=1e-4
-            @test ka_nl ≈ ref atol=1e-4
+            @test ka_ap ≈ ref atol=1e-3
+            @test ka_nl ≈ ref atol=1e-3
         end
 
         # Production path: feed the kernel a real finder NeighborList (what a GPU
@@ -792,8 +794,9 @@ end
     valid = Set(keys(pot.species_map))
     coords_list, elem_list = load_6mrr_atoms(valid; limit=200)
     n = length(elem_list)
+    mkatom() = Atom(mass=1.0f0u"u", charge=0.0f0, σ=0.0f0u"nm", ϵ=0.0f0u"kJ * mol^-1", λ=0.0f0)
     mksys(AT) = System(
-        atoms          = to_device([Atom(mass=1.0f0u"u") for _ in 1:n], AT),
+        atoms          = to_device([mkatom() for _ in 1:n], AT),
         coords         = to_device([SVector{3,Float32}(c...)u"Å" for c in coords_list], AT),
         velocities     = to_device([zero(SVector{3,Float32})u"Å/ps" for _ in 1:n], AT),
         boundary       = CubicBoundary(100.0f0u"Å"),
@@ -812,10 +815,10 @@ end
         @test maximum(norm.(F .- F_cpu)) < 1e-2
     end
     # Short simulation: CPU and each backend should reach the same coordinates.
-    sim_ref = mksys(Array); simulate!(sim_ref, VelocityVerlet(dt=0.1u"fs"), 10)
+    sim_ref = mksys(Array); simulate!(sim_ref, VelocityVerlet(dt=0.1f0u"fs"), 10)
     c_ref = [ustrip.(u"Å", c) for c in from_device(sim_ref.coords)]
     for AT in array_list
-        sim = mksys(AT); simulate!(sim, VelocityVerlet(dt=0.1u"fs"), 10)
+        sim = mksys(AT); simulate!(sim, VelocityVerlet(dt=0.1f0u"fs"), 10)
         c = [ustrip.(u"Å", c) for c in from_device(sim.coords)]
         @test maximum(norm.(c .- c_ref)) < 1e-2
     end
