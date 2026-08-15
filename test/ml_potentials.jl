@@ -640,6 +640,15 @@ end
         ka_wr = Molly.compute_aevs_ka(coords, species, p, n_sp; backend=cpu,
                                       neighbors=nbrs, write_reduce=true, workgroup=16)
         @test ka_wr ≈ ref atol=1e-4
+
+        # The finder NeighborList → device CSR path (nl_to_csr_device) must also run on the GPU
+        # backends, where it copies the host pair list onto the device.
+        for AT in array_list
+            cd = AT(coords32); sp = AT(species)
+            be = KernelAbstractions.get_backend(cd)
+            ka_dev = Array(Molly.compute_aevs_ka(cd, sp, p, n_sp; backend=be, neighbors=nbrs))
+            @test ka_dev ≈ ref atol=1e-3
+        end
     end
 end
 

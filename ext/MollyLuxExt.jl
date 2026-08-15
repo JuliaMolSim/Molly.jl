@@ -1351,7 +1351,10 @@ function nl_to_csr_device(neighbors, n_atoms::Int, ka_backend)
     # onto the compute backend.
     npairs = length(neighbors)
     pairs  = KernelAbstractions.allocate(ka_backend, eltype(neighbors.list), npairs)
-    copyto!(pairs, @view neighbors.list[1:npairs])              # device pair list (valid prefix)
+    # Copy a contiguous host Array (not a @view) — copyto! from a SubArray scalar-indexes on GPU
+    # (e.g. Metal). Slice only when the buffer is longer than the valid pair count.
+    src = length(neighbors.list) == npairs ? neighbors.list : neighbors.list[1:npairs]
+    copyto!(pairs, src)                                          # device pair list (valid prefix)
     deg = KernelAbstractions.zeros(ka_backend, Int32, n_atoms)
     csr_degree_kernel!(ka_backend, 256)(deg, pairs; ndrange = npairs)
     KernelAbstractions.synchronize(ka_backend)
