@@ -52,9 +52,10 @@ Molly.ani2x_data_dir() = artifact"ani2x"
 const NM_TO_ANGSTROM = 10
 
 # In-place conversion of coordinates to unitless Å in a pre-allocated buffer (zero allocations).
+# The unit check is on the element type (no indexing), so it also works for device arrays.
 function coords_to_angstrom_into!(out::AbstractVector{SVector{D,TF}},
                                   coords::AbstractVector{SVector{D,T}}) where {D, TF, T}
-    if unit(first(coords)[1]) == NoUnits   # unitless Molly coords are nm
+    if T <: Real   # unitless Molly coords are nm
         @inbounds for i in eachindex(coords)
             out[i] = SVector{D,TF}(coords[i]) * TF(NM_TO_ANGSTROM)
         end
@@ -65,10 +66,10 @@ function coords_to_angstrom_into!(out::AbstractVector{SVector{D,TF}},
     end
 end
 
-# Non-mutating conversion of coordinates to unitless Å, staying on the coords' device.
-# Unitless Molly coords are treated as nm.
+# Non-mutating conversion of coordinates to unitless Å, staying on the coords' device. Unitless
+# Molly coords are treated as nm. Unit check is on the element type so this works on GPU arrays.
 function coords_to_angstrom(coords)
-    unit(first(coords)[1]) == NoUnits ? coords .* NM_TO_ANGSTROM : ustrip_vec.(u"Å", coords)
+    eltype(eltype(coords)) <: Real ? coords .* NM_TO_ANGSTROM : ustrip_vec.(u"Å", coords)
 end
 
 # Convert a boundary to unitless Å (unitless side lengths are treated as nm).
