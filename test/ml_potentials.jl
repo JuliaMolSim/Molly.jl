@@ -787,39 +787,42 @@ end
 # ============================================================================
 # Test 20: GPU path from setup — build the System with GPU coordinates + the ANI interaction,
 #          then check that energy, forces and a short simulation match the CPU path. Runs over
-#          array_list (each GPU backend on CI); on a CPU-only machine it exercises Array.
+#          array_list (each GPU backend on CI); on a CPU-only machine it exercises Array. Uses a
+#          unitless Float32 system (nm coordinates, Molly convention) so it also runs on Metal,
+#          which is Float32-only and cannot compile broadcasts over unit-carrying arrays.
 # ============================================================================
 @testset "ANIPotential: GPU path from setup matches CPU" begin
     pot   = ANIPotential(ANI_H5; ensemble_idx=1)
     valid = Set(keys(pot.species_map))
     coords_list, elem_list = load_6mrr_atoms(valid; limit=200)
     n = length(elem_list)
-    mkatom() = Atom(mass=1.0f0u"u", charge=0.0f0, σ=0.0f0u"nm", ϵ=0.0f0u"kJ * mol^-1", λ=0.0f0)
+    coords_nm = [SVector{3,Float32}(c ./ 10) for c in coords_list]   # Å → nm (unitless)
+    mkatom() = Atom(mass=1.0f0, charge=0.0f0, σ=0.0f0, ϵ=0.0f0, λ=0.0f0)
     mksys(AT) = System(
         atoms          = to_device([mkatom() for _ in 1:n], AT),
-        coords         = to_device([SVector{3,Float32}(c...)u"Å" for c in coords_list], AT),
-        velocities     = to_device([zero(SVector{3,Float32})u"Å/ps" for _ in 1:n], AT),
-        boundary       = CubicBoundary(100.0f0u"Å"),
+        coords         = to_device(copy(coords_nm), AT),
+        velocities     = to_device([zero(SVector{3,Float32}) for _ in 1:n], AT),
+        boundary       = CubicBoundary(10.0f0),                      # 10 nm
         atoms_data     = [AtomData(element=e) for e in elem_list],
         general_inters = (ani=pot,),
-        force_units    = u"eV/Å",
-        energy_units   = u"eV",
+        force_units    = NoUnits,
+        energy_units   = NoUnits,
     )
     sys_cpu = mksys(Array)
-    E_cpu = ustrip(u"eV", potential_energy(sys_cpu))
-    F_cpu = [ustrip.(u"eV/Å", f) for f in forces(sys_cpu)]
+    E_cpu = potential_energy(sys_cpu)                                # kJ/mol (unitless)
+    F_cpu = forces(sys_cpu)                                          # kJ/mol/nm
+    maxf  = maximum(norm.(F_cpu))
     for AT in array_list
         sys = mksys(AT)
-        @test isapprox(ustrip(u"eV", potential_energy(sys)), E_cpu; rtol=1e-3)
-        F = [ustrip.(u"eV/Å", f) for f in from_device(forces(sys))]
-        @test maximum(norm.(F .- F_cpu)) < 1e-2
+        @test isapprox(potential_energy(sys), E_cpu; rtol=1e-3)
+        F = from_device(forces(sys))
+        @test maximum(norm.(F .- F_cpu)) < 1e-2 * maxf
     end
     # Short simulation: CPU and each backend should reach the same coordinates.
-    sim_ref = mksys(Array); simulate!(sim_ref, VelocityVerlet(dt=0.1f0u"fs"), 10)
-    c_ref = [ustrip.(u"Å", c) for c in from_device(sim_ref.coords)]
+    sim_ref = mksys(Array); simulate!(sim_ref, VelocityVerlet(dt=0.0005f0), 10)
+    c_ref = from_device(sim_ref.coords)
     for AT in array_list
-        sim = mksys(AT); simulate!(sim, VelocityVerlet(dt=0.1f0u"fs"), 10)
-        c = [ustrip.(u"Å", c) for c in from_device(sim.coords)]
-        @test maximum(norm.(c .- c_ref)) < 1e-2
+        sim = mksys(AT); simulate!(sim, VelocityVerlet(dt=0.0005f0), 10)
+        @test maximum(norm.(from_device(sim.coords) .- c_ref)) < 1e-3
     end
 end
