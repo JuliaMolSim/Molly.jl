@@ -15,7 +15,7 @@ const H5_PATH  = joinpath(@__DIR__, "..", "data", "ani_reference", "ani2x.h5")
 const PDB_PATH = joinpath(@__DIR__, "..", "data", "6mrr_equil.pdb")
 const SIZES    = parse.(Int, split(get(ENV, "ANI_SIZES", "500,1000,2000"), ","))
 
-pot   = ANIPotential(H5_PATH; ensemble_idx=0)
+pot   = ANIPotential(H5_PATH; ensemble_idx=1)
 p     = pot.aev_params
 n_sp  = length(pot.species_map)
 valid = Set(keys(pot.species_map))

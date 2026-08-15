@@ -55,7 +55,7 @@ logint = parse(Int,     get(ENV, "ANI_TRAJ_LOG",   "20"))
 temp0  = parse(Float64, get(ENV, "ANI_TRAJ_TEMP",  "300"))
 nbrint = parse(Int,     get(ENV, "ANI_TRAJ_NBR",   "10"))
 
-pot   = ANIPotential(H5_PATH; ensemble_idx=0)      # single member
+pot   = ANIPotential(H5_PATH; ensemble_idx=1)      # single member
 n_sp  = length(pot.species_map)
 valid = Set(keys(pot.species_map))
 println("Metal functional: ", Metal.functional())

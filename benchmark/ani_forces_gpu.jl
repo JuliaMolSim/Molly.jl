@@ -13,7 +13,7 @@ include(joinpath(@__DIR__, "ani_bench_common.jl"))
 
 const REF = joinpath(@__DIR__, "..", "data", "ani_reference")
 ens_full  = get(ENV, "ANI_ENSEMBLE", "0") == "full"
-pot   = ens_full ? ANIPotential(joinpath(REF, "ani2x.h5")) : ANIPotential(joinpath(REF, "ani2x.h5"); ensemble_idx=0)
+pot   = ens_full ? ANIPotential(joinpath(REF, "ani2x.h5")) : ANIPotential(joinpath(REF, "ani2x.h5"); ensemble_idx=1)
 n_sp  = length(pot.species_map)
 valid = Set(keys(pot.species_map))
 

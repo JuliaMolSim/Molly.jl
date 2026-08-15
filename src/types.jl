@@ -23,9 +23,7 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator,
-    AbstractMLPotential,
-    ANIPotential
+    ASECalculator
 
 # This is not the only place that the default float is set, for example
 #   some function argument defaults are Float64
@@ -49,12 +47,26 @@ Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
 
+# Whether a pairwise interaction uses velocities in its force/potential energy calculation
+pairwise_uses_velocity(inter) = false
+
+@inline any_uses_velocity(::Union{Tuple{}, @NamedTuple{}}) = false
+@inline function any_uses_velocity(inters)
+    return pairwise_uses_velocity(first(inters)) || any_uses_velocity(Base.tail(inters))
+end
+
+maybe_velocity(velocities, i, ::Val{true}) = velocities[i]
+maybe_velocity(velocities, i, ::Val{false}) = nothing
+
 """
     InteractionList1Atoms(is, inters)
     InteractionList1Atoms(is, inters, types, data=nothing)
     InteractionList1Atoms(inter_type)
 
 A list of specific interactions that involve one atom such as position restraints.
+
+Note that the virial contribution from these interactions is treated as zero, since only
+one coordinate is available and the virial in periodic space requires displacements.
 """
 struct InteractionList1Atoms{I, T, D} <: SpecificInteractionList{1}
     is::I
@@ -398,6 +410,10 @@ function hash(a::InteractionList5Atoms, h::UInt)
     return hash(is, hash(js, hash(ks, hash(ls, hash(ms, hash(inters, hash(types, hash(a.data, h))))))))
 end
 
+function Base.show(io::IO, sil::T) where T <: SpecificInteractionList
+    print(io, nameof(T), " with ", length(sil.is), " interactions of type ", eltype(sil.inters))
+end
+
 function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
     inters_grad = to_device(inject_interaction.(from_device(inter.inters),
                                 inter.types, (params_dic,)), AT)
@@ -440,7 +456,7 @@ default values.
 The types used should be bits types if the GPU is going to be used.
 
 # Arguments
-- `index::Int=1`: the index of the atom in the system. This only needs to be set if
+- `index::Int32=1`: the index of the atom in the system. This only needs to be set if
     it is used in the interactions. The order of atoms is determined by their order
     in the atom vector.
 - `atom_type::T=1`: the type of the atom. This only needs to be set if
@@ -452,21 +468,32 @@ The types used should be bits types if the GPU is going to be used.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 - `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
     transformations.
-- `alch_role::Int=CoreRole`: Role of the atom in an alchemical transformation.
+- `alch_role::Int32=CoreRole`: Role of the atom in an alchemical transformation.
 """
-@kwdef struct Atom{T, M, C, S, E, L}
-    index::Int = 1
-    atom_type::T = 1
-    mass::M = 1.0u"g/mol"
-    charge::C = 0.0
-    σ::S = 0.0u"nm"
-    ϵ::E = 0.0u"kJ * mol^-1"
-    λ::L = 1.0
-    alch_role::Int = CoreRole
+struct Atom{T, M, C, S, E, L} # With Float32 numeric fields this fits into 32 bytes
+    index::Int32
+    atom_type::T
+    mass::M
+    charge::C
+    σ::S
+    ϵ::E
+    λ::L
+    alch_role::Int32
+end
+
+# Accept any integer types for the Int32 index/alch_role fields
+function Atom(index, atom_type::T, mass::M, charge::C, σ::S, ϵ::E,
+              λ::L, alch_role) where {T, M, C, S, E, L}
+    return Atom{T, M, C, S, E, L}(index, atom_type, mass, charge, σ, ϵ, λ, alch_role)
+end
+
+function Atom(; index=Int32(1), atom_type=Int32(1), mass=1.0u"g/mol", charge=0.0,
+              σ=0.0u"nm", ϵ=0.0u"kJ * mol^-1", λ=1.0, alch_role=CoreRole)
+    return Atom(index, atom_type, mass, charge, σ, ϵ, λ, alch_role)
 end
 
 function Base.zero(::Atom{T, M, C, S, E, L}) where {T, M, C, S, E, L}
-    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), CoreRole)
+    return Atom(Int32(0), zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), CoreRole)
 end
 
 function Base.:+(a1::Atom, a2::Atom)
@@ -617,9 +644,17 @@ function Base.push!(nl::NeighborList, element)
 end
 
 function Base.append!(nl::NeighborList, list)
-    for element in list
-        push!(nl, element)
+    n_new = length(list)
+    n_avail = min(length(nl.list) - nl.n, n_new)
+    @inbounds if n_avail == n_new
+        nl.list[(nl.n + 1):(nl.n + n_avail)] .= list
+    elseif n_avail > 0
+        nl.list[(nl.n + 1):(nl.n + n_avail)] .= list[1:n_avail]
+        append!(nl.list, list[(n_avail + 1):end])
+    else # n_avail == 0
+        append!(nl.list, list)
     end
+    nl.n += n_new
     return nl
 end
 
@@ -653,11 +688,14 @@ Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 # CUDA launch configuration
+const CUDA_LAUNCH_UNSET = 0
+const CUDA_TILE_THREADS_UNSET = (0, 0)
+
 struct CUDALaunchConfig
-    force_block_y::Union{Nothing, Int}
-    force_maxregs::Union{Nothing, Int}
-    tile_threads::Union{Nothing, NTuple{2, Int}}
-    energy_block_y::Union{Nothing, Int}
+    force_block_y::Int
+    force_maxregs::Int
+    tile_threads::NTuple{2, Int}
+    energy_block_y::Int
 end
 
 function CUDALaunchConfig(;
@@ -677,7 +715,35 @@ function CUDALaunchConfig(;
         all(>(0), tile_threads) || throw(ArgumentError("tile_threads entries must be positive"))
     end
 
-    return CUDALaunchConfig(force_block_y, force_maxregs, tile_threads, energy_block_y)
+    tile_threads_raw = tile_threads === nothing ?
+                       CUDA_TILE_THREADS_UNSET :
+                       (Int(tile_threads[1]), Int(tile_threads[2]))
+    return CUDALaunchConfig(
+        Int(something(force_block_y, CUDA_LAUNCH_UNSET)),
+        Int(something(force_maxregs, CUDA_LAUNCH_UNSET)),
+        tile_threads_raw,
+        Int(something(energy_block_y, CUDA_LAUNCH_UNSET)),
+    )
+end
+
+@inline function cuda_force_block_y(config::CUDALaunchConfig)
+    value = config.force_block_y
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_force_maxregs(config::CUDALaunchConfig)
+    value = config.force_maxregs
+    return iszero(value) ? nothing : value
+end
+
+@inline function cuda_tile_threads(config::CUDALaunchConfig)
+    value = config.tile_threads
+    return value == CUDA_TILE_THREADS_UNSET ? nothing : value
+end
+
+@inline function cuda_energy_block_y(config::CUDALaunchConfig)
+    value = config.energy_block_y
+    return iszero(value) ? nothing : value
 end
 
 """
@@ -897,7 +963,7 @@ function System(;
     VF = typeof(virtual_site_flags)
     n_virtual_sites = sum(virtual_site_flags)
 
-    df = n_dof(D, n_atoms - n_virtual_sites, boundary)
+    df = calculate_n_dof(D, n_atoms - n_virtual_sites, boundary)
     if length(constraints) > 0
         for ca in constraints
             for cluster_type in cluster_keys(ca)
@@ -1136,6 +1202,10 @@ single thermodynamic state across all generalized ensemble methods.
 - `pressure=nothing`: Explicit target pressure. If `nothing`, it is inferred from the integrator's barostat.
 - `name::AbstractString=nothing`: A label for the state. If not provided, a default name based on 
     the temperature and pressure is generated.
+
+If `system` has loggers, construction emits a warning: generalized ensemble
+methods ignore `ThermoState` system loggers and use loggers attached to the
+appropriate generalized-ensemble object instead.
 """
 struct ThermoState{S, I, B, P}
     system::S
@@ -1148,6 +1218,11 @@ end
 function ThermoState(sys::System{D, AT, FT}, integrator; 
                      temperature=nothing, pressure=nothing,
                      name::Union{Nothing, AbstractString}=nothing) where {D, AT, FT}
+    if !isempty(values(sys.loggers))
+        @warn "ThermoState was constructed with a system that has loggers. " *
+              "Generalized ensemble methods ignore ThermoState system loggers; " *
+              "pass loggers to AWHSimulation, TSSSimulation or ReplicaSystem instead."
+    end
 
     temp_source = temperature
     press_source = pressure
@@ -1217,7 +1292,7 @@ end
 A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD).
 
 Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles 
-an [`AlchemicalPartition`](@ref) from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed 
+an `AlchemicalPartition` from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed
 topological and interactive components (e.g., bulk solvent) from state-specific perturbations. 
 During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
 necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
@@ -1243,8 +1318,11 @@ construction where `n` is the number of threads to be used per replica.
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
     to duplicating the boundary of the reference system (the first `ThermoState`).
-- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: The logger used to record
-    the exchange of replicas.
+- `replica_loggers=nothing`: Logger collections for each replica. Stateful logger objects and
+    `TrajectoryWriter` file paths cannot be shared across replicas.
+- `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
+    a default [`ReplicaExchangeLogger`](@ref) is used.
+- `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
 - `data::DA=nothing`: Arbitrary data associated with the replica system.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
     energies for perturbed state differences. Generally improves performance.
@@ -1264,6 +1342,8 @@ mutable struct ReplicaSystem{D, AT, T, P, B, I, C, V, BO, NF, RL, SPI, SSI, SGI,
     state_general_inters::SGI
     state_indices::Vector{Int}
     exchange_logger::EL
+    current_step::Int
+    initial_log_pending::Bool
     data::DA
 end
 
@@ -1274,10 +1354,12 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        replica_neighbor_finders=nothing,
                        replica_loggers=nothing,
                        exchange_logger=nothing,
+                       initial_step::Integer=0,
                        data=nothing,
                        reuse_neighbors::Bool=true)
     
     n_replicas = length(thermo_states)
+    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
     
     if length(replica_coords) != n_replicas
         throw(ArgumentError("Number of replica_coords ($(length(replica_coords))) " *
@@ -1320,6 +1402,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         throw(ArgumentError("Number of loggers arrays ($(length(replica_loggers))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
+    validate_replica_loggers(replica_loggers)
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
@@ -1346,7 +1429,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         partition, n_replicas, betas, integrators, replica_coords, replica_velocities, 
         replica_boundaries, replica_neighbor_finders, replica_loggers, 
         state_pairwise_inters, state_specific_inter_lists, state_general_inters,
-        state_indices, exchange_logger, data
+        state_indices, exchange_logger, Int(initial_step), true, data
     )
 end
 
@@ -1365,12 +1448,12 @@ function AtomsBase.atomic_number(s::ReplicaSystem)
     end
 end
 
-
 # Avoid unnecessary Array calls on CPU
 from_device(x::Array) = x
 from_device(x) = Array(x)
+from_device(x::StructArray) = replace_storage(Array, x)
 
-to_device(x::Array, ::Type{<:Array}) = x
+to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
 to_device(x, ::Type{AT}) where AT = AT(x)
 
 """
@@ -1436,7 +1519,7 @@ AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x in atomkeys
 AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(typeof(sys))
 AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
 Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) =
-    hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("no field `$x`, allowed keys are $(keys(sys))")
+    hasfield(typeof(sys), x) ? getfield(sys, x) : throw(KeyError("no field `$x`, allowed keys are $(keys(sys))"))
 Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
 Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) =
     haskey(sys, x) ? getfield(sys, x) : default
@@ -1617,8 +1700,8 @@ function System(sys::AtomsBase.AbstractSystem{D};
     end
 
     length_unit = unit(first(AtomsBase.position(sys, 1)))
-    atoms = Vector{Atom}(undef, (length(sys),))
-    atoms_data = Vector{AtomData}(undef, (length(sys),))
+    atoms = Vector{Atom}(undef, length(sys))
+    atoms_data = Vector{AtomData}(undef, length(sys))
     for (i, atom) in enumerate(sys)
         atoms[i] = Atom(
             index=i,
@@ -1792,7 +1875,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return potential_energy(sys, nbs, nothing, step_n; n_threads=n_threads)
+    return potential_energy(sys, nbs, step_n, nothing; n_threads=n_threads)
 end
 
 """
@@ -1861,9 +1944,9 @@ function check_strictness(strictness)
     end
 end
 
-function report_issue(err_str, strictness)
+function report_issue(err_str, strictness; maxlog=nothing)
     if strictness == :warn
-        @warn err_str
+        @warn err_str maxlog=maxlog
     elseif strictness == :error
         error(err_str)
     end
