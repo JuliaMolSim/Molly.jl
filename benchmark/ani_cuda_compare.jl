@@ -15,7 +15,7 @@ include(joinpath(@__DIR__, "ani_bench_common.jl"))
 
 const REF = joinpath(@__DIR__, "..", "data", "ani_reference")
 const PDB = joinpath(@__DIR__, "..", "data", "6mrr_equil.pdb")
-pot   = ANIPotential(joinpath(REF, "ani2x.h5"); ensemble_idx = 0)
+pot   = ANIPotential(joinpath(REF, "ani2x.h5"); ensemble_idx = 1)
 n_sp  = length(pot.species_map)
 valid = Set(keys(pot.species_map))
 sizes = parse.(Int, split(get(ENV, "ANI_SIZES", "1000,2000,5000,8000,15954"), ","))
