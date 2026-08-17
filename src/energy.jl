@@ -235,12 +235,12 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters) where TH
     if length(pairwise_inters) > 0
-        pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
-        pairwise_inters_nl   = filter( use_neighbors, values(pairwise_inters))
         use_vel = any_uses_velocity(pairwise_inters)
-        pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                              neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
-                              pairwise_inters_nl, step_n, Val(TH), Val(n_threads), Val(use_vel))
+        pe = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
+            pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
+                             neighbors, sys.energy_units, length(sys), pis_nonl,
+                             pis_nl, step_n, Val(TH), Val(n_threads), Val(use_vel))
+        end
     else
         pe = zero(TH) * sys.energy_units
     end
@@ -473,16 +473,16 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH},
                           general_inters=sys.general_inters) where TH
     fill!(buffers.pe_vec_nounits, zero(TH))
 
-    pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
-    if length(pairwise_inters_nonl) > 0
-        nbs = NoNeighborList(length(sys))
-        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
-    end
-
-    pairwise_inters_nl = filter(use_neighbors, values(pairwise_inters))
-    if length(pairwise_inters_nl) > 0
-        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nl,
-                              neighbors, step_n)
+    with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
+        if length(pis_nonl) > 0
+            nbs = NoNeighborList(length(sys))
+            pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pis_nonl, nbs, step_n)
+        end
+        if length(pis_nl) > 0
+            pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pis_nl,
+                                  neighbors, step_n)
+        end
+        return nothing
     end
 
     for inter_list in values(specific_inter_lists)

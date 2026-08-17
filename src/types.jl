@@ -55,6 +55,20 @@ end
 maybe_velocity(velocities, i, ::Val{true}) = velocities[i]
 maybe_velocity(velocities, i, ::Val{false}) = nothing
 
+# Call f(inters_without_neighbor_list, inters_with_neighbor_list)
+# `use_neighbors` reads a field so `filter(use_neighbors, inters)` returns a small isbits
+#   union, which Enzyme cannot always type analyse. Branching keeps the tuple types static
+#   in the all-or-none cases, which is what a System is set up to have
+@inline function with_pairwise_partition(f::F, inters) where F
+    if !any(use_neighbors, inters)
+        return f(inters, ())
+    elseif all(use_neighbors, inters)
+        return f((), inters)
+    else
+        return f(filter(!use_neighbors, inters), filter(use_neighbors, inters))
+    end
+end
+
 """
     InteractionList1Atoms(is, inters)
     InteractionList1Atoms(is, inters, types, data=nothing)
