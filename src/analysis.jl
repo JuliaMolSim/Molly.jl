@@ -31,12 +31,14 @@ periodic boundary conditions.
 """
 distances(coords, boundary) = norm.(displacements(coords, boundary))
 
-# Coordinates are superimposed by rotating and translating the first set
-#   of input coordinates and translating the second set of input coordinates
-# Assumes the coordinates do not cross the bounding box, i.e. all
-#   coordinates in each set correspond to the same periodic image
-function kabsch(coords_1::AbstractArray{SVector{3, T}},
-                coords_2::AbstractArray{SVector{3, T}}) where T
+# Rotation matrix that superimposes the first set of coordinates onto the second using
+#   the Kabsch algorithm, after both sets have been translated to the origin
+# Marked as non-differentiable for Enzyme, which cannot differentiate the singular value
+#   decomposition. This does not approximate the gradient of the RMSD: since the rotation
+#   is chosen to minimise the deviation, the term involving the derivative of the rotation
+#   vanishes and holding the rotation constant gives the exact gradient
+function kabsch_rotation_nograd(coords_1::AbstractArray{SVector{3, T}},
+                                coords_2::AbstractArray{SVector{3, T}}) where T
     n_atoms = length(coords_1)
     trans_1 = mean(coords_1)
     trans_2 = mean(coords_2)
@@ -50,22 +52,17 @@ function kabsch(coords_1::AbstractArray{SVector{3, T}},
     svd_res = svd(ustrip.(cov))
     Ut = transpose(svd_res.U)
     d = sign(det(svd_res.V * Ut))
-    dmat = [1 0 0; 0 1 0; 0 0 d]
-    rot = svd_res.V * dmat * Ut
-
-    p_rot = rot * p
-    p_rot_reshaped = SArray[SVector{3, T}(p_rot[i:(i+2)]) for i in 1:3:(length(p_rot)-2)]
-    q_reshaped = SArray[SVector{3, T}(q[i:(i+2)]) for i in 1:3:(length(q)-2)]
-
-    return p_rot_reshaped, q_reshaped
+    TS = typeof(ustrip(zero(T)))
+    dmat = SMatrix{3, 3, TS}(1, 0, 0, 0, 1, 0, 0, 0, d)
+    return SMatrix{3, 3, TS}(svd_res.V * dmat * Ut)
 end
 
-# Wrapper function to return only the translated and rotated coordinates of coords_1
-#   after superimposition of coords_1 and coords_2 by the Kabsch algorithm
-# Marked as non-differentiable, useful for CalcRMSD bias
-function kabsch_nograd(coords_1, coords_2)
-    p_rot, _ = kabsch(coords_1, coords_2)
-    return p_rot
+# Deviations between two sets of coordinates after superimposition by the Kabsch algorithm
+# Assumes the coordinates do not cross the bounding box, i.e. all
+#   coordinates in each set correspond to the same periodic image
+function kabsch_deviations(coords_1, coords_2)
+    rot = kabsch_rotation_nograd(coords_1, coords_2)
+    return (rot,) .* (coords_1 .- (mean(coords_1),)) .- (coords_2 .- (mean(coords_2),))
 end
 
 sum_abs2(x) = sum(abs2, x)
@@ -79,13 +76,12 @@ coordinates after superimposition by the Kabsch algorithm.
 Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates in each set correspond to the same periodic image.
 Only compatible with 3D systems.
+
+Can be differentiated with respect to either set of coordinates.
 """
 function rmsd(coords_1::AbstractArray{SVector{3, T}},
               coords_2::AbstractArray{SVector{3, T}}) where T
-    p_rot, q = kabsch(coords_1, coords_2)
-    diffs = p_rot .- q
-    msd = mean(sum_abs2, diffs)
-    return sqrt(msd)
+    return sqrt(mean(sum_abs2.(kabsch_deviations(coords_1, coords_2))))
 end
 
 """
@@ -98,9 +94,8 @@ coordinates correspond to the same periodic image.
 """
 function radius_gyration(coords, atoms)
     center = mean(coords)
-    vecs_to_center = coords .- (center,)
     atom_masses = mass.(atoms)
-    I = sum(sum_abs2.(vecs_to_center) .* atom_masses)
+    I = sum(sum_abs2.(coords .- (center,)) .* atom_masses)
     return sqrt(I / sum(atom_masses))
 end
 

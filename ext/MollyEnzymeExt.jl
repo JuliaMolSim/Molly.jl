@@ -42,7 +42,7 @@ EnzymeRules.inactive(::typeof(visualize), args...) = nothing
 EnzymeRules.inactive(::typeof(place_atoms), args...) = nothing
 EnzymeRules.inactive(::typeof(place_diatomics), args...) = nothing
 EnzymeRules.inactive(::typeof(read_frame!), args...) = nothing
-EnzymeRules.inactive(::typeof(Molly.kabsch_nograd), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.kabsch_rotation_nograd), args...) = nothing
 
 # Differentiable PME
 

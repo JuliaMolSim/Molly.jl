@@ -662,19 +662,16 @@ struct CalcRMSD{RC}
 end
 
 function calculate_cv(cv::CalcRMSD, coords, args...; kwargs...)
+    coords_used, ref_coords_used = rmsd_coords(cv, coords)
+    return rmsd(ref_coords_used, coords_used)
+end
+
+# Select the atoms of the system and of the reference used by a CalcRMSD collective variable
+function rmsd_coords(cv::CalcRMSD, coords)
     atom_inds_used = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
-    coords_used = coords[atom_inds_used]
     ref_atom_inds_used = (iszero(length(cv.ref_atom_inds)) ? eachindex(cv.ref_coords)
                                                            : cv.ref_atom_inds)
-    ref_coords_used = cv.ref_coords[ref_atom_inds_used]
-
-    # RMSD can be differentiated with respect to the system coordinates without
-    #   differentiating through the Kabsch algorithm
-    p_rot = kabsch_nograd(ref_coords_used, coords_used)
-    trans = mean(coords_used)
-    q = coords_used .- (trans,)
-    diffs = p_rot .- q
-    return sqrt(mean(sum_abs2, diffs))
+    return coords[atom_inds_used], cv.ref_coords[ref_atom_inds_used]
 end
 
 function calculate_cv_ustrip!(unit_arr, args...)
@@ -699,18 +696,12 @@ end
 # The exact analytical gradient for an evaluated atom k simplifies to:
 # ∇_{r_k} d_{RMSD} = [1 / (N * d_{RMSD})] * ((r_k^{sys} - R_COM^{sys}) - Q r_k^{ref})
 function cv_gradient(cv::CalcRMSD, coords, args...; kwargs...)
-    atom_inds_used = iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds
-    ref_atom_inds_used = iszero(length(cv.ref_atom_inds)) ? eachindex(cv.ref_coords) : cv.ref_atom_inds
-
-    c_used = coords[atom_inds_used]
-    ref_c_used = cv.ref_coords[ref_atom_inds_used]
+    atom_inds_used = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
+    c_used, ref_c_used = rmsd_coords(cv, coords)
     N = length(c_used)
 
-    p_rot = kabsch_nograd(ref_c_used, c_used)
-    centroid = mean(c_used)
-    q = c_used .- (centroid,)
-    diffs = p_rot .- q
-    
+    # Deviations of the rotated reference from the current coordinates
+    diffs = kabsch_deviations(ref_c_used, c_used)
     rmsd_val = sqrt(mean(sum_abs2, diffs))
 
     grad = ustrip_vec.(zero(coords))
