@@ -1403,20 +1403,48 @@
     c3t = SVector(0.2, 0.1, 0.0)u"nm"
     c4t = SVector(0.3, 0.1, 0.1)u"nm"
     boundary_rb = CubicBoundary(5.0u"nm")
-    
-    rb1 = RBTorsion(f1=10.0u"kJ * mol^-1", f2=20.0u"kJ * mol^-1",
-                    f3=30.0u"kJ * mol^-1", f4=5.0u"kJ * mol^-1")
-    
-    # Test that force calculation produces expected values (regression test)
+
+    rb_coeffs = (1.0, 10.0, 20.0, 30.0, 5.0, 2.0) .* u"kJ * mol^-1"
+    rb1 = RBTorsion(c0=rb_coeffs[1], c1=rb_coeffs[2], c2=rb_coeffs[3],
+                    c3=rb_coeffs[4], c4=rb_coeffs[5], c5=rb_coeffs[6])
+
     fs = force(rb1, c1t, c2t, c3t, c4t, boundary_rb)
-    @test isapprox(norm(fs.f1), 497.6067743425172u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(norm(fs.f2), 673.7627575276049u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(norm(fs.f3), 351.86112450195805u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(norm(fs.f4), 287.2934051172337u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
-    
-    # Test potential energy calculation
+    @test isapprox(fs.f1, SVector(0.0, 0.0, 785.8213324448034)u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(fs.f2, SVector(-130.9702220741338, 130.9702220741338,
+                                  -1047.7617765930711)u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(fs.f3, SVector(392.9106662224017, -392.9106662224017,
+                                  0.0)u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(fs.f4, SVector(-261.9404441482678, 261.9404441482678,
+                                  261.9404441482678)u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(norm(fs.f1 + fs.f2 + fs.f3 + fs.f4), 0.0u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+
     pe = potential_energy(rb1, c1t, c2t, c3t, c4t, boundary_rb)
-    @test isapprox(pe, 47.38033871712585u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
+    @test isapprox(pe, 19.89752766583465u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
+
+    # ψ = ϕ - 180°, so at ϕ = 180° the energy is the sum of the coefficients and
+    #   at ϕ = 0° the odd coefficients change sign
+    c1_trans = SVector(0.0, 0.1, 0.0)u"nm"
+    c2_trans = SVector(0.0, 0.0, 0.0)u"nm"
+    c3_trans = SVector(0.1, 0.0, 0.0)u"nm"
+    c4_trans = SVector(0.1, -0.1, 0.0)u"nm"
+    c4_cis   = SVector(0.1, 0.1, 0.0)u"nm"
+    @test torsion_angle(c1_trans, c2_trans, c3_trans, c4_trans, boundary_rb) ≈ π
+    @test potential_energy(rb1, c1_trans, c2_trans, c3_trans, c4_trans, boundary_rb) ≈
+          sum(rb_coeffs)
+    @test torsion_angle(c1_trans, c2_trans, c3_trans, c4_cis, boundary_rb) ≈ 0.0 atol=1e-12
+    @test potential_energy(rb1, c1_trans, c2_trans, c3_trans, c4_cis, boundary_rb) ≈
+          sum((-1)^n * rb_coeffs[n + 1] for n in 0:5)
+
+    # The constant term does not contribute to the force
+    rb_c0 = RBTorsion(c0=3.0u"kJ * mol^-1", c1=0.0u"kJ * mol^-1", c2=0.0u"kJ * mol^-1",
+                      c3=0.0u"kJ * mol^-1", c4=0.0u"kJ * mol^-1", c5=0.0u"kJ * mol^-1")
+    @test potential_energy(rb_c0, c1t, c2t, c3t, c4t, boundary_rb) ≈ 3.0u"kJ * mol^-1"
+    @test iszero(force(rb_c0, c1t, c2t, c3t, c4t, boundary_rb).f1)
 
     # PeriodicTorsion tests
     pt1 = PeriodicTorsion(periodicities=(1, 2, 3), phases=(0.0, Float64(π/2), Float64(π)),
