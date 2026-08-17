@@ -29,6 +29,7 @@ EnzymeRules.inactive(::typeof(Molly.setup_progress_minimizer), args...) = nothin
 EnzymeRules.inactive(::typeof(Molly.next_nograd!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.update_nograd!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.needs_virial_schedule), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.parse_splitting), args...) = nothing
 EnzymeRules.inactive(::typeof(use_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(find_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.uses_gpu_neighbor_finder), args...) = nothing

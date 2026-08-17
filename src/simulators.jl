@@ -1258,7 +1258,36 @@ struct LangevinSplitting{S, K, F, W}
     remove_CM_motion::Int
 end
 
+function parse_splitting(splitting)
+    ops = collect(splitting)
+    if !all(op -> op in ('A', 'B', 'O'), ops)
+        throw(ArgumentError("splitting must contain only A, B, and O steps"))
+    end
+    counts = [count(==(op), ops) for op in ops]
+
+    # Determine the need to recompute accelerations before B steps
+    forces_known = !occursin(r"^.*B[^B]*A[^B]*$", String(ops))
+    force_computation_steps = map(ops) do op
+        if op == 'O'
+            return false
+        elseif op == 'A'
+            forces_known = false
+            return false
+        else
+            if forces_known
+                return false
+            else
+                forces_known = true
+                return true
+            end
+        end
+    end
+
+    return ops, counts, force_computation_steps
+end
+
 function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_motion=1)
+    parse_splitting(splitting) # Validate the splitting specifier early
     return LangevinSplitting{typeof(dt), typeof(temperature), typeof(friction), typeof(splitting)}(
                     dt, temperature, friction, splitting, Int(remove_CM_motion))
 end
@@ -1287,10 +1316,8 @@ end
         local x = inv(m)
         ifelse(vsf, zero(x), x)
     end
-    if !all(op -> op in ('A', 'B', 'O'), sim.splitting)
-        throw(ArgumentError("splitting must contain only A, B, and O steps"))
-    end
-    n_o_steps = count('O', sim.splitting)
+    splitting_ops, splitting_counts, force_computation_steps = parse_splitting(sim.splitting)
+    n_o_steps = count(==('O'), splitting_ops)
     if n_o_steps > 0
         # These local variables are only needed in the O step
         vel_scales = exp.((-sim.friction * sim.dt / n_o_steps) .* M_inv)
@@ -1317,33 +1344,15 @@ end
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(false); n_threads=n_threads)
     accels_t = calc_accels.(forces_t, masses(sys))
 
-    effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
+    effective_dts = [sim.dt / c for c in splitting_counts]
 
-    # Determine the need to recompute accelerations before B steps
-    forces_known = !occursin(r"^.*B[^B]*A[^B]*$", sim.splitting)
-
-    force_computation_steps = map(collect(sim.splitting)) do op
-        if op == 'O'
-            return false
-        elseif op == 'A'
-            forces_known = false
-            return false
-        elseif op == 'B'
-            if forces_known
-                return false
-            else
-                forces_known = true
-                return true
-            end
-        end
-    end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        for (j, op) in enumerate(sim.splitting)
+        for (j, op) in enumerate(splitting_ops)
             if op == 'A'
                 A_step!(sys, effective_dts[j])
             elseif op == 'B'
