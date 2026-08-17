@@ -86,6 +86,12 @@ function Ewald(dist_cutoff; error_tol=0.0005, scheduler=DefaultLambdaScheduler()
     return Ewald(dist_cutoff, T(error_tol), scheduler)
 end
 
+Base.zero(inter::Ewald{T, D}) where {T, D} = Ewald(zero(D), zero(T), inter.scheduler)
+
+function Base.:+(i1::Ewald, i2::Ewald)
+    return Ewald(i1.dist_cutoff + i2.dist_cutoff, i1.error_tol + i2.error_tol, i1.scheduler)
+end
+
 function ewald_error(αr::T, target, guess) where T
     t = guess * T(π) / αr
     return target - T(0.05) * sqrt(αr) * guess * exp(-t^2)

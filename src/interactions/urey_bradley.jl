@@ -29,6 +29,31 @@ function Base.:+(a1::UreyBradley, a2::UreyBradley)
                        kbond=(a1.kbond + a2.kbond), r0=(a1.r0 + a2.r0))
 end
 
+function inject_interaction(inter::UreyBradley, inter_type, params_dic)
+    key_prefix = "inter_UB_$(inter_type)_"
+    return UreyBradley(
+        dict_get(params_dic, key_prefix * "kangle", inter.kangle),
+        dict_get(params_dic, key_prefix * "θ0"    , inter.θ0    ),
+        dict_get(params_dic, key_prefix * "kbond" , inter.kbond ),
+        dict_get(params_dic, key_prefix * "r0"    , inter.r0    ),
+    )
+end
+
+function extract_parameters!(params_dic,
+                             inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:UreyBradley}},
+                             ff)
+    for (angle_type, ang) in zip(inter.types, from_device(inter.inters))
+        key_prefix = "inter_UB_$(angle_type)_"
+        if !haskey(params_dic, key_prefix * "kangle")
+            params_dic[key_prefix * "kangle"] = ang.kangle
+            params_dic[key_prefix * "θ0"    ] = ang.θ0
+            params_dic[key_prefix * "kbond" ] = ang.kbond
+            params_dic[key_prefix * "r0"    ] = ang.r0
+        end
+    end
+    return params_dic
+end
+
 @inline function force(a::UreyBradley, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)

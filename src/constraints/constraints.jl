@@ -59,9 +59,7 @@ struct PositionConstraintApplication <: AbstractConstraintApplication end
 
 struct VelocityConstraintApplication <: AbstractConstraintApplication end
 
-Base.@kwdef struct ConstraintApplicationContext{
-    K <: AbstractConstraintApplication, B, A, DT, S, CB, VB,
-}
+@kwdef struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, A, DT, S, CB, VB}
     kind::K
     needs_virial::Bool = false
     step_n::Int = 0

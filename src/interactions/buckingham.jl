@@ -50,6 +50,25 @@ function Base.:+(b1::Buckingham, b2::Buckingham)
                       b1.C_mixing, b1.weight_special + b2.weight_special)
 end
 
+function inject_interaction(inter::Buckingham, params_dic)
+    key_prefix = "inter_BU_"
+    return Buckingham(
+        inter.cutoff,
+        inter.use_neighbors,
+        inter.shortcut,
+        inter.A_mixing,
+        inter.B_mixing,
+        inter.C_mixing,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+    )
+end
+
+function extract_parameters!(params_dic, inter::Buckingham, ff)
+    key_prefix = "inter_BU_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
+end
+
 @inline function force(inter::Buckingham,
                        dr,
                        atom_i,

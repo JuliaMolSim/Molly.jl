@@ -28,6 +28,39 @@ end
 
 FENEBond(; k, r0, σ, ϵ) = FENEBond{typeof(k), typeof(r0), typeof(ϵ)}(k, r0, σ, ϵ)
 
+function Base.zero(::FENEBond{K, D, E}) where {K, D, E}
+    return FENEBond(k=zero(K), r0=zero(D), σ=zero(D), ϵ=zero(E))
+end
+
+function Base.:+(b1::FENEBond, b2::FENEBond)
+    return FENEBond(k=(b1.k + b2.k), r0=(b1.r0 + b2.r0), σ=(b1.σ + b2.σ), ϵ=(b1.ϵ + b2.ϵ))
+end
+
+function inject_interaction(inter::FENEBond, inter_type, params_dic)
+    key_prefix = "inter_FB_$(inter_type)_"
+    return FENEBond(
+        dict_get(params_dic, key_prefix * "k" , inter.k ),
+        dict_get(params_dic, key_prefix * "r0", inter.r0),
+        dict_get(params_dic, key_prefix * "σ" , inter.σ ),
+        dict_get(params_dic, key_prefix * "ϵ" , inter.ϵ ),
+    )
+end
+
+function extract_parameters!(params_dic,
+                             inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:FENEBond}},
+                             ff)
+    for (bond_type, bond) in zip(inter.types, from_device(inter.inters))
+        key_prefix = "inter_FB_$(bond_type)_"
+        if !haskey(params_dic, key_prefix * "k")
+            params_dic[key_prefix * "k" ] = bond.k
+            params_dic[key_prefix * "r0"] = bond.r0
+            params_dic[key_prefix * "σ" ] = bond.σ
+            params_dic[key_prefix * "ϵ" ] = bond.ϵ
+        end
+    end
+    return params_dic
+end
+
 @inline function force(b::FENEBond, coord_i, coord_j, boundary, args...)
     dr = vector(coord_i, coord_j, boundary)
     r = sqrt(sum(abs2, dr))

@@ -21,6 +21,29 @@ Base.zero(::MorseBond{T, A, R}) where {T, A, R} = MorseBond(D=zero(T), a=zero(A)
 Base.:+(b1::MorseBond, b2::MorseBond) = MorseBond(D=(b1.D + b2.D), a=(b1.a + b2.a),
                                                   r0=(b1.r0 + b2.r0))
 
+function inject_interaction(inter::MorseBond, inter_type, params_dic)
+    key_prefix = "inter_MB_$(inter_type)_"
+    return MorseBond(
+        dict_get(params_dic, key_prefix * "D" , inter.D ),
+        dict_get(params_dic, key_prefix * "a" , inter.a ),
+        dict_get(params_dic, key_prefix * "r0", inter.r0),
+    )
+end
+
+function extract_parameters!(params_dic,
+                             inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:MorseBond}},
+                             ff)
+    for (bond_type, bond) in zip(inter.types, from_device(inter.inters))
+        key_prefix = "inter_MB_$(bond_type)_"
+        if !haskey(params_dic, key_prefix * "D")
+            params_dic[key_prefix * "D" ] = bond.D
+            params_dic[key_prefix * "a" ] = bond.a
+            params_dic[key_prefix * "r0"] = bond.r0
+        end
+    end
+    return params_dic
+end
+
 @inline function force(b::MorseBond, coord_i, coord_j, boundary, args...)
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)

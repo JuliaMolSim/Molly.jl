@@ -370,6 +370,28 @@ function Base.:+(l1::LennardJonesSoftCoreBeutler, l2::LennardJonesSoftCoreBeutle
     )
 end
 
+function inject_interaction(inter::LennardJonesSoftCoreBeutler, params_dic)
+    key_prefix = "inter_LJSCB_"
+    return LennardJonesSoftCoreBeutler(
+        inter.cutoff,
+        dict_get(params_dic, key_prefix * "α", inter.α),
+        inter.use_neighbors,
+        inter.shortcut,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
+        inter.λ_mixing,
+        inter.scheduler,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+    )
+end
+
+function extract_parameters!(params_dic, inter::LennardJonesSoftCoreBeutler, ff)
+    key_prefix = "inter_LJSCB_"
+    params_dic[key_prefix * "α"        ] = inter.α
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
+end
+
 @inline function force(inter::LennardJonesSoftCoreBeutler,
                        dr,
                        atom_i,
@@ -605,6 +627,28 @@ function Base.:+(l1::LennardJonesSoftCoreGapsys, l2::LennardJonesSoftCoreGapsys)
     )
 end
 
+function inject_interaction(inter::LennardJonesSoftCoreGapsys, params_dic)
+    key_prefix = "inter_LJSCG_"
+    return LennardJonesSoftCoreGapsys(
+        inter.cutoff,
+        dict_get(params_dic, key_prefix * "α", inter.α),
+        inter.use_neighbors,
+        inter.shortcut,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
+        inter.λ_mixing,
+        inter.scheduler,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+    )
+end
+
+function extract_parameters!(params_dic, inter::LennardJonesSoftCoreGapsys, ff)
+    key_prefix = "inter_LJSCG_"
+    params_dic[key_prefix * "α"        ] = inter.α
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
+end
+
 @inline function force(inter::LennardJonesSoftCoreGapsys,
                        dr,
                        atom_i,
@@ -832,6 +876,25 @@ function Base.:+(l1::AshbaughHatch, l2::AshbaughHatch)
     )
 end
 
+function inject_interaction(inter::AshbaughHatch, params_dic)
+    key_prefix = "inter_AH_"
+    return AshbaughHatch(
+        inter.cutoff,
+        inter.use_neighbors,
+        inter.shortcut,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
+        inter.λ_mixing,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+    )
+end
+
+function extract_parameters!(params_dic, inter::AshbaughHatch, ff)
+    key_prefix = "inter_AH_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
+end
+
 @inline function force(inter::AshbaughHatch,
                        dr,
                        atom_i,
@@ -928,6 +991,29 @@ function Base.:+(l1::LennardJones14, l2::LennardJones14)
         l1.ϵ14_mixed + l2.ϵ14_mixed,
         l1.weight_14 + l2.weight_14,
     )
+end
+
+function inject_interaction(inter::LennardJones14, inter_type, params_dic)
+    key_prefix = "inter_LJ14_$(inter_type)_"
+    return LennardJones14(
+        dict_get(params_dic, key_prefix * "σ14"      , inter.σ14_mixed),
+        dict_get(params_dic, key_prefix * "ϵ14"      , inter.ϵ14_mixed),
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_14),
+    )
+end
+
+function extract_parameters!(params_dic,
+                             inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:LennardJones14}},
+                             ff)
+    for (inter_type, lj14) in zip(inter.types, from_device(inter.inters))
+        key_prefix = "inter_LJ14_$(inter_type)_"
+        if !haskey(params_dic, key_prefix * "σ14")
+            params_dic[key_prefix * "σ14"      ] = lj14.σ14_mixed
+            params_dic[key_prefix * "ϵ14"      ] = lj14.ϵ14_mixed
+            params_dic[key_prefix * "weight_14"] = lj14.weight_14
+        end
+    end
+    return params_dic
 end
 
 @inline function force(inter::LennardJones14, coords_i, coords_l, boundary, args...)

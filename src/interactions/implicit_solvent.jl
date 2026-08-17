@@ -431,6 +431,65 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
     end
 end
 
+function gb_bond_index(sys)
+    return findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
+end
+
+function gb_element_dicts(key_prefix, params_dic, default_radii, default_screens)
+    element_to_radius = Dict{String, Float64}()
+    for k in keys(default_radii)
+        element_to_radius[k] = dict_get(params_dic, key_prefix * "radius_" * k,
+                                        ustrip(default_radii[k]))
+    end
+    element_to_screen = empty(default_screens)
+    for k in keys(default_screens)
+        element_to_screen[k] = dict_get(params_dic, key_prefix * "screen_" * k,
+                                        default_screens[k])
+    end
+    return element_to_radius, element_to_screen
+end
+
+function inject_interaction(inter::ImplicitSolventOBC, params_dic, sys)
+    key_prefix = "inter_OBC_"
+    element_to_radius, element_to_screen = gb_element_dicts(key_prefix, params_dic,
+                                    mbondi2_element_to_radius, obc_element_to_screen)
+
+    ImplicitSolventOBC(
+        sys.atoms,
+        sys.atoms_data,
+        sys.specific_inter_lists[gb_bond_index(sys)];
+        solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
+        solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
+        kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
+        offset=dict_get(params_dic, key_prefix * "offset", ustrip(inter.offset))u"nm",
+        dist_cutoff=inter.dist_cutoff,
+        probe_radius=dict_get(params_dic, key_prefix * "probe_radius", ustrip(inter.probe_radius))u"nm",
+        sa_factor=dict_get(params_dic, key_prefix * "sa_factor", ustrip(inter.sa_factor))u"kJ * mol^-1 * nm^-2",
+        use_ACE=inter.use_ACE,
+        # α, β and γ define the OBC1/OBC2 variants and are not treated as parameters
+        use_OBC2=(inter.β != zero(inter.β)),
+        element_to_radius=element_to_radius,
+        element_to_screen=element_to_screen,
+    )
+end
+
+function extract_parameters!(params_dic, inter::ImplicitSolventOBC, ff)
+    key_prefix = "inter_OBC_"
+    params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
+    params_dic[key_prefix * "solute_dielectric" ] = inter.solute_dielectric
+    params_dic[key_prefix * "kappa"             ] = ustrip(inter.kappa)
+    params_dic[key_prefix * "offset"            ] = ustrip(inter.offset)
+    params_dic[key_prefix * "probe_radius"      ] = ustrip(inter.probe_radius)
+    params_dic[key_prefix * "sa_factor"         ] = ustrip(inter.sa_factor)
+    for (k, v) in mbondi2_element_to_radius
+        params_dic[key_prefix * "radius_" * k] = ustrip(v)
+    end
+    for (k, v) in obc_element_to_screen
+        params_dic[key_prefix * "screen_" * k] = v
+    end
+    return params_dic
+end
+
 """
     ImplicitSolventGBN2(atoms, atoms_data, bonds)
 
@@ -584,17 +643,8 @@ end
 
 function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
     key_prefix = "inter_GB_"
-    bond_index = findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
-
-    element_to_radius = Dict{String, Float64}()
-    for k in keys(mbondi2_element_to_radius)
-        element_to_radius[k] = dict_get(params_dic, key_prefix * "radius_" * k,
-                                        ustrip(mbondi2_element_to_radius[k]))
-    end
-    element_to_screen = empty(gbn2_element_to_screen)
-    for k in keys(gbn2_element_to_screen)
-        element_to_screen[k] = dict_get(params_dic, key_prefix * "screen_" * k, gbn2_element_to_screen[k])
-    end
+    element_to_radius, element_to_screen = gb_element_dicts(key_prefix, params_dic,
+                                    mbondi2_element_to_radius, gbn2_element_to_screen)
     atom_params = empty(gbn2_atom_params)
     for k in keys(gbn2_atom_params)
         atom_params[k] = dict_get(params_dic, key_prefix * "params_" * k, gbn2_atom_params[k])
@@ -603,7 +653,7 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
     ImplicitSolventGBN2(
         sys.atoms,
         sys.atoms_data,
-        sys.specific_inter_lists[bond_index];
+        sys.specific_inter_lists[gb_bond_index(sys)];
         solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
         solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
         kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
@@ -618,6 +668,28 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
         element_to_screen=element_to_screen,
         atom_params=atom_params,
     )
+end
+
+function extract_parameters!(params_dic, inter::ImplicitSolventGBN2, ff)
+    key_prefix = "inter_GB_"
+    params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
+    params_dic[key_prefix * "solute_dielectric" ] = inter.solute_dielectric
+    params_dic[key_prefix * "kappa"             ] = ustrip(inter.kappa)
+    params_dic[key_prefix * "offset"            ] = ustrip(inter.offset)
+    params_dic[key_prefix * "probe_radius"      ] = ustrip(inter.probe_radius)
+    params_dic[key_prefix * "sa_factor"         ] = ustrip(inter.sa_factor)
+    params_dic[key_prefix * "neck_scale"        ] = inter.neck_scale
+    params_dic[key_prefix * "neck_cut"          ] = ustrip(inter.neck_cut)
+    for (k, v) in mbondi2_element_to_radius
+        params_dic[key_prefix * "radius_" * k] = ustrip(v)
+    end
+    for (k, v) in gbn2_element_to_screen
+        params_dic[key_prefix * "screen_" * k] = v
+    end
+    for (k, v) in gbn2_atom_params
+        params_dic[key_prefix * "params_" * k] = v
+    end
+    return params_dic
 end
 
 function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)

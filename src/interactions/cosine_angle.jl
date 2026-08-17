@@ -16,6 +16,31 @@ V(\theta) = k(1 + \cos(\theta - \theta_0))
     θ0::D
 end
 
+Base.zero(::CosineAngle{K, D}) where {K, D} = CosineAngle(k=zero(K), θ0=zero(D))
+
+Base.:+(a1::CosineAngle, a2::CosineAngle) = CosineAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
+
+function inject_interaction(inter::CosineAngle, inter_type, params_dic)
+    key_prefix = "inter_CA_$(inter_type)_"
+    return CosineAngle(
+        dict_get(params_dic, key_prefix * "k" , inter.k ),
+        dict_get(params_dic, key_prefix * "θ0", inter.θ0),
+    )
+end
+
+function extract_parameters!(params_dic,
+                             inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:CosineAngle}},
+                             ff)
+    for (angle_type, ang) in zip(inter.types, from_device(inter.inters))
+        key_prefix = "inter_CA_$(angle_type)_"
+        if !haskey(params_dic, key_prefix * "k")
+            params_dic[key_prefix * "k" ] = ang.k
+            params_dic[key_prefix * "θ0"] = ang.θ0
+        end
+    end
+    return params_dic
+end
+
 @inline function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)

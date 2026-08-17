@@ -65,6 +65,27 @@ function Base.:+(m1::Mie, m2::Mie)
     )
 end
 
+function inject_interaction(inter::Mie, params_dic)
+    key_prefix = "inter_MIE_"
+    return Mie(
+        inter.m,
+        inter.n,
+        inter.cutoff,
+        inter.use_neighbors,
+        inter.shortcut,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        inter.mn_fac,
+    )
+end
+
+function extract_parameters!(params_dic, inter::Mie, ff)
+    key_prefix = "inter_MIE_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
+end
+
 @inline function force(inter::Mie,
                        dr,
                        atom_i,
