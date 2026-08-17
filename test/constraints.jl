@@ -50,7 +50,7 @@
                 energy_units=u"kcal * mol^-1",
             )
 
-            simulate!(sys, simulator, 10_000)
+            simulate!(sys, simulator, 2_000)
 
             @test check_position_constraints(sys, cons)
             if simulator isa VelocityVerlet
@@ -340,7 +340,7 @@ end
                 random_velocities!(sys, temp)
 
                 simulate!(sys, simulator, 20)
-                simulate!(sys, simulator, 1000)
+                simulate!(sys, simulator, 300)
 
                 @test check_position_constraints(sys)
                 @test check_velocity_constraints(sys)

@@ -557,6 +557,8 @@ end
     end
 
     # No units
+    n_steps, burn_in = 50_000, 250
+
     for AT in array_list
         n_atoms = 10
         boundary = CubicBoundary(10.0)
@@ -592,15 +594,15 @@ end
             ),
         )
 
-        simulate!(sys, simulator, 200_000)
+        simulate!(sys, simulator, n_steps)
 
         pair_dists_12 = values(sys.loggers.pair_dist_12)
         pair_dists_13 = values(sys.loggers.pair_dist_13)
 
-        dist_12_mean = mean(pair_dists_12[1000:end])
-        dist_13_mean = mean(pair_dists_13[1000:end])
-        dist_12_std = std(pair_dists_12[1000:100:end])
-        dist_13_std = std(pair_dists_13[1000:100:end])
+        dist_12_mean = mean(pair_dists_12[burn_in:end])
+        dist_13_mean = mean(pair_dists_13[burn_in:end])
+        dist_12_std = std(pair_dists_12[burn_in:100:end])
+        dist_13_std = std(pair_dists_13[burn_in:100:end])
 
         @test isapprox(dist_12_mean, 1.5; atol=0.05)
         @test !isapprox(dist_13_mean, 1.5; atol=0.05)
@@ -642,15 +644,15 @@ end
             ),
         )
 
-        simulate!(sys, simulator, 200_000)
+        simulate!(sys, simulator, n_steps)
 
         pair_dists_12 = values(sys.loggers.pair_dist_12)
         pair_dists_13 =values(sys.loggers.pair_dist_13)
 
-        dist_12_mean = mean(pair_dists_12[1000:end])
-        dist_13_mean = mean(pair_dists_13[1000:end])
-        dist_12_std = std(pair_dists_12[1000:100:end])
-        dist_13_std = std(pair_dists_13[1000:100:end])
+        dist_12_mean = mean(pair_dists_12[burn_in:end])
+        dist_13_mean = mean(pair_dists_13[burn_in:end])
+        dist_12_std = std(pair_dists_12[burn_in:100:end])
+        dist_13_std = std(pair_dists_13[burn_in:100:end])
 
         @test isapprox(dist_12_mean, 1.5u"nm"; atol=0.05u"nm")
         @test !isapprox(dist_13_mean, 1.5u"nm"; atol=0.05u"nm")

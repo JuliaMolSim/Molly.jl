@@ -1676,31 +1676,35 @@ end
         SVector(71.2789625237053  , -18.668854487669485, -74.8618171164182  ),
     ] * u"kJ * mol^-1 * nm^-1"
 
+    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
+
     for AT in array_list
-        for n_threads in n_threads_list
-            for T in (Float64, Float32)
-                if (n_threads > 1 && AT != Array) || (T == Float64 && AT == MtlArray)
+        for T in (Float64, Float32)
+            if T == Float64 && AT == MtlArray
+                continue
+            end
+            sys_init = System(
+                joinpath(data_dir, "water_3mol_cubic.pdb"),
+                ff;
+                array_type=AT,
+                float_type=T,
+                dist_cutoff=T(dist_cutoff),
+                dist_buffer=zero(T(dist_cutoff)),
+                nonbonded_method=:ewald,
+                dispersion_correction=false,
+                center_coords=false,
+                strictness=:nowarn,
+            )
+            sys = System(
+                sys_init;
+                pairwise_inters=(sys_init.pairwise_inters[2],),
+                specific_inter_lists=(sys_init.specific_inter_lists[end],),
+            )
+
+            for n_threads in n_threads_list
+                if n_threads > 1 && AT != Array
                     continue
                 end
-                ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
-                sys_init = System(
-                    joinpath(data_dir, "water_3mol_cubic.pdb"),
-                    ff;
-                    array_type=AT,
-                    float_type=T,
-                    dist_cutoff=T(dist_cutoff),
-                    dist_buffer=zero(T(dist_cutoff)),
-                    nonbonded_method=:ewald,
-                    dispersion_correction=false,
-                    center_coords=false,
-                    strictness=:nowarn,
-                )
-                sys = System(
-                    sys_init;
-                    pairwise_inters=(sys_init.pairwise_inters[2],),
-                    specific_inter_lists=(sys_init.specific_inter_lists[end],),
-                )
-
                 @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=2e-4u"kJ/mol"
                 fs = from_device(forces(sys; n_threads=n_threads))
                 @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"
@@ -1752,31 +1756,33 @@ end
 
     for (pdb_fp, E_openmm, Fs_openmm) in pme_data
         for AT in array_list
-            for n_threads in n_threads_list
-                for T in (Float64, Float32)
-                    if (n_threads > 1 && AT != Array) || (T == Float64 && AT == MtlArray)
+            for T in (Float64, Float32)
+                if T == Float64 && AT == MtlArray
+                    continue
+                end
+                sys_init = System(
+                    joinpath(data_dir, pdb_fp),
+                    ff;
+                    array_type=AT,
+                    float_type=T,
+                    dist_cutoff=T(dist_cutoff),
+                    dist_buffer=zero(T(dist_cutoff)),
+                    nonbonded_method=:pme,
+                    pme_mesh_dims=pme_mesh_dims,
+                    dispersion_correction=false,
+                    center_coords=false,
+                    strictness=:nowarn,
+                )
+                sys = System(
+                    sys_init;
+                    pairwise_inters=(sys_init.pairwise_inters[2],),
+                    specific_inter_lists=(sys_init.specific_inter_lists[end],),
+                )
+
+                for n_threads in n_threads_list
+                    if n_threads > 1 && AT != Array
                         continue
                     end
-                    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
-                    sys_init = System(
-                        joinpath(data_dir, pdb_fp),
-                        ff;
-                        array_type=AT,
-                        float_type=T,
-                        dist_cutoff=T(dist_cutoff),
-                        dist_buffer=zero(T(dist_cutoff)),
-                        nonbonded_method=:pme,
-                        pme_mesh_dims=pme_mesh_dims,
-                        dispersion_correction=false,
-                        center_coords=false,
-                        strictness=:nowarn,
-                    )
-                    sys = System(
-                        sys_init;
-                        pairwise_inters=(sys_init.pairwise_inters[2],),
-                        specific_inter_lists=(sys_init.specific_inter_lists[end],),
-                    )
-
                     @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=2e-4u"kJ/mol"
                     fs = from_device(forces(sys; n_threads=n_threads))
                     @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"

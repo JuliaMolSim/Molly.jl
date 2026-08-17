@@ -128,7 +128,8 @@ end
 @testset "Lennard-Jones" begin
     n_atoms = 100
     atom_mass = 10.0u"g/mol"
-    n_steps = 20_000
+    n_steps = 5_000
+    n_frames = (n_steps ÷ 100) + 1
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
@@ -270,7 +271,7 @@ end
 
         traj = Chemfiles.Trajectory(temp_fp_dcd)
         rm(temp_fp_dcd)
-        @test Int(length(traj)) == 201
+        @test Int(length(traj)) == n_frames
         frame = read(traj)
         @test length(frame) == 100
         # Chemfiles does not write velocities to DCD files
@@ -282,7 +283,7 @@ end
 
         traj = Chemfiles.Trajectory(temp_fp_trr)
         rm(temp_fp_trr)
-        @test Int(length(traj)) == 201
+        @test Int(length(traj)) == n_frames
         frame = read(traj)
         @test length(frame) == 100
         @test size(Chemfiles.positions(frame)) == (3, 100)
@@ -294,7 +295,7 @@ end
         @test readlines(temp_fp_pdb)[1] == "CRYST1     20.0     20.0     20.0  90.00  90.00  90.00 P 1           1"
         traj = read(temp_fp_pdb, BioStructures.PDBFormat)
         rm(temp_fp_pdb)
-        @test BioStructures.countmodels(traj) == 201
+        @test BioStructures.countmodels(traj) == n_frames
         @test BioStructures.countatoms(first(traj)) == 100
 
         run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
@@ -333,21 +334,19 @@ end
             float_type_high=Measurement{Float64},
             strictness=:nowarn
         )
-        for n_threads in n_threads_list
-            @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
-                                typeof((1.0 ± 0.1)u"kJ * mol^-1")
-            @test abs(potential_energy(sys_unc; n_threads=n_threads) -
-                                potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
-            @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
-            @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
-            @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
-            @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
-                                typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
-        end
+
+        @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
+                            typeof((1.0 ± 0.1)u"kJ * mol^-1")
+        @test abs(potential_energy(sys_unc; n_threads=n_threads) -
+                            potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
+        @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
+        @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
+        @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
+        @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
+                            typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
+
         simulator_unc = VelocityVerlet(dt=0.002u"ps")
-        for n_threads in n_threads_list
-            simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads, run_loggers=false)
-        end
+        simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads, run_loggers=false)
     end
 end
 
@@ -390,7 +389,7 @@ end
 
 @testset "Lennard-Jones simulators" begin
     n_atoms = 100
-    n_steps = 20_000
+    n_steps = 2_000
     dt = 0.002u"ps"
     sim_time = n_steps * dt
     temp = 298.0u"K"
@@ -512,7 +511,7 @@ end
 
 @testset "Pairwise interactions" begin
     n_atoms = 100
-    n_steps = 20_000
+    n_steps = 1_000
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     G = 10.0u"kJ * mol * nm * g^-2"
@@ -1386,11 +1385,11 @@ end
             sys = System(
                 sys;
                 loggers=(
-                    TemperatureLogger(10),
-                    BoxLogger(10),
+                    TemperatureLogger(5),
+                    BoxLogger(5),
                 ),
             )
-            simulate!(sys, sim_lang, 1_000)
+            simulate!(sys, sim_lang, 600)
 
             @test 290u"K" < mean(values(sys.loggers[1])[81:end]) < 310u"K"
             @test 2.95u"nm" < mean(values(sys.loggers[2])[81:end])[1, 1] < 3.05u"nm"

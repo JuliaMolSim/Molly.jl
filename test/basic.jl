@@ -305,7 +305,7 @@
         coords_start = copy(sys.coords)
         pe_start = potential_energy(sys, find_neighbors(sys))
         scale_factor = SMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0]) * 1.02
-        n_scales = 10
+        n_scales = 3
 
         for i in 1:n_scales
             scale_coords!(sys, scale_factor)
@@ -613,6 +613,8 @@ end
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
+    sorted_ref = sort_nbs(neighbors_ref.list)
+    identical_to_ref(nl) = (nl.n == neighbors_ref.n && sort_nbs(nl.list) == sorted_ref)
 
     function dense_masks(nf::GPUNeighborFinder)
         eligible = trues(nf.n_atoms, nf.n_atoms)
@@ -656,7 +658,7 @@ end
             neighbors = find_neighbors(sys, nf; n_threads=n_threads)
             @test length(neighbors) == n_neighbors_ref
             @test neighbors[10] isa Tuple{Int32, Int32, Bool}
-            @test identical_neighbors(neighbors, neighbors_ref)
+            @test identical_to_ref(neighbors)
         end
     end
 

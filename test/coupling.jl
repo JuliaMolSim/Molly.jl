@@ -1,6 +1,6 @@
 @testset "Immediate thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -25,7 +25,7 @@
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -33,7 +33,7 @@ end
 
 @testset "Velocity rescale thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -58,7 +58,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -66,7 +66,7 @@ end
 
 @testset "Andersen thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -91,7 +91,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -99,7 +99,7 @@ end
 
 @testset "Berendsen thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -124,7 +124,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end

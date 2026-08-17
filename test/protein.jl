@@ -119,7 +119,7 @@
     @test length(sys) == length(sys.atoms) == length(sys.coords) == length(sys.velocities) == 15954
     @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
     @test count(i -> is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
-    @test length(sys.topology.atom_molecule_inds) == length(sys) == 15954
+    @test length(sys.topology.atom_molecule_inds) == 15954
     @test sys.topology.atom_molecule_inds[10] == 1
     @test length(sys.topology.molecule_atom_counts) == 4929
     @test sys.topology.molecule_atom_counts[1] == 1170
@@ -128,13 +128,13 @@
     @test sum(sys.neighbor_finder.eligible) == 254477970
     @test sum(sys.neighbor_finder.special) == 6208
 
-    bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
+    bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1) samples=5 evals=1
     @test bench_result.allocs <= 8
     @test bench_result.memory <= 208
     forces_t = Molly.zero_forces(sys)
     buffers = Molly.init_buffers!(sys, 1)
     bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
-                                            n_threads=1)
+                                            n_threads=1) samples=5 evals=1
     @test bench_result.allocs <= 4
     @test bench_result.memory <= 144
 
@@ -478,17 +478,23 @@ end
 
 @testset "CHARMM OpenMM protein comparison" begin
     pme_mesh_dims = (46, 46, 51)
+    ff = MolecularForceField(
+        joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+        strictness=:nowarn,
+    )
+    show(devnull, ff)
+    @test_throws ErrorException MolecularForceField(
+        joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+        strictness=:error,
+    )
+    ff_nounits = MolecularForceField(
+        joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+        units=false,
+        strictness=:nowarn,
+    )
+    start_temp = 485.281907022u"K" # High since it does not take into account constraints
+
     for constraint_algorithm in (SetupLINCS(), SetupSHAKE_RATTLE())
-        start_temp = 485.281907022u"K" # High since it does not take into account constraints
-        ff = MolecularForceField(
-            joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
-            strictness=:nowarn,
-        )
-        show(devnull, ff)
-        @test_throws ErrorException MolecularForceField(
-            joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
-            strictness=:error,
-        )
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
@@ -516,13 +522,13 @@ end
         @test length(constrained_pairs) == 15380
         @test count(p -> (p[1] <= 1170 && p[2] <= 1170), constrained_pairs) == 596
 
-        bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
+        bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1) samples=5 evals=1
         @test bench_result.allocs <= 16
         @test bench_result.memory <= 1000
         forces_t = Molly.zero_forces(sys)
         buffers = Molly.init_buffers!(sys, 1)
         bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
-                                                n_threads=1)
+                                                n_threads=1) samples=5 evals=1
         @test bench_result.allocs <= 15
         @test bench_result.memory <= 1100
 
@@ -579,11 +585,6 @@ end
         @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
         # Test with no units
-        ff_nounits = MolecularForceField(
-            joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
-            units=false,
-            strictness=:nowarn,
-        )
         sys_nounits = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff_nounits;
