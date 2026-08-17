@@ -1913,6 +1913,7 @@ end
 
 function update_ase_calc! end
 
+
 # ForwardDiff.jl checks both value and derivative
 # This could be extended to only check the value for Duals
 iszero_value(x) = iszero(x)
