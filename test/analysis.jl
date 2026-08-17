@@ -71,6 +71,40 @@
     inv_rh_formula = (1/d12 + 1/d13 + 1/d23) / 9
     @test hydrodynamic_radius(coords2, boundary) ≈ inv(inv_rh_formula) atol=1e-12
 
+    # Radial distribution function
+    # The largest peak for a face-centred cubic lattice is the nearest neighbor
+    #   shell at a / √2
+    a_fcc = 0.52468u"nm"
+    fcc_crystal = SimpleCrystals.FCC(a_fcc, 39.948u"g/mol", SVector(4, 4, 4))
+    sys_fcc = System(fcc_crystal; force_units=u"kJ * mol^-1 * nm^-1",
+                     energy_units=u"kJ * mol^-1")
+    bins_fcc, gr_fcc = rdf(sys_fcc.coords, sys_fcc.boundary)
+    @test length(bins_fcc) == length(gr_fcc) == 200
+    @test bins_fcc[argmax(gr_fcc)] ≈ a_fcc / sqrt(2) atol=0.02u"nm"
+    # There are no pairs closer than the nearest neighbor distance
+    @test first(gr_fcc) < 0.01 * maximum(gr_fcc)
+
+    # Uniformly distributed coordinates give g(r) = 1 away from the boundary, and
+    #   this should not depend on the number of atoms or on npoints
+    for n_atoms_rdf in (500, 2_000)
+        for npoints_rdf in (100, 400)
+            rng_rdf = Xoshiro(4)
+            boundary_rdf = CubicBoundary(6.0u"nm")
+            coords_rdf = [SVector{3}(rand(rng_rdf, 3) .* 6.0u"nm") for _ in 1:n_atoms_rdf]
+            bins_gas, gr_gas = rdf(coords_rdf, boundary_rdf; npoints=npoints_rdf)
+            sel_gas = findall(r -> 1.0u"nm" < r < 2.5u"nm", bins_gas)
+            @test all(g -> isapprox(g, 1.0; atol=0.05), gr_gas[sel_gas])
+        end
+    end
+
+    # The same holds in 2D, where the shell is a circumference rather than a sphere
+    rng_rdf_2D = Xoshiro(7)
+    boundary_rdf_2D = RectangularBoundary(6.0u"nm")
+    coords_rdf_2D = [SVector{2}(rand(rng_rdf_2D, 2) .* 6.0u"nm") for _ in 1:1_000]
+    bins_2D, gr_2D = rdf(coords_rdf_2D, boundary_rdf_2D; npoints=100)
+    sel_2D = findall(r -> 1.0u"nm" < r < 2.5u"nm", bins_2D)
+    @test all(g -> isapprox(g, 1.0; atol=0.05), gr_2D[sel_2D])
+
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)
     coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
     bb_to_mass = Dict("C" => 12.011u"g/mol", "N" => 14.007u"g/mol", "O" => 15.999u"g/mol")

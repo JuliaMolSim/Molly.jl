@@ -174,7 +174,7 @@ Calculate the radial distribution function of a set of coordinates.
 
 This function is only available when KernelDensity is imported.
 This describes how density varies as a function of distance from each atom.
-Returns a list of distance bin centers and a list of the corresponding
-densities.
+Returns a list of distance bin centers and a list of the corresponding values
+of ``g(r)``, which tends to 1 at large distances for a uniform system.
 """
 function rdf end
