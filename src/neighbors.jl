@@ -5,6 +5,7 @@ export
     NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
+    GPUCellListNeighborFinder,
     DistanceNeighborFinder,
     TreeNeighborFinder,
     CellListMapNeighborFinder
@@ -362,6 +363,105 @@ end
 
 # The interacting tile list is constructed within the CUDA pairwise kernels.
 find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
+
+"""
+    GPUCellListNeighborFinder(;
+        dist_cutoff,
+        n_steps=10,
+        max_neighbors=nothing,
+        output=:molly_pairs,
+        eligible=nothing,
+        special=nothing,
+    )
+
+GPU cell-list neighbor finder that materializes a per-atom geometric
+neighbor list on the GPU.
+
+Output modes:
+
+- `:ragged`: per-atom padded ragged representation only.
+- `:geometric_pairs`: geometric half-pair list with all special flags false.
+- `:molly_pairs`: half-pair list filtered by `eligible`, with flags read
+  from `special`.
+
+When `max_neighbors` is `nothing`, the initial per-atom capacity is estimated from the global
+number density and neighbor cutoff, with a safety factor of 1.5, and rounded up to a multiple of 32.
+An explicit positive integer overrides this estimate. Capacity overflow is always checked.
+"""
+struct GPUCellListNeighborFinder{D,E,S}
+    dist_cutoff::D
+    n_steps::Int
+    max_neighbors::Union{Nothing, Int}
+    output::Symbol
+    eligible::E
+    special::S
+end
+
+function GPUCellListNeighborFinder(;
+    dist_cutoff,
+    n_steps=10,
+    max_neighbors=nothing,
+    output::Symbol=:molly_pairs,
+    eligible=nothing,
+    special=nothing,
+)
+    n_steps_int = Int(n_steps)
+    max_neighbors_int = isnothing(max_neighbors) ? nothing : Int(max_neighbors)
+
+    dist_cutoff > zero(dist_cutoff) || throw(
+        ArgumentError("dist_cutoff must be positive, got $dist_cutoff"),
+    )
+
+    isfinite(ustrip(dist_cutoff)) || throw(
+        ArgumentError("dist_cutoff must be finite, got $dist_cutoff"),
+    )
+
+    n_steps_int > 0 || throw(
+        ArgumentError("n_steps must be positive, got $n_steps"),
+    )
+
+    if !isnothing(max_neighbors_int)
+        max_neighbors_int > 0 || throw(
+            ArgumentError(
+                "max_neighbors must be positive, got $max_neighbors",
+            ),
+        )
+    end
+
+    output in (:ragged, :geometric_pairs, :molly_pairs) || throw(
+        ArgumentError(
+            "output must be :ragged, :geometric_pairs or :molly_pairs, " *
+            "got $output",
+        ),
+    )
+
+    if output === :molly_pairs
+        eligible === nothing && throw(
+            ArgumentError(":molly_pairs requires eligible"),
+        )
+
+        special === nothing && throw(
+            ArgumentError(":molly_pairs requires special"),
+        )
+
+        size(eligible) == size(special) || throw(
+            ArgumentError("eligible and special must have the same size"),
+        )
+
+        size(eligible, 1) == size(eligible, 2) || throw(
+            ArgumentError("eligible and special must be square matrices"),
+        )
+    end
+
+    return GPUCellListNeighborFinder(
+        dist_cutoff,
+        n_steps_int,
+        max_neighbors_int,
+        output,
+        eligible,
+        special,
+    )
+end
 
 """
     DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)

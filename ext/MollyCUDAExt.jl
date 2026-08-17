@@ -2820,4 +2820,901 @@ function remove_cm_velocity_kernel_3d!(velocities, momentum::CuDeviceVector{T},
     return nothing
 end
 
+
+const CELL_BLOCK_SIZE = 32
+
+function estimate_gpu_cell_list_max_neighbors(
+    n_atoms,
+    box_Lx::T,
+    box_Ly::T,
+    box_Lz::T,
+    cutoff::T,
+) where {T}
+    volume = box_Lx * box_Ly * box_Lz
+    density = T(n_atoms) / volume
+
+    expected_neighbors = (
+        T(1.5) *
+        density *
+        T(4π / 3) *
+        cutoff^3
+    )
+
+    estimated_neighbors = ceil(Int, expected_neighbors)
+
+    return max(
+        CELL_BLOCK_SIZE,
+        cld(estimated_neighbors, CELL_BLOCK_SIZE) * CELL_BLOCK_SIZE,
+    )
+end
+
+function get_cell_id!(
+    cell_ids,
+    x,
+    y,
+    z,
+    n_atoms,
+    num_cell_x,
+    num_cell_y,
+    num_cell_z,
+    cell_Lx,
+    cell_Ly,
+    cell_Lz,
+)
+    atom_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+
+    if atom_i <= n_atoms
+        cell_id_x = floor(Int32, x[atom_i] / cell_Lx)
+        cell_id_y = floor(Int32, y[atom_i] / cell_Ly)
+        cell_id_z = floor(Int32, z[atom_i] / cell_Lz)
+
+        cell_id_x = min(
+            max(cell_id_x, Int32(0)),
+            num_cell_x - Int32(1),
+        )
+        cell_id_y = min(
+            max(cell_id_y, Int32(0)),
+            num_cell_y - Int32(1),
+        )
+        cell_id_z = min(
+            max(cell_id_z, Int32(0)),
+            num_cell_z - Int32(1),
+        )
+
+        cell_ids[atom_i] = (
+            Int32(1) +
+            cell_id_x +
+            cell_id_y * num_cell_x +
+            cell_id_z * num_cell_x * num_cell_y
+        )
+    end
+
+    return nothing
+end
+
+function get_cell_counts_gpu!(
+    cell_counts,
+    cell_ids,
+    n_atoms,
+)
+    atom_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+
+    if atom_i <= n_atoms
+        CUDA.@atomic cell_counts[cell_ids[atom_i]] += Int32(1)
+    end
+
+    return nothing
+end
+
+function get_cell_particles_gpu!(
+    cell_particles,
+    cell_write_counts,
+    cell_ids,
+    cell_offsets,
+    n_atoms,
+)
+    atom_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+
+    if atom_i <= n_atoms
+        cell = cell_ids[atom_i]
+        slot = CUDA.atomic_add!(
+            pointer(cell_write_counts, cell),
+            Int32(1),
+        )
+
+        cell_particles[cell_offsets[cell] + slot] = atom_i
+    end
+
+    return nothing
+end
+
+function gather_cell_coordinates_gpu!(
+    cell_x,
+    cell_y,
+    cell_z,
+    cell_particles,
+    x,
+    y,
+    z,
+    n_atoms,
+)
+    cell_index =
+        (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if cell_index <= n_atoms
+        atom_index = cell_particles[cell_index]
+
+        cell_x[cell_index] = x[atom_index]
+        cell_y[cell_index] = y[atom_index]
+        cell_z[cell_index] = z[atom_index]
+    end
+
+    return nothing
+end
+
+function inclusive_to_offsets_gpu!(
+    cell_offsets,
+    inclusive_counts,
+    n_cells,
+)
+    cell = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if cell <= n_cells
+        if cell == Int32(1)
+            cell_offsets[cell] = Int32(1)
+        else
+            cell_offsets[cell] = inclusive_counts[cell - Int32(1)] + Int32(1)
+        end
+    end
+
+    return nothing
+end
+
+function count_host_tiles_gpu!(
+    cell_tile_counts,
+    cell_counts,
+    n_cells,
+)
+    cell = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if cell <= n_cells
+        cell_tile_counts[cell] = cld(
+            cell_counts[cell],
+            Int32(CELL_BLOCK_SIZE),
+        )
+    end
+
+    return nothing
+end
+
+function write_host_tiles_gpu!(
+    host_tile_cells,
+    host_tile_starts,
+    cell_tile_counts,
+    cell_tile_offsets,
+    n_cells,
+)
+    cell = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if cell <= n_cells
+        n_tiles = cell_tile_counts[cell]
+
+        if n_tiles > Int32(0)
+            first_tile = cell_tile_offsets[cell]
+
+            for local_tile in Int32(0):(n_tiles - Int32(1))
+                tile = first_tile + local_tile
+
+                host_tile_cells[tile] = cell
+                host_tile_starts[tile] =
+                    local_tile * Int32(CELL_BLOCK_SIZE)
+            end
+        end
+    end
+
+    return nothing
+end
+
+@inline include_half_pair(
+    ::Val{:geometric},
+    eligible,
+    atom_i,
+    atom_j,
+) = atom_i > atom_j
+
+@inline include_half_pair(
+    ::Val{:molly},
+    eligible,
+    atom_i,
+    atom_j,
+) = atom_i > atom_j && eligible[atom_j, atom_i]
+
+@inline pair_special(
+    ::Val{:geometric},
+    special,
+    atom_i,
+    atom_j,
+) = false
+
+@inline pair_special(
+    ::Val{:molly},
+    special,
+    atom_i,
+    atom_j,
+) = special[atom_j, atom_i]
+
+function count_half_pairs_gpu!(
+    pair_counts,
+    neighbour_counts,
+    neighbours,
+    eligible,
+    mode,
+    n_atoms,
+)
+    atom_i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if atom_i <= n_atoms
+        count = Int32(0)
+        n_neighbours = neighbour_counts[atom_i]
+
+        for slot in Int32(1):n_neighbours
+            atom_j = neighbours[slot, atom_i]
+
+            if include_half_pair(mode, eligible, atom_i, atom_j)
+                count += Int32(1)
+            end
+        end
+
+        pair_counts[atom_i] = count
+    end
+
+    return nothing
+end
+
+function write_half_pairs_gpu!(
+    pair_list,
+    pair_offsets,
+    neighbour_counts,
+    neighbours,
+    eligible,
+    special,
+    mode,
+    n_atoms,
+)
+    atom_i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+
+    if atom_i <= n_atoms
+        write_position = pair_offsets[atom_i]
+        n_neighbours = neighbour_counts[atom_i]
+
+        for slot in Int32(1):n_neighbours
+            atom_j = neighbours[slot, atom_i]
+
+            if include_half_pair(mode, eligible, atom_i, atom_j)
+                pair_list[write_position] = (
+                    Int32(atom_i),
+                    Int32(atom_j),
+                    pair_special(mode, special, atom_i, atom_j),
+                )
+
+                write_position += Int32(1)
+            end
+        end
+    end
+
+    return nothing
+end
+
+function get_neighbours_cell_shared_contiguous_gpu!(
+    neighbour_counts,
+    neighbours,
+    cell_counts,
+    cell_offsets,
+    cell_particles,
+    host_tile_cells,
+    host_tile_starts,
+    cell_x::CuDeviceVector{T},
+    cell_y::CuDeviceVector{T},
+    cell_z::CuDeviceVector{T},
+    num_cell_x,
+    num_cell_y,
+    num_cell_z,
+    box_Lx,
+    box_Ly,
+    box_Lz,
+    cutoff2,
+    max_neighbours,
+) where {T}
+    host_tile = blockIdx().x
+    lane = threadIdx().x
+
+    host_cell = host_tile_cells[host_tile]
+    host_tile_start = host_tile_starts[host_tile]
+
+    host_start = cell_offsets[host_cell]
+    n_host = cell_counts[host_cell]
+
+    host_local = host_tile_start + lane - Int32(1)
+    host_active = host_local < n_host
+
+    atom_i = Int32(0)
+    x_i = zero(T)
+    y_i = zero(T)
+    z_i = zero(T)
+    count = Int32(0)
+
+    if host_active
+        host_index = host_start + host_local
+
+        atom_i = cell_particles[host_index]
+        x_i = cell_x[host_index]
+        y_i = cell_y[host_index]
+        z_i = cell_z[host_index]
+    end
+
+    cell0 = host_cell - Int32(1)
+    cx = cell0 % num_cell_x
+    tmp = cell0 ÷ num_cell_x
+    cy = tmp % num_cell_y
+    cz = tmp ÷ num_cell_y
+
+    shared_x = CuStaticSharedArray(T, CELL_BLOCK_SIZE)
+    shared_y = CuStaticSharedArray(T, CELL_BLOCK_SIZE)
+    shared_z = CuStaticSharedArray(T, CELL_BLOCK_SIZE)
+    shared_ids = CuStaticSharedArray(Int32, CELL_BLOCK_SIZE)
+
+    for dz in Int32(-1):Int32(1)
+        nz = (cz + dz + num_cell_z) % num_cell_z
+
+        for dy in Int32(-1):Int32(1)
+            ny = (cy + dy + num_cell_y) % num_cell_y
+
+            for dx in Int32(-1):Int32(1)
+                nx = (cx + dx + num_cell_x) % num_cell_x
+
+                candidate_cell =
+                    Int32(1) +
+                    nx +
+                    num_cell_x * (ny + num_cell_y * nz)
+
+                candidate_start = cell_offsets[candidate_cell]
+                n_candidates = cell_counts[candidate_cell]
+                candidate_tile_start = Int32(0)
+
+                while candidate_tile_start < n_candidates
+                    candidate_local =
+                        candidate_tile_start + lane - Int32(1)
+
+                    tile_count = min(
+                        Int32(CELL_BLOCK_SIZE),
+                        n_candidates - candidate_tile_start,
+                    )
+
+                    if candidate_local < n_candidates
+                        candidate_index =
+                            candidate_start + candidate_local
+
+                        shared_ids[lane] =
+                            cell_particles[candidate_index]
+                        shared_x[lane] = cell_x[candidate_index]
+                        shared_y[lane] = cell_y[candidate_index]
+                        shared_z[lane] = cell_z[candidate_index]
+                    end
+
+                    sync_threads()
+
+                    if host_active
+                        for candidate_lane in Int32(1):tile_count
+                            atom_j = shared_ids[candidate_lane]
+
+                            if atom_j != atom_i
+                                dx_ij =
+                                    shared_x[candidate_lane] - x_i
+                                dy_ij =
+                                    shared_y[candidate_lane] - y_i
+                                dz_ij =
+                                    shared_z[candidate_lane] - z_i
+
+                                dx_ij -= box_Lx * floor(
+                                    dx_ij / box_Lx + T(0.5),
+                                )
+                                dy_ij -= box_Ly * floor(
+                                    dy_ij / box_Ly + T(0.5),
+                                )
+                                dz_ij -= box_Lz * floor(
+                                    dz_ij / box_Lz + T(0.5),
+                                )
+
+                                r2 = (
+                                    dx_ij * dx_ij +
+                                    dy_ij * dy_ij +
+                                    dz_ij * dz_ij
+                                )
+
+                                if r2 <= cutoff2
+                                    count += Int32(1)
+
+                                    if count <= max_neighbours
+                                        neighbours[count, atom_i] =
+                                            atom_j
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    sync_threads()
+
+                    candidate_tile_start +=
+                        Int32(CELL_BLOCK_SIZE)
+                end
+            end
+        end
+    end
+
+    if host_active
+        neighbour_counts[atom_i] = count
+    end
+
+    return nothing
+end
+
+function allocate_optimised_gpu_state(
+    x_gpu,
+    y_gpu,
+    z_gpu,
+    box_Lx,
+    box_Ly,
+    box_Lz,
+    cutoff;
+    max_neighbours=Int32(128),
+    allocate_pairs=false,
+)
+    n_atoms = length(x_gpu)
+
+    num_cell_x = floor(Int32, box_Lx / cutoff)
+    num_cell_y = floor(Int32, box_Ly / cutoff)
+    num_cell_z = floor(Int32, box_Lz / cutoff)
+
+    cell_Lx = box_Lx / num_cell_x
+    cell_Ly = box_Ly / num_cell_y
+    cell_Lz = box_Lz / num_cell_z
+
+    n_cells = Int(num_cell_x * num_cell_y * num_cell_z)
+
+    pair_capacity = cld(n_atoms * Int(max_neighbours), 2)
+
+    return (
+        x=x_gpu,
+        y=y_gpu,
+        z=z_gpu,
+        cell_ids=CUDA.zeros(Int32, n_atoms),
+        cell_counts=CUDA.zeros(Int32, n_cells),
+        inclusive_counts=CUDA.zeros(Int32, n_cells),
+        cell_offsets=CUDA.zeros(Int32, n_cells),
+        cell_write_counts=CUDA.zeros(Int32, n_cells),
+        cell_particles=CUDA.zeros(Int32, n_atoms),
+        cell_tile_counts=CUDA.zeros(Int32, n_cells),
+        cell_tile_inclusive_counts=CUDA.zeros(Int32, n_cells),
+        cell_tile_offsets=CUDA.zeros(Int32, n_cells),
+        host_tile_cells=CUDA.zeros(Int32, n_atoms),
+        host_tile_starts=CUDA.zeros(Int32, n_atoms),
+        n_host_tiles=Ref(0),
+        cell_x=similar(x_gpu),
+        cell_y=similar(y_gpu),
+        cell_z=similar(z_gpu),
+        neighbour_counts=CUDA.zeros(Int32, n_atoms),
+        neighbours=CUDA.zeros(
+            Int32,
+            Int(max_neighbours),
+            n_atoms,
+        ),
+        pair_counts=allocate_pairs ? CUDA.zeros(Int32, n_atoms) : nothing,
+        pair_inclusive_counts=allocate_pairs ? CUDA.zeros(Int32, n_atoms) : nothing,
+        pair_offsets=allocate_pairs ? CUDA.zeros(Int32, n_atoms) : nothing,
+        pair_list=allocate_pairs ? CuArray{
+            Tuple{Int32,Int32,Bool},
+        }(undef, pair_capacity) : nothing,
+        pair_capacity=pair_capacity,
+        n_atoms=n_atoms,
+        n_cells=n_cells,
+        num_cell_x=num_cell_x,
+        num_cell_y=num_cell_y,
+        num_cell_z=num_cell_z,
+        cell_Lx=cell_Lx,
+        cell_Ly=cell_Ly,
+        cell_Lz=cell_Lz,
+        box_Lx=box_Lx,
+        box_Ly=box_Ly,
+        box_Lz=box_Lz,
+        cutoff2=cutoff * cutoff,
+        max_neighbours=max_neighbours,
+    )
+end
+
+function build_optimised_cell_list!(state)
+    n_threads = 256
+    n_blocks = cld(state.n_atoms, n_threads)
+
+    fill!(state.cell_counts, Int32(0))
+    fill!(state.cell_write_counts, Int32(0))
+
+    @cuda threads=n_threads blocks=n_blocks get_cell_id!(
+        state.cell_ids,
+        state.x,
+        state.y,
+        state.z,
+        state.n_atoms,
+        state.num_cell_x,
+        state.num_cell_y,
+        state.num_cell_z,
+        state.cell_Lx,
+        state.cell_Ly,
+        state.cell_Lz,
+    )
+
+    @cuda threads=n_threads blocks=n_blocks get_cell_counts_gpu!(
+        state.cell_counts,
+        state.cell_ids,
+        state.n_atoms,
+    )
+
+    accumulate!(
+        +,
+        state.inclusive_counts,
+        state.cell_counts,
+    )
+
+    offset_threads = 256
+    offset_blocks = cld(state.n_cells, offset_threads)
+
+    @cuda threads=offset_threads blocks=offset_blocks inclusive_to_offsets_gpu!(
+        state.cell_offsets,
+        state.inclusive_counts,
+        state.n_cells,
+    )
+
+        @cuda threads=offset_threads blocks=offset_blocks count_host_tiles_gpu!(
+        state.cell_tile_counts,
+        state.cell_counts,
+        state.n_cells,
+    )
+
+    accumulate!(
+        +,
+        state.cell_tile_inclusive_counts,
+        state.cell_tile_counts,
+    )
+
+    @cuda threads=offset_threads blocks=offset_blocks inclusive_to_offsets_gpu!(
+        state.cell_tile_offsets,
+        state.cell_tile_inclusive_counts,
+        state.n_cells,
+    )
+
+    state.n_host_tiles[] = Int(
+        only(
+            Array(
+                state.cell_tile_inclusive_counts[
+                    state.n_cells:state.n_cells
+                ],
+            ),
+        ),
+    )
+
+    @cuda threads=offset_threads blocks=offset_blocks write_host_tiles_gpu!(
+        state.host_tile_cells,
+        state.host_tile_starts,
+        state.cell_tile_counts,
+        state.cell_tile_offsets,
+        state.n_cells,
+    )
+
+    @cuda threads=n_threads blocks=n_blocks get_cell_particles_gpu!(
+        state.cell_particles,
+        state.cell_write_counts,
+        state.cell_ids,
+        state.cell_offsets,
+        state.n_atoms,
+    )
+
+    @cuda threads=n_threads blocks=n_blocks gather_cell_coordinates_gpu!(
+        state.cell_x,
+        state.cell_y,
+        state.cell_z,
+        state.cell_particles,
+        state.x,
+        state.y,
+        state.z,
+        state.n_atoms,
+    )
+
+    return nothing
+end
+
+function query_gpu_cell_list!(state)
+    fill!(state.neighbour_counts, Int32(0))
+
+    n_blocks = state.n_host_tiles[]
+
+    @cuda threads=CELL_BLOCK_SIZE blocks=n_blocks get_neighbours_cell_shared_contiguous_gpu!(
+        state.neighbour_counts,
+        state.neighbours,
+        state.cell_counts,
+        state.cell_offsets,
+        state.cell_particles,
+        state.host_tile_cells,
+        state.host_tile_starts,
+        state.cell_x,
+        state.cell_y,
+        state.cell_z,
+        state.num_cell_x,
+        state.num_cell_y,
+        state.num_cell_z,
+        state.box_Lx,
+        state.box_Ly,
+        state.box_Lz,
+        state.cutoff2,
+        state.max_neighbours,
+    )
+
+    return nothing
+end
+
+function check_gpu_cell_list_capacity(state)
+    maximum_neighbours = maximum(state.neighbour_counts)
+    capacity = size(state.neighbours, 1)
+
+    maximum_neighbours <= capacity || error(
+        "GPU cell-list neighbor capacity exceeded: " *
+        "$maximum_neighbours > $capacity. " *
+        "Increase max_neighbors.",
+    )
+
+    return maximum_neighbours
+end
+
+function build_pair_list!(
+    state,
+    mode,
+    eligible,
+    special,
+)
+    state.pair_list === nothing && error(
+        "pair buffers were not allocated for this GPU cell-list state",
+    )
+
+    n_threads = 256
+    n_blocks = cld(state.n_atoms, n_threads)
+
+    @cuda threads=n_threads blocks=n_blocks count_half_pairs_gpu!(
+        state.pair_counts,
+        state.neighbour_counts,
+        state.neighbours,
+        eligible,
+        mode,
+        state.n_atoms,
+    )
+
+    accumulate!(
+        +,
+        state.pair_inclusive_counts,
+        state.pair_counts,
+    )
+
+    @cuda threads=n_threads blocks=n_blocks inclusive_to_offsets_gpu!(
+        state.pair_offsets,
+        state.pair_inclusive_counts,
+        state.n_atoms,
+    )
+
+    @cuda threads=n_threads blocks=n_blocks write_half_pairs_gpu!(
+        state.pair_list,
+        state.pair_offsets,
+        state.neighbour_counts,
+        state.neighbours,
+        eligible,
+        special,
+        mode,
+        state.n_atoms,
+    )
+
+    n_pairs = Int(
+        only(
+            Array(
+                state.pair_inclusive_counts[
+                    state.n_atoms:state.n_atoms
+                ],
+            ),
+        ),
+    )
+
+    n_pairs <= state.pair_capacity || error(
+        "pair capacity exceeded: " *
+        "$n_pairs > $(state.pair_capacity)",
+    )
+
+    return n_pairs
+end
+
+function split_gpu_cell_list_coordinates!(
+    x::CuDeviceVector{T},
+    y::CuDeviceVector{T},
+    z::CuDeviceVector{T},
+    coords,
+    n_atoms,
+) where {T}
+    atom_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+
+    if atom_i <= n_atoms
+        coord = ustrip_vec(coords[atom_i])
+
+        x[atom_i] = T(coord[1])
+        y[atom_i] = T(coord[2])
+        z[atom_i] = T(coord[3])
+    end
+
+    return nothing
+end
+
+function split_gpu_cell_list_coordinates!(
+    x,
+    y,
+    z,
+    coords,
+)
+    n_atoms = length(coords)
+    n_threads = 256
+    n_blocks = cld(n_atoms, n_threads)
+
+    @cuda threads=n_threads blocks=n_blocks split_gpu_cell_list_coordinates!(
+        x,
+        y,
+        z,
+        coords,
+        n_atoms,
+    )
+
+    return nothing
+end
+
+function split_gpu_cell_list_coordinates(coords, ::Type{T}) where {T}
+    n_atoms = length(coords)
+
+    x = CUDA.zeros(T, n_atoms)
+    y = CUDA.zeros(T, n_atoms)
+    z = CUDA.zeros(T, n_atoms)
+
+    split_gpu_cell_list_coordinates!(x, y, z, coords)
+
+    return x, y, z
+end
+
+function Molly.find_neighbors(
+    sys::Molly.System{3, AT},
+    nf::Molly.GPUCellListNeighborFinder,
+    current_neighbors=nothing,
+    step_n::Integer=0,
+    force_recompute::Bool=false;
+    kwargs...,
+) where {AT<:CuArray}
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
+
+    sys.boundary isa Molly.CubicBoundary || throw(
+        ArgumentError(
+            "GPUCellListNeighborFinder currently supports only " *
+            "three-dimensional CubicBoundary systems, got " *
+            "$(typeof(sys.boundary))",
+        ),
+    )
+
+    Molly.has_infinite_boundary(sys.boundary) && throw(
+        ArgumentError(
+            "GPUCellListNeighborFinder does not support infinite boundaries",
+        ),
+    )
+
+    dist_unit = unit(zero(eltype(eltype(sys.coords))))
+    T = Molly.float_type(sys)
+
+    box = box_sides(sys.boundary)
+    box_Lx = T(ustrip(dist_unit, box[1]))
+    box_Ly = T(ustrip(dist_unit, box[2]))
+    box_Lz = T(ustrip(dist_unit, box[3]))
+    cutoff = T(ustrip(dist_unit, nf.dist_cutoff))
+
+    max_neighbors = if isnothing(nf.max_neighbors)
+        estimate_gpu_cell_list_max_neighbors(
+            length(sys),
+            box_Lx,
+            box_Ly,
+            box_Lz,
+            cutoff,
+        )
+    else
+        nf.max_neighbors
+    end
+
+    num_cell_x = floor(Int, box_Lx / cutoff)
+    num_cell_y = floor(Int, box_Ly / cutoff)
+    num_cell_z = floor(Int, box_Lz / cutoff)
+
+    minimum((num_cell_x, num_cell_y, num_cell_z)) >= 3 || throw(
+        ArgumentError(
+            "GPUCellListNeighborFinder requires at least three cells " *
+            "along every box axis; box sides are " *
+            "($box_Lx, $box_Ly, $box_Lz) and cutoff is $cutoff",
+        ),
+    )
+
+    build_pairs = nf.output !== :ragged
+    pair_mode = nf.output === :molly_pairs ?
+                Val(:molly) :
+                Val(:geometric)
+
+    can_reuse_state = (
+        current_neighbors isa Molly.GPUCellListNeighborList &&
+        current_neighbors.state !== nothing &&
+        (!build_pairs || current_neighbors.state.pair_list !== nothing) &&
+        current_neighbors.state.n_atoms == length(sys) &&
+        current_neighbors.state.box_Lx == box_Lx &&
+        current_neighbors.state.box_Ly == box_Ly &&
+        current_neighbors.state.box_Lz == box_Lz &&
+        current_neighbors.state.cutoff2 == cutoff * cutoff &&
+        current_neighbors.state.max_neighbours == Int32(max_neighbors)
+    )
+
+    if can_reuse_state
+        state = current_neighbors.state
+
+        split_gpu_cell_list_coordinates!(
+            state.x,
+            state.y,
+            state.z,
+            sys.coords,
+        )
+    else
+        x, y, z = split_gpu_cell_list_coordinates(sys.coords, T)
+
+        state = allocate_optimised_gpu_state(
+            x,
+            y,
+            z,
+            box_Lx,
+            box_Ly,
+            box_Lz,
+            cutoff;
+            max_neighbours=Int32(max_neighbors),
+            allocate_pairs=build_pairs,
+        )
+    end
+
+    build_optimised_cell_list!(state)
+    query_gpu_cell_list!(state)
+    check_gpu_cell_list_capacity(state)
+
+    n_pairs = if build_pairs
+        build_pair_list!(
+            state,
+            pair_mode,
+            nf.eligible,
+            nf.special,
+        )
+    else
+        0
+    end
+
+    pair_list = build_pairs ? state.pair_list : nothing
+
+    return Molly.GPUCellListNeighborList(
+        state.neighbour_counts,
+        state.neighbours,
+        n_pairs,
+        pair_list,
+        state,
+    )
+end
+
 end

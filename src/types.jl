@@ -14,6 +14,7 @@ export
     AtomData,
     MolecularTopology,
     NeighborList,
+    GPUCellListNeighborList,
     System,
     ThermoState,
     ReplicaSystem,
@@ -609,6 +610,80 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
     return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
 end
 
+"""
+    GPUCellListNeighborList(counts, neighbors, n, list, state)
+
+GPU cell-list result containing a padded per-atom neighbor matrix and,
+when requested, a flat half-pair list.
+
+For atom `i`, valid ragged entries are stored in
+`neighbors[1:counts[i], i]`.
+"""
+struct GPUCellListNeighborList{C,R,L,S}
+    counts::C
+    neighbors::R
+    n::Int
+    list::L
+    state::S
+
+    function GPUCellListNeighborList(
+        counts::C,
+        neighbors::R,
+        n::Integer,
+        list::L,
+        state::S,
+    ) where {C,R,L,S}
+        size(neighbors, 2) == length(counts) || throw(
+            ArgumentError(
+                "the second dimension of neighbors must equal " *
+                "the number of atoms",
+            ),
+        )
+
+        n_int = Int(n)
+
+        if list === nothing
+            iszero(n_int) || throw(
+                ArgumentError("n must be zero when list is nothing"),
+            )
+        else
+            0 <= n_int <= length(list) || throw(
+                ArgumentError(
+                    "n must be between zero and the pair-list capacity",
+                ),
+            )
+        end
+
+        return new{C,R,L,S}(
+            counts,
+            neighbors,
+            n_int,
+            list,
+            state,
+        )
+    end
+end
+
+function Base.length(neighbors::GPUCellListNeighborList)
+    neighbors.list === nothing && throw(
+        ArgumentError(
+            "ragged-only GPU neighbor output has no flat pair list",
+        ),
+    )
+
+    return neighbors.n
+end
+
+Base.getindex(neighbors::GPUCellListNeighborList, i::Integer) =
+    neighbors.list[i]
+
+Base.firstindex(::GPUCellListNeighborList) = 1
+
+Base.lastindex(neighbors::GPUCellListNeighborList) =
+    length(neighbors)
+
+Base.eachindex(neighbors::GPUCellListNeighborList) =
+    Base.OneTo(length(neighbors))
 """
     NeighborList(n, list)
     NeighborList()
