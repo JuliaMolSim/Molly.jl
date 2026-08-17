@@ -1661,6 +1661,92 @@ end
     end
 end
 
+@testset "Force is minus the energy gradient" begin
+    # The reference values above check force and potential_energy separately, so also
+    #   check that they are consistent with each other by finite differences
+    boundary_fd = CubicBoundary(5.0u"nm")
+    atom_i = Atom(index=1, atom_type=1, charge= 0.6, σ=0.25u"nm", ϵ=0.3u"kJ * mol^-1", λ=1.0)
+    atom_j = Atom(index=2, atom_type=2, charge=-0.4, σ=0.32u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
+    kbT = 2.479u"kJ * mol^-1"
+
+    pairwise_inters_fd = (
+        LennardJones(),
+        LennardJones(cutoff=ShiftedPotentialCutoff(0.9u"nm")),
+        LennardJones(cutoff=ShiftedForceCutoff(0.9u"nm")),
+        LennardJones(cutoff=CubicSplineCutoff(0.5u"nm", 0.9u"nm")),
+        LennardJonesSoftCoreBeutler(α=0.3),
+        LennardJonesSoftCoreGapsys(α=0.85),
+        SoftSphere(),
+        Mie(m=5, n=10),
+        DoubleExponential(α=12.159626, β=4.326311),
+        Coulomb(),
+        CoulombReactionField(dist_cutoff=0.9u"nm"),
+        Yukawa(),
+    )
+    h_pair = 1e-7u"nm"
+    dx = SVector(h_pair, zero(h_pair), zero(h_pair))
+    for inter in pairwise_inters_fd
+        for r in (0.3u"nm", 0.45u"nm", 0.7u"nm")
+            dr = SVector(r, zero(r), zero(r))
+            dU_dx = (potential_energy(inter, dr + dx, atom_i, atom_j) -
+                     potential_energy(inter, dr - dx, atom_i, atom_j)) / 2h_pair
+            @test isapprox(force(inter, dr, atom_i, atom_j)[1], -dU_dx;
+                           rtol=1e-4, atol=1e-5u"kJ * mol^-1 * nm^-1")
+        end
+    end
+
+    # Check every coordinate of a specific interaction against a central difference
+    function test_energy_gradient(inter, coords, boundary)
+        fs = force(inter, coords..., boundary)
+        fs_atoms = [getproperty(fs, p) for p in propertynames(fs)]
+        h = 1e-7 * oneunit(eltype(eltype(coords)))
+        for ai in eachindex(coords)
+            for d in 1:length(coords[ai])
+                δ = SVector(ntuple(k -> (k == d ? h : zero(h)), length(coords[ai])))
+                cs_p, cs_m = collect(coords), collect(coords)
+                cs_p[ai] += δ
+                cs_m[ai] -= δ
+                dU_dx = (potential_energy(inter, cs_p..., boundary) -
+                         potential_energy(inter, cs_m..., boundary)) / 2h
+                @test isapprox(fs_atoms[ai][d], -dU_dx;
+                               rtol=1e-4, atol=1e-4 * oneunit(dU_dx))
+            end
+        end
+    end
+
+    c1_fd = SVector(1.00, 1.00, 1.00)u"nm"
+    c2_fd = SVector(1.23, 1.05, 0.97)u"nm"
+    c3_fd = SVector(1.41, 1.22, 1.06)u"nm"
+    c4_fd = SVector(1.55, 1.19, 1.28)u"nm"
+
+    test_energy_gradient(HarmonicPositionRestraint(k=300.0u"kJ * mol^-1 * nm^-2", x0=c1_fd),
+                         (c2_fd,), boundary_fd)
+    test_energy_gradient(HarmonicBond(k=3000.0u"kJ * mol^-1 * nm^-2", r0=0.2u"nm"),
+                         (c1_fd, c2_fd), boundary_fd)
+    test_energy_gradient(MorseBond(D=100.0u"kJ * mol^-1", a=10.0u"nm^-1", r0=0.2u"nm"),
+                         (c1_fd, c2_fd), boundary_fd)
+    test_energy_gradient(FENEBond(k=10.0u"nm^-2" * kbT, r0=1.6u"nm", σ=1.0u"nm", ϵ=kbT),
+                         (c1_fd, c2_fd), boundary_fd)
+    test_energy_gradient(HarmonicAngle(k=300.0u"kJ * mol^-1", θ0=0.8),
+                         (c1_fd, c2_fd, c3_fd), boundary_fd)
+    test_energy_gradient(CosineAngle(k=10.0 * kbT, θ0=0.9),
+                         (c1_fd, c2_fd, c3_fd), boundary_fd)
+    test_energy_gradient(UreyBradley(kangle=300.0u"kJ * mol^-1", θ0=0.8,
+                                     kbond=10_000.0u"kJ * mol^-1 * nm^-2", r0=0.3u"nm"),
+                         (c1_fd, c2_fd, c3_fd), boundary_fd)
+    test_energy_gradient(PeriodicTorsion(periodicities=(1, 2, 3),
+                                         phases=(0.0, Float64(π / 2), Float64(π)),
+                                         ks=(10.0u"kJ * mol^-1", 5.0u"kJ * mol^-1",
+                                             2.0u"kJ * mol^-1"), proper=true),
+                         (c1_fd, c2_fd, c3_fd, c4_fd), boundary_fd)
+    test_energy_gradient(RBTorsion(c0=1.0u"kJ * mol^-1", c1=10.0u"kJ * mol^-1",
+                                   c2=20.0u"kJ * mol^-1", c3=30.0u"kJ * mol^-1",
+                                   c4=5.0u"kJ * mol^-1", c5=2.0u"kJ * mol^-1"),
+                         (c1_fd, c2_fd, c3_fd, c4_fd), boundary_fd)
+    test_energy_gradient(HarmonicTorsion(1000.0u"kJ * mol^-1", -1.8),
+                         (c1_fd, c2_fd, c3_fd, c4_fd), boundary_fd)
+end
+
 @testset "Ewald and PME" begin
     dist_cutoff = 0.9u"nm"
     E_openmm = -5.465127432466375u"kJ/mol"
