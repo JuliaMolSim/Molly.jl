@@ -37,6 +37,35 @@
     @test wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
     @test_throws ErrorException wrap_coord_1D(-2.0u"nm", 10.0)
 
+    # Bond and torsion angles
+    b_ang = CubicBoundary(10.0u"nm")
+    origin = SVector(0.0, 0.0, 0.0)u"nm"
+    @test bond_angle(SVector(1.0, 0.0, 0.0)u"nm", origin,
+                     SVector(0.0, 1.0, 0.0)u"nm", b_ang) ≈ π / 2
+    @test bond_angle(SVector(1.0, 0.0, 0.0)u"nm", origin,
+                     SVector(2.0, 0.0, 0.0)u"nm", b_ang) ≈ 0.0 atol=1e-12
+    @test bond_angle(SVector(1.0, 0.0, 0.0)u"nm", origin,
+                     SVector(-1.0, 0.0, 0.0)u"nm", b_ang) ≈ π
+    @test bond_angle(SVector(1.0, 0.0, 0.0), SVector(1.0, 1.0, 0.0)) ≈ π / 4
+
+    # j→k lies along x, the torsion is the angle from i to l about that axis
+    tj, tk = origin, SVector(0.1, 0.0, 0.0)u"nm"
+    ti = SVector(0.0, 0.1, 0.0)u"nm"
+    @test torsion_angle(ti, tj, tk, SVector(0.1,  0.1, 0.0)u"nm", b_ang) ≈ 0.0 atol=1e-12
+    @test torsion_angle(ti, tj, tk, SVector(0.1, -0.1, 0.0)u"nm", b_ang) ≈ π
+    @test torsion_angle(ti, tj, tk, SVector(0.1,  0.0, 0.1)u"nm", b_ang) ≈  π / 2
+    @test torsion_angle(ti, tj, tk, SVector(0.1,  0.0,-0.1)u"nm", b_ang) ≈ -π / 2
+    @test torsion_angle(ti, tj, tk,
+                        SVector(0.1, 0.1 * cosd(60), 0.1 * sind(60))u"nm", b_ang) ≈ deg2rad(60)
+
+    # Both respect the periodic boundary conditions
+    b_small = CubicBoundary(1.0u"nm")
+    @test bond_angle(SVector(0.95, 0.1, 0.0)u"nm", SVector(0.95, 0.0, 0.0)u"nm",
+                     SVector(0.05, 0.0, 0.0)u"nm", b_small) ≈ π / 2
+    @test torsion_angle(SVector(0.95, 0.1, 0.0)u"nm", SVector(0.95, 0.0, 0.0)u"nm",
+                        SVector(0.05, 0.0, 0.0)u"nm", SVector(0.05, 0.0, 0.1)u"nm",
+                        b_small) ≈ π / 2
+
     vels_units_1    = [maxwell_boltzmann(12.0u"u", 300.0u"K", uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
     vels_units_2    = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
     vels_molunits_1 = [maxwell_boltzmann(12.0u"g/mol", 300.0u"K", Unitful.k * Unitful.Na) for _ in 1:1_000]
@@ -110,6 +139,40 @@
     @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinatesLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test_throws DomainError CubicBoundary( 4.0u"nm", 0.0u"nm", 6.0u"nm")
+
+    # Density, which divides by the Avogadro constant for molar masses
+    n_dens = 100
+    boundary_dens = CubicBoundary(2.0u"nm")
+    coords_dens = place_atoms(n_dens, boundary_dens; min_dist=0.1u"nm")
+    sys_dens = System(
+        atoms=[Atom(mass=10.0u"g/mol") for _ in 1:n_dens],
+        coords=coords_dens,
+        boundary=boundary_dens,
+        loggers=(density=DensityLogger(1),),
+    )
+    @test density(sys_dens) ≈ uconvert(u"kg * m^-3",
+                        n_dens * 10.0u"g/mol" / Unitful.Na / volume(boundary_dens))
+    @test density(System(atoms=[Atom(mass=10.0u"u") for _ in 1:n_dens], coords=coords_dens,
+                         boundary=boundary_dens, energy_units=u"kJ",
+                         force_units=u"kJ * nm^-1")) ≈
+          uconvert(u"kg * m^-3", n_dens * 10.0u"u" / volume(boundary_dens))
+    # No units means no conversion from a molar mass
+    @test density(System(atoms=[Atom(mass=10.0) for _ in 1:n_dens],
+                         coords=ustrip_vec.(coords_dens), boundary=CubicBoundary(2.0),
+                         force_units=NoUnits, energy_units=NoUnits)) ≈ n_dens * 10.0 / 8.0
+    @test iszero(density(System(atoms=[Atom(mass=10.0u"g/mol") for _ in 1:n_dens],
+                                coords=coords_dens, boundary=CubicBoundary(Inf * u"nm"))))
+    # Halving the box lengths gives eight times the density
+    sys_dens_scaled = System(sys_dens; boundary=CubicBoundary(1.0u"nm"))
+    @test density(sys_dens_scaled) ≈ 8 * density(sys_dens)
+
+    apply_loggers!(sys_dens)
+    @test values(sys_dens.loggers.density) == [density(sys_dens)]
+    apply_loggers!(sys_dens, nothing, 1, nothing, false)
+    @test length(values(sys_dens.loggers.density)) == 1
+    apply_loggers!(sys_dens, nothing, 1)
+    @test length(values(sys_dens.loggers.density)) == 2
+    show(devnull, sys_dens.loggers.density)
 
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test float_type(b) == Float64
