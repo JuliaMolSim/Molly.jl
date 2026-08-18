@@ -80,12 +80,37 @@ function _allegro_energy_to_units(E, energy_units)
     end
 end
 
+function _allegro_force_to_units(f, force_units)
+    if force_units == Unitful.NoUnits
+        return f
+    elseif dimension(force_units) == dimension(u"kJ*mol^-1*nm^-1")
+        return uconvert.(force_units, f .* (u"eV/nm") .* Unitful.Na)
+    else
+        return uconvert.(force_units, f .* u"eV/nm")
+    end
+end
+
+_species_vec(sys, inter) = [inter.species_map[sys.atoms_data[i].element] for i in eachindex(sys.coords)]
+
 function AtomsCalculators.potential_energy(sys::System, inter::Molly.AllegroPotential; kwargs...)
     coords_A = _coords_to_angstrom(sys.coords)
-    species = [inter.species_map[sys.atoms_data[i].element] for i in eachindex(sys.coords)]
+    species = _species_vec(sys, inter)
     bdy = _boundary_to_angstrom(sys.boundary)
     E = Molly.allegro_total_energy(inter.model, coords_A, species, bdy, inter.model.r_c)
     return _allegro_energy_to_units(E, sys.energy_units)
+end
+
+function AtomsCalculators.forces!(fs, sys::System, inter::Molly.AllegroPotential; kwargs...)
+    coords_A = _coords_to_angstrom(sys.coords)
+    species = _species_vec(sys, inter)
+    bdy = _boundary_to_angstrom(sys.boundary)
+    # forces from the model are in eV/Å (energy eV, length Å); Molly coords are nm, so the force
+    # per nm-coordinate is 10× the per-Å force (dÅ/dnm = 10).
+    F = Molly.allegro_forces(inter.model, coords_A, species, bdy, inter.model.r_c)
+    for i in eachindex(fs)
+        fs[i] += _allegro_force_to_units(F[i] .* 10, sys.force_units)
+    end
+    return fs
 end
 
 end # module

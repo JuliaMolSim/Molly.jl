@@ -68,6 +68,12 @@ end
 
 @inline _dense(W, b, x) = W * x .+ b
 
+# derivative of SiLU: d/dx[x·σ(x)] = σ(x)·(1 + x·(1−σ(x)))
+@inline function _silu_grad(x::T) where T
+    s = one(T) / (one(T) + exp(-x))
+    return s * (one(T) + x * (one(T) - s))
+end
+
 # scalar (0e) block of a feature vector: the first C entries (entry k=1 is the 0e block, mul C)
 @inline _scalars0e(feat::Irreps, P, C) = @view P[1:C]
 
@@ -115,6 +121,132 @@ function allegro_edge_energy(m::AllegroModel{T}, d::T, rhat::SVector{3,T}, Zi::I
         V = eqlinear_forward(lw.lin, P)
     end
     return (m.out_W * x .+ m.out_b)[1]
+end
+
+"""
+    allegro_edge_energy_and_grad(m, d, rhat, Zi, Zj) -> (E, g)
+
+Energy of one directed edge and its analytic gradient `g = ∂E_edge/∂r` with respect to the edge
+vector `r = d·rhat` (`SVector{3}`), obtained by composing the primitive VJPs. Returns `(0, 0)` if
+`d ≥ r_c`.
+"""
+function allegro_edge_energy_and_grad(m::AllegroModel{T}, d::T, rhat::SVector{3,T},
+                                      Zi::Int, Zj::Int) where T
+    (d < m.r_c) || return (zero(T), zero(SVector{3,T}))
+    rvec = d .* rhat
+    Y, JY = real_sph_harm_grad(2, rvec)                 # Y (9,), JY = ∂Y/∂r (9×3)
+    Yv = collect(Y)
+    u, du = poly_envelope_grad(d, m.r_c, m.env_p)
+    B, dB = bessel_basis_grad(d, m.r_c, Val(m.nb))
+    R = B .* u
+
+    # ---- forward, caching activations ----
+    s_in = zeros(T, m.nb + 2 * m.S)
+    @inbounds for i in 1:m.nb; s_in[i] = R[i]; end
+    s_in[m.nb + Zi] = one(T); s_in[m.nb + m.S + Zj] = one(T)
+    a1 = _dense(m.emb_W1, m.emb_b1, s_in)
+    x0 = _dense(m.emb_W2, m.emb_b2, silu.(a1))
+
+    V0 = zeros(T, m.feat.dim)
+    @inbounds for k in 1:3
+        dk = 2 * (k - 1) + 1; yoff = m.sh.offsets[k]
+        for c in 1:m.C
+            wl = m.init_w[c, k]; base = m.feat.offsets[k] + (c - 1) * dk
+            for mm in 1:dk; V0[base + mm] = wl * Y[yoff + mm] * u; end
+        end
+    end
+    @inbounds for c in 1:m.C; V0[m.feat.offsets[1] + c] += m.init_b0[c] * u; end
+
+    L = length(m.layers)
+    x_ins = Vector{Vector{T}}(undef, L); V_ins = Vector{Vector{T}}(undef, L)
+    ws = Vector{Vector{T}}(undef, L); Ps = Vector{Vector{T}}(undef, L); axs = Vector{Vector{T}}(undef, L)
+    x = x0; V = V0
+    for (li, lw) in enumerate(m.layers)
+        x_ins[li] = x; V_ins[li] = V
+        w = _dense(lw.tp_W, lw.tp_b, x); ws[li] = w
+        P = tensor_product(m.paths, m.cg, V, Yv, w); Ps[li] = P
+        scal = P[1:m.C]
+        ax = _dense(lw.x_W, lw.x_b, vcat(x, scal)); axs[li] = ax
+        x = x .+ silu.(ax)
+        V = eqlinear_forward(lw.lin, P)
+    end
+    E = (m.out_W * x .+ m.out_b)[1]
+
+    # ---- backward ----
+    gx = vec(collect(m.out_W[1, :]))                    # ∂E/∂x_final
+    gV = zeros(T, m.feat.dim)                           # ∂E/∂V_final (unused by readout)
+    gY = zeros(T, length(Yv))                           # ∂E/∂Y (accumulated)
+    for li in L:-1:1
+        lw = m.layers[li]
+        gh = gx                                         # residual: x_out = x_in + silu(ax)
+        gax = gh .* _silu_grad.(axs[li])
+        gcat = lw.x_W' * gax                            # ∂E/∂[x_in; scal]
+        gx_in = copy(gx)                                # residual path
+        @inbounds for i in 1:m.H; gx_in[i] += gcat[i]; end
+        gscal = @view gcat[(m.H + 1):(m.H + m.C)]
+        gP = zeros(T, m.feat.dim)
+        @inbounds for c in 1:m.C; gP[c] += gscal[c]; end
+        gP_lin, _, _ = eqlinear_vjp(lw.lin, Ps[li], gV)
+        gP .+= gP_lin
+        gVin, gYc, gw = tensor_product_vjp(m.paths, m.cg, V_ins[li], Yv, ws[li], gP)
+        gY .+= gYc
+        gx_in .+= lw.tp_W' * gw
+        gx = gx_in; gV = gVin
+    end
+    # gx = ∂E/∂x0 ; gV = ∂E/∂V0
+    gu = zero(T)
+    @inbounds for k in 1:3
+        dk = 2 * (k - 1) + 1; yoff = m.sh.offsets[k]
+        for c in 1:m.C
+            wl = m.init_w[c, k]; base = m.feat.offsets[k] + (c - 1) * dk
+            for mm in 1:dk
+                gY[yoff + mm] += gV[base + mm] * wl * u
+                gu += gV[base + mm] * wl * Y[yoff + mm]
+            end
+        end
+    end
+    @inbounds for c in 1:m.C; gu += gV[m.feat.offsets[1] + c] * m.init_b0[c]; end
+    # embedding backward → ∂E/∂R
+    g_silu_a1 = m.emb_W2' * gx
+    ga1 = g_silu_a1 .* _silu_grad.(a1)
+    gs_in = m.emb_W1' * ga1
+    # radial ∂E/∂d : R_n = B_n·u  ⇒ dR_n/dd = dB_n·u + B_n·du ; plus u's direct role in V init
+    gd = zero(T)
+    @inbounds for n in 1:m.nb
+        gd += gs_in[n] * (dB[n] * u + B[n] * du)
+    end
+    gd += gu * du
+    # assemble ∂E/∂r = JYᵀ·gY (directional) + gd·rhat (radial)
+    gr = MVector{3,T}(0, 0, 0)
+    @inbounds for b in 1:3
+        acc = zero(T)
+        for i in 1:length(Yv); acc += JY[i, b] * gY[i]; end
+        gr[b] = acc + gd * rhat[b]
+    end
+    return E, SVector{3,T}(gr)
+end
+
+"""
+    allegro_forces(m, coords, species, boundary, r_c) -> Vector{SVector{3,T}}
+
+Analytic forces `F = -∂E/∂r` for all atoms, summing each directed edge's contribution: for edge
+`i ← j` with `g = ∂E_edge/∂r`, `F[i] += g` and `F[j] -= g`. Also returns nothing extra; use
+[`allegro_total_energy`](@ref) for the energy.
+"""
+function allegro_forces(m::AllegroModel{T}, coords::AbstractVector{<:SVector{3}},
+                        species::AbstractVector{<:Integer}, boundary, r_c::T) where T
+    n = length(coords)
+    F = [zero(SVector{3,T}) for _ in 1:n]
+    for i in 1:n, j in 1:n
+        i == j && continue
+        r = isnothing(boundary) ? (coords[j] - coords[i]) : vector(coords[i], coords[j], boundary)
+        d = sqrt(r[1]^2 + r[2]^2 + r[3]^2)
+        (d < r_c && d > 1e-8) || continue
+        _, g = allegro_edge_energy_and_grad(m, T(d), r ./ T(d), Int(species[i]), Int(species[j]))
+        F[i] += g
+        F[j] -= g
+    end
+    return F
 end
 
 """

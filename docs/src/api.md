@@ -9,7 +9,7 @@ Package extensions are used in order to reduce the number of dependencies:
 - To use [`ASECalculator`](@ref), call `using PythonCall`.
 - To use [`rdf`](@ref), call `using KernelDensity`.
 - To use [`ANIPotential`](@ref), call `using Lux, HDF5`.
-- [`AllegroPotential`](@ref), a native equivariant (Allegro-style) neural network potential, is under active development. The O(3)-equivariant building blocks it needs (real spherical harmonics, Clebsch-Gordan tensor products, equivariant linear layers) and their analytic gradients live in core Molly and are validated by `test/equivariant.jl`; the model assembly and weight loading (which need `using Lux, HDF5`) land in a follow-up.
+- [`AllegroPotential`](@ref), a native equivariant (Allegro-style) neural network potential, computes energy and analytic forces on the CPU (`using Lux, HDF5`). It is built on O(3)-equivariant primitives (real spherical harmonics, Clebsch-Gordan tensor products, equivariant linear layers) that live in core Molly and are pinned to e3nn's conventions; these and the forces are validated by `test/equivariant.jl` and `test/allegro_potentials.jl`. GPU kernels and a weights artifact are follow-ups.
 
 ## Exported names
 
