@@ -128,15 +128,11 @@ species list. Coordinates without units are treated as nm (Molly convention) and
     land in a follow-up. `path` is left untyped here so the extension's `::AbstractString`
     method is strictly more specific (avoids a precompile-time method overwrite).
 """
-struct AllegroPotential{CFG, IR, EMB, W, SP, SH, D, B} <: AbstractMLPotential
-    config::CFG        # NamedTuple: l_max, n_layers, n_channels, n_bessel, r_cutoff (Å), env_p, ...
-    irreps::IR         # per-stage Irreps + precomputed TensorProductPaths / SparseCG tables
-    type_embed::EMB    # per-element embedding table (n_species × embed_dim)
-    weights::W         # per-layer NamedTuples: latent-MLP, tensor-product and linear weights (single model)
+struct AllegroPotential{M, SP, D} <: AbstractMLPotential
+    model::M           # AllegroModel (config + precomputed tensor-product paths/CG + weights)
     species_map::SP    # Dict{String,Int}: element → 1-based index
-    shifts_scales::SH  # per-type energy shift/scale and global scale (eV)
     cutoff::D          # r_cutoff, plain Float (Å)
-    buffers::B         # Ref{Any}: lazily-initialized per-edge scratch buffers
+    buffers::Ref{Any}  # lazily-initialized per-edge scratch buffers
 end
 
 # Fallback constructor. The real `AbstractString` method is in the extension (needs Lux + HDF5);

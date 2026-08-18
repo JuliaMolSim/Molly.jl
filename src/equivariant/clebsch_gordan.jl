@@ -148,10 +148,11 @@ function _real_cg_dense(l1::Int, l2::Int, l3::Int)
         end
         Cr[M1, M2, M3] = acc
     end
-    # The naive complex→real transform is purely imaginary when l1+l2+l3 is odd; the standard
-    # i^(l1+l2+l3) phase makes the real Wigner-3j real in every case. A global real rescaling of a
-    # path's coefficients preserves equivariance (it is absorbed by the layer weights).
-    Cr .*= im^(l1 + l2 + l3)
+    # The naive complex→real transform is purely imaginary when l1+l2+l3 is odd; the i^(l1+l2+l3)
+    # phase makes the real Wigner-3j real in every case, and the extra (-1)^(l1+l2) fixes the sign
+    # gauge to match e3nn's o3.wigner_3j exactly (verified for all couplings with l ≤ 2). Both are
+    # global real rescalings of a coupling, so equivariance is unaffected.
+    Cr .*= im^(l1 + l2 + l3) * (-1)^(l1 + l2)
     maximum(abs.(imag.(Cr))) < 1e-9 ||
         error("real CG has nonzero imaginary part (max $(maximum(abs.(imag.(Cr))))) — convention bug")
     return real.(Cr)
