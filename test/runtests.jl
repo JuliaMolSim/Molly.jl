@@ -12,6 +12,7 @@ using CUDA
 using Enzyme
 using FiniteDifferences
 using GPUArrays
+using JET
 using KernelDensity
 using Measurements
 using Metal
@@ -130,6 +131,7 @@ if GROUP in ("All", "NotGradients")
     include("constraints.jl")
     include("tss.jl")
     include("analysis.jl")
+    include("jet.jl")
     if run_cuda_tests
         include("gpu_consistency.jl")
         include("gpu_optimizations.jl")
