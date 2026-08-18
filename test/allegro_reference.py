@@ -22,6 +22,8 @@ import numpy as np
 import torch
 from e3nn import o3
 
+torch.set_default_dtype(torch.float64)  # keep the whole export in float64
+
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "allegro_reference")
 
@@ -73,13 +75,12 @@ def export_tensor_product():
     irreps_in1 = o3.Irreps("2x1o")
     irreps_in2 = o3.Irreps("1x1o")
     irreps_out = o3.Irreps("2x0e+2x1e+2x2e")
-    tp = o3.FullyConnectedTensorProduct(irreps_in1, irreps_in2, irreps_out, shared_weights=True)
-    torch.manual_seed(0)
+    tp = o3.FullyConnectedTensorProduct(irreps_in1, irreps_in2, irreps_out, shared_weights=True).double()
     x = torch.arange(1, irreps_in1.dim + 1, dtype=torch.float64) * 0.1
     y = torch.arange(1, irreps_in2.dim + 1, dtype=torch.float64) * 0.1
     with torch.no_grad():
         w = torch.arange(1, tp.weight_numel + 1, dtype=torch.float64) * 0.01
-        z = tp(x.unsqueeze(0).double(), y.unsqueeze(0).double(), w.double()).squeeze(0)
+        z = tp(x.unsqueeze(0), y.unsqueeze(0), w).squeeze(0)
     return {
         "irreps_in1": str(irreps_in1), "irreps_in2": str(irreps_in2), "irreps_out": str(irreps_out),
         "x": x.tolist(), "y": y.tolist(), "weights": w.tolist(), "z": z.tolist(),
@@ -94,9 +95,10 @@ def main():
             "lmax": LMAX,
             "sh_normalization": SH_NORMALIZATION,
             "sh_normalize": SH_NORMALIZE,
-            "note": "e3nn l=1 axis order is (y, z, x); Molly's internal primitives currently use "
-                    "(x, y, z). Pin Molly to this reference (permutation + any sign/scale) before "
-                    "loading trained weights.",
+            "note": "Molly's real spherical harmonics in src/equivariant/spherical_harmonics.jl "
+                    "are pinned to these e3nn values (component normalization, l=1 (x,y,z), the "
+                    "specific e3nn l=2 basis). test/equivariant.jl asserts the bit-match when this "
+                    "file is present.",
         },
         "spherical_harmonics": export_spherical_harmonics(),
         "wigner_3j": export_wigner_3j(),

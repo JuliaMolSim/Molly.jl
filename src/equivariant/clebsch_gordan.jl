@@ -49,7 +49,8 @@ function _real_sph_harm(l::Int, x::Float64, y::Float64, z::Float64)
     elseif l == 1
         return [C1 * x, C1 * y, C1 * z]
     elseif l == 2
-        return [C2A * x * y, C2A * y * z, C2B * (2z*z - x*x - y*y), C2A * x * z, C2C * (x*x - y*y)]
+        # e3nn l=2 basis (component-normalized)
+        return [C2A * x * z, C2A * x * y, C2B * (2y*y - x*x - z*z), C2A * y * z, C2C * (z*z - x*x)]
     else
         throw(ArgumentError("real SH implemented only for l ≤ 2"))
     end
@@ -157,12 +158,22 @@ function _real_cg_dense(l1::Int, l2::Int, l3::Int)
 end
 
 """
-    build_sparse_cg(paths; T=Float32, tol=1e-10)
+    build_sparse_cg(paths; T=Float32, tol=1e-10, normalization=:wigner3j)
 
 Build the [`SparseCG`](@ref) table for the couplings in a `TensorProductPaths`, keeping only
 coefficients with `|val| > tol`. Coefficients are computed in Float64 and cast to `T`.
+
+`normalization`:
+- `:wigner3j` (default) — e3nn's `o3.wigner_3j` convention, which the coefficients match
+  bit-for-bit (verified against e3nn 0.6.0). Use this so a weighted tensor product reproduces
+  e3nn's `o3.TensorProduct` and trained weights transfer.
+- `:cg` — Clebsch-Gordan normalization, `√(2l3+1)` times the Wigner-3j values.
+Both are equally equivariant; they differ only by a per-coupling real scale absorbed by weights.
 """
-function build_sparse_cg(paths::TensorProductPaths; T::Type=Float32, tol::Float64=1e-10)
+function build_sparse_cg(paths::TensorProductPaths; T::Type=Float32, tol::Float64=1e-10,
+                         normalization::Symbol=:wigner3j)
+    normalization in (:wigner3j, :cg) ||
+        throw(ArgumentError("normalization must be :wigner3j or :cg, got $normalization"))
     m1s, m2s, m3s = Int32[], Int32[], Int32[]
     vals = T[]
     poff = Int[0]
@@ -173,9 +184,11 @@ function build_sparse_cg(paths::TensorProductPaths; T::Type=Float32, tol::Float6
         dense = get!(cache, (l1, l2, l3)) do
             _real_cg_dense(l1, l2, l3)
         end
+        # _real_cg_dense returns Clebsch-Gordan-normalized coefficients (= √(2l3+1)·wigner_3j).
+        scale = normalization === :wigner3j ? 1.0 / sqrt(2l3 + 1) : 1.0
         d1, d2, d3 = size(dense)
         for i1 in 1:d1, i2 in 1:d2, i3 in 1:d3
-            v = dense[i1, i2, i3]
+            v = dense[i1, i2, i3] * scale
             abs(v) > tol || continue
             push!(m1s, i1); push!(m2s, i2); push!(m3s, i3); push!(vals, T(v))
         end

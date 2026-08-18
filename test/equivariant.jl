@@ -142,6 +142,36 @@ _rand_vec(seed) = SVector{3,Float64}(sin(seed * 1.1) + 0.3, cos(seed * 2.3) - 0.
         end
     end
 
+    @testset "e3nn convention pin (real SH values)" begin
+        # Exact values from e3nn 0.6.0 o3.spherical_harmonics([0,1,2], x, normalize=true,
+        # normalization="component"). Pins the axis order / normalization / l=2 basis so trained
+        # e3nn/Allegro weights transfer. Regenerate with test/allegro_reference.py.
+        cases = [
+            (SVector(0.3, -0.5, 0.8),
+             [1.0, 0.524890659168, -0.87481776528, 1.399708424448, 0.948485717439,
+              -0.592803573399, -0.262395732054, -1.580809529064, 1.086806551232]),
+            (SVector(0.1, 0.2, -0.4),
+             [1.0, 0.377964473009, 0.755928946018, -1.511857892037, -0.737711113563,
+              0.368855556782, -0.47915742375, -1.475422227127, 1.383208337931]),
+        ]
+        for (v, ref) in cases
+            @test isapprox(collect(Molly.real_sph_harm(2, v)), ref; atol=1e-9)
+        end
+    end
+
+    @testset "e3nn convention pin (Wigner-3j coupling)" begin
+        # e3nn o3.wigner_3j(1,1,2) nonzeros; build_sparse_cg(:wigner3j) must match bit-for-bit.
+        w3j = Dict((1, 1, 3) => -0.182574, (1, 1, 5) => -0.316228, (1, 2, 2) => 0.316228,
+                   (1, 3, 1) => 0.316228, (2, 1, 2) => 0.316228, (2, 2, 3) => 0.365148,
+                   (2, 3, 4) => 0.316228, (3, 1, 1) => 0.316228, (3, 2, 4) => 0.316228,
+                   (3, 3, 3) => -0.182574, (3, 3, 5) => 0.316228)  # 1-based (i,j,k)
+        dense = Molly._real_cg_dense(1, 1, 2) ./ sqrt(5.0)  # CG → wigner_3j normalization
+        for i in 1:3, j in 1:3, k in 1:5
+            ref = get(w3j, (i, j, k), 0.0)
+            @test isapprox(dense[i, j, k], ref; atol=1e-5)
+        end
+    end
+
     @testset "Equivariant-linear VJP vs finite differences" begin
         irs = Molly.Irreps("2x0e+2x1e")
         W = [reshape([0.3, 0.1, -0.2, 0.5], 2, 2), reshape([0.4, -0.1, 0.2, 0.6], 2, 2)]

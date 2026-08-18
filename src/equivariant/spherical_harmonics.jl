@@ -5,12 +5,12 @@
 # polynomials in the unit vector) with fixed per-l constants, and are written directly as
 # polynomials so their gradients are analytic — needed for analytic forces.
 #
-# Axis/normalization convention: components are ordered by m = -l, …, +l in the standard real-SH
-# xyz convention (l=1 → (x, y, z)). This is internally self-consistent with the Clebsch-Gordan
-# coefficients derived in clebsch_gordan.jl (both are built from the same real transform), so the
-# tensor product is exactly equivariant. Matching e3nn's exact convention (its l=1 → (y, z, x)
-# axis order) is verified separately by a reference bit-match test and is a prerequisite for
-# loading e3nn-trained weights; see test/allegro_reference.py.
+# Axis/normalization convention: matches e3nn's real spherical harmonics
+# (`o3.spherical_harmonics(l, x, normalize=true, normalization="component")`, verified against
+# e3nn 0.6.0 to ~1e-15). l=1 is (x, y, z); l=2 is
+# [√15·xz, √15·xy, (√5/2)(2y²−x²−z²), √15·yz, (√15/2)(z²−x²)]. This is internally consistent with
+# the Clebsch-Gordan coefficients in clebsch_gordan.jl (both derive from the same real transform),
+# so the tensor product is exactly equivariant, and the bit-match to e3nn lets trained weights load.
 #
 # Pure StaticArrays maths, no Lux/HDF5 — lives in core Molly. Internal (unexported).
 
@@ -33,13 +33,14 @@ const C2C = 0.5 * sqrt(15.0)  # l=2 m=±2
     return (c * x, c * y, c * z)                       # m = -1, 0, +1  ↔  x, y, z
 end
 
+# e3nn l=2 basis (component-normalized): [√15·xz, √15·xy, (√5/2)(2y²−x²−z²), √15·yz, (√15/2)(z²−x²)].
 @inline function _P2(x::T, y::T, z::T) where T
     ca, cb, cc = T(C2A), T(C2B), T(C2C)
-    return (ca * x * y,                                # m = -2  ↔  xy
-            ca * y * z,                                # m = -1  ↔  yz
-            cb * (2z * z - x * x - y * y),             # m =  0  ↔  (3z²−r²)/… homogeneous form
-            ca * x * z,                                # m = +1  ↔  xz
-            cc * (x * x - y * y))                      # m = +2  ↔  x²−y²
+    return (ca * x * z,                                # [0]  √15·xz
+            ca * x * y,                                # [1]  √15·xy
+            cb * (2y * y - x * x - z * z),             # [2]  (√5/2)(2y²−x²−z²)
+            ca * y * z,                                # [3]  √15·yz
+            cc * (z * z - x * x))                      # [4]  (√15/2)(z²−x²)
 end
 
 """
@@ -112,14 +113,15 @@ and `J::SMatrix{(lmax+1)^2, 3}`. Supports `lmax ≤ 2`.
 
     # l=2
     ca, cb, cc = T(C2A), T(C2B), T(C2C)
+    c5 = T(sqrt(5.0))  # = 2·cb, from d/d[.] of (√5/2)(2y²−x²−z²)
     p2 = _P2(x, y, z)
-    # ∇P2 for each m (degree-1 polynomials in x,y,z):
+    # ∇P2 for each e3nn l=2 component (degree-1 polynomials in x,y,z):
     gP2 = (
-        SVector{3,T}(ca * y, ca * x, 0),                       # xy
-        SVector{3,T}(0, ca * z, ca * y),                       # yz
-        SVector{3,T}(cb * (-2x), cb * (-2y), cb * (4z)),       # 2z²−x²−y²
-        SVector{3,T}(ca * z, 0, ca * x),                       # xz
-        SVector{3,T}(cc * (2x), cc * (-2y), 0),                # x²−y²
+        SVector{3,T}(ca * z, 0, ca * x),               # [0] √15·xz
+        SVector{3,T}(ca * y, ca * x, 0),               # [1] √15·xy
+        SVector{3,T}(-c5 * x, 2c5 * y, -c5 * z),       # [2] (√5/2)(2y²−x²−z²)
+        SVector{3,T}(0, ca * z, ca * y),               # [3] √15·yz
+        SVector{3,T}(-ca * x, 0, ca * z),              # [4] (√15/2)(z²−x²)
     )
     Y = SVector{9,T}(one(T), p1[1], p1[2], p1[3], p2[1], p2[2], p2[3], p2[4], p2[5])
     rows = ntuple(9) do i
