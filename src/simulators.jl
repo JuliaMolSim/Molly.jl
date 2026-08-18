@@ -1267,19 +1267,18 @@ function parse_splitting(splitting)
 
     # Determine the need to recompute accelerations before B steps
     forces_known = !occursin(r"^.*B[^B]*A[^B]*$", String(ops))
-    force_computation_steps = map(ops) do op
+    force_computation_steps = Vector{Bool}(undef, length(ops))
+    for (i, op) in enumerate(ops)
         if op == 'O'
-            return false
+            force_computation_steps[i] = false
         elseif op == 'A'
             forces_known = false
-            return false
+            force_computation_steps[i] = false
+        elseif forces_known
+            force_computation_steps[i] = false
         else
-            if forces_known
-                return false
-            else
-                forces_known = true
-                return true
-            end
+            forces_known = true
+            force_computation_steps[i] = true
         end
     end
 
@@ -1318,20 +1317,18 @@ end
     end
     splitting_ops, splitting_counts, force_computation_steps = parse_splitting(sim.splitting)
     n_o_steps = count(==('O'), splitting_ops)
-    if n_o_steps > 0
-        # These local variables are only needed in the O step
-        vel_scales = exp.((-sim.friction * sim.dt / n_o_steps) .* M_inv)
-        kT = sim.temperature*sys.k
-        vel_el_zero = zero(eltype(eltype(sys.velocities)))
-        vel_scale_one_sq = abs2(oneunit(eltype(vel_scales)))
-        noise_scales = oftype.(
-            vel_el_zero,
-            sqrt.(kT .* M_inv .* (vel_scale_one_sq .- (abs2.(vel_scales))))
-        )
-        # Seed the per step noise
-        philox_key = rand(rng, UInt64)
-        philox_ctr1 = rand(rng, UInt64)
-    end
+    vel_scales = exp.((-sim.friction * sim.dt / max(n_o_steps, 1)) .* M_inv)
+    kT = sim.temperature*sys.k
+    vel_el_zero = zero(eltype(eltype(sys.velocities)))
+    vel_scale_one_sq = abs2(oneunit(eltype(vel_scales)))
+    noise_scales = oftype.(
+        vel_el_zero,
+        sqrt.(kT .* M_inv .* (vel_scale_one_sq .- (abs2.(vel_scales))))
+    )
+    # Seed the per step noise, only drawing from rng when there are O steps
+    #   so that the random number stream is unchanged for other splittings
+    philox_key  = (n_o_steps > 0 ? rand(rng, UInt64) : zero(UInt64))
+    philox_ctr1 = (n_o_steps > 0 ? rand(rng, UInt64) : zero(UInt64))
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     place_virtual_sites!(sys)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)

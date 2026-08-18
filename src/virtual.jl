@@ -211,7 +211,7 @@ end
             r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
             r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
             vs_coord = coords[vs.atom_1] + vs.weight_2 * r12 + vs.weight_3 * r13
-        elseif vs.type == 4
+        else # vs.type == 4
             # Assumes 3D
             r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
             r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)

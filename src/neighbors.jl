@@ -639,13 +639,13 @@ function CellListMap.reduce_output!(output::NeighborList, output_threaded::Vecto
 
     if (n_tot - n_start) > 100_000 && length(output_threaded) > 1 && Threads.nthreads() > 1
         Threads.@threads for i in eachindex(output_threaded)
-            offset = n_start
+            chunk_offset = n_start
             @inbounds for jb in 1:(i - 1)
-                offset += output_threaded[jb].n
+                chunk_offset += output_threaded[jb].n
             end
             nb = output_threaded[i]
             if nb.n > 0
-                copyto!(output.list, offset + 1, nb.list, 1, nb.n)
+                copyto!(output.list, chunk_offset + 1, nb.list, 1, nb.n)
             end
         end
     else

@@ -55,11 +55,7 @@ function Base.:+(p1::PeriodicTorsion{N, T, E}, p2::PeriodicTorsion{N, T, E}) whe
 end
 
 function inject_interaction(inter::PeriodicTorsion{N, T, E}, inter_type, params_dic) where {N, T, E}
-    if inter.proper
-        key_prefix = "inter_PT_$(inter_type)_"
-    else
-        key_prefix = "inter_IT_$(inter_type)_"
-    end
+    key_prefix = (inter.proper ? "inter_PT_$(inter_type)_" : "inter_IT_$(inter_type)_")
     return PeriodicTorsion{N, T, E}(
         inter.periodicities,
         ntuple(i -> dict_get(params_dic, key_prefix * "phase_$i", inter.phases[i]), N),

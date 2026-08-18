@@ -565,7 +565,7 @@ end
 
 use_neighbors(inter::CoulombSoftCoreGapsys) = inter.use_neighbors
 
-required_atom_fields(::CoulombSoftCoreGapsys) = (:charge, :λ, :alch_role,
+required_atom_fields(inter::CoulombSoftCoreGapsys) = (:charge, :λ, :alch_role,
             mixing_atom_fields(inter.λ_mixing)...)
 
 function Base.zero(coul::CoulombSoftCoreGapsys{C, A, S, LM, SCH, W, T}) where {C, A, S, LM, SCH, W, T}
@@ -1276,7 +1276,7 @@ end
 
 use_neighbors(inter::CoulombSoftCoreGapsysReactionField) = inter.use_neighbors
 
-required_atom_fields(::CoulombSoftCoreGapsysReactionField) = (:charge, :λ, :alch_role,
+required_atom_fields(inter::CoulombSoftCoreGapsysReactionField) = (:charge, :λ, :alch_role,
             mixing_atom_fields(inter.λ_mixing)...)
 
 function Base.zero(coul::CoulombSoftCoreGapsysReactionField{D, S, A, SQ, LM, SCH, W, T}) where {D, S, A, SQ, LM, SCH, W, T}
@@ -2021,7 +2021,7 @@ end
 
 use_neighbors(inter::CoulombSoftCoreGapsysEwald) = inter.use_neighbors
 
-required_atom_fields(::CoulombSoftCoreGapsysEwald) = (:charge, :λ, :alch_role,
+required_atom_fields(inter::CoulombSoftCoreGapsysEwald) = (:charge, :λ, :alch_role,
             mixing_atom_fields(inter.λ_mixing)...)
 
 function Base.zero(coul::CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA}) where {ET, D, A, SQ, LM, SCH, W, C, EA}

@@ -915,13 +915,13 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     end
 
     @inbounds if length(pairwise_inters_nonl) > 0
-        sqdist_cutoff = max_zero_beyond(pairwise_inters_nonl)
+        sqdist_cutoff_nonl = max_zero_beyond(pairwise_inters_nonl)
         Threads.@threads for chunk_i in 1:n_threads
             fs_chunk = fs_chunks[chunk_i]
             vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
             pairwise_forces_nonl_range!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,
                             force_units, pairwise_inters_nonl, step_n, chunk_i, n_threads, n_atoms,
-                            sqdist_cutoff, Val(needs_vir), Val(use_vel))
+                            sqdist_cutoff_nonl, Val(needs_vir), Val(use_vel))
         end
     end
 
@@ -932,7 +932,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         n_neighbors = length(neighbors)
         block_size = 512
         next_block_start = Threads.Atomic{Int}(1)
-        sqdist_cutoff = max_zero_beyond(pairwise_inters_nl)
+        sqdist_cutoff_nl = max_zero_beyond(pairwise_inters_nl)
         @sync for chunk_i in 1:n_threads
             Threads.@spawn begin
                 fs_chunk = fs_chunks[chunk_i]
@@ -943,7 +943,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                     block_stop = min(block_start + block_size - 1, n_neighbors)
                     pairwise_forces_nl_block!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,
                                     force_units, neighbors, pairwise_inters_nl, step_n, block_start,
-                                    block_stop, sqdist_cutoff, Val(needs_vir), Val(use_vel))
+                                    block_stop, sqdist_cutoff_nl, Val(needs_vir), Val(use_vel))
                 end
             end
         end

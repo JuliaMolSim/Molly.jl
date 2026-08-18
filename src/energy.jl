@@ -395,63 +395,95 @@ end
     return pe_chunk
 end
 
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList1Atoms)
+    @inbounds for (i, inter) in zip(inter_list.is, inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], boundary, atoms[i], energy_units,
+                              velocities[i], step_n, inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList2Atoms)
+    @inbounds for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], coords[j], boundary, atoms[i], atoms[j],
+                              energy_units, velocities[i], velocities[j], step_n,
+                              inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList3Atoms)
+    @inbounds for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
+                                          inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], boundary, atoms[i],
+                              atoms[j], atoms[k], energy_units, velocities[i], velocities[j],
+                              velocities[k], step_n, inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList4Atoms)
+    @inbounds for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
+                                             inter_list.ls, inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], coords[l], boundary,
+                              atoms[i], atoms[j], atoms[k], atoms[l], energy_units,
+                              velocities[i], velocities[j], velocities[k], velocities[l],
+                              step_n, inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList5Atoms)
+    @inbounds for (i, j, k, l, m, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
+                                                inter_list.ls, inter_list.ms, inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], coords[l],
+                              coords[m], boundary, atoms[i], atoms[j], atoms[k], atoms[l],
+                              atoms[m], energy_units, velocities[i], velocities[j],
+                              velocities[k], velocities[l], velocities[m], step_n,
+                              inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
 function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_atoms,
                      sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms, ::Val{TH},
                      step_n=0) where TH
     pe = zero(TH) * energy_units
 
-    @inbounds for inter_list in sils_1_atoms
-        for (i, inter) in zip(inter_list.is, inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], boundary, atoms[i], energy_units,
-                                  velocities[i], step_n, inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
+    for inter_list in sils_1_atoms
+        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
+                                    step_n, inter_list)
     end
-
-    @inbounds for inter_list in sils_2_atoms
-        for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], coords[j], boundary, atoms[i], atoms[j],
-                                  energy_units, velocities[i], velocities[j], step_n,
-                                  inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
+    for inter_list in sils_2_atoms
+        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
+                                    step_n, inter_list)
     end
-
-    @inbounds for inter_list in sils_3_atoms
-        for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], boundary, atoms[i],
-                                  atoms[j], atoms[k], energy_units, velocities[i], velocities[j],
-                                  velocities[k], step_n, inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
+    for inter_list in sils_3_atoms
+        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
+                                    step_n, inter_list)
     end
-
-    @inbounds for inter_list in sils_4_atoms
-        for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-                                       inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], coords[l], boundary,
-                                  atoms[i], atoms[j], atoms[k], atoms[l], energy_units,
-                                  velocities[i], velocities[j], velocities[k], velocities[l],
-                                  step_n, inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
+    for inter_list in sils_4_atoms
+        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
+                                    step_n, inter_list)
     end
-
-    @inbounds for inter_list in sils_5_atoms
-        for (i, j, k, l, m, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
-                                          inter_list.ls, inter_list.ms, inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], coords[l],
-                                  coords[m], boundary, atoms[i], atoms[j], atoms[k], atoms[l],
-                                  atoms[m], energy_units, velocities[i], velocities[j],
-                                  velocities[k], velocities[l], velocities[m], step_n,
-                                  inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
+    for inter_list in sils_5_atoms
+        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
+                                    step_n, inter_list)
     end
 
     return pe
