@@ -1563,7 +1563,10 @@ function Molly.compute_ani_energy_ka(
                                  backend = backend, neighbors = neighbors,
                                  boundary = boundary)   # (n_atoms, aev_len)
     on_gpu = !(aevs isa Array)
-    dev    = on_gpu ? Lux.gpu_device() : Lux.cpu_device()
+    # Derive the device from the actual data array (get_device) rather than Lux's global
+    # gpu_device(), which needs a GPU trigger package (cuDNN/LuxCUDA) loaded and otherwise silently
+    # returns a CPUDevice — leaving the NN weights on the host while the AEVs are on the GPU.
+    dev    = on_gpu ? Lux.get_device(aevs) : Lux.cpu_device()
 
     sp_host     = Array(species)
     idx_to_elem = Dict(v => k for (k, v) in pot.species_map)
@@ -1639,7 +1642,10 @@ end
 function ani_energy_aev_grad_ka(aevs, species, pot, n_species::Int; backend=nothing, need_energy::Bool=true)
     ka_backend = isnothing(backend) ? KernelAbstractions.get_backend(aevs) : backend
     on_gpu = !(aevs isa Array)
-    dev    = on_gpu ? Lux.gpu_device() : Lux.cpu_device()
+    # Derive the device from the actual data array (get_device) rather than Lux's global
+    # gpu_device(), which needs a GPU trigger package (cuDNN/LuxCUDA) loaded and otherwise silently
+    # returns a CPUDevice — leaving the NN weights on the host while the AEVs are on the GPU.
+    dev    = on_gpu ? Lux.get_device(aevs) : Lux.cpu_device()
     n_atoms, aev_len = size(aevs)
     sp_host     = Array(species)
     idx_to_elem = Dict(v => k for (k, v) in pot.species_map)
