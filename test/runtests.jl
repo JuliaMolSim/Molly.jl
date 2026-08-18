@@ -122,6 +122,7 @@ if GROUP in ("All", "NotGradients")
 
     include("basic.jl")
     include("interactions.jl")
+    include("equivariant.jl")
     include("minimization.jl")
     include("agent.jl")
     include("simulation.jl")
