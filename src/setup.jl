@@ -444,7 +444,8 @@ templates is carried out.
     zero by default.
 - `loggers=()`: the loggers that record properties of interest during a
     simulation.
-- `units::Bool=true`: whether to use Unitful quantities.
+- `units::Bool=true`: whether to use Unitful quantities. Should match the
+    corresponding argument used for the force field argument.
 - `array_type=Array`: the array type for the simulation, for example
     use `CuArray` or `ROCArray` for GPU support.
 - `float_type`: the floating point type of the system, defaults to `Float64` on CPU
@@ -521,11 +522,11 @@ function System(coord_file::AbstractString,
                 dist_cutoff=add_units(1.0, u"nm", units),
                 dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,
-                rigid_water=false,
+                rigid_water::Bool=false,
                 constraint_algorithm=SetupLINCS(),
                 nonbonded_method=:none,
                 ewald_error_tol=0.0005,
-                approximate_pme=true,
+                approximate_pme::Bool=true,
                 pme_mesh_dims=nothing,
                 dispersion_correction=nothing,
                 hydrogen_mass::Union{Bool, Number}=false,
@@ -536,14 +537,30 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
-                disulfide_bonds=true,
+                disulfide_bonds::Bool=true,
                 n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                force_separate_lj14=false) where {AT <: AbstractArray}
+                force_separate_lj14::Bool=false) where {AT <: AbstractArray}
     check_strictness(strictness)
+    if units != force_field.units
+        throw(ArgumentError("units argument to System is $units but force field has " *
+                            "units $(force_field.units)"))
+    end
+    if dist_cutoff <= zero(dist_cutoff)
+        throw(ArgumentError("dist_cutoff ($dist_cutoff) should be positive"))
+    end
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
+    end
+    if !(constraints in (:none, :hbonds, :allbonds, :hangles))
+        throw(ArgumentError("constraints must be one of :none, :hbonds, :allbonds or :hangles"))
+    end
+    if !(nonbonded_method in (:none, :cutoff, :pme, :ewald))
+        throw(ArgumentError("nonbonded_method must be one of :none, :cutoff, :pme or :ewald"))
+    end
+    if ewald_error_tol <= zero(ewald_error_tol)
+        throw(ArgumentError("ewald_error_tol ($ewald_error_tol) should be positive"))
     end
     if isa(hydrogen_mass, Bool) && hydrogen_mass
         throw(ArgumentError("hydrogen_mass can be false, a number or a unitful value " *

@@ -868,7 +868,8 @@ struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     bond_resolver::BondResolver{K, D}
     angle_resolver::AngleResolver{KA, DA, K, D}
     torsion_resolver::TorsionResolver{T, E}
-    cmap_resolver::CMAPResolver{E}           
+    cmap_resolver::CMAPResolver{E}
+    units::Bool
 end
 
 function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
@@ -1175,10 +1176,10 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
 
     return MolecularForceField{T, G, NB, M, D, DA, E, K, KA, IC}(
         atom_types, atom_type_order, residues, torsion_order, weight_14_coulomb, weight_14_lj,
-        global_params,
-        dispersion_correction, ff_param_array[13], nbfix_pairs_conc, attributes_from_residue, resname_replacements,
-        atomname_replacements, standard_bonds, type_to_class, class_to_types, bond_resolver,
-        angle_resolver, torsion_resolver, cmap_resolver,
+        global_params, dispersion_correction, ff_param_array[13], nbfix_pairs_conc,
+        attributes_from_residue, resname_replacements, atomname_replacements, standard_bonds,
+        type_to_class, class_to_types, bond_resolver, angle_resolver, torsion_resolver,
+        cmap_resolver, units,
     )
 end
 

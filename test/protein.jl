@@ -78,6 +78,13 @@
         nonbonded_method=:cutoff,
         center_coords=false,
     )
+    @test_throws ArgumentError System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        units=false,
+        nonbonded_method=:cutoff,
+        center_coords=false,
+    )
     show(devnull, sys)
     show(devnull, first(sys.atoms))
     zero(sys)
