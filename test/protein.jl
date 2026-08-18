@@ -734,6 +734,15 @@ end
             E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
             @test abs(E_molly - E_openmm) < 1e-2u"kJ * mol^-1"
 
+            if AT == Array
+                bench_result = @benchmark AtomsCalculators.forces!($forces_molly, $sys,
+                                                        $(sys.general_inters[1])) samples=5 evals=1
+                @test bench_result.allocs == 0
+                bench_result = @benchmark AtomsCalculators.potential_energy($sys,
+                                                        $(sys.general_inters[1])) samples=5 evals=1
+                @test bench_result.allocs == 0
+            end
+
             if solvent_model == :gbn2
                 sim = SteepestDescentMinimizer(tol=400.0u"kJ * mol^-1 * nm^-1")
                 coords_start = copy(sys.coords)

@@ -334,9 +334,9 @@ I (`false`, the default) or II (`true`).
 
 Not currently compatible with virial calculation.
 """
-struct ImplicitSolventOBC{T, D, V, K, S, F, I, DI} <: AbstractGBSA
-    offset_radii::V
-    scaled_offset_radii::V
+struct ImplicitSolventOBC{T, D, VT, VD, K, S, F, I, DI, BF, MT} <: AbstractGBSA
+    offset_radii::VD
+    scaled_offset_radii::VD
     solvent_dielectric::T
     solute_dielectric::T
     kappa::K
@@ -355,6 +355,13 @@ struct ImplicitSolventOBC{T, D, V, K, S, F, I, DI} <: AbstractGBSA
     oris::DI
     orjs::DI
     srjs::DI
+    buffer_Bs::VD
+    buffer_B_grads::VT
+    buffer_atom_charges::VT
+    buffer_born_forces::BF
+    buffer_Is_nounits::VT
+    buffer_born_forces_mod::VT
+    buffer_fs_mat::MT
 end
 
 function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
@@ -416,18 +423,37 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
     orjs = @view or[js]
     srjs = @view sor[js]
 
+    buffer_Bs = to_device(zero(offset_radii), AT)
+    buffer_B_grads = to_device(zeros(T, n_atoms), AT)
+    buffer_atom_charges = to_device(zeros(T, n_atoms), AT)
+    buffer_born_forces = to_device(zeros(typeof(T(sa_factor * dist_cutoff)), n_atoms), AT)
+    if AT <: AbstractGPUArray
+        buffer_Is_nounits = to_device(zeros(T, n_atoms), AT)
+        buffer_born_forces_mod = to_device(zeros(T, n_atoms), AT)
+        buffer_fs_mat = to_device(zeros(T, 3, n_atoms), AT)
+    else
+        buffer_Is_nounits = zeros(T, 0)
+        buffer_born_forces_mod = zeros(T, 0)
+        buffer_fs_mat = zeros(T, 0, 0)
+    end
+
     if units
-        return ImplicitSolventOBC{T, D, typeof(or), typeof(T(kappa)), typeof(T(sa_factor)),
-                        typeof(factor_solute), typeof(is), typeof(oris)}(
+        return ImplicitSolventOBC{T, D, typeof(buffer_B_grads), typeof(or), typeof(T(kappa)),
+                        typeof(T(sa_factor)), typeof(factor_solute), typeof(is), typeof(oris),
+                        typeof(buffer_born_forces), typeof(buffer_fs_mat)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset,
                     dist_cutoff, use_ACE, α, β, γ, probe_radius, T(sa_factor),
-                    factor_solute, factor_solvent, is, js, oris, orjs, srjs)
+                    factor_solute, factor_solvent, is, js, oris, orjs, srjs, buffer_Bs,
+                    buffer_B_grads, buffer_atom_charges, buffer_born_forces,
+                    buffer_Is_nounits, buffer_born_forces_mod, buffer_fs_mat)
     else
-        return ImplicitSolventOBC{T, T, typeof(or), typeof(T(ustrip(kappa))), T, T, typeof(is),
-                        typeof(oris)}(
+        return ImplicitSolventOBC{T, T, typeof(buffer_B_grads), typeof(or), T, T, T, typeof(is),
+                        typeof(oris), typeof(buffer_born_forces), typeof(buffer_fs_mat)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)),
                     ustrip(offset), ustrip(dist_cutoff), use_ACE, α, β, γ, ustrip(probe_radius),
-                    ustrip(sa_factor), factor_solute, factor_solvent, is, js, oris, orjs, srjs)
+                    ustrip(sa_factor), factor_solute, factor_solvent, is, js, oris, orjs, srjs,
+                    buffer_Bs, buffer_B_grads, buffer_atom_charges, buffer_born_forces,
+                    buffer_Is_nounits, buffer_born_forces_mod, buffer_fs_mat)
     end
 end
 
@@ -499,7 +525,7 @@ Should be used along with a Coulomb interaction.
 
 Not currently compatible with virial calculation.
 """
-struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI} <: AbstractGBSA
+struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, DI, BF, MT, TD, TM, IG} <: AbstractGBSA
     offset_radii::VD
     scaled_offset_radii::VD
     solvent_dielectric::T
@@ -524,6 +550,14 @@ struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI} <: AbstractGBSA
     oris::DI
     orjs::DI
     srjs::DI
+    buffer_Bs::VD
+    buffer_B_grads::VT
+    buffer_atom_charges::VT
+    buffer_born_forces::BF
+    buffer_I_grads::IG
+    buffer_Is_nounits::VT
+    buffer_born_forces_mod::VT
+    buffer_fs_mat::MT
 end
 
 function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
@@ -625,19 +659,41 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
     orjs = @view or[js]
     srjs = @view sor[js]
 
-    if units
-        return ImplicitSolventGBN2{T, D, typeof(αs), typeof(or), typeof(T(kappa)), typeof(T(sa_factor)),
-                        typeof(factor_solute), typeof(is), typeof(d0s), typeof(m0s), typeof(oris)}(
-                    or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset, dist_cutoff,
-                    use_ACE, αs, βs, γs, probe_radius, T(sa_factor), factor_solute,
-                    factor_solvent, is, js, d0s, m0s, neck_scale, neck_cut, oris, orjs, srjs)
+    buffer_Bs = to_device(zero(offset_radii), AT)
+    buffer_B_grads = to_device(zeros(T, n_atoms), AT)
+    buffer_atom_charges = to_device(zeros(T, n_atoms), AT)
+    buffer_born_forces = to_device(zeros(typeof(T(sa_factor * dist_cutoff)), n_atoms), AT)
+    buffer_I_grads = to_device(zeros(typeof(T(inv(dist_cutoff ^ 2))), n_atoms, n_atoms), AT)
+    if AT <: AbstractGPUArray
+        buffer_Is_nounits = to_device(zeros(T, n_atoms), AT)
+        buffer_born_forces_mod = to_device(zeros(T, n_atoms), AT)
+        buffer_fs_mat = to_device(zeros(T, 3, n_atoms), AT)
     else
-        return ImplicitSolventGBN2{T, T, typeof(αs), typeof(or), typeof(T(ustrip(kappa))), T, T,
-                        typeof(is), typeof(d0s), typeof(m0s), typeof(oris)}(
+        buffer_Is_nounits = zeros(T, 0)
+        buffer_born_forces_mod = zeros(T, 0)
+        buffer_fs_mat = zeros(T, 0, 0)
+    end
+
+    if units
+        return ImplicitSolventGBN2{T, D, typeof(buffer_B_grads), typeof(or), typeof(T(kappa)),
+                        typeof(T(sa_factor)), typeof(factor_solute), typeof(is), typeof(oris),
+                        typeof(buffer_born_forces), typeof(buffer_fs_mat), typeof(d0s),
+                        typeof(m0s), typeof(buffer_I_grads)}(
+                    or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset, dist_cutoff,
+                    use_ACE, αs, βs, γs, probe_radius, T(sa_factor), factor_solute, factor_solvent,
+                    is, js, d0s, m0s, neck_scale, neck_cut, oris, orjs, srjs, buffer_Bs,
+                    buffer_B_grads, buffer_atom_charges, buffer_born_forces, buffer_I_grads,
+                    buffer_Is_nounits, buffer_born_forces_mod, buffer_fs_mat)
+    else
+        return ImplicitSolventGBN2{T, T, typeof(buffer_B_grads), typeof(or), T, T, T, typeof(is),
+                        typeof(oris), typeof(buffer_born_forces), typeof(buffer_fs_mat),
+                        typeof(d0s), typeof(m0s), typeof(buffer_I_grads)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)), ustrip(offset),
                     ustrip(dist_cutoff), use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor),
                     factor_solute, factor_solvent, is, js, d0s, m0s, neck_scale, ustrip(neck_cut),
-                    oris, orjs, srjs)
+                    oris, orjs, srjs, buffer_Bs, buffer_B_grads, buffer_atom_charges,
+                    buffer_born_forces, buffer_I_grads, buffer_Is_nounits, buffer_born_forces_mod,
+                    buffer_fs_mat)
     end
 end
 
@@ -733,20 +789,19 @@ end
 #     with respect to atomic distance
 # Custom GBSA methods should implement this function
 function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, boundary) where T
-    Is = fill(zero(T) / unit(inter.dist_cutoff), length(coords))
     @inbounds for i in eachindex(coords)
-        I = zero(eltype(Is))
+        coord_i, oris_i = coords[i], inter.oris[i]
+        I_sum = zero(inv(coord_i[1]))
         for j in eachindex(coords)
-            I += born_radii_loop_OBC(coords[i], coords[j], inter.oris[i],
-                                     inter.srjs[j], inter.dist_cutoff, boundary)
+            I_sum += born_radii_loop_OBC(coord_i, coords[j], oris_i, inter.srjs[j],
+                                         inter.dist_cutoff, boundary)
         end
-        Is[i] = I
+        B, B_grad = born_radii_sum(inter.offset_radii[i], inter.offset[i], I_sum,
+                                   inter.α, inter.β, inter.γ)
+        inter.buffer_Bs[i] = B
+        inter.buffer_B_grads[i] = B_grad
     end
-    Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
-                                 inter.α, inter.β, inter.γ)
-    Bs      = get_i1.(Bs_B_grads)
-    B_grads = get_i2.(Bs_B_grads)
-    return Bs, B_grads, EmptyIgrads()
+    return inter.buffer_Bs, inter.buffer_B_grads, EmptyIgrads()
 end
 
 function born_radii_and_grad(inter::ImplicitSolventOBC, coords::AbstractGPUArray, boundary)
@@ -797,34 +852,33 @@ function born_radii_loop_GBN2(coord_i::SVector{D, C}, coord_j, ori, orj, srj, di
 end
 
 function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords, boundary) where T
-    Is = fill(zero(T) / unit(inter.dist_cutoff), length(coords))
-    I_grads = zeros(eltype(Is), length(Is), length(Is)) ./ unit(inter.dist_cutoff)
+    I_grads = inter.buffer_I_grads
     @inbounds for i in eachindex(coords)
-        I_sum = zero(eltype(Is))
+        coord_i, oris_i = coords[i], inter.oris[i]
+        I_sum = zero(inv(coord_i[1]))
         for j in eachindex(coords)
             I, I_grad = born_radii_loop_GBN2(
-                coords[i], coords[j], inter.oris[i], inter.orjs[j], inter.srjs[j],
+                coord_i, coords[j], oris_i, inter.orjs[j], inter.srjs[j],
                 inter.dist_cutoff, inter.offset, inter.neck_scale, inter.neck_cut,
                 inter.d0s[i, j], inter.m0s[i, j], boundary,
             )
             I_sum += I
             I_grads[i, j] = I_grad
         end
-        Is[i] = I_sum
+        B, B_grad = born_radii_sum(inter.offset_radii[i], inter.offset[i], I_sum,
+                                   inter.αs[i], inter.βs[i], inter.γs[i])
+        inter.buffer_Bs[i] = B
+        inter.buffer_B_grads[i] = B_grad
     end
-
-    Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
-                                 inter.αs, inter.βs, inter.γs)
-    Bs      = get_i1.(Bs_B_grads)
-    B_grads = get_i2.(Bs_B_grads)
-    return Bs, B_grads, I_grads
+    return inter.buffer_Bs, inter.buffer_B_grads, I_grads
 end
 
 function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::AbstractGPUArray, boundary) where T
-    Is, I_grads = gbsa_born_gpu(coords, inter.offset_radii, inter.scaled_offset_radii,
+    Is_nounits, I_grads = gbsa_born_gpu(inter, coords, inter.offset_radii, inter.scaled_offset_radii,
                                 inter.dist_cutoff, inter.offset, inter.neck_scale,
-                                inter.neck_cut, inter.d0s, inter.m0s, boundary, Val(T))
+                                inter.neck_cut, inter.d0s, inter.m0s, boundary)
 
+    Is = Is_nounits .* unit(inter.dist_cutoff)^-1
     Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
                                  inter.αs, inter.βs, inter.γs)
     Bs      = get_i1.(Bs_B_grads)
@@ -837,32 +891,25 @@ function gpu_threads_gbsa(n_inters)
     return n_threads_gpu
 end
 
-function gbsa_born_gpu(coords::AbstractArray{SVector{D, C}}, offset_radii, scaled_offset_radii,
-                       dist_cutoff, offset, neck_scale, neck_cut, d0s, m0s, boundary,
-                       ::Val{T}) where {D, C, T}
+function gbsa_born_gpu(inter, coords::AbstractArray{SVector{D, C}}, offset_radii,
+                       scaled_offset_radii, dist_cutoff, offset, neck_scale, neck_cut, d0s,
+                       m0s, boundary) where {D, C}
+    inter.buffer_Is_nounits .= zero(eltype(inter.buffer_Is_nounits))
     backend = get_backend(coords)
-    n_atoms = length(coords)
-    Is_nounits = KernelAbstractions.zeros(backend, T, n_atoms)
-    I_grads_nounits = KernelAbstractions.zeros(backend, T, n_atoms, n_atoms)
-    n_inters = n_atoms ^ 2
+    n_inters = length(coords) ^ 2
     n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_born_kernel!(backend, n_threads_gpu)
-    kernel!(Is_nounits, I_grads_nounits, coords, offset_radii,
+    kernel!(inter.buffer_Is_nounits, inter.buffer_I_grads, coords, offset_radii,
             scaled_offset_radii, dist_cutoff, offset, neck_scale,
-            neck_cut, d0s, m0s, boundary, Val(C), ndrange=n_inters)
+            neck_cut, d0s, m0s, boundary, Val(C); ndrange=n_inters)
 
-    Is = Is_nounits * unit(dist_cutoff)^-1
-    I_grads = I_grads_nounits * unit(dist_cutoff)^-2
-    return Is, I_grads
+    return inter.buffer_Is_nounits, inter.buffer_I_grads
 end
 
-@kernel function gbsa_born_kernel!(Is, I_grads, @Const(coords),
-                                   @Const(offset_radii),
-                                   @Const(scaled_offset_radii),
-                                   dist_cutoff, offset, neck_scale, neck_cut,
-                                   @Const(d0s), @Const(m0s), boundary,
-                                   ::Val{C}) where C
+@kernel function gbsa_born_kernel!(Is_nounits, I_grads, @Const(coords), @Const(offset_radii),
+                                   @Const(scaled_offset_radii), dist_cutoff, offset, neck_scale,
+                                   neck_cut, @Const(d0s), @Const(m0s), boundary, ::Val{C}) where C
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
     inter_i = @index(Global, Linear)
@@ -901,8 +948,8 @@ end
                     numer = 2 * r_d0_strip + 9 * r_d0_strip^5 / 5
                     I_grad -= 10 * neck_scale * m0 * numer / (denom^2 * unit(dist_cutoff))
                 end
-                Atomix.@atomic Is[i] += ustrip(unit(dist_cutoff)^-1, I)
-                I_grads[i, j] += ustrip(unit(dist_cutoff)^-2, I_grad)
+                Atomix.@atomic Is_nounits[i] += ustrip(unit(dist_cutoff)^-1, I)
+                I_grads[i, j] = I_grad
             end
         end
     end
@@ -969,28 +1016,25 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
     end
 end
 
-
-function forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
+function forces_gbsa!(fs, born_forces, sys, inter, Bs, B_grads, I_grads, atom_charges)
     coords, boundary = sys.coords, sys.boundary
-    born_forces_1 = copy(born_forces)
     @inbounds for i in eachindex(sys)
         for j in eachindex(sys)
             bi, bj, fi, fj = gb_force_loop_1(
                 coords[i], coords[j], i, j, atom_charges[i], atom_charges[j], Bs[i], Bs[j],
                 inter.dist_cutoff, inter.factor_solute, inter.factor_solvent, inter.kappa, boundary,
             )
-            born_forces_1[i] += bi
-            born_forces_1[j] += bj
+            born_forces[i] += bi
+            born_forces[j] += bj
             fs[i] = fs[i] .+ fi
             fs[j] = fs[j] .+ fj
         end
     end
 
-    born_forces_2 = born_forces_1 .* (Bs .^ 2) .* B_grads
     @inbounds for i in eachindex(sys)
+        bf = born_forces[i] * (Bs[i] ^ 2) * B_grads[i]
         for j in eachindex(sys)
-            f = gb_force_loop_2(coords[i], coords[j], born_forces_2[i],
-                                I_grads[i, j],
+            f = gb_force_loop_2(coords[i], coords[j], bf, I_grads[i, j],
                                 inter.oris[i], inter.srjs[j], inter.dist_cutoff, boundary)
             fs[i] = fs[i] .- f
             fs[j] = fs[j] .+ f
@@ -1000,60 +1044,52 @@ function forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_ch
     return fs
 end
 
-function forces_gbsa!(fs, sys::System{D, <:AbstractGPUArray, T}, inter, Bs, B_grads, I_grads,
-                      born_forces, atom_charges) where {D, T}
-    fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys.coords, sys.boundary, inter.dist_cutoff,
-                        inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, atom_charges,
-                        sys.force_units)
-    born_forces_units = born_forces .+ born_forces_mod_ustrip * unit(eltype(born_forces))
-    fs_mat_2 = gbsa_force_2_gpu(sys.coords, sys.boundary, inter.dist_cutoff, Bs, B_grads, I_grads,
-                        born_forces_units, inter.offset_radii, inter.scaled_offset_radii,
-                        sys.force_units, Val(T))
-    fs_mat = fs_mat_1 .+ fs_mat_2
-    fs .+= reinterpret(SVector{D, T}, vec(fs_mat)) * sys.force_units
+function forces_gbsa!(fs, born_forces, sys::System{D, <:AbstractGPUArray, T}, inter, Bs, B_grads,
+                      I_grads, atom_charges) where {D, T}
+    inter.buffer_fs_mat .= zero(eltype(inter.buffer_fs_mat))
+    inter.buffer_born_forces_mod .= zero(eltype(inter.buffer_born_forces_mod))
+    gbsa_force_1_gpu!(inter, sys.coords, sys.boundary, inter.dist_cutoff, inter.factor_solute,
+                      inter.factor_solvent, inter.kappa, Bs, atom_charges, sys.force_units)
+    born_forces .+= inter.buffer_born_forces_mod .* unit(eltype(born_forces))
+    gbsa_force_2_gpu!(inter, sys.coords, sys.boundary, inter.dist_cutoff, Bs, B_grads,
+                      I_grads, born_forces, inter.offset_radii, inter.scaled_offset_radii,
+                      sys.force_units, Val(T))
+    fs .+= reinterpret(SVector{D, T}, vec(inter.buffer_fs_mat)) * sys.force_units
     return fs
 end
 
-function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff,
-                          factor_solute, factor_solvent, kappa, Bs, atom_charges::AbstractArray{T},
-                          force_units) where {D, C, T}
+function gbsa_force_1_gpu!(inter, coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff,
+                           factor_solute, factor_solvent, kappa, Bs, atom_charges::AbstractArray{T},
+                           force_units) where {D, C, T}
     backend = get_backend(coords)
     n_atoms = length(coords)
-    fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
-    born_forces_mod_ustrip = KernelAbstractions.zeros(backend, T, n_atoms)
     n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
     n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_force_1_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, born_forces_mod_ustrip, coords, boundary, dist_cutoff,
+    kernel!(inter.buffer_fs_mat, inter.buffer_born_forces_mod, coords, boundary, dist_cutoff,
             factor_solute, factor_solvent, kappa, Bs, atom_charges,
-            Val(D), Val(force_units), ndrange=n_inters)
-
-    return fs_mat, born_forces_mod_ustrip
+            Val(D), Val(force_units); ndrange=n_inters)
+    return inter
 end
 
-function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff, Bs, B_grads,
-                          I_grads, born_forces, offset_radii, scaled_offset_radii,
-                          force_units, ::Val{T}) where {D, C, T}
+function gbsa_force_2_gpu!(inter, coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff,
+                           Bs, B_grads, I_grads, born_forces, offset_radii, scaled_offset_radii,
+                           force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    n_atoms = length(coords)
-    fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
-    n_inters = n_atoms ^ 2
+    n_inters = length(coords) ^ 2
     n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_force_2_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, born_forces, coords, boundary, dist_cutoff, offset_radii,
-            scaled_offset_radii, Bs, B_grads, I_grads, Val(D), Val(force_units),
-            ndrange=n_inters)
-
-    return fs_mat
+    kernel!(inter.buffer_fs_mat, born_forces, coords, boundary, dist_cutoff, offset_radii,
+            scaled_offset_radii, Bs, B_grads, I_grads, Val(D), Val(force_units); ndrange=n_inters)
+    return inter
 end
 
-@kernel function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip,
-                                      @Const(coords), boundary, dist_cutoff,
-                                      factor_solute, factor_solvent, kappa,
-                                      @Const(Bs), @Const(atom_charges),
-                                      ::Val{D}, ::Val{F}) where {D, F}
+@kernel function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, @Const(coords), boundary,
+                                      dist_cutoff, factor_solute, factor_solvent, kappa,
+                                      @Const(Bs), @Const(atom_charges), ::Val{D},
+                                      ::Val{F}) where {D, F}
     n_atoms = length(coords)
     n_inters_not_self = n_atoms_to_n_pairs(n_atoms)
     n_inters = n_inters_not_self + n_atoms
@@ -1105,11 +1141,9 @@ end
     end
 end
 
-@kernel function gbsa_force_2_kernel!(forces, born_forces, @Const(coords),
-                                      boundary, dist_cutoff, @Const(or),
-                                      @Const(sor), @Const(Bs),
-                                      @Const(B_grads), I_grads,
-                                      ::Val{D}, ::Val{F}) where {D, F}
+@kernel function gbsa_force_2_kernel!(forces, born_forces, @Const(coords), boundary, dist_cutoff,
+                                      @Const(or), @Const(sor), @Const(Bs), @Const(B_grads),
+                                      I_grads, ::Val{D}, ::Val{F}) where {D, F}
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
     inter_i = @index(Global, Linear)
@@ -1152,15 +1186,15 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
     Bs, B_grads, I_grads = born_radii_and_grad(inter, sys.coords, sys.boundary)
 
     if inter.use_ACE
-        radii = inter.offset_radii .+ inter.offset
-        sa_terms = inter.sa_factor .* (radii .+ inter.probe_radius) .^ 2 .* (radii ./ Bs) .^ 6
-        born_forces = (-6 .* sa_terms ./ Bs) .* (Bs .> zero(inter.offset))
+        inter.buffer_born_forces .= (-6 .* (inter.sa_factor .* (inter.offset_radii .+ inter.offset .+ inter.probe_radius) .^ 2 .*
+                                    ((inter.offset_radii .+ inter.offset) ./ Bs) .^ 6) ./ Bs) .* (Bs .> zero(inter.offset))
     else
-        born_forces = zeros(typeof(inter.sa_factor * inter.dist_cutoff), length(sys))
+        inter.buffer_born_forces .= zero(eltype(inter.buffer_born_forces))
     end
 
-    atom_charges = charge.(sys.atoms)
-    forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
+    inter.buffer_atom_charges .= charge.(sys.atoms)
+    forces_gbsa!(fs, inter.buffer_born_forces, sys, inter, Bs, B_grads, I_grads,
+                 inter.buffer_atom_charges)
     return fs
 end
 
@@ -1205,7 +1239,8 @@ function AtomsCalculators.potential_energy(sys::System{<:Any, <:Any, T}, inter::
                                            kwargs...) where T
     coords, boundary = sys.coords, sys.boundary
     Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
-    atom_charges = charge.(sys.atoms)
+    inter.buffer_atom_charges .= charge.(sys.atoms)
+    atom_charges = inter.buffer_atom_charges
 
     E = zero(T) * sys.energy_units
     @inbounds for i in eachindex(sys)
@@ -1228,9 +1263,9 @@ function AtomsCalculators.potential_energy(sys::System{<:Any, AT}, inter::Abstra
 
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
-    atom_charges = charge.(atoms)
-    charges_i = @view atom_charges[inter.is]
-    charges_j = @view atom_charges[inter.js]
+    inter.buffer_atom_charges .= charge.(atoms)
+    charges_i = @view inter.buffer_atom_charges[inter.is]
+    charges_j = @view inter.buffer_atom_charges[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
     return sum(gb_energy_loop.(
