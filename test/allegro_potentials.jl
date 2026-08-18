@@ -78,6 +78,37 @@ if isfile(ALLEGRO_H5) && isfile(ALLEGRO_JSON)
                 @test isapprox(fs[1][1], -(Ep - Em) / (2h); rtol=1e-4)
             end
         end
+
+        # GPU consistency: the potential runs on a GPU-backed System (coords/forces on device via a
+        # host round-trip; native on-device kernels are a further optimization). Runs for whichever
+        # GPU backends are in `array_list` (defined by runtests.jl); Metal is validated separately.
+        if @isdefined(array_list)
+            for AT in array_list
+                AT == Array && continue
+                @testset "GPU consistency ($AT)" begin
+                    sysj = ref.systems[1]
+                    coords32 = [SVector{3,Float32}(c[1] / 10, c[2] / 10, c[3] / 10) for c in sysj.coords_A]
+                    n = length(coords32)
+                    atoms32 = [Atom(index=Int32(i), atom_type=Int32(1), mass=1.0f0, charge=0.0f0,
+                                    σ=0.0f0, ϵ=0.0f0, λ=0.0f0) for i in 1:n]
+                    ad = [AtomData(element=species_syms[Int(s) + 1]) for s in sysj.species]
+                    mk(coords, atoms) = System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0f0),
+                                               atoms_data=ad, general_inters=(allegro=pot,),
+                                               energy_units=NoUnits, force_units=NoUnits)
+                    sys_cpu = mk(coords32, atoms32)
+                    sys_gpu = mk(Molly.to_device(coords32, AT), Molly.to_device(atoms32, AT))
+                    Ec = AtomsCalculators.potential_energy(sys_cpu, pot)
+                    Eg = AtomsCalculators.potential_energy(sys_gpu, pot)
+                    @test isapprox(Ec, Eg; rtol=1e-5)
+                    fc = [zero(SVector{3,Float64}) for _ in 1:n]
+                    AtomsCalculators.forces!(fc, sys_cpu, pot)
+                    fg = Molly.to_device([zero(SVector{3,Float32}) for _ in 1:n], AT)
+                    AtomsCalculators.forces!(fg, sys_gpu, pot)
+                    fg_host = Array(fg)
+                    @test maximum(maximum(abs.(Float64.(fg_host[i]) .- fc[i])) for i in 1:n) < 1e-4
+                end
+            end
+        end
     end
 else
     @warn "Skipping Allegro potential tests — reference files not found. " *

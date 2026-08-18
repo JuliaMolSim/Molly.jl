@@ -6,7 +6,7 @@
 module MollyAllegroExt
 
 using Molly
-using Molly: AllegroModel, build_allegro_model, vector, SVector
+using Molly: AllegroModel, build_allegro_model, vector, SVector, from_device, to_device, array_type
 import AtomsCalculators
 using HDF5
 using Unitful
@@ -50,8 +50,10 @@ end
 Molly.allegro_data_dir() = error("no artifact configured yet; load AllegroPotential from a local HDF5 path")
 
 # Coordinates: Molly stores unitless coords as nm; the model uses Å (×10). Unitful coords are
-# stripped to nm first.
-function _coords_to_angstrom(coords)
+# stripped to nm first. GPU-backed coords are pulled to the host (the model forward/backward is a
+# CPU reference; native on-device kernels are a further optimization).
+function _coords_to_angstrom(coords_dev)
+    coords = from_device(coords_dev)
     c1 = first(coords)
     if eltype(c1) <: Real
         return [SVector{3,Float64}(Float64(c[1]) * 10, Float64(c[2]) * 10, Float64(c[3]) * 10) for c in coords]
@@ -107,8 +109,13 @@ function AtomsCalculators.forces!(fs, sys::System, inter::Molly.AllegroPotential
     # forces from the model are in eV/Å (energy eV, length Å); Molly coords are nm, so the force
     # per nm-coordinate is 10× the per-Å force (dÅ/dnm = 10).
     F = Molly.allegro_forces(inter.model, coords_A, species, bdy, inter.model.r_c)
-    for i in eachindex(fs)
-        fs[i] += _allegro_force_to_units(F[i] .* 10, sys.force_units)
+    inc = [_allegro_force_to_units(F[i] .* 10, sys.force_units) for i in eachindex(F)]
+    if fs isa Array
+        fs .+= inc
+    else
+        # GPU-backed force buffer: upload the host increment (matching fs's element type, e.g.
+        # Float32 on Metal) and add on-device — avoids scalar indexing into the GPU array.
+        fs .+= to_device(convert.(eltype(fs), inc), array_type(sys))
     end
     return fs
 end
