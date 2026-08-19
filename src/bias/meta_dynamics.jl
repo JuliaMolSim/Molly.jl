@@ -177,16 +177,6 @@ function add_hill!(mem::GridHills, cv_value)
     return nothing
 end
 
-function check_meta_dynamics_cvs(md)
-    if isempty(md.cvs)
-        throw(ArgumentError(
-            "This MetaDynamicsBias has no stored collective variables, so it cannot be " *
-            "used directly as a general interaction. Either construct it as " *
-            "MetaDynamicsBias(cvs, memory) with a tuple of CV descriptors, or wrap it in " *
-            "a BiasPotential with an externally supplied CV: BiasPotential(cv, bias)."))
-    end
-    return nothing
-end
 
 @doc raw"""
     MetaDynamicsBias(k, sigma, centers=Float64[])
@@ -236,6 +226,13 @@ struct MetaDynamicsBias{C <: Tuple, M <: AbstractMetaDynamicsMemory}
     memory::M
 
     function MetaDynamicsBias(cvs::C, memory::M) where {C <: Tuple, M <: AbstractMetaDynamicsMemory}
+         if isempty(cvs)
+            throw(ArgumentError(
+                "This MetaDynamicsBias has no stored collective variables, so it cannot be " *
+                "used directly as a general interaction. Either construct it as " *
+                "MetaDynamicsBias(cvs, memory) with a tuple of CV descriptors, or wrap it in " *
+                "a BiasPotential with an externally supplied CV: BiasPotential(cv, bias)."))
+        end
         if memory isa GridHills && length(cvs) > 1
             throw(ArgumentError(
                 "GridHills memory only supports a single collective variable, got " *
@@ -271,7 +268,6 @@ function add_hill!(md::MetaDynamicsBias, cv_value)
 end
 
 function AtomsCalculators.potential_energy(sys, md::MetaDynamicsBias; kwargs...)
-    check_meta_dynamics_cvs(md)
     coords_pbc = any(cv -> cv.correction == :pbc, md.cvs) ? unwrap_molecules(sys) : nothing
 
     cv_sim = map(md.cvs) do cv
@@ -285,17 +281,15 @@ function AtomsCalculators.potential_energy(sys, md::MetaDynamicsBias; kwargs...)
     return potential_energy(md.memory, cv_sim; kwargs...)
 end
 
+### needs gpu offloading
 function AtomsCalculators.forces!(
     fs, sys, md::MetaDynamicsBias;
     needs_vir::Bool = false,
-    buffers = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
+    buffers = nothing,
     kwargs...
 )
-    check_meta_dynamics_cvs(md)
     coords_pbc = any(cv -> cv.correction == :pbc, md.cvs) ? unwrap_molecules(sys) : nothing
 
-    # Evaluate every CV, and its gradient with respect to coordinates, before calling the
-    # bias potential's gradient
     per_cv = map(md.cvs) do cv
         coords = from_device(cv.correction == :pbc ? coords_pbc : sys.coords)
         atoms = from_device(sys.atoms)
