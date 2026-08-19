@@ -99,7 +99,7 @@ CUDA_CORE.Const(nl::Molly.NoNeighborList) = nl
 function env_int(name::AbstractString)
     value = ENV[name]
     parsed = tryparse(Int, value)
-    parsed === nothing && error("Invalid integer value for $(name): $(repr(value))")
+    parsed === nothing && error("invalid integer value for $(name): $(repr(value))")
     return parsed
 end
 
@@ -138,7 +138,7 @@ function effective_tile_threads_override(config::Molly.CUDALaunchConfig)
     threads_x_env = env_override("MOLLY_CUDA_TILE_THREADS_X")
     threads_y_env = env_override("MOLLY_CUDA_TILE_THREADS_Y")
     if xor(threads_x_env === nothing, threads_y_env === nothing)
-        error("Set both MOLLY_CUDA_TILE_THREADS_X and MOLLY_CUDA_TILE_THREADS_Y together")
+        error("set both MOLLY_CUDA_TILE_THREADS_X and MOLLY_CUDA_TILE_THREADS_Y together")
     end
     config_tile_threads = Molly.cuda_tile_threads(config)
     return config_tile_threads === nothing ?
@@ -794,7 +794,7 @@ function tile_launch_params(sys, kernel)
     threads_x_override = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_X") : config_tile_threads[1]
     threads_y_override = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_Y") : config_tile_threads[2]
     if xor(threads_x_override === nothing, threads_y_override === nothing)
-        error("Set both MOLLY_CUDA_TILE_THREADS_X and MOLLY_CUDA_TILE_THREADS_Y together")
+        error("set both MOLLY_CUDA_TILE_THREADS_X and MOLLY_CUDA_TILE_THREADS_Y together")
     end
 
     max_threads = CUDA.maxthreads(kernel)
@@ -839,7 +839,7 @@ function throw_if_interacting_tiles_overflowed(buffers)
     overflow_count == 0 && return nothing
 
     max_tiles = length(buffers.interacting_tiles_i)
-    error("Maximum number of interacting tiles exceeded (> $(max_tiles)); increase buffer size.")
+    error("maximum number of interacting tiles exceeded (> $(max_tiles)), increase buffer size")
 end
 
 macro shfl_multiple_sync(mask, target, width, vars...)

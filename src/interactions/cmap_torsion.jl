@@ -197,7 +197,7 @@ end
 function evaluate_spline_derivative(x, y, deriv, t)
     n = length(x)
     if t < x[1] || t > x[n]
-        error()
+        error("CMAP value out of range")
     end
 
     lower = 1

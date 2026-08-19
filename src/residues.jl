@@ -931,7 +931,7 @@ end
 # Helper to make combinations, needed for impropers
 function combinations_of(vec::Vector, n::Integer)
     if n < 0 || n > length(vec)
-        throw(ArgumentError("n must be between 0 and length(vec)"))
+        error("n must be between 0 and length(vec)")
     end
     result = Vector{Vector{eltype(vec)}}()
     inds = collect(1:n)

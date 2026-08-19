@@ -142,8 +142,8 @@ function order_atoms(is, js)
     elseif length(central_atoms) == 0 # Will trigger if just 1 bond in constraint (e.g. C-C)
         return unique_atoms
     else
-        error("cannot find central atom, constraint chains of 4 atoms (e.g. C-C-C-C) " *
-              "are not permitted")
+        throw(ArgumentError("cannot find central atom, constraint chains of 4 atoms " *
+                            "(e.g. C-C-C-C) are not permitted"))
     end
 end
 
@@ -302,9 +302,9 @@ function build_central_atom_clusters(num_atoms::Integer,
                 # Skip angle constraints, we will build them later if needed
                 continue
             else
-                error("constraint clusters with more than 3 constraints or too few unique " *
-                      "atoms are not unsupported, found $N_constraint constraints and " *
-                      "$N_unique unique atoms")
+                throw(ArgumentError("constraint clusters with more than 3 constraints or too few " *
+                                    "unique atoms are not unsupported, found $N_constraint " *
+                                    "constraints and $N_unique unique atoms"))
             end
         end
     end

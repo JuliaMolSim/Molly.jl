@@ -5,7 +5,7 @@ using StaticArrays
 
 function gpu_cuda_ext()
     ext = Base.get_extension(Molly, :MollyCUDAExt)
-    ext === nothing && error("MollyCUDAExt is not loaded; import CUDA before profiling GPU kernels.")
+    isnothing(ext) && error("MollyCUDAExt is not loaded, import CUDA before profiling GPU kernels")
     return ext
 end
 
@@ -41,7 +41,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
                                  buffers=Molly.init_buffers!(sys, 1)) where {D, T}
     ext = gpu_cuda_ext()
     pairwise_inters = Tuple(filter(use_neighbors, values(sys.pairwise_inters)))
-    isempty(pairwise_inters) && error("No neighbor-list pairwise interactions found to profile.")
+    isempty(pairwise_inters) && error("no neighbor-list pairwise interactions found to profile")
 
     N = length(sys.coords)
     n_blocks = cld(N, 32)
@@ -249,7 +249,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
                                   buffers=Molly.init_buffers!(sys, 1, true)) where {D, T}
     ext = gpu_cuda_ext()
     pairwise_inters = Tuple(filter(use_neighbors, values(sys.pairwise_inters)))
-    isempty(pairwise_inters) && error("No neighbor-list pairwise interactions found to profile.")
+    isempty(pairwise_inters) && error("no neighbor-list pairwise interactions found to profile")
 
     N = length(sys.coords)
     n_blocks = cld(N, 32)

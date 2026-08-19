@@ -762,7 +762,8 @@ struct CalcTorsion
         check_correction_arg(correction)
         tol = Float64(gradient_singularity_tol)
         if !isfinite(tol) || tol <= 0
-            throw(ArgumentError("gradient_singularity_tol must be finite and positive, got $(gradient_singularity_tol)."))
+            throw(ArgumentError("gradient_singularity_tol must be finite and positive, " *
+                                "got $gradient_singularity_tol"))
         end
         return new(atom_inds, correction, has_virial, tol)
     end
@@ -792,7 +793,7 @@ end
 function check_torsion_bond_norm(norm_value, label::AbstractString)
     if !isfinite(ustrip(norm_value)) || norm_value <= zero(norm_value)
         throw(ArgumentError("CalcTorsion cannot compute a finite gradient because $(label) " *
-                            "has non-positive or non-finite length ($(norm_value))."))
+                            "has non-positive or non-finite length ($(norm_value))"))
     end
     return norm_value
 end

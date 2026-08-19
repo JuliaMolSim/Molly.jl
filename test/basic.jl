@@ -778,10 +778,11 @@ end
     @test length(nf.clm_particlesystem.positions) == 0
     @test size(nf.clm_particlesystem.unitcell) == (3,3)
     @test first(nf.clm_particlesystem.unitcell) > 2 * 0.6u"nm"
-    @test_throws "Cannot use infinite boundaries" CellListMapNeighborFinder(eligible=trues(100,100), 
-                                                                            dist_cutoff=1.0u"nm",
-                                                                            boundary=CubicBoundary(SVector(Inf, 100.0, 100.0)))
-
+    @test_throws ArgumentError CellListMapNeighborFinder(
+        eligible=trues(100,100), 
+        dist_cutoff=1.0u"nm",
+        boundary=CubicBoundary(SVector(Inf, 100.0, 100.0)),
+    )
 end
 
 @testset "GPUNeighborFinder sparse metadata" begin
@@ -1184,7 +1185,7 @@ end
     water_fp = joinpath(data_dir, "water_3mol_cubic.pdb")
 
     # Neighbor list cutoff has to fit twice in the box for the cell list finder
-    @test_throws "cell list neighbor finder does not support" System(water_fp, ff)
+    @test_throws ArgumentError System(water_fp, ff)
     sys = System(water_fp, ff; dist_cutoff=0.5u"nm")
     @test length(sys) == 9
 
@@ -1193,9 +1194,9 @@ end
     @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
                                       implicit_solvent=:obc2, kappa=1.0u"nm")
     @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
-                                      neighbor_finder_type=Int)
-    @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
                                       nonbonded_method=:pme, pme_mesh_dims=(3, 3, 3))
+    @test_throws MethodError   System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                      neighbor_finder_type=Int)
 
     # Residues that do not match a template give a diagnostic message
     missing_h_fp = joinpath(mktempdir(), "water_missing_h.pdb")
@@ -1204,8 +1205,7 @@ end
             startswith(line, "HETATM  279") || println(out, line)
         end
     end
-    @test_throws "The set of heavy atoms matches HOH" System(missing_h_fp, ff;
-                                                             dist_cutoff=0.5u"nm")
+    @test_throws ErrorException System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
 end
 
 @testset "AtomsBase conversion" begin

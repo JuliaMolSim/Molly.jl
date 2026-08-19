@@ -759,14 +759,14 @@ end
 
 function check_float_types(T, TH)
     if promote_type(T, TH) != TH
-        throw(ArgumentError("Float type is $T and float_type_high is $TH, which appears " *
+        throw(ArgumentError("float_type is $T and float_type_high is $TH, which appears " *
                             "to be a lower precision type"))
     end
 end
 
 function check_n_dims(coords::AbstractVector{SVector{DC, C}},
                       vels::AbstractVector{SVector{DV, V}},
-                      D) where {DC, C, DV, V, D}
+                      D) where {DC, C, DV, V}
     if DC != D
         throw(ArgumentError("the boundary has $D dimensions but the coordinates have " *
                             "$DC, they should match"))
@@ -1252,11 +1252,12 @@ function System(crystal::Crystal{D};
     elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
         boundary = RectangularBoundary(side_lengths...)
     elseif D == 2 # Honeycomb, Hex2D and Oblique
-        throw(ArgumentError("$(crystal.lattice.crystal_family) is not supported as it would need " *
-            "a 2D triclinic boundary, try defining the crystal with a rectangular or square unit cell"))
+        throw(ArgumentError("$(crystal.lattice.crystal_family) is not supported as it would " *
+                            "need a 2D triclinic boundary, try defining the crystal with a " *
+                            "rectangular or square unit cell"))
     else # 3D non-cubic systems
         if !all(crystal.lattice.crystal_family.lattice_angles .< 90u"°")
-            throw(error("all crystal lattice angles must be less than 90°"))
+            throw(ArgumentError("all crystal lattice angles must be less than 90°"))
         end
         boundary = TriclinicBoundary(side_lengths, crystal.lattice_angles)
     end
@@ -1428,7 +1429,9 @@ function ThermoState(sys::System{<:Any, <:Any, <:Any, TH}, integrator;
     end
 
     if isnothing(temp_source)
-        throw(ArgumentError("No temperature provided or inferred from the integrator. " * "You must provide an explicit temperature, use a thermostat, or " * "use an integrator with an implicit temperature."))
+        throw(ArgumentError("no temperature provided or inferred from the integrator; " *
+                            "you must provide an explicit temperature, use a thermostat or " *
+                            "use an integrator with an implicit temperature"))
     end
 
     # Calculate beta (inverse temperature) in system-compatible units (e.g., mol/kJ)
@@ -1436,9 +1439,9 @@ function ThermoState(sys::System{<:Any, <:Any, <:Any, TH}, integrator;
     kBT_raw = Unitful.R * temp_source
     
     if Unitful.dimension(sys.energy_units) != Unitful.dimension(kBT_raw)
-        throw(ArgumentError("Temperature provided is not compatible with system energy units. " *
-                            "Expected dimension $(Unitful.dimension(sys.energy_units)), " *
-                            "but got $(Unitful.dimension(kBT_raw))."))
+        throw(ArgumentError("temperature provided is not compatible with system energy units; " *
+                            "expected dimension $(Unitful.dimension(sys.energy_units)), " *
+                            "but got $(Unitful.dimension(kBT_raw))"))
     end
 
     kBT = uconvert(sys.energy_units, kBT_raw)
@@ -1538,11 +1541,11 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
                        data=nothing,
                        reuse_neighbors::Bool=true)
     n_replicas = length(thermo_states)
-    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative."))
+    initial_step >= 0 || throw(ArgumentError("initial_step must be non-negative"))
     
     if length(replica_coords) != n_replicas
-        throw(ArgumentError("Number of replica_coords ($(length(replica_coords))) " *
-                            "does not match number of ThermoStates ($n_replicas)"))
+        throw(ArgumentError("number of replica_coords ($(length(replica_coords))) " *
+                            "does not match number of thermo_states ($n_replicas)"))
     end
 
     ref_sys = thermo_states[1].system
@@ -1555,7 +1558,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
     if isnothing(replica_boundaries)
         replica_boundaries = [ref_sys.boundary for _ in 1:n_replicas]
     elseif length(replica_boundaries) != n_replicas
-        throw(ArgumentError("Number of boundaries ($(length(replica_boundaries))) " *
+        throw(ArgumentError("number of boundaries ($(length(replica_boundaries))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
 
@@ -1566,21 +1569,21 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
             replica_velocities = [zero(replica_coords[1]) * u"ps^-1" for _ in 1:n_replicas]
         end
     elseif length(replica_velocities) != n_replicas
-        throw(ArgumentError("Number of velocities ($(length(replica_velocities))) " *
+        throw(ArgumentError("number of velocities ($(length(replica_velocities))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
 
     if isnothing(replica_neighbor_finders)
         replica_neighbor_finders = [deepcopy(ts.system.neighbor_finder) for ts in thermo_states]
     elseif length(replica_neighbor_finders) != n_replicas
-        throw(ArgumentError("Number of neighbor finders ($(length(replica_neighbor_finders))) " *
+        throw(ArgumentError("number of neighbor finders ($(length(replica_neighbor_finders))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
 
     if isnothing(replica_loggers)
         replica_loggers = [() for _ in 1:n_replicas]
     elseif length(replica_loggers) != n_replicas
-        throw(ArgumentError("Number of loggers arrays ($(length(replica_loggers))) " *
+        throw(ArgumentError("number of loggers arrays ($(length(replica_loggers))) " *
                             "does not match number of replicas ($n_replicas)"))
     end
     validate_replica_loggers(replica_loggers)

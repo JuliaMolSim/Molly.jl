@@ -457,7 +457,7 @@ function apply_coupling!(sys::System{D},
             μ[i,j] = Δ
         end
     else
-        error("unsupported coupling_type=$(barostat.coupling_type)")
+        throw(ArgumentError("unsupported coupling_type=$(barostat.coupling_type)"))
     end
 
     # Triclinic projector (move lower into upper, zero lower) before left-multiplying B' = μ B
@@ -707,7 +707,7 @@ function apply_coupling!(sys::System{D},
             μ[i,j] = Δ
         end
     else
-        error("unsupported coupling_type=$(barostat.coupling_type)")
+        throw(ArgumentError("unsupported coupling_type=$(barostat.coupling_type)"))
     end
 
     # Triclinic projector (move lower into upper, zero lower) before left-multiplying B' = μ B

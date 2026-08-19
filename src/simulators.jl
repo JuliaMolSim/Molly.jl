@@ -1364,7 +1364,7 @@ end
                     neighbors,
                     step_n,
                 )
-            elseif op == 'O'
+            else # op == 'O'
                 langevin_o_step!(
                     sys.velocities,
                     vel_scales,
@@ -1374,8 +1374,6 @@ end
                     T,
                 )
                 philox_ctr1 += UInt64(1)
-            else
-                error("Unexpected op $(repr(op))")
             end
         end
 

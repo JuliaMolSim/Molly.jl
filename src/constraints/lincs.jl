@@ -366,9 +366,9 @@ function group_constraints_for_gpu(atom1, atom2, block_size)
     for comp in components
         if length(comp) > block_size
             error(
-                "LINCS: connected component of $(length(comp)) coupled constraints exceeds " *
-                "gpu_block_size=$block_size. Increase gpu_block_size in the LINCS constructor " *
-                "to at least $(length(comp)), or use CPU constraints for this system.",
+                "LINCS connected component of $(length(comp)) coupled constraints exceeds " *
+                "gpu_block_size=$block_size; increase gpu_block_size in the LINCS constructor " *
+                "to at least $(length(comp)), or use CPU constraints for this system",
             )
         end
     end

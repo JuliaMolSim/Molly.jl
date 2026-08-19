@@ -1063,7 +1063,7 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
 
     is_triclinic = hasproperty(boundary, :basis_vectors)
     if is_triclinic && D != 3
-        error("Triclinic boundary only defined for 3-dimensions")
+        error("triclinic boundary only defined for 3-dimensions")
     end
 
     # Build frac<->cart transforms

@@ -36,7 +36,7 @@ const GROUP = get(ENV, "GROUP", "All")
 if GROUP in ("Protein", "Gradients", "NotGradients")
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 elseif GROUP != "All"
-    error("Unrecognised test group, GROUP=$GROUP")
+    error("unrecognised test group, GROUP=$GROUP")
 end
 
 # Some CPU gradient tests give memory errors on CI

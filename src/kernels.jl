@@ -133,8 +133,8 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
                     pairwise_inters, neighbors, ::Val{needs_vir},
                     step_n) where {D, needs_vir}
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
-              "should use DistanceNeighborFinder instead")
+        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA " *
+              "GPU you should use DistanceNeighborFinder instead")
     end
     if typeof(neighbors) == NoNeighborList
         nbs = neighbors

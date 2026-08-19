@@ -83,7 +83,7 @@ end
 
  function validate_flat_bottom_width(r_fb, label::AbstractString)
     if !isfinite(ustrip(r_fb)) || r_fb < zero(r_fb)
-        throw(ArgumentError("$(label) flat-bottom width must be finite and non-negative, got $(r_fb)."))
+        throw(ArgumentError("$label flat-bottom width must be finite and non-negative, got $r_fb"))
     end
     return r_fb
 end
@@ -259,7 +259,7 @@ bias_max_abs_ustrip(value) = abs(ustrip(value))
     if !isnothing(max_abs_component)
         msg *= ", max_abs_component=$(max_abs_component)"
     end
-    error(msg * ".")
+    error(msg)
 end
 
 function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)

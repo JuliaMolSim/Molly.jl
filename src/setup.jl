@@ -30,7 +30,8 @@ function place_atoms(n_atoms::Integer,
     dims = AtomsBase.n_dimensions(boundary)
     max_atoms = volume(boundary) / (min_dist ^ dims)
     if n_atoms > max_atoms
-        throw(ArgumentError("boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
+        throw(ArgumentError("boundary $boundary too small for $n_atoms atoms with " *
+                            "minimum distance $min_dist"))
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
@@ -52,7 +53,8 @@ function place_atoms(n_atoms::Integer,
             push!(coords, new_coord)
             failed_attempts = 0
         elseif failed_attempts >= max_attempts
-            error("failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
+            error("failed to place atom $(length(coords) + 1) after $max_attempts " *
+                  "(max_attempts) tries")
         end
     end
     return [coords...]
@@ -86,7 +88,8 @@ function place_diatomics(n_molecules::Integer,
     dims = AtomsBase.n_dimensions(boundary)
     max_molecules = volume(boundary) / ((min_dist + bond_length) ^ dims)
     if n_molecules > max_molecules
-        throw(ArgumentError("boundary $boundary too small for $n_molecules diatomics with minimum distance $min_dist"))
+        throw(ArgumentError("boundary $boundary too small for $n_molecules diatomics with " *
+                            "minimum distance $min_dist"))
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
@@ -116,7 +119,8 @@ function place_diatomics(n_molecules::Integer,
             push!(coords, new_coord_b)
             failed_attempts = 0
         elseif failed_attempts >= max_attempts
-            error("failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
+            error("failed to place atom $(length(coords) + 1) after $max_attempts " *
+                  "(max_attempts) tries")
         end
     end
     # Second atom in each molecule may be outside boundary
@@ -1584,7 +1588,7 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
         general_inters_ewald = ()
-    elseif nonbonded_method in (:ewald, :pme)
+    else # in (:ewald, :pme)
         coul = CoulombEwald(
             dist_cutoff=T(dist_cutoff),
             error_tol=T(ewald_error_tol),
@@ -1619,9 +1623,6 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
             )
         end
         general_inters_ewald = (ewald,)
-    else
-        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
-                            ":none, :cutoff, :pme and :ewald"))
     end
 
     pairwise_inters = (lj, coul)
@@ -1690,11 +1691,8 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
         if implicit_solvent in (:obc1, :obc2)
             general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
                                  kappa=kappa, use_OBC2=(implicit_solvent == :obc2)),)
-        elseif implicit_solvent == :gbn2
+        else # :gbn2
             general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
-        else
-            throw(ArgumentError("unknown implicit solvent model $implicit_solvent, " *
-                                "options are :none, :obc1, :obc2 and :gbn2"))
         end
     else
         general_inters_is = ()
@@ -1778,7 +1776,8 @@ function add_position_restraints(sys::System{<:Any, AT, T, TH},
                                  restrain_coords=sys.coords) where {AT, T, TH}
     k_array = isa(k, AbstractArray) ? k : fill(k, length(sys))
     if length(k_array) != length(sys)
-        throw(ArgumentError("the system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
+        throw(ArgumentError("the system has $(length(sys)) atoms but there are " *
+                            "$(length(k_array)) k values"))
     end
     is = Int32[]
     types = String[]

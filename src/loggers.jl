@@ -917,8 +917,7 @@ function validate_replica_loggers(replica_loggers)
                 prev_i = get(seen_paths, filepath, nothing)
                 if !isnothing(prev_i) && prev_i != replica_i
                     throw(ArgumentError("replica_loggers cannot contain multiple " *
-                                        "TrajectoryWriters with the same filepath " *
-                                        "($filepath)"))
+                                        "TrajectoryWriters with the same filepath ($filepath)"))
                 end
                 seen_paths[filepath] = replica_i
             end

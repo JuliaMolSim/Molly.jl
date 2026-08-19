@@ -346,7 +346,9 @@ function GPUNeighborFinder(;
     end
     eligible_cpu = copy_to_bitmatrix(eligible)
     special_cpu = copy_to_bitmatrix(special)
-    size(eligible_cpu) == size(special_cpu) || throw(ArgumentError("eligible and special must have the same size"))
+    if !(size(eligible_cpu) == size(special_cpu))
+        throw(ArgumentError("eligible and special must have the same size"))
+    end
     excluded_pairs_cpu, special_pairs_cpu = dense_masks_to_pair_lists(eligible_cpu, special_cpu)
     return GPUNeighborFinder(
         n_atoms=size(eligible_cpu, 1),
@@ -565,11 +567,13 @@ function clm_unitcell_arg(b::Union{CubicBoundary, RectangularBoundary})
         if all(isinf.(uc))
             return nothing, D
         else
-            throw(ArgumentError("Cannot use infinite boundaries in some, but not all, dimension."))
+            throw(ArgumentError("cannot use infinite boundaries in some, but not all, " *
+                                "dimensions with CellListMapNeighborFinder"))
         end
     end
     return uc, D
 end
+
 function clm_unitcell_arg(b::TriclinicBoundary) 
     uc = hcat(b.basis_vectors...)
     D = size(uc, 1)

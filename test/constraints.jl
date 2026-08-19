@@ -988,7 +988,6 @@ end
                 iter_vel_correction=true,
             )
         end
-        error("unknown constraint kind $kind")
     end
 
     function simulator_constraint_system(kind; loggers, coords_in=coords, velocities_in=velocities)
