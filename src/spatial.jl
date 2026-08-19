@@ -1189,17 +1189,18 @@ Rigid-molecular barostat update with optional rotation.
 - Positions:  r′ = μ * r  (implemented via COM affine + optional rotation of internal offsets)
 - Velocities: v′ = μ⁻¹ * v  (applied when `scale_velocities=true`)
 """
-function scale_coords!(sys::System{<:Any, AT},
-                       μ::SMatrix{D, D};
+function scale_coords!(sys::System{<:Any, AT, T},
+                       μ_in::SMatrix{D, D};
                        rotate::Bool=true,
                        ignore_molecules::Bool=false,
-                       scale_velocities::Bool=false) where {AT, D}
+                       scale_velocities::Bool=false) where {AT, T, D}
     # This function assumes that constrained atoms, and virtual sites and the atoms that
     #   define them, are in the same molecule, meaning that they are scaled appropriately
     if has_infinite_boundary(sys.boundary)
-        throw(AssertionError("infinite boundary not supported"))
+        throw(ArgumentError("infinite boundary not supported for scale_coords!"))
     end
 
+    μ = SMatrix{D, D, T}(μ_in) # Convert scaling matrix to float type of the system
     μinv = inv(μ)
 
     if ignore_molecules || isnothing(sys.topology)

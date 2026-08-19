@@ -677,11 +677,16 @@ function find_neighbors(sys::System{D, AT},
     end
 
     # Update the CellListMap.ParticleSystem
-    CellListMap.update!(nf.clm_particlesystem; 
-        positions=from_device(sys.coords),
-        unitcell=first(clm_unitcell_arg(sys.boundary)), 
-        parallel=(n_threads > 1),
-    )
+    positions = from_device(sys.coords)
+    unitcell = first(clm_unitcell_arg(sys.boundary))
+    parallel = (n_threads > 1)
+    if isnothing(unitcell) # Avoid small Union dispatch
+        CellListMap.update!(nf.clm_particlesystem; positions=positions, unitcell=nothing,
+                            parallel=parallel)
+    else
+        CellListMap.update!(nf.clm_particlesystem; positions=positions, unitcell=unitcell,
+                            parallel=parallel)
+    end
 
     # Update the neighbor list
     neighbors = CellListMap.pairwise!(

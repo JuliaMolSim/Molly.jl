@@ -261,21 +261,31 @@ end
 
 function accumulate_shake_position_virial!(coords_ref, coords_before, coords_after, ms,
                                            boundary, ca::SHAKE_RATTLE, context)
-    context.needs_virial || return context
-    for clusters in (ca.clusters12, ca.clusters23, ca.clusters34, ca.angle_clusters)
-        accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms,
-                                         boundary, clusters, context)
-    end
+    # The snapshot is nothing exactly when the virial is not needed, checking it here
+    #   means the cluster loops below never see a Nothing to index into
+    (context.needs_virial && !isnothing(coords_before)) || return context
+    accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms, boundary,
+                                     ca.clusters12, context)
+    accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms, boundary,
+                                     ca.clusters23, context)
+    accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms, boundary,
+                                     ca.clusters34, context)
+    accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms, boundary,
+                                     ca.angle_clusters, context)
     return context
 end
 
 function accumulate_rattle_velocity_virial!(coords, velocities_before, velocities_after, ms,
                                             boundary, ca::SHAKE_RATTLE, context)
-    context.needs_virial || return context
-    for clusters in (ca.clusters12, ca.clusters23, ca.clusters34, ca.angle_clusters)
-        accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms,
-                                         boundary, clusters, context)
-    end
+    (context.needs_virial && !isnothing(velocities_before)) || return context
+    accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms, boundary,
+                                     ca.clusters12, context)
+    accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms, boundary,
+                                     ca.clusters23, context)
+    accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms, boundary,
+                                     ca.clusters34, context)
+    accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms, boundary,
+                                     ca.angle_clusters, context)
     return context
 end
 
@@ -435,7 +445,7 @@ end
 
 function accumulate_shake_virial_gpu!(coords_ref, values_before, values_after, ms, boundary,
                                       ca::SHAKE_RATTLE, context, backend, block_size)
-    context.needs_virial || return context
+    (context.needs_virial && !isnothing(values_before)) || return context
     accumulate_shake_cluster12_virial_gpu!(coords_ref, values_before, values_after, ms,
                                            boundary, ca.clusters12, context, backend,
                                            block_size)

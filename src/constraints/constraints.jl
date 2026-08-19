@@ -75,11 +75,14 @@ function copyto_constraint_scratch!(scratch, values)
     if isnothing(scratch)
         return copy(values)
     elseif scratch isa Base.RefValue
-        if isnothing(scratch[])
+        # The scratch buffer is stored untyped, so it is asserted to the type of the
+        #   values here, otherwise the copy below is a runtime dispatch every step
+        if !(scratch[] isa typeof(values))
             scratch[] = similar(values)
         end
-        scratch[] .= values
-        return scratch[]
+        buffer = scratch[]::typeof(values)
+        buffer .= values
+        return buffer
     else
         scratch .= values
         return scratch

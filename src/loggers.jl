@@ -94,9 +94,10 @@ Custom loggers should implement this function.
 Additional keyword arguments can be passed to the logger if required.
 """
 function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0, buffers=nothing; kwargs...)
+                        step_n::Integer=0, buffers=nothing;
+                        n_threads::Integer=Threads.nthreads(), kwargs...)
     if (step_n % logger.n_steps) == 0
-        obs = logger.observable(s, neighbors, step_n, buffers; kwargs...)
+        obs = logger.observable(s, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
         push!(logger.history, obs)
     end
 end
@@ -1133,9 +1134,10 @@ function Base.values(aol::AverageObservableLogger; std::Bool=true)
 end
 
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
-                        step_n::Integer=0, buffers=nothing; kwargs...) where T
+                        step_n::Integer=0, buffers=nothing;
+                        n_threads::Integer=Threads.nthreads(), kwargs...) where T
     if (step_n % aol.n_steps) == 0
-        obs = aol.observable(s, neighbors, step_n, buffers; kwargs...)
+        obs = aol.observable(s, neighbors, step_n, buffers; n_threads=n_threads, kwargs...)
         push!(aol.current_block, obs)
 
         if length(aol.current_block) == aol.current_block_size
