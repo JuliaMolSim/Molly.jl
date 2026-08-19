@@ -996,7 +996,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         if !isnothing(i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name already present"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         el = atom_types[atom_type].element
@@ -1013,7 +1013,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         if isnothing(i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         types[i] = atom_type
@@ -1026,21 +1026,21 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         if isnothing(i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name_1 missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         j = findfirst(isequal(atom_name_2), atoms)
         if isnothing(j)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name_2 missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         bond_i = find_bond_ind(i, j, bonds)
         if isnothing(bond_i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "bond between $atom_name_1 and $atom_name_2 missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         deleteat!(bonds, bond_i)
@@ -1051,7 +1051,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         if isnothing(i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         deleteat!(atoms, i)
@@ -1063,7 +1063,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         if any(bij -> (bij[1] == i || bij[2] == i), bonds)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name can't be removed as it is part of a bond"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
         end
         bonds .= shift_bond_inds.(bonds, i)
     end
@@ -1073,21 +1073,21 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         if isnothing(i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name_1 missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         j = findfirst(isequal(atom_name_2), atoms)
         if isnothing(j)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name_2 missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         bond_i = find_bond_ind(i, j, bonds)
         if !isnothing(bond_i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "bond between $atom_name_1 and $atom_name_2 already present"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         push!(bonds, (i, j))
@@ -1098,7 +1098,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         if isnothing(i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         external_bonds[i] += 1
@@ -1109,7 +1109,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         if isnothing(i)
             err_str = "Can't apply patch $patch_name to residue template $res_name: " *
                       "atom name $atom_name missing"
-            report_issue(err_str, strictness)
+            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             return nothing
         end
         external_bonds[i] = max(external_bonds[i] - 1, 0)

@@ -1,5 +1,5 @@
 using Molly
-using Molly: from_device, to_device
+using Molly: from_device, to_device, ForceFieldXMLError
 using AMDGPU
 using Aqua
 import AtomsBase

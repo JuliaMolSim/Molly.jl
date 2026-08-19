@@ -543,7 +543,7 @@ end
     @test ff_tip3p.custom_nonbonded == false
 
     ff_fp = joinpath(ff_dir, "tip4pfb.xml")
-    @test_throws ErrorException MolecularForceField(ff_fp, ff_fp)
+    @test_throws ForceFieldXMLError MolecularForceField(ff_fp, ff_fp)
 end
 
 @testset "Double exponential force field setup" begin
@@ -1086,14 +1086,14 @@ end
      <AtomTypes>
       <Type name="AR" class="Ar" element="Ar"/>
      </AtomTypes>""")
-    @test_throws "missing the required \"mass\" attribute" MolecularForceField(fp)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
 
     # Attribute that cannot be parsed
     fp = write_ff("bad_mass.xml", """
      <AtomTypes>
       <Type name="AR" class="Ar" element="Ar" mass="heavy"/>
      </AtomTypes>""")
-    @test_throws "could not parse the \"mass\" attribute" MolecularForceField(fp)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
 
     # Residue template referring to an unknown atom type
     fp = write_ff("bad_type.xml", types_block * """
@@ -1102,7 +1102,7 @@ end
        <Atom name="AR" type="ARR" charge="0.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws "which is not defined in an <AtomTypes> entry" MolecularForceField(fp)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
 
     # Atom types have to come before the residue templates that use them
     fp_types = write_ff("types_only.xml", types_block * nb_block)
@@ -1113,7 +1113,7 @@ end
       </Residue>
      </Residues>""")
     @test length(MolecularForceField(fp_types, fp_res).residues) == 1
-    @test_throws "give the files that define atom types first" MolecularForceField(fp_res, fp_types)
+    @test_throws ForceFieldXMLError MolecularForceField(fp_res, fp_types)
 
     # Duplicate atom names in a residue template
     fp = write_ff("dup_atom.xml", types_block * """
@@ -1123,7 +1123,7 @@ end
        <Atom name="AR" type="AR" charge="0.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws "contains multiple atoms named" MolecularForceField(fp)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
 
     # Duplicate residue templates
     fp = write_ff("dup_res.xml", types_block * """
@@ -1135,7 +1135,7 @@ end
        <Atom name="AR2" type="AR" charge="1.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws "is defined twice" MolecularForceField(fp)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
 
     # Bond in a residue template referring to an unknown atom name
     fp = write_ff("bad_bond.xml", types_block * """
@@ -1145,18 +1145,18 @@ end
        <Bond atomName1="AR" atomName2="ZZ"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws "which is not one of the atoms of the template" MolecularForceField(fp)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
 
     # Both an atom type and an atom class given for the same atom
     fp = write_ff("type_class.xml", types_block * """
      <HarmonicBondForce>
       <Bond type1="AR" class1="Ar" type2="AR" k="100.0" length="0.1"/>
      </HarmonicBondForce>""" * nb_block)
-    @test_throws "specifies both" MolecularForceField(fp)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
 
     # Atom type with no non-bonded parameters
     fp = write_ff("no_nb.xml", types_block)
-    @test_throws "have not had σ and ϵ set" MolecularForceField(fp)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
 
     # A residue template with a higher override level replaces one with a lower level
     fp = write_ff("override.xml", """

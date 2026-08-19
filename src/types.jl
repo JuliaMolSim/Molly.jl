@@ -2169,10 +2169,10 @@ function check_strictness(strictness)
     end
 end
 
-function report_issue(err_str, strictness; maxlog=nothing)
+function report_issue(err_str, strictness; error_type=ErrorException, maxlog=nothing)
     if strictness == :warn
         @warn err_str maxlog=maxlog
     elseif strictness == :error
-        error(err_str)
+        throw(error_type(err_str))
     end
 end

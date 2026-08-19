@@ -3,6 +3,12 @@
 export
     MolecularForceField
 
+struct ForceFieldXMLError <: Exception
+    msg::String
+end
+
+Base.showerror(io::IO, e::ForceFieldXMLError) = print(io, "ForceFieldXMLError: ", e.msg)
+
 @enum SpecKind::UInt8 WILD=0 TYPE=1 CLASS=2
 
 struct AtomPattern
@@ -26,9 +32,9 @@ spec_score(ap::AtomPattern) = (ap.kind==TYPE ? 2 : (ap.kind==CLASS ? 1 : 0))
 function pattern_from_attrs(n::EzXML.Node, typekey::AbstractString, classkey::AbstractString)
     if haskey(n, typekey)
         if haskey(n, classkey)
-            error("a <$(n.name)> tag in the force field specifies both \"$typekey\" and " *
-                  "\"$classkey\" for the same atom, only one of an atom type and an atom " *
-                  "class can be given")
+            throw(ForceFieldXMLError("a <$(n.name)> tag in the force field specifies both " *
+                    "\"$typekey\" and \"$classkey\" for the same atom, only one of an atom " *
+                    "type and an atom class can be given"))
         end
         v = n[typekey]
         return (isempty(v) ? AtomPattern(WILD, "") : AtomPattern(TYPE, v))
@@ -298,8 +304,8 @@ element_string_to_symbol(el) = (el == "?" ? :X : Symbol(el))
 get_ezxml(collection, key, default) = (haskey(collection, key) ? collection[key] : default)
 
 function check_lj_params(σ, ϵ)
-    σ < zero(σ) && error("σ value $σ must be non-negative")
-    ϵ < zero(ϵ) && error("ϵ value $ϵ must be non-negative")
+    σ < zero(σ) && throw(ForceFieldXMLError("σ value $σ must be non-negative"))
+    ϵ < zero(ϵ) && throw(ForceFieldXMLError("ϵ value $ϵ must be non-negative"))
 end
 
 # Read a required attribute from an XML tag, giving an error naming the tag,
@@ -308,8 +314,8 @@ function xml_attr(node::EzXML.Node, key::AbstractString, ff_file)
     if !haskey(node, key)
         found = join(("\"$(a.name)\"" for a in attributes(node)), ", ")
         found = (isempty(found) ? "no attributes" : "attributes $found")
-        error("a <$(node.name)> tag in force field file $ff_file is missing the required " *
-              "\"$key\" attribute, it has $found")
+        throw(ForceFieldXMLError("a <$(node.name)> tag in force field file $ff_file is missing " *
+                                 "the required \"$key\" attribute, it has $found"))
     end
     return node[key]
 end
@@ -320,8 +326,8 @@ function parse_attr(::Type{T}, node::EzXML.Node, key::AbstractString, ff_file) w
     str = xml_attr(node, key, ff_file)
     val = tryparse(T, strip(str))
     if isnothing(val)
-        error("could not parse the \"$key\" attribute of a <$(node.name)> tag in force " *
-              "field file $ff_file as $T, found \"$str\"")
+        throw(ForceFieldXMLError("could not parse the \"$key\" attribute of a " *
+                "<$(node.name)> tag in force field file $ff_file as $T, found \"$str\""))
     end
     return val
 end
@@ -330,8 +336,8 @@ function parse_bool_attr(node::EzXML.Node, key::AbstractString, ff_file)
     str = strip(lowercase(xml_attr(node, key, ff_file)))
     str in ("true" , "1") && return true
     str in ("false", "0") && return false
-    error("could not parse the \"$key\" attribute of a <$(node.name)> tag in force " *
-          "field file $ff_file as a boolean, found \"$str\"")
+    throw(ForceFieldXMLError("could not parse the \"$key\" attribute of a <$(node.name)> tag " *
+                             "in force field file $ff_file as a boolean, found \"$str\""))
 end
 
 # Having this as a function allows recursion to support <Include> tags
@@ -347,15 +353,15 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
     ff_xml = parsexml(read(ff_file))
     ff = root(ff_xml)
     if ff.name != "ForceField"
-        throw(ArgumentError("file $ff_file does not have a ForceField top level " *
-                            "tag, found $(ff.name)"))
+        throw(ForceFieldXMLError("file $ff_file does not have a ForceField top level " *
+                                 "tag, found $(ff.name)"))
     end
 
     has_lj_force = any(entry -> entry.name == "LennardJonesForce", eachelement(ff))
     has_custom_nb_force = any(entry -> entry.name == "CustomNonbondedForce", eachelement(ff))
     if has_lj_force && has_custom_nb_force
-        error("file $ff_file contains both LennardJonesForce and CustomNonbondedForce tags " *
-              "which is not supported")
+        throw(ForceFieldXMLError("file $ff_file contains both LennardJonesForce and " *
+                                 "CustomNonbondedForce tags which is not supported"))
     end
 
     for entry in eachelement(ff)
@@ -378,7 +384,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 σ = add_units(T(-1), u"nm", units)
                 ϵ = add_units(T(-1), u"kJ * mol^-1", units)
                 if haskey(atom_types, at_type)
-                    error("atom type $at_type is defined twice in the force field XML file(s)")
+                    throw(ForceFieldXMLError("atom type $at_type is defined twice in the " *
+                                             "force field XML file(s)"))
                 end
                 atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
                     at_type, at_class, element, ch, atom_mass, σ, ϵ, missing, missing)
@@ -404,15 +411,15 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         at_name = xml_attr(re, "name", ff_file)
                         q = (haskey(re, "charge") ? parse_attr(T, re, "charge", ff_file) : missing)
                         if !haskey(atom_types, at_type)
-                            error("atom \"$at_name\" in residue template $rname in force " *
-                                  "field file $ff_file has type \"$at_type\", which is not " *
-                                  "defined in an <AtomTypes> entry read so far. Atom types " *
-                                  "have to be defined before the residue templates that " *
-                                  "use them, so give the files that define atom types first")
+                            throw(ForceFieldXMLError("atom \"$at_name\" in residue template " *
+                                    "$rname in force field file $ff_file has type \"$at_type\", " *
+                                    "which is not defined in an <AtomTypes> entry read so far; " *
+                                    "atom types have to be defined before the residue templates " *
+                                    "that use them"))
                         end
                         if at_name in atoms
-                            error("residue template $rname in force field file $ff_file " *
-                                  "contains multiple atoms named \"$at_name\"")
+                            throw(ForceFieldXMLError("residue template $rname in force field " *
+                                    "file $ff_file contains multiple atoms named \"$at_name\""))
                         end
                         push!(atoms, at_name)
                         push!(types, at_type)
@@ -498,12 +505,14 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         elseif vs_type == "localCoords"
                             report_issue(
                                 "Virtual site type $vs_type not currently supported, ignoring",
-                                strictness,
+                                strictness;
+                                error_type=ForceFieldXMLError,
                             )
                         else
                             report_issue(
                                 "Unrecognised virtual site type $vs_type, ignoring",
-                                strictness,
+                                strictness;
+                                error_type=ForceFieldXMLError,
                             )
                         end
                     end
@@ -513,13 +522,15 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 for a1_a2 in bonds_by_name
                     for nm in a1_a2
                         if nm in vs_atom_names
-                            error("virtual site $nm in residue $rname appears in a bond")
+                            throw(ForceFieldXMLError("virtual site $nm in residue $rname " *
+                                                     "appears in a bond"))
                         end
                     end
                 end
                 for nm in external_bonds_name
                     if nm in vs_atom_names
-                        error("virtual site $nm in residue $rname appears in an external bond")
+                        throw(ForceFieldXMLError("virtual site $nm in residue $rname appears " *
+                                                 "in an external bond"))
                     end
                 end
 
@@ -528,9 +539,9 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 for (a1, a2) in bonds_by_name
                     for a in (a1, a2)
                         if !haskey(name_to_idx, a)
-                            error("a <Bond> tag in residue template $rname in force field " *
-                                  "file $ff_file refers to atom \"$a\", which is not one " *
-                                  "of the atoms of the template ($(join(atoms, ", ")))")
+                            throw(ForceFieldXMLError("a <Bond> tag in residue template $rname " *
+                                "in force field file $ff_file refers to atom \"$a\", which is " *
+                                "not one of the atoms of the template ($(join(atoms, ", ")))"))
                         end
                     end
                     i, j = name_to_idx[a1], name_to_idx[a2]
@@ -548,9 +559,9 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     if override < existing_override
                         continue # The existing template takes precedence
                     elseif override == existing_override
-                        error("residue template $rname with the same override level " *
-                              "$override is defined twice in the force field XML file(s), " *
-                              "the second definition is in $ff_file")
+                        throw(ForceFieldXMLError("residue template $rname with the same " *
+                            "override level $override is defined twice in the force field " *
+                            "XML file(s), the second definition is in $ff_file"))
                     end
                 end
                 residue_overrides[rname] = override
@@ -564,7 +575,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 if haskey(patch, "residues") && patch["residues"] != "1"
                     err_str = "Residue patches altering multiple templates not currently " *
                               "supported, ignoring patch $pname"
-                    report_issue(err_str, strictness)
+                    report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                     continue
                 end
 
@@ -688,7 +699,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             if xml_attr(entry, "energy", ff_file) != "k*(theta-theta0)^2"
                 err_str = "CustomTorsionForce without energy=\"k*(theta-theta0)^2\" not " *
                           "currently supported, ignoring"
-                report_issue(err_str, strictness)
+                report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                 continue
             end
             for torsion in eachelement(entry)
@@ -712,7 +723,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 elseif torsion.name == "Proper"
                     err_str = "CustomTorsionForce with Proper entries not " *
                               "currently supported, ignoring"
-                    report_issue(err_str, strictness)
+                    report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                     continue
                 end
             end
@@ -722,15 +733,16 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 dispersion_correction = parse_bool_attr(entry, "useDispersionCorrection",
                                                         ff_file)
                 if !isnothing(ff_param_array[12]) && dispersion_correction != ff_param_array[12]
-                    error("multiple NonbondedForce/LennardJonesForce entries with " *
-                          "different useDispersionCorrection")
+                    throw(ForceFieldXMLError("multiple NonbondedForce/LennardJonesForce entries " *
+                                             "with different useDispersionCorrection"))
                 end
                 ff_param_array[12] = dispersion_correction
             end
             if haskey(entry, "coulomb14scale")
                 w = parse_attr(T, entry, "coulomb14scale", ff_file)
                 if ff_param_array[3] && w != ff_param_array[2]
-                    error("multiple NonbondedForce entries with different coulomb14scale")
+                    throw(ForceFieldXMLError("multiple NonbondedForce entries with different " *
+                                             "coulomb14scale"))
                 end
                 ff_param_array[2] = w
                 ff_param_array[3] = true
@@ -738,7 +750,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             if haskey(entry, "lj14scale")
                 w = parse_attr(T, entry, "lj14scale", ff_file)
                 if ff_param_array[5] && w != ff_param_array[4]
-                    error("multiple NonbondedForce entries with different lj14scale")
+                    throw(ForceFieldXMLError("multiple NonbondedForce entries with different " *
+                                             "lj14scale"))
                 end
                 ff_param_array[4] = w
                 ff_param_array[5] = true
@@ -772,7 +785,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     if use_attr != "charge"
                         err_str = "UseAttributeFromResidue only supported for charge, " *
                                     "ignoring $use_attr"
-                        report_issue(err_str, strictness)
+                        report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                     end
                 end
             end
@@ -781,15 +794,16 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             if haskey(entry, "useDispersionCorrection")
                 dispersion_correction = parse_bool_attr(entry, "useDispersionCorrection", ff_file)
                 if !isnothing(ff_param_array[12]) && dispersion_correction != ff_param_array[12]
-                    error("multiple NonbondedForce/LennardJonesForce entries with " *
-                          "different useDispersionCorrection")
+                    throw(ForceFieldXMLError("multiple NonbondedForce/LennardJonesForce entries " *
+                                             "with different useDispersionCorrection"))
                 end
                 ff_param_array[12] = dispersion_correction
             end
             if haskey(entry, "lj14scale")
                 w = parse_attr(T, entry, "lj14scale", ff_file)
                 if ff_param_array[7] && w != ff_param_array[6]
-                    error("multiple LennardJonesForce entries with different lj14scale")
+                    throw(ForceFieldXMLError("multiple LennardJonesForce entries with " *
+                                             "different lj14scale"))
                 end
                 ff_param_array[6] = w
                 ff_param_array[7] = true
@@ -852,17 +866,23 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 for element in eachelement(entry)
                     if element.name == "GlobalParameter"
                         if xml_attr(element, "name", ff_file) == "alpha"
-                            ff_param_array[9] && error("Multiple alpha values for double exponential alpha")
+                            if ff_param_array[9]
+                                throw(ForceFieldXMLError("multiple alpha values for double " *
+                                                         "exponential alpha"))
+                            end
                             ff_param_array[8] = parse_attr(T, element, "defaultValue", ff_file)
                             ff_param_array[9] = true
                         elseif xml_attr(element, "name", ff_file) == "beta"
-                            ff_param_array[11] && error("Multiple alpha values for double exponential beta")
+                            if ff_param_array[11]
+                                throw(ForceFieldXMLError("multiple alpha values for double " *
+                                                         "exponential beta"))
+                            end
                             ff_param_array[10] = parse_attr(T, element, "defaultValue", ff_file)
                             ff_param_array[11] = true
                         else
                             err_str = "CustomNonbondedForce with global parameters other than " *
                                       "\"alpha\" and \"beta\" not supported, ignoring parameter"
-                            report_issue(err_str, strictness)
+                            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                         end
                     elseif element.name == "Atom"
                         σ = add_units(parse_attr(T, element, "sigma", ff_file), u"nm", units)
@@ -890,7 +910,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             else
                 err_str = "CustomNonbondedForce without energy=\"$dexp_definition\" " *
                           "and bondCutoff=\"3\" not supported, ignoring"
-                report_issue(err_str, strictness)
+                report_issue(err_str, strictness; error_type=ForceFieldXMLError)
             end
 
         elseif entry_name == "AmoebaUreyBradleyForce"
@@ -913,10 +933,18 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     "AmoebaStretchBendForce", "AmoebaVdwForce", "AmoebaMultipoleForce", 
                     "AmoebaWcaDispersionForce", "AmoebaGeneralizedKirkwoodForce",
                 )
-            report_issue("$entry_name not currently supported, ignoring", strictness)
+            report_issue(
+                "$entry_name not currently supported, ignoring",
+                strictness;
+                error_type=ForceFieldXMLError,
+            )
 
         elseif entry_name != "Info" # Info contains metadata
-            report_issue("Ignoring unknown XML entry $entry_name", strictness)
+            report_issue(
+                "Ignoring unknown XML entry $entry_name",
+                strictness;
+                error_type=ForceFieldXMLError,
+            )
         end
     end
 end
@@ -946,6 +974,7 @@ custom template file to the `custom_residue_templates` keyword argument.
 is determined later when creating the [`System`](@ref).
 Behavior with unsupported files is determined by the `strictness` keyword argument.
 This can be `:warn` to emit warnings, `:nowarn` to suppress warnings or `:error` to error.
+Failures when reading in force field XML files throw a `ForceFieldXMLError` exception.
 """
 struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
@@ -1039,8 +1068,8 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
     global_params = [double_exp_alpha, double_exp_beta]
     G = typeof(global_params)
     if ff_param_array[13] && count(at -> at.ϵ > zero(at.ϵ), nb_atom_classes) > 0
-        error("if CustomNonbondedForce is used, all atoms must have a NonbondedForce " *
-              "ϵ of zero since the Lennard-Jones potential is not used")
+        throw(ForceFieldXMLError("if CustomNonbondedForce is used, all atoms must have " *
+                "a NonbondedForce ϵ of zero since the Lennard-Jones potential is not used"))
     end
 
     # Apply residue patches
@@ -1132,11 +1161,9 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
         n_missing = length(at_missing_params)
         shown = join(at_missing_params[1:min(n_missing, 20)], ", ")
         n_missing > 20 && (shown *= " and $(n_missing - 20) more")
-        error("$n_missing atom types have not had σ and ϵ set in a NonbondedForce, " *
-              "LennardJonesForce or CustomNonbondedForce entry: $shown. Every atom type " *
-              "in the force field files needs non-bonded parameters, so check that all " *
-              "the required XML files are given and that the atom types and classes in " *
-              "them match")
+        throw(ForceFieldXMLError("$n_missing atom types have not had σ and ϵ set in a " *
+                "NonbondedForce, LennardJonesForce or CustomNonbondedForce entry: $shown; " *
+                "every atom type in the force field files needs non-bonded parameters"))
     end
 
     # Bonds resolver
