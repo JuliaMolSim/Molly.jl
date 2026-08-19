@@ -5,6 +5,10 @@ export
     AbstractMetaDynamicsMemory,
     ListHills,
     GridHills,
+    AbstractTempering,
+    NoTempering,
+    WellTemperedTempering,
+    tempering_height,
     add_hill!
 
 function validate_positive_finite(value, label::AbstractString)
@@ -26,15 +30,15 @@ Built-in subtypes are [`ListHills`](@ref) and [`GridHills`](@ref).
 abstract type AbstractMetaDynamicsMemory end
 
 @doc raw"""
-    ListHills(k, sigma, centers=Float64[])
+    ListHills(k, sigma, centers=Float64[], heights=fill(k, length(centers)))
 
 Metadynamics memory that stores every deposited hill explicitly as a list of CV centers,
-all sharing a common height `k` and width `sigma`.
+each with its own deposited height, and a shared width `sigma`.
 
 The bias potential and its gradient are evaluated by summing the contribution of every
 deposited hill:
 ```math
-V(s) = \sum_{t' < t} k \exp\left(-\frac{|s - s(t')|^2}{2\sigma^2}\right)
+V(s) = \sum_{t' < t} h_{t'} \exp\left(-\frac{|s - s(t')|^2}{2\sigma^2}\right)
 ```
 Evaluation cost scales as O(n_hills) with the number of deposited hills, so this is best
 suited to short or infrequently biased simulations. See [`GridHills`](@ref) for O(1)
@@ -46,43 +50,54 @@ when given multiple CV descriptors. Tuples allow each CV dimension to carry its 
 (e.g. a distance in nm and a torsion angle in radians biased together).
 
 # Arguments
-- `k`: Height (weight) of each Gaussian hill. Must match system energy units.
+- `k`: Default/base height of each Gaussian hill, used unless [`add_hill!`](@ref) is given
+    an explicit height (e.g. via tempering). Must match system energy units.
 - `sigma`: Width (standard deviation) of the Gaussians. Must match CV units.
 - `centers`: Vector of CV values where hills have already been deposited.
+- `heights`: The deposited height of each entry in `centers`; defaults to `k` for all of
+    them if not given.
 """
-struct ListHills{K, R, V} <: AbstractMetaDynamicsMemory
+struct ListHills{K, R, V, H} <: AbstractMetaDynamicsMemory
     k::K
     sigma::R
     centers::V
+    heights::H
 
-    function ListHills(k::K, sigma::R, centers::V=DefaultFloat[]) where {K, R, V}
+    function ListHills(k::K, sigma::R, centers::V=DefaultFloat[],
+                       heights::H=fill(k, length(centers))) where {K, R, V, H}
         validate_positive_finite.(sigma, "ListHills sigma")
-        return new{K, R, V}(k, sigma, centers)
+        if length(heights) != length(centers)
+            throw(ArgumentError(
+                "ListHills heights must be the same length as centers, got " *
+                "$(length(heights)) and $(length(centers))."))
+        end
+        return new{K, R, V, H}(k, sigma, centers, heights)
     end
 end
 
 function potential_energy(mem::ListHills, cv_sim; kwargs...)
     total = zero(mem.k)
-    for center in mem.centers
+    for (center, height) in zip(mem.centers, mem.heights)
         scaled_diff = (cv_sim .- center) ./ mem.sigma
-        total += mem.k * exp(-0.5 * sum(abs2, scaled_diff))
+        total += height * exp(-0.5 * sum(abs2, scaled_diff))
     end
     return total
 end
 
 function bias_gradient(mem::ListHills, cv_sim)
     total = zero(mem.k) ./ mem.sigma
-    for center in mem.centers
+    for (center, height) in zip(mem.centers, mem.heights)
         diff = cv_sim .- center
         scaled_diff = diff ./ mem.sigma
-        weight = mem.k * exp(-0.5 * sum(abs2, scaled_diff))
+        weight = height * exp(-0.5 * sum(abs2, scaled_diff))
         total = total .+ weight .* (.-diff) ./ (mem.sigma .^ 2)
     end
     return total
 end
 
-function add_hill!(mem::ListHills, cv_value)
+function add_hill!(mem::ListHills, cv_value, height=mem.k)
     push!(mem.centers, cv_value)
+    push!(mem.heights, height)
     return nothing
 end
 
@@ -105,7 +120,8 @@ the number of deposited hills, making it well suited to long biased simulations.
 [`ListHills`](@ref) for an exact but O(n_hills) alternative.
 
 # Arguments
-- `k`: Height (weight) of each Gaussian hill. Must match system energy units.
+- `k`: Default/base height of each Gaussian hill, used unless [`add_hill!`](@ref) is given
+    an explicit height (e.g. via tempering). Must match system energy units.
 - `sigma`: Width (standard deviation) of the Gaussians. Must match CV units.
 - `grid_min`, `grid_max`: The extent of the grid, in CV units.
 - `n_bins`: Number of grid points, must be at least 2.
@@ -163,7 +179,7 @@ function bias_gradient(mem::GridHills, cv_sim)
     return (mem.values[i1] - mem.values[i0]) / mem.bin_width
 end
 
-function add_hill!(mem::GridHills, cv_value)
+function add_hill!(mem::GridHills, cv_value, height=mem.k)
     n = length(mem.values)
     cutoff = mem.cutoff * mem.sigma
     lo = clamp(cv_value - cutoff, mem.grid_min, mem.grid_max)
@@ -172,23 +188,95 @@ function add_hill!(mem::GridHills, cv_value)
     i_hi = clamp(ceil(Int, ustrip((hi - mem.grid_min) / mem.bin_width)) + 1, 1, n)
     for i in i_lo:i_hi
         d = grid_cv_value(mem, i) - cv_value
-        mem.values[i] += mem.k * exp(-0.5 * (d / mem.sigma)^2)
+        mem.values[i] += height * exp(-0.5 * (d / mem.sigma)^2)
     end
     return nothing
 end
 
+"""
+    AbstractTempering
+
+Abstract type controlling how the height of each newly deposited Metadynamics hill is
+scaled before being added to a [`MetaDynamicsBias`](@ref)'s memory.
+
+Subtypes must implement
+`tempering_height(tempering, bias::MetaDynamicsBias, cv_sim, base_height)`, returning the
+actual height to deposit. The function receives the whole `bias`, so it has access to the
+CVs (`bias.cvs`), the memory accumulated so far (`bias.memory`), and how many hills have
+been deposited so far (`bias.call_count[]`, `bias.deposit_interval`), alongside whatever
+parameters the tempering subtype itself stores, and the CV value the hill is about to be
+deposited at (`cv_sim`).
+
+Built-in subtypes are [`NoTempering`](@ref) (the default) and
+[`WellTemperedTempering`](@ref).
+"""
+abstract type AbstractTempering end
+
+"""
+    NoTempering()
+
+The default tempering: every deposited hill keeps its full base height, i.e. standard
+(non-tempered) Metadynamics with a constant hill height.
+"""
+struct NoTempering <: AbstractTempering end
+
+tempering_height(::NoTempering, bias, cv_sim, base_height) = base_height
 
 @doc raw"""
-    MetaDynamicsBias(k, sigma, centers=Float64[])
-    MetaDynamicsBias(cvs, k, sigma, centers=Float64[])
-    MetaDynamicsBias(cvs, memory)
+    WellTemperedTempering(bias_factor, kT)
+
+The standard well-tempered Metadynamics height decay (Barducci, Bussi & Parrinello, 2008).
+The height of each new hill is scaled down according to how much bias has already been
+deposited at the current CV value:
+```math
+h(\boldsymbol{s}) = h_0 \exp\left(-\frac{V_{bias}(\boldsymbol{s})}{k_B (\gamma - 1) T}\right)
+```
+where $h_0$ is the base hill height, $V_{bias}(\boldsymbol{s})$ is the bias accumulated so
+far at $\boldsymbol{s}$ (evaluated via [`potential_energy`](@ref) on the current memory),
+$\gamma$ is `bias_factor` (must be greater than 1), and $k_B T$ is `kT`.
+
+This makes deposits self-limiting: hills shrink as a region fills up, so the bias
+converges towards an estimate of the free energy surface (scaled by `bias_factor`) instead
+of growing without bound, as constant-height Metadynamics does. See
+[`MetaDynamicsBias`](@ref) for how to attach this to a bias.
+
+# Arguments
+- `bias_factor`: The temperature boost factor $\gamma > 1$. Larger values temper more
+    slowly, approaching standard (untempered) Metadynamics as $\gamma \to \infty$; values
+    close to 1 temper very aggressively (near-immediate saturation).
+- `kT`: Thermal energy $k_B T$, in the same units as the bias height.
+"""
+struct WellTemperedTempering{Γ, T} <: AbstractTempering
+    bias_factor::Γ
+    kT::T
+
+    function WellTemperedTempering(bias_factor::Γ, kT::T) where {Γ, T}
+        if bias_factor <= one(bias_factor)
+            throw(ArgumentError(
+                "WellTemperedTempering bias_factor must be greater than 1, got " *
+                "$(bias_factor)."))
+        end
+        validate_positive_finite(kT, "WellTemperedTempering kT")
+        return new{Γ, T}(bias_factor, kT)
+    end
+end
+
+function tempering_height(wt::WellTemperedTempering, bias, cv_sim, base_height)
+    v_bias = potential_energy(bias.memory, cv_sim)
+    return base_height * exp(-v_bias / (wt.kT * (wt.bias_factor - 1)))
+end
+
+@doc raw"""
+    MetaDynamicsBias(k, sigma, centers=Float64[]; deposit_interval=1, tempering=NoTempering())
+    MetaDynamicsBias(cvs, k, sigma, centers=Float64[]; deposit_interval=1, tempering=NoTempering())
+    MetaDynamicsBias(cvs, memory; deposit_interval=1, tempering=NoTempering())
 
 A history-dependent bias potential for standard Metadynamics.
 
 The bias potential is a sum of Gaussians deposited at previously visited collective
 variable (CV) values:
 ```math
-V(\boldsymbol{s}) = \sum_{t' < t} k \exp\left(-\frac{|\boldsymbol{s} - \boldsymbol{s}(t')|^2}{2\sigma^2}\right)
+V(\boldsymbol{s}) = \sum_{t' < t} h_{t'} \exp\left(-\frac{|\boldsymbol{s} - \boldsymbol{s}(t')|^2}{2\sigma^2}\right)
 ```
 
 How the history of deposited hills is stored and evaluated is controlled by the `memory`
@@ -224,6 +312,14 @@ useful to call directly, e.g. for the externally-evaluated single-CV form, which
 `deposit_interval` throttles that down to every `deposit_interval`-th call, whether the
 call comes from `forces!` or from `add_hill!` directly.
 
+`tempering` controls how much of `memory.k` each individual deposit actually uses (see
+[`AbstractTempering`](@ref)): the default [`NoTempering`](@ref) always deposits the full
+`memory.k`, giving standard constant-height Metadynamics. [`WellTemperedTempering`](@ref)
+is provided as a simple, standard alternative that decays each hill's height based on how
+much bias has already been deposited nearby, so the bias self-limits rather than growing
+without bound. Custom schemes can be added by subtyping `AbstractTempering` and
+implementing `tempering_height`.
+
 # Arguments
 - `cvs`: A tuple of collective variable descriptors, evaluated in order to build the CV
     vector the bias acts on. Omit to evaluate the CV externally via [`BiasPotential`](@ref).
@@ -231,15 +327,20 @@ call comes from `forces!` or from `add_hill!` directly.
 - `deposit_interval::Integer=1`: Number of deposit-triggering calls (force evaluations when
     used as a `general_inters` entry, or calls to `add_hill!` otherwise) between actual
     deposits into `memory`. For example `deposit_interval=500` deposits every 500 calls.
+- `tempering::AbstractTempering=NoTempering()`: Scales the height of each deposited hill;
+    see above.
 """
-struct MetaDynamicsBias{C <: Tuple, M <: AbstractMetaDynamicsMemory}
+struct MetaDynamicsBias{C <: Tuple, M <: AbstractMetaDynamicsMemory, TP <: AbstractTempering}
     cvs::C
     memory::M
     deposit_interval::Int
     call_count::Base.RefValue{Int}
+    tempering::TP
 
     function MetaDynamicsBias(cvs::C, memory::M;
-                              deposit_interval::Integer=1) where {C <: Tuple, M <: AbstractMetaDynamicsMemory}
+                              deposit_interval::Integer=1,
+                              tempering::TP=NoTempering()) where {
+                                  C <: Tuple, M <: AbstractMetaDynamicsMemory, TP <: AbstractTempering}
         # An empty cvs is a valid, intentional state: it means the CV is evaluated
         # externally via BiasPotential rather than by this struct's own calculator methods
         # (see check_meta_dynamics_cvs, called from those methods instead).
@@ -251,14 +352,18 @@ struct MetaDynamicsBias{C <: Tuple, M <: AbstractMetaDynamicsMemory}
         if deposit_interval < 1
             throw(ArgumentError("deposit_interval must be at least 1, got $(deposit_interval)."))
         end
-        return new{C, M}(cvs, memory, Int(deposit_interval), Ref(0))
+        return new{C, M, TP}(cvs, memory, Int(deposit_interval), Ref(0), tempering)
     end
 end
 
-MetaDynamicsBias(k, sigma, centers=DefaultFloat[]; deposit_interval::Integer=1) =
-    MetaDynamicsBias((), ListHills(k, sigma, centers); deposit_interval=deposit_interval)
-MetaDynamicsBias(cvs::Tuple, k, sigma, centers=DefaultFloat[]; deposit_interval::Integer=1) =
-    MetaDynamicsBias(cvs, ListHills(k, sigma, centers); deposit_interval=deposit_interval)
+MetaDynamicsBias(k, sigma, centers=DefaultFloat[]; deposit_interval::Integer=1,
+                 tempering::AbstractTempering=NoTempering()) =
+    MetaDynamicsBias((), ListHills(k, sigma, centers);
+                     deposit_interval=deposit_interval, tempering=tempering)
+MetaDynamicsBias(cvs::Tuple, k, sigma, centers=DefaultFloat[]; deposit_interval::Integer=1,
+                 tempering::AbstractTempering=NoTempering()) =
+    MetaDynamicsBias(cvs, ListHills(k, sigma, centers);
+                     deposit_interval=deposit_interval, tempering=tempering)
 
 function potential_energy(md::MetaDynamicsBias, cv_sim; kwargs...)
     return potential_energy(md.memory, cv_sim; kwargs...)
@@ -288,16 +393,25 @@ and deposits the result with the correct shape; it requires `bias` to have been
 constructed with a non-empty `cvs`.
 
 Every call counts towards `bias.deposit_interval` (see [`MetaDynamicsBias`](@ref)); only
-every `deposit_interval`-th call actually updates the memory.
+every `deposit_interval`-th call actually updates the memory. The height actually
+deposited is `tempering_height(bias.tempering, bias, cv_sim, bias.memory.k)` (see
+[`AbstractTempering`](@ref)).
 """
 function add_hill!(md::MetaDynamicsBias, cv_value)
-    should_deposit_hill!(md) && add_hill!(md.memory, cv_value)
+    if should_deposit_hill!(md)
+        height = tempering_height(md.tempering, md, cv_value, md.memory.k)
+        add_hill!(md.memory, cv_value, height)
+    end
     return nothing
 end
 
 function add_hill!(md::MetaDynamicsBias, sys::System)
     check_meta_dynamics_cvs(md)
-    should_deposit_hill!(md) && add_hill!(md.memory, evaluate_meta_dynamics_cvs(md, sys))
+    if should_deposit_hill!(md)
+        cv_sim = evaluate_meta_dynamics_cvs(md, sys)
+        height = tempering_height(md.tempering, md, cv_sim, md.memory.k)
+        add_hill!(md.memory, cv_sim, height)
+    end
     return nothing
 end
 
@@ -372,7 +486,10 @@ function AtomsCalculators.forces!(
     # caveat: couplings that trigger a same-step force recomputation (e.g. some barostats)
     # will count as an extra call towards deposit_interval, a minor pacing perturbation
     # rather than a correctness issue.
-    should_deposit_hill!(md) && add_hill!(md.memory, cv_sim)
+    if should_deposit_hill!(md)
+        height = tempering_height(md.tempering, md, cv_sim, md.memory.k)
+        add_hill!(md.memory, cv_sim, height)
+    end
 
     return fs
 end
