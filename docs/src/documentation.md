@@ -380,6 +380,15 @@ If your simulation contains other types of molecules, you must provide the topol
 
     Some PDB files that read in fine can be found [here](https://github.com/JuliaMolSim/Molly.jl/tree/master/data/openmm_refs).
 
+If a residue in the structure file cannot be matched to a residue template then the error message names the residue, gives its atoms and diagnoses the most likely cause by comparing it to the closest template, for example:
+```
+could not match residue TRP (residue number 2 of chain "A") to any of the residue
+templates in the force field. The set of atoms is similar to TRP, but the residue is
+missing 1 C atom. The residue has 23 atoms: N, H, CA, ...
+```
+Common causes are missing heavy atoms or hydrogens, missing bond information for non-standard residues, non-standard atom or residue naming, and using a force field that does not cover the molecules in the file.
+A template with the same name as the residue is used if it matches, otherwise the templates are tried in alphabetical order; if more than one of them matches and they give different parameters then this is reported according to `strictness` and the first is used.
+
 To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
 The floating point type can be set with `float_type`.
 Certain quantities such as the [`potential_energy`](@ref) and the [`virial`](@ref) are accumulated using a higher precision type, as are the large constant terms of [`Ewald`](@ref) and [`PME`](@ref) summation.
@@ -387,7 +396,9 @@ This can be set with `float_type_high` but should generally be left as the defau
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
+Note that `rigid_water` defaults to `false`, whereas OpenMM makes water rigid by default, so set `rigid_water=true` to reproduce OpenMM behavior.
 Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`, and is applied before constraints are generated.
+Unlike OpenMM, it is also applied to the hydrogens of rigid water.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
 The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -409,7 +420,7 @@ sys_res = add_position_restraints(
 See the [OpenMM documentation](https://docs.openmm.org/latest/userguide/application/06_creating_ffs.html#writing-the-xml-file) for the available tags.
 The following tags are supported:
 - `<AtomTypes>`: both atom types and atom classes are supported
-- `<Residues>`: `<VirtualSite>` tags are supported except for `type="localCoords"`
+- `<Residues>`: `<VirtualSite>` tags are supported except for `type="localCoords"`, and the `override` attribute on `<Residue>` tags is supported
 - `<Patches>`: patches that apply to multiple residue templates and multiple patches acting on one residue template are not supported
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
@@ -703,6 +714,9 @@ If you need to strip units for downstream analysis, use the `ustrip` or [`ustrip
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
 It is possible that you may run into issues when using different but valid units of the same dimension together, e.g. `1.0u"nm"` and `10.0u"Å"`.
 In this case, try using the same units throughout.
+
+The float type of a [`System`](@ref) is read from the boundary by default and can be set with the `float_type` argument.
+The coordinates, velocities and boundary should all use this float type; mixing `Float32` and `Float64` data silently loses the precision you asked for on CPU and can fail to compile on GPU, so it is reported according to `strictness`.
 
 ## Atom types
 

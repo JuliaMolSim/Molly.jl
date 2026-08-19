@@ -397,7 +397,15 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     if isnothing(mesh_dims)
         mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
     else
+        if length(mesh_dims) != 3
+            throw(ArgumentError("mesh_dims should have 3 entries, one for each dimension, " *
+                                "found $mesh_dims"))
+        end
         mesh_dims = SVector{3, Int}(mesh_dims)
+        if any(<(order), mesh_dims)
+            throw(ArgumentError("every entry of mesh_dims should be at least the B-spline " *
+                                "order ($order), found $(Tuple(mesh_dims))"))
+        end
     end
     # The three B-spline dimensions are flattened into one axis to keep these 2D. The atom
     # index goes last on CPU, so that the values belonging to an atom share a cache line,

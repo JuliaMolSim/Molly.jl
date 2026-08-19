@@ -559,6 +559,27 @@ function System(coord_file::AbstractString,
     if !(nonbonded_method in (:none, :cutoff, :pme, :ewald))
         throw(ArgumentError("nonbonded_method must be one of :none, :cutoff, :pme or :ewald"))
     end
+    if !(implicit_solvent in (:none, :obc1, :obc2, :gbn2))
+        throw(ArgumentError("implicit_solvent must be one of :none, :obc1, :obc2 or :gbn2, " *
+                            "found $implicit_solvent"))
+    end
+    if implicit_solvent != :none
+        if nonbonded_method in (:pme, :ewald)
+            err_str = "nonbonded_method $nonbonded_method is being used with implicit " *
+                      "solvent, this may not be intended since long range electrostatics " *
+                      "and implicit solvent both model the effect of the solvent, " *
+                      "nonbonded_method=:none is usual with implicit solvent"
+            report_issue(err_str, strictness)
+        end
+        expected_kappa_units = (units ? u"nm^-1" : NoUnits)
+        if dimension(kappa) != dimension(expected_kappa_units)
+            throw(ArgumentError("kappa should have units of inverse length " *
+                    "($expected_kappa_units), found $(unit(kappa))"))
+        end
+        if kappa < zero(kappa)
+            throw(ArgumentError("kappa ($kappa) should not be less than zero"))
+        end
+    end
     if ewald_error_tol <= zero(ewald_error_tol)
         throw(ArgumentError("ewald_error_tol ($ewald_error_tol) should be positive"))
     end
@@ -621,7 +642,7 @@ function System(coord_file::AbstractString,
     min_box_side = minimum(box_sides(boundary_used))
     if min_box_side < (2 * dist_cutoff)
         err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
-                  "($(2 * dist_cutoff)), this can lead to unphysical simulations" *
+                  "($(2 * dist_cutoff)), this can lead to unphysical simulations " *
                   "since multiple copies of the same atom are seen but only one is " *
                   "considered due to the minimum image convention"
         report_issue(err_str, strictness)
@@ -647,7 +668,8 @@ function System(coord_file::AbstractString,
     end
     top_bonds = read_extra_bonds!(canonical_system, top, top_bonds)
 
-    template_names = keys(force_field.residues)
+    # Templates are checked in name order so that the assignment is reproducible
+    sorted_template_names = sort(collect(keys(force_field.residues)))
     # Match each residue graph to a template and assign atom types/charges
     atom_type_of = Vector{String}(undef, n_atoms)
     charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
@@ -657,59 +679,31 @@ function System(coord_file::AbstractString,
     virtual_sites = VirtualSite{T, IC}[]
     for (chain, resids) in canonical_system
         for (res_id, rgraph) in resids
-            matched = false
-            if rgraph.res_name in template_names
-                template = force_field.residues[rgraph.res_name]
-                matches = match_residue_to_template(rgraph, template)
-                if isnothing(matches)
-                    for (templ_name, template) in force_field.residues
-                        # Dont check it again
-                        if rgraph.res_name == templ_name
-                            continue
-                        end
-                        matches = match_residue_to_template(rgraph, template)
-                        if !isnothing(matches)
-                            matched = true
-                            for (r_i, m_i) in enumerate(matches)
-                                global_idx = rgraph.atom_inds[r_i]
-                                atom_type_of[global_idx] = template.types[m_i]
-                                charge_of[global_idx] = template.charges[m_i]
-                                element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
-                            end
-                            add_virtual_sites!(virtual_sites, template, rgraph, matches)
-                            break
-                        end
-                    end
-                else
-                    matched = true
-                    for (r_i, m_i) in enumerate(matches)
-                        global_idx = rgraph.atom_inds[r_i]
-                        atom_type_of[global_idx] = template.types[m_i]
-                        charge_of[global_idx] = template.charges[m_i]
-                        element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
-                    end
-                    add_virtual_sites!(virtual_sites, template, rgraph, matches)
+            template, matches = match_residue(rgraph, force_field, sorted_template_names,
+                                              chain, res_id, strictness)
+            matched = !isnothing(matches)
+            if matched
+                for (r_i, m_i) in enumerate(matches)
+                    global_idx = rgraph.atom_inds[r_i]
+                    atom_type_of[global_idx] = template.types[m_i]
+                    charge_of[global_idx] = template.charges[m_i]
+                    element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                 end
-            else
-                for (templ_name, template) in force_field.residues
-                    matches = match_residue_to_template(rgraph, template)
-                    if !isnothing(matches)
-                        matched = true
-                        for (r_i, m_i) in enumerate(matches)
-                            global_idx = rgraph.atom_inds[r_i]
-                            atom_type_of[global_idx] = template.types[m_i]
-                            charge_of[global_idx] = template.charges[m_i]
-                            element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
-                        end
-                        add_virtual_sites!(virtual_sites, template, rgraph, matches)
-                        break
-                    end
-                end
+                add_virtual_sites!(virtual_sites, template, rgraph, matches)
             end
             if !matched
-                error("could not match residue $(rgraph.res_name) to any of " *
-                      "the provided templates, make sure that the atoms match " *
-                      "and have elements assigned")
+                n_names = length(rgraph.atom_names)
+                if n_names > 30
+                    atom_str = join(rgraph.atom_names[1:30], ", ") * " and $(n_names - 30) more"
+                else
+                    atom_str = join(rgraph.atom_names, ", ")
+                end
+                error("could not match residue $(rgraph.res_name) (residue number " *
+                      "$res_id of chain \"$chain\") to any of the residue templates in " *
+                      "the force field. " * residue_match_error(rgraph, force_field.residues) *
+                      " The residue has $n_names atoms: $atom_str. " *
+                      "See the Molly documentation section on simulating a protein for " *
+                      "tips on obtaining compatible structure files.")
             end
         end
     end
@@ -755,13 +749,19 @@ function System(coord_file::AbstractString,
         if use_charge_from_residue
             ch = charge_of[ai]
             if ismissing(ch)
-                error("atom $ai type $atype has charge missing from residue template")
+                error("atom $ai (type $atype) has no charge in the residue template it " *
+                      "was matched to, the force field uses " *
+                      "<UseAttributeFromResidue name=\"charge\"/> so every atom in a " *
+                      "residue template needs a charge attribute")
             end
+            ch = T(ch)
         else
-            ch = T(force_field.atom_types[atype].charge)
+            ch = force_field.atom_types[atype].charge
             if ismissing(ch)
-                error("atom $ai type $atype has charge missing")
+                error("atom $ai has type $atype, which has no charge set in a " *
+                      "NonbondedForce entry of the force field")
             end
+            ch = T(ch)
         end
         push!(atoms_abst, Atom(index=Int32(ai), atom_type=Int32(ati), mass=T(at.mass), charge=ch,
                                σ=T(at.σ), ϵ=T(at.ϵ), λ=T(1.0)))
@@ -1650,6 +1650,15 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
             dist_cutoff=T(dist_neighbors),
         )
     elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
+        # CellListMap requires the cell list cutoff to fit twice in the box
+        min_box_side = minimum(box_sides(boundary_used))
+        if !has_infinite_boundary(boundary_used) && min_box_side < (2 * dist_neighbors)
+            throw(ArgumentError("the minimum box side ($min_box_side) is less than " *
+                    "2 * (dist_cutoff + dist_buffer) ($(2 * dist_neighbors)), which the " *
+                    "cell list neighbor finder does not support. Reduce dist_cutoff or " *
+                    "dist_buffer, use a larger box, or pass " *
+                    "neighbor_finder_type=DistanceNeighborFinder."))
+        end
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,

@@ -25,6 +25,11 @@ spec_score(ap::AtomPattern) = (ap.kind==TYPE ? 2 : (ap.kind==CLASS ? 1 : 0))
 
 function pattern_from_attrs(n::EzXML.Node, typekey::AbstractString, classkey::AbstractString)
     if haskey(n, typekey)
+        if haskey(n, classkey)
+            error("a <$(n.name)> tag in the force field specifies both \"$typekey\" and " *
+                  "\"$classkey\" for the same atom, only one of an atom type and an atom " *
+                  "class can be given")
+        end
         v = n[typekey]
         return (isempty(v) ? AtomPattern(WILD, "") : AtomPattern(TYPE, v))
     elseif haskey(n, classkey)
@@ -297,12 +302,48 @@ function check_lj_params(σ, ϵ)
     ϵ < zero(ϵ) && error("ϵ value $ϵ must be non-negative")
 end
 
+# Read a required attribute from an XML tag, giving an error naming the tag,
+#   the attribute and the file when it is not present
+function xml_attr(node::EzXML.Node, key::AbstractString, ff_file)
+    if !haskey(node, key)
+        found = join(("\"$(a.name)\"" for a in attributes(node)), ", ")
+        found = (isempty(found) ? "no attributes" : "attributes $found")
+        error("a <$(node.name)> tag in force field file $ff_file is missing the required " *
+              "\"$key\" attribute, it has $found")
+    end
+    return node[key]
+end
+
+# Parse a required numeric attribute from an XML tag, giving an error naming the tag,
+#   the attribute and the file when it is not present or cannot be parsed
+function parse_attr(::Type{T}, node::EzXML.Node, key::AbstractString, ff_file) where T
+    str = xml_attr(node, key, ff_file)
+    val = tryparse(T, strip(str))
+    if isnothing(val)
+        error("could not parse the \"$key\" attribute of a <$(node.name)> tag in force " *
+              "field file $ff_file as $T, found \"$str\"")
+    end
+    return val
+end
+
+function parse_bool_attr(node::EzXML.Node, key::AbstractString, ff_file)
+    str = strip(lowercase(xml_attr(node, key, ff_file)))
+    str in ("true" , "1") && return true
+    str in ("false", "0") && return false
+    error("could not parse the \"$key\" attribute of a <$(node.name)> tag in force " *
+          "field file $ff_file as a boolean, found \"$str\"")
+end
+
 # Having this as a function allows recursion to support <Include> tags
 # Modifies most arguments
 function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attributes_from_residue,
-                      residues, patches, bond_rule_specs, angle_rule_specs, torsion_rule_specs,
-                      cmap_rules, custor_rule_specs, nb_atom_classes, ljforce_atom_classes,
-                      nbfix_pairs, urey_rule_specs, units, strictness, T, IC)
+                      residues, residue_overrides, patches, bond_rule_specs, angle_rule_specs,
+                      torsion_rule_specs, cmap_rules, custor_rule_specs, nb_atom_classes,
+                      ljforce_atom_classes, nbfix_pairs, urey_rule_specs, units, strictness,
+                      T, IC)
+    if !isfile(ff_file)
+        throw(ArgumentError("force field XML file $ff_file does not exist"))
+    end
     ff_xml = parsexml(read(ff_file))
     ff = root(ff_xml)
     if ff.name != "ForceField"
@@ -320,20 +361,20 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
     for entry in eachelement(ff)
         entry_name = entry.name
         if entry_name == "Include"
-            xml_fp = joinpath(dirname(ff_file), entry["file"])
+            xml_fp = joinpath(dirname(ff_file), xml_attr(entry, "file", ff_file))
             read_ff_xml!(xml_fp, ff_param_array, atom_types, atom_type_order,
-                         attributes_from_residue, residues, patches, bond_rule_specs,
-                         angle_rule_specs, torsion_rule_specs, cmap_rules, custor_rule_specs,
-                         nb_atom_classes, ljforce_atom_classes, nbfix_pairs, urey_rule_specs,
-                         units, strictness, T, IC)
+                         attributes_from_residue, residues, residue_overrides, patches,
+                         bond_rule_specs, angle_rule_specs, torsion_rule_specs, cmap_rules,
+                         custor_rule_specs, nb_atom_classes, ljforce_atom_classes, nbfix_pairs,
+                         urey_rule_specs, units, strictness, T, IC)
 
         elseif entry_name == "AtomTypes"
             for atom_type in eachelement(entry)
-                at_type  = atom_type["name"]
-                at_class = atom_type["class"]
+                at_type  = xml_attr(atom_type, "name" , ff_file)
+                at_class = xml_attr(atom_type, "class", ff_file)
                 element = get_ezxml(atom_type, "element", "?")
                 ch = missing # This is set later
-                atom_mass = add_units(parse(T, atom_type["mass"]), u"g/mol", units)
+                atom_mass = add_units(parse_attr(T, atom_type, "mass", ff_file), u"g/mol", units)
                 σ = add_units(T(-1), u"nm", units)
                 ϵ = add_units(T(-1), u"kJ * mol^-1", units)
                 if haskey(atom_types, at_type)
@@ -346,7 +387,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "Residues"
             for residue in eachelement(entry)
-                rname = residue["name"]
+                rname = xml_attr(residue, "name", ff_file)
                 atoms, types = String[], String[]
                 charges = Union{T, Missing}[]
                 elements = Symbol[]
@@ -359,9 +400,21 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
                 for re in eachelement(residue)
                     if re.name == "Atom"
-                        at_type = re["type"]
-                        q = (haskey(re, "charge") ? parse(T, re["charge"]) : missing)
-                        push!(atoms, re["name"])
+                        at_type = xml_attr(re, "type", ff_file)
+                        at_name = xml_attr(re, "name", ff_file)
+                        q = (haskey(re, "charge") ? parse_attr(T, re, "charge", ff_file) : missing)
+                        if !haskey(atom_types, at_type)
+                            error("atom \"$at_name\" in residue template $rname in force " *
+                                  "field file $ff_file has type \"$at_type\", which is not " *
+                                  "defined in an <AtomTypes> entry read so far. Atom types " *
+                                  "have to be defined before the residue templates that " *
+                                  "use them, so give the files that define atom types first")
+                        end
+                        if at_name in atoms
+                            error("residue template $rname in force field file $ff_file " *
+                                  "contains multiple atoms named \"$at_name\"")
+                        end
+                        push!(atoms, at_name)
                         push!(types, at_type)
                         push!(charges, q)
                         push!(externals, 0)
@@ -373,45 +426,45 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             an1 = re["atomName1"]
                         else
                             # Allow the deprecated "from/to" syntax
-                            an1 = atoms[parse(Int, re["from"]) + 1]
+                            an1 = atoms[parse_attr(Int, re, "from", ff_file) + 1]
                         end
                         if haskey(re, "atomName2")
                             an2 = re["atomName2"]
                         else
                             # Allow the deprecated "from/to" syntax
-                            an2 = atoms[parse(Int, re["to"]) + 1]
+                            an2 = atoms[parse_attr(Int, re, "to", ff_file) + 1]
                         end
                         push!(bonds_by_name, (an1, an2))
                     elseif re.name == "ExternalBond"
                         if haskey(re, "atomName")
                             an = re["atomName"]
                         else
-                            an = atoms[parse(Int, re["from"]) + 1]
+                            an = atoms[parse_attr(Int, re, "from", ff_file) + 1]
                         end
                         push!(external_bonds_name, an)
                     elseif re.name == "AllowPatch"
-                        push!(allowed_patches, re["name"])
+                        push!(allowed_patches, xml_attr(re, "name", ff_file))
                     elseif re.name == "VirtualSite"
-                        vs_type = re["type"]
+                        vs_type = xml_attr(re, "type", ff_file)
                         if haskey(re, "siteName")
                             vs_name = re["siteName"]
                         else
                             # Allow the deprecated "index/atom1/atom2/atom3" syntax
-                            vs_name = atoms[parse(Int, re["index"]) + 1]
+                            vs_name = atoms[parse_attr(Int, re, "index", ff_file) + 1]
                         end
                         if haskey(re, "atomName1")
                             atom_name_1 = re["atomName1"]
                         else
-                            atom_name_1 = atoms[parse(Int, re["atom1"]) + 1]
+                            atom_name_1 = atoms[parse_attr(Int, re, "atom1", ff_file) + 1]
                         end
                         if haskey(re, "atomName2")
                             atom_name_2 = re["atomName2"]
                         else
-                            atom_name_2 = atoms[parse(Int, re["atom2"]) + 1]
+                            atom_name_2 = atoms[parse_attr(Int, re, "atom2", ff_file) + 1]
                         end
                         if vs_type == "average2"
-                            weight_1 = parse(T, re["weight1"])
-                            weight_2 = parse(T, re["weight2"])
+                            weight_1 = parse_attr(T, re, "weight1", ff_file)
+                            weight_2 = parse_attr(T, re, "weight2", ff_file)
                             vs = VirtualSiteTemplate(2, vs_name, atom_name_1, atom_name_2,
                                     "", weight_1, weight_2, zero(T), zero(T), zero(T), zero(IC))
                             push!(virtual_sites, vs)
@@ -419,11 +472,11 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             if haskey(re, "atomName3")
                                 atom_name_3 = re["atomName3"]
                             else
-                                atom_name_3 = atoms[parse(Int, re["atom3"]) + 1]
+                                atom_name_3 = atoms[parse_attr(Int, re, "atom3", ff_file) + 1]
                             end
-                            weight_1 = parse(T, re["weight1"])
-                            weight_2 = parse(T, re["weight2"])
-                            weight_3 = parse(T, re["weight3"])
+                            weight_1 = parse_attr(T, re, "weight1", ff_file)
+                            weight_2 = parse_attr(T, re, "weight2", ff_file)
+                            weight_3 = parse_attr(T, re, "weight3", ff_file)
                             vs = VirtualSiteTemplate(3, vs_name, atom_name_1, atom_name_2,
                                     atom_name_3, weight_1, weight_2, weight_3, zero(T),
                                     zero(T), zero(IC))
@@ -432,11 +485,12 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             if haskey(re, "atomName3")
                                 atom_name_3 = re["atomName3"]
                             else
-                                atom_name_3 = atoms[parse(Int, re["atom3"]) + 1]
+                                atom_name_3 = atoms[parse_attr(Int, re, "atom3", ff_file) + 1]
                             end
-                            weight_12 = parse(T, re["weight12"])
-                            weight_13 = parse(T, re["weight13"])
-                            weight_cross = add_units(parse(T, re["weightCross"]), u"nm^-1", units)
+                            weight_12 = parse_attr(T, re, "weight12", ff_file)
+                            weight_13 = parse_attr(T, re, "weight13", ff_file)
+                            weight_cross = add_units(
+                                parse_attr(T, re, "weightCross", ff_file), u"nm^-1", units)
                             vs = VirtualSiteTemplate(4, vs_name, atom_name_1, atom_name_2,
                                     atom_name_3, zero(T), zero(T), zero(T), weight_12,
                                     weight_13, weight_cross)
@@ -472,6 +526,13 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 name_to_idx = Dict(a => i for (i,a) in enumerate(atoms))
                 bonds = Tuple{Int, Int}[]
                 for (a1, a2) in bonds_by_name
+                    for a in (a1, a2)
+                        if !haskey(name_to_idx, a)
+                            error("a <Bond> tag in residue template $rname in force field " *
+                                  "file $ff_file refers to atom \"$a\", which is not one " *
+                                  "of the atoms of the template ($(join(atoms, ", ")))")
+                        end
+                    end
                     i, j = name_to_idx[a1], name_to_idx[a2]
                     push!(bonds, (i < j ? (i, j) : (j, i)))
                 end
@@ -480,13 +541,26 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         externals[name_to_idx[nm]] += 1
                     end
                 end
+                override = (haskey(residue, "override") ?
+                            parse_attr(Int, residue, "override", ff_file) : 0)
+                if haskey(residues, rname)
+                    existing_override = residue_overrides[rname]
+                    if override < existing_override
+                        continue # The existing template takes precedence
+                    elseif override == existing_override
+                        error("residue template $rname with the same override level " *
+                              "$override is defined twice in the force field XML file(s), " *
+                              "the second definition is in $ff_file")
+                    end
+                end
+                residue_overrides[rname] = override
                 residues[rname] = ResidueTemplate(rname, atoms, elements, types, virtual_sites,
                                         bonds, externals, allowed_patches, charges, extras)
             end
 
         elseif entry_name == "Patches"
             for patch in eachelement(entry)
-                pname = patch["name"]
+                pname = xml_attr(patch, "name", ff_file)
                 if haskey(patch, "residues") && patch["residues"] != "1"
                     err_str = "Residue patches altering multiple templates not currently " *
                               "supported, ignoring patch $pname"
@@ -505,23 +579,29 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
                 for pa in eachelement(patch)
                     if pa.name == "AddAtom"
-                        q = (haskey(pa, "charge") ? parse(T, pa["charge"]) : missing)
-                        push!(add_atoms, (pa["name"], pa["type"], q))
+                        q = (haskey(pa, "charge") ?
+                             parse_attr(T, pa, "charge", ff_file) : missing)
+                        push!(add_atoms, (xml_attr(pa, "name", ff_file),
+                                          xml_attr(pa, "type", ff_file), q))
                     elseif pa.name == "ChangeAtom"
-                        q = (haskey(pa, "charge") ? parse(T, pa["charge"]) : missing)
-                        push!(change_atoms, (pa["name"], pa["type"], q))
+                        q = (haskey(pa, "charge") ?
+                             parse_attr(T, pa, "charge", ff_file) : missing)
+                        push!(change_atoms, (xml_attr(pa, "name", ff_file),
+                                             xml_attr(pa, "type", ff_file), q))
                     elseif pa.name == "RemoveAtom"
-                        push!(remove_atoms, pa["name"])
+                        push!(remove_atoms, xml_attr(pa, "name", ff_file))
                     elseif pa.name == "AddBond"
-                        push!(add_bonds, (pa["atomName1"], pa["atomName2"]))
+                        push!(add_bonds, (xml_attr(pa, "atomName1", ff_file),
+                                          xml_attr(pa, "atomName2", ff_file)))
                     elseif pa.name == "RemoveBond"
-                        push!(remove_bonds, (pa["atomName1"], pa["atomName2"]))
+                        push!(remove_bonds, (xml_attr(pa, "atomName1", ff_file),
+                                             xml_attr(pa, "atomName2", ff_file)))
                     elseif pa.name == "AddExternalBond"
-                        push!(add_external_bonds, pa["atomName"])
+                        push!(add_external_bonds, xml_attr(pa, "atomName", ff_file))
                     elseif pa.name == "RemoveExternalBond"
-                        push!(remove_external_bonds, pa["atomName"])
+                        push!(remove_external_bonds, xml_attr(pa, "atomName", ff_file))
                     elseif pa.name == "ApplyToResidue"
-                        push!(apply_to_residues, pa["name"])
+                        push!(apply_to_residues, xml_attr(pa, "name", ff_file))
                     end
                 end
                 patches[pname] = ResiduePatchTemplate(pname, add_atoms, change_atoms,
@@ -531,8 +611,9 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "HarmonicBondForce"
             for bond in eachelement(entry)
-                k = add_units(parse(T, bond["k"]), u"kJ * mol^-1 * nm^-2", units)
-                r0 = add_units(parse(T, bond["length"]), u"nm", units)
+                k = add_units(parse_attr(T, bond, "k", ff_file),
+                              u"kJ * mol^-1 * nm^-2", units)
+                r0 = add_units(parse_attr(T, bond, "length", ff_file), u"nm", units)
                 p1 = pattern_from_attrs(bond, "type1", "class1")
                 p2 = pattern_from_attrs(bond, "type2", "class2")
                 push!(bond_rule_specs, (:bond_rule, p1, p2, HarmonicBond(k,r0)))
@@ -540,8 +621,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "HarmonicAngleForce"
             for ang in eachelement(entry)
-                k = add_units(parse(T, ang["k"]), u"kJ * mol^-1", units)
-                θ0 = parse(T, ang["angle"])
+                k = add_units(parse_attr(T, ang, "k", ff_file), u"kJ * mol^-1", units)
+                θ0 = parse_attr(T, ang, "angle", ff_file)
                 p1 = pattern_from_attrs(ang, "type1", "class1")
                 p2 = pattern_from_attrs(ang, "type2", "class2")
                 p3 = pattern_from_attrs(ang, "type3", "class3")
@@ -558,9 +639,10 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 ks = (units ? typeof(T(1u"kJ * mol^-1"))[] : T[])
                 i = 1
                 while haskey(torsion, "periodicity$i")
-                    push!(periodicities, parse(Int, torsion["periodicity$i"]))
-                    push!(phases, parse(T,   torsion["phase$i"]))
-                    push!(ks, add_units(parse(T, torsion["k$i"]), u"kJ * mol^-1", units))
+                    push!(periodicities, parse_attr(Int, torsion, "periodicity$i", ff_file))
+                    push!(phases, parse_attr(T, torsion, "phase$i", ff_file))
+                    push!(ks, add_units(parse_attr(T, torsion, "k$i", ff_file),
+                                        u"kJ * mol^-1", units))
                     i += 1
                 end
 
@@ -583,7 +665,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     tmp_map = add_units(parse.(T, split(cmap.content)), u"kJ * mol^-1", units)
                     push!(maps, tmp_map)
                 elseif cmap.name == "Torsion"
-                    map_n = parse(Int, cmap["map"]) + 1 # Zero-indexed
+                    map_n = parse_attr(Int, cmap, "map", ff_file) + 1 # Zero-indexed
                     p1 = pattern_from_attrs(cmap, "type1", "class1")
                     p2 = pattern_from_attrs(cmap, "type2", "class2")
                     p3 = pattern_from_attrs(cmap, "type3", "class3")
@@ -603,7 +685,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             end
 
         elseif entry_name == "CustomTorsionForce"
-            if entry["energy"] != "k*(theta-theta0)^2"
+            if xml_attr(entry, "energy", ff_file) != "k*(theta-theta0)^2"
                 err_str = "CustomTorsionForce without energy=\"k*(theta-theta0)^2\" not " *
                           "currently supported, ignoring"
                 report_issue(err_str, strictness)
@@ -612,8 +694,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             for torsion in eachelement(entry)
                 # Assume PerTorsionParameter entries are k and theta0
                 if torsion.name == "Improper"
-                    k = add_units(parse(T, torsion["k"]), u"kJ * mol^-1", units)
-                    θ0 = parse(T, torsion["theta0"])
+                    k = add_units(parse_attr(T, torsion, "k", ff_file), u"kJ * mol^-1", units)
+                    θ0 = parse_attr(T, torsion, "theta0", ff_file)
 
                     p1 = pattern_from_attrs(torsion, "type1", "class1")
                     p2 = pattern_from_attrs(torsion, "type2", "class2")
@@ -637,7 +719,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "NonbondedForce"
             if haskey(entry, "useDispersionCorrection")
-                dispersion_correction = parse(Bool, lowercase(entry["useDispersionCorrection"]))
+                dispersion_correction = parse_bool_attr(entry, "useDispersionCorrection",
+                                                        ff_file)
                 if !isnothing(ff_param_array[12]) && dispersion_correction != ff_param_array[12]
                     error("multiple NonbondedForce/LennardJonesForce entries with " *
                           "different useDispersionCorrection")
@@ -645,7 +728,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 ff_param_array[12] = dispersion_correction
             end
             if haskey(entry, "coulomb14scale")
-                w = parse(T, entry["coulomb14scale"])
+                w = parse_attr(T, entry, "coulomb14scale", ff_file)
                 if ff_param_array[3] && w != ff_param_array[2]
                     error("multiple NonbondedForce entries with different coulomb14scale")
                 end
@@ -653,7 +736,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 ff_param_array[3] = true
             end
             if haskey(entry, "lj14scale")
-                w = parse(T, entry["lj14scale"])
+                w = parse_attr(T, entry, "lj14scale", ff_file)
                 if ff_param_array[5] && w != ff_param_array[4]
                     error("multiple NonbondedForce entries with different lj14scale")
                 end
@@ -662,15 +745,19 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             end
             for atom_or_attr in eachelement(entry)
                 if atom_or_attr.name == "Atom"
-                    ch = (haskey(atom_or_attr, "charge") ? parse(T, atom_or_attr["charge"]) : missing)
-                    σ = add_units(parse(T, atom_or_attr["sigma"]), u"nm", units)
-                    ϵ = add_units(parse(T, atom_or_attr["epsilon"]), u"kJ * mol^-1", units)
+                    ch = (haskey(atom_or_attr, "charge") ?
+                          parse_attr(T, atom_or_attr, "charge", ff_file) : missing)
+                    σ = add_units(parse_attr(T, atom_or_attr, "sigma", ff_file), u"nm", units)
+                    ϵ = add_units(parse_attr(T, atom_or_attr, "epsilon", ff_file),
+                                  u"kJ * mol^-1", units)
                     check_lj_params(σ, ϵ)
                     if haskey(atom_or_attr, "class")
                         push!(nb_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
-                                "", atom_or_attr["class"], "", ch, zero(T), σ, ϵ, missing, missing))
+                                "", xml_attr(atom_or_attr, "class", ff_file), "", ch,
+                                zero(T), σ, ϵ,
+                                missing, missing))
                     else
-                        atom_type = atom_or_attr["type"]
+                        atom_type = xml_attr(atom_or_attr, "type", ff_file)
                         if haskey(atom_types, atom_type)
                             at = atom_types[atom_type]
                             atom_types[atom_type] = AtomType{T, typeof(at.mass), typeof(σ), typeof(ϵ)}(
@@ -678,7 +765,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         end
                     end
                 elseif atom_or_attr.name == "UseAttributeFromResidue"
-                    use_attr = atom_or_attr["name"]
+                    use_attr = xml_attr(atom_or_attr, "name", ff_file)
                     if !(use_attr in attributes_from_residue)
                         push!(attributes_from_residue, use_attr)
                     end
@@ -692,7 +779,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "LennardJonesForce"
             if haskey(entry, "useDispersionCorrection")
-                dispersion_correction = parse(Bool, lowercase(entry["useDispersionCorrection"]))
+                dispersion_correction = parse_bool_attr(entry, "useDispersionCorrection", ff_file)
                 if !isnothing(ff_param_array[12]) && dispersion_correction != ff_param_array[12]
                     error("multiple NonbondedForce/LennardJonesForce entries with " *
                           "different useDispersionCorrection")
@@ -700,7 +787,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 ff_param_array[12] = dispersion_correction
             end
             if haskey(entry, "lj14scale")
-                w = parse(T, entry["lj14scale"])
+                w = parse_attr(T, entry, "lj14scale", ff_file)
                 if ff_param_array[7] && w != ff_param_array[6]
                     error("multiple LennardJonesForce entries with different lj14scale")
                 end
@@ -710,23 +797,28 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             for atom_or_nbfix in eachelement(entry)
                 if atom_or_nbfix.name == "Atom"
                     if haskey(atom_or_nbfix, "sigma14")
-                        σ14 = add_units(parse(T, atom_or_nbfix["sigma14"]), u"nm", units)
+                        σ14 = add_units(parse_attr(T, atom_or_nbfix, "sigma14", ff_file),
+                                        u"nm", units)
                     else
                         σ14 = missing
                     end
                     if haskey(atom_or_nbfix, "epsilon14")
-                        ϵ14 = add_units(parse(T, atom_or_nbfix["epsilon14"]), u"kJ * mol^-1", units)
+                        ϵ14 = add_units(parse_attr(T, atom_or_nbfix, "epsilon14", ff_file),
+                                        u"kJ * mol^-1", units)
                     else
                         ϵ14 = missing
                     end
-                    σ = add_units(parse(T, atom_or_nbfix["sigma"]), u"nm", units)
-                    ϵ = add_units(parse(T, atom_or_nbfix["epsilon"]), u"kJ * mol^-1", units)
+                    σ = add_units(parse_attr(T, atom_or_nbfix, "sigma", ff_file), u"nm", units)
+                    ϵ = add_units(parse_attr(T, atom_or_nbfix, "epsilon", ff_file),
+                                  u"kJ * mol^-1", units)
                     check_lj_params(σ, ϵ)
                     if haskey(atom_or_nbfix, "class")
                         push!(ljforce_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
-                                "", atom_or_nbfix["class"], "", zero(T), zero(T), σ, ϵ, σ14, ϵ14))
+                                "", xml_attr(atom_or_nbfix, "class", ff_file), "",
+                                zero(T), zero(T),
+                                σ, ϵ, σ14, ϵ14))
                     else
-                        atom_type = atom_or_nbfix["type"]
+                        atom_type = xml_attr(atom_or_nbfix, "type", ff_file)
                         if haskey(atom_types, atom_type)
                             at = atom_types[atom_type]
                             # Re-use charge from NonbondedForce entry if present
@@ -736,14 +828,17 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     end
                 elseif atom_or_nbfix.name == "NBFixPair"
                     if haskey(atom_or_nbfix, "type1")
-                        type1, type2 = atom_or_nbfix["type1"], atom_or_nbfix["type2"]
+                        type1 = xml_attr(atom_or_nbfix, "type1", ff_file)
+                        type2 = xml_attr(atom_or_nbfix, "type2", ff_file)
                         class1, class2 = "", ""
                     else
                         type1, type2 = "", ""
-                        class1, class2 = atom_or_nbfix["class1"], atom_or_nbfix["class2"]
+                        class1 = xml_attr(atom_or_nbfix, "class1", ff_file)
+                        class2 = xml_attr(atom_or_nbfix, "class2", ff_file)
                     end
-                    σ = add_units(parse(T, atom_or_nbfix["sigma"]), u"nm", units)
-                    ϵ = add_units(parse(T, atom_or_nbfix["epsilon"]), u"kJ * mol^-1", units)
+                    σ = add_units(parse_attr(T, atom_or_nbfix, "sigma", ff_file), u"nm", units)
+                    ϵ = add_units(parse_attr(T, atom_or_nbfix, "epsilon", ff_file),
+                                  u"kJ * mol^-1", units)
                     check_lj_params(σ, ϵ)
                     push!(nbfix_pairs, NBFixPair(type1, type2, class1, class2, σ, ϵ))
                 end
@@ -751,17 +846,18 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "CustomNonbondedForce"
             dexp_definition = "sqrt(epsilon1*epsilon2)*(((beta*exp(alpha))/(alpha-beta))*exp(-alpha*(r/((2^(1/6))*((sigma1+sigma2)/2))))-((alpha*exp(beta))/(alpha-beta))*exp(-beta*(r/((2^(1/6))*((sigma1+sigma2)/2)))))"
-            if entry["energy"] == dexp_definition && entry["bondCutoff"] == "3"
+            if get_ezxml(entry, "energy", "") == dexp_definition &&
+                            get_ezxml(entry, "bondCutoff", "") == "3"
                 ff_param_array[13] = true
                 for element in eachelement(entry)
                     if element.name == "GlobalParameter"
-                        if element["name"] == "alpha"
+                        if xml_attr(element, "name", ff_file) == "alpha"
                             ff_param_array[9] && error("Multiple alpha values for double exponential alpha")
-                            ff_param_array[8] = parse(T, element["defaultValue"])
+                            ff_param_array[8] = parse_attr(T, element, "defaultValue", ff_file)
                             ff_param_array[9] = true
-                        elseif element["name"] == "beta"
+                        elseif xml_attr(element, "name", ff_file) == "beta"
                             ff_param_array[11] && error("Multiple alpha values for double exponential beta")
-                            ff_param_array[10] = parse(T, element["defaultValue"])
+                            ff_param_array[10] = parse_attr(T, element, "defaultValue", ff_file)
                             ff_param_array[11] = true
                         else
                             err_str = "CustomNonbondedForce with global parameters other than " *
@@ -769,16 +865,19 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             report_issue(err_str, strictness)
                         end
                     elseif element.name == "Atom"
-                        σ = add_units(parse(T, element["sigma"]), u"nm", units)
-                        ϵ = add_units(parse(T, element["epsilon"]), u"kJ * mol^-1", units)
+                        σ = add_units(parse_attr(T, element, "sigma", ff_file), u"nm", units)
+                        ϵ = add_units(parse_attr(T, element, "epsilon", ff_file),
+                                      u"kJ * mol^-1", units)
                         check_lj_params(σ, ϵ)
                         if haskey(element, "class")
                             # This array can be used since CustomNonbondedForce and
                             #   LennardJonesForce cannot both be present
                             push!(ljforce_atom_classes, AtomType{T, T, typeof(σ), typeof(ϵ)}(
-                                    "", element["class"], "", zero(T), zero(T), σ, ϵ, missing, missing))
+                                    "", xml_attr(element, "class", ff_file), "",
+                                    zero(T), zero(T), σ, ϵ,
+                                    missing, missing))
                         else
-                            atom_type = element["type"]
+                            atom_type = xml_attr(element, "type", ff_file)
                             if haskey(atom_types, atom_type)
                                 at = atom_types[atom_type]
                                 # Re-use charge from NonbondedForce entry if present
@@ -796,8 +895,8 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
 
         elseif entry_name == "AmoebaUreyBradleyForce"
             for ang in eachelement(entry)
-                k = add_units(2 * parse(T, ang["k"]), u"kJ * mol^-1 * nm^-2", units)
-                r0 = add_units(parse(T, ang["d"]), u"nm", units)
+                k = add_units(2 * parse_attr(T, ang, "k", ff_file), u"kJ * mol^-1 * nm^-2", units)
+                r0 = add_units(parse_attr(T, ang, "d", ff_file), u"nm", units)
                 p1 = pattern_from_attrs(ang, "type1", "class1")
                 p2 = pattern_from_attrs(ang, "type2", "class2")
                 p3 = pattern_from_attrs(ang, "type3", "class3")
@@ -903,6 +1002,8 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
                       nothing, false]
     attributes_from_residue = String[]
     residues = Dict{String, ResidueTemplate}()
+    # Residue templates can be replaced by ones with a higher override level
+    residue_overrides = Dict{String, Int}()
     patches = Dict{String, ResiduePatchTemplate}()
 
     atom_type_order = String[]
@@ -917,9 +1018,10 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
 
     for ff_file in ff_files
         read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attributes_from_residue,
-                     residues, patches, bond_rule_specs, angle_rule_specs, torsion_rule_specs,
-                     cmap_rules, custor_rule_specs, nb_atom_classes, ljforce_atom_classes,
-                     nbfix_pairs, urey_rule_specs, units, strictness, T, IC)
+                     residues, residue_overrides, patches, bond_rule_specs, angle_rule_specs,
+                     torsion_rule_specs, cmap_rules, custor_rule_specs, nb_atom_classes,
+                     ljforce_atom_classes, nbfix_pairs, urey_rule_specs, units, strictness,
+                     T, IC)
     end
     torsion_order = ff_param_array[1]
     weight_14_coulomb = ff_param_array[2]
@@ -1024,10 +1126,17 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
         end
     end
 
-    at_missing_params = filter(t -> atom_types[t].σ < zero(atom_types[t].σ), keys(atom_types))
+    at_missing_params = sort(collect(filter(t -> atom_types[t].σ < zero(atom_types[t].σ),
+                                            keys(atom_types))))
     if length(at_missing_params) > 0
-        error("atom types $(sort(collect(at_missing_params))) have not had σ and ϵ set in a " *
-              "NonbondedForce/LennardJonesForce/CustomNonbondedForce entry")
+        n_missing = length(at_missing_params)
+        shown = join(at_missing_params[1:min(n_missing, 20)], ", ")
+        n_missing > 20 && (shown *= " and $(n_missing - 20) more")
+        error("$n_missing atom types have not had σ and ϵ set in a NonbondedForce, " *
+              "LennardJonesForce or CustomNonbondedForce entry: $shown. Every atom type " *
+              "in the force field files needs non-bonded parameters, so check that all " *
+              "the required XML files are given and that the atom types and classes in " *
+              "them match")
     end
 
     # Bonds resolver

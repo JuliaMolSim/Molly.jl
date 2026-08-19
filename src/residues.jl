@@ -600,6 +600,250 @@ function match_residue_to_template(res::ResidueGraph,
     return [tpl_new2old[t_new] for t_new in matches_tpl_in_res_order]
 end
 
+# Match a residue read from a structure file to a residue template in the force field
+# A template with the same name as the residue is preferred, otherwise all templates are
+#   checked in name order so that the assignment does not depend on dictionary ordering
+# Returns the template and the mapping from residue atoms to template atoms, or
+#   (nothing, nothing) if no template matches
+function match_residue(rgraph::ResidueGraph, force_field, sorted_template_names,
+                       chain, res_id, strictness)
+    templates = force_field.residues
+    if haskey(templates, rgraph.res_name)
+        template = templates[rgraph.res_name]
+        matches = match_residue_to_template(rgraph, template)
+        isnothing(matches) || return template, matches
+    end
+
+    matched_names, matched_lists = String[], Vector{Int}[]
+    for templ_name in sorted_template_names
+        templ_name == rgraph.res_name && continue # Already checked above
+        matches = match_residue_to_template(rgraph, templates[templ_name])
+        if !isnothing(matches)
+            push!(matched_names, templ_name)
+            push!(matched_lists, matches)
+        end
+    end
+    length(matched_names) == 0 && return nothing, nothing
+
+    # Multiple matching templates are only unambiguous if they assign the same atom
+    #   types and charges to every atom
+    if length(matched_names) > 1
+        name_1, matches_1 = matched_names[1], matched_lists[1]
+        templ_1 = templates[name_1]
+        ambiguous = String[]
+        for (name_2, matches_2) in zip(matched_names[2:end], matched_lists[2:end])
+            templ_2 = templates[name_2]
+            same = all(zip(matches_1, matches_2)) do (m1, m2)
+                templ_1.types[m1] == templ_2.types[m2] &&
+                    isequal(templ_1.charges[m1], templ_2.charges[m2])
+            end
+            same || push!(ambiguous, name_2)
+        end
+        if length(ambiguous) > 0
+            err_str = "residue $(rgraph.res_name) (residue number $res_id of chain " *
+                      "\"$chain\") matches multiple residue templates that assign " *
+                      "different parameters: $(join([name_1; ambiguous], ", ")). " *
+                      "Template $name_1 was used, rename the residue in the structure " *
+                      "file to select a different one."
+            report_issue(err_str, strictness)
+        end
+    end
+    return templates[matched_names[1]], matched_lists[1]
+end
+
+function count_occurrences(items)
+    counts = Dict{eltype(items), Int}()
+    for item in items
+        counts[item] = get(counts, item, 0) + 1
+    end
+    return counts
+end
+
+element_counts(elements) = count_occurrences(collect(Symbol, elements))
+
+# counts1 - counts2, keeping negative values (missing from counts1)
+function counts_subtract(counts1::Dict{K, Int}, counts2::Dict{K, Int}) where K
+    diff = copy(counts1)
+    for (k, v) in counts2
+        diff[k] = get(diff, k, 0) - v
+    end
+    return diff
+end
+
+element_label(el::Symbol) = (el == :X ? "extra site" : String(el))
+
+function format_count(el, n)
+    return "$n $(element_label(el)) atom" * (n == 1 ? "" : "s")
+end
+
+function format_bond_count(key, n)
+    return "$(element_label(key[1]))-$(element_label(key[2])) bond" * (n == 1 ? "" : "s")
+end
+
+function join_messages(messages)
+    msgs = collect(messages)
+    length(msgs) == 0 && return ""
+    length(msgs) == 1 && return msgs[1]
+    return join(msgs[1:(end - 1)], ", ") * " and " * msgs[end]
+end
+
+# Describe how a residue differs from a template given the difference in counts
+function format_diff_message(diffs, formatter)
+    missing_keys = sort([(k, -v) for (k, v) in diffs if v < 0], by=first)
+    extra_keys   = sort([(k,  v) for (k, v) in diffs if v > 0], by=first)
+    messages = String[]
+    if length(missing_keys) > 0
+        push!(messages, "is missing " *
+              join_messages(formatter(k, n) for (k, n) in missing_keys))
+    end
+    if length(extra_keys) > 0
+        push!(messages, "has " *
+              join_messages(formatter(k, n) for (k, n) in extra_keys) * " too many")
+    end
+    return join_messages(messages)
+end
+
+# Score templates by how closely their atom counts match, optionally ignoring
+#   hydrogens and extra sites
+# Templates the residue is missing atoms from are favored over templates where the
+#   residue has extra atoms
+function best_matching_templates(template_diffs, template_names, heavy_only)
+    best_names, best_score = String[], nothing
+    for name in template_names
+        all_diffs = template_diffs[name]
+        if heavy_only
+            diffs = [(k, v) for (k, v) in all_diffs if !(k in (:H, :D, :X))]
+        else
+            diffs = collect(all_diffs)
+        end
+        score = (any(v -> v > 0, values(all_diffs)), sum(abs(v) for (_, v) in diffs; init=0))
+        if isnothing(best_score) || score <= best_score
+            if score != best_score
+                empty!(best_names)
+                best_score = score
+            end
+            push!(best_names, name)
+        end
+    end
+    return best_names, best_score
+end
+
+# Pick the template with the name closest to the residue name for reporting
+function pick_best_match(best_names, res_name)
+    length(best_names) == 1 && return best_names[1]
+    sorted_names = sort(best_names)
+    res_name in sorted_names && return res_name
+    # Prefer the longest shared prefix, e.g. NALA/CALA for ALA
+    score(name) = length(res_name) == 0 ? 0 :
+                  count(i -> i <= length(name) && name[i] == res_name[i],
+                        eachindex(res_name))
+    return argmax(score, sorted_names)
+end
+
+# Element pair key for a bond, sorted so the order of the atoms does not matter
+bond_key(el1::Symbol, el2::Symbol) = (el1 <= el2 ? (el1, el2) : (el2, el1))
+
+# Diagnose why a residue read from a structure file did not match any of the residue
+#   templates in the force field, following the approach used by OpenMM
+# Returns a sentence explaining the most likely cause
+function residue_match_error(rgraph::ResidueGraph, templates)
+    length(templates) == 0 && return "The force field contains no residue templates."
+    template_names = sort(collect(keys(templates)))
+
+    res_counts = element_counts(rgraph.elements)
+    supported = Set{Symbol}()
+    for name in template_names
+        union!(supported, templates[name].elements)
+    end
+    unsupported = sort([el for el in keys(res_counts) if !(el in supported)])
+    if length(unsupported) > 0
+        msg = join_messages(element_label(el) * " atoms" for el in unsupported)
+        return "The residue contains $msg, which are not supported by any template in " *
+               "the force field."
+    end
+
+    template_diffs = Dict(name => counts_subtract(res_counts,
+                                                  element_counts(templates[name].elements))
+                          for name in template_names)
+
+    # Compare heavy atom counts, then all atom counts
+    best_names, best_score = best_matching_templates(template_diffs, template_names, true)
+    if length(best_names) > 0 && !iszero(best_score[2])
+        best = pick_best_match(best_names, rgraph.res_name)
+        return "The set of atoms is similar to $best, but the residue " *
+               format_diff_message(template_diffs[best], format_count) * "."
+    end
+    best_names, best_score = best_matching_templates(template_diffs, best_names, false)
+    if length(best_names) > 0 && !iszero(best_score[2])
+        best = pick_best_match(best_names, rgraph.res_name)
+        diffs = template_diffs[best]
+        extra_msg = ""
+        if get(diffs, :H, 0) < 0 && all(v -> v >= 0, [v for (k, v) in diffs if k != :H])
+            extra_msg = " Hydrogens can be added with a tool such as OpenMM Modeller, " *
+                        "PDBFixer or gmx pdb2gmx."
+        end
+        return "The set of heavy atoms matches $best, but the residue " *
+               format_diff_message(diffs, format_count) * "." * extra_msg
+    end
+
+    # Atom counts match, so compare the bonds within the residue
+    res_bond_counts = count_occurrences([bond_key(rgraph.elements[i], rgraph.elements[j])
+                                        for (i, j) in rgraph.bonds])
+    bond_diffs = Dict{String, Dict{Tuple{Symbol, Symbol}, Int}}()
+    for name in best_names
+        tpl = templates[name]
+        tpl_counts = count_occurrences([bond_key(tpl.elements[i], tpl.elements[j])
+                                       for (i, j) in tpl.bonds])
+        bond_diffs[name] = counts_subtract(res_bond_counts, tpl_counts)
+    end
+    bond_best_names, bond_best_score = best_matching_templates(bond_diffs, best_names, false)
+    if length(bond_best_names) > 0 && !iszero(bond_best_score[2])
+        best = pick_best_match(bond_best_names, rgraph.res_name)
+        if length(rgraph.bonds) == 0
+            return "The set of atoms matches $best, but the residue has no bonds between " *
+                   "its atoms. If the structure was read from a PDB file it may contain " *
+                   "non-standard residue or atom names, or be missing CONECT records."
+        end
+        return "The set of atoms matches $best, but the residue " *
+               format_diff_message(bond_diffs[best], format_bond_count) * "."
+    end
+
+    # Atoms and internal bonds match, so compare the bonds to other residues
+    res_ext_counts = Dict{Symbol, Int}()
+    for (i, n_ext) in enumerate(rgraph.external_bonds)
+        n_ext > 0 && (res_ext_counts[rgraph.elements[i]] =
+                      get(res_ext_counts, rgraph.elements[i], 0) + n_ext)
+    end
+    ext_diffs = Dict{String, Dict{Symbol, Int}}()
+    for name in bond_best_names
+        tpl = templates[name]
+        tpl_counts = Dict{Symbol, Int}()
+        for (i, n_ext) in enumerate(tpl.external_bonds)
+            n_ext > 0 && (tpl_counts[tpl.elements[i]] =
+                          get(tpl_counts, tpl.elements[i], 0) + n_ext)
+        end
+        ext_diffs[name] = counts_subtract(res_ext_counts, tpl_counts)
+    end
+    ext_best_names, ext_best_score = best_matching_templates(ext_diffs, bond_best_names, false)
+    if length(ext_best_names) > 0 && !iszero(ext_best_score[2])
+        best = pick_best_match(ext_best_names, rgraph.res_name)
+        diffs = ext_diffs[best]
+        extra_msg = (all(v -> v <= 0, values(diffs)) ?
+                     " Is the chain missing a terminal capping group, or are bonds to " *
+                     "neighboring residues missing?" : "")
+        return "The atoms and bonds in the residue match $best, but the set of atoms " *
+               "bonded to other residues " * format_diff_message(diffs, format_count) *
+               "." * extra_msg
+    end
+
+    if length(ext_best_names) > 0
+        return "The atoms and bonds in the residue match " * join_messages(ext_best_names) *
+               ", but the connectivity is different."
+    end
+    return "This may mean that the structure file is missing atoms or bonds, or that the " *
+           "wrong force field is being used."
+end
+
 # Global adjacency from bonds
 function build_adjacency(natoms::Integer, bonds::Vector{NTuple{2, Int}})
     adj = [Int[] for _ in 1:natoms]

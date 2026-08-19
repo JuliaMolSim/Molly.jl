@@ -1638,12 +1638,8 @@ end
     mass_O = 15.999u"g/mol"
     mass_H = 1.008u"g/mol"
 
-    atoms = Atom[]
-    for _ in 1:n_molecules
-        push!(atoms, Atom(mass=mass_O, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
-        push!(atoms, Atom(mass=mass_H, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
-        push!(atoms, Atom(mass=mass_H, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
-    end
+    atoms = [Atom(mass=(i % 3 == 1 ? mass_O : mass_H), σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+             for i in 1:n_atoms]
     atom_masses = [a.mass for a in atoms]
 
     boundary = CubicBoundary(3.0u"nm")

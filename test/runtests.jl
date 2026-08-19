@@ -13,6 +13,8 @@ using Enzyme
 using FiniteDifferences
 using GPUArrays
 using JET
+using JSON3
+using KernelAbstractions
 using KernelDensity
 using Measurements
 using Metal
@@ -149,6 +151,6 @@ end
 if GROUP in ("All", "NotGradients")
     # ani2x.h5 and 6mrr_ani2x.json come from the lazily-downloaded ANI-2x artifact
     # (Molly.ani2x_data_dir()); loading the extension makes that available.
-    using Lux, HDF5, KernelAbstractions, JSON3
+    using Lux, HDF5
     include("ml_potentials.jl")
 end

@@ -981,6 +981,233 @@ end
         velocities=good_velo, energy_units=u"kJ")
 end
 
+@testset "Invalid system setup" begin
+    n_atoms = 10
+    boundary = CubicBoundary(4.0u"nm")
+    atoms = [Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:n_atoms]
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+
+    # Coordinate dimensions have to match the boundary
+    coords_2D = [SVector(c[1], c[2]) for c in coords]
+    @test_throws ArgumentError System(atoms=atoms, coords=coords_2D, boundary=boundary)
+    @test_throws ArgumentError System(atoms=atoms, coords=coords,
+                                      boundary=RectangularBoundary(4.0u"nm"))
+    vels_2D = [SVector(0.0, 0.0)u"nm * ps^-1" for _ in 1:n_atoms]
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
+                                      velocities=vels_2D)
+
+    # Mixing float types is reported
+    coords_f32 = [Float32.(ustrip_vec(c)) * u"nm" for c in coords]
+    @test_throws ErrorException System(atoms=atoms, coords=coords_f32, boundary=boundary,
+                                       strictness=:error)
+    @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
+                                       float_type=Float32, strictness=:error)
+    sys_f32 = @suppress_err System(atoms=atoms, coords=coords_f32, boundary=boundary)
+    @test float_type(sys_f32) == Float64 # Read from the boundary
+
+    # Atoms should be concretely typed
+    @test_throws ErrorException System(atoms=Any[atoms...], coords=coords, boundary=boundary,
+                                       strictness=:error)
+
+    # The eligible/special matrices should match the number of atoms and the device
+    nf_wrong_size = DistanceNeighborFinder(eligible=trues(n_atoms + 1, n_atoms + 1),
+                                           dist_cutoff=1.0u"nm")
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
+                    pairwise_inters=(LennardJones(use_neighbors=true),),
+                    neighbor_finder=nf_wrong_size)
+
+    # A neighbor finder cutoff smaller than the interaction cutoff misses pairs
+    nf_small = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.5u"nm")
+    @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                                  use_neighbors=true),),
+                    neighbor_finder=nf_small, strictness=:error)
+
+    # An interaction cutoff more than half the box breaks the minimum image convention
+    @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(2.5u"nm")),),
+                    strictness=:error)
+
+    # Specific interaction lists should refer to atoms in the system
+    bond = HarmonicBond(k=100.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm")
+    il_bad = InteractionList2Atoms([1, n_atoms + 5], [2, 3], [bond, bond])
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
+                                      specific_inter_lists=(il_bad,))
+
+    # A valid system with all of the above set correctly
+    sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                               use_neighbors=true),),
+                 neighbor_finder=DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms),
+                                                        dist_cutoff=1.2u"nm"),
+                 specific_inter_lists=(InteractionList2Atoms([1], [2], [bond]),),
+                 strictness=:error)
+    @test length(sys) == n_atoms
+end
+
+@testset "Invalid force field files" begin
+    ff_dir_tmp = mktempdir()
+    function write_ff(name, body)
+        fp = joinpath(ff_dir_tmp, name)
+        open(fp, "w") do io
+            println(io, "<ForceField>")
+            println(io, body)
+            println(io, "</ForceField>")
+        end
+        return fp
+    end
+
+    types_block = """
+     <AtomTypes>
+      <Type name="AR" class="Ar" element="Ar" mass="39.948"/>
+     </AtomTypes>"""
+    nb_block = """
+     <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">
+      <Atom type="AR" charge="0.0" sigma="0.34" epsilon="0.996"/>
+     </NonbondedForce>"""
+
+    # Valid file
+    fp_ok = write_ff("ok.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    ff = MolecularForceField(fp_ok)
+    @test length(ff.atom_types) == 1
+    @test length(ff.residues) == 1
+
+    # Missing file
+    @test_throws ArgumentError MolecularForceField(joinpath(ff_dir_tmp, "nope.xml"))
+
+    # Missing required attribute
+    fp = write_ff("no_mass.xml", """
+     <AtomTypes>
+      <Type name="AR" class="Ar" element="Ar"/>
+     </AtomTypes>""")
+    @test_throws "missing the required \"mass\" attribute" MolecularForceField(fp)
+
+    # Attribute that cannot be parsed
+    fp = write_ff("bad_mass.xml", """
+     <AtomTypes>
+      <Type name="AR" class="Ar" element="Ar" mass="heavy"/>
+     </AtomTypes>""")
+    @test_throws "could not parse the \"mass\" attribute" MolecularForceField(fp)
+
+    # Residue template referring to an unknown atom type
+    fp = write_ff("bad_type.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="ARR" charge="0.0"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    @test_throws "which is not defined in an <AtomTypes> entry" MolecularForceField(fp)
+
+    # Atom types have to come before the residue templates that use them
+    fp_types = write_ff("types_only.xml", types_block * nb_block)
+    fp_res = write_ff("res_only.xml", """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+     </Residues>""")
+    @test length(MolecularForceField(fp_types, fp_res).residues) == 1
+    @test_throws "give the files that define atom types first" MolecularForceField(fp_res, fp_types)
+
+    # Duplicate atom names in a residue template
+    fp = write_ff("dup_atom.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    @test_throws "contains multiple atoms named" MolecularForceField(fp)
+
+    # Duplicate residue templates
+    fp = write_ff("dup_res.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+      <Residue name="ARG1">
+       <Atom name="AR2" type="AR" charge="1.0"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    @test_throws "is defined twice" MolecularForceField(fp)
+
+    # Bond in a residue template referring to an unknown atom name
+    fp = write_ff("bad_bond.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+       <Bond atomName1="AR" atomName2="ZZ"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    @test_throws "which is not one of the atoms of the template" MolecularForceField(fp)
+
+    # Both an atom type and an atom class given for the same atom
+    fp = write_ff("type_class.xml", types_block * """
+     <HarmonicBondForce>
+      <Bond type1="AR" class1="Ar" type2="AR" k="100.0" length="0.1"/>
+     </HarmonicBondForce>""" * nb_block)
+    @test_throws "specifies both" MolecularForceField(fp)
+
+    # Atom type with no non-bonded parameters
+    fp = write_ff("no_nb.xml", types_block)
+    @test_throws "have not had σ and ϵ set" MolecularForceField(fp)
+
+    # A residue template with a higher override level replaces one with a lower level
+    fp = write_ff("override.xml", """
+     <AtomTypes>
+      <Type name="AR" class="Ar" element="Ar" mass="39.948"/>
+      <Type name="AR2" class="Ar2" element="Ar" mass="39.948"/>
+     </AtomTypes>
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+      <Residue name="ARG1" override="2">
+       <Atom name="AR" type="AR2" charge="1.0"/>
+      </Residue>
+     </Residues>
+     <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">
+      <Atom type="AR" charge="0.0" sigma="0.34" epsilon="0.996"/>
+      <Atom type="AR2" charge="1.0" sigma="0.34" epsilon="0.996"/>
+     </NonbondedForce>""")
+    ff_override = MolecularForceField(fp)
+    @test ff_override.residues["ARG1"].types == ["AR2"]
+end
+
+@testset "Invalid system setup from file" begin
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
+    water_fp = joinpath(data_dir, "water_3mol_cubic.pdb")
+
+    # Neighbor list cutoff has to fit twice in the box for the cell list finder
+    @test_throws "cell list neighbor finder does not support" System(water_fp, ff)
+    sys = System(water_fp, ff; dist_cutoff=0.5u"nm")
+    @test length(sys) == 9
+
+    @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                      implicit_solvent=:obc4)
+    @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                      implicit_solvent=:obc2, kappa=1.0u"nm")
+    @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                      neighbor_finder_type=Int)
+    @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                      nonbonded_method=:pme, pme_mesh_dims=(3, 3, 3))
+
+    # Residues that do not match a template give a diagnostic message
+    missing_h_fp = joinpath(mktempdir(), "water_missing_h.pdb")
+    open(missing_h_fp, "w") do out
+        for line in eachline(water_fp)
+            startswith(line, "HETATM  279") || println(out, line)
+        end
+    end
+    @test_throws "The set of heavy atoms matches HOH" System(missing_h_fp, ff;
+                                                             dist_cutoff=0.5u"nm")
+end
+
 @testset "AtomsBase conversion" begin
     ab_sys_1 = make_test_system().system
     # Update values to be something that works with Molly

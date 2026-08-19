@@ -764,6 +764,120 @@ function check_float_types(T, TH)
     end
 end
 
+function check_n_dims(coords::AbstractVector{SVector{DC, C}},
+                      vels::AbstractVector{SVector{DV, V}},
+                      D) where {DC, C, DV, V, D}
+    if DC != D
+        throw(ArgumentError("the boundary has $D dimensions but the coordinates have " *
+                            "$DC, they should match"))
+    end
+    if DV != D
+        throw(ArgumentError("the boundary has $D dimensions but the velocities have " *
+                            "$DV, they should match"))
+    end
+end
+
+function check_float_type_consistency(T, coords, vels, boundary, strictness)
+    mismatches = String[]
+    for (FT, name) in ((typeof(one(eltype(eltype(coords)))), "coords"    ),
+                       (typeof(one(eltype(eltype(vels))))  , "velocities"),
+                       (float_type(boundary)               , "boundary"  ))
+        if FT != T
+            push!(mismatches, "$name ($FT)")
+        end
+    end
+    if length(mismatches) > 0
+        err_str = "float_type of the System is $T but a different float type is used by " *
+                  join(mismatches, ", ") * ". float_type is read from the boundary by " *
+                  "default and can be set with the float_type argument, mixing float " *
+                  "types loses precision and can fail to compile on GPU."
+        report_issue(err_str, strictness)
+    end
+end
+
+function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary,
+                               on_gpu, strictness)
+    neighbor_finder isa NoNeighborFinder && return nothing
+
+    for name in (:eligible, :special)
+        hasproperty(neighbor_finder, name) || continue
+        mask = getproperty(neighbor_finder, name)
+        mask isa AbstractMatrix || continue
+        if size(mask) != (n_atoms, n_atoms)
+            throw(ArgumentError("the $name matrix in the neighbor finder has size " *
+                                "$(size(mask)) but the system has $n_atoms atoms, it " *
+                                "should be $((n_atoms, n_atoms))"))
+        end
+        if on_gpu && !isa(mask, AbstractGPUArray)
+            throw(ArgumentError("the atoms are on the GPU but the $name matrix of the " *
+                                "neighbor finder is not, try $name=to_device($name, AT) " *
+                                "where AT is the GPU array type"))
+        end
+        if !on_gpu && isa(mask, AbstractGPUArray)
+            throw(ArgumentError("the atoms are not on the GPU but the $name matrix " *
+                                "of the neighbor finder is"))
+        end
+    end
+
+    if hasproperty(neighbor_finder, :dist_cutoff)
+        nf_cutoff = neighbor_finder.dist_cutoff
+        max_sqdist = max_zero_beyond(pairwise_inters)
+        if !isnothing(max_sqdist) && dimension(max_sqdist) == dimension(nf_cutoff^2) &&
+                            max_sqdist > nf_cutoff^2
+            err_str = "the neighbor finder has a cutoff of $nf_cutoff but a pairwise " *
+                      "interaction has a larger cutoff of $(sqrt(max_sqdist)), interacting " *
+                      "pairs will be missed"
+            report_issue(err_str, strictness)
+        end
+    end
+end
+
+function check_cutoff_box_size(dist_cutoff, boundary, strictness)
+    has_infinite_boundary(boundary) && return nothing
+    isinf(ustrip(dist_cutoff)) && return nothing
+    min_box_side = minimum(box_sides(boundary))
+    if dimension(min_box_side) != dimension(dist_cutoff)
+        return nothing # Unit mismatches are reported elsewhere
+    end
+    if min_box_side < (2 * dist_cutoff)
+        err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
+                  "($(2 * dist_cutoff)), this can lead to unphysical simulations " *
+                  "since multiple copies of the same atom are seen but only one is " *
+                  "considered due to the minimum image convention"
+        report_issue(err_str, strictness)
+    end
+end
+
+function check_specific_inter_lists(specific_inter_lists, n_atoms, on_gpu)
+    device_fields = (:is, :js, :ks, :ls, :ms, :inters, :data) # `types` stays on the CPU
+    for (li, inter_list) in enumerate(values(specific_inter_lists))
+        for name in device_fields
+            hasproperty(inter_list, name) || continue
+            arr = getproperty(inter_list, name)
+            arr isa AbstractArray || continue
+            if on_gpu && !isa(arr, AbstractGPUArray)
+                throw(ArgumentError("the atoms are on the GPU but the $name field of " *
+                                    "specific interaction list $li is not, try " *
+                                    "Molly.to_device on the fields of the interaction list"))
+            end
+            if !on_gpu && isa(arr, AbstractGPUArray)
+                throw(ArgumentError("the atoms are not on the GPU but the $name field " *
+                                    "of specific interaction list $li is"))
+            end
+        end
+        # Atom indices are read on the CPU where possible to avoid scalar indexing
+        for name in (:is, :js, :ks, :ls, :ms)
+            hasproperty(inter_list, name) || continue
+            inds = getproperty(inter_list, name)
+            if length(inds) > 0 && (minimum(inds) < 1 || maximum(inds) > n_atoms)
+                throw(ArgumentError("the $name field of specific interaction list $li " *
+                                    "has atom indices outside the range 1 to $n_atoms " *
+                                    "(the number of atoms in the system)"))
+            end
+        end
+    end
+end
+
 """
     System(; <keyword arguments>)
 
@@ -776,6 +890,14 @@ The minimal required arguments are `atoms`, `coords` and `boundary`.
 `atoms_data` if these are provided.
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
+
+The arguments have to be consistent with each other and errors are thrown when
+they are not. In particular `coords` and `velocities` should have the same number
+of dimensions as `boundary`, should use the same float type as `float_type`, and
+should be on the same device (CPU or GPU) as `atoms`. The same applies to the
+arrays in `specific_inter_lists` and in the neighbor finder. Cases that are
+allowed but are often mistakes, such as an interaction cutoff more than half the
+minimum box side, are reported according to `strictness`.
 
 # Arguments
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
@@ -912,28 +1034,38 @@ function System(;
     if length(atoms_data) > 0 && n_atoms != length(atoms_data)
         throw(ArgumentError("there are $n_atoms atoms but $(length(atoms_data)) atom data entries"))
     end
+    if !(eltype(coords) <: SVector)
+        throw(ArgumentError("the eltype of the coordinates should be a SVector type, " *
+                            "found $(eltype(coords))"))
+    end
+    if !(eltype(vels) <: SVector)
+        throw(ArgumentError("the eltype of the velocities should be a SVector type, " *
+                            "found $(eltype(vels))"))
+    end
+    check_n_dims(coords, vels, D)
 
-    if isa(atoms, AbstractGPUArray) && !isbitstype(eltype(atoms))
+    on_gpu = isa(atoms, AbstractGPUArray)
+    if on_gpu && !isbitstype(eltype(atoms))
         throw(ArgumentError("the atoms are on the GPU but are not a bits type, found " *
                             "atom type $(eltype(atoms))"))
     end
-    if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
+    if on_gpu && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
-    if isa(coords, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
+    if isa(coords, AbstractGPUArray) && !on_gpu
         throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
     end
-    if isa(atoms, AbstractGPUArray) && !isa(vels, AbstractGPUArray)
+    if on_gpu && !isa(vels, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
     end
-    if isa(vels, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
+    if isa(vels, AbstractGPUArray) && !on_gpu
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
     if length(virtual_sites) > 0
-        if isa(atoms, AbstractGPUArray) && !isa(virtual_sites, AbstractGPUArray)
+        if on_gpu && !isa(virtual_sites, AbstractGPUArray)
             throw(ArgumentError("the atoms are on the GPU but the virtual sites are not"))
         end
-        if isa(virtual_sites, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
+        if isa(virtual_sites, AbstractGPUArray) && !on_gpu
             throw(ArgumentError("the virtual sites are on the GPU but the atoms are not"))
         end
     end
@@ -970,6 +1102,14 @@ function System(;
         report_issue(err_str, strictness)
     end
 
+    check_specific_inter_lists(specific_inter_lists, n_atoms, on_gpu)
+    check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary, on_gpu, strictness)
+    max_sqdist = max_zero_beyond(pairwise_inters)
+    if !isnothing(max_sqdist) && !iszero(max_sqdist)
+        check_cutoff_box_size(sqrt(max_sqdist), boundary, strictness)
+    end
+    check_float_type_consistency(T, coords, vels, boundary, strictness)
+
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)
     total_mass = sum(atom_masses)
@@ -981,6 +1121,12 @@ function System(;
     if !isbitstype(eltype(coords)) || !isbitstype(eltype(vels))
         err_str = "eltype of coords or velocities is not isbits, it is recomended to use a " *
                   "vector of SVectors for performance"
+        report_issue(err_str, strictness)
+    end
+    if n_atoms > 0 && !isconcretetype(eltype(atoms))
+        err_str = "the atoms are not concretely typed, they have eltype $(eltype(atoms)). " *
+                  "This gives poor performance and can cause confusing errors elsewhere, " *
+                  "make sure that all the atoms have the same type."
         report_issue(err_str, strictness)
     end
 
@@ -1778,18 +1924,15 @@ function System(sys::AtomsBase.AbstractSystem{D};
     end
 
     length_unit = unit(first(AtomsBase.position(sys, 1)))
-    atoms = Vector{Atom}(undef, length(sys))
-    atoms_data = Vector{AtomData}(undef, length(sys))
-    for (i, atom) in enumerate(sys)
-        atoms[i] = Atom(
-            index=i,
-            charge=ustrip(get(atom, :charge, 0.0)), # Remove e unit
-            mass=AtomsBase.mass(atom),
-            σ=(0.0 * length_unit),
-            ϵ=(0.0 * energy_units),
-        )
-        atoms_data[i] = AtomData(element=String(Symbol(AtomsBase.atomic_symbol(atom))))
-    end
+    atoms = [Atom(
+        index=i,
+        charge=ustrip(get(atom, :charge, 0.0)), # Remove e unit
+        mass=AtomsBase.mass(atom),
+        σ=(0.0 * length_unit),
+        ϵ=(0.0 * energy_units),
+    ) for (i, atom) in enumerate(sys)]
+    atoms_data = [AtomData(element=String(Symbol(AtomsBase.atomic_symbol(atom))))
+                  for atom in sys]
 
     # AtomsBase does not specify a type for coordinates or velocities so we convert to SVector
     if !(:position in AtomsBase.atomkeys(sys))
