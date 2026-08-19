@@ -76,7 +76,7 @@ function bias_gradient(mem::ListHills, cv_sim)
         diff = cv_sim .- center
         scaled_diff = diff ./ mem.sigma
         weight = mem.k * exp(-0.5 * sum(abs2, scaled_diff))
-        total = total .+ weight .* (-diff) ./ (mem.sigma .^ 2)
+        total = total .+ weight .* (.-diff) ./ (mem.sigma .^ 2)
     end
     return total
 end
@@ -213,37 +213,52 @@ argument, an [`AbstractMetaDynamicsMemory`](@ref):
     CV at a time. When biasing several CVs, `k`, `sigma` and any hill `centers` should be
     passed as tuples matching the length of `cvs` (see [`ListHills`](@ref)).
 
-Use [`add_hill!`](@ref) to deposit a new hill, typically called periodically during a
-simulation loop, e.g. from a logger.
+    Used this way, the bias is fully self-updating: forces are computed every simulation
+    step regardless of simulator, and `deposit_interval` (below) paces how often those
+    force evaluations also deposit a hill. No external logger is needed to drive
+    metadynamics -- just add the bias to `general_inters` and simulate as normal.
+
+[`add_hill!`](@ref) is the lower-level entry point used internally for depositing (also
+useful to call directly, e.g. for the externally-evaluated single-CV form, which has no
+`forces!` method of its own to hook into). By default every call deposits a hill;
+`deposit_interval` throttles that down to every `deposit_interval`-th call, whether the
+call comes from `forces!` or from `add_hill!` directly.
 
 # Arguments
 - `cvs`: A tuple of collective variable descriptors, evaluated in order to build the CV
     vector the bias acts on. Omit to evaluate the CV externally via [`BiasPotential`](@ref).
 - `memory::AbstractMetaDynamicsMemory`: Storage and evaluation strategy for deposited hills.
+- `deposit_interval::Integer=1`: Number of deposit-triggering calls (force evaluations when
+    used as a `general_inters` entry, or calls to `add_hill!` otherwise) between actual
+    deposits into `memory`. For example `deposit_interval=500` deposits every 500 calls.
 """
 struct MetaDynamicsBias{C <: Tuple, M <: AbstractMetaDynamicsMemory}
     cvs::C
     memory::M
+    deposit_interval::Int
+    call_count::Base.RefValue{Int}
 
-    function MetaDynamicsBias(cvs::C, memory::M) where {C <: Tuple, M <: AbstractMetaDynamicsMemory}
-         if isempty(cvs)
-            throw(ArgumentError(
-                "This MetaDynamicsBias has no stored collective variables, so it cannot be " *
-                "used directly as a general interaction. Either construct it as " *
-                "MetaDynamicsBias(cvs, memory) with a tuple of CV descriptors, or wrap it in " *
-                "a BiasPotential with an externally supplied CV: BiasPotential(cv, bias)."))
-        end
+    function MetaDynamicsBias(cvs::C, memory::M;
+                              deposit_interval::Integer=1) where {C <: Tuple, M <: AbstractMetaDynamicsMemory}
+        # An empty cvs is a valid, intentional state: it means the CV is evaluated
+        # externally via BiasPotential rather than by this struct's own calculator methods
+        # (see check_meta_dynamics_cvs, called from those methods instead).
         if memory isa GridHills && length(cvs) > 1
             throw(ArgumentError(
                 "GridHills memory only supports a single collective variable, got " *
                 "$(length(cvs)) CVs. Use ListHills for multiple CVs."))
         end
-        return new{C, M}(cvs, memory)
+        if deposit_interval < 1
+            throw(ArgumentError("deposit_interval must be at least 1, got $(deposit_interval)."))
+        end
+        return new{C, M}(cvs, memory, Int(deposit_interval), Ref(0))
     end
 end
 
-MetaDynamicsBias(k, sigma, centers=DefaultFloat[]) = MetaDynamicsBias((), ListHills(k, sigma, centers))
-MetaDynamicsBias(cvs::Tuple, k, sigma, centers=DefaultFloat[]) = MetaDynamicsBias(cvs, ListHills(k, sigma, centers))
+MetaDynamicsBias(k, sigma, centers=DefaultFloat[]; deposit_interval::Integer=1) =
+    MetaDynamicsBias((), ListHills(k, sigma, centers); deposit_interval=deposit_interval)
+MetaDynamicsBias(cvs::Tuple, k, sigma, centers=DefaultFloat[]; deposit_interval::Integer=1) =
+    MetaDynamicsBias(cvs, ListHills(k, sigma, centers); deposit_interval=deposit_interval)
 
 function potential_energy(md::MetaDynamicsBias, cv_sim; kwargs...)
     return potential_energy(md.memory, cv_sim; kwargs...)
@@ -255,39 +270,82 @@ end
 
 """
     add_hill!(bias::MetaDynamicsBias, cv_value)
+    add_hill!(bias::MetaDynamicsBias, sys)
 
-Deposit a new Gaussian hill at the current CV value.
-Typically called periodically during a simulation loop, e.g. from a logger.
+Deposit a new Gaussian hill.
 
-`cv_value` should match the shape `bias` was constructed with: a scalar for a single CV, or
-a tuple of values (one per entry in `bias.cvs`) for multiple CVs.
+When `bias` has a non-empty `cvs`, this is called automatically from `forces!` every
+simulation step it is used in `general_inters` (see [`MetaDynamicsBias`](@ref)) -- there is
+usually no need to call it directly. It remains useful for the externally-evaluated
+single-CV form (constructed via `MetaDynamicsBias(k, sigma)`, wrapped in
+[`BiasPotential`](@ref)), which has no `forces!` method of its own to hook a deposit into,
+so must be called manually, typically from a logger.
+
+The single-value form takes `cv_value` matching the shape `bias` was constructed with: a
+scalar for a single CV, or a tuple of values (one per entry in `bias.cvs`) for multiple
+CVs. The `sys` form instead evaluates `bias.cvs` against the current system state itself
+and deposits the result with the correct shape; it requires `bias` to have been
+constructed with a non-empty `cvs`.
+
+Every call counts towards `bias.deposit_interval` (see [`MetaDynamicsBias`](@ref)); only
+every `deposit_interval`-th call actually updates the memory.
 """
 function add_hill!(md::MetaDynamicsBias, cv_value)
-    add_hill!(md.memory, cv_value)
+    should_deposit_hill!(md) && add_hill!(md.memory, cv_value)
     return nothing
 end
 
-function AtomsCalculators.potential_energy(sys, md::MetaDynamicsBias; kwargs...)
-    coords_pbc = any(cv -> cv.correction == :pbc, md.cvs) ? unwrap_molecules(sys) : nothing
+function add_hill!(md::MetaDynamicsBias, sys::System)
+    check_meta_dynamics_cvs(md)
+    should_deposit_hill!(md) && add_hill!(md.memory, evaluate_meta_dynamics_cvs(md, sys))
+    return nothing
+end
 
-    cv_sim = map(md.cvs) do cv
-        coords = from_device(cv.correction == :pbc ? coords_pbc : sys.coords) #TODO compute on gpu
-        calculate_cv(
-            cv, coords, from_device(sys.atoms), sys.boundary, from_device(sys.velocities);
-            kwargs...,
-        )
+# Advances bias's internal call counter and reports whether this call lands on the
+# configured deposit_interval pace.
+function should_deposit_hill!(md::MetaDynamicsBias)
+    md.call_count[] += 1
+    return (md.call_count[] % md.deposit_interval) == 0
+end
+
+function check_meta_dynamics_cvs(md::MetaDynamicsBias)
+    if isempty(md.cvs)
+        throw(ArgumentError(
+            "This MetaDynamicsBias has no stored collective variables, so it cannot be " *
+            "used directly as a general interaction or with add_hill!(bias, sys). Either " *
+            "construct it as MetaDynamicsBias(cvs, memory) with a tuple of CV descriptors, " *
+            "or wrap it in a BiasPotential with an externally supplied CV: " *
+            "BiasPotential(cv, bias)."))
     end
+    return nothing
+end
 
+# A single CV evaluates to a bare scalar (matching the shape ListHills/GridHills expect
+# by default), while multiple CVs evaluate to a tuple, one value per CV.
+reshape_meta_dynamics_cvs(cv_values::Tuple) = (length(cv_values) == 1) ? only(cv_values) : cv_values
+
+function evaluate_meta_dynamics_cvs(md::MetaDynamicsBias, sys)
+    coords_pbc = any(cv -> cv.correction == :pbc, md.cvs) ? unwrap_molecules(sys) : nothing
+    cv_values = map(md.cvs) do cv
+        coords = from_device(cv.correction == :pbc ? coords_pbc : sys.coords) #TODO compute on gpu
+        calculate_cv(cv, coords, from_device(sys.atoms), sys.boundary, from_device(sys.velocities))
+    end
+    return reshape_meta_dynamics_cvs(cv_values)
+end
+
+function AtomsCalculators.potential_energy(sys, md::MetaDynamicsBias; kwargs...)
+    check_meta_dynamics_cvs(md)
+    cv_sim = evaluate_meta_dynamics_cvs(md, sys)
     return potential_energy(md.memory, cv_sim; kwargs...)
 end
 
-### needs gpu offloading
 function AtomsCalculators.forces!(
     fs, sys, md::MetaDynamicsBias;
     needs_vir::Bool = false,
     buffers = nothing,
     kwargs...
 )
+    check_meta_dynamics_cvs(md)
     coords_pbc = any(cv -> cv.correction == :pbc, md.cvs) ? unwrap_molecules(sys) : nothing
 
     per_cv = map(md.cvs) do cv
@@ -297,7 +355,7 @@ function AtomsCalculators.forces!(
         (cv=cv, coords=coords, atoms=atoms, d_coords=d_coords, cv_val=cv_val)
     end
 
-    cv_sim = map(x -> x.cv_val, per_cv)
+    cv_sim = reshape_meta_dynamics_cvs(map(x -> x.cv_val, per_cv))
     d_bias = bias_gradient(md.memory, cv_sim)
 
     for (i, x) in enumerate(per_cv)
@@ -307,6 +365,14 @@ function AtomsCalculators.forces!(
         end
         fs .-= to_device(fs_svec, typeof(fs))
     end
+
+    # Forces are computed every simulation step regardless of simulator, so depositing here
+    # (paced by deposit_interval) makes MetaDynamicsBias fully self-updating as a
+    # general_inters entry -- no external logger is needed to drive add_hill!. Note a small
+    # caveat: couplings that trigger a same-step force recomputation (e.g. some barostats)
+    # will count as an extra call towards deposit_interval, a minor pacing perturbation
+    # rather than a correctness issue.
+    should_deposit_hill!(md) && add_hill!(md.memory, cv_sim)
 
     return fs
 end
