@@ -104,17 +104,28 @@ end
 @doc raw"""
     GridHills(k, sigma, grid_min, grid_max, n_bins, cutoff=6)
 
-Metadynamics memory that accumulates deposited hills directly onto a discretized 1D grid
-of `n_bins` points spanning `[grid_min, grid_max]`.
+Metadynamics memory that accumulates deposited hills directly onto a discretized grid
+spanning `[grid_min, grid_max]`.
 
-Only supports a single CV; use [`ListHills`](@ref) for multiple CVs.
+For a single CV, `sigma`, `grid_min` and `grid_max` are scalars and `n_bins` is an Integer,
+giving a 1D grid stored as a `Vector` of `n_bins` points.
+
+For several CVs biased together, pass `sigma`, `grid_min` and `grid_max` as same-length
+tuples (one entry per CV, matching the `cvs` order given to [`MetaDynamicsBias`](@ref)) and
+`n_bins` as either a single Integer (used for every dimension) or a matching tuple of
+per-dimension bin counts. This gives a dense N-dimensional grid stored as an `Array`, with
+hills deposited/evaluated via N-linear interpolation instead of the 1D linear interpolation
+used for a single CV. Both memory and per-deposit cost scale as roughly O(prod(n_bins)) and
+O(cutoff^N) respectively, so this is only practical for a handful of CVs (2-3) with modest
+bin counts; use [`ListHills`](@ref) instead for more CVs or finer/larger grids.
 
 Each deposit adds the new hill's Gaussian contribution onto every grid point within
-`cutoff` standard deviations of the hill center, an O(n_bins) operation performed once per
-deposit. Evaluating the potential or gradient at simulation time is then O(1), using linear
-interpolation between the two grid points bracketing the current CV value.
+`cutoff` standard deviations of the hill center (per dimension), an operation performed
+once per deposit. Evaluating the potential or gradient at simulation time is O(1)
+(independent of the number of deposited hills), using linear (or N-linear) interpolation
+between the grid points bracketing the current CV value.
 
-This trades some accuracy (linear interpolation, and hills deposited near or outside
+This trades some accuracy (interpolation, and hills deposited near or outside
 `[grid_min, grid_max]` are truncated at the boundary) for evaluation speed independent of
 the number of deposited hills, making it well suited to long biased simulations. See
 [`ListHills`](@ref) for an exact but O(n_hills) alternative.
@@ -122,73 +133,126 @@ the number of deposited hills, making it well suited to long biased simulations.
 # Arguments
 - `k`: Default/base height of each Gaussian hill, used unless [`add_hill!`](@ref) is given
     an explicit height (e.g. via tempering). Must match system energy units.
-- `sigma`: Width (standard deviation) of the Gaussians. Must match CV units.
-- `grid_min`, `grid_max`: The extent of the grid, in CV units.
-- `n_bins`: Number of grid points, must be at least 2.
+- `sigma`: Width (standard deviation) of the Gaussians, scalar or one per dimension. Must
+    match CV units.
+- `grid_min`, `grid_max`: The extent of the grid, in CV units; scalar or one per dimension.
+- `n_bins`: Number of grid points; for a multi-dimensional grid, a single Integer (applied
+    to every dimension) or one per dimension. Must be at least 2 in every dimension.
 - `cutoff`: Number of standard deviations beyond which a deposited hill's contribution to
     the grid is ignored.
 """
 mutable struct GridHills{K, R, G, E, T} <: AbstractMetaDynamicsMemory
     k::K
-    sigma::R
-    grid_min::G
-    grid_max::G
-    bin_width::G
-    values::E
+    sigma::R    # NTuple{n_dims}, one per CV dimension
+    grid_min::G # NTuple{n_dims}
+    grid_max::G # NTuple{n_dims}
+    bin_width::G # NTuple{n_dims}
+    values::E   # n_dims-dimensional Array
     cutoff::T
 end
 
-function GridHills(k::K, sigma::R, grid_min::G, grid_max::G, n_bins::Integer,
-                   cutoff=6) where {K, R, G}
-    validate_positive_finite(sigma, "GridHills sigma")
-    if n_bins < 2
-        throw(ArgumentError("GridHills n_bins must be at least 2, got $(n_bins)."))
+# Wraps a scalar into a length-1 tuple so a single n_dims-dimensional implementation below
+# (n_dims >= 1) covers both the single-CV and multi-CV cases; Tuples/AbstractVectors (one
+# entry per CV dimension) pass through as-is.
+as_dims_tuple(x::Tuple) = x
+as_dims_tuple(x::AbstractVector) = Tuple(x)
+as_dims_tuple(x) = (x,)
+
+function GridHills(k, sigma, grid_min, grid_max, n_bins, cutoff=6)
+    sigma_t = as_dims_tuple(sigma)
+    grid_min_t = as_dims_tuple(grid_min)
+    grid_max_t = as_dims_tuple(grid_max)
+    n_dims = length(grid_min_t)
+    n_bins_t = n_bins isa Integer ? ntuple(_ -> n_bins, n_dims) : as_dims_tuple(n_bins)
+
+    if length(sigma_t) != n_dims || length(grid_max_t) != n_dims || length(n_bins_t) != n_dims
+        throw(ArgumentError(
+            "GridHills sigma, grid_min, grid_max and n_bins must all cover the same number " *
+            "of dimensions, got $(length(sigma_t)), $(n_dims), $(length(grid_max_t)) and " *
+            "$(length(n_bins_t))."))
     end
-    if !(grid_max > grid_min)
-        throw(ArgumentError("GridHills grid_max must be greater than grid_min."))
+    validate_positive_finite.(sigma_t, "GridHills sigma")
+    if any(nb -> nb < 2, n_bins_t)
+        throw(ArgumentError("GridHills n_bins must be at least 2 in every dimension, got $(n_bins_t)."))
+    end
+    if any(gmax <= gmin for (gmin, gmax) in zip(grid_min_t, grid_max_t))
+        throw(ArgumentError("GridHills grid_max must be greater than grid_min in every dimension."))
     end
 
-    bin_width = (grid_max - grid_min) / (n_bins - 1)
-    values = fill(zero(k), n_bins)
-    return GridHills{K, R, G, typeof(values), typeof(cutoff)}(
-        k, sigma, grid_min, grid_max, bin_width, values, cutoff,
+    bin_width_t = (grid_max_t .- grid_min_t) ./ (n_bins_t .- 1)
+    values = fill(zero(k), n_bins_t)
+    return GridHills{typeof(k), typeof(sigma_t), typeof(grid_min_t), typeof(values), typeof(cutoff)}(
+        k, sigma_t, grid_min_t, grid_max_t, bin_width_t, values, cutoff,
     )
 end
 
-grid_cv_value(mem::GridHills, i::Integer) = mem.grid_min + (i - 1) * mem.bin_width
+grid_axis_value(mem::GridHills, d::Integer, i::Integer) = mem.grid_min[d] + (i - 1) * mem.bin_width[d]
 
-# Returns the indices of the two grid points bracketing cv_sim (clamped to the grid
-# extent) and the fractional distance between them, for linear interpolation.
-function grid_bracket(mem::GridHills, cv_sim)
-    n = length(mem.values)
-    clamped = clamp(cv_sim, mem.grid_min, mem.grid_max)
-    frac_bin = ustrip((clamped - mem.grid_min) / mem.bin_width)
-    i0 = clamp(floor(Int, frac_bin) + 1, 1, n - 1)
-    i1 = i0 + 1
-    frac = frac_bin - (i0 - 1)
-    return i0, i1, frac
+# Per-dimension bracketing indices (i0, i1) and fractional distance between them, for
+# N-linear interpolation. cv_sim is a scalar when n_dims == 1 (Number indexing cv_sim[1]
+# just returns cv_sim itself) or an n_dims-tuple otherwise.
+function grid_bracket_dims(mem::GridHills, cv_sim)
+    n_dims = length(mem.grid_min)
+    return ntuple(n_dims) do d
+        n = size(mem.values, d)
+        clamped = clamp(cv_sim[d], mem.grid_min[d], mem.grid_max[d])
+        frac_bin = ustrip((clamped - mem.grid_min[d]) / mem.bin_width[d])
+        i0 = clamp(floor(Int, frac_bin) + 1, 1, n - 1)
+        (i0, i0 + 1, frac_bin - (i0 - 1))
+    end
 end
 
 function potential_energy(mem::GridHills, cv_sim; kwargs...)
-    i0, i1, frac = grid_bracket(mem, cv_sim)
-    return mem.values[i0] + frac * (mem.values[i1] - mem.values[i0])
+    dims = grid_bracket_dims(mem, cv_sim)
+    n_dims = length(dims)
+    total = zero(mem.k)
+    for corner in CartesianIndices(ntuple(_ -> 2, n_dims))
+        idx = ntuple(d -> corner[d] == 1 ? dims[d][1] : dims[d][2], n_dims)
+        weight = prod(d -> corner[d] == 1 ? (1 - dims[d][3]) : dims[d][3], 1:n_dims)
+        total += weight * mem.values[idx...]
+    end
+    return total
 end
 
+# Partial derivative of the N-linear interpolant along each dimension, via the chain rule
+# through frac_d = (cv_sim[d] - grid_min[d]) / bin_width[d]. Returns a scalar for a 1D grid,
+# matching potential_energy/bias_gradient's convention elsewhere in this file of collapsing
+# a length-1 tuple down to its single value (see reshape_meta_dynamics_cvs).
 function bias_gradient(mem::GridHills, cv_sim)
-    i0, i1, _ = grid_bracket(mem, cv_sim)
-    return (mem.values[i1] - mem.values[i0]) / mem.bin_width
+    dims = grid_bracket_dims(mem, cv_sim)
+    n_dims = length(dims)
+    grad = ntuple(n_dims) do d
+        total = zero(mem.k) / mem.bin_width[d]
+        for corner in CartesianIndices(ntuple(_ -> 2, n_dims))
+            idx = ntuple(e -> corner[e] == 1 ? dims[e][1] : dims[e][2], n_dims)
+            other_weight = prod(1:n_dims) do e
+                e == d ? one(dims[e][3]) : (corner[e] == 1 ? (1 - dims[e][3]) : dims[e][3])
+            end
+            sign = corner[d] == 1 ? -1 : 1
+            total += sign * other_weight * mem.values[idx...] / mem.bin_width[d]
+        end
+        total
+    end
+    return n_dims == 1 ? only(grad) : grad
 end
 
 function add_hill!(mem::GridHills, cv_value, height=mem.k)
-    n = length(mem.values)
-    cutoff = mem.cutoff * mem.sigma
-    lo = clamp(cv_value - cutoff, mem.grid_min, mem.grid_max)
-    hi = clamp(cv_value + cutoff, mem.grid_min, mem.grid_max)
-    i_lo = clamp(floor(Int, ustrip((lo - mem.grid_min) / mem.bin_width)) + 1, 1, n)
-    i_hi = clamp(ceil(Int, ustrip((hi - mem.grid_min) / mem.bin_width)) + 1, 1, n)
-    for i in i_lo:i_hi
-        d = grid_cv_value(mem, i) - cv_value
-        mem.values[i] += height * exp(-0.5 * (d / mem.sigma)^2)
+    n_dims = length(mem.grid_min)
+    ranges = ntuple(n_dims) do d
+        n = size(mem.values, d)
+        cutoff_d = mem.cutoff * mem.sigma[d]
+        lo = clamp(cv_value[d] - cutoff_d, mem.grid_min[d], mem.grid_max[d])
+        hi = clamp(cv_value[d] + cutoff_d, mem.grid_min[d], mem.grid_max[d])
+        i_lo = clamp(floor(Int, ustrip((lo - mem.grid_min[d]) / mem.bin_width[d])) + 1, 1, n)
+        i_hi = clamp(ceil(Int, ustrip((hi - mem.grid_min[d]) / mem.bin_width[d])) + 1, 1, n)
+        i_lo:i_hi
+    end
+    for idx in CartesianIndices(ranges)
+        scaled_sq = sum(1:n_dims) do d
+            diff = grid_axis_value(mem, d, idx[d]) - cv_value[d]
+            (diff / mem.sigma[d])^2
+        end
+        mem.values[idx] += height * exp(-0.5 * scaled_sq)
     end
     return nothing
 end
@@ -284,7 +348,8 @@ argument, an [`AbstractMetaDynamicsMemory`](@ref):
 - [`ListHills`](@ref): an explicit list of hill centers, summed from scratch at every
     evaluation. Exact, O(n_hills) per evaluation, and supports biasing multiple CVs at once.
 - [`GridHills`](@ref): a discretized grid accumulating the sum of deposited hills.
-    Approximate (linear interpolation), O(1) per evaluation, single CV only.
+    Approximate (interpolation), O(1) per evaluation. Supports multiple CVs via an
+    N-dimensional grid, but is only practical for a handful of them (2-3).
 
 `MetaDynamicsBias` can be used in two ways:
 - **Single CV, evaluated externally**: the one-CV-worth constructor `MetaDynamicsBias(k,
@@ -344,10 +409,11 @@ struct MetaDynamicsBias{C <: Tuple, M <: AbstractMetaDynamicsMemory, TP <: Abstr
         # An empty cvs is a valid, intentional state: it means the CV is evaluated
         # externally via BiasPotential rather than by this struct's own calculator methods
         # (see check_meta_dynamics_cvs, called from those methods instead).
-        if memory isa GridHills && length(cvs) > 1
+        if memory isa GridHills && !isempty(cvs) && length(cvs) != length(memory.grid_min)
             throw(ArgumentError(
-                "GridHills memory only supports a single collective variable, got " *
-                "$(length(cvs)) CVs. Use ListHills for multiple CVs."))
+                "GridHills memory has $(length(memory.grid_min)) dimension(s) but " *
+                "$(length(cvs)) CVs were given; these must match. Build the GridHills with " *
+                "one grid_min/grid_max/sigma entry per CV, or use ListHills instead."))
         end
         if deposit_interval < 1
             throw(ArgumentError("deposit_interval must be at least 1, got $(deposit_interval)."))

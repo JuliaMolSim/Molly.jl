@@ -682,10 +682,12 @@ end
     @test isapprox(grad2[1], -1.99067; atol=1e-3)
     @test isapprox(grad2[2], -1.24047; atol=1e-3)
 
-    # GridHills: single CV only, deposited hills are accumulated onto the grid
+    # GridHills: a single CV, deposited hills are accumulated onto the grid. Scalar
+    # arguments are internally wrapped into length-1 tuples (n_dims == 1), and bias_gradient
+    # collapses its result back down to a bare scalar for this case.
     gh = GridHills(1.0, 0.2, 0.0, 2.0, 5)
     @test length(gh.values) == 5
-    @test isapprox(gh.bin_width, 0.5; atol=1e-9)
+    @test isapprox(only(gh.bin_width), 0.5; atol=1e-9)
 
     add_hill!(gh, 1.0)
     @test isapprox(potential_energy(gh, 1.0), 1.0; atol=1e-9) # Exactly on a grid point
@@ -695,6 +697,37 @@ end
     @test_throws ArgumentError GridHills(1.0, 0.2, 0.0, 2.0, 1)
     @test_throws ArgumentError GridHills(1.0, -0.2, 0.0, 2.0, 5)
     @test_throws ArgumentError GridHills(1.0, 0.2, 2.0, 0.0, 5)
+
+    # GridHills: multiple CVs at once, sigma/grid_min/grid_max/n_bins become tuples (one
+    # entry per dimension) and hills are deposited/evaluated via N-linear interpolation
+    gh2d = GridHills(1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 9) # bin_width (0.25, 0.25)
+    @test size(gh2d.values) == (9, 9)
+    @test all(isapprox.(gh2d.bin_width, (0.25, 0.25); atol=1e-9))
+
+    add_hill!(gh2d, (1.0, 1.0)) # Lands exactly on grid point (index 5, 5)
+    # cutoff=6 default reaches +/-0.6 in each dimension from (1.0, 1.0), i.e. indices 2:8;
+    # the grid corners are well outside that box and so are untouched (still exactly 0)
+    @test gh2d.values[1, 1] == 0.0
+    @test gh2d.values[1, 5] == 0.0
+    @test gh2d.values[5, 1] == 0.0
+    @test gh2d.values[9, 9] == 0.0
+
+    # Evaluated exactly at the hill center, both potential_energy and bias_gradient reduce
+    # to reading/differencing straight off the grid (no interpolation blending needed)
+    @test isapprox(potential_energy(gh2d, (1.0, 1.0)), 1.0; atol=1e-9)
+    grad2d = Molly.bias_gradient(gh2d, (1.0, 1.0))
+    @test isapprox(grad2d[1], -3.82423; atol=1e-3)
+    # Grid, sigma and hill placement are all symmetric between the two CV dimensions here,
+    # so the gradient components must match by symmetry
+    @test isapprox(grad2d[1], grad2d[2]; atol=1e-9)
+
+    @test_throws ArgumentError GridHills(1.0, (0.1, 0.1), (0.0, 0.0, 0.0), (2.0, 2.0), 9)
+    @test_throws ArgumentError GridHills(1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), (5, 5, 5))
+
+    # n_bins can also be given per-dimension instead of a single shared Integer
+    gh2d_uneven = GridHills(1.0, (0.1, 0.2), (0.0, 0.0), (1.0, 2.0), (3, 5))
+    @test size(gh2d_uneven.values) == (3, 5)
+    @test all(isapprox.(gh2d_uneven.bin_width, (0.5, 0.5); atol=1e-9))
 end
 
 @testset "MetaDynamicsBias via BiasPotential" begin
@@ -764,6 +797,16 @@ end
     cv2 = CalcDist([1], [3], CalcSingleDist(), :wrap) # Distance 1-3 is 0.4
 
     @test_throws ArgumentError MetaDynamicsBias((cv1, cv2), GridHills(1.0, 0.1, 0.0, 1.0, 5))
+
+    # A GridHills built with one grid dimension per CV works directly as a multi-CV memory
+    bias_grid = MetaDynamicsBias((cv1, cv2), GridHills(5.0, (0.1, 0.1), (0.0, 0.0), (1.0, 1.0), 11))
+    sys_grid = System(
+        atoms=atoms, coords=coords, boundary=boundary, velocities=velocities,
+        general_inters=(bias_grid,), force_units=NoUnits, energy_units=NoUnits,
+    )
+    fs_grid = Molly.zero_forces(sys_grid)
+    AtomsCalculators.forces!(fs_grid, sys_grid, bias_grid) # Deposits a hill at (0.3, 0.4)
+    @test isapprox(AtomsCalculators.potential_energy(sys_grid, bias_grid), 5.0; atol=1e-6)
 
     bias = MetaDynamicsBias((cv1, cv2), 5.0, (0.1, 0.1), Tuple{Float64, Float64}[])
     @test length(bias.cvs) == 2
