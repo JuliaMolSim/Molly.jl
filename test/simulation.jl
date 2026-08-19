@@ -1129,7 +1129,7 @@ end
         return SimpleCrystals.Crystal(lattice, basis, N)
     end
     my_crystal = MyInvalidCrystal(a, :Ar, SVector(1, 1, 1))
-    @test_throws ErrorException System(my_crystal)
+    @test_throws ArgumentError System(my_crystal)
 end
 
 @testset "Different implementations" begin
