@@ -53,7 +53,7 @@ struct ListHills{K, R, V, H} <: AbstractMetaDynamicsMemory
     centers::V
     heights::H
 
-    function ListHills(k::K, sigma::R, centers::V=DefaultFloat[],
+    function ListHills(k::K, sigma::R, centers::V=Float32[],
                        heights::H=fill(k, length(centers))) where {K, R, V, H}
         validate_positive_finite.(sigma, "ListHills sigma")
         if length(heights) != length(centers)
@@ -350,11 +350,11 @@ struct MetaDynamicsBias{C <: Tuple, M <: AbstractMetaDynamicsMemory, TP <: Abstr
     end
 end
 
-MetaDynamicsBias(k, sigma, centers=DefaultFloat[]; deposit_interval::Integer=1,
+MetaDynamicsBias(k, sigma, centers=Float32[]; deposit_interval::Integer=1,
                  tempering::AbstractTempering=NoTempering()) =
     MetaDynamicsBias((), ListHills(k, sigma, centers);
                      deposit_interval=deposit_interval, tempering=tempering)
-MetaDynamicsBias(cvs::Tuple, k, sigma, centers=DefaultFloat[]; deposit_interval::Integer=1,
+MetaDynamicsBias(cvs::Tuple, k, sigma, centers=Float32[]; deposit_interval::Integer=1,
                  tempering::AbstractTempering=NoTempering()) =
     MetaDynamicsBias(cvs, ListHills(k, sigma, centers);
                      deposit_interval=deposit_interval, tempering=tempering)
