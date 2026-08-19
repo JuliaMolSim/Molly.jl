@@ -2,7 +2,6 @@ struct BiasNaNGradient end
 
 Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
 
-#=
 @testset "Collective variables" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
@@ -659,7 +658,6 @@ end
         @test dist_13_std > dist_12_std
     end
 end
-=#
 
 @testset "MetaDynamicsBias memory" begin
     # ListHills: a single CV
