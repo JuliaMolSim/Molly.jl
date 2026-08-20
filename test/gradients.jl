@@ -644,7 +644,7 @@ end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(AT)
+    function create_sys(AT, n_threads)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
@@ -658,6 +658,7 @@ end
             kappa=0.7,
             grad_safe=true,
             strictness=:nowarn,
+            n_threads=n_threads,
         )
     end
 
@@ -824,8 +825,8 @@ end
 
     for (test_name, test_fn, test_tol) in test_runs
         for (platform, AT, parallel) in platform_runs
-            sys_ref = create_sys(AT)
             n_threads = (parallel ? Threads.nthreads() : 1)
+            sys_ref = create_sys(AT, n_threads)
             grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
             autodiff(
                 set_runtime_activity(Reverse),
