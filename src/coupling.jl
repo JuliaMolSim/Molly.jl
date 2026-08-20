@@ -643,6 +643,9 @@ function apply_coupling!(sys::System{D},
     scalarP(P) = (P[1,1] + P[2,2] + P[3,3]) / D
     xyP(P)     = (P[1,1] + P[2,2]) / 2
     μ = zeros(FT, D, D)
+    exp_scale(x) = (isfinite(barostat.max_scale_frac) ?
+                    clamp(exp(x), 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac) :
+                    exp(x))
 
     if barostat.coupling_type == :isotropic
         P̄ = scalarP(P)
@@ -651,11 +654,7 @@ function apply_coupling!(sys::System{D},
             α = (barostat.compressibility[d,d] * dt) / τp
             det_term = -α * (barostat.pressure[d,d] - P̄) / D
             stoch    = sqrt(2*kT_pv*α / V) * (g / D)
-            s = exp(det_term + stoch)
-            if isfinite(barostat.max_scale_frac)
-                s = clamp(s, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
-            end
-            μ[d,d] = s
+            μ[d,d] = exp_scale(det_term + stoch)
         end
     elseif barostat.coupling_type == :semiisotropic
         if D != 3
@@ -667,20 +666,12 @@ function apply_coupling!(sys::System{D},
             α = (barostat.compressibility[d,d] * dt) / τp
             det_term = -α * (barostat.pressure[d,d] - Pxy) / D
             stoch    = sqrt((D-1) * 2*kT_pv*α / (V*D)) * (gxy / (D-1))
-            s = exp(det_term + stoch)
-            if isfinite(barostat.max_scale_frac)
-                s = clamp(s, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
-            end
-            μ[d,d] = s
+            μ[d,d] = exp_scale(det_term + stoch)
         end
         αz = (barostat.compressibility[3,3] * dt) / τp
         det_term_z = -αz * (barostat.pressure[3,3] - P[3,3]) / D
         stoch_z    = sqrt(2*kT_pv*αz / (V*D)) * gz
-        sz = exp(det_term_z + stoch_z)
-        if isfinite(barostat.max_scale_frac)
-            sz = clamp(sz, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
-        end
-        μ[3,3] = sz
+        μ[3,3] = exp_scale(det_term_z + stoch_z)
     elseif barostat.coupling_type == :anisotropic
         # Diagonals (exp map)
         gx, gy, gz = randn(rng, FT), randn(rng, FT), randn(rng, FT)
@@ -688,11 +679,7 @@ function apply_coupling!(sys::System{D},
             α = (barostat.compressibility[d,d] * dt) / τp
             det_term = -α * (barostat.pressure[d,d] - P[d,d]) / D
             stoch    = sqrt(2*kT_pv*α / (V*D)) * (d==1 ? gx : d==2 ? gy : gz)
-            s = exp(det_term + stoch)
-            if isfinite(barostat.max_scale_frac)
-                s = clamp(s, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
-            end
-            μ[d,d] = s
+            μ[d,d] = exp_scale(det_term + stoch)
         end
         # Shear increments (lower triangle)
         for i in 2:3, j in 1:i-1
