@@ -252,12 +252,14 @@ is_carboxylate_O(at_data) = at_data.atom_type == "O2"
 
 function atoms_bonded_to_N(atoms_data, bonds)
     bonded_to_N = falses(length(atoms_data))
-    for (i, j) in zip(from_device(bonds.is), from_device(bonds.js))
-        if atoms_data[i].element == "N"
-            bonded_to_N[j] = true
-        end
-        if atoms_data[j].element == "N"
-            bonded_to_N[i] = true
+    if !isnothing(bonds)
+        for (i, j) in zip(from_device(bonds.is), from_device(bonds.js))
+            if atoms_data[i].element == "N"
+                bonded_to_N[j] = true
+            end
+            if atoms_data[j].element == "N"
+                bonded_to_N[i] = true
+            end
         end
     end
     return bonded_to_N
@@ -401,7 +403,7 @@ function gbsa_buffers(::Type{AT}, ::Type{T}, n_atoms, offset_radii, sa_factor_us
 end
 
 """
-    ImplicitSolventOBC(atoms, atoms_data, bonds)
+    ImplicitSolventOBC(atoms, atoms_data, bonds=nothing)
 
 Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculator.
 
@@ -409,6 +411,7 @@ Should be used along with a Coulomb interaction.
 The keyword argument `use_OBC2` determines whether to use parameter set
 I (`false`, the default) or II (`true`).
 
+Only compatible with 3D systems.
 Not currently compatible with virial calculation.
 """
 struct ImplicitSolventOBC{T, D, VT, VD, K, S, F, BF, BS, PT, MT, FC} <: AbstractGBSA
@@ -441,7 +444,7 @@ end
 
 function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                             atoms_data,
-                            bonds;
+                            bonds=nothing;
                             solvent_dielectric=gb_solvent_dielectric,
                             solute_dielectric=gb_solute_dielectric,
                             kappa=0.0u"nm^-1",
@@ -583,12 +586,13 @@ function extract_parameters!(params_dic, inter::ImplicitSolventOBC, ff)
 end
 
 """
-    ImplicitSolventGBN2(atoms, atoms_data, bonds)
+    ImplicitSolventGBN2(atoms, atoms_data, bonds=nothing)
 
 GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
 Should be used along with a Coulomb interaction.
 
+Only compatible with 3D systems.
 Not currently compatible with virial calculation.
 """
 struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, TD, TM, VI, BF, BS, PT, MT, FC} <: AbstractGBSA
@@ -625,26 +629,26 @@ struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, TD, TM, VI, BF, BS, PT, MT, FC
 end
 
 function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
-                                atoms_data,
-                                bonds;
-                                solvent_dielectric=gb_solvent_dielectric,
-                                solute_dielectric=gb_solute_dielectric,
-                                kappa=0.0u"nm^-1",
-                                offset=gbn2_offset,
-                                dist_cutoff=0.0u"nm",
-                                probe_radius=gb_probe_radius,
-                                sa_factor=gb_sa_factor,
-                                use_ACE=true,
-                                neck_scale=gbn2_neck_scale,
-                                neck_cut=gbn2_neck_cut,
-                                element_to_radius=mbondi2_element_to_radius,
-                                element_to_screen=gbn2_element_to_screen,
-                                element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
-                                atom_params=gbn2_atom_params,
-                                atom_params_nucleic=gbn2_atom_params_nucleic,
-                                data_d0=gbn2_data_d0,
-                                data_m0=gbn2_data_m0,
-                                n_threads::Integer=Threads.nthreads()) where {TY, M, T, D, E, L}
+                             atoms_data,
+                             bonds=nothing;
+                             solvent_dielectric=gb_solvent_dielectric,
+                             solute_dielectric=gb_solute_dielectric,
+                             kappa=0.0u"nm^-1",
+                             offset=gbn2_offset,
+                             dist_cutoff=0.0u"nm",
+                             probe_radius=gb_probe_radius,
+                             sa_factor=gb_sa_factor,
+                             use_ACE=true,
+                             neck_scale=gbn2_neck_scale,
+                             neck_cut=gbn2_neck_cut,
+                             element_to_radius=mbondi2_element_to_radius,
+                             element_to_screen=gbn2_element_to_screen,
+                             element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
+                             atom_params=gbn2_atom_params,
+                             atom_params_nucleic=gbn2_atom_params_nucleic,
+                             data_d0=gbn2_data_d0,
+                             data_m0=gbn2_data_m0,
+                             n_threads::Integer=Threads.nthreads()) where {TY, M, T, D, E, L}
     units = dimension(D) == u"𝐋"
     radii = mbondi3_radii(atoms_data, bonds; element_to_radius=element_to_radius)
     nucleic_acid_residues = ("A", "C", "G", "U", "DA", "DC", "DG", "DT")
@@ -1610,8 +1614,9 @@ end
     end
 end
 
-AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
-                        inter::AbstractGBSA; n_threads::Integer=Threads.nthreads(), kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
+                        sys::AtomsBase.AbstractSystem{3}, inter::AbstractGBSA;
+                        n_threads::Integer=Threads.nthreads(), kwargs...)
     check_gbsa_n_threads(inter.buffer_force_chunks, n_threads)
     Bs, B_grads = born_radii_and_grad!(inter, sys.coords, sys.boundary, n_threads)
     gbsa_setup!(inter, sys, Bs)
@@ -1620,7 +1625,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
     return fs
 end
 
-function AtomsCalculators.potential_energy(sys, inter::AbstractGBSA;
+function AtomsCalculators.potential_energy(sys::AtomsBase.AbstractSystem{3}, inter::AbstractGBSA;
                                            n_threads::Integer=Threads.nthreads(), kwargs...)
     check_gbsa_n_threads(inter.buffer_force_chunks, n_threads)
     Bs, B_grads = born_radii_and_grad!(inter, sys.coords, sys.boundary, n_threads)
