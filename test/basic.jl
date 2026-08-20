@@ -450,7 +450,8 @@ end
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
-        @test_throws ErrorException System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
+        @test_throws MissingResidueTemplateError System(joinpath(data_dir, "imatinib.pdb"), ff;
+                                                        boundary=boundary)
     end
 
     water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff)
@@ -501,7 +502,7 @@ end
 
         if struc_name == "sgpb_omtky3"
             # Catch if disulfide bonds are not added properly
-            @test_throws ErrorException System(
+            @test_throws MissingResidueTemplateError System(
                 pdb_file,
                 ff;
                 array_type=AT,
@@ -1205,7 +1206,7 @@ end
             startswith(line, "HETATM  279") || println(out, line)
         end
     end
-    @test_throws ErrorException System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
+    @test_throws MissingResidueTemplateError System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
 end
 
 @testset "AtomsBase conversion" begin

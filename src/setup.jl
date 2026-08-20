@@ -432,6 +432,14 @@ function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T}}, template, r
     return virtual_sites
 end
 
+struct MissingResidueTemplateError <: Exception
+    msg::String
+end
+
+function Base.showerror(io::IO, e::MissingResidueTemplateError)
+    return print(io, "MissingResidueTemplateError: ", e.msg)
+end
+
 """
     System(coordinate_file, force_field; <keyword arguments>)
 
@@ -703,12 +711,11 @@ function System(coord_file::AbstractString,
                 else
                     atom_str = join(rgraph.atom_names, ", ")
                 end
-                error("could not match residue $(rgraph.res_name) (residue number " *
-                      "$res_id of chain \"$chain\") to any of the residue templates in " *
-                      "the force field. " * residue_match_error(rgraph, force_field.residues) *
-                      " The residue has $n_names atoms: $atom_str. " *
-                      "See the Molly documentation section on simulating a protein for " *
-                      "tips on obtaining compatible structure files.")
+                throw(MissingResidueTemplateError("could not match residue $(rgraph.res_name) " *
+                    "(residue number $res_id of chain \"$chain\") to any of the residue templates " *
+                    "in the force field. " * residue_match_error(rgraph, force_field.residues) *
+                    " The residue has $n_names atoms: $atom_str. See the Molly documentation " *
+                    "section on simulating a protein for tips on obtaining compatible files."))
             end
         end
     end
