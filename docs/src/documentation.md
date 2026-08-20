@@ -197,7 +197,7 @@ To use another GPU package, just swap out `CUDA` for your desired package and `C
 The device to run on can be changed with `device!`, e.g. `device!(1)`.
 There are two GPU code paths currently: a fast path specific to CUDA and a slower path using [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) that is suitable for all backends.
 
-The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF` and `MOLLY_GPUNTHREADS_IMPLICIT`.
+The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF`, `MOLLY_GPUNTHREADS_IMPLICIT` and `MOLLY_GPUMINTHREADS_IMPLICIT`.
 In general these should only be changed if GPU memory errors occur on smaller GPUs.
 
 For the CUDA fast path, users can explicitly call `Molly.optimize_cuda_launch_config!(sys)` prior to a simulation. This will benchmark various launch configurations and cache the optimal parameters, which are then used to accelerate subsequent pairwise force and energy kernels globally. Users can also manually override the kernel parameters by setting the environment variables `MOLLY_CUDA_FORCE_BLOCK_Y`, `MOLLY_CUDA_ENERGY_BLOCK_Y`, `MOLLY_CUDA_TILE_THREADS_X`, `MOLLY_CUDA_TILE_THREADS_Y`, and `MOLLY_CUDA_FORCE_MAXREGS`, or directly via the `set_cuda_launch_config!` function.

@@ -301,6 +301,9 @@ Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
+Unitful.ustrip(b::TriclinicBoundary) = TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors))
+Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary) = TriclinicBoundary(
+                                            map(bv -> ustrip.(u, bv), b.basis_vectors))
 
 function AtomsBase.cell_vectors(b::CubicBoundary{3, <:Any, C}) where C
     z = zero(C)

@@ -507,7 +507,8 @@ templates is carried out.
     residues in the structure file and add them to the topology. Uses geometric
     arguments to assign them.
 - `n_threads=Threads.nthreads()`: the number of threads the simulation will likely
-    be run on, used for example when setting up PME. Only relevant when running on CPU.
+    be run on, used for example when setting up PME and implicit solvent. Only
+    relevant when running on CPU.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
     with Enzyme.jl and `nonbonded_method` is `:pme` or `array_type` is `CuArray`.
 - `strictness=:warn`: determines behavior when encountering possible problems,
@@ -1689,10 +1690,11 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
 
     if implicit_solvent != :none
         if implicit_solvent in (:obc1, :obc2)
-            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
-                                 kappa=kappa, use_OBC2=(implicit_solvent == :obc2)),)
+            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds; kappa=kappa,
+                                 use_OBC2=(implicit_solvent == :obc2), n_threads=n_threads),)
         else # :gbn2
-            general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
+            general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa,
+                                 n_threads=n_threads),)
         end
     else
         general_inters_is = ()
