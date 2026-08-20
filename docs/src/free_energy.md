@@ -1866,10 +1866,14 @@ V_{bias}(\boldsymbol{s}, t) = \sum_{t' < t} h_{t'} \exp\left(-\frac{|\boldsymbol
 
 Once the bias has grown to compensate the underlying free energy landscape, $V_{bias}(\boldsymbol{s})$ estimates the (negative) free energy surface along $\boldsymbol{s}$, up to an additive constant: $F(\boldsymbol{s}) \approx -V_{bias}(\boldsymbol{s}) + C$.
 
-In Molly this is implemented by [`MetaDynamicsBias`](@ref), usable directly as a `general_inters` entry (evaluating its own CVs and self-updating every simulation step) or, for a single externally-supplied CV, wrapped in a [`BiasPotential`](@ref) alongside the other bias potentials. Two aspects are controlled by Julia type dispatch:
+In Molly this is implemented by [`MetaDynamicsBias`](@ref), usable directly as a `general_inters` entry. The CVs and the resulting force or potential are evaluated each step and the rate at which new gaussians are added is controlled via `deposit_interval`. Two aspects are controlled by Julia type dispatch:
 
-- **Hill memory**, an [`AbstractMetaDynamicsMemory`](@ref): [`ListHills`](@ref) stores every deposited hill and sums them at evaluation time (exact, O(n_hills)); [`GridHills`](@ref) accumulates hills onto a discretized grid instead (approximate, O(1) regardless of the number of hills), as a 1D grid for one CV or a dense N-dimensional grid for several.
-- **Hill height scaling**, an [`AbstractTempering`](@ref): the default [`NoTempering`](@ref) always deposits the full configured height (standard, constant-height Metadynamics); [`WellTemperedTempering`](@ref) (Barducci, Bussi & Parrinello, 2008) instead shrinks each new hill according to how much bias has already accumulated nearby, so the bias self-limits and converges to a free energy estimate instead of growing without bound.
+- **Hill memory**, an [`AbstractMetaDynamicsMemory`](@ref): 
+    - [`ListHills`](@ref) stores every deposited hill and sums them at evaluation time (exact, O(n_hills), no knowledge of CV range needed)
+    - [`GridHills`](@ref) accumulates hills onto a discretized grid instead (approximate, O(1) regardless of the number of hills), as a 1D grid for one CV or a dense N-dimensional grid for several.
+- **Hill height scaling**, an [`AbstractTempering`](@ref):
+    - the default [`NoTempering`](@ref) always deposits the full configured height (standard, constant-height Metadynamics)
+    - [`WellTemperedTempering`](@ref) (Barducci, Bussi & Parrinello, 2008) instead shrinks each new hill according to how much bias has already accumulated nearby, so the bias self-limits and converges to a free energy estimate instead of growing without bound.
 
 Standard metadynamics is prone to over-filling: if the total deposited height grows much larger than $k_B T$, the bias floods the well and the system random-walks broadly for the rest of the run, widening the reconstructed profile well beyond the true surface. Well-tempered metadynamics avoids this at the cost of one extra parameter, `bias_factor`.
 
@@ -1881,14 +1885,14 @@ As a minimal, easily-checked example, we bias the distance between two particles
 using Molly
 using Unitful
 
-mass, r0, k_bond, temp = 10.0, 1.0, 500.0, 298.0
-boundary = CubicBoundary(10.0)
+mass, r0, k_bond, temp = 10.0, 1.0, 500.0, 298.0 # u, nm, kJ * mol^-1 * nm^-2, K
+boundary = CubicBoundary(10.0) # nm
 
-atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2), Atom(mass=mass, σ=0.3, ϵ=0.2)]
-coords = [SVector(4.5, 5.0, 5.0), SVector(4.5 + r0, 5.0, 5.0)]
-velocities = [random_velocity(mass, temp) for i in 1:2]
+atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2), Atom(mass=mass, σ=0.3, ϵ=0.2)] # σ in nm, ϵ in kJ * mol^-1
+coords = [SVector(4.5, 5.0, 5.0), SVector(4.5 + r0, 5.0, 5.0)] # nm
+velocities = [random_velocity(mass, temp) for i in 1:2] # nm * ps^-1
 
-bond = HarmonicBond(k=k_bond, r0=r0)
+bond = HarmonicBond(k=k_bond, r0=r0) # k in kJ * mol^-1 * nm^-2, r0 in nm
 specific_inter_lists = (InteractionList2Atoms([1], [2], [bond]),)
 ```
 
@@ -1898,11 +1902,11 @@ Next we define the collective variable to bias -- the 1-2 distance -- and the bi
 calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
 
 kB = ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k) # Same convention System uses internally
-kT = kB * temp
+kT = kB * temp # kJ * mol^-1
 
-grid_min, grid_max, n_bins = 0.3, 1.7, 701
-memory = GridHills(0.0025, 0.01, grid_min, grid_max, n_bins) # k, sigma, grid_min, grid_max, n_bins
-tempering = WellTemperedTempering(10.0, kT)                  # bias_factor, kT
+grid_min, grid_max, n_bins = 0.3, 1.7, 701 # nm, nm, dimensionless
+memory = GridHills(0.05, 0.02, grid_min, grid_max, n_bins) # k (hill height, kJ * mol^-1), sigma (nm), grid_min (nm), grid_max (nm), n_bins
+tempering = WellTemperedTempering(10.0, kT)                  # bias_factor (dimensionless), kT (kJ * mol^-1)
 
 bias = MetaDynamicsBias((calc_dist,), memory; deposit_interval=200, tempering=tempering)
 ```
@@ -1910,7 +1914,7 @@ bias = MetaDynamicsBias((calc_dist,), memory; deposit_interval=200, tempering=te
 `deposit_interval=200` paces the deposits to every 200th force evaluation. `bias` needs no external logger to know when to deposit a hill, since it hooks directly into `forces!`; we just add it to `general_inters` and simulate as normal:
 
 ```julia
-simulator = VelocityVerlet(dt=0.002, coupling=AndersenThermostat(temp, 0.1))
+simulator = VelocityVerlet(dt=0.002, coupling=AndersenThermostat(temp, 0.1)) # dt in ps, coupling const in ps
 
 sys = System(
     atoms=atoms,
@@ -1937,6 +1941,35 @@ F_estimate = @. -v_bias * bias_factor / (bias_factor - 1)
 
 bond_pe(r) = potential_energy(bond, SVector(0.0, 0.0, 0.0), SVector(r, 0.0, 0.0), boundary)
 F_analytical = bond_pe.(grid_s)
+
+# Well-tempered metadynamics only recovers F up to an unknown additive constant, so anchor
+# F_estimate to F_analytical at r0, where the bond potential is exactly zero by construction
+r0_idx = argmin(abs.(grid_s .- r0))
+F_estimate = F_estimate .- F_estimate[r0_idx]
 ```
 
-`F_estimate` should track `F_analytical`, up to an additive constant, over the region of `s` that was actually visited during the run. For full worked examples with plots -- comparing the sampled histogram against the analytical equilibrium distribution, and tempered against untempered sampling -- see `scripts/metadynamics_bond_recovery_plots.jl`.
+`F_estimate` should track `F_analytical` over the region of `s` that was actually visited during the run; grid points far from `r0` never received a hill and so stay at the flat baseline, not a meaningful free energy.
+
+```julia
+using Plots
+
+# Restrict the comparison to where the walker actually sampled, a few thermal widths
+# around r0 -- outside this window F_estimate carries no information
+σ_thermal = sqrt(kT / k_bond)
+in_window = @. r0 - 3σ_thermal <= grid_s <= r0 + 3σ_thermal
+
+fig = Plots.plot(grid_s[in_window], F_analytical[in_window], label="analytical", xlabel="cv range", ylabel="potentials", size=(400,300))
+Plots.plot!(grid_s[in_window], F_estimate[in_window], label="estimate")
+
+savefig(fig,"./docs/src/images/MetaDynamicsPotential.png")
+
+fig2 = Plots.plot(grid_s[in_window], exp.(-F_analytical[in_window]./kT), label="analytical", xlabel="cv range", ylabel="P(cv)", size=(400,300))
+Plots.plot!(grid_s[in_window], exp.(-F_estimate[in_window]./kT), label="estimate")
+
+savefig(fig2,"./docs/src/images/MetaDynamicsHistogram.png")
+```
+
+![Recovered vs. analytical bond potential](images/MetaDynamicsPotential.png)
+![Recovered vs. analytical equilibrium distribution](images/MetaDynamicsHistogram.png)
+
+For full worked examples with plots -- comparing the sampled histogram against the analytical equilibrium distribution, and tempered against untempered sampling -- see `scripts/metadynamics_bond_recovery_plots.jl`.
