@@ -64,6 +64,16 @@ end
 ```
 To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`System`](@ref).
 
+## Exception types
+
+Molly throws various standard exception types, especially `ArgumentError`s, but also has its own error types:
+
+| Exception type                | Description                                                                                     |
+| :---------------------------- | :---------------------------------------------------------------------------------------------- |
+| `NaNSimulationError`          | A `NaN` is encountered during a simulation or setup                                             |
+| `ForceFieldXMLError`          | An error reading a force field XML file, [see more here](@ref "Simulating a protein")           |
+| `MissingResidueTemplateError` | A residue cannot be matched to a residue template, [see more here](@ref "Simulating a protein") |
+
 ## Fast math
 
 On CUDA GPUs the pairwise force and energy kernels are compiled with fast math for `Float32` systems, where the loss in precision is not noticeable. `Float64` systems do not use fast math, since there is a noticeable loss in precision and that path is much slower anyway.

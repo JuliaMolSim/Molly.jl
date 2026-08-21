@@ -1,6 +1,6 @@
 using Molly
-using Molly: from_device, to_device, ForceFieldXMLError, MissingResidueTemplateError,
-             NaNSimulationError
+using Molly: from_device, to_device, NaNSimulationError, ForceFieldXMLError,
+             MissingResidueTemplateError
 using AMDGPU
 using Aqua
 import AtomsBase
