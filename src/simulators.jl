@@ -1674,6 +1674,9 @@ Coupling, removing the center of mass motion and running loggers applies per out
 - `coupling::C=nothing`: the coupling which applies each outer step during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of outer steps,
     set to `false` or `0` to not remove center of mass motion.
+- `inner_step_neighbors=false`: whether to force recomputation of the neighbors at every
+    inner step, useful when force calculation is slow compared to neighbor finding. If used,
+    the `n_steps`/`n_steps_reorder` arguments to the neighbor finder are ignored.
 """
 struct MTSIntegrator{NF, NP, NS, NG, S, C} <: AbstractMTSIntegrator{NF, NP, NS, NG}
     ordered_fractions::NTuple{NF, Int}
@@ -1683,6 +1686,7 @@ struct MTSIntegrator{NF, NP, NS, NG, S, C} <: AbstractMTSIntegrator{NF, NP, NS, 
     dt::S
     coupling::C
     remove_CM_motion::Int
+    inner_step_neighbors::Bool
 end
 
 """
@@ -1720,6 +1724,9 @@ Coupling, removing the center of mass motion and running loggers applies per out
 - `coupling::C=nothing`: the coupling which applies each outer step during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of outer steps,
     set to `false` or `0` to not remove center of mass motion.
+- `inner_step_neighbors=false`: whether to force recomputation of the neighbors at every
+    inner step, useful when force calculation is slow compared to neighbor finding. If used,
+    the `n_steps`/`n_steps_reorder` arguments to the neighbor finder are ignored.
 """
 struct MTSLangevinIntegrator{NF, NP, NS, NG, S, K, F, C, T} <: AbstractMTSIntegrator{NF, NP, NS, NG}
     ordered_fractions::NTuple{NF, Int}
@@ -1733,6 +1740,7 @@ struct MTSLangevinIntegrator{NF, NP, NS, NG, S, K, F, C, T} <: AbstractMTSIntegr
     remove_CM_motion::Int
     vel_scale::T
     noise_scale::T
+    inner_step_neighbors::Bool
 end
 
 check_integer(x) = iszero(length(x)) || all(i -> i isa Integer, x)
@@ -1765,21 +1773,24 @@ function setup_mts_integrator(pi_fractions, si_fractions, gi_fractions)
 end
 
 function MTSIntegrator(; dt, pi_fractions=(), si_fractions=(), gi_fractions=(),
-                       coupling=nothing, remove_CM_motion=1)
+                       coupling=nothing, remove_CM_motion=1, inner_step_neighbors=false)
     ordered_fractions = setup_mts_integrator(pi_fractions, si_fractions, gi_fractions)
     return MTSIntegrator(ordered_fractions, Tuple(pi_fractions), Tuple(si_fractions),
-                         Tuple(gi_fractions), dt, coupling, Int(remove_CM_motion))
+                         Tuple(gi_fractions), dt, coupling, Int(remove_CM_motion),
+                         inner_step_neighbors)
 end
 
 function MTSLangevinIntegrator(; dt, temperature, friction, pi_fractions=(), si_fractions=(),
-                               gi_fractions=(), coupling=nothing, remove_CM_motion=1)
+                               gi_fractions=(), coupling=nothing, remove_CM_motion=1,
+                               inner_step_neighbors=false)
     ordered_fractions = setup_mts_integrator(pi_fractions, si_fractions, gi_fractions)
     total_substeps = last(ordered_fractions)
     vel_scale = exp(-dt * friction / total_substeps)
     noise_scale = sqrt(1 - vel_scale^2)
     return MTSLangevinIntegrator(ordered_fractions, Tuple(pi_fractions), Tuple(si_fractions),
                                  Tuple(gi_fractions), dt, temperature, friction, coupling,
-                                 Int(remove_CM_motion), vel_scale, noise_scale)
+                                 Int(remove_CM_motion), vel_scale, noise_scale,
+                                 inner_step_neighbors)
 end
 
 function mts_interaction_groups(sys, sim::AbstractMTSIntegrator{<:Any, NP, NS, NG}) where {NP, NS, NG}
@@ -1821,11 +1832,19 @@ function mts_coordinate_update!(sys, noise, sim::MTSLangevinIntegrator, dt_frac_
     return sys
 end
 
+# Recalculate the neighbors during the inner steps of an MTS integrator if required
+function mts_find_neighbors(sys, buffers, neighbors, step_n, n_threads)
+    invalidate_cached_neighbors!(buffers, sys.neighbor_finder)
+    return find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                          n_threads=n_threads)
+end
+
 # Can modify sys, forces_t, accels_t, buffers, noise, cons_coord_storage and cons_vel_storage
+# Returns the neighbors, which are updated during the substeps if inner_step_neighbors is true
 function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
-                       cons_vel_storage, sim, ordered_fractions, fraction_inters, neighbors, dt,
-                       step_n, n_threads, rng, using_constraints, n_parent_substeps,
-                       strictness, recompute_forces_in)
+                       cons_vel_storage, sim, ordered_fractions, fraction_inters, neighbors,
+                       dt, step_n, n_threads, rng, using_constraints, n_parent_substeps,
+                       strictness, inner_step_neighbors, recompute_forces_in)
     n_substeps = first(ordered_fractions)
     n_steps_per_parent_step = n_substeps ÷ n_parent_substeps
     pis, sis, gis = first(fraction_inters)
@@ -1854,11 +1873,16 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
             end
             sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
             place_virtual_sites!(sys)
+            if inner_step_neighbors
+                neighbors = mts_find_neighbors(sys, buffers, neighbors, step_n, n_threads)
+            end
         else
-            mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
-                          cons_vel_storage, sim, Base.tail(ordered_fractions),
-                          Base.tail(fraction_inters), neighbors, dt, step_n, n_threads, rng,
-                          using_constraints, n_substeps, strictness, true)
+            neighbors = mts_substeps!(sys, forces_t, accels_t, buffers, noise,
+                                      cons_coord_storage, cons_vel_storage, sim,
+                                      Base.tail(ordered_fractions),
+                                      Base.tail(fraction_inters), neighbors, dt, step_n,
+                                      n_threads, rng, using_constraints, n_substeps,
+                                      strictness, inner_step_neighbors, true)
         end
 
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
@@ -1868,7 +1892,7 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
         recompute_forces = false
     end
 
-    return sys
+    return neighbors
 end
 
 mts_initialize_noise(sys, ::MTSIntegrator) = nothing
@@ -1927,10 +1951,11 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
-                      cons_vel_storage, sim, sim.ordered_fractions, fraction_inters, neighbors,
-                      sim.dt, step_n, n_threads, rng, using_constraints, 1, strictness,
-                      recompute_forces)
+        neighbors = mts_substeps!(sys, forces_t, accels_t, buffers, noise,
+                                  cons_coord_storage, cons_vel_storage, sim,
+                                  sim.ordered_fractions, fraction_inters, neighbors, sim.dt,
+                                  step_n, n_threads, rng, using_constraints, 1, strictness,
+                                  sim.inner_step_neighbors, recompute_forces)
         if using_constraints
             apply_velocity_constraints!(sys; n_threads=n_threads, strictness=strictness)
         end
@@ -1952,9 +1977,16 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng, strictness=strictness)
-
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
-                                   n_threads=n_threads)
+        if sim.inner_step_neighbors
+            # The neighbors are up to date from the substeps, so they only need to be
+            #   recalculated if the coupling changed the coordinates
+            if recompute_forces
+                neighbors = mts_find_neighbors(sys, buffers, neighbors, step_n, n_threads)
+            end
+        else
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n,
+                                       recompute_forces; n_threads=n_threads)
+        end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        strictness=strictness)

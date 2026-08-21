@@ -365,6 +365,17 @@ end
 # The interacting tile list is constructed within the CUDA pairwise kernels.
 find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
 
+# Mark neighbor data cached in `buffers` as stale so that it is rebuilt on the next force
+#   or energy evaluation
+# Neighbor finders that return a neighbor list from `find_neighbors` do not cache
+#   anything in the buffers, so this does nothing for them
+invalidate_cached_neighbors!(buffers, neighbor_finder) = buffers
+
+function invalidate_cached_neighbors!(buffers::BuffersGPU, nf::GPUNeighborFinder)
+    buffers.step_n_preprocessed = -1
+    return buffers
+end
+
 """
     DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
 
