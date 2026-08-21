@@ -397,6 +397,8 @@ end
     atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
              for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    coords_nan = copy(coords)
+    coords_nan[10] = SVector(NaN, 1.0, 1.0)u"nm"
     simulators = [
         Verlet(dt=dt, coupling=(AndersenThermostat(temp, 10.0u"ps"),)),
         StormerVerlet(dt=dt),
@@ -427,10 +429,32 @@ end
             loggers=(coords=CoordinatesLogger(100),),
         )
         random_velocities!(sys, temp)
+
         for simulator in simulators
             @time simulate!(sys, simulator, sim_time; n_threads=1)
         end
         @test_throws ArgumentError simulate!(sys, simulators[1], 1; n_threads=1, strictness=:wrong)
+
+        sys_nan = System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords_nan, AT),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(use_neighbors=true),),
+            neighbor_finder=neighbor_finder,
+            strictness=:nowarn,
+        )
+        @test_throws NaNSimulationError System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords_nan, AT),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(use_neighbors=true),),
+            neighbor_finder=neighbor_finder,
+            strictness=:error,
+        )
+        for simulator in simulators
+            @test_throws NaNSimulationError simulate!(sys_nan, simulator, sim_time; n_threads=1,
+                                                      check_nans=true)
+        end
     end
 
     @test Molly.calc_n_steps(n_steps, dt) == n_steps

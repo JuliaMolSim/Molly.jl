@@ -1070,6 +1070,14 @@ function System(;
         end
     end
 
+    for (label, arr) in (("coordinates", coords), ("velocities", vels))
+        if isnan_svec_array(arr)
+            c = count(isnan_svec, arr)
+            err_str = "NaNs found in $label, $c out of $(length(arr)) contain a NaN"
+            report_issue(err_str, strictness; error_type=NaNSimulationError)
+        end
+    end
+
     if !any(TT -> (pairwise_inters isa TT), (Tuple, NamedTuple))
         throw(ArgumentError("pairwise_inters should be a Tuple or a NamedTuple but has " *
                             "type $(typeof(pairwise_inters))"))

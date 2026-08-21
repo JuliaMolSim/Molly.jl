@@ -88,6 +88,12 @@ next_nograd!(::Nothing) = nothing
 update_nograd!(progress, val) = ProgressMeter.update!(progress, val)
 update_nograd!(::Nothing, val) = nothing
 
+struct NaNSimulationError <: Exception
+    msg::String
+end
+
+Base.showerror(io::IO, e::NaNSimulationError) = print(io, "NaNSimulationError: ", e.msg)
+
 default_check_nans(sys, sim) = true
 default_check_nans(::System{<:Any, <:AbstractGPUArray}, sim) = false
 
@@ -106,7 +112,7 @@ function check_array_nans(svec_arrays, labels, step_n)
             c = count(isnan_svec, svec_array)
             err_msg *= "\n    $label - $c out of $(length(svec_array)) contain a NaN"
         end
-        error(err_msg)
+        throw(NaNSimulationError(err_msg))
     end
 end
 
