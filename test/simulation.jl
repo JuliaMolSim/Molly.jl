@@ -1418,6 +1418,49 @@ end
             @test 290u"K" < mean(values(sys.loggers[1])[81:end]) < 310u"K"
             @test 2.95u"nm" < mean(values(sys.loggers[2])[81:end])[1, 1] < 3.05u"nm"
         end
+
+        # inner_step_neighbors recalculates the neighbors every inner step, giving correct
+        #   dynamics with no neighbor list buffer even when the neighbor finder would not
+        #   otherwise update the neighbors
+        sys = System(
+            joinpath(data_dir, "tip4pew.pdb"),
+            ff;
+            array_type=AT,
+            float_type=Float64,
+            nonbonded_method=:cutoff,
+            center_coords=false,
+            dist_buffer=0.0u"nm",
+        )
+        nf = sys.neighbor_finder
+        coords_start, velocities_start = copy(sys.coords), copy(sys.velocities)
+
+        function run_mts(inner_step_neighbors, n_steps_neighbors)
+            sys.coords .= coords_start
+            sys.velocities .= velocities_start
+            if nf isa GPUNeighborFinder
+                nf.n_steps_reorder = n_steps_neighbors
+            else
+                nf.n_steps = n_steps_neighbors
+            end
+            sim = MTSIntegrator(
+                dt=1.0u"fs",
+                pi_fractions=(1, 1),
+                si_fractions=(8, 4),
+                gi_fractions=(1,),
+                remove_CM_motion=false,
+                inner_step_neighbors=inner_step_neighbors,
+            )
+            simulate!(sys, sim, 100)
+            return copy(from_device(sys.coords))
+        end
+
+        # The neighbor finder cadence should make no difference when it is switched on
+        coords_isn    = run_mts(true , 10^9)
+        coords_isn_10 = run_mts(true , 10  )
+        # With it switched off the neighbors are never updated after the first step
+        coords_no_isn = run_mts(false, 10^9)
+        @test maximum(norm.(coords_isn .- coords_isn_10)) < 1e-10u"nm"
+        @test maximum(norm.(coords_isn .- coords_no_isn)) > 1e-3u"nm"
     end
 end
 
