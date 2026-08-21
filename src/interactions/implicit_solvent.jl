@@ -1302,7 +1302,7 @@ end
             f_i -= fdr
             gbsa_chunk_add!(chunk, j, fdr)
         end
-        gbsa_chunk_add!(chunk, i, f_i)
+        @noinline gbsa_chunk_add!(chunk, i, f_i) # @noinline avoids an Enzyme error on Julia 1.10
     end
     return nothing
 end

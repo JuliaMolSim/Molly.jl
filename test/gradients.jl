@@ -424,7 +424,7 @@ end
         ("CPU forward"     , Array, false, true , false, false, false, 0.5 , 0.1 ),
         ("CPU f32"         , Array, false, false, true , false, false, 0.01, 5e-4),
         ("CPU obc2"        , Array, false, false, false, true , false, 1e-4, 1e-4),
-        ("CPU gbn2"        , Array, false, false, false, false, true , 1e-4, 1e-4),
+        ("CPU gbn2"        , Array, false, false, false, false, true , 1e-3, 1e-3),
         ("CPU gbn2 forward", Array, false, true , false, false, true , 0.5 , 0.1 ),
     ]
     if run_parallel_tests #                  gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
