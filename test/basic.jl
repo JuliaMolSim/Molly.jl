@@ -387,7 +387,7 @@
         a2 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(7.0, 8.0)u"nm/ps"], AT)
         a3 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(NaN, 8.0)u"nm/ps"], AT)
         Molly.check_array_nans((a1, a2), ("a1", "a2"), 10)
-        @test_throws ErrorException Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
+        @test_throws NaNSimulationError Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
     end
 end
 
