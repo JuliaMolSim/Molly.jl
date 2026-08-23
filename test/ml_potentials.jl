@@ -496,8 +496,8 @@ end
         aevs_w_cpu = Molly.compute_aevs(coords_w, species_w, nothing, bdy, p, n_sp)
 
         # The KA kernel must match the scalar CPU path on every backend — CPU and each GPU in
-        # array_list. GPU kernels can diverge from the CPU path, so exercise them all.
-        for AT in array_list
+        # array_list_metal. GPU kernels can diverge from the CPU path, so exercise them all.
+        for AT in array_list_metal
             aevs_n2 = Array(Molly.compute_aevs_ka(AT(coords_n2), AT(species_n2), p, n_sp))
             @test aevs_n2 ≈ aevs_n2_cpu atol=1f-5
             aevs_w  = Array(Molly.compute_aevs_ka(AT(coords_w), AT(species_w), p, n_sp))
@@ -612,9 +612,9 @@ end
         coords32 = [SVector{3,Float32}(c) for c in coords]   # Metal is Float32-only
 
         # All-pairs and neighbour-list KA kernels must match the scalar CPU path on every
-        # backend — CPU and each GPU in array_list (kernels can diverge on GPU). Float32 coords
+        # backend — CPU and each GPU in array_list_metal (kernels can diverge on GPU). Float32 coords
         # so the same test runs on Metal; the tolerance absorbs the Float32-vs-Float64 difference.
-        for AT in array_list
+        for AT in array_list_metal
             cd = AT(coords32); sp = AT(species)
             be = KernelAbstractions.get_backend(cd)
             ka_ap = Array(Molly.compute_aevs_ka(cd, sp, p, n_sp; backend=be))
@@ -643,7 +643,7 @@ end
 
         # The finder NeighborList → device CSR path (nl_to_csr_device) must also run on the GPU
         # backends, where it copies the host pair list onto the device.
-        for AT in array_list
+        for AT in array_list_metal
             cd = AT(coords32); sp = AT(species)
             be = KernelAbstractions.get_backend(cd)
             ka_dev = Array(Molly.compute_aevs_ka(cd, sp, p, n_sp; backend=be, neighbors=nbrs))
@@ -796,7 +796,7 @@ end
 # ============================================================================
 # Test 20: GPU path from setup — build the System with GPU coordinates + the ANI interaction,
 #          then check that energy, forces and a short simulation match the CPU path. Runs over
-#          array_list (each GPU backend on CI); on a CPU-only machine it exercises Array. Uses a
+#          array_list_metal (each GPU backend on CI); on a CPU-only machine it exercises Array. Uses a
 #          unitless Float32 system (nm coordinates, Molly convention) so it also runs on Metal,
 #          which is Float32-only and cannot compile broadcasts over unit-carrying arrays.
 # ============================================================================
@@ -821,7 +821,7 @@ end
     E_cpu = potential_energy(sys_cpu)                                # kJ/mol (unitless)
     F_cpu = forces(sys_cpu)                                          # kJ/mol/nm
     maxf  = maximum(norm.(F_cpu))
-    for AT in array_list
+    for AT in array_list_metal
         sys = mksys(AT)
         @test isapprox(potential_energy(sys), E_cpu; rtol=1e-3)
         F = from_device(forces(sys))
@@ -830,7 +830,7 @@ end
     # Short simulation: CPU and each backend should reach the same coordinates.
     sim_ref = mksys(Array); simulate!(sim_ref, VelocityVerlet(dt=0.0005f0), 10)
     c_ref = from_device(sim_ref.coords)
-    for AT in array_list
+    for AT in array_list_metal
         sim = mksys(AT); simulate!(sim, VelocityVerlet(dt=0.0005f0), 10)
         @test maximum(norm.(from_device(sim.coords) .- c_ref)) < 1e-3
     end

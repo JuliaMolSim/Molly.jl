@@ -398,7 +398,7 @@ end
     # from_device on a CPU array is a no-op that avoids copying
     @test from_device(cpu) === cpu
 
-    for AT in array_list
+    for AT in array_list_metal
         dev = to_device(cpu, AT)
         @test dev isa AT
         @test Array(dev) == cpu

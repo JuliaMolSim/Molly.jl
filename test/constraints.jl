@@ -322,7 +322,7 @@ end
 
     constraint_algorithms = (SetupSHAKE_RATTLE(), SetupLINCS(n_rec=6, n_iter=6))
 
-    for AT in array_list
+    for AT in array_list_metal
         for constraint_algorithm in constraint_algorithms
             for rigid_water in (false, true)
                 sys = System(

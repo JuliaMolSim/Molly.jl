@@ -458,8 +458,10 @@ templates is carried out.
     use `CuArray` or `ROCArray` for GPU support.
 - `float_type`: the floating point type of the system, defaults to `Float64` on CPU
     and `Float32` on GPU.
-- `float_type_high=Float64`: the floating point type used for accumulation where
+- `float_type_high`: the floating point type used for accumulation where
     higher precision is useful, such as the potential energy and the virial.
+    `Float64` by default, or `float_type` on backends that do not support
+    `Float64` such as Metal.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
     classical neighbor lists every few steps. Not used by
@@ -527,7 +529,7 @@ function System(coord_file::AbstractString,
                 units::Bool=true,
                 array_type::Type{AT}=Array,
                 float_type=(array_type <: AbstractGPUArray ? Float32 : Float64),
-                float_type_high=Float64,
+                float_type_high=default_float_type_high(array_type, float_type),
                 dist_cutoff=add_units(1.0, u"nm", units),
                 dist_buffer=add_units(0.2, u"nm", units),
                 constraints=:none,

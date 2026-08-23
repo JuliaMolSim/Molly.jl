@@ -1212,7 +1212,7 @@ end
         coords = to_device(copy(f32 ? starting_coords_f32 : starting_coords), AT)
         velocities = to_device(copy(f32 ? starting_velocities_f32 : starting_velocities), AT)
         atoms = to_device([Atom(charge=zero(T), mass=atom_mass, σ=T(0.2)u"nm",
-                                ϵ=T(0.2)u"kJ * mol^-1") for i in 1:n_atoms], AT)
+                                ϵ=T(0.2)u"kJ * mol^-1", λ=one(T)) for i in 1:n_atoms], AT)
 
         sys = System(
             atoms=atoms,

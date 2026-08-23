@@ -1764,7 +1764,7 @@ end
 
     ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
 
-    for AT in array_list
+    for AT in array_list_metal
         for T in (Float64, Float32)
             if T == Float64 && AT == MtlArray
                 continue
@@ -1841,7 +1841,7 @@ end
     )
 
     for (pdb_fp, E_openmm, Fs_openmm) in pme_data
-        for AT in array_list
+        for AT in array_list_metal
             for T in (Float64, Float32)
                 if T == Float64 && AT == MtlArray
                     continue

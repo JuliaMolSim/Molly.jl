@@ -186,7 +186,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
 - `awh_sim::AWHSimulation`: The [`AWHSimulation`](@ref) struct defining the AWH parameters and state.
 - `n_steps::Int`: The total number of molecular dynamics steps to perform.
 """
-@inline function simulate!(sys,
+@inline function simulate!(sys::System{<:Any, <:Any, T},
                            sim::SteepestDescentMinimizer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=false,
@@ -195,7 +195,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness()) where T
     # @inline needed to avoid Enzyme error
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
@@ -228,7 +228,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                    strictness=strictness, current_potential_energy=E)
     println(sim.log_stream, "Step ", init_step, " - potential energy ", E,
             " - max force N/A - N/A")
-    hn = sim.step_size
+    hn = T(sim.step_size)
     coords_copy = zero(sys.coords)
     F = zero_forces(sys)
     check_nan_labels = ("coordinates", "forces")

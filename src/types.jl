@@ -680,12 +680,27 @@ n_atoms_to_n_pairs(n_atoms::Integer) = (n_atoms * (n_atoms - 1)) ÷ 2
 
 Base.length(nl::NoNeighborList) = n_atoms_to_n_pairs(nl.n_atoms)
 
-function pair_index(n_atoms::Integer, ind::Integer)
-    kz = ind - 1
-    iz = n_atoms - 2 - Int(floor(sqrt(-8 * kz + 4 * n_atoms * (n_atoms - 1) - 7) / 2 - 0.5))
-    jz = kz + iz + 1 - (n_atoms * (n_atoms - 1)) ÷ 2 + ((n_atoms - iz) * ((n_atoms - iz) - 1)) ÷ 2
-    i = iz + 1
-    j = jz + 1
+# Zero-based index of the first pair whose zero-based first atom is iz
+@inline pair_row_start(n_atoms::Integer, iz::Integer) = iz * (n_atoms - 1) - (iz * (iz - 1)) ÷ 2
+
+# Map a one-based index over the n_atoms * (n_atoms - 1) ÷ 2 pairs to the pair (i, j), i < j
+# The square root is taken in Float32 since Metal GPUs do not support Float64, so the initial
+#   estimate of i can be off by one or more for large n_atoms and is corrected below using
+#   exact integer arithmetic, which also makes the result the same on all backends
+@inline function pair_index(n_atoms::Integer, ind::Integer)
+    n, kz = promote(n_atoms, ind - one(ind))
+    T = typeof(n)
+    disc = 4 * n * (n - 1) - 7 - 8 * kz
+    iz = min(max(n - 2 - unsafe_trunc(T, sqrt(Float32(disc)) / 2.0f0 - 0.5f0), zero(T)), n - 2)
+    while iz > 0 && pair_row_start(n, iz) > kz
+        iz -= one(T)
+    end
+    while iz < n - 2 && pair_row_start(n, iz + one(T)) <= kz
+        iz += one(T)
+    end
+    jz = kz - pair_row_start(n, iz) + iz + one(T)
+    i = iz + one(T)
+    j = jz + one(T)
     return i, j
 end
 
@@ -762,6 +777,26 @@ function check_float_types(T, TH)
         throw(ArgumentError("float_type is $T and float_type_high is $TH, which appears " *
                             "to be a lower precision type"))
     end
+end
+
+# The default value of float_type_high, which is Float64 unless the backend does not
+#   support Float64 (Metal), in which case the general float type is used
+function default_float_type_high(backend::Backend, ::Type{T}) where T
+    return (KernelAbstractions.supports_float64(backend) ? Float64 : T)
+end
+
+default_float_type_high(::AbstractArray, ::Type{T}) where {T} = Float64
+
+function default_float_type_high(arr::AbstractGPUArray, ::Type{T}) where T
+    return default_float_type_high(get_backend(arr), T)
+end
+
+default_float_type_high(::Type{<:AbstractArray}, ::Type{T}) where {T} = Float64
+
+function default_float_type_high(::Type{AT}, ::Type{T}) where {AT <: AbstractGPUArray, T}
+    # get_backend requires an array rather than an array type, Float32 is used to make
+    #   the array since it is supported by every backend
+    return default_float_type_high(get_backend(AT{Float32}(undef, 0)), T)
 end
 
 function check_n_dims(coords::AbstractVector{SVector{DC, C}},
@@ -936,8 +971,10 @@ minimum box side, are reported according to `strictness`.
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `float_type::T`: the floating point type of the system, read from the boundary
     by default.
-- `float_type_high::TH=Float64`: the floating point type used for accumulation where
+- `float_type_high::TH`: the floating point type used for accumulation where
     higher precision is useful, such as the potential energy and the virial.
+    `Float64` by default, or `float_type` on backends that do not support
+    `Float64` such as Metal.
 - `data::DA=nothing`: arbitrary data associated with the system.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
@@ -987,7 +1024,7 @@ function System(;
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
                 float_type=float_type(boundary),
-                float_type_high=Float64,
+                float_type_high=default_float_type_high(coords, float_type),
                 data=nothing,
                 launch_config=CUDALaunchConfig(),
                 strictness=default_strictness())

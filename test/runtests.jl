@@ -103,6 +103,9 @@ else
     @warn "The Metal tests will not be run as a Metal-enabled device is not available"
 end
 
+# Metal only supports 32 bit precision, so MtlArray can not be added to array_list
+const array_list_metal = (run_metal_tests ? (array_list..., MtlArray) : array_list)
+
 const data_dir = normpath(@__DIR__, "..", "data")
 const ff_dir     = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
