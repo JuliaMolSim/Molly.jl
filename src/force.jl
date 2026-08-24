@@ -660,7 +660,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
 
     coords_reordered = zero(sys.coords)
     velocities_reordered = zero(sys.velocities)
-    atoms_reordered = zero(sys.atoms)
+    atoms_reordered = zero.(sys.atoms)
 
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
