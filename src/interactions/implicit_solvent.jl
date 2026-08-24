@@ -1189,8 +1189,9 @@ end
     Bs, B_grads = inter.buffer_Bs, inter.buffer_B_grads
     B_unit = oneunit(eltype(Bs))
     @inbounds for i in gbsa_chunk_range(n_atoms, chunk_i, n_chunks)
+        ori = ustrip(lu, or[i])
         I_sum = born_radii_partial(coords, or, sor, neck, sqdist_cutoff, bnd, i, 1:n_atoms)
-        B, B_grad = born_radii_sum(ustrip(lu, or[i]), offset, I_sum, atom_param(αs, i),
+        B, B_grad = born_radii_sum(ori, offset, I_sum, atom_param(αs, i),
                                    atom_param(βs, i), atom_param(γs, i))
         Bs[i] = B * B_unit
         B_grads[i] = B_grad
