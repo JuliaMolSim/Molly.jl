@@ -126,6 +126,16 @@ copy_to_bitmatrix(x::BitMatrix) = copy(x)
 copy_to_bitmatrix(x) = BitMatrix(Array(x))
 
 #=
+    to_bitmatrix(x)
+
+Convert a given matrix `x` to a `BitMatrix`, returning it unchanged if it is already one.
+
+Unlike `copy_to_bitmatrix` this does not copy, so the result should not be modified.
+=#
+to_bitmatrix(x::BitMatrix) = x
+to_bitmatrix(x) = BitMatrix(Array(x))
+
+#=
     gpu_exception_vector_type(eligible, device_vector_type)
 
 Determine or validate the 1D `Int32` array type for storing sparse GPU exceptions.

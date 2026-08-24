@@ -23,10 +23,11 @@ function cmap_coefficients(n, mp::Vector{E}) where E
     c = cmap_map_derivatives(n, mp)
     coeff_matrix = Matrix{E}(undef, n*n*4, 4)
     for j in 1:(n*n)
-        coeff_matrix[(j-1)*4+1, :] .= c[j, 1:4]
-        coeff_matrix[(j-1)*4+2, :] .= c[j, 5:8]
-        coeff_matrix[(j-1)*4+3, :] .= c[j, 9:12]
-        coeff_matrix[(j-1)*4+4, :] .= c[j, 13:16]
+        for row in 1:4
+            for col in 1:4
+                coeff_matrix[(j-1)*4+row, col] = c[j, (row-1)*4+col]
+            end
+        end
     end
     return coeff_matrix
 end

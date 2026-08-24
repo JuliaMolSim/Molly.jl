@@ -786,6 +786,36 @@ end
     )
 end
 
+@testset "Ewald excluded pairs" begin
+    # Reference implementation of Molly.find_excluded_pairs, which scans the masks
+    #   64 entries at a time
+    function ref_excluded_pairs(eligible, special)
+        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
+        eligible_ref = (isnothing(eligible) ? trues( n_atoms, n_atoms) : eligible)
+        special_ref  = (isnothing(special ) ? falses(n_atoms, n_atoms) : special )
+        return [(Int32(i), Int32(j)) for i in 1:n_atoms for j in (i + 1):n_atoms
+                if !eligible_ref[i, j] || special_ref[i, j]]
+    end
+
+    Random.seed!(1234)
+    @test Molly.find_excluded_pairs(nothing, nothing) == Tuple{Int32, Int32}[]
+    for n_atoms in (1, 2, 8, 63, 64, 65, 127, 128, 129, 200)
+        eligible = trues(n_atoms, n_atoms)
+        special = falses(n_atoms, n_atoms)
+        for _ in 1:(2 * n_atoms)
+            i, j = rand(1:n_atoms), rand(1:n_atoms)
+            eligible[i, j] = false
+            special[rand(1:n_atoms), rand(1:n_atoms)] = true
+        end
+        @test Molly.find_excluded_pairs(eligible, special) ==
+                    ref_excluded_pairs(eligible, special)
+        @test Molly.find_excluded_pairs(eligible, nothing) ==
+                    ref_excluded_pairs(eligible, nothing)
+        @test Molly.find_excluded_pairs(nothing, special) ==
+                    ref_excluded_pairs(nothing, special)
+    end
+end
+
 @testset "GPUNeighborFinder sparse metadata" begin
     nf = GPUNeighborFinder(
         n_atoms=4,

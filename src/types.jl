@@ -1640,6 +1640,7 @@ end
 
 # Avoid unnecessary Array calls on CPU
 from_device(x::Array) = x
+from_device(x::BitArray) = x
 from_device(x) = Array(x)
 from_device(x::StructArray) = replace_storage(Array, x)
 

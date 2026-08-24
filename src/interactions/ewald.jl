@@ -1125,15 +1125,43 @@ function find_excluded_pairs(eligible, special)
     excluded_pairs = Tuple{Int32, Int32}[]
     if !(isnothing(eligible) && isnothing(special))
         n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
-        eligible_cpu = (isnothing(eligible) ? trues( n_atoms, n_atoms) : from_device(eligible))
-        special_cpu  = (isnothing(special ) ? falses(n_atoms, n_atoms) : from_device(special ))
-        for i in 1:n_atoms
-            for j in (i+1):n_atoms
-                if !eligible_cpu[i, j] || special_cpu[i, j]
-                    push!(excluded_pairs, (Int32(i), Int32(j)))
+        eligible_cpu = (isnothing(eligible) ? nothing : to_bitmatrix(from_device(eligible)))
+        special_cpu  = (isnothing(special ) ? nothing : to_bitmatrix(from_device(special )))
+        # Only a small fraction of the n_atoms^2 entries are excluded, so scan the mask
+        #   64 entries at a time and skip the chunks with nothing set
+        n_entries = n_atoms * n_atoms
+        n_chunks = cld(n_entries, 64)
+        eligible_chunks = (isnothing(eligible_cpu) ? nothing : eligible_cpu.chunks)
+        special_chunks  = (isnothing(special_cpu ) ? nothing : special_cpu.chunks )
+        # Bits past the end of the last chunk are unset in a BitArray but are set by the
+        #   negation below, so mask them off
+        end_mask = ~zero(UInt64) >>> ((-n_entries) & 63)
+        for ci in 1:n_chunks
+            # A missing eligible matrix means every pair is eligible, a missing special
+            #   matrix means no pair is special, so neither excludes anything
+            chunk = zero(UInt64)
+            if !isnothing(eligible_chunks)
+                chunk = ~eligible_chunks[ci]
+            end
+            if !isnothing(special_chunks)
+                chunk |= special_chunks[ci]
+            end
+            if ci == n_chunks
+                chunk &= end_mask
+            end
+            while !iszero(chunk)
+                # Column-major linear index of the set bit, zero-based
+                li = (ci - 1) * 64 + trailing_zeros(chunk)
+                j, i = divrem(li, n_atoms)
+                if i < j
+                    push!(excluded_pairs, (Int32(i + 1), Int32(j + 1)))
                 end
+                chunk &= chunk - one(UInt64)
             end
         end
+        # The scan runs down the columns, sort to give the same order as looping over
+        #   i and then j
+        sort!(excluded_pairs)
     end
     return excluded_pairs
 end

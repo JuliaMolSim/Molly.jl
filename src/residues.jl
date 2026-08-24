@@ -38,47 +38,46 @@ struct ResidueGraph
     external_bonds::Vector{Int} # Count of external connections per atom
 end
 
-function atom_name_from_index(atom_idx, canon_system)
+# Lookup from global atom index to the chain, residue number, residue graph and index of
+#   the atom within that residue
+# Scanning the canonical system for each atom is O(n_atoms) per query, so the lookup is
+#   built once and shared by the accessors below
+const AtomResidueLookup = Dict{Int, Tuple{String, Int, ResidueGraph, Int}}
+
+function build_atom_residue_lookup(canon_system)
+    lookup = AtomResidueLookup()
     for (chain, resids) in canon_system
         for (res_id, rgraph) in resids
-            if !(atom_idx in rgraph.atom_inds)
-                continue
-            else
-                local_idx = findfirst(isequal(atom_idx), rgraph.atom_inds)
-                return rgraph.atom_names[local_idx]
+            for (local_idx, atom_idx) in enumerate(rgraph.atom_inds)
+                lookup[atom_idx] = (chain, res_id, rgraph, local_idx)
             end
         end
     end
+    return lookup
 end
 
-function residue_from_atom_idx(atom_idx, canon_system)
-    for (chain, resids) in canon_system
-        for (res_id, rgraph) in resids
-            if atom_idx in rgraph.atom_inds
-                return rgraph
-            end
-        end
-    end
+function atom_name_from_index(atom_idx, lookup::AtomResidueLookup)
+    entry = get(lookup, atom_idx, nothing)
+    isnothing(entry) && return nothing
+    return entry[3].atom_names[entry[4]]
 end
 
-function resnum_from_atom_idx(atom_idx, canon_system)
-    for (chain, resids) in canon_system
-        for (res_id, rgraph) in resids
-            if atom_idx in rgraph.atom_inds
-                return res_id
-            end
-        end
-    end
+function residue_from_atom_idx(atom_idx, lookup::AtomResidueLookup)
+    entry = get(lookup, atom_idx, nothing)
+    isnothing(entry) && return nothing
+    return entry[3]
 end
 
-function chain_from_atom_idx(atom_idx, canon_system)
-    for (chain, resids) in canon_system
-        for (res_id, rgraph) in resids
-            if atom_idx in rgraph.atom_inds
-                return chain
-            end
-        end
-    end
+function resnum_from_atom_idx(atom_idx, lookup::AtomResidueLookup)
+    entry = get(lookup, atom_idx, nothing)
+    isnothing(entry) && return nothing
+    return entry[2]
+end
+
+function chain_from_atom_idx(atom_idx, lookup::AtomResidueLookup)
+    entry = get(lookup, atom_idx, nothing)
+    isnothing(entry) && return nothing
+    return entry[1]
 end
 
 # Fill d with every attribute value of each <Atom> mapping to the canonical name
@@ -189,6 +188,7 @@ end
 #   template bonds
 function create_bonds!(canon_sys, standard_bonds)
     bonds = Tuple{Int, Int}[]
+    bond_set = Set{Tuple{Int, Int}}() # Mirrors bonds to make the lookup below fast
 
     for (chain, resids) in canon_sys
         n_resids = length(resids)
@@ -261,8 +261,9 @@ function create_bonds!(canon_sys, standard_bonds)
                         atom1 = atom_maps[fromResidue][fromAtom]
                         atom2 = atom_maps[toResidue][toAtom]
                         pair = (atom1 < atom2 ? (atom1, atom2) : (atom2, atom1))
-                        if !(pair in bonds)
+                        if !(pair in bond_set)
                             push!(bonds, pair)
+                            push!(bond_set, pair)
                             if !external
                                 i_local = findfirst(isequal(fromAtom), rgraph.atom_names)
                                 j_local = findfirst(isequal(toAtom),   rgraph.atom_names)
@@ -280,7 +281,7 @@ function create_bonds!(canon_sys, standard_bonds)
 end
 
 # Builds disulfide bonds given some geometric criteria
-function create_disulfide_bonds(coords, boundary, canon_system, bonds)
+function create_disulfide_bonds(coords, boundary, canon_system, atom_lookup, bonds)
     function is_cysx(rgraph::ResidueGraph)
         names = rgraph.atom_names
         return ("SG" in names && !("HG" in names))
@@ -288,8 +289,8 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
 
     function is_disulfide_bonded(atom_idx)
         for b in bonds
-            atom_name_i = atom_name_from_index(b[1], canon_system)
-            atom_name_j = atom_name_from_index(b[2], canon_system)
+            atom_name_i = atom_name_from_index(b[1], atom_lookup)
+            atom_name_j = atom_name_from_index(b[2], atom_lookup)
             if atom_idx in b && atom_name_i == "SG" && atom_name_j == "SG"
                 return true
             end
@@ -347,27 +348,28 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
 end
 
 # Add bonds only if they have not been added by the previous steps
-function read_extra_bonds!(canonical_system, top, top_bonds)
+function read_extra_bonds!(atom_lookup, top, top_bonds)
     chfl_bonds = Vector{Int}[is .+ 1 for is in eachcol(Int.(Chemfiles.bonds(top)))]
+    top_bond_set = Set(top_bonds)
     for (i, j) in chfl_bonds
-        res_i = residue_from_atom_idx(i, canonical_system)
-        res_j = residue_from_atom_idx(j, canonical_system)
+        _, _, res_i, local_idx = atom_lookup[i]
+        _, _, res_j, local_jdx = atom_lookup[j]
         pair = (i < j ? (i, j) : (j, i))
-        local_idx = findfirst(isequal(i), res_i.atom_inds)
-        local_jdx = findfirst(isequal(j), res_j.atom_inds)
         if res_i == res_j
             local_pair = (local_idx < local_jdx ? (local_idx, local_jdx) : (local_jdx, local_idx))
-            if !(pair in top_bonds)
+            if !(pair in top_bond_set)
                 push!(top_bonds, pair)
+                push!(top_bond_set, pair)
                 if !(local_pair in res_i.bonds)
                     push!(res_i.bonds, local_pair)
                 end
             end
         else
-            if !(pair in top_bonds)
+            if !(pair in top_bond_set)
                 res_i.external_bonds[local_idx] += 1
                 res_j.external_bonds[local_jdx] += 1
                 push!(top_bonds, pair)
+                push!(top_bond_set, pair)
             end
         end
     end
@@ -389,18 +391,21 @@ function match_residue_to_template(res::ResidueGraph,
     is_extra_tpl(j) = tpl.extras[j]
 
     # 1) Select atoms to consider
+    # Most candidate templates are rejected on atom count alone, so check that before
+    #   allocating the index vectors
     if ignoreExtraParticles
+        n_res_keep = count(i -> !is_extra_res(i), eachindex(res.atom_names))
+        n_tpl_keep = count(j -> !is_extra_tpl(j), eachindex(tpl.atoms))
+        n_res_keep == n_tpl_keep || return nothing
         res_keep = findall(i -> !is_extra_res(i), eachindex(res.atom_names))
         tpl_keep = findall(j -> !is_extra_tpl(j), eachindex(tpl.atoms))
     else
+        length(res.atom_names) == length(tpl.atoms) || return nothing
         res_keep = collect(eachindex(res.atom_names))
         tpl_keep = collect(eachindex(tpl.atoms))
     end
 
     numAtoms = length(res_keep)
-    if numAtoms != length(tpl_keep)
-        return nothing
-    end
     if numAtoms == 0
         return Int[] # Both empty after filtering → vacuous match
     end
@@ -600,18 +605,60 @@ function match_residue_to_template(res::ResidueGraph,
     return [tpl_new2old[t_new] for t_new in matches_tpl_in_res_order]
 end
 
+# Everything match_residue depends on for a given residue graph
+# Systems commonly contain many copies of the same residue, e.g. water, so the matching
+#   result is cached against this key rather than being recomputed for each copy
+const ResidueMatchKey = Tuple{String, Vector{String}, Vector{Symbol}, Vector{Tuple{Int, Int}},
+                              Vector{Int}}
+
+residue_match_key(rgraph::ResidueGraph) = (rgraph.res_name, rgraph.atom_names, rgraph.elements,
+                                           rgraph.bonds, rgraph.external_bonds)
+
+# The key holds references to the mutable fields of the residue graph, so take copies
+#   before storing it in the cache
+copy_residue_match_key(k::ResidueMatchKey) = (k[1], copy(k[2]), copy(k[3]), copy(k[4]), copy(k[5]))
+
 # Match a residue read from a structure file to a residue template in the force field
 # A template with the same name as the residue is preferred, otherwise all templates are
 #   checked in name order so that the assignment does not depend on dictionary ordering
 # Returns the template and the mapping from residue atoms to template atoms, or
 #   (nothing, nothing) if no template matches
 function match_residue(rgraph::ResidueGraph, force_field, sorted_template_names,
-                       chain, res_id, strictness)
+                       chain, res_id, strictness, match_cache=nothing)
+    key = residue_match_key(rgraph)
+    cached = (isnothing(match_cache) ? nothing : get(match_cache, key, nothing))
+    if isnothing(cached)
+        template, matches, name_1, ambiguous = find_residue_match(rgraph, force_field,
+                                                                  sorted_template_names)
+        if !isnothing(match_cache)
+            match_cache[copy_residue_match_key(key)] = (template, matches, name_1, ambiguous)
+        end
+    else
+        template, matches, name_1, ambiguous = cached
+    end
+
+    # Multiple matching templates are only unambiguous if they assign the same atom
+    #   types and charges to every atom
+    if !isnothing(ambiguous) && length(ambiguous) > 0
+        err_str = "residue $(rgraph.res_name) (residue number $res_id of chain " *
+                  "\"$chain\") matches multiple residue templates that assign " *
+                  "different parameters: $(join([name_1; ambiguous], ", ")). " *
+                  "Template $name_1 was used, rename the residue in the structure " *
+                  "file to select a different one."
+        report_issue(err_str, strictness)
+    end
+    return template, matches
+end
+
+# Find the template matching a residue graph, along with the names of any other templates
+#   that match it but assign different parameters
+# Depends only on the residue graph and the force field, so the result can be cached
+function find_residue_match(rgraph::ResidueGraph, force_field, sorted_template_names)
     templates = force_field.residues
     if haskey(templates, rgraph.res_name)
         template = templates[rgraph.res_name]
         matches = match_residue_to_template(rgraph, template)
-        isnothing(matches) || return template, matches
+        isnothing(matches) || return template, matches, rgraph.res_name, nothing
     end
 
     matched_names, matched_lists = String[], Vector{Int}[]
@@ -623,14 +670,12 @@ function match_residue(rgraph::ResidueGraph, force_field, sorted_template_names,
             push!(matched_lists, matches)
         end
     end
-    length(matched_names) == 0 && return nothing, nothing
+    length(matched_names) == 0 && return nothing, nothing, nothing, nothing
 
-    # Multiple matching templates are only unambiguous if they assign the same atom
-    #   types and charges to every atom
+    name_1, matches_1 = matched_names[1], matched_lists[1]
+    ambiguous = String[]
     if length(matched_names) > 1
-        name_1, matches_1 = matched_names[1], matched_lists[1]
         templ_1 = templates[name_1]
-        ambiguous = String[]
         for (name_2, matches_2) in zip(matched_names[2:end], matched_lists[2:end])
             templ_2 = templates[name_2]
             same = all(zip(matches_1, matches_2)) do (m1, m2)
@@ -639,16 +684,8 @@ function match_residue(rgraph::ResidueGraph, force_field, sorted_template_names,
             end
             same || push!(ambiguous, name_2)
         end
-        if length(ambiguous) > 0
-            err_str = "residue $(rgraph.res_name) (residue number $res_id of chain " *
-                      "\"$chain\") matches multiple residue templates that assign " *
-                      "different parameters: $(join([name_1; ambiguous], ", ")). " *
-                      "Template $name_1 was used, rename the residue in the structure " *
-                      "file to select a different one."
-            report_issue(err_str, strictness)
-        end
     end
-    return templates[matched_names[1]], matched_lists[1]
+    return templates[name_1], matches_1, name_1, ambiguous
 end
 
 function count_occurrences(items)

@@ -93,6 +93,10 @@ function validate_angle_constraints(dist_constraints, angle_constraints)
         push!(dist_atoms, dc.i, dc.j)
     end
 
+    # Index of the angle constraint each atom appears in, so that shared atoms can be
+    #   found without comparing every pair of angle constraints
+    angle_atoms = Dict{Int, Int}()
+
     for (idx, ac) in enumerate(angle_constraints)
         ac_atoms = (ac.i, ac.j, ac.k)
         for a in ac_atoms
@@ -104,17 +108,18 @@ function validate_angle_constraints(dist_constraints, angle_constraints)
             end
         end
 
-        for (idx2, ac2) in enumerate(angle_constraints)
-            idx2 == idx && continue
-            ac2_atoms = (ac2.i, ac2.j, ac2.k)
-            for a in ac_atoms
-                if a in ac2_atoms
-                    throw(ArgumentError(
-                        "angle constraint $idx (atoms $(ac.i)/$(ac.j)/$(ac.k)) shares " *
-                        "atom $a with angle constraint $idx2 (atoms $(ac2.i)/$(ac2.j)/$(ac2.k)); " *
-                        "LINCS requires angle constraints to be isolated"))
-                end
+        for a in ac_atoms
+            idx2 = get(angle_atoms, a, 0)
+            if !iszero(idx2)
+                ac2 = angle_constraints[idx2]
+                throw(ArgumentError(
+                    "angle constraint $idx (atoms $(ac.i)/$(ac.j)/$(ac.k)) shares " *
+                    "atom $a with angle constraint $idx2 (atoms $(ac2.i)/$(ac2.j)/$(ac2.k)); " *
+                    "LINCS requires angle constraints to be isolated"))
             end
+        end
+        for a in ac_atoms
+            angle_atoms[a] = idx
         end
     end
 end

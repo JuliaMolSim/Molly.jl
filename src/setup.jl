@@ -145,17 +145,13 @@ function chemfiles_residue(top, ai)
     return Chemfiles.Residue(Chemfiles.CxxPointer(ptr, is_const=true))
 end
 
-function chemfiles_residue_for_atom(top, ai)
-    ptr = Chemfiles.lib.chfl_residue_for_atom(Chemfiles.__ptr(top), UInt64(ai))
-    return Chemfiles.Residue(Chemfiles.CxxPointer(ptr, is_const=true))
-end
-
-function chemfiles_name(top, ai)
+function chemfiles_atom(top, ai)
     ptr_raw = Chemfiles.lib.chfl_atom_from_topology(Chemfiles.__ptr(top), UInt64(ai))
     ptr = Chemfiles.@__check_ptr(ptr_raw)
-    at = Chemfiles.Atom(Chemfiles.CxxPointer(ptr, is_const=false))
-    return Chemfiles.name(at)
+    return Chemfiles.Atom(Chemfiles.CxxPointer(ptr, is_const=false))
 end
+
+chemfiles_name(top, ai) = Chemfiles.name(chemfiles_atom(top, ai))
 
 # Creates a Dict representation of the system Chains -> Residues -> Graphs
 # It is useful to have all the necessary data in one hashable object
@@ -187,37 +183,37 @@ function canonicalize_system(top, resname_replacements, atomname_replacements)
             atom_inds_zero = Int.(Chemfiles.atoms(res))
         end
         atom_inds = atom_inds_zero .+ 1
-        atom_names = Molly.chemfiles_name.((top,), atom_inds_zero)
-        atom_elements = Symbol[]
-        for atom_idx in atom_inds_zero
-            atom = Chemfiles.Atom(top, atom_idx)
+        atom_names = Vector{String}(undef, length(atom_inds_zero))
+        atom_elements = Vector{Symbol}(undef, length(atom_inds_zero))
+        for (li, atom_idx) in enumerate(atom_inds_zero)
+            # Reading the atom in place avoids the copy and explicit finalize done by
+            #   Chemfiles.Atom(top, atom_idx), which is slow when repeated for each atom
+            atom = chemfiles_atom(top, atom_idx)
+            atom_name = Chemfiles.name(atom)
+            atom_names[li] = atom_name
             an = Int(Chemfiles.atomic_number(atom))
             # Chemfiles treats e.g. "C" but not "C2" as carbon
             # Here we search for elements after removing numbers, so "C2" is treated as carbon
             # Cases that are ambiguous, such as "CA" with calcium, are not assigned (i.e. X)
             if iszero(an)
-                atom_name_nonum = replace(Chemfiles.name(atom), r"\d+" => "")
+                atom_name_nonum = replace(atom_name, r"\d+" => "")
                 element_symbol = Symbol(atom_name_nonum)
                 if haskey(PeriodicTable.elements, element_symbol)
                     an = PeriodicTable.elements[element_symbol].number
                 end
             end
             if iszero(an) # Extra particle returns 0 from chemfiles
-                push!(atom_elements, :X)
+                atom_elements[li] = :X
             else
-                elm_str = PeriodicTable.elements[an].symbol
-                push!(atom_elements, Symbol(elm_str))
+                atom_elements[li] = Symbol(PeriodicTable.elements[an].symbol)
             end
         end
         if haskey(atomname_replacements, res_name)
             lookup = atomname_replacements[res_name]
-            atom_names = [(haskey(lookup, a) ? (lookup[a], aidx+1) : (a, aidx+1))
-                          for (a, aidx) in zip(atom_names, atom_inds_zero)]
-        else
-            atom_names = [(a, aidx+1) for (a, aidx) in zip(atom_names, atom_inds_zero)]
+            atom_names = [get(lookup, a, a) for a in atom_names]
         end
 
-        rgraph = ResidueGraph(res_name, atom_inds, [a[1] for a in atom_names], atom_elements,
+        rgraph = ResidueGraph(res_name, atom_inds, atom_names, atom_elements,
                               Tuple{Int,Int}[], fill(0, length(atom_inds)))
 
         if !haskey(canon_system, res_id[2])
@@ -675,11 +671,14 @@ function System(coord_file::AbstractString,
     canonical_system, assume_one_res = canonicalize_system(top, resname_replacements,
                                                                     atomname_replacements)
 
+    atom_lookup = build_atom_residue_lookup(canonical_system)
+
     top_bonds = create_bonds!(canonical_system, standard_bonds)
     if disulfide_bonds
-        top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system, top_bonds)
+        top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system,
+                                           atom_lookup, top_bonds)
     end
-    top_bonds = read_extra_bonds!(canonical_system, top, top_bonds)
+    top_bonds = read_extra_bonds!(atom_lookup, top, top_bonds)
 
     # Templates are checked in name order so that the assignment is reproducible
     sorted_template_names = sort(collect(keys(force_field.residues)))
@@ -688,12 +687,21 @@ function System(coord_file::AbstractString,
     charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
+    # Index of each atom type in the force field, avoiding repeated linear searches
+    atom_type_index = Dict{String, Int}(at => i
+                                        for (i, at) in enumerate(force_field.atom_type_order))
 
     virtual_sites = VirtualSite{T, IC}[]
+    # Identical residues, e.g. the water molecules in a solvated system, match the same
+    #   template so the search is only carried out once for each distinct residue
+    match_cache = Dict{ResidueMatchKey, Tuple{Union{ResidueTemplate, Nothing},
+                                              Union{Vector{Int}, Nothing},
+                                              Union{String, Nothing},
+                                              Union{Vector{String}, Nothing}}}()
     for (chain, resids) in canonical_system
         for (res_id, rgraph) in resids
             template, matches = match_residue(rgraph, force_field, sorted_template_names,
-                                              chain, res_id, strictness)
+                                              chain, res_id, strictness, match_cache)
             matched = !isnothing(matches)
             if matched
                 for (r_i, m_i) in enumerate(matches)
@@ -749,12 +757,31 @@ function System(coord_file::AbstractString,
     ϵs_14 = (units ? typeof(one(T) * u"kJ * mol^-1")[] : T[])
     separate_lj14 = force_separate_lj14
 
+    # Whether each atom belongs to a residue that is not a standard PDB residue
+    # The Chemfiles property is read once per residue rather than once per atom
+    hetero_atoms = fill(assume_one_res, n_atoms)
+    if !assume_one_res
+        for ri in 1:Chemfiles.count_residues(top)
+            res_cfl = chemfiles_residue(top, ri - 1)
+            if "is_standard_pdb" in Chemfiles.list_properties(res_cfl)
+                hetero_res = !Chemfiles.property(res_cfl, "is_standard_pdb")
+            else
+                hetero_res = false
+            end
+            if hetero_res
+                for ai_zero in Chemfiles.atoms(res_cfl)
+                    hetero_atoms[Int(ai_zero) + 1] = true
+                end
+            end
+        end
+    end
+
     # Atoms
     for ai in 1:n_atoms
         atype = atom_type_of[ai]
         at = force_field.atom_types[atype]
         # Convert atom type to an index
-        ati = findfirst(isequal(atype), force_field.atom_type_order)
+        ati = get(atom_type_index, atype, nothing)
         if (units && T(at.σ) < zero(T)u"nm") || (!units && T(at.σ) < zero(T))
             error("atom $ai type $atype has unset σ or ϵ")
         end
@@ -791,25 +818,15 @@ function System(coord_file::AbstractString,
             push!(ϵs_14, T(at.ϵ))
         end
 
-        res = residue_from_atom_idx(ai, canonical_system)
-        if assume_one_res
-            hetero = true
-        else
-            res_cfl = chemfiles_residue_for_atom(top, ai - 1)
-            if "is_standard_pdb" in Chemfiles.list_properties(res_cfl)
-                hetero = !Chemfiles.property(res_cfl, "is_standard_pdb")
-            else
-                hetero = false
-            end
-        end
+        chain_ai, resnum_ai, res, local_idx_ai = atom_lookup[ai]
         push!(atoms_data, AtomData(
             atom_type=atype,
-            atom_name=atom_name_from_index(ai, canonical_system),
-            res_number=resnum_from_atom_idx(ai, canonical_system),
+            atom_name=res.atom_names[local_idx_ai],
+            res_number=resnum_ai,
             res_name=res.res_name,
-            chain_id=chain_from_atom_idx(ai, canonical_system),
+            chain_id=chain_ai,
             element=element_of[ai],
-            hetero_atom=hetero,
+            hetero_atom=hetero_atoms[ai],
         ))
         eligible[ai, ai] = false
     end
@@ -932,17 +949,9 @@ function System(coord_file::AbstractString,
         end
 
         # topology indices for current j,k,l
-        r2 = resnum_from_atom_idx(j, canonical_system)
-        r3 = resnum_from_atom_idx(k, canonical_system)
-        r4 = resnum_from_atom_idx(l, canonical_system)
-
-        res2 = residue_from_atom_idx(j, canonical_system)
-        res3 = residue_from_atom_idx(k, canonical_system)
-        res4 = residue_from_atom_idx(l, canonical_system)
-
-        ta2 = findfirst(isequal(j), res2.atom_inds)
-        ta3 = findfirst(isequal(k), res3.atom_inds)
-        ta4 = findfirst(isequal(l), res4.atom_inds)
+        _, r2, res2, ta2 = atom_lookup[j]
+        _, r3, res3, ta3 = atom_lookup[k]
+        _, r4, res4, ta4 = atom_lookup[l]
 
         e2 = Symbol(element_of[j])
         e3 = Symbol(element_of[k])
@@ -1092,17 +1101,9 @@ function System(coord_file::AbstractString,
         end
 
         # topology indices for current j,k,l
-        r2 = resnum_from_atom_idx(j, canonical_system)
-        r3 = resnum_from_atom_idx(k, canonical_system)
-        r4 = resnum_from_atom_idx(l, canonical_system)
-
-        res2 = residue_from_atom_idx(j, canonical_system)
-        res3 = residue_from_atom_idx(k, canonical_system)
-        res4 = residue_from_atom_idx(l, canonical_system)
-
-        ta2 = findfirst(isequal(j), res2.atom_inds)
-        ta3 = findfirst(isequal(k), res3.atom_inds)
-        ta4 = findfirst(isequal(l), res4.atom_inds)
+        _, r2, res2, ta2 = atom_lookup[j]
+        _, r3, res3, ta3 = atom_lookup[k]
+        _, r4, res4, ta4 = atom_lookup[l]
 
         e2 = Symbol(element_of[j])
         e3 = Symbol(element_of[k])
@@ -1149,6 +1150,8 @@ function System(coord_file::AbstractString,
 
     # CMAP corrections
     cmaps_maps_vec = []
+    # The same CMAP appears in many torsions, so only build its coefficients once
+    cmap_coeffs = IdDict{Any, Any}()
     index = 0
     for (i,j,k,l,m) in top_cmap
         t1,t2,t3,t4,t5 = atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l], atom_type_of[m]
@@ -1171,7 +1174,8 @@ function System(coord_file::AbstractString,
         end
         push!(cmaps_il.inters, CMAPTorsion(index, cmap.size))
         index += 4*cmap.size*cmap.size
-        push!(cmaps_maps_vec, cmap_coefficients(cmap.size, T.(cmap.energy)))
+        push!(cmaps_maps_vec, get!(() -> cmap_coefficients(cmap.size, T.(cmap.energy)),
+                                   cmap_coeffs, cmap))
     end
     cmaps_maps = vcat(cmaps_maps_vec...)
 
@@ -1193,8 +1197,8 @@ function System(coord_file::AbstractString,
                                 nbfix_pair.class2 in atclasses_present
             for type1 in force_field.class_to_types[nbfix_pair.class1]
                 for type2 in force_field.class_to_types[nbfix_pair.class2]
-                    ati1 = findfirst(isequal(type1), force_field.atom_type_order)
-                    ati2 = findfirst(isequal(type2), force_field.atom_type_order)
+                    ati1 = get(atom_type_index, type1, nothing)
+                    ati2 = get(atom_type_index, type2, nothing)
                     if ati1 in atis_present && ati2 in atis_present
                         lj_exceptions_σ[(ati1, ati2)] = T(nbfix_pair.σ)
                         lj_exceptions_ϵ[(ati1, ati2)] = T(nbfix_pair.ϵ)
@@ -1205,8 +1209,8 @@ function System(coord_file::AbstractString,
     end
     for nbfix_pair in force_field.nbfix_pairs
         if nbfix_pair.type1 != ""
-            ati1 = findfirst(isequal(nbfix_pair.type1), force_field.atom_type_order)
-            ati2 = findfirst(isequal(nbfix_pair.type2), force_field.atom_type_order)
+            ati1 = get(atom_type_index, nbfix_pair.type1, nothing)
+            ati2 = get(atom_type_index, nbfix_pair.type2, nothing)
             if ati1 in atis_present && ati2 in atis_present
                 lj_exceptions_σ[(ati1, ati2)] = T(nbfix_pair.σ)
                 lj_exceptions_ϵ[(ati1, ati2)] = T(nbfix_pair.ϵ)
@@ -1233,13 +1237,21 @@ function is_h_angle(atoms_data, i, j, k)
     return (el_i == "H" && el_k == "H") || (el_j == "O" && (el_i == "H" || el_k == "H"))
 end
 
-function find_bond_r0(bonds_all, i, j)
+# Map each bonded pair to the equilibrium distance of the first bond between those atoms
+function bond_r0_lookup(bonds_all)
+    lookup = Dict{Tuple{Int, Int}, typeof(first(bonds_all.inters).r0)}()
     for (bi, bj, inter) in zip(bonds_all.is, bonds_all.js, bonds_all.inters)
-        if (bi, bj) == (i, j) || (bj, bi) == (i, j)
-            return inter.r0
-        end
+        get!(lookup, (min(bi, bj), max(bi, bj)), inter.r0)
     end
-    error("atoms $i and $j are in an angle constraint but the bond cannot be found")
+    return lookup
+end
+
+function find_bond_r0(bond_r0s, i, j)
+    r0 = get(bond_r0s, (min(i, j), max(i, j)), nothing)
+    if isnothing(r0)
+        error("atoms $i and $j are in an angle constraint but the bond cannot be found")
+    end
+    return r0
 end
 
 # Allow setup structs to have unitful defaults
@@ -1295,13 +1307,14 @@ function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_da
     angles = InteractionList3Atoms(HarmonicAngle)
     dist_constraints, angle_constraints = [], []
     angle_dist_pairs = Set{Tuple{Int, Int}}()
+    bond_r0s = bond_r0_lookup(bonds_all)
 
     for (i, j, k, inter, type) in zip(angles_all.is, angles_all.js, angles_all.ks,
                                       angles_all.inters, angles_all.types)
         if (constraints_type == :hangles && is_h_angle(atoms_data, i, j, k)) ||
                 (rigid_water && atoms_data[i].res_name in water_residue_names)
-            r0_ij = find_bond_r0(bonds_all, i, j)
-            r0_jk = find_bond_r0(bonds_all, j, k)
+            r0_ij = find_bond_r0(bond_r0s, i, j)
+            r0_jk = find_bond_r0(bond_r0s, j, k)
             push!(angle_constraints, AngleConstraint(i, j, k, inter.θ0, r0_ij, r0_jk))
             push!(angle_dist_pairs, (min(i, j), max(i, j)))
             push!(angle_dist_pairs, (min(j, k), max(j, k)))
@@ -1509,13 +1522,13 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
     # It is assumed that these interactions are always within the cutoff distance
     if separate_lj14 && length(torsions.is) > 0
         inds_used = Int[]
-        pairs_used = Tuple{Int, Int}[]
+        pairs_used = Set{Tuple{Int, Int}}()
         lj14_inters = []
         atoms_cpu = from_device(atoms)
         for (torsion_i, (i, l)) in enumerate(zip(torsions.is, torsions.ls))
             # Multiple torsions can have the same i and l atoms
             # i and l can be part of an angle too, e.g. in a ring, so ignore those cases
-            if (i, l) in pairs_used || (l, i) in pairs_used || !eligible[i, l]
+            if (min(i, l), max(i, l)) in pairs_used || !eligible[i, l]
                 continue
             end
             # Don't add shortcut interactions unless they are changed by a NBFixPair entry
@@ -1542,7 +1555,7 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
             end
             if !iszero_value(σ14) && !iszero_value(ϵ14)
                 push!(inds_used, torsion_i)
-                push!(pairs_used, (i, l))
+                push!(pairs_used, (min(i, l), max(i, l)))
                 push!(lj14_inters, LennardJones14(σ14, ϵ14, weight_14_lj))
             end
         end
