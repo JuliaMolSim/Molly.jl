@@ -180,6 +180,16 @@ function Base.show(io::IO, lincs::LINCS)
           ", iter_vel_correction=", lincs.iter_vel_correction, ")")
 end
 
+"""
+    SetupLINCS(; dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
+               n_rec=4, n_iter=1, iter_vel_correction::Bool=false, gpu_block_size::Integer=128)
+
+Set up constraints using the LINCS (LINear Constraint Solver) algorithm.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a set of
+[`LINCS`](@ref) constraints.
+See [`LINCS`](@ref) for argument descriptions.
+"""
 struct SetupLINCS{D, V}
     dist_tolerance::D
     vel_tolerance::V
@@ -201,6 +211,21 @@ function SetupLINCS(; dist_tolerance=1e-6u"nm",
     n_iter < 0 && throw(ArgumentError("n_iter cannot be negative"))
     return SetupLINCS(dist_tolerance, vel_tolerance, n_rec, n_iter,
                       iter_vel_correction, gpu_block_size)
+end
+
+function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
+                                    units, strictness, masses, ca::SetupLINCS)
+    return LINCS(
+        masses=masses,
+        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
+        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
+        dist_constraints=[dist_constraints...],
+        angle_constraints=[angle_constraints...],
+        n_rec=ca.n_rec,
+        n_iter=ca.n_iter,
+        iter_vel_correction=ca.iter_vel_correction,
+        gpu_block_size=ca.gpu_block_size,
+    )
 end
 
 function constrained_atom_inds(lincs::LINCS)

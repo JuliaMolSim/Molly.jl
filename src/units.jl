@@ -221,3 +221,16 @@ function energy_remove_mol(x)
         return x
     end
 end
+
+# Allow setup structs to have unitful defaults
+function convert_setup_quantity(x, units, T)
+    if units
+        return T(x)
+    else
+        if unit(x) == NoUnits
+            return T(x)
+        else
+            return T(ustrip(x))
+        end
+    end
+end

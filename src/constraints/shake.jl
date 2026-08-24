@@ -102,6 +102,16 @@ function Base.show(io::IO, sr::SHAKE_RATTLE)
           " 4-atom clusters and ", length(sr.angle_clusters), " angle clusters")
 end
 
+"""
+    SetupSHAKE_RATTLE(; dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
+                      gpu_block_size=128, max_iters=25)
+
+Set up constraints using the SHAKE and RATTLE algorithms.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a set of
+[`SHAKE_RATTLE`](@ref) constraints.
+See [`SHAKE_RATTLE`](@ref) for argument descriptions.
+"""
 struct SetupSHAKE_RATTLE{D, V}
     dist_tolerance::D
     vel_tolerance::V
@@ -116,6 +126,20 @@ function SetupSHAKE_RATTLE(; dist_tolerance=1e-6u"nm",
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance ) > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
     return SetupSHAKE_RATTLE(dist_tolerance, vel_tolerance, gpu_block_size, max_iters)
+end
+
+function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
+                                    units, strictness, masses, ca::SetupSHAKE_RATTLE)
+    return SHAKE_RATTLE(
+        n_atoms=length(atoms_data),
+        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
+        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
+        dist_constraints=[dist_constraints...],
+        angle_constraints=[angle_constraints...],
+        gpu_block_size=ca.gpu_block_size,
+        max_iters=ca.max_iters,
+        strictness=strictness,
+    )
 end
 
 cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_clusters)

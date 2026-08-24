@@ -1256,48 +1256,6 @@ function find_bond_r0(bond_r0s, i, j)
     return r0
 end
 
-# Allow setup structs to have unitful defaults
-function convert_setup_quantity(x, units, T)
-    if units
-        return T(x)
-    else
-        if unit(x) == NoUnits
-            return T(x)
-        else
-            return T(ustrip(x))
-        end
-    end
-end
-
-function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
-                                    units, strictness, masses, ca::SetupSHAKE_RATTLE)
-    return SHAKE_RATTLE(
-        n_atoms=length(atoms_data),
-        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
-        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
-        dist_constraints=[dist_constraints...],
-        angle_constraints=[angle_constraints...],
-        gpu_block_size=ca.gpu_block_size,
-        max_iters=ca.max_iters,
-        strictness=strictness,
-    )
-end
-
-function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
-                                    units, strictness, masses, ca::SetupLINCS)
-    return LINCS(
-        masses=masses,
-        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
-        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
-        dist_constraints=[dist_constraints...],
-        angle_constraints=[angle_constraints...],
-        n_rec=ca.n_rec,
-        n_iter=ca.n_iter,
-        iter_vel_correction=ca.iter_vel_correction,
-        gpu_block_size=ca.gpu_block_size,
-    )
-end
-
 function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_data,
                               constraints_type, rigid_water, units, strictness, masses,
                               constraint_algorithm)
