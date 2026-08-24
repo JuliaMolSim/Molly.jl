@@ -5,43 +5,40 @@
     sys = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
         data="data_string",
     )
     sys_pme = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        nonbonded_method=:pme,
-        pme_mesh_dims=pme_mesh_dims,
+        nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
         center_coords=false,
     )
     sys_pme_exact = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        nonbonded_method=:pme,
-        approximate_pme=false,
-        pme_mesh_dims=pme_mesh_dims,
+        nonbonded_method=SetupPME(approximate_erfc=false, mesh_dims=pme_mesh_dims),
         center_coords=false,
     )
     sys_hmr = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
         hydrogen_mass=2,
     )
     sys_hbonds = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
         constraints=:hbonds,
     )
     sys_hmr_hbonds = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
         constraints=:hbonds,
         hydrogen_mass=2,
@@ -49,7 +46,7 @@
     sys_hmr_rigid_water = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
         constraints=:hbonds,
         rigid_water=true,
@@ -59,7 +56,7 @@
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
         float_type=Float32,
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
     )
     sys_f32h = System(
@@ -67,7 +64,7 @@
         ff;
         float_type=Float32,
         float_type_high=Float32,
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
     )
     @test_throws ArgumentError System(
@@ -75,14 +72,14 @@
         ff;
         float_type=Float64,
         float_type_high=Float32,
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
     )
     @test_throws ArgumentError System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
         units=false,
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
     )
     show(devnull, sys)
@@ -156,7 +153,7 @@
     sys_lj14 = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         center_coords=false,
         force_separate_lj14=true,
     )
@@ -288,9 +285,7 @@
         ff_nounits;
         velocities=copy(ustrip_vec.(velocities_start)),
         units=false,
-        nonbonded_method=:pme,
-        approximate_pme=false,
-        pme_mesh_dims=pme_mesh_dims,
+        nonbonded_method=SetupPME(approximate_erfc=false, mesh_dims=pme_mesh_dims),
         center_coords=false,
     )
     zero(sys_nounits)
@@ -325,7 +320,7 @@
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:cutoff,
+            nonbonded_method=SetupCoulombReactionField(),
             center_coords=false,
         )
         sys_f32 = System(
@@ -333,7 +328,7 @@
             ff;
             array_type=AT,
             float_type=Float32,
-            nonbonded_method=:cutoff,
+            nonbonded_method=SetupCoulombReactionField(),
             center_coords=false,
         )
         sys_f32h = System(
@@ -342,7 +337,7 @@
             array_type=AT,
             float_type=Float32,
             float_type_high=Float32,
-            nonbonded_method=:cutoff,
+            nonbonded_method=SetupCoulombReactionField(),
             center_coords=false,
         )
         show(devnull, sys.neighbor_finder)
@@ -386,8 +381,7 @@
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:pme,
-            pme_mesh_dims=pme_mesh_dims,
+            nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
             center_coords=false,
         )
         zero(sys_pme)
@@ -408,9 +402,7 @@
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:pme,
-            approximate_pme=false,
-            pme_mesh_dims=pme_mesh_dims,
+            nonbonded_method=SetupPME(approximate_erfc=false, mesh_dims=pme_mesh_dims),
             center_coords=false,
         )
 
@@ -445,9 +437,7 @@
             units=false,
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:pme,
-            approximate_pme=false,
-            pme_mesh_dims=pme_mesh_dims,
+            nonbonded_method=SetupPME(approximate_erfc=false, mesh_dims=pme_mesh_dims),
             center_coords=false,
         )
         zero(sys_nounits)
@@ -505,8 +495,7 @@ end
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
-            nonbonded_method=:pme,
-            pme_mesh_dims=pme_mesh_dims,
+            nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
             center_coords=false,
             constraints=:hbonds,
             rigid_water=true,
@@ -543,8 +532,7 @@ end
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
-            nonbonded_method=:pme,
-            pme_mesh_dims=pme_mesh_dims,
+            nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
             center_coords=false,
             constraints=:hbonds,
             rigid_water=true,
@@ -597,8 +585,7 @@ end
             ff_nounits;
             velocities=copy(ustrip_vec.(velocities_start)),
             units=false,
-            nonbonded_method=:pme,
-            pme_mesh_dims=pme_mesh_dims,
+            nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
             center_coords=false,
             constraints=:hbonds,
             rigid_water=true,
@@ -636,8 +623,7 @@ end
                 ff;
                 array_type=AT,
                 float_type=Float64,
-                nonbonded_method=:pme,
-                pme_mesh_dims=pme_mesh_dims,
+                nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
                 center_coords=false,
                 constraints=:hbonds,
                 rigid_water=true,
@@ -669,8 +655,7 @@ end
                 units=false,
                 array_type=AT,
                 float_type=Float64,
-                nonbonded_method=:pme,
-                pme_mesh_dims=pme_mesh_dims,
+                nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
                 center_coords=false,
                 constraints=:hbonds,
                 rigid_water=true,
@@ -714,7 +699,7 @@ end
                 array_type=AT,
                 float_type=Float64,
                 dist_cutoff=5.0u"nm",
-                nonbonded_method=:none,
+                nonbonded_method=DistanceCutoff(5.0u"nm"),
                 dispersion_correction=false,
                 implicit_solvent=solvent_model,
                 kappa=1.0u"nm^-1",
@@ -822,8 +807,7 @@ end
             array_type=AT,
             float_type=FT,
             dist_cutoff=1.0u"nm",
-            nonbonded_method=:pme,
-            approximate_pme=false,
+            nonbonded_method=SetupPME(approximate_erfc=false),
             disulfide_bonds=true,
         )
 

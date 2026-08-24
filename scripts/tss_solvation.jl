@@ -205,10 +205,10 @@ function rebuild_alchemical_specific_inter_lists(sys_base, coul_scaled)
 end
 
 function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Random.default_rng())
-    nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
     dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
+    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
     replica_loggers = [
         tss_solvation_loggers(is_vacuum, N_REPLICAS == 1 ? nothing : replica_i)

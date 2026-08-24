@@ -333,7 +333,8 @@ end
                     float_type=T,
                     constraints=:hbonds,
                     rigid_water=rigid_water, # No water present
-                    constraint_algorithm=constraint_algorithm,    
+                    constraint_algorithm=constraint_algorithm,
+                    nonbonded_method=DistanceCutoff(T(1.0)u"nm"),
                 )
 
                 simulate!(sys, minimizer)
@@ -1772,14 +1773,14 @@ end
             ff;
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:pme,
+            nonbonded_method=SetupPME(),
         )
         sys_cons = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:pme,
+            nonbonded_method=SetupPME(),
             constraints=:hbonds,
             rigid_water=true,
         )

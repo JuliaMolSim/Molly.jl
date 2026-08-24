@@ -47,7 +47,7 @@ end
         units=false,
         array_type=AT,
         float_type=T,
-        nonbonded_method=:pme,
+        nonbonded_method=SetupPME(),
         grad_safe=true,
     )
 
@@ -240,7 +240,7 @@ end
         units=false,
         array_type=AT,
         float_type=FT,
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
     )
 
     sys_trc = System(sys; boundary=TriclinicBoundary(Molly.boxmatrix(sys.boundary)))
@@ -490,6 +490,7 @@ end
 
     for (name, AT, parallel, forward, f32, obc2, gbn2, tol_σ, tol_r0) in runs
         T = (f32 ? Float32 : Float64)
+        n_threads = (parallel ? Threads.nthreads() : 1)
         σ  = T(0.4)
         r0 = T(1.0)
         n_atoms = 50
@@ -545,6 +546,7 @@ end
                 InteractionList2Atoms(bond_is, bond_js, fill(0, length(bond_is)));
                 kappa=T(0.7),
                 use_OBC2=true,
+                n_threads=n_threads,
             )
             general_inters = (imp_obc2,)
         elseif gbn2
@@ -553,6 +555,7 @@ end
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, fill(0, length(bond_is)));
                 kappa=T(0.7),
+                n_threads=n_threads,
             )
             general_inters = (imp_gbn2,)
         else
@@ -563,7 +566,6 @@ end
             n_steps=10,
             dist_cutoff=T(1.5),
         )
-        n_threads = (parallel ? Threads.nthreads() : 1)
 
         const_args = [
             Const(boundary), Const(pairwise_inters),
@@ -652,7 +654,7 @@ end
             units=false,
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:cutoff,
+            nonbonded_method=SetupCoulombReactionField(),
             dispersion_correction=false,
             implicit_solvent=:gbn2,
             kappa=0.7,

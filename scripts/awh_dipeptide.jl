@@ -44,9 +44,9 @@ sys = System(
     ff;
     array_type=AT,
     float_type=FT,
-    nonbonded_method=:pme,
+    nonbonded_method=SetupPME(),
     constraints=:hbonds,
-    rigid_water = true,
+    rigid_water=true,
     hydrogen_mass=3
 )
 

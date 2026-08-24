@@ -30,7 +30,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
         array_type=AT,
         float_type=T,
         dist_cutoff=Molly.add_units(dist_cutoff, u"nm", units),
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
     )
 
     dt = T(0.0005)

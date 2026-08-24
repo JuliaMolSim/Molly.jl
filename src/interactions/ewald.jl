@@ -4,10 +4,14 @@ import Base: ==, hash
 
 export
     Ewald,
+    SetupEwald,
     PME,
+    SetupPME,
     EwaldExclusion
 
 abstract type AbstractEwald end
+
+const default_ewald_error_tol = 0.0005
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                             inter::AbstractEwald;
@@ -81,7 +85,7 @@ struct Ewald{T, D, SCH} <: AbstractEwald
     scheduler::SCH
 end
 
-function Ewald(dist_cutoff; error_tol=0.0005, scheduler=DefaultLambdaScheduler())
+function Ewald(dist_cutoff; error_tol=default_ewald_error_tol, scheduler=DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
     return Ewald(dist_cutoff, T(error_tol), scheduler)
 end
@@ -271,13 +275,59 @@ function hash(a::Ewald, h::UInt)
     return hash(a.scheduler, v)
 end
 
+abstract type AbstractSetupEwald end
+
+"""
+    SetupEwald(; error_tol=0.0005, approximate_erfc=true,
+               coulomb_const=138.93545764u"kJ * mol^-1 * nm")
+
+Set up Ewald summation for long range electrostatics.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a [`Ewald`](@ref)
+general interaction, a [`CoulombEwald`](@ref) pairwise interaction and a
+[`EwaldExclusion`](@ref) specific interaction.
+
+`error_tol` is the error tolerance for Ewald summation.
+`approximate_erfc` determines whether to use a fast approximation to the erfc function.
+"""
+struct SetupEwald{T, C} <: AbstractSetupEwald
+    error_tol::T
+    approximate_erfc::Bool
+    coulomb_const::C
+end
+
+function SetupEwald(; error_tol=default_ewald_error_tol, approximate_erfc::Bool=true,
+                    coulomb_const=coulomb_const)
+    if error_tol <= zero(error_tol)
+        throw(ArgumentError("error_tol must be greater than zero, found $error_tol"))
+    end
+    return SetupEwald(error_tol, approximate_erfc, coulomb_const)
+end
+
+function setup_coulomb_pairwise(se::AbstractSetupEwald, dist_cutoff, weight_special,
+                                use_neighbors, units, T)
+    return CoulombEwald(
+        dist_cutoff=T(dist_cutoff),
+        error_tol=T(se.error_tol),
+        use_neighbors=use_neighbors,
+        weight_special=weight_special,
+        coulomb_const=convert_setup_quantity(se.coulomb_const, units, T),
+        approximate_erfc=se.approximate_erfc,
+    )
+end
+
+function setup_coulomb_general(se::SetupEwald, atoms, boundary, dist_cutoff, n_threads,
+                               grad_safe, units, T)
+    return Ewald(T(dist_cutoff); error_tol=T(se.error_tol))
+end
+
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
         scheduler=DefaultLambdaScheduler(), float_type_high=Float64,
         grad_safe=false, n_threads=Threads.nthreads())
 
-Particle mesh Ewald summation for long range electrostatics implemented as an
+Particle mesh Ewald (PME) summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
 
 Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
@@ -384,7 +434,52 @@ function pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
     return bsplines_moduli
 end
 
-function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
+function find_excluded_pairs(eligible, special)
+    excluded_pairs = Tuple{Int32, Int32}[]
+    if !(isnothing(eligible) && isnothing(special))
+        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
+        eligible_cpu = (isnothing(eligible) ? nothing : to_bitmatrix(from_device(eligible)))
+        special_cpu  = (isnothing(special ) ? nothing : to_bitmatrix(from_device(special )))
+        # Only a small fraction of the n_atoms^2 entries are excluded, so scan the mask
+        #   64 entries at a time and skip the chunks with nothing set
+        n_entries = n_atoms * n_atoms
+        n_chunks = cld(n_entries, 64)
+        eligible_chunks = (isnothing(eligible_cpu) ? nothing : eligible_cpu.chunks)
+        special_chunks  = (isnothing(special_cpu ) ? nothing : special_cpu.chunks )
+        # Bits past the end of the last chunk are unset in a BitArray but are set by the
+        #   negation below, so mask them off
+        end_mask = ~zero(UInt64) >>> ((-n_entries) & 63)
+        for ci in 1:n_chunks
+            # A missing eligible matrix means every pair is eligible, a missing special
+            #   matrix means no pair is special, so neither excludes anything
+            chunk = zero(UInt64)
+            if !isnothing(eligible_chunks)
+                chunk = ~eligible_chunks[ci]
+            end
+            if !isnothing(special_chunks)
+                chunk |= special_chunks[ci]
+            end
+            if ci == n_chunks
+                chunk &= end_mask
+            end
+            while !iszero(chunk)
+                # Column-major linear index of the set bit, zero-based
+                li = (ci - 1) * 64 + trailing_zeros(chunk)
+                j, i = divrem(li, n_atoms)
+                if i < j
+                    push!(excluded_pairs, (Int32(i + 1), Int32(j + 1)))
+                end
+                chunk &= chunk - one(UInt64)
+            end
+        end
+        # The scan runs down the columns, sort to give the same order as looping over
+        #   i and then j
+        sort!(excluded_pairs)
+    end
+    return excluded_pairs
+end
+
+function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, order=5,
              ϵr=1.0, fixed_charges=true, mesh_dims=nothing, eligible=nothing, special=nothing,
              scheduler=DefaultLambdaScheduler(), float_type_high=Float64, grad_safe=false,
              n_threads::Integer=Threads.nthreads())
@@ -1121,49 +1216,47 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     return nothing
 end
 
-function find_excluded_pairs(eligible, special)
-    excluded_pairs = Tuple{Int32, Int32}[]
-    if !(isnothing(eligible) && isnothing(special))
-        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
-        eligible_cpu = (isnothing(eligible) ? nothing : to_bitmatrix(from_device(eligible)))
-        special_cpu  = (isnothing(special ) ? nothing : to_bitmatrix(from_device(special )))
-        # Only a small fraction of the n_atoms^2 entries are excluded, so scan the mask
-        #   64 entries at a time and skip the chunks with nothing set
-        n_entries = n_atoms * n_atoms
-        n_chunks = cld(n_entries, 64)
-        eligible_chunks = (isnothing(eligible_cpu) ? nothing : eligible_cpu.chunks)
-        special_chunks  = (isnothing(special_cpu ) ? nothing : special_cpu.chunks )
-        # Bits past the end of the last chunk are unset in a BitArray but are set by the
-        #   negation below, so mask them off
-        end_mask = ~zero(UInt64) >>> ((-n_entries) & 63)
-        for ci in 1:n_chunks
-            # A missing eligible matrix means every pair is eligible, a missing special
-            #   matrix means no pair is special, so neither excludes anything
-            chunk = zero(UInt64)
-            if !isnothing(eligible_chunks)
-                chunk = ~eligible_chunks[ci]
-            end
-            if !isnothing(special_chunks)
-                chunk |= special_chunks[ci]
-            end
-            if ci == n_chunks
-                chunk &= end_mask
-            end
-            while !iszero(chunk)
-                # Column-major linear index of the set bit, zero-based
-                li = (ci - 1) * 64 + trailing_zeros(chunk)
-                j, i = divrem(li, n_atoms)
-                if i < j
-                    push!(excluded_pairs, (Int32(i + 1), Int32(j + 1)))
-                end
-                chunk &= chunk - one(UInt64)
-            end
-        end
-        # The scan runs down the columns, sort to give the same order as looping over
-        #   i and then j
-        sort!(excluded_pairs)
+"""
+    SetupPME(; error_tol=0.0005, approximate_erfc=true, mesh_dims=nothing,
+             coulomb_const=138.93545764u"kJ * mol^-1 * nm")
+
+Set up the particle mesh Ewald (PME) summation for long range electrostatics.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a [`PME`](@ref)
+general interaction, a [`CoulombEwald`](@ref) pairwise interaction and a
+[`EwaldExclusion`](@ref) specific interaction.
+
+`error_tol` is the error tolerance for Ewald summation.
+`approximate_erfc` determines whether to use a fast approximation to the erfc function.
+`mesh_dims` determines the number of PME grid points in each dimension and defaults
+to a value chosen from `error_tol`.
+"""
+struct SetupPME{T, C, M} <: AbstractSetupEwald
+    error_tol::T
+    approximate_erfc::Bool
+    coulomb_const::C
+    mesh_dims::M
+end
+
+function SetupPME(; error_tol=default_ewald_error_tol, approximate_erfc::Bool=true,
+                  coulomb_const=coulomb_const, mesh_dims=nothing)
+    if error_tol <= zero(error_tol)
+        throw(ArgumentError("error_tol must be greater than zero, found $error_tol"))
     end
-    return excluded_pairs
+    return SetupPME(error_tol, approximate_erfc, coulomb_const, mesh_dims)
+end
+
+function setup_coulomb_general(se::SetupPME, atoms, boundary, dist_cutoff, n_threads,
+                               grad_safe, units, T)
+    return PME(
+        T(dist_cutoff),
+        atoms,
+        boundary;
+        error_tol=T(se.error_tol),
+        mesh_dims=se.mesh_dims,
+        grad_safe=grad_safe,
+        n_threads=n_threads,
+    )
 end
 
 """
@@ -1196,7 +1289,7 @@ struct EwaldExclusionData{T, D, A, F, S}
     scheduler::S
 end
 
-function EwaldExclusionData(dist_cutoff; error_tol=0.0005, ϵr=1.0,
+function EwaldExclusionData(dist_cutoff; error_tol=default_ewald_error_tol, ϵr=1.0,
                             scheduler=DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
     error_tol_T = T(error_tol)

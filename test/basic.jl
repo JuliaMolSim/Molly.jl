@@ -341,7 +341,7 @@
             ff;
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:cutoff,
+            nonbonded_method=SetupCoulombReactionField(),
             dispersion_correction=false,
             neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
                                     DistanceNeighborFinder),
@@ -441,12 +441,16 @@ end
         custom_residue_templates=joinpath(data_dir, "imatinib_topo.xml"),
     )
     boundary = CubicBoundary(Inf*u"nm")
+    dist_cutoff = DistanceCutoff(1.0u"nm")
 
     # Suppress MOL2 invalid sybyl type warning
     @suppress_err begin
-        sys_mol2        = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary=boundary)
-        sys_pdb_connect = System(joinpath(data_dir, "imatinib_conect.pdb"), ff; boundary=boundary)
-        sys_pdb         = System(joinpath(data_dir, "imatinib.pdb"), ff_custom; boundary=boundary)
+        sys_mol2        = System(joinpath(data_dir, "imatinib.mol2"), ff;
+                                 boundary=boundary, nonbonded_method=dist_cutoff)
+        sys_pdb_connect = System(joinpath(data_dir, "imatinib_conect.pdb"), ff;
+                                 boundary=boundary, nonbonded_method=dist_cutoff)
+        sys_pdb         = System(joinpath(data_dir, "imatinib.pdb"), ff_custom;
+                                 boundary=boundary, nonbonded_method=dist_cutoff)
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
@@ -454,10 +458,14 @@ end
                                                         boundary=boundary)
     end
 
-    water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff)
-    water_cif  = System(joinpath(data_dir, "water_formats", "water.cif" ), ff)
-    water_mol2 = System(joinpath(data_dir, "water_formats", "water.mol2"), ff)
-    water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff) # Residue inferred
+    water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff;
+                        nonbonded_method=dist_cutoff)
+    water_cif  = System(joinpath(data_dir, "water_formats", "water.cif" ), ff;
+                        nonbonded_method=dist_cutoff)
+    water_mol2 = System(joinpath(data_dir, "water_formats", "water.mol2"), ff;
+                        nonbonded_method=dist_cutoff)
+    water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff;
+                        nonbonded_method=dist_cutoff) # Residue inferred
     @test potential_energy(water_pdb ) ≈ potential_energy(water_cif) ≈
           potential_energy(water_mol2) ≈ potential_energy(water_sdf) ≈ 11.90186520388919u"kJ/mol"
 end
@@ -495,8 +503,7 @@ end
             ff;
             array_type=AT,
             float_type=FT,
-            nonbonded_method=:pme,
-            approximate_pme=false,
+            nonbonded_method=SetupPME(approximate_erfc=false),
             disulfide_bonds=true,
         )
 
@@ -507,8 +514,7 @@ end
                 ff;
                 array_type=AT,
                 float_type=FT,
-                nonbonded_method=:pme,
-                approximate_pme=false,
+                nonbonded_method=SetupPME(approximate_erfc=false),
                 disulfide_bonds=false,
             )
         end
@@ -555,7 +561,7 @@ end
     sys = System(
         joinpath(data_dir, "ethanol_garnet.pdb"),
         ff;
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         dist_cutoff=1.0u"nm",
     )
 
@@ -1225,7 +1231,7 @@ end
     @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
                                       implicit_solvent=:obc2, kappa=1.0u"nm")
     @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
-                                      nonbonded_method=:pme, pme_mesh_dims=(3, 3, 3))
+                                      nonbonded_method=SetupPME(mesh_dims=(3, 3, 3)))
     @test_throws MethodError   System(water_fp, ff; dist_cutoff=0.5u"nm",
                                       neighbor_finder_type=Int)
 

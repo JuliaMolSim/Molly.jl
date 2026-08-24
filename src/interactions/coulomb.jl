@@ -4,6 +4,7 @@ export
     CoulombSoftCoreBeutler,
     CoulombSoftCoreGapsys,
     CoulombReactionField,
+    SetupCoulombReactionField,
     CoulombReactionFieldScaled,
     CoulombSoftCoreBeutlerReactionField,
     CoulombSoftCoreGapsysReactionField,
@@ -888,6 +889,31 @@ end
     else
         return pe * (r <= inter.dist_cutoff)
     end
+end
+
+"""
+    SetupCoulombReactionField(; solvent_dielectric, coulomb_const)
+
+Set up the Coulomb electrostatic interaction modified using the reaction field approximation
+between two atoms.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a
+[`CoulombReactionField`](@ref) pairwise interaction.
+"""
+@kwdef struct SetupCoulombReactionField{T, C}
+    solvent_dielectric::T = crf_solvent_dielectric
+    coulomb_const::C = coulomb_const
+end
+
+function setup_coulomb_pairwise(scrf::SetupCoulombReactionField, dist_cutoff,
+                                weight_special, use_neighbors, units, T)
+    return CoulombReactionField(
+        dist_cutoff=T(dist_cutoff),
+        solvent_dielectric=T(scrf.solvent_dielectric),
+        use_neighbors=use_neighbors,
+        weight_special=weight_special,
+        coulomb_const=convert_setup_quantity(scrf.coulomb_const, units, T),
+    )
 end
 
 @doc raw"""

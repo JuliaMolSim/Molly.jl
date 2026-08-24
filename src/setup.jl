@@ -474,18 +474,13 @@ templates is carried out.
 - `rigid_water=false`: whether to constrain the bonds and angle in water
     molecules. Applied on top of `constraints`, so `constraints=:hangles` and
     `rigid_water=false` gives rigid water.
-- `constraint_algorithm`: Constraint algorithm to use for enforcing the constraints.
-    Can be an instance of `SetupLINCS` or `SetupSHAKE_RATTLE`, defaults to `SetupLINCS()`.
-- `nonbonded_method=:none`: method for long range interaction summation,
-    options are `:none` (short range only), `:cutoff` (reaction field method),
-    `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
-- `ewald_error_tol=0.0005`: the error tolerance for Ewald summation, used when
-    `nonbonded_method` is `:pme` or `:ewald`.
-- `approximate_pme=true`: whether to use a fast approximation to the erfc
-    function, used when `nonbonded_method` is `:pme`.
-- `pme_mesh_dims=nothing`: the number of particle mesh Ewald grid points in each
-    dimension, used when `nonbonded_method` is `:pme`. Defaults to a value
-    chosen from `ewald_error_tol`.
+- `constraint_algorithm=SetupLINCS()`: Constraint algorithm to use for enforcing the
+    constraints. Can be an instance of [`SetupLINCS`](@ref) or [`SetupSHAKE_RATTLE`](@ref).
+- `nonbonded_method=SetupCoulombReactionField()`: method for long range interaction summation,
+    can be an instance of [`SetupCoulombReactionField`](@ref) (reaction field method),
+    [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref)
+    (Ewald summation, slow), or a cutoff like [`DistanceCutoff`](@ref) (short range only).
+    For a cutoff, the cutoff distance must match `dist_cutoff`.
 - `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
     dispersion correction. Defaults to the force field setting, which defaults
     to `true`.
@@ -516,7 +511,7 @@ templates is carried out.
     be run on, used for example when setting up PME and implicit solvent. Only
     relevant when running on CPU.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
-    with Enzyme.jl and `nonbonded_method` is `:pme` or `array_type` is `CuArray`.
+    with Enzyme.jl and PME is being used or `array_type` is `CuArray`.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
@@ -535,10 +530,7 @@ function System(coord_file::AbstractString,
                 constraints=:none,
                 rigid_water::Bool=false,
                 constraint_algorithm=SetupLINCS(),
-                nonbonded_method=:none,
-                ewald_error_tol=0.0005,
-                approximate_pme::Bool=true,
-                pme_mesh_dims=nothing,
+                nonbonded_method=SetupCoulombReactionField(),
                 dispersion_correction=nothing,
                 hydrogen_mass::Union{Bool, Number}=false,
                 center_coords::Bool=true,
@@ -567,19 +559,22 @@ function System(coord_file::AbstractString,
     if !(constraints in (:none, :hbonds, :allbonds, :hangles))
         throw(ArgumentError("constraints must be one of :none, :hbonds, :allbonds or :hangles"))
     end
-    if !(nonbonded_method in (:none, :cutoff, :pme, :ewald))
-        throw(ArgumentError("nonbonded_method must be one of :none, :cutoff, :pme or :ewald"))
+    if !(nonbonded_method isa SetupCoulombReactionField ||
+                nonbonded_method isa AbstractSetupEwald ||
+                nonbonded_method isa AbstractCutoff)
+        throw(ArgumentError("nonbonded_method must be a setup type like " *
+                            "SetupCoulombReactionField/SetupPME/SetupEwald or an AbstractCutoff"))
     end
     if !(implicit_solvent in (:none, :obc1, :obc2, :gbn2))
         throw(ArgumentError("implicit_solvent must be one of :none, :obc1, :obc2 or :gbn2, " *
                             "found $implicit_solvent"))
     end
     if implicit_solvent != :none
-        if nonbonded_method in (:pme, :ewald)
-            err_str = "nonbonded_method $nonbonded_method is being used with implicit " *
+        if nonbonded_method isa AbstractSetupEwald
+            err_str = "Ewald summation or PME is being used with implicit " *
                       "solvent, this may not be intended since long range electrostatics " *
                       "and implicit solvent both model the effect of the solvent, " *
-                      "nonbonded_method=:none is usual with implicit solvent"
+                      "nonbonded_method=DistanceCutoff(dist_cutoff) is usual with implicit solvent"
             report_issue(err_str, strictness)
         end
         expected_kappa_units = (units ? u"nm^-1" : NoUnits)
@@ -590,9 +585,6 @@ function System(coord_file::AbstractString,
         if kappa < zero(kappa)
             throw(ArgumentError("kappa ($kappa) should not be less than zero"))
         end
-    end
-    if ewald_error_tol <= zero(ewald_error_tol)
-        throw(ArgumentError("ewald_error_tol ($ewald_error_tol) should be positive"))
     end
     if isa(hydrogen_mass, Bool) && hydrogen_mass
         throw(ArgumentError("hydrogen_mass can be false, a number or a unitful value " *
@@ -645,8 +637,8 @@ function System(coord_file::AbstractString,
     else
         boundary_used = boundary
     end
-    if has_infinite_boundary(boundary_used) && nonbonded_method in (:ewald, :pme)
-        throw(ArgumentError("nonbonded_method $nonbonded_method cannot be used with " *
+    if has_infinite_boundary(boundary_used) && nonbonded_method isa AbstractSetupEwald
+        throw(ArgumentError("Ewald summation or PME cannot be used with " *
                             "infinite boundaries, boundary can be set in structure file or " *
                             "with boundary argument"))
     end
@@ -1224,8 +1216,8 @@ function System(coord_file::AbstractString,
                   atoms_data, virtual_sites_type, loggers, data, force_field.global_params, bonds_il, bonds_ub_flags,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
-                  units, dist_cutoff, constraints, rigid_water, nonbonded_method, ewald_error_tol,
-                  approximate_pme, pme_mesh_dims, neighbor_finder_type, implicit_solvent,
+                  units, dist_cutoff, constraints, rigid_water, nonbonded_method,
+                  neighbor_finder_type, implicit_solvent,
                   kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
                   hydrogen_mass, strictness, launch_config, autotune_launch,
                   constraint_algorithm, n_threads)
@@ -1366,12 +1358,12 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
 end
 
 # Separated out as a function to allow other setup paths
-function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data, virtual_sites,
+function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virtual_sites,
                 loggers, data, global_params, bonds_all, bonds_ub_flags, angles_all, torsions,
                 impropers, torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
-                ewald_error_tol, approximate_pme, pme_mesh_dims, neighbor_finder_type,
+                neighbor_finder_type,
                 implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
                 weight_14_coulomb, dispersion_correction,
                 hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
@@ -1552,35 +1544,12 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
         )
     end
 
-    if nonbonded_method == :none
-        coul = Coulomb(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method == :cutoff
-        coul = CoulombReactionField(
-            dist_cutoff=T(dist_cutoff),
-            solvent_dielectric=T(crf_solvent_dielectric),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    else # in (:ewald, :pme)
-        coul = CoulombEwald(
-            dist_cutoff=T(dist_cutoff),
-            error_tol=T(ewald_error_tol),
-            use_neighbors=using_neighbors,
-            weight_special=weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-            approximate_erfc=approximate_pme,
-        )
+    if nonbonded_method isa AbstractSetupEwald
+        coul = setup_coulomb_pairwise(nonbonded_method, dist_cutoff, weight_14_coulomb,
+                                      using_neighbors, units, T)
 
         excluded_pairs = find_excluded_pairs(eligible, special)
-        exclusion_data = EwaldExclusionData(T(dist_cutoff); error_tol=T(ewald_error_tol))
+        exclusion_data = EwaldExclusionData(T(dist_cutoff); error_tol=T(nonbonded_method.error_tol))
         ewald_exclusions = InteractionList2Atoms(
             to_device([ep[1] for ep in excluded_pairs], AT),
             to_device([ep[2] for ep in excluded_pairs], AT),
@@ -1590,20 +1559,21 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
         )
         push!(specific_inter_array, ewald_exclusions)
 
-        if nonbonded_method == :ewald
-            ewald = Ewald(T(dist_cutoff); error_tol=T(ewald_error_tol))
-        else
-            ewald = PME(
-                T(dist_cutoff),
-                atoms,
-                boundary_used;
-                error_tol=T(ewald_error_tol),
-                mesh_dims=pme_mesh_dims,
-                grad_safe=grad_safe,
-                n_threads=n_threads,
-            )
-        end
+        ewald = setup_coulomb_general(nonbonded_method, atoms, boundary, dist_cutoff,
+                                      n_threads, grad_safe, units, T)
         general_inters_ewald = (ewald,)
+    elseif nonbonded_method isa AbstractCutoff
+        coul = Coulomb(
+            cutoff=nonbonded_method,
+            use_neighbors=using_neighbors,
+            weight_special=weight_14_coulomb,
+            coulomb_const=convert_setup_quantity(coulomb_const, units, T),
+        )
+        general_inters_ewald = ()
+    else # Includes SetupCoulombReactionField
+        coul = setup_coulomb_pairwise(nonbonded_method, dist_cutoff, weight_14_coulomb,
+                                      using_neighbors, units, T)
+        general_inters_ewald = ()
     end
 
     pairwise_inters = (lj, coul)
@@ -1624,7 +1594,7 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
             device_vector_type=AT{Int32, 1},
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
-                (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
+                (AT <: AbstractGPUArray || has_infinite_boundary(boundary))
         neighbor_finder = DistanceNeighborFinder(
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
@@ -1633,8 +1603,8 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
         )
     elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
         # CellListMap requires the cell list cutoff to fit twice in the box
-        min_box_side = minimum(box_sides(boundary_used))
-        if !has_infinite_boundary(boundary_used) && min_box_side < (2 * dist_neighbors)
+        min_box_side = minimum(box_sides(boundary))
+        if !has_infinite_boundary(boundary) && min_box_side < (2 * dist_neighbors)
             throw(ArgumentError("the minimum box side ($min_box_side) is less than " *
                     "2 * (dist_cutoff + dist_buffer) ($(2 * dist_neighbors)), which the " *
                     "cell list neighbor finder does not support. Reduce dist_cutoff or " *
@@ -1646,7 +1616,7 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
             special=special,
             n_steps=10,
             x0=coords,
-            boundary=boundary_used,
+            boundary=boundary,
             dist_cutoff=T(dist_neighbors),
         )
     else
@@ -1680,7 +1650,7 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
         general_inters_is = ()
     end
     # Infinite boundaries give infinite volume, hence no dispersion correction
-    if dispersion_correction && !has_infinite_boundary(boundary_used)
+    if dispersion_correction && !has_infinite_boundary(boundary)
         general_inters_disp = (LJDispersionCorrection(atoms, T(dist_cutoff), σ_mix, ϵ_mix),)
     else
         general_inters_disp = ()
@@ -1693,7 +1663,7 @@ function System(T, TH, AT, atoms, coords, boundary_used, velocities, atoms_data,
     sys = System(
         atoms=atoms,
         coords=coords_dev,
-        boundary=boundary_used,
+        boundary=boundary,
         velocities=vels,
         atoms_data=atoms_data,
         topology=topology,

@@ -243,7 +243,7 @@ sys_0 = System(
     ff;
     array_type=AT,
     float_type=FT,
-    nonbonded_method=:cutoff,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 random_velocities!(sys_0, T0) # Initialize velocities from M-B distribution at target temperature
@@ -363,7 +363,7 @@ sys = System(
     ff;
     array_type=AT,
     float_type=FT,
-    nonbonded_method=:cutoff,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 random_velocities!(sys, T0)
@@ -457,7 +457,7 @@ sys_nobias = System(
     ff;
     array_type=AT,
     float_type=FT,
-    nonbonded_method=:cutoff,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 # Atom indices defining dihedral
@@ -940,10 +940,10 @@ The setup function builds either the solvated or vacuum leg. The solvated leg us
 
 ```julia
 function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
-    nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
     dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
+    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
 
     sys_base = System(
@@ -1515,10 +1515,10 @@ The setup function constructs the solvated and vacuum legs. The non-bonded treat
 
 ```julia
 function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
-    nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
     dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
+    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
 
     sys_base = System(

@@ -131,7 +131,7 @@
                 ff;
                 array_type=CuArray,
                 float_type=T,
-                nonbonded_method=:cutoff,
+                nonbonded_method=SetupCoulombReactionField(),
                 dist_cutoff=0.6u"nm",
                 dist_buffer=0.1u"nm",
                 launch_config=launch_config,

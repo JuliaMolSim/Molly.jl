@@ -51,7 +51,7 @@
         "LJ with units"    => jet_lj_system(),
         "LJ without units" => jet_lj_system(; units=false, T=Float32),
         "protein cutoff"   => jet_protein(),
-        "protein PME"      => jet_protein(; nonbonded_method=:pme),
+        "protein PME"      => jet_protein(; nonbonded_method=SetupPME()),
         "protein hbonds"   => jet_protein(; constraints=:hbonds, rigid_water=true),
         "TIP4P"            => System(joinpath(data_dir, "tip4pew.pdb"),
                                      MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))),

@@ -1346,7 +1346,7 @@ end
                 float_type=Float64,
                 constraints=constraints,
                 constraint_algorithm=constraint_algorithm,
-                nonbonded_method=:cutoff,
+                nonbonded_method=SetupCoulombReactionField(),
                 center_coords=false,
             )
 
@@ -1427,7 +1427,7 @@ end
             ff;
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=:cutoff,
+            nonbonded_method=SetupCoulombReactionField(),
             center_coords=false,
             dist_buffer=0.0u"nm",
         )

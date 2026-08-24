@@ -338,7 +338,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    nonbonded_method=:pme,
+    nonbonded_method=SetupPME(),
     loggers=(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -394,7 +394,7 @@ The floating point type can be set with `float_type`.
 Certain quantities such as the [`potential_energy`](@ref) and the [`virial`](@ref) are accumulated using a higher precision type, as are the large constant terms of [`Ewald`](@ref) and [`PME`](@ref) summation.
 This can be set with `float_type_high` but should generally be left as the default `Float64`.
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
-The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
+This can can be an instance of [`SetupCoulombReactionField`](@ref) (reaction field method), [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref) (Ewald summation, slow), or a cutoff like [`DistanceCutoff`](@ref) (short range only).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
 Note that `rigid_water` defaults to `false`, whereas OpenMM makes water rigid by default, so set `rigid_water=true` to reproduce OpenMM behavior.
 Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`, and is applied before constraints are generated.
