@@ -13,9 +13,21 @@ There are some projects that explore differentiable molecular simulations - see 
 However Julia provides a strong suite of AD tools, with [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) allowing source-to-source transformations for much of the language.
 With Molly you can use the power of Enzyme to obtain gradients through molecular simulations, even in the presence of complex interactions such as PME or implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
 Reverse and forward mode AD can be used on the CPU with multithreading and on the GPU; performance is typically within an order of magnitude of the primal run.
-Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
+Pairwise, specific and general interactions work for most simulators, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
+In addition, the following work with gradients:
+- Simulations with constraints using [`SHAKE_RATTLE`](@ref).
+- Gradients with respect to the alchemical λ of each atom, which give the ``\partial U / \partial \lambda`` gradients required for thermodynamic integration.
+- Units work for simple simulations provided the loss function returns a unitless value, but they are not supported throughout and the examples below are unitless.
+- Force field parameters, which can be read out of a system with `Molly.extract_parameters` and put back with `Molly.inject_gradients`. Most built-in interactions define the required `Molly.extract_parameters!` and `Molly.inject_interaction` methods.
+- Values recorded by loggers during the simulation, allowing loss functions that depend on the whole trajectory rather than only the final state.
+- Analysis functions such as [`radius_gyration`](@ref), [`hydrodynamic_radius`](@ref), [`distances`](@ref) and [`rmsd`](@ref).
+- The parameters of a custom general interaction, such as the weights of a neural network potential.
+- Second derivatives of interaction energies by applying forward mode over reverse mode.
 
-Differentiable simulation does not currently work with units and some components of the package.
+Differentiable simulation does not currently work with some components of the package:
+- Monte Carlo simulators and couplers.
+- [`LINCS`](@ref) constraints.
+- Virtual sites.
 This is mentioned in the relevant docstrings.
 It is memory intensive on the GPU so using gradient checkpointing, e.g. with [Checkpointing.jl](https://github.com/Argonne-National-Laboratory/Checkpointing.jl), will likely be required for larger simulations.
 
@@ -162,9 +174,24 @@ For [`DistanceNeighborFinder`](@ref) this includes the `eligible` matrix;
 If using custom interactions or some built-in interactions you may need to define methods of `zero` and `+` for your interaction type.
 
 It is common to require a loss function formed from values throughout a simulation.
-In this case it is recommended to split up the simulation into a set of short simulations in the loss function, each starting from the previous final coordinates and velocities.
+The values recorded by loggers can be used directly in the loss, for example by attaching a [`CoordinatesLogger`](@ref) and averaging a property over the recorded frames:
+```julia
+sys = System(
+    # ...
+    loggers=(coords=CoordinatesLogger(Float64, 100),),
+)
+
+simulate!(sys, simulator, n_steps)
+
+logged_coords = values(sys.loggers.coords)
+loss_val = zero(Float64)
+for cs in logged_coords
+    loss_val += radius_gyration(cs, sys.atoms)
+end
+loss_val /= length(logged_coords)
+```
+Alternatively the simulation can be split up into a set of short simulations in the loss function, each starting from the previous final coordinates and velocities.
 This runs an identical simulation but makes the intermediate coordinates and velocities available for use in calculating the final loss.
-For example, the RMSD could be calculated from the coordinates every 100 steps and added to a variable that is then divided by the number of chunks to get a loss value corresponding to the mean RMSD over the simulation.
 
 ## Specific interaction gradients
 
@@ -449,10 +476,12 @@ Here are some ideas for loss functions suitable for differentiable molecular sim
 - The temperature of the system.
 - Some measure of phase change or a critical point.
 - A combination of the above, for example to obtain a force field relevant to both ordered and disordered proteins.
-Some of these are currently not possible in Molly as the loggers are ignored for gradient purposes, but this will hopefully change in future.
+Gradients propagate through the values recorded by loggers, so a loss function can be formed from properties throughout the simulation rather than only the final state.
 
 ## Tips and tricks
 
 - The magnitude of gradients may be less important than the sign. Consider sampling gradients across different sources of stochasticity, such as starting velocities and conformations.
 - Exploding gradients prove a problem when using the velocity Verlet integrator in the NVE ensemble. This is why the velocity rescaling and Berendsen thermostats were used in the above examples. Langevin dynamics also seems to work. It is likely that the development of suitable simulation strategies and thermostats will be necessary to unlock the potential of differentiable simulation.
 - Forward mode AD holds much promise for differentiable simulation, provided that the number of parameters is small, because the memory requirement is constant in the number of simulation steps. However, if the code runs slower than non-differentiable alternatives then the best approach is likely to use finite differencing with the simulation as a black box. Adjoint sensitivity is another approach to getting gradients which is not yet available in Molly.jl.
+- [`PME`](@ref) stores mesh buffers that carry gradient information, so it must be passed as `Duplicated` with a `zero` shadow rather than as `Const`. Marking it `Const` silently gives the wrong gradient rather than erroring, which also means that a [`System`](@ref) containing a `PME` interaction should not be passed as `Const`.
+- Second derivatives can be obtained by applying forward mode over reverse mode with `autodiff_deferred`, for example to get the Hessian of the potential energy for normal mode analysis. This currently works when differentiating the interaction energy functions directly but not when going through [`System`](@ref).

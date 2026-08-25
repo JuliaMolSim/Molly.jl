@@ -45,6 +45,8 @@ Returns a `VirtualSite` defined by:
 \mathbf{r} = \mathbf{r}_1
 ```
 This can be useful in alchemical simulations when multiple versions of an atom are required.
+
+Not compatible with gradient calculation using Enzyme.
 """
 function OneParticleSite(atom_ind::Integer, atom_1::Integer, weight_cross=0.0u"nm^-1")
     # Optional weight_cross allows arrays of different virtual site types to be
@@ -64,6 +66,8 @@ Returns a `VirtualSite` defined by:
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2
 ```
 where ``w_1 + w_2`` must equal 1.
+
+Not compatible with gradient calculation using Enzyme.
 """
 function TwoParticleAverageSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, weight_1::T,
                                 weight_2::T, weight_cross=(zero(T) * u"nm^-1")) where T
@@ -85,6 +89,8 @@ Returns a `VirtualSite` defined by:
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2 + w_3 \mathbf{r}_3
 ```
 where ``w_1 + w_2 + w_3`` must equal 1.
+
+Not compatible with gradient calculation using Enzyme.
 """
 function ThreeParticleAverageSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer,
                                   atom_3::Integer, weight_1::T, weight_2::T, weight_3::T,
@@ -110,6 +116,7 @@ Returns a `VirtualSite` defined by:
 
 Only compatible with 3D systems.
 Not currently compatible with virial calculation.
+Not compatible with gradient calculation using Enzyme.
 """
 function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, atom_3::Integer,
                         weight_12::T, weight_13::T, weight_cross) where T

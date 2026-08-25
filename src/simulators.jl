@@ -119,6 +119,8 @@ end
 
 Steepest descent energy minimization.
 
+Not compatible with gradient calculation using Enzyme.
+
 # Arguments
 - `step_size::D=0.01u"nm"`: the initial maximum displacement.
 - `max_steps::Int=1_000`: the maximum number of steps.
@@ -1428,6 +1430,7 @@ Simulates the overdamped Langevin equation using the Euler-Maruyama method.
 
 Not currently compatible with constraints, will print a warning and continue
 without applying constraints.
+Not compatible with gradient calculation using Enzyme.
 
 # Arguments
 - `dt::S`: the time step of the simulation.

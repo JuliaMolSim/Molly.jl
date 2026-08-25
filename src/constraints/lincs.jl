@@ -53,6 +53,8 @@ Velocity constraints are applied implicitly through position constraint correcti
 See [Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)
 for the original LINCS paper.
 
+Not compatible with gradient calculation using Enzyme.
+
 # Arguments
 - `masses`: vector of atom masses.
 - `dist_tolerance=1e-8u"nm"`: the tolerance for checking position constraints, should

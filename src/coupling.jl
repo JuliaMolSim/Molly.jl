@@ -762,8 +762,8 @@ Does not currently work with shear stresses, the anisotropic variant only applie
 independent linear scaling of the box vectors.
 If shear deformation is required the [`BerendsenBarostat`](@ref) or,
 preferably, the [`CRescaleBarostat`](@ref) should be used instead.
-Due to the stochastic nature of the Monte Carlo acceptance criteria, this barostat
-may not propagate gradients correctly with differentiable simulation.
+
+Not compatible with gradient calculation using Enzyme.
 """
 mutable struct MonteCarloBarostat{T, P, K, V} <: AbstractBarostat
     pressure::P
