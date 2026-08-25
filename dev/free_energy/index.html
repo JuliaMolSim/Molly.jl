@@ -179,7 +179,7 @@ sys_0 = System(
     ff;
     array_type=AT,
     float_type=FT,
-    nonbonded_method=:cutoff,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 random_velocities!(sys_0, T0) # Initialize velocities from M-B distribution at target temperature</code></pre><p>Now, before starting to produce the pulling simulations, we need to know what is the value of the CV (remember, the torsion angle) for an equilibrated system. We can make use of the functions defined in <code>restraints.jl</code>. Remember to take note of this value, it will be important later!</p><pre><code class="language-julia hljs"># pulling.jl
@@ -273,7 +273,7 @@ sys = System(
     ff;
     array_type=AT,
     float_type=FT,
-    nonbonded_method=:cutoff,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 random_velocities!(sys, T0)
@@ -357,7 +357,7 @@ sys_nobias = System(
     ff;
     array_type=AT,
     float_type=FT,
-    nonbonded_method=:cutoff,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 # Atom indices defining dihedral
@@ -672,10 +672,10 @@ SOLVENT_EQUIL_TIME = FT(500)u&quot;ps&quot;
 VACUUM_EQUIL_TIME = FT(100)u&quot;ps&quot;
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))</code></pre><p>The setup function builds either the solvated or vacuum leg. The solvated leg uses PME and a Langevin integrator coupled to an NPT barostat. The vacuum leg uses short-range Coulomb with an infinite boundary and infinite non-bonded cutoff so the ethanol molecule is not split by a finite cutoff.</p><pre><code class="language-julia hljs">function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
-    nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u&quot;nm&quot;) : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u&quot;nm&quot; : FT(1) * u&quot;nm&quot;
     dist_buffer = is_vacuum ? FT(0) * u&quot;nm&quot; : FT(0.2) * u&quot;nm&quot;
+    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
 
     sys_base = System(
@@ -1085,10 +1085,10 @@ lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
 
 tss_solvation_replica_rngs(seed::Integer) =
     [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]</code></pre><p>The setup function constructs the solvated and vacuum legs. The non-bonded treatment is chosen before alchemical states are generated: PME for the solvated leg, and short-range Coulomb with an infinite cutoff for the vacuum leg.</p><pre><code class="language-julia hljs">function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
-    nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u&quot;nm&quot;) : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u&quot;nm&quot; : FT(1) * u&quot;nm&quot;
     dist_buffer = is_vacuum ? FT(0) * u&quot;nm&quot; : FT(0.2) * u&quot;nm&quot;
+    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
 
     sys_base = System(
@@ -1363,4 +1363,4 @@ Annihilation in vacuum (kJ mol^-1):    8.85278
 Standard State Correction (kJ mol^-1): 8.375271054356045
 Solvation Free Energy (kJ mol^-1):     -5.187966888071426
 Jackknife SE, no std-state uncertainty (kJ mol^-1): 0.1866043
-=========================================</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 24 August 2026 11:05">Monday 24 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+=========================================</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 25 August 2026 15:52">Tuesday 25 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
