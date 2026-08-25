@@ -37,9 +37,7 @@ function check_simulate_inputs(init_step::Integer, run_loggers, strictness)
     if init_step < 0
         throw(ArgumentError("init_step must be non-negative, found $init_step"))
     end
-    if !(run_loggers in (true, false, :skipstart))
-        throw(ArgumentError("run_loggers must be true, false or :skipstart, found $run_loggers"))
-    end
+    check_run_loggers(run_loggers)
     check_strictness(strictness)
 end
 

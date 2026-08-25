@@ -642,7 +642,7 @@ function apply_coupling!(sys::System{D},
 
     scalarP(P) = (P[1,1] + P[2,2] + P[3,3]) / D
     xyP(P)     = (P[1,1] + P[2,2]) / 2
-    μ = zeros(FT, D, D)
+    μ = zeros(MMatrix{D, D, FT})
     exp_scale(x) = (isfinite(barostat.max_scale_frac) ?
                     clamp(exp(x), 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac) :
                     exp(x))
@@ -706,7 +706,7 @@ function apply_coupling!(sys::System{D},
     end
 
     rotate = (barostat.coupling_type != :isotropic)
-    scale_coords!(sys, SMatrix{3, 3, FT}(μ); rotate=rotate, scale_velocities=true)
+    scale_coords!(sys, SMatrix{D, D, FT}(μ); rotate=rotate, scale_velocities=true)
     return true
 end
 

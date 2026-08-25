@@ -30,6 +30,12 @@ export
     ReplicaExchangeLogger,
     MonteCarloLogger
 
+function check_run_loggers(run_loggers)
+    if !(run_loggers == true || run_loggers == false || run_loggers == :skipstart)
+        throw(ArgumentError("run_loggers must be true, false or :skipstart, found $run_loggers"))
+    end
+end
+
 """
     apply_loggers!(system, neighbors=nothing, step_n=0, buffers=nothing, run_loggers=true;
                    n_threads=Threads.nthreads(), strictness=:warn, kwargs...)
@@ -43,9 +49,7 @@ Additional keyword arguments can be passed to the loggers if required.
 function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, buffers=nothing,
                         run_loggers=true; n_threads::Integer=Threads.nthreads(),
                         strictness=default_strictness(), kwargs...)
-    if !(run_loggers in (true, false, :skipstart))
-        throw(ArgumentError("run_loggers must be true, false or :skipstart, found $run_loggers"))
-    end
+    check_run_loggers(run_loggers)
     if run_loggers == true || (run_loggers == :skipstart && step_n != 0)
         for logger in values(sys.loggers)
             log_property!(logger, sys, neighbors, step_n, buffers; n_threads=n_threads,
