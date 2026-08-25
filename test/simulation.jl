@@ -943,7 +943,6 @@ end
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
     @test efficiency > 0.16 # This is a fairly arbitrary threshold but it's a good test for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
-    @info "Exchange Efficiency: $efficiency"
 
     for id in 1:n_replicas
         mean_temp = mean(values(repsys.replica_loggers[id].temp))
@@ -1009,7 +1008,6 @@ end
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
     @test efficiency > 0.1 # This is a fairly arbitrary threshold, but it's a good test for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
-    @info "Exchange Efficiency: $efficiency"
 
     for id in 1:n_replicas
         mean_temp = mean(values(repsys.replica_loggers[id].temp))
@@ -1062,9 +1060,7 @@ end
     @time simulate!(sys, simulator_gaussian, n_steps)
 
     acceptance_rate = sys.loggers.mcl.n_accept / sys.loggers.mcl.n_trials
-    @info "Acceptance Rate: $acceptance_rate"
     @test acceptance_rate > 0.05
-
     @test sys.loggers.avgpe.block_averages[end] < sys.loggers.avgpe.block_averages[1]
 
     distance_sum = 0.0u"nm"
@@ -1273,7 +1269,6 @@ end
             coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
             E_diff = abs(Float64(E_start) - E_start_ref)
             name = (triclinic ? "$name triclinic" : "$name cubic")
-            @info "$(rpad(name, 29)) - difference per coordinate $coord_diff_size - potential energy difference $E_diff"
             @test coord_diff_size < 1e-4u"nm"
             @test E_diff < 5e-4u"kJ * mol^-1"
         end
@@ -1322,7 +1317,6 @@ end
 
     temps = values(sys.loggers.temp)
     mean_temp = mean(temps[length(temps) ÷ 2 + 1:end])
-    @info "DPD mean temperature (second half): $mean_temp, target kBT: $kBT"
     @test 0.5 < mean_temp < 1.5
 
     total_momentum = sum(sys.velocities .* mass.(atoms))
