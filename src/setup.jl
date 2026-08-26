@@ -464,8 +464,7 @@ templates is carried out.
     `Float64` such as Metal.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
-    classical neighbor lists every few steps. Not used by
-    [`GPUNeighborFinder`](@ref).
+    classical neighbor lists every few steps.
 - `constraints=:none`: which constraints to apply during the simulation, options
     are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` (all bonds)
     and `:hangles` (all bonds plus H-X-H and H-O-X angles). Note that not all options
@@ -480,7 +479,7 @@ templates is carried out.
     can be an instance of [`SetupCoulombReactionField`](@ref) (reaction field method),
     [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref)
     (Ewald summation, slow), or a cutoff like [`DistanceCutoff`](@ref) (short range only).
-    For a cutoff, the cutoff distance must match `dist_cutoff`.
+    For a cutoff, the cutoff distance must not exceed `dist_cutoff`.
 - `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
     dispersion correction. Defaults to the force field setting, which defaults
     to `true`.
@@ -492,9 +491,11 @@ templates is carried out.
 - `neighbor_finder_type`: which neighbor finder to use, default is
     [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref)
     on CUDA compatible GPUs and [`DistanceNeighborFinder`](@ref) on non-CUDA
-    compatible GPUs. [`GPUNeighborFinder`](@ref) keeps sparse exception pairs
-    and lets the CUDA pairwise kernels build and cache interacting tiles
-    internally.
+    compatible GPUs. [`NoNeighborFinder`](@ref) can be used but in this case bonded
+    atoms will not be excluded from the non-bonded interactions.
+- `neighbor_finder_n_steps=10`: the number of steps between neighbor finder
+    updates. Can be tuned along with `dist_buffer` to ensure that particles
+    do not cross the buffer distance during the update interval.
 - `launch_config=CUDALaunchConfig()`: stored CUDA launch overrides for this
     system. Ignored on CPU and non-CUDA GPU backends.
 - `autotune_launch=true`: whether to autotune CUDA launch parameters at the end
@@ -535,6 +536,7 @@ function System(coord_file::AbstractString,
                 hydrogen_mass::Union{Bool, Number}=false,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
+                neighbor_finder_n_steps::Integer=10,
                 launch_config=CUDALaunchConfig(),
                 autotune_launch::Bool=true,
                 data=nothing,
@@ -564,6 +566,24 @@ function System(coord_file::AbstractString,
                 nonbonded_method isa AbstractCutoff)
         throw(ArgumentError("nonbonded_method must be a setup type like " *
                             "SetupCoulombReactionField/SetupPME/SetupEwald or an AbstractCutoff"))
+    end
+    if nonbonded_method isa AbstractCutoff && hasproperty(nonbonded_method, :dist_cutoff) &&
+            nonbonded_method.dist_cutoff > dist_cutoff
+        throw(ArgumentError("the cutoff distance for nonbonded_method (" *
+                "$(nonbonded_method.dist_cutoff)) must not exceed dist_cutoff ($dist_cutoff)"))
+    end
+    if nonbonded_method == NoCutoff() && neighbor_finder_type != NoNeighborFinder
+        err_str = "nonbonded_method is NoCutoff() but a neighbor finder is being used, this " *
+                  "means that interactions may depend on internal details of the neighbor finder"
+        report_issue(err_str, strictness)
+    end
+    if neighbor_finder_type == NoNeighborFinder
+        err_str = "neighbor_finder_type is NoNeighborFinder, this means that bonded atoms " *
+                  "will not be excluded from the non-bonded interactions"
+        report_issue(err_str, strictness)
+    end
+    if neighbor_finder_n_steps <= 0
+        throw(ArgumentError("neighbor_finder_n_steps ($neighbor_finder_n_steps) must be positive"))
     end
     if !(implicit_solvent in (:none, :obc1, :obc2, :gbn2))
         throw(ArgumentError("implicit_solvent must be one of :none, :obc1, :obc2 or :gbn2, " *
@@ -1217,7 +1237,7 @@ function System(coord_file::AbstractString,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method,
-                  neighbor_finder_type, implicit_solvent,
+                  neighbor_finder_type, neighbor_finder_n_steps, implicit_solvent,
                   kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
                   hydrogen_mass, strictness, launch_config, autotune_launch,
                   constraint_algorithm, n_threads)
@@ -1363,7 +1383,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                 impropers, torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
-                neighbor_finder_type,
+                neighbor_finder_type, neighbor_finder_n_steps,
                 implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
                 weight_14_coulomb, dispersion_correction,
                 hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
@@ -1591,6 +1611,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
             dist_cutoff=T(dist_neighbors),
             excluded_pairs=excluded_pairs,
             special_pairs=special_pairs,
+            n_steps_reorder=neighbor_finder_n_steps,
             device_vector_type=AT{Int32, 1},
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
@@ -1598,7 +1619,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         neighbor_finder = DistanceNeighborFinder(
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
-            n_steps=10,
+            n_steps=neighbor_finder_n_steps,
             dist_cutoff=T(dist_neighbors),
         )
     elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
@@ -1614,7 +1635,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
-            n_steps=10,
+            n_steps=neighbor_finder_n_steps,
             x0=coords,
             boundary=boundary,
             dist_cutoff=T(dist_neighbors),
@@ -1623,7 +1644,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         neighbor_finder = neighbor_finder_type(
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
-            n_steps=10,
+            n_steps=neighbor_finder_n_steps,
             dist_cutoff=T(dist_neighbors),
         )
     end
