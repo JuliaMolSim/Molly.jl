@@ -480,6 +480,10 @@ templates is carried out.
     [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref)
     (Ewald summation, slow), or a cutoff like [`DistanceCutoff`](@ref) (short range only).
     For a cutoff, the cutoff distance must not exceed `dist_cutoff`.
+- `lj_cutoff=nothing`: the cutoff method to use for the Lennard-Jones interaction,
+    by default uses `DistanceCutoff(dist_cutoff)`. The cutoff distance must not exceed
+    `dist_cutoff`. If the long-range Lennard-Jones dispersion correction is being used,
+    this must be a `DistanceCutoff`.
 - `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
     dispersion correction. Defaults to the force field setting, which defaults
     to `true`.
@@ -532,6 +536,7 @@ function System(coord_file::AbstractString,
                 rigid_water::Bool=false,
                 constraint_algorithm=SetupLINCS(),
                 nonbonded_method=SetupCoulombReactionField(),
+                lj_cutoff=nothing,
                 dispersion_correction=nothing,
                 hydrogen_mass::Union{Bool, Number}=false,
                 center_coords::Bool=true,
@@ -559,21 +564,34 @@ function System(coord_file::AbstractString,
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
     if !(constraints in (:none, :hbonds, :allbonds, :hangles))
-        throw(ArgumentError("constraints must be one of :none, :hbonds, :allbonds or :hangles"))
+        throw(ArgumentError("constraints ($constraints) must be one of :none, :hbonds, " *
+                            ":allbonds or :hangles"))
     end
     if !(nonbonded_method isa SetupCoulombReactionField ||
                 nonbonded_method isa AbstractSetupEwald ||
                 nonbonded_method isa AbstractCutoff)
-        throw(ArgumentError("nonbonded_method must be a setup type like " *
+        throw(ArgumentError("nonbonded_method ($nonbonded_method) must be a setup type like " *
                             "SetupCoulombReactionField/SetupPME/SetupEwald or an AbstractCutoff"))
+    end
+    if !(isnothing(lj_cutoff) || lj_cutoff isa AbstractCutoff)
+        throw(ArgumentError("lj_cutoff ($lj_cutoff) must be nothing or an AbstractCutoff"))
     end
     if nonbonded_method isa AbstractCutoff && hasproperty(nonbonded_method, :dist_cutoff) &&
             nonbonded_method.dist_cutoff > dist_cutoff
         throw(ArgumentError("the cutoff distance for nonbonded_method (" *
                 "$(nonbonded_method.dist_cutoff)) must not exceed dist_cutoff ($dist_cutoff)"))
     end
+    if hasproperty(lj_cutoff, :dist_cutoff) && lj_cutoff.dist_cutoff > dist_cutoff
+        throw(ArgumentError("the cutoff distance for lj_cutoff (" *
+                "$(lj_cutoff.dist_cutoff)) must not exceed dist_cutoff ($dist_cutoff)"))
+    end
     if nonbonded_method == NoCutoff() && neighbor_finder_type != NoNeighborFinder
         err_str = "nonbonded_method is NoCutoff() but a neighbor finder is being used, this " *
+                  "means that interactions may depend on internal details of the neighbor finder"
+        report_issue(err_str, strictness)
+    end
+    if lj_cutoff == NoCutoff() && neighbor_finder_type != NoNeighborFinder
+        err_str = "lj_cutoff is NoCutoff() but a neighbor finder is being used, this " *
                   "means that interactions may depend on internal details of the neighbor finder"
         report_issue(err_str, strictness)
     end
@@ -619,17 +637,19 @@ function System(coord_file::AbstractString,
     if isnothing(dispersion_correction)
         disp_corr = force_field.dispersion_correction
     else
-        disp_corr = dispersion_correction
-    end
-    if disp_corr && force_field.custom_nonbonded
-        throw(ArgumentError("dispersion_correction=true is not supported with CustomNonbondedForce"))
-    end
-    if !isnothing(dispersion_correction)
         if dispersion_correction != force_field.dispersion_correction
             err_str = "dispersion_correction is $dispersion_correction but value in the force " *
                       "field is $(force_field.dispersion_correction), using $dispersion_correction"
             report_issue(err_str, strictness)
         end
+        disp_corr = dispersion_correction
+    end
+    if disp_corr && force_field.custom_nonbonded
+        throw(ArgumentError("dispersion correction is not supported with CustomNonbondedForce"))
+    end
+    if disp_corr && !(isnothing(lj_cutoff) || lj_cutoff isa DistanceCutoff)
+        throw(ArgumentError("dispersion correction is not supported with lj_cutoff values " *
+                            "other than DistanceCutoff, found $lj_cutoff"))
     end
     dist_neighbors = dist_cutoff + dist_buffer
     T, TH = float_type, float_type_high
@@ -1236,7 +1256,7 @@ function System(coord_file::AbstractString,
                   atoms_data, virtual_sites_type, loggers, data, force_field.global_params, bonds_il, bonds_ub_flags,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
-                  units, dist_cutoff, constraints, rigid_water, nonbonded_method,
+                  units, dist_cutoff, constraints, rigid_water, nonbonded_method, lj_cutoff,
                   neighbor_finder_type, neighbor_finder_n_steps, implicit_solvent,
                   kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
                   hydrogen_mass, strictness, launch_config, autotune_launch,
@@ -1382,7 +1402,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                 loggers, data, global_params, bonds_all, bonds_ub_flags, angles_all, torsions,
                 impropers, torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
-                units, dist_cutoff, constraints_type, rigid_water, nonbonded_method,
+                units, dist_cutoff, constraints_type, rigid_water, nonbonded_method, lj_cutoff,
                 neighbor_finder_type, neighbor_finder_n_steps,
                 implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
                 weight_14_coulomb, dispersion_correction,
@@ -1541,12 +1561,13 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         end
     end
 
+    cutoff_lj = (isnothing(lj_cutoff) ? DistanceCutoff(T(dist_cutoff)) : lj_cutoff)
     if global_params[1] == zero(T)
         # If we are adding specific interactions for Lennard-Jones 1-4, set the weight
         #   to zero for the pairwise interaction
         pi_weight_14_lj = (separate_lj14 ? zero(T) : weight_14_lj)
         lj = LennardJones(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
+            cutoff=cutoff_lj,
             use_neighbors=using_neighbors,
             σ_mixing=σ_mix,
             ϵ_mixing=ϵ_mix,
@@ -1554,7 +1575,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         )
     else
         lj = DoubleExponential(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
+            cutoff=cutoff_lj,
             use_neighbors=using_neighbors,
             α=T(global_params[1]),
             β=T(global_params[2]),
@@ -1672,7 +1693,12 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     end
     # Infinite boundaries give infinite volume, hence no dispersion correction
     if dispersion_correction && !has_infinite_boundary(boundary)
-        general_inters_disp = (LJDispersionCorrection(atoms, T(dist_cutoff), σ_mix, ϵ_mix),)
+        if isnothing(lj_cutoff) || !hasproperty(lj_cutoff, :dist_cutoff)
+            lj_dist_cutoff = T(dist_cutoff)
+        else
+            lj_dist_cutoff = lj_cutoff.dist_cutoff
+        end
+        general_inters_disp = (LJDispersionCorrection(atoms, lj_dist_cutoff, σ_mix, ϵ_mix),)
     else
         general_inters_disp = ()
     end
