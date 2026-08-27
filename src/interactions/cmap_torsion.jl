@@ -15,7 +15,8 @@ struct CMAPTorsion
     size::Int
 end
 
-Base.zero(::CMAPTorsion) = CMAPTorsion(0, 0)
+Base.zero(::Type{CMAPTorsion}) = CMAPTorsion(0, 0)
+Base.zero(c::CMAPTorsion) = zero(typeof(c))
 
 Base.:+(c1::CMAPTorsion, c2::CMAPTorsion) = c1
 

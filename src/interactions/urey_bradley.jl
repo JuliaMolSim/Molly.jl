@@ -20,9 +20,11 @@ V(\theta, r) = \frac{1}{2} k_a (\theta - \theta_0)^2 + \frac{1}{2} k_b (r - r_0)
     r0::D
 end
 
-function Base.zero(::UreyBradley{KA, A, KB, D}) where {KA, A, KB, D}
+function Base.zero(::Type{UreyBradley{KA, A, KB, D}}) where {KA, A, KB, D}
     return UreyBradley(kangle=zero(KA), θ0=zero(A), kbond=zero(KB), r0=zero(D))
 end
+
+Base.zero(a::UreyBradley) = zero(typeof(a))
 
 function Base.:+(a1::UreyBradley, a2::UreyBradley)
     return UreyBradley(kangle=(a1.kangle + a2.kangle), θ0=(a1.θ0 + a2.θ0),

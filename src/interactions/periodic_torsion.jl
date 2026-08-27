@@ -36,7 +36,7 @@ function PeriodicTorsion(; periodicities, phases, ks, proper::Bool=true,
                                     tuple(ks_pad...), proper)
 end
 
-function Base.zero(::PeriodicTorsion{N, T, E}) where {N, T, E}
+function Base.zero(::Type{PeriodicTorsion{N, T, E}}) where {N, T, E}
     return PeriodicTorsion{N, T, E}(
         ntuple(_ -> 0      , N),
         ntuple(_ -> zero(T), N),
@@ -44,6 +44,8 @@ function Base.zero(::PeriodicTorsion{N, T, E}) where {N, T, E}
         false,
     )
 end
+
+Base.zero(pt::PeriodicTorsion) = zero(typeof(pt))
 
 function Base.:+(p1::PeriodicTorsion{N, T, E}, p2::PeriodicTorsion{N, T, E}) where {N, T, E}
     return PeriodicTorsion{N, T, E}(
@@ -54,12 +56,21 @@ function Base.:+(p1::PeriodicTorsion{N, T, E}, p2::PeriodicTorsion{N, T, E}) whe
     )
 end
 
+# Pre-compute string interpolation
+const torsion_phase_keys = ["phase_$i" for i in 1:20]
+const torsion_k_keys     = ["k_$i"     for i in 1:20]
+
+@inline torsion_phase_key(i::Integer) =
+    (i <= length(torsion_phase_keys) ? @inbounds(torsion_phase_keys[i]) : "phase_$i")
+@inline torsion_k_key(i::Integer) =
+    (i <= length(torsion_k_keys) ? @inbounds(torsion_k_keys[i]) : "k_$i")
+
 function inject_interaction(inter::PeriodicTorsion{N, T, E}, inter_type, params_dic) where {N, T, E}
     key_prefix = (inter.proper ? "inter_PT_$(inter_type)_" : "inter_IT_$(inter_type)_")
     return PeriodicTorsion{N, T, E}(
         inter.periodicities,
-        ntuple(i -> dict_get(params_dic, key_prefix * "phase_$i", inter.phases[i]), N),
-        ntuple(i -> dict_get(params_dic, key_prefix * "k_$i"    , inter.ks[i]    ), N),
+        ntuple(i -> dict_get(params_dic, key_prefix * torsion_phase_key(i), inter.phases[i]), N),
+        ntuple(i -> dict_get(params_dic, key_prefix * torsion_k_key(i)    , inter.ks[i]    ), N),
         inter.proper,
     )
 end
@@ -75,8 +86,8 @@ function extract_parameters!(params_dic,
         end
         if !haskey(params_dic, key_prefix * "phase_1")
             for i in eachindex(torsion.phases)
-                params_dic[key_prefix * "phase_$i"] = torsion.phases[i]
-                params_dic[key_prefix * "k_$i"    ] = torsion.ks[i]
+                params_dic[key_prefix * torsion_phase_key(i)] = torsion.phases[i]
+                params_dic[key_prefix * torsion_k_key(i)    ] = torsion.ks[i]
             end
         end
     end

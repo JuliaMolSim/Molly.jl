@@ -16,7 +16,8 @@ V(r) = D(1 - e^{-a(r - r_0)})^2
     r0::R
 end
 
-Base.zero(::MorseBond{T, A, R}) where {T, A, R} = MorseBond(D=zero(T), a=zero(A), r0=zero(R))
+Base.zero(::Type{MorseBond{T, A, R}}) where {T, A, R} = MorseBond(D=zero(T), a=zero(A), r0=zero(R))
+Base.zero(b::MorseBond) = zero(typeof(b))
 
 Base.:+(b1::MorseBond, b2::MorseBond) = MorseBond(D=(b1.D + b2.D), a=(b1.a + b2.a),
                                                   r0=(b1.r0 + b2.r0))

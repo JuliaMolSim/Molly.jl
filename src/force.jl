@@ -525,6 +525,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, ITD, NIT, OIT, 
     velocities_reordered::VR
     atoms_reordered::AR
     fs_mat_reordered::fs_re
+    grad_scratch::Base.RefValue{Any}
     step_n_preprocessed::Int
     sparse_pair_generation::UInt64
     num_pairs::Int
@@ -554,8 +555,9 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
                       num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
-                      atoms_reordered, fs_mat_reordered, step_n_preprocessed,
-                      sparse_pair_generation, num_pairs, masks_initialized)
+                      atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
+                      step_n_preprocessed, sparse_pair_generation, num_pairs,
+                      masks_initialized)
 end
 
 function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
@@ -676,7 +678,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
                       num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
-                      atoms_reordered, fs_mat_reordered, -1, UInt64(0), 0, false)
+                      atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
+                      -1, UInt64(0), 0, false)
 end
 
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
@@ -1230,15 +1233,30 @@ function specific_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 end
 
 function forces!(fs,
-                 sys::System{D, <:AbstractGPUArray, T, TH},
+                 sys::System{<:Any, <:AbstractGPUArray},
                  neighbors,
                  step_n::Integer,
                  buffers::BuffersGPU,
-                 ::Val{needs_vir};
+                 needs_vir::Val;
                  n_threads::Integer=Threads.nthreads(),
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
-                 general_inters=sys.general_inters) where {D, T, TH, needs_vir}
+                 general_inters=sys.general_inters)
+    # Allow an Enzyme reverse rule
+    return gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir, pairwise_inters,
+                       specific_inter_lists, general_inters, n_threads)
+end
+
+function gpu_forces!(fs,
+                     sys::System{D, <:AbstractGPUArray, T, TH},
+                     neighbors,
+                     step_n::Integer,
+                     buffers::BuffersGPU,
+                     ::Val{needs_vir},
+                     pairwise_inters,
+                     specific_inter_lists,
+                     general_inters,
+                     n_threads::Integer) where {D, T, TH, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
         fill!(buffers.virial_nounits, zero(TH))

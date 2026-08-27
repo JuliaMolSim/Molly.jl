@@ -19,7 +19,8 @@ Only compatible with 3D systems.
     θ0::D
 end
 
-Base.zero(::HarmonicTorsion{K, D}) where {K, D} = HarmonicTorsion(k=zero(K), θ0=zero(D))
+Base.zero(::Type{HarmonicTorsion{K, D}}) where {K, D} = HarmonicTorsion(k=zero(K), θ0=zero(D))
+Base.zero(t::HarmonicTorsion) = zero(typeof(t))
 
 Base.:+(t1::HarmonicTorsion, t2::HarmonicTorsion) = HarmonicTorsion(k=(t1.k + t2.k),
                                                                         θ0=(t1.θ0 + t2.θ0))

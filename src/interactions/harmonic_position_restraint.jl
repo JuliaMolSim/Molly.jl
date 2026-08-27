@@ -17,9 +17,11 @@ Does not contribute to the virial.
     x0::C
 end
 
-function Base.zero(::HarmonicPositionRestraint{K, C}) where {K, C}
+function Base.zero(::Type{HarmonicPositionRestraint{K, C}}) where {K, C}
     return HarmonicPositionRestraint(k=zero(K), x0=zero(C))
 end
+
+Base.zero(r::HarmonicPositionRestraint) = zero(typeof(r))
 
 function Base.:+(r1::HarmonicPositionRestraint, r2::HarmonicPositionRestraint)
     return HarmonicPositionRestraint(k=(r1.k + r2.k), x0=(r1.x0 + r2.x0))

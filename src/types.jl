@@ -503,16 +503,26 @@ function Atom(; index=Int32(1), atom_type=Int32(1), mass=1.0u"g/mol", charge=0.0
     return Atom(index, atom_type, mass, charge, σ, ϵ, λ, alch_role)
 end
 
-function Base.zero(::Atom{T, M, C, S, E, L}) where {T, M, C, S, E, L}
+function Base.zero(::Type{Atom{T, M, C, S, E, L}}) where {T, M, C, S, E, L}
     return Atom(Int32(0), zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), CoreRole)
 end
+
+Base.zero(at::Atom) = zero(typeof(at))
 
 function Base.:+(a1::Atom, a2::Atom)
     return Atom(a1.index, a1.atom_type, a1.mass + a2.mass, a1.charge + a2.charge,
                 a1.σ + a2.σ, a1.ϵ + a2.ϵ, a1.λ + a2.λ, a1.alch_role)
 end
 
-# get function errors with AD
+# The `get` function errors with AD, so branch on `haskey` instead. For a `Dict` go
+# straight to the slot: `haskey` followed by `getindex` hashes the key twice, and this is
+# on the hot path of every gradient through `inject_gradients`. Reverse mode never sees
+# this body, as `MollyEnzymeExt` puts a rule on `dict_get`.
+function dict_get(dic::Dict, key, default::T) where T
+    idx = Base.ht_keyindex(dic, key)
+    return (idx > 0 ? T(@inbounds dic.vals[idx]) : default)
+end
+
 dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
 
 function inject_atom(at, at_data, params_dic)

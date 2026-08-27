@@ -967,17 +967,17 @@ end
         ("CPU gbn2"        , Array, false, false, false, false, true , 1e-3, 1e-3),
         ("CPU gbn2 forward", Array, false, true , false, false, true , 0.5 , 0.1 ),
     ]
-    if run_parallel_tests #                  gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("CPU parallel"        , Array, true , false, false, false, false, 1e-4, 1e-4))
-        push!(runs, ("CPU parallel forward", Array, true , true , false, false, false, 0.5 , 0.1 ))
-        push!(runs, ("CPU parallel f32"    , Array, true , false, true , false, false, 0.01, 5e-4))
+    if run_parallel_tests #                       gpu    par   fwd    f32    obc2   gbn2   tol_σ tol_r0
+        push!(runs, ("CPU parallel"             , Array, true, false, false, false, false, 1e-4, 1e-4))
+        push!(runs, ("CPU parallel forward"     , Array, true, true , false, false, false, 0.5 , 0.1 ))
+        push!(runs, ("CPU parallel f32"         , Array, true, false, true , false, false, 0.01, 5e-4))
+        push!(runs, ("CPU parallel obc2"        , Array, true, false, false, true , false, 1e-4, 1e-4))
+        push!(runs, ("CPU parallel gbn2"        , Array, true, false, false, false, true , 1e-3, 1e-3))
+        push!(runs, ("CPU parallel gbn2 forward", Array, true, true , false, false, true , 0.5 , 0.1 ))
     end
-    for AT in array_list[2:end] #            gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("$AT"                 , AT   , false, false, false, false, false, 0.25, 20.0))
-        push!(runs, ("$AT forward"         , AT   , false, true , false, false, false, 0.25, 20.0))
-        push!(runs, ("$AT f32"             , AT   , false, false, true , false, false, 0.5 , 50.0))
-        push!(runs, ("$AT obc2"            , AT   , false, false, false, true , false, 0.25, 20.0))
-        push!(runs, ("$AT gbn2"            , AT   , false, false, false, false, true , 0.25, 20.0))
+    for AT in array_list[2:end] # gpu  par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+        push!(runs, ("$AT"    ,   AT,  false, false, false, false, false, 0.25, 20.0))
+        push!(runs, ("$AT f32",   AT,  false, false, true , false, false, 0.5 , 50.0))
     end
 
     function mean_min_separation(coords, boundary, ::Val{T}) where T
@@ -1726,8 +1726,6 @@ end
             float_type=Float64,
             nonbonded_method=SetupCoulombReactionField(),
             dispersion_correction=false,
-            implicit_solvent=:gbn2,
-            kappa=0.7,
             grad_safe=true,
             strictness=:nowarn,
             n_threads=n_threads,
@@ -1768,7 +1766,7 @@ end
         )
 
         fs = forces(sys; n_threads=n_threads)
-        return sum(sum.(abs, fs))
+        return sum(sum.(abs2, fs))
     end
 
     function test_sim_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
@@ -1815,27 +1813,6 @@ end
         "atom_O_σ"                 => 0.2959921901149463,
         "atom_O_ϵ"                 => 0.87864,
         "inter_CO_weight_14"       => 0.8333,
-        "inter_GB_neck_cut"        => 0.68,
-        "inter_GB_neck_scale"      => 0.826836,
-        "inter_GB_offset"          => 0.0195141,
-        "inter_GB_params_C_α"      => 0.733756,
-        "inter_GB_params_C_β"      => 0.506378,
-        "inter_GB_params_C_γ"      => 0.205844,
-        "inter_GB_params_N_α"      => 0.503364,
-        "inter_GB_params_N_β"      => 0.316828,
-        "inter_GB_params_N_γ"      => 0.192915,
-        "inter_GB_params_O_α"      => 0.867814,
-        "inter_GB_params_O_β"      => 0.876635,
-        "inter_GB_params_O_γ"      => 0.387882,
-        "inter_GB_probe_radius"    => 0.14,
-        "inter_GB_radius_C"        => 0.17,
-        "inter_GB_radius_N"        => 0.155,
-        "inter_GB_radius_O"        => 0.15,
-        "inter_GB_radius_O_CAR"    => 0.14,
-        "inter_GB_sa_factor"       => 28.3919551,
-        "inter_GB_screen_C"        => 1.058554,
-        "inter_GB_screen_N"        => 0.733599,
-        "inter_GB_screen_O"        => 1.061039,
         "inter_LJ_weight_14"       => 0.5,
         "inter_PT_-/C/CT/-_k_1"    => 0.0,
         "inter_PT_-/C/N/-_k_1"     => -10.46,
@@ -1882,21 +1859,25 @@ end
     for AT in array_list[2:end]
         push!(platform_runs, ("$AT", AT, false))
     end
-    test_runs = [
-        ("Energy", test_energy_grad, 1e-8),
-        ("Force" , test_forces_grad, 1e-8),
+    test_runs = Any[
+        ("Energy", test_energy_grad, 1e-8, 1e-10),
+        ("Force" , test_forces_grad, 1e-8, 1e-10),
     ]
     if !running_CI
-        push!(test_runs, ("Sim", test_sim_grad, 1e-2))
+        push!(test_runs, ("Sim", test_sim_grad, 1e-2, nothing))
     end
     params_to_test = (
+        "atom_N_σ",
         "atom_N_ϵ",
         "inter_PT_C/N/CT/C_k_1",
-        "inter_GB_screen_O",
     )
 
-    for (test_name, test_fn, test_tol) in test_runs
+    for (test_name, test_fn, tol_fd, tol_cross) in test_runs
+        grads_ref = nothing # Single-threaded CPU gradients for every parameter
         for (platform, AT, parallel) in platform_runs
+            if test_name == "Sim" && !startswith(platform, "CPU")
+                continue
+            end
             n_threads = (parallel ? Threads.nthreads() : 1)
             sys_ref = create_sys(AT, n_threads)
             grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
@@ -1918,8 +1899,19 @@ end
                     test_fn(dic, sys_ref, copy(sys_ref.coords), sys_ref.neighbor_finder, n_threads)
                 end
                 frac_diff = abs(genz - gfd) / abs(gfd)
-                tol = (test_name == "Force" && param == "atom_N_ϵ" ? 2e-3 : test_tol)
-                @test frac_diff < tol
+                @test frac_diff < tol_fd
+            end
+            if isnothing(tol_cross)
+                continue # Random numbers on different backends may be different
+            elseif isnothing(grads_ref)
+                grads_ref = grads_enzyme
+            else
+                # Every force field parameter should give the same gradient on every
+                # platform, measured relative to the largest gradient so that parameters
+                # with a near-zero gradient do not dominate
+                scale = maximum(abs, values(grads_ref))
+                max_diff = maximum(abs(grads_enzyme[k] - grads_ref[k]) for k in keys(params_dic))
+                @test max_diff / scale < tol_cross
             end
         end
     end

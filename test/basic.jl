@@ -1040,7 +1040,7 @@ end
                                        strictness=:error)
     @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
                                        float_type=Float32, strictness=:error)
-    sys_f32 = @suppress_err System(atoms=atoms, coords=coords_f32, boundary=boundary)
+    sys_f32 = System(atoms=atoms, coords=coords_f32, boundary=boundary, strictness=:nowarn)
     @test float_type(sys_f32) == Float64 # Read from the boundary
 
     # Atoms should be concretely typed

@@ -495,14 +495,23 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray}, neighbors,
     return potential_energy(sys, neighbors, step_n, buffers; kwargs...)
 end
 
-function potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH},
+function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                           neighbors,
                           step_n::Integer,
                           buffers::BuffersGPU;
                           n_threads::Integer=Threads.nthreads(),
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
-                          general_inters=sys.general_inters) where TH
+                          general_inters=sys.general_inters)
+    # Allow an Enzyme reverse rule
+    return gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
+                                specific_inter_lists, general_inters, n_threads)
+end
+
+function gpu_potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH}, neighbors,
+                              step_n::Integer, buffers::BuffersGPU, pairwise_inters,
+                              specific_inter_lists, general_inters,
+                              n_threads::Integer) where TH
     fill!(buffers.pe_vec_nounits, zero(TH))
 
     with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl

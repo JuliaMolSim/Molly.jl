@@ -28,10 +28,12 @@ end
 
 RBTorsion(; c0, c1, c2, c3, c4, c5) = RBTorsion{typeof(c0)}(c0, c1, c2, c3, c4, c5)
 
-function Base.zero(::RBTorsion{T}) where T
+function Base.zero(::Type{RBTorsion{T}}) where T
     z = zero(T)
     return RBTorsion(z, z, z, z, z, z)
 end
+
+Base.zero(t::RBTorsion) = zero(typeof(t))
 
 function Base.:+(t1::RBTorsion, t2::RBTorsion)
     return RBTorsion(t1.c0 + t2.c0, t1.c1 + t2.c1, t1.c2 + t2.c2, t1.c3 + t2.c3,

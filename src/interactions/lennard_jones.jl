@@ -168,11 +168,12 @@ struct LJDispersionCorrection{F6, F12}
     factor_12::F12
 end
 
-function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
+function LJDispersionCorrection(atoms::AbstractArray,
+                                dist_cutoff,
                                 σ_mix=LorentzMixing(),
                                 ϵ_mix=GeometricMixing(),
                                 λ_mix=MinimumMixing(),
-                                scheduler = DefaultLambdaScheduler())
+                                scheduler=DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
     n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
@@ -230,8 +231,9 @@ function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
     )
 end
 
-Base.zero(dc::LJDispersionCorrection) =
-    LJDispersionCorrection(zero(dc.factor_6), zero(dc.factor_12))
+Base.zero(::Type{LJDispersionCorrection{F6, F12}}) where {F6, F12} =
+    LJDispersionCorrection(zero(F6), zero(F12))
+Base.zero(dc::LJDispersionCorrection) = zero(typeof(dc))
 
 function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
     return LJDispersionCorrection(
@@ -981,9 +983,11 @@ struct LennardJones14{S, E, W}
     weight_14::W
 end
 
-function Base.zero(::LennardJones14{S, E, W}) where {S, E, W}
+function Base.zero(::Type{LennardJones14{S, E, W}}) where {S, E, W}
     return LennardJones14(zero(S), zero(E), zero(W))
 end
+
+Base.zero(l::LennardJones14) = zero(typeof(l))
 
 function Base.:+(l1::LennardJones14, l2::LennardJones14)
     return LennardJones14(

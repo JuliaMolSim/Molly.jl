@@ -16,7 +16,8 @@ V(\theta) = k(1 + \cos(\theta - \theta_0))
     θ0::D
 end
 
-Base.zero(::CosineAngle{K, D}) where {K, D} = CosineAngle(k=zero(K), θ0=zero(D))
+Base.zero(::Type{CosineAngle{K, D}}) where {K, D} = CosineAngle(k=zero(K), θ0=zero(D))
+Base.zero(a::CosineAngle) = zero(typeof(a))
 
 Base.:+(a1::CosineAngle, a2::CosineAngle) = CosineAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
 

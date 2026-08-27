@@ -275,17 +275,16 @@
     @test maximum(norm.(coords_diff)) < 1e-10u"nm"
     @test maximum(norm.(vels_diff  )) < 1e-7u"nm * ps^-1"
 
-    @suppress_err begin
-        sys_ljcut = System(
-            joinpath(data_dir, "6mrr_equil.pdb"),
-            ff;
-            nonbonded_method=SetupCoulombReactionField(),
-            center_coords=false,
-            lj_cutoff=PolynomialCutoff(0.8u"nm", 1.0u"nm"),
-            dispersion_correction=false,
-        )
-        @test potential_energy(sys_ljcut) ≈ 42906.57411130544u"kJ * mol^-1"
-    end
+    sys_ljcut = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=SetupCoulombReactionField(),
+        center_coords=false,
+        lj_cutoff=PolynomialCutoff(0.8u"nm", 1.0u"nm"),
+        dispersion_correction=false,
+        strictness=:nowarn,
+    )
+    @test potential_energy(sys_ljcut) ≈ 42906.57411130544u"kJ * mol^-1"
 
     # Test with no units
     ff_nounits = MolecularForceField(

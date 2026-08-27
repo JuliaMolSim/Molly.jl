@@ -17,7 +17,8 @@ V(\theta) = \frac{1}{2} k (\theta - \theta_0)^2
     θ0::D
 end
 
-Base.zero(::HarmonicAngle{K, D}) where {K, D} = HarmonicAngle(k=zero(K), θ0=zero(D))
+Base.zero(::Type{HarmonicAngle{K, D}}) where {K, D} = HarmonicAngle(k=zero(K), θ0=zero(D))
+Base.zero(a::HarmonicAngle) = zero(typeof(a))
 
 Base.:+(a1::HarmonicAngle, a2::HarmonicAngle) = HarmonicAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
 
