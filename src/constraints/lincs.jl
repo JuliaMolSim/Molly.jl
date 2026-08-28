@@ -48,6 +48,8 @@ algorithm.
 LINCS is a non-iterative constraint algorithm that uses matrix expansion to approximate
 the inverse of the constraint coupling matrix. It is typically faster than
 [`SHAKE_RATTLE`](@ref) for large systems but is approximate for ring topologies.
+Either or both of `dist_constraints` and `angle_constraints` must be given.
+[`SetupLINCS`](@ref) provides LINCS parameters when setting up a system from a file.
 
 Velocity constraints are applied implicitly through position constraint correction.
 See [Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)

@@ -770,6 +770,9 @@ c_\mathrm{rf} = \frac{1}{r_\mathrm{c}} \frac{3\varepsilon_\mathrm{rf}}{2\varepsi
 `solvent_dielectric` corresponds to ``\varepsilon_\mathrm{rf}``.
 Setting `solvent_dielectric=Inf` gives conducting boundary conditions
 (``k_\mathrm{rf} = 1/(2r_\mathrm{c}^3)``, ``c_\mathrm{rf} = 3/(2r_\mathrm{c})``).
+
+[`SetupCoulombReactionField`](@ref) provides reaction field parameters when setting up a
+system from a file.
 """
 @kwdef struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
     dist_cutoff::D

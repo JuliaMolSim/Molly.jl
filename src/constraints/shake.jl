@@ -8,7 +8,9 @@ export
                  gpu_block_size=128, max_iters=25, strictness=:warn)
 
 Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
+
 Either or both of `dist_constraints` and `angle_constraints` must be given.
+[`SetupSHAKE_RATTLE`](@ref) provides SHAKE/RATTLE parameters when setting up a system from a file.
 
 Velocity constraints will be imposed for simulators that integrate velocities such as
 [`VelocityVerlet`](@ref).

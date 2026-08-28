@@ -72,6 +72,7 @@ Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
 which provides the short range term, and the [`EwaldExclusion`](@ref) specific
 interaction, which provides the exclusions for bonded atoms.
 `dist_cutoff` and `error_tol` should match these interactions.
+[`SetupEwald`](@ref) provides Ewald parameters when setting up a system from a file.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
 This algorithm is O(N^2) and in general [`PME`](@ref) should be used instead.
@@ -334,6 +335,7 @@ Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
 which provides the short range term, and the [`EwaldExclusion`](@ref) specific
 interaction, which provides the exclusions for bonded atoms.
 `dist_cutoff` and `error_tol` should match these interactions.
+[`SetupPME`](@ref) provides PME parameters when setting up a system from a file.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
 `fixed_charges` should be set to `false` if the partial charges can change,
