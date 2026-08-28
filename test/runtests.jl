@@ -40,12 +40,6 @@ elseif GROUP != "All"
     error("unrecognised test group, GROUP=$GROUP")
 end
 
-# Some CPU gradient tests give memory errors on CI
-const running_CI = haskey(ENV, "CI")
-if running_CI
-    @warn "Some CPU gradient tests will not be run as this is CI"
-end
-
 const run_visualize_tests = get(ENV, "VISTESTS", "1") != "0"
 if run_visualize_tests
     import GLMakie

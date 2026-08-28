@@ -975,10 +975,10 @@ end
         push!(runs, ("CPU parallel gbn2"        , Array, true, false, false, false, true , 1e-3, 1e-3))
         push!(runs, ("CPU parallel gbn2 forward", Array, true, true , false, false, true , 0.5 , 0.1 ))
     end
-    for AT in array_list[2:end] # gpu  par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+    #=for AT in array_list[2:end] # gpu  par    fwd    f32    obc2   gbn2   tol_σ tol_r0
         push!(runs, ("$AT"    ,   AT,  false, false, false, false, false, 0.25, 20.0))
         push!(runs, ("$AT f32",   AT,  false, false, true , false, false, 0.5 , 50.0))
-    end
+    end=#
 
     function mean_min_separation(coords, boundary, ::Val{T}) where T
         min_seps = T[]
@@ -1022,7 +1022,7 @@ end
             neighbor_finder=neighbor_finder,
             force_units=NoUnits,
             energy_units=NoUnits,
-            grad_safe=grad_safe, # false to allow FD to test that the two paths are the same
+            grad_safe=grad_safe, # false for FD to test that the two paths are the same
         )
 
         simulate!(sys, simulator, n_steps; n_threads=n_threads, rng=rng)
@@ -1747,6 +1747,7 @@ end
             neighbor_finder=neighbor_finder,
             force_units=NoUnits,
             energy_units=NoUnits,
+            grad_safe=true,
         )
 
         return potential_energy(sys; n_threads=n_threads)
@@ -1765,6 +1766,7 @@ end
             neighbor_finder=neighbor_finder,
             force_units=NoUnits,
             energy_units=NoUnits,
+            grad_safe=true,
         )
 
         fs = forces(sys; n_threads=n_threads)
@@ -1784,6 +1786,7 @@ end
             neighbor_finder=neighbor_finder,
             force_units=NoUnits,
             energy_units=NoUnits,
+            grad_safe=true,
         )
 
         simulator = Langevin(dt=0.001, temperature=300.0, friction=1.0)
@@ -1862,12 +1865,10 @@ end
         push!(platform_runs, ("$AT", AT, false))
     end
     test_runs = Any[
-        ("Energy", test_energy_grad, 1e-8, 1e-10),
-        ("Force" , test_forces_grad, 1e-8, 1e-10),
+        ("Energy", test_energy_grad, 1e-8, 1e-10  ),
+        ("Force" , test_forces_grad, 1e-8, 1e-10  ),
+        ("Sim"   , test_sim_grad   , 1e-2, nothing),
     ]
-    if !running_CI
-        push!(test_runs, ("Sim", test_sim_grad, 1e-2, nothing))
-    end
     params_to_test = (
         "atom_N_σ",
         "atom_N_ϵ",

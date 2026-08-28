@@ -481,8 +481,7 @@ function EnzymeRules.reverse(config::RevConfig,
                              ::Type{RT}, tape, buffers::Annotation, sys::Annotation,
                              pairwise_inters::Annotation, neighbors::Annotation,
                              needs_vir::Const{Val{NV}}, step_n::Annotation) where {RT, NV}
-    NV && error("gradients through the virial are not implemented on the GPU, use " *
-                "forces rather than forces_virial")
+    NV && error("gradients through the virial are not implemented on the GPU")
     dinters = nothing
     dfs_mat = grad_shadow(buffers, :fs_mat)
     if !isnothing(dfs_mat) && length(neighbors.val) > 0
@@ -667,8 +666,7 @@ function EnzymeRules.reverse(config::RevConfig,
                              boundary::Annotation, needs_vir::Const{Val{NV}},
                              step_n::Annotation, force_units::Annotation,
                              TH::Const) where {RT, NV}
-    NV && error("gradients through the virial are not implemented on the GPU, use " *
-                "forces rather than forces_virial")
+    NV && error("gradients through the virial are not implemented on the GPU")
     dfs_mat = whole_shadow(fs_mat)
     il = inter_list.val
     if !isnothing(dfs_mat) && length(il) > 0
@@ -815,24 +813,15 @@ function specific_adjoint!(rev_kernel_for, sys, prim, step_n, specific_inter_lis
     return nothing
 end
 
-@inline function check_no_general_inters(general_inters)
-    length(general_inters) > 0 && error(
-        "reverse-mode gradients through general interactions (such as implicit solvent) " *
-        "are not implemented on the GPU yet; the pairwise and specific interactions are")
-    return nothing
-end
-
 function EnzymeRules.augmented_primal(config::RevConfig,
                                       func::Const{typeof(Molly.gpu_potential_energy)},
                                       ::Type{RT}, sys::Annotation, neighbors::Annotation,
                                       step_n::Annotation, buffers::Annotation,
                                       pairwise_inters::Annotation,
                                       specific_inter_lists::Annotation,
-                                      general_inters::Annotation,
                                       n_threads::Annotation) where RT
-    check_no_general_inters(general_inters.val)
     pe = func.val(sys.val, neighbors.val, step_n.val, buffers.val, pairwise_inters.val,
-                  specific_inter_lists.val, general_inters.val, n_threads.val)
+                  specific_inter_lists.val, n_threads.val)
     tape = adjoint_tape(sys.val, !(sys isa Const) || !(pairwise_inters isa Const) ||
                                  !(specific_inter_lists isa Const),
                         Molly.any_uses_velocity(values(pairwise_inters.val)))
@@ -848,7 +837,7 @@ function EnzymeRules.reverse(config::RevConfig,
                              step_n::Annotation, buffers::Annotation,
                              pairwise_inters::Annotation,
                              specific_inter_lists::Annotation,
-                             general_inters::Annotation, n_threads::Annotation)
+                             n_threads::Annotation)
     dpe = ustrip(dret isa Type ? zero(Float64) : dret.val)
     dinters = nothing
     if !iszero(dpe)
@@ -880,7 +869,7 @@ function EnzymeRules.reverse(config::RevConfig,
         value_cotangent!(pairwise_inters,
                          isnothing(dinters) ? Enzyme.make_zero(pairwise_inters.val) : dinters)
     end
-    return (nothing, nothing, nothing, nothing, dpis, nothing, nothing, nothing)
+    return (nothing, nothing, nothing, nothing, dpis, nothing, nothing)
 end
 
 function EnzymeRules.augmented_primal(config::RevConfig,
@@ -890,12 +879,9 @@ function EnzymeRules.augmented_primal(config::RevConfig,
                                       buffers::Annotation, needs_vir::Const,
                                       pairwise_inters::Annotation,
                                       specific_inter_lists::Annotation,
-                                      general_inters::Annotation,
                                       n_threads::Annotation) where RT
-    check_no_general_inters(general_inters.val)
     func.val(fs.val, sys.val, neighbors.val, step_n.val, buffers.val, needs_vir.val,
-             pairwise_inters.val, specific_inter_lists.val, general_inters.val,
-             n_threads.val)
+             pairwise_inters.val, specific_inter_lists.val, n_threads.val)
     tape = adjoint_tape(sys.val, !(fs isa Const),
                         Molly.any_uses_velocity(values(pairwise_inters.val)))
     primal = EnzymeRules.needs_primal(config) ? (fs.val, buffers.val) : nothing
@@ -913,10 +899,8 @@ function EnzymeRules.reverse(config::RevConfig,
                              buffers::Annotation, needs_vir::Const{Val{NV}},
                              pairwise_inters::Annotation,
                              specific_inter_lists::Annotation,
-                             general_inters::Annotation,
                              n_threads::Annotation) where {RT, NV}
-    NV && error("gradients through the virial are not implemented on the GPU, use " *
-                "forces rather than forces_virial")
+    NV && error("gradients through the virial are not implemented on the GPU")
     dfs = whole_shadow(fs)
     dinters = nothing
     if !isnothing(dfs)
@@ -953,8 +937,7 @@ function EnzymeRules.reverse(config::RevConfig,
         value_cotangent!(pairwise_inters,
                          isnothing(dinters) ? Enzyme.make_zero(pairwise_inters.val) : dinters)
     end
-    return (nothing, nothing, nothing, nothing, nothing, nothing, dpis, nothing, nothing,
-            nothing)
+    return (nothing, nothing, nothing, nothing, nothing, nothing, dpis, nothing, nothing)
 end
 
 end

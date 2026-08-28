@@ -1,10 +1,7 @@
 # Differentiable simulation with Molly
 
 !!! note
-    There are still many rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember the golden rule of AD: check your gradients against finite differencing if you want to make sure they are correct.
-
-!!! note
-    There are currently issues with running differentiable simulations on the GPU and on the CPU in certain cases. Hopefully these will be resolved soon.
+    There are still rough edges when taking gradients through simulations. Please open an issue if you run into an error.
 
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
 The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atomic potentials.
@@ -28,6 +25,7 @@ Differentiable simulation does not currently work with some components of the pa
 - Monte Carlo simulators and couplers.
 - [`LINCS`](@ref) constraints.
 - Virtual sites.
+- GPU gradients only work for reverse mode, do not work for implicit solvent, and may only work on the CUDA backend.
 This is mentioned in the relevant docstrings.
 It is memory intensive on the GPU so using gradient checkpointing, e.g. with [Checkpointing.jl](https://github.com/Argonne-National-Laboratory/Checkpointing.jl), will likely be required for larger simulations.
 

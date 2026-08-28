@@ -1254,14 +1254,31 @@ function forces!(fs,
                  neighbors,
                  step_n::Integer,
                  buffers::BuffersGPU,
-                 needs_vir::Val;
+                 needs_vir_val::Val{needs_vir};
                  n_threads::Integer=Threads.nthreads(),
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
-                 general_inters=sys.general_inters)
+                 general_inters=sys.general_inters,
+                 strictness=default_strictness()) where needs_vir
     # Allow an Enzyme reverse rule
-    return gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir, pairwise_inters,
-                       specific_inter_lists, general_inters, n_threads)
+    gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
+                specific_inter_lists, n_threads)
+
+    for inter in values(general_inters)
+        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
+                                 strictness=strictness)
+    end
+    distribute_forces!(fs, sys, buffers)
+
+    if needs_vir
+        mark_interaction_virial!(buffers.validity, step_n)
+        if length(sys.constraints) == 0
+            mark_total_virial!(buffers.validity, step_n)
+        end
+    end
+
+    return fs, buffers
 end
 
 function gpu_forces!(fs,
@@ -1272,7 +1289,6 @@ function gpu_forces!(fs,
                      ::Val{needs_vir},
                      pairwise_inters,
                      specific_inter_lists,
-                     general_inters,
                      n_threads::Integer) where {D, T, TH, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
@@ -1309,19 +1325,4 @@ function gpu_forces!(fs,
     if needs_vir
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
-
-    for inter in values(general_inters)
-        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
-                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
-    end
-    distribute_forces!(fs, sys, buffers)
-
-    if needs_vir
-        mark_interaction_virial!(buffers.validity, step_n)
-        if length(sys.constraints) == 0
-            mark_total_virial!(buffers.validity, step_n)
-        end
-    end
-
-    return fs, buffers
 end

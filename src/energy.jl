@@ -520,16 +520,26 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                           n_threads::Integer=Threads.nthreads(),
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
-                          general_inters=sys.general_inters)
+                          general_inters=sys.general_inters,
+                          strictness=default_strictness())
     # Allow an Enzyme reverse rule
-    return gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
-                                specific_inter_lists, general_inters, n_threads)
+    pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
+                              specific_inter_lists, n_threads)
+
+    for inter in values(general_inters)
+        pe += uconvert(
+            sys.energy_units,
+            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                n_threads=n_threads, strictness=strictness),
+        )
+    end
+
+    return pe
 end
 
 function gpu_potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH}, neighbors,
                               step_n::Integer, buffers::BuffersGPU, pairwise_inters,
-                              specific_inter_lists, general_inters,
-                              n_threads::Integer) where TH
+                              specific_inter_lists, n_threads::Integer) where TH
     fill!(buffers.pe_vec_nounits, zero(TH))
 
     with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
@@ -549,17 +559,7 @@ function gpu_potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH},
                          sys.boundary, step_n, sys.energy_units, Val(TH))
     end
 
-    pe = only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
-
-    for inter in values(general_inters)
-        pe += uconvert(
-            sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
-                                              step_n=step_n, n_threads=n_threads),
-        )
-    end
-
-    return pe
+    return only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
 end
 
 # Allow GPU-specific potential energy functions to be defined if required
