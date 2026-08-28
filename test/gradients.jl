@@ -1724,7 +1724,7 @@ end
             units=false,
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=SetupCoulombReactionField(),
+            nonbonded_method=DistanceCutoff(1.0),
             dispersion_correction=false,
             grad_safe=true,
             strictness=:nowarn,

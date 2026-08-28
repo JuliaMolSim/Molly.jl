@@ -1062,10 +1062,10 @@ function System(;
 
     if isnothing(velocities)
         if force_units == NoUnits
-            vels = zero(coords)
+            vels = zero.(coords)
         else
             # Assume time units are ps
-            vels = zero(coords) * u"ps^-1"
+            vels = zero.(coords) * u"ps^-1"
         end
     else
         vels = velocities
