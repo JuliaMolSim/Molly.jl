@@ -31,7 +31,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 oneAPI = "8f75cd03-7ff8-4ecb-9b8f-daf728133b1b"
 
 [compat]
-AMDGPU = "1"
+AMDGPU = "2"
 Aqua = "0.8"
 AtomsBaseTesting = "0.4"
 BenchmarkTools = "1"
