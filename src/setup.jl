@@ -516,7 +516,7 @@ templates is carried out.
     be run on, used for example when setting up PME and implicit solvent. Only
     relevant when running on CPU.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
-    with Enzyme.jl and PME is being used or `array_type` is `CuArray`.
+    with Enzyme.jl.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
@@ -1727,8 +1727,9 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         float_type=T,
         float_type_high=TH,
         data=data,
-        launch_config=launch_config,
+        grad_safe=grad_safe,
         strictness=strictness,
+        launch_config=launch_config,
     )
 
     # Virtual sites are in the structure file but not necessarily in the correct place
@@ -1772,7 +1773,8 @@ For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
 function add_position_restraints(sys::System{<:Any, AT, T, TH},
                                  k;
                                  atom_selector::Function=is_any_atom,
-                                 restrain_coords=sys.coords) where {AT, T, TH}
+                                 restrain_coords=sys.coords,
+                                 strictness=default_strictness()) where {AT, T, TH}
     k_array = isa(k, AbstractArray) ? k : fill(k, length(sys))
     if length(k_array) != length(sys)
         throw(ArgumentError("the system has $(length(sys)) atoms but there are " *
@@ -1812,6 +1814,8 @@ function add_position_restraints(sys::System{<:Any, AT, T, TH},
         float_type=T,
         float_type_high=TH,
         data=sys.data,
+        grad_safe=sys.grad_safe,
+        strictness=strictness,
         launch_config=sys.launch_config,
     )
 end

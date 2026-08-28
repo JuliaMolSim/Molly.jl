@@ -20,7 +20,7 @@ calc_accels(f, m) = (iszero(m) ? zero(f / oneunit(m)) : (f / m))
     accelerations(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
-                  general_inters=system.general_inters)
+                  general_inters=system.general_inters, strictness=:warn)
 
 Calculate the accelerations of all atoms in a system using the pairwise,
 specific and general interactions and Newton's second law of motion.
@@ -682,13 +682,13 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       -1, UInt64(0), 0, false)
 end
 
-zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
+zero_forces(sys) = ustrip_vec.(zero.(sys.coords)) .* sys.force_units
 
 """
     forces(system, neighbors=find_neighbors(system), step_n=0;
            n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
            specific_inter_lists=system.specific_inter_lists,
-           general_inters=system.general_inters)
+           general_inters=system.general_inters, strictness=:warn)
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.
@@ -708,7 +708,7 @@ end
     forces_virial(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
-                  general_inters=system.general_inters)
+                  general_inters=system.general_inters, strictness=:warn)
 
 Calculate the forces on all atoms in a system and the virial using the pairwise,
 specific and general interactions.
@@ -746,7 +746,8 @@ function forces!(fs,
                  n_threads::Integer=Threads.nthreads(),
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
-                 general_inters=sys.general_inters) where {T, TH, needs_vir}
+                 general_inters=sys.general_inters,
+                 strictness=default_strictness()) where {T, TH, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(TH) * sys.energy_units)
     else
@@ -779,8 +780,8 @@ function forces!(fs,
         with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
             pairwise_forces_loop!(buffers.fs_nounits, buffers.fs_chunks, buffers.vir_nounits,
                     buffers.vir_chunks, sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                    neighbors, sys.force_units, length(sys), pis_nonl,
-                    pis_nl, step_n, Val(n_threads), Val(needs_vir), Val(use_vel))
+                    neighbors, sys.force_units, length(sys), pis_nonl, pis_nl, step_n,
+                    Val(n_threads), Val(needs_vir), Val(use_vel), Val(sys.grad_safe))
         end
     end
 
@@ -809,7 +810,8 @@ function forces!(fs,
 
     for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
-                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
+                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
+                                 strictness=strictness)
     end
     distribute_forces!(fs, sys, buffers)
 
@@ -846,7 +848,7 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{1},
-                               ::Val{needs_vir}, ::Val{use_vel}) where {needs_vir, use_vel}
+                               ::Val{needs_vir}, ::Val{use_vel}, ::Val) where {needs_vir, use_vel}
     @inbounds if length(pairwise_inters_nonl) > 0
         sqdist_cutoff = max_zero_beyond(pairwise_inters_nonl)
         for i in 1:n_atoms
@@ -908,7 +910,8 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{n_threads},
-                               ::Val{needs_vir}, ::Val{use_vel}) where {n_threads, needs_vir, use_vel}
+                               ::Val{needs_vir}, ::Val{use_vel},
+                               ::Val{grad_safe}) where {n_threads, needs_vir, use_vel, grad_safe}
     if isnothing(fs_chunks) || (needs_vir && isnothing(vir_chunks))
         throw(ArgumentError("fs_chunks / vir_chunks is not set but n_threads is > 1"))
     end
@@ -936,8 +939,9 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         block_size = 512
         next_block_start = Threads.Atomic{Int}(1)
         sqdist_cutoff_nl = max_zero_beyond(pairwise_inters_nl)
-        @sync for chunk_i in 1:n_threads
-            Threads.@spawn begin
+        if grad_safe
+            # Enzyme struggles with tasks
+            Threads.@threads for chunk_i in 1:n_threads
                 fs_chunk = fs_chunks[chunk_i]
                 vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
                 while true
@@ -947,6 +951,21 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                     pairwise_forces_nl_block!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,
                                     force_units, neighbors, pairwise_inters_nl, step_n, block_start,
                                     block_stop, sqdist_cutoff_nl, Val(needs_vir), Val(use_vel))
+                end
+            end
+        else
+            @sync for chunk_i in 1:n_threads
+                Threads.@spawn begin
+                    fs_chunk = fs_chunks[chunk_i]
+                    vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
+                    while true
+                        block_start = Threads.atomic_add!(next_block_start, block_size)
+                        block_start > n_neighbors && break
+                        block_stop = min(block_start + block_size - 1, n_neighbors)
+                        pairwise_forces_nl_block!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,
+                                        force_units, neighbors, pairwise_inters_nl, step_n, block_start,
+                                        block_stop, sqdist_cutoff_nl, Val(needs_vir), Val(use_vel))
+                    end
                 end
             end
         end
@@ -1197,35 +1216,33 @@ function specific_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                             "($(length(vir_chunks))) does not match n_threads ($n_threads)"))
     end
 
-    @sync for chunk_i in 1:n_threads
-        Threads.@spawn begin
-            fs_chunk = fs_chunks[chunk_i]
-            vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
-            for inter_list in sils_1_atoms
-                cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-                specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                            boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-            end
-            for inter_list in sils_2_atoms
-                cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-                specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                            boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-            end
-            for inter_list in sils_3_atoms
-                cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-                specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                            boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-            end
-            for inter_list in sils_4_atoms
-                cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-                specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                            boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-            end
-            for inter_list in sils_5_atoms
-                cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-                specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                            boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-            end
+    Threads.@threads for chunk_i in 1:n_threads
+        fs_chunk = fs_chunks[chunk_i]
+        vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
+        for inter_list in sils_1_atoms
+            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
+            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
+                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
+        end
+        for inter_list in sils_2_atoms
+            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
+            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
+                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
+        end
+        for inter_list in sils_3_atoms
+            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
+            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
+                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
+        end
+        for inter_list in sils_4_atoms
+            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
+            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
+                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
+        end
+        for inter_list in sils_5_atoms
+            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
+            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
+                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
         end
     end
 

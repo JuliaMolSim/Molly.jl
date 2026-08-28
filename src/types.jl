@@ -986,6 +986,8 @@ minimum box side, are reported according to `strictness`.
     `Float64` by default, or `float_type` on backends that do not support
     `Float64` such as Metal.
 - `data::DA=nothing`: arbitrary data associated with the system.
+- `grad_safe=false`: should be set to `true` if the system is going to be used
+    with Enzyme.jl.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
@@ -1013,6 +1015,7 @@ mutable struct System{D, AT, T, TH, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, 
     masses::M
     total_mass::TM
     data::DA
+    grad_safe::Bool
     launch_config::CUDALaunchConfig
 end
 
@@ -1036,8 +1039,9 @@ function System(;
                 float_type=float_type(boundary),
                 float_type_high=default_float_type_high(coords, float_type),
                 data=nothing,
-                launch_config=CUDALaunchConfig(),
-                strictness=default_strictness())
+                grad_safe::Bool=false,
+                strictness=default_strictness(),
+                launch_config=CUDALaunchConfig())
     check_strictness(strictness)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
@@ -1210,7 +1214,7 @@ function System(;
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, virtual_sites,
                     virtual_site_flags, neighbor_finder, loggers, df, force_units, energy_units,
-                    k_converted, atom_masses, total_mass, data, launch_config)
+                    k_converted, atom_masses, total_mass, data, grad_safe, launch_config)
 end
 
 """
@@ -1241,8 +1245,9 @@ function System(sys::System{<:Any, <:Any, T, TH};
                 float_type=T,
                 float_type_high=TH,
                 data=sys.data,
-                launch_config=sys.launch_config,
-                strictness=default_strictness()) where {T, TH}
+                grad_safe=sys.grad_safe,
+                strictness=default_strictness(),
+                launch_config=sys.launch_config) where {T, TH}
     return System(
         atoms=atoms,
         coords=coords,
@@ -1263,8 +1268,9 @@ function System(sys::System{<:Any, <:Any, T, TH};
         float_type=float_type,
         float_type_high=float_type_high,
         data=data,
-        launch_config=launch_config,
+        grad_safe=grad_safe,
         strictness=strictness,
+        launch_config=launch_config,
     )
 end
 
@@ -1294,6 +1300,7 @@ function System(crystal::Crystal{D};
                 k=default_k(energy_units),
                 float_type_high=Float64,
                 data=nothing,
+                grad_safe::Bool=false,
                 launch_config=CUDALaunchConfig()) where D
     atoms = [Atom(index=i, charge=ustrip(uconvert(u"C", charge(a)) / Unitful.q), mass=AtomsBase.mass(a))
              for (i, a) in enumerate(crystal.atoms)]
@@ -1335,6 +1342,7 @@ function System(crystal::Crystal{D};
         k=k,
         float_type_high=float_type_high,
         data=data,
+        grad_safe=grad_safe,
         launch_config=launch_config,
     )
 end
@@ -1365,6 +1373,7 @@ function Base.zero(sys::System{D, AT, T, TH, A, C, B, V,
         zero(sys.masses),
         zero(sys.total_mass),
         sys.data,
+        sys.grad_safe,
         sys.launch_config,
     )
 end
@@ -1667,7 +1676,7 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
         partition, n_replicas, betas, integrators, replica_coords, replica_velocities, 
         replica_boundaries, replica_neighbor_finders, replica_loggers, 
         state_pairwise_inters, state_specific_inter_lists, state_general_inters,
-        state_indices, exchange_logger, Int(initial_step), true, data
+        state_indices, exchange_logger, Int(initial_step), true, data,
     )
 end
 
@@ -1954,6 +1963,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
                 k=default_k(energy_units),
                 float_type_high=Float64,
                 data=nothing,
+                grad_safe::Bool=false,
                 launch_config=CUDALaunchConfig()) where D
     bb = AtomsBase.cell_vectors(sys)
     is_cubic = true
@@ -2037,6 +2047,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
         k=k,
         float_type_high=float_type_high,
         data=data,
+        grad_safe=grad_safe,
         launch_config=launch_config,
     )
 end

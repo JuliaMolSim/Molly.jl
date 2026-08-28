@@ -404,6 +404,7 @@ function apply_coupling!(sys::System{D},
                          neighbors=nothing,
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
+                         strictness=default_strictness(),
                          pressure_kin_tensor=nothing,
                          kwargs...) where {D, PT, CT, ST, ICT, FT}
     if step_n % barostat.n_steps != 0
@@ -412,7 +413,7 @@ function apply_coupling!(sys::System{D},
 
     # Pressure in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
-                 kin_tensor=pressure_kin_tensor)
+                 kin_tensor=pressure_kin_tensor, strictness=strictness)
 
     τp = barostat.coupling_const
     dt = sim.dt * barostat.n_steps
@@ -623,6 +624,7 @@ function apply_coupling!(sys::System{D},
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng(),
+                         strictness=default_strictness(),
                          pressure_kin_tensor=nothing,
                          kwargs...) where {D, PT, CT, ST, ICT, FT}
     if step_n % barostat.n_steps != 0
@@ -631,7 +633,7 @@ function apply_coupling!(sys::System{D},
 
     # Pressure tensor in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
-                 kin_tensor=pressure_kin_tensor)
+                 kin_tensor=pressure_kin_tensor, strictness=strictness)
 
     # Thermo factors
     V         = volume(sys.boundary)
@@ -860,13 +862,15 @@ end
 
 function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarloBarostat, sim,
                          neighbors=nothing, step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng(), kwargs...) where {D, T}
+                         rng=Random.default_rng(), strictness=default_strictness(),
+                         kwargs...) where {D, T}
     if !iszero(step_n % barostat.n_steps)
         return false
     end
 
     recompute_forces = apply_coupling_mc!(sys, barostat, Val(barostat.coupling_type), neighbors,
-                                          buffers, step_n; n_threads=n_threads, rng=rng)
+                                          buffers, step_n; n_threads=n_threads,
+                                          strictness=strictness, rng=rng)
 
     if barostat.n_attempted >= 10
         V_now = volume(sys.boundary)
@@ -885,14 +889,15 @@ end
 
 function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic}, neighbors,
                             buffers, step_n::Integer; n_threads::Integer=Threads.nthreads(),
-                            rng=Random.default_rng()) where {D, T}
+                            rng=Random.default_rng(), strictness=default_strictness()) where {D, T}
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
-        E  = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
+        E  = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
+                              strictness=strictness)
         V  = volume(sys.boundary)
         dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
 
@@ -914,7 +919,8 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
             neighbors_trial = neighbors
         end
 
-        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads,
+                                   strictness=strictness)
         dE = energy_remove_mol(E_trial - E)
 
         dW = dE + uconvert(unit(dE), tr(barostat.pressure) * dV / 3) -
@@ -934,7 +940,7 @@ end
 
 function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotropic}, neighbors,
                             buffers, step_n::Integer; n_threads::Integer=Threads.nthreads(),
-                            rng=Random.default_rng()) where {D, T}
+                            rng=Random.default_rng(), strictness=default_strictness()) where {D, T}
     Pxx, Pyy, Pzz = barostat.pressure[1,1], barostat.pressure[2,2], barostat.pressure[3,3]
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
@@ -942,7 +948,8 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
     old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
-        E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
+        E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
+                                     strictness=strictness)
         V         = volume(sys.boundary)
         dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
         V_plus_dV = V + dV
@@ -973,7 +980,8 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
             neighbors_trial = neighbors
         end
 
-        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads,
+                                   strictness=strictness)
         dE = energy_remove_mol(E_trial - E)
 
         work = ((w1/2)*Pxx + (w1/2)*Pyy + w2*Pzz) * V_plus_dV * log(v_scale)
@@ -994,7 +1002,7 @@ end
 
 function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotropic}, neighbors,
                             buffers, step_n::Integer; n_threads::Integer=Threads.nthreads(),
-                            rng=Random.default_rng()) where {D, T}
+                            rng=Random.default_rng(), strictness=default_strictness()) where {D, T}
     Pxx, Pyy, Pzz = barostat.pressure[1,1], barostat.pressure[2,2], barostat.pressure[3,3]
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
@@ -1002,7 +1010,8 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
     old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
-        E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads)
+        E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
+                                     strictness=strictness)
         V         = volume(sys.boundary)
         dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
         V_plus_dV = V + dV
@@ -1035,7 +1044,8 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
             neighbors_trial = neighbors
         end
 
-        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n, buffers; n_threads=n_threads,
+                                   strictness=strictness)
         dE = energy_remove_mol(E_trial - E)
 
         work = (w1*Pxx + w2*Pyy + w3*Pzz) * V_plus_dV * log(v_scale)

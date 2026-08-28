@@ -99,7 +99,14 @@ uconvert_vec(x...) = uconvert.(x...)
 function AtomsCalculators.forces!(fs,
                                   sys::System{D, AT, T},
                                   ase_calc::ASECalculator;
+                                  needs_vir=false,
+                                  strictness=Molly.default_strictness(),
                                   kwargs...) where {D, AT, T}
+    if needs_vir
+        err_str = "The virial contribution for ASECalculators is not implemented" *
+                  "and will be ignored"
+        Molly.report_issue(err_str, strictness; maxlog=1)
+    end
     Molly.update_ase_calc!(ase_calc, sys)
     forces_py = ase_calc.ase_atoms.get_forces()
     forces_flat = reshape(transpose(pyconvert(Matrix{T}, forces_py)), length(sys) * D)

@@ -1617,7 +1617,13 @@ end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
                         sys::AtomsBase.AbstractSystem{3}, inter::AbstractGBSA;
-                        n_threads::Integer=Threads.nthreads(), kwargs...)
+                        n_threads::Integer=Threads.nthreads(), needs_vir=false,
+                        strictness=default_strictness(), kwargs...)
+    if needs_vir
+        err_str = "The virial contribution for implicit solvent is not implemented" *
+                  "and will be ignored"
+        report_issue(err_str, strictness; maxlog=1)
+    end
     check_gbsa_n_threads(inter.buffer_force_chunks, n_threads)
     Bs, B_grads = born_radii_and_grad!(inter, sys.coords, sys.boundary, n_threads)
     gbsa_setup!(inter, sys, Bs)

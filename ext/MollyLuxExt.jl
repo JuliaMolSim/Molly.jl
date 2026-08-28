@@ -1777,7 +1777,13 @@ end
 # GPU array → Metal/CUDA), computes forces via the analytic backward, and accumulates into `fs`
 # in the system's units.
 function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::ANIPotential;
+                                  needs_vir=false, strictness=Molly.default_strictness(),
                                   kwargs...) where {D, AT, T}
+    if needs_vir
+        err_str = "The virial contribution for ANIPotential is not implemented" *
+                  "and will be ignored"
+        Molly.report_issue(err_str, strictness; maxlog=1)
+    end
     nbrs    = get(kwargs, :neighbors, nothing)
     n_thr   = get(kwargs, :n_threads, Threads.nthreads())
     n_sp    = length(inter.species_map)

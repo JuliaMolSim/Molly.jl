@@ -944,7 +944,7 @@ end
              recompute=true, n_threads=Threads.nthreads(),
              pairwise_inters=system.pairwise_inters,
              specific_inter_lists=system.specific_inter_lists,
-             general_inters=system.general_inters)
+             general_inters=system.general_inters, strictness=:warn)
 
 Calculate the pressure tensor of the system.
 
@@ -1035,7 +1035,7 @@ end
                     recompute=true, n_threads=Threads.nthreads(),
                     pairwise_inters=system.pairwise_inters,
                     specific_inter_lists=system.specific_inter_lists,
-                    general_inters=system.general_inters)
+                    general_inters=system.general_inters, strictness=:warn)
 
 Calculate the pressure of the system as a scalar.
 

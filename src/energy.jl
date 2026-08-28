@@ -14,7 +14,7 @@ export
     total_energy(system, neighbors=find_neighbors(sys), step_n=0, buffers=nothing;
                  n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                  specific_inter_lists=system.specific_inter_lists,
-                 general_inters=system.general_inters)
+                 general_inters=system.general_inters, strictness=:warn)
 
 Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
@@ -90,7 +90,7 @@ end
     virial(system, neighbors=find_neighbors(system), step_n=0;
            n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
            specific_inter_lists=system.specific_inter_lists,
-           general_inters=system.general_inters)
+           general_inters=system.general_inters, strictness=:warn)
 
 Calculate the virial tensor of the system.
 
@@ -132,7 +132,7 @@ end
     scalar_virial(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
-                  general_inters=system.general_inters)
+                  general_inters=system.general_inters, strictness=:warn)
 
 Calculate the virial of the system as a scalar.
 
@@ -200,7 +200,7 @@ end
     potential_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                      n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                      specific_inter_lists=system.specific_inter_lists,
-                     general_inters=system.general_inters)
+                     general_inters=system.general_inters, strictness=:warn)
 
 Calculate the potential energy of a system using the pairwise, specific and
 general interactions.
@@ -233,13 +233,14 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           n_threads::Integer=Threads.nthreads(),
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
-                          general_inters=sys.general_inters) where TH
+                          general_inters=sys.general_inters,
+                          strictness=default_strictness()) where TH
     if length(pairwise_inters) > 0
         use_vel = any_uses_velocity(pairwise_inters)
         pe = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
             pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                             neighbors, sys.energy_units, length(sys), pis_nonl,
-                             pis_nl, step_n, Val(TH), Val(n_threads), Val(use_vel))
+                             neighbors, sys.energy_units, length(sys), pis_nonl, pis_nl,
+                             step_n, Val(TH), Val(n_threads), Val(use_vel), Val(sys.grad_safe))
         end
     else
         pe = zero(TH) * sys.energy_units
@@ -259,8 +260,8 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
     for inter in values(general_inters)
         pe += uconvert(
             sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
-                                              step_n=step_n, n_threads=n_threads),
+            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                              n_threads=n_threads, strictness=strictness),
         )
     end
 
@@ -269,7 +270,7 @@ end
 
 function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
                           n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{TH},
-                          ::Val{1}, ::Val{use_vel}) where {TH, use_vel}
+                          ::Val{1}, ::Val{use_vel}, ::Val) where {TH, use_vel}
     pe = zero(TH) * energy_units
 
     @inbounds if length(pairwise_inters_nonl) > 0
@@ -315,7 +316,8 @@ end
 
 function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
                           n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{TH},
-                          ::Val{n_threads}, ::Val{use_vel}) where {TH, n_threads, use_vel}
+                          ::Val{n_threads}, ::Val{use_vel},
+                          ::Val{grad_safe}) where {TH, n_threads, use_vel, grad_safe}
     pe_chunks_nounits = zeros(TH, n_threads)
 
     @inbounds if length(pairwise_inters_nonl) > 0
@@ -333,8 +335,9 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
         n_neighbors = length(neighbors)
         block_size = 512
         next_block_start = Threads.Atomic{Int}(1)
-        @sync for chunk_i in 1:n_threads
-            Threads.@spawn begin
+        if grad_safe
+            # Enzyme struggles with tasks
+            Threads.@threads for chunk_i in 1:n_threads
                 pe_chunk = zero(TH)
                 while true
                     block_start = Threads.atomic_add!(next_block_start, block_size)
@@ -345,6 +348,21 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
                                     Val(TH), Val(use_vel))
                 end
                 pe_chunks_nounits[chunk_i] += pe_chunk
+            end
+        else
+            @sync for chunk_i in 1:n_threads
+                Threads.@spawn begin
+                    pe_chunk = zero(TH)
+                    while true
+                        block_start = Threads.atomic_add!(next_block_start, block_size)
+                        block_start > n_neighbors && break
+                        block_stop = min(block_start + block_size - 1, n_neighbors)
+                        pe_chunk += pairwise_pe_nl_block(atoms, coords, velocities, boundary, neighbors,
+                                        energy_units, pairwise_inters_nl, step_n, block_start, block_stop,
+                                        Val(TH), Val(use_vel))
+                    end
+                    pe_chunks_nounits[chunk_i] += pe_chunk
+                end
             end
         end
     end
