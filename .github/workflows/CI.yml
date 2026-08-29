@@ -40,6 +40,7 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
         env:
+          JULIA_NUM_THREADS: 4
           GROUP: ${{ matrix.test }}
           DISPLAY: ':0'
         with:
