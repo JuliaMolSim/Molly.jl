@@ -1165,34 +1165,49 @@ function specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, vel
     return fs_nounits
 end
 
+# Walked recursively rather than with a loop to avoid a possible `Union`
+@inline specific_forces_lists!(::Tuple{}, fs_nounits, vir_nounits, atoms, coords,
+                               velocities, boundary, force_units, step_n,
+                               needs_vir::Val) = nothing
+
+@inline function specific_forces_lists!(inter_lists::Tuple, fs_nounits, vir_nounits, atoms,
+                                        coords, velocities, boundary, force_units, step_n,
+                                        needs_vir::Val)
+    inter_list = first(inter_lists)
+    specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
+                force_units, step_n, inter_list, eachindex(inter_list.inters), needs_vir)
+    return specific_forces_lists!(Base.tail(inter_lists), fs_nounits, vir_nounits, atoms,
+                                  coords, velocities, boundary, force_units, step_n, needs_vir)
+end
+
+@inline specific_forces_lists_chunk!(::Tuple{}, fs_chunk, vir_chunk, atoms, coords,
+                                     velocities, boundary, force_units, step_n, chunk_i,
+                                     n_chunks, needs_vir::Val) = nothing
+
+@inline function specific_forces_lists_chunk!(inter_lists::Tuple, fs_chunk, vir_chunk, atoms,
+                                              coords, velocities, boundary, force_units,
+                                              step_n, chunk_i, n_chunks, needs_vir::Val)
+    inter_list = first(inter_lists)
+    cr = chunk_range(length(inter_list.inters), chunk_i, n_chunks)
+    specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,
+                                force_units, step_n, inter_list, cr, needs_vir)
+    return specific_forces_lists_chunk!(Base.tail(inter_lists), fs_chunk, vir_chunk, atoms,
+                    coords, velocities, boundary, force_units, step_n, chunk_i, n_chunks,
+                    needs_vir)
+end
+
 function specific_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, force_units, sils_1_atoms, sils_2_atoms,
                                sils_3_atoms, sils_4_atoms, sils_5_atoms, step_n, ::Val{1},
                                ::Val{needs_vir}) where needs_vir
-    for inter_list in sils_1_atoms
-        specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
-                    force_units, step_n, inter_list, eachindex(inter_list.inters), Val(needs_vir))
-    end
+    args = (fs_nounits, vir_nounits, atoms, coords, velocities, boundary, force_units,
+            step_n, Val(needs_vir))
 
-    for inter_list in sils_2_atoms
-        specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
-                    force_units, step_n, inter_list, eachindex(inter_list.inters), Val(needs_vir))
-    end
-
-    for inter_list in sils_3_atoms
-        specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
-                    force_units, step_n, inter_list, eachindex(inter_list.inters), Val(needs_vir))
-    end
-
-    for inter_list in sils_4_atoms
-        specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
-                    force_units, step_n, inter_list, eachindex(inter_list.inters), Val(needs_vir))
-    end
-
-    for inter_list in sils_5_atoms
-        specific_forces_inter_list!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary,
-                    force_units, step_n, inter_list, eachindex(inter_list.inters), Val(needs_vir))
-    end
+    specific_forces_lists!(sils_1_atoms, args...)
+    specific_forces_lists!(sils_2_atoms, args...)
+    specific_forces_lists!(sils_3_atoms, args...)
+    specific_forces_lists!(sils_4_atoms, args...)
+    specific_forces_lists!(sils_5_atoms, args...)
 
     return fs_nounits
 end
@@ -1219,31 +1234,13 @@ function specific_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     Threads.@threads for chunk_i in 1:n_threads
         fs_chunk = fs_chunks[chunk_i]
         vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
-        for inter_list in sils_1_atoms
-            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-        end
-        for inter_list in sils_2_atoms
-            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-        end
-        for inter_list in sils_3_atoms
-            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-        end
-        for inter_list in sils_4_atoms
-            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-        end
-        for inter_list in sils_5_atoms
-            cr = chunk_range(length(inter_list.inters), chunk_i, n_threads)
-            specific_forces_inter_list!(fs_chunk, vir_chunk, atoms, coords, velocities,
-                        boundary, force_units, step_n, inter_list, cr, Val(needs_vir))
-        end
+        args = (fs_chunk, vir_chunk, atoms, coords, velocities, boundary, force_units,
+                step_n, chunk_i, n_threads, Val(needs_vir))
+        specific_forces_lists_chunk!(sils_1_atoms, args...)
+        specific_forces_lists_chunk!(sils_2_atoms, args...)
+        specific_forces_lists_chunk!(sils_3_atoms, args...)
+        specific_forces_lists_chunk!(sils_4_atoms, args...)
+        specific_forces_lists_chunk!(sils_5_atoms, args...)
     end
 
     return fs_nounits

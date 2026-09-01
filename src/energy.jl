@@ -478,31 +478,24 @@ function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_
     return pe
 end
 
+@inline specific_pe_lists(pe, ::Tuple{}, args...) = pe
+
+@inline function specific_pe_lists(pe, inter_lists::Tuple, args...)
+    pe = specific_pe_inter_list(pe, args..., first(inter_lists))
+    return specific_pe_lists(pe, Base.tail(inter_lists), args...)
+end
+
 function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_atoms,
                      sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms, ::Val{TH},
                      step_n=0) where TH
     pe = zero(TH) * energy_units
+    args = (atoms, coords, velocities, boundary, energy_units, step_n)
 
-    for inter_list in sils_1_atoms
-        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
-                                    step_n, inter_list)
-    end
-    for inter_list in sils_2_atoms
-        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
-                                    step_n, inter_list)
-    end
-    for inter_list in sils_3_atoms
-        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
-                                    step_n, inter_list)
-    end
-    for inter_list in sils_4_atoms
-        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
-                                    step_n, inter_list)
-    end
-    for inter_list in sils_5_atoms
-        pe = specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units,
-                                    step_n, inter_list)
-    end
+    pe = specific_pe_lists(pe, sils_1_atoms, args...)
+    pe = specific_pe_lists(pe, sils_2_atoms, args...)
+    pe = specific_pe_lists(pe, sils_3_atoms, args...)
+    pe = specific_pe_lists(pe, sils_4_atoms, args...)
+    pe = specific_pe_lists(pe, sils_5_atoms, args...)
 
     return pe
 end
