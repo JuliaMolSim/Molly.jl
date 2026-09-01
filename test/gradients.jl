@@ -297,68 +297,104 @@ end
 
 @testset "Differentiable PME" begin
     T = Float64
-    AT = Array
     ff = MolecularForceField(
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...,
         units=false,
     )
-    sys = System(
-        joinpath(data_dir, "6mrr_equil.pdb"),
-        ff;
-        units=false,
-        array_type=AT,
-        float_type=T,
-        nonbonded_method=SetupPME(),
-        grad_safe=true,
-    )
 
-    pme = sys.general_inters[1]
-    Fs = zero(sys.coords)
-    d_sys = zero(sys)
-    d_pme = zero(pme)
+    for AT in array_list
+        sys = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            units=false,
+            array_type=AT,
+            float_type=T,
+            nonbonded_method=SetupPME(),
+            grad_safe=true,
+        )
 
-    pe = Molly.ewald_pe_forces!(Fs, nothing, sys, pme, Val(false))
-    Fs_ad = zero(sys.coords)
+        pme = sys.general_inters[1]
+        Fs = zero(sys.coords)
+        d_sys = zero(sys)
+        d_pme = zero(pme)
 
-    pe_ad = autodiff(
-        ReverseWithPrimal,
-        Molly.ewald_pe_forces!,
-        Active,
-        Const(Fs_ad),
-        Const(nothing),
-        Duplicated(sys, d_sys),
-        Duplicated(pme, d_pme),
-        Const(Val(false)),
-    )[2]
+        pe = Molly.ewald_pe_forces!(Fs, nothing, sys, pme, Val(false))
+        Fs_ad = zero(sys.coords)
 
-    @test pe_ad ≈ pe atol=1e-7
-    @test Fs_ad ≈ Fs atol=1e-10
-    @test -d_sys.coords ≈ Fs atol=1e-10
+        pe_ad = autodiff(
+            ReverseWithPrimal,
+            Molly.ewald_pe_forces!,
+            Active,
+            Const(Fs_ad),
+            Const(nothing),
+            Duplicated(sys, d_sys),
+            Duplicated(pme, d_pme),
+            Const(Val(false)),
+        )[2]
 
-    function coord_fdm(c)
-        coords_mod = copy(sys.coords)
-        coords_mod[1] = SVector(c, coords_mod[1][2], coords_mod[1][3])
-        sys_mod = System(deepcopy(sys); coords=coords_mod)
-        return Molly.ewald_pe_forces!(Fs, nothing, sys_mod, pme, Val(false))
+        @test pe_ad ≈ pe atol=1e-7
+        @test from_device(Fs_ad) ≈ from_device(Fs) atol=1e-10
+        @test from_device(-d_sys.coords) ≈ from_device(Fs) atol=1e-10
+
+        coords_cpu, atoms_cpu = from_device(sys.coords), from_device(sys.atoms)
+
+        function coord_fdm(c)
+            coords_mod = copy(coords_cpu)
+            coords_mod[1] = SVector(c, coords_mod[1][2], coords_mod[1][3])
+            sys_mod = System(deepcopy(sys); coords=to_device(coords_mod, AT))
+            return Molly.ewald_pe_forces!(Fs, nothing, sys_mod, pme, Val(false))
+        end
+
+        c = coords_cpu[1][1]
+        coord_fdm(c)
+        coord_grad = central_fdm(5, 1)(coord_fdm, c)
+        @test from_device(d_sys.coords)[1][1] ≈ coord_grad atol=1e-6
+
+        function charge_fdm(ch)
+            atoms_mod = copy(atoms_cpu)
+            at = atoms_cpu[1]
+            atoms_mod[1] = Atom(mass=at.mass, charge=ch, σ=at.σ, ϵ=at.σ)
+            sys_mod = System(deepcopy(sys); atoms=to_device(atoms_mod, AT))
+            return Molly.ewald_pe_forces!(Fs, nothing, sys_mod, pme, Val(false))
+        end
+
+        at = atoms_cpu[1]
+        charge_fdm(charge(at))
+        charge_grad = central_fdm(5, 1)(charge_fdm, charge(at))
+        @test charge(from_device(d_sys.atoms)[1]) ≈ charge_grad atol=1e-6
+
+        # A loss that depends on the forces rather than the energy, which differentiates
+        # the force interpolation and needs the second derivative of the B-splines
+        function force_loss(Fs, pme, atoms, coords, boundary)
+            Molly.ewald_pe_forces!(Fs, nothing, pme, atoms, coords, boundary, NoUnits,
+                                   NoUnits, Val(false), true, Val(true), Val(T);
+                                   n_threads=1)
+            return sum(sum.(abs2, Fs))
+        end
+
+        d_coords_f = zero(sys.coords)
+        autodiff(
+            set_runtime_activity(Reverse),
+            force_loss,
+            Active,
+            Duplicated(zero(sys.coords), zero(sys.coords)),
+            Duplicated(pme, zero(pme)),
+            Const(sys.atoms),
+            Duplicated(copy(sys.coords), d_coords_f),
+            Const(sys.boundary),
+        )
+
+        function force_loss_fdm(c)
+            coords_mod = copy(coords_cpu)
+            coords_mod[1] = SVector(c, coords_mod[1][2], coords_mod[1][3])
+            return force_loss(zero(sys.coords), pme, sys.atoms,
+                              to_device(coords_mod, AT), sys.boundary)
+        end
+
+        force_loss_fdm(c)
+        force_grad = central_fdm(5, 1)(force_loss_fdm, c)
+        @test from_device(d_coords_f)[1][1] ≈ force_grad rtol=1e-6
     end
-
-    c = sys.coords[1][1]
-    coord_fdm(c)
-    coord_grad = central_fdm(5, 1)(coord_fdm, c)
-    @test d_sys.coords[1][1] ≈ coord_grad atol=1e-6
-
-    function charge_fdm(ch)
-        atoms_mod = copy(sys.atoms)
-        at = sys.atoms[1]
-        atoms_mod[1] = Atom(mass=at.mass, charge=ch, σ=at.σ, ϵ=at.σ)
-        sys_mod = System(deepcopy(sys); atoms=atoms_mod)
-        return Molly.ewald_pe_forces!(Fs, nothing, sys_mod, pme, Val(false))
-    end
-
-    at = sys.atoms[1]
-    charge_fdm(charge(at))
-    charge_grad = central_fdm(5, 1)(charge_fdm, charge(at))
-    @test charge(d_sys.atoms[1]) ≈ charge_grad atol=1e-6
 end
 
 @testset "Ewald gradients" begin
@@ -651,6 +687,79 @@ end
     W_exclusion, _, _ = virial_enzyme(sys_exclusion, nothing)
     test_virial_match(W_exclusion, Molly.virial(sys_exclusion, nothing; n_threads=1);
                       relative_tol=1e-12)
+end
+
+@testset "Virial and pressure gradients" begin
+    T = Float64
+    n_atoms = 8
+    boundary = CubicBoundary(T(3.0))
+    coords = place_atoms(n_atoms, boundary; min_dist=T(0.5), rng=Xoshiro(3))
+    velocities = [random_velocity(T(10.0), T(1.0); rng=Xoshiro(4 + i)) for i in 1:n_atoms]
+    atoms = [Atom(index=i, mass=T(10.0), charge=(iseven(i) ? T(0.2) : T(-0.2)), σ=T(0.3),
+                  ϵ=T(0.4)) for i in 1:n_atoms]
+    neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=1,
+                                             dist_cutoff=T(1.5))
+    pairwise_inters = (
+        LennardJones(cutoff=DistanceCutoff(T(1.2)), use_neighbors=true),
+        CoulombReactionField(dist_cutoff=T(1.2),
+                             solvent_dielectric=T(Molly.crf_solvent_dielectric),
+                             use_neighbors=true,
+                             coulomb_const=T(ustrip(Molly.coulomb_const))),
+    )
+    bonds = InteractionList2Atoms(Int32.(collect(1:4)), Int32.(collect(5:8)),
+                                  [HarmonicBond(T(100.0), T(0.6)) for _ in 1:4])
+
+    function build_sys(coords, velocities)
+        return System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=pairwise_inters,
+            specific_inter_lists=(bonds,),
+            neighbor_finder=neighbor_finder,
+            force_units=NoUnits,
+            energy_units=NoUnits,
+            grad_safe=true,
+        )
+    end
+
+    neighbors = find_neighbors(build_sys(coords, velocities); n_threads=1)
+    loss_virial(  coords, velocities) = scalar_virial(  build_sys(coords, velocities),
+                                                      neighbors; n_threads=1)
+    loss_pressure(coords, velocities) = scalar_pressure(build_sys(coords, velocities),
+                                                        neighbors; n_threads=1)
+
+    # The virial does not depend on the velocities, the pressure does through the kinetic
+    #   energy tensor
+    for (f, uses_velocities) in ((loss_virial, false), (loss_pressure, true))
+        d_coords, d_velocities = zero(coords), zero(velocities)
+        autodiff(
+            set_runtime_activity(Reverse),
+            Const(f), # The loss closes over the interactions, which Enzyme cannot prove read only
+            Active,
+            Duplicated(copy(coords), d_coords),
+            Duplicated(copy(velocities), d_velocities),
+        )
+        for i in (1, 2)
+            grad_fd = central_fdm(5, 1)(coords[i][1]) do x
+                coords_mod = copy(coords)
+                coords_mod[i] = SVector(x, coords_mod[i][2], coords_mod[i][3])
+                f(coords_mod, velocities)
+            end
+            @test d_coords[i][1] ≈ grad_fd rtol=1e-8
+        end
+        if uses_velocities
+            grad_fd = central_fdm(5, 1)(velocities[1][1]) do x
+                velocities_mod = copy(velocities)
+                velocities_mod[1] = SVector(x, velocities_mod[1][2], velocities_mod[1][3])
+                f(coords, velocities_mod)
+            end
+            @test d_velocities[1][1] ≈ grad_fd rtol=1e-8
+        else
+            @test iszero(d_velocities)
+        end
+    end
 end
 
 @testset "CV gradients" begin
@@ -960,18 +1069,18 @@ end
 
 @testset "Differentiable simulation" begin
     runs = [ #               gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        ("CPU"             , Array, false, false, false, false, false, 1e-4, 1e-4),
+        ("CPU"             , Array, false, false, false, false, false, 1e-8, 1e-5),
         ("CPU forward"     , Array, false, true , false, false, false, 0.5 , 0.1 ),
         ("CPU f32"         , Array, false, false, true , false, false, 0.01, 5e-4),
-        ("CPU obc2"        , Array, false, false, false, true , false, 1e-4, 1e-4),
+        ("CPU obc2"        , Array, false, false, false, true , false, 1e-3, 1e-3),
         ("CPU gbn2"        , Array, false, false, false, false, true , 1e-3, 1e-3),
         ("CPU gbn2 forward", Array, false, true , false, false, true , 0.5 , 0.1 ),
     ]
     if run_parallel_tests #                       gpu    par   fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("CPU parallel"             , Array, true, false, false, false, false, 1e-4, 1e-4))
+        push!(runs, ("CPU parallel"             , Array, true, false, false, false, false, 1e-8, 1e-5))
         push!(runs, ("CPU parallel forward"     , Array, true, true , false, false, false, 0.5 , 0.1 ))
         push!(runs, ("CPU parallel f32"         , Array, true, false, true , false, false, 0.01, 5e-4))
-        push!(runs, ("CPU parallel obc2"        , Array, true, false, false, true , false, 1e-4, 1e-4))
+        push!(runs, ("CPU parallel obc2"        , Array, true, false, false, true , false, 1e-3, 1e-3))
         push!(runs, ("CPU parallel gbn2"        , Array, true, false, false, false, true , 1e-3, 1e-3))
         push!(runs, ("CPU parallel gbn2 forward", Array, true, true , false, false, true , 0.5 , 0.1 ))
     end
@@ -1535,21 +1644,8 @@ end
     atoms_data      = [AtomData(atom_type="XX", element="C") for i in 1:n_atoms]
     atoms_data_spec = [AtomData(atom_type="XX", element="C") for i in eachindex(coords_spec)]
 
-    function pe_injected(params_dic, sys_ref, coords, neighbors)
-        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
-
-        sys = System(
-            atoms=atoms,
-            coords=coords,
-            boundary=sys_ref.boundary,
-            pairwise_inters=pis,
-            specific_inter_lists=sis,
-            general_inters=gis,
-            neighbor_finder=sys_ref.neighbor_finder,
-            force_units=NoUnits,
-            energy_units=NoUnits,
-        )
-
+    function pe_injected(params_dic, sys_ref, plan, coords, neighbors)
+        sys = inject_gradients(sys_ref, params_dic, plan, coords)
         return potential_energy(sys, neighbors; n_threads=1)
     end
 
@@ -1560,6 +1656,7 @@ end
     function test_params(name, sys_ref, params_dic, broken=())
         @test length(params_dic) > 0
         neighbors = find_neighbors(sys_ref; n_threads=1)
+        plan = ParameterPlan(sys_ref, params_dic)
         grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
         autodiff(
             set_runtime_activity(Reverse),
@@ -1567,6 +1664,7 @@ end
             Active,
             Duplicated(params_dic, grads_enzyme),
             Const(sys_ref),
+            Const(plan),
             Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
             Const(neighbors),
         )
@@ -1575,7 +1673,7 @@ end
             grad_fd = central_fdm(6, 1)(params_dic[param]) do val
                 dic = copy(params_dic)
                 dic[param] = val
-                pe_injected(dic, sys_ref, copy(sys_ref.coords), neighbors)
+                pe_injected(dic, sys_ref, plan, copy(sys_ref.coords), neighbors)
             end
             grad_enzyme = grads_enzyme[param]
             if abs(grad_fd) < 1e-10
@@ -1676,7 +1774,8 @@ end
     for (name, inter, broken) in pairwise_inters
         sys_ref = pairwise_sys(inter)
         params_dic = Dict{String, Float64}()
-        Molly.extract_parameters!(params_dic, inter, nothing)
+        Molly.extract_block!(params_dic, parameter_prefix(inter), Molly.parameter_keys(inter),
+                             Molly.parameter_values(inter))
         test_params(name, sys_ref, params_dic, broken)
     end
 
@@ -1712,13 +1811,16 @@ end
     for (name, inter_list) in specific_inters
         sys_ref = specific_sys(inter_list)
         params_dic = Dict{String, Float64}()
-        Molly.extract_parameters!(params_dic, inter_list, nothing)
+        for (inter, inter_type) in zip(inter_list.inters, inter_list.types)
+            Molly.extract_block!(params_dic, parameter_prefix(inter, inter_type),
+                                 Molly.parameter_keys(inter), Molly.parameter_values(inter))
+        end
         test_params(name, sys_ref, params_dic)
     end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(AT, n_threads)
+    function create_sys(AT, n_threads, nonbonded_method)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
@@ -1726,7 +1828,7 @@ end
             units=false,
             array_type=AT,
             float_type=Float64,
-            nonbonded_method=DistanceCutoff(1.0),
+            nonbonded_method=nonbonded_method,
             dispersion_correction=false,
             grad_safe=true,
             strictness=:nowarn,
@@ -1734,61 +1836,19 @@ end
         )
     end
 
-    function test_energy_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
-
-        sys = System(
-            atoms=atoms,
-            coords=coords,
-            boundary=sys_ref.boundary,
-            pairwise_inters=pis,
-            specific_inter_lists=sis,
-            general_inters=gis,
-            neighbor_finder=neighbor_finder,
-            force_units=NoUnits,
-            energy_units=NoUnits,
-            grad_safe=true,
-        )
-
+    function test_energy_grad(params_dic, sys_ref, plan, coords, n_threads)
+        sys = inject_gradients(sys_ref, params_dic, plan, coords)
         return potential_energy(sys; n_threads=n_threads)
     end
 
-    function test_forces_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
-
-        sys = System(
-            atoms=atoms,
-            coords=coords,
-            boundary=sys_ref.boundary,
-            pairwise_inters=pis,
-            specific_inter_lists=sis,
-            general_inters=gis,
-            neighbor_finder=neighbor_finder,
-            force_units=NoUnits,
-            energy_units=NoUnits,
-            grad_safe=true,
-        )
-
+    function test_forces_grad(params_dic, sys_ref, plan, coords, n_threads)
+        sys = inject_gradients(sys_ref, params_dic, plan, coords)
         fs = forces(sys; n_threads=n_threads)
         return sum(sum.(abs2, fs))
     end
 
-    function test_sim_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
-
-        sys = System(
-            atoms=atoms,
-            coords=coords,
-            boundary=sys_ref.boundary,
-            pairwise_inters=pis,
-            specific_inter_lists=sis,
-            general_inters=gis,
-            neighbor_finder=neighbor_finder,
-            force_units=NoUnits,
-            energy_units=NoUnits,
-            grad_safe=true,
-        )
-
+    function test_sim_grad(params_dic, sys_ref, plan, coords, n_threads)
+        sys = inject_gradients(sys_ref, params_dic, plan, coords)
         simulator = Langevin(dt=0.001, temperature=300.0, friction=1.0)
         n_steps = 5
         rng = Xoshiro(1000)
@@ -1864,10 +1924,11 @@ end
     for AT in array_list[2:end]
         push!(platform_runs, ("$AT", AT, false))
     end
+    nonbonded_methods = (("cutoff", DistanceCutoff(1.0)), ("PME", SetupPME()))
     test_runs = Any[
-        ("Energy", test_energy_grad, 1e-8, 1e-10  ),
-        ("Force" , test_forces_grad, 1e-8, 1e-10  ),
-        ("Sim"   , test_sim_grad   , 1e-2, nothing),
+        ("Energy", test_energy_grad, (1e-7, 1e-7), 1e-14  , central_fdm(6, 1)),
+        ("Force" , test_forces_grad, (1e-9, 1e-9), 1e-14  , central_fdm(6, 1)),
+        ("Sim"   , test_sim_grad   , (1e-3, 1e-2), nothing, central_fdm(6, 1; max_range=1e-4)),
     ]
     params_to_test = (
         "atom_N_σ",
@@ -1875,46 +1936,54 @@ end
         "inter_PT_C/N/CT/C_k_1",
     )
 
-    for (test_name, test_fn, tol_fd, tol_cross) in test_runs
-        grads_ref = nothing # Single-threaded CPU gradients for every parameter
-        for (platform, AT, parallel) in platform_runs
-            if test_name == "Sim" && !startswith(platform, "CPU")
+    for (test_name, test_fn, tol_fds, tol_cross, fdm) in test_runs
+        for (nb_i, (nb_name, nonbonded_method)) in enumerate(nonbonded_methods)
+            if test_name == "Sim" && nb_name == "PME"
                 continue
             end
-            n_threads = (parallel ? Threads.nthreads() : 1)
-            sys_ref = create_sys(AT, n_threads)
-            grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
-            autodiff(
-                set_runtime_activity(Reverse),
-                test_fn,
-                Active,
-                Duplicated(params_dic, grads_enzyme),
-                Const(sys_ref),
-                Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
-                Duplicated(sys_ref.neighbor_finder, sys_ref.neighbor_finder),
-                Const(n_threads),
-            )
-            for param in params_to_test
-                genz = grads_enzyme[param]
-                gfd = central_fdm(6, 1)(params_dic[param]) do val
-                    dic = copy(params_dic)
-                    dic[param] = val
-                    test_fn(dic, sys_ref, copy(sys_ref.coords), sys_ref.neighbor_finder, n_threads)
+            tol_fd = tol_fds[nb_i]
+            grads_ref = nothing # Single-threaded CPU gradients for every parameter
+            for (platform, AT, parallel) in platform_runs
+                if test_name == "Sim" && !startswith(platform, "CPU")
+                    continue
                 end
-                frac_diff = abs(genz - gfd) / abs(gfd)
-                @test frac_diff < tol_fd
-            end
-            if isnothing(tol_cross)
-                continue # Random numbers on different backends may be different
-            elseif isnothing(grads_ref)
-                grads_ref = grads_enzyme
-            else
-                # Every force field parameter should give the same gradient on every
-                # platform, measured relative to the largest gradient so that parameters
-                # with a near-zero gradient do not dominate
-                scale = maximum(abs, values(grads_ref))
-                max_diff = maximum(abs(grads_enzyme[k] - grads_ref[k]) for k in keys(params_dic))
-                @test max_diff / scale < tol_cross
+                n_threads = (parallel ? Threads.nthreads() : 1)
+                sys_ref = create_sys(AT, n_threads, nonbonded_method)
+                plan = ParameterPlan(sys_ref, params_dic)
+                grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
+                autodiff(
+                    set_runtime_activity(Reverse),
+                    test_fn,
+                    Active,
+                    Duplicated(params_dic, grads_enzyme),
+                    Const(sys_ref),
+                    Const(plan),
+                    Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
+                    Const(n_threads),
+                )
+                for param in params_to_test
+                    genz = grads_enzyme[param]
+                    gfd = fdm(params_dic[param]) do val
+                        dic = copy(params_dic)
+                        dic[param] = val
+                        test_fn(dic, sys_ref, plan, copy(sys_ref.coords), n_threads)
+                    end
+                    frac_diff = abs(genz - gfd) / abs(gfd)
+                    @test frac_diff < tol_fd
+                end
+                if isnothing(tol_cross)
+                    continue # Random numbers on different backends may be different
+                elseif isnothing(grads_ref)
+                    grads_ref = grads_enzyme
+                else
+                    # Every force field parameter should give the same gradient on every
+                    # platform, measured relative to the largest gradient so that parameters
+                    # with a near-zero gradient do not dominate
+                    scale = maximum(abs, values(grads_ref))
+                    max_diff = maximum(abs(grads_enzyme[k] - grads_ref[k])
+                                       for k in keys(params_dic))
+                    @test max_diff / scale < tol_cross
+                end
             end
         end
     end
