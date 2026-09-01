@@ -319,9 +319,10 @@
     @test maximum(norm.(vels_diff  )) < 1e-7u"nm * ps^-1"
 
     params_dic = Molly.extract_parameters(sys_nounits, ff_nounits)
-    atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(sys_nounits, params_dic)
-    @test atoms_grad == sys_nounits.atoms
-    @test pis_grad == sys_nounits.pairwise_inters
+    sys_grad = inject_gradients(sys_nounits, params_dic)
+    @test sys_grad.atoms == sys_nounits.atoms
+    @test sys_grad.pairwise_inters == sys_nounits.pairwise_inters
+    @test sys_grad.specific_inter_lists == sys_nounits.specific_inter_lists
 
     # Test the same simulation on the GPU
     for AT in array_list[2:end]
@@ -478,9 +479,10 @@
 
         params_dic_gpu = Molly.extract_parameters(sys_nounits, ff_nounits)
         @test params_dic == params_dic_gpu
-        atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(sys_nounits, params_dic_gpu)
-        @test atoms_grad == sys_nounits.atoms
-        @test pis_grad == sys_nounits.pairwise_inters
+        sys_grad = inject_gradients(sys_nounits, params_dic_gpu)
+        @test sys_grad.atoms == sys_nounits.atoms
+        @test sys_grad.pairwise_inters == sys_nounits.pairwise_inters
+        @test sys_grad.specific_inter_lists == sys_nounits.specific_inter_lists
     end
 end
 
@@ -623,9 +625,10 @@ end
         @test maximum(norm.(vels_diff  )) < 0.5u"nm * ps^-1"
 
         params_dic = Molly.extract_parameters(sys_nounits, ff_nounits)
-        atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(sys_nounits, params_dic)
-        @test atoms_grad == sys_nounits.atoms
-        @test pis_grad == sys_nounits.pairwise_inters
+        sys_grad = inject_gradients(sys_nounits, params_dic)
+        @test sys_grad.atoms == sys_nounits.atoms
+        @test sys_grad.pairwise_inters == sys_nounits.pairwise_inters
+        @test sys_grad.specific_inter_lists == sys_nounits.specific_inter_lists
 
         # Test the same simulation on the GPU
         for AT in array_list[2:end]
@@ -691,9 +694,10 @@ end
 
             params_dic_gpu = Molly.extract_parameters(sys_nounits, ff_nounits)
             @test params_dic == params_dic_gpu
-            atoms_grad, pis_grad, sis_grad, gis_grad = Molly.inject_gradients(sys_nounits, params_dic_gpu)
-            @test atoms_grad == sys_nounits.atoms
-            @test pis_grad == sys_nounits.pairwise_inters
+            sys_grad = inject_gradients(sys_nounits, params_dic_gpu)
+            @test sys_grad.atoms == sys_nounits.atoms
+            @test sys_grad.pairwise_inters == sys_nounits.pairwise_inters
+            @test sys_grad.specific_inter_lists == sys_nounits.specific_inter_lists
         end
     end
 end
@@ -739,8 +743,9 @@ end
                 forces_nt = forces(sys; n_threads=n_threads)
                 @test maximum(norm.(forces_nt .- forces_molly)) < 1e-10u"kJ * mol^-1 * nm^-1"
                 @test maximum(norm.(from_device(forces_nt) .- forces_openmm)) < 1e-3u"kJ * mol^-1 * nm^-1"
-                @test maximum(norm.(forces_nt .- forces_virial(sys; n_threads=n_threads)[1])) <
-                            1e-10u"kJ * mol^-1 * nm^-1"
+                forces_vir = forces_virial(sys; n_threads=n_threads, strictness=:nowarn)
+                @test_throws ErrorException forces_virial(sys; n_threads=n_threads, strictness=:error)
+                @test maximum(norm.(forces_nt .- forces_vir[1])) < 1e-10u"kJ * mol^-1 * nm^-1"
                 @test maximum(norm.(forces_nt .- forces(sys, neighbors; n_threads=n_threads))) <
                             1e-10u"kJ * mol^-1 * nm^-1"
 

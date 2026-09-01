@@ -103,7 +103,7 @@ function AtomsCalculators.forces!(fs,
                                   strictness=Molly.default_strictness(),
                                   kwargs...) where {D, AT, T}
     if needs_vir
-        err_str = "The virial contribution for ASECalculators is not implemented" *
+        err_str = "The virial contribution for ASECalculators is not implemented " *
                   "and will be ignored"
         Molly.report_issue(err_str, strictness; maxlog=1)
     end

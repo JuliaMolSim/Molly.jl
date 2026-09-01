@@ -78,27 +78,10 @@ function Base.:+(d1::DPDInteraction, ::DPDInteraction)
     return DPDInteraction(d1.a, d1.γ, d1.σ, d1.r_c, d1.dt, d1.use_neighbors, d1.key)
 end
 
-function inject_interaction(inter::DPDInteraction, params_dic)
-    key_prefix = "inter_DPD_"
-    return DPDInteraction(
-        dict_get(params_dic, key_prefix * "a"  , inter.a  ),
-        dict_get(params_dic, key_prefix * "γ"  , inter.γ  ),
-        dict_get(params_dic, key_prefix * "σ"  , inter.σ  ),
-        dict_get(params_dic, key_prefix * "r_c", inter.r_c),
-        inter.dt,
-        inter.use_neighbors,
-        inter.key,
-    )
-end
+parameter_prefix(::DPDInteraction) = "inter_DPD_"
+parameter_fields(::Type{<:DPDInteraction}) =
+    ((:a, "a"), (:γ, "γ"), (:σ, "σ"), (:r_c, "r_c"))
 
-function extract_parameters!(params_dic, inter::DPDInteraction, ff)
-    key_prefix = "inter_DPD_"
-    params_dic[key_prefix * "a"  ] = inter.a
-    params_dic[key_prefix * "γ"  ] = inter.γ
-    params_dic[key_prefix * "σ"  ] = inter.σ
-    params_dic[key_prefix * "r_c"] = inter.r_c
-    return params_dic
-end
 
 # Deterministic per-pair Gaussian noise via hash-based Box-Muller transform.
 # Symmetric in (i, j) to ensure momentum conservation.

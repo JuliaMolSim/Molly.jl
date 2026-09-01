@@ -425,38 +425,6 @@ function Base.show(io::IO, sil::T) where T <: SpecificInteractionList
     print(io, nameof(T), " with ", length(sil.is), " interactions of type ", eltype(sil.inters))
 end
 
-function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList1Atoms(inter.is, inters_grad, inter.types, inter.data)
-end
-
-function inject_interaction_list(inter::InteractionList2Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types, inter.data)
-end
-
-function inject_interaction_list(inter::InteractionList3Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types, inter.data)
-end
-
-function inject_interaction_list(inter::InteractionList4Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types,
-                          inter.data)
-end
-
-function inject_interaction_list(inter::InteractionList5Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList5Atoms(inter.is, inter.js, inter.ks, inter.ls, inter.ms, inters_grad,
-                          inter.types, inter.data)
-end
-
 """
     Atom(; <keyword arguments>)
 
@@ -524,20 +492,6 @@ function dict_get(dic::Dict, key, default::T) where T
 end
 
 dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : default)
-
-function inject_atom(at, at_data, params_dic)
-    key_prefix = "atom_$(at_data.atom_type)_"
-    Atom(
-        at.index,
-        at.atom_type,
-        dict_get(params_dic, key_prefix * "mass"  , at.mass),
-        at.charge, # Residue-specific
-        dict_get(params_dic, key_prefix * "σ"     , at.σ   ),
-        dict_get(params_dic, key_prefix * "ϵ"     , at.ϵ   ),
-        at.λ, # Preserve lambda from existing atom,
-        at.alch_role
-    )
-end
 
 """
     charge(atom)
@@ -1377,60 +1331,6 @@ function Base.zero(sys::System{D, AT, T, TH, A, C, B, V,
         sys.launch_config,
     )
 end
-
-# Add parameters from a dictionary to a system, allowing gradients to be tracked
-function inject_gradients(sys::System{<:Any, AT}, params_dic) where AT
-    atoms_grad = to_device(inject_atom.(from_device(sys.atoms), sys.atoms_data, (params_dic,)), AT)
-    if length(sys.pairwise_inters) > 0
-        pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
-    else
-        pis_grad = sys.pairwise_inters
-    end
-    if length(sys.specific_inter_lists) > 0
-        sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), AT)
-    else
-        sis_grad = sys.specific_inter_lists
-    end
-    if length(sys.general_inters) > 0
-        gis_grad = inject_interaction.(sys.general_inters, (params_dic,), (sys,))
-    else
-        gis_grad = sys.general_inters
-    end
-    return atoms_grad, pis_grad, sis_grad, gis_grad
-end
-
-inject_interaction(inter, args...) = inter
-
-# Form a dictionary of all parameters in a system, allowing gradients to be tracked
-function extract_parameters(sys, ff)
-    params_dic = Dict()
-
-    for at_data in sys.atoms_data
-        key_prefix = "atom_$(at_data.atom_type)_"
-        if !haskey(params_dic, key_prefix * "mass")
-            at = ff.atom_types[at_data.atom_type]
-            params_dic[key_prefix * "mass"] = at.mass
-            params_dic[key_prefix * "σ"   ] = at.σ
-            params_dic[key_prefix * "ϵ"   ] = at.ϵ
-        end
-    end
-
-    for inter in values(sys.pairwise_inters)
-        extract_parameters!(params_dic, inter, ff)
-    end
-
-    for inter in values(sys.specific_inter_lists)
-        extract_parameters!(params_dic, inter, ff)
-    end
-
-    for inter in values(sys.general_inters)
-        extract_parameters!(params_dic, inter, ff)
-    end
-
-    return params_dic
-end
-
-extract_parameters!(params_dic, inter, ff) = params_dic
 
 @doc raw"""
     ThermoState(system::System, integrator; <keyword arguments>)

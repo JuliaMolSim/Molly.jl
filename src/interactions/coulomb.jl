@@ -54,22 +54,10 @@ function Base.:+(c1::Coulomb, c2::Coulomb)
     )
 end
 
-function inject_interaction(inter::Coulomb, params_dic)
-    key_prefix = "inter_CO_"
-    return Coulomb(
-        inter.cutoff,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
+parameter_prefix(::Coulomb) = "inter_CO_"
+parameter_fields(::Type{<:Coulomb}) =
+    ((:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::Coulomb, ff)
-    key_prefix = "inter_CO_"
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::Coulomb{C},
                        dr,
@@ -160,23 +148,10 @@ function Base.:+(c1::CoulombScaled, c2::CoulombScaled)
     )
 end
 
-function inject_interaction(inter::CoulombScaled, params_dic)
-    key_prefix = "inter_COS_"
-    return CoulombScaled(
-        inter.cutoff,
-        inter.use_neighbors,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
+parameter_prefix(::CoulombScaled) = "inter_CO_"
+parameter_fields(::Type{<:CoulombScaled}) =
+    ((:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombScaled, ff)
-    key_prefix = "inter_COS_"
-    params_dic[key_prefix * "weight_14"]     = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombScaled{C},
                        dr,
@@ -369,28 +344,10 @@ function Base.:+(c1::CoulombSoftCoreBeutler, c2::CoulombSoftCoreBeutler)
     )
 end
 
-function inject_interaction(inter::CoulombSoftCoreBeutler, params_dic)
-    key_prefix = "inter_COSCB_"
-    return CoulombSoftCoreBeutler(
-        inter.cutoff,
-        dict_get(params_dic, key_prefix * "α", inter.α),
-        inter.use_neighbors,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
+parameter_prefix(::CoulombSoftCoreBeutler) = "inter_CO_"
+parameter_fields(::Type{<:CoulombSoftCoreBeutler}) =
+    ((:α, "α"), (:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombSoftCoreBeutler, ff)
-    key_prefix = "inter_COSCB_"
-    params_dic[key_prefix * "α"]             = inter.α
-    params_dic[key_prefix * "weight_14"]     = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombSoftCoreBeutler,
                        dr,
@@ -595,28 +552,11 @@ function Base.:+(c1::CoulombSoftCoreGapsys, c2::CoulombSoftCoreGapsys)
     )
 end
 
-function inject_interaction(inter::CoulombSoftCoreGapsys, params_dic)
-    key_prefix = "inter_COSCG_"
-    return CoulombSoftCoreGapsys(
-        inter.cutoff,
-        dict_get(params_dic, key_prefix * "α" , inter.α),
-        dict_get(params_dic, key_prefix * "σQ", inter.σQ),
-        inter.use_neighbors,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
+parameter_prefix(::CoulombSoftCoreGapsys) = "inter_CO_"
+parameter_fields(::Type{<:CoulombSoftCoreGapsys}) =
+    ((:α, "α"), (:σQ, "σQ"), (:weight_special, "weight_14"),
+     (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombSoftCoreGapsys, ff)
-    key_prefix = "inter_COSCG_"
-    params_dic[key_prefix * "α"]             = inter.α
-    params_dic[key_prefix * "σQ"]            = inter.σQ
-    params_dic[key_prefix * "weight_14"]     = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombSoftCoreGapsys, 
                        dr,
@@ -806,25 +746,11 @@ function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
     )
 end
 
-function inject_interaction(inter::CoulombReactionField, params_dic)
-    key_prefix = "inter_CRF_"
-    return CoulombReactionField(
-        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
+parameter_prefix(::CoulombReactionField) = "inter_CO_"
+parameter_fields(::Type{<:CoulombReactionField}) =
+    ((:dist_cutoff, "dist_cutoff"), (:solvent_dielectric, "solvent_dielectric"),
+     (:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombReactionField, ff)
-    key_prefix = "inter_CRF_"
-    params_dic[key_prefix * "dist_cutoff"] = inter.dist_cutoff
-    params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombReactionField,
                        dr,
@@ -961,26 +887,11 @@ function Base.:+(c1::CoulombReactionFieldScaled, c2::CoulombReactionFieldScaled)
     )
 end
 
-function inject_interaction(inter::CoulombReactionFieldScaled, params_dic)
-    key_prefix = "inter_CRFS_"
-    return CoulombReactionFieldScaled(
-        dict_get(params_dic, key_prefix * "dist_cutoff",        inter.dist_cutoff),
-        dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
-        inter.use_neighbors,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
+parameter_prefix(::CoulombReactionFieldScaled) = "inter_CO_"
+parameter_fields(::Type{<:CoulombReactionFieldScaled}) =
+    ((:dist_cutoff, "dist_cutoff"), (:solvent_dielectric, "solvent_dielectric"),
+     (:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombReactionFieldScaled, ff)
-    key_prefix = "inter_CRFS_"
-    params_dic[key_prefix * "dist_cutoff"]        = inter.dist_cutoff
-    params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
-    params_dic[key_prefix * "weight_14"]          = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"]      = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombReactionFieldScaled,
                        dr,
@@ -1115,31 +1026,11 @@ function Base.:+(c1::CoulombSoftCoreBeutlerReactionField, c2::CoulombSoftCoreBeu
     )
 end
 
-function inject_interaction(inter::CoulombSoftCoreBeutlerReactionField, params_dic)
-    key_prefix = "inter_CRFSCB_"
-    return CoulombSoftCoreBeutlerReactionField(
-        dict_get(params_dic, key_prefix * "dist_cutoff",        inter.dist_cutoff),
-        dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
-        dict_get(params_dic, key_prefix * "α",                  inter.α),
-        inter.use_neighbors,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
+parameter_prefix(::CoulombSoftCoreBeutlerReactionField) = "inter_CO_"
+parameter_fields(::Type{<:CoulombSoftCoreBeutlerReactionField}) =
+    ((:dist_cutoff, "dist_cutoff"), (:solvent_dielectric, "solvent_dielectric"), (:α, "α"),
+     (:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombSoftCoreBeutlerReactionField, ff)
-    key_prefix = "inter_CRFSCB_"
-    params_dic[key_prefix * "dist_cutoff"]        = inter.dist_cutoff
-    params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
-    params_dic[key_prefix * "α"]                  = inter.α
-    params_dic[key_prefix * "weight_14"]          = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"]      = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombSoftCoreBeutlerReactionField,
                        dr,
@@ -1336,31 +1227,11 @@ function Base.:+(c1::CoulombSoftCoreGapsysReactionField, c2::CoulombSoftCoreGaps
     )
 end
 
-function inject_interaction(inter::CoulombSoftCoreGapsysReactionField, params_dic)
-    key_prefix = "inter_CRFSCG_"
-    return CoulombSoftCoreGapsysReactionField(
-        dict_get(params_dic, key_prefix * "dist_cutoff",        inter.dist_cutoff),
-        dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
-        dict_get(params_dic, key_prefix * "α",                  inter.α),
-        dict_get(params_dic, key_prefix * "σQ",                 inter.σQ),
-        inter.use_neighbors,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
+parameter_prefix(::CoulombSoftCoreGapsysReactionField) = "inter_CO_"
+parameter_fields(::Type{<:CoulombSoftCoreGapsysReactionField}) =
+    ((:dist_cutoff, "dist_cutoff"), (:solvent_dielectric, "solvent_dielectric"), (:α, "α"),
+     (:σQ, "σQ"), (:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombSoftCoreGapsysReactionField, ff)
-    key_prefix = "inter_CRFSCG_"
-    params_dic[key_prefix * "dist_cutoff"]        = inter.dist_cutoff
-    params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
-    params_dic[key_prefix * "α"]                  = inter.α
-    params_dic[key_prefix * "σQ"]                 = inter.σQ
-    params_dic[key_prefix * "weight_14"]          = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"]      = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombSoftCoreGapsysReactionField,
                        dr,
@@ -1550,26 +1421,11 @@ function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
     )
 end
 
-function inject_interaction(inter::CoulombEwald, params_dic)
-    key_prefix = "inter_CE_"
-    return CoulombEwald(
-        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        inter.error_tol,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-        inter.α,
-        inter.approximate_erfc,
-    )
-end
+parameter_prefix(::CoulombEwald) = "inter_CO_"
+parameter_fields(::Type{<:CoulombEwald}) =
+    ((:dist_cutoff, "dist_cutoff"), (:weight_special, "weight_14"),
+     (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombEwald, ff)
-    key_prefix = "inter_CE_"
-    params_dic[key_prefix * "dist_cutoff"] = inter.dist_cutoff
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 function calc_erfc(αr::T, exp_mαr2, approximate_erfc) where T
     if approximate_erfc
@@ -1687,27 +1543,11 @@ function Base.:+(c1::CoulombEwaldScaled, c2::CoulombEwaldScaled)
     )
 end
 
-function inject_interaction(inter::CoulombEwaldScaled, params_dic)
-    key_prefix = "inter_CES_"
-    return CoulombEwaldScaled(
-        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        inter.error_tol,
-        inter.use_neighbors,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-        inter.α,
-        inter.approximate_erfc,
-    )
-end
+parameter_prefix(::CoulombEwaldScaled) = "inter_CO_"
+parameter_fields(::Type{<:CoulombEwaldScaled}) =
+    ((:dist_cutoff, "dist_cutoff"), (:weight_special, "weight_14"),
+     (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombEwaldScaled, ff)
-    key_prefix = "inter_CES_"
-    params_dic[key_prefix * "dist_cutoff"]   = inter.dist_cutoff
-    params_dic[key_prefix * "weight_14"]     = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombEwaldScaled{T},
                        dr,
@@ -1889,32 +1729,11 @@ function Base.:+(c1::CoulombSoftCoreBeutlerEwald, c2::CoulombSoftCoreBeutlerEwal
     )
 end
 
-function inject_interaction(inter::CoulombSoftCoreBeutlerEwald, params_dic)
-    key_prefix = "inter_CESCB_"
-    return CoulombSoftCoreBeutlerEwald(
-        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        inter.error_tol,
-        dict_get(params_dic, key_prefix * "α", inter.α),
-        inter.use_neighbors,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-        inter.α_ewald,
-        inter.approximate_erfc,
-    )
-end
+parameter_prefix(::CoulombSoftCoreBeutlerEwald) = "inter_CO_"
+parameter_fields(::Type{<:CoulombSoftCoreBeutlerEwald}) =
+    ((:dist_cutoff, "dist_cutoff"), (:α, "α"), (:weight_special, "weight_14"),
+     (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombSoftCoreBeutlerEwald, ff)
-    key_prefix = "inter_CESCB_"
-    params_dic[key_prefix * "dist_cutoff"]   = inter.dist_cutoff
-    params_dic[key_prefix * "α"]             = inter.α
-    params_dic[key_prefix * "weight_14"]     = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombSoftCoreBeutlerEwald,
                        dr,
@@ -2085,32 +1904,11 @@ function Base.:+(c1::CoulombSoftCoreGapsysEwald, c2::CoulombSoftCoreGapsysEwald)
     )
 end
 
-function inject_interaction(inter::CoulombSoftCoreGapsysEwald, params_dic)
-    key_prefix = "inter_CESCG_"
-    return CoulombSoftCoreGapsysEwald(
-        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        inter.error_tol,
-        dict_get(params_dic, key_prefix * "α",  inter.α),
-        dict_get(params_dic, key_prefix * "σQ", inter.σQ),
-        inter.use_neighbors,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-        inter.α_ewald,
-        inter.approximate_erfc,
-    )
-end
+parameter_prefix(::CoulombSoftCoreGapsysEwald) = "inter_CO_"
+parameter_fields(::Type{<:CoulombSoftCoreGapsysEwald}) =
+    ((:dist_cutoff, "dist_cutoff"), (:α, "α"), (:σQ, "σQ"), (:weight_special, "weight_14"),
+     (:coulomb_const, "coulomb_const"))
 
-function extract_parameters!(params_dic, inter::CoulombSoftCoreGapsysEwald, ff)
-    key_prefix = "inter_CESCG_"
-    params_dic[key_prefix * "dist_cutoff"]   = inter.dist_cutoff
-    params_dic[key_prefix * "α"]             = inter.α
-    params_dic[key_prefix * "σQ"]            = inter.σQ
-    params_dic[key_prefix * "weight_14"]     = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    return params_dic
-end
 
 @inline function force(inter::CoulombSoftCoreGapsysEwald,
                        dr,
@@ -2250,24 +2048,9 @@ function Base.:+(c1::Yukawa, c2::Yukawa)
     )
 end
 
-function inject_interaction(inter::Yukawa, params_dic)
-    key_prefix = "inter_YU_"
-    return Yukawa(
-        inter.cutoff,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "weight_14",     inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-        dict_get(params_dic, key_prefix * "kappa",         inter.kappa),
-    )
-end
-
-function extract_parameters!(params_dic, inter::Yukawa, ff)
-    key_prefix = "inter_YU_"
-    params_dic[key_prefix * "weight_14"]     = inter.weight_special
-    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-    params_dic[key_prefix * "kappa"]         = inter.kappa
-    return params_dic
-end
+parameter_prefix(::Yukawa) = "inter_YU_"
+parameter_fields(::Type{<:Yukawa}) =
+    ((:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"), (:kappa, "kappa"))
 
 @inline function force(inter::Yukawa,
                        dr,

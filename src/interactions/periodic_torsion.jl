@@ -65,33 +65,25 @@ const torsion_k_keys     = ["k_$i"     for i in 1:20]
 @inline torsion_k_key(i::Integer) =
     (i <= length(torsion_k_keys) ? @inbounds(torsion_k_keys[i]) : "k_$i")
 
-function inject_interaction(inter::PeriodicTorsion{N, T, E}, inter_type, params_dic) where {N, T, E}
-    key_prefix = (inter.proper ? "inter_PT_$(inter_type)_" : "inter_IT_$(inter_type)_")
+# The parameters are the per-term entries of two tuple fields rather than whole fields, so
+# the four functions that `parameter_fields` would otherwise derive are given directly
+parameter_prefix(inter::PeriodicTorsion, inter_type) =
+    (inter.proper ? "inter_PT_$(inter_type)_" : "inter_IT_$(inter_type)_")
+
+n_parameters(::Type{<:PeriodicTorsion{N}}) where {N} = 2 * N
+
+parameter_keys(::Type{<:PeriodicTorsion{N}}) where {N} =
+    (ntuple(torsion_phase_key, N)..., ntuple(torsion_k_key, N)...)
+
+parameter_values(inter::PeriodicTorsion) = (inter.phases..., inter.ks...)
+
+@inline function inject_parameters(inter::PeriodicTorsion{N, T, E}, vals::Tuple) where {N, T, E}
     return PeriodicTorsion{N, T, E}(
         inter.periodicities,
-        ntuple(i -> dict_get(params_dic, key_prefix * torsion_phase_key(i), inter.phases[i]), N),
-        ntuple(i -> dict_get(params_dic, key_prefix * torsion_k_key(i)    , inter.ks[i]    ), N),
+        ntuple(i -> convert(T, vals[i]    ), N),
+        ntuple(i -> convert(E, vals[N + i]), N),
         inter.proper,
     )
-end
-
-function extract_parameters!(params_dic,
-                             inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:PeriodicTorsion}},
-                             ff)
-    for (torsion_type, torsion) in zip(inter.types, from_device(inter.inters))
-        if torsion.proper
-            key_prefix = "inter_PT_$(torsion_type)_"
-        else
-            key_prefix = "inter_IT_$(torsion_type)_"
-        end
-        if !haskey(params_dic, key_prefix * "phase_1")
-            for i in eachindex(torsion.phases)
-                params_dic[key_prefix * torsion_phase_key(i)] = torsion.phases[i]
-                params_dic[key_prefix * torsion_k_key(i)    ] = torsion.ks[i]
-            end
-        end
-    end
-    return params_dic
 end
 
 function periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, cross_bc_cd,

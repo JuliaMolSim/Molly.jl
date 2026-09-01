@@ -26,19 +26,9 @@ end
 
 Base.:+(g1::Gravity, g2::Gravity) = Gravity(g1.cutoff, g1.G + g2.G, g1.use_neighbors)
 
-function inject_interaction(inter::Gravity, params_dic)
-    key_prefix = "inter_GR_"
-    return Gravity(
-        inter.cutoff,
-        dict_get(params_dic, key_prefix * "G", inter.G),
-        inter.use_neighbors,
-    )
-end
+parameter_prefix(::Gravity) = "inter_GR_"
+parameter_fields(::Type{<:Gravity}) = ((:G, "G"),)
 
-function extract_parameters!(params_dic, inter::Gravity, ff)
-    params_dic["inter_GR_G"] = inter.G
-    return params_dic
-end
 
 @inline function force(inter::Gravity,
                        dr,

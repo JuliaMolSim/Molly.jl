@@ -1620,7 +1620,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
                         n_threads::Integer=Threads.nthreads(), needs_vir=false,
                         strictness=default_strictness(), kwargs...)
     if needs_vir
-        err_str = "The virial contribution for implicit solvent is not implemented" *
+        err_str = "The virial contribution for implicit solvent is not implemented " *
                   "and will be ignored"
         report_issue(err_str, strictness; maxlog=1)
     end

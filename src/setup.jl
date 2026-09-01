@@ -578,12 +578,12 @@ function System(coord_file::AbstractString,
     end
     if nonbonded_method isa AbstractCutoff && hasproperty(nonbonded_method, :dist_cutoff) &&
             nonbonded_method.dist_cutoff > dist_cutoff
-        throw(ArgumentError("the cutoff distance for nonbonded_method (" *
-                "$(nonbonded_method.dist_cutoff)) must not exceed dist_cutoff ($dist_cutoff)"))
+        throw(ArgumentError("the cutoff distance for nonbonded_method " *
+                "($(nonbonded_method.dist_cutoff)) must not exceed dist_cutoff ($dist_cutoff)"))
     end
     if hasproperty(lj_cutoff, :dist_cutoff) && lj_cutoff.dist_cutoff > dist_cutoff
-        throw(ArgumentError("the cutoff distance for lj_cutoff (" *
-                "$(lj_cutoff.dist_cutoff)) must not exceed dist_cutoff ($dist_cutoff)"))
+        throw(ArgumentError("the cutoff distance for lj_cutoff " *
+                "($(lj_cutoff.dist_cutoff)) must not exceed dist_cutoff ($dist_cutoff)"))
     end
     if nonbonded_method == NoCutoff() && neighbor_finder_type != NoNeighborFinder
         err_str = "nonbonded_method is NoCutoff() but a neighbor finder is being used, this " *
@@ -901,7 +901,7 @@ function System(coord_file::AbstractString,
         if !isnothing(hb)
             push!(bonds_il.is, i)
             push!(bonds_il.js, k)
-            push!(bonds_il.types, atom_types_to_string(t1, t3))
+            push!(bonds_il.types, atom_types_to_string(t1, t2, t3))
             push!(bonds_il.inters, HarmonicBond(T(hb.k), T(hb.r0)))
             push!(bonds_ub_flags, true)
             eligible[i, k] = false

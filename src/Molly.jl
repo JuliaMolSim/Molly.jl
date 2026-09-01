@@ -38,6 +38,7 @@ using Statistics
 using StatsBase
 
 include("types.jl")
+include("parameters.jl")
 include("units.jl")
 include("cuda_config.jl")
 include("spatial.jl")

@@ -22,26 +22,9 @@ Base.zero(a::HarmonicAngle) = zero(typeof(a))
 
 Base.:+(a1::HarmonicAngle, a2::HarmonicAngle) = HarmonicAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
 
-function inject_interaction(inter::HarmonicAngle, inter_type, params_dic)
-    key_prefix = "inter_HA_$(inter_type)_"
-    return HarmonicAngle(
-        dict_get(params_dic, key_prefix * "k" , inter.k ),
-        dict_get(params_dic, key_prefix * "θ0", inter.θ0),
-    )
-end
+parameter_prefix(::HarmonicAngle, inter_type) = "inter_HA_$(inter_type)_"
+parameter_fields(::Type{<:HarmonicAngle}) = ((:k, "k"), (:θ0, "θ0"))
 
-function extract_parameters!(params_dic,
-                             inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:HarmonicAngle}},
-                             ff)
-    for (angle_type, ang) in zip(inter.types, from_device(inter.inters))
-        key_prefix = "inter_HA_$(angle_type)_"
-        if !haskey(params_dic, key_prefix * "k")
-            params_dic[key_prefix * "k" ] = ang.k
-            params_dic[key_prefix * "θ0"] = ang.θ0
-        end
-    end
-    return params_dic
-end
 
 @inline function force(a::HarmonicAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product

@@ -69,7 +69,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
                                         inter::MullerBrown; needs_vir=false,
                                         strictness=default_strictness(), kwargs...)                
     if needs_vir
-        err_str = "The virial contribution for MullerBrown is not implemented" *
+        err_str = "The virial contribution for MullerBrown is not implemented " *
                   "and will be ignored"
         report_issue(err_str, strictness; maxlog=1)
     end

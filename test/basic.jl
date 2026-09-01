@@ -544,6 +544,7 @@ end
         ff_garnet;
         units=false,
         dispersion_correction=true,
+        strictness=:nowarn,
     )
 
     ff_tip3p = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=false)

@@ -21,26 +21,9 @@ Base.zero(a::CosineAngle) = zero(typeof(a))
 
 Base.:+(a1::CosineAngle, a2::CosineAngle) = CosineAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
 
-function inject_interaction(inter::CosineAngle, inter_type, params_dic)
-    key_prefix = "inter_CA_$(inter_type)_"
-    return CosineAngle(
-        dict_get(params_dic, key_prefix * "k" , inter.k ),
-        dict_get(params_dic, key_prefix * "θ0", inter.θ0),
-    )
-end
+parameter_prefix(::CosineAngle, inter_type) = "inter_CA_$(inter_type)_"
+parameter_fields(::Type{<:CosineAngle}) = ((:k, "k"), (:θ0, "θ0"))
 
-function extract_parameters!(params_dic,
-                             inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:CosineAngle}},
-                             ff)
-    for (angle_type, ang) in zip(inter.types, from_device(inter.inters))
-        key_prefix = "inter_CA_$(angle_type)_"
-        if !haskey(params_dic, key_prefix * "k")
-            params_dic[key_prefix * "k" ] = ang.k
-            params_dic[key_prefix * "θ0"] = ang.θ0
-        end
-    end
-    return params_dic
-end
 
 @inline function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product

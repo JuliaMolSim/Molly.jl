@@ -40,26 +40,9 @@ function Base.:+(t1::RBTorsion, t2::RBTorsion)
                      t1.c4 + t2.c4, t1.c5 + t2.c5)
 end
 
-function inject_interaction(inter::RBTorsion, inter_type, params_dic)
-    key_prefix = "inter_RB_$(inter_type)_"
-    return RBTorsion(
-        ntuple(i -> dict_get(params_dic, key_prefix * "c$(i - 1)", getfield(inter, i)), 6)...,
-    )
-end
-
-function extract_parameters!(params_dic,
-                             inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:RBTorsion}},
-                             ff)
-    for (torsion_type, torsion) in zip(inter.types, from_device(inter.inters))
-        key_prefix = "inter_RB_$(torsion_type)_"
-        if !haskey(params_dic, key_prefix * "c0")
-            for i in 1:6
-                params_dic[key_prefix * "c$(i - 1)"] = getfield(torsion, i)
-            end
-        end
-    end
-    return params_dic
-end
+parameter_prefix(::RBTorsion, inter_type) = "inter_RB_$(inter_type)_"
+parameter_fields(::Type{<:RBTorsion}) =
+    ((:c0, "c0"), (:c1, "c1"), (:c2, "c2"), (:c3, "c3"), (:c4, "c4"), (:c5, "c5"))
 
 @inline function force(d::RBTorsion, coords_i, coords_j, coords_k, coords_l, boundary, args...)
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(

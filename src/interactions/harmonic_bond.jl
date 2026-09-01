@@ -20,26 +20,9 @@ Base.zero(b::HarmonicBond) = zero(typeof(b))
 
 Base.:+(b1::HarmonicBond, b2::HarmonicBond) = HarmonicBond(k=(b1.k + b2.k), r0=(b1.r0 + b2.r0))
 
-function inject_interaction(inter::HarmonicBond, inter_type, params_dic)
-    key_prefix = "inter_HB_$(inter_type)_"
-    return HarmonicBond(
-        dict_get(params_dic, key_prefix * "k" , inter.k ),
-        dict_get(params_dic, key_prefix * "r0", inter.r0),
-    )
-end
+parameter_prefix(::HarmonicBond, inter_type) = "inter_HB_$(inter_type)_"
+parameter_fields(::Type{<:HarmonicBond}) = ((:k, "k"), (:r0, "r0"))
 
-function extract_parameters!(params_dic,
-                             inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:HarmonicBond}},
-                             ff)
-    for (bond_type, bond) in zip(inter.types, from_device(inter.inters))
-        key_prefix = "inter_HB_$(bond_type)_"
-        if !haskey(params_dic, key_prefix * "k")
-            params_dic[key_prefix * "k" ] = bond.k
-            params_dic[key_prefix * "r0"] = bond.r0
-        end
-    end
-    return params_dic
-end
 
 @inline function force(b::HarmonicBond, coord_i, coord_j, boundary, args...)
     ab = vector(coord_i, coord_j, boundary)
