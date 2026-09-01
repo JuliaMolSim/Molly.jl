@@ -676,11 +676,17 @@ function grid_placement!(grid_indices::Matrix, grid_fractions, coords, recip_box
 end
 
 function grid_placement!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, n_threads)
+    # Allow Enzyme rule
+    grid_placement_gpu!(grid_indices, grid_fractions, coords, recip_box, mesh_dims)
+    return grid_indices, grid_fractions
+end
+
+function grid_placement_gpu!(grid_indices, grid_fractions, coords, recip_box, mesh_dims)
     backend = get_backend(parent(grid_indices))
     n_threads_gpu = 128
     kernel! = grid_placement_kernel!(backend, n_threads_gpu)
     kernel!(grid_indices, grid_fractions, coords, recip_box, mesh_dims; ndrange=length(coords))
-    return grid_indices, grid_fractions
+    return nothing
 end
 
 @kernel function grid_placement_kernel!(grid_indices, grid_fractions, @Const(coords),
@@ -742,12 +748,18 @@ end
 
 function update_bsplines!(bsplines_θ, bsplines_dθ, grid_fractions, order,
                           n_threads)
+    # Allow Enzyme rule
+    update_bsplines_gpu!(bsplines_θ, bsplines_dθ, grid_fractions, order)
+    return bsplines_θ, bsplines_dθ
+end
+
+function update_bsplines_gpu!(bsplines_θ, bsplines_dθ, grid_fractions, order)
     n_atoms = size(grid_fractions, 2)
     backend = get_backend(parent(bsplines_θ))
     n_threads_gpu = 128
     kernel! = update_bsplines_kernel!(backend, n_threads_gpu)
     kernel!(bsplines_θ, bsplines_dθ, grid_fractions, order; ndrange=n_atoms)
-    return bsplines_θ, bsplines_dθ
+    return nothing
 end
 
 @kernel function update_bsplines_kernel!(bsplines_θ, bsplines_dθ, @Const(grid_fractions),
@@ -869,13 +881,21 @@ end
 
 function spread_charge!(charge_grid::AbstractArray{T, 3}, buffer, grid_indices,
                         bsplines_θ, mesh_dims, order, atoms, scheduler, n_threads) where T
+    # Allow Enzyme rule
+    spread_charge_gpu!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms,
+                       scheduler, Val(T))
+    return charge_grid
+end
+
+function spread_charge_gpu!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms,
+                            scheduler, ::Val{T}) where T
     backend = get_backend(charge_grid)
     n_threads_gpu = 128
     kernel! = spread_charge_kernel!(backend, n_threads_gpu)
     charge_grid .= zero(T)
     kernel!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms, scheduler, Val(T);
             ndrange=length(atoms)*order)
-    return charge_grid
+    return nothing
 end
 
 @kernel function spread_charge_kernel!(charge_grid_real, @Const(grid_indices), @Const(bsplines_θ),
@@ -888,13 +908,8 @@ end
     end
 end
 
-@inline function recip_conv_inner!(vir_nou, recip_grid::AbstractArray{Complex{T}, 3}, bsm_x,
-                           bsm_y, bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor,
-                           boxfactor, kx, ky, kz, ::Val{needs_vir},
-                           ::Val{atomic}) where {T, needs_vir, atomic}
-    if iszero(kx) && iszero(ky) && iszero(kz)
-        return zero(T) * energy_units
-    end
+@inline function recip_conv_terms(bsm_x, bsm_y, bsm_z, recip_box, mesh_dims, energy_units,
+                                  f_div_ϵr, factor, boxfactor, kx, ky, kz, ::Val{T}) where {T}
     nx, ny, nz = mesh_dims
     maxkx, maxky, maxkz = T(0.5)*(nx+1), T(0.5)*(ny+1), T(0.5)*(nz+1)
     # The real to complex transform only keeps the modes with kz up to nz/2, and each of
@@ -910,13 +925,28 @@ end
         by = bsm_y[ky+1]
         mz = (kz < maxkz ? kz : kz - nz)
         mhz = mx * recip_box[3][1] + my * recip_box[3][2] + mz * recip_box[3][3]
-        d1, d2 = reim(recip_grid[kz+1, ky+1, kx+1])
         m2 = mhx^2 + mhy^2 + mhz^2
         bz = bsm_z[kz+1]
         denom = m2 * bx * by * bz
         c  = exp(-factor * m2)
         eterm = f_div_ϵr * c / denom
         eterm_nou = ustrip(energy_units, eterm)
+    end
+    return weight, eterm, eterm_nou, mhx, mhy, mhz, m2
+end
+
+@inline function recip_conv_inner!(vir_nou, recip_grid::AbstractArray{Complex{T}, 3}, bsm_x,
+                           bsm_y, bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor,
+                           boxfactor, kx, ky, kz, ::Val{needs_vir},
+                           ::Val{atomic}) where {T, needs_vir, atomic}
+    if iszero(kx) && iszero(ky) && iszero(kz)
+        return zero(T) * energy_units
+    end
+    weight, eterm, eterm_nou, mhx, mhy, mhz, m2 = recip_conv_terms(bsm_x, bsm_y, bsm_z,
+                recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                kx, ky, kz, Val(T))
+    @inbounds begin
+        d1, d2 = reim(recip_grid[kz+1, ky+1, kx+1])
         recip_grid[kz+1, ky+1, kx+1] = Complex(d1*eterm_nou, d2*eterm_nou)
         struct2 = weight * (d1^2 + d2^2)
 
@@ -999,12 +1029,9 @@ function recip_conv!(vir, buffer_virial, recip_grid::AbstractArray{Complex{T}, 3
     end
     factor = T(π)^2 / α^2
     boxfactor = T(π) * volume(boundary)
-    backend = get_backend(recip_grid)
-    n_threads_gpu = 256
-    kernel! = recip_conv_kernel!(backend, n_threads_gpu)
-    kernel!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
-            energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir), Val(needs_pe);
-            ndrange=length(recip_grid))
+    recip_conv_gpu!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box,
+                    mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir),
+                    Val(needs_pe))
     if needs_vir
         # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
         vir .+= from_device(buffer_virial) .* energy_units / 2
@@ -1013,6 +1040,18 @@ function recip_conv!(vir, buffer_virial, recip_grid::AbstractArray{Complex{T}, 3
     # over the whole mesh, and the device synchronisation it forces, can be skipped
     needs_pe || return zero(T) * energy_units
     return sum(buffer) * energy_units / 2
+end
+
+function recip_conv_gpu!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box,
+                         mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                         ::Val{needs_vir}, ::Val{needs_pe}) where {needs_vir, needs_pe}
+    backend = get_backend(recip_grid)
+    n_threads_gpu = 256
+    kernel! = recip_conv_kernel!(backend, n_threads_gpu)
+    kernel!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
+            energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir), Val(needs_pe);
+            ndrange=length(recip_grid))
+    return nothing
 end
 
 # One thread per grid point, indexed so that neighbouring threads touch neighbouring grid
@@ -1135,12 +1174,23 @@ function interpolate_force!(Fs, charge_grid::AbstractArray{T, 3}, grid_indices, 
     recip_box_nou = map(v -> ustrip.(v), recip_box)
     unit_scale = T(ustrip(force_units,
                           oneunit(T) * unit(eltype(eltype(recip_box))) * energy_units))
+    interpolate_force_gpu!(Fs, charge_grid, grid_indices, bsplines_θ, bsplines_dθ,
+                           recip_box_nou, mesh_dims, order, unit_scale, atoms, scheduler,
+                           Val(T))
+    return Fs
+end
+
+function interpolate_force_gpu!(Fs, charge_grid, grid_indices, bsplines_θ, bsplines_dθ,
+                                recip_box, mesh_dims, order, unit_scale, atoms, scheduler,
+                                ::Val{T}) where T
+    backend = get_backend(Fs)
+    n_threads_gpu = 128
     Fs_flat = reinterpret(T, Fs)
     kernel! = interpolate_force_kernel!(backend, n_threads_gpu)
-    kernel!(Fs_flat, charge_grid, grid_indices, bsplines_θ, bsplines_dθ, recip_box_nou,
+    kernel!(Fs_flat, charge_grid, grid_indices, bsplines_θ, bsplines_dθ, recip_box,
             mesh_dims, order, unit_scale, atoms, scheduler, Val(T);
             ndrange=length(atoms)*order)
-    return Fs
+    return nothing
 end
 
 @kernel function interpolate_force_kernel!(Fs_flat, @Const(charge_grid), @Const(grid_indices),

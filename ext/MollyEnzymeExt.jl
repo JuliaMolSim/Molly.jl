@@ -83,8 +83,8 @@ EnzymeRules.inactive(::typeof(plan_brfft), args...) = nothing
 # take it back out.
 function hermitian_scale(charge_grid::AbstractArray{T, 3}, recip_grid) where T
     n = size(charge_grid, 1)
-    return reshape([(isone(i) || 2*(i-1) == n ? one(T) : T(2))
-                    for i in 1:size(recip_grid, 1)], :, 1, 1)
+    scale = [(isone(i) || 2*(i-1) == n ? one(T) : T(2)) for i in 1:size(recip_grid, 1)]
+    return reshape(Molly.to_device(scale, Molly.array_type(recip_grid)), :, 1, 1)
 end
 
 function EnzymeRules.augmented_primal(config, ::Const{typeof(Molly.grad_safe_fft!)}, t,
@@ -682,6 +682,382 @@ function EnzymeRules.reverse(config::RevConfig,
     return ntuple(Returns(nothing), Val(11))
 end
 
+# PME mesh stages
+
+@inline zero_cotangent(x::Active) = Enzyme.make_zero(x.val)
+@inline zero_cotangent(::Annotation) = nothing
+
+# Grid placement: one thread per atom, each writing only its own column.
+
+@inline function grid_placement_contrib!(grid_indices, grid_fractions, coords, recip_box,
+                                         mesh_dims, i)
+    Molly.grid_placement_inner!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, i)
+    return nothing
+end
+
+@kernel inbounds=true function grid_placement_rev_kernel!(grid_indices, grid_fractions,
+                    dgrid_fractions, coords, dcoords, recip_box, mesh_dims)
+    i = @index(Global, Linear)
+
+    if i <= length(coords)
+        Enzyme.autodiff_deferred(
+            Reverse, Const(grid_placement_contrib!), Const, Const(grid_indices),
+            dup(grid_fractions, dgrid_fractions), dup(coords, dcoords), Const(recip_box),
+            Const(mesh_dims), Const(i),
+        )
+    end
+end
+
+function EnzymeRules.augmented_primal(config::RevConfig,
+                                      func::Const{typeof(Molly.grid_placement_gpu!)},
+                                      ::Type{RT}, grid_indices::Annotation,
+                                      grid_fractions::Annotation, coords::Annotation,
+                                      recip_box::Annotation, mesh_dims::Annotation) where {RT}
+    func.val(grid_indices.val, grid_fractions.val, coords.val, recip_box.val, mesh_dims.val)
+    return EnzymeRules.AugmentedReturn{EnzymeRules.primal_type(config, RT),
+                                       EnzymeRules.shadow_type(config, RT),
+                                       Nothing}(nothing, nothing, nothing)
+end
+
+function EnzymeRules.reverse(config::RevConfig,
+                             func::Const{typeof(Molly.grid_placement_gpu!)}, ::Type{RT},
+                             tape, grid_indices::Annotation, grid_fractions::Annotation,
+                             coords::Annotation, recip_box::Annotation,
+                             mesh_dims::Annotation) where {RT}
+    dgf, dcoords = whole_shadow(grid_fractions), whole_shadow(coords)
+    if !isnothing(dgf) && !isnothing(dcoords)
+        backend = get_backend(coords.val)
+        kernel! = grid_placement_rev_kernel!(backend, 128)
+        kernel!(grid_indices.val, grid_fractions.val, dgf, coords.val, dcoords,
+                recip_box.val, mesh_dims.val; ndrange=length(coords.val))
+    end
+    return (nothing, nothing, nothing, zero_cotangent(recip_box), zero_cotangent(mesh_dims))
+end
+
+# B-splines: one thread per atom, each writing only its own column, so no atomics. The
+# recursion is not differentiated. The splines the primal writes are B-splines evaluated at
+# the grid fraction and the derivative array it writes alongside them is exactly their
+# derivative with respect to that grid fraction, so the adjoint of the whole recursion is a
+# contraction of the two. The second derivative, which is needed when the force
+# interpolation feeds a cotangent back into the derivative array, comes from running the
+# same recursion one order lower: the primal builds `dθ[1] = -θ2[1]` and
+# `dθ[k+1] = θ2[k] - θ2[k+1]` from the order n-1 splines `θ2`, so the derivative of `dθ`
+# follows from the derivative of `θ2`, which that run also writes.
+
+@inline shadow_read(::Nothing, k, i, ::Val{T}) where {T} = zero(T)
+@inline shadow_read(a, k, i, ::Val) = @inbounds a[k, i]
+@inline shadow_zero!(::Nothing, k, i) = nothing
+@inline shadow_zero!(a, k, i) = (@inbounds a[k, i] = zero(eltype(a)); nothing)
+
+@kernel inbounds=true function update_bsplines_rev_kernel!(dbsplines_θ, bsplines_dθ,
+                    dbsplines_dθ, bsplines_θ_lo, bsplines_dθ_lo, grid_fractions,
+                    dgrid_fractions, order, TV::Val{T}) where T
+    i = @index(Global, Linear)
+
+    if i <= size(grid_fractions, 2)
+        order_lo = order - 1
+        Molly.update_bsplines_inner!(bsplines_θ_lo, bsplines_dθ_lo, grid_fractions,
+                                     order_lo, i)
+        for j in 1:3
+            o, o_lo = (j - 1) * order, (j - 1) * order_lo
+            s = zero(T)
+            for k in 1:order
+                s += shadow_read(dbsplines_θ, o + k, i, TV) * bsplines_dθ[o + k, i]
+                d2 = (k >= 2       ? bsplines_dθ_lo[o_lo + k - 1, i] : zero(T)) -
+                     (k <= order_lo ? bsplines_dθ_lo[o_lo + k, i]     : zero(T))
+                s += shadow_read(dbsplines_dθ, o + k, i, TV) * d2
+                # Both arrays are overwritten by the primal, so their cotangents are
+                # consumed here rather than accumulated into
+                shadow_zero!(dbsplines_θ , o + k, i)
+                shadow_zero!(dbsplines_dθ, o + k, i)
+            end
+            dgrid_fractions[j, i] += s
+        end
+    end
+end
+
+function EnzymeRules.augmented_primal(config::RevConfig,
+                                      func::Const{typeof(Molly.update_bsplines_gpu!)},
+                                      ::Type{RT}, bsplines_θ::Annotation,
+                                      bsplines_dθ::Annotation, grid_fractions::Annotation,
+                                      order::Annotation) where {RT}
+    func.val(bsplines_θ.val, bsplines_dθ.val, grid_fractions.val, order.val)
+    return EnzymeRules.AugmentedReturn{EnzymeRules.primal_type(config, RT),
+                                       EnzymeRules.shadow_type(config, RT),
+                                       Nothing}(nothing, nothing, nothing)
+end
+
+function EnzymeRules.reverse(config::RevConfig,
+                             func::Const{typeof(Molly.update_bsplines_gpu!)}, ::Type{RT},
+                             tape, bsplines_θ::Annotation, bsplines_dθ::Annotation,
+                             grid_fractions::Annotation, order::Annotation) where {RT}
+    dθ, ddθ = whole_shadow(bsplines_θ), whole_shadow(bsplines_dθ)
+    dgf = whole_shadow(grid_fractions)
+    if !isnothing(dgf) && (!isnothing(dθ) || !isnothing(ddθ))
+        n_atoms = size(grid_fractions.val, 2)
+        ord = order.val
+        T = eltype(bsplines_dθ.val)
+        # Scratch for the order n-1 run, in the same atom first layout as the primal arrays
+        lo = similar(parent(bsplines_dθ.val), n_atoms, 3 * (ord - 1))
+        θ_lo, dθ_lo = transpose(lo), transpose(similar(lo))
+        backend = get_backend(parent(grid_fractions.val))
+        kernel! = update_bsplines_rev_kernel!(backend, 128)
+        kernel!(dθ, bsplines_dθ.val, ddθ, θ_lo, dθ_lo, grid_fractions.val, dgf, ord,
+                Val(T); ndrange=n_atoms)
+    end
+    return (nothing, nothing, nothing, zero_cotangent(order))
+end
+
+# Charge spreading: the primal scatters into the grid, so the reverse gathers from the grid
+# cotangent. The contribution is the same product of splines as the primal, contracted with
+# the grid cotangent, so that the primal scatter is not repeated. The grid is overwritten by
+# the zeroing at the start of the primal, so its cotangent is consumed rather than kept.
+
+@inline function spread_charge_contrib(dcharge_grid, grid_indices, bsplines_θ, mesh_dims,
+                                       order, atoms, scheduler, i, iz, ::Val{T}) where T
+    q = Molly.effective_charge(scheduler, atoms[i], Val(T))
+    nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
+    s = zero(T)
+    @inbounds begin
+        x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
+        zindex = Molly.wrap_grid_index(z0index + iz, nz)
+        qz = q * bsplines_θ[2*order+iz+1, i]
+        for ix in 0:(order-1)
+            xbase = Molly.wrap_grid_index(x0index + ix, nx) * ny * nz
+            qzx = qz * bsplines_θ[ix+1, i]
+            for iy in 0:(order-1)
+                ybase = xbase + Molly.wrap_grid_index(y0index + iy, ny) * nz
+                cb = qzx * bsplines_θ[order+iy+1, i]
+                s += cb * dcharge_grid[ybase + zindex + 1]
+            end
+        end
+    end
+    return s
+end
+
+@kernel inbounds=true function spread_charge_rev_kernel!(dcharge_grid, grid_indices,
+                    bsplines_θ, dbsplines_θ, mesh_dims, order, atoms, datoms, scheduler,
+                    TV::Val{T}) where T
+    ti = @index(Global, Linear)
+
+    if ti <= length(atoms)*order
+        i, iz1 = fldmod1(ti, order)
+        Enzyme.autodiff_deferred(
+            Reverse, Const(spread_charge_contrib), Active{T}, Const(dcharge_grid),
+            Const(grid_indices), dup(bsplines_θ, dbsplines_θ), Const(mesh_dims),
+            Const(order), dup(atoms, datoms), Const(scheduler), Const(i), Const(iz1-1),
+            Const(TV),
+        )
+    end
+end
+
+function EnzymeRules.augmented_primal(config::RevConfig,
+                                      func::Const{typeof(Molly.spread_charge_gpu!)},
+                                      ::Type{RT}, charge_grid::Annotation,
+                                      grid_indices::Annotation, bsplines_θ::Annotation,
+                                      mesh_dims::Annotation, order::Annotation,
+                                      atoms::Annotation, scheduler::Annotation,
+                                      TV::Const) where {RT}
+    func.val(charge_grid.val, grid_indices.val, bsplines_θ.val, mesh_dims.val, order.val,
+             atoms.val, scheduler.val, TV.val)
+    return EnzymeRules.AugmentedReturn{EnzymeRules.primal_type(config, RT),
+                                       EnzymeRules.shadow_type(config, RT),
+                                       Nothing}(nothing, nothing, nothing)
+end
+
+function EnzymeRules.reverse(config::RevConfig,
+                             func::Const{typeof(Molly.spread_charge_gpu!)}, ::Type{RT},
+                             tape, charge_grid::Annotation, grid_indices::Annotation,
+                             bsplines_θ::Annotation, mesh_dims::Annotation,
+                             order::Annotation, atoms::Annotation, scheduler::Annotation,
+                             TV::Const{Val{T}}) where {RT, T}
+    dcg = whole_shadow(charge_grid)
+    dθ, datoms = whole_shadow(bsplines_θ), whole_shadow(atoms)
+    if !isnothing(dcg) && (!isnothing(dθ) || !isnothing(datoms))
+        n = length(atoms.val) * order.val
+        backend = get_backend(charge_grid.val)
+        kernel! = spread_charge_rev_kernel!(backend, 128)
+        kernel!(dcg, grid_indices.val, bsplines_θ.val, dθ, mesh_dims.val, order.val,
+                atoms.val, datoms, scheduler.val, Val(T); ndrange=n)
+    end
+    isnothing(dcg) || fill!(dcg, zero(eltype(dcg)))
+    return (nothing, nothing, nothing, zero_cotangent(mesh_dims), zero_cotangent(order),
+            nothing, zero_cotangent(scheduler), nothing)
+end
+
+# Reciprocal space convolution: one thread per mesh point, scaling that point in place and
+# writing that point of the energy buffer. Both are linear in the incoming grid value, so
+# the adjoint is applied directly rather than through Enzyme. With `out = eterm * in` the
+# energy term of the adjoint is `2 * weight * de * out`, which needs no division by `eterm`
+# and so is safe where it underflows.
+
+@kernel inbounds=true function recip_conv_rev_kernel!(recip_grid, drecip_grid, desum_arr,
+                    @Const(bsm_x), @Const(bsm_y), @Const(bsm_z), recip_box, mesh_dims,
+                    energy_units, f_div_ϵr, factor, boxfactor, TV::Val{T}) where T
+    li = @index(Global, Linear)
+
+    if li <= length(recip_grid)
+        nzh = size(recip_grid, 1)
+        i0 = li - 1
+        kz, r = i0 % nzh, i0 ÷ nzh
+        ky, kx = r % mesh_dims[2], r ÷ mesh_dims[2]
+        # The primal leaves the k = 0 point alone and writes a zero energy for it, so its
+        # cotangent passes straight through
+        if !(iszero(kx) && iszero(ky) && iszero(kz))
+            weight, _, eterm_nou, _, _, _, _ = Molly.recip_conv_terms(bsm_x, bsm_y, bsm_z,
+                        recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                        kx, ky, kz, TV)
+            o1, o2 = reim(recip_grid[li])
+            g1, g2 = reim(drecip_grid[li])
+            de = desum_arr[li]
+            drecip_grid[li] = Complex(eterm_nou*g1 + 2*weight*de*o1,
+                                      eterm_nou*g2 + 2*weight*de*o2)
+        end
+    end
+end
+
+function EnzymeRules.augmented_primal(config::RevConfig,
+                                      func::Const{typeof(Molly.recip_conv_gpu!)},
+                                      ::Type{RT}, buffer_virial::Annotation,
+                                      buffer::Annotation, recip_grid::Annotation,
+                                      bsm_x::Annotation, bsm_y::Annotation,
+                                      bsm_z::Annotation, recip_box::Annotation,
+                                      mesh_dims::Annotation, energy_units::Annotation,
+                                      f_div_ϵr::Annotation, factor::Annotation,
+                                      boxfactor::Annotation, needs_vir::Const,
+                                      needs_pe::Const) where {RT}
+    func.val(buffer_virial.val, buffer.val, recip_grid.val, bsm_x.val, bsm_y.val, bsm_z.val,
+             recip_box.val, mesh_dims.val, energy_units.val, f_div_ϵr.val, factor.val,
+             boxfactor.val, needs_vir.val, needs_pe.val)
+    return EnzymeRules.AugmentedReturn{EnzymeRules.primal_type(config, RT),
+                                       EnzymeRules.shadow_type(config, RT),
+                                       Nothing}(nothing, nothing, nothing)
+end
+
+function EnzymeRules.reverse(config::RevConfig, func::Const{typeof(Molly.recip_conv_gpu!)},
+                             ::Type{RT}, tape, buffer_virial::Annotation,
+                             buffer::Annotation, recip_grid::Annotation, bsm_x::Annotation,
+                             bsm_y::Annotation, bsm_z::Annotation, recip_box::Annotation,
+                             mesh_dims::Annotation, energy_units::Annotation,
+                             f_div_ϵr::Annotation, factor::Annotation,
+                             boxfactor::Annotation, needs_vir::Const{Val{NV}},
+                             needs_pe::Const) where {RT, NV}
+    NV && error("gradients through the virial are not implemented on the GPU")
+    drg = whole_shadow(recip_grid)
+    if !isnothing(drg)
+        dbuf = whole_shadow(buffer)
+        desum = isnothing(dbuf) ? Molly.zero_array(buffer.val) : dbuf
+        T = real(eltype(recip_grid.val))
+        backend = get_backend(recip_grid.val)
+        kernel! = recip_conv_rev_kernel!(backend, 256)
+        kernel!(recip_grid.val, drg, desum, bsm_x.val, bsm_y.val, bsm_z.val, recip_box.val,
+                mesh_dims.val, energy_units.val, f_div_ϵr.val, factor.val, boxfactor.val,
+                Val(T); ndrange=length(recip_grid.val))
+        isnothing(dbuf) || fill!(dbuf, zero(eltype(dbuf)))
+    end
+    return (nothing, nothing, nothing, nothing, nothing, nothing,
+            zero_cotangent(recip_box), zero_cotangent(mesh_dims),
+            zero_cotangent(energy_units), zero_cotangent(f_div_ϵr), zero_cotangent(factor),
+            zero_cotangent(boxfactor), nothing, nothing)
+end
+
+# Force interpolation: the primal gathers from the grid and scatters into the forces, so the
+# reverse contracts the same force components with the force cotangent. Writing it as a
+# scalar contribution rather than differentiating the primal keeps the atomic scatter into
+# the forces out of the reverse pass, which would otherwise run again and corrupt them.
+
+@inline function interpolate_force_contrib(charge_grid, grid_indices, bsplines_θ,
+                            bsplines_dθ, recip_box, mesh_dims, order, unit_scale, atoms,
+                            scheduler, dFs_flat, i, iz, ::Val{T}) where T
+    nx, ny, nz = mesh_dims
+    fx, fy, fz = zero(T), zero(T), zero(T)
+    @inbounds begin
+        q = Molly.effective_charge(scheduler, atoms[i], Val(T))
+        x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
+        zindex = Molly.wrap_grid_index(z0index + iz, nz)
+        tz, dtz = bsplines_θ[2*order+iz+1, i], bsplines_dθ[2*order+iz+1, i]
+        for ix in 0:(order-1)
+            xbase = Molly.wrap_grid_index(x0index + ix, nx) * ny * nz
+            tx, dtx = bsplines_θ[ix+1, i], bsplines_dθ[ix+1, i]
+            for iy in 0:(order-1)
+                ybase = xbase + Molly.wrap_grid_index(y0index + iy, ny) * nz
+                ty, dty = bsplines_θ[order+iy+1, i], bsplines_dθ[order+iy+1, i]
+                gridvalue = charge_grid[ybase + zindex + 1]
+                fx += dtx * ty * tz * gridvalue
+                fy += tx * dty * tz * gridvalue
+                fz += tx * ty * dtz * gridvalue
+            end
+        end
+        f1 = q * (fx*nx*recip_box[1][1])
+        f2 = q * (fx*nx*recip_box[2][1] + fy*ny*recip_box[2][2])
+        f3 = q * (fx*nx*recip_box[3][1] + fy*ny*recip_box[3][2] + fz*nz*recip_box[3][3])
+        # The primal does `Fs_flat[3(i-1)+d] -= unit_scale * f_d`
+        return -unit_scale * (f1*dFs_flat[3*(i-1)+1] + f2*dFs_flat[3*(i-1)+2] +
+                              f3*dFs_flat[3*(i-1)+3])
+    end
+end
+
+@kernel inbounds=true function interpolate_force_rev_kernel!(charge_grid, dcharge_grid,
+                    grid_indices, bsplines_θ, dbsplines_θ, bsplines_dθ, dbsplines_dθ,
+                    recip_box, mesh_dims, order, unit_scale, atoms, datoms, scheduler,
+                    dFs_flat, TV::Val{T}) where T
+    ti = @index(Global, Linear)
+
+    if ti <= length(atoms)*order
+        i, iz1 = fldmod1(ti, order)
+        Enzyme.autodiff_deferred(
+            Reverse, Const(interpolate_force_contrib), Active{T},
+            dup(charge_grid, dcharge_grid), Const(grid_indices),
+            dup(bsplines_θ, dbsplines_θ), dup(bsplines_dθ, dbsplines_dθ), Const(recip_box),
+            Const(mesh_dims), Const(order), Const(unit_scale), dup(atoms, datoms),
+            Const(scheduler), Const(dFs_flat), Const(i), Const(iz1-1), Const(TV),
+        )
+    end
+end
+
+function EnzymeRules.augmented_primal(config::RevConfig,
+                                      func::Const{typeof(Molly.interpolate_force_gpu!)},
+                                      ::Type{RT}, Fs::Annotation, charge_grid::Annotation,
+                                      grid_indices::Annotation, bsplines_θ::Annotation,
+                                      bsplines_dθ::Annotation, recip_box::Annotation,
+                                      mesh_dims::Annotation, order::Annotation,
+                                      unit_scale::Annotation, atoms::Annotation,
+                                      scheduler::Annotation, TV::Const) where {RT}
+    func.val(Fs.val, charge_grid.val, grid_indices.val, bsplines_θ.val, bsplines_dθ.val,
+             recip_box.val, mesh_dims.val, order.val, unit_scale.val, atoms.val,
+             scheduler.val, TV.val)
+    return EnzymeRules.AugmentedReturn{EnzymeRules.primal_type(config, RT),
+                                       EnzymeRules.shadow_type(config, RT),
+                                       Nothing}(nothing, nothing, nothing)
+end
+
+function EnzymeRules.reverse(config::RevConfig,
+                             func::Const{typeof(Molly.interpolate_force_gpu!)},
+                             ::Type{RT}, tape, Fs::Annotation, charge_grid::Annotation,
+                             grid_indices::Annotation, bsplines_θ::Annotation,
+                             bsplines_dθ::Annotation, recip_box::Annotation,
+                             mesh_dims::Annotation, order::Annotation,
+                             unit_scale::Annotation, atoms::Annotation,
+                             scheduler::Annotation, TV::Const{Val{T}}) where {RT, T}
+    dFs = whole_shadow(Fs)
+    if !isnothing(dFs)
+        dcg, dθ = whole_shadow(charge_grid), whole_shadow(bsplines_θ)
+        ddθ, datoms = whole_shadow(bsplines_dθ), whole_shadow(atoms)
+        if !isnothing(dcg) || !isnothing(dθ) || !isnothing(ddθ) || !isnothing(datoms)
+            n = length(atoms.val) * order.val
+            backend = get_backend(charge_grid.val)
+            kernel! = interpolate_force_rev_kernel!(backend, 128)
+            kernel!(charge_grid.val, dcg, grid_indices.val, bsplines_θ.val, dθ,
+                    bsplines_dθ.val, ddθ, recip_box.val, mesh_dims.val, order.val,
+                    unit_scale.val, atoms.val, datoms, scheduler.val,
+                    reinterpret(T, dFs), Val(T); ndrange=n)
+        end
+    end
+    return (nothing, nothing, nothing, nothing, nothing, zero_cotangent(recip_box),
+            zero_cotangent(mesh_dims), zero_cotangent(order), zero_cotangent(unit_scale),
+            nothing, zero_cotangent(scheduler), nothing)
+end
+
 # Applying force units
 # A straight copy of the force matrix into the force vector, so the adjoint is a copy the
 # other way. Each thread owns one atom, so no atomics are needed. `fs` is overwritten by
@@ -754,10 +1130,18 @@ end
             tape_or_live(tape.velocities, sys.velocities))
 end
 
+# Enzyme wraps the shadow of a tuple in a `Ref` when the tuple mixes active and constant
+# elements. PME is one such case: the `EwaldExclusion` list has no injectable parameters, so
+# `inject_gradients` passes it through unchanged and it stays shared with the reference
+# system while the other lists are rebuilt.
+@inline shadow_tuple(dval) = dval
+@inline shadow_tuple(dval::Base.RefValue) = dval[]
+
 # Shadow of the `inters` array of each specific interaction list, as a tuple
 @inline specific_inter_shadows(::Const, sils) = map(Returns(nothing), sils)
 @inline function specific_inter_shadows(x::Annotation, sils)
-    return map((il, dil) -> il.inters === dil.inters ? nothing : dil.inters, sils, x.dval)
+    dsils = values(shadow_tuple(x.dval))
+    return map((il, dil) -> il.inters === dil.inters ? nothing : dil.inters, sils, dsils)
 end
 
 # Pairwise contribution. The interaction cotangent is left on the device in
