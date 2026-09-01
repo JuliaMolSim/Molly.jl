@@ -15,7 +15,7 @@ In addition, the following work with gradients:
 - Simulations with constraints using [`SHAKE_RATTLE`](@ref).
 - Gradients with respect to the alchemical λ of each atom, which give the ``\partial U / \partial \lambda`` gradients required for thermodynamic integration.
 - Units work for simple simulations provided the loss function returns a unitless value, but they are not supported throughout and the examples below are unitless.
-- Force field parameters, which can be read out of a system with `Molly.extract_parameters` and put back with `Molly.inject_gradients`. Most built-in interactions define the required `Molly.extract_parameters!` and `Molly.inject_interaction` methods.
+- Force field parameters, which can be read out of a system with [`extract_parameters`](@ref) and put back with [`inject_gradients`](@ref) as shown below.
 - Values recorded by loggers during the simulation, allowing loss functions that depend on the whole trajectory rather than only the final state.
 - Analysis functions such as [`radius_gyration`](@ref), [`hydrodynamic_radius`](@ref), [`distances`](@ref) and [`rmsd`](@ref).
 - The parameters of a custom general interaction, such as the weights of a neural network potential.
@@ -25,12 +25,60 @@ Differentiable simulation does not currently work with some components of the pa
 - Monte Carlo simulators and couplers.
 - [`LINCS`](@ref) constraints.
 - Virtual sites.
-- GPU gradients only work for reverse mode, do not work for implicit solvent, and may only work on the CUDA backend.
+- GPU gradients only work for reverse mode, do not work for implicit solvent, do not work through virial/pressure, and may only work on the CUDA backend.
 This is mentioned in the relevant docstrings.
 It is memory intensive on the GPU so using gradient checkpointing, e.g. with [Checkpointing.jl](https://github.com/Argonne-National-Laboratory/Checkpointing.jl), will likely be required for larger simulations.
 
+## High-level gradient interface
+
+For training force fields, gradients are required with respect to all force field parameters.
+In this case [`extract_parameters`](@ref) can be used to get a dictionary of parameters, a [`ParameterPlan`](@ref) is used to insert the parameters into the loss function, and [`inject_gradients`](@ref) is used inside the loss function to set up the system.
+For example, to get the gradient of the potential energy with respect to each parameter:
+```julia
+using Enzyme
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff = MolecularForceField(joinpath(data_dir, "force_fields", "ff99SBildn.xml"); units=false)
+
+sys =System(
+    joinpath(data_dir, "6mrr_nowater.pdb"),
+    ff;
+    units=false,
+    #nonbonded_method=DistanceCutoff,
+    dispersion_correction=false,
+    grad_safe=true,
+    #strictness=:nowarn,
+    #n_threads=n_threads,
+)
+
+params_dic = extract_parameters(sys)  # A Dict from parameter name to value
+plan = ParameterPlan(sys, params_dic) # Resolve the names once, outside the loss
+
+function loss(params_dic, plan, sys, coords)
+    sys_params = inject_gradients(sys, params_dic, plan, coords)
+    return potential_energy(sys_params)
+end
+
+grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
+
+autodiff(
+    set_runtime_activity(Reverse),
+    loss,
+    Active,
+    Duplicated(params_dic, grads_enzyme),
+    Const(plan),
+    Const(sys),
+    Duplicated(copy(sys.coords), zero(sys.coords)),
+)
+
+grads_enzyme # Contains gradients
+```
+If the system is on GPU, this will run on GPU as well.
+A custom interaction becomes compatible with this interface by defining [`parameter_prefix`](@ref) and [`parameter_fields`](@ref).
+
 ## Pairwise interaction gradients
 
+Now, we show how to explicitly set up differentiable simulations.
 First, we show how taking gradients through a simulation can be used to optimise an atom property in a [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) fluid.
 In this type of simulation each atom has a σ value that determines how close it likes to get to other atoms.
 We are going to find the σ value that results in a desired distance of each atom to its closest neighbor.
@@ -93,6 +141,7 @@ function loss(σ, coords, velocities, boundary, pairwise_inters,
         neighbor_finder=neighbor_finder,
         force_units=NoUnits,
         energy_units=NoUnits,
+        grad_safe=true,
     )
 
     simulate!(sys, simulator, n_steps)
@@ -237,6 +286,7 @@ function loss(θ, coords, velocities, atoms, bonds, boundary, simulator, n_steps
         specific_inter_lists=(bonds, angles),
         force_units=NoUnits,
         energy_units=NoUnits,
+        grad_safe=true,
     )
 
     simulate!(sys, simulator, n_steps)
@@ -378,6 +428,7 @@ function loss(model, coords, velocities, atoms, boundary, simulator, n_steps, di
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
+        grad_safe=true,
     )
 
     simulate!(sys, simulator, n_steps)
