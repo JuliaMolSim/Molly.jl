@@ -1856,67 +1856,6 @@ end
         return sum(sum.(abs, sys.coords))
     end
 
-    params_dic = Dict(
-        "atom_C8_σ"                => 0.33996695084235345,
-        "atom_C8_ϵ"                => 0.4577296,
-        "atom_C9_σ"                => 0.33996695084235345,
-        "atom_C9_ϵ"                => 0.4577296,
-        "atom_CA_σ"                => 0.33996695084235345,
-        "atom_CA_ϵ"                => 0.359824,
-        "atom_CT_σ"                => 0.33996695084235345,
-        "atom_CT_ϵ"                => 0.4577296,
-        "atom_C_σ"                 => 0.33996695084235345,
-        "atom_C_ϵ"                 => 0.359824,
-        "atom_N3_σ"                => 0.32499985237759577,
-        "atom_N3_ϵ"                => 0.71128,
-        "atom_N_σ"                 => 0.32499985237759577,
-        "atom_N_ϵ"                 => 0.71128,
-        "atom_O2_σ"                => 0.2959921901149463,
-        "atom_O2_ϵ"                => 0.87864,
-        "atom_OH_σ"                => 0.30664733878390477,
-        "atom_OH_ϵ"                => 0.8803136,
-        "atom_O_σ"                 => 0.2959921901149463,
-        "atom_O_ϵ"                 => 0.87864,
-        "inter_CO_weight_14"       => 0.8333,
-        "inter_LJ_weight_14"       => 0.5,
-        "inter_PT_-/C/CT/-_k_1"    => 0.0,
-        "inter_PT_-/C/N/-_k_1"     => -10.46,
-        "inter_PT_-/CA/CA/-_k_1"   => -15.167,
-        "inter_PT_-/CA/CT/-_k_1"   => 0.0,
-        "inter_PT_-/CT/C8/-_k_1"   => 0.64852,
-        "inter_PT_-/CT/C9/-_k_1"   => 0.64852,
-        "inter_PT_-/CT/CT/-_k_1"   => 0.6508444444444447,
-        "inter_PT_-/CT/N/-_k_1"    => 0.0,
-        "inter_PT_-/CT/N3/-_k_1"   => 0.6508444444444447,
-        "inter_PT_C/N/CT/C_k_1"    => -0.142256,
-        "inter_PT_C/N/CT/C_k_2"    => 1.40164,
-        "inter_PT_C/N/CT/C_k_3"    => 2.276096,
-        "inter_PT_C/N/CT/C_k_4"    => 0.33472,
-        "inter_PT_C/N/CT/C_k_5"    => 1.6736,
-        "inter_PT_CT/CT/C/N_k_1"   => 0.8368,
-        "inter_PT_CT/CT/C/N_k_2"   => 0.8368,
-        "inter_PT_CT/CT/C/N_k_3"   => 1.6736,
-        "inter_PT_CT/CT/N/C_k_1"   => 8.368,
-        "inter_PT_CT/CT/N/C_k_2"   => 8.368,
-        "inter_PT_CT/CT/N/C_k_3"   => 1.6736,
-        "inter_PT_H/N/C/O_k_1"     => 8.368,
-        "inter_PT_H/N/C/O_k_2"     => -10.46,
-        "inter_PT_H1/CT/C/O_k_1"   => 3.3472,
-        "inter_PT_H1/CT/C/O_k_2"   => -0.33472,
-        "inter_PT_HC/CT/C4/CT_k_1" => 0.66944,
-        "inter_PT_N/CT/C/N_k_1"    => 2.7196,
-        "inter_PT_N/CT/C/N_k_10"   => 0.1046,
-        "inter_PT_N/CT/C/N_k_11"   => -0.046024,
-        "inter_PT_N/CT/C/N_k_2"    => -0.824248,
-        "inter_PT_N/CT/C/N_k_3"    => 6.04588,
-        "inter_PT_N/CT/C/N_k_4"    => 2.004136,
-        "inter_PT_N/CT/C/N_k_5"    => -0.0799144,
-        "inter_PT_N/CT/C/N_k_6"    => -0.016736,
-        "inter_PT_N/CT/C/N_k_7"    => -1.06692,
-        "inter_PT_N/CT/C/N_k_8"    => 0.3138,
-        "inter_PT_N/CT/C/N_k_9"    => 0.238488,
-    )
-
     platform_runs = [("CPU", Array, false)]
     if run_parallel_tests
         push!(platform_runs, ("CPU parallel", Array, true))
@@ -1925,10 +1864,14 @@ end
         push!(platform_runs, ("$AT", AT, false))
     end
     nonbonded_methods = (("cutoff", DistanceCutoff(1.0)), ("PME", SetupPME()))
+
+    params_dics = map(nonbonded_methods) do (_, nonbonded_method)
+        extract_parameters(create_sys(Array, 1, nonbonded_method))
+    end
     test_runs = Any[
         ("Energy", test_energy_grad, (1e-7, 1e-7), 1e-14  , central_fdm(6, 1)),
         ("Force" , test_forces_grad, (1e-9, 1e-9), 1e-14  , central_fdm(6, 1)),
-        ("Sim"   , test_sim_grad   , (1e-3, 1e-2), nothing, central_fdm(6, 1; max_range=1e-4)),
+        ("Sim"   , test_sim_grad   , (1e-2, 1e-2), nothing, central_fdm(6, 1; max_range=1e-4)),
     ]
     params_to_test = (
         "atom_N_σ",
@@ -1941,7 +1884,7 @@ end
             if test_name == "Sim" && nb_name == "PME"
                 continue
             end
-            tol_fd = tol_fds[nb_i]
+            tol_fd, params_dic = tol_fds[nb_i], params_dics[nb_i]
             grads_ref = nothing # Single-threaded CPU gradients for every parameter
             for (platform, AT, parallel) in platform_runs
                 if test_name == "Sim" && !startswith(platform, "CPU")

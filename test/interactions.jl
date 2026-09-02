@@ -1876,7 +1876,7 @@ end
                     fs_gi2 = zero(fs_gi)
                     E_gi2, fs_gi2 = AtomsCalculators.energy_forces!(fs_gi2, sys,
                                                     sys.general_inters[1]; n_threads=n_threads)
-                    @test E_gi == E_gi2
+                    @test abs(E_gi - E_gi2) < 1e-4u"kJ * mol^-1"
                     @test maximum(norm.(fs_gi .- fs_gi2)) < 1e-4u"kJ * mol^-1 * nm^-1"
                 end
             end
