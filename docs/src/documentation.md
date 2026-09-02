@@ -401,7 +401,7 @@ Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2
 Unlike OpenMM, it is also applied to the hydrogens of rigid water.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
-The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
+The options are instances of [`SetupImplicitSolventOBC`](@ref) and [`SetupImplicitSolventGBN2`](@ref), corresponding to the Onufriev-Bashford-Case GBSA model and the GB-Neck2 model.
 Other options detailed in the docstring for [`System`](@ref) include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_buffer`).
 The `strictness` keyword argument determines behavior when encountering possible problems and can be set to `:error` or `:nowarn` rather than the default `:warn`.
 It can be set globally with the `MOLLY_STRICTNESS` environmental variable.

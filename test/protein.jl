@@ -707,6 +707,12 @@ end
 
     for AT in array_list
         for solvent_model in (:obc2, :gbn2)
+            if solvent_model == :obc2
+                implicit_solvent = SetupImplicitSolventOBC(use_OBC2=true, kappa=1.0u"nm^-1")
+            else
+                implicit_solvent = SetupImplicitSolventGBN2(kappa=1.0u"nm^-1")
+            end
+
             mk_sys(nt) = System(
                 joinpath(data_dir, "6mrr_nowater.pdb"),
                 ff;
@@ -716,11 +722,11 @@ end
                 dist_cutoff=5.0u"nm",
                 nonbonded_method=DistanceCutoff(5.0u"nm"),
                 dispersion_correction=false,
-                implicit_solvent=solvent_model,
-                kappa=1.0u"nm^-1",
+                implicit_solvent=implicit_solvent,
                 strictness=:nowarn,
                 n_threads=nt,
             )
+
             sys_1 = mk_sys(1)
             neighbors = find_neighbors(sys_1)
             openmm_force_fp = joinpath(openmm_dir, "amber", "forces_$solvent_model.txt")

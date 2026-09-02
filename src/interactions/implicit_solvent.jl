@@ -3,12 +3,16 @@
 
 export
     ImplicitSolventOBC,
-    ImplicitSolventGBN2
+    SetupImplicitSolventOBC,
+    ImplicitSolventGBN2,
+    SetupImplicitSolventGBN2
 
 # Generalized Born (GB) implicit solvent models augmented with the
 #   hydrophobic solvent accessible surface area (SA) term
 # Custom GBSA methods should sub-type this abstract type
 abstract type AbstractGBSA end
+
+abstract type AbstractSetupGBSA end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
 # Elsewhere it is 78.3
@@ -403,13 +407,32 @@ function gbsa_buffers(::Type{AT}, ::Type{T}, n_atoms, offset_radii, sa_factor_us
 end
 
 """
-    ImplicitSolventOBC(atoms, atoms_data, bonds=nothing)
+    ImplicitSolventOBC(atoms, atoms_data, bonds=nothing; solvent_dielectric=gb_solvent_dielectric,
+                       solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
+                       offset=obc_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
+                       sa_factor=gb_sa_factor, use_ACE=true, use_OBC2=false,
+                       element_to_radius=mbondi2_element_to_radius,
+                       element_to_screen=obc_element_to_screen, n_threads=Threads.nthreads())
 
 Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculator.
 
 Should be used along with a Coulomb interaction.
-The keyword argument `use_OBC2` determines whether to use parameter set
-I (`false`, the default) or II (`true`).
+[`SetupImplicitSolventOBC`](@ref) provides parameters when setting up a system from a file.
+
+`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs.
+`solvent_dielectric` and `solute_dielectric` are the dielectric constants of the solvent and
+the solute.
+`kappa` is the Debye-Hückel screening parameter, the inverse of the Debye length, and is
+zero when there is no salt screening.
+`offset` is the dielectric offset subtracted from the intrinsic radii.
+`dist_cutoff` is the cutoff distance for the Born radius and solvation sums, with zero
+meaning no cutoff.
+`probe_radius` is the radius of the solvent probe and `sa_factor` the surface tension used
+by the solvent accessible surface area term, which `use_ACE` switches on and off.
+`use_OBC2` determines whether to use parameter set I (`false`, the default) or II (`true`).
+`element_to_radius` and `element_to_screen` map an element to its intrinsic radius and its
+screening parameter, the key `"-"` giving the value used for elements not in the dictionary.
+`n_threads` determines how many per-thread force buffers are allocated.
 
 Only compatible with 3D systems.
 Not currently compatible with virial calculation.
@@ -457,6 +480,18 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                             element_to_radius=mbondi2_element_to_radius,
                             element_to_screen=obc_element_to_screen,
                             n_threads::Integer=Threads.nthreads()) where {TY, M, T, D, E, L}
+    if offset < zero(offset)
+        throw(ArgumentError("offset for ImplicitSolventOBC must be non-negative, found $offset"))
+    end
+    if dist_cutoff < zero(dist_cutoff)
+        throw(ArgumentError("dist_cutoff for ImplicitSolventOBC must be non-negative, " *
+                            "found $dist_cutoff"))
+    end
+    if probe_radius < zero(probe_radius)
+        throw(ArgumentError("probe_radius for ImplicitSolventOBC must be non-negative, " *
+                            "found $probe_radius"))
+    end
+
     units = dimension(D) == u"𝐋"
     radii = mbondi2_radii(atoms_data, bonds; element_to_radius=element_to_radius)
 
@@ -499,26 +534,26 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
     sor = to_device(scaled_offset_radii, AT)
 
     if units
-        bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, T(sa_factor), dist_cutoff,
-                            offset, factor_solute, n_threads)
+        bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, T(sa_factor), T(dist_cutoff),
+                            T(offset), factor_solute, n_threads)
         return ImplicitSolventOBC{T, D, typeof(bufs.B_grads), typeof(or), typeof(T(kappa)),
                         typeof(T(sa_factor)), typeof(factor_solute), typeof(bufs.born_forces),
                         typeof(bufs.born_forces_scaled), typeof(bufs.pes), typeof(bufs.fs_mat),
                         typeof(bufs.force_chunks)}(
-                    or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset,
-                    dist_cutoff, use_ACE, α, β, γ, probe_radius, T(sa_factor),
+                    or, sor, T(solvent_dielectric), T(solute_dielectric), T(kappa), T(offset),
+                    T(dist_cutoff), use_ACE, α, β, γ, T(probe_radius), T(sa_factor),
                     factor_solute, factor_solvent, bufs.Bs, bufs.B_grads, bufs.atom_charges,
                     bufs.born_forces, bufs.born_forces_scaled, bufs.born_forces_mod,
                     bufs.Is_nounits, bufs.pes, bufs.fs_mat, bufs.force_chunks)
     else
-        bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, ustrip(sa_factor),
-                            ustrip(dist_cutoff), ustrip(offset), factor_solute, n_threads)
+        bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, T(ustrip(sa_factor)),
+                            T(ustrip(dist_cutoff)), ustrip(offset), factor_solute, n_threads)
         return ImplicitSolventOBC{T, T, typeof(bufs.B_grads), typeof(or), T, T, T,
                         typeof(bufs.born_forces), typeof(bufs.born_forces_scaled),
                         typeof(bufs.pes), typeof(bufs.fs_mat), typeof(bufs.force_chunks)}(
-                    or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)),
-                    ustrip(offset), ustrip(dist_cutoff), use_ACE, α, β, γ, ustrip(probe_radius),
-                    ustrip(sa_factor), factor_solute, factor_solvent, bufs.Bs, bufs.B_grads,
+                    or, sor, T(solvent_dielectric), T(solute_dielectric), T(ustrip(kappa)),
+                    T(ustrip(offset)), T(ustrip(dist_cutoff)), use_ACE, α, β, γ, T(ustrip(probe_radius)),
+                    T(ustrip(sa_factor)), factor_solute, factor_solvent, bufs.Bs, bufs.B_grads,
                     bufs.atom_charges, bufs.born_forces, bufs.born_forces_scaled,
                     bufs.born_forces_mod, bufs.Is_nounits, bufs.pes, bufs.fs_mat,
                     bufs.force_chunks)
@@ -586,11 +621,90 @@ function extract_parameters!(params_dic, inter::ImplicitSolventOBC, ff)
 end
 
 """
-    ImplicitSolventGBN2(atoms, atoms_data, bonds=nothing)
+    SetupImplicitSolventOBC(; use_OBC2=false, solvent_dielectric=gb_solvent_dielectric,
+                            solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
+                            offset=obc_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
+                            sa_factor=gb_sa_factor, use_ACE=true,
+                            element_to_radius=mbondi2_element_to_radius,
+                            element_to_screen=obc_element_to_screen)
+
+Set up the Onufriev-Bashford-Case GBSA model.
+
+Passed to the [`System`](@ref) constructor from files, where it creates an
+[`ImplicitSolventOBC`](@ref) general interaction.
+See [`ImplicitSolventOBC`](@ref) for argument descriptions.
+"""
+@kwdef struct SetupImplicitSolventOBC{T, D, K, S, ER, ES} <: AbstractSetupGBSA
+    use_OBC2::Bool = false
+    solvent_dielectric::T = gb_solvent_dielectric
+    solute_dielectric::T = gb_solute_dielectric
+    kappa::K = 0.0u"nm^-1"
+    offset::D = obc_offset
+    dist_cutoff::D = 0.0u"nm"
+    probe_radius::D = gb_probe_radius
+    sa_factor::S = gb_sa_factor
+    use_ACE::Bool = true
+    element_to_radius::ER = mbondi2_element_to_radius
+    element_to_screen::ES = obc_element_to_screen
+end
+
+function setup_implicit_solvent(is::SetupImplicitSolventOBC, atoms, atoms_data, bonds, n_threads)
+    return ImplicitSolventOBC(
+        atoms,
+        atoms_data,
+        bonds;
+        solvent_dielectric=is.solvent_dielectric,
+        solute_dielectric=is.solute_dielectric,
+        kappa=is.kappa,
+        offset=is.offset,
+        dist_cutoff=is.dist_cutoff,
+        probe_radius=is.probe_radius,
+        sa_factor=is.sa_factor,
+        use_ACE=is.use_ACE,
+        use_OBC2=is.use_OBC2,
+        element_to_radius=is.element_to_radius,
+        element_to_screen=is.element_to_screen,
+        n_threads=n_threads,
+    )
+end
+
+"""
+    ImplicitSolventGBN2(atoms, atoms_data, bonds=nothing; solvent_dielectric=gb_solvent_dielectric,
+                        solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
+                        offset=gbn2_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
+                        sa_factor=gb_sa_factor, use_ACE=true, neck_scale=gbn2_neck_scale,
+                        neck_cut=gbn2_neck_cut, element_to_radius=mbondi2_element_to_radius,
+                        element_to_screen=gbn2_element_to_screen,
+                        element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
+                        atom_params=gbn2_atom_params,
+                        atom_params_nucleic=gbn2_atom_params_nucleic, data_d0=gbn2_data_d0,
+                        data_m0=gbn2_data_m0, n_threads=Threads.nthreads())
 
 GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
 Should be used along with a Coulomb interaction.
+[`SetupImplicitSolventGBN2`](@ref) provides parameters when setting up a system from a file.
+
+`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs.
+`solvent_dielectric` and `solute_dielectric` are the dielectric constants of the solvent and
+the solute.
+`kappa` is the Debye-Hückel screening parameter, the inverse of the Debye length, and is
+zero when there is no salt screening.
+`offset` is the dielectric offset subtracted from the intrinsic radii.
+`dist_cutoff` is the cutoff distance for the Born radius and solvation sums, with zero
+meaning no cutoff.
+`probe_radius` is the radius of the solvent probe and `sa_factor` the surface tension used
+by the solvent accessible surface area term, which `use_ACE` switches on and off.
+`neck_scale` scales the neck correction that GBn2 adds to the Born radii and `neck_cut` is
+the separation beyond which that correction is zero.
+`element_to_radius` maps an element to its intrinsic radius, and `element_to_screen` and
+`atom_params` map an element to its screening parameter and to its `α`, `β` and `γ`
+parameters, with `element_to_screen_nucleic` and `atom_params_nucleic` used instead for
+atoms in nucleic acid residues. The key `"-"` gives the value used for elements not in the
+dictionary.
+`data_d0` and `data_m0` are the tabulated neck function parameters, interpolated over the
+radii of each pair of atoms.
+`n_threads` determines how many per-thread force buffers are allocated.
 
 Only compatible with 3D systems.
 Not currently compatible with virial calculation.
@@ -649,6 +763,22 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                              data_d0=gbn2_data_d0,
                              data_m0=gbn2_data_m0,
                              n_threads::Integer=Threads.nthreads()) where {TY, M, T, D, E, L}
+    if offset < zero(offset)
+        throw(ArgumentError("offset for ImplicitSolventGBN2 must be non-negative, found $offset"))
+    end
+    if dist_cutoff < zero(dist_cutoff)
+        throw(ArgumentError("dist_cutoff for ImplicitSolventGBN2 must be non-negative, " *
+                            "found $dist_cutoff"))
+    end
+    if probe_radius < zero(probe_radius)
+        throw(ArgumentError("probe_radius for ImplicitSolventGBN2 must be non-negative, " *
+                            "found $probe_radius"))
+    end
+    if neck_cut < zero(neck_cut)
+        throw(ArgumentError("neck_cut for ImplicitSolventGBN2 must be non-negative, " *
+                            "found $neck_cut"))
+    end
+
     units = dimension(D) == u"𝐋"
     radii = mbondi3_radii(atoms_data, bonds; element_to_radius=element_to_radius)
     nucleic_acid_residues = ("A", "C", "G", "U", "DA", "DC", "DG", "DT")
@@ -728,26 +858,26 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
     αs, βs, γs = to_device(αs_cpu, AT), to_device(βs_cpu, AT), to_device(γs_cpu, AT)
 
     if units
-        bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, T(sa_factor), dist_cutoff,
-                            offset, factor_solute, n_threads)
+        bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, T(sa_factor), T(dist_cutoff),
+                            T(offset), factor_solute, n_threads)
         return ImplicitSolventGBN2{T, D, typeof(bufs.B_grads), typeof(or), typeof(T(kappa)),
                         typeof(T(sa_factor)), typeof(factor_solute), typeof(d0s), typeof(m0s),
                         typeof(rcs), typeof(bufs.born_forces), typeof(bufs.born_forces_scaled),
                         typeof(bufs.pes), typeof(bufs.fs_mat), typeof(bufs.force_chunks)}(
-                    or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset, dist_cutoff,
-                    use_ACE, αs, βs, γs, probe_radius, T(sa_factor), factor_solute, factor_solvent,
+                    or, sor, T(solvent_dielectric), T(solute_dielectric), T(kappa), T(offset), T(dist_cutoff),
+                    use_ACE, αs, βs, γs, T(probe_radius), T(sa_factor), factor_solute, factor_solvent,
                     d0s, m0s, rcs, neck_scale, neck_cut, bufs.Bs, bufs.B_grads, bufs.atom_charges,
                     bufs.born_forces, bufs.born_forces_scaled, bufs.born_forces_mod,
                     bufs.Is_nounits, bufs.pes, bufs.fs_mat, bufs.force_chunks)
     else
         bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, ustrip(sa_factor),
-                            ustrip(dist_cutoff), ustrip(offset), factor_solute, n_threads)
+                            T(ustrip(dist_cutoff)), T(ustrip(offset)), factor_solute, n_threads)
         return ImplicitSolventGBN2{T, T, typeof(bufs.B_grads), typeof(or), T, T, T, typeof(d0s),
                         typeof(m0s), typeof(rcs), typeof(bufs.born_forces),
                         typeof(bufs.born_forces_scaled), typeof(bufs.pes), typeof(bufs.fs_mat),
                         typeof(bufs.force_chunks)}(
-                    or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)), ustrip(offset),
-                    ustrip(dist_cutoff), use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor),
+                    or, sor, T(solvent_dielectric), T(solute_dielectric), T(ustrip(kappa)), T(ustrip(offset)),
+                    T(ustrip(dist_cutoff)), use_ACE, αs, βs, γs, T(ustrip(probe_radius)), ustrip(sa_factor),
                     factor_solute, factor_solvent, d0s, m0s, rcs, neck_scale, ustrip(neck_cut),
                     bufs.Bs, bufs.B_grads, bufs.atom_charges, bufs.born_forces,
                     bufs.born_forces_scaled, bufs.born_forces_mod, bufs.Is_nounits, bufs.pes,
@@ -805,6 +935,70 @@ function extract_parameters!(params_dic, inter::ImplicitSolventGBN2, ff)
         params_dic[key_prefix * "params_" * k] = v
     end
     return params_dic
+end
+
+"""
+    SetupImplicitSolventGBN2(; solvent_dielectric=gb_solvent_dielectric,
+                             solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
+                             offset=gbn2_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
+                             sa_factor=gb_sa_factor, use_ACE=true, neck_scale=gbn2_neck_scale,
+                             neck_cut=gbn2_neck_cut, element_to_radius=mbondi2_element_to_radius,
+                             element_to_screen=gbn2_element_to_screen,
+                             element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
+                             atom_params=gbn2_atom_params,
+                             atom_params_nucleic=gbn2_atom_params_nucleic,
+                             data_d0=gbn2_data_d0, data_m0=gbn2_data_m0)
+
+Set up the GBn2 solvation model.
+
+Passed to the [`System`](@ref) constructor from files, where it creates an
+[`ImplicitSolventGBN2`](@ref) general interaction.
+See [`ImplicitSolventGBN2`](@ref) for argument descriptions.
+"""
+@kwdef struct SetupImplicitSolventGBN2{T, D, K, S, ER, ES, A, DD, DM} <: AbstractSetupGBSA
+    solvent_dielectric::T = gb_solvent_dielectric
+    solute_dielectric::T = gb_solute_dielectric
+    kappa::K = 0.0u"nm^-1"
+    offset::D = gbn2_offset
+    dist_cutoff::D = 0.0u"nm"
+    probe_radius::D = gb_probe_radius
+    sa_factor::S = gb_sa_factor
+    use_ACE::Bool = true
+    neck_scale::T = gbn2_neck_scale
+    neck_cut::D = gbn2_neck_cut
+    element_to_radius::ER = mbondi2_element_to_radius
+    element_to_screen::ES = gbn2_element_to_screen
+    element_to_screen_nucleic::ES = gbn2_element_to_screen_nucleic
+    atom_params::A = gbn2_atom_params
+    atom_params_nucleic::A = gbn2_atom_params_nucleic
+    data_d0::DD = gbn2_data_d0
+    data_m0::DM = gbn2_data_m0
+end
+
+function setup_implicit_solvent(is::SetupImplicitSolventGBN2, atoms, atoms_data, bonds, n_threads)
+    return ImplicitSolventGBN2(
+        atoms,
+        atoms_data,
+        bonds;
+        solvent_dielectric=is.solvent_dielectric,
+        solute_dielectric=is.solute_dielectric,
+        kappa=is.kappa,
+        offset=is.offset,
+        dist_cutoff=is.dist_cutoff,
+        probe_radius=is.probe_radius,
+        sa_factor=is.sa_factor,
+        use_ACE=is.use_ACE,
+        neck_scale=is.neck_scale,
+        neck_cut=is.neck_cut,
+        element_to_radius=is.element_to_radius,
+        element_to_screen=is.element_to_screen,
+        element_to_screen_nucleic=is.element_to_screen_nucleic,
+        atom_params=is.atom_params,
+        atom_params_nucleic=is.atom_params_nucleic,
+        data_d0=is.data_d0,
+        data_m0=is.data_m0,
+        n_threads=n_threads,
+    )
 end
 
 #=

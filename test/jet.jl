@@ -314,7 +314,7 @@
                     jet_config...)
 
     # Implicit solvent
-    for solvent in (:obc1, :obc2, :gbn2)
+    for solvent in (SetupImplicitSolventOBC(), SetupImplicitSolventGBN2())
         sys = jet_protein(; implicit_solvent=solvent, dist_cutoff=1.2f0u"nm")
         neighbors = find_neighbors(sys)
         JET.test_call(forces          , Base.typesof(sys, neighbors); jet_config...)

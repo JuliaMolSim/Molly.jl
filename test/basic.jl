@@ -1228,9 +1228,7 @@ end
     @test length(sys) == 9
 
     @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
-                                      implicit_solvent=:obc4)
-    @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
-                                      implicit_solvent=:obc2, kappa=1.0u"nm")
+                                      implicit_solvent=SetupImplicitSolventOBC(dist_cutoff=-0.1u"nm"))
     @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
                                       nonbonded_method=SetupPME(mesh_dims=(3, 3, 3)))
     @test_throws MethodError   System(water_fp, ff; dist_cutoff=0.5u"nm",

@@ -505,10 +505,9 @@ templates is carried out.
 - `autotune_launch=true`: whether to autotune CUDA launch parameters at the end
     of setup. This is a no-op on CPU and non-CUDA GPU backends.
 - `data=nothing`: arbitrary data associated with the system.
-- `implicit_solvent=:none`: the implicit solvent model to use, options are
-    `:none`, `:obc1`, `:obc2` and `:gbn2`.
-- `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
-    is used.
+- `implicit_solvent=nothing`: the implicit solvent model to use, can be `nothing`
+    or an instance of [`SetupImplicitSolventOBC`](@ref) or
+    [`SetupImplicitSolventGBN2`](@ref).
 - `disulfide_bonds=true`: whether or not to look for disulfide bonds between CYS
     residues in the structure file and add them to the topology. Uses geometric
     arguments to assign them.
@@ -545,8 +544,7 @@ function System(coord_file::AbstractString,
                 launch_config=CUDALaunchConfig(),
                 autotune_launch::Bool=true,
                 data=nothing,
-                implicit_solvent=:none,
-                kappa=0.0u"nm^-1",
+                implicit_solvent=nothing,
                 disulfide_bonds::Bool=true,
                 n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
@@ -603,26 +601,16 @@ function System(coord_file::AbstractString,
     if neighbor_finder_n_steps <= 0
         throw(ArgumentError("neighbor_finder_n_steps ($neighbor_finder_n_steps) must be positive"))
     end
-    if !(implicit_solvent in (:none, :obc1, :obc2, :gbn2))
-        throw(ArgumentError("implicit_solvent must be one of :none, :obc1, :obc2 or :gbn2, " *
-                            "found $implicit_solvent"))
+    if !(isnothing(implicit_solvent) || implicit_solvent isa AbstractSetupGBSA)
+        throw(ArgumentError("implicit_solvent must be nothing or a setup type like " *
+                    "SetupImplicitSolventOBC/SetupImplicitSolventGBN2, found $implicit_solvent"))
     end
-    if implicit_solvent != :none
-        if nonbonded_method isa AbstractSetupEwald
-            err_str = "Ewald summation or PME is being used with implicit " *
-                      "solvent, this may not be intended since long range electrostatics " *
-                      "and implicit solvent both model the effect of the solvent, " *
-                      "nonbonded_method=DistanceCutoff(dist_cutoff) is usual with implicit solvent"
-            report_issue(err_str, strictness)
-        end
-        expected_kappa_units = (units ? u"nm^-1" : NoUnits)
-        if dimension(kappa) != dimension(expected_kappa_units)
-            throw(ArgumentError("kappa should have units of inverse length " *
-                    "($expected_kappa_units), found $(unit(kappa))"))
-        end
-        if kappa < zero(kappa)
-            throw(ArgumentError("kappa ($kappa) should not be less than zero"))
-        end
+    if !isnothing(implicit_solvent) && nonbonded_method isa AbstractSetupEwald
+        err_str = "Ewald summation or PME is being used with implicit " *
+                  "solvent, this may not be intended since long range electrostatics " *
+                  "and implicit solvent both model the effect of the solvent, " *
+                  "nonbonded_method=DistanceCutoff(dist_cutoff) is usual with implicit solvent"
+        report_issue(err_str, strictness)
     end
     if isa(hydrogen_mass, Bool) && hydrogen_mass
         throw(ArgumentError("hydrogen_mass can be false, a number or a unitful value " *
@@ -1258,7 +1246,7 @@ function System(coord_file::AbstractString,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, nonbonded_method, lj_cutoff,
                   neighbor_finder_type, neighbor_finder_n_steps, implicit_solvent,
-                  kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
+                  grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
                   hydrogen_mass, strictness, launch_config, autotune_launch,
                   constraint_algorithm, n_threads)
 end
@@ -1404,7 +1392,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method, lj_cutoff,
                 neighbor_finder_type, neighbor_finder_n_steps,
-                implicit_solvent, kappa, grad_safe, dist_neighbors, weight_14_lj,
+                implicit_solvent, grad_safe, dist_neighbors, weight_14_lj,
                 weight_14_coulomb, dispersion_correction,
                 hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
                 n_threads)
@@ -1680,14 +1668,9 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         vels = to_device(velocities, AT)
     end
 
-    if implicit_solvent != :none
-        if implicit_solvent in (:obc1, :obc2)
-            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds; kappa=kappa,
-                                 use_OBC2=(implicit_solvent == :obc2), n_threads=n_threads),)
-        else # :gbn2
-            general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa,
-                                 n_threads=n_threads),)
-        end
+    if !isnothing(implicit_solvent)
+        gi_is = setup_implicit_solvent(implicit_solvent, atoms, atoms_data, bonds, n_threads)
+        general_inters_is = (gi_is,)
     else
         general_inters_is = ()
     end
