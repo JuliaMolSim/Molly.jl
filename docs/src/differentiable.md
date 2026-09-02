@@ -40,15 +40,11 @@ using Enzyme
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(joinpath(data_dir, "force_fields", "ff99SBildn.xml"); units=false)
 
-sys =System(
+sys = System(
     joinpath(data_dir, "6mrr_nowater.pdb"),
     ff;
     units=false,
-    #nonbonded_method=DistanceCutoff,
-    dispersion_correction=false,
-    grad_safe=true,
-    #strictness=:nowarn,
-    #n_threads=n_threads,
+    grad_safe=true, # Take Enzyme-safe code paths
 )
 
 params_dic = extract_parameters(sys)  # A Dict from parameter name to value

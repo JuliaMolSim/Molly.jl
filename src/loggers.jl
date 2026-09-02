@@ -445,7 +445,8 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(scalar_virial_w
             vl.n_steps, ", ", length(values(vl)), " virials recorded")
 end
 
-function pressure_wrapper(sys, neighbors, step_n, buffers; n_threads, kwargs...)
+function pressure_wrapper(sys, neighbors, step_n, buffers; n_threads,
+                          strictness=default_strictness(), kwargs...)
     if valid_pressure(buffers, step_n)
         return copy(buffers.pres_tensor)
     elseif valid_total_virial(buffers, step_n)

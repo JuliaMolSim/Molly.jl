@@ -194,28 +194,28 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
         disable_constrained_interactions!(neighbor_finder, sr.angle_clusters)
     end
 
-    # Move to proper backend, if CPU do nothing
-    if arr_type <: AbstractGPUArray
-        clusters12_gpu, clusters23_gpu, clusters34_gpu = [], [], []
-        angle_clusters_gpu = []
+    return move_constraints_to_device(sr, arr_type)
+end
 
-        if length(sr.clusters12) > 0
-            clusters12_gpu = replace_storage(arr_type, sr.clusters12)
-        end
-        if length(sr.clusters23) > 0
-            clusters23_gpu = replace_storage(arr_type, sr.clusters23)
-        end
-        if length(sr.clusters34) > 0
-            clusters34_gpu = replace_storage(arr_type, sr.clusters34)
-        end
-        if length(sr.angle_clusters) > 0
-            angle_clusters_gpu = replace_storage(arr_type, sr.angle_clusters)
-        end
+# Move to proper backend, if CPU do nothing
+function move_constraints_to_device(sr::SHAKE_RATTLE, ::Type{AT}) where {AT <: AbstractGPUArray}
+    clusters12_gpu, clusters23_gpu, clusters34_gpu = [], [], []
+    angle_clusters_gpu = []
 
-        sr = SHAKE_RATTLE(sr, clusters12_gpu, clusters23_gpu, clusters34_gpu, angle_clusters_gpu)
+    if length(sr.clusters12) > 0
+        clusters12_gpu = replace_storage(AT, sr.clusters12)
+    end
+    if length(sr.clusters23) > 0
+        clusters23_gpu = replace_storage(AT, sr.clusters23)
+    end
+    if length(sr.clusters34) > 0
+        clusters34_gpu = replace_storage(AT, sr.clusters34)
+    end
+    if length(sr.angle_clusters) > 0
+        angle_clusters_gpu = replace_storage(AT, sr.angle_clusters)
     end
 
-    return sr
+    return SHAKE_RATTLE(sr, clusters12_gpu, clusters23_gpu, clusters34_gpu, angle_clusters_gpu)
 end
 
 default_shake_position_constraint_context() = ConstraintApplicationContext(

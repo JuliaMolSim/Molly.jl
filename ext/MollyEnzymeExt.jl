@@ -38,6 +38,7 @@ EnzymeRules.inactive(::typeof(Molly.lookup_table), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.radius_classes), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.gb_log_scaling), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.calculate_n_dof), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.setup_constraints!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_show_progress), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_check_nans), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_array_nans), args...) = nothing

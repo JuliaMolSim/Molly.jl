@@ -1291,21 +1291,22 @@ function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
         disable_constrained_interactions!(neighbor_finder, lincs.clusters)
     end
 
-    if arr_type <: AbstractGPUArray && !(lincs.lincs_data.atom1 isa arr_type)
+    return move_constraints_to_device(lincs, arr_type)
+end
 
-        n_atoms = length(lincs.lincs_data.invmass)
-        data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(
-            lincs.lincs_data, lincs.workspace, arr_type, n_atoms, lincs.gpu_block_size)
+function move_constraints_to_device(lincs::LINCS, ::Type{AT}) where {AT <: AbstractGPUArray}
+    lincs.lincs_data.atom1 isa AT && return lincs
 
-        ca_indices = sort!(unique!(vcat(lincs.lincs_data.atom1, lincs.lincs_data.atom2)))
-        ca_gpu = arr_type(ca_indices)
+    n_atoms = length(lincs.lincs_data.invmass)
+    data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(
+        lincs.lincs_data, lincs.workspace, AT, n_atoms, lincs.gpu_block_size)
 
-        clusters_gpu = replace_storage(arr_type, lincs.clusters)
+    ca_indices = sort!(unique!(vcat(lincs.lincs_data.atom1, lincs.lincs_data.atom2)))
+    ca_gpu = AT(ca_indices)
 
-        lincs = LINCS(clusters_gpu, data_gpu, ws_gpu, lincs.dist_constraints,
-                      lincs.angle_constraints, lincs.dist_tolerance, lincs.vel_tolerance,
-                      lincs.iter_vel_correction, lincs.gpu_block_size, delta_buf, ca_gpu)
-    end
+    clusters_gpu = replace_storage(AT, lincs.clusters)
 
-    return lincs
+    return LINCS(clusters_gpu, data_gpu, ws_gpu, lincs.dist_constraints,
+                 lincs.angle_constraints, lincs.dist_tolerance, lincs.vel_tolerance,
+                 lincs.iter_vel_correction, lincs.gpu_block_size, delta_buf, ca_gpu)
 end

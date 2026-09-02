@@ -247,6 +247,9 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
     end
 end
 
+# Extended for GPU elsewhere
+move_constraints_to_device(constraint_algo, ::Type) = constraint_algo
+
 # Check for interactions between angle and non-angle clusters,
 # builds only non-angle clusters
 function build_central_atom_clusters(num_atoms::Integer,

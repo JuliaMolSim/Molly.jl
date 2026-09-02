@@ -1157,7 +1157,7 @@ function System(;
             end
         end
     end
-    constraints = Tuple(setup_constraints!(ca, neighbor_finder, AT) for ca in constraints)
+    constraints = map(ca -> setup_constraints!(ca, neighbor_finder, AT), constraints)
     CN = typeof(constraints)
 
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
