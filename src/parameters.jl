@@ -47,12 +47,8 @@ parameter_fields(x) = parameter_fields(typeof(x))
 # Current values of the parameters, in the same order
 @inline parameter_values(inter) = map(f -> getfield(inter, first(f)), parameter_fields(inter))
 
-"""
-    inject_parameters(inter, values)
-
-A copy of `inter` with its differentiable parameters replaced by `values`, which are in the
-order given by [`parameter_fields`](@ref).
-"""
+# A copy of `inter` with its differentiable parameters replaced by `values`, which are in the
+# order given by `parameter_fields`
 @inline inject_parameters(inter, vals...) = inject_parameters(inter, vals)
 
 @generated function inject_parameters(inter::T, vals::Tuple) where {T}
