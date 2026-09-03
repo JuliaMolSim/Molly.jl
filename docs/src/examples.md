@@ -570,6 +570,34 @@ forces(sys_gpu)
 ```
 The atomic environment vectors can also be computed directly with `compute_aevs_ka`, and a full energy evaluation kept on-device with `compute_ani_energy_ka`, when [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) is loaded.
 
+## Allegro equivariant potential
+
+[`AllegroPotential`](@ref) is a native Julia implementation of the strictly-local, O(3)-equivariant [Allegro](https://doi.org/10.1038/s41467-023-36329-y) interatomic potential, with no Python runtime dependency.
+It is built on equivariant primitives that live in core Molly (real spherical harmonics, Clebsch-Gordan tensor products and equivariant linear layers), pinned to the [e3nn](https://github.com/e3nn/e3nn) conventions so trained weights transfer.
+Energy and analytic forces (`F = -∂E/∂r`, composed from the primitive vector-Jacobian products) both work when [Lux.jl](https://github.com/LuxDL/Lux.jl) and [HDF5.jl](https://github.com/JuliaIO/HDF5.jl) are loaded.
+Weights are loaded from an HDF5 file exported by `test/allegro_reference.py`:
+```julia
+using Molly
+using Lux, HDF5 # required to construct and run an AllegroPotential
+
+pot = AllegroPotential("allegro_model.h5")
+
+sys = System(
+    atoms      = [Atom(mass=1.0), Atom(mass=1.0), Atom(mass=1.0)],
+    coords     = [SVector(0.0, 0.0, 0.0), SVector(0.11, 0.0, 0.0), SVector(0.02, 0.10, 0.03)],
+    boundary   = CubicBoundary(10.0),
+    atoms_data = [AtomData(element="H"), AtomData(element="C"), AtomData(element="H")],
+    general_inters = (allegro=pot,),
+    energy_units   = NoUnits,
+    force_units    = NoUnits,
+)
+
+potential_energy(sys)
+forces(sys)
+```
+The energy is a sum over directed edges within the cutoff and is exactly invariant under translation, rotation and permutation; the forces satisfy `ΣF = 0` by construction.
+The potential also runs when the system's coordinates live on a GPU array (`CuArray`, `MtlArray`, `ROCArray`): the calculation currently takes a host round-trip, with native on-device kernels planned.
+
 ## Python ASE calculator
 
 [`ASECalculator`](@ref) can be used along with [PythonCall.jl](https://github.com/JuliaPy/PythonCall.jl) to use a Python [ASE](https://wiki.fysik.dtu.dk/ase) calculator with Molly.

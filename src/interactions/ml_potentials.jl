@@ -7,7 +7,9 @@
 export
     ANIPotential,
     ani2x_data_dir,
-    compute_aevs
+    compute_aevs,
+    AllegroPotential,
+    allegro_data_dir
 
 # Base type for ML interatomic potentials, a shared supertype for current and future ones.
 abstract type AbstractMLPotential end
@@ -94,4 +96,66 @@ end
 # On-device analytic ANI forces (implementation in ext/MollyLuxExt.jl).
 function compute_ani_forces_ka(args...; kwargs...)
     error("compute_ani_forces_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
+end
+
+# ---- Allegro (equivariant GNN) potential -------------------------------------------------------
+#
+# Allegro (Musaelian et al. 2023) is a strictly-local O(3)-equivariant potential: its energy is a
+# sum over directed edges within a cutoff. The equivariant primitives it is built from (irreps,
+# real spherical harmonics, Clebsch-Gordan tensor products, equivariant linear layers) live in
+# core Molly under src/equivariant/ and are exercised directly by test/equivariant.jl. The trained
+# model container, HDF5 weight loading and AtomsCalculators wiring are provided by an extension
+# (loaded with `using Lux, HDF5`); the function stubs below error until then.
+
+# SiLU / swish activation, the scalar nonlinearity in Allegro's latent MLPs. Defined in core so
+# AD backends and the extension share one definition.
+silu(x::T) where T = x / (one(T) + exp(-x))
+
+"""
+    AllegroPotential(path; T=Float32)
+
+Load a native Allegro equivariant neural-network potential from an HDF5 file exported by
+`test/allegro_reference.py`. Requires `Lux` and `HDF5` to be loaded.
+
+The element of each atom is read from `atoms_data[i].element` and mapped through the model's
+species list. Coordinates without units are treated as nm (Molly convention) and converted to the
+Å the model uses; periodic systems must use a neighbour finder (minimum-image convention).
+
+!!! note
+    This is under active development. The equivariant primitives (spherical harmonics,
+    Clebsch-Gordan tensor products, equivariant linear layers) and their analytic gradients are
+    implemented and validated in core Molly; the energy/forces model assembly and weight loading
+    land in a follow-up. `path` is left untyped here so the extension's `::AbstractString`
+    method is strictly more specific (avoids a precompile-time method overwrite).
+"""
+struct AllegroPotential{M, SP, D} <: AbstractMLPotential
+    model::M           # AllegroModel (config + precomputed tensor-product paths/CG + weights)
+    species_map::SP    # Dict{String,Int}: element → 1-based index
+    cutoff::D          # r_cutoff, plain Float (Å)
+    buffers::Ref{Any}  # lazily-initialized per-edge scratch buffers
+end
+
+# Fallback constructor. The real `AbstractString` method is in the extension (needs Lux + HDF5);
+# `path` is left untyped here so that method is strictly more specific and does not overwrite this
+# one (method overwriting is an error during extension precompilation).
+function AllegroPotential(path; kwargs...)
+    error("AllegroPotential requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
+end
+
+"""
+    allegro_data_dir()
+
+Path to the Allegro data directory (a lazily-downloaded artifact holding the exported model
+weights and reference data). Requires `Lux` and `HDF5`. Implementation is in the extension.
+"""
+function allegro_data_dir end
+
+# End-to-end on-device Allegro energy (implementation in the extension).
+function compute_allegro_energy_ka(args...; kwargs...)
+    error("compute_allegro_energy_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
+end
+
+# On-device analytic Allegro forces (implementation in the extension).
+function compute_allegro_forces_ka(args...; kwargs...)
+    error("compute_allegro_forces_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
 end

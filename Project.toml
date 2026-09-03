@@ -53,6 +53,7 @@ PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 MollyCUDAExt = "CUDA"
 MollyEnzymeExt = "Enzyme"
 MollyGLMakieExt = ["GLMakie", "Colors"]
+MollyAllegroExt = ["Lux", "HDF5"]
 MollyKernelDensityExt = "KernelDensity"
 MollyLuxExt = ["Lux", "HDF5"]
 MollyPythonCallExt = "PythonCall"
