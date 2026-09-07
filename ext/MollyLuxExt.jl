@@ -33,7 +33,9 @@
 module MollyLuxExt
 
 using Molly
-using Molly: from_device, to_device, vector, celu01, cosine_cutoff
+using Molly: from_device, to_device, vector, celu01, cosine_cutoff,
+             coords_to_angstrom, coords_to_angstrom_into!, strip_boundary,
+             ml_energy_to_units, ml_force_to_units
 import AtomsCalculators
 using Lux, HDF5
 using KernelAbstractions
@@ -49,66 +51,9 @@ Molly.ani2x_data_dir() = artifact"ani2x"
 # The ANI parameters are in Å, so coordinates and boundaries are converted to unitless Å
 # before the kernels. Following the Molly convention, unitless input is treated as nm.
 
-const NM_TO_ANGSTROM = 10
-
-# In-place conversion of coordinates to unitless Å in a pre-allocated buffer (zero allocations).
-# The unit check is on the element type (no indexing), so it also works for device arrays.
-function coords_to_angstrom_into!(out::AbstractVector{SVector{D,TF}},
-                                  coords::AbstractVector{SVector{D,T}}) where {D, TF, T}
-    if T <: Real   # unitless Molly coords are nm
-        @inbounds for i in eachindex(coords)
-            out[i] = SVector{D,TF}(coords[i]) * TF(NM_TO_ANGSTROM)
-        end
-    else
-        @inbounds for i in eachindex(coords)
-            out[i] = SVector{D,TF}(ustrip.(u"Å", coords[i]))
-        end
-    end
-end
-
-# Non-mutating conversion of coordinates to unitless Å, staying on the coords' device. Unitless
-# Molly coords are treated as nm. Unit check is on the element type so this works on GPU arrays.
-function coords_to_angstrom(coords)
-    eltype(eltype(coords)) <: Real ? coords .* NM_TO_ANGSTROM : ustrip_vec.(u"Å", coords)
-end
-
-# Convert a boundary to unitless Å (unitless side lengths are treated as nm).
-strip_boundary(b::CubicBoundary) =
-    unit(b.side_lengths[1]) == NoUnits ? CubicBoundary(b.side_lengths .* NM_TO_ANGSTROM) :
-                                         CubicBoundary(ustrip.(u"Å", b.side_lengths))
-
-function strip_boundary(b::TriclinicBoundary{D, T, C, A}) where {D, T, C, A}
-    if unit(b.basis_vectors[1][1]) == NoUnits
-        bv = SVector(ntuple(i -> b.basis_vectors[i] .* NM_TO_ANGSTROM, 3))
-    else
-        bv = SVector(ntuple(i -> ustrip.(u"Å", b.basis_vectors[i]), 3))
-    end
-    return TriclinicBoundary(bv; approx_images=A)
-end
-
-# Convert an ANI energy (eV, unitless) to the system's energy units. In the no-units case the
-# Molly convention is kJ/mol.
-function ani_energy_to_units(E_eV, energy_units)
-    if energy_units == NoUnits
-        return ustrip(u"kJ * mol^-1", E_eV * Unitful.Na * u"eV")
-    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        return uconvert(energy_units, E_eV * Unitful.Na * u"eV")
-    else
-        return uconvert(energy_units, E_eV * u"eV")
-    end
-end
-
-# Convert an ANI force SVector (eV/Å, unitless) to the system's force units. In the no-units
-# case the Molly convention is kJ/mol/nm.
-function ani_force_to_units(fi::SVector{D,T}, force_units) where {D, T}
-    if force_units == NoUnits
-        return ustrip.(u"kJ * mol^-1 * nm^-1", fi .* (Unitful.Na * u"eV/Å"))
-    elseif dimension(force_units) == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        return uconvert.(force_units, fi .* (Unitful.Na * u"eV/Å"))
-    else
-        return uconvert.(force_units, fi .* u"eV/Å")
-    end
-end
+# The unit/coordinate conversion helpers (NM_TO_ANGSTROM, coords_to_angstrom[_into!],
+# strip_boundary, ml_energy_to_units, ml_force_to_units) are shared with AllegroPotential and live
+# in core Molly (src/interactions/ml_potentials.jl); they are imported at the top of this module.
 
 # ============================================================================
 # AEV computation — zero-allocation in-place implementation
@@ -640,14 +585,14 @@ function AtomsCalculators.potential_energy(sys::System{D, AT, T},
         coords_strip = @view buf.coords_strip[1:n_atoms]
         species_idx  = @view buf.species_idx[1:n_atoms]
         E_ha = ani_raw_energy(coords_strip, species_idx, sys.boundary, inter, nbrs; n_threads=n_thr)
-        return ani_energy_to_units(E_ha * Molly.HARTREE_TO_EV, sys.energy_units)
+        return ml_energy_to_units(E_ha * Molly.HARTREE_TO_EV, sys.energy_units)
     else
         # GPU system: keep the AEV + energy on-device (no host scalar indexing of the coords).
         coords  = coords_to_angstrom(sys.coords)             # nm→Å, stays on device
         species = Molly.to_device(Int32[inter.species_map[ad.element] for ad in sys.atoms_data], AT)
         E_eV = Molly.compute_ani_energy_ka(coords, species, inter, n_sp;
                     neighbors=nbrs, boundary=strip_boundary(sys.boundary))
-        return ani_energy_to_units(E_eV, sys.energy_units)
+        return ml_energy_to_units(E_eV, sys.energy_units)
     end
 end
 
@@ -1797,14 +1742,14 @@ function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::ANIPotential
             n_threads = n_thr)
     if AT <: Array
         @inbounds for i in eachindex(fs)
-            fs[i] += ani_force_to_units(SVector{D, T}(F[i]), sys.force_units)
+            fs[i] += ml_force_to_units(SVector{D, T}(F[i]), sys.force_units)
         end
     else   # GPU system: build the unit-carrying increment on the host matching the force buffer's
         # element type, then add on-device.
         FU  = eltype(eltype(fs))                       # unit-carrying scalar type of `fs`
         inc = Vector{SVector{D, FU}}(undef, length(F))
         @inbounds for i in eachindex(F)
-            fui = ani_force_to_units(SVector{D, T}(F[i]), sys.force_units)
+            fui = ml_force_to_units(SVector{D, T}(F[i]), sys.force_units)
             inc[i] = SVector{D, FU}(ntuple(k -> fui[k], D))
         end
         fs .+= Molly.to_device(inc, AT)

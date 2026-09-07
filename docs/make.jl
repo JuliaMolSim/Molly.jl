@@ -8,6 +8,9 @@ makedocs(
         size_threshold_ignore=["api.md"],
     ),
     modules=[Molly],
+    # Only exported names are documented in the manual (see `Private = false` in api.md); allow
+    # docstrings on internal helpers (e.g. the equivariant primitives) without listing them.
+    checkdocs=:exports,
     pages=[
         "Home"                      => "index.md",
         "Documentation"             => "documentation.md",

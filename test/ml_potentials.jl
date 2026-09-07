@@ -835,3 +835,97 @@ end
         @test maximum(norm.(from_device(sim.coords) .- c_ref)) < 1e-3
     end
 end
+
+# ============================================================================
+# AllegroPotential (native equivariant potential). The equivariant primitives are tested in
+# test/equivariant.jl; here we check the loaded model reproduces the reference energy and forces.
+# Guarded on the reference files from test/allegro_reference.py (needs e3nn + torch offline).
+# ============================================================================
+const ALLEGRO_DIR  = joinpath(@__DIR__, "..", "data", "allegro_reference")
+const ALLEGRO_H5   = joinpath(ALLEGRO_DIR, "allegro_model.h5")
+const ALLEGRO_JSON = joinpath(ALLEGRO_DIR, "allegro_model.json")
+
+if isfile(ALLEGRO_H5) && isfile(ALLEGRO_JSON)
+    @testset "AllegroPotential" begin
+        pot = AllegroPotential(ALLEGRO_H5; T=Float64)
+        ref = JSON3.read(read(ALLEGRO_JSON, String))
+        species_syms = String.(ref.species)
+        rc = pot.model.r_c
+
+        # Unitless System with coords in nm (= Å/10), from Å coordinates and 0-based species.
+        function mk_allegro_sys(coords_A, species0)
+            coords = [SVector{3,Float64}(c[1] / 10, c[2] / 10, c[3] / 10) for c in coords_A]
+            atoms = [Atom(mass=1.0) for _ in coords]
+            atoms_data = [AtomData(element=species_syms[Int(s) + 1]) for s in species0]
+            System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0),
+                   atoms_data=atoms_data, general_inters=(allegro=pot,),
+                   energy_units=NoUnits, force_units=NoUnits)
+        end
+
+        @testset "energy and forces vs reference" begin
+            for sysj in ref.systems
+                coords_A = [SVector{3,Float64}(c...) for c in sysj.coords_A]
+                species = [Int(s) + 1 for s in sysj.species]  # JSON species are 0-based
+                # raw model energy (eV) reproduces the reference
+                E = Molly.allegro_total_energy(pot.model, coords_A, species, nothing, rc)
+                @test isapprox(E, Float64(sysj.energy); rtol=1e-4)
+                # analytic forces (eV/Å) match the reference, with ΣF ≈ 0
+                F = Molly.allegro_forces(pot.model, coords_A, species, nothing, rc)
+                Fref = [SVector{3,Float64}(fr...) for fr in sysj.forces]
+                for i in eachindex(F)
+                    @test isapprox(F[i], Fref[i]; atol=1e-5)
+                end
+                @test isapprox(sum(F), zero(SVector{3,Float64}); atol=1e-8)
+            end
+        end
+
+        @testset "calculator: rotation invariance, ΣF≈0, finite differences" begin
+            sysj = ref.systems[1]
+            sys = mk_allegro_sys(sysj.coords_A, sysj.species)
+            E = AtomsCalculators.potential_energy(sys, pot)
+            th = 0.7
+            Rmat = [cos(th) -sin(th) 0; sin(th) cos(th) 0; 0 0 1]
+            rot_coords = [SVector{3,Float64}((Rmat * [c...])...) for c in sys.coords]
+            sys_rot = System(sys; coords=rot_coords)
+            @test isapprox(E, AtomsCalculators.potential_energy(sys_rot, pot); atol=1e-8)
+
+            fs = [zero(SVector{3,Float64}) for _ in sys.coords]
+            AtomsCalculators.forces!(fs, sys, pot)
+            @test isapprox(sum(fs), zero(SVector{3,Float64}); atol=1e-8)
+            h = 1e-6
+            shift(c, i, dx) = [j == i ? SVector{3,Float64}(c[j][1] + dx, c[j][2], c[j][3]) : c[j]
+                               for j in eachindex(c)]
+            Ep = AtomsCalculators.potential_energy(System(sys; coords=shift(sys.coords, 1, h)), pot)
+            Em = AtomsCalculators.potential_energy(System(sys; coords=shift(sys.coords, 1, -h)), pot)
+            @test isapprox(fs[1][1], -(Ep - Em) / (2h); rtol=1e-4)
+        end
+
+        # GPU consistency (host round-trip): runs for the GPU backends in array_list.
+        for AT in array_list
+            AT == Array && continue
+            @testset "AllegroPotential GPU consistency ($AT)" begin
+                sysj = ref.systems[1]
+                coords32 = [SVector{3,Float32}(c[1] / 10, c[2] / 10, c[3] / 10) for c in sysj.coords_A]
+                n = length(coords32)
+                atoms32 = [Atom(mass=1.0f0, charge=0.0f0, σ=0.0f0, ϵ=0.0f0, λ=0.0f0) for _ in 1:n]
+                ad = [AtomData(element=species_syms[Int(s) + 1]) for s in sysj.species]
+                mk(coords, atoms) = System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0f0),
+                                           atoms_data=ad, general_inters=(allegro=pot,),
+                                           energy_units=NoUnits, force_units=NoUnits)
+                sys_cpu = mk(coords32, atoms32)
+                sys_gpu = mk(to_device(coords32, AT), to_device(atoms32, AT))
+                @test isapprox(AtomsCalculators.potential_energy(sys_cpu, pot),
+                               AtomsCalculators.potential_energy(sys_gpu, pot); rtol=1e-5)
+                fc = [zero(SVector{3,Float64}) for _ in 1:n]
+                AtomsCalculators.forces!(fc, sys_cpu, pot)
+                fg = to_device([zero(SVector{3,Float32}) for _ in 1:n], AT)
+                AtomsCalculators.forces!(fg, sys_gpu, pot)
+                fg_host = Array(fg)
+                @test maximum(maximum(abs.(Float64.(fg_host[i]) .- fc[i])) for i in 1:n) < 1e-4
+            end
+        end
+    end
+else
+    @warn "Skipping AllegroPotential tests — reference files not found. " *
+          "Run test/allegro_reference.py (needs e3nn) to generate them."
+end
