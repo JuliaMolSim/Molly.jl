@@ -1685,15 +1685,6 @@ end
     ke, α_ewald = inter.coulomb_const, inter.α_ewald
 
     pair_role, λ, λR, λ_params, qij = softcore_pair_elec_lambda(inter, atom_i, atom_j, special)
-    # if !special
-    #     qi = effective_charge(atom_i, inter.scheduler, Val(T))
-    #     qj = effective_charge(atom_j, inter.scheduler, Val(T))
-    #     qij = qi*qj
-    #     λ = T(1.0)
-    #     λR = T(1.0)
-    # else
-    #     pair_role, λ, λR, λ_params, qij = softcore_pair_elec_lambda(inter, atom_i, atom_j, special)
-    # end
 
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
@@ -1734,15 +1725,6 @@ end
                                   args...) where T
     ke, α_ewald = inter.coulomb_const, inter.α_ewald
     pair_role, λ, λR, λ_params, qij = softcore_pair_elec_lambda(inter, atom_i, atom_j, special)
-    # if !special
-    #     qi = effective_charge(atom_i, inter.scheduler, Val(T))
-    #     qj = effective_charge(atom_j, inter.scheduler, Val(T))
-    #     qij = qi*qj
-    #     λ = T(1.0)
-    #     λR = T(1.0)
-    # else
-    #     pair_role, λ, λR, λ_params, qij = softcore_pair_elec_lambda(inter, atom_i, atom_j, special)
-    # end
 
     if λ <= 0
         return zero_pairwise_energy(dr, energy_units)

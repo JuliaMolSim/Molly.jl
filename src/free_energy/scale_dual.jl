@@ -69,9 +69,13 @@ end
 ###############################
 
 @inline function scale_sterics(::LinearLambdaScheduler, λ::T, role::AlchemicalRole, dual::Val{true}, args...) where T
-    if role == InsertRole || role == CoreIRole
+    if role == InsertRole 
         return λ, one(λ), one(λ)
-    elseif role == DeleteRole || role == CoreDRole
+    elseif role == CoreIRole
+        return λ, one(λ), one(λ)
+    elseif role == DeleteRole 
+        return (1-λ), one(λ), one(λ)
+    elseif role == CoreDRole
         return (1-λ), one(λ), one(λ)
     else
         return one(λ), one(λ), one(λ)
@@ -79,9 +83,13 @@ end
 end
 
 @inline function scale_elec(::LinearLambdaScheduler, λ::T, role::AlchemicalRole, dual::Val{true}, args...) where T
-    if role == InsertRole || role == CoreIRole
+    if role == InsertRole 
         return λ, one(λ), one(λ)
-    elseif role == DeleteRole || role == CoreDRole
+    elseif role == CoreIRole
+        return λ, one(λ), one(λ)
+    elseif role == DeleteRole 
+        return (1-λ), one(λ), one(λ)
+    elseif role == CoreDRole
         return (1-λ), one(λ), one(λ)
     else
         return one(λ), one(λ), one(λ)

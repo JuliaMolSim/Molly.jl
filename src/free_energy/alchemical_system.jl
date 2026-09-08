@@ -122,8 +122,8 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     GenerInteraction = []
     for inter in sys.general_inters
         if inter isa PME
-            push!(GenerInteraction, PME(inter.dist_cutoff, to_device(Atoms, AT), Boundary, grad_safe=inter.grad_safe; 
-                                        error_tol=inter.error_tol, fixed_charges=false, scheduler=scheduler),
+            push!(GenerInteraction, PME_λ(inter.dist_cutoff, to_device(Atoms, AT), Boundary, grad_safe=inter.grad_safe; 
+                                        error_tol=inter.error_tol, fixed_charges=false, scheduler=scheduler, states=2, global_λ),
                         )
         elseif inter isa LJDispersionCorrection
             push!(GenerInteraction, LJDispersionCorrectionλ(to_device(Atoms, AT), inter.dist_cutoff, scheduler, 

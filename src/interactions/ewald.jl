@@ -48,13 +48,9 @@ function AtomsCalculators.energy_forces(sys::System,
     return (energy=pe, forces=fs)
 end
 
-@inline function electrostatic_lambda(scheduler, atom::Atom, ::Val{T}) where T
-    dual_val = scheduler.dual ? Val(true) : Val(false)
-    return scale_elec(scheduler, T(atom.λ), atom.alch_role, dual_val)
-end
-
 @inline function effective_charge(atom::Atom, scheduler, ::Val{T}) where T
-    λ, λR, λ_params = electrostatic_lambda(scheduler, atom, Val(T))
+    dual_val = scheduler.dual ? Val(true) : Val(false)
+    λ, λR, λ_params = scale_elec(scheduler, T(atom.λ), atom.alch_role, dual_val)
     if scheduler.dual
         return λ*atom.charge
     else
@@ -62,14 +58,13 @@ end
     end
 end
 
-@inline function effective_charge_sqrt(atom::Atom, scheduler, ::Val{T}) where T
-    λ, λR, λ_params = electrostatic_lambda(scheduler, atom, Val(T))
-    if scheduler.dual
-        return sqrt(λ)*atom.charge
-    else
-        return params_mixing(λ_params, atom.charge)
-    end
+
+@inline function effective_charge(atom::Atom, scheduler, ::Val{T}, global_λ) where T
+    dual_val = scheduler.dual ? Val(true) : Val(false)
+    λ, λR, λ_params = scale_elec(scheduler, T(global_λ), atom.alch_role, dual_val)
+    return λ*atom.charge
 end
+
 """
     Ewald(dist_cutoff; error_tol=0.0005, scheduler=DefaultLambdaScheduler())
 
@@ -440,11 +435,11 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         partial_charge_buffer = zeros(T, n_atoms)
     end
 
+    fixed_charges = false
     if fixed_charges && !grad_safe
         partial_charge_buffer = effective_charge.(atoms, Ref(scheduler), Val(T))
-        partial_charge_buffer_sqrt = effective_charge_sqrt.(atoms, Ref(scheduler), Val(T))
         pc_sum = sum(partial_charge_buffer)
-        pc_abs2_sum = sum(abs2, partial_charge_buffer_sqrt)
+        pc_abs2_sum = sum(abs2, partial_charge_buffer)
     else
         pc_sum, pc_abs2_sum = nothing, nothing
     end
@@ -1148,10 +1143,8 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     if needs_pe || needs_vir
         if isnothing(inter.pc_sum) || inter.grad_safe
             partial_charge_buffer = effective_charge.(atoms, Ref(inter.scheduler), Val(T))
-            # partial_charge_buffer_sqrt = effective_charge_sqrt.(atoms, Ref(inter.scheduler), Val(T))
-            partial_charge_buffer_sqrt = effective_charge.(atoms, Ref(inter.scheduler), Val(T))
             pc_sum = sum(partial_charge_buffer)
-            pc_abs2_sum = sum(abs2, partial_charge_buffer_sqrt)
+            pc_abs2_sum = sum(abs2, partial_charge_buffer)
         else
             pc_sum, pc_abs2_sum = inter.pc_sum, inter.pc_abs2_sum
         end
@@ -1258,12 +1251,6 @@ end
     scheduler, α, f_div_ϵr = data.scheduler, data.α, data.f_div_ϵr
     pair_role, λ, λR, λ_params, qij = softcore_pair_elec_lambda(data, atom_i, atom_j)
 
-    # qi = effective_charge(atom_i, data.scheduler, Val(T))
-    # qj = effective_charge(atom_j, data.scheduler, Val(T))
-    # qij = qi*qj
-    # λ = T(1.0)
-    # λR = T(1.0)
-
     αr = α * r
     erf_αr = erf(αr)
     if erf_αr > T(1e-6)
@@ -1284,12 +1271,6 @@ end
     r = sqrt(sum(abs2, vec_ij))
     scheduler, α, f_div_ϵr = data.scheduler, data.α, data.f_div_ϵr
     pair_role, λ, λR, λ_params, qij = softcore_pair_elec_lambda(data, atom_i, atom_j)
-
-    # qi = effective_charge(atom_i, data.scheduler, Val(T))
-    # qj = effective_charge(atom_j, data.scheduler, Val(T))
-    # qij = qi*qj
-    # λ = T(1.0)
-    # λR = T(1.0)
     
     erf_αr = erf(α * r)
     if erf_αr > T(1e-6)
@@ -1319,4 +1300,887 @@ end
         qij = qi*qj
     end
     return pair_role, λ, λR, λ_params, qij
+end
+
+"""
+    PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
+        ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
+        scheduler=DefaultLambdaScheduler(), grad_safe=false,
+        n_threads=Threads.nthreads())
+
+Particle mesh Ewald summation for long range electrostatics implemented as an
+AtomsCalculators.jl calculator.
+
+Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
+which provides the short range term, and the [`EwaldExclusion`](@ref) specific
+interaction, which provides the exclusions for bonded atoms.
+`dist_cutoff` and `error_tol` should match these interactions.
+
+`dist_cutoff` is the cutoff distance for short range interactions.
+`fixed_charges` should be set to `false` if the partial charges can change,
+for example when using a polarizable force field.
+`mesh_dims` gives the number of grid points in each dimension, overriding the
+value chosen from `error_tol`.
+`grad_safe` should be set to `true` if gradients are going to be calculated
+with Enzyme.jl.
+`n_threads` is used to pre-allocate memory on CPU and plan the FFTs.
+
+This implementation is based on the implementation in OpenMM, which
+is based on the smooth PME algorithm from
+[Essmann et al. 1995](https://doi.org/10.1063/1.470117).
+
+Only compatible with 3D systems.
+Not compatible with infinite boundaries.
+"""
+struct PME_λ{T, D, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: AbstractEwald
+    dist_cutoff::D
+    error_tol::T
+    order::Int
+    ϵr::T
+    α::A
+    mesh_dims::SVector{3, Int}
+    grid_indices::I
+    grid_fractions::M
+    bsplines_θ::M
+    bsplines_dθ::M
+    bsplines_moduli_x::BM
+    bsplines_moduli_y::BM
+    bsplines_moduli_z::BM
+    charge_grid::C
+    recip_grid::RG
+    charge_grid_buffer::CB
+    recip_conv_buffer::RB
+    virial_buffer::VB
+    partial_charge_buffer::PB
+    pc_sum::P
+    pc_abs2_sum::P
+    fft_plan::F
+    bfft_plan::B
+    scheduler::SCH
+    grad_safe::Bool
+    λ::T
+end
+
+function PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
+             ϵr=1.0, fixed_charges=true, mesh_dims=nothing, eligible=nothing, special=nothing,
+             scheduler=DefaultLambdaScheduler(dual=true), grad_safe=false,
+             n_threads::Integer=Threads.nthreads(), states=2, global_λ=0.0)
+    T = typeof(ustrip(dist_cutoff))
+    AT = array_type(atoms)
+    n_atoms = length(atoms)
+    error_tol_T = T(error_tol)
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
+    if isnothing(mesh_dims)
+        mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
+    else
+        mesh_dims = SVector{3, Int}(mesh_dims)
+    end
+
+    λ, _, _ = scale_elec(scheduler, global_λ, DeleteRole, Val(true))
+    λ = (1-λ)
+    # The three B-spline dimensions are flattened into one axis to keep these 2D. The atom
+    # index goes last on CPU, so that the values belonging to an atom share a cache line,
+    # and first on GPU, so that neighbouring threads touch neighbouring elements. See
+    # `atom_last`, which hides the difference from the code that uses them.
+    if AT <: AbstractGPUArray
+        grid_indices = to_device(zeros(Int, states, n_atoms, 3), AT)
+        grid_fractions = to_device(zeros(T, states, n_atoms, 3), AT)
+        bsplines_θ = to_device(zeros(T, states, n_atoms, order * 3), AT)
+    else
+        grid_indices = zeros(Int, 3, n_atoms)
+        grid_fractions = zeros(T, 3, n_atoms)
+        bsplines_θ = zeros(T, order * 3, n_atoms)
+    end
+    bsplines_dθ = zero(bsplines_θ)
+    # Ordered z/y/x for better memory access. The charge grid is real, so a real to complex
+    # transform is used, which halves the work of the FFTs and of everything else that
+    # touches the reciprocal space grid.
+    charge_grid = to_device(zeros(T, states, mesh_dims[3], mesh_dims[2], mesh_dims[1]),AT) 
+    recip_grid = to_device(zeros(Complex{T}, states, mesh_dims[3] ÷ 2 + 1, mesh_dims[2], mesh_dims[1]),AT) 
+    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
+
+    bsplines_moduli = pme_bspline_moduli(T, order, mesh_dims)
+
+    if AT <: AbstractGPUArray
+        # The charge is added to the real grid atomically, so no per-thread grid is needed
+        charge_grid_buffer = to_device([nothing for _ in 1:length(charge_grid)], AT)
+        recip_conv_buffer  = to_device(zeros(T, size(recip_grid)), AT)
+        virial_buffer      = to_device(zeros(T, states,3, 3), AT)
+        partial_charge_buffer = to_device(zeros(T, states, n_atoms), AT) 
+    elseif n_threads > 1
+        charge_grid_buffer = [zeros(T, size(charge_grid)) for _ in 1:n_spread_threads(n_threads)]
+        recip_conv_buffer = zeros(T, n_threads)
+        virial_buffer = [zeros(T, 3, 3) for _ in 1:n_threads]
+        partial_charge_buffer = zeros(T, n_atoms)
+    else
+        charge_grid_buffer = nothing
+        recip_conv_buffer = zeros(T, 1)
+        virial_buffer = [zeros(T, 3, 3)]
+        partial_charge_buffer = zeros(T, n_atoms)
+    end
+
+    fixed_charges = false
+    if fixed_charges && !grad_safe
+        partial_charge_buffer = charge.(atoms, Ref(scheduler), Val(T))
+        pc_sum = sum(partial_charge_buffer)
+        pc_abs2_sum = sum(abs2, partial_charge_buffer_sqrt)
+    else
+        pc_sum, pc_abs2_sum = nothing, nothing
+    end
+    
+    charge_grid = permutedims(charge_grid, (2, 3, 4, 1))
+    recip_grid = permutedims(recip_grid, (2, 3, 4, 1))
+
+    fft_plan  = plan_rfft(charge_grid, 1:3)
+    bfft_plan = plan_brfft(recip_grid, mesh_dims[3], 1:3)
+
+    charge_grid = permutedims(charge_grid, (4, 1, 2, 3))
+    recip_grid = permutedims(recip_grid, (4, 1, 2, 3))
+
+    charge_grid .= zero(T) # Can be overwritten by FFTW.MEASURE
+    recip_grid .= zero(Complex{T})
+
+    bsm_x = to_device(bsplines_moduli[1], AT)
+    bsm_y = to_device(bsplines_moduli[2], AT)
+    bsm_z = to_device(bsplines_moduli[3], AT)
+
+    return PME_λ(dist_cutoff, error_tol_T, order, T(ϵr), α, mesh_dims, grid_indices, grid_fractions,
+               bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z, charge_grid, recip_grid, charge_grid_buffer,
+               recip_conv_buffer, virial_buffer, partial_charge_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan,
+               scheduler, grad_safe, λ)
+end
+
+function Base.deepcopy(pme::PME_λ)
+    # 1. Deepcopy standard immutable parameters and CPU buffers
+    dist_cutoff    = pme.dist_cutoff
+    error_tol      = pme.error_tol
+    order          = pme.order
+    ϵr             = pme.ϵr
+    α              = pme.α
+    mesh_dims      = pme.mesh_dims
+    pc_sum         = deepcopy(pme.pc_sum)
+    pc_abs2_sum    = deepcopy(pme.pc_abs2_sum)
+    scheduler      = pme.scheduler
+    grad_safe      = pme.grad_safe
+    global_λ       = pme.λ
+
+    # 2. Duplicate GPU/CPU Arrays cleanly via deepcopy or copy
+    grid_indices        = deepcopy(pme.grid_indices)
+    grid_fractions      = deepcopy(pme.grid_fractions)
+    bsplines_θ          = deepcopy(pme.bsplines_θ)
+    bsplines_dθ         = deepcopy(pme.bsplines_dθ)
+    bsplines_moduli_x   = deepcopy(pme.bsplines_moduli_x)
+    bsplines_moduli_y   = deepcopy(pme.bsplines_moduli_y)
+    bsplines_moduli_z   = deepcopy(pme.bsplines_moduli_z)
+    partial_charge_buffer = deepcopy(pme.partial_charge_buffer)
+
+    # Critical allocations: Main charge grid and working buffers
+    charge_grid         = deepcopy(pme.charge_grid)
+    charge_grid_buffer  = deepcopy(pme.charge_grid_buffer)
+    recip_grid          = deepcopy(pme.recip_grid)
+    recip_conv_buffer   = deepcopy(pme.recip_conv_buffer)
+    virial_buffer       = deepcopy(pme.virial_buffer)
+
+    charge_grid = permutedims(charge_grid, (2, 3, 4, 1))
+    recip_grid = permutedims(recip_grid, (2, 3, 4, 1))
+
+    fft_plan  = plan_rfft(charge_grid, 1:3)
+    bfft_plan = plan_brfft(recip_grid, mesh_dims[3], 1:3)
+
+    charge_grid = permutedims(charge_grid, (4, 1, 2, 3))
+    recip_grid = permutedims(recip_grid, (4, 1, 2, 3))
+
+    # 4. Return the brand new, isolated PME_λ struct
+    return PME_λ(
+        dist_cutoff, error_tol, order, ϵr, α, mesh_dims,
+        grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, 
+        bsplines_moduli_x, bsplines_moduli_y, bsplines_moduli_z,
+        charge_grid, recip_grid, charge_grid_buffer,
+        recip_conv_buffer, virial_buffer, partial_charge_buffer, pc_sum, pc_abs2_sum, 
+        fft_plan, bfft_plan, scheduler, grad_safe, global_λ
+    )
+end
+
+function Base.zero(pme::PME_λ)
+    if pme.charge_grid_buffer isa Vector
+        charge_grid_buffer = zero.(pme.charge_grid_buffer)
+    else
+        charge_grid_buffer = zero_or_nothing(pme.charge_grid_buffer)
+    end
+    return PME_λ(
+        zero(pme.dist_cutoff),
+        zero(pme.error_tol),
+        pme.order,
+        zero(pme.ϵr),
+        zero(pme.α),
+        pme.mesh_dims,
+        zero(pme.grid_indices),
+        zero(pme.grid_fractions),
+        zero(pme.bsplines_θ),
+        zero(pme.bsplines_dθ),
+        zero(pme.bsplines_moduli_x),
+        zero(pme.bsplines_moduli_y),
+        zero(pme.bsplines_moduli_z),
+        zero(pme.charge_grid),
+        zero(pme.recip_grid),
+        charge_grid_buffer,
+        zero_or_nothing(pme.recip_conv_buffer),
+        zero_or_nothing(pme.virial_buffer),
+        zero_or_nothing(pme.partial_charge_buffer),
+        zero_or_nothing(pme.pc_sum),
+        zero_or_nothing(pme.pc_abs2_sum),
+        pme.fft_plan,
+        pme.bfft_plan,
+        pme.scheduler,
+        pme.grad_safe,
+        zero(pme.global_λ),
+    )
+end
+
+function ==(a::PME_λ, b::PME_λ)
+    return a.dist_cutoff    == b.dist_cutoff    &&
+           a.error_tol      == b.error_tol      &&
+           a.order          == b.order          &&
+           a.ϵr             == b.ϵr             &&
+           a.α              == b.α              &&
+           a.mesh_dims      == b.mesh_dims      &&
+           a.scheduler      == b.scheduler      &&
+           a.grad_safe      == b.grad_safe
+end
+
+function hash(a::PME_λ, h::UInt)
+    v = hash(a.dist_cutoff, h)
+    v = hash(a.error_tol, v)
+    v = hash(a.order, v)
+    v = hash(a.ϵr, v)
+    v = hash(a.α, v)
+    v = hash(a.mesh_dims, v)
+    v = hash(a.scheduler, v)
+    v = hash(a.grad_safe, v)
+    return v
+end
+
+@inline function grid_placement_inner_batch!(grid_indices, grid_fractions, coords, recip_box,
+                                       mesh_dims, b, a)
+    @inbounds for d in 1:3
+        t = sum(coords[a] .* SVector(recip_box[1][d], recip_box[2][d], recip_box[3][d]))
+        t = (t - floor(t)) * mesh_dims[d]
+        ti = floor(Int, t)
+        grid_fractions[b, d, a] = t - ti
+        # `t` is below the mesh length, so rounding is the only way `ti` can reach it and
+        # the wrap can be done with a subtraction rather than an integer division
+        grid_indices[b, d, a] = wrap_grid_index(ti, mesh_dims[d])
+    end
+    return grid_indices, grid_fractions
+end
+
+function grid_placement_batch!(grid_indices::Matrix, grid_fractions, coords, recip_box, mesh_dims,
+                         n_threads)
+
+    n_batches = size(grid_indices, 1)
+    n_atoms   = size(coords, 1)
+
+    @maybe_threads (n_threads > 1) for b in 1:n_batches
+        for a in 1:n_atoms
+            grid_placement_inner_batch!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, b, a)
+        end
+    end
+    return grid_indices, grid_fractions
+end
+
+function grid_placement_batch!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, n_threads)
+    backend = get_backend(parent(grid_indices))
+    n_threads_gpu = 128
+
+    n_batches = size(grid_indices, 1)
+    n_atoms   = size(coords, 1)
+
+    kernel! = grid_placement_kernel_batch!(backend, n_threads_gpu)
+    kernel!(grid_indices, grid_fractions, coords, recip_box, mesh_dims; ndrange=(n_batches,n_atoms))
+    return grid_indices, grid_fractions
+end
+
+@kernel function grid_placement_kernel_batch!(grid_indices, grid_fractions, @Const(coords),
+                                        recip_box, mesh_dims)
+    i = @index(Global, Linear)
+    b, a = @index(Global, NTuple)
+    
+    n_batches = size(grid_indices, 1)
+    n_atoms   = size(coords, 1)
+
+    if b <= n_batches && a <= n_atoms
+        grid_placement_inner_batch!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, b,a)
+    end
+end
+
+@inline function update_bsplines_inner_batch!(bsplines_θ::AbstractArray{T, 3}, bsplines_dθ,
+                                        grid_fractions, order, b, a) where T
+    @inbounds for j in 1:3
+        o = (j - 1) * order
+        dr = grid_fractions[b, j, a]
+        bsplines_θ[b, o + order, a] = zero(T)
+        bsplines_θ[b, o + 2, a]     = dr
+        bsplines_θ[b, o + 1, a]     = 1 - dr
+        for k in 3:(order-1)
+            d = inv(k - one(T))
+            bsplines_θ[b, o + k, a] = d * dr * bsplines_θ[b, o + k - 1, a]
+            for l in 1:(k-2)
+                bsplines_θ[b, o + k - l, a] = d * (
+                        (dr + l) * bsplines_θ[b, o + k - l - 1, a] +
+                        (k - l - dr) * bsplines_θ[b, o + k - l, a]
+                    )
+            end
+            bsplines_θ[b, o + 1, a] *= d * (1 - dr)
+        end
+
+        bsplines_dθ[b, o + 1, a] = -bsplines_θ[b, o + 1, a]
+        for k in 1:(order-1)
+            bsplines_dθ[b, o + k + 1, a] = bsplines_θ[b, o + k, a] - bsplines_θ[b, o + k + 1, a]
+        end
+        d = inv(order - one(T))
+        bsplines_θ[b, o + order, a] = d * dr * bsplines_θ[b, o + order - 1, a]
+        for l in 1:(order-2)
+            bsplines_θ[b, o + order - l, a] = d * (
+                    (dr + l) * bsplines_θ[b, o + order - l - 1, a] +
+                    (order - l - dr) * bsplines_θ[b, o + order - l, a]
+                )
+        end
+        bsplines_θ[b, o + 1, a] *= d * (1 - dr)
+    end
+    return bsplines_θ, bsplines_dθ
+end
+
+function update_bsplines_batch!(bsplines_θ::Matrix, bsplines_dθ, grid_fractions, order,
+                          n_threads)
+    n_batches = size(grid_indices, 1)
+    n_atoms   = size(coords, 1)
+    @maybe_threads (n_threads > 1) for b in 1:n_batches
+        for a in 1:n_atoms
+            update_bsplines_inner_batch!(bsplines_θ, bsplines_dθ, grid_fractions,
+                                   order, i)
+        end
+    end
+    return bsplines_θ, bsplines_dθ
+end
+
+function update_bsplines_batch!(bsplines_θ, bsplines_dθ, grid_fractions, order,
+                          n_threads)
+    backend = get_backend(parent(bsplines_θ))
+    n_threads_gpu = 128
+
+    n_batches = size(bsplines_θ, 1)
+    n_atoms   = size(grid_fractions, 3)
+
+    kernel! = update_bsplines_kernel_batch!(backend, n_threads_gpu)
+    kernel!(bsplines_θ, bsplines_dθ, grid_fractions, order; ndrange=(n_batches,n_atoms))
+    return bsplines_θ, bsplines_dθ
+end
+
+@kernel function update_bsplines_kernel_batch!(bsplines_θ, bsplines_dθ, @Const(grid_fractions),
+                                         order)
+    b, a = @index(Global, NTuple)
+    n_batches = size(bsplines_θ, 1)
+    n_atoms   = size(grid_fractions, 3)
+
+    if b <= n_batches && a <= n_atoms
+        update_bsplines_inner_batch!(bsplines_θ, bsplines_dθ, grid_fractions, order, b, a)
+    end
+end
+
+# CPU case, each thread has its own grid so the addition does not have to be atomic
+@inline function add_charge_grid_batch!(charge_grid, b, li, cb, ::Val{false})
+    @inbounds charge_grid[b, li] += cb
+    return charge_grid
+end
+
+# GPU case, where all the threads share one grid
+@inline function add_charge_grid_batch!(charge_grid, b, li, cb, ::Val{true})
+    @inbounds Atomix.@atomic charge_grid[b, li] += cb
+    return charge_grid
+end
+
+# The per-atom B-spline and grid index arrays are stored atom index last on CPU and atom
+# index first on GPU, see the `PME` constructor. Transposing the GPU arrays lets both be
+# indexed as [value, atom] everywhere else.
+@inline atom_last_batch(A::Matrix) = A
+# @inline atom_last(A) = transpose(A)
+@inline atom_last_batch(A) = permutedims(A, (1, 3, 2))
+
+@inline function spread_charge_inner_batch!(charge_grid, grid_indices, bsplines_θ,
+                              mesh_dims, order, atoms, scheduler, b, i, ::Val{T},
+                              ::Val{atomic}) where {T, atomic}
+    q = effective_charge(atoms[i], scheduler, Val(T), (b-1))
+    nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
+    @inbounds x0index, y0index, z0index = grid_indices[b, 1, i], grid_indices[b, 2, i], grid_indices[b, 3, i]
+    @inbounds for ix in 0:(order-1)
+        xbase = wrap_grid_index(x0index + ix, nx) * ny * nz
+        θx = bsplines_θ[b, ix+1, i]
+        qx = q * θx
+        for iy in 0:(order-1)
+            ybase = xbase + wrap_grid_index(y0index + iy, ny) * nz
+            θy = bsplines_θ[b, order+iy+1, i]
+            qxy = qx * θy
+            for iz in 0:(order-1)
+                zindex = wrap_grid_index(z0index + iz, nz)
+                θz = bsplines_θ[b, 2*order+iz+1, i]
+                cb = qxy * θz
+                add_charge_grid_batch!(charge_grid, b, ybase + zindex + 1, cb, Val(atomic))
+            end
+        end
+    end
+    return charge_grid
+end
+
+# GPU version, one thread per (atom, z slice) pair. `order` threads cooperate on each
+# atom, which gives `order` times the parallelism of one thread per atom and makes the
+# threads of an atom write neighbouring grid points, as in the OpenMM implementation
+@inline function spread_charge_slice_batch!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order,
+                                      atoms, scheduler, b, i, iz, ::Val{T}) where T
+    q = effective_charge(atoms[i], scheduler, Val(T), T(b-1))
+    nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
+    @inbounds begin
+        x0index, y0index, z0index = grid_indices[b, 1, i], grid_indices[b, 2, i], grid_indices[b, 3, i]
+        zindex = wrap_grid_index(z0index + iz, nz)
+        qz = q * bsplines_θ[b, 2*order+iz+1, i]
+        for ix in 0:(order-1)
+            xbase = wrap_grid_index(x0index + ix, nx) * ny * nz
+            qzx = qz * bsplines_θ[b, ix+1, i]
+            for iy in 0:(order-1)
+                ybase = xbase + wrap_grid_index(y0index + iy, ny) * nz
+                cb = qzx * bsplines_θ[b, order+iy+1, i]
+                add_charge_grid_batch!(charge_grid, b, ybase + zindex + 1, cb, Val(true))
+            end
+        end
+    end
+    return charge_grid
+end
+
+function spread_charge_batch!(charge_grid::Array{T, 4}, buffer, grid_indices, bsplines_θ,
+                        mesh_dims, order, atoms, scheduler, n_threads) where T
+    if n_threads == 1
+        charge_grid .= zero(T)
+        for b in size(charge_grid, 1)
+            for i in eachindex(atoms)
+                spread_charge_inner_batch!(charge_grid, grid_indices, bsplines_θ, mesh_dims,
+                                    order, atoms, scheduler, b, i, Val(T), Val(false))
+            end
+        end
+        return charge_grid
+    end
+    #maybe fall back in batch=1
+    Threads.@threads for b in 1:n_batches
+        for i in eachindex(atoms)
+            spread_charge_inner_batch!(charge_grid, grid_indices, bsplines_θ, mesh_dims,
+                                  order, atoms, scheduler, b, i, Val(T), Val(false))
+        end
+    end
+end
+
+# Sum the per-thread grids in one parallel pass, as reduce_force_chunks! does for the
+# forces, rather than one serial pass over the whole grid per thread. The number of grids
+# is a type parameter so that the inner sum can be unrolled.
+function reduce_charge_grids_batch!(charge_grid::Array{T, 3}, buffer,
+                              ::Val{n_threads}) where {T, n_threads}
+    @inbounds Threads.@threads for li in eachindex(charge_grid)
+        c = zero(T)
+        for chunk_i in 1:n_threads
+            c += buffer[chunk_i][li]
+        end
+        charge_grid[li] = c
+    end
+    return charge_grid
+end
+
+function spread_charge_batch!(charge_grid::AbstractArray{T, 4}, buffer, grid_indices,
+                        bsplines_θ, mesh_dims, order, atoms, scheduler, n_threads) where T
+    backend = get_backend(charge_grid)
+    n_threads_gpu = 128
+
+    n_atoms = length(atoms)*order
+    n_batches = size(charge_grid, 1)
+
+    kernel! = spread_charge_kernel_batch!(backend, n_threads_gpu)
+    charge_grid .= zero(T)
+    kernel!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms, scheduler, Val(T);
+            ndrange=(n_batches,n_atoms))
+    return charge_grid
+end
+
+@kernel function spread_charge_kernel_batch!(charge_grid_real, @Const(grid_indices), @Const(bsplines_θ),
+                                       mesh_dims, order, atoms, scheduler, ::Val{T}) where T
+    b, a = @index(Global, NTuple)
+    n_batches = size(charge_grid_real,1)
+    n_atoms = length(atoms)*order
+
+    if b <= n_batches && a <= n_atoms
+        i, iz1 = fldmod1(a, order)
+        spread_charge_slice_batch!(charge_grid_real, grid_indices, bsplines_θ, mesh_dims, order, atoms,
+                             scheduler, b, i, iz1-1, Val(T))
+    end
+end
+
+@inline function recip_conv_inner_batch!(vir_nou, recip_grid::AbstractArray{Complex{T}, 4}, bsm_x,
+                           bsm_y, bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor,
+                           boxfactor, b, kx, ky, kz, ::Val{needs_vir},
+                           ::Val{atomic}) where {T, needs_vir, atomic}
+    if iszero(kx) && iszero(ky) && iszero(kz)
+        return zero(T) * energy_units
+    end
+    nx, ny, nz = mesh_dims
+    maxkx, maxky, maxkz = T(0.5)*(nx+1), T(0.5)*(ny+1), T(0.5)*(nz+1)
+    # The real to complex transform only keeps the modes with kz up to nz/2, and each of
+    # them stands for both k and -k of the full mesh apart from the two, or one when nz is
+    # odd, that are their own conjugate
+    weight = (iszero(kz) || 2*kz == nz ? one(T) : T(2))
+    @inbounds begin
+        mx = (kx < maxkx ? kx : kx - nx)
+        mhx = mx * recip_box[1][1]
+        bx = boxfactor * bsm_x[kx+1]
+        my = (ky < maxky ? ky : ky - ny)
+        mhy = mx * recip_box[2][1] + my * recip_box[2][2]
+        by = bsm_y[ky+1]
+        mz = (kz < maxkz ? kz : kz - nz)
+        mhz = mx * recip_box[3][1] + my * recip_box[3][2] + mz * recip_box[3][3]
+        d1, d2 = reim(recip_grid[b, kz+1, ky+1, kx+1])
+        m2 = mhx^2 + mhy^2 + mhz^2
+        bz = bsm_z[kz+1]
+        denom = m2 * bx * by * bz
+        c  = exp(-factor * m2)
+        eterm = f_div_ϵr * c / denom
+        eterm_nou = ustrip(energy_units, eterm)
+        recip_grid[b, kz+1, ky+1, kx+1] = Complex(d1*eterm_nou, d2*eterm_nou)
+        struct2 = weight * (d1^2 + d2^2)
+
+        if needs_vir
+            # V*P_k = E_k * [I - 2(1 + factor*m2) * (m ⊗ m) / m2], symmetric by construction.
+            Ek = eterm * struct2
+            invm2 = one(T) / m2
+            coeff = 2*one(T) * (one(T) + factor*m2) * invm2
+            gxx = 1 - coeff*mhx*mhx
+            gxy =   - coeff*mhx*mhy
+            gxz =   - coeff*mhx*mhz
+            gyy = 1 - coeff*mhy*mhy
+            gyz =   - coeff*mhy*mhz
+            gzz = 1 - coeff*mhz*mhz
+            G = SMatrix{3, 3, T}(gxx, gxy, gxz,
+                                 gxy, gyy, gyz,
+                                 gxz, gyz, gzz)
+            Ek_nou = ustrip(energy_units, Ek)
+            if atomic
+                for d1 in 1:3
+                    for d2 in 1:3
+                        Atomix.@atomic vir_nou[b, d1, d2] += Ek_nou * G[b, d1, d2]
+                    end
+                end
+            else
+                vir_nou .+= Ek_nou .* G
+            end
+        end
+    end
+    return eterm * struct2
+end
+
+function recip_conv_batch!(vir, buffer_virial, recip_grid::Array{Complex{T}, 3}, buffer,
+                     bsm_x, bsm_y, bsm_z, recip_box, f_div_ϵr, α, mesh_dims, boundary,
+                     energy_units, n_threads, ::Val{needs_vir},
+                     ::Val{needs_pe}=Val(true)) where {T, needs_vir, needs_pe}
+    factor = T(π)^2 / α^2
+    boxfactor = T(π) * volume(boundary)
+    n_columns = mesh_dims[1] * mesh_dims[2]
+    nzh = size(recip_grid, 1)
+    # The threads take whole (kx, ky) columns, of which there are many more than there are
+    # threads, so they get an even share of the mesh whatever its dimensions are
+    @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
+        if needs_vir
+            buffer_virial[chunk_i] .= zero(T)
+        end
+        # The energy is summed into a local variable rather than into `buffer`, where the
+        # threads would be writing to the same cache line on every grid point
+        esum = zero(T)
+        for column in chunk_i:n_threads:n_columns
+            kx, ky = fldmod(column - 1, mesh_dims[2])
+            for kz in 0:(nzh-1)
+                esum_val = recip_conv_inner_batch!(buffer_virial[chunk_i], recip_grid, bsm_x, bsm_y,
+                            bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                            kx, ky, kz, Val(needs_vir), Val(false))
+                if needs_pe
+                    esum += ustrip(energy_units, esum_val)
+                end
+            end
+        end
+        buffer[chunk_i] = esum
+    end
+    if needs_vir
+        for chunk_i in 1:n_threads
+            # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+            vir .+= buffer_virial[chunk_i] .* energy_units / 2
+        end
+    end
+    needs_pe || return zero(T) * energy_units
+    # `buffer` is sized for the threads the PME was created with, which is not necessarily
+    # how many are in use here, so only the entries written above are summed
+    return sum(@view buffer[1:n_threads]) * energy_units / 2
+end
+
+function recip_conv_batch!(vir, buffer_virial, recip_grid::AbstractArray{Complex{T}, 4}, buffer, bsm_x,
+                     bsm_y, bsm_z, recip_box, f_div_ϵr, α, mesh_dims, boundary, energy_units,
+                     n_threads, ::Val{needs_vir}, ::Val{needs_pe}, λ) where {T, needs_vir, needs_pe}
+    if needs_vir
+        buffer_virial .= zero(T)
+    end
+    factor = T(π)^2 / α^2
+    boxfactor = T(π) * volume(boundary)
+    backend = get_backend(recip_grid)
+    n_threads_gpu = 256
+
+    n_batches = size(recip_grid, 1)
+    len_recipg = Int(length(recip_grid)/n_batches)
+
+    kernel! = recip_conv_kernel_batch!(backend, n_threads_gpu)
+    kernel!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
+            energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir), Val(needs_pe);
+            ndrange=(n_batches, len_recipg))
+    if needs_vir
+        # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
+        vir .+= dropdims(sum((from_device(buffer_virial) .* energy_units / 2) .* (1-λ,λ), dims=1), dims=1)
+    end
+    # The energy is discarded when only forces are wanted, in which case the reduction
+    # over the whole mesh, and the device synchronisation it forces, can be skipped
+    needs_pe || return zero(T) * energy_units
+    return sum(vec(sum(buffer,dims=[2,3,4])) * energy_units / 2 .* (1-λ,λ))
+end
+
+# One thread per grid point, indexed so that neighbouring threads touch neighbouring grid
+# points. `recip_grid` is stored z fastest, so z has to be the fastest varying index of
+# the launch as well.
+@kernel function recip_conv_kernel_batch!(vir, esum_arr, recip_grid, @Const(bsm_x), @Const(bsm_y),
+                                    @Const(bsm_z), recip_box, mesh_dims, energy_units,
+                                    f_div_ϵr, factor, boxfactor, ::Val{needs_vir},
+                                    ::Val{needs_pe}) where {needs_vir, needs_pe}
+    b, li = @index(Global, NTuple)
+
+    n_batches = size(recip_grid, 1)
+    len_recipg = Int(length(recip_grid)/n_batches)
+
+    if b <= n_batches && li <= len_recipg
+        nzh = size(recip_grid, 2)
+        i0 = li - 1
+        kz, r = i0 % nzh, i0 ÷ nzh
+        ky, kx = r % mesh_dims[2], r ÷ mesh_dims[2]
+        esum = recip_conv_inner_batch!(vir, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
+                                 energy_units, f_div_ϵr, factor, boxfactor, b,
+                                 kx, ky, kz, Val(needs_vir), Val(true))
+        if needs_pe
+            @inbounds esum_arr[b, li] = ustrip(energy_units, esum)
+        end
+    end
+end
+
+@inline function interpolate_force_inner_batch!(Fs, charge_grid, grid_indices, bsplines_θ,
+                            bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
+                            scheduler, ::Val{T}, i) where T
+    nx, ny, nz = mesh_dims
+    fx, fy, fz = zero(T), zero(T), zero(T)
+    @inbounds begin
+        q = effective_charge(atoms[i], scheduler, Val(T), T(b-1))
+        x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
+        for ix in 0:(order-1)
+            xbase = wrap_grid_index(x0index + ix, nx) * ny * nz
+            tx, dtx = bsplines_θ[ix+1, i], bsplines_dθ[ix+1, i]
+            for iy in 0:(order-1)
+                ybase = xbase + wrap_grid_index(y0index + iy, ny) * nz
+                ty, dty = bsplines_θ[order+iy+1, i], bsplines_dθ[order+iy+1, i]
+                dtx_ty = dtx * ty
+                tx_dty = tx * dty
+                txy = tx * ty
+                for iz in 0:(order-1)
+                    zindex = wrap_grid_index(z0index + iz, nz)
+                    tz, dtz = bsplines_θ[2*order+iz+1, i], bsplines_dθ[2*order+iz+1, i]
+                    gridvalue = charge_grid[ybase + zindex + 1]
+                    fx += dtx_ty * tz * gridvalue
+                    fy += tx_dty * tz * gridvalue
+                    fz += txy * dtz * gridvalue
+                end
+            end
+        end
+        f = SVector(
+            q * (fx*nx*recip_box[1][1]),
+            q * (fx*nx*recip_box[2][1] + fy*ny*recip_box[2][2]),
+            q * (fx*nx*recip_box[3][1] + fy*ny*recip_box[3][2] + fz*nz*recip_box[3][3]),
+        ) * energy_units
+        Fs[i] -= f
+    end
+    return Fs
+end
+
+function interpolate_force_batch!(Fs, charge_grid::Array{T, 4}, grid_indices, bsplines_θ,
+                            bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
+                            scheduler, n_threads) where T
+    @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
+        for i in chunk_i:n_threads:length(atoms)
+            interpolate_force_inner_batch!(Fs, charge_grid, grid_indices, bsplines_θ,
+                        bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
+                        scheduler, Val(T), i)
+        end
+    end
+    return Fs
+end
+
+# GPU version, one thread per (atom, z slice) pair as for the charge spreading. Each of
+# the `order` threads of an atom accumulates a partial force over its own z slice and
+# adds it atomically, which gives `order` times the parallelism of one thread per atom
+# and makes the threads of an atom read neighbouring grid points.
+@inline function interpolate_force_slice_batch!(Fs_flat, charge_grid, grid_indices, bsplines_θ,
+                            bsplines_dθ, recip_box, mesh_dims, order, unit_scale, atoms,
+                            scheduler, ::Val{T}, b, i, iz) where T
+    nx, ny, nz = mesh_dims
+    fx, fy, fz = zero(T), zero(T), zero(T)
+    @inbounds begin
+        q = effective_charge(atoms[i], scheduler, Val(T), T(b-1))
+        x0index, y0index, z0index = grid_indices[b, 1, i], grid_indices[b, 2, i], grid_indices[b, 3, i]
+        zindex = wrap_grid_index(z0index + iz, nz)
+        tz, dtz = bsplines_θ[b, 2*order+iz+1, i], bsplines_dθ[b, 2*order+iz+1, i]
+        for ix in 0:(order-1)
+            xbase = wrap_grid_index(x0index + ix, nx) * ny * nz
+            tx, dtx = bsplines_θ[b, ix+1, i], bsplines_dθ[b, ix+1, i]
+            for iy in 0:(order-1)
+                ybase = xbase + wrap_grid_index(y0index + iy, ny) * nz
+                ty, dty = bsplines_θ[b, order+iy+1, i], bsplines_dθ[b, order+iy+1, i]
+                gridvalue = charge_grid[b, ybase + zindex + 1]
+                fx += dtx * ty * tz * gridvalue
+                fy += tx * dty * tz * gridvalue
+                fz += tx * ty * dtz * gridvalue
+            end
+        end
+        # `Fs_flat` reinterprets the force vectors as raw numbers in the force units, since
+        # atomics do not work on the unitful static vectors. `recip_box` is stripped of its
+        # units on the host for the same reason, with `unit_scale` putting them back.
+        f1 = q * (fx*nx*recip_box[1][1])
+        f2 = q * (fx*nx*recip_box[2][1] + fy*ny*recip_box[2][2])
+        f3 = q * (fx*nx*recip_box[3][1] + fy*ny*recip_box[3][2] + fz*nz*recip_box[3][3])
+        Atomix.@atomic Fs_flat[b, 3*(i-1)+1] -= unit_scale * f1
+        Atomix.@atomic Fs_flat[b, 3*(i-1)+2] -= unit_scale * f2
+        Atomix.@atomic Fs_flat[b, 3*(i-1)+3] -= unit_scale * f3
+    end
+    return Fs_flat
+end
+
+function interpolate_force_batch!(Fs, charge_grid::AbstractArray{T, 4}, grid_indices, bsplines_θ,
+                            bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
+                            scheduler, n_threads, λ) where T
+    backend = get_backend(Fs)
+    AT = array_type(atoms)
+    n_threads_gpu = 128
+    force_units = unit(zero(eltype(eltype(Fs))))
+    recip_box_nou = map(v -> ustrip.(v), recip_box)
+    unit_scale = T(ustrip(force_units,
+                          oneunit(T) * unit(eltype(eltype(recip_box))) * energy_units))
+
+    n_atoms = length(atoms)*order
+    n_batches = size(charge_grid, 1)
+    Fs_flat = to_device(zeros(T, n_batches, length(atoms)*3), AT)
+
+    kernel! = interpolate_force_kernel_batch!(backend, n_threads_gpu)
+    kernel!(Fs_flat, charge_grid, grid_indices, bsplines_θ, bsplines_dθ, recip_box_nou,
+            mesh_dims, order, unit_scale, atoms, scheduler, Val(T);
+            ndrange=(n_batches, n_atoms))
+    
+    f_sum = dropdims(sum(Fs_flat .* (1-λ, λ), dims=1),dims=1)
+    Fs .+= reinterpret(SVector{3, T}, f_sum) .* force_units
+
+    return Fs
+end
+
+@kernel function interpolate_force_kernel_batch!(Fs_flat, @Const(charge_grid), @Const(grid_indices),
+                        @Const(bsplines_θ), @Const(bsplines_dθ), recip_box, mesh_dims, order,
+                        unit_scale, @Const(atoms), scheduler, ::Val{T}) where T
+    b, ti = @index(Global, NTuple)
+    n_batches = size(charge_grid,1)
+    n_atoms = length(atoms)*order
+
+    if b <= n_batches && ti <= n_atoms
+        i, iz1 = fldmod1(ti, order)
+        interpolate_force_slice_batch!(Fs_flat, charge_grid, grid_indices, bsplines_θ,
+                    bsplines_dθ, recip_box, mesh_dims, order, unit_scale, atoms, scheduler,
+                    Val(T), b, i, iz1-1)
+    end
+end
+
+function ewald_pe_forces!(Fs, vir, inter::PME_λ{T}, atoms, coords, boundary, force_units,
+                          energy_units, ::Val{needs_vir}, calculate_forces=true,
+                          ::Val{needs_pe}=Val(true);
+                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir, needs_pe}
+    if !is_on_gpu(coords) && n_threads > 1 &&
+            (isnothing(inter.charge_grid_buffer) || length(inter.virial_buffer) != n_threads)
+        ntc = (isnothing(inter.charge_grid_buffer) ? 1 : length(inter.virial_buffer))
+        error("PME was created with n_threads $ntc but called with n_threads $n_threads")
+    end
+    n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
+    order, ϵr, α, mesh_dims, λ = inter.order, inter.ϵr, inter.α, inter.mesh_dims, inter.λ
+    V = volume(boundary)
+    f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
+    f_div_ϵr = f / ϵr
+
+    recip_box = invert_box_vectors(boundary)
+    grid_indices, grid_fractions = atom_last_batch(inter.grid_indices), atom_last_batch(inter.grid_fractions)
+    bsplines_θ, bsplines_dθ = atom_last_batch(inter.bsplines_θ), atom_last_batch(inter.bsplines_dθ)
+    charge_grid, recip_grid = inter.charge_grid, inter.recip_grid
+    grid_placement_batch!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, n_thr)
+    update_bsplines_batch!(bsplines_θ, bsplines_dθ, grid_fractions, order, n_thr)
+    spread_charge_batch!(charge_grid, inter.charge_grid_buffer, grid_indices,
+                    bsplines_θ, mesh_dims, order, atoms, inter.scheduler,
+                    Molly.n_spread_threads(n_thr))
+    
+    charge_grid = permutedims(charge_grid, (2, 3, 4, 1))
+    recip_grid = permutedims(recip_grid, (2, 3, 4, 1))
+    
+    Molly.grad_safe_fft!(charge_grid, recip_grid, inter.fft_plan)
+
+    charge_grid = permutedims(charge_grid, (4, 1, 2, 3))
+    recip_grid = permutedims(recip_grid, (4, 1, 2, 3))
+    
+    reciprocal_space_E = Molly.recip_conv_batch!(vir, inter.virial_buffer, recip_grid,
+                    inter.recip_conv_buffer, inter.bsplines_moduli_x, inter.bsplines_moduli_y,
+                    inter.bsplines_moduli_z, recip_box, f_div_ϵr, α, mesh_dims, boundary,
+                    energy_units, n_thr, Val(needs_vir), Val(needs_pe), λ)
+
+    charge_grid = permutedims(charge_grid, (2, 3, 4, 1))
+    recip_grid = permutedims(recip_grid, (2, 3, 4, 1))
+
+    Molly.grad_safe_bfft!(charge_grid, recip_grid, inter.bfft_plan)
+    charge_grid = permutedims(charge_grid, (4, 1, 2, 3))
+    recip_grid = permutedims(recip_grid, (4, 1, 2, 3))
+
+    if calculate_forces
+        Molly.interpolate_force_batch!(Fs, charge_grid, grid_indices, bsplines_θ,
+                            bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
+                            inter.scheduler, n_thr, λ)
+    end
+
+    if needs_pe || needs_vir
+        if isnothing(inter.pc_sum) || inter.grad_safe
+            cA = effective_charge.(atoms, Ref(inter.scheduler), Val(T), T(0))
+            cB = effective_charge.(atoms, Ref(inter.scheduler), Val(T), T(1))
+            pc_sum      = (sum(cA), sum(cB))
+            pc_abs2_sum = (sum(abs2,cA), sum(abs2,cB))
+        else
+            pc_sum, pc_abs2_sum = inter.pc_sum, inter.pc_abs2_sum
+        end
+        factor1 = -f_div_ϵr * T(π) / (2 * V * α^2)
+        factor2 = -f_div_ϵr * α / sqrt(T(π))
+        charge_E = factor1 .* (pc_sum .^ 2)
+        self_E   = (factor2 .* pc_abs2_sum) .+ charge_E
+        λ_weights = (1 - λ, λ)
+        self_E_scalar = self_E ⋅ λ_weights
+
+        if needs_vir
+            # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I.
+            charge_E_scalar = charge_E ⋅ λ_weights
+            vir .+= charge_E_scalar .* I(3)
+        end
+        if needs_pe
+            return reciprocal_space_E + self_E_scalar
+        end
+    end
+    return nothing
 end
