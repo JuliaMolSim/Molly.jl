@@ -156,3 +156,105 @@ n_steps = 25
 
 simulate!(sys, sim, n_steps; n_threads=Threads.nthreads())
 SUITE["protein"]["CPU parallel NL"] = @benchmarkable simulate!($(sys), $(sim), $(n_steps); n_threads=Threads.nthreads())
+
+# GPU copy of sys, reused by the CV benchmarks below 
+sys_gpu = if run_cuda_tests
+    velocities_f32 = [Float32.(v) for v in velocities]
+    System(joinpath(data_dir, "6mrr_equil.pdb"), ff; velocities=velocities_f32, array_type=CuArray)
+else
+    nothing
+end
+SUITE["cv"] = BenchmarkGroup()
+
+# Supplies a persistent scratch struct so MinDist/MaxDist/CMDist/Rg/RMSD take their fused GPU
+# kernel path (as a real BiasPotential does) instead of the unbatched fallback.
+function cv_scratch_kwargs(cv, coords, atoms, ::Type{AT}) where AT
+    if AT == CuArray && cv isa Union{CalcDist{<:Union{CalcMinDist, CalcMaxDist, CalcCMDist}}, CalcRg, CalcRMSD}
+        tmp_bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+        Molly.ensure_bias_dist_scratch!(tmp_bias, coords, atoms)
+        return (; scratch=tmp_bias.dist_scratch)
+    end
+    return NamedTuple()
+end
+
+# calculate_cv!'s positional-argument prefix before `buff` varies by CV type.
+bench_cv_value!(cv::CalcRMSD, coords, atoms, boundary, buff; kwargs...) = calculate_cv!(cv, coords, buff; kwargs...)
+bench_cv_value!(cv::CalcRg, coords, atoms, boundary, buff; kwargs...) = calculate_cv!(cv, coords, atoms, buff; kwargs...)
+bench_cv_value!(cv, coords, atoms, boundary, buff; kwargs...) = calculate_cv!(cv, coords, atoms, boundary, buff; kwargs...)
+
+cv_bench_systems = run_cuda_tests ? (("CPU", sys), ("CUDA", sys_gpu)) : (("CPU", sys),)
+array_type(s::System) = s.coords isa CuArray ? CuArray : Array
+
+# 1. Small, fixed-group CV cost.
+for (bk, s) in cv_bench_systems
+    local coords, atoms, boundary = s.coords, s.atoms, s.boundary
+    local AT = array_type(s)
+    group_a, group_b = collect(1:5), collect(1000:1004)
+    ref_coords = copy(coords)
+    cvs = (SingleDist = CalcDist([1], [2], CalcSingleDist(), :wrap),
+           MinDist    = CalcDist(group_a, group_b, CalcMinDist(), :wrap),
+           MaxDist    = CalcDist(group_a, group_b, CalcMaxDist(), :wrap),
+           CMDist     = CalcDist(group_a, group_b, CalcCMDist(), :wrap),
+           Rg         = CalcRg(group_a, :wrap),
+           RMSD       = CalcRMSD(ref_coords, group_a, group_a, :wrap),)
+    for (name, cv) in pairs(cvs)
+        buff = similar(coords, eltype(eltype(coords)), 1)
+        grad = ustrip_vec.(zero(coords))
+        d_buf = similar(coords, eltype(eltype(coords)), 1)
+        sk = cv_scratch_kwargs(cv, coords, atoms, AT)
+        bench_cv_value!(cv, coords, atoms, boundary, buff; sk...) # warm up / compile
+        cv_gradient!(grad, d_buf, cv, coords, atoms, boundary; sk...)
+        f_val = () -> bench_cv_value!(cv, coords, atoms, boundary, buff; sk...)
+        f_grad = () -> cv_gradient!(grad, d_buf, cv, coords, atoms, boundary; sk...)
+        SUITE["cv"]["micro $name $bk value"] = @benchmarkable $f_val() evals=1 samples=20 seconds=1
+        SUITE["cv"]["micro $name $bk gradient"] = @benchmarkable $f_grad() evals=1 samples=20 seconds=1
+    end
+end
+
+# 2. CV scaling vs CV group size, within the fixed sys/sys_gpu.
+for group_size in (50, 400, 3200)
+    for (bk, s) in cv_bench_systems
+        local coords, atoms, boundary = s.coords, s.atoms, s.boundary
+        local AT = array_type(s)
+        group_a, group_b = collect(1:group_size), collect((group_size + 1):(2 * group_size))
+        ref_coords = copy(coords)
+        cvs = (MinDist = CalcDist(group_a, group_b, CalcMinDist(), :wrap),
+               MaxDist = CalcDist(group_a, group_b, CalcMaxDist(), :wrap),
+               CMDist  = CalcDist(group_a, group_b, CalcCMDist(), :wrap),
+               Rg      = CalcRg(group_a, :wrap),
+               RMSD    = CalcRMSD(ref_coords, group_a, group_a, :wrap),)
+        for (name, cv) in pairs(cvs)
+            buff = similar(coords, eltype(eltype(coords)), 1)
+            grad = ustrip_vec.(zero(coords))
+            d_buf = similar(coords, eltype(eltype(coords)), 1)
+            sk = cv_scratch_kwargs(cv, coords, atoms, AT)
+            bench_cv_value!(cv, coords, atoms, boundary, buff; sk...) # warm up / compile
+            cv_gradient!(grad, d_buf, cv, coords, atoms, boundary; sk...)
+            f_val = () -> bench_cv_value!(cv, coords, atoms, boundary, buff; sk...)
+            f_grad = () -> cv_gradient!(grad, d_buf, cv, coords, atoms, boundary; sk...)
+            SUITE["cv"]["scaling $name $bk $group_size value"] = @benchmarkable $f_val() evals=1 samples=10 seconds=1
+            SUITE["cv"]["scaling $name $bk $group_size gradient"] = @benchmarkable $f_grad() evals=1 samples=10 seconds=1
+        end
+    end
+end
+
+# 3. CUDA graph capture smoke check (GPU only): a regression here throws instead of just
+# reporting a slower number.
+if run_cuda_tests
+    let group_a = collect(1:5), group_b = collect(1000:1004)
+        cv_pool = (
+            CalcDist([1], [2], CalcSingleDist(), :wrap),
+            CalcDist(group_a, group_b, CalcCMDist(), :wrap),
+        )
+        biases = ntuple(i -> BiasPotential(cv_pool[i], SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm")), 2)
+        # general_inters can't be attached to an already-built System in place.
+        cg_sys = System(atoms=sys_gpu.atoms, coords=sys_gpu.coords, boundary=sys_gpu.boundary,
+                        velocities=sys_gpu.velocities, pairwise_inters=sys_gpu.pairwise_inters,
+                        general_inters=biases, neighbor_finder=sys_gpu.neighbor_finder)
+        cg_sim = Langevin(dt=0.0002u"ps", temperature=298.0u"K", friction=1.0u"ps^-1")
+        Molly.check_cuda_graph_legality(cg_sys, true)
+        f_capture = () -> (simulate!(cg_sys, cg_sim, 20; use_cuda_graph=true); cg_sys.coords)
+        f_capture() # warm up / compile
+        SUITE["cv"]["cuda_graph capture"] = @benchmarkable $f_capture() evals=1 samples=3 seconds=5
+    end
+end

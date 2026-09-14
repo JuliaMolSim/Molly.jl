@@ -610,13 +610,10 @@ end
 # Returns coordinates on CPU
 unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 
-function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topology) where D
-    coords_cpu = from_device(coords)
-    if isnothing(topology)
-        return coords_cpu
-    end
-
-    # Fractional to Cartesian conversion
+# Closures converting between Cartesian and fractional (dimensionless, box-relative)
+# coordinates for a given boundary, plus a wrap-into-[0,1) helper. Shared by the CPU
+# (unwrap_molecules/molecule_centers) and GPU (_gpu_unwrap_fractional) implementations.
+function _frac_cart_closures(boundary, ::Val{D}) where D
     if hasproperty(boundary, :basis_vectors)
         if D != 3
             error("Triclinic boundary only defined for 3-dimensions")
@@ -631,6 +628,16 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
         to_cart = (f::SVector{D}) -> f .* sl # Length units
     end
     wrap01(v) = v .- floor.(v .+ eps(eltype(v))) # Keep in [0,1)
+    return to_frac, to_cart, wrap01
+end
+
+function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topology) where D
+    coords_cpu = from_device(coords)
+    if isnothing(topology)
+        return coords_cpu
+    end
+
+    to_frac, to_cart, wrap01 = _frac_cart_closures(boundary, Val(D))
 
     # Wrapped fractional coords
     N  = length(coords_cpu)
@@ -699,6 +706,63 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
         out[i] = to_cart(u[i])
     end
     return out
+end
+
+"""
+    _gpu_unwrap_fractional(coords, boundary, topology)
+
+GPU-native molecule unwrapping. The CPU `unwrap_molecules` walks the bond graph with a stack-based
+DFS -- an inherently sequential dependency. This gets the same result with no host round trip via
+parallel pointer-doubling on a precomputed spanning-forest `parent` pointer (`topology.parent`):
+each round replaces every atom's (parent, accumulated delta) with its parent's, halving the
+remaining path length to the root, so `topology.n_rounds` (~log2 of the deepest molecule's depth)
+rounds suffice regardless of molecule size. Per-molecule center-of-geometry is a segmented mean via
+sort + inclusive scan (no atomics).
+"""
+function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary, topology) where D
+    AT = array_type(coords)
+    to_frac, to_cart, wrap01 = _frac_cart_closures(boundary, Val(D))
+    f = wrap01.(to_frac.(coords)) # Dimensionless, GPU-resident
+
+    parent      = topology.parent      isa AT ? topology.parent      : to_device(topology.parent, AT)
+    sort_perm   = topology.sort_perm   isa AT ? topology.sort_perm   : to_device(topology.sort_perm, AT)
+    mol_offsets = topology.mol_offsets isa AT ? topology.mol_offsets : to_device(topology.mol_offsets, AT)
+    atom_mol    = topology.atom_molecule_inds isa AT ? topology.atom_molecule_inds :
+                      to_device(topology.atom_molecule_inds, AT)
+
+    minimum_image(df) = df .- round.(df)
+
+    cur_delta  = minimum_image.(f .- f[parent]) # One-hop delta to spanning-tree parent
+    cur_parent = parent
+    for _ in 1:topology.n_rounds # Pointer doubling
+        gp         = cur_parent[cur_parent]            # Gather (fancy-indexed, GPU-safe)
+        cur_delta  = cur_delta .+ cur_delta[cur_parent]
+        cur_parent = gp
+    end
+    # Postcondition: cur_parent[i] == root(i); cur_delta[i] == accumulated minimum-image delta
+    # from root(i) to i
+    u = f[cur_parent] .+ cur_delta # Unwrapped fractional coords
+
+    # Segmented (per-molecule) mean via sort + inclusive scan
+    u_sorted = u[sort_perm]
+    cum      = AcceleratedKernels.accumulate(+, u_sorted; init=zero(eltype(u_sorted)))
+    cum_ext  = similar(cum, length(cum) + 1)
+    cum_ext[1:1]   .= (zero(eltype(cum)),)
+    cum_ext[2:end] .= cum
+    seg_hi  = cum_ext[mol_offsets[2:end]   .+ 1]
+    seg_lo  = cum_ext[mol_offsets[1:end-1] .+ 1]
+    counts  = mol_offsets[2:end] .- mol_offsets[1:end-1]
+    cog     = (seg_hi .- seg_lo) ./ counts # Length n_mol, fractional center of geometry
+
+    return u, cog, to_cart, wrap01, atom_mol
+end
+
+function unwrap_molecules(coords::AbstractGPUArray{<:SVector{D}}, boundary, topology) where D
+    isnothing(topology) && return coords
+    u, cog, to_cart, _, atom_mol = _gpu_unwrap_fractional(coords, boundary, topology)
+    floor_sv(v) = floor.(v) # `v` is one SVector; broadcasts over its own components
+    u = u .- floor_sv.(cog)[atom_mol]
+    return to_cart.(u)
 end
 
 function check_correction_arg(correction)
@@ -1172,8 +1236,9 @@ end
 function molecule_centers(coords::AbstractGPUArray,
                           boundary::AbstractBoundary{<:Any, T},
                           topology) where T
-    AT = array_type(coords)
-    return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
+    isnothing(topology) && return coords
+    _, cog, to_cart, wrap01, _ = _gpu_unwrap_fractional(coords, boundary, topology)
+    return to_cart.(wrap01.(cog))
 end
 
 rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)

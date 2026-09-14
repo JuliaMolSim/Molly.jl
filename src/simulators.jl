@@ -41,6 +41,49 @@ function check_simulate_inputs(init_step::Integer, run_loggers, strictness)
     check_strictness(strictness)
 end
 
+"""
+    check_cuda_graph_legality(sys, use_cuda_graph)
+
+Validates a `use_cuda_graph=true` request (supported by `VelocityVerlet`, `DPDVelocityVerlet`,
+`StormerVerlet`, `NoseHoover`, `Langevin` and `OverdampedLangevin`'s `simulate!` for now), which
+wraps each step's steady-state `forces!` call in a CUDA graph to amortise per-kernel host-dispatch
+overhead -- worthwhile with several attached `BiasPotential`s. Every kernel inside the captured
+region must have zero host syncs and zero GPU allocation, so this errors loudly up front rather
+than failing silently or mid-capture when that doesn't hold.
+"""
+function check_cuda_graph_legality(sys, use_cuda_graph::Bool)
+    use_cuda_graph || return nothing
+    if !(sys.coords isa AbstractGPUArray)
+        error("use_cuda_graph=true requires a GPU-resident System (sys.coords isa AbstractGPUArray).")
+    end
+    for inter in values(sys.general_inters)
+        inter isa BiasPotential || continue
+        if !inter.uses_persistent_buffers
+            error("use_cuda_graph=true is not supported: a BiasPotential with CV type " *
+                  "$(typeof(inter.cv_type)) does not use the built-in persistent-buffer " *
+                  "cv_gradient! path (custom/AD-only CV types allocate every call).")
+        end
+        if inter.cv_type isa CalcRMSD
+            error("use_cuda_graph=true is not supported for CalcRMSD: its Kabsch alignment " *
+                  "requires a host SVD every call, which cannot be captured.")
+        end
+        if inter.cv_type.correction == :pbc
+            error("use_cuda_graph=true is not supported for a BiasPotential with " *
+                  "correction=:pbc: unwrap_molecules is GPU-native but still allocates every " *
+                  "call, which cannot be captured. Use correction=:wrap instead.")
+        end
+    end
+    if length(sys.virtual_sites) > 0
+        error("use_cuda_graph=true is not supported for a System with virtual sites " *
+              "(not audited for graph-capture safety).")
+    end
+    if length(sys.constraints) > 0
+        error("use_cuda_graph=true is not supported for a System with constraints " *
+              "(not audited for graph-capture safety).")
+    end
+    return nothing
+end
+
 function default_show_progress()
     if haskey(ENV, "MOLLY_SHOW_PROGRESS")
         return parse(Bool, lowercase(ENV["MOLLY_SHOW_PROGRESS"]))
@@ -566,8 +609,11 @@ end
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           use_cuda_graph::Bool=false,
+                           finite_check_every::Integer=20)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_cuda_graph_legality(sys, use_cuda_graph)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -578,6 +624,8 @@ end
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers, use_cuda_graph;
+                               n_threads=n_threads, strictness=strictness)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(needs_vir_init);
             n_threads=n_threads, strictness=strictness)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -596,6 +644,7 @@ end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    has_bias_potential = any(inter -> inter isa BiasPotential, values(sys.general_inters))
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -623,8 +672,8 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys)
 
-        forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t_dt, sys, neighbors, step_n, buffers, needs_vir_step,
+                    Val(use_cuda_graph), has_bias_potential, finite_check_every; n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .+= accels_t_dt .* dt_div2
@@ -728,8 +777,11 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           use_cuda_graph::Bool=false,
+                           finite_check_every::Integer=20)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_cuda_graph_legality(sys, use_cuda_graph)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -748,6 +800,8 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                     strictness=strictness)
     end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers, use_cuda_graph;
+                               n_threads=n_threads, strictness=strictness)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(needs_vir_init);
             n_threads=n_threads, strictness=strictness)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -763,6 +817,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    has_bias_potential = any(inter -> inter isa BiasPotential, values(sys.general_inters))
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -802,8 +857,8 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
                                         strictness=strictness)
         end
-        forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t_dt, sys, neighbors, step_n, buffers, needs_vir_step,
+                    Val(use_cuda_graph), has_bias_potential, finite_check_every; n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .= velocities_half .+ accels_t_dt .* dt_div2
@@ -1002,8 +1057,11 @@ end
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           use_cuda_graph::Bool=false,
+                           finite_check_every::Integer=20)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_cuda_graph_legality(sys, use_cuda_graph)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(nothing, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -1014,6 +1072,8 @@ end
     accels_t = calc_accels.(forces_t, masses(sys))
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers, use_cuda_graph;
+                               n_threads=n_threads, strictness=strictness)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
                 strictness=strictness)
@@ -1032,12 +1092,13 @@ end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    has_bias_potential = any(inter -> inter isa BiasPotential, values(sys.general_inters))
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
-        forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step, Val(use_cuda_graph),
+                    has_bias_potential, finite_check_every; n_threads=n_threads, strictness=strictness)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         coords_copy .= sys.coords
@@ -1128,8 +1189,11 @@ end
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness()) where T
+                           strictness=default_strictness(),
+                           use_cuda_graph::Bool=false,
+                           finite_check_every::Integer=20) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_cuda_graph_legality(sys, use_cuda_graph)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -1141,6 +1205,8 @@ end
     accels_t = calc_accels.(forces_t, masses(sys))
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers, use_cuda_graph;
+                               n_threads=n_threads, strictness=strictness)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
                 strictness=strictness)
@@ -1174,11 +1240,13 @@ end
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
 
+    has_bias_potential = any(inter -> inter isa BiasPotential, values(sys.general_inters))
+
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
-        forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step, Val(use_cuda_graph),
+                    has_bias_potential, finite_check_every; n_threads=n_threads, strictness=strictness)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         sys.velocities .+= accels_t .* sim.dt
@@ -1468,8 +1536,11 @@ end
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           use_cuda_graph::Bool=false,
+                           finite_check_every::Integer=20)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_cuda_graph_legality(sys, use_cuda_graph)
     if length(sys.constraints) > 0
         err_str = "OverdampedLangevin is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -1483,6 +1554,8 @@ end
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
+    warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers, use_cuda_graph;
+                               n_threads=n_threads, strictness=strictness)
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                    n_threads=n_threads, strictness=strictness)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -1491,11 +1564,12 @@ end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations", "noise")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t, noise),
                                    check_nan_labels, init_step)
+    has_bias_potential = any(inter -> inter isa BiasPotential, values(sys.general_inters))
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
-                strictness=strictness)
+        forces_step!(forces_t, sys, neighbors, step_n, buffers, false, Val(use_cuda_graph),
+                    has_bias_potential, finite_check_every; n_threads=n_threads, strictness=strictness)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         random_velocities!(noise, sys, sim.temperature; rng=rng)
@@ -1567,8 +1641,11 @@ end
                            show_progress=default_show_progress(),
                            check_nans=default_check_nans(sys, sim),
                            rng=Random.default_rng(),
-                           strictness=default_strictness())
+                           strictness=default_strictness(),
+                           use_cuda_graph::Bool=false,
+                           finite_check_every::Integer=20)
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_cuda_graph_legality(sys, use_cuda_graph)
     if length(sys.constraints) > 0
         err_str = "NoseHoover is not currently compatible with constraints, " *
                   "constraints will be ignored"
@@ -1583,6 +1660,8 @@ end
                                n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
+    warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers, use_cuda_graph;
+                               n_threads=n_threads, strictness=strictness)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
             strictness=strictness)
     accels_t = calc_accels.(forces_t, masses(sys))
@@ -1595,6 +1674,7 @@ end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    has_bias_potential = any(inter -> inter isa BiasPotential, values(sys.general_inters))
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1611,8 +1691,8 @@ end
         T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
-        forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t_dt, sys, neighbors, step_n, buffers, needs_vir_step,
+                    Val(use_cuda_graph), has_bias_potential, finite_check_every; n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .= (v_half .+ accels_t_dt .* dt_div2) ./

@@ -554,10 +554,14 @@ Topology information for a system.
 Stores the index of the molecule each atom belongs to, the number of
 atoms in each molecule and the list of bonded atom pairs.
 """
-struct MolecularTopology
+struct MolecularTopology{VI <: AbstractVector{Int32}}
     atom_molecule_inds::Vector{Int32}
     molecule_atom_counts::Vector{Int32}
     bonded_atoms::Vector{Tuple{Int32, Int32}}
+    parent::VI       # length N; spanning-forest parent per atom, parent[root] == root
+    sort_perm::VI    # length N; permutation grouping atoms contiguously by molecule id
+    mol_offsets::VI  # length n_mol+1; 0-based prefix boundaries into sort_perm order
+    n_rounds::Int    # pointer-doubling round count for GPU unwrap_molecules; host Int, not device data
 end
 
 function bond_graph(bond_is, bond_js, n_atoms)
@@ -568,9 +572,9 @@ function bond_graph(bond_is, bond_js, n_atoms)
     return g
 end
 
-MolecularTopology(amis, macs) = MolecularTopology(amis, macs, [])
+MolecularTopology(amis, macs; kwargs...) = MolecularTopology(amis, macs, []; kwargs...)
 
-function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
+function MolecularTopology(bond_is, bond_js, n_atoms::Integer; kwargs...)
     g = bond_graph(bond_is, bond_js, n_atoms)
     cc = connected_components(g)
     atom_molecule_inds = zeros(Int32, n_atoms)
@@ -581,7 +585,62 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
     end
     molecule_atom_counts = length.(cc)
     bonded_atoms = collect(zip(bond_is, bond_js))
-    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
+    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms; kwargs...)
+end
+
+# Spanning forest (parent pointer per atom, self-loop at roots) of the bonded-atom graph via a
+# stack-based DFS. Any consistent spanning tree gives a physically valid unwrap, so the DFS's
+# particular choice doesn't matter for correctness. Feeds `parent`/`n_rounds` for
+# `_gpu_unwrap_fractional`'s pointer-doubling (spatial.jl); the CPU `unwrap_molecules` uses its
+# own independent traversal instead.
+function molecule_spanning_forest(atom_molecule_inds, bonded_atoms)
+    n_atoms = length(atom_molecule_inds)
+    adj = [Int[] for _ in 1:n_atoms]
+    for (i, j) in bonded_atoms
+        push!(adj[i], j)
+        push!(adj[j], i)
+    end
+    parent = collect(Int32, 1:n_atoms)   # self-loop default (covers bond-free/isolated atoms too)
+    depth = zeros(Int, n_atoms)
+    visited = falses(n_atoms)
+    for seed in 1:n_atoms
+        visited[seed] && continue
+        visited[seed] = true
+        stack = Int[seed]
+        while !isempty(stack)
+            i = pop!(stack)
+            for j in adj[i]
+                visited[j] && continue
+                parent[j] = i
+                depth[j] = depth[i] + 1
+                visited[j] = true
+                push!(stack, j)
+            end
+        end
+    end
+    max_depth = maximum(depth; init=0)
+    n_rounds = max_depth <= 1 ? 0 : ceil(Int, log2(max_depth)) + 1  # +1 safety margin
+    return parent, n_rounds
+end
+
+function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms;
+                           array_type::Type{AT}=Array) where AT
+    n_mol = length(molecule_atom_counts)
+    parent_cpu, n_rounds = molecule_spanning_forest(atom_molecule_inds, bonded_atoms)
+
+    sort_perm_cpu = Int32.(sortperm(atom_molecule_inds))
+    mol_offsets_cpu = Vector{Int32}(undef, n_mol + 1)
+    mol_offsets_cpu[1] = 0
+    for m in 1:n_mol
+        mol_offsets_cpu[m + 1] = mol_offsets_cpu[m] + molecule_atom_counts[m]
+    end
+
+    return MolecularTopology(
+        Vector{Int32}(atom_molecule_inds), Vector{Int32}(molecule_atom_counts),
+        Vector{Tuple{Int32, Int32}}(collect(bonded_atoms)),
+        to_device(parent_cpu, AT), to_device(sort_perm_cpu, AT), to_device(mol_offsets_cpu, AT),
+        n_rounds,
+    )
 end
 
 """

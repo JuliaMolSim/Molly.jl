@@ -334,6 +334,56 @@
     mcs = Molly.molecule_centers(coords, boundary, topology)
     @test isapprox(mcs, [SVector(0.05, 0.0), SVector(1.0, 1.0)]; atol=1e-6)
 
+    # unwrap_molecules: GPU (pointer-doubling spanning-forest) vs CPU (DFS) agreement.
+    # `topology` is built without `array_type` (defaults to Array), matching test/bias.jl's
+    # hand-built-topology pattern, so this also exercises unwrap_molecules' defensive
+    # re-upload path when topology's arrays don't already match `coords`' backend.
+    coords_chain = [SVector(1.95, 0.0, 0.0), SVector(0.05, 0.0, 0.0), SVector(0.15, 0.0, 0.0),
+                    SVector(1.0 , 1.0, 1.0)]
+    boundary_chain = CubicBoundary(2.0)
+    topology_chain = MolecularTopology([1, 1, 1, 2], [3, 1], [(1, 2), (2, 3)])
+    uw_cpu = Molly.unwrap_molecules(coords_chain, boundary_chain, topology_chain)
+    for AT in array_list
+        uw_gpu = Molly.unwrap_molecules(AT(coords_chain), boundary_chain, topology_chain)
+        @test isapprox(from_device(uw_gpu), uw_cpu; atol=1e-9)
+    end
+
+    # A ring/cycle molecule: the cycle-closing bond (4,1) is never anyone's spanning-tree
+    # parent, mirroring the CPU DFS's `visited` check, so both should agree regardless.
+    coords_ring = [SVector(0.0, 0.0, 0.0), SVector(1.0, 0.0, 0.0),
+                   SVector(1.0, 1.0, 0.0), SVector(0.0, 1.0, 0.0)]
+    boundary_ring = CubicBoundary(10.0)
+    topology_ring = MolecularTopology([1, 1, 1, 1], [4], [(1, 2), (2, 3), (3, 4), (4, 1)])
+    uw_ring_cpu = Molly.unwrap_molecules(coords_ring, boundary_ring, topology_ring)
+    for AT in array_list
+        uw_ring_gpu = Molly.unwrap_molecules(AT(coords_ring), boundary_ring, topology_ring)
+        @test isapprox(from_device(uw_ring_gpu), uw_ring_cpu; atol=1e-9)
+    end
+
+    # Mixed multi-component system: two 3-atom "waters", a longer 5-atom chain (depth 4,
+    # exercising n_rounds > 1), and two bond-free isolated atoms, all in one call.
+    coords_mixed = [
+        SVector(0.0, 0.0, 0.0), SVector(0.1, 0.0, 0.0), SVector(-0.1, 0.0, 0.0),
+        SVector(5.0, 0.0, 0.0), SVector(5.1, 0.0, 0.0), SVector(4.9, 0.0, 0.0),
+        SVector(10.0, 0.0, 0.0), SVector(10.1, 0.0, 0.0), SVector(10.2, 0.0, 0.0),
+        SVector(10.3, 0.0, 0.0), SVector(10.4, 0.0, 0.0),
+        SVector(15.0, 0.0, 0.0), SVector(2.0, 2.0, 2.0),
+    ]
+    boundary_mixed = CubicBoundary(20.0)
+    topology_mixed = MolecularTopology(
+        [1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 4, 5],
+        [3, 3, 5, 1, 1],
+        [(1, 2), (1, 3), (4, 5), (4, 6), (7, 8), (8, 9), (9, 10), (10, 11)],
+    )
+    uw_mixed_cpu = Molly.unwrap_molecules(coords_mixed, boundary_mixed, topology_mixed)
+    for AT in array_list
+        uw_mixed_gpu = Molly.unwrap_molecules(AT(coords_mixed), boundary_mixed, topology_mixed)
+        @test isapprox(from_device(uw_mixed_gpu), uw_mixed_cpu; atol=1e-9)
+    end
+    # Bond-free atoms are their own root and pass through unchanged (mod box wrap)
+    @test isapprox(uw_mixed_cpu[12], coords_mixed[12]; atol=1e-9)
+    @test isapprox(uw_mixed_cpu[13], coords_mixed[13]; atol=1e-9)
+
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     for AT in array_list
         sys = System(

@@ -1,7 +1,8 @@
+using Suppressor
 using Molly
 using Molly: from_device, to_device, NaNSimulationError, ForceFieldXMLError,
              MissingResidueTemplateError
-using AMDGPU
+@suppress using AMDGPU
 using Aqua
 import AtomsBase
 using AtomsBaseTesting
@@ -9,7 +10,7 @@ import AtomsCalculators
 using BenchmarkTools
 import BioStructures
 import Chemfiles
-using CUDA
+@suppress using CUDA
 using Enzyme
 using FiniteDifferences
 using GPUArrays
@@ -18,8 +19,8 @@ using JSON3
 using KernelAbstractions
 using KernelDensity
 using Measurements
-using Metal
-using oneAPI
+@suppress using Metal
+@suppress using oneAPI
 import SimpleCrystals
 using Suppressor
 

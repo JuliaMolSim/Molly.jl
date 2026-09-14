@@ -649,6 +649,36 @@ simulate!(sys, simulator, 100_000)
 ```
 See also [this example](@ref "Protein bias potential").
 
+### GPU offload for biased simulations
+
+A [`BiasPotential`](@ref) adds a CV evaluation, a CV gradient and a bias-gradient calculation on top of the regular force calculation, every step. When `coords` (and the rest of the `System`) is GPU-resident, `calculate_cv`/`cv_gradient` for the built-in CV types run on GPU too, using persistent scratch buffers to avoid allocating on every call -- so a GPU `System` biased by one or more `BiasPotential`s stays GPU-resident end to end, it isn't dropped to CPU for the CV part.
+
+Each of these steps is its own kernel launch, and for small, cheap kernels like most CV/bias calculations, launch (host-dispatch) latency rather than the arithmetic itself tends to dominate the cost. This is a general GPU characteristic, not specific to bias potentials: it's the same reason Molly fuses several of its own hot-path kernels internally (e.g. the persistent-buffer CV paths above fuse a reduce-and-finalize into one launch rather than issuing several small ones) where doing so is worthwhile. As a rough guide:
+
+* **Small systems (up to a few thousand atoms) with one or two CVs**: the extra bias kernels' launch overhead is a significant fraction of the whole step. GPU offload is usually still worth it once the rest of the simulation is already on GPU, but don't expect a large win from the bias machinery alone at this scale -- if you write a custom CV/bias type, look for opportunities to fuse work into fewer kernel launches, the same way the built-in persistent-buffer paths do.
+* **Larger systems, or several simultaneous CVs (e.g. multi-dimensional AWH ladders with 3-10 `BiasPotential`s)**: the CV/bias kernels amortize well over the main force/energy kernels, and GPU offload is clearly worthwhile.
+
+#### CUDA graph capture (`use_cuda_graph`)
+
+Simulators that support it can be run with `simulate!(sys, sim, n_steps; use_cuda_graph=true)`, which records the steady-state force calculation (main pairwise/specific force kernels plus every `BiasPotential`'s CV-gradient and bias-force kernels) into a single [CUDA graph](https://developer.nvidia.com/blog/cuda-graphs/) and replays it on subsequent steps, instead of dispatching each kernel from the host individually. This removes almost all host-dispatch overhead from steps that don't need anything else (no virial, no neighbor/tile-list refresh) -- exactly the case that dominates a long production run with several active CVs, where per-kernel launch latency would otherwise be the bottleneck described above.
+
+**When it's worth it.** Recapturing a graph (or replaying an already-captured one) is cheap relative to not capturing at all: a bare graph replay costs roughly half what a single plain (uncaptured) force calculation does, and even a full re-capture (record + instantiate a fresh `CuGraphExec`) is still cheaper than the naive per-kernel dispatch it replaces. `use_cuda_graph=true` is close to a strict win whenever it's legal for your system -- there's no need to reserve it only for very long runs.
+
+**Requirements and restrictions.** `check_cuda_graph_legality` is called automatically at the start of `simulate!` and raises a clear error if any of the following don't hold, since every kernel inside the captured region must have zero host syncs and zero GPU allocation:
+
+* `sys.coords` must be a GPU-resident array.
+* Every [`BiasPotential`](@ref) must use the built-in persistent-buffer `cv_gradient!` path (`uses_persistent_buffers`); custom or AD-only CV types that allocate on every call are not supported.
+* [`CalcRMSD`](@ref) is not supported (its Kabsch alignment needs a host SVD every call). [`CalcMinDist`](@ref)/[`CalcMaxDist`](@ref) *are* supported, via a fully device-resident tile-reduce.
+* A CV's `correction` must be `:wrap`, not `:pbc` (`:pbc`'s `unwrap_molecules` allocates GPU memory every call).
+* The system must have no virtual sites and no constraints (not yet audited for capture safety).
+
+**What still runs uncaptured.** Steps that need a virial (for barostat coupling) or that trigger a neighbor/tile-list refresh always fall back to a plain, uncaptured force calculation -- these steps have host syncs (e.g. reading back the refreshed pair count) that cannot legally happen inside a capture. The pairwise-force kernel's launch grid is sized from the neighbor list's pair count, so a tile refresh can change the shape of the very kernel a captured graph would otherwise replay; Molly detects this automatically and invalidates the captured graph immediately after a refresh, so the next steady-state step transparently re-captures rather than replaying a graph with a stale launch grid. Neighbor/tile refreshes are relatively infrequent (every few tens to a few hundred steps, depending on `neighbor_finder`/buffer settings), so the cost of this occasional re-capture is negligible against the savings on every step in between.
+
+A few practical notes:
+
+* Before the first captured step, `simulate!` runs a short internal warm-up (materializing every `BiasPotential`'s lazily-allocated buffers and JIT-compiling the captured-path kernels), so capture itself doesn't pay for first-call allocation or compilation. This happens automatically whenever `use_cuda_graph=true`; there's nothing to do for it.
+* If you write a custom CV or bias type intended to run under `use_cuda_graph=true`, make sure it never allocates GPU memory and never performs a host sync (e.g. no `Array`/`from_device` readback, no `findmin`/`findmax` without a device-resident reduction) anywhere on its hot path -- either will error inside a capture, or worse, silently corrupt the recorded graph.
+
 ## Monte Carlo sampling
 
 Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo sampling with Metropolis selection rates.
