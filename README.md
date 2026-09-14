@@ -1,4 +1,4 @@
-<img src="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/images/logo_molly.png" alt="Molly logo" width="400">
+![Molly logo](https://raw.githubusercontent.com/JuliaMolSim/Molly.jl/master/docs/src/images/logo_molly.svg)
 
 [![Build status](https://github.com/JuliaMolSim/Molly.jl/workflows/CI/badge.svg)](https://github.com/JuliaMolSim/Molly.jl/actions)
 [![Coverage status](https://codecov.io/gh/JuliaMolSim/Molly.jl/branch/master/graph/badge.svg?token=RD9XF0W90L)](https://codecov.io/gh/JuliaMolSim/Molly.jl)
@@ -42,7 +42,7 @@ Implemented features include:
 - Some analysis functions, e.g. RDF.
 - Visualise simulations as animations with [Makie.jl](https://makie.juliaplots.org/stable).
 - Compatibility with [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) and [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl).
-- Interface to use Python [ASE](https://wiki.fysik.dtu.dk/ase) calculators.
+- Interface to use Python [ASE](https://ase-lib.org) calculators.
 - Control of random numbers during simulation, allowing reproducible stochastic simulations.
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
@@ -150,7 +150,7 @@ Molly.jl follows the Contributor Covenant [code of conduct](https://github.com/J
 
 ## Citation
 
-If you use Molly, please cite the following paper ([bib entry here](https://github.com/JuliaMolSim/Molly.jl/blob/master/CITATION.bib)):
+If you use Molly, please cite the following paper ([bib entry here](https://github.com/JuliaMolSim/Molly.jl/blob/master/CITATION.bib), [cff entry here](https://github.com/JuliaMolSim/Molly.jl/blob/master/CITATION.cff)):
 
 - Greener JG. Differentiable simulation to develop molecular dynamics force fields for disordered proteins, [Chemical Science](https://doi.org/10.1039/D3SC05230C) 15, 4897-4909 (2024)
 
