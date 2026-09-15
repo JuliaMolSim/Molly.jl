@@ -984,6 +984,57 @@ end
     @test maximum(maximum(abs.(v)) for v in (s1.coords .- s2.coords)) < 1e-5u"nm"
 end
 
+@testset "Reproducible randomness" begin
+    n_atoms = 100
+    n_steps = 200
+    temp = 300.0u"K"
+    boundary = CubicBoundary(4.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=Xoshiro(2024))
+    atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+             for _ in 1:n_atoms]
+    make_sys() = System(
+        atoms=atoms,
+        coords=copy(coords),
+        boundary=boundary,
+        velocities=[random_velocity(10.0u"g/mol", temp; rng=Xoshiro(2024 + i))
+                    for i in 1:n_atoms],
+        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),),
+        neighbor_finder=DistanceNeighborFinder(
+            eligible=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=1.2u"nm",
+        ),
+    )
+
+    # Stochastic simulators and couplers should give identical trajectories for the
+    #   same seed, and different trajectories for different seeds
+    simulators = (
+        ("Langevin", Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1")),
+        ("Andersen", VelocityVerlet(dt=0.002u"ps",
+                        coupling=AndersenThermostat(temp, 1.0u"ps"))),
+        ("MC barostat", VelocityVerlet(dt=0.002u"ps",
+                        coupling=(AndersenThermostat(temp, 1.0u"ps"),
+                                  MonteCarloBarostat(1.0u"bar", temp, boundary; n_steps=10)))),
+    )
+    for (sim_name, sim) in simulators
+        sys_a, sys_b, sys_c = make_sys(), make_sys(), make_sys()
+        simulate!(sys_a, deepcopy(sim), n_steps; n_threads=1, rng=Xoshiro(100))
+        simulate!(sys_b, deepcopy(sim), n_steps; n_threads=1, rng=Xoshiro(100))
+        simulate!(sys_c, deepcopy(sim), n_steps; n_threads=1, rng=Xoshiro(200))
+        @test sys_a.coords == sys_b.coords
+        @test sys_a.velocities == sys_b.velocities
+        @test sys_a.boundary == sys_b.boundary
+        @test sys_a.coords != sys_c.coords
+    end
+
+    # Velocity generation with the same seed is reproducible
+    sys_v = make_sys()
+    @test random_velocities(sys_v, temp; rng=Xoshiro(1)) ==
+          random_velocities(sys_v, temp; rng=Xoshiro(1))
+    @test random_velocities(sys_v, temp; rng=Xoshiro(1)) !=
+          random_velocities(sys_v, temp; rng=Xoshiro(2))
+end
+
 @testset "Nosé-Hoover" begin
     n_atoms = 256
     atom_mass = 39.98u"g/mol"
