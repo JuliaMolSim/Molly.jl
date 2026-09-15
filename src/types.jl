@@ -497,8 +497,11 @@ dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : def
     charge(atom)
 
 The partial charge of an [`Atom`](@ref).
+
+Custom atom types should implement this function if charges are going to be used
+unless they have a `charge` field defined, which the function accesses by default.
 """
-charge(atom) = atom.charge
+@inline charge(atom) = atom.charge
 
 """
     mass(atom)
