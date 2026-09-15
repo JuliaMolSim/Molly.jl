@@ -428,6 +428,17 @@ end
         p2 = pdb_sys.coords[1]
         @test isapprox(p1, p2; rtol=0.001) # isapprox due to rounding errors in PDB file
     end
+
+    # An existing file is appended to with a warning, or deleted with overwrite=true
+    tw_path = tempname() * ".dcd"
+    write(tw_path, "existing content")
+    @test_logs (:warn,) TrajectoryWriter(10, tw_path)
+    @test isfile(tw_path)
+    tw = @test_logs TrajectoryWriter(10, tw_path; overwrite=true)
+    @test !isfile(tw_path)
+    @test tw.filepath == tw_path
+    # No warning and no error when the file does not exist
+    @test_logs TrajectoryWriter(10, tw_path; overwrite=true)
 end
 
 @testset "Structure file formats" begin
