@@ -1247,7 +1247,7 @@ correspond to the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
 [Fass et al. 2018](https://doi.org/10.3390/e20050318).
 
-Not currently compatible with constraints, will print a warning and continue
+Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
 # Arguments
@@ -1315,7 +1315,7 @@ end
                            strictness=default_strictness()) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
-        err_str = "LangevinSplitting is not currently compatible with constraints, " *
+        err_str = "LangevinSplitting is not compatible with constraints, " *
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
@@ -1436,7 +1436,7 @@ end
 
 Simulates the overdamped Langevin equation using the Euler-Maruyama method.
 
-Not currently compatible with constraints, will print a warning and continue
+Not compatible with constraints, will print a warning and continue
 without applying constraints.
 Not compatible with gradient calculation using Enzyme.
 
@@ -1471,7 +1471,7 @@ end
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
-        err_str = "OverdampedLangevin is not currently compatible with constraints, " *
+        err_str = "OverdampedLangevin is not compatible with constraints, " *
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
@@ -1534,7 +1534,7 @@ temperature of the system.
 See [Evans and Holian 1985](https://doi.org/10.1063/1.449071).
 The current implementation is limited to ergodic systems.
 
-Not currently compatible with constraints, will print a warning and continue
+Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
 # Arguments
@@ -1570,7 +1570,7 @@ end
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
-        err_str = "NoseHoover is not currently compatible with constraints, " *
+        err_str = "NoseHoover is not compatible with constraints, " *
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
@@ -2294,7 +2294,7 @@ end
 
 A Monte Carlo simulator that uses the Metropolis algorithm to sample the configuration space.
 
-Not currently compatible with constraints, will print a warning and continue
+Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
 # Arguments
@@ -2325,7 +2325,7 @@ end
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
-        err_str = "MetropolisMonteCarlo is not currently compatible with constraints, " *
+        err_str = "MetropolisMonteCarlo is not compatible with constraints, " *
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end

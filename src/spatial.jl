@@ -146,7 +146,7 @@ height/width.
 Setting the keyword argument `approx_images` to `false` means the exact closest
 image is found, which is slower.
 
-Not currently compatible with infinite boundaries.
+Not compatible with infinite boundaries.
 """
 struct TriclinicBoundary{D, T, C, A, I} <: AbstractBoundary{D, T, C}
     basis_vectors::SVector{3, SVector{3, C}}

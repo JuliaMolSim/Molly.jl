@@ -504,7 +504,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                             push!(virtual_sites, vs)
                         elseif vs_type == "localCoords"
                             report_issue(
-                                "Virtual site type $vs_type not currently supported, ignoring",
+                                "Virtual site type $vs_type not supported, ignoring",
                                 strictness;
                                 error_type=ForceFieldXMLError,
                             )
@@ -573,7 +573,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             for patch in eachelement(entry)
                 pname = xml_attr(patch, "name", ff_file)
                 if haskey(patch, "residues") && patch["residues"] != "1"
-                    err_str = "Residue patches altering multiple templates not currently " *
+                    err_str = "Residue patches altering multiple templates not " *
                               "supported, ignoring patch $pname"
                     report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                     continue
@@ -698,7 +698,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
         elseif entry_name == "CustomTorsionForce"
             if xml_attr(entry, "energy", ff_file) != "k*(theta-theta0)^2"
                 err_str = "CustomTorsionForce without energy=\"k*(theta-theta0)^2\" not " *
-                          "currently supported, ignoring"
+                          "supported, ignoring"
                 report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                 continue
             end
@@ -721,8 +721,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         (:custom_rule, p1, p2, p3, p4, spec, params_any, has_wildcard),
                     )
                 elseif torsion.name == "Proper"
-                    err_str = "CustomTorsionForce with Proper entries not " *
-                              "currently supported, ignoring"
+                    err_str = "CustomTorsionForce with Proper entries not supported, ignoring"
                     report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                     continue
                 end
@@ -934,7 +933,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                     "AmoebaWcaDispersionForce", "AmoebaGeneralizedKirkwoodForce",
                 )
             report_issue(
-                "$entry_name not currently supported, ignoring",
+                "$entry_name not supported, ignoring",
                 strictness;
                 error_type=ForceFieldXMLError,
             )

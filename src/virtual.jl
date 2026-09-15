@@ -115,7 +115,7 @@ Returns a `VirtualSite` defined by:
 ```
 
 Only compatible with 3D systems.
-Not currently compatible with virial calculation.
+Not compatible with virial calculation.
 Not compatible with gradient calculation using Enzyme.
 """
 function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, atom_3::Integer,
