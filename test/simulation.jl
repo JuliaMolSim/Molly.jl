@@ -463,6 +463,162 @@ end
     @test_throws ArgumentError Molly.calc_n_steps(ustrip(sim_time), dt)
 end
 
+# The fields required by the interactions used below are present on the type
+struct AtomWithFields{T, M, S, E}
+    index::Int32
+    mass::M
+    charge::T
+    σ::S
+    ϵ::E
+    λ::T
+end
+
+# The mass and charge are read through `mass` and `charge`, so they do not have to
+# be fields with those names
+struct AtomWithAccessors{T, M, S, E}
+    m::M
+    q::T
+    σ::S
+    ϵ::E
+    λ::T
+end
+
+Molly.mass(a::AtomWithAccessors) = a.m
+Molly.charge(a::AtomWithAccessors) = a.q
+
+@testset "Custom atom types" begin
+    n_atoms = 100
+    n_steps = 100
+    dt = 0.001u"ps"
+    temp = 100.0u"K"
+    boundary = CubicBoundary(4.0u"nm")
+    coords_start = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
+    vels_start = [random_velocity(10.0u"g/mol", temp; rng=Xoshiro(i)) for i in 1:n_atoms]
+    bonds = [HarmonicBond(k=10_000.0u"kJ * mol^-1 * nm^-2", r0=0.2u"nm") for _ in 1:(n_atoms ÷ 2)]
+    eligible = trues(n_atoms, n_atoms)
+    for i in 1:2:n_atoms
+        eligible[i, i + 1] = false
+        eligible[i + 1, i] = false
+    end
+    charge_i(i) = (isodd(i) ? 0.2 : -0.2)
+    make_ref_atom(i) = Atom(index=i, mass=10.0u"g/mol", charge=charge_i(i),
+                            σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    custom_makers = (
+        "AtomWithFields"    => i -> AtomWithFields(Int32(i), 10.0u"g/mol", charge_i(i),
+                                                   0.3u"nm", 0.2u"kJ * mol^-1", 1.0),
+        "AtomWithAccessors" => i -> AtomWithAccessors(10.0u"g/mol", charge_i(i),
+                                                      0.3u"nm", 0.2u"kJ * mol^-1", 1.0),
+    )
+
+    # The narrowed list of atom fields read by the interactions on the CUDA path is only
+    #   used when every entry is a field of the atom type, otherwise every field is used
+    inters_test = (LennardJones(use_neighbors=true), Coulomb(use_neighbors=true))
+    fields_test = Molly.combine_atom_fields(inters_test)
+    @test Molly.resolve_atom_fields(fields_test, typeof(make_ref_atom(1))) ==
+          (:σ, :ϵ, :λ, :charge)
+    @test Molly.resolve_atom_fields(fields_test, typeof(custom_makers[1][2](1))) ==
+          (:σ, :ϵ, :λ, :charge)
+    @test Molly.resolve_atom_fields(fields_test, typeof(custom_makers[2][2](1))) ==
+          (:m, :q, :σ, :ϵ, :λ)
+
+    function build_sys(make_atom, AT, nf_type)
+        if nf_type == GPUNeighborFinder
+            neighbor_finder = GPUNeighborFinder(
+                n_atoms=n_atoms,
+                dist_cutoff=1.2u"nm",
+                excluded_pairs=[(i, i + 1) for i in 1:2:n_atoms],
+                device_vector_type=AT{Int32, 1},
+            )
+        else
+            neighbor_finder = DistanceNeighborFinder(
+                eligible=to_device(copy(eligible), AT),
+                n_steps=10,
+                dist_cutoff=1.2u"nm",
+            )
+        end
+        cutoff = DistanceCutoff(1.0u"nm")
+        return System(
+            atoms=to_device([make_atom(i) for i in 1:n_atoms], AT),
+            coords=to_device(copy(coords_start), AT),
+            boundary=boundary,
+            velocities=to_device(copy(vels_start), AT),
+            pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=true),
+                             Coulomb(cutoff=cutoff, use_neighbors=true)),
+            specific_inter_lists=(InteractionList2Atoms(
+                to_device(Int32.(collect(1:2:n_atoms)), AT),
+                to_device(Int32.(collect(2:2:n_atoms)), AT),
+                to_device(bonds, AT),
+            ),),
+            neighbor_finder=neighbor_finder,
+            loggers=(temp=TemperatureLogger(10), pe=PotentialEnergyLogger(10),
+                     coords=CoordinatesLogger(10), svir=ScalarVirialLogger(10)),
+        )
+    end
+
+    max_diff(a, b) = maximum(maximum(abs.(v)) for v in (from_device(a) .- from_device(b)))
+    simulators = (VelocityVerlet(dt=dt),
+                  Langevin(dt=dt, temperature=temp, friction=1.0u"ps^-1"))
+
+    # Each backend is run with the neighbor finder it uses by default, since every
+    #   combination of atom type and neighbor finder is a separate kernel compilation
+    for AT in array_list
+        let nf_type = (Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
+                                                            DistanceNeighborFinder)
+            sys_ref = build_sys(make_ref_atom, AT, nf_type)
+            fs_ref, pe_ref, vir_ref = forces(sys_ref), potential_energy(sys_ref), virial(sys_ref)
+            # Reference trajectories to compare the custom atom types against
+            ref_runs = map(simulators) do simulator
+                sys_run = build_sys(make_ref_atom, AT, nf_type)
+                simulate!(sys_run, simulator, n_steps; n_threads=1, rng=Xoshiro(20))
+                (from_device(sys_run.coords), from_device(sys_run.velocities))
+            end
+
+            for (atom_i, (atom_name, make_atom)) in enumerate(custom_makers)
+                sys = build_sys(make_atom, AT, nf_type)
+                @test isbitstype(eltype(from_device(sys.atoms)))
+                @test from_device(masses(sys))  == from_device(masses(sys_ref))
+                @test from_device(charges(sys)) == from_device(charges(sys_ref))
+                @test sys.total_mass == sys_ref.total_mass
+                @test momentum(sys) ≈ momentum(sys_ref)
+                @test temperature(sys) ≈ temperature(sys_ref)
+                @test max_diff(forces(sys), fs_ref) < 1e-8u"kJ * mol^-1 * nm^-1"
+                @test potential_energy(sys) ≈ pe_ref
+                @test maximum(abs.(virial(sys) .- vir_ref)) < 1e-8u"kJ * mol^-1"
+
+                # A deterministic and a stochastic simulator should match the reference.
+                # Only the first atom type runs the stochastic simulator and the
+                #   operations below, since each extra atom type is a separate compilation
+                sim_inds = (atom_i == 1 ? eachindex(simulators) : 1:1)
+                for si in sim_inds
+                    simulator = simulators[si]
+                    coords_ref, vels_ref = ref_runs[si]
+                    sys_run = build_sys(make_atom, AT, nf_type)
+                    simulate!(sys_run, simulator, n_steps; n_threads=1, rng=Xoshiro(20))
+                    @test max_diff(sys_run.coords    , coords_ref) < 1e-6u"nm"
+                    @test max_diff(sys_run.velocities, vels_ref  ) < 1e-6u"nm * ps^-1"
+                    @test length(values(sys_run.loggers.coords)) == (n_steps ÷ 10) + 1
+                    @test !any(isnan, values(sys_run.loggers.temp))
+                end
+
+                # Other common operations should not require the built-in Atom type
+                sys_ops = build_sys(make_atom, AT, nf_type)
+                random_velocities!(sys_ops, temp; rng=Xoshiro(40))
+                remove_CM_motion!(sys_ops)
+                @test maximum(abs.(momentum(sys_ops))) < 1e-8u"g * nm * mol^-1 * ps^-1"
+                show(devnull, sys_ops)
+                if atom_i == 1
+                    simulate!(sys_ops,
+                              SteepestDescentMinimizer(step_size=0.001u"nm", max_steps=20))
+                    barostat = MonteCarloBarostat(1.0u"bar", temp, boundary; n_steps=5)
+                    simulate!(sys_ops, VelocityVerlet(dt=dt, coupling=barostat), 20;
+                              n_threads=1, rng=Xoshiro(30))
+                    @test !any(isnan, ustrip.(Molly.box_sides(sys_ops.boundary)))
+                end
+            end
+        end
+    end
+end
+
 @testset "Verlet integrators on CPU and GPU" begin
     n_atoms = 100
     n_steps = 1000
