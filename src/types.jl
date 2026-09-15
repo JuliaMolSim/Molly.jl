@@ -211,6 +211,44 @@ interaction_type(::InteractionList4Atoms{<:Any, T}) where {T} = eltype(T)
 interaction_type(::InteractionList5Atoms{<:Any, T}) where {T} = eltype(T)
 
 Base.length(inter_list::SpecificInteractionList) = length(inter_list.is)
+Base.firstindex(inter_list::SpecificInteractionList) = 1
+Base.lastindex(inter_list::SpecificInteractionList) = length(inter_list)
+Base.eachindex(inter_list::SpecificInteractionList) = Base.OneTo(length(inter_list))
+Base.keys(inter_list::SpecificInteractionList) = Base.OneTo(length(inter_list))
+
+function Base.iterate(inter_list::SpecificInteractionList, i::Integer=1)
+    return i > length(inter_list) ? nothing : (inter_list[i], i + 1)
+end
+
+#=
+Get the `i`th interaction in a specific interaction list.
+A `NamedTuple` is returned containing the atom indices, the interaction and the
+interaction type, for example `(i=1, j=2, inter=HarmonicBond(...), type="")`.
+The `data` field of the list is shared between interactions so is not returned.
+=#
+function Base.getindex(inter_list::InteractionList1Atoms, i::Integer)
+    return (i=inter_list.is[i], inter=inter_list.inters[i], type=inter_list.types[i])
+end
+
+function Base.getindex(inter_list::InteractionList2Atoms, i::Integer)
+    return (i=inter_list.is[i], j=inter_list.js[i], inter=inter_list.inters[i],
+            type=inter_list.types[i])
+end
+
+function Base.getindex(inter_list::InteractionList3Atoms, i::Integer)
+    return (i=inter_list.is[i], j=inter_list.js[i], k=inter_list.ks[i],
+            inter=inter_list.inters[i], type=inter_list.types[i])
+end
+
+function Base.getindex(inter_list::InteractionList4Atoms, i::Integer)
+    return (i=inter_list.is[i], j=inter_list.js[i], k=inter_list.ks[i], l=inter_list.ls[i],
+            inter=inter_list.inters[i], type=inter_list.types[i])
+end
+
+function Base.getindex(inter_list::InteractionList5Atoms, i::Integer)
+    return (i=inter_list.is[i], j=inter_list.js[i], k=inter_list.ks[i], l=inter_list.ls[i],
+            m=inter_list.ms[i], inter=inter_list.inters[i], type=inter_list.types[i])
+end
 
 zero_or_nothing(x) = zero(x)
 zero_or_nothing(x::Nothing) = nothing
@@ -2080,7 +2118,7 @@ end
 """
     ASECalculator(; <keyword arguments>)
 
-A Python [ASE](https://wiki.fysik.dtu.dk/ase) calculator.
+A Python [ASE](https://ase-lib.org) calculator.
 
 This calculator is only available when PythonCall is imported.
 It is the user's responsibility to have the required Python packages installed.
