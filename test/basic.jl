@@ -607,6 +607,28 @@ end
 @testset "Neighbor lists" begin
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 
+    # The GPU DistanceNeighborFinder kernels index pairs down the columns of the pair
+    #   triangle, which has to be an exact bijection for the neighbor list to be right
+    # The Float32 square root used to invert the triangular number is corrected with
+    #   integer arithmetic, which should stay exact for large atom counts
+    function pair_index_col_correct(n_atoms, pair_is)
+        return all(pair_is) do pair_i
+            i, j = Molly.pair_index_col(n_atoms, pair_i)
+            return 1 <= i < j <= n_atoms && ((j - 1) * (j - 2)) ÷ 2 + i == pair_i
+        end
+    end
+
+    for n_atoms in (2, 3, 8, 63, 64, 65, 127, 128, 129)
+        n_pairs = Molly.n_atoms_to_n_pairs(n_atoms)
+        pairs_col = [Molly.pair_index_col(n_atoms, pair_i) for pair_i in 1:n_pairs]
+        @test pair_index_col_correct(n_atoms, 1:n_pairs)
+        @test length(unique(pairs_col)) == n_pairs
+    end
+    for n_atoms in (100_000, 10_000_000)
+        n_pairs = Molly.n_atoms_to_n_pairs(n_atoms)
+        @test pair_index_col_correct(n_atoms, (1, 2, n_pairs ÷ 3, n_pairs - 1, n_pairs))
+    end
+
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         boundary=CubicBoundary(10.0u"nm")
         if neighbor_finder == CellListMapNeighborFinder

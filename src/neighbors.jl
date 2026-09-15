@@ -82,7 +82,10 @@ This is the recommended neighbor finder for `CuArray` systems.
 - `eligible`, `special`: compatibility inputs for dense boolean masks. These
   are converted once at construction into sparse exception lists; the dense
   masks are not retained.
-- `dist_cutoff`: interaction cutoff used by the pairwise kernels.
+- `dist_cutoff`: the neighbor search distance used by the pairwise kernels.
+  This should be the interaction cutoff distance plus a buffer distance, since
+  the tile list is only refreshed every `n_steps_reorder` steps. The buffer
+  should be larger than the distance an atom can move in that time.
 - `excluded_pairs`: iterable of `(i, j)` pairs that should be excluded from the
   normal nonbonded interaction path.
 - `special_pairs`: iterable of `(i, j)` pairs that should use the "special"
@@ -392,13 +395,16 @@ end
 Find close atoms by distance.
 
 This is the recommended neighbor finder on non-NVIDIA GPUs.
+
+`dist_cutoff` is the neighbor search distance, which should be the interaction
+cutoff distance plus a buffer distance since the list is only updated every
+`n_steps` steps.
 """
 struct DistanceNeighborFinder{B, D}
     eligible::B
     dist_cutoff::D
     special::B
     n_steps::Int
-    neighbors::B # Used internally during neighbor calculation on the GPU
 end
 
 function DistanceNeighborFinder(;
@@ -407,42 +413,138 @@ function DistanceNeighborFinder(;
                                 special=zero(eligible),
                                 n_steps=10)
     return DistanceNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
-                eligible, dist_cutoff, special, n_steps, zero(eligible))
+                eligible, dist_cutoff, special, n_steps)
 end
 
-function find_neighbors(sys::System,
+#=
+The neighbor search for `DistanceNeighborFinder` is done in two passes on both CPU and
+    GPU, which avoids growing intermediate lists and lets the output be written exactly
+    once into an array of the right size.
+The first pass records whether each candidate pair is a neighbor as one bit of a mask
+    word and counts the bits set in that word, the counts are turned into write offsets
+    with a prefix sum, and the second pass expands the mask words into the neighbor list.
+Splitting the distance test off from the list building also lets the distance loop be
+    vectorized on the CPU, which it cannot be when it contains a `push!`.
+=#
+
+# Number of pair flags packed into one CPU mask word
+const n_pairs_per_mask_cpu = 64
+
+# Multiplier that gathers the low bit of each of 8 bytes into the top byte of the product
+const byte_flags_to_bits = 0x0102040810204080
+
+#=
+Record in `flags[j]` whether atom j is within the cutoff of the atom at `ci` and eligible
+Written as a separate loop from the list building so that it can be vectorized
+=#
+@inline function neighbor_flags!(flags, coords_dims, ci, boundary, sqdist_cutoff, eligible_i,
+                                 n_j, ::Val{D}) where D
+    @inbounds for j in 1:n_j
+        cj = SVector{D}(ntuple(d -> @inbounds(coords_dims[d][j]), Val(D)))
+        r2 = sum(abs2, vector(ci, cj, boundary))
+        flags[j] = (r2 <= sqdist_cutoff) & eligible_i[j]
+    end
+    return flags
+end
+
+#=
+Pack the first `n_j` 0/1 bytes in `flags` into mask words starting at `mask_offset`
+`flag_words` is `flags` viewed 8 bytes at a time, which makes the packing 8 times cheaper
+Any bits of the last word past `n_j` are zeroed, so the flags there do not have to be
+Returns the number of bits set, i.e. the number of neighbors found for the atom
+=#
+@inline function pack_neighbor_masks!(masks, flag_words, mask_offset, n_j)
+    n_words = cld(n_j, n_pairs_per_mask_cpu)
+    n_set = 0
+    @inbounds for w in 1:n_words
+        word_start = (w - 1) << 3
+        mask = zero(UInt64)
+        for b in 0:7
+            byte_flags = flag_words[word_start + b + 1]
+            mask |= UInt64((byte_flags * byte_flags_to_bits) >> 56) << (b << 3)
+        end
+        n_bits = n_j - ((w - 1) << 6)
+        if n_bits < n_pairs_per_mask_cpu
+            mask &= (one(UInt64) << n_bits) - one(UInt64)
+        end
+        masks[mask_offset + w] = mask
+        n_set += count_ones(mask)
+    end
+    return n_set
+end
+
+# Expand the mask words for atom i into `neighbors_list`, starting after index `list_offset`
+@inline function expand_neighbor_masks!(neighbors_list, masks, mask_offset, n_j, i,
+                                        special_i, list_offset)
+    ni = list_offset
+    @inbounds for w in 1:cld(n_j, n_pairs_per_mask_cpu)
+        mask = masks[mask_offset + w]
+        while !iszero(mask)
+            j = ((w - 1) << 6) + trailing_zeros(mask) + 1
+            mask &= mask - one(mask)
+            ni += 1
+            neighbors_list[ni] = (Int32(i), Int32(j), special_i[j])
+        end
+    end
+    return ni
+end
+
+function find_neighbors(sys::System{D},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads())
+                        n_threads::Integer=Threads.nthreads()) where D
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
 
+    n_atoms = length(sys)
     sqdist_cutoff = nf.dist_cutoff ^ 2
-    nl_threads = [Tuple{Int32, Int32, Bool}[] for i in 1:n_threads]
+    # The coordinates are copied to one array per dimension since the strided reads of an
+    #   array of static vectors stop the distance loop being vectorized
+    coords_dims = ntuple(d -> [c[d] for c in sys.coords], Val(D))
+
+    # Mask words are packed by atom, with the words for atom i starting at mask_starts[i]
+    mask_starts = Vector{Int}(undef, n_atoms)
+    n_mask_words = 0
+    @inbounds for i in 1:n_atoms
+        mask_starts[i] = n_mask_words
+        n_mask_words += cld(i - 1, n_pairs_per_mask_cpu)
+    end
+    masks = Vector{UInt64}(undef, n_mask_words)
+    n_neighbors_atom = Vector{Int}(undef, n_atoms)
+    # Rounded up to a whole number of mask words so that the flags can be viewed as words
+    n_flags = cld(n_atoms, n_pairs_per_mask_cpu) * n_pairs_per_mask_cpu
+    flags_threads = [zeros(UInt8, n_flags) for _ in 1:n_threads]
 
     @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
-        for i in chunk_i:n_threads:length(sys)
-            ci = sys.coords[i]
-            nbi = @view nf.eligible[:, i]
-            speci = @view nf.special[:, i]
-            for j in 1:(i - 1)
-                r2 = sum(abs2, vector(ci, sys.coords[j], sys.boundary))
-                if r2 <= sqdist_cutoff && nbi[j]
-                    push!(nl_threads[chunk_i], (Int32(i), Int32(j), speci[j]))
-                end
-            end
+        flags = flags_threads[chunk_i]
+        flag_words = reinterpret(UInt64, flags)
+        @inbounds for i in chunk_i:n_threads:n_atoms
+            neighbor_flags!(flags, coords_dims, sys.coords[i], sys.boundary, sqdist_cutoff,
+                            (@view nf.eligible[:, i]), i - 1, Val(D))
+            n_neighbors_atom[i] = pack_neighbor_masks!(masks, flag_words, mask_starts[i], i - 1)
         end
     end
 
-    neighbors_list = Tuple{Int32, Int32, Bool}[]
-    for nl in nl_threads
-        append!(neighbors_list, nl)
+    # Exclusive prefix sum of the per-atom neighbor counts gives the write offsets
+    list_starts = Vector{Int}(undef, n_atoms)
+    n_neighbors = 0
+    @inbounds for i in 1:n_atoms
+        list_starts[i] = n_neighbors
+        n_neighbors += n_neighbors_atom[i]
+    end
+    neighbors_list = Vector{Tuple{Int32, Int32, Bool}}(undef, n_neighbors)
+
+    @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
+        @inbounds for i in chunk_i:n_threads:n_atoms
+            expand_neighbor_masks!(neighbors_list, masks, mask_starts[i], i - 1, i,
+                                   (@view nf.special[:, i]), list_starts[i])
+        end
     end
 
-    return NeighborList(length(neighbors_list), neighbors_list)
+    return NeighborList(n_neighbors, neighbors_list)
 end
 
 function gpu_threads_dnf(n_inters)
@@ -450,25 +552,91 @@ function gpu_threads_dnf(n_inters)
     return n_threads_gpu
 end
 
-@kernel function distance_neighbor_finder_kernel!(neighbors, @Const(coords),
-                                                  @Const(eligible), boundary, sq_dist_cutoff)
-    n_atoms = length(coords)
-    n_inters = n_atoms_to_n_pairs(n_atoms)
-    inter_i = @index(Global, Linear)
+const n_pairs_per_mask_gpu = 32 # n pair flags packed into one GPU mask word
+const n_masks_per_group_gpu = 32 # n mask words filled by one group of consecutive GPU threads
+const n_pairs_per_group_gpu = n_pairs_per_mask_gpu * n_masks_per_group_gpu
 
-    @inbounds if inter_i <= n_inters
-        i, j = pair_index(n_atoms, inter_i)
-        if eligible[i, j]
-            dr = vector(coords[i], coords[j], boundary)
-            r2 = sum(abs2, dr)
-            if r2 <= sq_dist_cutoff
-                neighbors[j, i] = true
+#=
+Map a one-based index over the n_atoms * (n_atoms - 1) / 2 pairs to the pair (i, j), i < j,
+    running down the columns of the pair triangle so that consecutive indices give
+    consecutive i for a fixed j.
+This is the transpose of `pair_index` and is used by the GPU neighbor finder kernels, where
+    it makes the `eligible[i, j]` and `coords[i]` reads of neighboring threads coalesced.
+As in `pair_index` the square root is taken in Float32 since Metal GPUs do not support
+    Float64, so the initial estimate of j is corrected below using exact integer arithmetic.
+=#
+@inline function pair_index_col(n_atoms::Integer, ind::Integer)
+    n, kz = promote(n_atoms, ind - one(ind))
+    T = typeof(n)
+    # Column j holds j - 1 pairs, so jz = j - 1 is the largest value with
+    #   jz * (jz - 1) / 2 <= kz
+    jz = unsafe_trunc(T, (sqrt(Float32(8 * kz + 1)) + 1.0f0) / 2)
+    jz = min(max(jz, one(T)), n - one(T))
+    while jz > one(T) && (jz * (jz - one(T))) ÷ T(2) > kz
+        jz -= one(T)
+    end
+    while jz < n - one(T) && ((jz + one(T)) * jz) ÷ T(2) <= kz
+        jz += one(T)
+    end
+    i = kz - (jz * (jz - one(T))) ÷ T(2) + one(T)
+    j = jz + one(T)
+    return i, j
+end
+
+#=
+Map bit `bit_i` (zero-based) of mask word `word_i` to the index of the pair it records.
+Consecutive threads in a group take consecutive pairs at each step so that the coordinate
+    reads are coalesced, meaning that consecutive bits of a mask word are
+    `n_masks_per_group_gpu` pairs apart.
+=#
+@inline function mask_bit_pair_index(word_i, bit_i)
+    group_i, word_in_group = divrem(word_i - 1, n_masks_per_group_gpu)
+    return group_i * n_pairs_per_group_gpu + bit_i * n_masks_per_group_gpu + word_in_group + 1
+end
+
+@kernel inbounds=true function distance_neighbor_finder_mask_kernel!(masks, counts, @Const(coords),
+                                        @Const(eligible), boundary, sq_dist_cutoff, n_inters)
+    n_atoms = length(coords)
+    word_i = @index(Global, Linear)
+
+    if word_i <= length(masks)
+        mask = zero(UInt32)
+        for bit_i in 0:(n_pairs_per_mask_gpu - 1)
+            inter_i = mask_bit_pair_index(word_i, bit_i)
+            if inter_i <= n_inters
+                i, j = pair_index_col(n_atoms, inter_i)
+                if eligible[i, j]
+                    dr = vector(coords[i], coords[j], boundary)
+                    r2 = sum(abs2, dr)
+                    if r2 <= sq_dist_cutoff
+                        mask |= (one(UInt32) << bit_i)
+                    end
+                end
+            end
+        end
+        masks[word_i] = mask
+        counts[word_i] = Int32(count_ones(mask))
+    end
+end
+
+@kernel inbounds=true function distance_neighbor_finder_fill_kernel!(neighbors_list, @Const(masks),
+                                        @Const(list_ends), @Const(special), n_atoms)
+    word_i = @index(Global, Linear)
+
+    if word_i <= length(masks)
+        mask = masks[word_i]
+        if !iszero(mask)
+            ni = list_ends[word_i] - Int32(count_ones(mask))
+            while !iszero(mask)
+                bit_i = trailing_zeros(mask)
+                mask &= mask - one(mask)
+                i, j = pair_index_col(n_atoms, mask_bit_pair_index(word_i, bit_i))
+                ni += Int32(1)
+                neighbors_list[ni] = (Int32(j), Int32(i), special[j, i])
             end
         end
     end
 end
-
-lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
 
 function find_neighbors(sys::System{D, AT},
                         nf::DistanceNeighborFinder,
@@ -480,26 +648,47 @@ function find_neighbors(sys::System{D, AT},
         return current_neighbors
     end
 
-    nf.neighbors .= false
     n_inters = n_atoms_to_n_pairs(length(sys))
+    if iszero(n_inters)
+        return NeighborList(0, similar(sys.coords, Tuple{Int32, Int32, Bool}, 0))
+    end
     n_threads_gpu = gpu_threads_dnf(n_inters)
-
     backend = get_backend(sys.coords)
-    kernel! = distance_neighbor_finder_kernel!(backend, n_threads_gpu)
-    kernel!(nf.neighbors, sys.coords, nf.eligible, sys.boundary,
-            nf.dist_cutoff^2, ndrange=n_inters)
 
-    pairs = findall(nf.neighbors)
-    nbsi, nbsj = getindex.(pairs, 1), getindex.(pairs, 2)
-    special = nf.special[pairs]
-    nl = lists_to_tuple_list.(nbsi, nbsj, special)
-    return NeighborList(length(nl), nl)
+    # Rounded up to a whole number of groups so that every pair is covered by a mask bit
+    n_masks = cld(n_inters, n_pairs_per_group_gpu) * n_masks_per_group_gpu
+    masks = similar(sys.coords, UInt32, n_masks)
+    counts = similar(sys.coords, Int32, n_masks)
+
+    mask_kernel! = distance_neighbor_finder_mask_kernel!(backend, n_threads_gpu)
+    mask_kernel!(masks, counts, sys.coords, nf.eligible, sys.boundary, nf.dist_cutoff^2,
+                 n_inters; ndrange=n_masks)
+
+    # The inclusive prefix sum of the per-word neighbor counts gives the index one past the
+    #   last neighbor written by each mask word, from which the fill kernel subtracts its
+    #   own count to get its write offset
+    # The inclusive version is used because AcceleratedKernels.accumulate! with
+    #   inclusive=false gives the wrong result past the first block
+    AcceleratedKernels.accumulate!(+, counts, backend; init=Int32(0))
+    n_neighbors = Int(only(Array(@view counts[n_masks:n_masks])))
+    neighbors_list = similar(sys.coords, Tuple{Int32, Int32, Bool}, n_neighbors)
+
+    if n_neighbors > 0
+        fill_kernel! = distance_neighbor_finder_fill_kernel!(backend, n_threads_gpu)
+        fill_kernel!(neighbors_list, masks, counts, nf.special, length(sys); ndrange=n_masks)
+    end
+
+    return NeighborList(n_neighbors, neighbors_list)
 end
 
 """
     TreeNeighborFinder(; eligible, dist_cutoff, special, n_steps)
 
 Find close atoms by distance using a tree search.
+
+`dist_cutoff` is the neighbor search distance, which should be the interaction
+cutoff distance plus a buffer distance since the list is only updated every
+`n_steps` steps.
 
 Can not be used if one or more dimensions has infinite boundaries.
 Can not be used with [`TriclinicBoundary`](@ref).
@@ -559,11 +748,14 @@ end
 
 """
     CellListMapNeighborFinder(; eligible, dist_cutoff, boundary,
-                                special, n_steps, x0)
+                                special, n_steps, x0, number_of_batches)
 
 Find close atoms by distance using a cell list algorithm from CellListMap.jl.
 
 This is the recommended neighbor finder on CPU.
+`dist_cutoff` is the neighbor search distance, which should be the interaction
+cutoff distance plus a buffer distance since the list is only updated every
+`n_steps` steps.
 `x0` are optional initial coordinates that improve the
 first approximation of the cell list structure.
 The number of dimensions `dims` is inferred from the boundary or `x0`, or assumed
@@ -571,6 +763,13 @@ to be 3 otherwise.
 
 The `boundary` parameter is required, and must be an `AbstractBoundary`. 
 Infinite boundaries are only accepted in all dimensions.
+
+CellListMap.jl chooses how many batches to split the work over from the number of Julia
+threads, so the `n_threads` argument to [`find_neighbors`](@ref) only selects between a
+serial (`n_threads=1`) and a parallel run. `number_of_batches` can be given as a tuple of
+the number of batches used to build the cell lists and to map over the pairs, which caps
+the number of tasks used, with `(0, 0)`, the default, meaning to use the CellListMap.jl
+heuristics.
 """
 mutable struct CellListMapNeighborFinder{N, T, S}
     eligible::BitArray{2}
