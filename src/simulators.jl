@@ -218,7 +218,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
 
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
@@ -243,7 +243,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         coords_copy .= sys.coords
         sys.coords .+= hn .* F ./ max_force
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -571,7 +571,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -621,7 +621,7 @@ end
                                         strictness=strictness)
         end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, strictness=strictness)
@@ -733,7 +733,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -788,7 +788,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                         strictness=strictness)
         end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         velocities_half .= sys.velocities
 
@@ -900,7 +900,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -952,7 +952,7 @@ end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         # Remove drift after the step velocity is finalized and before
         #   coupling/loggers observe the state
@@ -1007,7 +1007,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(nothing, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
@@ -1060,7 +1060,7 @@ end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
         # This is accurate to O(dt)
         sys.velocities .= zero_vs_velocity.(
             vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt,
@@ -1133,7 +1133,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -1209,7 +1209,7 @@ end
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -1341,7 +1341,7 @@ end
     philox_key  = (n_o_steps > 0 ? rand(rng, UInt64) : zero(UInt64))
     philox_ctr1 = (n_o_steps > 0 ? rand(rng, UInt64) : zero(UInt64))
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -1363,7 +1363,7 @@ end
     for step_n in (init_step + 1):(init_step + n_steps)
         for (j, op) in enumerate(splitting_ops)
             if op == 'A'
-                A_step!(sys, effective_dts[j])
+                A_step!(sys, effective_dts[j], n_threads)
             elseif op == 'B'
                 B_step!(
                     sys,
@@ -1391,7 +1391,7 @@ end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
         # Remove drift after all splitting substeps and before loggers observe
         # the state.
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -1413,10 +1413,10 @@ end
     return sys
 end
 
-function A_step!(sys, dt_eff)
+function A_step!(sys, dt_eff, n_threads::Integer)
     sys.coords .+= sys.velocities .* dt_eff
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     return sys
 end
 
@@ -1477,7 +1477,7 @@ end
     end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -1501,7 +1501,7 @@ end
         random_velocities!(noise, sys, sim.temperature; rng=rng)
         sys.coords .+= (accels_t ./ sim.friction) .* sim.dt .+ noise_prefac .* noise
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         # Overdamped dynamics advance coordinates directly; removing velocity
         # drift here only affects the velocity state seen by loggers.
@@ -1577,7 +1577,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -1603,7 +1603,7 @@ end
 
         sys.coords .+= v_half .* sim.dt
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) *
                         ((temperature(sys; kin_tensor=buffers.kin_tensor) / sim.temperature) - 1)
@@ -1884,7 +1884,7 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
                 apply_velocity_constraints!(sys; n_threads=n_threads, strictness=strictness)
             end
             sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-            place_virtual_sites!(sys)
+            place_virtual_sites!(sys; n_threads=n_threads)
             if inner_step_neighbors
                 neighbors = mts_find_neighbors(sys, buffers, neighbors, step_n, n_threads)
             end
@@ -1926,7 +1926,7 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -2330,7 +2330,7 @@ end
         report_issue(err_str, strictness)
     end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
@@ -2345,7 +2345,7 @@ end
         coords_old .= sys.coords
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
         neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
         E_new = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                                  strictness=strictness)

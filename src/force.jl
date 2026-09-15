@@ -813,7 +813,7 @@ function forces!(fs,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
                                  strictness=strictness)
     end
-    distribute_forces!(fs, sys, buffers)
+    distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
     if needs_vir
         mark_interaction_virial!(buffers.validity, step_n)
@@ -1266,7 +1266,7 @@ function forces!(fs,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
                                  strictness=strictness)
     end
-    distribute_forces!(fs, sys, buffers)
+    distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
     if needs_vir
         mark_interaction_virial!(buffers.validity, step_n)

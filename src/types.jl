@@ -2121,6 +2121,28 @@ macro maybe_threads(flag, expr)
     end |> esc
 end
 
+#=
+Set up a KernelAbstractions kernel launch that respects `n_threads` on the CPU backend.
+Sizing the workgroups on CPU so that there are `n_threads` of them limits the launch to
+`n_threads` tasks.
+Only use these for kernels where the workgroup size does not affect the result, i.e. not
+for kernels that use `@synchronize` or `@localmem`.
+=#
+@inline function backend_kernel(kernel, backend, block_size, static_ndrange...)
+    return kernel(backend, block_size, static_ndrange...)
+end
+
+@inline function backend_kernel(kernel, backend::KernelAbstractions.CPU, block_size,
+                                static_ndrange...)
+    return kernel(backend)
+end
+
+@inline backend_workgroupsize(backend, ndrange, n_threads) = nothing
+
+@inline function backend_workgroupsize(::KernelAbstractions.CPU, ndrange, n_threads)
+    return max(cld(ndrange, max(n_threads, 1)), 1)
+end
+
 function default_strictness()
     if haskey(ENV, "MOLLY_STRICTNESS")
         return Symbol(lowercase(ENV["MOLLY_STRICTNESS"]))

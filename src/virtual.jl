@@ -187,17 +187,20 @@ function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D,
 end
 
 """
-    place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+    place_virtual_sites!(sys, virtual_sites=sys.virtual_sites; n_threads=Threads.nthreads())
 
 Set the coordinates of virtual sites based on the coordinates of the atoms that define them.
 """
-function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites;
+                              n_threads::Integer=Threads.nthreads())
     # Assumes that each virtual site is only defined once
-    if length(virtual_sites) > 0
+    n_vs = length(virtual_sites)
+    if n_vs > 0
         backend = get_backend(sys.coords)
         n_threads_dev = 256
-        kernel! = place_virtual_sites_kernel!(backend, n_threads_dev)
-        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=length(virtual_sites))
+        kernel! = backend_kernel(place_virtual_sites_kernel!, backend, n_threads_dev)
+        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
+                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
     end
     return sys
 end
@@ -231,15 +234,17 @@ end
 end
 
 function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
-                            virtual_sites=sys.virtual_sites) where {D, T}
+                            virtual_sites=sys.virtual_sites;
+                            n_threads::Integer=Threads.nthreads()) where {D, T}
     # Assumes that each virtual site is only defined once
-    if length(virtual_sites) > 0
+    n_vs = length(virtual_sites)
+    if n_vs > 0
         copy_forces_to_matrix!(buffers.fs_mat, fs, Val(D))
         backend = get_backend(sys.coords)
         n_threads_dev = 128
-        kernel! = distribute_forces_kernel!(backend, n_threads_dev)
-        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites;
-                ndrange=length(virtual_sites))
+        kernel! = backend_kernel(distribute_forces_kernel!, backend, n_threads_dev)
+        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
+                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
         fs_mat_flat = reshape(buffers.fs_mat, length(sys) * D)
         fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* sys.force_units
     end

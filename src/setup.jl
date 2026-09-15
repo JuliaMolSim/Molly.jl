@@ -1716,7 +1716,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     )
 
     # Virtual sites are in the structure file but not necessarily in the correct place
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     maybe_optimize_cuda_launch_config!(sys; enabled=autotune_launch)
     return sys
 end
