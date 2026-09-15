@@ -10,6 +10,8 @@ export
 Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
 
 Either or both of `dist_constraints` and `angle_constraints` must be given.
+The constraints should always be on the CPU, even for a GPU system; the [`System`](@ref)
+constructor moves the constraint data to the device of the system.
 [`SetupSHAKE_RATTLE`](@ref) provides SHAKE/RATTLE parameters when setting up a system from a file.
 
 Velocity constraints will be imposed for simulators that integrate velocities such as
@@ -82,7 +84,7 @@ function SHAKE_RATTLE(; n_atoms,
     end
 
     if isa(dist_constraints, AbstractGPUArray) || isa(angle_constraints, AbstractGPUArray)
-        throw(ArgumentError("constraints should be passd to SHAKE_RATTLE on CPU, data will " *
+        throw(ArgumentError("constraints should be passed to SHAKE_RATTLE on CPU, data will " *
                             "be moved to GPU later"))
     end
 
@@ -545,6 +547,27 @@ end
 end
 
 # 2 atoms, 1 constraint
+@inline function rattle2_cluster!(cluster_idx, k1s, k2s, r, v, ms, boundary)
+    # Step 2: perform RATTLE, for a 2 atom cluster we
+    # just re-arrange λ = A / c since they are all scalars
+    k1 = k1s[cluster_idx]
+    k2 = k2s[cluster_idx]
+
+    v_k1 = v[k1] # Uncoalesced read
+    v_k2 = v[k2] # Uncoalesced read
+
+    m1_inv, m2_inv = inv(ms[k1]), inv(ms[k2]) # Uncoalesced read
+    r_k1k2  = vector(r[k1], r[k2], boundary) # Uncoalesced read
+    v_k1k2 = v_k2 .- v_k1
+
+    λₖ = -dot(r_k1k2, v_k1k2) / (dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv))
+
+    # Step 3: update velocities in global memory
+    v[k1] -= m1_inv .* λₖ .* r_k1k2
+    v[k2] += m2_inv .* λₖ .* r_k1k2
+    return nothing
+end
+
 @kernel inbounds=true function rattle2_kernel!(@Const(k1s),
                                                @Const(k2s),
                                                @Const(r),
@@ -552,241 +575,256 @@ end
                                                @Const(ms),
                                                boundary)
     idx = @index(Global, Linear)
-
     if idx <= length(k1s)
-        # Step 2: perform RATTLE, for a 2 atom cluster we
-        # just re-arrange λ = A / c since they are all scalars
-        k1 = k1s[idx]
-        k2 = k2s[idx]
-
-        v_k1 = v[k1] # Uncoalesced read
-        v_k2 = v[k2] # Uncoalesced read
-
-        m1_inv, m2_inv = inv(ms[k1]), inv(ms[k2]) # Uncoalesced read
-        r_k1k2  = vector(r[k1], r[k2], boundary) # Uncoalesced read
-        v_k1k2 = v_k2 .- v_k1
-
-        λₖ = -dot(r_k1k2, v_k1k2) / (dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv))
-
-        # Step 3: update velocities in global memory
-        v[k1] -= m1_inv .* λₖ .* r_k1k2
-        v[k2] += m2_inv .* λₖ .* r_k1k2
+        rattle2_cluster!(idx, k1s, k2s, r, v, ms, boundary)
     end
 end
 
 # 3 atoms, 2 constraints
 # Assumes first atom is central atom
+@inline function rattle3_cluster!(cluster_idx, k1s, k2s, k3s,
+                                  r::AbstractVector{<:AbstractVector{L}},
+                                  v::AbstractVector{<:AbstractVector{V}},
+                                  ms::AbstractVector{M},
+                                  boundary) where {L, V, M}
+    A_type = typeof(zero(L) * zero(L) / zero(M))
+    C_type = typeof(zero(V) * zero(L))
+    L_type = typeof(zero(C_type) / zero(A_type))
+
+    A = @MMatrix zeros(A_type, 2, 2) # Units are L^2 / M
+    C = @MVector zeros(C_type, 2) # Units are L^2 / T
+    λ = @MVector zeros(L_type, 2) # Units are M / T
+
+    k1 = k1s[cluster_idx] # Central atom
+    k2 = k2s[cluster_idx]
+    k3 = k3s[cluster_idx]
+    r_k1 = r[k1]
+
+    m1_inv, m2_inv, m3_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]) # Uncoalesced read
+    r_k1k2 = vector(r_k1, r[k2], boundary)
+    r_k1k3 = vector(r_k1, r[k3], boundary)
+
+    v_k1 = v[k1] # Uncoalesced read
+    v_k2 = v[k2] # Uncoalesced read
+    v_k3 = v[k3] # Uncoalesced read
+
+    v_k1k2 = v_k2 .- v_k1
+    v_k1k3 = v_k3 .- v_k1
+
+    A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
+    A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
+    A[2, 1] = A[1, 2]
+    A[2, 2] = dot(r_k1k3, r_k1k3) * (m1_inv + m3_inv)
+
+    C[1] = -dot(r_k1k2, v_k1k2)
+    C[2] = -dot(r_k1k3, v_k1k3)
+
+    solve_2x2_exactly(λ, A, C)
+
+    v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
+    v[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
+    v[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
+    return nothing
+end
+
 @kernel inbounds=true function rattle3_kernel!(@Const(k1s),
                                                @Const(k2s),
                                                @Const(k3s),
-                                               r::AbstractVector{<:AbstractVector{L}},
-                                               v::AbstractVector{<:AbstractVector{V}},
-                                               ms::AbstractVector{M},
-                                               boundary) where {L, V, M}
+                                               r,
+                                               v,
+                                               @Const(ms),
+                                               boundary)
     idx = @index(Global, Linear)
-    @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
-    @uniform C_type = typeof(zero(V) * zero(L))
-    @uniform L_type = typeof(zero(C_type) / zero(A_type))
-
     if idx <= length(k1s)
-        A = @MMatrix zeros(A_type, 2, 2) # Units are L^2 / M
-        C = @MVector zeros(C_type, 2) # Units are L^2 / T
-        λ = @MVector zeros(L_type, 2) # Units are M / T
-
-        k1 = k1s[idx] # Central atom
-        k2 = k2s[idx]
-        k3 = k3s[idx]
-        r_k1 = r[k1]
-
-        m1_inv, m2_inv, m3_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]) # Uncoalesced read
-        r_k1k2 = vector(r_k1, r[k2], boundary)
-        r_k1k3 = vector(r_k1, r[k3], boundary)
-
-        v_k1 = v[k1] # Uncoalesced read
-        v_k2 = v[k2] # Uncoalesced read
-        v_k3 = v[k3] # Uncoalesced read
-
-        v_k1k2 = v_k2 .- v_k1
-        v_k1k3 = v_k3 .- v_k1
-
-        A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
-        A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
-        A[2, 1] = A[1, 2]
-        A[2, 2] = dot(r_k1k3, r_k1k3) * (m1_inv + m3_inv)
-
-        C[1] = -dot(r_k1k2, v_k1k2)
-        C[2] = -dot(r_k1k3, v_k1k3)
-
-        solve_2x2_exactly(λ, A, C)
-
-        v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
-        v[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
-        v[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
+        rattle3_cluster!(idx, k1s, k2s, k3s, r, v, ms, boundary)
     end
 end
 
 # 4 atoms, 3 constraints
 # Assumes first atom is central atom
+@inline function rattle4_cluster!(cluster_idx, k1s, k2s, k3s, k4s,
+                                  r::AbstractVector{<:AbstractVector{L}},
+                                  v::AbstractVector{<:AbstractVector{V}},
+                                  ms::AbstractVector{M},
+                                  boundary) where {L, V, M}
+    A_type = typeof(zero(L) * zero(L) / zero(M))
+    A_tmp_type = typeof(zero(M) / (zero(L)*zero(L)))
+    C_type = typeof(zero(V)*zero(L))
+    L_type = typeof(zero(C_type) / zero(A_type))
+
+    A = @MMatrix zeros(A_type, 3, 3)
+    A_tmp = @MMatrix zeros(A_tmp_type, 3, 3)
+    C = @MVector zeros(C_type, 3)
+    λ = @MVector zeros(L_type, 3)
+
+    k1 = k1s[cluster_idx] # Central atom
+    k2 = k2s[cluster_idx]
+    k3 = k3s[cluster_idx]
+    k4 = k4s[cluster_idx]
+    r_k1 = r[k1] # Uncoalesced read
+
+    m1_inv, m2_inv, m3_inv, m4_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]), inv(ms[k4]) # Uncoalesced read
+    r_k1k2  = vector(r_k1, r[k2], boundary) # Uncoalesced read
+    r_k1k3  = vector(r_k1, r[k3], boundary) # Uncoalesced read
+    r_k1k4  = vector(r_k1, r[k4], boundary) # Uncoalesced read
+
+    vk1 = v[k1] # Uncoalesced read
+    vk2 = v[k2] # Uncoalesced read
+    vk3 = v[k3] # Uncoalesced read
+    vk4 = v[k4] # Uncoalesced read
+
+    v_k1k2 = vk2 .- vk1
+    v_k1k3 = vk3 .- vk1
+    v_k1k4 = vk4 .- vk1
+
+    A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
+    A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
+    A[1, 3] = dot(r_k1k2, r_k1k4) * (m1_inv)
+    A[2, 1] = A[1, 2]
+    A[2, 2] = dot(r_k1k3, r_k1k3) * (m1_inv + m3_inv)
+    A[2, 3] = dot(r_k1k3, r_k1k4) * (m1_inv)
+    A[3, 1] = A[1, 3]
+    A[3, 2] = A[2, 3]
+    A[3, 3] = dot(r_k1k4, r_k1k4) * (m1_inv + m4_inv)
+
+    C[1] = -dot(r_k1k2, v_k1k2)
+    C[2] = -dot(r_k1k3, v_k1k3)
+    C[3] = -dot(r_k1k4, v_k1k4)
+
+    solve_3x3_exactly!(λ, A, A_tmp, C)
+
+    v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3) .+ λ[3] .* r_k1k4)
+    v[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
+    v[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
+    v[k4] -= m4_inv .* (-λ[3] .* r_k1k4)
+    return nothing
+end
+
 @kernel inbounds=true function rattle4_kernel!(@Const(k1s),
                                                @Const(k2s),
                                                @Const(k3s),
                                                @Const(k4s),
-                                               r::AbstractVector{<:AbstractVector{L}},
-                                               v::AbstractVector{<:AbstractVector{V}},
-                                               ms::AbstractVector{M},
-                                               boundary) where {L, V, M}
+                                               r,
+                                               v,
+                                               @Const(ms),
+                                               boundary)
     idx = @index(Global, Linear)
-    @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
-    @uniform A_tmp_type = typeof(zero(M) / (zero(L)*zero(L)))
-    @uniform C_type = typeof(zero(V)*zero(L))
-    @uniform L_type = typeof(zero(C_type) / zero(A_type))
-
     if idx <= length(k1s)
-        A = @MMatrix zeros(A_type, 3, 3)
-        A_tmp = @MMatrix zeros(A_tmp_type, 3, 3)
-        C = @MVector zeros(C_type, 3)
-        λ = @MVector zeros(L_type, 3)
-
-        k1 = k1s[idx] # Central atom
-        k2 = k2s[idx]
-        k3 = k3s[idx]
-        k4 = k4s[idx]
-        r_k1 = r[k1] # Uncoalesced read
-
-        m1_inv, m2_inv, m3_inv, m4_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]), inv(ms[k4]) # Uncoalesced read
-        r_k1k2  = vector(r_k1, r[k2], boundary) # Uncoalesced read
-        r_k1k3  = vector(r_k1, r[k3], boundary) # Uncoalesced read
-        r_k1k4  = vector(r_k1, r[k4], boundary) # Uncoalesced read
-
-        vk1 = v[k1] # Uncoalesced read
-        vk2 = v[k2] # Uncoalesced read
-        vk3 = v[k3] # Uncoalesced read
-        vk4 = v[k4] # Uncoalesced read
-
-        v_k1k2 = vk2 .- vk1
-        v_k1k3 = vk3 .- vk1
-        v_k1k4 = vk4 .- vk1
-
-        A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
-        A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
-        A[1, 3] = dot(r_k1k2, r_k1k4) * (m1_inv)
-        A[2, 1] = A[1, 2]
-        A[2, 2] = dot(r_k1k3, r_k1k3) * (m1_inv + m3_inv)
-        A[2, 3] = dot(r_k1k3, r_k1k4) * (m1_inv)
-        A[3, 1] = A[1, 3]
-        A[3, 2] = A[2, 3]
-        A[3, 3] = dot(r_k1k4, r_k1k4) * (m1_inv + m4_inv)
-
-        C[1] = -dot(r_k1k2, v_k1k2)
-        C[2] = -dot(r_k1k3, v_k1k3)
-        C[3] = -dot(r_k1k4, v_k1k4)
-
-        solve_3x3_exactly!(λ, A, A_tmp, C)
-
-        v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3) .+ λ[3] .* r_k1k4)
-        v[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
-        v[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
-        v[k4] -= m4_inv .* (-λ[3] .* r_k1k4)
+        rattle4_cluster!(idx, k1s, k2s, k3s, k4s, r, v, ms, boundary)
     end
 end
 
 # 3 atoms, 3 constraints
+@inline function rattle3_angle_cluster!(cluster_idx, k1s, k2s, k3s,
+                                        r::AbstractVector{<:AbstractVector{L}},
+                                        v::AbstractVector{<:AbstractVector{V}},
+                                        ms::AbstractVector{M},
+                                        boundary) where {L, V, M}
+    A_type = typeof(zero(L) * zero(L) / zero(M))
+    A_tmp_type = typeof(zero(M) / (zero(L) * zero(L)))
+    C_type = typeof(zero(V) * zero(L))
+    L_type = typeof(zero(C_type) / zero(A_type))
+
+    A = @MMatrix zeros(A_type, 3, 3)
+    A_tmp = @MMatrix zeros(A_tmp_type, 3, 3)
+    C = @MVector zeros(C_type, 3)
+    λ = @MVector zeros(L_type, 3)
+
+    k1 = k1s[cluster_idx] # Central atom
+    k2 = k2s[cluster_idx]
+    k3 = k3s[cluster_idx]
+
+    r_k1, v_k1 = r[k1], v[k1]
+    r_k2, v_k2 = r[k2], v[k2]
+    r_k3, v_k3 = r[k3], v[k3]
+
+    m1_inv, m2_inv, m3_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]) # Uncoalesced read
+    r_k1k2  = vector(r_k1, r_k2, boundary) # Uncoalesced read
+    r_k1k3  = vector(r_k1, r_k3, boundary) # Uncoalesced read
+    r_k2k3  = vector(r_k2, r_k3, boundary) # Uncoalesced read
+
+    v_k1k2 = v_k2 .- v_k1
+    v_k1k3 = v_k3 .- v_k1
+    v_k2k3 = v_k3 .- v_k2
+
+    A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
+    A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
+    A[1, 3] = dot(r_k1k2, r_k2k3) * (-m2_inv)
+    A[2, 1] = A[1, 2]
+    A[2, 2] = dot(r_k1k3, r_k1k3) * (m1_inv + m3_inv)
+    A[2, 3] = dot(r_k1k3, r_k2k3) * (m3_inv)
+    A[3, 1] = A[1, 3]
+    A[3, 2] = A[2, 3]
+    A[3, 3] = dot(r_k2k3, r_k2k3) * (m2_inv + m3_inv)
+
+    C[1] = -dot(r_k1k2, v_k1k2)
+    C[2] = -dot(r_k1k3, v_k1k3)
+    C[3] = -dot(r_k2k3, v_k2k3)
+
+    solve_3x3_exactly!(λ, A, A_tmp, C)
+
+    v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
+    v[k2] -= m2_inv .* ((-λ[1] .* r_k1k2) .+ (λ[3] .* r_k2k3))
+    v[k3] -= m3_inv .* ((-λ[2] .* r_k1k3) .- (λ[3] .* r_k2k3))
+    return nothing
+end
+
 @kernel inbounds=true function rattle3_angle_kernel!(@Const(k1s),
                                                      @Const(k2s),
                                                      @Const(k3s),
-                                                     r::AbstractVector{<:AbstractVector{L}},
-                                                     v::AbstractVector{<:AbstractVector{V}},
-                                                     ms::AbstractVector{M},
-                                                     boundary) where {L, V, M}
+                                                     r,
+                                                     v,
+                                                     @Const(ms),
+                                                     boundary)
     idx = @index(Global, Linear)
-    @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
-    @uniform A_tmp_type = typeof(zero(M) / (zero(L) * zero(L)))
-    @uniform C_type = typeof(zero(V) * zero(L))
-    @uniform L_type = typeof(zero(C_type) / zero(A_type))
-
     if idx <= length(k1s)
-        A = @MMatrix zeros(A_type, 3, 3)
-        A_tmp = @MMatrix zeros(A_tmp_type, 3, 3)
-        C = @MVector zeros(C_type, 3)
-        λ = @MVector zeros(L_type, 3)
-
-        k1 = k1s[idx] # Central atom
-        k2 = k2s[idx]
-        k3 = k3s[idx]
-
-        r_k1, v_k1 = r[k1], v[k1]
-        r_k2, v_k2 = r[k2], v[k2]
-        r_k3, v_k3 = r[k3], v[k3]
-
-        m1_inv, m2_inv, m3_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]) # Uncoalesced read
-        r_k1k2  = vector(r_k1, r_k2, boundary) # Uncoalesced read
-        r_k1k3  = vector(r_k1, r_k3, boundary) # Uncoalesced read
-        r_k2k3  = vector(r_k2, r_k3, boundary) # Uncoalesced read
-
-        v_k1k2 = v_k2 .- v_k1
-        v_k1k3 = v_k3 .- v_k1
-        v_k2k3 = v_k3 .- v_k2
-
-        A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
-        A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
-        A[1, 3] = dot(r_k1k2, r_k2k3) * (-m2_inv)
-        A[2, 1] = A[1, 2]
-        A[2, 2] = dot(r_k1k3, r_k1k3) * (m1_inv + m3_inv)
-        A[2, 3] = dot(r_k1k3, r_k2k3) * (m3_inv)
-        A[3, 1] = A[1, 3]
-        A[3, 2] = A[2, 3]
-        A[3, 3] = dot(r_k2k3, r_k2k3) * (m2_inv + m3_inv)
-
-        C[1] = -dot(r_k1k2, v_k1k2)
-        C[2] = -dot(r_k1k3, v_k1k3)
-        C[3] = -dot(r_k2k3, v_k2k3)
-
-        solve_3x3_exactly!(λ, A, A_tmp, C)
-
-        v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
-        v[k2] -= m2_inv .* ((-λ[1] .* r_k1k2) .+ (λ[3] .* r_k2k3))
-        v[k3] -= m3_inv .* ((-λ[2] .* r_k1k3) .- (λ[3] .* r_k2k3))
+        rattle3_angle_cluster!(idx, k1s, k2s, k3s, r, v, ms, boundary)
     end
 end
 
 # 2 atoms, 1 constraint
+# Solved analytically, so unlike the larger clusters there is no need to iterate
+@inline function shake2_cluster!(cluster_idx, k1s, k2s, dists, r_t1, r_t2, ms, boundary)
+    k1 = k1s[cluster_idx] # Central atom
+    k2 = k2s[cluster_idx]
+    distance = dists[cluster_idx]
+
+    r_t2_k1 = r_t2[k1] # Uncoalesced read
+    r_t2_k2 = r_t2[k2] # Uncoalesced read
+    r_t1_k1 = r_t1[k1] # Uncoalesced read
+    r_t1_k2 = r_t1[k2] # Uncoalesced read
+
+    # Vector between the atoms after unconstrained update (s)
+    s12 = vector(r_t2_k1, r_t2_k2, boundary)
+
+    # Vector between the atoms before unconstrained update (r)
+    r12 = vector(r_t1_k1, r_t1_k2, boundary)
+
+    m1_inv, m2_inv = inv(ms[k1]), inv(ms[k2])
+    a = (m1_inv + m2_inv)^2 * sum(abs2, r12)
+    b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
+    c = sum(abs2, s12) - (distance)^2
+    D = b^2 - 4*a*c
+
+    α1 = (-b + sqrt(D)) / (2*a)
+    α2 = (-b - sqrt(D)) / (2*a)
+    g = ifelse(α1 <= α2, α1, α2)
+
+    r_t2[k1] += r12 .* (g*m1_inv)
+    r_t2[k2] += r12 .* (-g*m2_inv)
+    return nothing
+end
+
 @kernel inbounds=true function shake2_kernel!(@Const(k1s),
                                               @Const(k2s),
                                               @Const(dists),
                                               @Const(r_t1),
-                                              r_t2::T,
+                                              r_t2,
                                               @Const(ms),
-                                              boundary::AbstractBoundary{<:Any, FT}) where {T, FT}
+                                              boundary)
     idx = @index(Global, Linear)
-
     if idx <= length(k1s)
-        k1 = k1s[idx] # Central atom
-        k2 = k2s[idx]
-        distance = dists[idx]
-
-        r_t2_k1 = r_t2[k1] # Uncoalesced read
-        r_t2_k2 = r_t2[k2] # Uncoalesced read
-        r_t1_k1 = r_t1[k1] # Uncoalesced read
-        r_t1_k2 = r_t1[k2] # Uncoalesced read
-
-        # Vector between the atoms after unconstrained update (s)
-        s12 = vector(r_t2_k1, r_t2_k2, boundary)
-
-        # Vector between the atoms before unconstrained update (r)
-        r12 = vector(r_t1_k1, r_t1_k2, boundary)
-
-        m1_inv, m2_inv = inv(ms[k1]), inv(ms[k2])
-        a = (m1_inv + m2_inv)^2 * sum(abs2, r12)
-        b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
-        c = sum(abs2, s12) - (distance)^2
-        D = b^2 - 4*a*c
-
-        α1 = (-b + sqrt(D)) / (2*a)
-        α2 = (-b - sqrt(D)) / (2*a)
-        g = ifelse(α1 <= α2, α1, α2)
-
-        r_t2[k1] += r12 .* (g*m1_inv)
-        r_t2[k2] += r12 .* (-g*m2_inv)
+        shake2_cluster!(idx, k1s, k2s, dists, r_t1, r_t2, ms, boundary)
     end
 end
 
@@ -805,6 +843,90 @@ end
         )
         still_active[cluster_idx] = is_active
     end
+end
+
+# Call `cluster_fn(cluster_index, args...)` for every constraint cluster on CPU, splitting
+#   the clusters over at most `n_threads` tasks
+function apply_clusters_cpu!(cluster_fn::F, n_clusters::Integer, n_threads::Integer,
+                             args::Vararg{Any, N}) where {F, N}
+    n_chunks = n_constraint_chunks(n_clusters, n_threads)
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for cluster_idx in constraint_chunk_range(n_clusters, chunk_i, n_chunks)
+            cluster_fn(cluster_idx, args...)
+        end
+    end
+    return nothing
+end
+
+#=
+As `apply_clusters_cpu!`, but each cluster is iterated until `cluster_fn` returns `false`
+to report that the cluster has converged, which is what M-SHAKE needs.
+Iterating per cluster, rather than over every cluster at once as the GPU path has to,
+means no synchronisation between iterations and no compaction of the clusters that are
+still active.
+=#
+function iterate_clusters_cpu!(cluster_fn::F, n_clusters::Integer, n_threads::Integer,
+                               max_iters::Integer, args::Vararg{Any, N}) where {F, N}
+    n_chunks = n_constraint_chunks(n_clusters, n_threads)
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for cluster_idx in constraint_chunk_range(n_clusters, chunk_i, n_chunks)
+            converged = false
+            for _ in 1:max_iters
+                if !cluster_fn(cluster_idx, args...)
+                    converged = true
+                    break
+                end
+            end
+            converged || warn_shake_convergence(cluster_fn, max_iters)
+        end
+    end
+    return nothing
+end
+
+@noinline function warn_shake_convergence(shake_cluster_fn, max_iters)
+    @warn "SHAKE $(Symbol(shake_cluster_fn)) did not converge after $max_iters " *
+          "iterations, some constraints may not be satisfied" maxlog=1
+    return nothing
+end
+
+function shake_cpu!(clusters::StructArray{C},
+                    max_iters,
+                    n_threads,
+                    shake_cluster_fn,
+                    other_kernel_args...) where {C <: ConstraintKernelData}
+    n_clusters = length(clusters)
+    cluster_idxs  = getproperty.(Ref(clusters), idx_keys(C))
+    cluster_dists = getproperty.(Ref(clusters), dist_keys(C))
+    iterate_clusters_cpu!(shake_cluster_fn, n_clusters, n_threads, max_iters,
+                          cluster_idxs..., cluster_dists..., other_kernel_args...)
+    return nothing
+end
+
+# Run the single pass RATTLE solve for one group of clusters
+@inline function rattle_clusters!(on_gpu::Bool, rattle_kernel, rattle_cluster_fn::F,
+                                  n_clusters::Integer, ca, backend, n_threads::Integer,
+                                  args::Vararg{Any, N}) where {F, N}
+    if on_gpu
+        kernel! = rattle_kernel(backend, ca.gpu_block_size)
+        kernel!(args...; ndrange=n_clusters)
+    else
+        apply_clusters_cpu!(rattle_cluster_fn, n_clusters, n_threads, args...)
+    end
+    return nothing
+end
+
+# Run the iterative SHAKE solve for one group of clusters
+@inline function shake_clusters!(on_gpu::Bool, clusters, ca, backend, n_threads,
+                                 shake_cluster_fn::F,
+                                 args::Vararg{Any, N}) where {F, N}
+    if on_gpu
+        shake_gpu!(clusters, ca.max_iters, ca.gpu_block_size, backend, shake_cluster_fn,
+                   args..., ca.dist_tolerance)
+    else
+        shake_cpu!(clusters, ca.max_iters, n_threads, shake_cluster_fn, args...,
+                   ca.dist_tolerance)
+    end
+    return nothing
 end
 
 function shake_gpu!(clusters::StructArray{C},
@@ -851,14 +973,13 @@ function shake_gpu!(clusters::StructArray{C},
     end
 
     if iter == max_iters + 1
-        @warn "SHAKE $(Symbol(shake_kernel)) did not converge after $max_iters iterations, " *
-              "some constraints may not be satisfied"
+        warn_shake_convergence(shake_kernel, max_iters)
     end
 end
 
 # 3 atoms, 2 constraints
 # Constraints between 1-2 and 1-3
-@inline function shake3_kernel!(cluster_idx,
+@inline function shake3_cluster!(cluster_idx,
                                 k1s, k2s, k3s,
                                 dist12s, dist13s,
                                 r_t1::AbstractVector{<:AbstractVector{L}},
@@ -929,7 +1050,7 @@ end
 
 # 4 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 1-4
-@inline function shake4_kernel!(cluster_idx,
+@inline function shake4_cluster!(cluster_idx,
                                 k1s, k2s, k3s, k4s,
                                 dist12s, dist13s, dist14s,
                                 r_t1::AbstractVector{<:AbstractVector{L}},
@@ -1019,7 +1140,7 @@ end
 
 # 3 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 2-3
-@inline function shake3_angle_kernel!(cluster_idx,
+@inline function shake3_angle_cluster!(cluster_idx,
                                       k1s, k2s, k3s,
                                       dist12s, dist13s, dist23s,
                                       r_t1::AbstractVector{<:AbstractVector{L}},
@@ -1109,6 +1230,7 @@ function apply_position_constraints!(sys::System,
                                      ca::SHAKE_RATTLE,
                                      r_pre_unconstrained_update;
                                      context=nothing,
+                                     n_threads::Integer=Threads.nthreads(),
                                      kwargs...)
     context = isnothing(context) ? default_shake_position_constraint_context() : context
     validate_shake_position_virial_context(context)
@@ -1122,65 +1244,44 @@ function apply_position_constraints!(sys::System,
 
     backend = get_backend(r_pre_unconstrained_update)
     KernelAbstractions.synchronize(backend)
+    on_gpu = sys.coords isa AbstractGPUArray
+    ms = masses(sys)
 
     if N12_clusters > 0
         # 2 atom constraints are solved analytically, no need to iterate
-        s2_kernel! = shake2_kernel!(backend, ca.gpu_block_size)
-        s2_kernel!(
-            ca.clusters12.k1,
-            ca.clusters12.k2,
-            ca.clusters12.dist12,
-            r_pre_unconstrained_update,
-            sys.coords,
-            masses(sys),
-            sys.boundary,
-            ndrange=N12_clusters,
-        )
+        if on_gpu
+            s2_kernel! = shake2_kernel!(backend, ca.gpu_block_size)
+            s2_kernel!(
+                ca.clusters12.k1,
+                ca.clusters12.k2,
+                ca.clusters12.dist12,
+                r_pre_unconstrained_update,
+                sys.coords,
+                ms,
+                sys.boundary,
+                ndrange=N12_clusters,
+            )
+        else
+            apply_clusters_cpu!(shake2_cluster!, N12_clusters, n_threads,
+                                ca.clusters12.k1, ca.clusters12.k2, ca.clusters12.dist12,
+                                r_pre_unconstrained_update, sys.coords, ms, sys.boundary)
+        end
     end
 
     if N23_clusters > 0
-        shake_gpu!(
-            ca.clusters23,
-            ca.max_iters,
-            ca.gpu_block_size,
-            backend,
-            shake3_kernel!,
-            r_pre_unconstrained_update,
-            sys.coords,
-            masses(sys),
-            sys.boundary,
-            ca.dist_tolerance,
-        )
+        shake_clusters!(on_gpu, ca.clusters23, ca, backend, n_threads, shake3_cluster!,
+                        r_pre_unconstrained_update, sys.coords, ms, sys.boundary)
     end
 
     if N34_clusters > 0
-        shake_gpu!(
-            ca.clusters34,
-            ca.max_iters,
-            ca.gpu_block_size,
-            backend,
-            shake4_kernel!,
-            r_pre_unconstrained_update,
-            sys.coords,
-            masses(sys),
-            sys.boundary,
-            ca.dist_tolerance,
-        )
+        shake_clusters!(on_gpu, ca.clusters34, ca, backend, n_threads, shake4_cluster!,
+                        r_pre_unconstrained_update, sys.coords, ms, sys.boundary)
     end
 
     if N_angle_clusters > 0
-        shake_gpu!(
-            ca.angle_clusters,
-            ca.max_iters,
-            ca.gpu_block_size,
-            backend,
-            shake3_angle_kernel!,
-            r_pre_unconstrained_update,
-            sys.coords,
-            masses(sys),
-            sys.boundary,
-            ca.dist_tolerance,
-        )
+        shake_clusters!(on_gpu, ca.angle_clusters, ca, backend, n_threads,
+                        shake3_angle_cluster!, r_pre_unconstrained_update, sys.coords, ms,
+                        sys.boundary)
     end
 
     KernelAbstractions.synchronize(backend)
@@ -1195,7 +1296,8 @@ function apply_position_constraints!(sys::System,
     return sys
 end
 
-function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; context=nothing, kwargs...)
+function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; context=nothing,
+                                     n_threads::Integer=Threads.nthreads(), kwargs...)
     context = isnothing(context) ? default_shake_velocity_constraint_context() : context
     validate_shake_velocity_virial_context(context)
     velocities_before = context.needs_virial ?
@@ -1208,65 +1310,33 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; context=noth
 
     backend = get_backend(sys.velocities)
     KernelAbstractions.synchronize(backend)
+    on_gpu = sys.velocities isa AbstractGPUArray
+    ms = masses(sys)
 
     if N12_clusters > 0
-        N12_blocks = cld(N12_clusters, ca.gpu_block_size)
-        r2_kernel! = rattle2_kernel!(backend, N12_blocks, N12_clusters)
-        r2_kernel!(
-            ca.clusters12.k1,
-            ca.clusters12.k2,
-            sys.coords,
-            sys.velocities,
-            masses(sys),
-            sys.boundary,
-            ndrange=N12_clusters,
-        )
+        rattle_clusters!(on_gpu, rattle2_kernel!, rattle2_cluster!, N12_clusters, ca,
+                         backend, n_threads, ca.clusters12.k1, ca.clusters12.k2,
+                         sys.coords, sys.velocities, ms, sys.boundary)
     end
 
     if N23_clusters > 0
-        N23_blocks = cld(N23_clusters, ca.gpu_block_size)
-        r3_kernel! = rattle3_kernel!(backend, N23_blocks, N23_clusters)
-        r3_kernel!(
-            ca.clusters23.k1,
-            ca.clusters23.k2,
-            ca.clusters23.k3,
-            sys.coords,
-            sys.velocities,
-            masses(sys),
-            sys.boundary,
-            ndrange=N23_clusters,
-        )
+        rattle_clusters!(on_gpu, rattle3_kernel!, rattle3_cluster!, N23_clusters, ca,
+                         backend, n_threads, ca.clusters23.k1, ca.clusters23.k2,
+                         ca.clusters23.k3, sys.coords, sys.velocities, ms, sys.boundary)
     end
 
     if N34_clusters > 0
-        N34_blocks = cld(N34_clusters, ca.gpu_block_size)
-        r4_kernel! = rattle4_kernel!(backend, N34_blocks, N34_clusters)
-        r4_kernel!(
-            ca.clusters34.k1,
-            ca.clusters34.k2,
-            ca.clusters34.k3,
-            ca.clusters34.k4,
-            sys.coords,
-            sys.velocities,
-            masses(sys),
-            sys.boundary,
-            ndrange=N34_clusters,
-        )
+        rattle_clusters!(on_gpu, rattle4_kernel!, rattle4_cluster!, N34_clusters, ca,
+                         backend, n_threads, ca.clusters34.k1, ca.clusters34.k2,
+                         ca.clusters34.k3, ca.clusters34.k4, sys.coords, sys.velocities,
+                         ms, sys.boundary)
     end
 
     if N_angle_clusters > 0
-        N_angle_blocks = cld(N_angle_clusters, ca.gpu_block_size)
-        r3_angle_kernel! = rattle3_angle_kernel!(backend, N_angle_blocks, N_angle_clusters)
-        r3_angle_kernel!(
-            ca.angle_clusters.k1,
-            ca.angle_clusters.k2,
-            ca.angle_clusters.k3,
-            sys.coords,
-            sys.velocities,
-            masses(sys),
-            sys.boundary,
-            ndrange=N_angle_clusters,
-        )
+        rattle_clusters!(on_gpu, rattle3_angle_kernel!, rattle3_angle_cluster!,
+                         N_angle_clusters, ca, backend, n_threads, ca.angle_clusters.k1,
+                         ca.angle_clusters.k2, ca.angle_clusters.k3, sys.coords,
+                         sys.velocities, ms, sys.boundary)
     end
 
     KernelAbstractions.synchronize(backend)
