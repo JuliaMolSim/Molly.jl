@@ -1396,6 +1396,20 @@
         atol=1e-7u"kJ * mol^-1",
     )
 
+    sys_mb = System(
+        atoms=[Atom(mass=1.0u"g/mol")],
+        coords=[SVector(-0.5, 0.25)u"nm"],
+        boundary=RectangularBoundary(Inf * u"nm"),
+        general_inters=(MullerBrown(),),
+    )
+    # match_mode is :all by default, so this asserts exactly one warning is logged
+    @test_logs (:warn, r"virial contribution for MullerBrown") begin
+        for _ in 1:3
+            virial(sys_mb)
+        end
+    end
+    @test_throws ErrorException virial(sys_mb; strictness=:error)
+
     # RBTorsion tests
     # Use proper non-collinear geometry for torsion - atoms arranged in a dihedral
     c1t = SVector(0.0, 0.0, 0.0)u"nm"

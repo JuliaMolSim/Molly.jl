@@ -396,6 +396,29 @@
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
     end
 
+    # Changing the box size checks that the interaction cutoff still fits in the box
+    let n_atoms = 100
+        boundary_sc = CubicBoundary(4.0u"nm")
+        sys_sc = System(
+            atoms=[Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:n_atoms],
+            coords=place_atoms(n_atoms, boundary_sc; min_dist=0.3u"nm"),
+            boundary=boundary_sc,
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.5u"nm")),),
+        )
+        μ_ok = SMatrix{3, 3}(Diagonal(fill(0.99, 3))) # 3.96 nm sides, cutoff still fits
+        μ_small = SMatrix{3, 3}(Diagonal(fill(0.7, 3))) # 2.8 nm sides, less than 2 * 1.5 nm
+        @test_logs scale_coords!(deepcopy(sys_sc), μ_ok)
+        @test_logs (:warn, r"Minimum box side") scale_coords!(deepcopy(sys_sc), μ_small)
+        # Only warns once even when the box is scaled repeatedly
+        sys_sc_rep = deepcopy(sys_sc)
+        @test_logs (:warn, r"Minimum box side") begin
+            scale_coords!(sys_sc_rep, μ_small)
+            scale_coords!(sys_sc_rep, μ_ok)
+        end
+        @test_logs scale_coords!(deepcopy(sys_sc), μ_small; strictness=:nowarn)
+        @test_throws ErrorException scale_coords!(deepcopy(sys_sc), μ_small; strictness=:error)
+    end
+
     for AT in array_list
         a1 = to_device([SVector(1.0, 2.0)u"nm"   , SVector(3.0, 4.0)u"nm"   ], AT)
         a2 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(7.0, 8.0)u"nm/ps"], AT)
