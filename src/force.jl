@@ -662,7 +662,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
 
     coords_reordered = zero(sys.coords)
     velocities_reordered = zero(sys.velocities)
-    atoms_reordered = zero.(sys.atoms)
+    atoms_reordered = copy(sys.atoms)
 
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
@@ -828,12 +828,15 @@ end
 function reduce_force_chunks!(fs_nounits, fs_chunks, vir_nounits, vir_chunks,
                               ::Val{n_threads}, ::Val{needs_vir}) where {n_threads, needs_vir}
     FT = eltype(fs_nounits)
-    @inbounds Threads.@threads for i in eachindex(fs_nounits)
-        f = zero(FT)
-        for chunk_i in 1:n_threads
-            f += fs_chunks[chunk_i][i]
+    n_atoms = length(fs_nounits)
+    @inbounds Threads.@threads for chunk_i in 1:n_threads
+        for i in (((chunk_i - 1) * n_atoms) ÷ n_threads + 1):((chunk_i * n_atoms) ÷ n_threads)
+            f = zero(FT)
+            for ci in 1:n_threads
+                f += fs_chunks[ci][i]
+            end
+            fs_nounits[i] = f
         end
-        fs_nounits[i] = f
     end
 
     if needs_vir
