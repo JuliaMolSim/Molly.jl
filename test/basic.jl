@@ -122,6 +122,20 @@
         else
             @test n_repeated == 0
         end
+
+        local ms = mass.(atoms)
+        local mom_scale = n_atoms * atom_mass * σ
+        local vels_keep = random_velocities(sys, temp; rng=Xoshiro(10))
+        local vels_rm = random_velocities(sys, temp; rng=Xoshiro(10), remove_CM_motion=true)
+        @test maximum(abs.(sum(vels_keep .* ms))) > 1e-4 * mom_scale
+        @test maximum(abs.(sum(vels_rm   .* ms))) < 1e-4 * mom_scale
+        random_velocities!(sys, temp; rng=Xoshiro(10), remove_CM_motion=true)
+        @test momentum(sys) == sum(sys.velocities .* ms)
+        @test maximum(abs.(momentum(sys))) < 1e-4 * mom_scale
+        random_velocities!(sys, temp; rng=Xoshiro(10))
+        @test maximum(abs.(momentum(sys))) > 1e-4 * mom_scale
+        remove_CM_motion!(sys)
+        @test maximum(abs.(momentum(sys))) < 1e-4 * mom_scale
     end
 
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
