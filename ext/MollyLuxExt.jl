@@ -1762,8 +1762,10 @@ function Molly.compute_ani_forces_ka(coords::AbstractVector{SVector{D,T}}, speci
     na   = size(fmat, 2)
     F    = Vector{SVector{3,T}}(undef, na)
     if n_threads > 1 && na > 1
-        Threads.@threads for i in 1:na
-            @inbounds F[i] = SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha)
+        Threads.@threads for chunk_i in 1:n_threads
+            for i in (((chunk_i - 1) * na) ÷ n_threads + 1):((chunk_i * na) ÷ n_threads)
+                @inbounds F[i] = SVector{3,T}(-fmat[1,i]*Ha, -fmat[2,i]*Ha, -fmat[3,i]*Ha)
+            end
         end
     else
         @inbounds for i in 1:na
