@@ -323,7 +323,7 @@ visualize(
 
 ## Simulating a protein
 
-The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html) to a [`MolecularForceField`](@ref) and then read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
+The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](https://docs.openmm.org/latest/userguide/application/06_creating_ffs.html) to a [`MolecularForceField`](@ref) and then read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
 Files for common force fields can be found at [OpenMM](https://github.com/openmm/openmm) and [OpenMM force fields](https://github.com/openmm/openmmforcefields).
 This sets up a system in the same data structures as above and that is simulated in the same way.
 Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a [`TrajectoryWriter`](@ref) to write the trajectory as a DCD file (or another file format, by changing the file extension).
@@ -546,7 +546,12 @@ end
 In the force calculation, the gradient of the bias potential with respect to the CV and the gradient of the CV function with respect to the system coordinates are calculated in two separate steps.
 Either calculation can be performed with an explicitly defined gradient function or with automatic differentiation.
 
-A number of CV functions are available in Molly, including the distance between sets of atoms, the radius of gyration and the RMSD to a target structure.
+The available CV types are:
+- [`CalcDist`](@ref), the distance between two sets of atoms. The way the distance is calculated is set by giving [`CalcMinDist`](@ref), [`CalcMaxDist`](@ref), [`CalcCMDist`](@ref) or [`CalcSingleDist`](@ref) as the `dist_type` argument.
+- [`CalcRg`](@ref), the radius of gyration of a set of atoms.
+- [`CalcRMSD`](@ref), the RMSD of a set of atoms to a target structure.
+- [`CalcTorsion`](@ref), the torsion angle defined by four atoms.
+
 Currently, CV calculation is always done on the CPU.
 Other CV functions can be added by the user.
 Every CV type needs to have its own struct, an associated method of the [`calculate_cv`](@ref) function and potentially a method for the `cv_gradient` function.
@@ -577,7 +582,11 @@ end
 
 The system can be biased along the chosen CV using different bias potentials.
 The bias potential is a function of the system's current CV value and the target CV value and maps e.g. the difference between these two values to a potential energy.
-Molly currently includes the bias potential types [`LinearBias`](@ref), [`SquareBias`](@ref) and [`FlatBottomSquareBias`](@ref).
+The available bias potential types are:
+- [`LinearBias`](@ref)
+- [`SquareBias`](@ref)
+- [`FlatBottomSquareBias`](@ref)
+- [`PeriodicFlatBottomBias`](@ref), for periodic CVs such as torsion angles
 
 You can define your own type of bias potential by first defining a new `struct`:
 ```julia
@@ -705,7 +714,7 @@ For example, if your energy and force units are molar then your atom masses shou
 If you are not using units then no quantities can have Unitful annotations and you are responsible for ensuring a consistent unit system.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
-Units are not currently compatible with differentiable simulations.
+Units are not fully compatible with Enzyme, though simple cases may work.
 
 All your interaction types need to return the same units of force and energy or the simulation will not run.
 By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_units` and `energy_units` arguments to [`System`](@ref) and some interactions.
@@ -722,13 +731,31 @@ The coordinates, velocities and boundary should all use this float type; mixing 
 
 Molly has a built-in [`Atom`](@ref) type with a few properties commonly used in molecular simulation defined.
 The [`mass`](@ref) and [`charge`](@ref) functions can be used on an [`Atom`](@ref).
-Custom atom types can be used just as effectively provided that either the [`mass`](@ref) function is defined on the type or the type has a `mass` field (the fallback for the [`mass`](@ref) function).
-The type should also have all fields required by any interactions.
-The list of atoms passed to the [`System`](@ref) constructor should be concretely typed.
 
+Custom atom types can be used just as effectively, and are the way to provide per-atom parameters that the built-in [`Atom`](@ref) does not have.
+A custom atom type needs to have:
+- The mass, either as a `mass` field or by defining a method for [`mass`](@ref).
+- The charge, either as a `charge` field or by defining a method for [`charge`](@ref). Only required by interactions that use charges.
+- A field for every other atom parameter read by the interactions in the system. `Molly.required_atom_fields(inter)` gives these for a built-in interaction, for example `(:σ, :ϵ, :λ)` for [`LennardJones`](@ref) and `(:charge,)` for [`Coulomb`](@ref).
+
+For example, an atom type that works with [`LennardJones`](@ref) and [`Coulomb`](@ref) and carries an extra property:
+```julia
+struct MyAtom{T, M, S, E}
+    mass::M
+    charge::T
+    σ::S
+    ϵ::E
+    λ::T
+    hydrophobicity::T # Read by a custom interaction
+end
+```
 Custom atom types should generally be bits types, i.e. `isbitstype(MyAtom)` should be `true`, to work on the GPU.
+The list of atoms passed to the [`System`](@ref) constructor should be concretely typed.
+To differentiate through a simulation, a custom atom type also needs a `Base.zero` method, which is used to allocate the gradient; differentiating with respect to the atom parameters themselves currently requires the built-in [`Atom`](@ref) type.
+
 Additional non-bits type data for the atoms that is not directly used when calculating the interactions can be passed to the [`System`](@ref) constructor with the `atoms_data` keyword argument.
 For example the built-in [`AtomData`](@ref) type contains fields such as the atom name that are useful when writing trajectories.
+Setting up a [`System`](@ref) from a structure file and a force field always uses the built-in [`Atom`](@ref) type.
 
 ## Forces and energies
 
@@ -985,6 +1012,7 @@ specific_inter_lists = (
 )
 ```
 Giving interaction data, including arrays, as the last argument to the interaction list means that it can be accessed in the [`force`](@ref) and [`potential_energy`](@ref) functions via the `data` argument.
+Interaction lists can be indexed and iterated over, with each entry being a `NamedTuple` of the atom indices, the interaction and the interaction type.
 For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of indices.
 If using the GPU, the inner list of indices and interactions should be moved to the GPU with `CuArray`.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
@@ -1189,6 +1217,18 @@ The available simulators are:
 
 Many of these require a time step `dt` as an argument.
 Many also remove the center of mass motion every time step, which can be tuned with the `remove_CM_motion` argument (`false` or a number of steps).
+The third argument to [`simulate!`](@ref) can be an `Integer` number of steps or a simulation time, e.g. `simulate!(sys, simulator, 10.0u"ns")`, in which case the number of steps is calculated from `dt`.
+
+The statistical ensemble that is sampled depends on the simulator and on any [Coupling](@ref) that is applied:
+
+| Ensemble                         | Conserved quantities                   | How to sample it                                                                                                                                                                                                                                                                                   |
+| :------------------------------- | :------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NVE, microcanonical              | Number of atoms, volume, energy        | [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref) or [`MTSIntegrator`](@ref) with no coupling, or [`LangevinSplitting`](@ref) with a splitting containing no **O** steps                                                                                                         |
+| NVT, canonical                   | Number of atoms, volume, temperature   | A stochastic thermostatted integrator such as [`Langevin`](@ref), [`LangevinSplitting`](@ref), [`OverdampedLangevin`](@ref), [`MTSLangevinIntegrator`](@ref), [`DPDVelocityVerlet`](@ref) or [`MetropolisMonteCarlo`](@ref); [`NoseHoover`](@ref); or one of the NVE integrators with a thermostat |
+| NPT, isothermal-isobaric         | Number of atoms, pressure, temperature | One of the NVT options that accepts `coupling`, with a barostat such as [`MonteCarloBarostat`](@ref) or [`CRescaleBarostat`](@ref) added alongside a thermostat                                                                                                                                    |
+
+The available thermostats and barostats are listed under [Coupling](@ref).
+Not every coupler samples the corresponding ensemble correctly, for example the [`BerendsenThermostat`](@ref) and [`BerendsenBarostat`](@ref) do not, so read the docstrings before using them.
 
 Common options when calling [`simulate!`](@ref) with these simulators include:
 - `show_progress` to decide whether to show a progress bar for the simulation. This is `true` by default in the REPL/IJulia/Pluto, otherwise `false`, and can be set globally with the environmental variable `MOLLY_SHOW_PROGRESS`.
@@ -1669,6 +1709,9 @@ lincs = LINCS(
 ```
 `constraints=(lincs,)` can then be given when setting up a [`System`](@ref).
 
+The [`DistanceConstraint`](@ref)s, [`AngleConstraint`](@ref)s and masses given to [`SHAKE_RATTLE`](@ref) and [`LINCS`](@ref) should always be on the CPU, even for a GPU system.
+The [`System`](@ref) constructor moves the constraint data to the device of the system, so no manual transfer is required.
+
 See [this example](@ref "Constrained dynamics") for more.
 
 This diagram demonstrates the four allowed constraint types:
@@ -1756,13 +1799,25 @@ The available neighbor finders are:
 - [`TreeNeighborFinder`](@ref)
 
 The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`DistanceNeighborFinder`](@ref) on other GPUs.
-When using a classical neighbor finder you should in general also use an interaction cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor finder distance.
-The difference between the two should be larger than an atom can move in the time of the `n_steps` defined by the neighbor finder.
+
+The `dist_cutoff` of a neighbor finder is the distance used to search for neighbors, and is not the same as the interaction cutoff distance (see [Cutoffs](@ref)).
+Since the neighbor list is only rebuilt every `n_steps` steps, `dist_cutoff` should be the interaction cutoff distance plus a buffer distance:
+```julia
+dist_cutoff = 1.0u"nm" # Interaction cutoff distance
+dist_buffer = 0.2u"nm" # Buffer distance
+neighbor_finder = DistanceNeighborFinder(
+    eligible=eligible,
+    n_steps=10,
+    dist_cutoff=(dist_cutoff + dist_buffer),
+)
+```
+The buffer distance should be larger than the distance an atom can move in `n_steps` steps, otherwise interacting pairs can be missed.
+When setting up a [`System`](@ref) from a file the buffer is added automatically and the two distances are given separately as the `dist_cutoff` and `dist_buffer` keyword arguments.
 
 [`GPUNeighborFinder`](@ref) follows a different CUDA-specific path based on the tiled GPU strategy of [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms, build per-tile masks and cache a compact list of interacting `32x32` tiles internally.
 Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
-When using it, set `dist_cutoff` to the interaction cutoff distance and `n_steps_reorder` to the number of steps between reorder and tile-list refresh passes.
+When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps_reorder` to the number of steps between reorder and tile-list refresh passes.
 
 ## Analysis
 
@@ -1777,6 +1832,8 @@ Functions that may be useful for analysis include:
 - [`hydrodynamic_radius`](@ref)
 - [`bond_angle`](@ref)
 - [`torsion_angle`](@ref)
+- [`momentum`](@ref)
+- [`dipole_moment`](@ref)
 
 Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.
 
