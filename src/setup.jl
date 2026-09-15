@@ -672,11 +672,7 @@ function System(coord_file::AbstractString,
     end
     min_box_side = minimum(box_sides(boundary_used))
     if min_box_side < (2 * dist_cutoff)
-        err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
-                  "($(2 * dist_cutoff)), this can lead to unphysical simulations " *
-                  "since multiple copies of the same atom are seen but only one is " *
-                  "considered due to the minimum image convention"
-        report_issue(err_str, strictness)
+        report_box_size_issue(min_box_side, dist_cutoff, strictness)
     end
 
     # Units and coordinates

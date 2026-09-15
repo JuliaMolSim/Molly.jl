@@ -831,7 +831,15 @@ function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, bounda
     end
 end
 
-function check_cutoff_box_size(dist_cutoff, boundary, strictness)
+function report_box_size_issue(min_box_side, dist_cutoff, strictness, maxlog=nothing)
+    err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
+              "($(2 * dist_cutoff)), this can lead to unphysical simulations " *
+              "since multiple copies of the same atom are seen but only one is " *
+              "considered due to the minimum image convention"
+    report_issue(err_str, strictness; maxlog=maxlog)
+end
+
+function check_cutoff_box_size(dist_cutoff, boundary, strictness; maxlog=nothing)
     has_infinite_boundary(boundary) && return nothing
     isinf(ustrip(dist_cutoff)) && return nothing
     min_box_side = minimum(box_sides(boundary))
@@ -839,11 +847,7 @@ function check_cutoff_box_size(dist_cutoff, boundary, strictness)
         return nothing # Unit mismatches are reported elsewhere
     end
     if min_box_side < (2 * dist_cutoff)
-        err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
-                  "($(2 * dist_cutoff)), this can lead to unphysical simulations " *
-                  "since multiple copies of the same atom are seen but only one is " *
-                  "considered due to the minimum image convention"
-        report_issue(err_str, strictness)
+        report_box_size_issue(min_box_side, dist_cutoff, strictness, maxlog)
     end
 end
 
@@ -1966,8 +1970,8 @@ Note that this calculator is designed for using Molly in other contexts; if you
 want to use another calculator in Molly it can be given as `general_inters` when
 creating a [`System`](@ref).
 
-Not currently compatible with virial calculation.
-Not currently compatible with using atom properties such as `σ` and `ϵ`.
+Not compatible with virial calculation.
+Not compatible with using atom properties such as `σ` and `ϵ`.
 
 # Arguments
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
@@ -2083,8 +2087,8 @@ Contrary to the rest of Molly, unitless quantities are assumed to have ASE units
 Å for length, eV for energy, u for mass, and Å sqrt(u/eV) for time.
 Unitful quantities will be converted as appropriate.
 
-Not currently compatible with [`TriclinicBoundary`](@ref).
-Not currently compatible with virial calculation.
+Not compatible with [`TriclinicBoundary`](@ref).
+Not compatible with virial calculation.
 
 # Arguments
 - `ase_calc`: the ASE calculator created with PythonCall.

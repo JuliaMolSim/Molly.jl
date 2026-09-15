@@ -1180,23 +1180,38 @@ rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
 rebuild_boundary(b::RectangularBoundary, box) = RectangularBoundary(box)
 rebuild_boundary(b::TriclinicBoundary,   box) = TriclinicBoundary(box)
 
+# Check that the interaction cutoff still fits in the box after the boundary is changed,
+#   for example by a barostat
+function check_boundary_change(sys, strictness)
+    max_sqdist = max_zero_beyond(sys.pairwise_inters)
+    if !isnothing(max_sqdist) && !iszero(max_sqdist)
+        check_cutoff_box_size(sqrt(max_sqdist), sys.boundary, strictness; maxlog=1)
+    end
+    return nothing
+end
+
 """
     scale_coords!(sys::System{<:Any, AT}, μ::SMatrix{D,D};
                   rotate::Bool=true,
                   ignore_molecules::Bool=false,
-                  scale_velocities::Bool=false)
+                  scale_velocities::Bool=false,
+                  strictness=:warn)
 
 Rigid-molecular barostat update with optional rotation.
 
 - Box:        B′ = μ * B
 - Positions:  r′ = μ * r  (implemented via COM affine + optional rotation of internal offsets)
 - Velocities: v′ = μ⁻¹ * v  (applied when `scale_velocities=true`)
+
+A warning is given at most once if the new box is too small for the interaction
+cutoff distance.
 """
 function scale_coords!(sys::System{<:Any, AT, T},
                        μ_in::SMatrix{D, D};
                        rotate::Bool=true,
                        ignore_molecules::Bool=false,
-                       scale_velocities::Bool=false) where {AT, T, D}
+                       scale_velocities::Bool=false,
+                       strictness=default_strictness()) where {AT, T, D}
     # This function assumes that constrained atoms, and virtual sites and the atoms that
     #   define them, are in the same molecule, meaning that they are scaled appropriately
     if has_infinite_boundary(sys.boundary)
@@ -1218,6 +1233,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
         if scale_velocities
             sys.velocities .= to_device([μinv * v for v in from_device(sys.velocities)], AT)
         end
+        check_boundary_change(sys, strictness)
         return sys
     else
         # units and host copies
@@ -1294,6 +1310,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
             sys.velocities .= to_device(vels, AT)
         end
 
+        check_boundary_change(sys, strictness)
         return sys
     end
 end

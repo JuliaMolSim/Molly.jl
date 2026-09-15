@@ -470,7 +470,7 @@ function apply_coupling!(sys::System{D},
     end
 
     rotate = (barostat.coupling_type != :isotropic)
-    scale_coords!(sys, SMatrix{D,D,FT}(μ); rotate=rotate)
+    scale_coords!(sys, SMatrix{D, D, FT}(μ); rotate=rotate, strictness=strictness)
     return true
 end
 
@@ -708,7 +708,8 @@ function apply_coupling!(sys::System{D},
     end
 
     rotate = (barostat.coupling_type != :isotropic)
-    scale_coords!(sys, SMatrix{D, D, FT}(μ); rotate=rotate, scale_velocities=true)
+    scale_coords!(sys, SMatrix{D, D, FT}(μ); rotate=rotate, scale_velocities=true,
+                  strictness=strictness)
     return true
 end
 
@@ -760,7 +761,7 @@ It should be used alongside a temperature coupling method such as the [`Langevin
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
-Does not currently work with shear stresses, the anisotropic variant only applies
+Does not work with shear stresses, the anisotropic variant only applies
 independent linear scaling of the box vectors.
 If shear deformation is required the [`BerendsenBarostat`](@ref) or,
 preferably, the [`CRescaleBarostat`](@ref) should be used instead.
@@ -906,9 +907,9 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
         old_coords  .= sys.coords
         old_boundary = sys.boundary
         scale_matrix = SMatrix{D, D, T}([l_scale zero(T) zero(T);
-                                            zero(T) l_scale zero(T);
-                                            zero(T) zero(T) l_scale])
-        scale_coords!(sys, scale_matrix)
+                                         zero(T) l_scale zero(T);
+                                         zero(T) zero(T) l_scale])
+        scale_coords!(sys, scale_matrix; strictness=strictness)
 
         if barostat.trial_find_neighbors
             neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
@@ -967,9 +968,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
         old_coords  .= sys.coords
         old_boundary = sys.boundary
 
-        scale_coords!(sys, SMatrix{D, D, T}([l_scale_xy zero(T) zero(T);
-                                             zero(T) l_scale_xy zero(T);
-                                             zero(T) zero(T) l_scale_z]))
+        scale_matrix = SMatrix{D, D, T}([l_scale_xy zero(T) zero(T);
+                                         zero(T) l_scale_xy zero(T);
+                                         zero(T) zero(T) l_scale_z])
+        scale_coords!(sys, scale_matrix; strictness=strictness)
 
         if barostat.trial_find_neighbors
             neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
@@ -1031,9 +1033,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
         old_coords .= sys.coords
         old_boundary = sys.boundary
 
-        scale_coords!(sys, SMatrix{D, D, T}([l_scale_x zero(T)   zero(T);
-                                             zero(T)   l_scale_y zero(T);
-                                             zero(T)   zero(T)   l_scale_z]))
+        scale_matrix = SMatrix{D, D, T}([l_scale_x zero(T)   zero(T);
+                                         zero(T)   l_scale_y zero(T);
+                                         zero(T)   zero(T)   l_scale_z])
+        scale_coords!(sys, scale_matrix; strictness=strictness)
 
         if barostat.trial_find_neighbors
             neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
