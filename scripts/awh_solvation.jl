@@ -31,7 +31,10 @@ lambda_schedule = FT.(range(1.0, stop=0.0, length=N_LAMBDA_STATES))
 # --- Force Field Setup ---
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir   = joinpath(data_dir, "force_fields")
-ff = MolecularForceField(FT, joinpath.(ff_dir, ["tip3p_standard.xml", "gaff.xml", "ethanol.xml"])...; units=true)
+ff = MolecularForceField(
+    joinpath.(ff_dir, ["tip3p_standard.xml", "gaff.xml", "ethanol.xml"])...;
+    units=true,
+)
 
 ##
 function awh_solvation_loggers(is_vacuum::Bool)
@@ -191,10 +194,10 @@ function rebuild_alchemical_specific_inter_lists(sys_base, coul_scaled)
 end
 
 function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Random.default_rng())
-    nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
     dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
+    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
     awh_loggers = awh_solvation_loggers(is_vacuum)
 
@@ -202,6 +205,7 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Ran
         pdb_file,
         ff;
         array_type=AT,
+        float_type=FT,
         boundary=boundary,
         dist_cutoff=dist_cutoff,
         dist_buffer=dist_buffer,

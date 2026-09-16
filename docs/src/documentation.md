@@ -197,7 +197,7 @@ To use another GPU package, just swap out `CUDA` for your desired package and `C
 The device to run on can be changed with `device!`, e.g. `device!(1)`.
 There are two GPU code paths currently: a fast path specific to CUDA and a slower path using [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) that is suitable for all backends.
 
-The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF` and `MOLLY_GPUNTHREADS_IMPLICIT`.
+The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF`, `MOLLY_GPUNTHREADS_IMPLICIT` and `MOLLY_GPUMINTHREADS_IMPLICIT`.
 In general these should only be changed if GPU memory errors occur on smaller GPUs.
 
 For the CUDA fast path, users can explicitly call `Molly.optimize_cuda_launch_config!(sys)` prior to a simulation. This will benchmark various launch configurations and cache the optimal parameters, which are then used to accelerate subsequent pairwise force and energy kernels globally. Users can also manually override the kernel parameters by setting the environment variables `MOLLY_CUDA_FORCE_BLOCK_Y`, `MOLLY_CUDA_ENERGY_BLOCK_Y`, `MOLLY_CUDA_TILE_THREADS_X`, `MOLLY_CUDA_TILE_THREADS_Y`, and `MOLLY_CUDA_FORCE_MAXREGS`, or directly via the `set_cuda_launch_config!` function.
@@ -331,7 +331,6 @@ Here we carry out an energy minimization, simulate with a Langevin integrator in
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 T = Float32 # Float32 is much faster on GPU
 ff = MolecularForceField(
-    T,
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
 )
@@ -339,12 +338,13 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    nonbonded_method=:pme,
+    nonbonded_method=SetupPME(),
     loggers=(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
     ),
     array_type=Array, # CuArray for CUDA GPU
+    float_type=T, # By default Float32 on GPU and Float64 on CPU
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -380,39 +380,32 @@ If your simulation contains other types of molecules, you must provide the topol
 
     Some PDB files that read in fine can be found [here](https://github.com/JuliaMolSim/Molly.jl/tree/master/data/openmm_refs).
 
+If a residue in the structure file cannot be matched to a residue template then the error message names the residue, gives its atoms and diagnoses the most likely cause by comparing it to the closest template, for example:
+```
+could not match residue TRP (residue number 2 of chain "A") to any of the residue
+templates in the force field. The set of atoms is similar to TRP, but the residue is
+missing 1 C atom. The residue has 23 atoms: N, H, CA, ...
+```
+Common causes are missing heavy atoms or hydrogens, missing bond information for non-standard residues, non-standard atom or residue naming, and using a force field that does not cover the molecules in the file.
+A template with the same name as the residue is used if it matches, otherwise the templates are tried in alphabetical order; if more than one of them matches and they give different parameters then this is reported according to `strictness` and the first is used.
+
 To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
+The floating point type can be set with `float_type`.
+Certain quantities such as the [`potential_energy`](@ref) and the [`virial`](@ref) are accumulated using a higher precision type, as are the large constant terms of [`Ewald`](@ref) and [`PME`](@ref) summation.
+This can be set with `float_type_high` but should generally be left as the default `Float64`.
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
-The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
+This can can be an instance of [`SetupCoulombReactionField`](@ref) (reaction field method), [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref) (Ewald summation, slow), or a cutoff like [`DistanceCutoff`](@ref) (short range only).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
+Note that `rigid_water` defaults to `false`, whereas OpenMM makes water rigid by default, so set `rigid_water=true` to reproduce OpenMM behavior.
 Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`, and is applied before constraints are generated.
+Unlike OpenMM, it is also applied to the hydrogens of rigid water.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
-The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
+The options are instances of [`SetupImplicitSolventOBC`](@ref) and [`SetupImplicitSolventGBN2`](@ref), corresponding to the Onufriev-Bashford-Case GBSA model and the GB-Neck2 model.
 Other options detailed in the docstring for [`System`](@ref) include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_buffer`).
 The `strictness` keyword argument determines behavior when encountering possible problems and can be set to `:error` or `:nowarn` rather than the default `:warn`.
 It can be set globally with the `MOLLY_STRICTNESS` environmental variable.
 
-Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files, which should be considered experimental. For example:
-```julia
-sys = System(
-    joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
-    joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
-    nonbonded_method=:pme,
-    loggers=(
-        temp=TemperatureLogger(10),
-        writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
-    ),
-)
-
-temp = 298.0u"K"
-random_velocities!(sys, temp)
-simulator = Verlet(
-    dt=0.0002u"ps",
-    coupling=BerendsenThermostat(temp, 1.0u"ps"),
-)
-
-simulate!(sys, simulator, 5_000)
-```
 Harmonic position restraints can be added to a [`System`](@ref) for equilibration using [`add_position_restraints`](@ref):
 ```julia
 sys_res = add_position_restraints(
@@ -427,7 +420,7 @@ sys_res = add_position_restraints(
 See the [OpenMM documentation](https://docs.openmm.org/latest/userguide/application/06_creating_ffs.html#writing-the-xml-file) for the available tags.
 The following tags are supported:
 - `<AtomTypes>`: both atom types and atom classes are supported
-- `<Residues>`: `<VirtualSite>` tags are supported except for `type="localCoords"`
+- `<Residues>`: `<VirtualSite>` tags are supported except for `type="localCoords"`, and the `override` attribute on `<Residue>` tags is supported
 - `<Patches>`: patches that apply to multiple residue templates and multiple patches acting on one residue template are not supported
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
@@ -721,6 +714,9 @@ If you need to strip units for downstream analysis, use the `ustrip` or [`ustrip
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
 It is possible that you may run into issues when using different but valid units of the same dimension together, e.g. `1.0u"nm"` and `10.0u"Å"`.
 In this case, try using the same units throughout.
+
+The float type of a [`System`](@ref) is read from the boundary by default and can be set with the `float_type` argument.
+The coordinates, velocities and boundary should all use this float type; mixing `Float32` and `Float64` data silently loses the precision you asked for on CPU and can fail to compile on GPU, so it is reported according to `strictness`.
 
 ## Atom types
 
@@ -1455,7 +1451,6 @@ simulate!(sys, simulator, 100; run_loggers=:skipstart)
 simulate!(sys, simulator, 100; run_loggers=:skipstart)
 ```
 Running loggers can be disabled entirely with `run_loggers=false`, which is the default for [`SteepestDescentMinimizer`](@ref).
-Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
@@ -1823,9 +1818,9 @@ Some functions require `Random.default_rng()` for thread safety, and will error 
 ## Performance tips
 
 Here is a checklist to ensure that you are getting the optimal performance from your simulations:
-- On CPU, you should tune the `n_threads` argument to [`simulate!`](@ref). If running on a single thread, it should be `1`. Otherwise you should try various values, including larger than the number of threads available to Julia (which balances the load appropriately). Make sure to start Julia with as many threads as possible using `-t`. Generally, `Float32` is not much faster than `Float64` on CPU.
-- On GPU, using `Float32` will give vastly better performance. You can try changing the number of threads for each kernel as described in the [GPU acceleration](@ref) section, but the defaults are generally suitable for modern hardware. Multiple simulations can be run on different GPUs using `device!`. It is not currently possible to split one simulation onto multiple devices.
-- If you run a simulation using CUDA GPUs, Molly has available a `Molly.optimize_cuda_launch_config!(sys)` function. This will atomatically test several launch parameters for the CUDA kernels and select the most performant ones.
+- On CPU, you should tune the `n_threads` argument to [`simulate!`](@ref). If running on a single thread, it should be `1`. Otherwise you should try various values, including larger than the number of threads available to Julia (which balances the load appropriately). Make sure to start Julia with as many threads as possible using `-t`. Generally, `Float32` is not much faster than `Float64` on CPU so `Float64` is the default float type.
+- On GPU, using `Float32` will give vastly better performance and is the default float type. You can try changing the number of threads for each kernel as described in the [GPU acceleration](@ref) section, but the defaults are generally suitable for modern hardware. Multiple simulations can be run on different GPUs using `device!`. It is not currently possible to split one simulation onto multiple devices.
+- If you run a simulation using CUDA GPUs, the `Molly.optimize_cuda_launch_config!(sys)` function can be used to automatically test several launch parameters for the CUDA kernels and select the most performant ones. This is done automatically when setting a system up from a file.
 - Run a short `simulate!` call once to ensure JIT compilation. You can run it on `deepcopy(sys)` if you don't want to affect `sys`, though beware of side effects like writing out trajectory files and consider using `run_loggers=false`.
 - Make sure all arrays, such as coordinates and velocities, are concretely typed.
 - In general, using units doesn't slow things down as described in the [Units](@ref) section, but you could try running without units.

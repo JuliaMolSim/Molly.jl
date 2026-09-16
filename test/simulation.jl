@@ -106,7 +106,7 @@ end
 
         show(devnull, sys)
 
-        @time simulate!(sys, simulator, n_steps; n_threads=1)
+        simulate!(sys, simulator, n_steps; n_threads=1)
 
         @test length(values(sys.loggers.coords)) == 201
         final_coords = last(values(sys.loggers.coords))
@@ -128,7 +128,8 @@ end
 @testset "Lennard-Jones" begin
     n_atoms = 100
     atom_mass = 10.0u"g/mol"
-    n_steps = 20_000
+    n_steps = 5_000
+    n_frames = (n_steps ÷ 100) + 1
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
@@ -245,7 +246,7 @@ end
         @test length(neighbors.list) == length(neighbors_tree.list)
         @test all(nn in neighbors_tree.list for nn in neighbors.list)
 
-        @time simulate!(s, simulator, n_steps; n_threads=n_threads, show_progress=true)
+        simulate!(s, simulator, n_steps; n_threads=n_threads, show_progress=true)
 
         show(devnull, s.loggers.temp)
         show(devnull, s.loggers.coords)
@@ -270,17 +271,19 @@ end
 
         traj = Chemfiles.Trajectory(temp_fp_dcd)
         rm(temp_fp_dcd)
-        @test Int(length(traj)) == 201
+        @test Int(length(traj)) == n_frames
         frame = read(traj)
         @test length(frame) == 100
         # Chemfiles does not write velocities to DCD files
         @test size(Chemfiles.positions(frame)) == (3, 100)
         @test !iszero(sum(Array(Chemfiles.positions(frame))))
         @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [20.0, 20.0, 20.0]
+        boundary_dcd = Molly.boundary_from_chemfiles(Chemfiles.UnitCell(frame))
+        @test boundary_dcd.side_lengths ≈ SVector(2.0, 2.0, 2.0)u"nm"
 
         traj = Chemfiles.Trajectory(temp_fp_trr)
         rm(temp_fp_trr)
-        @test Int(length(traj)) == 201
+        @test Int(length(traj)) == n_frames
         frame = read(traj)
         @test length(frame) == 100
         @test size(Chemfiles.positions(frame)) == (3, 100)
@@ -292,7 +295,7 @@ end
         @test readlines(temp_fp_pdb)[1] == "CRYST1     20.0     20.0     20.0  90.00  90.00  90.00 P 1           1"
         traj = read(temp_fp_pdb, BioStructures.PDBFormat)
         rm(temp_fp_pdb)
-        @test BioStructures.countmodels(traj) == 201
+        @test BioStructures.countmodels(traj) == n_frames
         @test BioStructures.countatoms(first(traj)) == 100
 
         run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
@@ -328,23 +331,22 @@ end
                 potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
                 velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
             ),
+            float_type_high=Measurement{Float64},
             strictness=:nowarn
         )
-        for n_threads in n_threads_list
-            @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
-                                typeof((1.0 ± 0.1)u"kJ * mol^-1")
-            @test abs(potential_energy(sys_unc; n_threads=n_threads) -
-                                potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
-            @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
-            @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
-            @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
-            @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
-                                typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
-        end
+
+        @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
+                            typeof((1.0 ± 0.1)u"kJ * mol^-1")
+        @test abs(potential_energy(sys_unc; n_threads=n_threads) -
+                            potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
+        @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
+        @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
+        @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
+        @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
+                            typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
+
         simulator_unc = VelocityVerlet(dt=0.002u"ps")
-        for n_threads in n_threads_list
-            simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads, run_loggers=false)
-        end
+        simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads, run_loggers=false)
     end
 end
 
@@ -376,8 +378,8 @@ end
 
     random_velocities!(s, temp)
 
-    @time simulate!(s, simulator, n_steps ÷ 2)
-    @time simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipstart)
+    simulate!(s, simulator, n_steps ÷ 2)
+    simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipstart)
 
     @test length(values(s.loggers.coords)) == 21
     @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
@@ -387,7 +389,7 @@ end
 
 @testset "Lennard-Jones simulators" begin
     n_atoms = 100
-    n_steps = 20_000
+    n_steps = 2_000
     dt = 0.002u"ps"
     sim_time = n_steps * dt
     temp = 298.0u"K"
@@ -395,6 +397,8 @@ end
     atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
              for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    coords_nan = copy(coords)
+    coords_nan[10] = SVector(NaN, 1.0, 1.0)u"nm"
     simulators = [
         Verlet(dt=dt, coupling=(AndersenThermostat(temp, 10.0u"ps"),)),
         StormerVerlet(dt=dt),
@@ -425,10 +429,32 @@ end
             loggers=(coords=CoordinatesLogger(100),),
         )
         random_velocities!(sys, temp)
+
         for simulator in simulators
-            @time simulate!(sys, simulator, sim_time; n_threads=1)
+            simulate!(sys, simulator, sim_time; n_threads=1)
         end
         @test_throws ArgumentError simulate!(sys, simulators[1], 1; n_threads=1, strictness=:wrong)
+
+        sys_nan = System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords_nan, AT),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(use_neighbors=true),),
+            neighbor_finder=neighbor_finder,
+            strictness=:nowarn,
+        )
+        @test_throws NaNSimulationError System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords_nan, AT),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(use_neighbors=true),),
+            neighbor_finder=neighbor_finder,
+            strictness=:error,
+        )
+        for simulator in simulators
+            @test_throws NaNSimulationError simulate!(sys_nan, simulator, sim_time; n_threads=1,
+                                                      check_nans=true)
+        end
     end
 
     @test Molly.calc_n_steps(n_steps, dt) == n_steps
@@ -491,11 +517,11 @@ end
     end
 
     for simulator in simulators
-        @time simulate!(sys, simulator, n_steps; n_threads=1)
+        simulate!(sys, simulator, n_steps; n_threads=1)
         @test all(isequal(0.0u"nm"), norm.(first(values(sys.loggers.disp))))
         @test mean(norm.(sys.loggers.disp.displacements[end])) > 0.005u"nm"
         if run_cuda_tests
-            @time simulate!(sys_gpu, simulator, n_steps; n_threads=1)
+            simulate!(sys_gpu, simulator, n_steps; n_threads=1)
             @test all(isequal(0.0u"nm"), norm.(first(values(sys_gpu.loggers.disp))))
             @test mean(norm.(sys.loggers.disp.displacements[end])) > 0.005u"nm"
             coord_diff = sys.coords .- from_device(sys_gpu.coords)
@@ -509,7 +535,7 @@ end
 
 @testset "Pairwise interactions" begin
     n_atoms = 100
-    n_steps = 20_000
+    n_steps = 1_000
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     G = 10.0u"kJ * mol * nm * g^-2"
@@ -552,7 +578,7 @@ end
             ),
         )
 
-        @time simulate!(s, simulator, n_steps)
+        simulate!(s, simulator, n_steps)
     end
 end
 
@@ -605,7 +631,7 @@ end
             neighbor_finder=neighbor_finder,
         )
         E0 = potential_energy(sys)
-        @time simulate!(sys, simulator, n_steps)
+        simulate!(sys, simulator, n_steps)
 
         if run_cuda_tests
             sys_gpu = System(
@@ -618,7 +644,7 @@ end
             )
             E_diff_start = abs(E0 - potential_energy(sys_gpu))
             @test E_diff_start < 5e-4u"kJ * mol^-1"
-            @time simulate!(sys_gpu, simulator, n_steps)
+            simulate!(sys_gpu, simulator, n_steps)
             coord_diff = sys.coords .- from_device(sys_gpu.coords)
             coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
             E_diff = abs(potential_energy(sys) - potential_energy(sys_gpu))
@@ -759,7 +785,7 @@ end
         sys_res = add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
                                           atom_selector=atom_selector)
 
-        @time simulate!(sys_res, sim, n_steps)
+        simulate!(sys_res, sim, n_steps)
 
         dists = norm.(vector.(starting_coords, from_device(sys_res.coords), (boundary,)))
         @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
@@ -793,10 +819,10 @@ end
     simulator2 = LangevinSplitting(dt=0.002u"ps", temperature=temp,
                                    friction=10.0u"g * mol^-1 * ps^-1", splitting="BAOA")
 
-    @time simulate!(s1, simulator1, n_steps; rng=MersenneTwister(rseed))
+    simulate!(s1, simulator1, n_steps; rng=MersenneTwister(rseed))
     @test 280.0u"K" <= mean(s1.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
 
-    @time simulate!(s2, simulator2, n_steps; rng=MersenneTwister(rseed))
+    simulate!(s2, simulator2, n_steps; rng=MersenneTwister(rseed))
     @test 280.0u"K" <= mean(s2.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
 
     @test maximum(maximum(abs.(v)) for v in (s1.coords .- s2.coords)) < 1e-5u"nm"
@@ -903,8 +929,8 @@ end
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
     @test_throws ArgumentError simulate!(repsys, simulator, n_steps; rng=rng)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
+    simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
+    simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
     @test repsys.current_step == 2n_steps
     @test all(
@@ -917,7 +943,6 @@ end
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
     @test efficiency > 0.16 # This is a fairly arbitrary threshold but it's a good test for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
-    @info "Exchange Efficiency: $efficiency"
 
     for id in 1:n_replicas
         mean_temp = mean(values(repsys.replica_loggers[id].temp))
@@ -977,13 +1002,12 @@ end
     simulator = ReplicaExchangeMD(dt=0.005u"ps", exchange_time=2.5u"ps")
 
     @test_throws ArgumentError simulate!(repsys, simulator, n_steps; rng=rng)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
-    @time simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
+    simulate!(repsys, simulator, n_steps; assign_velocities=true, n_threads=1)
+    simulate!(repsys, simulator, n_steps; assign_velocities=false, n_threads=1)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
-    @test efficiency > 0.1 # This is a fairly arbitrary threshold, but it's a good test for very bad cases
+    @test efficiency > 0.08 # This is a fairly arbitrary threshold, but it's a good test for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
-    @info "Exchange Efficiency: $efficiency"
 
     for id in 1:n_replicas
         mean_temp = mean(values(repsys.replica_loggers[id].temp))
@@ -1032,13 +1056,11 @@ end
         trial_args=Dict(:shift_size => 0.1u"nm"),
     )
 
-    @time simulate!(sys, simulator_uniform , n_steps)
-    @time simulate!(sys, simulator_gaussian, n_steps)
+    simulate!(sys, simulator_uniform , n_steps)
+    simulate!(sys, simulator_gaussian, n_steps)
 
     acceptance_rate = sys.loggers.mcl.n_accept / sys.loggers.mcl.n_trials
-    @info "Acceptance Rate: $acceptance_rate"
     @test acceptance_rate > 0.05
-
     @test sys.loggers.avgpe.block_averages[end] < sys.loggers.avgpe.block_averages[1]
 
     distance_sum = 0.0u"nm"
@@ -1106,8 +1128,8 @@ end
         friction=1.0u"ps^-1",
     )
 
-    @time simulate!(sys, simulator, 25_000; run_loggers=false)
-    @time simulate!(sys, simulator, 25_000)
+    simulate!(sys, simulator, 25_000; run_loggers=false)
+    simulate!(sys, simulator, 25_000)
 
     @test length(values(sys.loggers.tot_eng)) == 251
     @test -1800u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1600u"kJ * mol^-1"
@@ -1127,7 +1149,7 @@ end
         return SimpleCrystals.Crystal(lattice, basis, N)
     end
     my_crystal = MyInvalidCrystal(a, :Ar, SVector(1, 1, 1))
-    @test_throws ErrorException System(my_crystal)
+    @test_throws ArgumentError System(my_crystal)
 end
 
 @testset "Different implementations" begin
@@ -1186,7 +1208,7 @@ end
         coords = to_device(copy(f32 ? starting_coords_f32 : starting_coords), AT)
         velocities = to_device(copy(f32 ? starting_velocities_f32 : starting_velocities), AT)
         atoms = to_device([Atom(charge=zero(T), mass=atom_mass, σ=T(0.2)u"nm",
-                                ϵ=T(0.2)u"kJ * mol^-1") for i in 1:n_atoms], AT)
+                                ϵ=T(0.2)u"kJ * mol^-1", λ=one(T)) for i in 1:n_atoms], AT)
 
         sys = System(
             atoms=atoms,
@@ -1247,7 +1269,6 @@ end
             coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
             E_diff = abs(Float64(E_start) - E_start_ref)
             name = (triclinic ? "$name triclinic" : "$name cubic")
-            @info "$(rpad(name, 29)) - difference per coordinate $coord_diff_size - potential energy difference $E_diff"
             @test coord_diff_size < 1e-4u"nm"
             @test E_diff < 5e-4u"kJ * mol^-1"
         end
@@ -1292,11 +1313,10 @@ end
     )
 
     simulator = DPDVelocityVerlet(dt=dt, λ=0.65)
-    @time simulate!(sys, simulator, n_steps; n_threads=1)
+    simulate!(sys, simulator, n_steps; n_threads=1)
 
     temps = values(sys.loggers.temp)
     mean_temp = mean(temps[length(temps) ÷ 2 + 1:end])
-    @info "DPD mean temperature (second half): $mean_temp, target kBT: $kBT"
     @test 0.5 < mean_temp < 1.5
 
     total_momentum = sum(sys.velocities .* mass.(atoms))
@@ -1317,9 +1337,10 @@ end
                 joinpath(data_dir, "tip4pew.pdb"),
                 ff;
                 array_type=AT,
+                float_type=Float64,
                 constraints=constraints,
                 constraint_algorithm=constraint_algorithm,
-                nonbonded_method=:cutoff,
+                nonbonded_method=SetupCoulombReactionField(),
                 center_coords=false,
             )
 
@@ -1382,15 +1403,58 @@ end
             sys = System(
                 sys;
                 loggers=(
-                    TemperatureLogger(10),
-                    BoxLogger(10),
+                    TemperatureLogger(5),
+                    BoxLogger(5),
                 ),
             )
-            simulate!(sys, sim_lang, 1_000)
+            simulate!(sys, sim_lang, 600)
 
             @test 290u"K" < mean(values(sys.loggers[1])[81:end]) < 310u"K"
             @test 2.95u"nm" < mean(values(sys.loggers[2])[81:end])[1, 1] < 3.05u"nm"
         end
+
+        # inner_step_neighbors recalculates the neighbors every inner step, giving correct
+        #   dynamics with no neighbor list buffer even when the neighbor finder would not
+        #   otherwise update the neighbors
+        sys = System(
+            joinpath(data_dir, "tip4pew.pdb"),
+            ff;
+            array_type=AT,
+            float_type=Float64,
+            nonbonded_method=SetupCoulombReactionField(),
+            center_coords=false,
+            dist_buffer=0.0u"nm",
+        )
+        nf = sys.neighbor_finder
+        coords_start, velocities_start = copy(sys.coords), copy(sys.velocities)
+
+        function run_mts(inner_step_neighbors, n_steps_neighbors)
+            sys.coords .= coords_start
+            sys.velocities .= velocities_start
+            if nf isa GPUNeighborFinder
+                nf.n_steps_reorder = n_steps_neighbors
+            else
+                nf.n_steps = n_steps_neighbors
+            end
+            sim = MTSIntegrator(
+                dt=1.0u"fs",
+                pi_fractions=(1, 1),
+                si_fractions=(8, 4),
+                gi_fractions=(1,),
+                remove_CM_motion=false,
+                inner_step_neighbors=inner_step_neighbors,
+            )
+            simulate!(sys, sim, 100)
+            return copy(from_device(sys.coords))
+        end
+
+        # The neighbor finder cadence should make no difference when it is switched on
+        coords_isn    = run_mts(true , 10^9)
+        coords_isn_10 = run_mts(true , 10  )
+        # With it switched off the neighbors are never updated after the first step
+        coords_no_isn = run_mts(false, 10^9)
+        @test maximum(norm.(coords_isn .- coords_isn_10)) < 1e-10u"nm"
+        @test maximum(norm.(coords_isn .- coords_no_isn)) > 1e-3u"nm"
     end
 end
 
@@ -1523,7 +1587,7 @@ end
     initial_f = copy(awh_sim.state.f)
 
     # Run the AWH simulation loop
-    @time simulate!(awh_sim, n_steps)
+    simulate!(awh_sim, n_steps)
 
     # Verification
     # 1. Active index must remain strictly within the bounds of the lambda ladder

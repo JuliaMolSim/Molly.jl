@@ -105,7 +105,7 @@
         strictness=:nowarn,
     )
 
-    @time simulate!(sys, simulator, n_steps; n_threads=1, rng=rng)
+    simulate!(sys, simulator, n_steps; n_threads=1, rng=rng)
 
     s, i, r = values(sys.loggers.SIR)[end]
     @test s < 0.9

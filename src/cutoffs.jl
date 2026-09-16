@@ -27,6 +27,7 @@ cutoff_sqdist(cutoff::AbstractCutoff) = cutoff.dist_cutoff^2
 end
 
 @inline max_zero_beyond(inters) = mzb(map(pairwise_zero_beyond, inters))
+@inline max_zero_beyond(::Union{Tuple{}, @NamedTuple{}}) = nothing
 @inline mzb(t::Union{Tuple, NamedTuple}) = mzb(first(t), Base.tail(t))
 @inline mzb(acc, ::Union{Tuple{}, @NamedTuple{}}) = acc
 @inline mzb(acc, t::Union{Tuple, NamedTuple}) = mzb(combine_cutoff(acc, first(t)), Base.tail(t))

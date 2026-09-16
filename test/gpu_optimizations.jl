@@ -120,7 +120,7 @@
             Molly.reset_cuda_launch_config!(sys)
         end
 
-        @testset "Setup-time CUDA Launch Autotune" begin
+        @testset "Setup-time CUDA launch autotune" begin
             ext = Base.get_extension(Molly, :MollyCUDAExt)
             @test ext !== nothing
 
@@ -130,7 +130,8 @@
                 joinpath(data_dir, "water_3mol_cubic.pdb"),
                 ff;
                 array_type=CuArray,
-                nonbonded_method=:cutoff,
+                float_type=T,
+                nonbonded_method=SetupCoulombReactionField(),
                 dist_cutoff=0.6u"nm",
                 dist_buffer=0.1u"nm",
                 launch_config=launch_config,

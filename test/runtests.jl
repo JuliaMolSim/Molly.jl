@@ -1,5 +1,6 @@
 using Molly
-using Molly: from_device, to_device
+using Molly: from_device, to_device, NaNSimulationError, ForceFieldXMLError,
+             MissingResidueTemplateError
 using AMDGPU
 using Aqua
 import AtomsBase
@@ -12,6 +13,9 @@ using CUDA
 using Enzyme
 using FiniteDifferences
 using GPUArrays
+using JET
+using JSON3
+using KernelAbstractions
 using KernelDensity
 using Measurements
 using Metal
@@ -33,13 +37,7 @@ const GROUP = get(ENV, "GROUP", "All")
 if GROUP in ("Protein", "Gradients", "NotGradients")
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 elseif GROUP != "All"
-    error("Unrecognised test group, GROUP=$GROUP")
-end
-
-# Some CPU gradient tests give memory errors on CI
-const running_CI = haskey(ENV, "CI")
-if running_CI
-    @warn "Some CPU gradient tests will not be run as this is CI"
+    error("unrecognised test group, GROUP=$GROUP")
 end
 
 const run_visualize_tests = get(ENV, "VISTESTS", "1") != "0"
@@ -99,6 +97,9 @@ else
     @warn "The Metal tests will not be run as a Metal-enabled device is not available"
 end
 
+# Metal only supports 32 bit precision, so MtlArray can not be added to array_list
+const array_list_metal = (run_metal_tests ? (array_list..., MtlArray) : array_list)
+
 const data_dir = normpath(@__DIR__, "..", "data")
 const ff_dir     = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
@@ -131,6 +132,7 @@ if GROUP in ("All", "NotGradients")
     include("constraints.jl")
     include("tss.jl")
     include("analysis.jl")
+    include("jet.jl")
     if run_cuda_tests
         include("gpu_consistency.jl")
         include("gpu_optimizations.jl")
@@ -143,4 +145,11 @@ end
 
 if GROUP in ("All", "Gradients")
     include("gradients.jl")
+end
+
+if GROUP in ("All", "NotGradients")
+    # ani2x.h5 and 6mrr_ani2x.json come from the lazily-downloaded ANI-2x artifact
+    # (Molly.ani2x_data_dir()); loading the extension makes that available.
+    using Lux, HDF5
+    include("ml_potentials.jl")
 end

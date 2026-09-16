@@ -234,7 +234,6 @@ data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir = joinpath(data_dir, "force_fields")
 
 ff = MolecularForceField(
-    FT,
     joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
@@ -243,7 +242,8 @@ sys_0 = System(
     joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
     array_type=AT,
-    nonbonded_method=:cutoff,
+    float_type=FT,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 random_velocities!(sys_0, T0) # Initialize velocities from M-B distribution at target temperature
@@ -354,7 +354,6 @@ data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir = joinpath(data_dir, "force_fields")
 
 ff = MolecularForceField(
-    FT,
     joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
@@ -363,7 +362,8 @@ sys = System(
     "pull_$(SIM_N).pdb", # Now we load the final structure for a given pull simulation
     ff;
     array_type=AT,
-    nonbonded_method=:cutoff,
+    float_type=FT,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 random_velocities!(sys, T0)
@@ -448,7 +448,6 @@ ff_dir = joinpath(data_dir, "force_fields")
 trajs_dir = "./" # Or wherever you have saved the umbrella simulations
 
 ff = MolecularForceField(
-    FT,
     joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
     units=true,
 )
@@ -457,7 +456,8 @@ sys_nobias = System(
     joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
     array_type=AT,
-    nonbonded_method=:cutoff,
+    float_type=FT,
+    nonbonded_method=SetupCoulombReactionField(),
 )
 
 # Atom indices defining dihedral
@@ -1273,16 +1273,17 @@ The setup function builds either the solvated or vacuum leg. The solvated leg us
 
 ```julia
 function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
-    nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
     dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
+    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
 
     sys_base = System(
         pdb_file,
         ff;
         array_type = AT,
+        float_type = FT,
         boundary = boundary,
         dist_cutoff = dist_cutoff,
         dist_buffer = dist_buffer,
@@ -1847,16 +1848,17 @@ The setup function constructs the solvated and vacuum legs. The non-bonded treat
 
 ```julia
 function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum = false, rng = Random.default_rng())
-    nonbonded_method = is_vacuum ? :none : :pme
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
     dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
+    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
 
     sys_base = System(
         pdb_file,
         ff;
         array_type = AT,
+        float_type = FT,
         boundary = boundary,
         dist_cutoff = dist_cutoff,
         dist_buffer = dist_buffer,

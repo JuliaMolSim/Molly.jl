@@ -14,7 +14,7 @@ export
     total_energy(system, neighbors=find_neighbors(sys), step_n=0, buffers=nothing;
                  n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                  specific_inter_lists=system.specific_inter_lists,
-                 general_inters=system.general_inters)
+                 general_inters=system.general_inters, strictness=:warn)
 
 Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
@@ -41,11 +41,9 @@ bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 ```
 where ``m_i`` is the mass and ``\bf{v_i}`` is the velocity vector of atom ``i``.
 """
-function kinetic_energy_tensor(sys::System{D}; kin_tensor=nothing) where D
+function kinetic_energy_tensor(sys::System{D, <:Any, <:Any, TH}; kin_tensor=nothing) where {D, TH}
     if isnothing(kin_tensor)
-        # Allows propagation of uncertainties to tensors
-        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-        kin_tensor_used = zeros(CT, D, D) * sys.energy_units
+        kin_tensor_used = zeros(TH, D, D) * sys.energy_units
     else
         kin_tensor_used = kin_tensor
     end
@@ -53,8 +51,8 @@ function kinetic_energy_tensor(sys::System{D}; kin_tensor=nothing) where D
     return kin_tensor_used
 end
 
-function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, T}) where {D, T}
-    fill!(kin_tensor, zero(T) * sys.energy_units)
+function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, <:Any, TH}) where {D, TH}
+    fill!(kin_tensor, zero(TH) * sys.energy_units)
     masses_cpu = from_device(sys.masses)
     velocities_cpu = from_device(sys.velocities)
     @inbounds for i in eachindex(sys)
@@ -92,7 +90,7 @@ end
     virial(system, neighbors=find_neighbors(system), step_n=0;
            n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
            specific_inter_lists=system.specific_inter_lists,
-           general_inters=system.general_inters)
+           general_inters=system.general_inters, strictness=:warn)
 
 Calculate the virial tensor of the system.
 
@@ -134,7 +132,7 @@ end
     scalar_virial(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
-                  general_inters=system.general_inters)
+                  general_inters=system.general_inters, strictness=:warn)
 
 Calculate the virial of the system as a scalar.
 
@@ -163,17 +161,17 @@ T = \frac{2 E_\mathrm{kin}}{N_\mathrm{df} k}
 where ``E_\mathrm{kin}`` is the kinetic energy, ``N_\mathrm{df}`` is the number of
 degrees of freedom in the system (`n_dof`) and ``k`` is the Boltzmann constant (`k`).
 """
-function temperature(sys::System{D}; kin_tensor=nothing, n_dof=sys.df, k=sys.k,
-                     recompute=true) where D
+function temperature(sys::System{D, <:Any, <:Any, TH}; kin_tensor=nothing, n_dof=sys.df,
+                     k=sys.k, recompute=true) where {D, TH}
     if isnothing(kin_tensor)
-        # Allows propagation of uncertainties to tensors
-        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-        kin_tensor = zeros(CT, D, D) * sys.energy_units
+        kin_tensor_used = zeros(TH, D, D) * sys.energy_units
+    else
+        kin_tensor_used = kin_tensor
     end
     if recompute
-        ke = kinetic_energy(sys; kin_tensor=kin_tensor)
+        ke = kinetic_energy(sys; kin_tensor=kin_tensor_used)
     else
-        ke = tr(kin_tensor)
+        ke = tr(kin_tensor_used)
     end
     temp = 2 * ke / (n_dof * k)
     if sys.energy_units == NoUnits
@@ -202,7 +200,7 @@ end
     potential_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                      n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                      specific_inter_lists=system.specific_inter_lists,
-                     general_inters=system.general_inters)
+                     general_inters=system.general_inters, strictness=:warn)
 
 Calculate the potential energy of a system using the pairwise, specific and
 general interactions.
@@ -228,26 +226,24 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
                             n_threads=n_threads, kwargs...)
 end
 
-function potential_energy(sys::System,
+function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           neighbors,
                           step_n::Integer=0,
                           buffers=nothing;
                           n_threads::Integer=Threads.nthreads(),
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
-                          general_inters=sys.general_inters)
-    # Allow types like those from Measurements.jl, T from System is different
-    T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
-
+                          general_inters=sys.general_inters,
+                          strictness=default_strictness()) where TH
     if length(pairwise_inters) > 0
-        pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
-        pairwise_inters_nl   = filter( use_neighbors, values(pairwise_inters))
         use_vel = any_uses_velocity(pairwise_inters)
-        pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                              neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
-                              pairwise_inters_nl, step_n, Val(T), Val(n_threads), Val(use_vel))
+        pe = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
+            pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
+                             neighbors, sys.energy_units, length(sys), pis_nonl, pis_nl,
+                             step_n, Val(TH), Val(n_threads), Val(use_vel), Val(sys.grad_safe))
+        end
     else
-        pe = zero(T) * sys.energy_units
+        pe = zero(TH) * sys.energy_units
     end
 
     if length(specific_inter_lists) > 0
@@ -258,14 +254,14 @@ function potential_energy(sys::System,
         sils_5_atoms = filter(il -> il isa InteractionList5Atoms, values(specific_inter_lists))
         pe += specific_pe(sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms,
-                          Val(T), step_n)
+                          Val(TH), step_n)
     end
 
     for inter in values(general_inters)
         pe += uconvert(
             sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
-                                              step_n=step_n, n_threads=n_threads),
+            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                              n_threads=n_threads, strictness=strictness),
         )
     end
 
@@ -273,9 +269,9 @@ function potential_energy(sys::System,
 end
 
 function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
-                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{T},
-                          ::Val{1}, ::Val{use_vel}) where {T, use_vel}
-    pe = zero(T) * energy_units
+                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{TH},
+                          ::Val{1}, ::Val{use_vel}, ::Val) where {TH, use_vel}
+    pe = zero(TH) * energy_units
 
     @inbounds if length(pairwise_inters_nonl) > 0
         for i in 1:n_atoms
@@ -319,15 +315,16 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
 end
 
 function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
-                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{T},
-                          ::Val{n_threads}, ::Val{use_vel}) where {T, n_threads, use_vel}
-    pe_chunks_nounits = zeros(T, n_threads)
+                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{TH},
+                          ::Val{n_threads}, ::Val{use_vel},
+                          ::Val{grad_safe}) where {TH, n_threads, use_vel, grad_safe}
+    pe_chunks_nounits = zeros(TH, n_threads)
 
     @inbounds if length(pairwise_inters_nonl) > 0
         Threads.@threads for chunk_i in 1:n_threads
             pe_chunks_nounits[chunk_i] = pairwise_pe_nonl_range(atoms, coords, velocities, boundary,
                             energy_units, pairwise_inters_nonl, step_n, chunk_i, n_threads, n_atoms,
-                            Val(T), Val(use_vel))
+                            Val(TH), Val(use_vel))
         end
     end
 
@@ -338,18 +335,34 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
         n_neighbors = length(neighbors)
         block_size = 512
         next_block_start = Threads.Atomic{Int}(1)
-        @sync for chunk_i in 1:n_threads
-            Threads.@spawn begin
-                pe_chunk = zero(T)
+        if grad_safe
+            # Enzyme struggles with tasks
+            Threads.@threads for chunk_i in 1:n_threads
+                pe_chunk = zero(TH)
                 while true
                     block_start = Threads.atomic_add!(next_block_start, block_size)
                     block_start > n_neighbors && break
                     block_stop = min(block_start + block_size - 1, n_neighbors)
                     pe_chunk += pairwise_pe_nl_block(atoms, coords, velocities, boundary, neighbors,
                                     energy_units, pairwise_inters_nl, step_n, block_start, block_stop,
-                                    Val(T), Val(use_vel))
+                                    Val(TH), Val(use_vel))
                 end
                 pe_chunks_nounits[chunk_i] += pe_chunk
+            end
+        else
+            @sync for chunk_i in 1:n_threads
+                Threads.@spawn begin
+                    pe_chunk = zero(TH)
+                    while true
+                        block_start = Threads.atomic_add!(next_block_start, block_size)
+                        block_start > n_neighbors && break
+                        block_stop = min(block_start + block_size - 1, n_neighbors)
+                        pe_chunk += pairwise_pe_nl_block(atoms, coords, velocities, boundary, neighbors,
+                                        energy_units, pairwise_inters_nl, step_n, block_start, block_stop,
+                                        Val(TH), Val(use_vel))
+                    end
+                    pe_chunks_nounits[chunk_i] += pe_chunk
+                end
             end
         end
     end
@@ -359,8 +372,8 @@ end
 
 @noinline function pairwise_pe_nonl_range(atoms, coords, velocities, boundary, energy_units,
                                           pairwise_inters_nonl, step_n, chunk_i, n_threads, n_atoms,
-                                          ::Val{T}, ::Val{use_vel}) where {T, use_vel}
-    pe_chunk = zero(T)
+                                          ::Val{TH}, ::Val{use_vel}) where {TH, use_vel}
+    pe_chunk = zero(TH)
     @inbounds for i in chunk_i:n_threads:n_atoms
         coord_i = coords[i]
         atom_i = atoms[i]
@@ -381,8 +394,8 @@ end
 
 @noinline function pairwise_pe_nl_block(atoms, coords, velocities, boundary, neighbors, energy_units,
                                       pairwise_inters_nl, step_n, block_start, block_stop,
-                                      ::Val{T}, ::Val{use_vel}) where {T, use_vel}
-    pe_chunk = zero(T)
+                                      ::Val{TH}, ::Val{use_vel}) where {TH, use_vel}
+    pe_chunk = zero(TH)
     @inbounds for ni in block_start:block_stop
         i, j, special = neighbors[ni]
         coord_i = coords[i]
@@ -400,64 +413,89 @@ end
     return pe_chunk
 end
 
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList1Atoms)
+    @inbounds for (i, inter) in zip(inter_list.is, inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], boundary, atoms[i], energy_units,
+                              velocities[i], step_n, inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList2Atoms)
+    @inbounds for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], coords[j], boundary, atoms[i], atoms[j],
+                              energy_units, velocities[i], velocities[j], step_n,
+                              inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList3Atoms)
+    @inbounds for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
+                                          inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], boundary, atoms[i],
+                              atoms[j], atoms[k], energy_units, velocities[i], velocities[j],
+                              velocities[k], step_n, inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList4Atoms)
+    @inbounds for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
+                                             inter_list.ls, inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], coords[l], boundary,
+                              atoms[i], atoms[j], atoms[k], atoms[l], energy_units,
+                              velocities[i], velocities[j], velocities[k], velocities[l],
+                              step_n, inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+function specific_pe_inter_list(pe, atoms, coords, velocities, boundary, energy_units, step_n,
+                                inter_list::InteractionList5Atoms)
+    @inbounds for (i, j, k, l, m, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
+                                                inter_list.ls, inter_list.ms, inter_list.inters)
+        pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], coords[l],
+                              coords[m], boundary, atoms[i], atoms[j], atoms[k], atoms[l],
+                              atoms[m], energy_units, velocities[i], velocities[j],
+                              velocities[k], velocities[l], velocities[m], step_n,
+                              inter_list.data)
+        check_energy_units(pe_inter, energy_units)
+        pe += pe_inter
+    end
+    return pe
+end
+
+@inline specific_pe_lists(pe, ::Tuple{}, args...) = pe
+
+@inline function specific_pe_lists(pe, inter_lists::Tuple, args...)
+    pe = specific_pe_inter_list(pe, args..., first(inter_lists))
+    return specific_pe_lists(pe, Base.tail(inter_lists), args...)
+end
+
 function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_atoms,
-                     sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms, ::Val{T},
-                     step_n=0) where T
-    pe = zero(T) * energy_units
+                     sils_2_atoms, sils_3_atoms, sils_4_atoms, sils_5_atoms, ::Val{TH},
+                     step_n=0) where TH
+    pe = zero(TH) * energy_units
+    args = (atoms, coords, velocities, boundary, energy_units, step_n)
 
-    @inbounds for inter_list in sils_1_atoms
-        for (i, inter) in zip(inter_list.is, inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], boundary, atoms[i], energy_units,
-                                  velocities[i], step_n, inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
-    end
-
-    @inbounds for inter_list in sils_2_atoms
-        for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], coords[j], boundary, atoms[i], atoms[j],
-                                  energy_units, velocities[i], velocities[j], step_n,
-                                  inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
-    end
-
-    @inbounds for inter_list in sils_3_atoms
-        for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], boundary, atoms[i],
-                                  atoms[j], atoms[k], energy_units, velocities[i], velocities[j],
-                                  velocities[k], step_n, inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
-    end
-
-    @inbounds for inter_list in sils_4_atoms
-        for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-                                       inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], coords[l], boundary,
-                                  atoms[i], atoms[j], atoms[k], atoms[l], energy_units,
-                                  velocities[i], velocities[j], velocities[k], velocities[l],
-                                  step_n, inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
-    end
-
-    @inbounds for inter_list in sils_5_atoms
-        for (i, j, k, l, m, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
-                                          inter_list.ls, inter_list.ms, inter_list.inters)
-            pe_inter = potential_energy(inter, coords[i], coords[j], coords[k], coords[l],
-                                  coords[m], boundary, atoms[i], atoms[j], atoms[k], atoms[l],
-                                  atoms[m], energy_units, velocities[i], velocities[j],
-                                  velocities[k], velocities[l], velocities[m], step_n,
-                                  inter_list.data)
-            check_energy_units(pe_inter, energy_units)
-            pe += pe_inter
-        end
-    end
+    pe = specific_pe_lists(pe, sils_1_atoms, args...)
+    pe = specific_pe_lists(pe, sils_2_atoms, args...)
+    pe = specific_pe_lists(pe, sils_3_atoms, args...)
+    pe = specific_pe_lists(pe, sils_4_atoms, args...)
+    pe = specific_pe_lists(pe, sils_5_atoms, args...)
 
     return pe
 end
@@ -468,43 +506,53 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray}, neighbors,
     return potential_energy(sys, neighbors, step_n, buffers; kwargs...)
 end
 
-function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T},
+function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                           neighbors,
                           step_n::Integer,
                           buffers::BuffersGPU;
                           n_threads::Integer=Threads.nthreads(),
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
-                          general_inters=sys.general_inters) where T
-    fill!(buffers.pe_vec_nounits, zero(T))
-
-    pairwise_inters_nonl = filter(!use_neighbors, values(pairwise_inters))
-    if length(pairwise_inters_nonl) > 0
-        nbs = NoNeighborList(length(sys))
-        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
-    end
-
-    pairwise_inters_nl = filter(use_neighbors, values(pairwise_inters))
-    if length(pairwise_inters_nl) > 0
-        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)
-    end
-
-    for inter_list in values(specific_inter_lists)
-        specific_pe_gpu!(buffers.pe_vec_nounits, inter_list, sys.coords, sys.velocities, sys.atoms,
-                         sys.boundary, step_n, sys.energy_units, Val(T))
-    end
-
-    pe = only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
+                          general_inters=sys.general_inters,
+                          strictness=default_strictness())
+    # Allow an Enzyme reverse rule
+    pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
+                              specific_inter_lists, n_threads)
 
     for inter in values(general_inters)
         pe += uconvert(
             sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
-                                              step_n=step_n, n_threads=n_threads),
+            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                n_threads=n_threads, strictness=strictness),
         )
     end
 
     return pe
+end
+
+function gpu_potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH}, neighbors,
+                              step_n::Integer, buffers::BuffersGPU, pairwise_inters,
+                              specific_inter_lists, n_threads::Integer) where TH
+    fill!(buffers.pe_vec_nounits, zero(TH))
+
+    with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
+        if length(pis_nonl) > 0
+            nbs = NoNeighborList(length(sys))
+            pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pis_nonl, nbs, step_n)
+        end
+        if length(pis_nl) > 0
+            pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pis_nl,
+                                  neighbors, step_n)
+        end
+        return nothing
+    end
+
+    for inter_list in values(specific_inter_lists)
+        specific_pe_gpu!(buffers.pe_vec_nounits, inter_list, sys.coords, sys.velocities, sys.atoms,
+                         sys.boundary, step_n, sys.energy_units, Val(TH))
+    end
+
+    return only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
 end
 
 # Allow GPU-specific potential energy functions to be defined if required

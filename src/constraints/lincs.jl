@@ -48,10 +48,14 @@ algorithm.
 LINCS is a non-iterative constraint algorithm that uses matrix expansion to approximate
 the inverse of the constraint coupling matrix. It is typically faster than
 [`SHAKE_RATTLE`](@ref) for large systems but is approximate for ring topologies.
+Either or both of `dist_constraints` and `angle_constraints` must be given.
+[`SetupLINCS`](@ref) provides LINCS parameters when setting up a system from a file.
 
 Velocity constraints are applied implicitly through position constraint correction.
 See [Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)
 for the original LINCS paper.
+
+Not compatible with gradient calculation using Enzyme.
 
 # Arguments
 - `masses`: vector of atom masses.
@@ -93,6 +97,10 @@ function validate_angle_constraints(dist_constraints, angle_constraints)
         push!(dist_atoms, dc.i, dc.j)
     end
 
+    # Index of the angle constraint each atom appears in, so that shared atoms can be
+    #   found without comparing every pair of angle constraints
+    angle_atoms = Dict{Int, Int}()
+
     for (idx, ac) in enumerate(angle_constraints)
         ac_atoms = (ac.i, ac.j, ac.k)
         for a in ac_atoms
@@ -104,17 +112,18 @@ function validate_angle_constraints(dist_constraints, angle_constraints)
             end
         end
 
-        for (idx2, ac2) in enumerate(angle_constraints)
-            idx2 == idx && continue
-            ac2_atoms = (ac2.i, ac2.j, ac2.k)
-            for a in ac_atoms
-                if a in ac2_atoms
-                    throw(ArgumentError(
-                        "angle constraint $idx (atoms $(ac.i)/$(ac.j)/$(ac.k)) shares " *
-                        "atom $a with angle constraint $idx2 (atoms $(ac2.i)/$(ac2.j)/$(ac2.k)); " *
-                        "LINCS requires angle constraints to be isolated"))
-                end
+        for a in ac_atoms
+            idx2 = get(angle_atoms, a, 0)
+            if !iszero(idx2)
+                ac2 = angle_constraints[idx2]
+                throw(ArgumentError(
+                    "angle constraint $idx (atoms $(ac.i)/$(ac.j)/$(ac.k)) shares " *
+                    "atom $a with angle constraint $idx2 (atoms $(ac2.i)/$(ac2.j)/$(ac2.k)); " *
+                    "LINCS requires angle constraints to be isolated"))
             end
+        end
+        for a in ac_atoms
+            angle_atoms[a] = idx
         end
     end
 end
@@ -175,6 +184,16 @@ function Base.show(io::IO, lincs::LINCS)
           ", iter_vel_correction=", lincs.iter_vel_correction, ")")
 end
 
+"""
+    SetupLINCS(; dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
+               n_rec=4, n_iter=1, iter_vel_correction::Bool=false, gpu_block_size::Integer=128)
+
+Set up constraints using the LINCS (LINear Constraint Solver) algorithm.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a set of
+[`LINCS`](@ref) constraints.
+See [`LINCS`](@ref) for argument descriptions.
+"""
 struct SetupLINCS{D, V}
     dist_tolerance::D
     vel_tolerance::V
@@ -196,6 +215,21 @@ function SetupLINCS(; dist_tolerance=1e-6u"nm",
     n_iter < 0 && throw(ArgumentError("n_iter cannot be negative"))
     return SetupLINCS(dist_tolerance, vel_tolerance, n_rec, n_iter,
                       iter_vel_correction, gpu_block_size)
+end
+
+function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
+                                    units, strictness, masses, ca::SetupLINCS)
+    return LINCS(
+        masses=masses,
+        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
+        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
+        dist_constraints=[dist_constraints...],
+        angle_constraints=[angle_constraints...],
+        n_rec=ca.n_rec,
+        n_iter=ca.n_iter,
+        iter_vel_correction=ca.iter_vel_correction,
+        gpu_block_size=ca.gpu_block_size,
+    )
 end
 
 function constrained_atom_inds(lincs::LINCS)
@@ -366,9 +400,9 @@ function group_constraints_for_gpu(atom1, atom2, block_size)
     for comp in components
         if length(comp) > block_size
             error(
-                "LINCS: connected component of $(length(comp)) coupled constraints exceeds " *
-                "gpu_block_size=$block_size. Increase gpu_block_size in the LINCS constructor " *
-                "to at least $(length(comp)), or use CPU constraints for this system.",
+                "LINCS connected component of $(length(comp)) coupled constraints exceeds " *
+                "gpu_block_size=$block_size; increase gpu_block_size in the LINCS constructor " *
+                "to at least $(length(comp)), or use CPU constraints for this system",
             )
         end
     end
@@ -1257,21 +1291,22 @@ function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
         disable_constrained_interactions!(neighbor_finder, lincs.clusters)
     end
 
-    if arr_type <: AbstractGPUArray && !(lincs.lincs_data.atom1 isa arr_type)
+    return move_constraints_to_device(lincs, arr_type)
+end
 
-        n_atoms = length(lincs.lincs_data.invmass)
-        data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(
-            lincs.lincs_data, lincs.workspace, arr_type, n_atoms, lincs.gpu_block_size)
+function move_constraints_to_device(lincs::LINCS, ::Type{AT}) where {AT <: AbstractGPUArray}
+    lincs.lincs_data.atom1 isa AT && return lincs
 
-        ca_indices = sort!(unique!(vcat(lincs.lincs_data.atom1, lincs.lincs_data.atom2)))
-        ca_gpu = arr_type(ca_indices)
+    n_atoms = length(lincs.lincs_data.invmass)
+    data_gpu, ws_gpu, delta_buf = move_lincs_to_gpu(
+        lincs.lincs_data, lincs.workspace, AT, n_atoms, lincs.gpu_block_size)
 
-        clusters_gpu = replace_storage(arr_type, lincs.clusters)
+    ca_indices = sort!(unique!(vcat(lincs.lincs_data.atom1, lincs.lincs_data.atom2)))
+    ca_gpu = AT(ca_indices)
 
-        lincs = LINCS(clusters_gpu, data_gpu, ws_gpu, lincs.dist_constraints,
-                      lincs.angle_constraints, lincs.dist_tolerance, lincs.vel_tolerance,
-                      lincs.iter_vel_correction, lincs.gpu_block_size, delta_buf, ca_gpu)
-    end
+    clusters_gpu = replace_storage(AT, lincs.clusters)
 
-    return lincs
+    return LINCS(clusters_gpu, data_gpu, ws_gpu, lincs.dist_constraints,
+                 lincs.angle_constraints, lincs.dist_tolerance, lincs.vel_tolerance,
+                 lincs.iter_vel_correction, lincs.gpu_block_size, delta_buf, ca_gpu)
 end

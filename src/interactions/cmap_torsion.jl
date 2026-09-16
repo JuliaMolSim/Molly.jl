@@ -3,14 +3,32 @@ export
 
 ##### Helper functions for calculation CMAPS #####
 
+Torsional correction map (CMAP) for sets of five atoms, for example protein ϕ and ψ
+backbone torsion angles.
+
+The CMAP data is stored in the `data` field of the associated [`InteractionList5Atoms`](@ref).
+
+Only compatible with 3D systems.
+"""
+struct CMAPTorsion
+    index::Int
+    size::Int
+end
+
+Base.zero(::Type{CMAPTorsion}) = CMAPTorsion(0, 0)
+Base.zero(c::CMAPTorsion) = zero(typeof(c))
+
+Base.:+(c1::CMAPTorsion, c2::CMAPTorsion) = c1
+
 function cmap_coefficients(n, mp::Vector{E}) where E
     c = cmap_map_derivatives(n, mp)
     coeff_matrix = Matrix{E}(undef, n*n*4, 4)
     for j in 1:(n*n)
-        coeff_matrix[(j-1)*4+1, :] .= c[j, 1:4]
-        coeff_matrix[(j-1)*4+2, :] .= c[j, 5:8]
-        coeff_matrix[(j-1)*4+3, :] .= c[j, 9:12]
-        coeff_matrix[(j-1)*4+4, :] .= c[j, 13:16]
+        for row in 1:4
+            for col in 1:4
+                coeff_matrix[(j-1)*4+row, col] = c[j, (row-1)*4+col]
+            end
+        end
     end
     return coeff_matrix
 end
@@ -181,7 +199,7 @@ end
 function evaluate_spline_derivative(x, y, deriv, t)
     n = length(x)
     if t < x[1] || t > x[n]
-        error()
+        error("CMAP value out of range")
     end
 
     lower = 1

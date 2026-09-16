@@ -19,10 +19,15 @@ Only compatible with 3D systems.
     θ0::D
 end
 
-Base.zero(::HarmonicTorsion{K, D}) where {K, D} = HarmonicTorsion(k=zero(K), θ0=zero(D))
+Base.zero(::Type{HarmonicTorsion{K, D}}) where {K, D} = HarmonicTorsion(k=zero(K), θ0=zero(D))
+Base.zero(t::HarmonicTorsion) = zero(typeof(t))
 
 Base.:+(t1::HarmonicTorsion, t2::HarmonicTorsion) = HarmonicTorsion(k=(t1.k + t2.k),
                                                                         θ0=(t1.θ0 + t2.θ0))
+
+parameter_prefix(::HarmonicTorsion, inter_type) = "inter_HT_$(inter_type)_"
+parameter_fields(::Type{<:HarmonicTorsion}) = ((:k, "k"), (:θ0, "θ0"))
+
 
 @inline function force(d::HarmonicTorsion, coords_i, coords_j, coords_k, coords_l,
                        boundary, args...)

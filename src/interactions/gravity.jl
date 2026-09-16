@@ -26,6 +26,10 @@ end
 
 Base.:+(g1::Gravity, g2::Gravity) = Gravity(g1.cutoff, g1.G + g2.G, g1.use_neighbors)
 
+parameter_prefix(::Gravity) = "inter_GR_"
+parameter_fields(::Type{<:Gravity}) = ((:G, "G"),)
+
+
 @inline function force(inter::Gravity,
                        dr,
                        atom_i,

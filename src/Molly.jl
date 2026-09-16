@@ -39,6 +39,7 @@ using Statistics
 using StatsBase
 
 include("types.jl")
+include("parameters.jl")
 include("units.jl")
 include("cuda_config.jl")
 include("spatial.jl")
@@ -71,6 +72,7 @@ include("interactions/ewald.jl")
 include("interactions/implicit_solvent.jl")
 include("interactions/muller_brown.jl")
 include("interactions/dpd.jl")
+include("interactions/ml_potentials.jl")
 include("free_energy/virial_scaling.jl")
 include("constraints/constraints.jl")
 include("constraints/shake.jl")

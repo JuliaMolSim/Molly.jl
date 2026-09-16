@@ -811,7 +811,8 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
     end
 
     active_state = ActiveThermoState(state_space, first_state)
-    FT = typeof(ustrip(active_state.active_sys.total_mass))
+    # Matches the float type used by the per-window estimators
+    TH = float_type_high(active_state.active_sys)
 
     normalized_windows = graph.windows
     state_to_windows = graph.state_to_windows
@@ -854,17 +855,17 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
                 adaptive_mode,
                 graph,
                 window,
-                FT,
+                TH,
             ),
             require_active_state = false,
         )
         for window in normalized_windows
     ]
 
-    stats = WindowedTSSStats(FT)
+    stats = WindowedTSSStats(TH)
 
     state = TSSState{
-        FT,
+        TH,
         typeof(state_space),
         typeof(active_state),
         typeof(graph),

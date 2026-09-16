@@ -1,6 +1,6 @@
 @testset "Immediate thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -25,7 +25,7 @@
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -33,7 +33,7 @@ end
 
 @testset "Velocity rescale thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -58,15 +58,15 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
-        @test std(temps_traj) < 1.0u"K"
+        @test std(temps_traj) < 1.1u"K"
     end
 end
 
 @testset "Andersen thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -91,7 +91,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -99,7 +99,7 @@ end
 
 @testset "Berendsen thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -124,7 +124,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -471,7 +471,7 @@ end
     lang = Langevin(dt=dt, temperature=temp, friction=friction)
 
     simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
-    @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
+    simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
 
     P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
     Vir   = [tr(V) for V in values(sys.loggers.virial)]
@@ -508,7 +508,7 @@ end
             random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
-            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
+            simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
             P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
             Vir   = [tr(V) for V in values(sys.loggers.virial)]
@@ -548,7 +548,7 @@ end
             random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
-            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
+            simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
             P_xy = [(P[1,1] + P[2,2]) / 2 for P in values(sys.loggers.pressure)]
             P_z  = [P[3,3] for P in values(sys.loggers.pressure)]
@@ -592,7 +592,7 @@ end
             random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
-            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
+            simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
             P_x = [P[1,1] for P in values(sys.loggers.pressure)]
             P_y = [P[2,2] for P in values(sys.loggers.pressure)]

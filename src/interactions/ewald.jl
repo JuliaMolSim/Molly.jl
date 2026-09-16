@@ -4,10 +4,14 @@ import Base: ==, hash
 
 export
     Ewald,
+    SetupEwald,
     PME,
+    SetupPME,
     EwaldExclusion
 
 abstract type AbstractEwald end
+
+const default_ewald_error_tol = 0.0005
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                             inter::AbstractEwald;
@@ -79,6 +83,7 @@ Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
 which provides the short range term, and the [`EwaldExclusion`](@ref) specific
 interaction, which provides the exclusions for bonded atoms.
 `dist_cutoff` and `error_tol` should match these interactions.
+[`SetupEwald`](@ref) provides Ewald parameters when setting up a system from a file.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
 This algorithm is O(N^2) and in general [`PME`](@ref) should be used instead.
@@ -92,9 +97,15 @@ struct Ewald{T, D, SCH} <: AbstractEwald
     scheduler::SCH
 end
 
-function Ewald(dist_cutoff; error_tol=0.0005, scheduler=DefaultLambdaScheduler())
+function Ewald(dist_cutoff; error_tol=default_ewald_error_tol, scheduler=DefaultLambdaScheduler())
     T = typeof(ustrip(dist_cutoff))
     return Ewald(dist_cutoff, T(error_tol), scheduler)
+end
+
+Base.zero(inter::Ewald{T, D}) where {T, D} = Ewald(zero(D), zero(T), inter.scheduler)
+
+function Base.:+(i1::Ewald, i2::Ewald)
+    return Ewald(i1.dist_cutoff + i2.dist_cutoff, i1.error_tol + i2.error_tol, i1.scheduler)
 end
 
 function ewald_error(αr::T, target, guess) where T
@@ -128,19 +139,23 @@ function ewald_params(side_length, α, error_tol)
     return k
 end
 
-function ewald_pe_forces!(Fs, vir, sys::System{3}, inter::AbstractEwald, ::Val{needs_vir},
-                          ::Val{needs_pe}=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {needs_vir, needs_pe}
+function ewald_pe_forces!(Fs, vir, sys::System{3, <:Any, <:Any, TH}, inter::AbstractEwald,
+                          ::Val{needs_vir}, ::Val{needs_pe}=Val(true);
+                          n_threads::Integer=Threads.nthreads()) where {TH, needs_vir, needs_pe}
     calculate_forces = !isnothing(Fs)
     return ewald_pe_forces!(Fs, vir, inter, sys.atoms, sys.coords, sys.boundary, sys.force_units,
-                            sys.energy_units, Val(needs_vir), calculate_forces, Val(needs_pe);
-                            n_threads=n_threads)
+                            sys.energy_units, Val(needs_vir), calculate_forces, Val(needs_pe),
+                            Val(TH); n_threads=n_threads)
 end
+
+@inline sum_float_type(f, ::Type{T}, v::AbstractVector{T}) where {T} = sum(f, v)
+@inline sum_float_type(f, ::Type{T}, v) where {T} = sum(f ∘ T, v)
 
 # The Ewald sum shares its loop between the energy and the forces, so `needs_pe` is ignored
 function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, force_units,
-                          energy_units, ::Val{needs_vir}, calculate_forces=true, ::Val=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
+                          energy_units, ::Val{needs_vir}, calculate_forces=true, ::Val=Val(true),
+                          ::Val{TH}=Val(Float64);
+                          n_threads::Integer=Threads.nthreads()) where {T, TH, needs_vir}
     AT = array_type(atoms)
     n_atoms = length(atoms)
     atoms_cpu, coords_cpu = from_device(atoms), from_device(coords)
@@ -242,13 +257,16 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
         end
     end
 
-    charge_E = -f * T(π) * sum(partial_charges_cpu)^2 / (2 * V * α^2)
-    self_E = f * -sum(abs2, partial_charges_cpu) * α / sqrt(T(π)) + charge_E
+    f_h, α_h, V_h = TH(f), TH(α), TH(V)
+    pc_sum      = sum_float_type(identity, TH, partial_charges_cpu)
+    pc_abs2_sum = sum_float_type(abs2    , TH, partial_charges_cpu)
+    charge_E = -f_h * TH(π) * pc_sum^2 / (2 * V_h * α_h^2)
+    self_E = -f_h * pc_abs2_sum * α_h / sqrt(TH(π)) + charge_E
     total_E = reciprocal_space_E + self_E
 
     if needs_vir
-        # E_charge = -A/V with A = f*π*Q^2/(2α^2) ⇒ W_charge = -E_charge * I
-        vir .+= (-charge_E) .* I(3)
+        # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I
+        vir .+= charge_E .* I(3)
     end
 
     if calculate_forces && AT <: AbstractGPUArray
@@ -269,19 +287,66 @@ function hash(a::Ewald, h::UInt)
     return hash(a.scheduler, v)
 end
 
+abstract type AbstractSetupEwald end
+
+"""
+    SetupEwald(; error_tol=0.0005, approximate_erfc=true,
+               coulomb_const=138.93545764u"kJ * mol^-1 * nm")
+
+Set up Ewald summation for long range electrostatics.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a [`Ewald`](@ref)
+general interaction, a [`CoulombEwald`](@ref) pairwise interaction and a
+[`EwaldExclusion`](@ref) specific interaction.
+
+`error_tol` is the error tolerance for Ewald summation.
+`approximate_erfc` determines whether to use a fast approximation to the erfc function.
+"""
+struct SetupEwald{T, C} <: AbstractSetupEwald
+    error_tol::T
+    approximate_erfc::Bool
+    coulomb_const::C
+end
+
+function SetupEwald(; error_tol=default_ewald_error_tol, approximate_erfc::Bool=true,
+                    coulomb_const=coulomb_const)
+    if error_tol <= zero(error_tol)
+        throw(ArgumentError("error_tol must be greater than zero, found $error_tol"))
+    end
+    return SetupEwald(error_tol, approximate_erfc, coulomb_const)
+end
+
+function setup_coulomb_pairwise(se::AbstractSetupEwald, dist_cutoff, weight_special,
+                                use_neighbors, units, T)
+    return CoulombEwald(
+        dist_cutoff=T(dist_cutoff),
+        error_tol=T(se.error_tol),
+        use_neighbors=use_neighbors,
+        weight_special=weight_special,
+        coulomb_const=convert_setup_quantity(se.coulomb_const, units, T),
+        approximate_erfc=se.approximate_erfc,
+    )
+end
+
+function setup_coulomb_general(se::SetupEwald, atoms, boundary, dist_cutoff, n_threads,
+                               grad_safe, units, T)
+    return Ewald(T(dist_cutoff); error_tol=T(se.error_tol))
+end
+
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
-        scheduler=DefaultLambdaScheduler(), grad_safe=false,
-        n_threads=Threads.nthreads())
+        scheduler=DefaultLambdaScheduler(), float_type_high=Float64,
+        grad_safe=false, n_threads=Threads.nthreads())
 
-Particle mesh Ewald summation for long range electrostatics implemented as an
+Particle mesh Ewald (PME) summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
 
 Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
 which provides the short range term, and the [`EwaldExclusion`](@ref) specific
 interaction, which provides the exclusions for bonded atoms.
 `dist_cutoff` and `error_tol` should match these interactions.
+[`SetupPME`](@ref) provides PME parameters when setting up a system from a file.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
 `fixed_charges` should be set to `false` if the partial charges can change,
@@ -383,11 +448,57 @@ function pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
     return bsplines_moduli
 end
 
-function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
+function find_excluded_pairs(eligible, special)
+    excluded_pairs = Tuple{Int32, Int32}[]
+    if !(isnothing(eligible) && isnothing(special))
+        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
+        eligible_cpu = (isnothing(eligible) ? nothing : to_bitmatrix(from_device(eligible)))
+        special_cpu  = (isnothing(special ) ? nothing : to_bitmatrix(from_device(special )))
+        # Only a small fraction of the n_atoms^2 entries are excluded, so scan the mask
+        #   64 entries at a time and skip the chunks with nothing set
+        n_entries = n_atoms * n_atoms
+        n_chunks = cld(n_entries, 64)
+        eligible_chunks = (isnothing(eligible_cpu) ? nothing : eligible_cpu.chunks)
+        special_chunks  = (isnothing(special_cpu ) ? nothing : special_cpu.chunks )
+        # Bits past the end of the last chunk are unset in a BitArray but are set by the
+        #   negation below, so mask them off
+        end_mask = ~zero(UInt64) >>> ((-n_entries) & 63)
+        for ci in 1:n_chunks
+            # A missing eligible matrix means every pair is eligible, a missing special
+            #   matrix means no pair is special, so neither excludes anything
+            chunk = zero(UInt64)
+            if !isnothing(eligible_chunks)
+                chunk = ~eligible_chunks[ci]
+            end
+            if !isnothing(special_chunks)
+                chunk |= special_chunks[ci]
+            end
+            if ci == n_chunks
+                chunk &= end_mask
+            end
+            while !iszero(chunk)
+                # Column-major linear index of the set bit, zero-based
+                li = (ci - 1) * 64 + trailing_zeros(chunk)
+                j, i = divrem(li, n_atoms)
+                if i < j
+                    push!(excluded_pairs, (Int32(i + 1), Int32(j + 1)))
+                end
+                chunk &= chunk - one(UInt64)
+            end
+        end
+        # The scan runs down the columns, sort to give the same order as looping over
+        #   i and then j
+        sort!(excluded_pairs)
+    end
+    return excluded_pairs
+end
+
+function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, order=5,
              ϵr=1.0, fixed_charges=true, mesh_dims=nothing, eligible=nothing, special=nothing,
-             scheduler=DefaultLambdaScheduler(dual=true), grad_safe=false,
+             scheduler=DefaultLambdaScheduler(), float_type_high=Float64, grad_safe=false,
              n_threads::Integer=Threads.nthreads())
     T = typeof(ustrip(dist_cutoff))
+    TH = float_type_high
     AT = array_type(atoms)
     n_atoms = length(atoms)
     error_tol_T = T(error_tol)
@@ -395,7 +506,15 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     if isnothing(mesh_dims)
         mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
     else
+        if length(mesh_dims) != 3
+            throw(ArgumentError("mesh_dims should have 3 entries, one for each dimension, " *
+                                "found $mesh_dims"))
+        end
         mesh_dims = SVector{3, Int}(mesh_dims)
+        if any(<(order), mesh_dims)
+            throw(ArgumentError("every entry of mesh_dims should be at least the B-spline " *
+                                "order ($order), found $(Tuple(mesh_dims))"))
+        end
     end
     # The three B-spline dimensions are flattened into one axis to keep these 2D. The atom
     # index goes last on CPU, so that the values belonging to an atom share a cache line,
@@ -441,9 +560,10 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
 
     fixed_charges = false
     if fixed_charges && !grad_safe
-        partial_charge_buffer = effective_charge.(atoms, Ref(scheduler), Val(T))
-        pc_sum = sum(partial_charge_buffer)
-        pc_abs2_sum = sum(abs2, partial_charge_buffer)
+        atoms_cpu = from_device(atoms)
+        partial_charges = effective_charge.(atoms_cpu, Ref(scheduler), Val(T))
+        pc_sum = sum(TH, partial_charges)
+        pc_abs2_sum = sum(abs2 ∘ TH, partial_charges)
     else
         pc_sum, pc_abs2_sum = nothing, nothing
     end
@@ -628,11 +748,17 @@ function grid_placement!(grid_indices::Matrix, grid_fractions, coords, recip_box
 end
 
 function grid_placement!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, n_threads)
+    # Allow Enzyme rule
+    grid_placement_gpu!(grid_indices, grid_fractions, coords, recip_box, mesh_dims)
+    return grid_indices, grid_fractions
+end
+
+function grid_placement_gpu!(grid_indices, grid_fractions, coords, recip_box, mesh_dims)
     backend = get_backend(parent(grid_indices))
     n_threads_gpu = 128
     kernel! = grid_placement_kernel!(backend, n_threads_gpu)
     kernel!(grid_indices, grid_fractions, coords, recip_box, mesh_dims; ndrange=length(coords))
-    return grid_indices, grid_fractions
+    return nothing
 end
 
 @kernel function grid_placement_kernel!(grid_indices, grid_fractions, @Const(coords),
@@ -694,12 +820,18 @@ end
 
 function update_bsplines!(bsplines_θ, bsplines_dθ, grid_fractions, order,
                           n_threads)
+    # Allow Enzyme rule
+    update_bsplines_gpu!(bsplines_θ, bsplines_dθ, grid_fractions, order)
+    return bsplines_θ, bsplines_dθ
+end
+
+function update_bsplines_gpu!(bsplines_θ, bsplines_dθ, grid_fractions, order)
     n_atoms = size(grid_fractions, 2)
     backend = get_backend(parent(bsplines_θ))
     n_threads_gpu = 128
     kernel! = update_bsplines_kernel!(backend, n_threads_gpu)
     kernel!(bsplines_θ, bsplines_dθ, grid_fractions, order; ndrange=n_atoms)
-    return bsplines_θ, bsplines_dθ
+    return nothing
 end
 
 @kernel function update_bsplines_kernel!(bsplines_θ, bsplines_dθ, @Const(grid_fractions),
@@ -821,13 +953,21 @@ end
 
 function spread_charge!(charge_grid::AbstractArray{T, 3}, buffer, grid_indices,
                         bsplines_θ, mesh_dims, order, atoms, scheduler, n_threads) where T
+    # Allow Enzyme rule
+    spread_charge_gpu!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms,
+                       scheduler, Val(T))
+    return charge_grid
+end
+
+function spread_charge_gpu!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms,
+                            scheduler, ::Val{T}) where T
     backend = get_backend(charge_grid)
     n_threads_gpu = 128
     kernel! = spread_charge_kernel!(backend, n_threads_gpu)
     charge_grid .= zero(T)
     kernel!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms, scheduler, Val(T);
             ndrange=length(atoms)*order)
-    return charge_grid
+    return nothing
 end
 
 @kernel function spread_charge_kernel!(charge_grid_real, @Const(grid_indices), @Const(bsplines_θ),
@@ -840,13 +980,8 @@ end
     end
 end
 
-@inline function recip_conv_inner!(vir_nou, recip_grid::AbstractArray{Complex{T}, 3}, bsm_x,
-                           bsm_y, bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor,
-                           boxfactor, kx, ky, kz, ::Val{needs_vir},
-                           ::Val{atomic}) where {T, needs_vir, atomic}
-    if iszero(kx) && iszero(ky) && iszero(kz)
-        return zero(T) * energy_units
-    end
+@inline function recip_conv_terms(bsm_x, bsm_y, bsm_z, recip_box, mesh_dims, energy_units,
+                                  f_div_ϵr, factor, boxfactor, kx, ky, kz, ::Val{T}) where {T}
     nx, ny, nz = mesh_dims
     maxkx, maxky, maxkz = T(0.5)*(nx+1), T(0.5)*(ny+1), T(0.5)*(nz+1)
     # The real to complex transform only keeps the modes with kz up to nz/2, and each of
@@ -862,13 +997,28 @@ end
         by = bsm_y[ky+1]
         mz = (kz < maxkz ? kz : kz - nz)
         mhz = mx * recip_box[3][1] + my * recip_box[3][2] + mz * recip_box[3][3]
-        d1, d2 = reim(recip_grid[kz+1, ky+1, kx+1])
         m2 = mhx^2 + mhy^2 + mhz^2
         bz = bsm_z[kz+1]
         denom = m2 * bx * by * bz
         c  = exp(-factor * m2)
         eterm = f_div_ϵr * c / denom
         eterm_nou = ustrip(energy_units, eterm)
+    end
+    return weight, eterm, eterm_nou, mhx, mhy, mhz, m2
+end
+
+@inline function recip_conv_inner!(vir_nou, recip_grid::AbstractArray{Complex{T}, 3}, bsm_x,
+                           bsm_y, bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor,
+                           boxfactor, kx, ky, kz, ::Val{needs_vir},
+                           ::Val{atomic}) where {T, needs_vir, atomic}
+    if iszero(kx) && iszero(ky) && iszero(kz)
+        return zero(T) * energy_units
+    end
+    weight, eterm, eterm_nou, mhx, mhy, mhz, m2 = recip_conv_terms(bsm_x, bsm_y, bsm_z,
+                recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                kx, ky, kz, Val(T))
+    @inbounds begin
+        d1, d2 = reim(recip_grid[kz+1, ky+1, kx+1])
         recip_grid[kz+1, ky+1, kx+1] = Complex(d1*eterm_nou, d2*eterm_nou)
         struct2 = weight * (d1^2 + d2^2)
 
@@ -951,12 +1101,9 @@ function recip_conv!(vir, buffer_virial, recip_grid::AbstractArray{Complex{T}, 3
     end
     factor = T(π)^2 / α^2
     boxfactor = T(π) * volume(boundary)
-    backend = get_backend(recip_grid)
-    n_threads_gpu = 256
-    kernel! = recip_conv_kernel!(backend, n_threads_gpu)
-    kernel!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
-            energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir), Val(needs_pe);
-            ndrange=length(recip_grid))
+    recip_conv_gpu!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box,
+                    mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir),
+                    Val(needs_pe))
     if needs_vir
         # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
         vir .+= from_device(buffer_virial) .* energy_units / 2
@@ -965,6 +1112,18 @@ function recip_conv!(vir, buffer_virial, recip_grid::AbstractArray{Complex{T}, 3
     # over the whole mesh, and the device synchronisation it forces, can be skipped
     needs_pe || return zero(T) * energy_units
     return sum(buffer) * energy_units / 2
+end
+
+function recip_conv_gpu!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box,
+                         mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                         ::Val{needs_vir}, ::Val{needs_pe}) where {needs_vir, needs_pe}
+    backend = get_backend(recip_grid)
+    n_threads_gpu = 256
+    kernel! = recip_conv_kernel!(backend, n_threads_gpu)
+    kernel!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
+            energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir), Val(needs_pe);
+            ndrange=length(recip_grid))
+    return nothing
 end
 
 # One thread per grid point, indexed so that neighbouring threads touch neighbouring grid
@@ -1087,12 +1246,23 @@ function interpolate_force!(Fs, charge_grid::AbstractArray{T, 3}, grid_indices, 
     recip_box_nou = map(v -> ustrip.(v), recip_box)
     unit_scale = T(ustrip(force_units,
                           oneunit(T) * unit(eltype(eltype(recip_box))) * energy_units))
+    interpolate_force_gpu!(Fs, charge_grid, grid_indices, bsplines_θ, bsplines_dθ,
+                           recip_box_nou, mesh_dims, order, unit_scale, atoms, scheduler,
+                           Val(T))
+    return Fs
+end
+
+function interpolate_force_gpu!(Fs, charge_grid, grid_indices, bsplines_θ, bsplines_dθ,
+                                recip_box, mesh_dims, order, unit_scale, atoms, scheduler,
+                                ::Val{T}) where T
+    backend = get_backend(Fs)
+    n_threads_gpu = 128
     Fs_flat = reinterpret(T, Fs)
     kernel! = interpolate_force_kernel!(backend, n_threads_gpu)
-    kernel!(Fs_flat, charge_grid, grid_indices, bsplines_θ, bsplines_dθ, recip_box_nou,
+    kernel!(Fs_flat, charge_grid, grid_indices, bsplines_θ, bsplines_dθ, recip_box,
             mesh_dims, order, unit_scale, atoms, scheduler, Val(T);
             ndrange=length(atoms)*order)
-    return Fs
+    return nothing
 end
 
 @kernel function interpolate_force_kernel!(Fs_flat, @Const(charge_grid), @Const(grid_indices),
@@ -1113,8 +1283,8 @@ grad_safe_bfft!(charge_grid, recip_grid, bfft_plan) = mul!(charge_grid, bfft_pla
 
 function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force_units,
                           energy_units, ::Val{needs_vir}, calculate_forces=true,
-                          ::Val{needs_pe}=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir, needs_pe}
+                          ::Val{needs_pe}=Val(true), ::Val{TH}=Val(Float64);
+                          n_threads::Integer=Threads.nthreads()) where {T, TH, needs_vir, needs_pe}
     if !is_on_gpu(coords) && n_threads > 1 &&
             (isnothing(inter.charge_grid_buffer) || length(inter.virial_buffer) != n_threads)
         ntc = (isnothing(inter.charge_grid_buffer) ? 1 : length(inter.virial_buffer))
@@ -1148,16 +1318,17 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
 
     if needs_pe || needs_vir
         if isnothing(inter.pc_sum) || inter.grad_safe
-            partial_charge_buffer = effective_charge.(atoms, Ref(inter.scheduler), Val(T))
-            pc_sum = sum(partial_charge_buffer)
-            pc_abs2_sum = sum(abs2, partial_charge_buffer)
+            partial_charge = effective_charge.(from_device(atoms), Ref(inter.scheduler), Val(T))
+            pc_sum      = sum_float_type(identity, TH, partial_charges)
+            pc_abs2_sum = sum_float_type(abs2    , TH, partial_charges)
         else
-            pc_sum, pc_abs2_sum = inter.pc_sum, inter.pc_abs2_sum
+            pc_sum, pc_abs2_sum = TH(inter.pc_sum), TH(inter.pc_abs2_sum)
         end
-        charge_E = -f_div_ϵr * T(π) * pc_sum^2 / (2 * V * α^2)
-        self_E = f_div_ϵr * -pc_abs2_sum * α / sqrt(T(π)) + charge_E
+        f_h, α_h, V_h = TH(f_div_ϵr), TH(α), TH(V)
+        charge_E = -f_h * TH(π) * pc_sum^2 / (2 * V_h * α_h^2)
+        self_E = -f_h * pc_abs2_sum * α_h / sqrt(TH(π)) + charge_E
         if needs_vir
-            # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I.
+            # Since charge_E = -A/V, affine box differentiation gives W = charge_E * I
             vir .+= charge_E .* I(3)
         end
         if needs_pe
@@ -1168,21 +1339,47 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     return nothing
 end
 
-function find_excluded_pairs(eligible, special)
-    excluded_pairs = Tuple{Int32, Int32}[]
-    if !(isnothing(eligible) && isnothing(special))
-        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
-        eligible_cpu = (isnothing(eligible) ? trues( n_atoms, n_atoms) : from_device(eligible))
-        special_cpu  = (isnothing(special ) ? falses(n_atoms, n_atoms) : from_device(special ))
-        for i in 1:n_atoms
-            for j in (i+1):n_atoms
-                if !eligible_cpu[i, j] || special_cpu[i, j]
-                    push!(excluded_pairs, (Int32(i), Int32(j)))
-                end
-            end
-        end
+"""
+    SetupPME(; error_tol=0.0005, approximate_erfc=true, mesh_dims=nothing,
+             coulomb_const=138.93545764u"kJ * mol^-1 * nm")
+
+Set up the particle mesh Ewald (PME) summation for long range electrostatics.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a [`PME`](@ref)
+general interaction, a [`CoulombEwald`](@ref) pairwise interaction and a
+[`EwaldExclusion`](@ref) specific interaction.
+
+`error_tol` is the error tolerance for Ewald summation.
+`approximate_erfc` determines whether to use a fast approximation to the erfc function.
+`mesh_dims` determines the number of PME grid points in each dimension and defaults
+to a value chosen from `error_tol`.
+"""
+struct SetupPME{T, C, M} <: AbstractSetupEwald
+    error_tol::T
+    approximate_erfc::Bool
+    coulomb_const::C
+    mesh_dims::M
+end
+
+function SetupPME(; error_tol=default_ewald_error_tol, approximate_erfc::Bool=true,
+                  coulomb_const=coulomb_const, mesh_dims=nothing)
+    if error_tol <= zero(error_tol)
+        throw(ArgumentError("error_tol must be greater than zero, found $error_tol"))
     end
-    return excluded_pairs
+    return SetupPME(error_tol, approximate_erfc, coulomb_const, mesh_dims)
+end
+
+function setup_coulomb_general(se::SetupPME, atoms, boundary, dist_cutoff, n_threads,
+                               grad_safe, units, T)
+    return PME(
+        T(dist_cutoff),
+        atoms,
+        boundary;
+        error_tol=T(se.error_tol),
+        mesh_dims=se.mesh_dims,
+        grad_safe=grad_safe,
+        n_threads=n_threads,
+    )
 end
 
 """
@@ -1234,7 +1431,8 @@ Only compatible with 3D systems.
 @kwdef struct EwaldExclusion null::UInt8 = 0 end
 # Due to a CuArray error with empty structs (https://github.com/JuliaGPU/CUDA.jl/issues/3181)
 
-Base.zero(::EwaldExclusion) = EwaldExclusion()
+Base.zero(::Type{EwaldExclusion}) = EwaldExclusion()
+Base.zero(e::EwaldExclusion) = zero(typeof(e))
 Base.:+(::EwaldExclusion, ::EwaldExclusion) = EwaldExclusion()
 
 struct EwaldExclusionData{T, D, A, F, S, LM}
@@ -1247,7 +1445,7 @@ struct EwaldExclusionData{T, D, A, F, S, LM}
     λ_mixing::LM
 end
 
-function EwaldExclusionData(dist_cutoff; error_tol=0.0005, ϵr=1.0,
+function EwaldExclusionData(dist_cutoff; error_tol=default_ewald_error_tol, ϵr=1.0,
                             scheduler=DefaultLambdaScheduler(), λ_mix=MinimumMixing())
     T = typeof(ustrip(dist_cutoff))
     error_tol_T = T(error_tol)

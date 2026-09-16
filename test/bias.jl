@@ -557,15 +557,18 @@ end
     end
 
     # No units
+    n_steps, burn_in = 50_000, 250
+
     for AT in array_list
         n_atoms = 10
         boundary = CubicBoundary(10.0)
         temp = 298.0
         atom_mass = 10.0
+        rng = Xoshiro(1000)
 
         atoms = to_device([Atom(mass=atom_mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms], AT)
-        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3), AT)
-        velocities = to_device([random_velocity(atom_mass, temp) for i in 1:n_atoms], AT)
+        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3, rng=rng), AT)
+        velocities = to_device([random_velocity(atom_mass, temp; rng=rng) for i in 1:n_atoms], AT)
         pairwise_inters = (LennardJones(),)
 
         define_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
@@ -592,15 +595,15 @@ end
             ),
         )
 
-        simulate!(sys, simulator, 200_000)
+        simulate!(sys, simulator, n_steps; rng=rng)
 
         pair_dists_12 = values(sys.loggers.pair_dist_12)
         pair_dists_13 = values(sys.loggers.pair_dist_13)
 
-        dist_12_mean = mean(pair_dists_12[1000:end])
-        dist_13_mean = mean(pair_dists_13[1000:end])
-        dist_12_std = std(pair_dists_12[1000:100:end])
-        dist_13_std = std(pair_dists_13[1000:100:end])
+        dist_12_mean = mean(pair_dists_12[burn_in:end])
+        dist_13_mean = mean(pair_dists_13[burn_in:end])
+        dist_12_std = std(pair_dists_12[burn_in:100:end])
+        dist_13_std = std(pair_dists_13[burn_in:100:end])
 
         @test isapprox(dist_12_mean, 1.5; atol=0.05)
         @test !isapprox(dist_13_mean, 1.5; atol=0.05)
@@ -614,10 +617,11 @@ end
         boundary = CubicBoundary(10.0u"nm")
         temp = 298.0u"K"
         atom_mass = 10.0u"g/mol"
+        rng = Xoshiro(1000)
 
         atoms = to_device([Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms], AT)
-        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"), AT)
-        velocities = to_device([random_velocity(atom_mass, temp) for i in 1:n_atoms], AT)
+        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng), AT)
+        velocities = to_device([random_velocity(atom_mass, temp; rng=rng) for i in 1:n_atoms], AT)
         pairwise_inters = (LennardJones(),)
 
         define_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
@@ -642,15 +646,15 @@ end
             ),
         )
 
-        simulate!(sys, simulator, 200_000)
+        simulate!(sys, simulator, n_steps; rng=rng)
 
         pair_dists_12 = values(sys.loggers.pair_dist_12)
         pair_dists_13 =values(sys.loggers.pair_dist_13)
 
-        dist_12_mean = mean(pair_dists_12[1000:end])
-        dist_13_mean = mean(pair_dists_13[1000:end])
-        dist_12_std = std(pair_dists_12[1000:100:end])
-        dist_13_std = std(pair_dists_13[1000:100:end])
+        dist_12_mean = mean(pair_dists_12[burn_in:end])
+        dist_13_mean = mean(pair_dists_13[burn_in:end])
+        dist_12_std = std(pair_dists_12[burn_in:100:end])
+        dist_13_std = std(pair_dists_13[burn_in:100:end])
 
         @test isapprox(dist_12_mean, 1.5u"nm"; atol=0.05u"nm")
         @test !isapprox(dist_13_mean, 1.5u"nm"; atol=0.05u"nm")

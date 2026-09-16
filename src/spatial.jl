@@ -292,6 +292,8 @@ end
 Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 
 AtomsBase.n_dimensions(::AbstractBoundary{D}) where {D} = D
+AtomsBase.n_dimensions(::Union{System{D}, ReplicaSystem{D}}) where {D} = D
+
 float_type(::AbstractBoundary{<:Any, T}) where {T} = T
 length_type(b::AbstractBoundary{<:Any, <:Any, C}) where {C} = C
 
@@ -299,6 +301,9 @@ Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
+Unitful.ustrip(b::TriclinicBoundary) = TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors))
+Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary) = TriclinicBoundary(
+                                            map(bv -> ustrip.(u, bv), b.basis_vectors))
 
 function AtomsBase.cell_vectors(b::CubicBoundary{3, <:Any, C}) where C
     z = zero(C)
@@ -798,9 +803,8 @@ function random_velocities!(sys, temp; rng=Random.default_rng())
     return sys
 end
 
-function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys, temp;
-                            rng=Random.default_rng()) where {D, C}
-    FT = float_type(sys)
+function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::System{<:Any, <:Any, T},
+                            temp; rng=Random.default_rng()) where {D, C, T}
     ms = from_device(masses(sys))
     vsf = from_device(sys.virtual_site_flags)
     kT = sys.k * temp
@@ -809,13 +813,13 @@ function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys, temp;
     natoms = UInt64(length(ms))
     @inbounds @simd ivdep for i in eachindex(vels, vsf, ms)
         scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
-        vels[i] = randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms) * scale
+        vels[i] = randn_svec(SVector{D, T}, i%UInt64, ctr1, key, natoms) * scale
     end
     return vels
 end
 
-function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.default_rng())
-    FT = float_type(sys)
+function random_velocities!(vels::AbstractGPUArray, sys::System{<:Any, <:Any, T},
+                            temp; rng=Random.default_rng()) where T
     AT = array_type(vels)
     ms = to_device(sys.masses, AT)
     vsf = to_device(sys.virtual_site_flags, AT)
@@ -824,7 +828,7 @@ function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.defaul
     key = rand(rng, UInt64)
     backend = get_backend(vels)
     kernel! = random_velocities_kernel!(backend)
-    kernel!(vels, ms, kT, vsf, ctr1, key, Val(FT); ndrange=length(vels))
+    kernel!(vels, ms, kT, vsf, ctr1, key, Val(T); ndrange=length(vels))
     return vels
 end
 
@@ -940,7 +944,7 @@ end
              recompute=true, n_threads=Threads.nthreads(),
              pairwise_inters=system.pairwise_inters,
              specific_inter_lists=system.specific_inter_lists,
-             general_inters=system.general_inters)
+             general_inters=system.general_inters, strictness=:warn)
 
 Calculate the pressure tensor of the system.
 
@@ -1031,7 +1035,7 @@ end
                     recompute=true, n_threads=Threads.nthreads(),
                     pairwise_inters=system.pairwise_inters,
                     specific_inter_lists=system.specific_inter_lists,
-                    general_inters=system.general_inters)
+                    general_inters=system.general_inters, strictness=:warn)
 
 Calculate the pressure of the system as a scalar.
 
@@ -1062,7 +1066,7 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
 
     is_triclinic = hasproperty(boundary, :basis_vectors)
     if is_triclinic && D != 3
-        error("Triclinic boundary only defined for 3-dimensions")
+        error("triclinic boundary only defined for 3-dimensions")
     end
 
     # Build frac<->cart transforms
@@ -1188,17 +1192,18 @@ Rigid-molecular barostat update with optional rotation.
 - Positions:  r′ = μ * r  (implemented via COM affine + optional rotation of internal offsets)
 - Velocities: v′ = μ⁻¹ * v  (applied when `scale_velocities=true`)
 """
-function scale_coords!(sys::System{<:Any, AT},
-                       μ::SMatrix{D, D};
+function scale_coords!(sys::System{<:Any, AT, T},
+                       μ_in::SMatrix{D, D};
                        rotate::Bool=true,
                        ignore_molecules::Bool=false,
-                       scale_velocities::Bool=false) where {AT, D}
+                       scale_velocities::Bool=false) where {AT, T, D}
     # This function assumes that constrained atoms, and virtual sites and the atoms that
     #   define them, are in the same molecule, meaning that they are scaled appropriately
     if has_infinite_boundary(sys.boundary)
-        throw(AssertionError("infinite boundary not supported"))
+        throw(ArgumentError("infinite boundary not supported for scale_coords!"))
     end
 
+    μ = SMatrix{D, D, T}(μ_in) # Convert scaling matrix to float type of the system
     μinv = inv(μ)
 
     if ignore_molecules || isnothing(sys.topology)

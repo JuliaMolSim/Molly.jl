@@ -16,6 +16,15 @@ V(\theta) = k(1 + \cos(\theta - \theta_0))
     θ0::D
 end
 
+Base.zero(::Type{CosineAngle{K, D}}) where {K, D} = CosineAngle(k=zero(K), θ0=zero(D))
+Base.zero(a::CosineAngle) = zero(typeof(a))
+
+Base.:+(a1::CosineAngle, a2::CosineAngle) = CosineAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
+
+parameter_prefix(::CosineAngle, inter_type) = "inter_CA_$(inter_type)_"
+parameter_fields(::Type{<:CosineAngle}) = ((:k, "k"), (:θ0, "θ0"))
+
+
 @inline function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)

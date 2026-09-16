@@ -126,6 +126,16 @@ copy_to_bitmatrix(x::BitMatrix) = copy(x)
 copy_to_bitmatrix(x) = BitMatrix(Array(x))
 
 #=
+    to_bitmatrix(x)
+
+Convert a given matrix `x` to a `BitMatrix`, returning it unchanged if it is already one.
+
+Unlike `copy_to_bitmatrix` this does not copy, so the result should not be modified.
+=#
+to_bitmatrix(x::BitMatrix) = x
+to_bitmatrix(x) = BitMatrix(Array(x))
+
+#=
     gpu_exception_vector_type(eligible, device_vector_type)
 
 Determine or validate the 1D `Int32` array type for storing sparse GPU exceptions.
@@ -346,7 +356,9 @@ function GPUNeighborFinder(;
     end
     eligible_cpu = copy_to_bitmatrix(eligible)
     special_cpu = copy_to_bitmatrix(special)
-    size(eligible_cpu) == size(special_cpu) || throw(ArgumentError("eligible and special must have the same size"))
+    if !(size(eligible_cpu) == size(special_cpu))
+        throw(ArgumentError("eligible and special must have the same size"))
+    end
     excluded_pairs_cpu, special_pairs_cpu = dense_masks_to_pair_lists(eligible_cpu, special_cpu)
     return GPUNeighborFinder(
         n_atoms=size(eligible_cpu, 1),
@@ -362,6 +374,17 @@ end
 
 # The interacting tile list is constructed within the CUDA pairwise kernels.
 find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
+
+# Mark neighbor data cached in `buffers` as stale so that it is rebuilt on the next force
+#   or energy evaluation
+# Neighbor finders that return a neighbor list from `find_neighbors` do not cache
+#   anything in the buffers, so this does nothing for them
+invalidate_cached_neighbors!(buffers, neighbor_finder) = buffers
+
+function invalidate_cached_neighbors!(buffers::BuffersGPU, nf::GPUNeighborFinder)
+    buffers.step_n_preprocessed = -1
+    return buffers
+end
 
 """
     DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
@@ -565,11 +588,13 @@ function clm_unitcell_arg(b::Union{CubicBoundary, RectangularBoundary})
         if all(isinf.(uc))
             return nothing, D
         else
-            throw(ArgumentError("Cannot use infinite boundaries in some, but not all, dimension."))
+            throw(ArgumentError("cannot use infinite boundaries in some, but not all, " *
+                                "dimensions with CellListMapNeighborFinder"))
         end
     end
     return uc, D
 end
+
 function clm_unitcell_arg(b::TriclinicBoundary) 
     uc = hcat(b.basis_vectors...)
     D = size(uc, 1)
@@ -639,13 +664,13 @@ function CellListMap.reduce_output!(output::NeighborList, output_threaded::Vecto
 
     if (n_tot - n_start) > 100_000 && length(output_threaded) > 1 && Threads.nthreads() > 1
         Threads.@threads for i in eachindex(output_threaded)
-            offset = n_start
+            chunk_offset = n_start
             @inbounds for jb in 1:(i - 1)
-                offset += output_threaded[jb].n
+                chunk_offset += output_threaded[jb].n
             end
             nb = output_threaded[i]
             if nb.n > 0
-                copyto!(output.list, offset + 1, nb.list, 1, nb.n)
+                copyto!(output.list, chunk_offset + 1, nb.list, 1, nb.n)
             end
         end
     else
@@ -673,11 +698,16 @@ function find_neighbors(sys::System{D, AT},
     end
 
     # Update the CellListMap.ParticleSystem
-    CellListMap.update!(nf.clm_particlesystem; 
-        positions=from_device(sys.coords),
-        unitcell=first(clm_unitcell_arg(sys.boundary)), 
-        parallel=(n_threads > 1),
-    )
+    positions = from_device(sys.coords)
+    unitcell = first(clm_unitcell_arg(sys.boundary))
+    parallel = (n_threads > 1)
+    if isnothing(unitcell) # Avoid small Union dispatch
+        CellListMap.update!(nf.clm_particlesystem; positions=positions, unitcell=nothing,
+                            parallel=parallel)
+    else
+        CellListMap.update!(nf.clm_particlesystem; positions=positions, unitcell=unitcell,
+                            parallel=parallel)
+    end
 
     # Update the neighbor list
     neighbors = CellListMap.pairwise!(

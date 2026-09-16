@@ -8,7 +8,9 @@ export
                  gpu_block_size=128, max_iters=25, strictness=:warn)
 
 Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
+
 Either or both of `dist_constraints` and `angle_constraints` must be given.
+[`SetupSHAKE_RATTLE`](@ref) provides SHAKE/RATTLE parameters when setting up a system from a file.
 
 Velocity constraints will be imposed for simulators that integrate velocities such as
 [`VelocityVerlet`](@ref).
@@ -102,6 +104,16 @@ function Base.show(io::IO, sr::SHAKE_RATTLE)
           " 4-atom clusters and ", length(sr.angle_clusters), " angle clusters")
 end
 
+"""
+    SetupSHAKE_RATTLE(; dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
+                      gpu_block_size=128, max_iters=25)
+
+Set up constraints using the SHAKE and RATTLE algorithms.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a set of
+[`SHAKE_RATTLE`](@ref) constraints.
+See [`SHAKE_RATTLE`](@ref) for argument descriptions.
+"""
 struct SetupSHAKE_RATTLE{D, V}
     dist_tolerance::D
     vel_tolerance::V
@@ -116,6 +128,20 @@ function SetupSHAKE_RATTLE(; dist_tolerance=1e-6u"nm",
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance ) > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
     return SetupSHAKE_RATTLE(dist_tolerance, vel_tolerance, gpu_block_size, max_iters)
+end
+
+function build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
+                                    units, strictness, masses, ca::SetupSHAKE_RATTLE)
+    return SHAKE_RATTLE(
+        n_atoms=length(atoms_data),
+        dist_tolerance=convert_setup_quantity(ca.dist_tolerance, units, T),
+        vel_tolerance=convert_setup_quantity(ca.vel_tolerance, units, T),
+        dist_constraints=[dist_constraints...],
+        angle_constraints=[angle_constraints...],
+        gpu_block_size=ca.gpu_block_size,
+        max_iters=ca.max_iters,
+        strictness=strictness,
+    )
 end
 
 cluster_keys(::SHAKE_RATTLE) = (:clusters12, :clusters23, :clusters34, :angle_clusters)
@@ -168,28 +194,28 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
         disable_constrained_interactions!(neighbor_finder, sr.angle_clusters)
     end
 
-    # Move to proper backend, if CPU do nothing
-    if arr_type <: AbstractGPUArray
-        clusters12_gpu, clusters23_gpu, clusters34_gpu = [], [], []
-        angle_clusters_gpu = []
+    return move_constraints_to_device(sr, arr_type)
+end
 
-        if length(sr.clusters12) > 0
-            clusters12_gpu = replace_storage(arr_type, sr.clusters12)
-        end
-        if length(sr.clusters23) > 0
-            clusters23_gpu = replace_storage(arr_type, sr.clusters23)
-        end
-        if length(sr.clusters34) > 0
-            clusters34_gpu = replace_storage(arr_type, sr.clusters34)
-        end
-        if length(sr.angle_clusters) > 0
-            angle_clusters_gpu = replace_storage(arr_type, sr.angle_clusters)
-        end
+# Move to proper backend, if CPU do nothing
+function move_constraints_to_device(sr::SHAKE_RATTLE, ::Type{AT}) where {AT <: AbstractGPUArray}
+    clusters12_gpu, clusters23_gpu, clusters34_gpu = [], [], []
+    angle_clusters_gpu = []
 
-        sr = SHAKE_RATTLE(sr, clusters12_gpu, clusters23_gpu, clusters34_gpu, angle_clusters_gpu)
+    if length(sr.clusters12) > 0
+        clusters12_gpu = replace_storage(AT, sr.clusters12)
+    end
+    if length(sr.clusters23) > 0
+        clusters23_gpu = replace_storage(AT, sr.clusters23)
+    end
+    if length(sr.clusters34) > 0
+        clusters34_gpu = replace_storage(AT, sr.clusters34)
+    end
+    if length(sr.angle_clusters) > 0
+        angle_clusters_gpu = replace_storage(AT, sr.angle_clusters)
     end
 
-    return sr
+    return SHAKE_RATTLE(sr, clusters12_gpu, clusters23_gpu, clusters34_gpu, angle_clusters_gpu)
 end
 
 default_shake_position_constraint_context() = ConstraintApplicationContext(
@@ -261,21 +287,31 @@ end
 
 function accumulate_shake_position_virial!(coords_ref, coords_before, coords_after, ms,
                                            boundary, ca::SHAKE_RATTLE, context)
-    context.needs_virial || return context
-    for clusters in (ca.clusters12, ca.clusters23, ca.clusters34, ca.angle_clusters)
-        accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms,
-                                         boundary, clusters, context)
-    end
+    # The snapshot is nothing exactly when the virial is not needed, checking it here
+    #   means the cluster loops below never see a Nothing to index into
+    (context.needs_virial && !isnothing(coords_before)) || return context
+    accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms, boundary,
+                                     ca.clusters12, context)
+    accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms, boundary,
+                                     ca.clusters23, context)
+    accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms, boundary,
+                                     ca.clusters34, context)
+    accumulate_shake_cluster_virial!(coords_ref, coords_before, coords_after, ms, boundary,
+                                     ca.angle_clusters, context)
     return context
 end
 
 function accumulate_rattle_velocity_virial!(coords, velocities_before, velocities_after, ms,
                                             boundary, ca::SHAKE_RATTLE, context)
-    context.needs_virial || return context
-    for clusters in (ca.clusters12, ca.clusters23, ca.clusters34, ca.angle_clusters)
-        accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms,
-                                         boundary, clusters, context)
-    end
+    (context.needs_virial && !isnothing(velocities_before)) || return context
+    accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms, boundary,
+                                     ca.clusters12, context)
+    accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms, boundary,
+                                     ca.clusters23, context)
+    accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms, boundary,
+                                     ca.clusters34, context)
+    accumulate_shake_cluster_virial!(coords, velocities_before, velocities_after, ms, boundary,
+                                     ca.angle_clusters, context)
     return context
 end
 
@@ -435,7 +471,7 @@ end
 
 function accumulate_shake_virial_gpu!(coords_ref, values_before, values_after, ms, boundary,
                                       ca::SHAKE_RATTLE, context, backend, block_size)
-    context.needs_virial || return context
+    (context.needs_virial && !isnothing(values_before)) || return context
     accumulate_shake_cluster12_virial_gpu!(coords_ref, values_before, values_after, ms,
                                            boundary, ca.clusters12, context, backend,
                                            block_size)

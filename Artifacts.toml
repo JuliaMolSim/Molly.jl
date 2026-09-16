@@ -1,0 +1,7 @@
+[ani2x]
+git-tree-sha1 = "0d49f491bd9ec50b1c39aad84bb2bab74a62471d"
+lazy = true
+
+    [[ani2x.download]]
+    sha256 = "9027c79156ea0de5b5435990c6aa903b4de991350416fdb847ede91964761ae2"
+    url = "https://github.com/sivasathyaseeelan/Molly.jl/releases/download/ani2x-data-v1/ani2x_data.tar.gz"

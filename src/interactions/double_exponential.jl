@@ -76,27 +76,10 @@ function Base.:+(i1::DoubleExponential, i2::DoubleExponential)
     )
 end
 
-function inject_interaction(inter::DoubleExponential, params_dic)
-    key_prefix = "inter_DEXP_"
-    return DoubleExponential(
-        inter.cutoff,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "alpha", inter.α),
-        dict_get(params_dic, key_prefix * "beta", inter.β),
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-    )
-end
+parameter_prefix(::DoubleExponential) = "inter_DEXP_"
+parameter_fields(::Type{<:DoubleExponential}) =
+    ((:α, "alpha"), (:β, "beta"), (:weight_special, "weight_14"))
 
-function extract_parameters!(params_dic, inter::DoubleExponential, ff)
-    key_prefix = "inter_DEXP_"
-    params_dic[key_prefix * "alpha"] = inter.α
-    params_dic[key_prefix * "beta"] = inter.β
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
-end
 
 const two_power_sixth = 2 ^ (1 / 6)
 
@@ -259,29 +242,10 @@ function Base.:+(i1::DoubleExponentialSoftCore, i2::DoubleExponentialSoftCore)
     )
 end
 
-function inject_interaction(inter::DoubleExponentialSoftCore, params_dic)
-    key_prefix = "inter_DEXPSC_"
-    return DoubleExponentialSoftCore(
-        inter.cutoff,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "alpha", inter.α),
-        dict_get(params_dic, key_prefix * "beta", inter.β),
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-    )
-end
+parameter_prefix(::DoubleExponentialSoftCore) = "inter_DEXP_"
+parameter_fields(::Type{<:DoubleExponentialSoftCore}) =
+    ((:α, "alpha"), (:β, "beta"), (:weight_special, "weight_14"))
 
-function extract_parameters!(params_dic, inter::DoubleExponentialSoftCore, ff)
-    key_prefix = "inter_DEXPSC_"
-    params_dic[key_prefix * "alpha"] = inter.α
-    params_dic[key_prefix * "beta"] = inter.β
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
-end
 
 @inline function force(
     inter::DoubleExponentialSoftCore{C, T},

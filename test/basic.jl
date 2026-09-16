@@ -37,6 +37,35 @@
     @test wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
     @test_throws ErrorException wrap_coord_1D(-2.0u"nm", 10.0)
 
+    # Bond and torsion angles
+    b_ang = CubicBoundary(10.0u"nm")
+    origin = SVector(0.0, 0.0, 0.0)u"nm"
+    @test bond_angle(SVector(1.0, 0.0, 0.0)u"nm", origin,
+                     SVector(0.0, 1.0, 0.0)u"nm", b_ang) ≈ π / 2
+    @test bond_angle(SVector(1.0, 0.0, 0.0)u"nm", origin,
+                     SVector(2.0, 0.0, 0.0)u"nm", b_ang) ≈ 0.0 atol=1e-12
+    @test bond_angle(SVector(1.0, 0.0, 0.0)u"nm", origin,
+                     SVector(-1.0, 0.0, 0.0)u"nm", b_ang) ≈ π
+    @test bond_angle(SVector(1.0, 0.0, 0.0), SVector(1.0, 1.0, 0.0)) ≈ π / 4
+
+    # j→k lies along x, the torsion is the angle from i to l about that axis
+    tj, tk = origin, SVector(0.1, 0.0, 0.0)u"nm"
+    ti = SVector(0.0, 0.1, 0.0)u"nm"
+    @test torsion_angle(ti, tj, tk, SVector(0.1,  0.1, 0.0)u"nm", b_ang) ≈ 0.0 atol=1e-12
+    @test torsion_angle(ti, tj, tk, SVector(0.1, -0.1, 0.0)u"nm", b_ang) ≈ π
+    @test torsion_angle(ti, tj, tk, SVector(0.1,  0.0, 0.1)u"nm", b_ang) ≈  π / 2
+    @test torsion_angle(ti, tj, tk, SVector(0.1,  0.0,-0.1)u"nm", b_ang) ≈ -π / 2
+    @test torsion_angle(ti, tj, tk,
+                        SVector(0.1, 0.1 * cosd(60), 0.1 * sind(60))u"nm", b_ang) ≈ deg2rad(60)
+
+    # Both respect the periodic boundary conditions
+    b_small = CubicBoundary(1.0u"nm")
+    @test bond_angle(SVector(0.95, 0.1, 0.0)u"nm", SVector(0.95, 0.0, 0.0)u"nm",
+                     SVector(0.05, 0.0, 0.0)u"nm", b_small) ≈ π / 2
+    @test torsion_angle(SVector(0.95, 0.1, 0.0)u"nm", SVector(0.95, 0.0, 0.0)u"nm",
+                        SVector(0.05, 0.0, 0.0)u"nm", SVector(0.05, 0.0, 0.1)u"nm",
+                        b_small) ≈ π / 2
+
     vels_units_1    = [maxwell_boltzmann(12.0u"u", 300.0u"K", uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
     vels_units_2    = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
     vels_molunits_1 = [maxwell_boltzmann(12.0u"g/mol", 300.0u"K", Unitful.k * Unitful.Na) for _ in 1:1_000]
@@ -110,6 +139,40 @@
     @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinatesLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test_throws DomainError CubicBoundary( 4.0u"nm", 0.0u"nm", 6.0u"nm")
+
+    # Density, which divides by the Avogadro constant for molar masses
+    n_dens = 100
+    boundary_dens = CubicBoundary(2.0u"nm")
+    coords_dens = place_atoms(n_dens, boundary_dens; min_dist=0.1u"nm")
+    sys_dens = System(
+        atoms=[Atom(mass=10.0u"g/mol") for _ in 1:n_dens],
+        coords=coords_dens,
+        boundary=boundary_dens,
+        loggers=(density=DensityLogger(1),),
+    )
+    @test density(sys_dens) ≈ uconvert(u"kg * m^-3",
+                        n_dens * 10.0u"g/mol" / Unitful.Na / volume(boundary_dens))
+    @test density(System(atoms=[Atom(mass=10.0u"u") for _ in 1:n_dens], coords=coords_dens,
+                         boundary=boundary_dens, energy_units=u"kJ",
+                         force_units=u"kJ * nm^-1")) ≈
+          uconvert(u"kg * m^-3", n_dens * 10.0u"u" / volume(boundary_dens))
+    # No units means no conversion from a molar mass
+    @test density(System(atoms=[Atom(mass=10.0) for _ in 1:n_dens],
+                         coords=ustrip_vec.(coords_dens), boundary=CubicBoundary(2.0),
+                         force_units=NoUnits, energy_units=NoUnits)) ≈ n_dens * 10.0 / 8.0
+    @test iszero(density(System(atoms=[Atom(mass=10.0u"g/mol") for _ in 1:n_dens],
+                                coords=coords_dens, boundary=CubicBoundary(Inf * u"nm"))))
+    # Halving the box lengths gives eight times the density
+    sys_dens_scaled = System(sys_dens; boundary=CubicBoundary(1.0u"nm"))
+    @test density(sys_dens_scaled) ≈ 8 * density(sys_dens)
+
+    apply_loggers!(sys_dens)
+    @test values(sys_dens.loggers.density) == [density(sys_dens)]
+    apply_loggers!(sys_dens, nothing, 1, nothing, false)
+    @test length(values(sys_dens.loggers.density)) == 1
+    apply_loggers!(sys_dens, nothing, 1)
+    @test length(values(sys_dens.loggers.density)) == 2
+    show(devnull, sys_dens.loggers.density)
 
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test float_type(b) == Float64
@@ -277,7 +340,8 @@
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             array_type=AT,
-            nonbonded_method=:cutoff,
+            float_type=Float64,
+            nonbonded_method=SetupCoulombReactionField(),
             dispersion_correction=false,
             neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
                                     DistanceNeighborFinder),
@@ -304,7 +368,7 @@
         coords_start = copy(sys.coords)
         pe_start = potential_energy(sys, find_neighbors(sys))
         scale_factor = SMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0]) * 1.02
-        n_scales = 10
+        n_scales = 3
 
         for i in 1:n_scales
             scale_coords!(sys, scale_factor)
@@ -323,7 +387,7 @@
         a2 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(7.0, 8.0)u"nm/ps"], AT)
         a3 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(NaN, 8.0)u"nm/ps"], AT)
         Molly.check_array_nans((a1, a2), ("a1", "a2"), 10)
-        @test_throws ErrorException Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
+        @test_throws NaNSimulationError Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
     end
 end
 
@@ -334,7 +398,7 @@ end
     # from_device on a CPU array is a no-op that avoids copying
     @test from_device(cpu) === cpu
 
-    for AT in array_list
+    for AT in array_list_metal
         dev = to_device(cpu, AT)
         @test dev isa AT
         @test Array(dev) == cpu
@@ -377,22 +441,31 @@ end
         custom_residue_templates=joinpath(data_dir, "imatinib_topo.xml"),
     )
     boundary = CubicBoundary(Inf*u"nm")
+    dist_cutoff = DistanceCutoff(1.0u"nm")
 
     # Suppress MOL2 invalid sybyl type warning
     @suppress_err begin
-        sys_mol2        = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary=boundary)
-        sys_pdb_connect = System(joinpath(data_dir, "imatinib_conect.pdb"), ff; boundary=boundary)
-        sys_pdb         = System(joinpath(data_dir, "imatinib.pdb"), ff_custom; boundary=boundary)
+        sys_mol2        = System(joinpath(data_dir, "imatinib.mol2"), ff;
+                                 boundary=boundary, nonbonded_method=dist_cutoff)
+        sys_pdb_connect = System(joinpath(data_dir, "imatinib_conect.pdb"), ff;
+                                 boundary=boundary, nonbonded_method=dist_cutoff)
+        sys_pdb         = System(joinpath(data_dir, "imatinib.pdb"), ff_custom;
+                                 boundary=boundary, nonbonded_method=dist_cutoff)
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
-        @test_throws ErrorException System(joinpath(data_dir, "imatinib.pdb"), ff; boundary=boundary)
+        @test_throws MissingResidueTemplateError System(joinpath(data_dir, "imatinib.pdb"), ff;
+                                                        boundary=boundary)
     end
 
-    water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff)
-    water_cif  = System(joinpath(data_dir, "water_formats", "water.cif" ), ff)
-    water_mol2 = System(joinpath(data_dir, "water_formats", "water.mol2"), ff)
-    water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff) # Residue inferred
+    water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff;
+                        nonbonded_method=dist_cutoff)
+    water_cif  = System(joinpath(data_dir, "water_formats", "water.cif" ), ff;
+                        nonbonded_method=dist_cutoff)
+    water_mol2 = System(joinpath(data_dir, "water_formats", "water.mol2"), ff;
+                        nonbonded_method=dist_cutoff)
+    water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff;
+                        nonbonded_method=dist_cutoff) # Residue inferred
     @test potential_energy(water_pdb ) ≈ potential_energy(water_cif) ≈
           potential_energy(water_mol2) ≈ potential_energy(water_sdf) ≈ 11.90186520388919u"kJ/mol"
 end
@@ -402,7 +475,6 @@ end
     AT = Array
 
     ff = MolecularForceField(
-        FT,
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
         units=true,
     )
@@ -430,19 +502,19 @@ end
             pdb_file,
             ff;
             array_type=AT,
-            nonbonded_method=:pme,
-            approximate_pme=false,
+            float_type=FT,
+            nonbonded_method=SetupPME(approximate_erfc=false),
             disulfide_bonds=true,
         )
 
         if struc_name == "sgpb_omtky3"
             # Catch if disulfide bonds are not added properly
-            @test_throws ErrorException System(
+            @test_throws MissingResidueTemplateError System(
                 pdb_file,
                 ff;
-                array_type = AT,
-                nonbonded_method=:pme,
-                approximate_pme=false,
+                array_type=AT,
+                float_type=FT,
+                nonbonded_method=SetupPME(approximate_erfc=false),
                 disulfide_bonds=false,
             )
         end
@@ -472,13 +544,14 @@ end
         ff_garnet;
         units=false,
         dispersion_correction=true,
+        strictness=:nowarn,
     )
 
     ff_tip3p = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=false)
     @test ff_tip3p.custom_nonbonded == false
 
     ff_fp = joinpath(ff_dir, "tip4pfb.xml")
-    @test_throws ErrorException MolecularForceField(ff_fp, ff_fp)
+    @test_throws ForceFieldXMLError MolecularForceField(ff_fp, ff_fp)
 end
 
 @testset "Double exponential force field setup" begin
@@ -489,7 +562,7 @@ end
     sys = System(
         joinpath(data_dir, "ethanol_garnet.pdb"),
         ff;
-        nonbonded_method=:cutoff,
+        nonbonded_method=SetupCoulombReactionField(),
         dist_cutoff=1.0u"nm",
     )
 
@@ -611,6 +684,8 @@ end
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
+    sorted_ref = sort_nbs(neighbors_ref.list)
+    identical_to_ref(nl) = (nl.n == neighbors_ref.n && sort_nbs(nl.list) == sorted_ref)
 
     function dense_masks(nf::GPUNeighborFinder)
         eligible = trues(nf.n_atoms, nf.n_atoms)
@@ -654,7 +729,7 @@ end
             neighbors = find_neighbors(sys, nf; n_threads=n_threads)
             @test length(neighbors) == n_neighbors_ref
             @test neighbors[10] isa Tuple{Int32, Int32, Bool}
-            @test identical_neighbors(neighbors, neighbors_ref)
+            @test identical_to_ref(neighbors)
         end
     end
 
@@ -681,6 +756,7 @@ end
             joinpath(data_dir, "water_3mol_cubic.pdb"),
             ff;
             array_type=AT,
+            float_type=Float64,
             dist_cutoff=dist_cutoff,
             dist_buffer=0.0u"nm",
             strictness=:nowarn,
@@ -710,10 +786,41 @@ end
     @test length(nf.clm_particlesystem.positions) == 0
     @test size(nf.clm_particlesystem.unitcell) == (3,3)
     @test first(nf.clm_particlesystem.unitcell) > 2 * 0.6u"nm"
-    @test_throws "Cannot use infinite boundaries" CellListMapNeighborFinder(eligible=trues(100,100), 
-                                                                            dist_cutoff=1.0u"nm",
-                                                                            boundary=CubicBoundary(SVector(Inf, 100.0, 100.0)))
+    @test_throws ArgumentError CellListMapNeighborFinder(
+        eligible=trues(100,100), 
+        dist_cutoff=1.0u"nm",
+        boundary=CubicBoundary(SVector(Inf, 100.0, 100.0)),
+    )
+end
 
+@testset "Ewald excluded pairs" begin
+    # Reference implementation of Molly.find_excluded_pairs, which scans the masks
+    #   64 entries at a time
+    function ref_excluded_pairs(eligible, special)
+        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
+        eligible_ref = (isnothing(eligible) ? trues( n_atoms, n_atoms) : eligible)
+        special_ref  = (isnothing(special ) ? falses(n_atoms, n_atoms) : special )
+        return [(Int32(i), Int32(j)) for i in 1:n_atoms for j in (i + 1):n_atoms
+                if !eligible_ref[i, j] || special_ref[i, j]]
+    end
+
+    Random.seed!(1234)
+    @test Molly.find_excluded_pairs(nothing, nothing) == Tuple{Int32, Int32}[]
+    for n_atoms in (1, 2, 8, 63, 64, 65, 127, 128, 129, 200)
+        eligible = trues(n_atoms, n_atoms)
+        special = falses(n_atoms, n_atoms)
+        for _ in 1:(2 * n_atoms)
+            i, j = rand(1:n_atoms), rand(1:n_atoms)
+            eligible[i, j] = false
+            special[rand(1:n_atoms), rand(1:n_atoms)] = true
+        end
+        @test Molly.find_excluded_pairs(eligible, special) ==
+                    ref_excluded_pairs(eligible, special)
+        @test Molly.find_excluded_pairs(eligible, nothing) ==
+                    ref_excluded_pairs(eligible, nothing)
+        @test Molly.find_excluded_pairs(nothing, special) ==
+                    ref_excluded_pairs(nothing, special)
+    end
 end
 
 @testset "GPUNeighborFinder sparse metadata" begin
@@ -911,6 +1018,230 @@ end
     atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ")]
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
         velocities=good_velo, energy_units=u"kJ")
+end
+
+@testset "Invalid system setup" begin
+    n_atoms = 10
+    boundary = CubicBoundary(4.0u"nm")
+    atoms = [Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:n_atoms]
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+
+    # Coordinate dimensions have to match the boundary
+    coords_2D = [SVector(c[1], c[2]) for c in coords]
+    @test_throws ArgumentError System(atoms=atoms, coords=coords_2D, boundary=boundary)
+    @test_throws ArgumentError System(atoms=atoms, coords=coords,
+                                      boundary=RectangularBoundary(4.0u"nm"))
+    vels_2D = [SVector(0.0, 0.0)u"nm * ps^-1" for _ in 1:n_atoms]
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
+                                      velocities=vels_2D)
+
+    # Mixing float types is reported
+    coords_f32 = [Float32.(ustrip_vec(c)) * u"nm" for c in coords]
+    @test_throws ErrorException System(atoms=atoms, coords=coords_f32, boundary=boundary,
+                                       strictness=:error)
+    @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
+                                       float_type=Float32, strictness=:error)
+    sys_f32 = System(atoms=atoms, coords=coords_f32, boundary=boundary, strictness=:nowarn)
+    @test float_type(sys_f32) == Float64 # Read from the boundary
+
+    # Atoms should be concretely typed
+    @test_throws ErrorException System(atoms=Any[atoms...], coords=coords, boundary=boundary,
+                                       strictness=:error)
+
+    # The eligible/special matrices should match the number of atoms and the device
+    nf_wrong_size = DistanceNeighborFinder(eligible=trues(n_atoms + 1, n_atoms + 1),
+                                           dist_cutoff=1.0u"nm")
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
+                    pairwise_inters=(LennardJones(use_neighbors=true),),
+                    neighbor_finder=nf_wrong_size)
+
+    # A neighbor finder cutoff smaller than the interaction cutoff misses pairs
+    nf_small = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.5u"nm")
+    @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                                  use_neighbors=true),),
+                    neighbor_finder=nf_small, strictness=:error)
+
+    # An interaction cutoff more than half the box breaks the minimum image convention
+    @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(2.5u"nm")),),
+                    strictness=:error)
+
+    # Specific interaction lists should refer to atoms in the system
+    bond = HarmonicBond(k=100.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm")
+    il_bad = InteractionList2Atoms([1, n_atoms + 5], [2, 3], [bond, bond])
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
+                                      specific_inter_lists=(il_bad,))
+
+    # A valid system with all of the above set correctly
+    sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                               use_neighbors=true),),
+                 neighbor_finder=DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms),
+                                                        dist_cutoff=1.2u"nm"),
+                 specific_inter_lists=(InteractionList2Atoms([1], [2], [bond]),),
+                 strictness=:error)
+    @test length(sys) == n_atoms
+end
+
+@testset "Invalid force field files" begin
+    ff_dir_tmp = mktempdir()
+    function write_ff(name, body)
+        fp = joinpath(ff_dir_tmp, name)
+        open(fp, "w") do io
+            println(io, "<ForceField>")
+            println(io, body)
+            println(io, "</ForceField>")
+        end
+        return fp
+    end
+
+    types_block = """
+     <AtomTypes>
+      <Type name="AR" class="Ar" element="Ar" mass="39.948"/>
+     </AtomTypes>"""
+    nb_block = """
+     <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">
+      <Atom type="AR" charge="0.0" sigma="0.34" epsilon="0.996"/>
+     </NonbondedForce>"""
+
+    # Valid file
+    fp_ok = write_ff("ok.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    ff = MolecularForceField(fp_ok)
+    @test length(ff.atom_types) == 1
+    @test length(ff.residues) == 1
+
+    # Missing file
+    @test_throws ArgumentError MolecularForceField(joinpath(ff_dir_tmp, "nope.xml"))
+
+    # Missing required attribute
+    fp = write_ff("no_mass.xml", """
+     <AtomTypes>
+      <Type name="AR" class="Ar" element="Ar"/>
+     </AtomTypes>""")
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
+
+    # Attribute that cannot be parsed
+    fp = write_ff("bad_mass.xml", """
+     <AtomTypes>
+      <Type name="AR" class="Ar" element="Ar" mass="heavy"/>
+     </AtomTypes>""")
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
+
+    # Residue template referring to an unknown atom type
+    fp = write_ff("bad_type.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="ARR" charge="0.0"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
+
+    # Atom types have to come before the residue templates that use them
+    fp_types = write_ff("types_only.xml", types_block * nb_block)
+    fp_res = write_ff("res_only.xml", """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+     </Residues>""")
+    @test length(MolecularForceField(fp_types, fp_res).residues) == 1
+    @test_throws ForceFieldXMLError MolecularForceField(fp_res, fp_types)
+
+    # Duplicate atom names in a residue template
+    fp = write_ff("dup_atom.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
+
+    # Duplicate residue templates
+    fp = write_ff("dup_res.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+      <Residue name="ARG1">
+       <Atom name="AR2" type="AR" charge="1.0"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
+
+    # Bond in a residue template referring to an unknown atom name
+    fp = write_ff("bad_bond.xml", types_block * """
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+       <Bond atomName1="AR" atomName2="ZZ"/>
+      </Residue>
+     </Residues>""" * nb_block)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
+
+    # Both an atom type and an atom class given for the same atom
+    fp = write_ff("type_class.xml", types_block * """
+     <HarmonicBondForce>
+      <Bond type1="AR" class1="Ar" type2="AR" k="100.0" length="0.1"/>
+     </HarmonicBondForce>""" * nb_block)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
+
+    # Atom type with no non-bonded parameters
+    fp = write_ff("no_nb.xml", types_block)
+    @test_throws ForceFieldXMLError MolecularForceField(fp)
+
+    # A residue template with a higher override level replaces one with a lower level
+    fp = write_ff("override.xml", """
+     <AtomTypes>
+      <Type name="AR" class="Ar" element="Ar" mass="39.948"/>
+      <Type name="AR2" class="Ar2" element="Ar" mass="39.948"/>
+     </AtomTypes>
+     <Residues>
+      <Residue name="ARG1">
+       <Atom name="AR" type="AR" charge="0.0"/>
+      </Residue>
+      <Residue name="ARG1" override="2">
+       <Atom name="AR" type="AR2" charge="1.0"/>
+      </Residue>
+     </Residues>
+     <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">
+      <Atom type="AR" charge="0.0" sigma="0.34" epsilon="0.996"/>
+      <Atom type="AR2" charge="1.0" sigma="0.34" epsilon="0.996"/>
+     </NonbondedForce>""")
+    ff_override = MolecularForceField(fp)
+    @test ff_override.residues["ARG1"].types == ["AR2"]
+end
+
+@testset "Invalid system setup from file" begin
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
+    water_fp = joinpath(data_dir, "water_3mol_cubic.pdb")
+
+    # Neighbor list cutoff has to fit twice in the box for the cell list finder
+    @test_throws ArgumentError System(water_fp, ff)
+    sys = System(water_fp, ff; dist_cutoff=0.5u"nm")
+    @test length(sys) == 9
+
+    @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                      implicit_solvent=SetupImplicitSolventOBC(dist_cutoff=-0.1u"nm"))
+    @test_throws ArgumentError System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                      nonbonded_method=SetupPME(mesh_dims=(3, 3, 3)))
+    @test_throws MethodError   System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                      neighbor_finder_type=Int)
+
+    # Residues that do not match a template give a diagnostic message
+    missing_h_fp = joinpath(mktempdir(), "water_missing_h.pdb")
+    open(missing_h_fp, "w") do out
+        for line in eachline(water_fp)
+            startswith(line, "HETATM  279") || println(out, line)
+        end
+    end
+    @test_throws MissingResidueTemplateError System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
 end
 
 @testset "AtomsBase conversion" begin

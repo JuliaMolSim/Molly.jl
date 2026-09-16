@@ -20,14 +20,21 @@ V(\theta, r) = \frac{1}{2} k_a (\theta - \theta_0)^2 + \frac{1}{2} k_b (r - r_0)
     r0::D
 end
 
-function Base.zero(::UreyBradley{KA, A, KB, D}) where {KA, A, KB, D}
+function Base.zero(::Type{UreyBradley{KA, A, KB, D}}) where {KA, A, KB, D}
     return UreyBradley(kangle=zero(KA), θ0=zero(A), kbond=zero(KB), r0=zero(D))
 end
+
+Base.zero(a::UreyBradley) = zero(typeof(a))
 
 function Base.:+(a1::UreyBradley, a2::UreyBradley)
     return UreyBradley(kangle=(a1.kangle + a2.kangle), θ0=(a1.θ0 + a2.θ0),
                        kbond=(a1.kbond + a2.kbond), r0=(a1.r0 + a2.r0))
 end
+
+parameter_prefix(::UreyBradley, inter_type) = "inter_UB_$(inter_type)_"
+parameter_fields(::Type{<:UreyBradley}) =
+    ((:kangle, "kangle"), (:θ0, "θ0"), (:kbond, "kbond"), (:r0, "r0"))
+
 
 @inline function force(a::UreyBradley, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product

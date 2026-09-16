@@ -37,17 +37,18 @@ barostat = CRescaleBarostat(PRES, TAU_P; n_steps = N_PRES)
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir   = joinpath(data_dir, "force_fields")
 ff = MolecularForceField(
-    FT,
     joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
-    units=true)
+    units=true,
+)
 
 sys = System(
     joinpath(data_dir, "..", "exercises", "dipeptide_equil.pdb"),
     ff;
     array_type=AT,
-    nonbonded_method=:pme,
+    float_type=FT,
+    nonbonded_method=SetupPME(),
     constraints=:hbonds,
-    rigid_water = true,
+    rigid_water=true,
     hydrogen_mass=3,
 )
 

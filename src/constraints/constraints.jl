@@ -59,9 +59,7 @@ struct PositionConstraintApplication <: AbstractConstraintApplication end
 
 struct VelocityConstraintApplication <: AbstractConstraintApplication end
 
-Base.@kwdef struct ConstraintApplicationContext{
-    K <: AbstractConstraintApplication, B, A, DT, S, CB, VB,
-}
+@kwdef struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, A, DT, S, CB, VB}
     kind::K
     needs_virial::Bool = false
     step_n::Int = 0
@@ -77,11 +75,14 @@ function copyto_constraint_scratch!(scratch, values)
     if isnothing(scratch)
         return copy(values)
     elseif scratch isa Base.RefValue
-        if isnothing(scratch[])
+        # The scratch buffer is stored untyped, so it is asserted to the type of the
+        #   values here, otherwise the copy below is a runtime dispatch every step
+        if !(scratch[] isa typeof(values))
             scratch[] = similar(values)
         end
-        scratch[] .= values
-        return scratch[]
+        buffer = scratch[]::typeof(values)
+        buffer .= values
+        return buffer
     else
         scratch .= values
         return scratch
@@ -144,8 +145,8 @@ function order_atoms(is, js)
     elseif length(central_atoms) == 0 # Will trigger if just 1 bond in constraint (e.g. C-C)
         return unique_atoms
     else
-        error("cannot find central atom, constraint chains of 4 atoms (e.g. C-C-C-C) " *
-              "are not permitted")
+        throw(ArgumentError("cannot find central atom, constraint chains of 4 atoms " *
+                            "(e.g. C-C-C-C) are not permitted"))
     end
 end
 
@@ -246,6 +247,9 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
     end
 end
 
+# Extended for GPU elsewhere
+move_constraints_to_device(constraint_algo, ::Type) = constraint_algo
+
 # Check for interactions between angle and non-angle clusters,
 # builds only non-angle clusters
 function build_central_atom_clusters(num_atoms::Integer,
@@ -304,9 +308,9 @@ function build_central_atom_clusters(num_atoms::Integer,
                 # Skip angle constraints, we will build them later if needed
                 continue
             else
-                error("constraint clusters with more than 3 constraints or too few unique " *
-                      "atoms are not unsupported, found $N_constraint constraints and " *
-                      "$N_unique unique atoms")
+                throw(ArgumentError("constraint clusters with more than 3 constraints or too few " *
+                                    "unique atoms are not unsupported, found $N_constraint " *
+                                    "constraints and $N_unique unique atoms"))
             end
         end
     end

@@ -64,6 +64,8 @@ function Base.:+(l1::LennardJones, l2::LennardJones)
     )
 end
 
+parameter_prefix(::LennardJones) = "inter_LJ_"
+parameter_fields(::Type{<:LennardJones}) = ((:weight_special, "weight_14"),)
 function to_lambda_function(inter::LennardJones, ::DefaultSoftCore; args...)
     return LennardJones(cutoff=inter.cutoff, 
                             use_neighbors=inter.use_neighbors, 
@@ -86,11 +88,6 @@ function inject_interaction(inter::LennardJones, params_dic)
     )
 end
 
-function extract_parameters!(params_dic, inter::LennardJones, ff)
-    key_prefix = "inter_LJ_"
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
-end
 
 @inline function force(inter::LennardJones,
                        dr,
@@ -184,7 +181,8 @@ struct LJDispersionCorrection{F6, F12, D, S, E}
     ϵ_mix::E
 end
 
-function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
+function LJDispersionCorrection(atoms::AbstractArray,
+                                dist_cutoff,
                                 σ_mix=LorentzMixing(),
                                 ϵ_mix=GeometricMixing())
     T = typeof(ustrip(dist_cutoff))
@@ -247,6 +245,9 @@ function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
     )
 end
 
+Base.zero(::Type{LJDispersionCorrection{F6, F12}}) where {F6, F12} =
+    LJDispersionCorrection(zero(F6), zero(F12))
+Base.zero(dc::LJDispersionCorrection) = zero(typeof(dc))
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)
     return (inter.factor_6 + inter.factor_12) / volume(sys)
@@ -567,6 +568,11 @@ function Base.:+(l1::LennardJonesSoftCoreBeutler, l2::LennardJonesSoftCoreBeutle
     )
 end
 
+parameter_prefix(::LennardJonesSoftCoreBeutler) = "inter_LJ_"
+parameter_fields(::Type{<:LennardJonesSoftCoreBeutler}) =
+    ((:α, "α"), (:weight_special, "weight_14"))
+
+
 function to_lambda_function(inter::LennardJones, ::BeutlerSoftCore; α=0.5, λ_mixing=MinimumMixing(), 
                             scheduler=DefaultLambdaScheduler(), float_type=Float32, args...)
     return LennardJonesSoftCoreBeutler(cutoff=inter.cutoff, α=float_type(α), 
@@ -799,6 +805,11 @@ function Base.:+(l1::LennardJonesSoftCoreGapsys, l2::LennardJonesSoftCoreGapsys)
         l1.weight_special + l2.weight_special,
     )
 end
+
+parameter_prefix(::LennardJonesSoftCoreGapsys) = "inter_LJ_"
+parameter_fields(::Type{<:LennardJonesSoftCoreGapsys}) =
+    ((:α, "α"), (:weight_special, "weight_14"))
+
 
 function to_lambda_function(inter::LennardJones, ::GapsysSoftCore; α=0.85, λ_mixing=MinimumMixing(), 
                             scheduler=DefaultLambdaScheduler(), float_type=Float32, args...)
@@ -1033,6 +1044,10 @@ function Base.:+(l1::AshbaughHatch, l2::AshbaughHatch)
     )
 end
 
+parameter_prefix(::AshbaughHatch) = "inter_AH_"
+parameter_fields(::Type{<:AshbaughHatch}) = ((:weight_special, "weight_14"),)
+
+
 @inline function force(inter::AshbaughHatch,
                        dr,
                        atom_i,
@@ -1120,9 +1135,11 @@ struct LennardJones14{S, E, W}
     weight_14::W
 end
 
-function Base.zero(::LennardJones14{S, E, W}) where {S, E, W}
+function Base.zero(::Type{LennardJones14{S, E, W}}) where {S, E, W}
     return LennardJones14(zero(S), zero(E), zero(W))
 end
+
+Base.zero(l::LennardJones14) = zero(typeof(l))
 
 function Base.:+(l1::LennardJones14, l2::LennardJones14)
     return LennardJones14(
@@ -1131,6 +1148,11 @@ function Base.:+(l1::LennardJones14, l2::LennardJones14)
         l1.weight_14 + l2.weight_14,
     )
 end
+
+parameter_prefix(::LennardJones14, inter_type) = "inter_LJ14_$(inter_type)_"
+parameter_fields(::Type{<:LennardJones14}) =
+    ((:σ14_mixed, "σ14"), (:ϵ14_mixed, "ϵ14"), (:weight_14, "weight_14"))
+
 
 @inline function force(inter::LennardJones14, coords_i, coords_l, boundary, args...)
     σ2 = inter.σ14_mixed ^ 2
