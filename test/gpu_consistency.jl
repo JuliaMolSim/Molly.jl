@@ -672,7 +672,5 @@
             @test vels_cpu != init_vels
             @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT)
         end
-    else
-        @warn "CUDA not functional, skipping GPU consistency tests"
     end
 end

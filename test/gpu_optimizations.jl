@@ -1,4 +1,3 @@
-
 @testset "GPU Optimizations" begin
     if CUDA.functional()
         n_atoms = 100
@@ -249,8 +248,5 @@
                 @test fs_mat[3, orig_idx] ≈ 1.0
             end
         end
-
-    else
-        @warn "CUDA not functional, skipping GPU optimization tests"
     end
 end
