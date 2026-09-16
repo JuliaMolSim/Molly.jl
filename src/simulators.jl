@@ -983,6 +983,10 @@ end
 
 The Störmer-Verlet integrator.
 
+Uses a velocity-based update for the first step since the previous step coordinates
+are not available.
+This means that two calls to [`simulate!`](@ref) will only be approximately the same
+as one longer call.
 Coupling methods are not supported.
 
 # Arguments
@@ -1534,6 +1538,8 @@ temperature of the system.
 See [Evans and Holian 1985](https://doi.org/10.1063/1.449071).
 The current implementation is limited to ergodic systems.
 
+ζ, the thermostat friction variable, is reset on each call to [`simulate!`](@ref).
+This means that two calls to [`simulate!`](@ref) will not be the same as one longer call.
 Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
