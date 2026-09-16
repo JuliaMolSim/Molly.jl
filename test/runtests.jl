@@ -88,7 +88,8 @@ const init_code_block = quote
     const n_threads_list = (1, $n_threads_per_job)
 
     const run_gpu_tests = $run_gpu_tests
-    const run_cuda_tests = run_gpu_tests && CUDA.functional()
+    const run_cuda_tests  = run_gpu_tests && CUDA.functional()
+    const run_metal_tests = run_gpu_tests && Metal.functional()
     const DEVICE = $DEVICE
     array_list = (Array,)
 
@@ -105,7 +106,7 @@ const init_code_block = quote
         array_list = (array_list..., oneArray)
         oneAPI.device!(DEVICE)
     end
-    if run_gpu_tests && Metal.functional()
+    if run_metal_tests
         # Metal only supports 32-bit precision, so MtlArray can not be added to array_list
         array_list_metal = (array_list..., MtlArray)
     else

@@ -671,10 +671,8 @@ end
         )
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
         @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-        if run_parallel_tests
-            neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
-            @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-        end
+        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
+        @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
         show(devnull, nf)
     end
 
@@ -697,10 +695,8 @@ end
     )
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=1)
     @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-    if run_parallel_tests
-        neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=Threads.nthreads())
-        @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-    end
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=Threads.nthreads())
+    @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
 
     # Test CellListMapNeighborFinder with TriclinicBoundary
     boundary = TriclinicBoundary(
