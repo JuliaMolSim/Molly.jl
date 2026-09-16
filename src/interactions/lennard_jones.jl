@@ -247,6 +247,7 @@ end
 
 Base.zero(::Type{LJDispersionCorrection{F6, F12, D, S, E}}) where {F6, F12, D, S, E} =
     LJDispersionCorrection(zero(F6), zero(F12), zero(D), S(), E())
+Base.zero(dc::LJDispersionCorrection) = zero(typeof(dc))
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)

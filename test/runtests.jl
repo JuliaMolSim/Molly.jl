@@ -131,6 +131,7 @@ if GROUP in ("All", "NotGradients")
     include("coupling.jl")
     include("constraints.jl")
     include("tss.jl")
+    include("free_energy.jl")
     include("analysis.jl")
     include("jet.jl")
     if run_cuda_tests

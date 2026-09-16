@@ -558,7 +558,6 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
         partial_charge_buffer = zeros(T, n_atoms)
     end
 
-    fixed_charges = false
     if fixed_charges && !grad_safe
         atoms_cpu = from_device(atoms)
         partial_charges = effective_charge.(atoms_cpu, Ref(scheduler), Val(T))
@@ -1392,7 +1391,7 @@ agree with the mesh by construction. Note that no role mixing appears here: the 
 effective charges already carry everything the mesh knows, so routing this through
 `mix_roles` could only introduce disagreement.
 """
-@inline function ewald_pair_qq(scheduler, atom_i, atom_j, ::Val{T}; kwargs) where T
+@inline function ewald_pair_qq(scheduler, atom_i, atom_j, ::Val{T}; kwargs...) where T
     return effective_charge(atom_i, scheduler, Val(T)) *
            effective_charge(atom_j, scheduler, Val(T))
 end
@@ -1416,7 +1415,7 @@ end
 end
 
 @inline function ewald_pair_qq(scheduler::Union{GROMACSLambdaABFEScheduler,GROMACSLambdaRBFEScheduler}, atom_i, atom_j,
-                               ::Val{T}; kwargs) where T
+                               ::Val{T}; kwargs...) where T
     # GROMACS: two grids mixed with weights (1 - λ, λ), with λ the electrostatic coupling —
     # the same weight `pme_lambda_mesh_weight` gives the mesh, so the two agree by
     # construction. `InsertRole` stands in for any role because the scheduler is required to
