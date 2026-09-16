@@ -1,5 +1,5 @@
 @testset "GPU Optimizations" begin
-    if CUDA.functional()
+    if run_cuda_tests
         n_atoms = 100
         D = 3
         T = Float64

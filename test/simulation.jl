@@ -1,3 +1,10 @@
+const temp_fp_dcd  = tempname(cleanup=true) * ".dcd"
+const temp_fp_trr  = tempname(cleanup=true) * ".trr"
+const temp_fp_pdb  = tempname(cleanup=true) * ".pdb"
+const temp_fp_xyz  = tempname(cleanup=true) * ".xyz"
+const temp_fp_mol2 = tempname(cleanup=true) * ".mol2"
+const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
+
 simulation_step_wrapper(sys, neighbors, step_n, buffers; kwargs...) = step_n
 
 mutable struct StepTrackingCoupler

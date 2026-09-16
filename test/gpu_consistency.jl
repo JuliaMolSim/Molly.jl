@@ -1,5 +1,5 @@
 @testset "GPU Consistency" begin
-    if CUDA.functional()
+    if run_cuda_tests
         @testset "33-atom (No Cancellation)" begin
             n_atoms = 33
             D = 3
