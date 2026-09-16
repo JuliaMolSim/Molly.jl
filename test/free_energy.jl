@@ -126,7 +126,6 @@
 
     # --- Energy and Forces for λ=0 ---
     for inter in inters
-        println("Inters: $inter, lambda=0.0")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
@@ -246,7 +245,6 @@
     buffers = Molly.init_buffers!(test_sys, 1)
 
     for inter in inters
-        println("Inters: $inter, lambda=1.0")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
@@ -366,7 +364,6 @@
     buffers = Molly.init_buffers!(test_sys, 1)
 
     for inter in inters
-        println("Inters: $inter, lambda=0.25")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
@@ -486,7 +483,6 @@
     buffers = Molly.init_buffers!(test_sys, 1)
 
     for inter in inters
-        println("Inters: $inter, lambda=0.5")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
@@ -606,7 +602,6 @@
     buffers = Molly.init_buffers!(test_sys, 1)
 
     for inter in inters
-        println("Inters: $inter, lambda=0.75")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
