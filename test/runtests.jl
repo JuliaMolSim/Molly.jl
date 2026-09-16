@@ -8,6 +8,7 @@ using AtomsBaseTesting
 import AtomsCalculators
 using BenchmarkTools
 import BioStructures
+using BSON
 import Chemfiles
 using CUDA
 using Enzyme

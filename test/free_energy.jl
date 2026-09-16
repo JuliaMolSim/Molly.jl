@@ -3,6 +3,12 @@
     FT = Float64
     AT = Array
 
+    # --- OpenFE reference results (bonded terms do not depend on λ, so they are stored once) ---
+    energy_ref = BSON.load(joinpath(tyk2_dir, "openfe", "energy_openfe.bson"))
+    forces_ref = BSON.load(joinpath(tyk2_dir, "openfe", "forces_openfe.bson"))
+    bonded = ("bond_only", "angle_only", "torsion_only")
+    openfe_ref(ref, inter, λtag) = ref[Symbol(inter in bonded ? inter : "$(inter)_$(λtag)")]
+
     # --- Force Field Setup ---
     ff_A = MolecularForceField(joinpath.(ff_dir, ["tip3p_standard.xml", "amber14/protein.ff14SB.xml"])...,
                                             joinpath(data_dir, "ejm31.xml"),
@@ -165,15 +171,13 @@
         )
 
         forces_molly = forces(sys_part, neighbors; n_threads=1)
-        openmm_forces_fp = joinpath(tyk2_dir, "openfe", "forces_openfe_$(inter)_l0.txt")
-        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        forces_openmm = SVector{3}.(eachrow(openfe_ref(forces_ref, inter, "l0")))u"kJ * mol^-1 * nm^-1"
         # All forces must match at some threshold
         ftol = (inter == "PME" || inter == "all" ? 1e-3 : 1e-6)u"kJ * mol^-1 * nm^-1"
         @test maximum(norm.(forces_molly[MO_map_idx] .- forces_openmm[OP_map_idx])) < ftol
 
         E_molly = potential_energy(sys_part, neighbors)
-        openmm_E_fp = joinpath(tyk2_dir, "openfe", "energy_openfe_$(inter)_l0.txt")
-        E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+        E_openmm = openfe_ref(energy_ref, inter, "l0") * u"kJ * mol^-1"
         # Energy must match at some threshold
         etol = (inter == "PME" || inter == "all" ? 1e-3 : 1e-4)u"kJ * mol^-1"
         @test abs(E_molly - E_openmm) < etol
@@ -284,15 +288,13 @@
         )
 
         forces_molly = forces(sys_part, neighbors; n_threads=1)
-        openmm_forces_fp = joinpath(tyk2_dir, "openfe", "forces_openfe_$(inter)_l1.txt")
-        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        forces_openmm = SVector{3}.(eachrow(openfe_ref(forces_ref, inter, "l1")))u"kJ * mol^-1 * nm^-1"
         # All forces must match at some threshold
         ftol = (inter == "PME" || inter == "all" || inter == "nonbonded" ? 1e-5 : 1e-7)u"kJ * mol^-1 * nm^-1"
         @test maximum(norm.(forces_molly[MO_map_idx] .- forces_openmm[OP_map_idx])) < ftol
 
         E_molly = potential_energy(sys_part, neighbors)
-        openmm_E_fp = joinpath(tyk2_dir, "openfe", "energy_openfe_$(inter)_l1.txt")
-        E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+        E_openmm = openfe_ref(energy_ref, inter, "l1") * u"kJ * mol^-1"
         # Energy must match at some threshold
         etol = (inter == "PME" || inter == "all" || inter == "nonbonded" ? 1e-3 : 1e-6)u"kJ * mol^-1"
         @test abs(E_molly - E_openmm) < etol
@@ -403,15 +405,13 @@
         )
 
         forces_molly = forces(sys_part, neighbors; n_threads=1)
-        openmm_forces_fp = joinpath(tyk2_dir, "openfe", "forces_openfe_$(inter)_l25.txt")
-        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        forces_openmm = SVector{3}.(eachrow(openfe_ref(forces_ref, inter, "l25")))u"kJ * mol^-1 * nm^-1"
         # All forces must match at some threshold
         ftol = (inter == "PME" || inter == "all" || inter == "nonbonded" ? 1e-5 : 1e-7)u"kJ * mol^-1 * nm^-1"
         @test maximum(norm.(forces_molly[MO_map_idx] .- forces_openmm[OP_map_idx])) < ftol
 
         E_molly = potential_energy(sys_part, neighbors)
-        openmm_E_fp = joinpath(tyk2_dir, "openfe", "energy_openfe_$(inter)_l25.txt")
-        E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+        E_openmm = openfe_ref(energy_ref, inter, "l25") * u"kJ * mol^-1"
         # Energy must match at some threshold
         etol = (inter == "PME" || inter == "all" || inter == "nonbonded" ? 1e-3 : 1e-6)u"kJ * mol^-1"
         @test abs(E_molly - E_openmm) < etol
@@ -522,15 +522,13 @@
         )
 
         forces_molly = forces(sys_part, neighbors; n_threads=1)
-        openmm_forces_fp = joinpath(tyk2_dir, "openfe", "forces_openfe_$(inter)_l5.txt")
-        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        forces_openmm = SVector{3}.(eachrow(openfe_ref(forces_ref, inter, "l5")))u"kJ * mol^-1 * nm^-1"
         # All forces must match at some threshold
         ftol = (inter == "PME" || inter == "all" || inter == "nonbonded" ? 1e-5 : 1e-7)u"kJ * mol^-1 * nm^-1"
         @test maximum(norm.(forces_molly[MO_map_idx] .- forces_openmm[OP_map_idx])) < ftol
 
         E_molly = potential_energy(sys_part, neighbors)
-        openmm_E_fp = joinpath(tyk2_dir, "openfe", "energy_openfe_$(inter)_l5.txt")
-        E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+        E_openmm = openfe_ref(energy_ref, inter, "l5") * u"kJ * mol^-1"
         # Energy must match at some threshold
         etol = (inter == "PME" || inter == "all" || inter == "nonbonded" ? 1e-3 : 1e-6)u"kJ * mol^-1"
         @test abs(E_molly - E_openmm) < etol
@@ -641,15 +639,13 @@
         )
 
         forces_molly = forces(sys_part, neighbors; n_threads=1)
-        openmm_forces_fp = joinpath(tyk2_dir, "openfe", "forces_openfe_$(inter)_l75.txt")
-        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        forces_openmm = SVector{3}.(eachrow(openfe_ref(forces_ref, inter, "l75")))u"kJ * mol^-1 * nm^-1"
         # All forces must match at some threshold
         ftol = (inter == "PME" || inter == "all" || inter == "nonbonded" ? 1e-5 : 1e-7)u"kJ * mol^-1 * nm^-1"
         @test maximum(norm.(forces_molly[MO_map_idx] .- forces_openmm[OP_map_idx])) < ftol
 
         E_molly = potential_energy(sys_part, neighbors)
-        openmm_E_fp = joinpath(tyk2_dir, "openfe", "energy_openfe_$(inter)_l75.txt")
-        E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+        E_openmm = openfe_ref(energy_ref, inter, "l75") * u"kJ * mol^-1"
         # Energy must match at some threshold
         etol = (inter == "PME" || inter == "all" || inter == "nonbonded" ? 1e-3 : 1e-6)u"kJ * mol^-1"
         @test abs(E_molly - E_openmm) < etol
