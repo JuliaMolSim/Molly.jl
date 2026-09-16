@@ -1620,12 +1620,24 @@ to_device(x::Nothing, ::Type{AT}) where AT = nothing
 to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
 to_device(x, ::Type{AT}) where AT = AT(x)
 
-function Base.deepcopy(t::Tuple)
-    return map(deepcopy, t)
-end
-
-function Base.deepcopy_internal(t::Tuple, dict::IdDict)
-    return map(deepcopy, t)
+# `deepcopy(x)` dispatches once, then recurses through `deepcopy_internal` all the way down, so
+# a custom `Base.deepcopy(::T)` is invisible to `deepcopy(sys)` — the interaction tuples would be
+# walked straight past. Types needing one register it through this helper instead, which is the
+# documented extension point (CUDA.jl handles `CuArray` the same way) and threads the shared
+# `IdDict`, so repeated references stay shared and cycles terminate.
+#
+# Do not "fix" this by overriding `Base.deepcopy_internal(::Tuple, ::IdDict)`: that signature is
+# identical to Base's, so it is an overwrite rather than an addition, and Julia refuses to
+# precompile any module that does it — which silently costs minutes of JIT on every fresh
+# process.
+# Only call this for a type that has its own `Base.deepcopy` method: it is what stops the
+# recursion. Without one, `deepcopy(x)` falls back to `deepcopy_internal(x, IdDict())`, which
+# lands right back here and loops forever.
+function deepcopy_registered(x, dict::IdDict)
+    haskey(dict, x) && return dict[x]::typeof(x)
+    y = deepcopy(x)
+    dict[x] = y
+    return y
 end
 
 reference_array(t::Tuple) = Any[t...]

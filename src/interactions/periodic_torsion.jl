@@ -286,14 +286,22 @@ end
 
     λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
     pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
-    λs = scale_torsion(d.scheduler, λ_glob, pair_role, Val(d.scheduler.dual))
+    if d.scheduler.dual
+        λs = scale_torsion(d.scheduler, λ_glob, pair_role, Val(true))
+        return periodic_torsion_force_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
+    else
+        λs = scale_torsion(d.scheduler, λ_glob, pair_role, Val(false))
+        return periodic_torsion_force_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
+    end
+end
 
-    fs = sum(zip(d.periodicities, d.phases, d.ks, λs)) do (periodicity, phase, k, λ)
+@inline function periodic_torsion_force_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd,
+                                          bc_norm, θ)
+    return sum(zip(d.periodicities, d.phases, d.ks, λs)) do (periodicity, phase, k, λ)
         fi, fj, fk, fl = periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc,
                                                 cross_bc_cd, bc_norm, θ)
         return SpecificForce4Atoms(λ*fi, λ*fj, λ*fk, λ*fl)
     end
-    return fs
 end
 
 @inline function force_gpu(d::PeriodicTorsionλ{N, T, E}, coords_i, coords_j, coords_k,
@@ -303,10 +311,20 @@ end
                                         coords_i, coords_j, coords_k, coords_l, boundary)
     λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
     pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
-    λs = scale_torsion(d.scheduler, λ_glob, pair_role, Val(d.scheduler.dual))
+    if d.scheduler.dual
+        return periodic_torsion_force_gpu_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true)),
+                                            ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
+    else
+        return periodic_torsion_force_gpu_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(false)),
+                                            ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
+    end
+end
 
-    fi_sum, fj_sum, fk_sum, fl_sum = λs[1] * periodic_torsion_force(d.periodicities[1], d.phases[1],
+@inline function periodic_torsion_force_gpu_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd,
+                                              bc_norm, θ, ::Val{N}) where N
+    fi1, fj1, fk1, fl1 = periodic_torsion_force(d.periodicities[1], d.phases[1],
                                         d.ks[1], ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
+    fi_sum, fj_sum, fk_sum, fl_sum = λs[1]*fi1, λs[1]*fj1, λs[1]*fk1, λs[1]*fl1
     for i in 2:N
         fi, fj, fk, fl = periodic_torsion_force(d.periodicities[i], d.phases[i], d.ks[i], ab, bc,
                                                 cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
@@ -325,8 +343,16 @@ end
 
     λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
     pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
-    λs = scale_torsion(d.scheduler, λ_glob, pair_role, Val(d.scheduler.dual))
-    
+    if d.scheduler.dual
+        return periodic_torsion_pe_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true)),
+                                     θ, Val(N))
+    else
+        return periodic_torsion_pe_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(false)),
+                                     θ, Val(N))
+    end
+end
+
+@inline function periodic_torsion_pe_λ(d, λs, θ, ::Val{N}) where N
     pe = λs[1] * (d.ks[1] + d.ks[1] * cos((d.periodicities[1] * θ) - d.phases[1]))
     for i in 2:N
         pe += λs[i] * (d.ks[i] + d.ks[i] * cos((d.periodicities[i] * θ) - d.phases[i]))

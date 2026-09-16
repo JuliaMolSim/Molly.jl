@@ -849,6 +849,8 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                     false, 0, suppress_warn)
 end
 
+Base.deepcopy_internal(tw::TrajectoryWriter, dict::IdDict) = deepcopy_registered(tw, dict)
+
 function Base.deepcopy(tw::TrajectoryWriter)
     return TrajectoryWriter(
         tw.n_steps,
@@ -862,6 +864,7 @@ function Base.deepcopy(tw::TrajectoryWriter)
         Chemfiles.Topology(),
         false,
         0,
+        false,
     )
 end
 

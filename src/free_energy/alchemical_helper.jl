@@ -334,10 +334,10 @@ function inject_lambda(sys::System, λ, AT)
             push!(GenerInteraction, PME(inter.dist_cutoff, to_device(Atoms, AT), sys.boundary, grad_safe=inter.grad_safe; 
                                         error_tol=inter.error_tol, fixed_charges=false, scheduler=inter.scheduler),
                         )
-        # elseif inter isa LJDispersionCorrectionλ
-        #     @time push!(GenerInteraction, LJDispersionCorrectionλ(Molly.to_device(Atoms, AT), inter.dist_cutoff, Molly.DefaultLambdaScheduler(), 
-        #                     Molly.MinimumMixing(), inter.p_σ, inter.p_ϵ)
-        #                     )
+        elseif inter isa LJDispersionCorrectionλ
+            push!(GenerInteraction, LJDispersionCorrectionλ(Molly.to_device(Atoms, AT), inter.dist_cutoff, Molly.DefaultLambdaScheduler(), 
+                            Molly.MinimumMixing(), inter.p_σ, inter.p_ϵ)
+                            )
         end
         push!(GenerInteraction, inter)
     end

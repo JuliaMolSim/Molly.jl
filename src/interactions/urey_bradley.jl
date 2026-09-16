@@ -91,43 +91,57 @@ function Base.:+(a1::UreyBradleyλ, a2::UreyBradleyλ)
                        kbond=(a1.kbond + a2.kbond), r0=(a1.r0 + a2.r0))
 end
 
-function to_lambda_function(inter::UreyBradley)
-    return UreyBradleyλ(kangle=inter.kangle, θ0=inter.θ0, kbond=inter.kbond, r0=inter.r0)
+function to_lambda_function(inter::UreyBradley; λ_mixing=MinimumMixing(),
+                            scheduler=DefaultLambdaScheduler())
+    return UreyBradleyλ(kangle=inter.kangle, θ0=inter.θ0, kbond=inter.kbond, r0=inter.r0,
+                        λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
-@inline function force(a::UreyBradleyλ, coords_i, coords_j, coords_k, boundary, args...)
+@inline function force(a::UreyBradleyλ, coords_i, coords_j, coords_k, boundary,
+                       atom_i, atom_j, atom_k, args...)
+    T = typeof(ustrip(atom_i.λ))
+    λ_glob = T(λ_mixing(a.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ)))
+    pair_role = mix_roles(a.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role))
+    λ, λ_params = scale_dual(a.scheduler, λ_glob, pair_role)
+    kangle = params_mixing(λ_params, a.kangle)
+    θ0 = params_mixing(λ_params, a.θ0)
+    kbond = params_mixing(λ_params, a.kbond)
+    r0 = params_mixing(λ_params, a.r0)
+
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)
     bc = vector_pad3D(coords_j, coords_k, boundary)
     cross_ba_bc = ba × bc
     if iszero_value(cross_ba_bc)
-        zf = zero(a.kangle ./ trim3D(ba, boundary))
+        zf = zero(kangle ./ trim3D(ba, boundary))
         fa, fb, fc = zf, zf, zf
     else
         pa = normalize(trim3D( ba × cross_ba_bc, boundary))
         pc = normalize(trim3D(-bc × cross_ba_bc, boundary))
-        angle_term = -a.kangle * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.θ0)
+        angle_term = -kangle * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - θ0)
         fa = (angle_term / norm(ba)) * pa
         fc = (angle_term / norm(bc)) * pc
         fb = -fa - fc
     end
     vec_ik = vector(coords_i, coords_k, boundary)
-    c = a.kbond * (norm(vec_ik) - a.r0)
+    c = kbond * (norm(vec_ik) - r0)
     f = c * normalize(vec_ik)
     fa += f
     fc -= f
-    λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))    
-    pair_role = mix_roles(b.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ = scale(b.scheduler, λ_glob, pair_role)
     return SpecificForce3Atoms(λ*fa, λ*fb, λ*fc)
 end
 
 @inline function potential_energy(a::UreyBradleyλ, coords_i, coords_j,
-                                  coords_k, boundary, args...)
+                                  coords_k, boundary, atom_i, atom_j, atom_k, args...)
+    T = typeof(ustrip(atom_i.λ))
     θ = bond_angle(coords_i, coords_j, coords_k, boundary)
     rik = norm(vector(coords_i, coords_k, boundary))
-    λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))    
-    pair_role = mix_roles(b.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ = scale(b.scheduler, λ_glob, pair_role)
-    return λ * ((a.kangle / 2) * (θ - a.θ0) ^ 2 + (a.kbond / 2) * (rik - a.r0) ^ 2)
+    λ_glob = T(λ_mixing(a.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ)))
+    pair_role = mix_roles(a.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role))
+    λ, λ_params = scale_dual(a.scheduler, λ_glob, pair_role)
+    kangle = params_mixing(λ_params, a.kangle)
+    θ0 = params_mixing(λ_params, a.θ0)
+    kbond = params_mixing(λ_params, a.kbond)
+    r0 = params_mixing(λ_params, a.r0)
+    return λ * ((kangle / 2) * (θ - θ0) ^ 2 + (kbond / 2) * (rik - r0) ^ 2)
 end

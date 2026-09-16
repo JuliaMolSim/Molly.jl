@@ -2270,6 +2270,7 @@ function simulate_remd!(sys::ReplicaSystem{<:Any, <:AbstractGPUArray},
     rep_id_proc, n_proc = divide_gpus((nprocs()-1), gpu_devices, sys.n_replicas, sys, 
                                     (cycle_length,run_loggers,rng,strictness,check_nans))
 
+    device_AT = array_type(sys.replica_coords[1])
     sys = ReplicaSystem(sys,
                         replica_coords=Molly.from_device.(sys.replica_coords),
                         replica_velocities=Molly.from_device.(sys.replica_velocities)
@@ -2414,7 +2415,8 @@ function simulate_remd!(sys::ReplicaSystem{<:Any, <:AbstractGPUArray},
     end
     sys.current_step = init_step + n_steps
     
-    return sys
+    return ReplicaSystem(sys; replica_coords=to_device.(sys.replica_coords, device_AT),
+                              replica_velocities=to_device.(sys.replica_velocities, device_AT))
 end
 
 is_c_pointer_type(::Type{<:Ptr}) = true

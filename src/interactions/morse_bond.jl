@@ -65,24 +65,33 @@ function to_lambda_function(inter::MorseBond; λ_mixing=MinimumMixing(), schedul
     return MorseBondλ(D=inter.D, a=inter.a, r0=inter.r0, λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
-@inline function force(b::MorseBondλ, coord_i, coord_j, boundary, args...)
+@inline function force(b::MorseBondλ, coord_i, coord_j, boundary, atom_i, atom_j, args...)
+    T = typeof(ustrip(atom_i.λ))
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
-    ralp = exp(-b.a * (r - b.r0))
-    c = 2 * b.D * b.a * (1 - ralp) * ralp
-    f = c * normalize(dr)
-    λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))    
+    λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))
     pair_role = mix_roles(b.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ = scale(b.scheduler, λ_glob, pair_role)
+    λ, λ_params = scale_dual(b.scheduler, λ_glob, pair_role)
+    D = params_mixing(λ_params, b.D)
+    a = params_mixing(λ_params, b.a)
+    r0 = params_mixing(λ_params, b.r0)
+    ralp = exp(-a * (r - r0))
+    c = 2 * D * a * (1 - ralp) * ralp
+    f = c * normalize(dr)
     return SpecificForce2Atoms(λ*f, λ*-f)
 end
 
-@inline function potential_energy(b::MorseBondλ, coord_i, coord_j, boundary, args...)
+@inline function potential_energy(b::MorseBondλ, coord_i, coord_j, boundary, atom_i, atom_j,
+                                  args...)
+    T = typeof(ustrip(atom_i.λ))
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
-    ralp = exp(-b.a * (r - b.r0))
-    λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))    
+    λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))
     pair_role = mix_roles(b.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ = scale(b.scheduler, λ_glob, pair_role)
-    return λ * (b.D * (1 - ralp)^2)
+    λ, λ_params = scale_dual(b.scheduler, λ_glob, pair_role)
+    D = params_mixing(λ_params, b.D)
+    a = params_mixing(λ_params, b.a)
+    r0 = params_mixing(λ_params, b.r0)
+    ralp = exp(-a * (r - r0))
+    return λ * (D * (1 - ralp)^2)
 end

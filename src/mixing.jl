@@ -33,16 +33,12 @@ function xy_mixing(::LorentzMixing, x, y, args...)
     return (x + y) / 2
 end
 
-function switchAB(alch_role, A, B)
-    return A,B
-end
-
-function xy_mixing(::LorentzMixing, x::Tuple, y::Tuple, λ_params, alch_role, args...) 
+function xy_mixing(::LorentzMixing, x::Tuple, y::Tuple, λ_params, alch_role) 
     xA, xB = x
     yA, yB = y
     A = (xA + yA) / 2
     B = (xB + yB) / 2
-    A, B = switchAB(Val(alch_role), A, B)
+    A, B = switchAB(alch_role, A, B)
     return (1-λ_params)*A + λ_params*B
 end
 
@@ -59,7 +55,7 @@ function xy_mixing(::GeometricMixing, x, y, args...)
     return sqrt(x * y)
 end
 
-function xy_mixing(::GeometricMixing, x::Tuple, y::Tuple, λ_params, args...) 
+function xy_mixing(::GeometricMixing, x::Tuple, y::Tuple, λ_params, alch_role, args...) 
     xA,xB = x
     yA,yB = y
     A = sqrt(xA*yA)

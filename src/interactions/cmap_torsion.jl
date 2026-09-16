@@ -441,9 +441,11 @@ end
     fl = force4 + force7
     fm =          force8
 
-    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ, atom_k.λ)))    
-    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role, atom_k.alch_role))
-    λ = scale(d.scheduler, λ_glob, pair_role)
+    T = typeof(ustrip(atoms_i.λ))
+    λ_glob = T(λ_mixing(inter.λ_mixing, (atoms_i.λ, atoms_j.λ, atoms_k.λ, atoms_l.λ, atoms_m.λ)))
+    pair_role = mix_roles(inter.scheduler, (atoms_i.alch_role, atoms_j.alch_role,
+                                            atoms_k.alch_role, atoms_l.alch_role, atoms_m.alch_role))
+    λ, λ_params = scale_dual(inter.scheduler, λ_glob, pair_role)
 
     return SpecificForce5Atoms(λ*fi, λ*fj, λ*fk, λ*fl, λ*fm)
 end
@@ -461,9 +463,11 @@ end
     pe = da*pe + ((data[idx+1,4]*db + data[idx+1,3])*db + data[idx+1,2])*db + data[idx+1,1]
     pe = da*pe + ((data[idx,4]*db + data[idx,3])*db + data[idx,2])*db + data[idx,1]
 
-    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ, atom_k.λ)))    
-    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role, atom_k.alch_role))
-    λ = scale(d.scheduler, λ_glob, pair_role)
+    T = typeof(ustrip(atoms_i.λ))
+    λ_glob = T(λ_mixing(inter.λ_mixing, (atoms_i.λ, atoms_j.λ, atoms_k.λ, atoms_l.λ, atoms_m.λ)))
+    pair_role = mix_roles(inter.scheduler, (atoms_i.alch_role, atoms_j.alch_role,
+                                            atoms_k.alch_role, atoms_l.alch_role, atoms_m.alch_role))
+    λ, λ_params = scale_dual(inter.scheduler, λ_glob, pair_role)
 
     return λ*pe
 end

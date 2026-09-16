@@ -2,14 +2,42 @@ export
     AbsoluteFESystem,
     RelativeFESystem
 
-const softcore_dic = Dict("none" => DefaultSoftCore(), 
+"""
+    to_lambda_inter_list(inter_list, scheduler, AT)
+
+Convert every entry of a specific interaction list to its λ counterpart.
+
+Types with no `to_lambda_function` method (`FENEBond`, `HarmonicPositionRestraint`, and the
+1-4 pair lists, whose conversion takes a soft core argument) are passed through unchanged
+with a warning rather than aborting the whole setup. They then fall under the default
+`virial_lambda_factor`, i.e. their virial is left unscaled.
+"""
+function to_lambda_inter_list(inter_list, scheduler, AT)
+    inters_cpu = from_device(inter_list.inters)
+    isempty(inters_cpu) && return inter_list
+    if !hasmethod(to_lambda_function, Tuple{eltype(inters_cpu)})
+        @warn "no to_lambda_function for $(eltype(inters_cpu)), leaving it unscaled; its " *
+              "virial will not follow the alchemical coupling"
+        return inter_list
+    end
+    new_inters = [to_lambda_function(x; λ_mixing=MinimumMixing(), scheduler=scheduler)
+                  for x in inters_cpu]
+    IT = typeof(inter_list).name.wrapper
+    fields = getfield.((inter_list,), fieldnames(typeof(inter_list)))
+    # The field order is (is, js, …, inters, types, data), so everything before the last
+    # three is the per-interaction atom index vectors, which are unchanged here
+    return IT(fields[1:(end - 3)]..., to_device(new_inters, AT), inter_list.types,
+              inter_list.data)
+end
+
+const softcore_dic = Dict("none" => DefaultSoftCore(),
                           "beutler" => BeutlerSoftCore(),
                           "gapsys" => GapsysSoftCore(), 
                           "scaled" => ScaledSoftCore())
 
 """
     AbsoluteFESystem(sys, global_λ, mapping; temp = 298.0u"K", units=true,
-                        scheduler=LinearLambdaScheduler(dual=true), loggers=(),
+                        scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
                         array_type=Array, float_type=Float32, LJsoftcore="gapsys",
                         Csoftcore="gapsys")
 
@@ -57,9 +85,13 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
         temp = units ? FT(ustrip(temp))u"K" : FT(ustrip(temp))
     end
     AT = array_type
-    S = typeof(sys.atoms[1].σ)
-    E = typeof(sys.atoms[1].ϵ)
-    C = typeof(sys.atoms[1].charge)
+    # The atoms and coords are rebuilt one at a time below, so bring them to the host once
+    # rather than indexing a device array per atom
+    sys_atoms  = from_device(sys.atoms)
+    sys_coords = from_device(sys.coords)
+    S = typeof(sys_atoms[1].σ)
+    E = typeof(sys_atoms[1].ϵ)
+    C = typeof(sys_atoms[1].charge)
 
     if !scheduler.dual
         @error "Current parameters scaling for absolute free energy setup is not available, set scheduler(dual=true)"
@@ -79,10 +111,10 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     res_number = 0
     chain = ""
     # Add unique atoms from system A
-    for i in 1:length(sys.atoms)
-        a = sys.atoms[i]
+    for i in 1:length(sys_atoms)
+        a = sys_atoms[i]
         d = sys.atoms_data[i]
-        c = sys.coords[i]
+        c = sys_coords[i]
         if i in mapping
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=a.charge, σ=a.σ, ϵ=a.ϵ, 
                                 λ=FT(global_λ), alch_role=DeleteRole))
@@ -119,31 +151,81 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     end
 
     # General interactions
+    #
+    # The scheduler decides which reciprocal sum the whole system uses. GROMACSLambdaABFEScheduler
+    # has linear λ curves, which is what the two grid scheme needs, so it selects `PME_λ`;
+    # every other scheduler selects the OpenFE/OpenMM `PME`. The short range and exclusion
+    # terms dispatch on the same scheduler through `ewald_pair_qq`, so all three Ewald terms
+    # follow from this one choice and cannot be mismatched.
     GenerInteraction = []
+    has_ewald = false
     for inter in sys.general_inters
         if inter isa PME
-            push!(GenerInteraction, PME_λ(inter.dist_cutoff, to_device(Atoms, AT), Boundary, grad_safe=inter.grad_safe; 
-                                        error_tol=inter.error_tol, fixed_charges=false, scheduler=scheduler, states=2, global_λ),
-                        )
-        elseif inter isa LJDispersionCorrection
-            push!(GenerInteraction, LJDispersionCorrectionλ(to_device(Atoms, AT), inter.dist_cutoff, scheduler, 
-                            MinimumMixing(), LorentzMixing(), GeometricMixing()),
+            has_ewald = true
+            if scheduler isa GROMACSLambdaABFEScheduler
+                push!(GenerInteraction, PME_λ(inter.dist_cutoff, to_device(Atoms, AT), Boundary,
+                                        grad_safe=inter.grad_safe;
+                                        error_tol=inter.error_tol, fixed_charges=false,
+                                        scheduler=scheduler, λ=global_λ),
                             )
+            else
+                push!(GenerInteraction, PME(inter.dist_cutoff, to_device(Atoms, AT), Boundary,
+                                        grad_safe=inter.grad_safe;
+                                        error_tol=inter.error_tol, fixed_charges=false,
+                                        scheduler=scheduler),
+                            )
+            end
+        elseif inter isa LJDispersionCorrection
+            push!(GenerInteraction, LJDispersionCorrectionλ(to_device(Atoms, AT), inter.dist_cutoff,
+                            scheduler, MinimumMixing(), inter.σ_mix, inter.ϵ_mix))
         else
             @warn "Currently $inter is not implemented for alchemical simulations"
+        end
+    end
+
+    # The Ewald real space, exclusion and mesh terms are three halves of one interaction and
+    # only add up to a screened Coulomb sum when all three are scaled by the same λ. The mesh
+    # scales each atom's charge through the scheduler and so always annihilates the solute's
+    # intramolecular electrostatics; `intraC=true` would keep them switched on in the
+    # pairwise term alone, leaving the exclusion correction subtracting a reciprocal
+    # contribution the mesh never put there.
+    if has_ewald && scheduler.intraC
+        @warn "scheduler has intraC=true but the system uses a reciprocal sum; the solute's " *
+              "intramolecular electrostatics cannot be decoupled independently of the mesh. " *
+              "Use intraC=false (annihilation) with PME or PME_λ."
+    end
+
+    # Every specific interaction is converted to its λ counterpart, as `RelativeFESystem`
+    # already does. Beyond keeping the two constructors consistent, this is what lets the
+    # virial tell a self-scaling interaction from a geometry-preserving one by type alone:
+    # after this an alchemical atom only ever carries λ types. Atom indices are unchanged in
+    # an absolute setup, so the index and type vectors carry straight over.
+    SpecificInteraction = Any[]
+    for inter_list in sys.specific_inter_lists
+        if inter_list isa InteractionList2Atoms && inter_list.data isa EwaldExclusionData
+            d = inter_list.data
+            push!(SpecificInteraction, InteractionList2Atoms(
+                inter_list.is, inter_list.js, inter_list.inters, inter_list.types,
+                EwaldExclusionData(d.dist_cutoff; error_tol=d.error_tol, ϵr=d.ϵr,
+                                   scheduler=scheduler, λ_mix=d.λ_mixing),
+            ))
+        else
+            push!(SpecificInteraction, to_lambda_inter_list(inter_list, scheduler, AT))
         end
     end
 
     # Create all interaction tuples
     pairwise_inters = tuple(PairInteraction...)
     general_inters = tuple(GenerInteraction...)
+    specific_inter_lists = tuple(SpecificInteraction...)
 
     # Setup new system
     vels_gpu = [random_velocity(a.mass, temp) for a in Atoms]
 
     # For the purposes of assigning molecules, add connections from atoms to virtual sites
     bonds_all = sys.specific_inter_lists[1]
-    bonds_all_vs_is, bonds_all_vs_js = copy(bonds_all.is), copy(bonds_all.js)
+    # `bond_graph` iterates the index arrays on the host, so these must not stay on device
+    bonds_all_vs_is, bonds_all_vs_js = from_device(bonds_all.is), from_device(bonds_all.js)
 
     if length(bonds_all_vs_is) > 0
         topology = MolecularTopology(bonds_all_vs_is, bonds_all_vs_js, length(Coords))
@@ -159,7 +241,7 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
         topology=topology,
         velocities=to_device(vels_gpu, AT),
         pairwise_inters=pairwise_inters,
-        specific_inter_lists=to_device.(sys.specific_inter_lists,AT),
+        specific_inter_lists=to_device.(specific_inter_lists,AT),
         neighbor_finder=sys.neighbor_finder,
         constraints=sys.constraints,
         general_inters=general_inters,
@@ -176,7 +258,7 @@ end
 
 """
     RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; temp = 298.0u"K", units=true,
-                        scheduler=LinearLambdaScheduler(dual=true), loggers=(),
+                        scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
                         array_type=Array, float_type=Float32, LJsoftcore="gapsys",
                         Csoftcore="gapsys")
 
@@ -598,9 +680,23 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     GenerInteraction = []
     for inter in sysA.general_inters
         if inter isa PME
-            push!(GenerInteraction, PME(inter.dist_cutoff, to_device(Atoms, AT), Boundary, grad_safe=inter.grad_safe; 
-                                        error_tol=inter.error_tol, fixed_charges=false, scheduler=scheduler),
-                        )
+            # As in `AbsoluteFESystem`, the scheduler picks the reciprocal sum. A relative
+            # system also has `InsertRole` atoms, and one mesh weight only serves both roles
+            # when they are mirror images, `s_I == 1 - s_D` — which the linear RBFE scheduler
+            # provides. Anything else uses `PME`.
+            if scheduler isa GROMACSLambdaRBFEScheduler
+                push!(GenerInteraction, PME_λ(inter.dist_cutoff, to_device(Atoms, AT), Boundary,
+                                            grad_safe=inter.grad_safe;
+                                            error_tol=inter.error_tol, fixed_charges=false,
+                                            scheduler=scheduler, λ=global_λ),
+                            )
+            else
+                push!(GenerInteraction, PME(inter.dist_cutoff, to_device(Atoms, AT), Boundary,
+                                            grad_safe=inter.grad_safe;
+                                            error_tol=inter.error_tol, fixed_charges=false,
+                                            scheduler=scheduler),
+                            )
+            end
             excluded_pairs = find_excluded_pairs(eligible, special)
             exclusion_data = EwaldExclusionData(FT(inter.dist_cutoff); error_tol=FT(inter.error_tol), scheduler=scheduler)
             ewald_exclusions = InteractionList2Atoms(
@@ -613,9 +709,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
             push!(Interactions, ewald_exclusions)
 
         elseif inter isa LJDispersionCorrection
-            push!(GenerInteraction, LJDispersionCorrectionλ(to_device(Atoms, AT), inter.dist_cutoff, scheduler, 
-                            MinimumMixing(), LorentzMixing(), GeometricMixing()),
-                            )
+            push!(GenerInteraction, LJDispersionCorrectionλ(to_device(Atoms, AT), inter.dist_cutoff,
+                            scheduler, MinimumMixing(), inter.σ_mix, inter.ϵ_mix))
         end
     end
 

@@ -149,13 +149,15 @@ function rebuild_alchemical_general_inters(sys_base, atoms_dev, lj_sc, coul_scal
 
         elseif inter isa LJDispersionCorrection
 
-            push!(rebuilt, LJDispersionCorrection(
+            # The λ-aware type: the plain `LJDispersionCorrection` ignores the scheduler and
+            # would give an unscaled tail here.
+            push!(rebuilt, Molly.LJDispersionCorrectionλ(
                 atoms_dev,
                 lj_sc.cutoff.dist_cutoff,
+                lj_sc.scheduler,
+                lj_sc.λ_mixing,
                 lj_sc.σ_mixing,
                 lj_sc.ϵ_mixing,
-                lj_sc.λ_mixing,
-                lj_sc.scheduler,
             ))
 
         else

@@ -186,9 +186,7 @@ end
 
 function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
                                 σ_mix=LorentzMixing(),
-                                ϵ_mix=GeometricMixing(),
-                                λ_mix=MinimumMixing(),
-                                scheduler = DefaultLambdaScheduler())
+                                ϵ_mix=GeometricMixing())
     T = typeof(ustrip(dist_cutoff))
     n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
@@ -249,22 +247,6 @@ function LJDispersionCorrection(atoms::AbstractArray, dist_cutoff,
     )
 end
 
-Base.zero(dc::LJDispersionCorrection) =
-    LJDispersionCorrection(zero(dc.factor_6), zero(dc.factor_12))
-
-function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
-    return LJDispersionCorrection(
-        dc1.factor_6  + dc2.factor_6,
-        dc1.factor_12 + dc2.factor_12,
-        dc1.cutoff + dc2.cutoff, 
-        dc1.p_σ, 
-        dc1.p_ϵ,
-    )
-end
-
-Unitful.ustrip(dc::LJDispersionCorrection) =
-    LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12))
-
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)
     return (inter.factor_6 + inter.factor_12) / volume(sys)
@@ -300,20 +282,27 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
 end
 
 @doc raw"""
-    LJDispersionCorrectionλ(atoms, dist_cutoff, σ_mixing=LorentzMixing(),
-                           ϵ_mixing=GeometricMixing())
+    LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix, ϵ_mix)
 
-The long-range dispersion correction for the [`LennardJones`](@ref) interaction scaled by λ for alchemical transformations.
+The long-range dispersion correction for the [`LennardJones`](@ref) interaction, scaled by λ for
+alchemical transformations.
 
 Approximately represents contributions from beyond the cutoff distance.
 Should be used alongside the [`LennardJones`](@ref) pairwise interaction when the long-range
 correction to the potential energy is required.
 The potential energy is defined as
 ```math
-E = \frac{8 \pi N^2}{V} \left( \frac{\left< \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
+E = \frac{8 \pi N^2}{V} \left( \frac{\left< \lambda_{ij} \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \lambda_{ij} \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
 ```
-The forces are zero.
+where the averages run over all pairs and `N` is the *effective* particle count — dual topology
+duplicates a site as a real atom plus a virtual one, whose couplings sum to 1.
 
+`λ_ij` is applied exactly once per pair, so the tail is as linear in the coupling as the explicit
+pairwise term. Beyond the
+cutoff a soft core has converged to plain LJ, so no soft-core factor enters here.
+
+The factors are computed once from the λ carried by `atoms` and **frozen**: changing `atom.λ`
+afterwards has no effect, so rebuild the interaction instead.
 The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
 volume can change).
 Only compatible with 3D systems.
@@ -348,90 +337,52 @@ function LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix,
     ϵσ6_unit  = unit(term_6_example)
     ϵσ12_unit = unit(term_12_example)
 
-    # Accumulate with units, but keep the numerical values in Float64.
     ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
     ϵσ12_sum = zero(Tacc) * ϵσ12_unit
 
-    # Accumulate unique (sigma, epsilon, lambda, alch_role) and count number of particles in each class.
+    # Class the atoms by (σ, ϵ, λ, role) and count them. The counts are plain integer particle
+    # counts: the coupling is applied once per class *pair* below. Folding it into the counts as
+    # well would make a pair pick up s_i·s_j, i.e. λ² for alchemical–alchemical pairs.
+    #
+    # Every atom is classed on its own σ/ϵ. OpenFE zeroes ϵ for the alchemical roles here, but
+    # only because it moves those atoms into a `CustomNonbondedForce` carrying a second
+    # correction of its own; Molly has one correction covering every pair, so zeroing would
+    # simply lose them.
     S = typeof(at.σ)
     E = typeof(at.ϵ)
-    E0 = zero.(at.ϵ)
-    classCounts = Dict{Tuple{S, E, T, Int32}, Tacc}()
-    nλ_atoms = 0
+    classCounts = Dict{Tuple{S, E, T, Int32}, Int}()
     for i in 1:n_atoms
         atom_i = atoms_cpu[i]
-        λ, λR, λ_params = scale_sterics(scheduler, atom_i.λ, atom_i.alch_role, Val(scheduler.dual))
-        if !scheduler.dual && scheduler isa OpenFEScheduler
-            if atom_i.alch_role in [CoreRole, DeleteRole, InsertRole]
-                classCounts[(atom_i.σ,E0,atom_i.λ,atom_i.alch_role)] = get(classCounts,(atom_i.σ,E0,atom_i.λ,atom_i.alch_role),0) + λ
-                nλ_atoms += λ
-            else
-                classCounts[(atom_i.σ,atom_i.ϵ,atom_i.λ,atom_i.alch_role)] = get(classCounts,(atom_i.σ,atom_i.ϵ,atom_i.λ,atom_i.alch_role),0) + λ
-                nλ_atoms += λ
-            end
-        elseif scheduler.dual
-            if atom_i.alch_role==CoreIRole || atom_i.alch_role==CoreDRole
-                classCounts[(atom_i.σ,atom_i.ϵ,atom_i.λ,atom_i.alch_role)] = get(classCounts,(atom_i.σ,atom_i.ϵ,atom_i.λ,atom_i.alch_role),0) + λ_params
-                nλ_atoms += λ_params
-            else
-                classCounts[(atom_i.σ,atom_i.ϵ,atom_i.λ,atom_i.alch_role)] = get(classCounts,(atom_i.σ,atom_i.ϵ,atom_i.λ,atom_i.alch_role),0) + λ
-                nλ_atoms += λ
-            end
-        else
-            classCounts[(atom_i.σ,atom_i.ϵ,atom_i.λ,atom_i.alch_role)] = get(classCounts,(atom_i.σ,atom_i.ϵ,atom_i.λ,atom_i.alch_role),0) + λ
-            nλ_atoms += λ
-        end
+        key = (atom_i.σ, atom_i.ϵ, atom_i.λ, atom_i.alch_role)
+        classCounts[key] = get(classCounts, key, 0) + 1
+    end
+    rep(key) = Atom(σ=key[1], ϵ=key[2], λ=key[3], alch_role=key[4])
+
+    ks = collect(keys(classCounts))
+    for a in eachindex(ks), b in 1:a
+        k1, k2 = ks[a], ks[b]
+        n1, n2 = classCounts[k1], classCounts[k2]
+        npair = Tacc(a == b ? (n1 * (n1 + 1)) / 2 : n1 * n2)
+        λ, _, _, σ, ϵ = λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, rep(k1), rep(k2), false)
+        ϵσ6_sum  += Tacc(ustrip(ϵσ6_unit,  λ * ϵ * σ^6 )) * npair * ϵσ6_unit
+        ϵσ12_sum += Tacc(ustrip(ϵσ12_unit, λ * ϵ * σ^12)) * npair * ϵσ12_unit
     end
 
-    # Compute the ϵσ^6 and ϵσ^12 for all unique classes times the number of particles in each class * 2 for the self-interaction.
-    for (key1,count) in classCounts
-        λ_glob = λ_mixing(λ_mix, (key1[3], key1[3]))
-        role_i = key1[4]
-        role_j = key1[4]
-        pair_role = mix_roles(scheduler, (role_i, role_j))
-        λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(scheduler.dual))
-        σ = xy_mixing(σ_mix, key1[1], key1[1], λ_params, pair_role)
-        ϵ = xy_mixing(ϵ_mix, key1[2], key1[2], λ_params, pair_role)
-        count2 = count * (count+1)/2
-        ϵσ12_sum += λ * λR * ϵ * σ^12 * count2
-        ϵσ6_sum  += λ * λR * ϵ * σ^6 * count2
-    end
+    # Dual topology duplicates every core site (a real atom plus a massless virtual site) and
+    # carries both ligands' unique atoms, so `length(atoms)` is not the physical particle count.
+    # Weighting by the steric coupling recovers it: (1-λ)·real + λ·virtual = 1 per site. Single
+    # topology returns one(λ) throughout, so this is just the atom count there.
+    n_eff = Tacc(sum(n * first(scale_sterics(scheduler, key[3], key[4], Val(scheduler.dual)))
+                     for (key, n) in classCounts))
+    n_pairs = n_eff * (n_eff + 1) / 2
 
-    # Compute the ϵσ^6 and ϵσ^12 for all unique pairs of classes times the number of particles in each class.
-    for (key1,count) in classCounts
-        for (key2,count2) in classCounts
-            if key1 == key2
-                break
-            end
-            λ_glob = λ_mixing(λ_mix, (key1[3], key2[3]))
-            role_i = key1[4]
-            role_j = key2[4]
-            pair_role = mix_roles(scheduler, (role_i, role_j))
-            λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(scheduler.dual))
-            σ = xy_mixing(σ_mix, key1[1], key2[1], λ_params, pair_role)
-            ϵ = xy_mixing(ϵ_mix, key1[2], key2[2], λ_params, pair_role)
-            ϵσ12_sum += λ * λR * ϵ * σ^12 * count * count2
-            ϵσ6_sum  += λ * λR * ϵ * σ^6 * count * count2
-        end
-    end
+    ϵσ6_mean  = ϵσ6_sum  / n_pairs
+    ϵσ12_mean = ϵσ12_sum / n_pairs
 
-    # Compute averages for the ϵσ^6 and ϵσ^12 terms.
-    nλ_pairs_acc = Tacc((nλ_atoms * (nλ_atoms + 1)) ÷ 2)
-
-    ϵσ12_mean = ϵσ12_sum / nλ_pairs_acc
-    ϵσ6_mean  = ϵσ6_sum  / nλ_pairs_acc
-
-    # Factors are divided by volume when evaluating the correction.
-    nλ_atoms_acc = Tacc(nλ_atoms)
     π_acc = Tacc(π)
 
-    factor_6_acc =
-        8 * π_acc * nλ_atoms_acc^2 *
-        (-ϵσ6_mean / (Tacc(3) * dist_cutoff^3))
-
-    factor_12_acc =
-        8 * π_acc * nλ_atoms_acc^2 *
-        (ϵσ12_mean / (Tacc(9) * dist_cutoff^9))
+    factor_6_acc  = 8 * π_acc * n_eff^2 * (-ϵσ6_mean  / (Tacc(3) * dist_cutoff^3))
+    factor_12_acc = 8 * π_acc * n_eff^2 * ( ϵσ12_mean / (Tacc(9) * dist_cutoff^9))
 
     F6 = typeof(-(term_6_example / dist_cutoff^3))
     F12 = typeof(term_12_example / dist_cutoff^9)
@@ -444,22 +395,6 @@ function LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix,
         ϵ_mix,
     )
 end
-
-Base.zero(dc::LJDispersionCorrectionλ) = LJDispersionCorrectionλ(zero(dc.factor_6), zero(dc.factor_12), 
-                                                                    zero(dc.cutoff), dc.p_σ, dc.p_ϵ)
-
-function Base.:+(dc1::LJDispersionCorrectionλ, dc2::LJDispersionCorrectionλ)
-    return LJDispersionCorrectionλ(
-                dc1.factor_6  + dc2.factor_6,
-                dc1.factor_12 + dc2.factor_12,
-                dc1.cutoff + dc2.cutoff, 
-                dc1.p_σ, 
-                dc1.p_ϵ
-                )
-end
-
-Unitful.ustrip(dc::LJDispersionCorrectionλ) =
-    LJDispersionCorrectionλ(ustrip(dc.factor_6), ustrip(dc.factor_12), ustrip(dc.cutoff), dc.p_σ, dc.p_ϵ)
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrectionλ; kwargs...)
@@ -511,26 +446,46 @@ end
     return λ * ((91 * C12 * (invR6 * invR6)) - (28 * C6 * invR6))
 end
 
-@inline function λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special)
+"""
+    λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special)
+
+The λ prefactor and the mixed `σ`/`ϵ` for one Lennard-Jones pair, as
+`(λ, λR, λ_params, σ, ϵ)`.
+
+The single place that decides how an LJ pair is scaled, shared by the pairwise soft cores and by
+the long-range dispersion correction so the two cannot disagree. 
+
+`λ` is the *energy* prefactor — the coupling in dual topology, `1` in single topology where the
+coupling lives in the interpolated `σ`/`ϵ` instead. `λR` is the soft-core radius coupling; a
+caller that only needs the asymptotic energy.
+"""
+@inline λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special) =
+    λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special, atom_i.σ)
+
+# Dual topology: one set of parameters per atom, scaled by the energy prefactor λ.
+@inline function λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special,
+                                   σ_layout)
     λ_glob = λ_mixing(λ_mix, (atom_i.λ, atom_j.λ))
     pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); type="LJ")
-    dual = scheduler.dual ? Val(true) : Val(false)
-    if scheduler.dual
-        λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(true))
-        σ = σ_mixing(σ_mix, atom_i, atom_j)
-        ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j)
-    # elseif !(scheduler.LJindividual) || (!(scheduler.LJspecial) && special)
-    #     λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(false))
-    #     σ = σ_mixing(σ_mix, atom_i, atom_j, λ_params, pair_role)
-    #     ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j, λ_params, pair_role)
-    # else
-    #     λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(false))
-    #     σi = params_mixing(atom_i.σ, λ_params)
-    #     σj = params_mixing(atom_j.σ, λ_params)
-    #     ϵi = params_mixing(atom_i.ϵ, λ_params)
-    #     ϵj = params_mixing(atom_j.ϵ, λ_params)
-    #     σ = xy_mixing(σ_mix, σi, σj)
-    #     ϵ = xy_mixing(ϵ_mix, ϵi, ϵj)
+    λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(true))
+    σ = σ_mixing(σ_mix, atom_i, atom_j)
+    ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j)
+    return λ, λR, λ_params, σ, ϵ
+end
+
+@inline function λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special,
+                                   σ_layout::Tuple)
+    λ_glob = λ_mixing(λ_mix, (atom_i.λ, atom_j.λ))
+    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); type="LJ")
+    λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(false))
+    if !scheduler.LJindividual || (!scheduler.LJspecial && special)
+        # Mix the two end states, then interpolate the pair.
+        σ = σ_mixing(σ_mix, atom_i, atom_j, λ_params, pair_role)
+        ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j, λ_params, pair_role)
+    else
+        # Interpolate each atom, then mix. `params_mixing` takes λ_params first.
+        σ = xy_mixing(σ_mix, params_mixing(λ_params, atom_i.σ), params_mixing(λ_params, atom_j.σ))
+        ϵ = xy_mixing(ϵ_mix, params_mixing(λ_params, atom_i.ϵ), params_mixing(λ_params, atom_j.ϵ))
     end
     return λ, λR, λ_params, σ, ϵ
 end
@@ -1240,7 +1195,7 @@ end
     dr = vector(coords_i, coords_l, boundary)
     λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
     pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λR, λ_params = scale_sterics(inter.scheduler, λ_glob, pair_role, Val(inter.scheduler.dual))
+    λ, λR, λ_params = scale_sterics_dual(inter.scheduler, λ_glob, pair_role)
 
     if λ <= 0
         return SpecificForce2Atoms(zero(dr)*force_units, zero(dr)*force_units)
@@ -1292,7 +1247,7 @@ end
     dr = vector(coords_i, coords_l, boundary)
     λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
     pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λR, λ_params = scale_sterics(inter.scheduler, λ_glob, pair_role, Val(inter.scheduler.dual))
+    λ, λR, λ_params = scale_sterics_dual(inter.scheduler, λ_glob, pair_role)
 
     if λ <= 0
         return ustrip(zero(dr[1])) * energy_units

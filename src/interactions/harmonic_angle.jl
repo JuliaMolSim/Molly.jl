@@ -160,7 +160,7 @@ end
 
     λ_glob = T(λ_mixing(a.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ)))    
     pair_role = mix_roles(a.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role))
-    λ, λ_params = scale(a.scheduler, λ_glob, pair_role, Val(a.scheduler.dual))
+    λ, λ_params = scale_dual(a.scheduler, λ_glob, pair_role)
     k = params_mixing(λ_params, a.k)
     θ0 = params_mixing(λ_params, a.θ0)
 
@@ -178,7 +178,7 @@ end
     θ = bond_angle(coords_i, coords_j, coords_k, boundary)
     λ_glob = T(λ_mixing(a.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ)))    
     pair_role = mix_roles(a.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role))
-    λ, λ_params = scale(a.scheduler, λ_glob, pair_role, Val(a.scheduler.dual))
+    λ, λ_params = scale_dual(a.scheduler, λ_glob, pair_role)
     k = params_mixing(λ_params, a.k)
     θ0 = params_mixing(λ_params, a.θ0)
     return λ * (k / 2) * (θ - θ0) ^ 2

@@ -79,13 +79,14 @@ function to_lambda_function(inter::HarmonicTorsion; λ_mixing=MinimumMixing(), s
 end
 
 @inline function force(d::HarmonicTorsionλ, coords_i, coords_j, coords_k, coords_l,
-                       boundary, args...)
+                       boundary, atom_i, atom_j, atom_k, atom_l, args...)
+    T = typeof(ustrip(atom_i.λ))
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
                                     coords_i, coords_j, coords_k, coords_l, boundary)
 
     λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
     pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
-    λ = scale_torsion(d.scheduler, λ_glob, pair_role)
+    λ, λ_params = scale_dual(d.scheduler, λ_glob, pair_role)
 
     dEdθ = d.k * (θ - d.θ0) + d.k * (θ - d.θ0)
     fi =  dEdθ * bc_norm * cross_ab_bc / dot(cross_ab_bc, cross_ab_bc)
@@ -97,11 +98,12 @@ end
 end
 
 @inline function potential_energy(d::HarmonicTorsionλ, coords_i, coords_j, coords_k,
-                                  coords_l, boundary, args...)
+                                  coords_l, boundary, atom_i, atom_j, atom_k, atom_l, args...)
+    T = typeof(ustrip(atom_i.λ))
     θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
     λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
     pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
-    λ = scale_torsion(d.scheduler, λ_glob, pair_role)
+    λ, λ_params = scale_dual(d.scheduler, λ_glob, pair_role)
     return λ * d.k * (θ - d.θ0)^2
 end
 

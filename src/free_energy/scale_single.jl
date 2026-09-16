@@ -10,11 +10,24 @@ https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_r
     if role == CoreRole
         return one(λ), λ
     elseif role == InsertRole
-        return one(λ), (1-λ)
+        return one(λ), λ
     elseif role == DeleteRole
         return one(λ), λ
     else
         return one(λ), zero(λ)
+    end
+end
+
+# Single topology never scales the force (the first return of `scale` is always `one(λ)`), it
+# interpolates parameters instead, and a bond inside the alchemical group has both end state
+# parameters non-zero so it stays on. `CoreRole` is present in both states.
+@inline function scale_virial(::Any, λ::T, role::AlchemicalRole, dual::Val{false}, args...) where T
+    if role == InsertRole
+        return λ
+    elseif role == DeleteRole
+        return (1 - λ)
+    else
+        return one(λ)
     end
 end
 
@@ -87,6 +100,50 @@ end
     end
 end
 
+#####################################
+### GROMACS RBFE Lambda Scheduler ###
+#####################################
+
+@inline scale_sterics(::GROMACSLambdaRBFEScheduler, λ::T, role::AlchemicalRole, dual::Val{false},
+                      args...) where T =
+    scale_sterics(LinearLambdaScheduler(), λ, role, dual, args...)
+
+@inline scale_elec(::GROMACSLambdaRBFEScheduler, λ::T, role::AlchemicalRole, dual::Val{false},
+                   args...) where T =
+    scale_elec(LinearLambdaScheduler(), λ, role, dual, args...)
+
+
+#####################################
+### GROMACS ABFE Lambda Scheduler ###
+#####################################
+
+@inline function scale_sterics(::GROMACSLambdaABFEScheduler, λ::T, role::AlchemicalRole, dual::Val{false}, args...) where T
+    if role == InsertRole
+        λ = λ < T(0.5) ? T(0.0) : T(2.0) * (λ - T(0.5))
+        return one(λ), λ, λ
+    elseif role == DeleteRole
+        λ = λ < T(0.5) ? T(0.0) : T(2.0) * (λ - T(0.5))
+        return one(λ), (1-λ), λ
+    elseif role == CoreRole
+        return one(λ), one(λ), λ
+    else
+        return one(λ), one(λ), one(λ)
+    end
+end
+
+@inline function scale_elec(::GROMACSLambdaABFEScheduler, λ::T, role::AlchemicalRole, dual::Val{false}, args...) where T
+    if role == InsertRole
+        λ = T(λ < T(0.5) ? T(2.0) * λ : T(1.0))
+        return one(λ), λ, λ
+    elseif role == DeleteRole
+        λ = T(λ < T(0.5) ? T(2.0) * λ : T(1.0))
+        return one(λ), (1-λ), λ
+    elseif role == CoreRole
+        return one(λ), one(λ), λ
+    else
+        return one(λ), one(λ), one(λ)
+    end
+end
 
 #############################
 ### OpenMM Test Scheduler ###

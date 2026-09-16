@@ -131,7 +131,7 @@ end
     ab = vector(coord_i, coord_j, boundary)
     λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))    
     pair_role = mix_roles(b.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λ_params = scale(b.scheduler, λ_glob, pair_role, Val(b.scheduler.dual))
+    λ, λ_params = scale_dual(b.scheduler, λ_glob, pair_role)
     k = params_mixing(λ_params, b.k)
     r0 = params_mixing(λ_params, b.r0)
     c = k * (norm(ab) - r0)
@@ -146,7 +146,7 @@ end
     r = norm(dr)
     λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))  
     pair_role = mix_roles(b.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λ_params = scale(b.scheduler, λ_glob, pair_role, Val(b.scheduler.dual))
+    λ, λ_params = scale_dual(b.scheduler, λ_glob, pair_role)
     k = params_mixing(λ_params, b.k)
 
     r0 = params_mixing(λ_params, b.r0)
