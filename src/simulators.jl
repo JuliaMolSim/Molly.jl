@@ -105,7 +105,7 @@ function check_array_nans(svec_arrays, labels, step_n)
                             "($(length(svec_arrays))) as labels ($(length(labels)))"))
     end
     if any(isnan_svec_array, svec_arrays)
-        err_msg = "NaNs found at the end of step $step_n for stage $stage:"
+        err_msg = "NaNs found at the end of step $step_n:"
         for (svec_array, label) in zip(svec_arrays, labels)
             c = count(isnan_svec, svec_array)
             idx = findall(x -> isnan_svec(x), svec_array)

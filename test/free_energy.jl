@@ -4,11 +4,11 @@
     AT = Array
 
     # --- Force Field Setup ---
-    ff_A = MolecularForceField(FT, joinpath.(ff_dir, ["tip3p_standard.xml", "amber14/protein.ff14SB.xml"])...,
+    ff_A = MolecularForceField(joinpath.(ff_dir, ["tip3p_standard.xml", "amber14/protein.ff14SB.xml"])...,
                                             joinpath(data_dir, "ejm31.xml"),
                                             ; units=true)
 
-    ff_B = MolecularForceField(FT, joinpath.(ff_dir, ["tip3p_standard.xml", "amber14/protein.ff14SB.xml"])...,
+    ff_B = MolecularForceField(joinpath.(ff_dir, ["tip3p_standard.xml", "amber14/protein.ff14SB.xml"])...,
                                             joinpath(data_dir, "ejm50.xml")
                                             ; units=true)
 
@@ -16,19 +16,17 @@
     sysA = System(
             joinpath(data_dir,"tyk2_ejm31.pdb"),
             ff_A;
-            nonbonded_method=:pme,
+            nonbonded_method=SetupPME(approximate_erfc=false),
             center_coords=false,
             dist_cutoff=FT(0.9)u"nm",
-            approximate_pme=false,
         )
 
     sysB = System(
             joinpath(data_dir, "tyk2_ejm50.pdb"),
             ff_B;
-            nonbonded_method=:pme,
+            nonbonded_method=SetupPME(approximate_erfc=false),
             center_coords=false,
             dist_cutoff=FT(0.9)u"nm",
-            approximate_pme=false,
         )
 
     mapping = Dict("unique_A"=>[4701], "unique_B" => [4701,4703])
@@ -128,6 +126,7 @@
 
     # --- Energy and Forces for λ=0 ---
     for inter in inters
+        println("Inters: $inter, lambda=0.0")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
@@ -247,6 +246,7 @@
     buffers = Molly.init_buffers!(test_sys, 1)
 
     for inter in inters
+        println("Inters: $inter, lambda=1.0")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
@@ -360,12 +360,13 @@
     place_virtual_sites!(test_sys)
     neighbors = find_neighbors(test_sys)
 
-    # --- Energy and Forces for λ=0.5 ---
+    # --- Energy and Forces for λ=0.25 ---
     neighbors = find_neighbors(test_sys)
     forces_t = Molly.zero_forces(test_sys)
     buffers = Molly.init_buffers!(test_sys, 1)
 
     for inter in inters
+        println("Inters: $inter, lambda=0.25")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
@@ -485,6 +486,7 @@
     buffers = Molly.init_buffers!(test_sys, 1)
 
     for inter in inters
+        println("Inters: $inter, lambda=0.5")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"
@@ -598,12 +600,13 @@
     place_virtual_sites!(test_sys)
     neighbors = find_neighbors(test_sys)
 
-    # --- Energy and Forces for λ=0.5 ---
+    # --- Energy and Forces for λ=0.75 ---
     neighbors = find_neighbors(test_sys)
     forces_t = Molly.zero_forces(test_sys)
     buffers = Molly.init_buffers!(test_sys, 1)
 
     for inter in inters
+        println("Inters: $inter, lambda=0.75")
         if inter == "all"
             pin = test_sys.pairwise_inters
         elseif inter == "nonbonded"

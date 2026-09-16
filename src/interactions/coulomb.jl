@@ -1729,7 +1729,7 @@ end
                        special=false,
                        args...) where T
     ke, α_ewald = inter.coulomb_const, inter.α_ewald
-    qq = ewald_pair_qq(inter.scheduler, atom_i, atom_j, Val(T))
+    qq = ewald_pair_qq(inter.scheduler, atom_i, atom_j, Val(T); special=special)
 
     if iszero_value(qq)
         return zero_pairwise_force(dr, force_units)
@@ -1761,7 +1761,7 @@ end
                                   special=false,
                                   args...) where T
     ke, α_ewald = inter.coulomb_const, inter.α_ewald
-    qq = ewald_pair_qq(inter.scheduler, atom_i, atom_j, Val(T))
+    qq = ewald_pair_qq(inter.scheduler, atom_i, atom_j, Val(T); special=special)
 
     if iszero_value(qq)
         return zero_pairwise_energy(dr, energy_units)
@@ -1789,8 +1789,7 @@ end
     T = typeof(ustrip(inter.coulomb_const))
     λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
     pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_j.alch_role); type="coulomb")
-    dual_val = inter.scheduler.dual ? Val(true) : Val(false)
-    λ, λR, λ_params = scale_elec(inter.scheduler, λ_glob, pair_role, dual_val)
+    λ, λR, λ_params = scale_elec_dual(inter.scheduler, λ_glob, pair_role)
     return pair_role, λ, λR, λ_params
 end
 
@@ -1937,7 +1936,7 @@ end
                        args...)
     pair_role, λ, λR, λ_params = lambda_pair(inter, atom_i, atom_j)
     qq = ewald_pair_qq(inter.scheduler, atom_i, atom_j,
-                       Val(typeof(ustrip(inter.coulomb_const))))
+                       Val(typeof(ustrip(inter.coulomb_const))); special=special)
 
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
@@ -1979,7 +1978,7 @@ end
                                   args...)
     pair_role, λ, λR, λ_params = lambda_pair(inter, atom_i, atom_j)
     qq = ewald_pair_qq(inter.scheduler, atom_i, atom_j,
-                       Val(typeof(ustrip(inter.coulomb_const))))
+                       Val(typeof(ustrip(inter.coulomb_const))); special=special)
 
     if λ <= 0
         return zero_pairwise_energy(dr, energy_units)
@@ -2132,7 +2131,7 @@ end
     # the reciprocal sum that the scheduler selects
     pair_role, λ, λR, λ_params = lambda_pair(inter, atom_i, atom_j)
     qq = ewald_pair_qq(inter.scheduler, atom_i, atom_j,
-                       Val(typeof(ustrip(inter.coulomb_const))))
+                       Val(typeof(ustrip(inter.coulomb_const))); special=special)
 
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
@@ -2182,7 +2181,7 @@ end
     # the reciprocal sum that the scheduler selects
     pair_role, λ, λR, λ_params = lambda_pair(inter, atom_i, atom_j)
     qq = ewald_pair_qq(inter.scheduler, atom_i, atom_j,
-                       Val(typeof(ustrip(inter.coulomb_const))))
+                       Val(typeof(ustrip(inter.coulomb_const))); special=special)
 
     if λ <= 0
         return zero_pairwise_energy(dr, energy_units)

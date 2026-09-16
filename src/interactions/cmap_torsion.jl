@@ -1,7 +1,8 @@
 export 
     CMAPTorsion
 
-##### Helper functions for calculation CMAPS #####
+"""
+    CMAPTorsion(index, size)
 
 Torsional correction map (CMAP) for sets of five atoms, for example protein ϕ and ψ
 backbone torsion angles.
@@ -19,6 +20,8 @@ Base.zero(::Type{CMAPTorsion}) = CMAPTorsion(0, 0)
 Base.zero(c::CMAPTorsion) = zero(typeof(c))
 
 Base.:+(c1::CMAPTorsion, c2::CMAPTorsion) = c1
+
+##### Helper functions for calculation CMAPS #####
 
 function cmap_coefficients(n, mp::Vector{E}) where E
     c = cmap_map_derivatives(n, mp)
@@ -275,25 +278,6 @@ function cmap_angles(inter, coords_i, coords_j, coords_k, coords_l, coords_m, bo
 
     return v0a, v1a, v2a, cp0a, cp1a, v0b, v1b, v2b, cp0b, cp1b, delta, idx, da, db
 end
-
-"""
-    CMAPTorsion(index, size)
-
-Torsional correction map (CMAP) for sets of five atoms, for example protein ϕ and ψ
-backbone torsion angles.
-
-The CMAP data is stored in the `data` field of the associated [`InteractionList5Atoms`](@ref).
-
-Only compatible with 3D systems.
-"""
-struct CMAPTorsion
-    index::Int
-    size::Int
-end
-
-Base.zero(::CMAPTorsion) = CMAPTorsion(0, 0)
-
-Base.:+(c1::CMAPTorsion, c2::CMAPTorsion) = c1
 
 @inline function force(inter::CMAPTorsion, coords_i, coords_j, coords_k, coords_l, 
                        coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, 

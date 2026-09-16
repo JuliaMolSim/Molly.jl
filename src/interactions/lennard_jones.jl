@@ -245,9 +245,9 @@ function LJDispersionCorrection(atoms::AbstractArray,
     )
 end
 
-Base.zero(::Type{LJDispersionCorrection{F6, F12}}) where {F6, F12} =
-    LJDispersionCorrection(zero(F6), zero(F12))
-Base.zero(dc::LJDispersionCorrection) = zero(typeof(dc))
+Base.zero(::Type{LJDispersionCorrection{F6, F12, D, S, E}}) where {F6, F12, D, S, E} =
+    LJDispersionCorrection(zero(F6), zero(F12), zero(D), S(), E())
+
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)
     return (inter.factor_6 + inter.factor_12) / volume(sys)
@@ -351,10 +351,15 @@ function LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix,
     # simply lose them.
     S = typeof(at.σ)
     E = typeof(at.ϵ)
+    E0 = zero.(at.ϵ)
     classCounts = Dict{Tuple{S, E, T, Int32}, Int}()
     for i in 1:n_atoms
         atom_i = atoms_cpu[i]
-        key = (atom_i.σ, atom_i.ϵ, atom_i.λ, atom_i.alch_role)
+        if scheduler isa OpenFEScheduler && atom_i.alch_role != EnvRole
+            key = (atom_i.σ, E0, atom_i.λ, atom_i.alch_role)
+        else
+            key = (atom_i.σ, atom_i.ϵ, atom_i.λ, atom_i.alch_role)
+        end
         classCounts[key] = get(classCounts, key, 0) + 1
     end
     rep(key) = Atom(σ=key[1], ϵ=key[2], λ=key[3], alch_role=key[4])

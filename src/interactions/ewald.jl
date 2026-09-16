@@ -1318,7 +1318,7 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
 
     if needs_pe || needs_vir
         if isnothing(inter.pc_sum) || inter.grad_safe
-            partial_charge = effective_charge.(from_device(atoms), Ref(inter.scheduler), Val(T))
+            partial_charges = effective_charge.(from_device(atoms), Ref(inter.scheduler), Val(T))
             pc_sum      = sum_float_type(identity, TH, partial_charges)
             pc_abs2_sum = sum_float_type(abs2    , TH, partial_charges)
         else
@@ -1392,14 +1392,31 @@ agree with the mesh by construction. Note that no role mixing appears here: the 
 effective charges already carry everything the mesh knows, so routing this through
 `mix_roles` could only introduce disagreement.
 """
-@inline function ewald_pair_qq(scheduler, atom_i, atom_j, ::Val{T}) where T
-    # OpenFE/OpenMM: charges scaled per atom on one grid
+@inline function ewald_pair_qq(scheduler, atom_i, atom_j, ::Val{T}; kwargs) where T
     return effective_charge(atom_i, scheduler, Val(T)) *
            effective_charge(atom_j, scheduler, Val(T))
 end
 
+@inline function ewald_pair_qq(scheduler::OpenFEScheduler, atom_i, atom_j, ::Val{T}; special=false) where T
+    # OpenFE/OpenMM: charges scaled per atom on one grid
+    λ_glob = T(λ_mixing(MinimumMixing(), (atom_i.λ, atom_j.λ)))
+    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); type="coulomb")
+    λ, λR, λ_params = scale_elec_dual(scheduler, λ_glob, pair_role)
+    if scheduler.dual
+        qij = atom_i.charge * atom_j.charge
+    elseif special
+        qij = atom_i.charge .* atom_j.charge
+        qij = params_mixing(λ_params, qij)
+    else
+        qi = effective_charge(atom_i, scheduler, Val(T))
+        qj = effective_charge(atom_j, scheduler, Val(T))
+        qij = qi*qj
+    end
+    return qij
+end
+
 @inline function ewald_pair_qq(scheduler::Union{GROMACSLambdaABFEScheduler,GROMACSLambdaRBFEScheduler}, atom_i, atom_j,
-                               ::Val{T}) where T
+                               ::Val{T}; kwargs) where T
     # GROMACS: two grids mixed with weights (1 - λ, λ), with λ the electrostatic coupling —
     # the same weight `pme_lambda_mesh_weight` gives the mesh, so the two agree by
     # construction. `InsertRole` stands in for any role because the scheduler is required to
