@@ -910,6 +910,9 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     return fs_nounits
 end
 
+# Mark inactive for Enzyme
+claim_block!(next_block_start, block_size) = Threads.atomic_add!(next_block_start, block_size)
+
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{n_threads},
@@ -948,7 +951,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 fs_chunk = fs_chunks[chunk_i]
                 vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
                 while true
-                    block_start = Threads.atomic_add!(next_block_start, block_size)
+                    block_start = claim_block!(next_block_start, block_size)
                     block_start > n_neighbors && break
                     block_stop = min(block_start + block_size - 1, n_neighbors)
                     pairwise_forces_nl_block!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,

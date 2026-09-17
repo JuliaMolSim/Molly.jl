@@ -245,10 +245,19 @@ function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
         kernel! = backend_kernel(distribute_forces_kernel!, backend, n_threads_dev)
         kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
                 workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
-        fs_mat_flat = reshape(buffers.fs_mat, length(sys) * D)
-        fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* sys.force_units
+        copy_matrix_to_forces!(fs, buffers.fs_mat, sys.force_units, Val(D), Val(T))
     end
     return fs
+end
+
+function copy_matrix_to_forces!(fs, fs_mat, force_units, ::Val{D}, ::Val{T}) where {D, T}
+    fs_mat_flat = reshape(fs_mat, length(fs) * D)
+    fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* force_units
+    return fs
+end
+
+function copy_matrix_to_forces!(fs::AbstractGPUArray, fs_mat, force_units, D::Val, T::Val)
+    return apply_force_units_gpu!(fs, fs_mat, force_units, D, T)
 end
 
 function copy_forces_to_matrix!(fs_mat::AbstractMatrix{T}, fs, ::Val{D}) where {T, D}

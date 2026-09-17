@@ -1563,6 +1563,11 @@ function NoseHoover(; dt, temperature, damping=100*dt, coupling=nothing, remove_
     return NoseHoover(dt, temperature, damping, coupling, Int(remove_CM_motion))
 end
 
+# Not inlined to work with Enzyme
+@noinline function kinetic_energy_velocities(masses, velocities)
+    return sum(masses .* sum.(abs2, velocities)) / 2
+end
+
 @inline function simulate!(sys,
                            sim::NoseHoover,
                            n_steps_or_time;
@@ -1613,7 +1618,7 @@ end
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) *
                         ((temperature(sys; kin_tensor=buffers.kin_tensor) / sim.temperature) - 1)
-        KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
+        KE_half = kinetic_energy_velocities(masses(sys), v_half)
         T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
