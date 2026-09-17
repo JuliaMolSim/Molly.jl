@@ -45,8 +45,7 @@ parameter_fields(::Type{<:HarmonicAngle}) = ((:k, "k"), (:θ0, "θ0"))
 end
 
 @inline function potential_energy(a::HarmonicAngle, coords_i, coords_j,
-                                  coords_k, boundary, atoms_i,
-                                  atoms_j, atoms_k, args...)
+                                  coords_k, boundary, args...)
     θ = bond_angle(coords_i, coords_j, coords_k, boundary)
     return (a.k / 2) * (θ - a.θ0) ^ 2
 end

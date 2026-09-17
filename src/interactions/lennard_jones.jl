@@ -1054,9 +1054,10 @@ parameter_fields(::Type{<:AshbaughHatch}) = ((:weight_special, "weight_14"),)
         return zero_pairwise_force(dr, force_units)
     end
 
-    λ, λR, λ_params, σ, ϵ = λ_params_function(inter.scheduler, inter.λ_mixing, 
-                                            inter.σ_mixing, inter.ϵ_mixing, 
-                                            atom_i, atom_j, special)
+    # Ashbaugh-Hatch λ is a per-atom interaction parameter, not an alchemical coupling
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)
+    λ = λ_mixing(inter.λ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = sqrt(sum(abs2, dr))
@@ -1094,9 +1095,10 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
 
-    λ, λR, λ_params, σ, ϵ = λ_params_function(inter.scheduler, inter.λ_mixing, 
-                                            inter.σ_mixing, inter.ϵ_mixing, 
-                                            atom_i, atom_j, special)
+    # Ashbaugh-Hatch λ is a per-atom interaction parameter, not an alchemical coupling
+    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
+    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j, special)
+    λ = λ_mixing(inter.λ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
     r = sqrt(sum(abs2, dr))

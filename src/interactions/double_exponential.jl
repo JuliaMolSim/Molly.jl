@@ -247,6 +247,15 @@ parameter_fields(::Type{<:DoubleExponentialSoftCore}) =
     ((:α, "alpha"), (:β, "beta"), (:weight_special, "weight_14"))
 
 
+# Energy prefactor, soft-core coupling and mixed σ/ϵ of a pair, from the scheduler as for the
+# Lennard-Jones soft cores
+@inline function dexp_lambda_params(inter::DoubleExponentialSoftCore{C, T}, atom_i, atom_j,
+                                    special) where {C, T}
+    λ, λR, _, σ, ϵ = λ_params_function(inter.scheduler, inter.λ_mixing, inter.σ_mixing,
+                                       inter.ϵ_mixing, atom_i, atom_j, special)
+    return T(λ), T(λ * λR), σ, ϵ
+end
+
 @inline function force(
     inter::DoubleExponentialSoftCore{C, T},
     dr,
@@ -257,8 +266,7 @@ parameter_fields(::Type{<:DoubleExponentialSoftCore}) =
     args...
 ) where {C, T}
 
-    λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
-    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
+    λ, λ_soft, σ, ϵ = dexp_lambda_params(inter, atom_i, atom_j, special)
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
     end
@@ -270,13 +278,11 @@ parameter_fields(::Type{<:DoubleExponentialSoftCore}) =
         return zero_pairwise_force(dr, force_units)
     end
 
-    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
-    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     rm = σ * T(two_power_sixth)
     # Following  https://doi.org/10.1039/d3dd00070b
     # αs = (1.1 + λ(α − 1.1)) and βs = (1 + λ(β − 1))
-    α_s = T(1.1 + λ * (inter.α - 1.1))
-    β_s = T(1 + λ * (inter.β - 1))
+    α_s = T(1.1 + λ_soft * (inter.α - 1.1))
+    β_s = T(1 + λ_soft * (inter.β - 1))
     params = (α_s, β_s, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = (λ * f / r) * dr
@@ -302,9 +308,7 @@ end
     args...
 ) where {C, T}
 
-    # Mix Lambda
-    λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
-    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
+    λ, λ_soft, σ, ϵ = dexp_lambda_params(inter, atom_i, atom_j, special)
     if λ <= 0
         return zero_pairwise_energy(dr, energy_units)
     end
@@ -312,13 +316,11 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
     r = sqrt(sum(abs2, dr))
-    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
-    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     rm = σ * T(two_power_sixth)
     # Following  https://doi.org/10.1039/d3dd00070b
     # αs = (1.1 + λ(α − 1.1)) and βs = (1 + λ(β − 1))
-    α_s = T(1.1 + λ * (inter.α - 1.1))
-    β_s = T(1 + λ * (inter.β - 1))
+    α_s = T(1.1 + λ_soft * (inter.α - 1.1))
+    β_s = T(1 + λ_soft * (inter.β - 1))
     params = (α_s, β_s, rm, ϵ)
     pe = pe_cutoff(inter.cutoff, inter, r, params)
     if special

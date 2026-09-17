@@ -120,7 +120,7 @@ electrostatic scheduler.
 @kwdef struct CoulombScaled{C, LM, SCH, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
-    λ_mixing::LM
+    λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
     weight_special::W = 1
     coulomb_const::T = coulomb_const
@@ -1788,7 +1788,7 @@ end
 @inline function lambda_pair(inter, atom_i, atom_j)
     T = typeof(ustrip(inter.coulomb_const))
     λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
-    pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_j.alch_role); type="coulomb")
+    pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_j.alch_role))
     λ, λR, λ_params = scale_elec_dual(inter.scheduler, λ_glob, pair_role)
     return pair_role, λ, λR, λ_params
 end

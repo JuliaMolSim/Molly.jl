@@ -138,8 +138,9 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5)
+    # CoreIRole atoms are scaled by their λ (dual topology); the default CoreRole is not
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
     inter = LennardJonesSoftCoreBeutler(α=0.3)
     @test isapprox(
         force(inter, dr14, a1, a1),
@@ -208,8 +209,11 @@
         )
         core = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
         ref_inter = LennardJones()
+        # intraLJ=true keeps the sterics between alchemical atoms of the same role on
+        scheduler = DefaultLambdaScheduler(intraLJ=true)
 
-        for inter in (LennardJonesSoftCoreBeutler(α=0.3), LennardJonesSoftCoreGapsys(α=0.85))
+        for inter in (LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler),
+                      LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler))
             @test isapprox(
                 force(inter, dr13, alch_i, alch_j),
                 force(ref_inter, dr13, alch_i, alch_j);
@@ -248,7 +252,7 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
+    AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
     @test isapprox(
         potential_energy(inter, dr13, AH_a1, AH_a1),
         -0.058520865u"kJ * mol^-1";
@@ -281,7 +285,7 @@
         -0.5 * 0.08202077553076385u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
-    AH_off = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0)
+    AH_off = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0, alch_role=Molly.CoreIRole)
     @test all(iszero, force(inter, dr13, AH_off, AH_a1))
     @test iszero(potential_energy(inter, dr13, AH_off, AH_a1))
 
@@ -397,19 +401,21 @@
     @testset "Scaled Coulomb matches pre-scaled charges" begin
         λ_state = 0.75
         scheduler = DefaultLambdaScheduler()
-        λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+        λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
         raw_i = Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole)
         raw_j = Atom(charge=-0.8, λ=λ_state, alch_role=Molly.InsertRole)
-        ref_i = Atom(charge=1.0 * λ_elec)
-        ref_j = Atom(charge=-0.8 * λ_elec)
+        # Dual topology scales the pair energy once in the plain and reaction field forms, and
+        # each charge in the Ewald form so that it agrees with the mesh
+        pair_i, pair_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8)
+        charge_i, charge_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8 * λ_elec)
         rc_test = 1.0u"nm"
 
-        for (scaled_inter, ref_inter) in (
-            (CoulombScaled(scheduler=scheduler), Coulomb()),
+        for (scaled_inter, ref_inter, ref_i, ref_j) in (
+            (CoulombScaled(scheduler=scheduler), Coulomb(), pair_i, pair_j),
             (CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
-             CoulombReactionField(dist_cutoff=rc_test)),
+             CoulombReactionField(dist_cutoff=rc_test), pair_i, pair_j),
             (CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
-             CoulombEwald(dist_cutoff=rc_test)),
+             CoulombEwald(dist_cutoff=rc_test), charge_i, charge_j),
         )
             @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
                            force(ref_inter, dr12, ref_i, ref_j);
@@ -444,9 +450,8 @@
         end
 
         scheduler = EleScaledLambdaScheduler()
-        λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
-        ref_i = Atom(charge=1.0 * λ_elec)
-        ref_j = Atom(charge=-0.8 * λ_elec)
+        λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
+        ref_i, ref_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8)
         scaled_inter = CoulombScaled(scheduler=scheduler)
 
         @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
@@ -457,8 +462,8 @@
                        atol=1e-9u"kJ * mol^-1")
     end
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5)
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
     inter = CoulombSoftCoreBeutler(α=0.3)
     @test isapprox(
         force(inter, dr13, a1, a1),
@@ -521,8 +526,8 @@
         )
 
         a1_rf = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
-        a1_l0 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0)
-        a1_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
+        a1_l0 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0, alch_role=Molly.CoreIRole)
+        a1_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole)
 
         @testset "lambda one matches reaction field" begin
             for dr_test in (dr12, dr13, dr14)
@@ -679,8 +684,8 @@
         )
 
         a1_l1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
-        a1_l0 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0)
-        a1_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
+        a1_l0 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0, alch_role=Molly.CoreIRole)
+        a1_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole)
 
         @testset "lambda one matches CoulombEwald" begin
             for dr_test in (dr12, dr13, dr14_ewald)
@@ -761,7 +766,7 @@
 
     @testset "Soft-core Exact Overlap Safeguards" begin
         dr_zero = zero(dr12)
-        overlap_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
+        overlap_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole)
         overlap_inters = (
             LennardJonesSoftCoreBeutler(α=0.3),
             LennardJonesSoftCoreGapsys(α=0.85),
@@ -785,8 +790,8 @@
             charge=1.0,
             σ=0.3u"nm",
             ϵ=0.2u"kJ * mol^-1",
-            λ=0.25,
-            alch_role=Molly.DeleteRole,
+            λ=0.0,
+            alch_role=Molly.InsertRole,
         )
         core_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
 
@@ -810,7 +815,7 @@
         @testset "default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
             scheduler = DefaultLambdaScheduler()
-            λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+            λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [
                 Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole),
@@ -859,7 +864,7 @@
         @testset "non-default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
             scheduler = EleScaledLambdaScheduler()
-            λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+            λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [
                 Atom(charge=1.2, λ=λ_state, alch_role=Molly.InsertRole),
@@ -899,8 +904,8 @@
             Atom(charge=-1.0, σ=0.25u"nm", ϵ=0.15u"kJ * mol^-1", λ=1.0),
         ]
         atoms_l05 = [
-            Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5),
-            Atom(charge=-1.0, σ=0.25u"nm", ϵ=0.15u"kJ * mol^-1", λ=0.5),
+            Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole),
+            Atom(charge=-1.0, σ=0.25u"nm", ϵ=0.15u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole),
         ]
 
         sys_ref = System(
