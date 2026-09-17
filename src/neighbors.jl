@@ -20,6 +20,19 @@ the `use_neighbors` field of the struct.
 """
 use_neighbors(inter) = false
 
+function check_neighbor_matrices(eligible, special)
+    if !isnothing(eligible) && !isnothing(special) && size(eligible) != size(special)
+        throw(ArgumentError("size of the eligible matrix $(size(eligible)) must be " *
+                            "the same as the size of the special matrix $(size(special))"))
+    end
+    if !isnothing(eligible) && !issymmetric(eligible)
+        throw(ArgumentError("eligible matrix is not symmetric"))
+    end
+    if !isnothing(special) && !issymmetric(special)
+        throw(ArgumentError("special matrix is not symmetric"))
+    end
+end
+
 """
     NoNeighborFinder()
 
@@ -352,6 +365,7 @@ function GPUNeighborFinder(;
                     excluded_i, excluded_j, special_i, special_j)
     end
 
+    check_neighbor_matrices(eligible, special)
     isnothing(eligible) && throw(ArgumentError("either n_atoms or eligible must be provided"))
     ET = gpu_exception_vector_type(eligible, device_vector_type)
     if isnothing(special)
@@ -412,6 +426,7 @@ function DistanceNeighborFinder(;
                                 dist_cutoff,
                                 special=zero(eligible),
                                 n_steps=10)
+    check_neighbor_matrices(eligible, special)
     return DistanceNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
                 eligible, dist_cutoff, special, n_steps)
 end
@@ -705,6 +720,7 @@ function TreeNeighborFinder(;
                             dist_cutoff,
                             special=zero(eligible),
                             n_steps=10)
+    check_neighbor_matrices(eligible, special)
     return TreeNeighborFinder(eligible, dist_cutoff, special, n_steps)
 end
 
@@ -809,8 +825,7 @@ function CellListMapNeighborFinder(;
                                    n_steps=10,
                                    x0=nothing,
                                    number_of_batches=(0, 0)) where T
-                            
-                                   
+    check_neighbor_matrices(eligible, special)
     # Obtain unit cell from boundary: If all boundaries are infinite, use `nothing`
     uc, D = clm_unitcell_arg(boundary)
 

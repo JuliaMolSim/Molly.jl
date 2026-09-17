@@ -653,11 +653,17 @@ end
     end
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
+        eligible_nonsym = [false false false; false true false; true false true]
         boundary=CubicBoundary(10.0u"nm")
         if neighbor_finder == CellListMapNeighborFinder
-            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm", boundary=boundary)
+            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm",
+                                 boundary=boundary)
+            @test_throws ArgumentError neighbor_finder(eligible=eligible_nonsym,
+                                                       dist_cutoff=2.0u"nm", boundary=boundary)
         else
             nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
+            @test_throws ArgumentError neighbor_finder(eligible=eligible_nonsym,
+                                                       dist_cutoff=2.0u"nm")
         end
         s = System(
             atoms=[Atom(), Atom(), Atom()],
