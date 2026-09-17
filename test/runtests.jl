@@ -139,4 +139,5 @@ runtests(
     testsuite=testsuite,
     init_code=init_code,
     exeflags=["--threads=$n_threads_per_job"],
+    retries=1,
 )
