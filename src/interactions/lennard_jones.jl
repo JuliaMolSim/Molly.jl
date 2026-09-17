@@ -453,19 +453,8 @@ end
     return λ * ((91 * C12 * (invR6 * invR6)) - (28 * C6 * invR6))
 end
 
-"""
-    λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special)
-
-The λ prefactor and the mixed `σ`/`ϵ` for one Lennard-Jones pair, as
-`(λ, λR, λ_params, σ, ϵ)`.
-
-The single place that decides how an LJ pair is scaled, shared by the pairwise soft cores and by
-the long-range dispersion correction so the two cannot disagree. 
-
-`λ` is the *energy* prefactor — the coupling in dual topology, `1` in single topology where the
-coupling lives in the interpolated `σ`/`ϵ` instead. `λR` is the soft-core radius coupling; a
-caller that only needs the asymptotic energy.
-"""
+# λ prefactor, soft-core coupling and mixed σ/ϵ of one Lennard-Jones pair, as (λ, λR, λ_params, σ, ϵ).
+# Shared by the pairwise soft cores and the dispersion correction so they cannot disagree.
 @inline λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special) =
     λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special, atom_i.σ)
 

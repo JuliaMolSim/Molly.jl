@@ -396,7 +396,7 @@
 
     @testset "Scaled Coulomb matches pre-scaled charges" begin
         λ_state = 0.75
-        scheduler = Molly.DefaultLambdaScheduler()
+        scheduler = DefaultLambdaScheduler()
         λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
         raw_i = Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole)
         raw_j = Atom(charge=-0.8, λ=λ_state, alch_role=Molly.InsertRole)
@@ -443,7 +443,7 @@
             @test iszero(potential_energy(scaled_inter, dr_zero, raw_i, raw_j))
         end
 
-        scheduler = Molly.EleScaledLambdaScheduler()
+        scheduler = EleScaledLambdaScheduler()
         λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
         ref_i = Atom(charge=1.0 * λ_elec)
         ref_j = Atom(charge=-0.8 * λ_elec)
@@ -809,7 +809,7 @@
 
         @testset "default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = Molly.DefaultLambdaScheduler()
+            scheduler = DefaultLambdaScheduler()
             λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
 
             atoms_raw = [
@@ -858,7 +858,7 @@
 
         @testset "non-default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = Molly.EleScaledLambdaScheduler()
+            scheduler = EleScaledLambdaScheduler()
             λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
 
             atoms_raw = [

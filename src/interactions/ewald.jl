@@ -1381,16 +1381,8 @@ function setup_coulomb_general(se::SetupPME, atoms, boundary, dist_cutoff, n_thr
     )
 end
 
-"""
-    ewald_pair_qq(scheduler, atom_i, atom_j, Val(T))
-
-The charge product a pair contributes under the reciprocal sum that `scheduler` selects.
-
-Used by the short range Ewald interactions and by [`EwaldExclusion`](@ref) so that both
-agree with the mesh by construction. Note that no role mixing appears here: the per atom
-effective charges already carry everything the mesh knows, so routing this through
-`mix_roles` could only introduce disagreement.
-"""
+# Charge product of a pair under the reciprocal sum the scheduler selects, shared by the short
+# range Ewald terms and `EwaldExclusion` so both agree with the mesh.
 @inline function ewald_pair_qq(scheduler, atom_i, atom_j, ::Val{T}; kwargs...) where T
     return effective_charge(atom_i, scheduler, Val(T)) *
            effective_charge(atom_j, scheduler, Val(T))
@@ -1399,7 +1391,7 @@ end
 @inline function ewald_pair_qq(scheduler::OpenFEScheduler, atom_i, atom_j, ::Val{T}; special=false) where T
     # OpenFE/OpenMM: charges scaled per atom on one grid
     λ_glob = T(λ_mixing(MinimumMixing(), (atom_i.λ, atom_j.λ)))
-    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); type="coulomb")
+    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role))
     λ, λR, λ_params = scale_elec_dual(scheduler, λ_glob, pair_role)
     if scheduler.dual
         qij = atom_i.charge * atom_j.charge
@@ -1528,37 +1520,8 @@ end
     return E
 end
 
-"""
-    PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-        ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
-        scheduler=LinearLambdaScheduler(dual=true), grad_safe=false,
-        n_threads=Threads.nthreads())
-
-Particle mesh Ewald summation for long range electrostatics implemented as an
-AtomsCalculators.jl calculator for GROMACS-based free energy calculations.
-
-Should be used alongside any alchemical version of [`CoulombEwald`](@ref) pairwise interaction,
-which provides the short range term, and the [`EwaldExclusion`](@ref) specific
-interaction, which provides the exclusions for bonded atoms.
-`dist_cutoff` and `error_tol` should match these interactions.
-
-`dist_cutoff` is the cutoff distance for short range interactions.
-`fixed_charges` should be set to `false` if the partial charges can change,
-for example when using a polarizable force field.
-`mesh_dims` gives the number of grid points in each dimension, overriding the
-value chosen from `error_tol`.
-`scheduler` scheduler used for λ-interpolation, this PME works only with GROMACSLambdaABFEScheduler or
-    GROMACSLambdaRBFEScheduler.
-`λ` the global λ assigned to the system.
-`grad_safe` should be set to `true` if gradients are going to be calculated
-with Enzyme.jl.
-`n_threads` is used to pre-allocate memory on CPU and plan the FFTs.
-
-This implementation is based on the implementation in GROMACS.
-
-Only compatible with 3D systems.
-Not compatible with infinite boundaries.
-"""
+# PME with λ-dependent charges, mixing the end-state grids as GROMACS does. Only works with
+# `GROMACSLambdaABFEScheduler` and `GROMACSLambdaRBFEScheduler`.
 struct PME_λ{T, D, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
@@ -1588,21 +1551,8 @@ struct PME_λ{T, D, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: Abstrac
     λ::T
 end
 
-"""
-    pme_lambda_mesh_weight(scheduler, global_λ, Val(T))
-
-The weight the two grid reciprocal sum mixes its end state grids with:
-`E = (1 - w)·E[q(0)] + w·E[q(1)]`.
-
-`w` is the electrostatic coupling `s_I(global_λ)`, **not** the global λ. Under a staged
-schedule they differ everywhere in between: `GROMACSLambdaABFEScheduler` has the charges fully
-off by `global_λ = 0.5`, while the sterics have not started. Taking `w` from the coupling is
-what lets electrostatics and sterics be staged independently — the direct, reciprocal, self
-and exclusion terms are all electrostatic and all read this one weight, while the LJ curve
-touches none of them.
-
-One weight can only serve both roles when `s_I(λ) == 1 - s_D(λ)`, which is checked here.
-"""
+# Weight w mixing the end-state grids, E = (1 - w)E[q(0)] + wE[q(1)]. w is the electrostatic
+# coupling rather than global_λ, which requires s_I(λ) == 1 - s_D(λ).
 function pme_lambda_mesh_weight(scheduler::Union{GROMACSLambdaABFEScheduler,GROMACSLambdaRBFEScheduler}, 
                                 global_λ, ::Val{T}) where T
     for l in 0.0:0.001:1.0
@@ -2224,8 +2174,8 @@ end
 
 function ewald_pe_forces!(Fs, vir, inter::PME_λ{T}, atoms, coords, boundary, force_units,
                           energy_units, ::Val{needs_vir}, calculate_forces=true,
-                          ::Val{needs_pe}=Val(true);
-                          n_threads::Integer=Threads.nthreads()) where {T, needs_vir, needs_pe}
+                          ::Val{needs_pe}=Val(true), ::Val{TH}=Val(Float64);
+                          n_threads::Integer=Threads.nthreads()) where {T, TH, needs_vir, needs_pe}
     n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
     order, ϵr, α, mesh_dims, λ = inter.order, inter.ϵr, inter.α, inter.mesh_dims, inter.λ
     V = volume(boundary)
@@ -2259,18 +2209,20 @@ function ewald_pe_forces!(Fs, vir, inter::PME_λ{T}, atoms, coords, boundary, fo
 
     if needs_pe || needs_vir
         if isnothing(inter.pc_sum) || inter.grad_safe
-            cA = effective_charge.(atoms, Ref(inter.scheduler), Val(T), T(0))
-            cB = effective_charge.(atoms, Ref(inter.scheduler), Val(T), T(1))
-            pc_sum      = (sum(cA), sum(cB))
-            pc_abs2_sum = (sum(abs2,cA), sum(abs2,cB))
+            atoms_cpu = from_device(atoms)
+            cA = effective_charge.(atoms_cpu, Ref(inter.scheduler), Val(T), T(0))
+            cB = effective_charge.(atoms_cpu, Ref(inter.scheduler), Val(T), T(1))
+            pc_sum      = (sum_float_type(identity, TH, cA), sum_float_type(identity, TH, cB))
+            pc_abs2_sum = (sum_float_type(abs2, TH, cA), sum_float_type(abs2, TH, cB))
         else
-            pc_sum, pc_abs2_sum = inter.pc_sum, inter.pc_abs2_sum
+            pc_sum, pc_abs2_sum = TH.(inter.pc_sum), TH.(inter.pc_abs2_sum)
         end
-        factor1 = -f_div_ϵr * T(π) / (2 * V * α^2)
-        factor2 = -f_div_ϵr * α / sqrt(T(π))
+        f_h, α_h, V_h = TH(f_div_ϵr), TH(α), TH(V)
+        factor1 = -f_h * TH(π) / (2 * V_h * α_h^2)
+        factor2 = -f_h * α_h / sqrt(TH(π))
         charge_E = factor1 .* (pc_sum .^ 2)
         self_E   = (factor2 .* pc_abs2_sum) .+ charge_E
-        λ_weights = (1 - λ, λ)
+        λ_weights = (1 - TH(λ), TH(λ))
         self_E_scalar = self_E ⋅ λ_weights
 
         if needs_vir

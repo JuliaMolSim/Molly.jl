@@ -11,29 +11,36 @@ CUDA.device!(parse(Int, get(ENV, "MOLLY_CUDA_DEVICE", "0")))
 FT = Float32
 AT = CuArray
 Δt = FT(4)u"fs"
-T0 = FT(310)u"K"
+T0 = FT(298.15)u"K"
 P0 = FT(1)u"bar"
 RNG_SEED = 20240520
 OUTPUT_PREFIX = "awh_solvation"
 
 N_LAMBDA_STATES = 20
 N_MD_STEPS = 50
-AWH_TIME = FT(15)u"ns"
+AWH_TIME = FT(30)u"ns"
 SOLVENT_EQUIL_TIME = FT(500)u"ps"
 VACUUM_EQUIL_TIME = FT(100)u"ps"
+CUTOFF = FT(1)u"nm"
 
-# Annihilate by running from full interactions at λ=1 to decoupled at λ=0.
-# InsertRole with DefaultLambdaScheduler keeps sterics fully on while
-# electrostatics are removed from λ=1 -> 0.5, then removes sterics from
-# λ=0.5 -> 0 using OpenFE-style charge scaling. Sterics use LJ soft core.
+# Experimental hydration free energy of benzene
+EXPERIMENT = -3.5u"kJ * mol^-1"
+
+# `AbsoluteFESystem` decouples the solute from global λ = 0 (fully coupled) to λ = 1 (fully
+# decoupled). The scheduler removes the charges over λ = 0 -> 0.5 with the sterics untouched,
+# then the sterics over λ = 0.5 -> 1 using the Beutler LJ soft core. The solute's own
+# electrostatics are annihilated with its charges, and intraLJ=true keeps its internal LJ.
+# For the GROMACS convention with two PME grids, use GROMACSLambdaABFEScheduler instead.
 lambda_schedule = FT.(range(1.0, stop=0.0, length=N_LAMBDA_STATES))
+scheduler = DefaultLambdaScheduler(dual=true, intraLJ=true)
 
 # --- Force Field Setup ---
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir   = joinpath(data_dir, "force_fields")
 ff = MolecularForceField(
-    joinpath.(ff_dir, ["tip3p_standard.xml", "gaff.xml", "ethanol.xml"])...;
+    joinpath.(ff_dir, ["tip3p_standard.xml", "benzene.xml"])...;
     units=true,
+    float_type=FT,
 )
 
 ##
@@ -87,117 +94,10 @@ end
 
 awh_visited_states(state) = collect(state.stats.active_λ)
 
-function alchemical_coulomb_scaled(coul::CoulombEwald)
-    return CoulombEwaldScaled(
-        dist_cutoff = coul.dist_cutoff,
-        error_tol = coul.error_tol,
-        use_neighbors = coul.use_neighbors,
-        scheduler = Molly.DefaultLambdaScheduler(),
-        weight_special = coul.weight_special,
-        coulomb_const = coul.coulomb_const,
-        approximate_erfc = coul.approximate_erfc,
-    )
-end
-
-function alchemical_coulomb_scaled(coul::Coulomb)
-    return CoulombScaled(
-        cutoff = coul.cutoff,
-        use_neighbors = coul.use_neighbors,
-        scheduler = Molly.DefaultLambdaScheduler(),
-        weight_special = coul.weight_special,
-        coulomb_const = coul.coulomb_const,
-    )
-end
-
-function alchemical_ewald_exclusion_data(data::Molly.EwaldExclusionData, scheduler)
-    return Molly.EwaldExclusionData(
-        data.dist_cutoff;
-        error_tol = data.error_tol,
-        ϵr = data.ϵr,
-        scheduler = scheduler,
-    )
-end
-
-function alchemical_lj_softcore(lj::LennardJones)
-    return LennardJonesSoftCoreGapsys(
-        cutoff = lj.cutoff,
-        α = FT(0.85),
-        use_neighbors = lj.use_neighbors,
-        shortcut = lj.shortcut,
-        σ_mixing = lj.σ_mixing,
-        ϵ_mixing = lj.ϵ_mixing,
-        scheduler = Molly.DefaultLambdaScheduler(),
-        weight_special = lj.weight_special,
-    )
-end
-
-function rebuild_alchemical_general_inters(sys_base, atoms_dev, lj_sc, coul_scaled)
-    rebuilt = Any[]
-
-    for inter in sys_base.general_inters
-        if inter isa PME
-            # Rebuild PME using the λ/role-modified atoms.
-            # fixed_charges=false avoids reusing charge sums cached from the λ=1 system.
-            push!(rebuilt, PME(
-                inter.dist_cutoff,
-                atoms_dev,
-                sys_base.boundary;
-                error_tol = inter.error_tol,
-                order = inter.order,
-                ϵr = inter.ϵr,
-                fixed_charges = false,
-                scheduler = coul_scaled.scheduler,
-                grad_safe = inter.grad_safe,
-            ))
-
-        elseif inter isa LJDispersionCorrection
-
-            # The λ-aware type: the plain `LJDispersionCorrection` ignores the scheduler and
-            # would give an unscaled tail here.
-            push!(rebuilt, Molly.LJDispersionCorrectionλ(
-                atoms_dev,
-                lj_sc.cutoff.dist_cutoff,
-                lj_sc.scheduler,
-                lj_sc.λ_mixing,
-                lj_sc.σ_mixing,
-                lj_sc.ϵ_mixing,
-            ))
-
-        else
-            # Keep unrelated general interactions, but avoid sharing mutable state.
-            push!(rebuilt, deepcopy(inter))
-        end
-    end
-
-    return tuple(rebuilt...)
-end
-
-function rebuild_alchemical_specific_inter_lists(sys_base, coul_scaled)
-    rebuilt = Any[]
-
-    for inter_list in sys_base.specific_inter_lists
-        if inter_list isa InteractionList2Atoms && inter_list.data isa Molly.EwaldExclusionData
-            data = alchemical_ewald_exclusion_data(inter_list.data, coul_scaled.scheduler)
-            push!(rebuilt, InteractionList2Atoms(
-                inter_list.is,
-                inter_list.js,
-                deepcopy(inter_list.inters),
-                copy(inter_list.types),
-                data,
-            ))
-        else
-            push!(rebuilt, deepcopy(inter_list))
-        end
-    end
-
-    return tuple(rebuilt...)
-end
-
 function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Random.default_rng())
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
-    dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : FT(1) * u"nm"
-    dist_buffer = is_vacuum ? FT(0) * u"nm" : FT(0.2) * u"nm"
-    nonbonded_method = is_vacuum ? dist_cutoff : SetupPME()
+    dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : CUTOFF
+    nonbonded_method = is_vacuum ? DistanceCutoff(dist_cutoff) : SetupPME()
     neighbor_finder_type = is_vacuum ? DistanceNeighborFinder : nothing
     awh_loggers = awh_solvation_loggers(is_vacuum)
 
@@ -208,7 +108,7 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Ran
         float_type=FT,
         boundary=boundary,
         dist_cutoff=dist_cutoff,
-        dist_buffer=dist_buffer,
+        dist_buffer=FT(0) * u"nm",
         neighbor_finder_type=neighbor_finder_type,
         nonbonded_method=nonbonded_method,
         constraints=:hbonds,
@@ -235,44 +135,25 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Ran
     simulate!(sys_base, int_eq, 10_000; rng=rng)
     simulate!(sys_base, integrator, equil_steps; rng=rng)
 
-    p_inters = sys_base.pairwise_inters
-    idx_lj   = findfirst(x -> x isa LennardJones, p_inters)
-    idx_coul = findfirst(x -> x isa Union{Coulomb, CoulombEwald}, p_inters)
-    isnothing(idx_lj) && error("could not find LennardJones pairwise interaction")
-    isnothing(idx_coul) && error("could not find a Coulomb pairwise interaction")
+    # The barostat changes the box during equilibration, so check that the minimum image
+    # convention still holds for the cutoff
+    if !is_vacuum
+        edge = minimum(Molly.box_sides(sys_base.boundary))
+        edge >= 2 * dist_cutoff || error("equilibrated box edge $edge is smaller than twice the cutoff")
+    end
 
-    lj_sc = alchemical_lj_softcore(p_inters[idx_lj])
-    cl_scaled = alchemical_coulomb_scaled(p_inters[idx_coul])
-
-    atoms_cpu = Molly.from_device(sys_base.atoms)
     thermo_states = ThermoState[]
 
     for λ in lambda_schedule
-        acopy = Atom[]
-        for a in atoms_cpu
-            if a.index ∈ solute_indices
-                # Only update the global lambda; the scheduler handles the component logic.
-                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, FT(λ), Molly.InsertRole))
-            else
-                push!(acopy, Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, FT(a.λ), a.alch_role))
-            end
-        end
-        atoms_dev = Molly.to_device([acopy...], AT)
-
-        general_inters = rebuild_alchemical_general_inters(
+        sys_w = AbsoluteFESystem(
             sys_base,
-            atoms_dev,
-            lj_sc,
-            cl_scaled,
-        )
-        specific_inter_lists = rebuild_alchemical_specific_inter_lists(sys_base, cl_scaled)
-
-        sys_w = System(
-            deepcopy(sys_base);
-            atoms = atoms_dev,
-            pairwise_inters = (lj_sc, cl_scaled),
-            general_inters = general_inters,
-            specific_inter_lists = specific_inter_lists,
+            FT(λ),
+            solute_indices;
+            scheduler = scheduler,
+            LJsoftcore = "beutler",
+            Csoftcore = "scaled",
+            array_type = AT,
+            float_type = FT,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -293,10 +174,11 @@ end
 
 ##
 
-solute_idx = 1:9
+solute_idx = 1:12
 
+# 4 nm cube of TIP3P water with 0.15 M NaCl, large enough for the 1 nm cutoff
 awh_state_solv, awh_sim_solv = setup_alchemical_awh(
-    joinpath(data_dir, "ethanol_solv.pdb"),
+    joinpath(data_dir, "benzene_solv_4.pdb"),
     solute_idx;
     is_vacuum=false,
     rng=MersenneTwister(RNG_SEED),
@@ -305,7 +187,7 @@ println()
 
 ##
 awh_state_vac, awh_sim_vac = setup_alchemical_awh(
-    joinpath(data_dir, "ethanol_vac.pdb"),
+    joinpath(data_dir, "benzene_vac.pdb"),
     solute_idx;
     is_vacuum=true,
     rng=MersenneTwister(RNG_SEED + 1),
@@ -434,27 +316,18 @@ save_state_histogram(
 
 ##
 
-dG_solv = f_solv[end] - f_solv[1]
-dG_vac  = f_vac[end]  - f_vac[1]
+# The first state is decoupled (λ = 1) and the last is coupled (λ = 0)
+dG_solv = f_solv[1] - f_solv[end]
+dG_vac  = f_vac[1]  - f_vac[end]
 
-# Standard gas state (1 bar) volume per molecule at T0
-V_gas = ustrip(u"nm^3", Unitful.k * T0 / P0)
-
-# Standard solution state (1 M = 1 mol/L) volume per molecule
-V_std = ustrip(u"nm^3", 1.0u"L" / (1.0u"mol" * Unitful.Na))
-
-# Analytical standard-state correction
-dG_std_corr = log(V_gas / V_std)
-
-# Final solvation free energy from the two-leg cycle
-dG = dG_vac - dG_solv + dG_std_corr
+# Hydration free energy from the two-leg cycle
+dG = dG_vac - dG_solv
 
 ##
 println("=========================================")
-println("Annihilation in solvent (kBT):   ", dG_solv)
-println("Annihilation in vacuum (kBT):    ", dG_vac)
-println("Standard State Correction (kBT): ", dG_std_corr)
-println("Solvation Free Energy (kBT):     ", dG)
+println("Annihilation in solvent (kBT): ", dG_solv)
+println("Annihilation in vacuum (kBT):  ", dG_vac)
+println("Hydration Free Energy (kBT):   ", dG)
 println("=========================================")
 
 ##
@@ -462,23 +335,18 @@ println("=========================================")
 beta = awh_state_solv.state_space.betas[1]
 
 println("=========================================")
-println("Annihilation in solvent (kJ mol^-1):   ", dG_solv / beta)
-println("Annihilation in vacuum (kJ mol^-1):    ", dG_vac / beta)
-println("Standard State Correction (kJ mol^-1): ", dG_std_corr / beta)
-println("Solvation Free Energy (kJ mol^-1):     ", dG / beta)
+println("Annihilation in solvent (kJ mol^-1): ", dG_solv / beta)
+println("Annihilation in vacuum (kJ mol^-1):  ", dG_vac / beta)
+println("Hydration Free Energy (kJ mol^-1):   ", dG / beta)
+println("Experiment (kJ mol^-1):              ", EXPERIMENT)
 println("=========================================")
 
 #=
+Result of a run with these settings:
 =========================================
-Annihilation in solvent (kBT):   8.642657
-Annihilation in vacuum (kBT):    3.4234502
-Standard State Correction (kBT): 3.249398594044294
-Solvation Free Energy (kBT):     -1.9698082159532646
-=========================================
-=========================================
-Annihilation in solvent (kJ mol^-1):   22.276306
-Annihilation in vacuum (kJ mol^-1):    8.823886
-Standard State Correction (kJ mol^-1): 8.375271054356045
-Solvation Free Energy (kJ mol^-1):     -5.077148049471093
+Annihilation in solvent (kJ mol^-1): -6.477
+Annihilation in vacuum (kJ mol^-1):  -9.984
+Hydration Free Energy (kJ mol^-1):   -3.507
+Experiment (kJ mol^-1):              -3.5 kJ mol^-1
 =========================================
 =#

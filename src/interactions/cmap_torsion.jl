@@ -348,17 +348,7 @@ end
     return pe
 end
 
-"""
-    CMAPTorsionλ(index, size, λ, res_num, res_id)
-
-Torsional correction map (CMAP) for sets of five atoms, for example protein ϕ and ψ
-backbone torsion angles scaled by λ for core atoms.
-
-The CMAP data is stored in the `data` field of the associated [`InteractionList5Atoms`](@ref).
-
-Only compatible with 3D systems.
-"""
-
+# λ version of `CMAPTorsion` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct CMAPTorsionλ{I,L,LM,SCH}
     index::I
     size::I

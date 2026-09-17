@@ -68,13 +68,7 @@ end
                                cos_ψ * (d.c4 + cos_ψ * d.c5))))
 end
 
-"""
-    RBTorsionλ(; f1, f2, f3, f4)
-
-A Ryckaert-Bellemans torsion angle between four atoms.
-
-Only compatible with 3D systems.
-"""
+# λ version of `RBTorsion` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct RBTorsionλ{T, LM, SCH}
     f1::T
     f2::T

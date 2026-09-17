@@ -140,20 +140,7 @@ end
     return E
 end
 
-@doc raw"""
-    PeriodicTorsionλ(; periodicities, phases, ks, proper)
-
-A periodic torsion angle between four atoms scaled by λ for core atoms and alchemical groups.
-
-`phases` are in radians.
-The potential energy is defined as
-```math
-V(\phi) = \sum_{n=1}^N k_n (1 + \cos(n \phi - \phi_{s,n}))
-```
-where `ϕ` is the angle between the planes defined by atoms (i, j, k) and (j, k, l).
-
-Only compatible with 3D systems.
-"""
+# λ version of `PeriodicTorsion` for alchemical systems, built by `to_lambda_function`.
 struct PeriodicTorsionλ{N, T, E, LM, SCH}
     periodicities::NTuple{N, Int}
     phases::NTuple{N, T}

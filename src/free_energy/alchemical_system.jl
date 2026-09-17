@@ -2,16 +2,8 @@ export
     AbsoluteFESystem,
     RelativeFESystem
 
-"""
-    to_lambda_inter_list(inter_list, scheduler, AT)
-
-Convert every entry of a specific interaction list to its λ counterpart.
-
-Types with no `to_lambda_function` method (`FENEBond`, `HarmonicPositionRestraint`, and the
-1-4 pair lists, whose conversion takes a soft core argument) are passed through unchanged
-with a warning rather than aborting the whole setup. They then fall under the default
-`virial_lambda_factor`, i.e. their virial is left unscaled.
-"""
+# λ version of every entry in a specific interaction list. Types without a `to_lambda_function`
+# method are kept unchanged with a warning, so their virial is not scaled.
 function to_lambda_inter_list(inter_list, scheduler, AT)
     inters_cpu = from_device(inter_list.inters)
     isempty(inters_cpu) && return inter_list
@@ -36,35 +28,39 @@ const softcore_dic = Dict("none" => DefaultSoftCore(),
                           "scaled" => ScaledSoftCore())
 
 """
-    AbsoluteFESystem(sys, global_λ, mapping; temp = 298.0u"K", units=true,
-                        scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
-                        array_type=Array, float_type=Float32, LJsoftcore="gapsys",
-                        Csoftcore="gapsys")
+    AbsoluteFESystem(sys, global_λ, mapping; temp=298.0u"K", units=true,
+                     scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
+                     array_type=Array, float_type=Float32, LJsoftcore="gapsys",
+                     Csoftcore="gapsys")
 
-Sets up a absolute free energy system, where atoms are transformed into alchemical atoms based on the
-provided indexes in the mapping. 
+Set up an alchemical system for an absolute free energy calculation, in which the atoms in
+`mapping` are decoupled from the rest of `sys`.
+
+The mapped atoms are fully coupled at `global_λ = 0` and fully decoupled at `global_λ = 1`.
+The atom order of `sys` is kept. Interactions are replaced by their λ-dependent versions and
+random velocities are generated at `temp`.
 
 # Arguments
-- `sys`: The reference system in which the solute is present.
-- `global_λ`: The global λ for the system.
-- `mapping`: A array with atom indexes for the solute that is annihilated.
-- `temp = 298.0u"K"`: Temperature to generate random velocities for the system, standard is 298K.
-- `units` = true``:  whether to use Unitful quantities.
-- `scheduler = DefaultLambdaScheduler(dual=true)`: Lambda scheduler used to transform global λ into
-lambda for sterics, electrostatics and bonded interactions. Options include: default, linear, openfe,
-    NAMD, quarters, electrostatics scaled. See the plots of the schedulers on the examples page.
-- `loggers = ()`:  the loggers that record properties of interest during a
-    simulation.
-- `array_type = Array`: the array type for the simulation, for example
-    use `CuArray` or `ROCArray` for GPU support.
-- `float_type = Float32`: 
-- `LJsoftcore = "gapsys"`: which softcore type to use for LennardJones potential, options are: "none" = regular LJ,
-"beutler" = softcore described in [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).,
-"gapsys" = softcore described in [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p),
-"scaled" = potential directly scaled by λ.
-- `Csoftcore = "gapsys"`: which softcore type to use for Coulomb potential, see options above.
+- `sys`: the [`System`](@ref) containing the atoms to decouple.
+- `global_λ`: the global λ of the system, from 0 (coupled) to 1 (decoupled).
+- `mapping`: a vector with the indices of the atoms to decouple.
+- `temp=298.0u"K"`: the temperature used to generate random velocities.
+- `units=true`: whether to use Unitful quantities.
+- `scheduler=DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
+    into the couplings of the steric, electrostatic and bonded interactions, for example
+    [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) or
+    [`OpenFEScheduler`](@ref). Absolute systems require dual topology (`dual=true`).
+- `loggers=()`: the loggers that record properties of interest during a simulation.
+- `array_type=Array`: the array type for the simulation, for example use `CuArray` or
+    `ROCArray` for GPU support.
+- `float_type=Float32`: the float type of the system. If the type of `global_λ` differs, the
+    type of `global_λ` is used.
+- `LJsoftcore="gapsys"`: the Lennard-Jones soft core, one of `"none"` (plain Lennard-Jones),
+    `"beutler"` ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)) or
+    `"gapsys"` ([Gapsys et al. 2012](https://doi.org/10.1021/ct300220p)).
+- `Csoftcore="gapsys"`: the Coulomb soft core, one of the options above or `"scaled"`, where
+    the potential is scaled directly by λ.
 """
-
 function AbsoluteFESystem(sys::System, global_λ, mapping; 
                         temp = 298.0u"K", 
                         units=true,
@@ -158,10 +154,8 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     # terms dispatch on the same scheduler through `ewald_pair_qq`, so all three Ewald terms
     # follow from this one choice and cannot be mismatched.
     GenerInteraction = []
-    has_ewald = false
     for inter in sys.general_inters
         if inter isa PME
-            has_ewald = true
             if scheduler isa GROMACSLambdaABFEScheduler
                 push!(GenerInteraction, PME_λ(inter.dist_cutoff, to_device(Atoms, AT), Boundary,
                                         grad_safe=inter.grad_safe;
@@ -181,18 +175,6 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
         else
             @warn "Currently $inter is not implemented for alchemical simulations"
         end
-    end
-
-    # The Ewald real space, exclusion and mesh terms are three halves of one interaction and
-    # only add up to a screened Coulomb sum when all three are scaled by the same λ. The mesh
-    # scales each atom's charge through the scheduler and so always annihilates the solute's
-    # intramolecular electrostatics; `intraC=true` would keep them switched on in the
-    # pairwise term alone, leaving the exclusion correction subtracting a reciprocal
-    # contribution the mesh never put there.
-    if has_ewald && scheduler.intraC
-        @warn "scheduler has intraC=true but the system uses a reciprocal sum; the solute's " *
-              "intramolecular electrostatics cannot be decoupled independently of the mesh. " *
-              "Use intraC=false (annihilation) with PME or PME_λ."
     end
 
     # Every specific interaction is converted to its λ counterpart, as `RelativeFESystem`
@@ -253,42 +235,48 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     return sys_final
 end
 
-# System A is the main reference system from which the environment atoms are taken
-# System B is only used for the Unique system B atoms and the parameters for Core atoms
-
 """
-    RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; temp = 298.0u"K", units=true,
-                        scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
-                        array_type=Array, float_type=Float32, LJsoftcore="gapsys",
-                        Csoftcore="gapsys")
+    RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; temp=298.0u"K", units=true,
+                     scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
+                     array_type=Array, float_type=Float32, LJsoftcore="gapsys",
+                     Csoftcore="gapsys")
 
-Sets up a relative free energy system, where atoms are interpolated between system A and system B. The mapping provides
-the atom indices for the core atoms, unique A and unique B atoms. 
+Set up a hybrid system for a relative free energy calculation that transforms system A
+(`global_λ = 0`) into system B (`global_λ = 1`).
+
+Core atoms are interpolated between their parameters in A and B, unique A atoms are decoupled
+and unique B atoms are coupled. The environment, every atom of `sysA` that is neither core nor
+unique A, is taken from `sysA`. The atoms of the returned system are ordered as core, unique A,
+unique B and environment. In dual topology each core atom is added twice, with the parameters
+of A and as a massless copy with the parameters of B. Interactions are replaced by their
+λ-dependent versions and random velocities are generated at `temp`.
 
 # Arguments
-- `sysA`: System A is the main reference system from which the environment atoms are taken.,
-- `sysB`: System B is only used for the Unique system B atoms and the parameters for Core atoms
-- `global_λ`: The global λ for the system.
-- `mapping`: A dictionary with arrays of atom indexes for "core", "unique_A", "unique_B".
-- `core_mapAB`: A dictionary of mapping for atom indices for core atoms in system A and matching atom indices
-for core atoms in B.
-- `temp = 298.0u"K"`: Temperature to generate random velocities for the system, standard is 298K.
-- `units` = true``:  whether to use Unitful quantities.
-- `scheduler = DefaultLambdaScheduler(dual=true)`: Lambda scheduler used to transform global λ into
-lambda for sterics, electrostatics and bonded interactions. Options include: default, linear, openfe,
-    NAMD, quarters, electrostatics scaled. See the plots of the schedulers on the examples page.
-- `loggers = ()`:  the loggers that record properties of interest during a
-    simulation.
-- `array_type = Array`: the array type for the simulation, for example
-    use `CuArray` or `ROCArray` for GPU support.
-- `float_type = Float32`: 
-- `LJsoftcore = "gapsys"`: which softcore type to use for LennardJones potential, options are: "none" = regular LJ,
-"beutler" = softcore described in [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).,
-"gapsys" = softcore described in [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p),
-"scaled" = potential directly scaled by λ.
-- `Csoftcore = "gapsys"`: which softcore type to use for Coulomb potential, see options above.
+- `sysA`: the [`System`](@ref) of state A, which also provides the environment.
+- `sysB`: the [`System`](@ref) of state B, which provides the unique B atoms and the B
+    parameters of the core atoms.
+- `global_λ`: the global λ of the system, from 0 (state A) to 1 (state B).
+- `mapping`: a dictionary of atom index vectors, where `"core"` and `"unique_A"` index into
+    `sysA` and `"unique_B"` into `sysB`. An `"env"` entry is added to it.
+- `core_mapAB`: a dictionary from each core atom index in `sysA` to its index in `sysB`.
+- `temp=298.0u"K"`: the temperature used to generate random velocities.
+- `units=true`: whether to use Unitful quantities.
+- `scheduler=DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
+    into the couplings of the steric, electrostatic and bonded interactions, for example
+    [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaRBFEScheduler`](@ref) or
+    [`OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and `dual=false`
+    single topology (parameter scaling).
+- `loggers=()`: the loggers that record properties of interest during a simulation.
+- `array_type=Array`: the array type for the simulation, for example use `CuArray` or
+    `ROCArray` for GPU support.
+- `float_type=Float32`: the float type of the system. If the type of `global_λ` differs, the
+    type of `global_λ` is used.
+- `LJsoftcore="gapsys"`: the Lennard-Jones soft core, one of `"none"` (plain Lennard-Jones),
+    `"beutler"` ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)) or
+    `"gapsys"` ([Gapsys et al. 2012](https://doi.org/10.1021/ct300220p)).
+- `Csoftcore="gapsys"`: the Coulomb soft core, one of the options above or `"scaled"`, where
+    the potential is scaled directly by λ.
 """
-
 function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_mapAB; 
                         temp = 298.0u"K", 
                         units=true,

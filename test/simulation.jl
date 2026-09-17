@@ -981,7 +981,7 @@ end
             coords=coords,
             boundary=boundary,
             # SoftCore no longer takes λ; it relies on the atom's λ properties
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=Molly.LinearLambdaScheduler(dual=true)),),
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder
         )
         # All states share the exact same temperature and integrator parameters
@@ -1486,7 +1486,7 @@ end
             atoms=atoms_λ,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=Molly.LinearLambdaScheduler(dual=true)),),
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder,
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")

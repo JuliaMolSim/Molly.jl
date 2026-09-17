@@ -50,17 +50,7 @@ end
     return a.k * (1 + cos(θ - a.θ0))
 end
 
-@doc raw"""
-    CosineAngleλ(; k, θ0)
-
-A cosine bond angle between three atoms scaled by λ for core atoms.
-
-`θ0` is in radians.
-The potential energy is defined as
-```math
-V(\theta) = k(1 + \cos(\theta - \theta_0))
-```
-"""
+# λ version of `CosineAngle` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct CosineAngleλ{K, D, LM, SCH}
     k::K
     θ0::D

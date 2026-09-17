@@ -57,18 +57,7 @@ end
     return SpecificForce3Atoms(zero_pairwise_force(dr, F), zero_pairwise_force(dr, F), zero_pairwise_force(dr, F))
 end
 
-@doc raw"""
-    HarmonicAngleλ(; k, θ0)
-
-A harmonic bond angle between three atoms that are core atoms.
-
-`θ0` is in radians.
-The second atom is the middle atom.
-The potential energy is defined as
-```math
-V(\theta) = \frac{1}{2} k (\theta - \theta_0)^2
-```
-"""
+# λ version of `HarmonicAngle` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct HarmonicAngleλ{K, D, LM, SCH}
     k::K
     θ0::D

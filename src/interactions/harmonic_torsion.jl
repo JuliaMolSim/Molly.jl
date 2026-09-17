@@ -53,20 +53,7 @@ end
     return SpecificForce4Atoms(zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F))
 end
 
-@doc raw"""
-    HarmonicTorsionλ(; k, θ0)
-
-A harmonic torsion angle between four atoms, often used for improper torsions scaled by λ for core atoms and alchemical groups.
-
-`θ0` is in radians.
-The potential energy is defined as
-```math
-V(\theta) = k (\theta - \theta_0)^2
-```
-where `θ` is the angle between the planes defined by atoms (i, j, k) and (j, k, l).
-
-Only compatible with 3D systems.
-"""
+# λ version of `HarmonicTorsion` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct HarmonicTorsionλ{K, D, LM, SCH}
     k::K
     θ0::D

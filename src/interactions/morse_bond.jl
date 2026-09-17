@@ -42,16 +42,7 @@ end
     return b.D * (1 - ralp)^2
 end
 
-@doc raw"""
-    MorseBond(; D, a, r0)
-
-A Morse potential bond between two atoms.
-
-The potential energy is defined as
-```math
-V(r) = D(1 - e^{-a(r - r_0)})^2
-```
-"""
+# λ version of `MorseBond` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct MorseBondλ{T, A, R, LM, SCH}
     D::T
     a::A

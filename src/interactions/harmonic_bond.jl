@@ -42,18 +42,7 @@ end
     return SpecificForce2Atoms(zero_pairwise_force(dr, F), zero_pairwise_force(dr, F))
 end
 
-@doc raw"""
-    HarmonicBondλ(; k, r0)
-
-A harmonic bond between two atoms that is scaled by λ for core atoms.
-
-The potential energy is defined as
-```math
-V(r) = \frac{1}{2} k (r - r_0)^2
-k = (1-λ)*k^a + λ*k^b
-r_0 = (1-λ)*r_0^a + λ*r_0^b
-```
-"""
+# λ version of `HarmonicBond` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct HarmonicBondλ{K, D, LM, SCH}
     k::K
     r0::D

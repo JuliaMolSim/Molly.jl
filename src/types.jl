@@ -1641,8 +1641,11 @@ construction where `n` is the number of threads to be used per replica.
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
     to duplicating the boundary of the reference system (the first `ThermoState`).
-- `replica_loggers=nothing`: Logger collections for each replica. Stateful logger objects and
-    `TrajectoryWriter` file paths cannot be shared across replicas.
+- `replica_neighbor_finders=nothing`: The neighbor finder of each thermodynamic state. If not
+    provided, each state gets a copy of the neighbor finder of its system.
+- `replica_loggers=nothing`: Logger collections for each thermodynamic state, recording the replica
+    currently in that state. Stateful logger objects and `TrajectoryWriter` file paths cannot be
+    shared between states.
 - `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
     a default [`ReplicaExchangeLogger`](@ref) is used.
 - `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
@@ -1770,22 +1773,20 @@ function AtomsBase.atomic_number(s::ReplicaSystem)
     end
 end
 
-function ReplicaSystem(sys::ReplicaSystem;
-                        replica_coords=sys.replica_coords,
-                        replica_velocities=sys.replica_velocities,
-                )
-    D = AtomsBase.n_dimensions(sys.replica_boundaries[1])
-    T = float_type(sys.replica_boundaries[1])
+function ReplicaSystem(sys::ReplicaSystem{D, <:Any, T, TH};
+                       replica_coords=sys.replica_coords,
+                       replica_velocities=sys.replica_velocities) where {D, T, TH}
     AT = array_type(replica_coords[1])
-    return ReplicaSystem{D, AT, T, typeof(sys.partition), typeof(sys.betas), typeof(sys.integrators), 
-                         typeof(replica_coords), typeof(replica_velocities), 
-                         typeof(sys.replica_boundaries), typeof(sys.replica_neighbor_finders), 
-                         typeof(sys.replica_loggers), typeof(sys.state_pairwise_inters), 
+    return ReplicaSystem{D, AT, T, TH, typeof(sys.partition), typeof(sys.betas), typeof(sys.integrators),
+                         typeof(replica_coords), typeof(replica_velocities),
+                         typeof(sys.replica_boundaries), typeof(sys.replica_neighbor_finders),
+                         typeof(sys.replica_loggers), typeof(sys.state_pairwise_inters),
                          typeof(sys.state_specific_inter_lists), typeof(sys.state_general_inters),
-                         typeof(sys.exchange_logger), typeof(sys.data)}(sys.partition, sys.n_replicas, sys.betas, sys.integrators, replica_coords, replica_velocities, 
-        sys.replica_boundaries, sys.replica_neighbor_finders, sys.replica_loggers, 
+                         typeof(sys.exchange_logger), typeof(sys.data)}(
+        sys.partition, sys.n_replicas, sys.betas, sys.integrators, replica_coords, replica_velocities,
+        sys.replica_boundaries, sys.replica_neighbor_finders, sys.replica_loggers,
         sys.state_pairwise_inters, sys.state_specific_inter_lists, sys.state_general_inters,
-        sys.state_indices, sys.exchange_logger, sys.current_step, true, sys.data
+        sys.state_indices, sys.exchange_logger, sys.current_step, sys.initial_log_pending, sys.data,
     )
 end
 

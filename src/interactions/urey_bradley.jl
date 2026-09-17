@@ -67,19 +67,7 @@ end
     return (a.kangle / 2) * (θ - a.θ0) ^ 2 + (a.kbond / 2) * (rik - a.r0) ^ 2
 end
 
-@doc raw"""
-    UreyBradleyλ(; kangle, θ0, kbond, r0)
-
-An interaction between three atoms consisting of a harmonic bond angle
-and a harmonic bond between the outer atoms scaled by λ for core atoms.
-
-`θ0` is in radians.
-The second atom is the middle atom.
-The potential energy is defined as
-```math
-V(\theta, r) = \frac{1}{2} k_a (\theta - \theta_0)^2 + \frac{1}{2} k_b (r - r_0)^2
-```
-"""
+# λ version of `UreyBradley` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct UreyBradleyλ{KA, A, KB, D, LM, SCH}
     kangle::KA
     θ0::A

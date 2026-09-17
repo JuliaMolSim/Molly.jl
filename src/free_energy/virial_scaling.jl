@@ -1,17 +1,5 @@
-"""
-    virial_lambda_factor(inter, atoms::Tuple)
-
-Factor applied to a specific interaction's contribution to the virial.
-
-The default is `1`: the force already carries whatever alchemical scaling applies, either
-because the interaction is not alchemical or because it scales itself. [`EwaldExclusion`](@ref)
-(through its charge product) and `LennardJones14SoftCoreGapsys` are the two self-scaling
-specific interactions, which is why neither carries a λ suffix — the suffix marks types that
-consult a scheduler, and those two bake the coupling into their parameters instead.
-
-Defaulting to `1` means an interaction nobody remembers to register keeps the physically
-correct `Σ r ⊗ f` rather than being silently mis-scaled.
-"""
+# Factor on a specific interaction's virial contribution. The default of 1 is correct whenever
+# the force already carries the alchemical scaling.
 @inline virial_lambda_factor(inter, atoms) = 1
 
 # The bonded interactions an alchemical system is built from. `AbsoluteFESystem` and
