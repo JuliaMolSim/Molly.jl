@@ -79,17 +79,27 @@ function to_lambda_function(inter::HarmonicBond; λ_mixing=MinimumMixing(), sche
     return HarmonicBondλ(k=inter.k, r0=inter.r0, λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
-function to_lambda_function_single(interA::Union{HarmonicBond, Nothing}, interB::Union{HarmonicBond, Nothing}; 
+function to_lambda_function_single(interA::HarmonicBond, interB::Nothing; 
                                    λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
-    ref = isnothing(interA) ? interB : interA
-    
-    k_A  = isnothing(interA) ? ref.k  : interA.k
-    k_B  = isnothing(interB) ? ref.k  : interB.k
-    r0_A = isnothing(interA) ? ref.r0 : interA.r0
-    r0_B = isnothing(interB) ? ref.r0 : interB.r0
+    k_A  = interA.k
+    k_B  = interA.k
+    r0_A = interA.r0
+    r0_B = interA.r0
     
     return HarmonicBondλ(k=(k_A, k_B), r0=(r0_A, r0_B), λ_mixing=λ_mixing, scheduler=scheduler)
 end
+
+
+function to_lambda_function_single(interA::Nothing, interB::HarmonicBond; 
+                                   λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    k_A  = interB.k
+    k_B  = interB.k
+    r0_A = interB.r0
+    r0_B = interB.r0
+    
+    return HarmonicBondλ(k=(k_A, k_B), r0=(r0_A, r0_B), λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
 
 function update_lambda_function(existing_lambda::HarmonicBondλ, interB::HarmonicBond)
     return HarmonicBondλ(k=(existing_lambda.k[1], interB.k), 

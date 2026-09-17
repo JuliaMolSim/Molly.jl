@@ -237,21 +237,34 @@ end
 @inline tuplejoin(x, y) = (x..., y...)
 @inline Base.zero(x::Tuple) = (zero(i) for i in x)
 
-function to_lambda_function_single(interA::Union{PeriodicTorsion, Nothing}, interB::Union{PeriodicTorsion, Nothing}; 
+function to_lambda_function_single(interA::PeriodicTorsion, interB::Nothing; 
                                    λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
-    ref = isnothing(interA) ? interB : interA
-    
-    periodicities_A  = isnothing(interA) ? zero(ref.periodicities)  : interA.periodicities
-    periodicities_B  = isnothing(interB) ? zero(ref.periodicities)  : interB.periodicities
-    phases_A  = isnothing(interA) ? zero(ref.phases)  : interA.phases
-    phases_B  = isnothing(interB) ? zero(ref.phases)  : interB.phases
-    ks_A = isnothing(interA) ? zero(ref.ks) : interA.ks
-    ks_B = isnothing(interB) ? zero(ref.ks) : interB.ks
+    periodicities_A  = interA.periodicities
+    periodicities_B  = zero(interA.periodicities)
+    phases_A  = interA.phases
+    phases_B  = zero(interA.phases)
+    ks_A = interA.ks
+    ks_B = zero(interA.ks)
     
     return PeriodicTorsionλ(periodicities=tuplejoin(periodicities_A, periodicities_B), 
                             phases=tuplejoin(phases_A, phases_B), ks=tuplejoin(ks_A,ks_B), proper=ref.proper, 
                             λ_mixing=λ_mixing, scheduler=scheduler)
 end
+
+function to_lambda_function_single(interA::Nothing, interB::PeriodicTorsion; 
+                                   λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    periodicities_A  = zero(interB.periodicities) 
+    periodicities_B  = interB.periodicities
+    phases_A  = zero(interB.phases) 
+    phases_B  = interB.phases
+    ks_A = zero(interB.ks) 
+    ks_B = interB.ks
+    
+    return PeriodicTorsionλ(periodicities=tuplejoin(periodicities_A, periodicities_B), 
+                            phases=tuplejoin(phases_A, phases_B), ks=tuplejoin(ks_A,ks_B), proper=ref.proper, 
+                            λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
 
 function update_lambda_function(existing_lambda::PeriodicTorsionλ, interB::PeriodicTorsion)
     return PeriodicTorsionλ(periodicities=tuplejoin(existing_lambda.periodicities[1:(end/2)], interB.periodicities), 

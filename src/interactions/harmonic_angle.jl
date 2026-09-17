@@ -97,14 +97,22 @@ function to_lambda_function(inter::HarmonicAngle; λ_mixing=MinimumMixing(), sch
     return HarmonicAngleλ(k=inter.k, θ0=inter.θ0, λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
-function to_lambda_function_single(interA::Union{HarmonicAngle, Nothing}, interB::Union{HarmonicAngle, Nothing}; 
+function to_lambda_function_single(interA::HarmonicAngle, interB::Nothing; 
                                    λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
-    ref = isnothing(interA) ? interB : interA
+    k_A  = interA.k
+    k_B  = interA.k 
+    θ0_A = interA.θ0
+    θ0_B = interA.θ0
     
-    k_A  = isnothing(interA) ? ref.k  : interA.k
-    k_B  = isnothing(interB) ? ref.k  : interB.k
-    θ0_A = isnothing(interA) ? ref.θ0 : interA.θ0
-    θ0_B = isnothing(interB) ? ref.θ0 : interB.θ0
+    return HarmonicAngleλ(k=(k_A, k_B), θ0=(θ0_A, θ0_B), λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::Nothing, interB::HarmonicAngle; 
+                                   λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    k_A  = interB.k 
+    k_B  = interB.k
+    θ0_A = interB.θ0 
+    θ0_B = interB.θ0
     
     return HarmonicAngleλ(k=(k_A, k_B), θ0=(θ0_A, θ0_B), λ_mixing=λ_mixing, scheduler=scheduler)
 end
