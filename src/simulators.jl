@@ -2137,6 +2137,59 @@ function remd_exchange!(sys::ReplicaSystem,
     return delta, should_exchange
 end
 
+# Total steps, exchange cycles, steps per cycle and steps left over after the last cycle
+function remd_schedule(remd_sim::ReplicaExchangeMD, n_steps_or_time)
+    n_steps = calc_n_steps(n_steps_or_time, remd_sim.dt)
+    n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
+    cycle_length = n_cycles > 0 ? n_steps ÷ n_cycles : 0
+    remaining_steps = n_cycles > 0 ? n_steps % n_cycles : n_steps
+    return n_steps, n_cycles, cycle_length, remaining_steps
+end
+
+remd_logger_mode(sys::ReplicaSystem, run_loggers) =
+    run_loggers == false ? false : (sys.initial_log_pending ? true : :skipstart)
+
+# States built from the same System share interaction and integrator objects, and threads running
+# those states together must not share mutable buffers, so any repeated object is copied
+function remd_unshared(items)
+    seen = Base.IdSet{Any}()
+    return map(items) do x
+        x in seen ? deepcopy(x) : (push!(seen, x); x)
+    end
+end
+
+# Attempt exchanges between neighbouring states, alternating which pairs are tried every cycle
+function remd_exchange_sweep!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, cycle::Integer,
+                              step_n::Integer, run_loggers, n_threads::Integer, rng)
+    log_exchanges = run_loggers != false && !isnothing(sys.exchange_logger)
+    n_attempts = 0
+    for n in (1 + cycle % 2):2:(sys.n_replicas - 1)
+        n_attempts += 1
+        Δ, exchanged = remd_exchange!(sys, remd_sim, n, n + 1; rng=rng)
+        if log_exchanges && exchanged
+            log_exchange!(sys.exchange_logger, sys, nothing, step_n, nothing;
+                          indices=(n, n + 1), delta=Δ, n_threads=n_threads)
+        end
+    end
+    if log_exchanges
+        log_exchange!(sys.exchange_logger, sys, nothing, step_n, nothing)
+    end
+    return n_attempts
+end
+
+function finish_remd!(sys::ReplicaSystem, n_steps, n_attempts, init_step, run_loggers)
+    if run_loggers != false && !isnothing(sys.exchange_logger)
+        if sys.exchange_logger isa ReplicaExchangeLogger
+            finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts,
+                         end_step=(init_step + n_steps))
+        else
+            finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts)
+        end
+    end
+    sys.current_step = init_step + n_steps
+    return sys
+end
+
 @doc raw"""
     simulate_remd!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, n_steps::Integer;
                    <keyword arguments>)
@@ -2217,27 +2270,6 @@ function simulate_remd!(sys::ReplicaSystem,
     return finish_remd!(sys, n_steps, n_attempts, init_step, run_loggers)
 end
 
-# Total steps, exchange cycles, steps per cycle and steps left over after the last cycle
-function remd_schedule(remd_sim::ReplicaExchangeMD, n_steps_or_time)
-    n_steps = calc_n_steps(n_steps_or_time, remd_sim.dt)
-    n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
-    cycle_length = n_cycles > 0 ? n_steps ÷ n_cycles : 0
-    remaining_steps = n_cycles > 0 ? n_steps % n_cycles : n_steps
-    return n_steps, n_cycles, cycle_length, remaining_steps
-end
-
-remd_logger_mode(sys::ReplicaSystem, run_loggers) =
-    run_loggers == false ? false : (sys.initial_log_pending ? true : :skipstart)
-
-# States built from the same System share interaction and integrator objects, and threads running
-# those states together must not share mutable buffers, so any repeated object is copied
-function remd_unshared(items)
-    seen = Base.IdSet{Any}()
-    return map(items) do x
-        x in seen ? deepcopy(x) : (push!(seen, x); x)
-    end
-end
-
 # State k integrates the replica currently in it, `state_indices[k]`, and records into its own
 # loggers. Coordinates, velocities and the boundary are written back to that replica.
 function remd_propagate_cpu!(sys::ReplicaSystem, general_inters, integrators, n_steps, start_step,
@@ -2273,54 +2305,6 @@ function remd_propagate_cpu!(sys::ReplicaSystem, general_inters, integrators, n_
     end
     sys.initial_log_pending = false
     return sys
-end
-
-# Attempt exchanges between neighbouring states, alternating which pairs are tried every cycle
-function remd_exchange_sweep!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, cycle::Integer,
-                              step_n::Integer, run_loggers, n_threads::Integer, rng)
-    log_exchanges = run_loggers != false && !isnothing(sys.exchange_logger)
-    n_attempts = 0
-    for n in (1 + cycle % 2):2:(sys.n_replicas - 1)
-        n_attempts += 1
-        Δ, exchanged = remd_exchange!(sys, remd_sim, n, n + 1; rng=rng)
-        if log_exchanges && exchanged
-            log_exchange!(sys.exchange_logger, sys, nothing, step_n, nothing;
-                          indices=(n, n + 1), delta=Δ, n_threads=n_threads)
-        end
-    end
-    if log_exchanges
-        log_exchange!(sys.exchange_logger, sys, nothing, step_n, nothing)
-    end
-    return n_attempts
-end
-
-function finish_remd!(sys::ReplicaSystem, n_steps, n_attempts, init_step, run_loggers)
-    if run_loggers != false && !isnothing(sys.exchange_logger)
-        if sys.exchange_logger isa ReplicaExchangeLogger
-            finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts,
-                         end_step=(init_step + n_steps))
-        else
-            finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts)
-        end
-    end
-    sys.current_step = init_step + n_steps
-    return sys
-end
-
-# Calculate k almost equal patitions of n
-@inline function equal_parts(n, k)
-    ndiv = n ÷ k
-    nrem = n % k
-    n_parts = ntuple(i -> (i <= nrem) ? ndiv + 1 : ndiv, k)
-    return n_parts
-end
-
-function get_gpu_devices(::Val{false})
-    return nothing
-end
-
-function set_gpu_device!(gpu_id, ::Val{false})
-    return nothing
 end
 
 function simulate_remd!(sys::ReplicaSystem{<:Any, <:AbstractGPUArray},
@@ -2418,6 +2402,25 @@ function remd_propagate_gpu!(sys::ReplicaSystem, rep_id_proc, n_proc, n_steps, s
     return sys
 end
 
+# Additional helper function of GPU HREMD
+# Calculate k almost equal patitions of n
+@inline function equal_parts(n, k)
+    ndiv = n ÷ k
+    nrem = n % k
+    n_parts = ntuple(i -> (i <= nrem) ? ndiv + 1 : ndiv, k)
+    return n_parts
+end
+
+# Set GPU devices
+function get_gpu_devices(::Val{false})
+    return nothing
+end
+
+function set_gpu_device!(gpu_id, ::Val{false})
+    return nothing
+end
+
+# Reset trajectorywriter on processes
 is_c_pointer_type(::Type{<:Ptr}) = true
 is_c_pointer_type(::Type{<:Chemfiles.CxxPointer}) = true
 is_c_pointer_type(::Type) = false
@@ -2495,7 +2498,6 @@ const remd_workers_key = Ref{Any}(nothing)
         end
     end
 
-    println("Transferring data from main process to GPUs")
     @sync for (i, rep_ids) in enumerate(rep_id_proc)
         @async begin
         remotecall_fetch(workers()[i], rep_ids, sys) do rep_id, rep_sys
@@ -2517,7 +2519,6 @@ const remd_workers_key = Ref{Any}(nothing)
         end
         end
     end
-    println("Done with process and GPU setup")
     remd_workers_key[] = key
 
     return rep_id_proc, n_blocks
