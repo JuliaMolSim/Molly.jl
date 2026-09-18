@@ -152,7 +152,7 @@ end
 
 @testset "Hamiltonian REMD" begin
     Random.seed!(1234)
-    rng = Xoshiro(10)
+    rng = Xoshiro(100)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
