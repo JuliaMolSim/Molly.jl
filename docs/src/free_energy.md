@@ -1516,6 +1516,8 @@ Hydration Free Energy (kJ mol^-1):   -3.763
 =========================================
 ```
 
+The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 ([Kashefolgheta et al. 2020](https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)), 0.09 kJ mol^-1 above this result.
+
 ## Free energies with TSS
 
 ### Method overview
@@ -2109,6 +2111,8 @@ Jackknife SE (kJ mol^-1):            0.176
 =========================================
 ```
 
+The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 ([Kashefolgheta et al. 2020](https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)), 0.23 kJ mol^-1 above this result, or 1.3 jackknife standard errors.
+
 ## Free energies with REMD
 
 ### Method overview
@@ -2539,4 +2543,4 @@ Lowest pair acceptance in solvent:   0.163
 =========================================
 ```
 
-A single run of this length is worth about $\pm 0.5$ kJ mol^-1: the first and second halves of the samples of this run differ by 0.9 kJ mol^-1, while the vacuum leg reproduces to 0.001 kJ mol^-1 between runs, so the scatter comes from the solvated leg alone. Its ladder mixes slowly where the cavity forms, the dip around states 3 and 4 in the acceptance plot above. Adding $\lambda$ states in that region, so that neighbouring states overlap more, and running for longer both reduce the scatter.
+The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 ([Kashefolgheta et al. 2020](https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)), 0.52 kJ mol^-1 above this result, which is about the scatter of a single run. A single run of this length is worth about $\pm 0.5$ kJ mol^-1: the first and second halves of the samples of this run differ by 0.9 kJ mol^-1, while the vacuum leg reproduces to 0.001 kJ mol^-1 between runs, so the scatter comes from the solvated leg alone. Its ladder mixes slowly where the cavity forms, the dip around states 3 and 4 in the acceptance plot above. Adding $\lambda$ states in that region, so that neighbouring states overlap more, and running for longer both reduce the scatter.

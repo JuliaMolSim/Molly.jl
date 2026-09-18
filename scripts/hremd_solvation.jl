@@ -34,8 +34,9 @@ cycles_per_sample = Int(round(SAMPLE_TIME / Δt)) / Int(round(EXCHANGE_TIME / Δ
 isinteger(cycles_per_sample) && iseven(Int(cycles_per_sample)) ||
     error("SAMPLE_TIME must be a whole and even number of exchange cycles")
 
-# Experimental hydration free energy of benzene
-EXPERIMENT = -3.5u"kJ * mol^-1"
+# Experimental hydration free energy of benzene, -3.67 ± 0.05 kJ/mol (Kashefolgheta et al. 2020,
+# https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)
+EXPERIMENT = -3.67u"kJ * mol^-1"
 
 # Replica exchange uses the default random number generator
 Random.seed!(RNG_SEED)

@@ -26,8 +26,9 @@ SOLVENT_EQUIL_TIME = FT(500)u"ps"
 VACUUM_EQUIL_TIME = FT(100)u"ps"
 CUTOFF = FT(1)u"nm"
 
-# Experimental hydration free energy of benzene
-EXPERIMENT = -3.5u"kJ * mol^-1"
+# Experimental hydration free energy of benzene, -3.67 ± 0.05 kJ/mol (Kashefolgheta et al. 2020,
+# https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)
+EXPERIMENT = -3.67u"kJ * mol^-1"
 
 # `AbsoluteFESystem` decouples the solute from global λ = 0 (fully coupled) to λ = 1 (fully
 # decoupled). The scheduler removes the charges over λ = 0 -> 0.5 with the sterics untouched,
