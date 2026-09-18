@@ -2057,7 +2057,6 @@ lines!(
 )
 
 axislegend(position = :rt, labelsize = 24)
-ylims!(ax_df, -5, 0.5)
 display(fig_df)
 
 save("tss_solvation_convergence.png", fig_df)

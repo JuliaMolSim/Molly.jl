@@ -367,9 +367,6 @@ axislegend(
     labelsize = 24
 )
 
-ylims!(ax_df, -5, 0.5)
-
-
 display(fig_df)
 
 save("$(OUTPUT_PREFIX)_convergence.png", fig_df)
