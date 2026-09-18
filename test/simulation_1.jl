@@ -82,7 +82,7 @@ end
     n_frames = (n_steps ÷ 100) + 1
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
+    simulator = VelocityVerlet(dt=2.0u"fs", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
 
     TV = typeof(random_velocity(10.0u"g/mol", temp))
     TP = typeof(0.2u"kJ * mol^-1")
@@ -295,7 +295,7 @@ end
         @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
                             typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
 
-        simulator_unc = VelocityVerlet(dt=0.002u"ps")
+        simulator_unc = VelocityVerlet(dt=2.0u"fs")
         simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads, run_loggers=false)
     end
 end
