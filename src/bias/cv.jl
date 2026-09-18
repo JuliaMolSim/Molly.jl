@@ -10,6 +10,7 @@ export
     cv_gradient,
     CalcRg,
     CalcRMSD,
+    CalcAngle,
     CalcTorsion
 
 # Does not account for periodic boundary conditions, assumes appropriate unwrapping
@@ -218,6 +219,71 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     dist_val = dist_between_groups(cv.dist_type, coords_1, coords_2, boundary, atoms_1, atoms_2)
     return dist_val
 end
+
+"""
+    CalcAngle(atom_inds::AbstractVector{Int}; correction=:pbc, has_virial::Bool=true)
+
+A collective variable that calculates the angle defined by three atoms.
+
+The angle is defined by the angle between the vectors (j -> i) and (j -> k), where the indices are given by `atom_inds`.
+
+# Fields
+- `atom_inds::AbstractVector{Int}`: The indices of the three atoms (i, j, k) defining the angle.
+- `correction::Symbol`: The method used to handle periodic boundary conditions. Defaults to `:pbc`.
+- `has_virial::Bool`: Whether the virial contribution should be calculated for this collective variable. Defaults to `true`.
+"""
+struct CalcAngle
+    atom_inds::Vector{Int}
+    correction::Symbol
+    has_virial::Bool
+
+    function CalcAngle(atom_inds=[], correction=:pbc, has_virial = true)
+        check_correction_arg(correction)
+        return new(atom_inds, correction, has_virial)
+    end
+end
+
+function calculate_cv(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
+    c = @view coords[collect(cv.atom_inds)]
+    return  bond_angle(c[1], c[2], c[3], boundary)
+end
+
+function cv_gradient(cv::CalcAngle, coords, atoms, boundary, velocities; kwargs...)
+    i, j, k = cv.atom_inds
+    ri, rj, rk = coords[i], coords[j], coords[k]
+    
+    ba = vector_pad3D(rj, ri, boundary)
+    bc = vector_pad3D(rj, rk, boundary)
+    cross_ba_bc = ba × bc
+    theta = bond_angle(ri, rj, rk, boundary)
+
+    grad = ustrip.(zero(coords)) / oneunit(eltype(eltype(coords)))
+    if iszero_value(cross_ba_bc)
+        return -grad, theta
+    end
+    pa = normalize(trim3D( ba × cross_ba_bc, boundary))
+    pc = normalize(trim3D(-bc × cross_ba_bc, boundary))
+
+    grad_i = pa / norm(ba)
+    grad_k = pc / norm(bc)
+    grad[i] = -grad_i
+    grad[k] = -grad_k
+    grad[j] = grad_i + grad_k
+
+    return -grad, theta 
+end
+
+function calculate_virial!(virial_buff, cv::CalcAngle, coords, forces, atoms, boundary)
+    ids = collect(cv.atom_inds)
+    c = @view coords[ids]
+    f = @view forces[ids]
+    r_ji = vector(c[2], c[1], boundary) 
+    r_jk = vector(c[2], c[3], boundary)
+    
+    virial_buff .+= r_ji * transpose(f[1]) + 
+                    r_jk * transpose(f[3])
+end
+
 
 # Computes the analytical gradient of the distance between two atoms.
 #

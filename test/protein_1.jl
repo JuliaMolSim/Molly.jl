@@ -631,3 +631,236 @@ end
         @test diff < FT(0.15)u"kJ * mol^-1 * nm^-1"
     end
 end
+
+@testset "Amber14 OpenMM TYK2 comparison" begin
+    ff = MolecularForceField(joinpath.(ff_dir, ["amber14/protein.ff14SB.xml", "amber14/tip3p.xml"])..., 
+                                        joinpath(data_dir, "ejm31.xml"))
+    show(devnull, ff)
+    pme_mesh_dims = (65, 65, 65)  # OpenMM's grid for the 8.0382 nm box, 1 nm cutoff, tol 5e-4
+    sys = System(
+        joinpath(data_dir, "tyk2_ejm31.pdb"),
+        ff;
+        nonbonded_method=SetupCoulombReactionField(),
+        center_coords=false,
+    )
+    sys_pme = System(
+        joinpath(data_dir, "tyk2_ejm31.pdb"),
+        ff;
+        nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
+        center_coords=false,
+    )
+    sys_pme_exact = System(
+        joinpath(data_dir, "tyk2_ejm31.pdb"),
+        ff;
+        nonbonded_method=SetupPME(approximate_erfc=false, mesh_dims=pme_mesh_dims),
+        center_coords=false,
+    )
+    sys_hmr = System(
+        joinpath(data_dir, "tyk2_ejm31.pdb"),
+        ff;
+        nonbonded_method=SetupCoulombReactionField(),
+        center_coords=false,
+        hydrogen_mass=2,
+    )
+    zero(sys)
+    zero(sys_pme)
+    neighbors = find_neighbors(sys)
+
+    cs = charges(sys)
+    @test cs isa Vector{Float64}
+    @test sum(cs) ≈ 0.0 atol=1e-12
+    @test Molly.interaction_type(sys.specific_inter_lists[1]) <: HarmonicBond
+    @test Molly.interaction_type(sys.specific_inter_lists[2]) <: HarmonicAngle
+    @test Molly.interaction_type(sys.specific_inter_lists[3]) <: PeriodicTorsion
+    @test Molly.interaction_type(sys.specific_inter_lists[4]) <: PeriodicTorsion
+
+    bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1) samples=5 evals=1
+    @test bench_result.allocs <= 8
+    @test bench_result.memory <= 208
+    forces_t = Molly.zero_forces(sys)
+    buffers = Molly.init_buffers!(sys, 1)
+    bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
+                                            n_threads=1) samples=5 evals=1
+    @test bench_result.allocs <= 4
+    @test bench_result.memory <= 144
+
+    scalar_vir = scalar_virial(sys_pme)
+    scalar_P = scalar_pressure(sys_pme)
+    @test scalar_vir ≈ tr(virial(sys_pme))
+    @test scalar_P ≈ tr(pressure(sys_pme)) / 3
+    @test scalar_vir ≈ scalar_virial(sys_pme; n_threads=1)
+    @test scalar_P ≈ scalar_pressure(sys_pme; n_threads=1)
+
+    # Test that Lennard-Jones 1-4 specific interactions work as expected
+    sys_lj14 = System(
+        joinpath(data_dir, "tyk2_ejm31.pdb"),
+        ff;
+        nonbonded_method=SetupCoulombReactionField(),
+        center_coords=false,
+        force_separate_lj14=true,
+    )
+    @test potential_energy(sys) ≈ potential_energy(sys_lj14)
+    @test maximum(norm.(forces(sys) .- forces(sys_lj14))) < 1e-9u"kJ * nm^-1 * mol^-1"
+
+    @test sum(masses(sys)) ≈ sum(masses(sys_hmr))
+    @test potential_energy(sys) ≈ potential_energy(sys_hmr)
+    @test maximum(norm.(forces(sys) .- forces(sys_hmr))) < 1e-9u"kJ * nm^-1 * mol^-1"
+    @test_throws ErrorException System(joinpath(data_dir, "tyk2_ejm31.pdb"), ff; hydrogen_mass=6)
+    @test_throws ArgumentError System(joinpath(data_dir, "tyk2_ejm31.pdb"), ff; hydrogen_mass=true)
+
+    inters = (
+        "all_cut", "all_pme", "all_pme_exact",
+    )
+    for inter in inters
+        if inter == "all_cut"
+            pin = sys.pairwise_inters
+        elseif inter == "all_pme"
+            pin = sys_pme.pairwise_inters
+        elseif inter == "all_pme_exact"
+            pin = sys_pme_exact.pairwise_inters
+        else
+            pin = ()
+        end
+
+        if inter == "all_pme"
+            sils = sys_pme.specific_inter_lists
+        elseif inter == "all_pme_exact"
+            sils = sys_pme_exact.specific_inter_lists
+        elseif inter == "all_cut"
+            sils = sys.specific_inter_lists
+        else
+            sils = ()
+        end
+
+        if inter == "all_pme"
+            gis = sys_pme.general_inters
+        elseif inter == "all_pme_exact"
+            gis = sys_pme_exact.general_inters
+        elseif inter == "all_cut"
+            gis = sys.general_inters
+        else
+            gis = ()
+        end
+
+        sys_part = System(
+            atoms=sys.atoms,
+            coords=sys.coords,
+            boundary=sys.boundary,
+            pairwise_inters=pin,
+            specific_inter_lists=sils,
+            general_inters=gis,
+            neighbor_finder=sys.neighbor_finder,
+        )
+
+        forces_molly = forces(sys_part, neighbors; n_threads=1)
+        openmm_forces_fp = joinpath(tyk2_dir, "openmm", "forces_$inter.txt")
+        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        # All forces must match at some threshold
+        ftol = (inter == "all_pme" ? 2e-3 : 1e-6)u"kJ * mol^-1 * nm^-1"
+        @test maximum(norm.(forces_molly .- forces_openmm)) < ftol
+
+        E_molly = potential_energy(sys_part, neighbors)
+        openmm_E_fp = joinpath(tyk2_dir, "openmm", "energy_$inter.txt")
+        E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+        # Energy must match at some threshold
+        etol = (inter == "all_pme" ? 0.2 : 1e-4)u"kJ * mol^-1"
+        @test abs(E_molly - E_openmm) < etol
+    end
+
+    # Run a short simulation with all interactions
+    n_steps = 100
+    simulator = VelocityVerlet(dt=0.0005u"ps")
+    start_vels_fp = joinpath(tyk2_dir, "velocities_300K.txt")
+    velocities_start = SVector{3}.(eachrow(readdlm(start_vels_fp)))u"nm * ps^-1"
+    sys_pme_exact.velocities = copy(velocities_start)
+
+    simulate!(sys_pme_exact, simulator, n_steps; n_threads=Threads.nthreads())
+
+    openmm_coords_fp = joinpath(tyk2_dir, "openmm", "coordinates_$(n_steps)steps.txt")
+    openmm_vels_fp   = joinpath(tyk2_dir, "openmm", "velocities_$(n_steps)steps.txt" )
+    coords_openmm = SVector{3}.(eachrow(readdlm(openmm_coords_fp)))u"nm"
+    vels_openmm   = SVector{3}.(eachrow(readdlm(openmm_vels_fp)))u"nm * ps^-1"
+
+    coords_diff = sys_pme_exact.coords .- wrap_coords.(coords_openmm, (sys_pme_exact.boundary,))
+    vels_diff = sys_pme_exact.velocities .- vels_openmm
+    # Coordinates and velocities at end must match at some threshold
+    @test maximum(norm.(coords_diff)) < 1e-10u"nm"
+    @test maximum(norm.(vels_diff  )) < 1e-7u"nm * ps^-1"
+
+    # Test the same simulation on the GPU
+    for AT in array_list[2:end]
+        sys = System(
+            joinpath(data_dir, "tyk2_ejm31.pdb"),
+            ff;
+            velocities=to_device(copy(velocities_start), AT),
+            array_type=AT,
+            float_type=Float64,
+            nonbonded_method=SetupCoulombReactionField(),
+            center_coords=false,
+        )
+        show(devnull, sys.neighbor_finder)
+        zero(sys)
+
+        neighbors = find_neighbors(sys)
+        openmm_forces_fp = joinpath(tyk2_dir, "openmm", "forces_all_cut.txt")
+        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        @test maximum(norm.(from_device(forces(sys, neighbors)) .- forces_openmm)) < 1e-6u"kJ * mol^-1 * nm^-1"
+        E_openmm = readdlm(joinpath(tyk2_dir, "openmm", "energy_all_cut.txt"))[1] * u"kJ * mol^-1"
+        @test isapprox(potential_energy(sys, neighbors), E_openmm; atol=1e-4u"kJ * mol^-1")
+
+        sys_pme = System(
+            joinpath(data_dir, "tyk2_ejm31.pdb"),
+            ff;
+            velocities=to_device(copy(velocities_start), AT),
+            array_type=AT,
+            float_type=Float64,
+            nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
+            center_coords=false,
+        )
+        zero(sys_pme)
+
+        neighbors = find_neighbors(sys_pme)
+        openmm_forces_fp = joinpath(tyk2_dir, "openmm", "forces_all_pme.txt")
+        forces_openmm_pme = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        @test maximum(norm.(from_device(forces(sys_pme, neighbors)) .- forces_openmm_pme)) < 2e-3u"kJ * mol^-1 * nm^-1"
+        E_openmm_pme = readdlm(joinpath(tyk2_dir, "openmm", "energy_all_pme.txt"))[1] * u"kJ * mol^-1"
+        @test isapprox(potential_energy(sys_pme, neighbors), E_openmm_pme; atol=0.2u"kJ * mol^-1")
+        sys_pme.velocities .= (zero(SVector{3, Float64}) * u"nm * ps^-1",)
+        @test scalar_virial(sys_pme) ≈ scalar_vir
+        @test scalar_pressure(sys_pme) ≈ scalar_P
+
+        sys_pme_exact = System(
+            joinpath(data_dir, "tyk2_ejm31.pdb"),
+            ff;
+            velocities=to_device(copy(velocities_start), AT),
+            array_type=AT,
+            float_type=Float64,
+            nonbonded_method=SetupPME(approximate_erfc=false, mesh_dims=pme_mesh_dims),
+            center_coords=false,
+        )
+
+        neighbors = find_neighbors(sys_pme_exact)
+        openmm_forces_fp = joinpath(tyk2_dir, "openmm", "forces_all_pme_exact.txt")
+        forces_openmm_pme = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        @test maximum(norm.(from_device(forces(sys_pme_exact, neighbors)) .- forces_openmm_pme)) < 1e-6u"kJ * mol^-1 * nm^-1"
+        E_openmm_pme = readdlm(joinpath(tyk2_dir, "openmm", "energy_all_pme_exact.txt"))[1] * u"kJ * mol^-1"
+        @test isapprox(potential_energy(sys_pme_exact, neighbors),
+                       E_openmm_pme; atol=1e-4u"kJ * mol^-1")
+
+        simulate!(sys_pme_exact, simulator, n_steps)
+
+        coords_diff = from_device(sys_pme_exact.coords) .-
+                                    wrap_coords.(coords_openmm, (sys_pme_exact.boundary,))
+        vels_diff = from_device(sys_pme_exact.velocities) .- vels_openmm
+        @test maximum(norm.(coords_diff)) < 1e-10u"nm"
+        @test maximum(norm.(vels_diff  )) < 1e-7u"nm * ps^-1"
+
+        # Test Andersen thermostat on GPU
+        simulator_and = Verlet(
+            dt=0.0005u"ps",
+            coupling=AndersenThermostat(321.0u"K", 10.0u"ps"),
+        )
+        simulate!(sys_pme_exact, simulator_and, n_steps)
+        @test temperature(sys_pme_exact) > 400.0u"K"
+    end
+end

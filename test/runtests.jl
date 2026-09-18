@@ -53,6 +53,7 @@ const init_code_block = quote
     import AtomsCalculators
     using BenchmarkTools
     import BioStructures
+    using BSON
     import Chemfiles
     using Enzyme
     using FiniteDifferences
@@ -116,6 +117,7 @@ const init_code_block = quote
     const data_dir = normpath(@__DIR__, "..", "data")
     const ff_dir     = joinpath(data_dir, "force_fields")
     const openmm_dir = joinpath(data_dir, "openmm_6mrr")
+    const tyk2_dir   = joinpath(data_dir, "openmm_tyk2")
 end
 
 # Allow @suppress_err to work in the quote block

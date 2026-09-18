@@ -241,19 +241,13 @@ end
 
 # Impropers: lookup with 6-permutation scan and cache
 function find_improper_match(t1::AbstractString, t2::AbstractString, t3::AbstractString,
-                             t4::AbstractString; resolver::TorsionResolver{T, E},
+                             t4::AbstractString, indexes, atom_type_of, resnum_of, template_id_of, 
+                             element_of; resolver::TorsionResolver{T, E},
                              type_to_class::Dict{String, String}) where {T, E}
-    key = (t1, t2, t3, t4)
+    (c, j, k, l) = indexes
     ic = resolver.improper_cache
-    if haskey(ic, key)
-        v = ic[key]
-        if v == :miss
-            return nothing
-        else
-            return resolver.rules[(v::Tuple{NTuple{4, Int}, Int})[2]].params
-        end
-    end
-
+    key = (t1, t2, t3, t4)
+    
     # Candidates by central atom 1 (type → class → wild)
     cand = Int[]
     c1 = type_to_class[t1]
@@ -265,6 +259,7 @@ function find_improper_match(t1::AbstractString, t2::AbstractString, t3::Abstrac
     bestperm = (1,2,3,4)
     bestspec = Int8(-1)
 
+    found_match = false
     for (p2,p3,p4,perm) in (
         (t2,t3,t4,(1,2,3,4)),
         (t2,t4,t3,(1,2,4,3)),
@@ -280,21 +275,178 @@ function find_improper_match(t1::AbstractString, t2::AbstractString, t3::Abstrac
             if matches(r.p2, p2, type_to_class) && matches(r.p3, p3, type_to_class) &&
                                                         matches(r.p4, p4, type_to_class)
                 if !r.has_wildcard
-                    ic[key] = (perm, i)
-                    return r.params
+                    bestspec, best, bestperm = r.specificity, i, perm
+                    found_match = true
+                    break
                 elseif r.specificity > bestspec
                     bestspec, best, bestperm = r.specificity, i, perm
                 end
             end
         end
+        if found_match
+            break
+        end
     end
 
     if best == 0
-        ic[key] = :miss
+        ic[key] = nothing
         return nothing
     else
-        ic[key] = (bestperm, best)
-        return resolver.rules[best].params
+        if resolver.rules[best].params isa PeriodicTorsionType
+            r = resolver.rules[best]
+            ordering = r.ordering
+            has_wild = r.has_wildcard
+
+            # Reorder indices based on how atoms were permuted
+            src_atoms = (c, j, k, l)
+            j = src_atoms[bestperm[2]]
+            k = src_atoms[bestperm[3]]
+            l = src_atoms[bestperm[4]]
+            p1, p2, p3, p4 = bestperm 
+
+            # refresh types after remapping
+            t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
+
+            # topology indices for current j,k,l
+            r2 = resnum_of[j]
+            r3 = resnum_of[k]
+            r4 = resnum_of[l]
+
+            ta2 = template_id_of[j]
+            ta3 = template_id_of[k]
+            ta4 = template_id_of[l]
+
+            e2 = Symbol(element_of[j])
+            e3 = Symbol(element_of[k])
+            e4 = Symbol(element_of[l])
+
+            if ordering == "amber"
+                # OpenMM amber branch, with/without wildcards
+                if !has_wild
+                    if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                        (j,   l)   = (l,   j)
+                        (r2,  r4)  = (r4,  r2)
+                        (ta2, ta4) = (ta4, ta2)
+                        (p2, p4)   = (p4, p2)
+                    end
+                    if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                        (k,   l)   = (l,   k)
+                        (r3,  r4)  = (r4,  r3)
+                        (ta3, ta4) = (ta4, ta3)
+                        (p3, p4)   = (p4, p3)
+                    end
+                    if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
+                        (j, k) = (k, j)
+                        (p2, p3) = (p3, p2)
+                    end
+                else
+                    if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                        (j,   l)   = (l,   j)
+                        (r2,  r4)  = (r4,  r2)
+                        (ta2, ta4) = (ta4, ta2)
+                        (p2, p4)   = (p4, p2)
+                    end
+                    if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                        (k,   l)   = (l,   k)
+                        (r3,  r4)  = (r4,  r3)
+                        (ta3, ta4) = (ta4, ta3)
+                        (p3, p4)   = (p4, p3)
+                    end
+                    if r2 > r3 || (r2 == r3 && ta2 > ta3)
+                        (j, k) = (k, j)
+                        (p2, p3) = (p3, p2)
+                    end
+                end
+            elseif ordering == "charmm"
+                # If wildcards were used then apply the same Amber tie-break, else unambiguous
+                if has_wild
+                    if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                        (j,   l)   = (l,   j)
+                        (r2,  r4)  = (r4,  r2)
+                        (ta2, ta4) = (ta4, ta2)
+                        (p2, p4)   = (p4, p2)
+                    end
+                    if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                        (k,   l)   = (l,   k)
+                        (r3,  r4)  = (r4,  r3)
+                        (ta3, ta4) = (ta4, ta3)
+                        (p3, p4)   = (p4, p3)
+                    end
+                end
+            elseif ordering == "default"
+                # ordering == "default"
+                # Only if a wildcard is present
+                if has_wild
+                    # Mirror the permutation on the current topology atoms (c,j,k,l)
+                    src_atoms = (c, j, k, l)
+
+                    # We need the two peripheral atoms in positions 2 and 3, and the remaining
+                    #   peripheral in 4
+                    a1 = src_atoms[bestperm[2]]
+                    a2 = src_atoms[bestperm[3]]
+                    a4 = src_atoms[bestperm[4]]
+
+                    # Elements and masses for tie-break
+                    e_a1 = Symbol(element_of[a1])
+                    e_a2 = Symbol(element_of[a2])
+                    m_a1 = force_field.atom_types[atom_type_of[a1]].mass
+                    m_a2 = force_field.atom_types[atom_type_of[a2]].mass
+
+                    # 1) If same element, lower atom index first
+                    # 2) Else, prefer carbon; else heavier mass first
+                    if e_a1 == e_a2
+                        if a1 > a2
+                            (a1, a2) = (a2, a1)
+                            (p2, p3) = (p3, p2)
+                        end
+                    elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
+                        (a1, a2) = (a2, a1)
+                        (p2, p3) = (p3, p2)
+                    end
+                end
+                # If no wildcard leave j, k, l as-is
+            end
+            bestperm = (p1, p2, p3, p4)
+            ic[key] = (bestperm, best)
+            return resolver.rules[best].params
+        elseif resolver.rules[best].params isa HarmonicTorsionType
+            r = resolver.rules[best]
+            has_wild = r.has_wildcard
+
+            # Reorder indices based on how atoms were permuted
+            # Mirror the permutation on the current topology atoms (c,j,k,l)
+            src_atoms = (c, j, k, l)
+
+            # We need the two peripheral atoms in positions 2 and 3, and the remaining
+            #   peripheral in 4
+            a1 = src_atoms[bestperm[2]]
+            a2 = src_atoms[bestperm[3]]
+            a4 = src_atoms[bestperm[4]]
+            p1, p2, p3, p4 = bestperm
+
+            if has_wild
+                # Elements and masses for tie-break
+                e_a1 = Symbol(element_of[a1])
+                e_a2 = Symbol(element_of[a2])
+                m_a1 = force_field.atom_types[atom_type_of[a1]].mass
+                m_a2 = force_field.atom_types[atom_type_of[a2]].mass
+
+                # 1) If same element, lower atom index first
+                # 2) Else, prefer carbon; else heavier mass first
+                if e_a1 == e_a2
+                    if a1 > a2
+                        (a1, a2) = (a2, a1)
+                        (p2, p3) = (p3, p2)
+                    end
+                elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
+                    (a1, a2) = (a2, a1)
+                    (p2, p3) = (p3, p2)
+                end
+            end
+            bestperm = (p1, p2, p3, p4)
+            ic[key] = (bestperm, best)
+            return resolver.rules[best].params
+        end
     end
 end
 

@@ -47,3 +47,55 @@ end
     θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
     return d.k * (θ - d.θ0)^2
 end
+
+# λ version of `HarmonicTorsion` for alchemical systems, built by `to_lambda_function`.
+@kwdef struct HarmonicTorsionλ{K, D, LM, SCH}
+    k::K
+    θ0::D
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+end
+
+Base.zero(::HarmonicTorsionλ{K, D, LM, SCH}) where {K, D, LM, SCH} = HarmonicTorsionλ(k=zero(K), θ0=zero(D))
+
+Base.:+(t1::HarmonicTorsionλ, t2::HarmonicTorsionλ) = HarmonicTorsionλ(k=(t1.k + t2.k),
+                                                                        θ0=(t1.θ0 + t2.θ0))
+
+function to_lambda_function(inter::HarmonicTorsion; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return HarmonicTorsionλ(k=inter.k, θ0=inter.θ0, λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+@inline function force(d::HarmonicTorsionλ, coords_i, coords_j, coords_k, coords_l,
+                       boundary, atom_i, atom_j, atom_k, atom_l, args...)
+    T = typeof(ustrip(atom_i.λ))
+    ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
+                                    coords_i, coords_j, coords_k, coords_l, boundary)
+
+    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
+    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
+    λ, λ_params = scale_dual(d.scheduler, λ_glob, pair_role)
+
+    dEdθ = d.k * (θ - d.θ0) + d.k * (θ - d.θ0)
+    fi =  dEdθ * bc_norm * cross_ab_bc / dot(cross_ab_bc, cross_ab_bc)
+    fl = -dEdθ * bc_norm * cross_bc_cd / dot(cross_bc_cd, cross_bc_cd)
+    v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
+    fj =  v - fi
+    fk = -v - fl
+    return SpecificForce4Atoms(λ*fi, λ*fj, λ*fk, λ*fl)
+end
+
+@inline function potential_energy(d::HarmonicTorsionλ, coords_i, coords_j, coords_k,
+                                  coords_l, boundary, atom_i, atom_j, atom_k, atom_l, args...)
+    T = typeof(ustrip(atom_i.λ))
+    θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
+    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
+    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
+    λ, λ_params = scale_dual(d.scheduler, λ_glob, pair_role)
+    return λ * d.k * (θ - d.θ0)^2
+end
+
+@inline function force_λ(d::HarmonicTorsionλ, coords_i, coords_j, coords_k, coords_l,
+                       boundary, atoms_i, atoms_j, atoms_k, atoms_l, F, args...)
+    @warn("HarmonicTorsions not implemented yet for force with respect to λ")
+    return SpecificForce4Atoms(zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F))
+end

@@ -15,12 +15,12 @@ function make_tss_thermo_states(; n_atoms=6, n_states=3)
     thermo_states = ThermoState[]
     for lambda in range(1.0, 0.6; length=n_states)
         atoms = [Atom(mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1",
-                      λ=lambda) for _ in 1:n_atoms]
+                      λ=lambda, alch_role=Molly.InsertRole) for _ in 1:n_atoms]
         sys = System(
             atoms=atoms,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder,
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")
