@@ -126,16 +126,13 @@ struct FlatBottomSquareBias{K, R, C}
     end
 end
 
-function potential_energy(fb::FlatBottomSquareBias{K, R, C}, cv_sim; kwargs...) where {K, R, C}
+function potential_energy(fb::FlatBottomSquareBias, cv_sim; kwargs...)
     d_abs = abs(cv_sim - fb.cv_target)
-    if d_abs < fb.r_fb
-        return K(0)*(d_abs)^2
-    else
-        return (fb.k / 2) * (d_abs - fb.r_fb)^2
-    end
+    H = (d_abs < fb.r_fb ? 0 : 1)
+    return (fb.k / 2) * (d_abs - fb.r_fb)^2 * H
 end
 
-function bias_gradient(fb::FlatBottomSquareBias{K, R, C}, cv_sim) where {K, R, C}
+function bias_gradient(fb::FlatBottomSquareBias, cv_sim)
     d = cv_sim - fb.cv_target
     d_abs = abs(d)
     d_abs <= fb.r_fb && return zero(fb.k * fb.r_fb)
