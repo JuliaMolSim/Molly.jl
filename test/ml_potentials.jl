@@ -597,10 +597,14 @@ end
         coords=[c*u"Å" for c in coords], boundary=CubicBoundary(200.0u"Å"),
         atoms_data=[AtomData(element=e) for e in elems],
         general_inters=(ani=pot,), force_units=u"eV/Å", energy_units=u"eV")
-    E_ref = ustrip(potential_energy(sys))                        # CPU, Float64 AEV
-    E_ka  = Molly.compute_ani_energy_ka(coords, species, pot, n_sp;
-                                        backend=KernelAbstractions.CPU())
-    @test isapprox(E_ref, E_ka; atol=0.05)   # ≤ ~5e-4 eV/atom (Float32 AEV gap)
+
+    # Suppress "Mixed-Precision `matmul_cpu_fallback!` detected" warning
+    @suppress_err begin
+        E_ref = ustrip(potential_energy(sys)) # CPU, Float64 AEV
+        E_ka  = Molly.compute_ani_energy_ka(coords, species, pot, n_sp;
+                                            backend=KernelAbstractions.CPU())
+        @test isapprox(E_ref, E_ka; atol=0.05) # ≤ ~5e-4 eV/atom (Float32 AEV gap)
+    end
 end
 
 # ============================================================================

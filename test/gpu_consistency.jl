@@ -235,6 +235,7 @@
                 ),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
+                strictness=:nowarn,
             )
 
             function with_tiny_tile_capacity(buffers)
