@@ -220,7 +220,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
 
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
@@ -245,7 +245,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         coords_copy .= sys.coords
         sys.coords .+= hn .* F ./ max_force
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -573,7 +573,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -623,7 +623,7 @@ end
                                         strictness=strictness)
         end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, strictness=strictness)
@@ -735,7 +735,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -790,7 +790,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                         strictness=strictness)
         end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         velocities_half .= sys.velocities
 
@@ -902,7 +902,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -954,7 +954,7 @@ end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         # Remove drift after the step velocity is finalized and before
         #   coupling/loggers observe the state
@@ -985,6 +985,10 @@ end
 
 The Störmer-Verlet integrator.
 
+Uses a velocity-based update for the first step since the previous step coordinates
+are not available.
+This means that two calls to [`simulate!`](@ref) will only be approximately the same
+as one longer call.
 Coupling methods are not supported.
 
 # Arguments
@@ -1009,7 +1013,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(nothing, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     forces_t = zero_forces(sys)
@@ -1062,7 +1066,7 @@ end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
         # This is accurate to O(dt)
         sys.velocities .= zero_vs_velocity.(
             vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt,
@@ -1135,7 +1139,7 @@ end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -1211,7 +1215,7 @@ end
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -1249,7 +1253,7 @@ correspond to the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
 [Fass et al. 2018](https://doi.org/10.3390/e20050318).
 
-Not currently compatible with constraints, will print a warning and continue
+Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
 # Arguments
@@ -1317,7 +1321,7 @@ end
                            strictness=default_strictness()) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
-        err_str = "LangevinSplitting is not currently compatible with constraints, " *
+        err_str = "LangevinSplitting is not compatible with constraints, " *
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
@@ -1343,7 +1347,7 @@ end
     philox_key  = (n_o_steps > 0 ? rand(rng, UInt64) : zero(UInt64))
     philox_ctr1 = (n_o_steps > 0 ? rand(rng, UInt64) : zero(UInt64))
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -1365,7 +1369,7 @@ end
     for step_n in (init_step + 1):(init_step + n_steps)
         for (j, op) in enumerate(splitting_ops)
             if op == 'A'
-                A_step!(sys, effective_dts[j])
+                A_step!(sys, effective_dts[j], n_threads)
             elseif op == 'B'
                 B_step!(
                     sys,
@@ -1393,7 +1397,7 @@ end
         end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
         # Remove drift after all splitting substeps and before loggers observe
         # the state.
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -1415,10 +1419,10 @@ end
     return sys
 end
 
-function A_step!(sys, dt_eff)
+function A_step!(sys, dt_eff, n_threads::Integer)
     sys.coords .+= sys.velocities .* dt_eff
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     return sys
 end
 
@@ -1438,7 +1442,7 @@ end
 
 Simulates the overdamped Langevin equation using the Euler-Maruyama method.
 
-Not currently compatible with constraints, will print a warning and continue
+Not compatible with constraints, will print a warning and continue
 without applying constraints.
 Not compatible with gradient calculation using Enzyme.
 
@@ -1473,13 +1477,13 @@ end
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
-        err_str = "OverdampedLangevin is not currently compatible with constraints, " *
+        err_str = "OverdampedLangevin is not compatible with constraints, " *
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -1503,7 +1507,7 @@ end
         random_velocities!(noise, sys, sim.temperature; rng=rng)
         sys.coords .+= (accels_t ./ sim.friction) .* sim.dt .+ noise_prefac .* noise
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         # Overdamped dynamics advance coordinates directly; removing velocity
         # drift here only affects the velocity state seen by loggers.
@@ -1536,7 +1540,9 @@ temperature of the system.
 See [Evans and Holian 1985](https://doi.org/10.1063/1.449071).
 The current implementation is limited to ergodic systems.
 
-Not currently compatible with constraints, will print a warning and continue
+ζ, the thermostat friction variable, is reset on each call to [`simulate!`](@ref).
+This means that two calls to [`simulate!`](@ref) will not be the same as one longer call.
+Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
 # Arguments
@@ -1559,6 +1565,11 @@ function NoseHoover(; dt, temperature, damping=100*dt, coupling=nothing, remove_
     return NoseHoover(dt, temperature, damping, coupling, Int(remove_CM_motion))
 end
 
+# Not inlined to work with Enzyme
+@noinline function kinetic_energy_velocities(masses, velocities)
+    return sum(masses .* sum.(abs2, velocities)) / 2
+end
+
 @inline function simulate!(sys,
                            sim::NoseHoover,
                            n_steps_or_time;
@@ -1572,14 +1583,14 @@ end
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
-        err_str = "NoseHoover is not currently compatible with constraints, " *
+        err_str = "NoseHoover is not compatible with constraints, " *
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -1605,11 +1616,11 @@ end
 
         sys.coords .+= v_half .* sim.dt
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) *
                         ((temperature(sys; kin_tensor=buffers.kin_tensor) / sim.temperature) - 1)
-        KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
+        KE_half = kinetic_energy_velocities(masses(sys), v_half)
         T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
@@ -1886,7 +1897,7 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
                 apply_velocity_constraints!(sys; n_threads=n_threads, strictness=strictness)
             end
             sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-            place_virtual_sites!(sys)
+            place_virtual_sites!(sys; n_threads=n_threads)
             if inner_step_neighbors
                 neighbors = mts_find_neighbors(sys, buffers, neighbors, step_n, n_threads)
             end
@@ -1928,7 +1939,7 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
     n_steps = calc_n_steps(n_steps_or_time, sim.dt)
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling, sys.loggers, run_loggers)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     init_step == 0 && !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
@@ -2451,12 +2462,14 @@ function reinit_c_pointers(val::T) where T
     return T(new_vals...)
 end
 
+# Writers are rebuilt on the workers at every call and keep appending to their own file, so
+#   the file is never deleted and the append warning is not repeated
 function process_logger(logger)
     if logger isa TrajectoryWriter
         return TrajectoryWriter(logger.n_steps, logger.filepath;
                                 logger.format, logger.correction, logger.atom_inds,
                                 logger.excluded_res, logger.write_velocities,
-                                logger.write_boundary, logger.suppress_warn)
+                                logger.write_boundary, overwrite=false, suppress_warn=true)
     else
         return logger
     end
@@ -2529,7 +2542,7 @@ end
 
 A Monte Carlo simulator that uses the Metropolis algorithm to sample the configuration space.
 
-Not currently compatible with constraints, will print a warning and continue
+Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
 # Arguments
@@ -2560,12 +2573,12 @@ end
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
     if length(sys.constraints) > 0
-        err_str = "MetropolisMonteCarlo is not currently compatible with constraints, " *
+        err_str = "MetropolisMonteCarlo is not compatible with constraints, " *
                   "constraints will be ignored"
         report_issue(err_str, strictness)
     end
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-    place_virtual_sites!(sys)
+    place_virtual_sites!(sys; n_threads=n_threads)
     neighbors = find_neighbors(sys, sys.neighbor_finder, nothing, init_step, true;
                                n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
@@ -2580,7 +2593,7 @@ end
         coords_old .= sys.coords
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
-        place_virtual_sites!(sys)
+        place_virtual_sites!(sys; n_threads=n_threads)
         neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
         E_new = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                                  strictness=strictness)

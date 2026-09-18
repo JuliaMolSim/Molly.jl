@@ -793,7 +793,8 @@ end
 
 """
     TrajectoryWriter(n_steps, filepath; format="", correction=:pbc, atom_inds=[],
-                     excluded_res=String[], write_velocities=false, write_boundary=true)
+                     excluded_res=String[], write_velocities=false, write_boundary=true,
+                     overwrite=false, suppress_warn=false)
 
 Write 3D structures to a file throughout a simulation.
 
@@ -819,6 +820,9 @@ The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
 information is required.
 The file will be appended to, so should be deleted before simulation if it
 already exists.
+Setting `overwrite=true` deletes the file when the logger is constructed if it
+exists, rather than warning and appending to it.
+Setting `suppress_warn=true` appends to an existing file without the warning.
 
 Not compatible with 2D systems.
 For the PDB format, the box size for the CRYST1 record is taken from the first
@@ -843,11 +847,17 @@ end
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           format::AbstractString="", correction::Symbol=:pbc, atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
-                          write_boundary::Bool=true, suppress_warn::Bool=false)
+                          write_boundary::Bool=true, overwrite::Bool=false,
+                          suppress_warn::Bool=false)
     check_correction_arg(correction)
-    if isfile(filepath) && !(suppress_warn)
-        @warn "TrajectoryWriter created with a file path ($filepath) that already exists, " *
-              "will try to append to this file"
+    if isfile(filepath)
+        if overwrite
+            rm(filepath)
+        elseif !suppress_warn
+            @warn "TrajectoryWriter created with a file path ($filepath) that already " *
+                  "exists, will try to append to this file, use overwrite=true to " *
+                  "delete the file instead"
+        end
     end
     topology = Chemfiles.Topology() # Added to later when sys is available
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
@@ -863,6 +873,8 @@ end
 
 Base.deepcopy_internal(tw::TrajectoryWriter, dict::IdDict) = deepcopy_registered(tw, dict)
 
+# A copy writes to the same file as the original, so it appends without the warning. It goes
+#   through the positional constructor, so the file is never deleted as with overwrite=true.
 function Base.deepcopy(tw::TrajectoryWriter)
     return TrajectoryWriter(
         tw.n_steps,
@@ -876,7 +888,7 @@ function Base.deepcopy(tw::TrajectoryWriter)
         Chemfiles.Topology(),
         false,
         0,
-        false,
+        true,
     )
 end
 

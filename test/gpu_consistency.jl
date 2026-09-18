@@ -1,5 +1,5 @@
 @testset "GPU Consistency" begin
-    if CUDA.functional()
+    if run_cuda_tests
         @testset "33-atom (No Cancellation)" begin
             n_atoms = 33
             D = 3
@@ -235,6 +235,7 @@
                 ),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
+                strictness=:nowarn,
             )
 
             function with_tiny_tile_capacity(buffers)
@@ -672,7 +673,5 @@
             @test vels_cpu != init_vels
             @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT)
         end
-    else
-        @warn "CUDA not functional, skipping GPU consistency tests"
     end
 end

@@ -115,7 +115,7 @@ Returns a `VirtualSite` defined by:
 ```
 
 Only compatible with 3D systems.
-Not currently compatible with virial calculation.
+Not compatible with virial calculation.
 Not compatible with gradient calculation using Enzyme.
 """
 function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, atom_3::Integer,
@@ -187,17 +187,20 @@ function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D,
 end
 
 """
-    place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+    place_virtual_sites!(sys, virtual_sites=sys.virtual_sites; n_threads=Threads.nthreads())
 
 Set the coordinates of virtual sites based on the coordinates of the atoms that define them.
 """
-function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites;
+                              n_threads::Integer=Threads.nthreads())
     # Assumes that each virtual site is only defined once
-    if length(virtual_sites) > 0
+    n_vs = length(virtual_sites)
+    if n_vs > 0
         backend = get_backend(sys.coords)
         n_threads_dev = 256
-        kernel! = place_virtual_sites_kernel!(backend, n_threads_dev)
-        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=length(virtual_sites))
+        kernel! = backend_kernel(place_virtual_sites_kernel!, backend, n_threads_dev)
+        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
+                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
     end
     return sys
 end
@@ -231,19 +234,30 @@ end
 end
 
 function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
-                            virtual_sites=sys.virtual_sites) where {D, T}
+                            virtual_sites=sys.virtual_sites;
+                            n_threads::Integer=Threads.nthreads()) where {D, T}
     # Assumes that each virtual site is only defined once
-    if length(virtual_sites) > 0
+    n_vs = length(virtual_sites)
+    if n_vs > 0
         copy_forces_to_matrix!(buffers.fs_mat, fs, Val(D))
         backend = get_backend(sys.coords)
         n_threads_dev = 128
-        kernel! = distribute_forces_kernel!(backend, n_threads_dev)
-        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites;
-                ndrange=length(virtual_sites))
-        fs_mat_flat = reshape(buffers.fs_mat, length(sys) * D)
-        fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* sys.force_units
+        kernel! = backend_kernel(distribute_forces_kernel!, backend, n_threads_dev)
+        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
+                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
+        copy_matrix_to_forces!(fs, buffers.fs_mat, sys.force_units, Val(D), Val(T))
     end
     return fs
+end
+
+function copy_matrix_to_forces!(fs, fs_mat, force_units, ::Val{D}, ::Val{T}) where {D, T}
+    fs_mat_flat = reshape(fs_mat, length(fs) * D)
+    fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* force_units
+    return fs
+end
+
+function copy_matrix_to_forces!(fs::AbstractGPUArray, fs_mat, force_units, D::Val, T::Val)
+    return apply_force_units_gpu!(fs, fs_mat, force_units, D, T)
 end
 
 function copy_forces_to_matrix!(fs_mat::AbstractMatrix{T}, fs, ::Val{D}) where {T, D}

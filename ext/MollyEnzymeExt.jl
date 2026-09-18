@@ -12,6 +12,16 @@ using KernelAbstractions
 
 const GPUArraysCore = GPUArrays.GPUArraysCore
 
+function __init__()
+    # On Julia 1.11 the LLVM Attributor that Enzyme runs before differentiating marks the
+    #   pointer arguments of calls that are not inlined in GPU kernels as readnone, so the
+    #   gradient through the call is silently dropped. Later versions do not run it.
+    @static if v"1.11" <= VERSION < v"1.12"
+        Enzyme.Compiler.RunAttributor[] = false
+    end
+    return nothing
+end
+
 EnzymeRules.inactive(::typeof(is_on_gpu), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_strictness), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_strictness), args...) = nothing
@@ -52,6 +62,7 @@ EnzymeRules.inactive(::typeof(Molly.parse_splitting), args...) = nothing
 EnzymeRules.inactive(::typeof(use_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(find_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.uses_gpu_neighbor_finder), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.claim_block!), args...) = nothing
 EnzymeRules.inactive_type(::Type{<:NoNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:GPUNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:DistanceNeighborFinder}) = true

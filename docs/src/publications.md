@@ -2,7 +2,7 @@
 
 ## Citation
 
-If you use Molly, please cite the following paper ([bib entry here](https://github.com/JuliaMolSim/Molly.jl/blob/master/CITATION.bib)):
+If you use Molly, please cite the following paper ([bib entry here](https://github.com/JuliaMolSim/Molly.jl/blob/master/CITATION.bib), [cff entry here](https://github.com/JuliaMolSim/Molly.jl/blob/master/CITATION.cff)):
 
 - Greener JG. Differentiable simulation to develop molecular dynamics force fields for disordered proteins, [Chemical Science](https://doi.org/10.1039/D3SC05230C) 15, 4897-4909 (2024)
 

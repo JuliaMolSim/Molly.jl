@@ -122,6 +122,20 @@
         else
             @test n_repeated == 0
         end
+
+        local ms = mass.(atoms)
+        local mom_scale = n_atoms * atom_mass * σ
+        local vels_keep = random_velocities(sys, temp; rng=Xoshiro(10))
+        local vels_rm = random_velocities(sys, temp; rng=Xoshiro(10), remove_CM_motion=true)
+        @test maximum(abs.(sum(vels_keep .* ms))) > 1e-4 * mom_scale
+        @test maximum(abs.(sum(vels_rm   .* ms))) < 1e-4 * mom_scale
+        random_velocities!(sys, temp; rng=Xoshiro(10), remove_CM_motion=true)
+        @test momentum(sys) == sum(sys.velocities .* ms)
+        @test maximum(abs.(momentum(sys))) < 1e-4 * mom_scale
+        random_velocities!(sys, temp; rng=Xoshiro(10))
+        @test maximum(abs.(momentum(sys))) > 1e-4 * mom_scale
+        remove_CM_motion!(sys)
+        @test maximum(abs.(momentum(sys))) < 1e-4 * mom_scale
     end
 
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
@@ -382,6 +396,29 @@
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
     end
 
+    # Changing the box size checks that the interaction cutoff still fits in the box
+    let n_atoms = 100
+        boundary_sc = CubicBoundary(4.0u"nm")
+        sys_sc = System(
+            atoms=[Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:n_atoms],
+            coords=place_atoms(n_atoms, boundary_sc; min_dist=0.3u"nm"),
+            boundary=boundary_sc,
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.5u"nm")),),
+        )
+        μ_ok = SMatrix{3, 3}(Diagonal(fill(0.99, 3))) # 3.96 nm sides, cutoff still fits
+        μ_small = SMatrix{3, 3}(Diagonal(fill(0.7, 3))) # 2.8 nm sides, less than 2 * 1.5 nm
+        @test_logs scale_coords!(deepcopy(sys_sc), μ_ok)
+        @test_logs (:warn, r"Minimum box side") scale_coords!(deepcopy(sys_sc), μ_small)
+        # Only warns once even when the box is scaled repeatedly
+        sys_sc_rep = deepcopy(sys_sc)
+        @test_logs (:warn, r"Minimum box side") begin
+            scale_coords!(sys_sc_rep, μ_small)
+            scale_coords!(sys_sc_rep, μ_ok)
+        end
+        @test_logs scale_coords!(deepcopy(sys_sc), μ_small; strictness=:nowarn)
+        @test_throws ErrorException scale_coords!(deepcopy(sys_sc), μ_small; strictness=:error)
+    end
+
     for AT in array_list
         a1 = to_device([SVector(1.0, 2.0)u"nm"   , SVector(3.0, 4.0)u"nm"   ], AT)
         a2 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(7.0, 8.0)u"nm/ps"], AT)
@@ -428,6 +465,17 @@ end
         p2 = pdb_sys.coords[1]
         @test isapprox(p1, p2; rtol=0.001) # isapprox due to rounding errors in PDB file
     end
+
+    # An existing file is appended to with a warning, or deleted with overwrite=true
+    tw_path = tempname() * ".dcd"
+    write(tw_path, "existing content")
+    @test_logs (:warn,) TrajectoryWriter(10, tw_path)
+    @test isfile(tw_path)
+    tw = @test_logs TrajectoryWriter(10, tw_path; overwrite=true)
+    @test !isfile(tw_path)
+    @test tw.filepath == tw_path
+    # No warning and no error when the file does not exist
+    @test_logs TrajectoryWriter(10, tw_path; overwrite=true)
 end
 
 @testset "Structure file formats" begin
@@ -582,12 +630,40 @@ end
 @testset "Neighbor lists" begin
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 
+    # The GPU DistanceNeighborFinder kernels index pairs down the columns of the pair
+    #   triangle, which has to be an exact bijection for the neighbor list to be right
+    # The Float32 square root used to invert the triangular number is corrected with
+    #   integer arithmetic, which should stay exact for large atom counts
+    function pair_index_col_correct(n_atoms, pair_is)
+        return all(pair_is) do pair_i
+            i, j = Molly.pair_index_col(n_atoms, pair_i)
+            return 1 <= i < j <= n_atoms && ((j - 1) * (j - 2)) ÷ 2 + i == pair_i
+        end
+    end
+
+    for n_atoms in (2, 3, 8, 63, 64, 65, 127, 128, 129)
+        n_pairs = Molly.n_atoms_to_n_pairs(n_atoms)
+        pairs_col = [Molly.pair_index_col(n_atoms, pair_i) for pair_i in 1:n_pairs]
+        @test pair_index_col_correct(n_atoms, 1:n_pairs)
+        @test length(unique(pairs_col)) == n_pairs
+    end
+    for n_atoms in (100_000, 10_000_000)
+        n_pairs = Molly.n_atoms_to_n_pairs(n_atoms)
+        @test pair_index_col_correct(n_atoms, (1, 2, n_pairs ÷ 3, n_pairs - 1, n_pairs))
+    end
+
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
+        eligible_nonsym = [false false false; false true false; true false true]
         boundary=CubicBoundary(10.0u"nm")
         if neighbor_finder == CellListMapNeighborFinder
-            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm", boundary=boundary)
+            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm",
+                                 boundary=boundary)
+            @test_throws ArgumentError neighbor_finder(eligible=eligible_nonsym,
+                                                       dist_cutoff=2.0u"nm", boundary=boundary)
         else
             nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
+            @test_throws ArgumentError neighbor_finder(eligible=eligible_nonsym,
+                                                       dist_cutoff=2.0u"nm")
         end
         s = System(
             atoms=[Atom(), Atom(), Atom()],
@@ -601,10 +677,8 @@ end
         )
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
         @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-        if run_parallel_tests
-            neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
-            @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-        end
+        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
+        @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
         show(devnull, nf)
     end
 
@@ -627,10 +701,8 @@ end
     )
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=1)
     @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-    if run_parallel_tests
-        neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=Threads.nthreads())
-        @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-    end
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=Threads.nthreads())
+    @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
 
     # Test CellListMapNeighborFinder with TriclinicBoundary
     boundary = TriclinicBoundary(

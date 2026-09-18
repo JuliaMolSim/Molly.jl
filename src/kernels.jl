@@ -83,7 +83,15 @@ required_atom_fields(inter) = nothing
 end
 
 @inline resolve_atom_fields(::Nothing, ::Type{A}) where {A} = fieldnames(A)
-@inline resolve_atom_fields(syms::Tuple, ::Type{A}) where {A} = syms
+@inline resolve_atom_fields(syms::Tuple, ::Type{A}) where {A} = resolve_atom_fields(Val(syms), A)
+
+# A custom atom type may provide a value such as the mass or charge through a method
+# rather than through a field of that name, so the narrowed list can name a field that
+# does not exist. Fall back to the conservative default of shuffling every field when
+# that happens.
+@generated function resolve_atom_fields(::Val{syms}, ::Type{A}) where {syms, A}
+    return all(n -> hasfield(A, n), syms) ? :(syms) : :(fieldnames(A))
+end
 
 # Extract the values of `syms` from an atom as a tuple (the warp-shuffle payload)
 @inline atom_shuffle_payload(atom, ::Val{syms}) where {syms} = map(s -> getfield(atom, s), syms)

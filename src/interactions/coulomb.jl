@@ -70,7 +70,7 @@ end
     r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     ke = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
+    qi, qj = charge(atom_i), charge(atom_j)
     params = (ke, qi, qj)
 
     f = force_cutoff(cutoff, inter, r, params)
@@ -96,7 +96,7 @@ end
     r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     ke = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
+    qi, qj = charge(atom_i), charge(atom_j)
     params = (ke, qi, qj)
 
     pe = pe_cutoff(cutoff, inter, r, params)
@@ -820,7 +820,7 @@ end
                        args...)
     r2 = sum(abs2, dr)
     ke = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
+    qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
 
     if special
@@ -853,7 +853,7 @@ end
                                   args...)
     r2 = sum(abs2, dr)
     ke = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
+    qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
 
     if special
@@ -1606,7 +1606,7 @@ end
                        args...) where T
     r2 = sum(abs2, dr)
     ke, α_ewald = inter.coulomb_const, inter.α_ewald
-    qi, qj = atom_i.charge, atom_j.charge
+    qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
     inv_r = inv(r)
     αr = α_ewald * r
@@ -1631,7 +1631,7 @@ end
                                   args...)
     r2 = sum(abs2, dr)
     ke, α_ewald = inter.coulomb_const, inter.α_ewald
-    qi, qj = atom_i.charge, atom_j.charge
+    qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
     inv_r = inv(r)
     αr = α_ewald * r
@@ -2286,7 +2286,7 @@ parameter_fields(::Type{<:Yukawa}) =
     r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
+    qi, qj = charge(atom_i), charge(atom_j)
     kappa = inter.kappa
     params = (coulomb_const, qi, qj, kappa)
 
@@ -2313,7 +2313,7 @@ end
     r = sqrt(sum(abs2, dr))
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
-    qi, qj = atom_i.charge, atom_j.charge
+    qi, qj = charge(atom_i), charge(atom_j)
     params = (coulomb_const, qi, qj, inter.kappa)
 
     pe = pe_cutoff(cutoff, inter, r, params)

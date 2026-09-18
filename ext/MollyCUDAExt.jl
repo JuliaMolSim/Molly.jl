@@ -2764,20 +2764,20 @@ end
 function Molly.remove_CM_motion!(sys::System{3, <:CuArray, T}) where T
     M = unit(zero(eltype(eltype(sys.velocities))) * zero(sys.total_mass))
     n_atoms = length(sys)
-    momentum = CUDA.zeros(T, 3)
+    cm_momentum = CUDA.zeros(T, 3)
     n_threads = 256
     n_blocks = cld(n_atoms, n_threads)
     shmem = 3 * n_threads * sizeof(T)
 
     @cuda threads=n_threads blocks=n_blocks shmem=shmem cm_momentum_kernel_3d!(
-                    momentum, sys.velocities, masses(sys), Val(n_atoms))
+                    cm_momentum, sys.velocities, masses(sys), Val(n_atoms))
     @cuda threads=n_threads blocks=n_blocks remove_cm_velocity_kernel_3d!(
-                    sys.velocities, momentum, sys.virtual_site_flags, sys.total_mass,
+                    sys.velocities, cm_momentum, sys.virtual_site_flags, sys.total_mass,
                     Val(M), Val(n_atoms), Val(!isempty(sys.virtual_sites)))
     return sys
 end
 
-function cm_momentum_kernel_3d!(momentum::CuDeviceVector{T}, velocities, atom_masses,
+function cm_momentum_kernel_3d!(cm_momentum::CuDeviceVector{T}, velocities, atom_masses,
                                 ::Val{n_atoms}) where {T, n_atoms}
     tid = threadIdx().x
     block_size = blockDim().x
@@ -2817,22 +2817,22 @@ function cm_momentum_kernel_3d!(momentum::CuDeviceVector{T}, velocities, atom_ma
     end
 
     if tid == 1
-        CUDA.atomic_add!(pointer(momentum, 1), shmem[1])
-        CUDA.atomic_add!(pointer(momentum, 2), shmem[block_size + 1])
-        CUDA.atomic_add!(pointer(momentum, 3), shmem[2 * block_size + 1])
+        CUDA.atomic_add!(pointer(cm_momentum, 1), shmem[1])
+        CUDA.atomic_add!(pointer(cm_momentum, 2), shmem[block_size + 1])
+        CUDA.atomic_add!(pointer(cm_momentum, 3), shmem[2 * block_size + 1])
     end
     return nothing
 end
 
-function remove_cm_velocity_kernel_3d!(velocities, momentum::CuDeviceVector{T},
+function remove_cm_velocity_kernel_3d!(velocities, cm_momentum::CuDeviceVector{T},
                             virtual_site_flags, total_mass, ::Val{momentum_unit}, ::Val{n_atoms},
                             ::Val{has_vs}) where {T, momentum_unit, n_atoms, has_vs}
     idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     @inbounds if idx <= n_atoms
         cm_velocity = SVector(
-            momentum[1] * momentum_unit / total_mass,
-            momentum[2] * momentum_unit / total_mass,
-            momentum[3] * momentum_unit / total_mass,
+            cm_momentum[1] * momentum_unit / total_mass,
+            cm_momentum[2] * momentum_unit / total_mass,
+            cm_momentum[3] * momentum_unit / total_mass,
         )
         v = velocities[idx]
         if has_vs && virtual_site_flags[idx]

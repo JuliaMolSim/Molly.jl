@@ -29,7 +29,7 @@ check_force_units(F::SVector, force_units) = @inbounds check_force_units(F[1], f
 function check_energy_units(E, energy_units)
     if unit(E) != energy_units
         throw(ArgumentError("system energy units are $energy_units but encountered " *
-                            "energy units ", unit(E)))
+                            "energy units $(unit(E))"))
     end
 end
 

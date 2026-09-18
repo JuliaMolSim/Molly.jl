@@ -212,6 +212,44 @@ interaction_type(::InteractionList4Atoms{<:Any, T}) where {T} = eltype(T)
 interaction_type(::InteractionList5Atoms{<:Any, T}) where {T} = eltype(T)
 
 Base.length(inter_list::SpecificInteractionList) = length(inter_list.is)
+Base.firstindex(inter_list::SpecificInteractionList) = 1
+Base.lastindex(inter_list::SpecificInteractionList) = length(inter_list)
+Base.eachindex(inter_list::SpecificInteractionList) = Base.OneTo(length(inter_list))
+Base.keys(inter_list::SpecificInteractionList) = Base.OneTo(length(inter_list))
+
+function Base.iterate(inter_list::SpecificInteractionList, i::Integer=1)
+    return i > length(inter_list) ? nothing : (inter_list[i], i + 1)
+end
+
+#=
+Get the `i`th interaction in a specific interaction list.
+A `NamedTuple` is returned containing the atom indices, the interaction and the
+interaction type, for example `(i=1, j=2, inter=HarmonicBond(...), type="")`.
+The `data` field of the list is shared between interactions so is not returned.
+=#
+function Base.getindex(inter_list::InteractionList1Atoms, i::Integer)
+    return (i=inter_list.is[i], inter=inter_list.inters[i], type=inter_list.types[i])
+end
+
+function Base.getindex(inter_list::InteractionList2Atoms, i::Integer)
+    return (i=inter_list.is[i], j=inter_list.js[i], inter=inter_list.inters[i],
+            type=inter_list.types[i])
+end
+
+function Base.getindex(inter_list::InteractionList3Atoms, i::Integer)
+    return (i=inter_list.is[i], j=inter_list.js[i], k=inter_list.ks[i],
+            inter=inter_list.inters[i], type=inter_list.types[i])
+end
+
+function Base.getindex(inter_list::InteractionList4Atoms, i::Integer)
+    return (i=inter_list.is[i], j=inter_list.js[i], k=inter_list.ks[i], l=inter_list.ls[i],
+            inter=inter_list.inters[i], type=inter_list.types[i])
+end
+
+function Base.getindex(inter_list::InteractionList5Atoms, i::Integer)
+    return (i=inter_list.is[i], j=inter_list.js[i], k=inter_list.ks[i], l=inter_list.ls[i],
+            m=inter_list.ms[i], inter=inter_list.inters[i], type=inter_list.types[i])
+end
 
 zero_or_nothing(x) = zero(x)
 zero_or_nothing(x::Nothing) = nothing
@@ -666,8 +704,11 @@ dict_get(dic, key, default::T) where {T} = (haskey(dic, key) ? T(dic[key]) : def
     charge(atom)
 
 The partial charge of an [`Atom`](@ref).
+
+Custom atom types should implement this function if charges are going to be used
+unless they have a `charge` field defined, which the function accesses by default.
 """
-charge(atom) = atom.charge
+@inline charge(atom) = atom.charge
 
 """
     lambda(atom)
@@ -1007,7 +1048,15 @@ function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, bounda
     end
 end
 
-function check_cutoff_box_size(dist_cutoff, boundary, strictness)
+function report_box_size_issue(min_box_side, dist_cutoff, strictness, maxlog=nothing)
+    err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
+              "($(2 * dist_cutoff)), this can lead to unphysical simulations " *
+              "since multiple copies of the same atom are seen but only one is " *
+              "considered due to the minimum image convention"
+    report_issue(err_str, strictness; maxlog=maxlog)
+end
+
+function check_cutoff_box_size(dist_cutoff, boundary, strictness; maxlog=nothing)
     has_infinite_boundary(boundary) && return nothing
     isinf(ustrip(dist_cutoff)) && return nothing
     min_box_side = minimum(box_sides(boundary))
@@ -1015,11 +1064,7 @@ function check_cutoff_box_size(dist_cutoff, boundary, strictness)
         return nothing # Unit mismatches are reported elsewhere
     end
     if min_box_side < (2 * dist_cutoff)
-        err_str = "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
-                  "($(2 * dist_cutoff)), this can lead to unphysical simulations " *
-                  "since multiple copies of the same atom are seen but only one is " *
-                  "considered due to the minimum image convention"
-        report_issue(err_str, strictness)
+        report_box_size_issue(min_box_side, dist_cutoff, strictness, maxlog)
     end
 end
 
@@ -1759,9 +1804,9 @@ function ReplicaSystem(thermo_states::AbstractArray{<:ThermoState},
     )
 end
 
-function AtomsBase.atomic_number(s::ReplicaSystem)
-    if length(s.partition.master_sys.atoms_data) > 0
-        return map(s.partition.master_sys.atoms_data) do ad
+function AtomsBase.atomic_number(sys::ReplicaSystem)
+    if length(sys.partition.master_sys.atoms_data) > 0
+        return map(sys.partition.master_sys.atoms_data) do ad
             if ad.element != "?"
                 PeriodicTable.elements[Symbol(ad.element)].number
             else
@@ -1769,7 +1814,7 @@ function AtomsBase.atomic_number(s::ReplicaSystem)
             end
         end
     else
-        return fill(:unknown, length(s))
+        return fill(:unknown, length(sys))
     end
 end
 
@@ -1904,33 +1949,33 @@ float_type_high(::Union{System{<:Any, <:Any, <:Any, TH},
 
 The masses of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 """
-masses(s::System) = s.masses
-masses(s::ReplicaSystem) = mass.(s.partition.master_sys.atoms)
+masses(sys::System) = sys.masses
+masses(sys::ReplicaSystem) = mass.(sys.partition.master_sys.atoms)
 
 """
     charges(sys)
 
 The partial charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 """
-charges(s::System) = charge.(s.atoms)
-charges(s::ReplicaSystem) = charge.(s.partition.master_sys.atoms)
-charge(s::System, i::Integer) = charge(s.atoms[i])
-charge(s::ReplicaSystem, i::Integer) = charge(s.partition.master_sys.atoms[i])
-charge(s::System, ::Colon) = charge.(s.atoms)
-charge(s::ReplicaSystem, ::Colon) = charge.(s.partition.master_sys.atoms)
+charges(sys::System) = charge.(sys.atoms)
+charges(sys::ReplicaSystem) = charge.(sys.partition.master_sys.atoms)
+charge(sys::System, i::Integer) = charge(sys.atoms[i])
+charge(sys::ReplicaSystem, i::Integer) = charge(sys.partition.master_sys.atoms[i])
+charge(sys::System, ::Colon) = charge.(sys.atoms)
+charge(sys::ReplicaSystem, ::Colon) = charge.(sys.partition.master_sys.atoms)
 
 # Separate methods to avoid method ambiguity with AtomsBase
-Base.getindex(s::System, i::Integer) = s.atoms[i]
-Base.getindex(s::ReplicaSystem, i::Integer) = s.partition.master_sys.atoms[i]
-Base.getindex(s::System, is::AbstractVector{Bool}) = s.atoms[is]
-Base.getindex(s::ReplicaSystem, is::AbstractVector{Bool}) = s.partition.master_sys.atoms[is]
-Base.length(s::System) = length(s.atoms)
-Base.length(s::ReplicaSystem) = length(s.partition.master_sys.atoms)
-Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
+Base.getindex(sys::System, i::Integer) = sys.atoms[i]
+Base.getindex(sys::ReplicaSystem, i::Integer) = sys.partition.master_sys.atoms[i]
+Base.getindex(sys::System, is::AbstractVector{Bool}) = sys.atoms[is]
+Base.getindex(sys::ReplicaSystem, is::AbstractVector{Bool}) = sys.partition.master_sys.atoms[is]
+Base.length(sys::System) = length(sys.atoms)
+Base.length(sys::ReplicaSystem) = length(sys.partition.master_sys.atoms)
+Base.eachindex(sys::Union{System, ReplicaSystem}) = Base.OneTo(length(sys))
 
-AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :mass, :atomic_number, :charge)
+AtomsBase.atomkeys(sys::Union{System, ReplicaSystem}) = (:position, :velocity, :mass, :atomic_number, :charge)
 AtomsBase.haskey(at::Atom, x::Symbol) = x in (:position, :velocity, :mass, :atomic_number, :charge)
-AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x in atomkeys(s)
+AtomsBase.hasatomkey(sys::Union{System, ReplicaSystem}, x::Symbol) = x in atomkeys(sys)
 AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(typeof(sys))
 AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
 Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) =
@@ -1939,34 +1984,34 @@ Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
 Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) =
     haskey(sys, x) ? getfield(sys, x) : default
 
-AtomsBase.position(s::System, i::Union{Integer, AbstractVector}) = s.coords[i]
-AtomsBase.position(s::System, ::Colon) = s.coords
-AtomsBase.position(s::ReplicaSystem, i::Union{Integer, AbstractVector}) = s.replica_coords[1][i]
-AtomsBase.position(s::ReplicaSystem, ::Colon) = s.replica_coords[1]
+AtomsBase.position(sys::System, i::Union{Integer, AbstractVector}) = sys.coords[i]
+AtomsBase.position(sys::System, ::Colon) = sys.coords
+AtomsBase.position(sys::ReplicaSystem, i::Union{Integer, AbstractVector}) = sys.replica_coords[1][i]
+AtomsBase.position(sys::ReplicaSystem, ::Colon) = sys.replica_coords[1]
 
-AtomsBase.velocity(s::System, i::Union{Integer, AbstractVector}) = s.velocities[i]
-AtomsBase.velocity(s::System, ::Colon) = s.velocities
-AtomsBase.velocity(s::ReplicaSystem, i::Union{Integer, AbstractVector}) = s.replica_velocities[1][i]
-AtomsBase.velocity(s::ReplicaSystem, ::Colon) = s.replica_velocities[1]
+AtomsBase.velocity(sys::System, i::Union{Integer, AbstractVector}) = sys.velocities[i]
+AtomsBase.velocity(sys::System, ::Colon) = sys.velocities
+AtomsBase.velocity(sys::ReplicaSystem, i::Union{Integer, AbstractVector}) = sys.replica_velocities[1][i]
+AtomsBase.velocity(sys::ReplicaSystem, ::Colon) = sys.replica_velocities[1]
 
-AtomsBase.mass(s::System, i::Union{Integer, AbstractVector}) = mass(s.atoms[i])
-AtomsBase.mass(s::System, ::Colon) = s.masses
-AtomsBase.mass(s::ReplicaSystem, i::Integer) = mass(s.partition.master_sys.atoms[i])
-AtomsBase.mass(s::ReplicaSystem, ::Colon) = mass.(s.partition.master_sys.atoms)
-AtomsBase.mass(s::ReplicaSystem, is::AbstractVector) = mass.(s.partition.master_sys.atoms[is])
+AtomsBase.mass(sys::System, i::Union{Integer, AbstractVector}) = mass(sys.atoms[i])
+AtomsBase.mass(sys::System, ::Colon) = sys.masses
+AtomsBase.mass(sys::ReplicaSystem, i::Integer) = mass(sys.partition.master_sys.atoms[i])
+AtomsBase.mass(sys::ReplicaSystem, ::Colon) = mass.(sys.partition.master_sys.atoms)
+AtomsBase.mass(sys::ReplicaSystem, is::AbstractVector) = mass.(sys.partition.master_sys.atoms[is])
 
-function AtomsBase.species(s::System, i::Integer)
-    return AtomsBase.ChemicalSpecies(Symbol(s.atoms_data[i].element))
+function AtomsBase.species(sys::System, i::Integer)
+    return AtomsBase.ChemicalSpecies(Symbol(sys.atoms_data[i].element))
 end
-function AtomsBase.species(s::ReplicaSystem, i::Integer)
-    return AtomsBase.ChemicalSpecies(Symbol(s.partition.master_sys.atoms_data[i].element))
+function AtomsBase.species(sys::ReplicaSystem, i::Integer)
+    return AtomsBase.ChemicalSpecies(Symbol(sys.partition.master_sys.atoms_data[i].element))
 end
 
-function AtomsBase.species(s::System, i::Union{AbstractVector, Colon})
-    return AtomsBase.ChemicalSpecies.(Symbol.(getfield.(s.atoms_data[i], :element)))
+function AtomsBase.species(sys::System, i::Union{AbstractVector, Colon})
+    return AtomsBase.ChemicalSpecies.(Symbol.(getfield.(sys.atoms_data[i], :element)))
 end
-function AtomsBase.species(s::ReplicaSystem, i::Union{AbstractVector, Colon})
-    return AtomsBase.ChemicalSpecies.(Symbol.(getfield.(s.partition.master_sys.atoms_data[i], :element)))
+function AtomsBase.species(sys::ReplicaSystem, i::Union{AbstractVector, Colon})
+    return AtomsBase.ChemicalSpecies.(Symbol.(getfield.(sys.partition.master_sys.atoms_data[i], :element)))
 end
 
 function Base.getindex(sys::Union{System, ReplicaSystem}, i, x::Symbol)
@@ -1982,39 +2027,39 @@ function Base.getindex(sys::Union{System, ReplicaSystem}, i, x::Symbol)
     end
 end
 
-function AtomsBase.atomic_symbol(s::System)
-    if length(s.atoms_data) > 0
-        return map(ad -> Symbol(ad.element), s.atoms_data)
+function AtomsBase.atomic_symbol(sys::System)
+    if length(sys.atoms_data) > 0
+        return map(ad -> Symbol(ad.element), sys.atoms_data)
     else
-        return fill(:unknown, length(s))
+        return fill(:unknown, length(sys))
     end
 end
-function AtomsBase.atomic_symbol(s::ReplicaSystem)
-    if length(s.partition.master_sys.atoms_data) > 0
-        return map(ad -> Symbol(ad.element), s.partition.master_sys.atoms_data)
+function AtomsBase.atomic_symbol(sys::ReplicaSystem)
+    if length(sys.partition.master_sys.atoms_data) > 0
+        return map(ad -> Symbol(ad.element), sys.partition.master_sys.atoms_data)
     else
-        return fill(:unknown, length(s))
+        return fill(:unknown, length(sys))
     end
 end
 
-function AtomsBase.atomic_symbol(s::System, i::Integer)
-    if length(s.atoms_data) > 0
-        return Symbol(s.atoms_data[i].element)
+function AtomsBase.atomic_symbol(sys::System, i::Integer)
+    if length(sys.atoms_data) > 0
+        return Symbol(sys.atoms_data[i].element)
     else
         return :unknown
     end
 end
-function AtomsBase.atomic_symbol(s::ReplicaSystem, i::Integer)
-    if length(s.partition.master_sys.atoms_data) > 0
-        return Symbol(s.partition.master_sys.atoms_data[i].element)
+function AtomsBase.atomic_symbol(sys::ReplicaSystem, i::Integer)
+    if length(sys.partition.master_sys.atoms_data) > 0
+        return Symbol(sys.partition.master_sys.atoms_data[i].element)
     else
         return :unknown
     end
 end
 
-function AtomsBase.atomic_number(s::Union{System, ReplicaSystem})
-    if length(s.atoms_data) > 0
-        return map(s.atoms_data) do ad
+function AtomsBase.atomic_number(sys::Union{System, ReplicaSystem})
+    if length(sys.atoms_data) > 0
+        return map(sys.atoms_data) do ad
             if ad.element != "?"
                 PeriodicTable.elements[Symbol(ad.element)].number
             else
@@ -2022,27 +2067,27 @@ function AtomsBase.atomic_number(s::Union{System, ReplicaSystem})
             end
         end
     else
-        return fill(:unknown, length(s))
+        return fill(:unknown, length(sys))
     end
 end
 
-function AtomsBase.atomic_number(s::System , i::Integer)
-    if length(s.atoms_data) > 0 && s.atoms_data[i].element != "?"
-        return PeriodicTable.elements[Symbol(s.atoms_data[i].element)].number
+function AtomsBase.atomic_number(sys::System , i::Integer)
+    if length(sys.atoms_data) > 0 && sys.atoms_data[i].element != "?"
+        return PeriodicTable.elements[Symbol(sys.atoms_data[i].element)].number
     else
         return :unknown
     end
 end
-function AtomsBase.atomic_number(s::ReplicaSystem, i::Integer)
-    if length(s.partition.master_sys.atoms_data) > 0 && s.partition.master_sys.atoms_data[i].element != "?"
-        return PeriodicTable.elements[Symbol(s.partition.master_sys.atoms_data[i].element)].number
+function AtomsBase.atomic_number(sys::ReplicaSystem, i::Integer)
+    if length(sys.partition.master_sys.atoms_data) > 0 && sys.partition.master_sys.atoms_data[i].element != "?"
+        return PeriodicTable.elements[Symbol(sys.partition.master_sys.atoms_data[i].element)].number
     else
         return :unknown
     end
 end
 
-AtomsBase.cell_vectors(s::System) = AtomsBase.cell_vectors(s.boundary)
-AtomsBase.cell_vectors(s::ReplicaSystem) = AtomsBase.cell_vectors(s.replica_boundaries[1])
+AtomsBase.cell_vectors(sys::System) = AtomsBase.cell_vectors(sys.boundary)
+AtomsBase.cell_vectors(sys::ReplicaSystem) = AtomsBase.cell_vectors(sys.replica_boundaries[1])
 
 function AtomsBase.cell(sys::System{D}) where D
     return AtomsBase.PeriodicCell(
@@ -2214,8 +2259,8 @@ Note that this calculator is designed for using Molly in other contexts; if you
 want to use another calculator in Molly it can be given as `general_inters` when
 creating a [`System`](@ref).
 
-Not currently compatible with virial calculation.
-Not currently compatible with using atom properties such as `σ` and `ϵ`.
+Not compatible with virial calculation.
+Not compatible with using atom properties such as `σ` and `ϵ`.
 
 # Arguments
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
@@ -2321,7 +2366,7 @@ end
 """
     ASECalculator(; <keyword arguments>)
 
-A Python [ASE](https://wiki.fysik.dtu.dk/ase) calculator.
+A Python [ASE](https://ase-lib.org) calculator.
 
 This calculator is only available when PythonCall is imported.
 It is the user's responsibility to have the required Python packages installed.
@@ -2331,8 +2376,8 @@ Contrary to the rest of Molly, unitless quantities are assumed to have ASE units
 Å for length, eV for energy, u for mass, and Å sqrt(u/eV) for time.
 Unitful quantities will be converted as appropriate.
 
-Not currently compatible with [`TriclinicBoundary`](@ref).
-Not currently compatible with virial calculation.
+Not compatible with [`TriclinicBoundary`](@ref).
+Not compatible with virial calculation.
 
 # Arguments
 - `ase_calc`: the ASE calculator created with PythonCall.
@@ -2368,6 +2413,28 @@ macro maybe_threads(flag, expr)
             $expr
         end
     end |> esc
+end
+
+#=
+Set up a KernelAbstractions kernel launch that respects `n_threads` on the CPU backend.
+Sizing the workgroups on CPU so that there are `n_threads` of them limits the launch to
+`n_threads` tasks.
+Only use these for kernels where the workgroup size does not affect the result, i.e. not
+for kernels that use `@synchronize` or `@localmem`.
+=#
+@inline function backend_kernel(kernel, backend, block_size, static_ndrange...)
+    return kernel(backend, block_size, static_ndrange...)
+end
+
+@inline function backend_kernel(kernel, backend::KernelAbstractions.CPU, block_size,
+                                static_ndrange...)
+    return kernel(backend)
+end
+
+@inline backend_workgroupsize(backend, ndrange, n_threads) = nothing
+
+@inline function backend_workgroupsize(::KernelAbstractions.CPU, ndrange, n_threads)
+    return max(cld(ndrange, max(n_threads, 1)), 1)
 end
 
 function default_strictness()

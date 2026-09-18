@@ -97,22 +97,8 @@ function periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, 
     return fi, fj, fk, fl
 end
 
-# The summation gives different errors with Enzyme on CPU and GPU
-#   so there are two similar implementations
-@inline function force(d::PeriodicTorsion, coords_i, coords_j, coords_k,
-                       coords_l, boundary, args...)
-    ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
-                                        coords_i, coords_j, coords_k, coords_l, boundary)
-    fs = sum(zip(d.periodicities, d.phases, d.ks)) do (periodicity, phase, k)
-        fi, fj, fk, fl = periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc,
-                                                cross_bc_cd, bc_norm, θ)
-        return SpecificForce4Atoms(fi, fj, fk, fl)
-    end
-    return fs
-end
-
-@inline function force_gpu(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
-                           coords_l, boundary, args...) where N
+@inline function force(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
+                       coords_l, boundary, args...) where N
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
                                         coords_i, coords_j, coords_k, coords_l, boundary)
     fi_sum, fj_sum, fk_sum, fl_sum = periodic_torsion_force(d.periodicities[1], d.phases[1],

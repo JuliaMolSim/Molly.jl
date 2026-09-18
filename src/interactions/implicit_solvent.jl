@@ -435,7 +435,7 @@ screening parameter, the key `"-"` giving the value used for elements not in the
 `n_threads` determines how many per-thread force buffers are allocated.
 
 Only compatible with 3D systems.
-Not currently compatible with virial calculation.
+Not compatible with virial calculation.
 """
 struct ImplicitSolventOBC{T, D, VT, VD, K, S, F, BF, BS, PT, MT, FC} <: AbstractGBSA
     offset_radii::VD
@@ -707,7 +707,7 @@ radii of each pair of atoms.
 `n_threads` determines how many per-thread force buffers are allocated.
 
 Only compatible with 3D systems.
-Not currently compatible with virial calculation.
+Not compatible with virial calculation.
 """
 struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, TD, TM, VI, BF, BS, PT, MT, FC} <: AbstractGBSA
     offset_radii::VD

@@ -1401,6 +1401,20 @@
         atol=1e-7u"kJ * mol^-1",
     )
 
+    sys_mb = System(
+        atoms=[Atom(mass=1.0u"g/mol")],
+        coords=[SVector(-0.5, 0.25)u"nm"],
+        boundary=RectangularBoundary(Inf * u"nm"),
+        general_inters=(MullerBrown(),),
+    )
+    # match_mode is :all by default, so this asserts exactly one warning is logged
+    @test_logs (:warn, r"virial contribution for MullerBrown") begin
+        for _ in 1:3
+            virial(sys_mb)
+        end
+    end
+    @test_throws ErrorException virial(sys_mb; strictness=:error)
+
     # RBTorsion tests
     # Use proper non-collinear geometry for torsion - atoms arranged in a dihedral
     c1t = SVector(0.0, 0.0, 0.0)u"nm"
@@ -1602,6 +1616,26 @@
 
     InteractionList2Atoms([1, 2], [3, 4], [0.0, 0.0])
     @test_throws ArgumentError InteractionList2Atoms([1, 2], [3, 4], [0.0])
+
+    # Indexing and iterating over specific interaction lists
+    bond_1 = HarmonicBond(k=100.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm")
+    bond_2 = HarmonicBond(k=200.0u"kJ * mol^-1 * nm^-2", r0=0.2u"nm")
+    il2 = InteractionList2Atoms([1, 3], [2, 4], [bond_1, bond_2], ["b1", "b2"])
+    @test length(il2) == 2
+    @test eachindex(il2) == 1:2
+    @test il2[1] == (i=1, j=2, inter=bond_1, type="b1")
+    @test il2[end] == (i=3, j=4, inter=bond_2, type="b2")
+    @test collect(il2) == [il2[1], il2[2]]
+    @test [entry.i for entry in il2] == [1, 3]
+    il1 = InteractionList1Atoms([2], [HarmonicPositionRestraint(
+                    k=100.0u"kJ * mol^-1 * nm^-2", x0=SVector(1.0, 1.0, 1.0)u"nm")])
+    @test il1[1].i == 2
+    il3 = InteractionList3Atoms([1], [2], [3],
+                                [HarmonicAngle(k=10.0u"kJ * mol^-1", θ0=2.0)])
+    @test (il3[1].i, il3[1].j, il3[1].k) == (1, 2, 3)
+    il4 = InteractionList4Atoms([1], [2], [3], [4],
+                    [PeriodicTorsion(periodicities=[1], phases=[0.0], ks=[10.0u"kJ * mol^-1"])])
+    @test (il4[1].i, il4[1].j, il4[1].k, il4[1].l) == (1, 2, 3, 4)
 end
 
 @testset "Cutoffs" begin
