@@ -14,8 +14,8 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
         atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                  for i in 1:n_atoms]
         simulator = VelocityVerlet(dt=0.001u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
-        gen_temp_wrapper(s, neighbors, step_n, buffers; kwargs...) =
-            temperature(s; kin_tensor=buffers.kin_tensor)
+        gen_temp_wrapper(sys, neighbors, step_n, buffers; kwargs...) =
+            temperature(sys; kin_tensor=buffers.kin_tensor)
 
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
@@ -92,7 +92,7 @@ end
     kin_obs(sys, args...; kwargs...) = kinetic_energy(sys)
 
     for n_threads in n_threads_list
-        s = System(
+        sys = System(
             atoms=[Atom(index=i, mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                    for i in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
@@ -124,7 +124,7 @@ end
         )
 
         if n_threads == 1
-            write_structure(temp_fp_pdb, s; atom_inds=[10, 12, 14, 16])
+            write_structure(temp_fp_pdb, sys; atom_inds=[10, 12, 14, 16])
             @test readlines(temp_fp_pdb)[1] == "CRYST1     20.0     20.0     20.0  90.00  90.00  90.00 P 1           1"
             traj = read(temp_fp_pdb, BioStructures.PDBFormat)
             rm(temp_fp_pdb)
@@ -138,7 +138,7 @@ end
             for write_boundary in (true, false)
                 # Suppress sybyl type warning
                 @suppress_err begin
-                    write_structure(temp_fp_mol2, s; format="MOL2",
+                    write_structure(temp_fp_mol2, sys; format="MOL2",
                                     write_boundary=write_boundary)
                     traj = Chemfiles.Trajectory(temp_fp_mol2)
                     rm(temp_fp_mol2)
@@ -153,7 +153,7 @@ end
                 end
             end
 
-            write_structure(temp_fp_xyz, s)
+            write_structure(temp_fp_xyz, sys)
             @test countlines(temp_fp_xyz) == 102
             traj = Chemfiles.Trajectory(temp_fp_xyz)
             rm(temp_fp_xyz)
@@ -166,58 +166,58 @@ end
         end
 
         # Test AtomsBase.jl interface
-        @test length(s) == n_atoms
-        @test eachindex(s) == Base.OneTo(n_atoms)
-        @test length(s[2:4]) == 3
-        @test length(s[[2, 4]]) == 2
-        @test broadcast(a -> a.index, s) == collect(1:n_atoms)
-        @test AtomsBase.position(s, :) == s.coords
-        @test AtomsBase.position(s, 5) == s.coords[5]
-        @test AtomsBase.velocity(s, :) == s.velocities
-        @test AtomsBase.velocity(s, 5) == s.velocities[5]
-        @test AtomsBase.mass(s, :) == fill(atom_mass, n_atoms)
-        @test AtomsBase.mass(s, 5) == atom_mass
-        @test AtomsBase.atomic_symbol(s) == fill(:Ar, n_atoms)
-        @test AtomsBase.atomic_symbol(s, 5) == :Ar
-        @test AtomsBase.cell_vectors(s) == (
+        @test length(sys) == n_atoms
+        @test eachindex(sys) == Base.OneTo(n_atoms)
+        @test length(sys[2:4]) == 3
+        @test length(sys[[2, 4]]) == 2
+        @test broadcast(a -> a.index, sys) == collect(1:n_atoms)
+        @test AtomsBase.position(sys, :) == sys.coords
+        @test AtomsBase.position(sys, 5) == sys.coords[5]
+        @test AtomsBase.velocity(sys, :) == sys.velocities
+        @test AtomsBase.velocity(sys, 5) == sys.velocities[5]
+        @test AtomsBase.mass(sys, :) == fill(atom_mass, n_atoms)
+        @test AtomsBase.mass(sys, 5) == atom_mass
+        @test AtomsBase.atomic_symbol(sys) == fill(:Ar, n_atoms)
+        @test AtomsBase.atomic_symbol(sys, 5) == :Ar
+        @test AtomsBase.cell_vectors(sys) == (
             SVector(2.0, 0.0, 0.0)u"nm",
             SVector(0.0, 2.0, 0.0)u"nm",
             SVector(0.0, 0.0, 2.0)u"nm",
         )
-        show(devnull, s[5])
-        show(devnull, s[2:4])
-        for a in s
+        show(devnull, sys[5])
+        show(devnull, sys[2:4])
+        for a in sys
             show(devnull, a)
         end
 
         nf_tree = TreeNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
-        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=n_threads)
-        neighbors_tree = find_neighbors(s, nf_tree; n_threads=n_threads)
+        neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+        neighbors_tree = find_neighbors(sys, nf_tree; n_threads=n_threads)
         @test length(neighbors.list) == length(neighbors_tree.list)
         @test all(nn in neighbors_tree.list for nn in neighbors.list)
 
-        simulate!(s, simulator, n_steps; n_threads=n_threads, show_progress=true)
+        simulate!(sys, simulator, n_steps; n_threads=n_threads, show_progress=true)
 
-        show(devnull, s.loggers.temp)
-        show(devnull, s.loggers.coords)
-        show(devnull, s.loggers.vels)
-        show(devnull, s.loggers.energy)
-        show(devnull, s.loggers.ke)
-        show(devnull, s.loggers.pe)
-        show(devnull, s.loggers.force)
-        show(devnull, s.loggers.dcd_writer)
-        show(devnull, s.loggers.pdb_writer)
-        show(devnull, s.loggers.potkin_correlation)
-        show(devnull, s.loggers.velocity_autocorrelation)
+        show(devnull, sys.loggers.temp)
+        show(devnull, sys.loggers.coords)
+        show(devnull, sys.loggers.vels)
+        show(devnull, sys.loggers.energy)
+        show(devnull, sys.loggers.ke)
+        show(devnull, sys.loggers.pe)
+        show(devnull, sys.loggers.force)
+        show(devnull, sys.loggers.dcd_writer)
+        show(devnull, sys.loggers.pdb_writer)
+        show(devnull, sys.loggers.potkin_correlation)
+        show(devnull, sys.loggers.velocity_autocorrelation)
 
-        final_coords = last(values(s.loggers.coords))
+        final_coords = last(values(sys.loggers.coords))
         @test all(all(c .> 0.0u"nm") for c in final_coords)
         @test all(all(c .< boundary) for c in final_coords)
         displacements(final_coords, boundary)
         distances(final_coords, boundary)
         rdf(final_coords, boundary)
-        @test unit(first(values(s.loggers.potkin_correlation))) == NoUnits
-        @test unit(first(values(s.loggers.velocity_autocorrelation; normalize=false))) == u"nm^2 * ps^-2"
+        @test unit(first(values(sys.loggers.potkin_correlation))) == NoUnits
+        @test unit(first(values(sys.loggers.velocity_autocorrelation; normalize=false))) == u"nm^2 * ps^-2"
 
         traj = Chemfiles.Trajectory(temp_fp_dcd)
         rm(temp_fp_dcd)
@@ -248,10 +248,10 @@ end
         @test BioStructures.countmodels(traj) == n_frames
         @test BioStructures.countatoms(first(traj)) == 100
 
-        run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
+        run_visualize_tests && visualize(sys.loggers.coords, boundary, temp_fp_mp4)
 
-        coords_unc = [c .± (abs(randn()) / 100)u"nm"         for c in s.coords    ]
-        vels_unc   = [v .± (abs(randn()) / 100)u"nm * ps^-1" for v in s.velocities]
+        coords_unc = [c .± (abs(randn()) / 100)u"nm"         for c in sys.coords  ]
+        vels_unc   = [v .± (abs(randn()) / 100)u"nm * ps^-1" for v in sys.velocities]
         sys_unc = System(
             atoms=[Atom(index=i, mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                    for i in 1:n_atoms],
@@ -288,10 +288,10 @@ end
         @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
                             typeof((1.0 ± 0.1)u"kJ * mol^-1")
         @test abs(potential_energy(sys_unc; n_threads=n_threads) -
-                            potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
+                            potential_energy(sys; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
         @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
         @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
-        @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
+        @test abs(temperature(sys_unc) - temperature(sys)) < 0.1u"K"
         @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
                             typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
 
@@ -308,7 +308,7 @@ end
     coords = place_atoms(n_atoms, CubicBoundary(2.0u"nm"); min_dist=0.3u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
 
-    s = System(
+    sys = System(
         atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
@@ -322,19 +322,19 @@ end
     )
 
     @test Molly.has_infinite_boundary(boundary)
-    @test Molly.has_infinite_boundary(s)
-    @test AtomsBase.atomic_symbol(s) == fill(:unknown, n_atoms)
-    @test AtomsBase.atomic_symbol(s, 5) == :unknown
+    @test Molly.has_infinite_boundary(sys)
+    @test AtomsBase.atomic_symbol(sys) == fill(:unknown, n_atoms)
+    @test AtomsBase.atomic_symbol(sys, 5) == :unknown
 
-    random_velocities!(s, temp)
+    random_velocities!(sys, temp)
 
-    simulate!(s, simulator, n_steps ÷ 2)
-    simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipstart)
+    simulate!(sys, simulator, n_steps ÷ 2)
+    simulate!(sys, simulator, n_steps ÷ 2; run_loggers=:skipstart)
 
-    @test length(values(s.loggers.coords)) == 21
-    @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
+    @test length(values(sys.loggers.coords)) == 21
+    @test maximum(distances(sys.coords, boundary)) > 5.0u"nm"
 
-    run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
+    run_visualize_tests && visualize(sys.loggers.coords, boundary, temp_fp_mp4)
 end
 
 @testset "Lennard-Jones simulators" begin
@@ -669,7 +669,7 @@ end
             neighbor_finder = NoNeighborFinder()
         end
 
-        s = System(
+        sys = System(
             atoms=[Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary; min_dist=0.2u"nm"),
@@ -684,7 +684,7 @@ end
             ),
         )
 
-        simulate!(s, simulator, n_steps)
+        simulate!(sys, simulator, n_steps)
     end
 end
 
@@ -799,7 +799,7 @@ end
     vtype = eltype(velocities)
     V(sys::System, neighbors=nothing) = sys.velocities
 
-    s = System(
+    sys = System(
         atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
@@ -819,7 +819,7 @@ end
 
     vtype_nounits = eltype(ustrip_vec.(velocities))
 
-    s_nounits = System(
+    sys_nounits = System(
         atoms=[Atom(mass=10.0, charge=0.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         coords=ustrip_vec.(coords),
         boundary=CubicBoundary(ustrip.(boundary)),
@@ -839,31 +839,31 @@ end
         energy_units=NoUnits,
     )
 
-    neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
-    neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; n_threads=1)
-    a1 = accelerations(s, neighbors)
-    a2 = accelerations(s_nounits, neighbors_nounits)u"kJ * nm^-1 * g^-1"
-    a3 = accelerations(s)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=1)
+    neighbors_nounits = find_neighbors(sys_nounits, sys_nounits.neighbor_finder; n_threads=1)
+    a1 = accelerations(sys, neighbors)
+    a2 = accelerations(sys_nounits, neighbors_nounits)u"kJ * nm^-1 * g^-1"
+    a3 = accelerations(sys)
     @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1))
     @test all(all(a1[i] .≈ a3[i]) for i in eachindex(a1))
 
-    simulate!(s, simulator, n_steps; n_threads=1)
-    simulate!(s_nounits, simulator_nounits, n_steps; n_threads=1)
+    simulate!(sys, simulator, n_steps; n_threads=1)
+    simulate!(sys_nounits, simulator_nounits, n_steps; n_threads=1)
 
-    coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers.coords)) * u"nm"
+    coords_diff = last(values(sys.loggers.coords)) .- last(values(sys_nounits.loggers.coords)) * u"nm"
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
 
-    final_energy = last(values(s.loggers.energy))
-    final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
+    final_energy = last(values(sys.loggers.energy))
+    final_energy_nounits = last(values(sys_nounits.loggers.energy)) * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits; atol=5e-4u"kJ * mol^-1")
 
     # Test init_step
-    s2 = deepcopy(s)
-    simulate!(s, simulator, 100; n_threads=1)
-    simulate!(s2, simulator, 40; n_threads=1)
-    simulate!(s2, simulator, 40; n_threads=1, init_step=40)
-    simulate!(s2, simulator, 20; n_threads=1, init_step=80)
-    @test maximum(norm.(s.coords .- s2.coords)) < 1e-8u"nm"
+    sys2 = deepcopy(sys)
+    simulate!(sys, simulator, 100; n_threads=1)
+    simulate!(sys2, simulator, 40; n_threads=1)
+    simulate!(sys2, simulator, 40; n_threads=1, init_step=40)
+    simulate!(sys2, simulator, 20; n_threads=1, init_step=80)
+    @test maximum(norm.(sys.coords .- sys2.coords)) < 1e-8u"nm"
 end
 
 @testset "Position restraints" begin
@@ -906,7 +906,7 @@ end
     boundary = CubicBoundary(10.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
-    s1 = System(
+    sys1 = System(
         atoms=[Atom( mass=10.0u"g/mol", charge=0.0,σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
@@ -919,19 +919,19 @@ end
         ),
         loggers=(temp=TemperatureLogger(10),),
     )
-    s2 = deepcopy(s1)
+    sys2 = deepcopy(sys1)
     rseed = 2022
     simulator1 = Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1")
     simulator2 = LangevinSplitting(dt=0.002u"ps", temperature=temp,
                                    friction=10.0u"g * mol^-1 * ps^-1", splitting="BAOA")
 
-    simulate!(s1, simulator1, n_steps; rng=MersenneTwister(rseed))
-    @test 280.0u"K" <= mean(s1.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
+    simulate!(sys1, simulator1, n_steps; rng=MersenneTwister(rseed))
+    @test 280.0u"K" <= mean(sys1.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
 
-    simulate!(s2, simulator2, n_steps; rng=MersenneTwister(rseed))
-    @test 280.0u"K" <= mean(s2.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
+    simulate!(sys2, simulator2, n_steps; rng=MersenneTwister(rseed))
+    @test 280.0u"K" <= mean(sys2.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
 
-    @test maximum(maximum(abs.(v)) for v in (s1.coords .- s2.coords)) < 1e-5u"nm"
+    @test maximum(maximum(abs.(v)) for v in (sys1.coords .- sys2.coords)) < 1e-5u"nm"
 end
 
 @testset "Reproducible randomness" begin
