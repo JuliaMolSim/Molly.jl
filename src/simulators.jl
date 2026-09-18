@@ -2062,7 +2062,8 @@ function simulate!(sys::ReplicaSystem,
                    show_progress=default_show_progress(),
                    check_nans=default_check_nans(sys, sim),
                    rng=Random.default_rng(),
-                   strictness=default_strictness())
+                   strictness=default_strictness(),
+                   kwargs...)
     check_simulate_inputs(init_step, run_loggers, strictness)
     if assign_velocities
         master_sys = sys.partition.master_sys
@@ -2084,9 +2085,10 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
+    # Further keyword arguments, such as `gpu_devices`, are passed to `simulate_remd!`
     return simulate_remd!(sys, sim, n_steps_or_time; n_threads=n_threads, run_loggers=run_loggers,
                           shortcut=shortcut, init_step=init_step, show_progress=show_progress,
-                          check_nans=check_nans, rng=rng, strictness=strictness)
+                          check_nans=check_nans, rng=rng, strictness=strictness, kwargs...)
 end
 
 @doc raw"""

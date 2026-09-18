@@ -37,7 +37,7 @@ end
 function effective_charges(inter::AbstractEwald, atoms)
     T = typeof(inter.error_tol)
     atoms_cpu = from_device(atoms)
-    return [effective_charge(atom, inter.scheduler, Val(T)) for atom in atoms_cpu]
+    return [effective_charge(inter.scheduler, atom, Val(T)) for atom in atoms_cpu]
 end
 
 function effective_charges_vary(inter::AbstractEwald, λ_atoms)
@@ -56,11 +56,11 @@ function ewald_exclusion_charges_vary(inter_list::InteractionList2Atoms, λ_atom
     T = typeof(inter_list.data.error_tol)
     scheduler = inter_list.data.scheduler
     ref_atoms = from_device(first(λ_atoms))
-    ref_charges = [effective_charge(ref_atoms[i], scheduler, Val(T)) for i in inds]
+    ref_charges = [effective_charge(scheduler, ref_atoms[i], Val(T)) for i in inds]
 
     for atoms in λ_atoms[2:end]
         atoms_cpu = from_device(atoms)
-        charges = [effective_charge(atoms_cpu[i], scheduler, Val(T)) for i in inds]
+        charges = [effective_charge(scheduler, atoms_cpu[i], Val(T)) for i in inds]
         charges != ref_charges && return true
     end
     return false

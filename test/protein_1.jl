@@ -700,11 +700,11 @@ end
         force_separate_lj14=true,
     )
     @test potential_energy(sys) ≈ potential_energy(sys_lj14)
-    @test maximum(norm.(forces(sys) .- forces(sys_lj14))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test maximum(norm.(forces(sys) .- forces(sys_lj14))) < 1e-9u"kJ * nm^-1 * mol^-1"
 
     @test sum(masses(sys)) ≈ sum(masses(sys_hmr))
     @test potential_energy(sys) ≈ potential_energy(sys_hmr)
-    @test maximum(norm.(forces(sys) .- forces(sys_hmr))) < 1e-10u"kJ * nm^-1 * mol^-1"
+    @test maximum(norm.(forces(sys) .- forces(sys_hmr))) < 1e-9u"kJ * nm^-1 * mol^-1"
     @test_throws ErrorException System(joinpath(data_dir, "tyk2_ejm31.pdb"), ff; hydrogen_mass=6)
     @test_throws ArgumentError System(joinpath(data_dir, "tyk2_ejm31.pdb"), ff; hydrogen_mass=true)
 

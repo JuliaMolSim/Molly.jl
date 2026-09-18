@@ -155,7 +155,7 @@ end
 
 struct MinimumMixing end
 
-@inline function λ_mixing(m::MinimumMixing, lambdas::Tuple{Vararg{T}}, args...) where T
+@inline function λ_mixing(m::MinimumMixing, lambdas::Tuple{T, Vararg{T}}, args...) where T
     return min(lambdas...)
 end
 

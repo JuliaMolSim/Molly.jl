@@ -221,16 +221,15 @@ function to_lambda_function(inter::PeriodicTorsion; λ_mixing=MinimumMixing(), s
 end
 
 @inline tuplejoin(x, y) = (x..., y...)
-@inline Base.zero(x::Tuple) = (zero(i) for i in x)
 
 function to_lambda_function_single(interA::PeriodicTorsion, interB::Nothing; 
                                    λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
     periodicities_A  = interA.periodicities
-    periodicities_B  = zero(interA.periodicities)
+    periodicities_B  = map(zero, interA.periodicities)
     phases_A  = interA.phases
-    phases_B  = zero(interA.phases)
+    phases_B  = map(zero, interA.phases)
     ks_A = interA.ks
-    ks_B = zero(interA.ks)
+    ks_B = map(zero, interA.ks)
     
     return PeriodicTorsionλ(periodicities=tuplejoin(periodicities_A, periodicities_B), 
                             phases=tuplejoin(phases_A, phases_B), ks=tuplejoin(ks_A,ks_B), proper=interA.proper, 
@@ -239,11 +238,11 @@ end
 
 function to_lambda_function_single(interA::Nothing, interB::PeriodicTorsion; 
                                    λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
-    periodicities_A  = zero(interB.periodicities) 
+    periodicities_A  = map(zero, interB.periodicities) 
     periodicities_B  = interB.periodicities
-    phases_A  = zero(interB.phases) 
+    phases_A  = map(zero, interB.phases) 
     phases_B  = interB.phases
-    ks_A = zero(interB.ks) 
+    ks_A = map(zero, interB.ks) 
     ks_B = interB.ks
     
     return PeriodicTorsionλ(periodicities=tuplejoin(periodicities_A, periodicities_B), 

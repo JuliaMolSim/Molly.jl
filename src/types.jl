@@ -2403,6 +2403,7 @@ function update_ase_calc! end
 # This could be extended to only check the value for Duals
 iszero_value(x) = iszero(x)
 iszero_value(x::SVector) = all(iszero_value, x)
+iszero_value(x::Tuple) = all(iszero_value, x)
 
 # Only use threading if a condition is true
 macro maybe_threads(flag, expr)

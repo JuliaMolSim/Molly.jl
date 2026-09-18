@@ -52,7 +52,10 @@ function AtomsCalculators.energy_forces(sys::System,
     return (energy=pe, forces=fs)
 end
 
-@inline function effective_charge(atom::Atom, scheduler, ::Val{T}) where T
+# Atom types without an alchemical role keep their charge
+@inline effective_charge(scheduler, atom, ::Val{T}) where T = charge(atom)
+
+@inline function effective_charge(scheduler, atom::Atom, ::Val{T}) where T
     dual_val = scheduler.dual ? Val(true) : Val(false)
     λ, λR, λ_params = scale_elec(scheduler, T(atom.λ), atom.alch_role, dual_val)
     if scheduler.dual
@@ -63,7 +66,7 @@ end
 end
 
 
-@inline function effective_charge(atom::Atom, scheduler, ::Val{T}, global_λ) where T
+@inline function effective_charge(scheduler, atom::Atom, ::Val{T}, global_λ) where T
     dual_val = scheduler.dual ? Val(true) : Val(false)
     λ, λR, λ_params = scale_elec(scheduler, T(global_λ), atom.alch_role, dual_val)
     if scheduler.dual
@@ -166,7 +169,7 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
     if kmax < 1
         error("kmax for Ewald summation is $kmax, should be at least 1")
     end
-    partial_charges_cpu = [effective_charge(atom, inter.scheduler, Val(T)) for atom in atoms_cpu]
+    partial_charges_cpu = [effective_charge(inter.scheduler, atom, Val(T)) for atom in atoms_cpu]
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
     if AT <: AbstractGPUArray && calculate_forces
@@ -560,7 +563,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
 
     if fixed_charges && !grad_safe
         atoms_cpu = from_device(atoms)
-        partial_charges = effective_charge.(atoms_cpu, Ref(scheduler), Val(T))
+        partial_charges = [effective_charge(scheduler, atom, Val(T)) for atom in atoms_cpu]
         pc_sum = sum(TH, partial_charges)
         pc_abs2_sum = sum(abs2 ∘ TH, partial_charges)
     else
@@ -869,7 +872,7 @@ end
 @inline function spread_charge_inner!(charge_grid, grid_indices, bsplines_θ,
                               mesh_dims, order, atoms, scheduler, i, ::Val{T},
                               ::Val{atomic}) where {T, atomic}
-    q = effective_charge(atoms[i], scheduler, Val(T))
+    q = effective_charge(scheduler, atoms[i], Val(T))
     nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
     @inbounds x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
     @inbounds for ix in 0:(order-1)
@@ -896,7 +899,7 @@ end
 # threads of an atom write neighbouring grid points, as in the OpenMM implementation
 @inline function spread_charge_slice!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order,
                                       atoms, scheduler, i, iz, ::Val{T}) where T
-    q = effective_charge(atoms[i], scheduler, Val(T))
+    q = effective_charge(scheduler, atoms[i], Val(T))
     nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
     @inbounds begin
         x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
@@ -1156,7 +1159,7 @@ end
     nx, ny, nz = mesh_dims
     fx, fy, fz = zero(T), zero(T), zero(T)
     @inbounds begin
-        q = effective_charge(atoms[i], scheduler, Val(T))
+        q = effective_charge(scheduler, atoms[i], Val(T))
         x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
         for ix in 0:(order-1)
             xbase = wrap_grid_index(x0index + ix, nx) * ny * nz
@@ -1210,7 +1213,7 @@ end
     nx, ny, nz = mesh_dims
     fx, fy, fz = zero(T), zero(T), zero(T)
     @inbounds begin
-        q = effective_charge(atoms[i], scheduler, Val(T))
+        q = effective_charge(scheduler, atoms[i], Val(T))
         x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
         zindex = wrap_grid_index(z0index + iz, nz)
         tz, dtz = bsplines_θ[2*order+iz+1, i], bsplines_dθ[2*order+iz+1, i]
@@ -1320,7 +1323,8 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
 
     if needs_pe || needs_vir
         if isnothing(inter.pc_sum) || inter.grad_safe
-            partial_charges = effective_charge.(from_device(atoms), Ref(inter.scheduler), Val(T))
+            partial_charges = [effective_charge(inter.scheduler, atom, Val(T))
+                               for atom in from_device(atoms)]
             pc_sum      = sum_float_type(identity, TH, partial_charges)
             pc_abs2_sum = sum_float_type(abs2    , TH, partial_charges)
         else
@@ -1387,8 +1391,8 @@ end
 # Charge product of a pair under the reciprocal sum the scheduler selects, shared by the short
 # range Ewald terms and `EwaldExclusion` so both agree with the mesh.
 @inline function ewald_pair_qq(scheduler, atom_i, atom_j, ::Val{T}; kwargs...) where T
-    return effective_charge(atom_i, scheduler, Val(T)) *
-           effective_charge(atom_j, scheduler, Val(T))
+    return effective_charge(scheduler, atom_i, Val(T)) *
+           effective_charge(scheduler, atom_j, Val(T))
 end
 
 @inline function ewald_pair_qq(scheduler::OpenFEScheduler, atom_i, atom_j, ::Val{T}; special=false) where T
@@ -1402,8 +1406,8 @@ end
         qij = atom_i.charge .* atom_j.charge
         qij = params_mixing(λ_params, qij)
     else
-        qi = effective_charge(atom_i, scheduler, Val(T))
-        qj = effective_charge(atom_j, scheduler, Val(T))
+        qi = effective_charge(scheduler, atom_i, Val(T))
+        qj = effective_charge(scheduler, atom_j, Val(T))
         qij = qi*qj
     end
     return qij
@@ -1417,10 +1421,10 @@ end
     # scale Insert and Delete as mirror images.
     λ_glob = T(λ_mixing(MinimumMixing(), (atom_i.λ, atom_j.λ)))
     λ, λR, λ_params = scale_elec_dual(scheduler, λ_glob, InsertRole)
-    qA = effective_charge(atom_i, scheduler, Val(T), zero(T)) *
-         effective_charge(atom_j, scheduler, Val(T), zero(T))
-    qB = effective_charge(atom_i, scheduler, Val(T), one(T)) *
-         effective_charge(atom_j, scheduler, Val(T), one(T))
+    qA = effective_charge(scheduler, atom_i, Val(T), zero(T)) *
+         effective_charge(scheduler, atom_j, Val(T), zero(T))
+    qB = effective_charge(scheduler, atom_i, Val(T), one(T)) *
+         effective_charge(scheduler, atom_j, Val(T), one(T))
     return (one(T) - λ) * qA + λ * qB
 end
 
@@ -1901,7 +1905,7 @@ end
 @inline function spread_charge_inner_batch!(charge_grid, grid_indices, bsplines_θ,
                               mesh_dims, order, atoms, scheduler, b, i, ::Val{T},
                               ::Val{atomic}) where {T, atomic}
-    q = effective_charge(atoms[i], scheduler, Val(T), (b-1))
+    q = effective_charge(scheduler, atoms[i], Val(T), (b-1))
     nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
     @inbounds x0index, y0index, z0index = grid_indices[b, 1, i], grid_indices[b, 2, i], grid_indices[b, 3, i]
     @inbounds for ix in 0:(order-1)
@@ -1928,7 +1932,7 @@ end
 # threads of an atom write neighbouring grid points, as in the OpenMM implementation
 @inline function spread_charge_slice_batch!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order,
                                       atoms, scheduler, b, i, iz, ::Val{T}) where T
-    q = effective_charge(atoms[i], scheduler, Val(T), T(b-1))
+    q = effective_charge(scheduler, atoms[i], Val(T), T(b-1))
     nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
     @inbounds begin
         x0index, y0index, z0index = grid_indices[b, 1, i], grid_indices[b, 2, i], grid_indices[b, 3, i]
@@ -2104,7 +2108,7 @@ end
     nx, ny, nz = mesh_dims
     fx, fy, fz = zero(T), zero(T), zero(T)
     @inbounds begin
-        q = effective_charge(atoms[i], scheduler, Val(T), T(b-1))
+        q = effective_charge(scheduler, atoms[i], Val(T), T(b-1))
         x0index, y0index, z0index = grid_indices[b, 1, i], grid_indices[b, 2, i], grid_indices[b, 3, i]
         zindex = wrap_grid_index(z0index + iz, nz)
         tz, dtz = bsplines_θ[b, 2*order+iz+1, i], bsplines_dθ[b, 2*order+iz+1, i]
@@ -2213,8 +2217,8 @@ function ewald_pe_forces!(Fs, vir, inter::PME_λ{T}, atoms, coords, boundary, fo
     if needs_pe || needs_vir
         if isnothing(inter.pc_sum) || inter.grad_safe
             atoms_cpu = from_device(atoms)
-            cA = effective_charge.(atoms_cpu, Ref(inter.scheduler), Val(T), T(0))
-            cB = effective_charge.(atoms_cpu, Ref(inter.scheduler), Val(T), T(1))
+            cA = [effective_charge(inter.scheduler, atom, Val(T), T(0)) for atom in atoms_cpu]
+            cB = [effective_charge(inter.scheduler, atom, Val(T), T(1)) for atom in atoms_cpu]
             pc_sum      = (sum_float_type(identity, TH, cA), sum_float_type(identity, TH, cB))
             pc_abs2_sum = (sum_float_type(abs2, TH, cA), sum_float_type(abs2, TH, cB))
         else
