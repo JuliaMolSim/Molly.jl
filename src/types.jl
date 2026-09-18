@@ -464,38 +464,6 @@ function Base.show(io::IO, sil::T) where T <: SpecificInteractionList
     print(io, nameof(T), " with ", length(sil.is), " interactions of type ", eltype(sil.inters))
 end
 
-function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList1Atoms(inter.is, inters_grad, inter.types, inter.data)
-end
-
-function inject_interaction_list(inter::InteractionList2Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types, inter.data)
-end
-
-function inject_interaction_list(inter::InteractionList3Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types, inter.data)
-end
-
-function inject_interaction_list(inter::InteractionList4Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types,
-                          inter.data)
-end
-
-function inject_interaction_list(inter::InteractionList5Atoms, params_dic, AT)
-    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
-                                inter.types, (params_dic,)), AT)
-    InteractionList5Atoms(inter.is, inter.js, inter.ks, inter.ls, inter.ms, inters_grad,
-                          inter.types, inter.data)
-end
-
 function merge(interactions)
     interactions_final = []
     cache = []

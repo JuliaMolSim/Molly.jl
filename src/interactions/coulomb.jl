@@ -799,17 +799,6 @@ function to_lambda_function(inter::CoulombReactionField, ::DefaultSoftCore; args
                                     coulomb_const=inter.coulomb_const)
 end
 
-function inject_interaction(inter::CoulombReactionField, params_dic)
-    key_prefix = "inter_CRF_"
-    return CoulombReactionField(
-        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-    )
-end
-
 
 @inline function force(inter::CoulombReactionField,
                        dr,
@@ -1571,20 +1560,6 @@ function to_lambda_function(inter::CoulombEwald, ::DefaultSoftCore; args...)
                                     approximate_erfc=inter.approximate_erfc,
                                     )
 end
-
-function inject_interaction(inter::CoulombEwald, params_dic)
-    key_prefix = "inter_CE_"
-    return CoulombEwald(
-        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
-        inter.error_tol,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-        inter.α,
-        inter.approximate_erfc,
-    )
-end
-
 
 function calc_erfc(αr::T, exp_mαr2, approximate_erfc) where T
     if approximate_erfc

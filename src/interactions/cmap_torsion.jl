@@ -366,16 +366,6 @@ function dict_get(dic, key, inter::CMAPTorsionλ, default)
     end
 end
 
-function inject_interaction(inter::CMAPTorsionλ{I,L,LM,SCH}, inter_type, params_dic) where {I,L,LM,SCH}
-    key_prefix = "residue_" * string(inter.res_num) * "_λ"
-    return CMAPTorsionλ{I,L}(
-        inter.index,
-        inter.size,
-        inter.λ_mixing,
-        inter.scheduler,
-    )
-end
-
 function to_lambda_function(inter::CMAPTorsion; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
     return CMAPTorsionλ(index=inter.index, size=inter.size, λ_mixing=λ_mixing, scheduler=scheduler)
 end

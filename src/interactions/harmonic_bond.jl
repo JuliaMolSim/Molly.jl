@@ -54,14 +54,6 @@ Base.zero(::HarmonicBondλ{K, D, LM, SCH}) where {K, D, LM, SCH} = HarmonicBond�
 
 Base.:+(b1::HarmonicBondλ, b2::HarmonicBondλ) = HarmonicBondλ(k=(b1.k + b2.k), r0=(b1.r0 + b2.r0))
 
-function inject_interaction(inter::HarmonicBondλ, inter_type, params_dic)
-    key_prefix = "inter_HB_$(inter_type)_"
-    return HarmonicBondλ(
-        dict_get(params_dic, key_prefix * "k" , inter.k ),
-        dict_get(params_dic, key_prefix * "r0", inter.r0),
-    )
-end
-
 function extract_parameters!(params_dic,
                              inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:HarmonicBondλ}},
                              ff)

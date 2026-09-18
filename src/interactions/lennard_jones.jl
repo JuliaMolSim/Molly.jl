@@ -76,19 +76,6 @@ function to_lambda_function(inter::LennardJones, ::DefaultSoftCore; args...)
                             )
 end
 
-function inject_interaction(inter::LennardJones, params_dic)
-    key_prefix = "inter_LJ_"
-    return LennardJones(
-        inter.cutoff,
-        inter.use_neighbors,
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-    )
-end
-
-
 @inline function force(inter::LennardJones,
                        dr,
                        atom_i,

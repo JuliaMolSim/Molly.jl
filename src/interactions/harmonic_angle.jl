@@ -72,14 +72,6 @@ function Base.show(io::IO, x::HarmonicAngleλ)
     println(io, "HarmonicAngleλ: (k: $(x.k)) - θ0: $(x.θ0) - λ_mixing: $(x.λ_mixing) - scheduler: $(x.scheduler)")
 end
 
-function inject_interaction(inter::HarmonicAngleλ, inter_type, params_dic)
-    key_prefix = "inter_HA_$(inter_type)_"
-    return HarmonicAngleλ(
-        dict_get(params_dic, key_prefix * "k" , inter.k ),
-        dict_get(params_dic, key_prefix * "θ0", inter.θ0),
-    )
-end
-
 function extract_parameters!(params_dic,
                              inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:HarmonicAngleλ}},
                              ff)
