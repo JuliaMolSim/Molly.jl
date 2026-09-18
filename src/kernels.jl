@@ -257,7 +257,7 @@ end
     if inter_i <= length(is)
         i = is[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], boundary, atoms[i], F, velocities[i],
-                        step_n, data)
+                       step_n, data)
         if unit(fs.f1[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
@@ -278,7 +278,7 @@ end
     if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i], atoms[j], F,
-                    velocities[i], velocities[j], step_n, data)
+                       velocities[i], velocities[j], step_n, data)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
@@ -308,8 +308,8 @@ end
     if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary, atoms[i],
-                    atoms[j], atoms[k], F, velocities[i], velocities[j], velocities[k],
-                    step_n, data)
+                       atoms[j], atoms[k], F, velocities[i], velocities[j], velocities[k],
+                       step_n, data)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
@@ -342,9 +342,10 @@ end
 
     if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
+
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary,
-                        atoms[i], atoms[j], atoms[k], atoms[l], F, velocities[i], velocities[j],
-                        velocities[k], velocities[l], step_n, data)
+                       atoms[i], atoms[j], atoms[k], atoms[l], F, velocities[i], velocities[j],
+                       velocities[k], velocities[l], step_n, data)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
@@ -381,9 +382,10 @@ end
 
     if inter_i <= length(is)
         i, j, k, l, m = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i], ms[inter_i]
+
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], coords[m],
-                    boundary, atoms[i], atoms[j], atoms[k], atoms[l], atoms[m], F, velocities[i],
-                    velocities[j], velocities[k], velocities[l], velocities[m], step_n, data)
+                       boundary, atoms[i], atoms[j], atoms[k], atoms[l], atoms[m], F, velocities[i],
+                       velocities[j], velocities[k], velocities[l], velocities[m], step_n, data)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F ||
                         unit(fs.f4[1]) != F || unit(fs.f5[1]) != F
             error("wrong force unit returned, was expecting $F")

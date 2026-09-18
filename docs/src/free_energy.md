@@ -802,7 +802,7 @@ ff = MolecularForceField(joinpath.(ff_dir, ["tip3p_standard.xml", "benzene.xml"]
 
 # --- Load Systems ---
 sysb_solv = System(
-        joinpath(data_dir, "benzene_solv_4.pdb"),
+        joinpath(data_dir, "benzene_solv.pdb"),
         ff;
         array_type=AT,
         float_type=FT,
@@ -1351,7 +1351,7 @@ The two legs are run independently. The free energy profile is stored in `awh_st
 solute_idx = 1:12
 
 awh_state_solv, awh_sim_solv = setup_alchemical_awh(
-    joinpath(data_dir, "benzene_solv_4.pdb"),
+    joinpath(data_dir, "benzene_solv.pdb"),
     solute_idx;
     is_vacuum = false,
     rng = MersenneTwister(RNG_SEED),
@@ -1900,7 +1900,7 @@ The two legs are constructed and run independently. `replica_parallel = :auto` l
 solute_idx = 1:12
 
 tss_state_solv, tss_sim_solv = setup_alchemical_tss(
-    joinpath(data_dir, "benzene_solv_4.pdb"),
+    joinpath(data_dir, "benzene_solv.pdb"),
     solute_idx;
     is_vacuum = false,
     rng = MersenneTwister(RNG_SEED),
@@ -2325,7 +2325,7 @@ The two legs are constructed and run one after the other, and the free energies 
 solute_idx = 1:12
 
 thermo_solv, base_solv = build_thermo_states(
-    joinpath(data_dir, "benzene_solv_4.pdb"),
+    joinpath(data_dir, "benzene_solv.pdb"),
     solute_idx;
     is_vacuum = false,
     rng = MersenneTwister(RNG_SEED),

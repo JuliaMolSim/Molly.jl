@@ -62,13 +62,6 @@ force_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn, data) = force(
 force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, data) = force(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, data)
 force_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data) = force(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data)
 
-force_λ_gpu(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn, data) = force_λ(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn, data)
-force_λ_gpu(inter, ci, bnd, ai, fu, vi, sn, data) = force_λ(inter, ci, bnd, ai, fu, vi, sn, data)
-force_λ_gpu(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn, args...) = force_λ(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn, args...)
-force_λ_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn, data) = force_λ(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn, data)
-force_λ_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, data) = force_λ(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, data)
-force_λ_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data) = force_λ(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data)
-
 @inline zero_pairwise_force(dr, force_units) = ustrip.(zero(dr)) * force_units
 
 @inline function zero_pairwise_force(dr::SVector{N, <:Unitful.Quantity{T}}, force_units) where {N, T}

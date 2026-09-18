@@ -215,7 +215,7 @@ solute_idx = 1:12
 
 # 4 nm cube of TIP3P water with 0.15 M NaCl, large enough for the 1 nm cutoff
 tss_state_solv, tss_sim_solv = setup_alchemical_tss(
-    joinpath(data_dir, "benzene_solv_4.pdb"),
+    joinpath(data_dir, "benzene_solv.pdb"),
     solute_idx;
     is_vacuum=false,
     rng=MersenneTwister(RNG_SEED),

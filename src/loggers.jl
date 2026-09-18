@@ -665,6 +665,7 @@ function write_chemfiles!(topology, filepath, sys, format, correction, atom_inds
             atom_inds_all_res,
         )
     end
+
     if calc_topology
         if isnothing(sys.atoms_data) || length(sys) != length(sys.atoms_data)
             throw(ArgumentError("structure writing requires atoms_data to be set"))
