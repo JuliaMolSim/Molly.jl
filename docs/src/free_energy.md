@@ -738,7 +738,9 @@ DefaultLambdaScheduler(
 ```
 the default is dual topology while in OpenFE single topology is used, OpenFE also uses other settings during set up and the differences between default and OpenFE are outlined below.
 
-The other schedulers take the same options and differ in how the electrostatics and sterics are staged along $\lambda$: [`LinearLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) and [`GROMACSLambdaRBFEScheduler`](@ref) (which use the two PME grids of GROMACS), [`NAMDLambdaScheduler`](@ref), [`QuartersLambdaScheduler`](@ref) and [`EleScaledLambdaScheduler`](@ref). [`OpenFEScheduler`](@ref) is described below.
+The other schedulers take the same options and differ in how the electrostatics and sterics are staged along $\lambda$: [`LinearLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) and [`GROMACSLambdaRBFEScheduler`](@ref) (which use two PME grids and scale linearly in between, rather than depositing a scaled charge on the grid, similar to GROMACS approach), [`NAMDLambdaScheduler`](@ref), [`QuartersLambdaScheduler`](@ref) and [`EleScaledLambdaScheduler`](@ref). Below shows how global λ is scaled for the sterics per scheduler and role. 
+
+![All lambda schedulers with the specific lambda scaling for each role (dual=true)](images/scheduler_plots.png)
 
 ### Matching OpenFE default settings
 
