@@ -77,6 +77,16 @@ parameter_keys(::Type{<:PeriodicTorsion{N}}) where {N} =
 
 parameter_values(inter::PeriodicTorsion) = (inter.phases..., inter.ks...)
 
+@inline function inject_parameters(inter::PeriodicTorsion{N, T, E}, vals::Tuple) where {N, T, E}
+    return PeriodicTorsion{N, T, E}(
+        inter.periodicities,
+        ntuple(i -> convert(T, vals[i]    ), N),
+        ntuple(i -> convert(E, vals[N + i]), N),
+        inter.proper,
+    )
+end
+
+
 function periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, cross_bc_cd,
                                 bc_norm, θ)
     dEdθ = -k * periodicity * sin((periodicity * θ) - phase)

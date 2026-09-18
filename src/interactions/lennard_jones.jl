@@ -236,6 +236,20 @@ Base.zero(::Type{LJDispersionCorrection{F6, F12, D, S, E}}) where {F6, F12, D, S
     LJDispersionCorrection(zero(F6), zero(F12), zero(D), S(), E())
 Base.zero(dc::LJDispersionCorrection) = zero(typeof(dc))
 
+function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
+    return LJDispersionCorrection(
+        dc1.factor_6  + dc2.factor_6,
+        dc1.factor_12 + dc2.factor_12,
+        dc1.dist_cutoff,
+        dc1.σ_mix,
+        dc1.ϵ_mix,
+    )
+end
+
+Unitful.ustrip(dc::LJDispersionCorrection) =
+    LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12), ustrip(dc.dist_cutoff), dc.σ_mix, dc.ϵ_mix)
+
+
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrection; kwargs...)
     return (inter.factor_6 + inter.factor_12) / volume(sys)
