@@ -247,7 +247,7 @@ function to_lambda_function_single(interA::PeriodicTorsion, interB::Nothing;
     ks_B = zero(interA.ks)
     
     return PeriodicTorsionλ(periodicities=tuplejoin(periodicities_A, periodicities_B), 
-                            phases=tuplejoin(phases_A, phases_B), ks=tuplejoin(ks_A,ks_B), proper=ref.proper, 
+                            phases=tuplejoin(phases_A, phases_B), ks=tuplejoin(ks_A,ks_B), proper=interA.proper, 
                             λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
@@ -261,7 +261,7 @@ function to_lambda_function_single(interA::Nothing, interB::PeriodicTorsion;
     ks_B = interB.ks
     
     return PeriodicTorsionλ(periodicities=tuplejoin(periodicities_A, periodicities_B), 
-                            phases=tuplejoin(phases_A, phases_B), ks=tuplejoin(ks_A,ks_B), proper=ref.proper, 
+                            phases=tuplejoin(phases_A, phases_B), ks=tuplejoin(ks_A,ks_B), proper=interB.proper, 
                             λ_mixing=λ_mixing, scheduler=scheduler)
 end
 

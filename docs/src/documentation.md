@@ -471,7 +471,7 @@ water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff) # Res
 
 Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`ReplicaExchangeMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
 On CPU these are run in parallel by dividing up the number of available threads.
-For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1 ps:
+For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 2.5 ps:
 ```julia
 using Molly
 using Statistics

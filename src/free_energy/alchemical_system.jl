@@ -90,7 +90,8 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     C = typeof(sys_atoms[1].charge)
 
     if !scheduler.dual
-        @error "Current parameters scaling for absolute free energy setup is not available, set scheduler(dual=true)"
+        throw(ArgumentError("absolute free energy systems require dual topology, " *
+                            "use a scheduler with dual=true"))
     end
 
     # Initialize data groups for new system
@@ -265,7 +266,7 @@ of A and as a massless copy with the parameters of B. Interactions are replaced 
     into the couplings of the steric, electrostatic and bonded interactions, for example
     [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaRBFEScheduler`](@ref) or
     [`OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and `dual=false`
-    single topology (parameter scaling).
+    single topology (parameter scaling), which does not support `intraLJ=true`.
 - `loggers=()`: the loggers that record properties of interest during a simulation.
 - `array_type=Array`: the array type for the simulation, for example use `CuArray` or
     `ROCArray` for GPU support.
@@ -295,6 +296,13 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     end
     if float_type!=typeof(ustrip(temp))
         temp = units ? FT(ustrip(temp))u"K" : FT(ustrip(temp))
+    end
+    # Single topology keeps both end states per atom and an unscaled pair takes the second one,
+    # which is the vanishing state for the atoms unique to A, so their internal Lennard-Jones
+    # would be off at every λ
+    if !scheduler.dual && scheduler.intraLJ
+        throw(ArgumentError("intraLJ=true requires dual topology, " *
+                            "use a scheduler with dual=true or intraLJ=false"))
     end
     AT = array_type
     S = typeof(sysA.atoms[1].σ)

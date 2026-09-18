@@ -318,6 +318,66 @@ display(fig_acc)
 save("$(OUTPUT_PREFIX)_acceptance.png", fig_acc)
 
 ##
+# The state of every replica after each exchange cycle, from the snapshot of `state_indices` that
+# the exchange logger stores every cycle. All replicas start in their own state.
+function replica_state_history(exchange_logger, K)
+    snapshots = vcat([collect(1:K)], exchange_logger.replica_indices)
+    return [[findfirst(==(r), s) for s in snapshots] for r in 1:K]
+end
+
+history_solv = replica_state_history(log_solv, N_LAMBDA_STATES)
+times_ns = (0:(length(history_solv[1]) - 1)) .* ustrip(u"ns", EXCHANGE_TIME)
+# All replicas are drawn, four of them highlighted to make individual walks visible
+highlight = round.(Int, range(1, N_LAMBDA_STATES; length = 4))
+highlight_colors = (:royalblue, :firebrick, :seagreen, :darkorange)
+
+fig_hist = Figure(size = (720, 720))
+
+ax_hist = Axis(
+    fig_hist[1,1],
+    title = L"\textbf{Replica Exchange History (Solvated)}",
+    xlabel = L"\textbf{Time (ns)}",
+    ylabel = L"\textbf{State}",
+    xlabelsize = 20, ylabelsize = 20,
+    titlesize = 24,
+    xlabelfont = :bold, ylabelfont = :bold,
+    xticklabelsize = 18, yticklabelsize = 18,
+    yticks = 1:2:N_LAMBDA_STATES
+)
+
+for r in 1:N_LAMBDA_STATES
+    r in highlight && continue
+    stairs!(
+        ax_hist,
+        times_ns, history_solv[r];
+        step = :post,
+        color = (:grey60, 0.5),
+        linewidth = 0.6
+    )
+end
+
+for (i, r) in enumerate(highlight)
+    stairs!(
+        ax_hist,
+        times_ns, history_solv[r];
+        step = :post,
+        color = highlight_colors[i],
+        linewidth = 2,
+        label = "Replica $r"
+    )
+end
+
+axislegend(
+    position = :rb,
+    labelsize = 18,
+    nbanks = 2
+)
+
+display(fig_hist)
+
+save("$(OUTPUT_PREFIX)_exchanges.png", fig_hist)
+
+##
 
 # The first state is decoupled (λ = 1) and the last is coupled (λ = 0)
 dG_solv = f_solv[1] - f_solv[end]
