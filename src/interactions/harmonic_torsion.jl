@@ -48,11 +48,6 @@ end
     return d.k * (θ - d.θ0)^2
 end
 
-@inline function force_λ(d::HarmonicTorsion, coords_i, coords_j, coords_k, coords_l,
-                       boundary, atoms_i, atoms_j, atoms_k, atoms_l, F, args...)
-    return SpecificForce4Atoms(zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F), zero_pairwise_force(coords_i, F))
-end
-
 # λ version of `HarmonicTorsion` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct HarmonicTorsionλ{K, D, LM, SCH}
     k::K

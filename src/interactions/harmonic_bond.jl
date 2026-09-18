@@ -37,11 +37,6 @@ end
     return (b.k / 2) * (r - b.r0) ^ 2
 end
 
-@inline function force_λ(b::HarmonicBond, coord_i, coord_j, boundary, atoms_i, atoms_j, F, args...)
-    dr = vector(coord_i, coord_j, boundary)
-    return SpecificForce2Atoms(zero_pairwise_force(dr, F), zero_pairwise_force(dr, F))
-end
-
 # λ version of `HarmonicBond` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct HarmonicBondλ{K, D, LM, SCH}
     k::K

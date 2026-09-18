@@ -50,12 +50,6 @@ end
     return (a.k / 2) * (θ - a.θ0) ^ 2
 end
 
-@inline function force_λ(a::HarmonicAngle, coords_i, coords_j, coords_k, boundary, atoms_i,
-                        atoms_j, atoms_k, F, args...)
-    dr = vector_pad3D(coords_j, coords_i, boundary)
-    return SpecificForce3Atoms(zero_pairwise_force(dr, F), zero_pairwise_force(dr, F), zero_pairwise_force(dr, F))
-end
-
 # λ version of `HarmonicAngle` for alchemical systems, built by `to_lambda_function`.
 @kwdef struct HarmonicAngleλ{K, D, LM, SCH}
     k::K

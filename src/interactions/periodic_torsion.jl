@@ -318,29 +318,3 @@ end
     end
     return pe
 end
-
-@inline function force_λ(d::PeriodicTorsionλ{N, T}, coords_i, coords_j, coords_k,
-                       coords_l, boundary, atom_i, atom_j, 
-                       atom_k, atom_l, F, args...) where {N, T}
-    θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
-    k1 = d.ks[1]
-    E = k1 + k1 * cos((d.periodicities[1] * θ) - d.phases[1])
-
-    if atom_i.alch_role==EnvRole && atom_j.alch_role==EnvRole && atom_k.alch_role==EnvRole && atom_l.alch_role==EnvRole
-        tmp = zero_pairwise_force(coords_i, F)
-        return SpecificForce4Atoms(tmp,tmp,tmp,tmp)
-    else
-        idx = findfirst(x-> x!=CoreRole, (atom_i.alch_role,atom_j.alch_role,atom_k.alch_role,atom_l.alch_role,ProbRole))
-        di = idx == 1
-        dj = idx == 2
-        dk = idx == 3
-        dl = idx == 4
-    end
-    
-    for i in 2:N
-        k = d.ks[i]
-        E += k + k * cos((d.periodicities[i] * θ) - d.phases[i])
-    end
-    tmp = SVector{3,T}(ustrip(E),T(0),T(0))*F
-    return SpecificForce4Atoms(tmp.*di, tmp.*dj, tmp.*dk, tmp.*dl)
-end
