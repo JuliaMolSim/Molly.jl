@@ -662,3 +662,276 @@ end
         @test dist_13_std > dist_12_std
     end
 end
+
+@testset "MetaDynamicsBias memory" begin
+    # ListHills: a single CV
+    lh = ListHills(2.0, 0.5, [1.0, 1.5, -0.5])
+    @test isapprox(potential_energy(lh, 1.2), 3.52295; atol=1e-3)
+    @test isapprox(Molly.bias_gradient(lh, 1.2), 0.485656; atol=1e-3)
+
+    add_hill!(lh, 2.0)
+    @test length(lh.centers) == 4
+    @test lh.centers[end] == 2.0
+
+    @test_throws ArgumentError ListHills(2.0, -0.5)
+    @test_throws ArgumentError ListHills(2.0, 0.0)
+
+    # ListHills: multiple CVs at once, sigma/centers become tuples but k stays a single
+    # scalar height for the joint Gaussian
+    lh2 = ListHills(3.0, (0.5, 1.0), [(1.0, 2.0), (0.0, 0.0)])
+    @test isapprox(potential_energy(lh2, (1.2, 2.5)), 2.451341; atol=1e-3)
+    grad2 = Molly.bias_gradient(lh2, (1.2, 2.5))
+    @test isapprox(grad2[1], -1.99067; atol=1e-3)
+    @test isapprox(grad2[2], -1.24047; atol=1e-3)
+
+    # GridHills: a single CV, deposited hills are accumulated onto the grid. Scalar
+    # arguments are internally wrapped into length-1 tuples (n_dims == 1), and bias_gradient
+    # collapses its result back down to a bare scalar for this case.
+    gh = GridHills(1.0, 0.2, 0.0, 2.0, 5)
+    @test length(gh.values) == 5
+    @test isapprox(only(gh.bin_width), 0.5; atol=1e-9)
+
+    add_hill!(gh, 1.0)
+    @test isapprox(potential_energy(gh, 1.0), 1.0; atol=1e-9) # Exactly on a grid point
+    @test isapprox(potential_energy(gh, 0.75), 0.52196847; atol=1e-3) # Interpolated
+    @test isapprox(Molly.bias_gradient(gh, 0.75), 1.91212614; atol=1e-3)
+
+    @test_throws ArgumentError GridHills(1.0, 0.2, 0.0, 2.0, 1)
+    @test_throws ArgumentError GridHills(1.0, -0.2, 0.0, 2.0, 5)
+    @test_throws ArgumentError GridHills(1.0, 0.2, 2.0, 0.0, 5)
+
+    # GridHills: multiple CVs at once, sigma/grid_min/grid_max/n_bins become tuples (one
+    # entry per dimension) and hills are deposited/evaluated via N-linear interpolation
+    gh2d = GridHills(1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 9) # bin_width (0.25, 0.25)
+    @test size(gh2d.values) == (9, 9)
+    @test all(isapprox.(gh2d.bin_width, (0.25, 0.25); atol=1e-9))
+
+    add_hill!(gh2d, (1.0, 1.0)) # Lands exactly on grid point (index 5, 5)
+    # cutoff=6 default reaches +/-0.6 in each dimension from (1.0, 1.0), i.e. indices 2:8;
+    # the grid corners are well outside that box and so are untouched (still exactly 0)
+    @test gh2d.values[1, 1] == 0.0
+    @test gh2d.values[1, 5] == 0.0
+    @test gh2d.values[5, 1] == 0.0
+    @test gh2d.values[9, 9] == 0.0
+
+    # Evaluated exactly at the hill center, both potential_energy and bias_gradient reduce
+    # to reading/differencing straight off the grid (no interpolation blending needed)
+    @test isapprox(potential_energy(gh2d, (1.0, 1.0)), 1.0; atol=1e-9)
+    grad2d = Molly.bias_gradient(gh2d, (1.0, 1.0))
+    @test isapprox(grad2d[1], -3.82423; atol=1e-3)
+    # Grid, sigma and hill placement are all symmetric between the two CV dimensions here,
+    # so the gradient components must match by symmetry
+    @test isapprox(grad2d[1], grad2d[2]; atol=1e-9)
+
+    @test_throws ArgumentError GridHills(1.0, (0.1, 0.1), (0.0, 0.0, 0.0), (2.0, 2.0), 9)
+    @test_throws ArgumentError GridHills(1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), (5, 5, 5))
+
+    # n_bins can also be given per-dimension instead of a single shared Integer
+    gh2d_uneven = GridHills(1.0, (0.1, 0.2), (0.0, 0.0), (1.0, 2.0), (3, 5))
+    @test size(gh2d_uneven.values) == (3, 5)
+    @test all(isapprox.(gh2d_uneven.bin_width, (0.5, 0.5); atol=1e-9))
+end
+
+@testset "MetaDynamicsBias via BiasPotential" begin
+    # A single CV evaluated externally, matching the interface of the other bias
+    # potentials in this file (LinearBias, SquareBias, ...)
+    c1 = SVector(1.0, 1.0, 1.0)u"nm"
+    c2 = SVector(1.3, 1.0, 1.0)u"nm"
+    a1 = Atom(mass=10u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a2 = Atom(mass=10u"g/mol", charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    boundary = CubicBoundary(2.0u"nm")
+
+    sys = System(
+        atoms=[a1, a2],
+        coords=[c1, c2],
+        boundary=boundary,
+        velocities=[random_velocity(10u"g/mol", 300u"K") for i in 1:2],
+    )
+
+    calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
+    md = MetaDynamicsBias(2.0u"kJ * mol^-1", 0.5u"nm", typeof(1.0u"nm")[])
+    @test isempty(md.cvs)
+    @test isapprox(
+        AtomsCalculators.potential_energy(sys, BiasPotential(calc_dist, md)),
+        0.0u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    add_hill!(md, 1.0u"nm")
+    add_hill!(md, 1.5u"nm")
+    add_hill!(md, -0.5u"nm")
+    @test length(md.memory.centers) == 3
+
+    # Actual distance between the two atoms is 0.3 nm
+    @test isapprox(potential_energy(md, 0.3u"nm"), 1.41897u"kJ * mol^-1"; atol=1e-3u"kJ * mol^-1")
+    @test isapprox(
+        Molly.bias_gradient(md, 0.3u"nm"),
+        0.86120u"kJ * mol^-1 * nm^-1";
+        atol=1e-3u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        AtomsCalculators.potential_energy(sys, BiasPotential(calc_dist, md)),
+        1.41897u"kJ * mol^-1";
+        atol=1e-3u"kJ * mol^-1",
+    )
+
+    fs = Molly.zero_forces(sys)
+    AtomsCalculators.forces!(fs, sys, BiasPotential(calc_dist, md))
+    @test isapprox(
+        fs[1], SVector(0.86120, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-3u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs[2], SVector(-0.86120, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-3u"kJ * mol^-1 * nm^-1",
+    )
+end
+
+@testset "MetaDynamicsBias multi-CV calculator" begin
+    # cvs stored directly on MetaDynamicsBias, making it a self-contained AtomsCalculators
+    # calculator usable directly as a general_inters entry, evaluating several CVs at once
+    atoms = [Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:3]
+    coords = [SVector(1.0, 1.0, 1.0), SVector(1.3, 1.0, 1.0), SVector(1.4, 1.0, 1.0)]
+    boundary = CubicBoundary(5.0)
+    velocities = [SVector(0.0, 0.0, 0.0) for _ in 1:3]
+
+    cv1 = CalcDist([1], [2], CalcSingleDist(), :wrap) # Distance 1-2 is 0.3
+    cv2 = CalcDist([1], [3], CalcSingleDist(), :wrap) # Distance 1-3 is 0.4
+
+    @test_throws ArgumentError MetaDynamicsBias((cv1, cv2), GridHills(1.0, 0.1, 0.0, 1.0, 5))
+
+    # A GridHills built with one grid dimension per CV works directly as a multi-CV memory
+    bias_grid = MetaDynamicsBias((cv1, cv2), GridHills(5.0, (0.1, 0.1), (0.0, 0.0), (1.0, 1.0), 11))
+    sys_grid = System(
+        atoms=atoms, coords=coords, boundary=boundary, velocities=velocities,
+        general_inters=(bias_grid,), force_units=NoUnits, energy_units=NoUnits,
+    )
+    fs_grid = Molly.zero_forces(sys_grid)
+    AtomsCalculators.forces!(fs_grid, sys_grid, bias_grid) # Deposits a hill at (0.3, 0.4)
+    @test isapprox(AtomsCalculators.potential_energy(sys_grid, bias_grid), 5.0; atol=1e-6)
+
+    bias = MetaDynamicsBias((cv1, cv2), 5.0, (0.1, 0.1), Tuple{Float64, Float64}[])
+    @test length(bias.cvs) == 2
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        general_inters=(bias,),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+
+    @test_throws ArgumentError AtomsCalculators.potential_energy(sys, MetaDynamicsBias(2.0, 0.5))
+    @test isapprox(AtomsCalculators.potential_energy(sys, bias), 0.0; atol=1e-9)
+
+    # forces! is self-updating: with the default deposit_interval=1, every call both
+    # computes forces and deposits a hill, with no external logger needed. This first call
+    # starts from an empty memory, so the resulting forces are trivially zero.
+    fs = Molly.zero_forces(sys)
+    AtomsCalculators.forces!(fs, sys, bias)
+    @test length(bias.memory.centers) == 1
+    @test isapprox(bias.memory.centers[1][1], 0.3; atol=1e-9)
+    @test isapprox(bias.memory.centers[1][2], 0.4; atol=1e-9)
+    for f in fs
+        @test isapprox(f, SVector(0.0, 0.0, 0.0); atol=1e-9)
+    end
+    @test isapprox(AtomsCalculators.potential_energy(sys, bias), 5.0; atol=1e-9)
+
+    # Coordinates haven't moved, so this second call evaluates the gradient exactly at the
+    # hill deposited above -- a Gaussian's own peak has zero gradient in every CV
+    # dimension, so the force on every atom should again be ~0, non-trivially this time
+    # since the memory is no longer empty. It also deposits a second, identical hill.
+    fs2 = Molly.zero_forces(sys)
+    AtomsCalculators.forces!(fs2, sys, bias)
+    @test length(bias.memory.centers) == 2
+    for f in fs2
+        @test isapprox(f, SVector(0.0, 0.0, 0.0); atol=1e-9)
+    end
+    @test isapprox(AtomsCalculators.potential_energy(sys, bias), 10.0; atol=1e-9)
+
+    # deposit_interval paces the automatic deposits: only every 3rd force evaluation
+    # should actually add a hill
+    bias3 = MetaDynamicsBias((cv1, cv2), 5.0, (0.1, 0.1), Tuple{Float64, Float64}[];
+                             deposit_interval=3)
+    sys3 = System(
+        atoms=atoms, coords=coords, boundary=boundary, velocities=velocities,
+        general_inters=(bias3,), force_units=NoUnits, energy_units=NoUnits,
+    )
+    fs3 = Molly.zero_forces(sys3)
+    for i in 1:6
+        AtomsCalculators.forces!(fs3, sys3, bias3)
+    end
+    @test length(bias3.memory.centers) == 2
+end
+
+@testset "MetaDynamicsBias simulation" begin
+    # Two atoms connected by a HarmonicBond, biased with MetaDynamicsBias used directly as
+    # a general interaction. After a thermostatted run depositing a modest number of hills,
+    # the accumulated bias should start to recover (the negative of) the underlying bond
+    # potential: the standard metadynamics free energy reconstruction result, here checked
+    # by verifying that adding the bias back to the true bond potential flattens it out
+    # over the sampled region compared to the bare bond potential alone.
+    mass = 10.0
+    r0 = 1.0
+    k_bond = 500.0
+    temp = 298.0
+    boundary = CubicBoundary(10.0)
+
+    atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2), Atom(mass=mass, σ=0.3, ϵ=0.2)]
+    coords = [SVector(4.5, 5.0, 5.0), SVector(4.5 + r0, 5.0, 5.0)]
+    velocities = [random_velocity(mass, temp) for i in 1:2]
+
+    bond = HarmonicBond(k=k_bond, r0=r0)
+    specific_inter_lists = (InteractionList2Atoms([1], [2], [bond]),)
+
+    calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
+    # deposit_interval paces deposits directly off forces! (called every step regardless
+    # of simulator), so no external logger is needed to drive hill deposition
+    bias = MetaDynamicsBias((calc_dist,), 0.5, 0.02; deposit_interval=200)
+
+    simulator = VelocityVerlet(dt=0.002, coupling=AndersenThermostat(temp, 0.1))
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=(bias,),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    )
+
+    simulate!(sys, simulator, 20_000)
+
+    centers = bias.memory.centers
+    @test length(centers) >= 50
+    @test all(isfinite, centers)
+
+    # Every deposited hill contributes at least its own height to the bias evaluated at its
+    # own centre, since every other hill's contribution is non-negative
+    @test all(c -> potential_energy(bias.memory, c) >= bias.memory.k - 1e-9, centers)
+
+    # Far outside anything ever visited, the accumulated bias has decayed to ~0
+    c_min, c_max = extrema(centers)
+    far = c_max + 50 * bias.memory.sigma
+    @test potential_energy(bias.memory, far) < 1e-12 * bias.memory.k
+
+    # The bond confines the atoms near r0, so the thermally-sampled centres should cluster
+    # there more densely than at either edge of the range actually visited
+    c_mean = mean(centers)
+    @test potential_energy(bias.memory, c_mean) > potential_energy(bias.memory, c_min)
+    @test potential_energy(bias.memory, c_mean) > potential_energy(bias.memory, c_max)
+
+    # Recovering the bond potential: adding the accumulated bias back to the true harmonic
+    # bond potential should flatten it out over the sampled region, compared to the bare
+    # bond potential alone
+    bond_pe(r) = potential_energy(bond, SVector(0.0, 0.0, 0.0), SVector(r, 0.0, 0.0), boundary)
+    bare = [bond_pe(c) for c in centers]
+    combined = [bond_pe(c) + potential_energy(bias.memory, c) for c in centers]
+    @test std(combined) < 0.9 * std(bare)
+end
+
+
