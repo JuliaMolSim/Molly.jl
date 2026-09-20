@@ -29,15 +29,18 @@ function tensor_product(paths::TensorProductPaths, cg::SparseCG{T},
         nch = paths.n_weights_per_path[p]
         woff = paths.weight_offset[p]
         rng = (cg.poff[p] + 1):cg.poff[p + 1]
+        # in2 channel: c for a C-channel in2 (uvu, feat ⊗ feat), 1 for a mul-1 in2 (feat ⊗ sh)
+        bcast2 = in2.entries[k2].mul == 1
         for c in 1:nch
             wc = w[woff + c]
             wc == 0 && continue
+            c2 = bcast2 ? 1 : c
             @inbounds for t in rng
                 m1 = Int(cg.m1[t])
                 m2 = Int(cg.m2[t])
                 m3 = Int(cg.m3[t])
                 v = cg.val[t]
-                z[tp_flat_index(out, k3, c, m3)] += wc * v * x[tp_flat_index(in1, k1, c, m1)] * y[tp_flat_index(in2, k2, 1, m2)]
+                z[tp_flat_index(out, k3, c, m3)] += wc * v * x[tp_flat_index(in1, k1, c, m1)] * y[tp_flat_index(in2, k2, c2, m2)]
             end
         end
     end
@@ -62,19 +65,21 @@ function tensor_product_vjp(paths::TensorProductPaths, cg::SparseCG{T},
         nch = paths.n_weights_per_path[p]
         woff = paths.weight_offset[p]
         rng = (cg.poff[p] + 1):cg.poff[p + 1]
+        bcast2 = in2.entries[k2].mul == 1
         for c in 1:nch
             wc = w[woff + c]
             acc_w = zero(T)
+            c2 = bcast2 ? 1 : c
             @inbounds for t in rng
                 m1 = Int(cg.m1[t])
                 m2 = Int(cg.m2[t])
                 m3 = Int(cg.m3[t])
                 v = cg.val[t]
                 xi = x[tp_flat_index(in1, k1, c, m1)]
-                yi = y[tp_flat_index(in2, k2, 1, m2)]
+                yi = y[tp_flat_index(in2, k2, c2, m2)]
                 gi = ḡ[tp_flat_index(out, k3, c, m3)]
                 x̄[tp_flat_index(in1, k1, c, m1)] += wc * v * yi * gi
-                ȳ[tp_flat_index(in2, k2, 1, m2)] += wc * v * xi * gi
+                ȳ[tp_flat_index(in2, k2, c2, m2)] += wc * v * xi * gi
                 acc_w += v * xi * yi * gi
             end
             w̄[woff + c] += acc_w

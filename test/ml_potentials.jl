@@ -879,6 +879,25 @@ if isfile(ALLEGRO_H5) && isfile(ALLEGRO_JSON)
             end
         end
 
+        @testset "many-body (non-additivity)" begin
+            # A pair potential decomposes exactly into a sum of isolated-pair energies:
+            # E({1..N}) == Σ_{i<j} E({i,j}). Allegro couples every edge to the central atom's
+            # environment, so the full energy differs from that sum. Use the largest system.
+            sysj = argmax(s -> length(s.species), ref.systems)
+            coords_A = [SVector{3,Float64}(c...) for c in sysj.coords_A]
+            species = [Int(s) + 1 for s in sysj.species]
+            n = length(species)
+            @test n >= 3  # need a real environment for a many-body signal
+            E_full = Molly.allegro_total_energy(pot.model, coords_A, species, nothing, rc)
+            E_pairs = 0.0
+            for i in 1:n, j in (i + 1):n
+                E_pairs += Molly.allegro_total_energy(pot.model, coords_A[[i, j]],
+                                                      species[[i, j]], nothing, rc)
+            end
+            # genuinely many-body ⇒ the two disagree well beyond numerical noise
+            @test abs(E_full - E_pairs) > 1e-4
+        end
+
         @testset "calculator: rotation invariance, ΣF≈0, finite differences" begin
             sysj = ref.systems[1]
             sys = mk_allegro_sys(sysj.coords_A, sysj.species)
