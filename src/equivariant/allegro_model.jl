@@ -198,30 +198,246 @@ function allegro_total_energy(m::AllegroModel{T}, coords::AbstractVector{<:SVect
 end
 
 """
+    allegro_energy_and_forces(m, coords, species, boundary, r_c) -> (E, F)
+
+Total many-body energy `E` and analytic forces `F = -∂E/∂r`, via a hand-written reverse pass
+(a full backward through every layer and the per-atom environment pooling). This mirrors Molly's
+native ANI implementation: a per-atom descriptor pooled over neighbours whose backward scatters
+`∂E/∂r` to every neighbour. The forward is taped per layer; the backward accumulates, per edge,
+the adjoints of the initial equivariant/scalar latents and of the spherical harmonics and radial
+cutoff, then converts those to Cartesian gradients through the SH Jacobian and the `|r|` chain.
+"""
+function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:SVector{3}},
+                                   species::AbstractVector{<:Integer}, boundary, r_c::T) where T
+    n = length(coords)
+    nbr = neighbour_lists(coords, boundary, T(r_c))
+    C, H, L = m.C, m.H, m.L
+    dims = (1, 3, 5)
+    shoff = ntuple(k -> m.feat.offsets[k] ÷ C, 3)   # SH block offset in a single-channel 9-vec
+    foff  = ntuple(k -> m.feat.offsets[k], 3)        # feat block offset (channel-major)
+
+    # ---- two-body precompute (per edge), plus geometry needed by the backward ----
+    Ys  = [Vector{Vector{T}}() for _ in 1:n]
+    us  = [T[] for _ in 1:n]
+    ds  = [T[] for _ in 1:n]
+    rhs = [SVector{3,T}[] for _ in 1:n]
+    jjs = [Int[] for _ in 1:n]
+    x0  = [Vector{Vector{T}}() for _ in 1:n]
+    V0  = [Vector{Vector{T}}() for _ in 1:n]
+    for i in 1:n
+        for (j, d, rhat) in nbr[i]
+            Y = collect(real_sph_harm(2, rhat))
+            u = poly_envelope(d, m.r_c, m.env_p)
+            R = bessel_basis(d, m.r_c, Val(m.nb)) .* u
+            xe = dense_forward(m.emb_W2, m.emb_b2, silu.(dense_forward(m.emb_W1, m.emb_b1,
+                     two_body_input(m, R, Int(species[i]), Int(species[j])))))
+            push!(Ys[i], Y); push!(us[i], u); push!(ds[i], d); push!(rhs[i], rhat); push!(jjs[i], j)
+            push!(x0[i], xe); push!(V0[i], init_equivariant(m, Y, u))
+        end
+    end
+
+    # ---- forward with a per-layer tape ----
+    xin = [[copy(x0[i][p]) for p in eachindex(x0[i])] for i in 1:n]
+    Vin = [[copy(V0[i][p]) for p in eachindex(V0[i])] for i in 1:n]
+    xin_tape = Vector{Vector{Vector{Vector{T}}}}(undef, L)   # [L][i][p], layer-input scalar latent
+    Vin_tape = Vector{Vector{Vector{Vector{T}}}}(undef, L)   # [L][i][p], layer-input equivariant latent
+    w_tape   = Vector{Vector{Vector{Vector{T}}}}(undef, L)   # [L][i][p], tp weights
+    P_tape   = Vector{Vector{Vector{Vector{T}}}}(undef, L)   # [L][i][p], tp output
+    a_tape   = Vector{Vector{Vector{Vector{T}}}}(undef, L)   # [L][i][p], resnet pre-activation
+    Env_tape = Vector{Vector{Vector{T}}}(undef, L)           # [L][i]
+    g_tape   = Vector{Vector{Vector{Vector{T}}}}(undef, L)   # [L][i][p], env weights (3C)
+
+    for lidx in 1:L
+        lw = m.layers[lidx]
+        xin_tape[lidx] = [[copy(xin[i][p]) for p in eachindex(xin[i])] for i in 1:n]
+        Vin_tape[lidx] = [[copy(Vin[i][p]) for p in eachindex(Vin[i])] for i in 1:n]
+        Env = [zeros(T, m.feat.dim) for _ in 1:n]
+        gL  = [Vector{Vector{T}}() for _ in 1:n]
+        for i in 1:n
+            e = Env[i]
+            for p in eachindex(xin[i])
+                g = dense_forward(lw.env_W, lw.env_b, xin[i][p])
+                push!(gL[i], g)
+                Y = Ys[i][p]
+                @inbounds for k in 1:3
+                    dk = dims[k]
+                    for c in 1:C
+                        gcl = g[(k - 1) * C + c]
+                        base = foff[k] + (c - 1) * dk
+                        for mm in 1:dk
+                            e[base + mm] += gcl * Y[shoff[k] + mm]
+                        end
+                    end
+                end
+            end
+            e ./= m.avg_nn
+        end
+        Env_tape[lidx] = Env
+        g_tape[lidx] = gL
+        wL = [Vector{Vector{T}}() for _ in 1:n]
+        PL = [Vector{Vector{T}}() for _ in 1:n]
+        aL = [Vector{Vector{T}}() for _ in 1:n]
+        for i in 1:n
+            for p in eachindex(xin[i])
+                x = xin[i][p]
+                w = dense_forward(lw.tp_W, lw.tp_b, x)
+                P = tensor_product(m.paths, m.cg, Vin[i][p], Env[i], w)
+                a = dense_forward(lw.x_W, lw.x_b, vcat(x, @view P[1:C]))
+                xin[i][p] = x .+ silu.(a) .* us[i][p]
+                Vin[i][p] = eqlinear_forward(lw.lin, P)
+                push!(wL[i], w); push!(PL[i], P); push!(aL[i], a)
+            end
+        end
+        w_tape[lidx] = wL; P_tape[lidx] = PL; a_tape[lidx] = aL
+    end
+
+    E = zero(T)
+    for i in 1:n, p in eachindex(xin[i])
+        E += (m.out_W * xin[i][p] .+ m.out_b)[1]
+    end
+
+    # ---- backward ----
+    # x̄/V̄ are the adjoints of the CURRENT layer's edge outputs; Ȳ/ū accumulate geometry adjoints
+    # across all layers (Y and u are reused every layer, in the env pooling and the resnet cutoff).
+    xbar = [[collect(m.out_W[1, :]) for _ in eachindex(xin[i])] for i in 1:n]   # ∂E/∂x_final
+    Vbar = [[zeros(T, m.feat.dim) for _ in eachindex(xin[i])] for i in 1:n]     # ∂E/∂V_final = 0
+    Ybar = [[zeros(T, 9) for _ in eachindex(xin[i])] for i in 1:n]
+    ubar = [zeros(T, length(xin[i])) for i in 1:n]
+
+    for lidx in L:-1:1
+        lw = m.layers[lidx]
+        Env = Env_tape[lidx]
+        xin_bar = [[zeros(T, H) for _ in eachindex(xin[i])] for i in 1:n]
+        Vin_bar = [[zeros(T, m.feat.dim) for _ in eachindex(xin[i])] for i in 1:n]
+        Envbar = [zeros(T, m.feat.dim) for _ in 1:n]
+        # Pass A: backward of each edge's update
+        for i in 1:n
+            for p in eachindex(xin[i])
+                xin_p = xin_tape[lidx][i][p]
+                Vin_p = Vin_tape[lidx][i][p]
+                w = w_tape[lidx][i][p]
+                P = P_tape[lidx][i][p]
+                a = a_tape[lidx][i][p]
+                u = us[i][p]
+                xb = xbar[i][p]
+                Vb = Vbar[i][p]
+                Pbar = zeros(T, m.feat.dim)
+                # V_out = eqlinear(lin, P)
+                Px, _, _ = eqlinear_vjp(lw.lin, P, Vb)
+                Pbar .+= Px
+                # x_out = x_in + silu(a)·u
+                xin_bar[i][p] .+= xb                          # identity residual
+                sa = silu.(a)
+                da = xb .* silu_grad.(a) .* u                 # ∂E/∂a
+                acc_u = zero(T)
+                @inbounds for q in eachindex(xb)
+                    acc_u += xb[q] * sa[q]
+                end
+                ubar[i][p] += acc_u                           # ∂E/∂u from the resnet
+                # a = x_W·[x_in; scalars_0e(P)] + x_b
+                gin = transpose(lw.x_W) * da                  # length H+C
+                @views xin_bar[i][p] .+= gin[1:H]
+                @views Pbar[1:C] .+= gin[H + 1:H + C]
+                # P = TP(V_in, Env_i, w)
+                Vx, Ex, wbar = tensor_product_vjp(m.paths, m.cg, Vin_p, Env[i], w, Pbar)
+                Vin_bar[i][p] .+= Vx
+                Envbar[i] .+= Ex
+                # w = tp_W·x_in + tp_b
+                xin_bar[i][p] .+= transpose(lw.tp_W) * wbar
+            end
+        end
+        # Pass B: backward of the environment pooling, scattering Envbar to each neighbour edge
+        invavg = one(T) / m.avg_nn
+        for i in 1:n
+            Eb = Envbar[i]
+            for p in eachindex(xin[i])
+                g = g_tape[lidx][i][p]
+                Y = Ys[i][p]
+                gbar = zeros(T, 3 * C)
+                @inbounds for k in 1:3
+                    dk = dims[k]
+                    for c in 1:C
+                        base = foff[k] + (c - 1) * dk
+                        gcl = g[(k - 1) * C + c]
+                        acc_g = zero(T)
+                        for mm in 1:dk
+                            eb = Eb[base + mm] * invavg
+                            acc_g += eb * Y[shoff[k] + mm]
+                            Ybar[i][p][shoff[k] + mm] += eb * gcl
+                        end
+                        gbar[(k - 1) * C + c] = acc_g
+                    end
+                end
+                # g = env_W·x_in + env_b
+                xin_bar[i][p] .+= transpose(lw.env_W) * gbar
+            end
+        end
+        xbar = xin_bar
+        Vbar = Vin_bar
+    end
+
+    # ---- backprop the two-body / initial-latent chain to Cartesian gradients ----
+    dEdc = [zero(SVector{3,T}) for _ in 1:n]
+    for i in 1:n
+        for p in eachindex(xin[i])
+            d = ds[i][p]; rhat = rhs[i][p]; u = us[i][p]; Y = Ys[i][p]; j = jjs[i][p]
+            Yb = Ybar[i][p]; ub = ubar[i][p]; Vb0 = Vbar[i][p]; xb0 = xbar[i][p]
+            # V^0 = init_equivariant(Y, u): V0[k,c,m] = init_w[c,k]·Y[k,m]·u (+ init_b0[c]·u on 0e)
+            @inbounds for k in 1:3
+                dk = dims[k]
+                for c in 1:C
+                    base = foff[k] + (c - 1) * dk
+                    iw = m.init_w[c, k]
+                    for mm in 1:dk
+                        vb = Vb0[base + mm]
+                        Yb[shoff[k] + mm] += iw * u * vb
+                        ub += iw * Y[shoff[k] + mm] * vb
+                    end
+                end
+            end
+            @inbounds for c in 1:C
+                ub += m.init_b0[c] * Vb0[foff[1] + c]
+            end
+            # x^0 = emb_W2·silu(emb_W1·s_in + emb_b1) + emb_b2  (recompute the forward)
+            B, dB = bessel_basis_grad(d, m.r_c, Val(m.nb))
+            _, du = poly_envelope_grad(d, m.r_c, m.env_p)
+            R = B .* u
+            s_in = two_body_input(m, R, Int(species[i]), j <= 0 ? 1 : Int(species[j]))
+            h1 = dense_forward(m.emb_W1, m.emb_b1, s_in)
+            da1 = transpose(m.emb_W2) * xb0
+            dh1 = da1 .* silu_grad.(h1)
+            ds_in = transpose(m.emb_W1) * dh1
+            # R = B·u  (both B and u depend on d)
+            dEdd = zero(T)
+            @inbounds for q in 1:m.nb
+                dR = ds_in[q]
+                ub += dR * B[q]           # ∂E/∂u via R
+                dEdd += dR * dB[q] * u    # ∂E/∂d via the Bessel basis
+            end
+            dEdd += ub * du               # ∂E/∂d via the polynomial envelope
+            # geometry: Y depends on r̂ (tangential, via the SH Jacobian); u, R depend on d = |r|
+            r_raw = rhat * d
+            _, J = real_sph_harm_grad(2, r_raw)   # J[q, b] = ∂Y[q]/∂r_b
+            gx = dEdd * rhat[1]; gy = dEdd * rhat[2]; gz = dEdd * rhat[3]
+            @inbounds for q in 1:9
+                gx += J[q, 1] * Yb[q]; gy += J[q, 2] * Yb[q]; gz += J[q, 3] * Yb[q]
+            end
+            dEdr = SVector{3,T}(gx, gy, gz)      # r = coords[j] - coords[i]
+            dEdc[j] += dEdr
+            dEdc[i] -= dEdr
+        end
+    end
+    F = [-dEdc[i] for i in 1:n]
+    return E, F
+end
+
+"""
     allegro_forces(m, coords, species, boundary, r_c) -> Vector{SVector{3,T}}
 
-Forces `F = -∂E/∂r`. **Temporary:** central finite differences of [`allegro_total_energy`](@ref);
-the analytic ANI-style backward (with the environment gradient scattered to all neighbours) is the
-next milestone.
+Analytic forces `F = -∂E/∂r` via [`allegro_energy_and_forces`](@ref).
 """
 function allegro_forces(m::AllegroModel{T}, coords::AbstractVector{<:SVector{3}},
                         species::AbstractVector{<:Integer}, boundary, r_c::T) where T
-    n = length(coords)
-    F = Vector{SVector{3,T}}(undef, n)
-    h = T(1e-5)
-    cc = collect(SVector{3,T}, coords)
-    for i in 1:n
-        g = zero(MVector{3,T})
-        for b in 1:3
-            orig = cc[i]
-            cc[i] = setindex(orig, orig[b] + h, b)
-            Ep = allegro_total_energy(m, cc, species, boundary, T(r_c))
-            cc[i] = setindex(orig, orig[b] - h, b)
-            Em = allegro_total_energy(m, cc, species, boundary, T(r_c))
-            cc[i] = orig
-            g[b] = -(Ep - Em) / (2h)
-        end
-        F[i] = SVector{3,T}(g)
-    end
+    _, F = allegro_energy_and_forces(m, coords, species, boundary, T(r_c))
     return F
 end
