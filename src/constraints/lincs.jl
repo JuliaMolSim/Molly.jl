@@ -17,7 +17,43 @@ struct LincsCouplingDense{CI, CC, NC}
     max_coupled::Int
 end
 
-struct LincsData{A1, A2, L, IM, SD, CM}
+#=
+Maps each atom to the constraints it takes part in, as a CSR where the constraint index
+is signed by which end of the constraint the atom is: `+i` when the atom is `atom2[i]`
+and `-i` when it is `atom1[i]`.
+With this mapping the update is gathered per atom instead of per constraint, which is
+conflict free. It is only built on CPU, since the GPU path scatters into a per-atom buffer
+with atomics instead.
+=#
+struct LincsAtomScatter{R, C}
+    range::R
+    constraints::C
+end
+
+function build_lincs_atom_scatter(atom1, atom2, n_atoms::Integer)
+    K = length(atom1)
+    range = zeros(Int32, n_atoms + 1)
+    for i in 1:K
+        range[atom1[i] + 1] += Int32(1)
+        range[atom2[i] + 1] += Int32(1)
+    end
+    range[1] = Int32(1)
+    for a in 1:n_atoms
+        range[a + 1] += range[a]
+    end
+    cursor = copy(range)
+    constraints = Vector{Int32}(undef, 2 * K)
+    for i in 1:K
+        a1, a2 = atom1[i], atom2[i]
+        constraints[cursor[a1]] = Int32(-i)
+        cursor[a1] += Int32(1)
+        constraints[cursor[a2]] = Int32(i)
+        cursor[a2] += Int32(1)
+    end
+    return LincsAtomScatter(range, constraints)
+end
+
+struct LincsData{A1, A2, L, IM, SD, CM, AS}
     atom1::A1
     atom2::A2
     lengths::L
@@ -26,6 +62,7 @@ struct LincsData{A1, A2, L, IM, SD, CM}
     coupling::CM
     n_rec::Int
     n_iter::Int
+    scatter::AS # `nothing` on GPU, see `LincsAtomScatter`
 end
 
 struct LincsWorkspace{BV, R, S, TM, BL, FS}
@@ -49,6 +86,8 @@ LINCS is a non-iterative constraint algorithm that uses matrix expansion to appr
 the inverse of the constraint coupling matrix. It is typically faster than
 [`SHAKE_RATTLE`](@ref) for large systems but is approximate for ring topologies.
 Either or both of `dist_constraints` and `angle_constraints` must be given.
+The masses and constraints should always be on the CPU, even for a GPU system; the
+[`System`](@ref) constructor moves the constraint data to the device of the system.
 [`SetupLINCS`](@ref) provides LINCS parameters when setting up a system from a file.
 
 Velocity constraints are applied implicitly through position constraint correction.
@@ -344,7 +383,8 @@ function build_lincs_data(dist_constraints::AbstractVector{<:DistanceConstraint}
     end
 
     coupling = build_lincs_coupling_matrix(atom1, atom2, invmass, sdiag, T)
-    return LincsData(atom1, atom2, lengths, invmass, sdiag, coupling, n_rec, n_iter)
+    scatter = build_lincs_atom_scatter(atom1, atom2, length(masses))
+    return LincsData(atom1, atom2, lengths, invmass, sdiag, coupling, n_rec, n_iter, scatter)
 end
 
 function create_lincs_workspace(data::LincsData)
@@ -758,112 +798,168 @@ end
 
 # --- CPU solve path ---
 
+# One iteration of the LINCS matrix expansion, reading `src` and writing `dst` and `sol`.
+# Every constraint writes only its own entry, so the iteration is split over chunks with a
+# barrier between iterations.
+function lincs_expand!(K::Integer, n_chunks::Integer, crange, neighbors, blcc, src, dst,
+                       sol, ::Type{T}) where T
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for i in constraint_chunk_range(K, chunk_i, n_chunks)
+            mvb = zero(T)
+            for n in crange[i]:(crange[i + 1] - 1)
+                mvb += blcc[n] * src[neighbors[n]]
+            end
+            dst[i] = mvb
+            sol[i] += mvb
+        end
+    end
+    return nothing
+end
+
+# Apply the corrections from the solve to the atoms, gathering the constraints that each
+# atom takes part in so that the loop can be split over chunks, see `LincsAtomScatter`
+function lincs_gather!(coords, n_chunks::Integer, scatter::LincsAtomScatter, sdiag, sol, B,
+                       invmass, unit_scale)
+    atom_range, atom_constraints = scatter.range, scatter.constraints
+    n_atoms = length(atom_range) - 1
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for a in constraint_chunk_range(n_atoms, chunk_i, n_chunks)
+            n_start, n_stop = atom_range[a], atom_range[a + 1] - Int32(1)
+            n_start > n_stop && continue
+            delta = zero(eltype(B))
+            for n in n_start:n_stop
+                signed_i = atom_constraints[n]
+                i = abs(signed_i)
+                contribution = B[i] * (sdiag[i] * sol[i])
+                # `atom1` is moved against the bond vector and `atom2` along it
+                delta = (signed_i > 0 ? (delta + contribution) : (delta - contribution))
+            end
+            coords[a] += (invmass[a] * delta) .* unit_scale
+        end
+    end
+    return nothing
+end
+
+# The virial needs the per-constraint correction factors, which the gather above does not
+# accumulate since it runs over atoms
+function accumulate_lincs_factors!(factor_sum, K::Integer, sdiag, sol)
+    @inbounds for i in 1:K
+        factor_sum[i] += sdiag[i] * sol[i]
+    end
+    return nothing
+end
+
 function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale)
-    return lincs_solve!(coords, data, ws, unit_scale, nothing)
+    return lincs_solve!(coords, data, ws, unit_scale, nothing, 1)
 end
 
 function lincs_solve!(coords, data::LincsData, ws::LincsWorkspace, unit_scale,
-                      factor_sum)
+                      factor_sum, n_threads::Integer=Threads.nthreads())
     T = eltype(data.lengths)
     coupling = data.coupling
-    atom1 = data.atom1
-    atom2 = data.atom2
-    invmass = data.invmass
-    sdiag = data.sdiag
-    B = ws.B
-    sol = ws.sol
-    blcc = ws.blcc
-    crange = coupling.range
-    neighbors = coupling.neighbors
-    rhs = ws.rhs
-    tmp = ws.tmp
+    K = length(data.atom1)
+    n_chunks = n_constraint_chunks(K, n_threads)
 
     # Matrix expansion: n_rec iterations
+    # Ping-pong: each iteration reads what the last one wrote. ws.rhs/ws.tmp still point to
+    #   the original arrays, and callers reassign ws.rhs before reuse
+    src, dst = ws.rhs, ws.tmp
     for rec in 1:data.n_rec
-        @inbounds for i in eachindex(atom1)
-            mvb = zero(T)
-            for n in crange[i]:(crange[i + 1] - 1)
-                mvb += blcc[n] * rhs[neighbors[n]]
-            end
-            tmp[i] = mvb
-            sol[i] += mvb
-        end
-        # Ping-pong: swap local bindings so next iteration reads from what was just written.
-        # ws.rhs/ws.tmp fields still point to original arrays; callers reassign ws.rhs before reuse.
-        rhs, tmp = tmp, rhs
+        lincs_expand!(K, n_chunks, coupling.range, coupling.neighbors, ws.blcc, src, dst,
+                      ws.sol, T)
+        src, dst = dst, src
     end
 
-    # Position update
-    @inbounds for i in eachindex(atom1)
-        a1, a2 = atom1[i], atom2[i]
-        factor = sdiag[i] * sol[i]
-        if !isnothing(factor_sum)
-            factor_sum[i] += factor
-        end
-        delta = B[i] * factor
-        coords[a1] -= (invmass[a1] * delta) .* unit_scale
-        coords[a2] += (invmass[a2] * delta) .* unit_scale
+    if !isnothing(factor_sum)
+        accumulate_lincs_factors!(factor_sum, K, data.sdiag, ws.sol)
     end
+    lincs_gather!(coords, n_chunks, data.scatter, data.sdiag, ws.sol, ws.B, data.invmass,
+                  unit_scale)
+    return nothing
+end
+
+# Unit bond vectors from the coordinates before the unconstrained update, and the initial
+# right hand side from the coordinates after it
+function lincs_position_rhs!(K::Integer, n_chunks::Integer, atom1, atom2, old_coords,
+                             coords, boundary, B, rhs, sdiag, lengths)
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for i in constraint_chunk_range(K, chunk_i, n_chunks)
+            a1, a2 = atom1[i], atom2[i]
+            diff_old = lincs_bond_vector(old_coords, a1, a2, boundary)
+            B_i = diff_old * inv(sqrt(dot(diff_old, diff_old)))
+            B[i] = B_i
+            diff_new = lincs_bond_vector(coords, a1, a2, boundary)
+            rhs[i] = sdiag[i] * (dot(B_i, diff_new) - lengths[i])
+        end
+    end
+    return nothing
+end
+
+# Runtime coupling coefficients: blcc = coef * dot(B[i], B[neighbor]).
+# Each constraint writes its own slice of the coupling CSR
+function lincs_coupling_coefs!(K::Integer, n_chunks::Integer, B, crange, neighbors, coef,
+                               blcc)
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for i in constraint_chunk_range(K, chunk_i, n_chunks)
+            B_i = B[i]
+            for n in crange[i]:(crange[i + 1] - 1)
+                blcc[n] = coef[n] * dot(B_i, B[neighbors[n]])
+            end
+        end
+    end
+    return nothing
+end
+
+# Right hand side for the correction iterations that undo rotational lengthening
+function lincs_correction_rhs!(K::Integer, n_chunks::Integer, atom1, atom2, coords,
+                               boundary, lengths, sdiag, rhs, ::Type{T}) where T
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for i in constraint_chunk_range(K, chunk_i, n_chunks)
+            a1, a2 = atom1[i], atom2[i]
+            diff = lincs_bond_vector(coords, a1, a2, boundary)
+            dlen2 = 2 * lengths[i]^2 - dot(diff, diff)
+            if dlen2 < zero(T)
+                warn_lincs_stretched(a1, a2)
+            end
+            p = sqrt(max(dlen2, zero(T)))
+            rhs[i] = sdiag[i] * (lengths[i] - p)
+        end
+    end
+    return nothing
+end
+
+@noinline function warn_lincs_stretched(a1, a2)
+    @warn "LINCS correction: bond $(a1)-$(a2) stretched beyond sqrt(2) * target " *
+          "length, constraint may be unreliable" maxlog=1
+    return nothing
 end
 
 function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
-                      boundary, context)
+                      boundary, context, n_threads::Integer=Threads.nthreads())
     T = eltype(data.lengths)
-    atom1 = data.atom1
-    atom2 = data.atom2
-    lengths = data.lengths
-    sdiag = data.sdiag
     coupling = data.coupling
-    crange = coupling.range
-    neighbors = coupling.neighbors
-    coef = coupling.coef
-    B = ws.B
-    rhs = ws.rhs
-    blcc = ws.blcc
-    K = length(atom1)
+    K = length(data.atom1)
+    n_chunks = n_constraint_chunks(K, n_threads)
     unit_scale = oneunit(eltype(eltype(coords)))
     factor_sum = context.needs_virial ? ws.factor_sum : nothing
     if !isnothing(factor_sum)
         fill!(factor_sum, zero(eltype(factor_sum)))
     end
 
-    # Compute unit bond vectors and initial RHS
-    @inbounds for i in 1:K
-        a1, a2 = atom1[i], atom2[i]
-        diff_old = lincs_bond_vector(old_coords, a1, a2, boundary)
-        B_i = diff_old * inv(sqrt(dot(diff_old, diff_old)))
-        B[i] = B_i
-        diff_new = lincs_bond_vector(coords, a1, a2, boundary)
-        rhs[i] = sdiag[i] * (dot(B_i, diff_new) - lengths[i])
-    end
+    lincs_position_rhs!(K, n_chunks, data.atom1, data.atom2, old_coords, coords, boundary,
+                        ws.B, ws.rhs, data.sdiag, data.lengths)
+    lincs_coupling_coefs!(K, n_chunks, ws.B, coupling.range, coupling.neighbors,
+                          coupling.coef, ws.blcc)
 
-    # Compute runtime coupling coefficients: blcc = coef * dot(B[i], B[neighbor])
-    @inbounds for i in 1:K
-        B_i = B[i]
-        for n in crange[i]:(crange[i + 1] - 1)
-            blcc[n] = coef[n] * dot(B_i, B[neighbors[n]])
-        end
-    end
-
-    copyto!(ws.sol, rhs)
-    lincs_solve!(coords, data, ws, unit_scale, factor_sum)
+    copyto!(ws.sol, ws.rhs)
+    lincs_solve!(coords, data, ws, unit_scale, factor_sum, n_threads)
 
     # Outer correction iterations (rotational lengthening)
     for _ in 1:data.n_iter
-        @inbounds for i in 1:K
-            a1 = atom1[i]
-            a2 = atom2[i]
-            diff = lincs_bond_vector(coords, a1, a2, boundary)
-            dlen2 = 2 * lengths[i]^2 - dot(diff, diff)
-            if dlen2 < zero(T)
-                @warn "LINCS correction: bond $(a1)-$(a2) stretched " *
-                      "beyond sqrt(2) * target length, constraint may be unreliable" maxlog=1
-            end
-            p = sqrt(max(dlen2, zero(T)))
-            rhs[i] = sdiag[i] * (lengths[i] - p)
-        end
-        copyto!(ws.sol, rhs)
-        lincs_solve!(coords, data, ws, unit_scale, factor_sum)
+        lincs_correction_rhs!(K, n_chunks, data.atom1, data.atom2, coords, boundary,
+                              data.lengths, data.sdiag, ws.rhs, T)
+        copyto!(ws.sol, ws.rhs)
+        lincs_solve!(coords, data, ws, unit_scale, factor_sum, n_threads)
     end
 
     accumulate_lincs_position_virial!(data, ws, context)
@@ -901,54 +997,61 @@ default_position_constraint_context() = ConstraintApplicationContext(
     needs_virial=false,
 )
 
+# Unit bond vectors from the current (constrained) coordinates and the velocity residual
+function lincs_velocity_rhs!(K::Integer, n_chunks::Integer, atom1, atom2, coords,
+                             velocities, boundary, B, rhs, sdiag)
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for i in constraint_chunk_range(K, chunk_i, n_chunks)
+            a1, a2 = atom1[i], atom2[i]
+            diff = lincs_bond_vector(coords, a1, a2, boundary)
+            B_i = diff * inv(sqrt(dot(diff, diff)))
+            B[i] = B_i
+            dv = ustrip.(velocities[a2] - velocities[a1])
+            rhs[i] = -sdiag[i] * dot(B_i, dv)
+        end
+    end
+    return nothing
+end
+
+# Velocity residual for the correction iterations, reusing the bond vectors already in `B`
+function lincs_velocity_correction_rhs!(K::Integer, n_chunks::Integer, atom1, atom2,
+                                        velocities, B, rhs, sdiag)
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        @inbounds for i in constraint_chunk_range(K, chunk_i, n_chunks)
+            a1, a2 = atom1[i], atom2[i]
+            dv = ustrip.(velocities[a2] - velocities[a1])
+            rhs[i] = -sdiag[i] * dot(B[i], dv)
+        end
+    end
+    return nothing
+end
+
 function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace,
-                          boundary, context, n_iter_velocity::Integer=data.n_iter)
-    atom1 = data.atom1
-    atom2 = data.atom2
-    sdiag = data.sdiag
+                          boundary, context, n_iter_velocity::Integer=data.n_iter,
+                          n_threads::Integer=Threads.nthreads())
     coupling = data.coupling
-    crange = coupling.range
-    neighbors = coupling.neighbors
-    coef = coupling.coef
-    B = ws.B
-    rhs = ws.rhs
-    blcc = ws.blcc
-    K = length(atom1)
+    K = length(data.atom1)
+    n_chunks = n_constraint_chunks(K, n_threads)
     unit_vel_scale = oneunit(eltype(eltype(velocities)))
     factor_sum = context.needs_virial ? ws.factor_sum : nothing
     if !isnothing(factor_sum)
         fill!(factor_sum, zero(eltype(factor_sum)))
     end
 
-    # Bond vectors from current (constrained) coords + velocity RHS
-    @inbounds for i in 1:K
-        a1, a2 = atom1[i], atom2[i]
-        diff = lincs_bond_vector(coords, a1, a2, boundary)
-        inv_len = inv(sqrt(dot(diff, diff)))
-        B[i] = diff * inv_len
-        dv = ustrip.(velocities[a2] - velocities[a1])
-        rhs[i] = -sdiag[i] * dot(B[i], dv)
-    end
+    lincs_velocity_rhs!(K, n_chunks, data.atom1, data.atom2, coords, velocities, boundary,
+                        ws.B, ws.rhs, data.sdiag)
+    lincs_coupling_coefs!(K, n_chunks, ws.B, coupling.range, coupling.neighbors,
+                          coupling.coef, ws.blcc)
 
-    # Recompute coupling coefficients using current B vectors
-    @inbounds for i in 1:K
-        for n in crange[i]:(crange[i+1] - 1)
-            blcc[n] = coef[n] * dot(B[i], B[neighbors[n]])
-        end
-    end
-
-    copyto!(ws.sol, rhs)
-    lincs_solve!(velocities, data, ws, unit_vel_scale, factor_sum)
+    copyto!(ws.sol, ws.rhs)
+    lincs_solve!(velocities, data, ws, unit_vel_scale, factor_sum, n_threads)
 
     # Iterative correction: re-evaluate velocity residual and solve again
     for _ in 1:n_iter_velocity
-        @inbounds for i in 1:K
-            a1, a2 = atom1[i], atom2[i]
-            dv = ustrip.(velocities[a2] - velocities[a1])
-            rhs[i] = -sdiag[i] * dot(B[i], dv)
-        end
-        copyto!(ws.sol, rhs)
-        lincs_solve!(velocities, data, ws, unit_vel_scale, factor_sum)
+        lincs_velocity_correction_rhs!(K, n_chunks, data.atom1, data.atom2, velocities,
+                                       ws.B, ws.rhs, data.sdiag)
+        copyto!(ws.sol, ws.rhs)
+        lincs_solve!(velocities, data, ws, unit_vel_scale, factor_sum, n_threads)
     end
 
     accumulate_lincs_velocity_virial!(data, ws, context)
@@ -1117,7 +1220,8 @@ end
 # --- Molly interface ---
 
 function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained_update;
-                                     context=nothing, kwargs...)
+                                     context=nothing,
+                                     n_threads::Integer=Threads.nthreads(), kwargs...)
     context = isnothing(context) ? default_position_constraint_context() : context
     if !isnothing(ca.delta_buf)
         lincs_apply_gpu!(sys.coords, r_pre_unconstrained_update,
@@ -1126,12 +1230,13 @@ function apply_position_constraints!(sys::System, ca::LINCS, r_pre_unconstrained
                          context)
     else
         lincs_apply!(sys.coords, r_pre_unconstrained_update,
-                     ca.lincs_data, ca.workspace, sys.boundary, context)
+                     ca.lincs_data, ca.workspace, sys.boundary, context, n_threads)
     end
     return sys
 end
 
-function apply_velocity_constraints!(sys::System, ca::LINCS; context=nothing, kwargs...)
+function apply_velocity_constraints!(sys::System, ca::LINCS; context=nothing,
+                                     n_threads::Integer=Threads.nthreads(), kwargs...)
     context = (isnothing(context) ? default_velocity_constraint_context() : context)
     n_iter_velocity = (ca.iter_vel_correction ? ca.lincs_data.n_iter : 0)
     if !isnothing(ca.delta_buf)
@@ -1141,7 +1246,8 @@ function apply_velocity_constraints!(sys::System, ca::LINCS; context=nothing, kw
                              n_iter_velocity)
     else
         lincs_vel_apply!(sys.velocities, sys.coords,
-                         ca.lincs_data, ca.workspace, sys.boundary, context, n_iter_velocity)
+                         ca.lincs_data, ca.workspace, sys.boundary, context,
+                         n_iter_velocity, n_threads)
     end
     return sys
 end
@@ -1267,8 +1373,10 @@ function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms, block_size)
     coupling_gpu = LincsCouplingDense(coupled_indices_gpu, coupled_coef_gpu,
                                       n_coupled_gpu, dense_coupling.max_coupled)
 
+    # The GPU path scatters into `delta_buf` with atomics and reorders and pads the
+    #   constraints, so the CPU atom mapping does not apply and is not carried over
     data_gpu = LincsData(atom1_gpu, atom2_gpu, lengths_gpu, invmass_gpu,
-                         sdiag_gpu, coupling_gpu, data.n_rec, data.n_iter)
+                         sdiag_gpu, coupling_gpu, data.n_rec, data.n_iter, nothing)
 
     # Workspace sized for padded constraint count
     backend = get_backend(atom1_gpu)

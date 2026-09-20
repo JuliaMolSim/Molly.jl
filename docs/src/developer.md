@@ -2,15 +2,16 @@
 
 ## Running tests
 
+We use [ParallelTestRunner.jl](https://github.com/JuliaTesting/ParallelTestRunner.jl) to run the tests in parallel across multiple threads.
+This allows different test groups to be run, for example `julia test/runtests.jl gradients` for the gradient tests or `julia test/runtests.jl \!gradients \!extra` for the non-gradient tests.
 The tests will automatically include multithreading and/or GPU tests if multiple threads and/or a GPU are available.
-Errors appearing at the start of the test run due to unavailable backends is expected.
-`test/runtests.jl` does not include all the tests, see the test directory for more, though these extra tests do not need to be run for every change.
+Warnings appearing at the start of the test run due to unavailable backends is expected.
+`test/runtests.jl` does not include all the tests, see the `test/extra` directory for more, though these extra tests do not need to be run for every change.
 Various environmental variables can be set to modify the tests:
 - `VISTESTS` determines whether to run the [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) plotting tests which will error on remote systems where a display is not available, default `VISTESTS=1`.
-- `GPUTESTS` determines whether to run the GPU tests, default `GPUTESTS=1`.
+- `GPUTESTS` determines whether to run the GPU tests if a GPU is available, default `GPUTESTS=1`.
 - `DEVICE` determines which GPU to run the GPU tests on, default `DEVICE=0`.
-- `GROUP` can be used to run a subset of the tests, options `All`/`Protein`/`Gradients`/`NotGradients`, default `GROUP=All`.
-The CI run does not carry out all tests - for example the GPU and parallel CPU tests are not run - and this is reflected in the code coverage.
+The CI run does not carry out all tests - for example the GPU tests are not run - and this is reflected in the code coverage.
 Running the test file locally gives higher coverage.
 
 ## Periodic boundary conditions

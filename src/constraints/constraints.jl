@@ -7,6 +7,16 @@ export
     check_velocity_constraints,
     check_constraints
 
+# Split `n_items` constraints or clusters over at most `n_threads` chunks on CPU
+# The ranges are contiguous rather than strided, since the per-constraint data is read in order
+@inline function n_constraint_chunks(n_items::Integer, n_threads::Integer)
+    return (n_threads > 1 && n_items > 1) ? Int(n_threads) : 1
+end
+
+@inline function constraint_chunk_range(n_items::Integer, chunk_i::Integer, n_chunks::Integer)
+    return (((chunk_i - 1) * n_items) ÷ n_chunks + 1):((chunk_i * n_items) ÷ n_chunks)
+end
+
 """
     DistanceConstraint(i, j, dist)
 

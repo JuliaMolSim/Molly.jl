@@ -601,7 +601,7 @@ The potential also runs when the system's coordinates live on a GPU array (`CuAr
 
 ## Python ASE calculator
 
-[`ASECalculator`](@ref) can be used along with [PythonCall.jl](https://github.com/JuliaPy/PythonCall.jl) to use a Python [ASE](https://wiki.fysik.dtu.dk/ase) calculator with Molly.
+[`ASECalculator`](@ref) can be used along with [PythonCall.jl](https://github.com/JuliaPy/PythonCall.jl) to use a Python [ASE](https://ase-lib.org) calculator with Molly.
 Here we simulate a dipeptide molecule in a vacuum with [MACE-OFF23](https://github.com/ACEsuit/mace-off):
 ```julia
 using Molly
@@ -650,7 +650,7 @@ simulate!(deepcopy(sys), simulator, 5; run_loggers=false)
 @time simulate!(sys, simulator, 2000)
 ```
 
-Another example using [psi4](https://wiki.fysik.dtu.dk/ase/ase/calculators/psi4.html) to get the potential energy of a water molecule:
+Another example using [psi4](https://docs.ase-lib.org/ase/calculators/psi4.html) to get the potential energy of a water molecule:
 ```julia
 using Molly
 using PythonCall # Python packages ase and psi4 need to be installed beforehand

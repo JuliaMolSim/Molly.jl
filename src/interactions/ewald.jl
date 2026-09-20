@@ -869,12 +869,15 @@ end
 # is a type parameter so that the inner sum can be unrolled.
 function reduce_charge_grids!(charge_grid::Array{T, 3}, buffer,
                               ::Val{n_threads}) where {T, n_threads}
-    @inbounds Threads.@threads for li in eachindex(charge_grid)
-        c = zero(T)
-        for chunk_i in 1:n_threads
-            c += buffer[chunk_i][li]
+    n_grid = length(charge_grid)
+    @inbounds Threads.@threads for chunk_i in 1:n_threads
+        for li in (((chunk_i - 1) * n_grid) ÷ n_threads + 1):((chunk_i * n_grid) ÷ n_threads)
+            c = zero(T)
+            for ci in 1:n_threads
+                c += buffer[ci][li]
+            end
+            charge_grid[li] = c
         end
-        charge_grid[li] = c
     end
     return charge_grid
 end

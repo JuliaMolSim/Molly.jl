@@ -793,7 +793,8 @@ end
 
 """
     TrajectoryWriter(n_steps, filepath; format="", correction=:pbc, atom_inds=[],
-                     excluded_res=String[], write_velocities=false, write_boundary=true)
+                     excluded_res=String[], write_velocities=false, write_boundary=true,
+                     overwrite=false)
 
 Write 3D structures to a file throughout a simulation.
 
@@ -819,6 +820,8 @@ The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
 information is required.
 The file will be appended to, so should be deleted before simulation if it
 already exists.
+Setting `overwrite=true` deletes the file when the logger is constructed if it
+exists, rather than warning and appending to it.
 
 Not compatible with 2D systems.
 For the PDB format, the box size for the CRYST1 record is taken from the first
@@ -842,11 +845,16 @@ end
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           format::AbstractString="", correction::Symbol=:pbc, atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
-                          write_boundary::Bool=true)
+                          write_boundary::Bool=true, overwrite::Bool=false)
     check_correction_arg(correction)
     if isfile(filepath)
-        @warn "TrajectoryWriter created with a file path ($filepath) that already exists, " *
-              "will try to append to this file"
+        if overwrite
+            rm(filepath)
+        else
+            @warn "TrajectoryWriter created with a file path ($filepath) that already " *
+                  "exists, will try to append to this file, use overwrite=true to " *
+                  "delete the file instead"
+        end
     end
     topology = Chemfiles.Topology() # Added to later when sys is available
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
