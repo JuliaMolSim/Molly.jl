@@ -574,7 +574,8 @@ The atomic environment vectors can also be computed directly with `compute_aevs_
 
 [`AllegroPotential`](@ref) is a native Julia implementation of the strictly-local, O(3)-equivariant [Allegro](https://doi.org/10.1038/s41467-023-36329-y) interatomic potential, with no Python runtime dependency.
 It is built on equivariant primitives that live in core Molly (real spherical harmonics, Clebsch-Gordan tensor products and equivariant linear layers), pinned to the [e3nn](https://github.com/e3nn/e3nn) conventions so trained weights transfer.
-Energy and analytic forces (`F = -∂E/∂r`, composed from the primitive vector-Jacobian products) both work when [Lux.jl](https://github.com/LuxDL/Lux.jl) and [HDF5.jl](https://github.com/JuliaIO/HDF5.jl) are loaded.
+It is genuinely many-body: each layer couples an edge to the central atom's environment (a sum over all of that atom's neighbours), not to the edge's own spherical harmonics.
+Energy and analytic forces (`F = -∂E/∂r`, composed from the primitive vector-Jacobian products) both work when [HDF5.jl](https://github.com/JuliaIO/HDF5.jl) is loaded.
 Weights are loaded from an HDF5 file exported by `test/allegro_reference.py`:
 ```julia
 using Molly
