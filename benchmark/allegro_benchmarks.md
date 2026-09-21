@@ -76,6 +76,39 @@ only to quantify the speedup.
 
 ---
 
+## CUDA (RTX 5080)
+
+The energy forward also runs natively on the GPU via KernelAbstractions (`compute_allegro_energy_ka`,
+the same kernels on CUDA / Metal / the KA CPU backend). Measured on an NVIDIA RTX 5080 (cyclops,
+Julia 1.12, `Float64`); both the CPU and CUDA series are on that same box, so this is a
+within-machine GPU-vs-CPU comparison. Reproduce:
+
+```
+julia --project=<env-with-Molly+HDF5+CUDA+JSON3> benchmark/allegro_cuda_compare.jl
+```
+
+| atoms | edges | CPU (ms) | CUDA (ms) | speedup | reldiff vs CPU |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| 64   | 726   | 11.34  | 2.01 | 5.6×  | 4.9e-16 |
+| 128  | 1574  | 24.83  | 2.53 | 9.8×  | 8.8e-16 |
+| 256  | 3446  | 55.78  | 3.04 | 18.4× | 1.1e-15 |
+| 512  | 7444  | 123.5  | 3.86 | 32.0× | 5.2e-15 |
+| 1024 | 15556 | 287.2  | 9.54 | 30.1× | 6.9e-16 |
+| 2048 | 32344 | 661.6  | 26.6 | 24.9× | 1.1e-15 |
+| 4096 | 66808 | 1487.2 | 92.3 | 16.1× | 3.0e-15 |
+
+The CUDA energy matches the CPU forward to ~1e-15 (Float64 machine precision), confirming the GPU
+kernels are correct on real hardware. Speedup peaks around **32× at ~512 atoms**. It tapers at
+larger N because the neighbour list is still built on the host (O(N²)) and copied over each call;
+a device-side neighbour build would remove that ceiling. The GPU energy also runs on Apple Metal
+(validated to ~3.6e-7 in Float32).
+
+![CUDA energy vs N](images/allegro_cuda_energy_vs_N.png)
+
+![CUDA speedup](images/allegro_cuda_speedup.png)
+
+---
+
 ## Reading the numbers
 
 - **Analytic forces are 29×–109× faster than finite differences, and the gap widens with system
@@ -98,9 +131,10 @@ only to quantify the speedup.
 - Weights are the small random reference model used by the test suite, not a trained potential.
   Timings depend on the architecture size (channels `C`, latent width `H`, number of layers,
   `l_max`), not on the weight values, so they are representative for a model of this shape.
-- Everything runs on the CPU. GPU-backed systems currently take a host round-trip; native
-  on-device (KernelAbstractions / CUDA) kernels for the many-body forward and backward are a
-  planned follow-up (as they were for ANI) and would change these numbers substantially.
+- The **energy** forward now runs natively on the GPU (CUDA + Metal, see the CUDA section). The
+  **forces** (backward) still run on the CPU; a native GPU backward is the next step. The neighbour
+  list is built on the host for both, so a device-side neighbour build is the main remaining
+  optimisation.
 - A head-to-head against the reference `nequip-allegro` (PyTorch) package — analogous to the
   ANI-vs-TorchANI comparison — is future work: it needs a trained checkpoint (or a matched-config
   build) shared between the two implementations for a fair comparison.

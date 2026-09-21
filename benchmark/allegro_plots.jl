@@ -71,4 +71,27 @@ function speedup_plot(out)
 end
 speedup_plot("allegro_forces_speedup.png")
 
+# --- CUDA vs CPU energy (from allegro_cuda_compare.jl, both series on the same box) -------------
+cuda = load_json(joinpath(RES, "allegro_cuda_energy.json"))
+if !isnothing(cuda)
+    vs_N_plot("Allegro energy: CPU vs NVIDIA CUDA (RTX 5080)", "allegro_cuda_energy_vs_N.png", [
+        ("CPU (1 thread)", :navy,     :solid, series(getk(cuda, "cpu"))),
+        ("CUDA (RTX 5080)", :seagreen, :solid, series(getk(cuda, "cuda"))),
+    ])
+    xc, yc = series(getk(cuda, "cpu")); xg, yg = series(getk(cuda, "cuda"))
+    common = sort(collect(intersect(xc, xg)))
+    if !isempty(common)
+        cpu = Dict(xc .=> yc); gpu = Dict(xg .=> yg)
+        sp = [cpu[x] / gpu[x] for x in common]
+        fig = Figure(size = (760, 520))
+        ax  = Axis(fig[1, 1], xscale = log10, xlabel = "number of atoms",
+                   ylabel = "CUDA speedup over CPU (×)",
+                   title = "Allegro energy: CUDA speedup over CPU (RTX 5080)")
+        scatterlines!(ax, common, sp, markersize = 11, color = :seagreen)
+        hlines!(ax, [1.0], color = :gray, linestyle = :dash)
+        save(joinpath(IMG, "allegro_cuda_speedup.png"), fig, px_per_unit = 2)
+        println("wrote images/allegro_cuda_speedup.png")
+    end
+end
+
 println("done — images in ", IMG)
