@@ -801,6 +801,20 @@ if isfile(ALLEGRO_H5) && isfile(ALLEGRO_JSON)
             @test abs(E_full - E_pairs) > 1e-4
         end
 
+        @testset "GPU energy path (KernelAbstractions CPU backend)" begin
+            # The GPU-portable forward (compute_allegro_energy_ka) must match the CPU forward on
+            # the KA CPU backend; on CUDA/Metal it runs the same kernels (checked in the GPU
+            # consistency testset below when a device is available).
+            for sysj in ref.systems
+                coords_A = [SVector{3,Float64}(c...) for c in sysj.coords_A]
+                species = [Int(s) + 1 for s in sysj.species]
+                E = Molly.allegro_total_energy(pot.model, coords_A, species, nothing, rc)
+                E_ka = Molly.compute_allegro_energy_ka(pot.model, coords_A, species, nothing;
+                           backend=KernelAbstractions.CPU(), T=Float64)
+                @test isapprox(E_ka, E; rtol=1e-8)
+            end
+        end
+
         @testset "calculator: rotation invariance, ΣF≈0, finite differences" begin
             sysj = ref.systems[1]
             sys = mk_allegro_sys(sysj.coords_A, sysj.species)
