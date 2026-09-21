@@ -24,7 +24,7 @@ Implemented features include:
 - Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin and Nosé-Hoover integrators.
 - Andersen, Berendsen and velocity rescaling thermostats.
 - C-rescale, Monte Carlo and Berendsen barostats with flexible virial calculation.
-- Steepest descent energy minimization.
+- Steepest descent, FIRE and L-BFGS energy minimization.
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.
 - Periodic, triclinic and infinite boundary conditions.

@@ -1205,6 +1205,8 @@ Simulators define what type of simulation is run.
 This could be anything from a simple energy minimization to complicated replica exchange MD.
 The available simulators are:
 - [`SteepestDescentMinimizer`](@ref)
+- [`FIREMinimizer`](@ref)
+- [`LBFGSMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
 - [`DPDVelocityVerlet`](@ref)
 - [`Verlet`](@ref)
@@ -1493,7 +1495,7 @@ simulate!(sys, simulator, 100) # Default run_loggers=true
 simulate!(sys, simulator, 100; run_loggers=:skipstart)
 simulate!(sys, simulator, 100; run_loggers=:skipstart)
 ```
-Running loggers can be disabled entirely with `run_loggers=false`, which is the default for [`SteepestDescentMinimizer`](@ref).
+Running loggers can be disabled entirely with `run_loggers=false`, which is the default for the energy minimizers such as [`SteepestDescentMinimizer`](@ref).
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
@@ -1674,6 +1676,8 @@ Due to the nature of the velocity treatment in each integrator, the velocities s
 
 The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
 - [`SteepestDescentMinimizer`](@ref)
+- [`FIREMinimizer`](@ref)
+- [`LBFGSMinimizer`](@ref)
 
 Simulators incompatible with constraints will print a warning and continue without applying constraints when used with systems containing constraints.
 
