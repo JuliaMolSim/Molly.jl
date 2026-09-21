@@ -2127,7 +2127,7 @@ where the reduced energy difference is
 
 $$\Delta \Delta u = \left[ u_j(x_i) + u_i(x_j) \right] - \left[ u_i(x_i) + u_j(x_j) \right]$$
 
-In Molly, a [`ReplicaSystem`](@ref) is built from one [`ThermoState`](@ref) per state, and [`ReplicaExchangeMD`](@ref) sets the time step `dt` and the time between exchange attempts, `exchange_time`. [`simulate_remd!`](@ref) propagates every replica with the Hamiltonian of the state it is currently in and, after every `exchange_time`, attempts exchanges between neighbouring states, alternating between the pairs $(1, 2), (3, 4), \dots$ and $(2, 3), (4, 5), \dots$. `state_indices[k]` is the replica that is currently in state $k$, and accepted exchanges are recorded in `exchange_logger`. Repeated calls continue from `current_step`. With CPU arrays the states are propagated in parallel on threads. With GPU arrays each GPU is driven by its own worker process, and the systems are sent to the workers on the first call only; later calls send the coordinates, velocities and boxes.
+In Molly, a [`ReplicaSystem`](@ref) is built from one [`ThermoState`](@ref) per state, and [`ReplicaExchangeMD`](@ref) sets the time step `dt` and the time between exchange attempts, `exchange_time`. [`simulate!`](@ref) with a [`ReplicaSystem`](@ref) and a [`ReplicaExchangeMD`](@ref) calls [`simulate_remd!`](@ref), which propagates every replica with the Hamiltonian of the state it is currently in and, after every `exchange_time`, attempts exchanges between neighbouring states, alternating between the pairs $(1, 2), (3, 4), \dots$ and $(2, 3), (4, 5), \dots$. `state_indices[k]` is the replica that is currently in state $k$, and accepted exchanges are recorded in `exchange_logger`. The loggers in `replica_loggers` belong to a state rather than to a replica, so each records the configurations sampled in its state. Repeated calls continue from `current_step`. With CPU arrays the states are propagated in parallel on threads. With GPU arrays each GPU is driven by its own worker process, and the systems are sent to the workers on the first call only; later calls send the coordinates, velocities and boxes.
 
 ### Free energy estimator
 
@@ -2180,13 +2180,13 @@ lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
 scheduler = DefaultLambdaScheduler(dual = true, intraLJ = true)
 ```
 
-`HREMD_TIME` is the simulated time for each $\lambda$ state. One sample per state is stored every `SAMPLE_TIME`, and the first `EQUIL_FRAC` of the samples of each state are discarded before MBAR.
+`HREMD_TIME` is the simulated time for each $\lambda$ state. One sample per state is written to that state's trajectory every `SAMPLE_TIME`, and the first `EQUIL_FRAC` of the samples of each state are discarded before MBAR.
 
 The setup function constructs the solvated and vacuum legs as in the AWH example: PME and an NPT barostat for the solvated leg, and short-range Coulomb with an infinite cutoff for the vacuum leg. Replica exchange starts every replica from the same configuration, so the function also runs the equilibration.
 
 ```julia
-function build_thermo_states(pdb_file, solute_indices; is_vacuum = false,
-                             rng = Random.default_rng())
+function setup_alchemical_hremd(pdb_file, solute_indices, traj_prefix; is_vacuum = false,
+                                rng = Random.default_rng())
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : CUTOFF
     nonbonded_method = is_vacuum ? DistanceCutoff(dist_cutoff) : SetupPME()
@@ -2222,7 +2222,7 @@ function build_thermo_states(pdb_file, solute_indices; is_vacuum = false,
     end
 ```
 
-After minimization and equilibration, the function checks the box against the cutoff and creates one [`ThermoState`](@ref) per $\lambda$ value with [`AbsoluteFESystem`](@ref), as in the AWH example. The equilibrated system is returned as well, since all replicas start from it.
+After minimization and equilibration, the function checks the box against the cutoff and creates one [`ThermoState`](@ref) per $\lambda$ value with [`AbsoluteFESystem`](@ref), as in the AWH example. Every state gets a [`TrajectoryWriter`](@ref) that writes a sample every `SAMPLE_TIME`, with the box for the solvated leg, and every replica starts from the equilibrated configuration. The atoms are wrapped into the box, as in the simulation, since the samples are evaluated again for MBAR.
 
 ```julia
     minim = SteepestDescentMinimizer(step_size = FT(0.01)u"nm", max_steps = 1000)
@@ -2257,45 +2257,43 @@ After minimization and equilibration, the function checks the box against the cu
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
     end
 
-    return thermo_states, sys_base
-end
-```
-
-Each leg starts every replica from the equilibrated configuration. [`simulate_remd!`](@ref) is called once per sampling interval and returns a new [`ReplicaSystem`](@ref). After each call, the configuration that is currently in each $\lambda$ state is stored for MBAR. Every call covers a whole and even number of exchange cycles, here two, so that both sets of neighbouring pairs are attempted equally often.
-
-```julia
-function run_hremd_leg(thermo_states, sys_base)
     K = length(thermo_states)
+    sample_steps = Int(round(SAMPLE_TIME / Δt))
+    replica_loggers = [(trj = TrajectoryWriter(sample_steps, "$(traj_prefix)_state_$(k).dcd";
+                                               correction = :wrap, write_boundary = !is_vacuum,
+                                               overwrite = true),)
+                       for k in 1:K]
+
     repsys = ReplicaSystem(
         thermo_states,
         [copy(sys_base.coords) for _ in 1:K];
         replica_velocities = [copy(sys_base.velocities) for _ in 1:K],
         replica_boundaries = [sys_base.boundary for _ in 1:K],
+        replica_loggers = replica_loggers,
         reuse_neighbors = true,
     )
-    sim = ReplicaExchangeMD(dt = Δt, exchange_time = EXCHANGE_TIME)
 
-    chunk_steps = Int(round(SAMPLE_TIME / Δt))
-    n_chunks = Int(floor(HREMD_TIME / Δt)) ÷ chunk_steps
-    coords_k = [Any[] for _ in 1:K]
-    boundaries_k = [Any[] for _ in 1:K]
-
-    for _ in 1:n_chunks
-        repsys = simulate_remd!(repsys, sim, chunk_steps;
-                                gpu_devices = gpu_devices, show_progress = false)
-
-        for k in 1:K
-            r = repsys.state_indices[k]
-            push!(coords_k[k], Array(repsys.replica_coords[r]))
-            push!(boundaries_k[k], repsys.replica_boundaries[r])
-        end
-    end
-
-    return coords_k, boundaries_k, repsys.exchange_logger
+    return repsys, thermo_states, sys_base
 end
 ```
 
-Every stored configuration is then evaluated in every state with [`assemble_mbar_inputs`](@ref), and the MBAR equations are solved with [`iterate_mbar`](@ref). All states start from the same fully coupled configuration, so the first 20% of the samples of each state are discarded. The free energies are dimensionless, in units of $k_B T$.
+After the simulation, the samples of each state are read back from its trajectory with [`read_trajectory`](@ref), which returns the coordinates and the box side lengths of every frame. The vacuum leg keeps its infinite box, which is not written.
+
+```julia
+function read_state_samples(sys_base, traj_prefix, K; is_vacuum = false)
+    coords_k = []
+    boundaries_k = []
+    for k in 1:K
+        coords, box_sides = read_trajectory(sys_base, "$(traj_prefix)_state_$(k).dcd")
+        push!(coords_k, coords)
+        push!(boundaries_k, is_vacuum ? fill(sys_base.boundary, length(coords)) :
+                                        [CubicBoundary(b...) for b in box_sides])
+    end
+    return coords_k, boundaries_k
+end
+```
+
+Every sample is then evaluated in every state with [`assemble_mbar_inputs`](@ref), and the MBAR equations are solved with [`iterate_mbar`](@ref). All states start from the same fully coupled configuration, so the first 20% of the samples of each state are discarded. The free energies are dimensionless, in units of $k_B T$.
 
 ```julia
 function hremd_free_energies(thermo_states, coords_k, boundaries_k)
@@ -2322,26 +2320,40 @@ function hremd_free_energies(thermo_states, coords_k, boundaries_k)
 end
 ```
 
-The two legs are constructed and run one after the other, and the free energies are then estimated for both.
+The two legs are constructed and run independently, each with one call to [`simulate!`](@ref). On GPUs a new [`ReplicaSystem`](@ref) is returned, so the result is assigned. The free energies are then estimated for both legs.
 
 ```julia
 solute_idx = 1:12
 
-thermo_solv, base_solv = build_thermo_states(
+repsys_solv, thermo_solv, base_solv = setup_alchemical_hremd(
     joinpath(data_dir, "benzene_solv.pdb"),
-    solute_idx;
+    solute_idx,
+    "hremd_solvation_solvated";
     is_vacuum = false,
     rng = MersenneTwister(RNG_SEED),
 )
-coords_solv, boundaries_solv, log_solv = run_hremd_leg(thermo_solv, base_solv)
 
-thermo_vac, base_vac = build_thermo_states(
+repsys_vac, thermo_vac, base_vac = setup_alchemical_hremd(
     joinpath(data_dir, "benzene_vac.pdb"),
-    solute_idx;
+    solute_idx,
+    "hremd_solvation_vacuum";
     is_vacuum = true,
     rng = MersenneTwister(RNG_SEED + 1),
 )
-coords_vac, boundaries_vac, log_vac = run_hremd_leg(thermo_vac, base_vac)
+
+hremd_sim = ReplicaExchangeMD(dt = Δt, exchange_time = EXCHANGE_TIME)
+hremd_steps = Int(floor(HREMD_TIME / Δt))
+
+repsys_solv = simulate!(repsys_solv, hremd_sim, hremd_steps; gpu_devices = gpu_devices)
+repsys_vac  = simulate!(repsys_vac, hremd_sim, hremd_steps; gpu_devices = gpu_devices)
+
+log_solv = repsys_solv.exchange_logger
+log_vac  = repsys_vac.exchange_logger
+
+coords_solv, boundaries_solv = read_state_samples(base_solv, "hremd_solvation_solvated",
+                                                  N_LAMBDA_STATES)
+coords_vac, boundaries_vac = read_state_samples(base_vac, "hremd_solvation_vacuum",
+                                                N_LAMBDA_STATES; is_vacuum = true)
 
 f_solv = hremd_free_energies(thermo_solv, coords_solv, boundaries_solv)
 f_vac  = hremd_free_energies(thermo_vac, coords_vac, boundaries_vac)
@@ -2398,8 +2410,7 @@ The exchange acceptance of every neighbouring pair of states shows how well the 
 
 ```julia
 function pair_acceptance(exchange_logger, K)
-    n_cycles = Int(floor(HREMD_TIME / Δt)) ÷ Int(round(SAMPLE_TIME / Δt)) *
-               (Int(round(SAMPLE_TIME / Δt)) ÷ Int(round(EXCHANGE_TIME / Δt)))
+    n_cycles = Int(round(HREMD_TIME / EXCHANGE_TIME))
     accepted = zeros(Int, K - 1)
     for (n, m) in exchange_logger.indices
         accepted[min(n, m)] += 1
@@ -2536,11 +2547,11 @@ A run with these settings gives, in kJ mol^-1:
 
 ```text
 =========================================
-Annihilation in solvent (kJ mol^-1): -5.826
-Annihilation in vacuum (kJ mol^-1):  -10.012
-Hydration Free Energy (kJ mol^-1):   -4.186
-Lowest pair acceptance in solvent:   0.163
+Annihilation in solvent (kJ mol^-1): -5.841
+Annihilation in vacuum (kJ mol^-1):  -10.013
+Hydration Free Energy (kJ mol^-1):   -4.172
+Lowest pair acceptance in solvent:   0.149
 =========================================
 ```
 
-The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 ([Kashefolgheta et al. 2020](https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)), 0.52 kJ mol^-1 above this result, which is about the scatter of a single run. A single run of this length is worth about $\pm 0.5$ kJ mol^-1: the first and second halves of the samples of this run differ by 0.9 kJ mol^-1, while the vacuum leg reproduces to 0.001 kJ mol^-1 between runs, so the scatter comes from the solvated leg alone. Its ladder mixes slowly where the cavity forms, the dip around states 3 and 4 in the acceptance plot above. Adding $\lambda$ states in that region, so that neighbouring states overlap more, and running for longer both reduce the scatter.
+The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 ([Kashefolgheta et al. 2020](https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)), 0.50 kJ mol^-1 above this result, which is within the scatter of a single run. Repeated runs of this length give between -3.6 and -4.4 kJ mol^-1, so a single run is worth about $\pm 0.5$ kJ mol^-1, while the vacuum leg reproduces to 0.01 kJ mol^-1 between runs, so the scatter comes from the solvated leg alone. Its ladder mixes slowly where the cavity forms, the dip around states 3 and 4 in the acceptance plot above. Adding $\lambda$ states in that region, so that neighbouring states overlap more, and running for longer both reduce the scatter.

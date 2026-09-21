@@ -24,15 +24,11 @@ OUTPUT_PREFIX = "hremd_solvation"
 N_LAMBDA_STATES = 20
 HREMD_TIME = FT(1.5)u"ns"     # simulated time for each λ state
 EXCHANGE_TIME = FT(2)u"ps"
-SAMPLE_TIME = FT(4)u"ps"      # one MBAR sample per state, a whole and even number of exchange cycles
+SAMPLE_TIME = FT(4)u"ps"      # one MBAR sample per state, written to that state's trajectory
 EQUIL_FRAC = 0.2              # fraction of the samples of each state discarded before MBAR
 SOLVENT_EQUIL_TIME = FT(500)u"ps"
 VACUUM_EQUIL_TIME = FT(100)u"ps"
 CUTOFF = FT(1)u"nm"
-
-cycles_per_sample = Int(round(SAMPLE_TIME / Δt)) / Int(round(EXCHANGE_TIME / Δt))
-isinteger(cycles_per_sample) && iseven(Int(cycles_per_sample)) ||
-    error("SAMPLE_TIME must be a whole and even number of exchange cycles")
 
 # Experimental hydration free energy of benzene, -3.67 ± 0.05 kJ/mol (Kashefolgheta et al. 2020,
 # https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)
@@ -59,7 +55,8 @@ ff = MolecularForceField(
 )
 
 ##
-function build_thermo_states(pdb_file, solute_indices; is_vacuum=false, rng=Random.default_rng())
+function setup_alchemical_hremd(pdb_file, solute_indices, traj_prefix; is_vacuum=false,
+                                rng=Random.default_rng())
     boundary = is_vacuum ? CubicBoundary(FT(Inf) * u"nm") : nothing
     dist_cutoff = is_vacuum ? FT(Inf) * u"nm" : CUTOFF
     nonbonded_method = is_vacuum ? DistanceCutoff(dist_cutoff) : SetupPME()
@@ -123,39 +120,41 @@ function build_thermo_states(pdb_file, solute_indices; is_vacuum=false, rng=Rand
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
     end
 
-    return thermo_states, sys_base
-end
-
-# All replicas start from the equilibrated configuration. `simulate_remd!` returns a new
-# `ReplicaSystem`, and after each call the configuration currently in each state is stored.
-function run_hremd_leg(thermo_states, sys_base)
+    # Loggers belong to a thermodynamic state, so the trajectory of state k holds the
+    # configurations sampled in that state, and the box for the solvated leg. Atoms are
+    # wrapped into the box, as in the simulation, since the samples are evaluated again for MBAR.
     K = length(thermo_states)
+    sample_steps = Int(round(SAMPLE_TIME / Δt))
+    replica_loggers = [(trj = TrajectoryWriter(sample_steps, "$(traj_prefix)_state_$(k).dcd";
+                                               correction = :wrap, write_boundary = !is_vacuum,
+                                               overwrite = true),)
+                       for k in 1:K]
+
+    # All replicas start from the equilibrated configuration
     repsys = ReplicaSystem(
         thermo_states,
         [copy(sys_base.coords) for _ in 1:K];
         replica_velocities = [copy(sys_base.velocities) for _ in 1:K],
         replica_boundaries = [sys_base.boundary for _ in 1:K],
+        replica_loggers = replica_loggers,
         reuse_neighbors = true,
     )
-    sim = ReplicaExchangeMD(dt = Δt, exchange_time = EXCHANGE_TIME)
 
-    chunk_steps = Int(round(SAMPLE_TIME / Δt))
-    n_chunks = Int(floor(HREMD_TIME / Δt)) ÷ chunk_steps
-    coords_k = [Any[] for _ in 1:K]
-    boundaries_k = [Any[] for _ in 1:K]
+    return repsys, thermo_states, sys_base
+end
 
-    for _ in 1:n_chunks
-        repsys = simulate_remd!(repsys, sim, chunk_steps;
-                                gpu_devices = gpu_devices, show_progress = false)
-
-        for k in 1:K
-            r = repsys.state_indices[k]
-            push!(coords_k[k], Array(repsys.replica_coords[r]))
-            push!(boundaries_k[k], repsys.replica_boundaries[r])
-        end
+# The samples of each state are read back from its trajectory. The vacuum leg keeps the
+# infinite box, which is not written.
+function read_state_samples(sys_base, traj_prefix, K; is_vacuum=false)
+    coords_k = []
+    boundaries_k = []
+    for k in 1:K
+        coords, box_sides = read_trajectory(sys_base, "$(traj_prefix)_state_$(k).dcd")
+        push!(coords_k, coords)
+        push!(boundaries_k, is_vacuum ? fill(sys_base.boundary, length(coords)) :
+                                        [CubicBoundary(b...) for b in box_sides])
     end
-
-    return coords_k, boundaries_k, repsys.exchange_logger
+    return coords_k, boundaries_k
 end
 
 function hremd_free_energies(thermo_states, coords_k, boundaries_k)
@@ -184,8 +183,7 @@ end
 # Accepted exchanges for each neighbouring pair of states, divided by the attempts on that pair.
 # Pairs alternate between exchange cycles, so each pair is attempted every other cycle.
 function pair_acceptance(exchange_logger, K)
-    n_cycles = Int(floor(HREMD_TIME / Δt)) ÷ Int(round(SAMPLE_TIME / Δt)) *
-               (Int(round(SAMPLE_TIME / Δt)) ÷ Int(round(EXCHANGE_TIME / Δt)))
+    n_cycles = Int(round(HREMD_TIME / EXCHANGE_TIME))
     accepted = zeros(Int, K - 1)
     for (n, m) in exchange_logger.indices
         accepted[min(n, m)] += 1
@@ -198,30 +196,41 @@ end
 solute_idx = 1:12
 
 # 4 nm cube of TIP3P water with 0.15 M NaCl, large enough for the 1 nm cutoff
-thermo_solv, base_solv = build_thermo_states(
+repsys_solv, thermo_solv, base_solv = setup_alchemical_hremd(
     joinpath(data_dir, "benzene_solv.pdb"),
-    solute_idx;
+    solute_idx,
+    "$(OUTPUT_PREFIX)_solvated";
     is_vacuum=false,
     rng=MersenneTwister(RNG_SEED),
 )
 println()
 
-##
-coords_solv, boundaries_solv, log_solv = run_hremd_leg(thermo_solv, base_solv)
-
-##
-thermo_vac, base_vac = build_thermo_states(
+repsys_vac, thermo_vac, base_vac = setup_alchemical_hremd(
     joinpath(data_dir, "benzene_vac.pdb"),
-    solute_idx;
+    solute_idx,
+    "$(OUTPUT_PREFIX)_vacuum";
     is_vacuum=true,
     rng=MersenneTwister(RNG_SEED + 1),
 )
 println()
 
 ##
-coords_vac, boundaries_vac, log_vac = run_hremd_leg(thermo_vac, base_vac)
+hremd_sim = ReplicaExchangeMD(dt = Δt, exchange_time = EXCHANGE_TIME)
+hremd_steps = Int(floor(HREMD_TIME / Δt))
+
+# On GPUs a new `ReplicaSystem` is returned
+repsys_solv = simulate!(repsys_solv, hremd_sim, hremd_steps; gpu_devices = gpu_devices)
+repsys_vac  = simulate!(repsys_vac, hremd_sim, hremd_steps; gpu_devices = gpu_devices)
+
+log_solv = repsys_solv.exchange_logger
+log_vac  = repsys_vac.exchange_logger
 
 ##
+coords_solv, boundaries_solv = read_state_samples(base_solv, "$(OUTPUT_PREFIX)_solvated",
+                                                  N_LAMBDA_STATES)
+coords_vac, boundaries_vac = read_state_samples(base_vac, "$(OUTPUT_PREFIX)_vacuum",
+                                                N_LAMBDA_STATES; is_vacuum=true)
+
 f_solv = hremd_free_energies(thermo_solv, coords_solv, boundaries_solv)
 f_vac  = hremd_free_energies(thermo_vac, coords_vac, boundaries_vac)
 
