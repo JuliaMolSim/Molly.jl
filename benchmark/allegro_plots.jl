@@ -71,27 +71,42 @@ function speedup_plot(out)
 end
 speedup_plot("allegro_forces_speedup.png")
 
-# --- CUDA vs CPU energy (from allegro_cuda_compare.jl, both series on the same box) -------------
-cuda = load_json(joinpath(RES, "allegro_cuda_energy.json"))
-if !isnothing(cuda)
-    vs_N_plot("Allegro energy: CPU vs NVIDIA CUDA (RTX 5080)", "allegro_cuda_energy_vs_N.png", [
-        ("CPU (1 thread)", :navy,     :solid, series(getk(cuda, "cpu"))),
-        ("CUDA (RTX 5080)", :seagreen, :solid, series(getk(cuda, "cuda"))),
-    ])
-    xc, yc = series(getk(cuda, "cpu")); xg, yg = series(getk(cuda, "cuda"))
-    common = sort(collect(intersect(xc, xg)))
-    if !isempty(common)
+# --- all backends: energy vs N (CPU t1/t8 + Metal on Apple M3, CUDA on RTX 5080) ----------------
+# CPU + Metal are Apple M3; CUDA is the RTX 5080 host — cross-machine, so read the scaling shape,
+# not the absolute cross-device level. Metal is Float32, CPU/CUDA Float64.
+metal = load_json(joinpath(RES, "allegro_metal_energy.json"))   # cpu_t1, cpu_t8, metal (Apple M3)
+cuda  = load_json(joinpath(RES, "allegro_cuda_energy.json"))    # cpu_t1, cpu_t8, cuda (RTX 5080)
+vs_N_plot("Allegro energy: CPU (t1/t8) vs Metal vs CUDA", "allegro_backends_energy_vs_N.png", [
+    ("CPU t1 (M3)",     :royalblue,  :solid, series(getk(metal, "cpu_t1"))),
+    ("CPU t8 (M3)",     :navy,       :solid, series(getk(metal, "cpu_t8"))),
+    ("Metal (M3)",      :darkorange, :solid, series(getk(metal, "metal"))),
+    ("CUDA (RTX 5080)", :seagreen,   :solid, series(getk(cuda,  "cuda"))),
+])
+
+# --- GPU speedup over host CPU-t8 (each backend over its OWN machine's CPU-t8) ------------------
+function speedup_over_cpu8(pairs, out)
+    fig = Figure(size = (780, 540))
+    ax  = Axis(fig[1, 1], xscale = log10, yscale = log10, xlabel = "number of atoms",
+               ylabel = "GPU speedup over host CPU-t8 (×)",
+               title = "Allegro energy: GPU speedup over host CPU (t8)")
+    plotted = false
+    for (lbl, col, (xc, yc), (xg, yg)) in pairs
+        (isempty(xc) || isempty(xg)) && continue
+        common = sort(collect(intersect(xc, xg))); isempty(common) && continue
         cpu = Dict(xc .=> yc); gpu = Dict(xg .=> yg)
-        sp = [cpu[x] / gpu[x] for x in common]
-        fig = Figure(size = (760, 520))
-        ax  = Axis(fig[1, 1], xscale = log10, xlabel = "number of atoms",
-                   ylabel = "CUDA speedup over CPU (×)",
-                   title = "Allegro energy: CUDA speedup over CPU (RTX 5080)")
-        scatterlines!(ax, common, sp, markersize = 11, color = :seagreen)
-        hlines!(ax, [1.0], color = :gray, linestyle = :dash)
-        save(joinpath(IMG, "allegro_cuda_speedup.png"), fig, px_per_unit = 2)
-        println("wrote images/allegro_cuda_speedup.png")
+        scatterlines!(ax, common, [cpu[x]/gpu[x] for x in common], label = lbl,
+                      markersize = 10, color = col)
+        plotted = true
     end
+    plotted || return
+    hlines!(ax, [1.0], color = :gray, linestyle = :dash)
+    axislegend(ax, position = :lt)
+    save(joinpath(IMG, out), fig, px_per_unit = 2)
+    println("wrote images/", out)
 end
+speedup_over_cpu8([
+    ("Metal / CPU-t8 (M3)",       :darkorange, series(getk(metal, "cpu_t8")), series(getk(metal, "metal"))),
+    ("CUDA / CPU-t8 (RTX 5080)",  :seagreen,   series(getk(cuda,  "cpu_t8")), series(getk(cuda,  "cuda"))),
+], "allegro_gpu_speedup.png")
 
 println("done — images in ", IMG)
