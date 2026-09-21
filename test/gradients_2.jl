@@ -723,6 +723,62 @@ end
                             coupling=(ImmediateThermostat(temp),)); nf=nf)
     end
 
+    # The energy minimizers do not take a number of steps
+    function loss_min(σ, coords, velocities, boundary, pairwise_inters, neighbor_finder,
+                      minimizer, n_atoms, atom_mass)
+        atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? -charge : charge), σ, ϵ, λ,
+                      Molly.EnvRole) for i in 1:n_atoms]
+
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=pairwise_inters,
+            neighbor_finder=neighbor_finder,
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+
+        simulate!(sys, minimizer; n_threads=1)
+
+        return mean_min_separation(sys.coords, boundary)
+    end
+
+    function test_min_grad(name, minimizer; tol=1e-5)
+        grad_enzyme = autodiff(
+            set_runtime_activity(Reverse),
+            loss_min,
+            Active,
+            Active(σ_start),
+            Duplicated(copy(coords), zero(coords)),
+            Duplicated(copy(velocities), zero(velocities)),
+            Const(boundary), Const((lj, crf)), Const(neighbor_finder),
+            Const(minimizer), Const(n_atoms), Const(atom_mass),
+        )[1][1]
+        grad_fd = central_fdm(6, 1)(σ_start) do σ
+            loss_min(σ, copy(coords), copy(velocities), boundary, (lj, crf),
+                     neighbor_finder, minimizer, n_atoms, atom_mass)
+        end
+        frac_diff = abs(grad_enzyme - grad_fd) / abs(grad_fd)
+        @test frac_diff < tol
+    end
+
+    # A tolerance of zero means that the number of steps taken does not depend on σ, so
+    #   the loss is smooth and can be compared to finite differences
+    n_min_steps = 10
+    minimizers = [
+        ("SteepestDescentMinimizer", SteepestDescentMinimizer(step_size=T(0.01),
+                                        tol=zero(T), max_steps=n_min_steps)),
+        ("FIREMinimizer"           , FIREMinimizer(dt=T(0.001), dt_max=T(0.01),
+                                        tol=zero(T), max_steps=n_min_steps)),
+        ("LBFGSMinimizer"          , LBFGSMinimizer(step_size=T(0.01), tol=zero(T),
+                                        max_steps=n_min_steps)),
+    ]
+    for (name, minimizer) in minimizers
+        test_min_grad(name, minimizer)
+    end
+
     dist_constraints = [DistanceConstraint(Int32(2i - 1), Int32(2i), T(0.6)) for i in 1:10]
     shake = SHAKE_RATTLE(
         n_atoms=n_atoms,
