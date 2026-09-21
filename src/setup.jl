@@ -1070,7 +1070,7 @@ function System(coord_file::AbstractString,
             push!(htors_il.ks, k)
             push!(htors_il.ls, l)
             push!(htors_il.types, atom_types_to_string(types...))
-            push!(htors_il.inters, HarmonicTorsion(k=tt.k, θ0=tt.θ0))
+            push!(htors_il.inters, HarmonicTorsion(k=T(tt.k), θ0=T(tt.θ0)))
         end
     end
 

@@ -49,19 +49,6 @@ Base.zero(::HarmonicBondλ{K, D, LM, SCH}) where {K, D, LM, SCH} = HarmonicBond�
 
 Base.:+(b1::HarmonicBondλ, b2::HarmonicBondλ) = HarmonicBondλ(k=(b1.k + b2.k), r0=(b1.r0 + b2.r0))
 
-function extract_parameters!(params_dic,
-                             inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:HarmonicBondλ}},
-                             ff)
-    for (bond_type, bond) in zip(inter.types, from_device(inter.inters))
-        key_prefix = "inter_HB_$(bond_type)_"
-        if !haskey(params_dic, key_prefix * "k")
-            params_dic[key_prefix * "k" ] = bond.k
-            params_dic[key_prefix * "r0"] = bond.r0
-        end
-    end
-    return params_dic
-end
-
 function to_lambda_function(inter::HarmonicBond; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
     return HarmonicBondλ(k=inter.k, r0=inter.r0, λ_mixing=λ_mixing, scheduler=scheduler)
 end

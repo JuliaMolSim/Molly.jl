@@ -153,19 +153,19 @@ function PeriodicTorsionλ(; periodicities, phases, ks, proper::Bool=true,
                                     tuple(ks_pad...), proper, λ_mixing, scheduler)
 end
 
-function Base.zero(::PeriodicTorsionλ{N, T, E}) where {N, T, E}
-    return PeriodicTorsionλ{N, T, E}(
+function Base.zero(d::PeriodicTorsionλ{N, T, E}) where {N, T, E}
+    return PeriodicTorsionλ(
         ntuple(_ -> 0      , N),
         ntuple(_ -> zero(T), N),
         ntuple(_ -> zero(E), N),
         false,
-        λ_mixing,
-        scheduler,
+        d.λ_mixing,
+        d.scheduler,
     )
 end
 
 function Base.:+(p1::PeriodicTorsionλ{N, T, E}, p2::PeriodicTorsionλ{N, T, E}) where {N, T, E}
-    return PeriodicTorsionλ{N, T, E}(
+    return PeriodicTorsionλ(
         p1.periodicities,
         p1.phases .+ p2.phases,
         p1.ks .+ p2.ks,
@@ -173,25 +173,6 @@ function Base.:+(p1::PeriodicTorsionλ{N, T, E}, p2::PeriodicTorsionλ{N, T, E})
         p1.λ_mixing,
         p1.scheduler,
     )
-end
-
-function extract_parameters!(params_dic,
-                             inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:PeriodicTorsionλ}},
-                             ff)
-    for (torsion_type, torsion) in zip(inter.types, from_device(inter.inters))
-        if torsion.proper
-            key_prefix = "inter_PT_$(torsion_type)_"
-        else
-            key_prefix = "inter_IT_$(torsion_type)_"
-        end
-        if !haskey(params_dic, key_prefix * "phase_1")
-            for i in eachindex(torsion.phases)
-                params_dic[key_prefix * "phase_$i"] = torsion.phases[i]
-                params_dic[key_prefix * "k_$i"    ] = torsion.ks[i]
-            end
-        end
-    end
-    return params_dic
 end
 
 function to_lambda_function(inter::PeriodicTorsion; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
@@ -245,52 +226,24 @@ function update_lambda_function(existing_lambda::PeriodicTorsionλ, interB::Peri
                           scheduler=existing_lambda.scheduler)
 end
 
-# The summation gives different errors with Enzyme on CPU and GPU
-#   so there are two similar implementations
 @inline function force(d::PeriodicTorsionλ{N, T, E}, coords_i, coords_j, coords_k,
-                       coords_l, boundary, atom_i, atom_j, 
+                       coords_l, boundary, atom_i, atom_j,
                        atom_k, atom_l, args...) where {N, T, E}
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
                                         coords_i, coords_j, coords_k, coords_l, boundary)
-
-    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
+    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))
     pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
     if d.scheduler.dual
-        λs = scale_torsion(d.scheduler, λ_glob, pair_role, Val(true))
-        return periodic_torsion_force_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
+        return periodic_torsion_force_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true)),
+                                        ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
     else
-        λs = scale_torsion(d.scheduler, λ_glob, pair_role, Val(false))
-        return periodic_torsion_force_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
+        return periodic_torsion_force_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(false)),
+                                        ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
     end
 end
 
 @inline function periodic_torsion_force_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd,
-                                          bc_norm, θ)
-    return sum(zip(d.periodicities, d.phases, d.ks, λs)) do (periodicity, phase, k, λ)
-        fi, fj, fk, fl = periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc,
-                                                cross_bc_cd, bc_norm, θ)
-        return SpecificForce4Atoms(λ*fi, λ*fj, λ*fk, λ*fl)
-    end
-end
-
-@inline function force_gpu(d::PeriodicTorsionλ{N, T, E}, coords_i, coords_j, coords_k,
-                           coords_l, boundary, atom_i, atom_j, 
-                           atom_k, atom_l, args...) where {N, T, E}
-    ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
-                                        coords_i, coords_j, coords_k, coords_l, boundary)
-    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
-    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
-    if d.scheduler.dual
-        return periodic_torsion_force_gpu_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true)),
-                                            ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
-    else
-        return periodic_torsion_force_gpu_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(false)),
-                                            ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
-    end
-end
-
-@inline function periodic_torsion_force_gpu_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd,
-                                              bc_norm, θ, ::Val{N}) where N
+                                          bc_norm, θ, ::Val{N}) where N
     fi1, fj1, fk1, fl1 = periodic_torsion_force(d.periodicities[1], d.phases[1],
                                         d.ks[1], ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
     fi_sum, fj_sum, fk_sum, fl_sum = λs[1]*fi1, λs[1]*fj1, λs[1]*fk1, λs[1]*fl1

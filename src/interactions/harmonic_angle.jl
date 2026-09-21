@@ -66,19 +66,6 @@ function Base.show(io::IO, x::HarmonicAngleλ)
     println(io, "HarmonicAngleλ: (k: $(x.k)) - θ0: $(x.θ0) - λ_mixing: $(x.λ_mixing) - scheduler: $(x.scheduler)")
 end
 
-function extract_parameters!(params_dic,
-                             inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:HarmonicAngleλ}},
-                             ff)
-    for (angle_type, ang) in zip(inter.types, from_device(inter.inters))
-        key_prefix = "inter_HA_$(angle_type)_"
-        if !haskey(params_dic, key_prefix * "k")
-            params_dic[key_prefix * "k" ] = ang.k
-            params_dic[key_prefix * "θ0"] = ang.θ0
-        end
-    end
-    return params_dic
-end
-
 function to_lambda_function(inter::HarmonicAngle; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
     return HarmonicAngleλ(k=inter.k, θ0=inter.θ0, λ_mixing=λ_mixing, scheduler=scheduler)
 end
