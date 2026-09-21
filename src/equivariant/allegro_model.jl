@@ -140,7 +140,8 @@ function allegro_total_energy(m::AllegroModel{T}, coords::AbstractVector{<:SVect
     us = [T[] for _ in 1:n]
     xs = [Vector{Vector{T}}() for _ in 1:n]   # scalar latent per edge
     Vs = [Vector{Vector{T}}() for _ in 1:n]   # equivariant latent per edge (feat)
-    for i in 1:n
+    # Independent per centre atom, so threaded over i (each atom writes only its own edge data).
+    Threads.@threads for i in 1:n
         for (j, d, rhat) in nbr[i]
             Y = collect(real_sph_harm(2, rhat))
             u = poly_envelope(d, m.r_c, m.env_p)
@@ -155,7 +156,7 @@ function allegro_total_energy(m::AllegroModel{T}, coords::AbstractVector{<:SVect
     for lw in m.layers
         # environment per atom (density trick): Env_i = (1/avg_nn) Σ_k g_ik[l,c]·Y_ik
         Env = [zeros(T, m.feat.dim) for _ in 1:n]
-        for i in 1:n
+        Threads.@threads for i in 1:n
             e = Env[i]
             @inbounds for pos in eachindex(xs[i])
                 g = dense_forward(lw.env_W, lw.env_b, xs[i][pos])   # length 3C, layout [l-major, channel]
@@ -174,8 +175,8 @@ function allegro_total_energy(m::AllegroModel{T}, coords::AbstractVector{<:SVect
             end
             e ./= m.avg_nn
         end
-        # per-edge update using the central atom's environment
-        for i in 1:n
+        # per-edge update using the central atom's environment (independent per centre atom)
+        Threads.@threads for i in 1:n
             for pos in eachindex(xs[i])
                 x = xs[i][pos]
                 w = dense_forward(lw.tp_W, lw.tp_b, x)
@@ -188,13 +189,15 @@ function allegro_total_energy(m::AllegroModel{T}, coords::AbstractVector{<:SVect
         end
     end
 
-    E = zero(T)
-    for i in 1:n
+    Eatom = zeros(T, n)
+    Threads.@threads for i in 1:n
+        s = zero(T)
         for pos in eachindex(xs[i])
-            E += (m.out_W * xs[i][pos] .+ m.out_b)[1]
+            s += (m.out_W * xs[i][pos] .+ m.out_b)[1]
         end
+        Eatom[i] = s
     end
-    return E
+    return sum(Eatom)
 end
 
 """

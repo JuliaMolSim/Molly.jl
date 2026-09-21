@@ -37,7 +37,21 @@ function main()
     println("Allegro CUDA vs CPU | ", run_header())
     println("model: C=$(m.C) H=$(m.H) layers=$(m.L) r_c=$(rc)  sizes=$(sizes)\n")
 
-    E_res = Dict{String,Any}("cpu" => Dict{String,Any}(), "cuda" => Dict{String,Any}())
+    # CPU timing depends on the thread count the script runs with; tag the key so t1 and t8 runs
+    # accumulate into one JSON (merged with any existing file).
+    cpu_key = "cpu_t$(Threads.nthreads())"
+    prev = isfile(joinpath(RES, "allegro_cuda_energy.json")) ?
+           JSON3.read(read(joinpath(RES, "allegro_cuda_energy.json"), String)) : nothing
+    E_res = Dict{String,Any}(cpu_key => Dict{String,Any}(), "cuda" => Dict{String,Any}())
+    if !isnothing(prev)
+        for k in keys(prev)
+            k == :header && continue
+            E_res[string(k)] = Dict{String,Any}(string(kk) => Dict(string(kkk)=>vvv for (kkk,vvv) in vv)
+                                                 for (kk, vv) in prev[k])
+        end
+        E_res[cpu_key] = Dict{String,Any}()   # refresh this thread count
+    end
+    println("CPU thread count: ", Threads.nthreads(), " (key $cpu_key)")
     @printf("| %6s | %8s | %12s | %12s | %10s | %10s |\n",
             "atoms", "edges", "CPU (ms)", "CUDA (ms)", "speedup", "reldiff")
     @printf("|%s|%s|%s|%s|%s|%s|\n", "-"^8, "-"^10, "-"^14, "-"^14, "-"^12, "-"^12)
@@ -52,8 +66,8 @@ function main()
         ec = bench(() -> Molly.allegro_total_energy(m, coords, species, nothing, rc))
         eg = bench(() -> (e = Molly.compute_allegro_energy_ka(m, cg, species, nothing;
                             backend=CUDABackend(), T=Float64, gpu=gpu); CUDA.synchronize(); e))
-        E_res["cpu"][string(n)]  = Dict("min"=>ec.min, "edges"=>n_edges)
-        E_res["cuda"][string(n)] = Dict("min"=>eg.min, "edges"=>n_edges)
+        E_res[cpu_key][string(n)] = Dict("min"=>ec.min, "edges"=>n_edges)
+        E_res["cuda"][string(n)]  = Dict("min"=>eg.min, "edges"=>n_edges)
         @printf("| %6d | %8d | %12.3f | %12.3f | %9.1f× | %10.2e |\n",
                 n, n_edges, ec.min, eg.min, ec.min/eg.min, reld)
     end
