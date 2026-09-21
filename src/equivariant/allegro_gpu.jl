@@ -4,11 +4,14 @@
 # outputs to global device arrays (one column per edge or per atom) — no per-thread dynamically
 # sized scratch, which is what keeps it portable.
 #
-# Layout: build_neighbor_csr gives per-centre-atom neighbour offsets `off` (n+1) and neighbour
-# atom indices `idx` (n_edges). Edge e belongs to centre atom `ecenter[e]` and points to atom
-# `idx[e]`; its unit vector `rhat[:,e]` and distance `d[e]` are precomputed on the host (the CSR
-# build is already an O(N²) host pass). KernelAbstractions is a core Molly dependency, so this
-# lives in core (no extension needed); only loading the weights from HDF5 needs the extension.
+# Layout: the neighbour list is built on device — a per-atom count kernel, a host prefix sum over
+# the counts (the only host round-trip), then a fill kernel where each atom writes its own
+# contiguous CSR range (no atomics). Edge e then belongs to centre atom `ecenter[e]` and points to
+# `ej[e]`; its geometry (r, d, r̂) is computed in the geometry kernel straight from `coords`, so
+# nothing per-edge is uploaded. The forward runs as ordered kernels on one backend with no
+# intermediate synchronize (each kernel sees the previous one's writes); only the final energy
+# reduction forces a host round-trip. KernelAbstractions is a core Molly dependency, so this lives
+# in core (no extension needed); only loading the weights from HDF5 needs the extension.
 
 using KernelAbstractions
 using KernelAbstractions: @kernel, @index, @Const
@@ -41,32 +44,74 @@ end
 
 # ---- kernels ---------------------------------------------------------------------------------
 
-# Per edge: real SH (l≤2), polynomial envelope u, Bessel radial R = B·u.
-@kernel inbounds=true function allegro_geom_kernel!(Y, u, R, @Const(rhx), @Const(rhy), @Const(rhz),
-                                                    @Const(d), rc, env_p, nb)
+# Minimum-image edge vector; box component 0 means that axis is not periodic (open).
+@inline function _edge_vec(ci::SVector{3,T}, cj::SVector{3,T}, bx, by, bz) where {T}
+    dx = cj[1] - ci[1]; dy = cj[2] - ci[2]; dz = cj[3] - ci[3]
+    bx > 0 && (dx -= bx * round(dx / bx))
+    by > 0 && (dy -= by * round(dy / by))
+    bz > 0 && (dz -= bz * round(dz / bz))
+    return dx, dy, dz
+end
+
+# Per atom: count neighbours within the cutoff (first pass of the device neighbour build).
+@kernel inbounds=true function allegro_count_kernel!(counts, @Const(coords), n, rc2, bx, by, bz)
+    i = @index(Global, Linear)
+    ci = coords[i]; c = 0
+    for j in 1:n
+        j == i && continue
+        dx, dy, dz = _edge_vec(ci, coords[j], bx, by, bz)
+        d2 = dx * dx + dy * dy + dz * dz
+        (d2 < rc2 && d2 > eps(rc2)) && (c += 1)
+    end
+    counts[i] = Int32(c)
+end
+
+# Per atom: write this atom's directed edges into the flat arrays at its CSR offset (no atomics —
+# each atom owns a contiguous range).
+@kernel inbounds=true function allegro_fill_kernel!(ecenter, ej, @Const(coords), @Const(off),
+                                                    n, rc2, bx, by, bz)
+    i = @index(Global, Linear)
+    ci = coords[i]; pos = off[i]
+    for j in 1:n
+        j == i && continue
+        dx, dy, dz = _edge_vec(ci, coords[j], bx, by, bz)
+        d2 = dx * dx + dy * dy + dz * dz
+        if d2 < rc2 && d2 > eps(rc2)
+            pos += 1
+            ecenter[pos] = Int32(i); ej[pos] = Int32(j)
+        end
+    end
+end
+
+# Per edge: real SH (l≤2), polynomial envelope u, Bessel radial R = B·u — geometry computed on
+# device from coords, so nothing per-edge is uploaded.
+@kernel inbounds=true function allegro_geom_kernel!(Y, u, R, @Const(coords), @Const(ecenter),
+                                                    @Const(ej), bx, by, bz, rc, env_p, nb)
     e = @index(Global, Linear)
     T = eltype(u)
-    x = rhx[e]; y = rhy[e]; z = rhz[e]
-    Yv = real_sph_harm(2, SVector{3,T}(x, y, z))
+    dx, dy, dz = _edge_vec(coords[ecenter[e]], coords[ej[e]], bx, by, bz)
+    de = sqrt(dx * dx + dy * dy + dz * dz)
+    invd = one(T) / de
+    Yv = real_sph_harm(2, SVector{3,T}(dx * invd, dy * invd, dz * invd))
     for q in 1:9
         Y[q, e] = Yv[q]
     end
-    de = d[e]
     ue = poly_envelope(de, rc, env_p)
     u[e] = ue
     s = sqrt(T(2) / rc)
     for q in 1:nb
-        R[q, e] = s * sin(q * T(pi) * de / rc) / de * ue
+        R[q, e] = s * sin(q * T(pi) * de / rc) * invd * ue
     end
 end
 
 # Per edge: two-body scalar latent x^0 = emb_W2·silu(emb_W1·[R;1hot(Zi);1hot(Zj)]+emb_b1)+emb_b2.
-@kernel inbounds=true function allegro_emb_kernel!(X, A1, @Const(R), @Const(spi), @Const(spj),
+@kernel inbounds=true function allegro_emb_kernel!(X, A1, @Const(R), @Const(species),
+                                                   @Const(ecenter), @Const(ej),
                                                    @Const(W1), @Const(b1), @Const(W2), @Const(b2),
                                                    nb, S, H)
     e = @index(Global, Linear)
     T = eltype(X)
-    zi = spi[e]; zj = spj[e]
+    zi = species[ecenter[e]]; zj = species[ej[e]]
     for h in 1:H
         acc = b1[h]
         for q in 1:nb
@@ -276,8 +321,10 @@ end
                               gpu=build_allegro_gpu(m, backend, T), workgroup=64) -> T
 
 GPU-portable total Allegro energy via KernelAbstractions. `coords` may live on any KA backend
-(CPU, CUDA, Metal). The neighbour list is built on the host (O(N²)); the forward runs on `backend`.
-Pass a prebuilt `gpu` (device model) to avoid re-uploading the weights each call.
+(CPU, CUDA, Metal). The neighbour list, edge geometry and the whole forward run on `backend`: the
+only host round-trip is copying per-atom neighbour counts back for the CSR prefix sum. `boundary`
+may be `nothing` (open) or a `CubicBoundary` (unitless Å). Pass a prebuilt `gpu` (device model) to
+avoid re-uploading the weights each call.
 """
 function compute_allegro_energy_ka(m::AllegroModel, coords::AbstractVector{<:SVector{3}},
                                    species::AbstractVector{<:Integer}, boundary;
@@ -285,56 +332,58 @@ function compute_allegro_energy_ka(m::AllegroModel, coords::AbstractVector{<:SVe
                                    T::Type = eltype(eltype(coords)),
                                    gpu::AllegroGPU = build_allegro_gpu(m, backend, T),
                                    workgroup::Int = 64)
-    ch = Array(coords)
-    n = length(ch)
-    nbr = neighbour_lists(ch, boundary, eltype(eltype(ch))(m.r_c))
-    off = Vector{Int32}(undef, n + 1); off[1] = 0
-    ecenter = Int32[]; ej = Int32[]; rhx = T[]; rhy = T[]; rhz = T[]; dd = T[]
-    for i in 1:n
-        for (j, d, rhat) in nbr[i]
-            push!(ecenter, i); push!(ej, j)
-            push!(rhx, T(rhat[1])); push!(rhy, T(rhat[2])); push!(rhz, T(rhat[3])); push!(dd, T(d))
-        end
-        off[i + 1] = Int32(length(ej))
-    end
-    ne = length(ej)
+    n = length(coords)
     C = gpu.C; H = gpu.H; nb = gpu.nb; S = gpu.S; fd = gpu.fd; nw = gpu.nw
     o1 = gpu.o1; o2 = gpu.o2; o3 = gpu.o3
-    if ne == 0
-        return zero(T)
+    rc2 = gpu.r_c^2
+    bx, by, bz = if boundary === nothing
+        (zero(T), zero(T), zero(T))
+    else
+        sl = boundary.side_lengths
+        (T(ustrip(sl[1])), T(ustrip(sl[2])), T(ustrip(sl[3])))
     end
-    spi = _dev(backend, Int32[species[ecenter[e]] for e in 1:ne])
-    spj = _dev(backend, Int32[species[ej[e]] for e in 1:ne])
-    off_d = _dev(backend, off); ec_d = _dev(backend, ecenter)
-    rhx_d = _devf(backend, T, rhx); rhy_d = _devf(backend, T, rhy); rhz_d = _devf(backend, T, rhz)
-    d_d = _devf(backend, T, dd)
+    # coords must be on `backend` with element type T (the benchmark/calculator ensures this).
+    cdev = coords
+    # ---- device neighbour build: count → host prefix-sum → fill ----
+    counts = KernelAbstractions.zeros(backend, Int32, n)
+    allegro_count_kernel!(backend, workgroup)(counts, cdev, n, T(rc2), bx, by, bz; ndrange=n)
+    KernelAbstractions.synchronize(backend)
+    counts_h = Array(counts)
+    off_h = Vector{Int32}(undef, n + 1); off_h[1] = 0
+    @inbounds for i in 1:n
+        off_h[i + 1] = off_h[i] + counts_h[i]
+    end
+    ne = Int(off_h[n + 1])
+    ne == 0 && return zero(T)
+    off_d = _dev(backend, off_h)
+    ecenter = KernelAbstractions.allocate(backend, Int32, ne)
+    ej = KernelAbstractions.allocate(backend, Int32, ne)
+    allegro_fill_kernel!(backend, workgroup)(ecenter, ej, cdev, off_d, n, T(rc2), bx, by, bz; ndrange=n)
+    species_d = _dev(backend, Int32.(collect(species)))
+
     z2 = (a, b) -> KernelAbstractions.zeros(backend, T, a, b)
     Y = z2(9, ne); u = KernelAbstractions.zeros(backend, T, ne); R = z2(nb, ne)
     X = z2(H, ne); A1 = z2(H, ne); V = z2(fd, ne); G = z2(3C, ne)
     Env = z2(fd, n); W = z2(nw, ne); P = z2(fd, ne); Xn = z2(H, ne); Vn = z2(fd, ne)
     Eedge = KernelAbstractions.zeros(backend, T, ne)
 
-    allegro_geom_kernel!(backend, workgroup)(Y, u, R, rhx_d, rhy_d, rhz_d, d_d, gpu.r_c, gpu.env_p, nb; ndrange=ne)
-    allegro_emb_kernel!(backend, workgroup)(X, A1, R, spi, spj, gpu.emb_W1, gpu.emb_b1, gpu.emb_W2, gpu.emb_b2, nb, S, H; ndrange=ne)
+    # No intermediate synchronize: kernels on one backend run in submission order, so each sees the
+    # previous one's writes. Only the final reduction (sum) forces a host round-trip.
+    allegro_geom_kernel!(backend, workgroup)(Y, u, R, cdev, ecenter, ej, bx, by, bz, gpu.r_c, gpu.env_p, nb; ndrange=ne)
+    allegro_emb_kernel!(backend, workgroup)(X, A1, R, species_d, ecenter, ej, gpu.emb_W1, gpu.emb_b1, gpu.emb_W2, gpu.emb_b2, nb, S, H; ndrange=ne)
     allegro_init_kernel!(backend, workgroup)(V, Y, u, gpu.init_w, gpu.init_b0, C, o1, o2, o3; ndrange=ne)
-    KernelAbstractions.synchronize(backend)
 
     for l in 1:gpu.L
         allegro_dense_kernel!(backend, workgroup)(G, gpu.env_W[l], gpu.env_b[l], X, 3C, H; ndrange=ne)
-        KernelAbstractions.synchronize(backend)
         allegro_env_kernel!(backend, workgroup)(Env, G, Y, off_d, C, o1, o2, o3, gpu.avg_nn, fd; ndrange=n)
         allegro_dense_kernel!(backend, workgroup)(W, gpu.tp_W[l], gpu.tp_b[l], X, nw, H; ndrange=ne)
-        KernelAbstractions.synchronize(backend)
-        allegro_tp_kernel!(backend, workgroup)(P, V, Env, W, ec_d, gpu.p_k1, gpu.p_k2, gpu.p_k3, gpu.p_woff, gpu.poff, gpu.cg_m1, gpu.cg_m2, gpu.cg_m3, gpu.cg_val, gpu.np, C, fd, o1, o2, o3; ndrange=ne)
-        KernelAbstractions.synchronize(backend)
+        allegro_tp_kernel!(backend, workgroup)(P, V, Env, W, ecenter, gpu.p_k1, gpu.p_k2, gpu.p_k3, gpu.p_woff, gpu.poff, gpu.cg_m1, gpu.cg_m2, gpu.cg_m3, gpu.cg_val, gpu.np, C, fd, o1, o2, o3; ndrange=ne)
         allegro_resnet_kernel!(backend, workgroup)(Xn, X, P, gpu.x_W[l], gpu.x_b[l], u, H, C, o1; ndrange=ne)
         allegro_eqlin_kernel!(backend, workgroup)(Vn, P, gpu.lin_w[l], gpu.lin_b0[l], C, o1, o2, o3; ndrange=ne)
-        KernelAbstractions.synchronize(backend)
         X, Xn = Xn, X
         V, Vn = Vn, V
     end
 
     allegro_readout_kernel!(backend, workgroup)(Eedge, X, gpu.out_W, gpu.out_b, H; ndrange=ne)
-    KernelAbstractions.synchronize(backend)
     return T(sum(Eedge))
 end
