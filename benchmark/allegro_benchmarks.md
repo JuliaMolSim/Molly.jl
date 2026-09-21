@@ -98,31 +98,34 @@ julia --project=<env+CUDA>  -t8 benchmark/allegro_cuda_compare.jl  # then -t1  (
 
 | atoms | CPU t1 | CPU t8 | CUDA | CUDA/t1 | CUDA/t8 | reldiff |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 11.8  | 3.6   | 2.33 | 5.1×  | 1.6×  | 1.6e-16 |
-| 128  | 25.8  | 8.2   | 1.81 | 14.2× | 4.6×  | 2.9e-16 |
-| 256  | 58.4  | 17.3  | 3.13 | 18.6× | 5.5×  | 4.0e-16 |
-| 512  | 130.3 | 34.5  | 4.67 | 27.9× | 7.4×  | 1.2e-16 |
-| 1024 | 336.8 | 105.4 | 9.72 | 34.7× | 10.8× | 1.2e-16 |
-| 2048 | 730.2 | 216.9 | 27.7 | 26.4× | 7.8×  | 0.0     |
-| 4096 | 1573.6| 477.4 | 92.0 | 17.1× | 5.2×  | 0.0     |
+| 64   | 11.3  | 3.5   | 1.31 | 9×   | 3×  | 1.6e-16 |
+| 128  | 24.7  | 8.2   | 1.58 | 16×  | 5×  | 2.9e-16 |
+| 256  | 55.4  | 16.4  | 1.68 | 33×  | 10× | 1.3e-16 |
+| 512  | 122.1 | 35.5  | 1.55 | 79×  | 23× | 2.4e-16 |
+| 1024 | 305.9 | 81.6  | 2.10 | 146× | 39× | 1.2e-16 |
+| 2048 | 645.1 | 218.8 | 3.50 | 184× | 62× | 0.0     |
+| 4096 | 1470.4| 459.0 | 7.03 | 209× | 65× | 0.0     |
 
 **Metal vs CPU (Apple M3), energy time in ms:**
 
 | atoms | CPU t1 | CPU t8 | Metal | Metal/t8 |
 | :---: | :---: | :---: | :---: | :---: |
-| 64   | 2.2   | 0.8  | 4.09 | 0.2× |
-| 128  | 4.9   | 1.4  | 3.63 | 0.4× |
-| 256  | 10.9  | 2.9  | 4.17 | 0.7× |
-| 512  | 24.5  | 6.2  | 7.81 | 0.8× |
-| 1024 | 53.4  | 13.1 | 6.83 | 1.9× |
-| 2048 | 117.1 | 31.0 | 12.8 | 2.4× |
+| 64   | 2.3   | 0.8  | 1.77 | 0.5× |
+| 128  | 5.0   | 1.5  | 1.99 | 0.7× |
+| 256  | 10.9  | 2.9  | 2.04 | 1.4× |
+| 512  | 24.0  | 6.0  | 2.48 | 2.4× |
+| 1024 | 53.0  | 13.5 | 3.82 | 3.5× |
+| 2048 | 114.5 | 41.0 | 6.70 | 6.1× |
 
-The GPU energy matches the CPU forward to ~1e-16 on CUDA (Float64) and ~3.6e-7 on Metal (Float32),
-confirming the kernels are correct on real hardware. Threading gives ~3.4–3.8× (t1→t8). CUDA is up
-to **34.7× over CPU-t1** and **10.8× over CPU-t8** (peak ~1024 atoms); it tapers at large N because
-the neighbour list is still built on the host (O(N²)) and copied over each call. Metal starts
+The GPU energy matches the CPU forward to ~1e-16 on CUDA (Float64) and ~1e-7 on Metal (Float32),
+confirming the kernels are correct on real hardware. Threading gives ~3.4–3.8× (t1→t8). The
+neighbour list, edge geometry and the whole forward run on-device with no inter-kernel
+synchronisation, so CUDA stays ~1.3–7 ms flat from 64 to 4096 atoms rather than climbing — up to
+**209× over CPU-t1** and **65× over CPU-t8** at 4096 atoms, growing with N. Metal starts
 launch-overhead bound at small N (the M3 CPU-t8 is sub-millisecond there) and overtakes CPU-t8 past
-~1000 atoms. A device-side neighbour build is the main remaining optimisation.
+~256 atoms (6.1× at 2048). An earlier version that built the neighbour list on the host and
+synchronised between kernels tapered badly at large N (92 ms CUDA at 4096 vs 7 ms now); moving that
+work on-device was the main win.
 
 ![Energy across backends](images/allegro_backends_energy_vs_N.png)
 
@@ -152,10 +155,10 @@ launch-overhead bound at small N (the M3 CPU-t8 is sub-millisecond there) and ov
 - Weights are the small random reference model used by the test suite, not a trained potential.
   Timings depend on the architecture size (channels `C`, latent width `H`, number of layers,
   `l_max`), not on the weight values, so they are representative for a model of this shape.
-- The **energy** forward now runs natively on the GPU (CUDA + Metal, see the CUDA section). The
-  **forces** (backward) still run on the CPU; a native GPU backward is the next step. The neighbour
-  list is built on the host for both, so a device-side neighbour build is the main remaining
-  optimisation.
+- The **energy** forward runs entirely on the GPU (CUDA + Metal, see the GPU section) — neighbour
+  build, geometry and the layer kernels, with no inter-kernel synchronisation. The **forces**
+  (backward) still run on the CPU (with a host-built neighbour list); a native GPU backward is the
+  next step.
 - A head-to-head against the reference `nequip-allegro` (PyTorch) package — analogous to the
   ANI-vs-TorchANI comparison — is future work: it needs a trained checkpoint (or a matched-config
   build) shared between the two implementations for a fair comparison.
