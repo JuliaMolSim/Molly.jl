@@ -1,0 +1,137 @@
+<ForceField>
+  <AtomTypes>
+    <Type name="BZNC1" element="C" mass="12.01078" class="BZNC1"/>
+    <Type name="BZNC2" element="C" mass="12.01078" class="BZNC2"/>
+    <Type name="BZNC3" element="C" mass="12.01078" class="BZNC3"/>
+    <Type name="BZNC4" element="C" mass="12.01078" class="BZNC4"/>
+    <Type name="BZNC5" element="C" mass="12.01078" class="BZNC5"/>
+    <Type name="BZNC6" element="C" mass="12.01078" class="BZNC6"/>
+    <Type name="BZNH1" element="H" mass="1.007947" class="BZNH1"/>
+    <Type name="BZNH2" element="H" mass="1.007947" class="BZNH2"/>
+    <Type name="BZNH3" element="H" mass="1.007947" class="BZNH3"/>
+    <Type name="BZNH4" element="H" mass="1.007947" class="BZNH4"/>
+    <Type name="BZNH5" element="H" mass="1.007947" class="BZNH5"/>
+    <Type name="BZNH6" element="H" mass="1.007947" class="BZNH6"/>
+  </AtomTypes>
+  <NonbondedForce coulomb14scale="0.8333333333333334" lj14scale="0.5">
+    <UseAttributeFromResidue name="charge"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="BZNC1"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="BZNC2"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="BZNC3"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="BZNC4"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="BZNC5"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="BZNC6"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="BZNH1"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="BZNH2"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="BZNH3"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="BZNH4"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="BZNH5"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="BZNH6"/>
+  </NonbondedForce>
+  <HarmonicBondForce>
+    <Bond class1="BZNC1" class2="BZNC2" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="BZNC1" class2="BZNC6" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="BZNC1" class2="BZNH1" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="BZNC2" class2="BZNC3" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="BZNC2" class2="BZNH2" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="BZNC3" class2="BZNC4" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="BZNC3" class2="BZNH3" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="BZNC4" class2="BZNC5" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="BZNC4" class2="BZNH4" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="BZNC5" class2="BZNC6" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="BZNC5" class2="BZNH5" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="BZNC6" class2="BZNH6" length="0.10859499048589999" k="323272.6619188585"/>
+  </HarmonicBondForce>
+  <HarmonicAngleForce>
+    <Angle class1="BZNC1" class2="BZNC2" class3="BZNC3" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="BZNC1" class2="BZNC2" class3="BZNH2" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC1" class2="BZNC6" class3="BZNC5" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="BZNC1" class2="BZNC6" class3="BZNH6" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC2" class2="BZNC1" class3="BZNC6" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="BZNC2" class2="BZNC1" class3="BZNH1" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC2" class2="BZNC3" class3="BZNC4" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="BZNC2" class2="BZNC3" class3="BZNH3" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC3" class2="BZNC2" class3="BZNH2" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC3" class2="BZNC4" class3="BZNC5" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="BZNC3" class2="BZNC4" class3="BZNH4" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC4" class2="BZNC3" class3="BZNH3" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC4" class2="BZNC5" class3="BZNC6" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="BZNC4" class2="BZNC5" class3="BZNH5" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC5" class2="BZNC4" class3="BZNH4" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC5" class2="BZNC6" class3="BZNH6" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC6" class2="BZNC1" class3="BZNH1" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="BZNC6" class2="BZNC5" class3="BZNH5" angle="2.091636539381344" k="273.094684216716"/>
+  </HarmonicAngleForce>
+  <PeriodicTorsionForce ordering="smirnoff">
+    <Proper class1="BZNC1" class2="BZNC2" class3="BZNC3" class4="BZNC4" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC1" class2="BZNC2" class3="BZNC3" class4="BZNH3" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC1" class2="BZNC6" class3="BZNC5" class4="BZNC4" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC1" class2="BZNC6" class3="BZNC5" class4="BZNH5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC2" class2="BZNC1" class3="BZNC6" class4="BZNC5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC2" class2="BZNC1" class3="BZNC6" class4="BZNH6" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC2" class2="BZNC3" class3="BZNC4" class4="BZNC5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC2" class2="BZNC3" class3="BZNC4" class4="BZNH4" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC3" class2="BZNC2" class3="BZNC1" class4="BZNC6" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC3" class2="BZNC2" class3="BZNC1" class4="BZNH1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC3" class2="BZNC4" class3="BZNC5" class4="BZNC6" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC3" class2="BZNC4" class3="BZNC5" class4="BZNH5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC4" class2="BZNC3" class3="BZNC2" class4="BZNH2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC4" class2="BZNC5" class3="BZNC6" class4="BZNH6" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC5" class2="BZNC4" class3="BZNC3" class4="BZNH3" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC5" class2="BZNC6" class3="BZNC1" class4="BZNH1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC6" class2="BZNC1" class3="BZNC2" class4="BZNH2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNC6" class2="BZNC5" class3="BZNC4" class4="BZNH4" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNH1" class2="BZNC1" class3="BZNC2" class4="BZNH2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNH1" class2="BZNC1" class3="BZNC6" class4="BZNH6" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNH2" class2="BZNC2" class3="BZNC3" class4="BZNH3" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNH3" class2="BZNC3" class3="BZNC4" class4="BZNH4" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNH4" class2="BZNC4" class3="BZNC5" class4="BZNH5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="BZNH5" class2="BZNC5" class3="BZNC6" class4="BZNH6" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Improper class1="BZNC2" class2="BZNC1" class3="BZNC3" class4="BZNH2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC2" class2="BZNC3" class3="BZNH2" class4="BZNC1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC2" class2="BZNH2" class3="BZNC1" class4="BZNC3" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC6" class2="BZNC1" class3="BZNC5" class4="BZNH6" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC6" class2="BZNC5" class3="BZNH6" class4="BZNC1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC6" class2="BZNH6" class3="BZNC1" class4="BZNC5" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC1" class2="BZNC2" class3="BZNC6" class4="BZNH1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC1" class2="BZNC6" class3="BZNH1" class4="BZNC2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC1" class2="BZNH1" class3="BZNC2" class4="BZNC6" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC3" class2="BZNC2" class3="BZNC4" class4="BZNH3" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC3" class2="BZNC4" class3="BZNH3" class4="BZNC2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC3" class2="BZNH3" class3="BZNC2" class4="BZNC4" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC4" class2="BZNC3" class3="BZNC5" class4="BZNH4" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC4" class2="BZNC5" class3="BZNH4" class4="BZNC3" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC4" class2="BZNH4" class3="BZNC3" class4="BZNC5" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC5" class2="BZNC4" class3="BZNC6" class4="BZNH5" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC5" class2="BZNC6" class3="BZNH5" class4="BZNC4" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="BZNC5" class2="BZNH5" class3="BZNC4" class4="BZNC6" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+  </PeriodicTorsionForce>
+  <Residues>
+    <Residue name="[H][c]1[c]([H])[c]([H])[c]([H])[c]([H])[c]1[H]">
+      <Atom name="C1" type="BZNC1" charge="-0.13"/>
+      <Atom name="C2" type="BZNC2" charge="-0.13"/>
+      <Atom name="C3" type="BZNC3" charge="-0.13"/>
+      <Atom name="C4" type="BZNC4" charge="-0.13"/>
+      <Atom name="C5" type="BZNC5" charge="-0.13"/>
+      <Atom name="C6" type="BZNC6" charge="-0.13"/>
+      <Atom name="H1" type="BZNH1" charge="0.13"/>
+      <Atom name="H2" type="BZNH2" charge="0.13"/>
+      <Atom name="H3" type="BZNH3" charge="0.13"/>
+      <Atom name="H4" type="BZNH4" charge="0.13"/>
+      <Atom name="H5" type="BZNH5" charge="0.13"/>
+      <Atom name="H6" type="BZNH6" charge="0.13"/>
+      <Bond atomName1="C1" atomName2="C2"/>
+      <Bond atomName1="C1" atomName2="C6"/>
+      <Bond atomName1="C1" atomName2="H1"/>
+      <Bond atomName1="C2" atomName2="C3"/>
+      <Bond atomName1="C2" atomName2="H2"/>
+      <Bond atomName1="C3" atomName2="C4"/>
+      <Bond atomName1="C3" atomName2="H3"/>
+      <Bond atomName1="C4" atomName2="C5"/>
+      <Bond atomName1="C4" atomName2="H4"/>
+      <Bond atomName1="C5" atomName2="C6"/>
+      <Bond atomName1="C5" atomName2="H5"/>
+      <Bond atomName1="C6" atomName2="H6"/>
+    </Residue>
+  </Residues>
+</ForceField>

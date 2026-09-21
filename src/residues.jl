@@ -490,16 +490,8 @@ function match_residue_to_template(res::ResidueGraph,
             t_is_extra = is_extra_tpl(tj_old)
 
             # Element/name gate
-            if r_is_extra
-                # Residue extra → template must be extra
-                t_is_extra || continue
-                if exactNameMatch && t_name != r_name
-                    continue
-                end
-            else
-                # Residue real element → template must be non-extra and element equal
-                t_is_extra && continue
-                t_el == r_el || continue
+            if (!t_is_extra && t_el != r_el) || (exactNameMatch && t_name != r_name)
+                continue
             end
 
             # Degree and external-bond checks
@@ -512,6 +504,7 @@ function match_residue_to_template(res::ResidueGraph,
         isempty(cands) && return nothing
         candidates[i] = cands
     end
+
     # 6) Heuristic search order: fewest candidates first, then neighbors of chosen
     atomsToOrder = Set(1:numAtoms)
     searchOrder = Int[]
@@ -520,16 +513,29 @@ function match_residue_to_template(res::ResidueGraph,
     while !isempty(atomsToOrder)
         if isempty(neighbor_heap)
             # Pick global minimum by candidate count among remaining
-            nextAtom = argmin(i -> length(candidates[i]), collect(atomsToOrder))
+            ## Evianne: "Had to follow more closely the implementation of OpenMM, as atoms that have similar number of neighbours were randomly ordered
+            ## causing problems in matching with OpenMM, where in a tie-break the first atom (based on index) is always done first.
+            ## for example hydrogens in Arg, if HH12 comes before HH11, OpenMM assigns the first hydrogen in template to HH12 and then second hydrogen to HH11.
+            ## In previous implementation, Molly assigned HH12 to be the second and HH11 the first resulting in different ordering in improper torsions.
+            ## Especially important for GAFF generated templates."
+            nextAtom = -1
+            fewestNeighbors = numAtoms + 1
+            for i in 1:numAtoms
+                if i in atomsToOrder && length(candidates[i]) < fewestNeighbors
+                    nextAtom = i
+                    fewestNeighbors = length(candidates[i])
+                end
+            end
         else
-            # Pick the neighbor with fewest candidates
-            sort!(neighbor_heap, by=(i -> length(candidates[i])))
+            sort!(neighbor_heap, by=(i -> (length(candidates[i]), i)))
             nextAtom = neighbor_heap[1]
-            filter!(i -> i != nextAtom, neighbor_heap)
+            deleteat!(neighbor_heap, 1)
         end
+        
         push!(searchOrder, nextAtom)
         delete!(atomsToOrder, nextAtom)
-        # push its neighbors
+        
+        # Push its neighbors
         for nb in res_adj[nextAtom]
             if nb in atomsToOrder && !(nb in neighbor_heap)
                 push!(neighbor_heap, nb)

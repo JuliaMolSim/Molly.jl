@@ -7,7 +7,8 @@ export
     radius_gyration,
     hydrodynamic_radius,
     visualize,
-    rdf
+    rdf,
+    read_trajectory
 
 """
     displacements(coords, boundary)
@@ -173,3 +174,36 @@ Returns a list of distance bin centers and a list of the corresponding values
 of ``g(r)``, which tends to 1 at large distances for a uniform system.
 """
 function rdf end
+
+
+"""
+    read_trajectory(sys::System, traj_file; units=true)
+
+Read a trajectory from traj_file with topology from [`System`](@ref).
+# Arguments
+- `sys=[`System`](@ref)`: System with topology of the system.
+- `traj_file`: A filepath for the trajectory file.
+- `units::Bool=true`: whether to return the frames with units.
+"""
+function read_trajectory(sys::System{D, <:Any, T}, traj_file; units=true) where {D,T}
+    traj = Chemfiles.Trajectory(traj_file)
+    total_traj = []
+    total_boundary = []
+    for i in range(1,size(traj))
+        frame = Chemfiles.read_step(traj,  i-1) # Zero-based indexing
+        coord_unit = typeof(sys.boundary[1])
+        coords_Å = T.(Chemfiles.positions(frame)) * u"Å"
+        bound_Å = T.(Chemfiles.lengths(Chemfiles.UnitCell(frame))) * u"Å"
+        if units
+            coords = ustrip.(u"nm", coords_Å) * u"nm"
+            bound = ustrip.(u"nm", bound_Å) * u"nm"
+        else
+            coords = ustrip.(u"nm", coords_Å)
+            bound = ustrip.(u"nm", bound_Å)
+        end
+        coords = SVector{3}.(eachcol(coords))
+        push!(total_traj, coords)
+        push!(total_boundary, bound)
+    end
+    return total_traj, total_boundary
+end

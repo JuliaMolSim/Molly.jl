@@ -11,6 +11,7 @@ export
     Atom,
     mass,
     charge,
+    lambda,
     AtomData,
     MolecularTopology,
     NeighborList,
@@ -463,6 +464,142 @@ function Base.show(io::IO, sil::T) where T <: SpecificInteractionList
     print(io, nameof(T), " with ", length(sil.is), " interactions of type ", eltype(sil.inters))
 end
 
+function merge(interactions)
+    interactions_final = []
+    cache = []
+    for (i,inter) in enumerate(interactions)
+        i in cache && continue
+        idx = findall(x->typeof(x)==typeof(inter), interactions)
+        inters = interactions[idx[1]]
+        for j in idx[2:end]
+            inters = append!(inters,interactions[j])
+        end
+        push!(interactions_final, inters)
+        append!(cache,idx)
+    end
+    return interactions_final
+end
+
+function Base.append!(il1::InteractionList1Atoms{I, T, D}, il2::InteractionList1Atoms{I, T, D}) where {I, T, D}
+    return InteractionList1Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.inters,il2.inters),
+        append!(il1.types,il2.types),
+        nothing,
+    )
+end
+
+function Base.append!(il1::InteractionList2Atoms{I, T, D}, il2::InteractionList2Atoms{I, T, D}) where {I, T, D}
+    return InteractionList2Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.js,il2.js),
+        append!(il1.inters,il2.inters),
+        append!(il1.types,il2.types),
+        nothing
+    )
+end
+
+function Base.append!(il1::InteractionList3Atoms{I, T, D}, il2::InteractionList3Atoms{I, T, D}) where {I, T, D}
+    return InteractionList3Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.js,il2.js),
+        append!(il1.ks,il2.ks),
+        append!(il1.inters,il2.inters),
+        append!(il1.types,il2.types),
+        nothing
+    )
+end
+
+function Base.append!(il1::InteractionList4Atoms{I, T, D}, il2::InteractionList4Atoms{I, T, D}) where {I, T, D}
+    return InteractionList4Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.js,il2.js),
+        append!(il1.ks,il2.ks),
+        append!(il1.ls,il2.ls),
+        append!(il1.inters,il2.inters),
+        append!(il1.types,il2.types),
+        nothing
+    )
+end
+
+function Base.append!(il1::InteractionList5Atoms{I, T, D}, il2::InteractionList5Atoms{I, T, D}) where {I, T, D}
+    tmp_inters = il1.inters
+    cmaptorsion = typeof(il1.inters[1])
+    matrix = typeof(il1.data)
+    for inter in il2.inters
+        if isa(inter, CMAPTorsion)
+            push!(tmp_inters, cmaptorsion((4*tmp_inters[end].size*tmp_inters[end].size)+tmp_inters[end].index, inter.size, inter.λ, inter.res_num, inter.res_id))
+        elseif isa(inter, CMAPTorsion_L)
+            push!(tmp_inters, cmaptorsion((4*tmp_inters[end].size*tmp_inters[end].size)+tmp_inters[end].index, inter.size, inter.λ, inter.res_num, inter.res_id, inter.λ_id))
+        end
+    end
+    return InteractionList5Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.js,il2.js),
+        append!(il1.ks,il2.ks),
+        append!(il1.ls,il2.ls),
+        append!(il1.ms,il2.ms),
+        tmp_inters,
+        append!(il1.types,il2.types),
+        vcat(il1.data,il2.data),
+    )
+end
+
+function to_device(il1::InteractionList1Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList1Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data, AT),
+    )
+end
+
+function to_device(il1::InteractionList2Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList2Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.js, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data, AT),
+    )
+end
+
+function to_device(il1::InteractionList3Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList3Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.js, AT),
+        to_device(il1.ks, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data, AT),
+    )
+end
+
+function to_device(il1::InteractionList4Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList4Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.js, AT),
+        to_device(il1.ks, AT),
+        to_device(il1.ls, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data, AT),
+    )
+end
+
+function to_device(il1::InteractionList5Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList5Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.js, AT),
+        to_device(il1.ks, AT),
+        to_device(il1.ls, AT),
+        to_device(il1.ms, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data,AT),
+    )
+end
+
 """
     Atom(; <keyword arguments>)
 
@@ -540,6 +677,13 @@ Custom atom types should implement this function if charges are going to be used
 unless they have a `charge` field defined, which the function accesses by default.
 """
 @inline charge(atom) = atom.charge
+
+"""
+    lambda(atom)
+
+The lambda of an [`Atom`](@ref).
+"""
+lambda(atom) = atom.λ
 
 """
     mass(atom)
@@ -1510,8 +1654,11 @@ construction where `n` is the number of threads to be used per replica.
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
     to duplicating the boundary of the reference system (the first `ThermoState`).
-- `replica_loggers=nothing`: Logger collections for each replica. Stateful logger objects and
-    `TrajectoryWriter` file paths cannot be shared across replicas.
+- `replica_neighbor_finders=nothing`: The neighbor finder of each thermodynamic state. If not
+    provided, each state gets a copy of the neighbor finder of its system.
+- `replica_loggers=nothing`: Logger collections for each thermodynamic state, recording the replica
+    currently in that state. Stateful logger objects and `TrajectoryWriter` file paths cannot be
+    shared between states.
 - `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
     a default [`ReplicaExchangeLogger`](@ref) is used.
 - `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
@@ -1639,14 +1786,83 @@ function AtomsBase.atomic_number(sys::ReplicaSystem)
     end
 end
 
+function ReplicaSystem(sys::ReplicaSystem{D, <:Any, T, TH};
+                       replica_coords=sys.replica_coords,
+                       replica_velocities=sys.replica_velocities) where {D, T, TH}
+    AT = array_type(replica_coords[1])
+    return ReplicaSystem{D, AT, T, TH, typeof(sys.partition), typeof(sys.betas), typeof(sys.integrators),
+                         typeof(replica_coords), typeof(replica_velocities),
+                         typeof(sys.replica_boundaries), typeof(sys.replica_neighbor_finders),
+                         typeof(sys.replica_loggers), typeof(sys.state_pairwise_inters),
+                         typeof(sys.state_specific_inter_lists), typeof(sys.state_general_inters),
+                         typeof(sys.exchange_logger), typeof(sys.data)}(
+        sys.partition, sys.n_replicas, sys.betas, sys.integrators, replica_coords, replica_velocities,
+        sys.replica_boundaries, sys.replica_neighbor_finders, sys.replica_loggers,
+        sys.state_pairwise_inters, sys.state_specific_inter_lists, sys.state_general_inters,
+        sys.state_indices, sys.exchange_logger, sys.current_step, sys.initial_log_pending, sys.data,
+    )
+end
+
 # Avoid unnecessary Array calls on CPU
 from_device(x::Array) = x
 from_device(x::BitArray) = x
 from_device(x) = Array(x)
 from_device(x::StructArray) = replace_storage(Array, x)
 
+to_device(x::Nothing, ::Type{AT}) where AT = nothing
 to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
 to_device(x, ::Type{AT}) where AT = AT(x)
+
+# `deepcopy(x)` dispatches once, then recurses through `deepcopy_internal` all the way down, so
+# a custom `Base.deepcopy(::T)` is invisible to `deepcopy(sys)` — the interaction tuples would be
+# walked straight past. Types needing one register it through this helper instead, which is the
+# documented extension point (CUDA.jl handles `CuArray` the same way) and threads the shared
+# `IdDict`, so repeated references stay shared and cycles terminate.
+#
+# Do not "fix" this by overriding `Base.deepcopy_internal(::Tuple, ::IdDict)`: that signature is
+# identical to Base's, so it is an overwrite rather than an addition, and Julia refuses to
+# precompile any module that does it — which silently costs minutes of JIT on every fresh
+# process.
+# Only call this for a type that has its own `Base.deepcopy` method: it is what stops the
+# recursion. Without one, `deepcopy(x)` falls back to `deepcopy_internal(x, IdDict())`, which
+# lands right back here and loops forever.
+function deepcopy_registered(x, dict::IdDict)
+    haskey(dict, x) && return dict[x]::typeof(x)
+    y = deepcopy(x)
+    dict[x] = y
+    return y
+end
+
+reference_array(t::Tuple) = Any[t...]
+
+function Base.deepcopy_internal(sys::System, dict::IdDict)
+    # 1. Check if already copied to handle references/cycles
+    if haskey(dict, sys)
+        return dict[sys]::typeof(sys)
+    end
+
+    # 2. Extract and recursively deepcopy fields via Julia dispatch
+    field_copies = ntuple(fieldcount(typeof(sys))) do i
+        fname = fieldname(typeof(sys), i)
+        fval  = getfield(sys, fname)
+        Base.deepcopy_internal(fval, dict)
+    end
+
+    # 3. Construct a new System instance with the copied fields
+    new_sys = ccall(:jl_new_structv, Any, (Any, Ptr{Any}, UInt32), 
+                    typeof(sys), reference_array(field_copies), length(field_copies))
+    
+    dict[sys] = new_sys
+    return new_sys::typeof(sys)
+end
+
+function to_device(t::Tuple)
+    return map(to_device, t)
+end
+
+function from_device(t::Tuple)
+    return map(from_device, t)
+end
 
 """
     array_type(sys)
@@ -2154,6 +2370,8 @@ function update_ase_calc! end
 # ForwardDiff.jl checks both value and derivative
 # This could be extended to only check the value for Duals
 iszero_value(x) = iszero(x)
+iszero_value(x::SVector) = all(iszero_value, x)
+iszero_value(x::Tuple) = all(iszero_value, x)
 
 # Only use threading if a condition is true
 macro maybe_threads(flag, expr)

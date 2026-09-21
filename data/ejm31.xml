@@ -1,0 +1,346 @@
+<ForceField>
+  <AtomTypes>
+    <Type name="ejm31C1" element="C" mass="12.01078" class="ejm31C1"/>
+    <Type name="ejm31C2" element="C" mass="12.01078" class="ejm31C2"/>
+    <Type name="ejm31C3" element="C" mass="12.01078" class="ejm31C3"/>
+    <Type name="ejm31C4" element="C" mass="12.01078" class="ejm31C4"/>
+    <Type name="ejm31C5" element="C" mass="12.01078" class="ejm31C5"/>
+    <Type name="ejm31C6" element="C" mass="12.01078" class="ejm31C6"/>
+    <Type name="ejm31C7" element="C" mass="12.01078" class="ejm31C7"/>
+    <Type name="ejm31C8" element="C" mass="12.01078" class="ejm31C8"/>
+    <Type name="ejm31C9" element="C" mass="12.01078" class="ejm31C9"/>
+    <Type name="ejm31C10" element="C" mass="12.01078" class="ejm31C10"/>
+    <Type name="ejm31Cl1" element="Cl" mass="35.4532" class="ejm31Cl1"/>
+    <Type name="ejm31O1" element="O" mass="15.99943" class="ejm31O1"/>
+    <Type name="ejm31N1" element="N" mass="14.00672" class="ejm31N1"/>
+    <Type name="ejm31N2" element="N" mass="14.00672" class="ejm31N2"/>
+    <Type name="ejm31C11" element="C" mass="12.01078" class="ejm31C11"/>
+    <Type name="ejm31C12" element="C" mass="12.01078" class="ejm31C12"/>
+    <Type name="ejm31N3" element="N" mass="14.00672" class="ejm31N3"/>
+    <Type name="ejm31C13" element="C" mass="12.01078" class="ejm31C13"/>
+    <Type name="ejm31O2" element="O" mass="15.99943" class="ejm31O2"/>
+    <Type name="ejm31C14" element="C" mass="12.01078" class="ejm31C14"/>
+    <Type name="ejm31Cl2" element="Cl" mass="35.4532" class="ejm31Cl2"/>
+    <Type name="ejm31H1" element="H" mass="1.007947" class="ejm31H1"/>
+    <Type name="ejm31H2" element="H" mass="1.007947" class="ejm31H2"/>
+    <Type name="ejm31H3" element="H" mass="1.007947" class="ejm31H3"/>
+    <Type name="ejm31H4" element="H" mass="1.007947" class="ejm31H4"/>
+    <Type name="ejm31H5" element="H" mass="1.007947" class="ejm31H5"/>
+    <Type name="ejm31H6" element="H" mass="1.007947" class="ejm31H6"/>
+    <Type name="ejm31H7" element="H" mass="1.007947" class="ejm31H7"/>
+    <Type name="ejm31H8" element="H" mass="1.007947" class="ejm31H8"/>
+    <Type name="ejm31H9" element="H" mass="1.007947" class="ejm31H9"/>
+    <Type name="ejm31H10" element="H" mass="1.007947" class="ejm31H10"/>
+    <Type name="ejm31H11" element="H" mass="1.007947" class="ejm31H11"/>
+  </AtomTypes>
+  <NonbondedForce coulomb14scale="0.8333333333333334" lj14scale="0.5">
+    <UseAttributeFromResidue name="charge"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C1"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C2"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C3"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C4"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C5"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C6"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C7"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C8"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C9"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C10"/>
+    <Atom sigma="0.3307527806460624" epsilon="1.111270837866897" class="ejm31Cl1"/>
+    <Atom sigma="0.3039812205065809" epsilon="0.8795023257036865" class="ejm31O1"/>
+    <Atom sigma="0.3206876023663901" epsilon="0.7016212989374017" class="ejm31N1"/>
+    <Atom sigma="0.3206876023663901" epsilon="0.7016212989374017" class="ejm31N2"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C11"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C12"/>
+    <Atom sigma="0.3206876023663901" epsilon="0.7016212989374017" class="ejm31N3"/>
+    <Atom sigma="0.34806468869450646" epsilon="0.3635030558377792" class="ejm31C13"/>
+    <Atom sigma="0.3039812205065809" epsilon="0.8795023257036865" class="ejm31O2"/>
+    <Atom sigma="0.337953176162662" epsilon="0.45538911611061844" class="ejm31C14"/>
+    <Atom sigma="0.3307527806460624" epsilon="1.111270837866897" class="ejm31Cl2"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="ejm31H1"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="ejm31H2"/>
+    <Atom sigma="0.24536265277299726" epsilon="0.05483968129296432" class="ejm31H3"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="ejm31H4"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="ejm31H5"/>
+    <Atom sigma="0.11034276772973167" epsilon="0.058955968900150965" class="ejm31H6"/>
+    <Atom sigma="0.2572581535063279" epsilon="0.06531785996356952" class="ejm31H7"/>
+    <Atom sigma="0.11034276772973167" epsilon="0.058955968900150965" class="ejm31H8"/>
+    <Atom sigma="0.26445434132681245" epsilon="0.06602135607582665" class="ejm31H9"/>
+    <Atom sigma="0.26445434132681245" epsilon="0.06602135607582665" class="ejm31H10"/>
+    <Atom sigma="0.26445434132681245" epsilon="0.06602135607582665" class="ejm31H11"/>
+  </NonbondedForce>
+  <HarmonicBondForce>
+    <Bond class1="ejm31C1" class2="ejm31C2" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C1" class2="ejm31C5" length="0.1467813669186" k="223802.327852415"/>
+    <Bond class1="ejm31C1" class2="ejm31C8" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C2" class2="ejm31C3" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C2" class2="ejm31Cl1" length="0.17492571023979997" k="153268.4973696194"/>
+    <Bond class1="ejm31C3" class2="ejm31C9" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C3" class2="ejm31H1" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="ejm31C4" class2="ejm31C6" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C4" class2="ejm31N1" length="0.13895946609589999" k="275382.57341367257"/>
+    <Bond class1="ejm31C4" class2="ejm31C12" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C5" class2="ejm31O1" length="0.12248193104019998" k="637637.5156846369"/>
+    <Bond class1="ejm31C5" class2="ejm31N1" length="0.1383769967656" k="273475.51463447465"/>
+    <Bond class1="ejm31C6" class2="ejm31C7" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C6" class2="ejm31H2" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="ejm31C7" class2="ejm31N2" length="0.133886585269" k="323931.23928467254"/>
+    <Bond class1="ejm31C7" class2="ejm31H3" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="ejm31C8" class2="ejm31C10" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C8" class2="ejm31Cl2" length="0.17492571023979997" k="153268.4973696194"/>
+    <Bond class1="ejm31C9" class2="ejm31C10" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C9" class2="ejm31H4" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="ejm31C10" class2="ejm31H5" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="ejm31N1" class2="ejm31H6" length="0.10187011914499998" k="402555.0887127301"/>
+    <Bond class1="ejm31N2" class2="ejm31C11" length="0.133886585269" k="323931.23928467254"/>
+    <Bond class1="ejm31C11" class2="ejm31C12" length="0.1400774190845" k="315454.5253553758"/>
+    <Bond class1="ejm31C11" class2="ejm31N3" length="0.13895946609589999" k="275382.57341367257"/>
+    <Bond class1="ejm31C12" class2="ejm31H7" length="0.10859499048589999" k="323272.6619188585"/>
+    <Bond class1="ejm31N3" class2="ejm31C13" length="0.1383769967656" k="273475.51463447465"/>
+    <Bond class1="ejm31N3" class2="ejm31H8" length="0.10187011914499998" k="402555.0887127301"/>
+    <Bond class1="ejm31C13" class2="ejm31O2" length="0.12248193104019998" k="637637.5156846369"/>
+    <Bond class1="ejm31C13" class2="ejm31C14" length="0.1529107327625" k="169279.03202668668"/>
+    <Bond class1="ejm31C14" class2="ejm31H9" length="0.10939788916649999" k="299455.78434797376"/>
+    <Bond class1="ejm31C14" class2="ejm31H10" length="0.10939788916649999" k="299455.78434797376"/>
+    <Bond class1="ejm31C14" class2="ejm31H11" length="0.10939788916649999" k="299455.78434797376"/>
+  </HarmonicBondForce>
+  <HarmonicAngleForce>
+    <Angle class1="ejm31C1" class2="ejm31C2" class3="ejm31C3" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C1" class2="ejm31C2" class3="ejm31Cl1" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C1" class2="ejm31C5" class3="ejm31O1" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C1" class2="ejm31C5" class3="ejm31N1" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C1" class2="ejm31C8" class3="ejm31C10" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C1" class2="ejm31C8" class3="ejm31Cl2" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C2" class2="ejm31C1" class3="ejm31C5" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C2" class2="ejm31C1" class3="ejm31C8" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C2" class2="ejm31C3" class3="ejm31C9" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C2" class2="ejm31C3" class3="ejm31H1" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C3" class2="ejm31C2" class3="ejm31Cl1" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C3" class2="ejm31C9" class3="ejm31C10" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C3" class2="ejm31C9" class3="ejm31H4" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C4" class2="ejm31C6" class3="ejm31C7" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C4" class2="ejm31C6" class3="ejm31H2" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C4" class2="ejm31N1" class3="ejm31C5" angle="2.102557279891683" k="657.3881463095896"/>
+    <Angle class1="ejm31C4" class2="ejm31N1" class3="ejm31H6" angle="2.060527159002061" k="310.5154027736061"/>
+    <Angle class1="ejm31C4" class2="ejm31C12" class3="ejm31C11" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C4" class2="ejm31C12" class3="ejm31H7" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C5" class2="ejm31C1" class3="ejm31C8" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C5" class2="ejm31N1" class3="ejm31H6" angle="2.060527159002061" k="310.5154027736061"/>
+    <Angle class1="ejm31C6" class2="ejm31C4" class3="ejm31N1" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C6" class2="ejm31C4" class3="ejm31C12" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C6" class2="ejm31C7" class3="ejm31N2" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C6" class2="ejm31C7" class3="ejm31H3" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C7" class2="ejm31C6" class3="ejm31H2" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C7" class2="ejm31N2" class3="ejm31C11" angle="2.0578102328475882" k="1213.2223494861184"/>
+    <Angle class1="ejm31C8" class2="ejm31C10" class3="ejm31C9" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C8" class2="ejm31C10" class3="ejm31H5" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C9" class2="ejm31C3" class3="ejm31H1" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C9" class2="ejm31C10" class3="ejm31H5" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C10" class2="ejm31C8" class3="ejm31Cl2" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C10" class2="ejm31C9" class3="ejm31H4" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31O1" class2="ejm31C5" class3="ejm31N1" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31N1" class2="ejm31C4" class3="ejm31C12" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31N2" class2="ejm31C7" class3="ejm31H3" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31N2" class2="ejm31C11" class3="ejm31C12" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31N2" class2="ejm31C11" class3="ejm31N3" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C11" class2="ejm31C12" class3="ejm31H7" angle="2.091636539381344" k="273.094684216716"/>
+    <Angle class1="ejm31C11" class2="ejm31N3" class3="ejm31C13" angle="2.102557279891683" k="657.3881463095896"/>
+    <Angle class1="ejm31C11" class2="ejm31N3" class3="ejm31H8" angle="2.060527159002061" k="310.5154027736061"/>
+    <Angle class1="ejm31C12" class2="ejm31C11" class3="ejm31N3" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31N3" class2="ejm31C13" class3="ejm31O2" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31N3" class2="ejm31C13" class3="ejm31C14" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31C13" class2="ejm31N3" class3="ejm31H8" angle="2.060527159002061" k="310.5154027736061"/>
+    <Angle class1="ejm31C13" class2="ejm31C14" class3="ejm31H9" angle="1.9188319964264946" k="559.2803824294216"/>
+    <Angle class1="ejm31C13" class2="ejm31C14" class3="ejm31H10" angle="1.9188319964264946" k="559.2803824294216"/>
+    <Angle class1="ejm31C13" class2="ejm31C14" class3="ejm31H11" angle="1.9188319964264946" k="559.2803824294216"/>
+    <Angle class1="ejm31O2" class2="ejm31C13" class3="ejm31C14" angle="2.095903466990631" k="706.7696784494784"/>
+    <Angle class1="ejm31H9" class2="ejm31C14" class3="ejm31H10" angle="1.8908789677076112" k="306.81862462732323"/>
+    <Angle class1="ejm31H9" class2="ejm31C14" class3="ejm31H11" angle="1.8908789677076112" k="306.81862462732323"/>
+    <Angle class1="ejm31H10" class2="ejm31C14" class3="ejm31H11" angle="1.8908789677076112" k="306.81862462732323"/>
+  </HarmonicAngleForce>
+  <PeriodicTorsionForce ordering="smirnoff">
+    <Proper class1="ejm31C1" class2="ejm31C2" class3="ejm31C3" class4="ejm31C9" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C1" class2="ejm31C2" class3="ejm31C3" class4="ejm31H1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C1" class2="ejm31C5" class3="ejm31N1" class4="ejm31C4" periodicity1="2" phase1="3.141592653589793" k1="8.792558778390793" periodicity2="1" phase2="0.0" k2="1.0140894260755025"/>
+    <Proper class1="ejm31C1" class2="ejm31C5" class3="ejm31N1" class4="ejm31H6" periodicity1="2" phase1="3.141592653589793" k1="8.792558778390793" periodicity2="1" phase2="0.0" k2="1.0140894260755025"/>
+    <Proper class1="ejm31C1" class2="ejm31C8" class3="ejm31C10" class4="ejm31C9" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C1" class2="ejm31C8" class3="ejm31C10" class4="ejm31H5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C2" class2="ejm31C1" class3="ejm31C5" class4="ejm31O1" periodicity1="2" phase1="3.141592653589793" k1="4.449255831644488"/>
+    <Proper class1="ejm31C2" class2="ejm31C1" class3="ejm31C5" class4="ejm31N1" periodicity1="2" phase1="3.141592653589793" k1="4.449255831644488"/>
+    <Proper class1="ejm31C2" class2="ejm31C1" class3="ejm31C8" class4="ejm31C10" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C2" class2="ejm31C1" class3="ejm31C8" class4="ejm31Cl2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C2" class2="ejm31C3" class3="ejm31C9" class4="ejm31C10" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C2" class2="ejm31C3" class3="ejm31C9" class4="ejm31H4" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C3" class2="ejm31C2" class3="ejm31C1" class4="ejm31C5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C3" class2="ejm31C2" class3="ejm31C1" class4="ejm31C8" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C3" class2="ejm31C9" class3="ejm31C10" class4="ejm31C8" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C3" class2="ejm31C9" class3="ejm31C10" class4="ejm31H5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C4" class2="ejm31C6" class3="ejm31C7" class4="ejm31N2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C4" class2="ejm31C6" class3="ejm31C7" class4="ejm31H3" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C4" class2="ejm31N1" class3="ejm31C5" class4="ejm31O1" periodicity1="2" phase1="3.141592653589793" k1="10.215589190962545" periodicity2="1" phase2="0.0" k2="-1.790149771764285"/>
+    <Proper class1="ejm31C4" class2="ejm31C12" class3="ejm31C11" class4="ejm31N2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C4" class2="ejm31C12" class3="ejm31C11" class4="ejm31N3" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C5" class2="ejm31C1" class3="ejm31C2" class4="ejm31Cl1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C5" class2="ejm31C1" class3="ejm31C8" class4="ejm31C10" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C5" class2="ejm31C1" class3="ejm31C8" class4="ejm31Cl2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C5" class2="ejm31N1" class3="ejm31C4" class4="ejm31C6" periodicity1="2" phase1="3.141592653589793" k1="5.950394871183448"/>
+    <Proper class1="ejm31C5" class2="ejm31N1" class3="ejm31C4" class4="ejm31C12" periodicity1="2" phase1="3.141592653589793" k1="5.950394871183448"/>
+    <Proper class1="ejm31C6" class2="ejm31C4" class3="ejm31N1" class4="ejm31H6" periodicity1="2" phase1="3.141592653589793" k1="5.950394871183448"/>
+    <Proper class1="ejm31C6" class2="ejm31C4" class3="ejm31C12" class4="ejm31C11" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C6" class2="ejm31C4" class3="ejm31C12" class4="ejm31H7" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C6" class2="ejm31C7" class3="ejm31N2" class4="ejm31C11" periodicity1="2" phase1="3.141592653589793" k1="23.389190521390137"/>
+    <Proper class1="ejm31C7" class2="ejm31C6" class3="ejm31C4" class4="ejm31N1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C7" class2="ejm31C6" class3="ejm31C4" class4="ejm31C12" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C7" class2="ejm31N2" class3="ejm31C11" class4="ejm31C12" periodicity1="2" phase1="3.141592653589793" k1="23.389190521390137"/>
+    <Proper class1="ejm31C7" class2="ejm31N2" class3="ejm31C11" class4="ejm31N3" periodicity1="2" phase1="3.141592653589793" k1="9.791299431495895"/>
+    <Proper class1="ejm31C8" class2="ejm31C1" class3="ejm31C2" class4="ejm31Cl1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C8" class2="ejm31C1" class3="ejm31C5" class4="ejm31O1" periodicity1="2" phase1="3.141592653589793" k1="4.449255831644488"/>
+    <Proper class1="ejm31C8" class2="ejm31C1" class3="ejm31C5" class4="ejm31N1" periodicity1="2" phase1="3.141592653589793" k1="4.449255831644488"/>
+    <Proper class1="ejm31C8" class2="ejm31C10" class3="ejm31C9" class4="ejm31H4" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C9" class2="ejm31C3" class3="ejm31C2" class4="ejm31Cl1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C9" class2="ejm31C10" class3="ejm31C8" class4="ejm31Cl2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C10" class2="ejm31C9" class3="ejm31C3" class4="ejm31H1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31Cl1" class2="ejm31C2" class3="ejm31C3" class4="ejm31H1" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31O1" class2="ejm31C5" class3="ejm31N1" class4="ejm31H6" periodicity1="2" phase1="3.141592653589793" k1="5.418493811073432" periodicity2="1" phase2="0.0" k2="5.12589189748288"/>
+    <Proper class1="ejm31N1" class2="ejm31C4" class3="ejm31C6" class4="ejm31H2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31N1" class2="ejm31C4" class3="ejm31C12" class4="ejm31C11" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31N1" class2="ejm31C4" class3="ejm31C12" class4="ejm31H7" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31N2" class2="ejm31C7" class3="ejm31C6" class4="ejm31H2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31N2" class2="ejm31C11" class3="ejm31C12" class4="ejm31H7" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31N2" class2="ejm31C11" class3="ejm31N3" class4="ejm31C13" periodicity1="2" phase1="3.141592653589793" k1="5.950394871183448"/>
+    <Proper class1="ejm31N2" class2="ejm31C11" class3="ejm31N3" class4="ejm31H8" periodicity1="2" phase1="3.141592653589793" k1="5.950394871183448"/>
+    <Proper class1="ejm31C11" class2="ejm31N2" class3="ejm31C7" class4="ejm31H3" periodicity1="2" phase1="3.141592653589793" k1="9.791299431495895"/>
+    <Proper class1="ejm31C11" class2="ejm31N3" class3="ejm31C13" class4="ejm31O2" periodicity1="2" phase1="3.141592653589793" k1="10.215589190962545" periodicity2="1" phase2="0.0" k2="-1.790149771764285"/>
+    <Proper class1="ejm31C11" class2="ejm31N3" class3="ejm31C13" class4="ejm31C14" periodicity1="2" phase1="3.141592653589793" k1="8.792558778390793" periodicity2="1" phase2="0.0" k2="1.0140894260755025"/>
+    <Proper class1="ejm31C12" class2="ejm31C4" class3="ejm31C6" class4="ejm31H2" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31C12" class2="ejm31C4" class3="ejm31N1" class4="ejm31H6" periodicity1="2" phase1="3.141592653589793" k1="5.950394871183448"/>
+    <Proper class1="ejm31C12" class2="ejm31C11" class3="ejm31N3" class4="ejm31C13" periodicity1="2" phase1="3.141592653589793" k1="5.950394871183448"/>
+    <Proper class1="ejm31C12" class2="ejm31C11" class3="ejm31N3" class4="ejm31H8" periodicity1="2" phase1="3.141592653589793" k1="5.950394871183448"/>
+    <Proper class1="ejm31N3" class2="ejm31C11" class3="ejm31C12" class4="ejm31H7" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31N3" class2="ejm31C13" class3="ejm31C14" class4="ejm31H9" periodicity1="3" phase1="0.0" k1="0.90899008864106"/>
+    <Proper class1="ejm31N3" class2="ejm31C13" class3="ejm31C14" class4="ejm31H10" periodicity1="3" phase1="0.0" k1="0.90899008864106"/>
+    <Proper class1="ejm31N3" class2="ejm31C13" class3="ejm31C14" class4="ejm31H11" periodicity1="3" phase1="0.0" k1="0.90899008864106"/>
+    <Proper class1="ejm31O2" class2="ejm31C13" class3="ejm31N3" class4="ejm31H8" periodicity1="2" phase1="3.141592653589793" k1="5.418493811073432" periodicity2="1" phase2="0.0" k2="5.12589189748288"/>
+    <Proper class1="ejm31O2" class2="ejm31C13" class3="ejm31C14" class4="ejm31H9" periodicity1="1" phase1="0.0" k1="3.899093020128699" periodicity2="2" phase2="0.0" k2="0.8293868677579376" periodicity3="3" phase3="3.141592653589793" k3="-0.9060988429849224"/>
+    <Proper class1="ejm31O2" class2="ejm31C13" class3="ejm31C14" class4="ejm31H10" periodicity1="1" phase1="0.0" k1="3.899093020128699" periodicity2="2" phase2="0.0" k2="0.8293868677579376" periodicity3="3" phase3="3.141592653589793" k3="-0.9060988429849224"/>
+    <Proper class1="ejm31O2" class2="ejm31C13" class3="ejm31C14" class4="ejm31H11" periodicity1="1" phase1="0.0" k1="3.899093020128699" periodicity2="2" phase2="0.0" k2="0.8293868677579376" periodicity3="3" phase3="3.141592653589793" k3="-0.9060988429849224"/>
+    <Proper class1="ejm31C14" class2="ejm31C13" class3="ejm31N3" class4="ejm31H8" periodicity1="2" phase1="3.141592653589793" k1="8.792558778390793" periodicity2="1" phase2="0.0" k2="1.0140894260755025"/>
+    <Proper class1="ejm31Cl2" class2="ejm31C8" class3="ejm31C10" class4="ejm31H5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31H1" class2="ejm31C3" class3="ejm31C9" class4="ejm31H4" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31H2" class2="ejm31C6" class3="ejm31C7" class4="ejm31H3" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Proper class1="ejm31H4" class2="ejm31C9" class3="ejm31C10" class4="ejm31H5" periodicity1="2" phase1="3.141592653589793" k1="13.624769480588176"/>
+    <Improper class1="ejm31C2" class2="ejm31C1" class3="ejm31C3" class4="ejm31Cl1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C2" class2="ejm31C3" class3="ejm31Cl1" class4="ejm31C1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C2" class2="ejm31Cl1" class3="ejm31C1" class4="ejm31C3" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C5" class2="ejm31C1" class3="ejm31O1" class4="ejm31N1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C5" class2="ejm31O1" class3="ejm31N1" class4="ejm31C1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C5" class2="ejm31N1" class3="ejm31C1" class4="ejm31O1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C8" class2="ejm31C1" class3="ejm31C10" class4="ejm31Cl2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C8" class2="ejm31C10" class3="ejm31Cl2" class4="ejm31C1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C8" class2="ejm31Cl2" class3="ejm31C1" class4="ejm31C10" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C1" class2="ejm31C2" class3="ejm31C5" class4="ejm31C8" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C1" class2="ejm31C5" class3="ejm31C8" class4="ejm31C2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C1" class2="ejm31C8" class3="ejm31C2" class4="ejm31C5" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C3" class2="ejm31C2" class3="ejm31C9" class4="ejm31H1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C3" class2="ejm31C9" class3="ejm31H1" class4="ejm31C2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C3" class2="ejm31H1" class3="ejm31C2" class4="ejm31C9" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C9" class2="ejm31C3" class3="ejm31C10" class4="ejm31H4" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C9" class2="ejm31C10" class3="ejm31H4" class4="ejm31C3" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C9" class2="ejm31H4" class3="ejm31C3" class4="ejm31C10" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C6" class2="ejm31C4" class3="ejm31C7" class4="ejm31H2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C6" class2="ejm31C7" class3="ejm31H2" class4="ejm31C4" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C6" class2="ejm31H2" class3="ejm31C4" class4="ejm31C7" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31N1" class2="ejm31C4" class3="ejm31C5" class4="ejm31H6" periodicity1="2" phase1="3.141592653589793" k1="1.7843938939524613"/>
+    <Improper class1="ejm31N1" class2="ejm31C5" class3="ejm31H6" class4="ejm31C4" periodicity1="2" phase1="3.141592653589793" k1="1.7843938939524613"/>
+    <Improper class1="ejm31N1" class2="ejm31H6" class3="ejm31C4" class4="ejm31C5" periodicity1="2" phase1="3.141592653589793" k1="1.7843938939524613"/>
+    <Improper class1="ejm31C12" class2="ejm31C4" class3="ejm31C11" class4="ejm31H7" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C12" class2="ejm31C11" class3="ejm31H7" class4="ejm31C4" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C12" class2="ejm31H7" class3="ejm31C4" class4="ejm31C11" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C4" class2="ejm31C6" class3="ejm31N1" class4="ejm31C12" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C4" class2="ejm31N1" class3="ejm31C12" class4="ejm31C6" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C4" class2="ejm31C12" class3="ejm31C6" class4="ejm31N1" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C7" class2="ejm31C6" class3="ejm31N2" class4="ejm31H3" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C7" class2="ejm31N2" class3="ejm31H3" class4="ejm31C6" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C7" class2="ejm31H3" class3="ejm31C6" class4="ejm31N2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C10" class2="ejm31C8" class3="ejm31C9" class4="ejm31H5" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C10" class2="ejm31C9" class3="ejm31H5" class4="ejm31C8" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C10" class2="ejm31H5" class3="ejm31C8" class4="ejm31C9" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C11" class2="ejm31N2" class3="ejm31C12" class4="ejm31N3" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C11" class2="ejm31C12" class3="ejm31N3" class4="ejm31N2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C11" class2="ejm31N3" class3="ejm31N2" class4="ejm31C12" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31N3" class2="ejm31C11" class3="ejm31C13" class4="ejm31H8" periodicity1="2" phase1="3.141592653589793" k1="1.7843938939524613"/>
+    <Improper class1="ejm31N3" class2="ejm31C13" class3="ejm31H8" class4="ejm31C11" periodicity1="2" phase1="3.141592653589793" k1="1.7843938939524613"/>
+    <Improper class1="ejm31N3" class2="ejm31H8" class3="ejm31C11" class4="ejm31C13" periodicity1="2" phase1="3.141592653589793" k1="1.7843938939524613"/>
+    <Improper class1="ejm31C13" class2="ejm31N3" class3="ejm31O2" class4="ejm31C14" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C13" class2="ejm31O2" class3="ejm31C14" class4="ejm31N3" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+    <Improper class1="ejm31C13" class2="ejm31C14" class3="ejm31N3" class4="ejm31O2" periodicity1="2" phase1="3.141592653589793" k1="7.391908600398789"/>
+  </PeriodicTorsionForce>
+  <Residues>
+    <Residue name="[H][c]1[n][c]([N]([H])[C](=[O])[C]([H])([H])[H])[c]([H])[c]([N]([H])[C](=[O])[c]2[c]([Cl])[c]([H])[c]([H])[c]([H])[c]2[Cl])[c]1[H]">
+      <Atom name="C1" type="ejm31C1" charge="-0.14353746875"/>
+      <Atom name="C2" type="ejm31C2" charge="0.05246253125"/>
+      <Atom name="C3" type="ejm31C3" charge="-0.12893746875"/>
+      <Atom name="C4" type="ejm31C4" charge="0.12766253125"/>
+      <Atom name="C5" type="ejm31C5" charge="0.69176253125"/>
+      <Atom name="C6" type="ejm31C6" charge="-0.30423746875"/>
+      <Atom name="C7" type="ejm31C7" charge="0.44526253125"/>
+      <Atom name="C8" type="ejm31C8" charge="0.05246253125"/>
+      <Atom name="C9" type="ejm31C9" charge="-0.09593746875"/>
+      <Atom name="C10" type="ejm31C10" charge="-0.12893746875"/>
+      <Atom name="Cl1" type="ejm31Cl1" charge="-0.060337468750000005"/>
+      <Atom name="O1" type="ejm31O1" charge="-0.55003746875"/>
+      <Atom name="N1" type="ejm31N1" charge="-0.46003746875"/>
+      <Atom name="N2" type="ejm31N2" charge="-0.73793746875"/>
+      <Atom name="C11" type="ejm31C11" charge="0.55126253125"/>
+      <Atom name="C12" type="ejm31C12" charge="-0.32323746875"/>
+      <Atom name="N3" type="ejm31N3" charge="-0.55333746875"/>
+      <Atom name="C13" type="ejm31C13" charge="0.67116253125"/>
+      <Atom name="O2" type="ejm31O2" charge="-0.59303746875"/>
+      <Atom name="C14" type="ejm31C14" charge="-0.17803746875"/>
+      <Atom name="Cl2" type="ejm31Cl2" charge="-0.060337468750000005"/>
+      <Atom name="H1" type="ejm31H1" charge="0.15706253125"/>
+      <Atom name="H2" type="ejm31H2" charge="0.18306253125"/>
+      <Atom name="H3" type="ejm31H3" charge="0.02516253125"/>
+      <Atom name="H4" type="ejm31H4" charge="0.14806253125"/>
+      <Atom name="H5" type="ejm31H5" charge="0.15706253125"/>
+      <Atom name="H6" type="ejm31H6" charge="0.33056253125"/>
+      <Atom name="H7" type="ejm31H7" charge="0.18006253125"/>
+      <Atom name="H8" type="ejm31H8" charge="0.33156253125"/>
+      <Atom name="H9" type="ejm31H9" charge="0.07109553125"/>
+      <Atom name="H10" type="ejm31H10" charge="0.07109553125"/>
+      <Atom name="H11" type="ejm31H11" charge="0.07109553125"/>
+      <Bond atomName1="C1" atomName2="C2"/>
+      <Bond atomName1="C1" atomName2="C5"/>
+      <Bond atomName1="C1" atomName2="C8"/>
+      <Bond atomName1="C2" atomName2="C3"/>
+      <Bond atomName1="C2" atomName2="Cl1"/>
+      <Bond atomName1="C3" atomName2="C9"/>
+      <Bond atomName1="C3" atomName2="H1"/>
+      <Bond atomName1="C4" atomName2="C6"/>
+      <Bond atomName1="C4" atomName2="N1"/>
+      <Bond atomName1="C4" atomName2="C12"/>
+      <Bond atomName1="C5" atomName2="O1"/>
+      <Bond atomName1="C5" atomName2="N1"/>
+      <Bond atomName1="C6" atomName2="C7"/>
+      <Bond atomName1="C6" atomName2="H2"/>
+      <Bond atomName1="C7" atomName2="N2"/>
+      <Bond atomName1="C7" atomName2="H3"/>
+      <Bond atomName1="C8" atomName2="C10"/>
+      <Bond atomName1="C8" atomName2="Cl2"/>
+      <Bond atomName1="C9" atomName2="C10"/>
+      <Bond atomName1="C9" atomName2="H4"/>
+      <Bond atomName1="C10" atomName2="H5"/>
+      <Bond atomName1="N1" atomName2="H6"/>
+      <Bond atomName1="N2" atomName2="C11"/>
+      <Bond atomName1="C11" atomName2="C12"/>
+      <Bond atomName1="C11" atomName2="N3"/>
+      <Bond atomName1="C12" atomName2="H7"/>
+      <Bond atomName1="N3" atomName2="C13"/>
+      <Bond atomName1="N3" atomName2="H8"/>
+      <Bond atomName1="C13" atomName2="O2"/>
+      <Bond atomName1="C13" atomName2="C14"/>
+      <Bond atomName1="C14" atomName2="H9"/>
+      <Bond atomName1="C14" atomName2="H10"/>
+      <Bond atomName1="C14" atomName2="H11"/>
+    </Residue>
+  </Residues>
+</ForceField>

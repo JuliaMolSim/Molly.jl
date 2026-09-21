@@ -794,7 +794,7 @@ end
 """
     TrajectoryWriter(n_steps, filepath; format="", correction=:pbc, atom_inds=[],
                      excluded_res=String[], write_velocities=false, write_boundary=true,
-                     overwrite=false)
+                     overwrite=false, suppress_warn=false)
 
 Write 3D structures to a file throughout a simulation.
 
@@ -822,6 +822,7 @@ The file will be appended to, so should be deleted before simulation if it
 already exists.
 Setting `overwrite=true` deletes the file when the logger is constructed if it
 exists, rather than warning and appending to it.
+Setting `suppress_warn=true` appends to an existing file without the warning.
 
 Not compatible with 2D systems.
 For the PDB format, the box size for the CRYST1 record is taken from the first
@@ -840,17 +841,19 @@ mutable struct TrajectoryWriter{I, T}
     topology::T
     topology_written::Bool
     structure_n::Int
+    suppress_warn::Bool
 end
 
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           format::AbstractString="", correction::Symbol=:pbc, atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
-                          write_boundary::Bool=true, overwrite::Bool=false)
+                          write_boundary::Bool=true, overwrite::Bool=false,
+                          suppress_warn::Bool=false)
     check_correction_arg(correction)
     if isfile(filepath)
         if overwrite
             rm(filepath)
-        else
+        elseif !suppress_warn
             @warn "TrajectoryWriter created with a file path ($filepath) that already " *
                   "exists, will try to append to this file, use overwrite=true to " *
                   "delete the file instead"
@@ -865,9 +868,13 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
     end
     return TrajectoryWriter(n_steps, filepath, format_used, correction, atom_inds,
                     Set(excluded_res), write_velocities, write_boundary, topology,
-                    false, 0)
+                    false, 0, suppress_warn)
 end
 
+Base.deepcopy_internal(tw::TrajectoryWriter, dict::IdDict) = deepcopy_registered(tw, dict)
+
+# A copy writes to the same file as the original, so it appends without the warning. It goes
+#   through the positional constructor, so the file is never deleted as with overwrite=true.
 function Base.deepcopy(tw::TrajectoryWriter)
     return TrajectoryWriter(
         tw.n_steps,
@@ -881,6 +888,7 @@ function Base.deepcopy(tw::TrajectoryWriter)
         Chemfiles.Topology(),
         false,
         0,
+        true,
     )
 end
 
@@ -1202,30 +1210,35 @@ mutable struct ReplicaExchangeLogger{T}
     n_attempts::Int
     n_exchanges::Int
     indices::Vector{Tuple{Int, Int}}
+    replica_indices::Vector{Vector{Int}}
     steps::Vector{Int}
     deltas::Vector{T}
     end_step::Int
 end
 
 function ReplicaExchangeLogger(T::DataType, n_replicas::Integer)
-    return ReplicaExchangeLogger{T}(n_replicas, 0, 0, Tuple{Int, Int}[], Int[], T[], 0)
+    return ReplicaExchangeLogger{T}(n_replicas, 0, 0, Tuple{Int, Int}[], Vector{Int}[], Int[], T[], 0)
 end
 
 ReplicaExchangeLogger(n_replicas::Integer) = ReplicaExchangeLogger(Float64, n_replicas)
 
-function log_property!(rexl::ReplicaExchangeLogger,
+function log_exchange!(rexl::ReplicaExchangeLogger,
                        sys::ReplicaSystem,
                        neighbors=nothing,
                        step_n::Integer=0,
                        buffers=nothing;
-                       indices,
-                       delta,
+                       indices=nothing,
+                       delta=nothing,
                        n_threads::Integer=Threads.nthreads(),
                        kwargs...)
-    push!(rexl.indices, indices)
-    push!(rexl.steps, step_n)
-    push!(rexl.deltas, delta)
-    rexl.n_exchanges += 1
+    if !isnothing(indices)
+        push!(rexl.indices, indices)
+        push!(rexl.steps, step_n)
+        push!(rexl.deltas, delta)
+        rexl.n_exchanges += 1
+    else
+        push!(rexl.replica_indices, deepcopy(sys.state_indices))
+    end
 end
 
 function finish_logs!(rexl::ReplicaExchangeLogger;

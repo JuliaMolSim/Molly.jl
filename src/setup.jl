@@ -337,25 +337,20 @@ function resolve_proper_torsion(ff::MolecularForceField, t1::AbstractString, t2:
 end
 
 function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
-                                  t3::AbstractString, t4::AbstractString)
+                                  t3::AbstractString, t4::AbstractString, indexes, atom_type_of, 
+                                  resnum_of, template_id_of, element_of)
     # Resolver scans all 6 permutations internally and caches the winner
-    p = find_improper_match(t1, t2, t3, t4; resolver=ff.torsion_resolver,
-                                                type_to_class=ff.type_to_class)
+    p = find_improper_match(t1, t2, t3, t4, indexes, atom_type_of, resnum_of, template_id_of, 
+                            element_of; resolver=ff.torsion_resolver, 
+                            type_to_class=ff.type_to_class)
     if isnothing(p)
-        return (nothing, ("", "", "", ""))
+        return nothing
     end
 
     # Recover matched permutation from cache to return the oriented key
     ic = ff.torsion_resolver.improper_cache
     cache_hit = get(ic, (t1, t2, t3, t4), :miss)
-    if cache_hit == :miss
-        return (p, (t1, t2, t3, t4)) # Fallback
-    else
-        perm, _ = cache_hit
-        src = (t1, t2, t3, t4)
-        key = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
-        return (p, key)
-    end
+    return cache_hit
 end
 
 function resolve_cmap(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
@@ -704,6 +699,8 @@ function System(coord_file::AbstractString,
     atom_type_of = Vector{String}(undef, n_atoms)
     charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
+    template_id_of = Vector{Integer}(undef, n_atoms)
+    resnum_of = Vector{Integer}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
     # Index of each atom type in the force field, avoiding repeated linear searches
     atom_type_index = Dict{String, Int}(at => i
@@ -727,6 +724,8 @@ function System(coord_file::AbstractString,
                     atom_type_of[global_idx] = template.types[m_i]
                     charge_of[global_idx] = template.charges[m_i]
                     element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
+                    template_id_of[global_idx] = m_i
+                    resnum_of[global_idx] = resnum_from_atom_idx(global_idx, atom_lookup)
                 end
                 add_virtual_sites!(virtual_sites, template, rgraph, matches)
             end
@@ -940,152 +939,78 @@ function System(coord_file::AbstractString,
     for (c, j, k, l) in top_impropers
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
-        # Resolve improper params and oriented key (central first)
-        tt, key = resolve_improper_torsion(force_field, t1, t2, t3, t4)
-        isnothing(tt) && continue
-        tt isa HarmonicTorsionType && continue
-
-        # Recover metadata from resolver cache
+        # See if signature is already in cache
         ic = force_field.torsion_resolver.improper_cache
         hit = get(ic, (t1, t2, t3, t4), :miss)
-        ordering = "default"
-        has_wild = false
-        if hit != :miss
+        if hit == nothing
+            # Previously checked, and doesn't appear in the database
+            continue
+        elseif hit != :miss
+            # Signature was cached
+            # Collect permutation and parameters
             perm, ridx = hit
             r = force_field.torsion_resolver.rules[ridx]
-            ordering = r.ordering
-            has_wild = r.has_wildcard
+            tt = force_field.torsion_resolver.rules[ridx].params
+            isnothing(tt) && continue
+            tt isa HarmonicTorsionType && continue
 
             # Reorder indices based on how atoms were permuted
             src_atoms = (c, j, k, l)
             j = src_atoms[perm[2]]
             k = src_atoms[perm[3]]
             l = src_atoms[perm[4]]
-
-            # refresh types after remapping
-            t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
+            src = (t1, t2, t3, t4)
+            types = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         end
 
-        # topology indices for current j,k,l
-        _, r2, res2, ta2 = atom_lookup[j]
-        _, r3, res3, ta3 = atom_lookup[k]
-        _, r4, res4, ta4 = atom_lookup[l]
+        if hit == :miss
+            # Signature was not found
+            # Resolve improper params and oriented key (central first)
+            hit = resolve_improper_torsion(force_field, t1, t2, t3, t4, (c,j,k,l), 
+                             atom_type_of, resnum_of, template_id_of, element_of)
+            if hit == nothing
+                continue
+            elseif hit == :miss
+                error("Can't match torsion, but something wrong in implementation")
+            end
+            perm, ridx = hit
+            r = force_field.torsion_resolver.rules[ridx]
+            tt = force_field.torsion_resolver.rules[ridx].params               
+            isnothing(tt) && continue
+            tt isa HarmonicTorsionType && continue
 
-        e2 = Symbol(element_of[j])
-        e3 = Symbol(element_of[k])
-        e4 = Symbol(element_of[l])
-
-        if ordering == "amber"
-            # OpenMM amber branch, with/without wildcards
-            if !has_wild
-                if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j,   l)   = (l,   j)
-                    (r2,  r4)  = (r4,  r2)
-                    (ta2, ta4) = (ta4, ta2)
-                end
-                if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k,   l)   = (l,   k)
-                    (r3,  r4)  = (r4,  r3)
-                    (ta3, ta4) = (ta4, ta3)
-                end
-                if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
-                    (j, k) = (k, j)
+            # Reorder indices based on how atoms were permuted
+            src_atoms = (c, j, k, l)
+            j = src_atoms[perm[2]]
+            k = src_atoms[perm[3]]
+            l = src_atoms[perm[4]]
+            src = (t1, t2, t3, t4)
+            types = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
+        end
+        if hit != :miss
+            if r.ordering=="smirnoff"
+                a1, a2, a3, a4 = c, j, k, l
+                for (x1, x2, x3, x4) in ((a1,a2,a3,a4),
+                                        (a1,a3,a4,a2),
+                                        (a1,a4,a2,a3))
+                    push!(imps_il.is, x1)
+                    push!(imps_il.js, x2)
+                    push!(imps_il.ks, x3)
+                    push!(imps_il.ls, x4)
+                    push!(imps_il.types, atom_types_to_string(types...))
+                    push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
+                                                phases=T.(tt.phases), ks=T.(tt.ks), proper=false))
                 end
             else
-                if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j,   l)   = (l,   j)
-                    (r2,  r4)  = (r4,  r2)
-                    (ta2, ta4) = (ta4, ta2)
-                end
-                if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k,   l)   = (l,   k)
-                    (r3,  r4)  = (r4,  r3)
-                    (ta3, ta4) = (ta4, ta3)
-                end
-                if r2 > r3 || (r2 == r3 && ta2 > ta3)
-                    (j, k) = (k, j)
-                end
+                push!(imps_il.is, j)
+                push!(imps_il.js, k)
+                push!(imps_il.ks, c)
+                push!(imps_il.ls, l)
+                push!(imps_il.types, atom_types_to_string(types...))
+                push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
+                                                    phases=T.(tt.phases), ks=T.(tt.ks), proper=false))
             end
-        elseif ordering == "charmm"
-            # If wildcards were used then apply the same Amber tie-break, else unambiguous
-            if has_wild
-                if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j,   l)   = (l,   j)
-                    (r2,  r4)  = (r4,  r2)
-                    (ta2, ta4) = (ta4, ta2)
-                end
-                if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k,   l)   = (l,   k)
-                    (r3,  r4)  = (r4,  r3)
-                    (ta3, ta4) = (ta4, ta3)
-                end
-            end
-        elseif ordering == "smirnoff"
-            # Add the trefoil set
-            a1, a2, a3, a4 = c, j, k, l
-            for (x1, x2, x3, x4) in ((a1,a2,a3,a4),
-                                     (a1,a3,a4,a2),
-                                     (a1,a4,a2,a3))
-                p1, p2, cen, p3 = x2, x3, x1, x4
-                push!(imps_il.is, p1)
-                push!(imps_il.js, p2)
-                push!(imps_il.ks, cen)
-                push!(imps_il.ls, p3)
-                push!(imps_il.types, atom_types_to_string(key...))
-                push!(imps_il.inters, PeriodicTorsion(
-                    periodicities=tt.periodicities,
-                    phases=T.(tt.phases),
-                    ks=T.(tt.ks),
-                    proper=false,
-                ))
-            end
-            continue # Skip the single-add fallback below
-        else
-            # ordering == "default"
-            # Only if a wildcard is present
-            if has_wild
-                # Mirror the permutation on the current topology atoms (c,j,k,l)
-                src_atoms = (c, j, k, l)
-
-                # We need the two peripheral atoms in positions 2 and 3, and the remaining
-                #   peripheral in 4
-                a1 = src_atoms[perm[2]]
-                a2 = src_atoms[perm[3]]
-                a4 = src_atoms[perm[4]]
-
-                # Elements and masses for tie-break
-                e_a1 = Symbol(element_of[a1])
-                e_a2 = Symbol(element_of[a2])
-                m_a1 = T(force_field.atom_types[atom_type_of[a1]].mass)
-                m_a2 = T(force_field.atom_types[atom_type_of[a2]].mass)
-
-                # 1) If same element, lower atom index first
-                # 2) Else, prefer carbon; else heavier mass first
-                if e_a1 == e_a2
-                    if a1 > a2
-                        (a1, a2) = (a2, a1)
-                    end
-                elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
-                    (a1, a2) = (a2, a1)
-                end
-
-                # Reassign current triplet to ordered pair and remaining peripheral
-                j, k, l = a1, a2, a4
-            end
-            # If no wildcard leave j, k, l as-is
         end
-
-        push!(imps_il.is, j)
-        push!(imps_il.js, k)
-        push!(imps_il.ks, c)
-        push!(imps_il.ls, l)
-        push!(imps_il.types, atom_types_to_string(key...))
-        push!(imps_il.inters, PeriodicTorsion(
-            periodicities=tt.periodicities,
-            phases=T.(tt.phases),
-            ks=T.(tt.ks),
-            proper=false,
-        ))
     end
     empty!(force_field.torsion_resolver.improper_cache)
 
@@ -1093,77 +1018,60 @@ function System(coord_file::AbstractString,
     for (c, j, k, l) in top_impropers
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
-        # Resolve improper params and oriented key (central first)
-        tt, key = resolve_improper_torsion(force_field, t1, t2, t3, t4)
-        isnothing(tt) && continue
-        tt isa PeriodicTorsionType && continue
-
-        # Recover metadata from resolver cache
+        # See if signature is already in cache
         ic = force_field.torsion_resolver.improper_cache
         hit = get(ic, (t1, t2, t3, t4), :miss)
-        ordering = "default"
-        has_wild = false
-        if hit != :miss
+        if hit == nothing
+            # Previously checked, and doesn't appear in the database
+            continue
+        elseif hit != :miss
+            # Signature was cached
+            # Collect permutation and parameters
             perm, ridx = hit
-            r = force_field.torsion_resolver.rules[ridx]
-            has_wild = r.has_wildcard
+            tt = force_field.torsion_resolver.rules[ridx].params
+            isnothing(tt) && continue
+            tt isa PeriodicTorsionType && continue
 
             # Reorder indices based on how atoms were permuted
             src_atoms = (c, j, k, l)
             j = src_atoms[perm[2]]
             k = src_atoms[perm[3]]
             l = src_atoms[perm[4]]
-
-            # refresh types after remapping
-            t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
+            src = (t1, t2, t3, t4)
+            types = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         end
 
-        # topology indices for current j,k,l
-        _, r2, res2, ta2 = atom_lookup[j]
-        _, r3, res3, ta3 = atom_lookup[k]
-        _, r4, res4, ta4 = atom_lookup[l]
-
-        e2 = Symbol(element_of[j])
-        e3 = Symbol(element_of[k])
-        e4 = Symbol(element_of[l])
-
-        if has_wild
-            # Mirror the permutation on the current topology atoms (c,j,k,l)
-            src_atoms = (c, j, k, l)
-
-            # We need the two peripheral atoms in positions 2 and 3, and the remaining
-            #   peripheral in 4
-            a1 = src_atoms[perm[2]]
-            a2 = src_atoms[perm[3]]
-            a4 = src_atoms[perm[4]]
-
-            # Elements and masses for tie-break
-            e_a1 = Symbol(element_of[a1])
-            e_a2 = Symbol(element_of[a2])
-            m_a1 = T(force_field.atom_types[atom_type_of[a1]].mass)
-            m_a2 = T(force_field.atom_types[atom_type_of[a2]].mass)
-
-            # 1) If same element, lower atom index first
-            # 2) Else, prefer carbon; else heavier mass first
-            if e_a1 == e_a2
-                if a1 > a2
-                    (a1, a2) = (a2, a1)
-                end
-            elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
-                (a1, a2) = (a2, a1)
+        if hit == :miss
+            # Signature was not found
+            # Resolve improper params and oriented key (central first)
+            hit = resolve_improper_torsion(force_field, t1, t2, t3, t4, (c,j,k,l), 
+                             atom_type_of, resnum_of, template_id_of, element_of)
+            if hit == nothing
+                continue
+            elseif hit == :miss
+                error("Can't match torsion, but something wrong in implementation")
             end
+            perm, ridx = hit
+            tt = force_field.torsion_resolver.rules[ridx].params               
+            isnothing(tt) && continue
+            tt isa PeriodicTorsionType && continue
 
-            # Reassign current triplet to ordered pair and remaining peripheral.
-            j, k, l = a1, a2, a4
+            # Reorder indices based on how atoms were permuted
+            src_atoms = (c, j, k, l)
+            j = src_atoms[perm[2]]
+            k = src_atoms[perm[3]]
+            l = src_atoms[perm[4]]
+            src = (t1, t2, t3, t4)
+            types = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         end
-        # If no wildcard leave j, k, l as-is
-
-        push!(htors_il.is, c)
-        push!(htors_il.js, j)
-        push!(htors_il.ks, k)
-        push!(htors_il.ls, l)
-        push!(htors_il.types, atom_types_to_string(key...))
-        push!(htors_il.inters, HarmonicTorsion(k=T(tt.k), θ0=T(tt.θ0)))
+        if hit != :miss
+            push!(htors_il.is, c)
+            push!(htors_il.js, j)
+            push!(htors_il.ks, k)
+            push!(htors_il.ls, l)
+            push!(htors_il.types, atom_types_to_string(types...))
+            push!(htors_il.inters, HarmonicTorsion(k=T(tt.k), θ0=T(tt.θ0)))
+        end
     end
 
     # CMAP corrections

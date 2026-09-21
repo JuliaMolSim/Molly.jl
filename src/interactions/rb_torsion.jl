@@ -67,3 +67,46 @@ end
     return d.c0 + cos_ψ * (d.c1 + cos_ψ * (d.c2 + cos_ψ * (d.c3 +
                                cos_ψ * (d.c4 + cos_ψ * d.c5))))
 end
+
+# λ version of `RBTorsion` for alchemical systems, built by `to_lambda_function`. The torsion
+# itself is evaluated by `RBTorsion` and scaled by the λ prefactor of the four atoms.
+@kwdef struct RBTorsionλ{T, LM, SCH}
+    c0::T
+    c1::T
+    c2::T
+    c3::T
+    c4::T
+    c5::T
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+end
+
+function to_lambda_function(inter::RBTorsion; λ_mixing=MinimumMixing(),
+                            scheduler=DefaultLambdaScheduler())
+    return RBTorsionλ(c0=inter.c0, c1=inter.c1, c2=inter.c2, c3=inter.c3, c4=inter.c4,
+                      c5=inter.c5, λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+rb_torsion(d::RBTorsionλ) = RBTorsion(d.c0, d.c1, d.c2, d.c3, d.c4, d.c5)
+
+@inline function rb_torsion_λ(d::RBTorsionλ, atom_i, atom_j, atom_k, atom_l)
+    T = typeof(ustrip(atom_i.λ))
+    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))
+    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role,
+                                        atom_l.alch_role))
+    λ, λ_params = scale_dual(d.scheduler, λ_glob, pair_role)
+    return λ
+end
+
+@inline function force(d::RBTorsionλ, coords_i, coords_j, coords_k, coords_l, boundary,
+                       atom_i, atom_j, atom_k, atom_l, args...)
+    fs = force(rb_torsion(d), coords_i, coords_j, coords_k, coords_l, boundary)
+    λ = rb_torsion_λ(d, atom_i, atom_j, atom_k, atom_l)
+    return SpecificForce4Atoms(λ * fs.f1, λ * fs.f2, λ * fs.f3, λ * fs.f4)
+end
+
+@inline function potential_energy(d::RBTorsionλ, coords_i, coords_j, coords_k,
+                                  coords_l, boundary, atom_i, atom_j, atom_k, atom_l, args...)
+    pe = potential_energy(rb_torsion(d), coords_i, coords_j, coords_k, coords_l, boundary)
+    return rb_torsion_λ(d, atom_i, atom_j, atom_k, atom_l) * pe
+end

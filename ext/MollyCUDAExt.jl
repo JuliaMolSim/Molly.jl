@@ -24,6 +24,14 @@ using CUDA
 using Atomix
 using KernelAbstractions
 
+function Molly.get_gpu_devices(::Val{true})
+    return collect(CUDA.devices())
+end
+
+function Molly.set_gpu_device!(gpu_id, ::Val{true})
+    CUDA.device!(gpu_id)
+end
+
 # At the moment this is needed, since a change on naming for CUDA 6
 # - In principle, CUDA does export Const, but it conflicts with another
 #   namespace, so annotation is required.

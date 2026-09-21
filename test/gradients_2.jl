@@ -1035,7 +1035,7 @@ end
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("DoubleExponentialSC", DoubleExponentialSoftCore(α=T(16.766), β=T(4.427),
                                     weight_special=w, cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true), ()),
+                                    use_neighbors=true), lost_w),
         ("Gravity"          , Gravity(G=T(1.0), use_neighbors=true), ()),
         ("LJSCBeutler"      , LennardJonesSoftCoreBeutler(α=T(0.5), weight_special=w,
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), lost_w),

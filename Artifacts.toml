@@ -5,3 +5,11 @@ lazy = true
     [[ani2x.download]]
     sha256 = "9027c79156ea0de5b5435990c6aa903b4de991350416fdb847ede91964761ae2"
     url = "https://github.com/sivasathyaseeelan/Molly.jl/releases/download/ani2x-data-v1/ani2x_data.tar.gz"
+
+[openfe_tyk2]
+git-tree-sha1 = "7c3c8de4c9037378811bfb6015813874ef049efc"
+lazy = true
+
+    [[openfe_tyk2.download]]
+    sha256 = "2a705a81b80fd95b5751d7c82ad0fcd0c6d24296f2663f126db2ed1715b9c53f"
+    url = "https://github.com/ERovers/Molly.jl/releases/download/openfe-tyk2-data-v1/openfe_tyk2_data.tar.gz"

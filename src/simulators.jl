@@ -108,7 +108,9 @@ function check_array_nans(svec_arrays, labels, step_n)
         err_msg = "NaNs found at the end of step $step_n:"
         for (svec_array, label) in zip(svec_arrays, labels)
             c = count(isnan_svec, svec_array)
+            idx = findall(x -> isnan_svec(x), svec_array)
             err_msg *= "\n    $label - $c out of $(length(svec_array)) contain a NaN"
+            err_msg *= "\n    indexes: $idx"
         end
         throw(NaNSimulationError(err_msg))
     end
@@ -2060,7 +2062,8 @@ function simulate!(sys::ReplicaSystem,
                    show_progress=default_show_progress(),
                    check_nans=default_check_nans(sys, sim),
                    rng=Random.default_rng(),
-                   strictness=default_strictness())
+                   strictness=default_strictness(),
+                   kwargs...)
     check_simulate_inputs(init_step, run_loggers, strictness)
     if assign_velocities
         master_sys = sys.partition.master_sys
@@ -2071,28 +2074,27 @@ function simulate!(sys::ReplicaSystem,
         # If the system does not use units, k_B is already a raw float
         k_B_val = e_unit == NoUnits ? k_B : ustrip(uconvert(e_unit / u"K", k_B))
         
-        for i in 1:sys.n_replicas
-            state_idx = sys.state_indices[i]
-            beta = sys.betas[state_idx]
-            
+        for k in 1:sys.n_replicas
             # Derive target temperature from internal beta: T = 1 / (k_B * beta)
-            T_val = 1 / (k_B_val * beta)
+            T_val = 1 / (k_B_val * sys.betas[k])
             T_target = e_unit == NoUnits ? T_val : (T_val * u"K")
-            
-            # Assign random velocities directly to the replica's array
-            random_velocities!(sys.replica_velocities[i], master_sys, T_target; rng=rng)
+
+            # Assign random velocities to the replica currently in state k
+            random_velocities!(sys.replica_velocities[sys.state_indices[k]], master_sys, T_target;
+                               rng=rng)
         end
     end
 
+    # Further keyword arguments, such as `gpu_devices`, are passed to `simulate_remd!`
     return simulate_remd!(sys, sim, n_steps_or_time; n_threads=n_threads, run_loggers=run_loggers,
                           shortcut=shortcut, init_step=init_step, show_progress=show_progress,
-                          check_nans=check_nans, rng=rng, strictness=strictness)
+                          check_nans=check_nans, rng=rng, strictness=strictness, kwargs...)
 end
 
 @doc raw"""
     remd_exchange!(sys::ReplicaSystem, sim::ReplicaExchangeMD, i::Integer, j::Integer; <keyword arguments>)
 
-Attempt a generalized replica exchange between physical replicas `i` and `j`. 
+Attempt a generalized replica exchange between the replicas in thermodynamic states `i` and `j`.
 """
 function remd_exchange!(sys::ReplicaSystem,
                         sim::ReplicaExchangeMD,
@@ -2100,35 +2102,36 @@ function remd_exchange!(sys::ReplicaSystem,
                         j::Integer;
                         rng=Random.default_rng())
     
-    # Identify the current thermodynamic states (m and n) assigned to physical replicas i and j
+    # Identify the replica m and n assigned to the thermodynamic states i and j, respectively
     m = sys.state_indices[i]
     n = sys.state_indices[j]
     
     # Retrieve inverse temperatures directly from the betas array
-    beta_m = sys.betas[m]
-    beta_n = sys.betas[n]
+    beta_i = sys.betas[i]
+    beta_j = sys.betas[j]
     
-    coords_i = sys.replica_coords[i]
-    coords_j = sys.replica_coords[j]
-    bound_i  = sys.replica_boundaries[i]
-    bound_j  = sys.replica_boundaries[j]
+    # Get last coordinates and boundaries of each thermodynamic states
+    coords_m = sys.replica_coords[m]
+    coords_n = sys.replica_coords[n]
+    bound_m  = sys.replica_boundaries[m]
+    bound_n  = sys.replica_boundaries[n]
     
     # Evaluate energies via AlchemicalPartition API
-    U_m_xi = evaluate_energy!(sys.partition, coords_i, bound_i, m; force_recompute=false)
-    U_n_xi = evaluate_energy!(sys.partition, coords_i, bound_i, n; force_recompute=false)
+    U_i_xm = evaluate_energy!(sys.partition, coords_m, bound_m, i; force_recompute=false)
+    U_j_xm = evaluate_energy!(sys.partition, coords_m, bound_m, j; force_recompute=false)
     
-    U_n_xj = evaluate_energy!(sys.partition, coords_j, bound_j, n; force_recompute=false)
-    U_m_xj = evaluate_energy!(sys.partition, coords_j, bound_j, m; force_recompute=false)
+    U_i_xn = evaluate_energy!(sys.partition, coords_n, bound_n, i; force_recompute=false)
+    U_j_xn = evaluate_energy!(sys.partition, coords_n, bound_n, j; force_recompute=false)
     
     # Strip units for Metropolis math
     e_unit = sys.partition.master_sys.energy_units
-    U_m_xi_val = ustrip(e_unit, U_m_xi)
-    U_n_xi_val = ustrip(e_unit, U_n_xi)
-    U_n_xj_val = ustrip(e_unit, U_n_xj)
-    U_m_xj_val = ustrip(e_unit, U_m_xj)
+    U_i_xm_val = ustrip(e_unit, U_i_xm)
+    U_j_xm_val = ustrip(e_unit, U_j_xm)
+    U_j_xn_val = ustrip(e_unit, U_j_xn)
+    U_i_xn_val = ustrip(e_unit, U_i_xn)
     
     # Generalized Metropolis Criterion
-    delta = beta_n * U_n_xi_val - beta_m * U_m_xi_val + beta_m * U_m_xj_val - beta_n * U_n_xj_val
+    delta = beta_j * U_j_xm_val - beta_i * U_i_xm_val + beta_i * U_i_xn_val - beta_j * U_j_xn_val
     
     should_exchange = delta <= 0 || rand(rng) < exp(-delta)
     
@@ -2138,13 +2141,66 @@ function remd_exchange!(sys::ReplicaSystem,
         sys.state_indices[j] = m
         
         # Rescale velocities to obey equipartition if the exchange involves a temperature differential
-        if beta_m != beta_n
-            sys.replica_velocities[i] .*= sqrt(beta_m / beta_n)
-            sys.replica_velocities[j] .*= sqrt(beta_n / beta_m)
+        if beta_i != beta_j
+            sys.replica_velocities[m] .*= sqrt(beta_i / beta_j)
+            sys.replica_velocities[n] .*= sqrt(beta_j / beta_i)
         end
     end
     
     return delta, should_exchange
+end
+
+# Total steps, exchange cycles, steps per cycle and steps left over after the last cycle
+function remd_schedule(remd_sim::ReplicaExchangeMD, n_steps_or_time)
+    n_steps = calc_n_steps(n_steps_or_time, remd_sim.dt)
+    n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
+    cycle_length = n_cycles > 0 ? n_steps ÷ n_cycles : 0
+    remaining_steps = n_cycles > 0 ? n_steps % n_cycles : n_steps
+    return n_steps, n_cycles, cycle_length, remaining_steps
+end
+
+remd_logger_mode(sys::ReplicaSystem, run_loggers) =
+    run_loggers == false ? false : (sys.initial_log_pending ? true : :skipstart)
+
+# States built from the same System share interaction and integrator objects, and threads running
+# those states together must not share mutable buffers, so any repeated object is copied
+function remd_unshared(items)
+    seen = Base.IdSet{Any}()
+    return map(items) do x
+        x in seen ? deepcopy(x) : (push!(seen, x); x)
+    end
+end
+
+# Attempt exchanges between neighbouring states, alternating which pairs are tried every cycle
+function remd_exchange_sweep!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, cycle::Integer,
+                              step_n::Integer, run_loggers, n_threads::Integer, rng)
+    log_exchanges = run_loggers != false && !isnothing(sys.exchange_logger)
+    n_attempts = 0
+    for n in (1 + cycle % 2):2:(sys.n_replicas - 1)
+        n_attempts += 1
+        Δ, exchanged = remd_exchange!(sys, remd_sim, n, n + 1; rng=rng)
+        if log_exchanges && exchanged
+            log_exchange!(sys.exchange_logger, sys, nothing, step_n, nothing;
+                          indices=(n, n + 1), delta=Δ, n_threads=n_threads)
+        end
+    end
+    if log_exchanges
+        log_exchange!(sys.exchange_logger, sys, nothing, step_n, nothing)
+    end
+    return n_attempts
+end
+
+function finish_remd!(sys::ReplicaSystem, n_steps, n_attempts, init_step, run_loggers)
+    if run_loggers != false && !isnothing(sys.exchange_logger)
+        if sys.exchange_logger isa ReplicaExchangeLogger
+            finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts,
+                         end_step=(init_step + n_steps))
+        else
+            finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts)
+        end
+    end
+    sys.current_step = init_step + n_steps
+    return sys
 end
 
 @doc raw"""
@@ -2178,6 +2234,12 @@ The simulation divides the total `n_steps` into cycles based on the time step an
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
+- `gpu_devices`: on GPU, the devices to use, with one worker process per device.
+
+Each thermodynamic state `k` simulates the replica currently assigned to it,
+`sys.replica_coords[sys.state_indices[k]]`, with its own interactions, integrator, neighbor finder
+and loggers, so `sys.replica_loggers[k]` records whichever replica is in state `k`. On GPU a new
+[`ReplicaSystem`](@ref) is returned, so use the returned value on both CPU and GPU.
 """
 function simulate_remd!(sys::ReplicaSystem,
                         remd_sim::ReplicaExchangeMD,
@@ -2196,108 +2258,285 @@ function simulate_remd!(sys::ReplicaSystem,
                             "to avoid race conditions"))
     end
     sys.current_step = init_step
-    n_steps = calc_n_steps(n_steps_or_time, remd_sim.dt)
+    n_steps, n_cycles, cycle_length, remaining_steps = remd_schedule(remd_sim, n_steps_or_time)
     thread_div = equal_parts(n_threads, sys.n_replicas)
+    general_inters = remd_unshared(sys.state_general_inters)
+    integrators = remd_unshared(sys.integrators)
 
-    n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
-    cycle_length = n_cycles > 0 ? n_steps ÷ n_cycles : 0
-    remaining_steps = n_cycles > 0 ? n_steps % n_cycles : n_steps
     n_attempts = 0
-
-    progress = setup_progress(n_steps, show_progress)
+    progress = setup_progress(n_cycles, show_progress)
     for cycle in 1:n_cycles
-        cycle_start_step = init_step + (cycle - 1) * cycle_length
-        run_loggers_used = (run_loggers == false ? false : (sys.initial_log_pending ? true : :skipstart))
-        @sync for i in 1:sys.n_replicas
-            state_idx = sys.state_indices[i]
-            integrator = sys.integrators[state_idx]
-            
-            # Construct active_sys with the FULL interaction lists for standard MD forces
-            active_sys = System(sys.partition.master_sys;
-                coords = sys.replica_coords[i],
-                velocities = sys.replica_velocities[i],
-                boundary = sys.replica_boundaries[i],
-                atoms = sys.partition.λ_atoms[state_idx],
-                pairwise_inters = sys.state_pairwise_inters[state_idx],
-                specific_inter_lists = sys.state_specific_inter_lists[state_idx],
-                general_inters = sys.state_general_inters[state_idx],
-                neighbor_finder = sys.replica_neighbor_finders[i],
-                loggers = sys.replica_loggers[i]
-            )
-            
-            # Enforce n_threads >= 1 to prevent buffer chunk crashes
-            Threads.@spawn simulate!(active_sys, integrator, cycle_length;
-                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers_used,
-                                     init_step=cycle_start_step, check_nans=check_nans,
-                                     rng=rng, strictness=strictness)
-        end
-        sys.initial_log_pending = false
-
-        cycle_parity = cycle % 2
-        for n in (1 + cycle_parity):2:(sys.n_replicas - 1)
-            n_attempts += 1
-            m = n + 1
-            Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; rng=rng)
-            
-            if run_loggers != false && exchanged && !isnothing(sys.exchange_logger)
-                log_property!(sys.exchange_logger, sys, nothing,
-                              init_step + cycle * cycle_length, nothing; indices=(n, m),
-                              delta=Δ, n_threads=n_threads, strictness=strictness)
-            end
-        end
+        remd_propagate_cpu!(sys, general_inters, integrators, cycle_length,
+                            init_step + (cycle - 1) * cycle_length, remd_logger_mode(sys, run_loggers),
+                            thread_div, check_nans, rng, strictness)
+        n_attempts += remd_exchange_sweep!(sys, remd_sim, cycle, init_step + cycle * cycle_length,
+                                           run_loggers, n_threads, rng)
         next_nograd!(progress)
     end
 
     if remaining_steps > 0
-        remainder_start_step = init_step + n_cycles * cycle_length
-        run_loggers_used = (run_loggers == false ? false : (sys.initial_log_pending ? true : :skipstart))
-        @sync for i in 1:sys.n_replicas
-            state_idx = sys.state_indices[i]
-            integrator = sys.integrators[state_idx]
-            
-            active_sys = System(sys.partition.master_sys;
-                coords = sys.replica_coords[i],
-                velocities = sys.replica_velocities[i],
-                boundary = sys.replica_boundaries[i],
-                atoms = sys.partition.λ_atoms[state_idx],
-                pairwise_inters = sys.state_pairwise_inters[state_idx],
-                specific_inter_lists = sys.state_specific_inter_lists[state_idx],
-                general_inters = sys.state_general_inters[state_idx],
-                neighbor_finder = sys.replica_neighbor_finders[i],
-                loggers = sys.replica_loggers[i]
-            )
-            
-            Threads.@spawn simulate!(active_sys, integrator, remaining_steps;
-                                     n_threads=max(1, thread_div[i]), run_loggers=run_loggers_used,
-                                     init_step=remainder_start_step, check_nans=check_nans,
-                                     rng=rng, strictness=strictness)
-        end
-        sys.initial_log_pending = false
+        remd_propagate_cpu!(sys, general_inters, integrators, remaining_steps,
+                            init_step + n_cycles * cycle_length, remd_logger_mode(sys, run_loggers),
+                            thread_div, check_nans, rng, strictness)
     end
 
-    if run_loggers != false && !isnothing(sys.exchange_logger)
-        if sys.exchange_logger isa ReplicaExchangeLogger
-            finish_logs!(
-                sys.exchange_logger;
-                n_steps=n_steps,
-                n_attempts=n_attempts,
-                end_step=(init_step + n_steps),
-            )
-        else
-            finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts)
-        end
-    end
-    sys.current_step = init_step + n_steps
+    return finish_remd!(sys, n_steps, n_attempts, init_step, run_loggers)
+end
 
+# State k integrates the replica currently in it, `state_indices[k]`, and records into its own
+# loggers. Coordinates, velocities and the boundary are written back to that replica.
+function remd_propagate_cpu!(sys::ReplicaSystem, general_inters, integrators, n_steps, start_step,
+                             run_loggers, thread_div, check_nans, rng, strictness)
+    master_sys = sys.partition.master_sys
+    active_systems = Vector{Any}(undef, sys.n_replicas)
+    @sync for k in 1:sys.n_replicas
+        r = sys.state_indices[k]
+        active_sys = System(master_sys;
+            coords=sys.replica_coords[r],
+            velocities=sys.replica_velocities[r],
+            boundary=sys.replica_boundaries[r],
+            atoms=sys.partition.λ_atoms[k],
+            pairwise_inters=sys.state_pairwise_inters[k],
+            specific_inter_lists=sys.state_specific_inter_lists[k],
+            general_inters=general_inters[k],
+            neighbor_finder=sys.replica_neighbor_finders[k],
+            loggers=sys.replica_loggers[k],
+        )
+        active_systems[k] = active_sys
+        # Enforce n_threads >= 1 to prevent buffer chunk crashes
+        Threads.@spawn simulate!(active_sys, integrators[k], n_steps;
+                                 n_threads=max(1, thread_div[k]), run_loggers=run_loggers,
+                                 init_step=start_step, check_nans=check_nans, show_progress=false,
+                                 rng=rng, strictness=strictness)
+    end
+    for k in 1:sys.n_replicas
+        r = sys.state_indices[k]
+        sys.replica_coords[r] = active_systems[k].coords
+        sys.replica_velocities[r] = active_systems[k].velocities
+        sys.replica_boundaries[r] = active_systems[k].boundary
+        sys.replica_loggers[k] = active_systems[k].loggers
+    end
+    sys.initial_log_pending = false
     return sys
 end
 
+function simulate_remd!(sys::ReplicaSystem{<:Any, <:AbstractGPUArray},
+                        remd_sim::ReplicaExchangeMD,
+                        n_steps_or_time;
+                        n_threads::Integer=Threads.nthreads(),
+                        run_loggers=true,
+                        shortcut=nothing, # Unused
+                        init_step::Integer=sys.current_step,
+                        show_progress=default_show_progress(),
+                        check_nans=default_check_nans(sys, remd_sim),
+                        rng=Random.default_rng(),
+                        strictness=default_strictness(),
+                        gpu_devices=get_gpu_devices(Val(true)))
+    check_simulate_inputs(init_step, run_loggers, strictness)
+    if rng != Random.default_rng()
+        throw(ArgumentError("rng for simulate_remd! must be Random.default_rng() " *
+                            "to avoid race conditions"))
+    end
+    n_steps, n_cycles, cycle_length, remaining_steps = remd_schedule(remd_sim, n_steps_or_time)
+    rep_id_proc, n_proc = divide_gpus((nprocs() - 1), gpu_devices, sys.n_replicas, sys)
+
+    device_AT = array_type(sys.replica_coords[1])
+    sys = ReplicaSystem(sys;
+                        replica_coords=from_device.(sys.replica_coords),
+                        replica_velocities=from_device.(sys.replica_velocities))
+    sys.current_step = init_step
+
+    n_attempts = 0
+    progress = setup_progress(n_cycles, show_progress)
+    for cycle in 1:n_cycles
+        remd_propagate_gpu!(sys, rep_id_proc, n_proc, cycle_length,
+                            init_step + (cycle - 1) * cycle_length, remd_logger_mode(sys, run_loggers),
+                            check_nans, strictness)
+        n_attempts += remd_exchange_sweep!(sys, remd_sim, cycle, init_step + cycle * cycle_length,
+                                           run_loggers, n_threads, rng)
+        next_nograd!(progress)
+    end
+
+    if remaining_steps > 0
+        remd_propagate_gpu!(sys, rep_id_proc, n_proc, remaining_steps,
+                            init_step + n_cycles * cycle_length, remd_logger_mode(sys, run_loggers),
+                            check_nans, strictness)
+    end
+
+    finish_remd!(sys, n_steps, n_attempts, init_step, run_loggers)
+    return ReplicaSystem(sys; replica_coords=to_device.(sys.replica_coords, device_AT),
+                              replica_velocities=to_device.(sys.replica_velocities, device_AT))
+end
+
+# The GPU counterpart of `remd_propagate_cpu!`: every worker advances its block of states on its
+# own device, with the systems and integrators that `divide_gpus` placed there
+function remd_propagate_gpu!(sys::ReplicaSystem, rep_id_proc, n_proc, n_steps, start_step,
+                             run_loggers, check_nans, strictness)
+    futures = Vector{Future}(undef, n_proc)
+    @sync for i in 1:n_proc
+        @async begin
+            futures[i] = remotecall(workers()[i], rep_id_proc[i], sys.state_indices,
+                                    sys.replica_coords, sys.replica_velocities,
+                                    sys.replica_boundaries, sys.replica_loggers, n_steps,
+                                    start_step, run_loggers, check_nans,
+                                    strictness) do state_ids, state_indices, replica_coords,
+                                        replica_velocities, replica_boundaries, replica_loggers,
+                                        n_steps, start_step, run_loggers, check_nans, strictness
+                results = Dict()
+                AT = array_type(local_sys[1].coords)
+                for (j, k) in enumerate(state_ids)
+                    r = state_indices[k]
+                    active_sys = System(local_sys[j];
+                        coords=to_device(replica_coords[r], AT),
+                        velocities=to_device(replica_velocities[r], AT),
+                        boundary=replica_boundaries[r],
+                        loggers=map(process_logger, replica_loggers[k]),
+                    )
+                    simulate!(active_sys, local_int[j], n_steps;
+                              n_threads=1, run_loggers=run_loggers, init_step=start_step,
+                              check_nans=check_nans, show_progress=false,
+                              rng=Random.default_rng(), strictness=strictness)
+                    results[k] = (from_device(active_sys.coords), active_sys.boundary,
+                                  from_device(active_sys.velocities), active_sys.loggers)
+                end
+                return results
+            end
+        end
+    end
+
+    for (k, (coords, boundary, velocities, loggers)) in Base.merge(fetch.(futures)...)
+        r = sys.state_indices[k]
+        sys.replica_coords[r] = coords
+        sys.replica_boundaries[r] = boundary
+        sys.replica_velocities[r] = velocities
+        sys.replica_loggers[k] = loggers
+    end
+    sys.initial_log_pending = false
+    return sys
+end
+
+# Additional helper function of GPU HREMD
 # Calculate k almost equal patitions of n
 @inline function equal_parts(n, k)
     ndiv = n ÷ k
     nrem = n % k
     n_parts = ntuple(i -> (i <= nrem) ? ndiv + 1 : ndiv, k)
     return n_parts
+end
+
+# Set GPU devices
+function get_gpu_devices(::Val{false})
+    return nothing
+end
+
+function set_gpu_device!(gpu_id, ::Val{false})
+    return nothing
+end
+
+# Reset trajectorywriter on processes
+is_c_pointer_type(::Type{<:Ptr}) = true
+is_c_pointer_type(::Type{<:Chemfiles.CxxPointer}) = true
+is_c_pointer_type(::Type) = false
+
+function has_c_pointer(::Type{T}) where T
+    is_c_pointer_type(T) && return true
+    isprimitivetype(T) && return false
+    
+    return any(has_c_pointer, fieldtypes(T))
+end
+
+function reinit_c_pointers(val::T) where T
+    # Fast-path: If the object contains no C pointers, return it as-is
+    if !has_c_pointer(T)
+        return val
+    end
+
+    # If the object itself is a C-wrapper type (e.g., Chemfiles.Topology)
+    # Re-invoke its constructor T() to allocate fresh memory in this process
+    if applicable(T) && !isabstracttype(T) && hasmethod(T, Tuple{})
+        return T() # Calls Chemfiles.Topology(), Chemfiles.Frame(), etc.
+    end
+
+    # For composite structs (like TrajectoryWriter), map recursively over all fields
+    new_vals = ntuple(i -> reinit_c_pointers(getfield(val, i)), fieldcount(T))
+    
+    # Re-invoke the positional constructor for the parent struct
+    return T(new_vals...)
+end
+
+# Writers are rebuilt on the workers at every call and keep appending to their own file, so
+#   the file is never deleted and the append warning is not repeated
+function process_logger(logger)
+    if logger isa TrajectoryWriter
+        return TrajectoryWriter(logger.n_steps, logger.filepath;
+                                logger.format, logger.correction, logger.atom_inds,
+                                logger.excluded_res, logger.write_velocities,
+                                logger.write_boundary, overwrite=false, suppress_warn=true)
+    else
+        return logger
+    end
+end
+
+# The replica system whose state systems the workers hold, so that later `simulate_remd!` calls
+# on it (or on the system it returns, which shares its partition) only send coordinates
+const remd_workers_key = Ref{Any}(nothing)
+
+@inline function divide_gpus(n_proc, gpu_devices, k, sys)
+    if n_proc != length(gpu_devices)
+        throw(ArgumentError("Number of processes ($n_proc) must be equal to n_gpu ($(length(gpu_devices))) when simulating on GPU"))
+    end
+    # Deal the states out in turn, so every state belongs to exactly one worker
+    n_blocks = min(n_proc, k)
+    rep_id_proc = [collect(i:n_blocks:k) for i in 1:n_blocks]
+    # A weak reference, so a new partition can never be mistaken for a freed one
+    key = (WeakRef(sys.partition), collect(gpu_devices), workers())
+    cached = remd_workers_key[]
+    if !isnothing(cached) && cached[1].value === sys.partition && cached[2:3] == key[2:3]
+        return rep_id_proc, n_blocks
+    end
+
+    if n_proc < k
+        @warn("Number of processes ($n_proc) less than the number of replicas ($k), some replicas will not be simulated in parallel, but sequentially")
+    elseif n_proc > k
+        @warn("Number of processes ($n_proc) greater than the number of replicas ($k), some processes will be idle during the simulation, 
+        consider reducing the number of processes to match the number of replicas for more efficient simulation")
+    end
+    println("Attach GPUs to workers")
+    @sync for (i, pid) in enumerate(workers())
+        @async begin
+        remotecall_fetch(pid, gpu_devices) do gpu_devices
+            gpu_id = gpu_devices[i]
+            set_gpu_device!(gpu_id, Val(true))
+            println("Worker $pid initialized on GPU $gpu_id")
+            flush(stdout)
+        end
+        end
+    end
+
+    @sync for (i, rep_ids) in enumerate(rep_id_proc)
+        @async begin
+        remotecall_fetch(workers()[i], rep_ids, sys) do rep_id, rep_sys
+            systems = []
+            integrators = []
+            for j in rep_id
+                new_sys = System(rep_sys.partition.master_sys,
+                                    atoms = rep_sys.partition.λ_atoms[j],
+                                    pairwise_inters = rep_sys.state_pairwise_inters[j],
+                                    specific_inter_lists = rep_sys.state_specific_inter_lists[j],
+                                    general_inters = rep_sys.state_general_inters[j],
+                                    neighbor_finder = rep_sys.replica_neighbor_finders[j],
+                                    )
+                push!(systems, deepcopy(new_sys))
+                push!(integrators, deepcopy(rep_sys.integrators[j]))
+            end
+            global local_sys = systems
+            global local_int = integrators
+        end
+        end
+    end
+    remd_workers_key[] = key
+
+    return rep_id_proc, n_blocks
 end
 
 """

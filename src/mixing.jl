@@ -6,8 +6,7 @@ struct LJZeroShortcut end
 
 function shortcut_pair(::LJZeroShortcut, atom_i, atom_j, args...)
     return iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-           iszero_value(atom_i.σ) || iszero_value(atom_j.σ) ||
-           iszero_value(atom_i.λ) || iszero_value(atom_j.λ)
+           iszero_value(atom_i.σ) || iszero_value(atom_j.σ) 
 end
 
 struct BuckinghamZeroShortcut end
@@ -17,12 +16,32 @@ function shortcut_pair(::BuckinghamZeroShortcut, atom_i, atom_j, args...)
            (iszero_value(atom_i.C) || iszero_value(atom_j.C))
 end
 
+function params_mixing(λ_params, params, args...)
+    return params
+end
+
+function params_mixing(λ_params, params::Tuple, args...)
+    return sum(((1-λ_params),λ_params) .* params)
+end
+
 # Extra Atom fields that a mixing rule reads
 mixing_atom_fields(mr) = ()
 
 struct LorentzMixing end
 
-xy_mixing(::LorentzMixing, x, y, args...) = (x + y) / 2
+function xy_mixing(::LorentzMixing, x, y, args...) 
+    return (x + y) / 2
+end
+
+function xy_mixing(::LorentzMixing, x::Tuple, y::Tuple, λ_params, alch_role) 
+    xA, xB = x
+    yA, yB = y
+    A = (xA + yA) / 2
+    B = (xB + yB) / 2
+    A, B = switchAB(alch_role, A, B)
+    return (1-λ_params)*A + λ_params*B
+end
+
 σ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.σ , atom_j.σ, args...)
 ϵ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.ϵ , atom_j.ϵ, args...)
 λ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.λ , atom_j.λ, args...)
@@ -32,7 +51,18 @@ C_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.C , at
 
 struct GeometricMixing end
 
-xy_mixing(::GeometricMixing, x, y, args...) = sqrt(x * y)
+function xy_mixing(::GeometricMixing, x, y, args...) 
+    return sqrt(x * y)
+end
+
+function xy_mixing(::GeometricMixing, x::Tuple, y::Tuple, λ_params, alch_role, args...) 
+    xA,xB = x
+    yA,yB = y
+    A = sqrt(xA*yA)
+    B = sqrt(xB*yB)
+    return (1-λ_params)*A + λ_params*B
+end
+
 σ_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.σ, atom_j.σ, args...)
 ϵ_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.ϵ, atom_j.ϵ, args...)
 λ_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.λ, atom_j.λ, args...)
@@ -118,14 +148,19 @@ function ϵ_mixing(me::MixingException, atom_i, atom_j, args...)
     return get_pair(me.exceptions, atom_i.atom_type, atom_j.atom_type, default)
 end
 
-function λ_mixing(me::MixingException, atom_i, atom_j, args...)
+@inline function λ_mixing(me::MixingException, atom_i, atom_j, args...)
     default = λ_mixing(me.mixing, atom_i, atom_j, args...)
     return get_pair(me.exceptions, atom_i.atom_type, atom_j.atom_type, default)
 end
 
-
 struct MinimumMixing end
 
-function λ_mixing(m::MinimumMixing, a, b, args...)
-    return min(one(a.λ), min(a.λ, b.λ))
+@inline function λ_mixing(m::MinimumMixing, lambdas::Tuple{T, Vararg{T}}, args...) where T
+    return min(lambdas...)
+end
+
+struct ProductMixing end
+
+@inline function λ_mixing(m::ProductMixing, (a, b), args...)
+    return a.λ*b.λ
 end

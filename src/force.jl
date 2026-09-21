@@ -1063,7 +1063,7 @@ end
 
     if needs_vir
         r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
-        λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+        λ = virial_lambda_factor(inter, (atoms[i], atoms[j]))
         v = λ * r_ji * transpose(sf.f1)
         vir_nounits .+= ustrip.(v)
     end
@@ -1086,9 +1086,7 @@ end
     if needs_vir
         r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j (second atom is the reference, MIC)
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
-        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-        λ = minimum((λ_ji, λ_jk))
+        λ = virial_lambda_factor(inter, (atoms[i], atoms[j], atoms[k]))
         vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) + r_jk * transpose(sf.f3))
     end
     return fs_nounits
@@ -1114,10 +1112,7 @@ end
         r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
         r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
-        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-        λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
-        λ = minimum((λ_ji, λ_jk, λ_jl))
+        λ = virial_lambda_factor(inter, (atoms[i], atoms[j], atoms[k], atoms[l]))
         vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) +
                                 r_jk * transpose(sf.f3) +
                                 r_jl * transpose(sf.f4) )
@@ -1148,11 +1143,7 @@ end
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
         r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
         r_jm = vector(coords[j], coords[m], boundary) # r_m - r_j
-        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-        λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
-        λ_jm = λ_mixing(MinimumMixing(), atoms[j], atoms[m])
-        λ = minimum((λ_ji, λ_jk, λ_jl, λ_jm))
+        λ = virial_lambda_factor(inter, (atoms[i], atoms[j], atoms[k], atoms[l], atoms[m]))
         vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) +
                                 r_jk * transpose(sf.f3) +
                                 r_jl * transpose(sf.f4) +
