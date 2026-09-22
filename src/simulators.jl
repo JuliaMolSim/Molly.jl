@@ -288,6 +288,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                     n_threads=n_threads)
+        neighbors_rebuilt = (neighbors !== neighbors_copy)
         E_trial = minimizer_potential_energy(sys, neighbors, step_n, buffers, sis,
                                              n_threads, strictness)
         if E_trial < E
@@ -297,7 +298,12 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                     E_trial, " - max force ", max_force, " - accepted")
         else
             sys.coords .= coords_copy
-            neighbors = neighbors_copy
+            if neighbors_rebuilt
+                # The previous list can not be reused since a neighbor finder may have
+                #   reused the buffers behind it for the list just found
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                           n_threads=n_threads)
+            end
             hn = hn / 5
             println(sim.log_stream, "Step ", step_n, " - potential energy ",
                     E_trial, " - max force ", max_force, " - rejected")
