@@ -133,53 +133,54 @@ work on-device was the main win.
 
 ---
 
-## Head-to-head: Molly native vs nequip-allegro (PyTorch)
+## Head-to-head: Molly native vs other Allegro implementations
 
-The reference implementation of Allegro is the PyTorch [`nequip-allegro`](https://github.com/mir-group/allegro)
-package. Both run a **comparable-size** model (`l_max=2`, 2 layers, ~4 tensor / 16 scalar channels,
-~11k params) so this measures implementation throughput. Two caveats: the two are **not identical
-ops** (the native op-by-op bit-match to nequip-allegro is a follow-up — read this as "a native-Julia
-Allegro of similar size vs the PyTorch reference", not same-weights), and CPU/CUDA are the same
-**RTX 5080 host** while Metal is the **Apple M3** (cross-machine). Reproduce with
-`benchmark/allegro_torch_bench.py` (nequip) alongside `benchmark/allegro_cuda_compare.jl` and
+The existing Allegro implementations are the PyTorch [`nequip-allegro`](https://github.com/mir-group/allegro)
+(the reference) and the JAX [`allegro-jax`](https://github.com/mariogeiger/allegro-jax) (on e3nn-jax).
+All three run a **comparable-size** model (`l_max=2`, 2 layers, ~4 tensor / 16 scalar channels,
+~11k params) so this measures implementation throughput. Two caveats: they are **not identical ops**
+(the native op-by-op bit-match to nequip-allegro is a follow-up — read this as "a native-Julia
+Allegro of similar size vs the others", not same-weights), and CPU/CUDA are the same **RTX 5080
+host** while Metal is the **Apple M3** (cross-machine). Reproduce with `benchmark/allegro_torch_bench.py`
+(nequip) and `benchmark/allegro_jax_bench.py` (JAX) alongside `benchmark/allegro_cuda_compare.jl` and
 `benchmark/allegro.jl` (Molly), on the same machine.
 
-**Energy, time in ms** (CUDA + CPU-t8 on the RTX 5080 host; Molly Metal on the M3). `nequip CUDA`
-is shown both eager and `torch.compile`d (its fast deployment path):
+**Energy, time in ms** (CUDA + CPU-t8 on the RTX 5080 host; Molly Metal on the M3). Three
+implementations: Molly native, `nequip-allegro` (PyTorch), and `allegro-jax` (e3nn-jax):
 
-| atoms | Molly CUDA | nequip CUDA (eager) | nequip CUDA (compiled) | Molly Metal | Molly CPU-t8 | nequip CPU-t8 |
+| atoms | Molly CUDA | nequip CUDA | allegro-jax CUDA | Molly Metal | Molly CPU-t8 | nequip CPU-t8 |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 1.33 | 5.65  | 2.79  | 1.99 | 3.4   | 188 |
-| 256  | 1.47 | 5.59  | 4.66  | 2.14 | 16.9  | 344 |
-| 512  | 1.64 | 5.68  | 4.91  | 2.66 | 35.7  | 435 |
-| 1024 | 2.13 | 5.70  | 2.48  | 3.92 | 106.3 | 618 |
-| 2048 | 3.62 | 7.85  | 5.11  | 7.11 | 206.1 | 849 |
-| 4096 | 7.32 | 13.42 | 10.73 | —    | 457.0 | —   |
+| 64   | 1.33 | 5.65  | 6.7   | 1.99 | 3.4   | 188 |
+| 256  | 1.47 | 5.59  | 30.2  | 2.14 | 16.9  | 344 |
+| 512  | 1.64 | 5.68  | 80.4  | 2.66 | 35.7  | 435 |
+| 1024 | 2.13 | 5.70  | 167.5 | 3.92 | 106.3 | 618 |
+| 2048 | 3.62 | 7.85  | 344.8 | 7.11 | 206.1 | 849 |
+| 4096 | 7.32 | 13.42 | 877.0 | —    | 457.0 | —   |
 
-(The compiled column is noisy — `torch.compile` with dynamic shapes recompiles per size — but the
-ordering is stable.)
+(`torch.compile` brings nequip CUDA to ~2.5–5 ms — still slower than Molly; omitted from the plot
+for clarity. `allegro-jax` uses dense all-pairs, so it scales O(N²) and is far slower at scale.)
 
 ![Allegro energy: all implementations](images/allegro_benchmark_energy.png)
 
 **Forces, time in ms** (Molly analytic vs nequip autograd; CPU on the RTX 5080 host):
 
-| atoms | Molly CPU | nequip CPU-t1 | nequip CPU-t8 | nequip CUDA (eager) | nequip CUDA (compiled) |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 45.9   | 34.8 | 411  | 15.2 | 7.4  |
-| 256  | 240.0  | 301  | 802  | 15.3 | 17.2 |
-| 1024 | 1280.7 | 1323 | 1543 | 15.4 | 11.2 |
-| 2048 | 2914.6 | 2799 | 2114 | 17.1 | 22.4 |
+| atoms | Molly CPU | nequip CUDA | allegro-jax CUDA | nequip CPU-t8 |
+| :---: | :---: | :---: | :---: | :---: |
+| 64   | 45.9   | 15.2 | 6.6   | 411  |
+| 256  | 240.0  | 15.3 | 30.0  | 802  |
+| 1024 | 1280.7 | 15.4 | 169.3 | 1543 |
+| 2048 | 2914.6 | 17.1 | 346.3 | 2114 |
 
 ![Allegro forces: all implementations](images/allegro_benchmark_force.png)
 
 Reading it:
 
 - **Energy: Molly's native kernels win clearly.** Molly's CUDA energy is **1.8×–4.2× faster** than
-  eager nequip-allegro (which is launch-bound at ~5.6 ms flat), and still **~1.5–2× faster than
-  `torch.compile`d nequip-allegro**, the fast deployment path. It stays sub-10 ms to 4096 atoms. On
-  CPU, PyTorch's threading is pathological at these sizes (188 ms at 64 atoms on 8 threads); Molly's
-  threaded CPU energy is 10–50× faster. Molly Metal (Apple M3) also beats eager and compiled nequip
-  CUDA at small N.
+  nequip-allegro (launch-bound at ~5.6 ms flat; ~2.5–5 ms even with `torch.compile`) and stays
+  sub-10 ms to 4096 atoms. `allegro-jax` uses dense all-pairs, so it scales **O(N²)** and is far
+  slower at scale (877 ms vs Molly's 7 ms at 4096). On CPU, PyTorch's threading is pathological at
+  these sizes (188 ms at 64 atoms on 8 threads); Molly's threaded CPU energy is 10–50× faster. Molly
+  Metal (Apple M3) also beats nequip CUDA at small N.
 - **Metal is a Molly-only capability.** nequip-allegro requires `float64` (its per-type energy
   shift casts to global float64), and Apple MPS is float32-only — so nequip-allegro **has no Apple
   GPU path at all**, the same situation TorchANI has. Molly's native Metal energy runs where the

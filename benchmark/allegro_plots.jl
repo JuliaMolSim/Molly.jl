@@ -34,7 +34,10 @@ function vs_N_plot(title, out, specs)
     plotted = false
     for (lbl, col, ls, (xs, ys)) in specs
         isempty(xs) && continue
-        scatterlines!(ax, xs, ys, label = lbl, markersize = 9, color = col, linestyle = ls)
+        # Molly (solid) lines drawn thicker/larger so they stand out against the reference impls.
+        lw = ls == :solid ? 3.4 : 1.8
+        ms = ls == :solid ? 12 : 8
+        scatterlines!(ax, xs, ys, label = lbl, markersize = ms, linewidth = lw, color = col, linestyle = ls)
         plotted = true
     end
     plotted || return
@@ -122,6 +125,8 @@ function series_key(d, k)
 end
 nq_cuda = load_json(joinpath(RES, "allegro_torch_cuda.json"))
 nq_cpu  = load_json(joinpath(RES, "allegro_torch_cpu.json"))
+jx_cuda = load_json(joinpath(RES, "allegro_jax_cuda.json"))         # allegro-jax (e3nn-jax) CUDA
+jx_cpu  = load_json(joinpath(RES, "allegro_jax_cpu.json"))          # allegro-jax CPU
 molly_e = load_json(joinpath(RES, "allegro_energy_cyclops.json"))   # Molly cyclops CPU energy (t8 run)
 molly_f = load_json(joinpath(RES, "allegro_forces_cyclops.json"))   # Molly cyclops CPU energy+forces
 
@@ -132,7 +137,10 @@ function overlay_plot(title, out, specs)
     plotted = false
     for (lbl, col, ls, (xs, ys)) in specs
         isempty(xs) && continue
-        scatterlines!(ax, xs, ys, label = lbl, markersize = 9, color = col, linestyle = ls)
+        # Molly (solid) lines drawn thicker/larger so they stand out against the reference impls.
+        lw = ls == :solid ? 3.4 : 1.8
+        ms = ls == :solid ? 12 : 8
+        scatterlines!(ax, xs, ys, label = lbl, markersize = ms, linewidth = lw, color = col, linestyle = ls)
         plotted = true
     end
     plotted || return
@@ -146,18 +154,19 @@ overlay_plot("Allegro energy: all implementations (comparable model; Metal=M3, r
     ("Molly CUDA (RTX 5080)",          :seagreen,   :solid,   series(getk(cuda, "cuda"))),
     ("Molly Metal (M3)",               :purple,     :solid,   series(getk(metal, "metal"))),
     ("Molly CPU t8",                   :navy,       :solid,   series(getk(cuda, "cpu_t8"))),
-    ("nequip-allegro CUDA (eager)",    :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "energy_ms")),
-    ("nequip-allegro CUDA (compiled)", :goldenrod,  :dashdot, series_key(getk(nq_cuda, "cuda_c"), "energy_ms")),
+    ("nequip-allegro CUDA",            :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "energy_ms")),
     ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
+    ("allegro-jax CUDA",               :teal,       :dot,     series_key(getk(jx_cuda, "cuda"), "energy_ms")),
+    ("allegro-jax CPU",                :goldenrod,  :dot,     series_key(getk(jx_cpu, "cpu"), "energy_ms")),
 ])
 
 overlay_plot("Allegro forces: all implementations (comparable model; RTX 5080 host)",
              "allegro_benchmark_force.png", [
     ("Molly CPU (analytic, t8)",       :navy,       :solid,   series(getk(molly_f, "cpu"))),
-    ("nequip-allegro CUDA (eager)",    :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "forces_ms")),
-    ("nequip-allegro CUDA (compiled)", :goldenrod,  :dashdot, series_key(getk(nq_cuda, "cuda_c"), "forces_ms")),
-    ("nequip-allegro CPU t1",          :seagreen,   :dash,    series_key(getk(nq_cpu, "cpu_t1"), "forces_ms")),
+    ("nequip-allegro CUDA",            :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "forces_ms")),
     ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "forces_ms")),
+    ("allegro-jax CUDA",               :teal,       :dot,     series_key(getk(jx_cuda, "cuda"), "forces_ms")),
+    ("allegro-jax CPU",                :goldenrod,  :dot,     series_key(getk(jx_cpu, "cpu"), "forces_ms")),
 ])
 
 println("done — images in ", IMG)
