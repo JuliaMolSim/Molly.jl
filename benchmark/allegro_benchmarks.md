@@ -55,11 +55,11 @@ only to quantify the speedup.
 
 | atoms | edges | energy (ms) | E+forces (ms) | fd forces (ms) | speedup |
 | :---: | :---: | :---: | :---: | :---: | :---: |
-| 16  | 118  | 0.343 | 1.313 | 38.06 | 29× |
-| 32  | 302  | 0.867 | 3.419 | 196.4 | 57× |
-| 64  | 726  | 2.214 | 8.694 | 944.4 | 109× |
-| 128 | 1574 | 4.868 | 18.88 | — | — |
-| 256 | 3446 | 10.82 | 42.93 | — | — |
+| 16  | 118  | 0.507 | 1.384 | 51.1  | 37× |
+| 32  | 302  | 1.014 | 3.514 | 215.1 | 61× |
+| 64  | 726  | 2.271 | 8.558 | 1007  | 118× |
+| 128 | 1574 | 5.247 | 18.78 | — | — |
+| 256 | 3446 | 10.97 | 42.79 | — | — |
 
 ("speedup" = finite-diff forces / analytic energy + forces. Finite differences are only run up to
 64 atoms because their cost is `6N` full energies.)
@@ -98,32 +98,32 @@ julia --project=<env+CUDA>  -t8 benchmark/allegro_cuda_compare.jl  # then -t1  (
 
 | atoms | CPU t1 | CPU t8 | CUDA | CUDA/t1 | CUDA/t8 | reldiff |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 11.3  | 3.5   | 1.31 | 9×   | 3×  | 1.6e-16 |
-| 128  | 24.7  | 8.2   | 1.58 | 16×  | 5×  | 2.9e-16 |
-| 256  | 55.4  | 16.4  | 1.68 | 33×  | 10× | 1.3e-16 |
-| 512  | 122.1 | 35.5  | 1.55 | 79×  | 23× | 2.4e-16 |
-| 1024 | 305.9 | 81.6  | 2.10 | 146× | 39× | 1.2e-16 |
-| 2048 | 645.1 | 218.8 | 3.50 | 184× | 62× | 0.0     |
-| 4096 | 1470.4| 459.0 | 7.03 | 209× | 65× | 0.0     |
+| 64   | 11.4  | 3.4   | 1.33 | 9×   | 3×  | 1.6e-16 |
+| 128  | 24.8  | 7.6   | 1.39 | 18×  | 5×  | 2.9e-16 |
+| 256  | 55.7  | 16.9  | 1.47 | 38×  | 12× | 1.3e-16 |
+| 512  | 123.0 | 35.7  | 1.64 | 75×  | 22× | 2.4e-16 |
+| 1024 | 308.3 | 106.3 | 2.13 | 144× | 50× | 1.2e-16 |
+| 2048 | 653.8 | 206.1 | 3.62 | 181× | 57× | 0.0     |
+| 4096 | 1511.2| 457.0 | 7.32 | 207× | 62× | 0.0     |
 
 **Metal vs CPU (Apple M3), energy time in ms:**
 
 | atoms | CPU t1 | CPU t8 | Metal | Metal/t8 |
 | :---: | :---: | :---: | :---: | :---: |
-| 64   | 2.3   | 0.8  | 1.77 | 0.5× |
-| 128  | 5.0   | 1.5  | 1.99 | 0.7× |
-| 256  | 10.9  | 2.9  | 2.04 | 1.4× |
-| 512  | 24.0  | 6.0  | 2.48 | 2.4× |
-| 1024 | 53.0  | 13.5 | 3.82 | 3.5× |
-| 2048 | 114.5 | 41.0 | 6.70 | 6.1× |
+| 64   | 2.2   | 0.8  | 1.99 | 0.4× |
+| 128  | 4.9   | 1.5  | 1.97 | 0.7× |
+| 256  | 10.8  | 2.9  | 2.14 | 1.4× |
+| 512  | 24.2  | 6.0  | 2.66 | 2.3× |
+| 1024 | 53.4  | 13.2 | 3.92 | 3.4× |
+| 2048 | 117.1 | 39.8 | 7.11 | 5.6× |
 
 The GPU energy matches the CPU forward to ~1e-16 on CUDA (Float64) and ~1e-7 on Metal (Float32),
 confirming the kernels are correct on real hardware. Threading gives ~3.4–3.8× (t1→t8). The
 neighbour list, edge geometry and the whole forward run on-device with no inter-kernel
 synchronisation, so CUDA stays ~1.3–7 ms flat from 64 to 4096 atoms rather than climbing — up to
-**209× over CPU-t1** and **65× over CPU-t8** at 4096 atoms, growing with N. Metal starts
+**207× over CPU-t1** and **62× over CPU-t8** at 4096 atoms, growing with N. Metal starts
 launch-overhead bound at small N (the M3 CPU-t8 is sub-millisecond there) and overtakes CPU-t8 past
-~256 atoms (6.1× at 2048). An earlier version that built the neighbour list on the host and
+~256 atoms (5.6× at 2048). An earlier version that built the neighbour list on the host and
 synchronised between kernels tapered badly at large N (92 ms CUDA at 4096 vs 7 ms now); moving that
 work on-device was the main win.
 
@@ -135,10 +135,10 @@ work on-device was the main win.
 
 ## Reading the numbers
 
-- **Analytic forces are 29×–109× faster than finite differences, and the gap widens with system
+- **Analytic forces are 37×–118× faster than finite differences, and the gap widens with system
   size.** Finite differencing costs `6N` energies, so its work grows as roughly `O(N) × O(energy)`;
   the analytic backward is a single reverse pass whose cost tracks one forward. At 64 atoms the
-  analytic energy + forces already beats finite-diff forces by ~110×, and the ratio keeps climbing —
+  analytic energy + forces already beats finite-diff forces by ~118×, and the ratio keeps climbing —
   finite differences are not viable beyond toy systems.
 - **Forces are cheap on top of the energy.** `energy + forces` costs about 3.8–4.0× a bare energy
   evaluation across the range (e.g. 8.7 ms vs 2.2 ms at 64 atoms) — the taped forward plus one
