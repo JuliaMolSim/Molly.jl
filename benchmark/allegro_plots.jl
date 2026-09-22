@@ -149,13 +149,18 @@ function overlay_plot(title, out, specs)
     println("wrote images/", out)
 end
 
-overlay_plot("Allegro energy: all implementations (comparable model; Metal=M3, rest=RTX 5080)",
+# Full range per backend (not forced uniform): Metal is Molly-only (nequip=float64, allegro-jax
+# hits a jax-metal op limit); allegro-jax is dense O(N^2) so its CPU only reaches ~512 atoms.
+# Colour encodes backend/thread, linestyle encodes framework (Molly solid, nequip dash, jax dot).
+overlay_plot("Allegro energy: all implementations (t1/t8/CUDA + Metal; Metal=M3, rest=RTX 5080)",
              "allegro_benchmark_energy.png", [
     ("Molly CUDA (RTX 5080)",          :seagreen,   :solid,   series(getk(cuda, "cuda"))),
     ("Molly Metal (M3)",               :purple,     :solid,   series(getk(metal, "metal"))),
     ("Molly CPU t8",                   :navy,       :solid,   series(getk(cuda, "cpu_t8"))),
+    ("Molly CPU t1",                   :royalblue,  :solid,   series(getk(cuda, "cpu_t1"))),
     ("nequip-allegro CUDA",            :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "energy_ms")),
     ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
+    ("nequip-allegro CPU t1",          :orchid,     :dash,    series_key(getk(nq_cpu, "cpu_t1"), "energy_ms")),
     ("allegro-jax CUDA",               :teal,       :dot,     series_key(getk(jx_cuda, "cuda"), "energy_ms")),
     ("allegro-jax CPU",                :goldenrod,  :dot,     series_key(getk(jx_cpu, "cpu"), "energy_ms")),
 ])
@@ -165,6 +170,7 @@ overlay_plot("Allegro forces: all implementations (comparable model; RTX 5080 ho
     ("Molly CPU (analytic, t8)",       :navy,       :solid,   series(getk(molly_f, "cpu"))),
     ("nequip-allegro CUDA",            :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "forces_ms")),
     ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "forces_ms")),
+    ("nequip-allegro CPU t1",          :orchid,     :dash,    series_key(getk(nq_cpu, "cpu_t1"), "forces_ms")),
     ("allegro-jax CUDA",               :teal,       :dot,     series_key(getk(jx_cuda, "cuda"), "forces_ms")),
     ("allegro-jax CPU",                :goldenrod,  :dot,     series_key(getk(jx_cpu, "cpu"), "forces_ms")),
 ])

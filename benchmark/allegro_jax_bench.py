@@ -23,7 +23,10 @@ import numpy as np
 
 import jax
 
-jax.config.update("jax_enable_x64", True)
+_PLAT = jax.devices()[0].platform.lower()   # "gpu" (cuda), "cpu", or "metal"
+# Apple Metal (jax-metal) is float32-only; everything else runs float64 to match the other columns.
+_X64 = os.environ.get("ALLEGRO_JAX_X64", "0" if "metal" in _PLAT else "1") == "1"
+jax.config.update("jax_enable_x64", _X64)
 
 import e3nn_jax as e3nn  # noqa: E402
 import flax.linen as nn  # noqa: E402
@@ -33,8 +36,8 @@ from allegro_jax import Allegro  # noqa: E402
 RC = 4.0
 SIZES = [int(x) for x in
          os.environ.get("ALLEGRO_SIZES", "64,128,256,512,1024,2048,4096").split(",")]
-DEVICE = jax.devices()[0].platform  # "gpu" or "cpu"
-KEY = "cuda" if DEVICE == "gpu" else "cpu"
+DEVICE = _PLAT
+KEY = "metal" if "metal" in _PLAT else ("cuda" if _PLAT == "gpu" else "cpu")
 
 
 class Model(nn.Module):
