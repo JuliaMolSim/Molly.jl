@@ -227,7 +227,10 @@ function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:
     jjs = [Int[] for _ in 1:n]
     x0  = [Vector{Vector{T}}() for _ in 1:n]
     V0  = [Vector{Vector{T}}() for _ in 1:n]
-    for i in 1:n
+    # Every loop below is over centre atoms and writes only atom i's own edge data, so the whole
+    # tape build and the backward passes thread cleanly; only the final Cartesian scatter (which
+    # writes a neighbour j) stays serial.
+    Threads.@threads for i in 1:n
         for (j, d, rhat) in nbr[i]
             Y = collect(real_sph_harm(2, rhat))
             u = poly_envelope(d, m.r_c, m.env_p)
@@ -256,7 +259,7 @@ function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:
         Vin_tape[lidx] = [[copy(Vin[i][p]) for p in eachindex(Vin[i])] for i in 1:n]
         Env = [zeros(T, m.feat.dim) for _ in 1:n]
         gL  = [Vector{Vector{T}}() for _ in 1:n]
-        for i in 1:n
+        Threads.@threads for i in 1:n
             e = Env[i]
             for p in eachindex(xin[i])
                 g = dense_forward(lw.env_W, lw.env_b, xin[i][p])
@@ -280,7 +283,7 @@ function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:
         wL = [Vector{Vector{T}}() for _ in 1:n]
         PL = [Vector{Vector{T}}() for _ in 1:n]
         aL = [Vector{Vector{T}}() for _ in 1:n]
-        for i in 1:n
+        Threads.@threads for i in 1:n
             for p in eachindex(xin[i])
                 x = xin[i][p]
                 w = dense_forward(lw.tp_W, lw.tp_b, x)
@@ -314,7 +317,7 @@ function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:
         Vin_bar = [[zeros(T, m.feat.dim) for _ in eachindex(xin[i])] for i in 1:n]
         Envbar = [zeros(T, m.feat.dim) for _ in 1:n]
         # Pass A: backward of each edge's update
-        for i in 1:n
+        Threads.@threads for i in 1:n
             for p in eachindex(xin[i])
                 xin_p = xin_tape[lidx][i][p]
                 Vin_p = Vin_tape[lidx][i][p]
@@ -351,7 +354,7 @@ function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:
         end
         # Pass B: backward of the environment pooling, scattering Envbar to each neighbour edge
         invavg = one(T) / m.avg_nn
-        for i in 1:n
+        Threads.@threads for i in 1:n
             Eb = Envbar[i]
             for p in eachindex(xin[i])
                 g = g_tape[lidx][i][p]
