@@ -109,4 +109,37 @@ speedup_over_cpu8([
     ("CUDA / CPU-t8 (RTX 5080)",  :seagreen,   series(getk(cuda,  "cpu_t8")), series(getk(cuda,  "cuda"))),
 ], "allegro_gpu_speedup.png")
 
+# --- head-to-head: Molly native vs the real nequip-allegro (PyTorch), same RTX 5080 host ----------
+# Comparable-size Allegro (l_max=2, 2 layers, ~4 tensor / 16 scalar channels), NOT identical ops.
+# Molly series read "min"; nequip series read "energy_ms". Molly solid, nequip dashed.
+function series_key(d, k)
+    isnothing(d) && return (Int[], Float64[])
+    ks = sort(parse.(Int, collect(string.(keys(d)))))
+    (ks, [Float64(d[string(k2)][k]) for k2 in ks])
+end
+nq_cuda = load_json(joinpath(RES, "allegro_torch_cuda.json"))
+nq_cpu  = load_json(joinpath(RES, "allegro_torch_cpu.json"))
+if !isnothing(nq_cuda) && !isnothing(cuda)
+    fig = Figure(size = (860, 580))
+    ax  = Axis(fig[1, 1], xscale = log10, yscale = log10, xlabel = "number of atoms",
+               ylabel = "energy time (ms)",
+               title = "Allegro energy: Molly vs nequip-allegro (comparable model; Metal on M3, rest on RTX 5080)")
+    # nequip-allegro has NO Apple GPU path (it requires float64; MPS is float32-only), so Metal is a
+    # Molly-only series. CPU/CUDA are the RTX 5080 host; Molly Metal is the Apple M3 (cross-machine).
+    specs = [
+        ("Molly CUDA (RTX 5080)",  :seagreen,   :solid, series(getk(cuda, "cuda"))),
+        ("Molly Metal (M3)",       :purple,     :solid, series(getk(metal, "metal"))),
+        ("Molly CPU t8",           :navy,       :solid, series(getk(cuda, "cpu_t8"))),
+        ("nequip-allegro CUDA",    :darkorange, :dash,  series_key(getk(nq_cuda, "cuda"), "energy_ms")),
+        ("nequip-allegro CPU t8",  :crimson,    :dash,  series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
+    ]
+    for (lbl, col, ls, (xs, ys)) in specs
+        isempty(xs) && continue
+        scatterlines!(ax, xs, ys, label = lbl, markersize = 9, color = col, linestyle = ls)
+    end
+    axislegend(ax, position = :lt, labelsize = 11)
+    save(joinpath(IMG, "allegro_vs_nequip_energy.png"), fig, px_per_unit = 2)
+    println("wrote images/allegro_vs_nequip_energy.png")
+end
+
 println("done — images in ", IMG)

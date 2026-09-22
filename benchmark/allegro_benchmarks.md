@@ -133,6 +133,56 @@ work on-device was the main win.
 
 ---
 
+## Head-to-head: Molly native vs nequip-allegro (PyTorch)
+
+The reference implementation of Allegro is the PyTorch [`nequip-allegro`](https://github.com/mir-group/allegro)
+package. Both run a **comparable-size** model (`l_max=2`, 2 layers, ~4 tensor / 16 scalar channels,
+~11k params) so this measures implementation throughput. Two caveats: the two are **not identical
+ops** (the native op-by-op bit-match to nequip-allegro is a follow-up — read this as "a native-Julia
+Allegro of similar size vs the PyTorch reference", not same-weights), and CPU/CUDA are the same
+**RTX 5080 host** while Metal is the **Apple M3** (cross-machine). Reproduce with
+`benchmark/allegro_torch_bench.py` (nequip) alongside `benchmark/allegro_cuda_compare.jl` and
+`benchmark/allegro.jl` (Molly), on the same machine.
+
+**Energy, time in ms** (CUDA + CPU-t8 on the RTX 5080 host; Molly Metal on the M3):
+
+| atoms | Molly CUDA | nequip CUDA | Molly CPU-t8 | nequip CPU-t8 | Molly Metal |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| 64   | 1.33 | 5.65  | 3.4   | 188 | 1.99 |
+| 256  | 1.47 | 5.59  | 16.9  | 344 | 2.14 |
+| 512  | 1.64 | 5.68  | 35.7  | 435 | 2.66 |
+| 1024 | 2.13 | 5.70  | 106.3 | 618 | 3.92 |
+| 2048 | 3.62 | 7.85  | 206.1 | 849 | 7.11 |
+| 4096 | 7.32 | 13.42 | 457.0 | —   | —    |
+
+**Forces, time in ms** (Molly analytic vs nequip autograd; CPU on the RTX 5080 host):
+
+| atoms | Molly CPU | nequip CPU-t1 | nequip CPU-t8 | nequip CUDA |
+| :---: | :---: | :---: | :---: | :---: |
+| 64   | 45.9   | 34.8 | 411  | 15.2 |
+| 256  | 240.0  | 301  | 802  | 15.3 |
+| 1024 | 1280.7 | 1323 | 1543 | 15.4 |
+| 2048 | 2914.6 | 2799 | 2114 | 17.1 |
+
+![Molly vs nequip-allegro energy](images/allegro_vs_nequip_energy.png)
+
+Reading it:
+
+- **Energy: Molly's native kernels win clearly.** Molly's CUDA energy is **1.8×–4.2× faster** than
+  nequip-allegro's and stays sub-10 ms to 4096 atoms, while nequip-allegro is launch-overhead bound
+  (~5.6 ms flat) at small N. On CPU, PyTorch's threading is pathological at these sizes (188 ms at
+  64 atoms on 8 threads); Molly's threaded CPU energy is 10–50× faster.
+- **Metal is a Molly-only capability.** nequip-allegro requires `float64` (its per-type energy
+  shift casts to global float64), and Apple MPS is float32-only — so nequip-allegro **has no Apple
+  GPU path at all**, the same situation TorchANI has. Molly's native Metal energy runs where the
+  reference cannot.
+- **Forces are the honest gap.** Molly's analytic CPU forces are competitive with nequip's autograd
+  CPU forces (comparable to CPU-t1; nequip's CPU-t8 pulls ahead at large N because Molly's backward
+  is not yet threaded). But nequip runs forces on **CUDA** (~15 ms flat) and Molly does not yet — a
+  native GPU backward is the outstanding follow-up.
+
+---
+
 ## Reading the numbers
 
 - **Analytic forces are 37×–118× faster than finite differences, and the gap widens with system
