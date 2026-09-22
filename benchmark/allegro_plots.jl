@@ -127,11 +127,12 @@ if !isnothing(nq_cuda) && !isnothing(cuda)
     # nequip-allegro has NO Apple GPU path (it requires float64; MPS is float32-only), so Metal is a
     # Molly-only series. CPU/CUDA are the RTX 5080 host; Molly Metal is the Apple M3 (cross-machine).
     specs = [
-        ("Molly CUDA (RTX 5080)",  :seagreen,   :solid, series(getk(cuda, "cuda"))),
-        ("Molly Metal (M3)",       :purple,     :solid, series(getk(metal, "metal"))),
-        ("Molly CPU t8",           :navy,       :solid, series(getk(cuda, "cpu_t8"))),
-        ("nequip-allegro CUDA",    :darkorange, :dash,  series_key(getk(nq_cuda, "cuda"), "energy_ms")),
-        ("nequip-allegro CPU t8",  :crimson,    :dash,  series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
+        ("Molly CUDA (RTX 5080)",       :seagreen,   :solid,   series(getk(cuda, "cuda"))),
+        ("Molly Metal (M3)",            :purple,     :solid,   series(getk(metal, "metal"))),
+        ("Molly CPU t8",                :navy,       :solid,   series(getk(cuda, "cpu_t8"))),
+        ("nequip-allegro CUDA (eager)", :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "energy_ms")),
+        ("nequip-allegro CUDA (compiled)", :goldenrod, :dashdot, series_key(getk(nq_cuda, "cuda_c"), "energy_ms")),
+        ("nequip-allegro CPU t8",       :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
     ]
     for (lbl, col, ls, (xs, ys)) in specs
         isempty(xs) && continue

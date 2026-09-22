@@ -25,7 +25,8 @@ DEVICE = os.environ.get("ALLEGRO_TORCH_DEVICE", "cpu")
 SIZES = [int(x) for x in os.environ.get("ALLEGRO_SIZES", "64,128,256,512,1024,2048,4096").split(",")]
 if DEVICE == "cpu":
     torch.set_num_threads(int(os.environ.get("ALLEGRO_TORCH_THREADS", "1")))
-KEY = "cuda" if DEVICE == "cuda" else f"cpu_t{torch.get_num_threads()}"
+COMPILE = os.environ.get("ALLEGRO_TORCH_COMPILE", "0") == "1"   # torch.compile (inductor) — the fast path
+KEY = ("cuda" if DEVICE == "cuda" else f"cpu_t{torch.get_num_threads()}") + ("_c" if COMPILE else "")
 
 def build_model():
     set_global_state(); torch.manual_seed(0)
@@ -80,7 +81,10 @@ def timeit(f, reps=5, samples=8):
 def main():
     model = build_model()
     energy_net = model.model.func   # inner SequentialGraphNetwork: total_energy without the force backward
-    print(f"nequip-allegro bench | device={DEVICE} key={KEY} | params={sum(p.numel() for p in model.parameters())}")
+    if COMPILE:
+        energy_net = torch.compile(energy_net, dynamic=True)
+        model = torch.compile(model, dynamic=True)
+    print(f"nequip-allegro bench | device={DEVICE} key={KEY} | compile={COMPILE} | params={sum(p.numel() for p in build_model().parameters())}")
     res = {KEY: {}}
     for n in SIZES:
         pos, types = make_system(n)

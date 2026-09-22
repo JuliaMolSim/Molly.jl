@@ -144,16 +144,20 @@ Allegro of similar size vs the PyTorch reference", not same-weights), and CPU/CU
 `benchmark/allegro_torch_bench.py` (nequip) alongside `benchmark/allegro_cuda_compare.jl` and
 `benchmark/allegro.jl` (Molly), on the same machine.
 
-**Energy, time in ms** (CUDA + CPU-t8 on the RTX 5080 host; Molly Metal on the M3):
+**Energy, time in ms** (CUDA + CPU-t8 on the RTX 5080 host; Molly Metal on the M3). `nequip CUDA`
+is shown both eager and `torch.compile`d (its fast deployment path):
 
-| atoms | Molly CUDA | nequip CUDA | Molly CPU-t8 | nequip CPU-t8 | Molly Metal |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 1.33 | 5.65  | 3.4   | 188 | 1.99 |
-| 256  | 1.47 | 5.59  | 16.9  | 344 | 2.14 |
-| 512  | 1.64 | 5.68  | 35.7  | 435 | 2.66 |
-| 1024 | 2.13 | 5.70  | 106.3 | 618 | 3.92 |
-| 2048 | 3.62 | 7.85  | 206.1 | 849 | 7.11 |
-| 4096 | 7.32 | 13.42 | 457.0 | —   | —    |
+| atoms | Molly CUDA | nequip CUDA (eager) | nequip CUDA (compiled) | Molly Metal | Molly CPU-t8 | nequip CPU-t8 |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 64   | 1.33 | 5.65  | 2.79  | 1.99 | 3.4   | 188 |
+| 256  | 1.47 | 5.59  | 4.66  | 2.14 | 16.9  | 344 |
+| 512  | 1.64 | 5.68  | 4.91  | 2.66 | 35.7  | 435 |
+| 1024 | 2.13 | 5.70  | 2.48  | 3.92 | 106.3 | 618 |
+| 2048 | 3.62 | 7.85  | 5.11  | 7.11 | 206.1 | 849 |
+| 4096 | 7.32 | 13.42 | 10.73 | —    | 457.0 | —   |
+
+(The compiled column is noisy — `torch.compile` with dynamic shapes recompiles per size — but the
+ordering is stable.)
 
 **Forces, time in ms** (Molly analytic vs nequip autograd; CPU on the RTX 5080 host):
 
@@ -169,9 +173,11 @@ Allegro of similar size vs the PyTorch reference", not same-weights), and CPU/CU
 Reading it:
 
 - **Energy: Molly's native kernels win clearly.** Molly's CUDA energy is **1.8×–4.2× faster** than
-  nequip-allegro's and stays sub-10 ms to 4096 atoms, while nequip-allegro is launch-overhead bound
-  (~5.6 ms flat) at small N. On CPU, PyTorch's threading is pathological at these sizes (188 ms at
-  64 atoms on 8 threads); Molly's threaded CPU energy is 10–50× faster.
+  eager nequip-allegro (which is launch-bound at ~5.6 ms flat), and still **~1.5–2× faster than
+  `torch.compile`d nequip-allegro**, the fast deployment path. It stays sub-10 ms to 4096 atoms. On
+  CPU, PyTorch's threading is pathological at these sizes (188 ms at 64 atoms on 8 threads); Molly's
+  threaded CPU energy is 10–50× faster. Molly Metal (Apple M3) also beats eager and compiled nequip
+  CUDA at small N.
 - **Metal is a Molly-only capability.** nequip-allegro requires `float64` (its per-type energy
   shift casts to global float64), and Apple MPS is float32-only — so nequip-allegro **has no Apple
   GPU path at all**, the same situation TorchANI has. Molly's native Metal energy runs where the
