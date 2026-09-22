@@ -864,8 +864,8 @@ end
         boundary=CubicBoundary(SVector(Inf, 100.0, 100.0)),
     )
 
-    if run_cuda_tests
-        @testset "GPU cell-list neighbor finder" begin
+    for AT in array_list_metal[2:end]
+        @testset "GPU cell-list neighbor finder $AT" begin
             function gpu_cell_list_test_system(
                 coords_cpu;
                 output=:ragged,
@@ -878,10 +878,10 @@ end
                 n_atoms = length(coords_cpu)
                 T = eltype(eltype(coords_cpu))
 
-                atoms = CuArray([
+                atoms = to_device([
                     Molly.Atom(index=i, mass=one(T))
                     for i in 1:n_atoms
-                ])
+                ], AT)
 
                 finder = GPUCellListNeighborFinder(
                     dist_cutoff=cutoff,
@@ -894,7 +894,7 @@ end
 
                 sys = System(
                     atoms=atoms,
-                    coords=CuArray(coords_cpu),
+                    coords=to_device(coords_cpu, AT),
                     boundary=boundary,
                     neighbor_finder=finder,
                     force_units=NoUnits,
@@ -913,7 +913,6 @@ end
 
                 sys, _ = gpu_cell_list_test_system(coords)
                 result = find_neighbors(sys)
-                CUDA.synchronize()
 
                 counts = Array(result.counts)
                 matrix = Array(result.neighbors)
@@ -923,34 +922,35 @@ end
                 @test matrix[1:counts[2], 2] == Int32[1]
                 @test isempty(matrix[1:counts[3], 3])
                 @test result.list === nothing
-                @test result.state.max_neighbours == Int32(32)
+                @test result.state.max_neighbors == Int32(32)
             end
 
-            @testset "Float64 ragged output" begin
-                coords = [
-                    SVector{3,Float64}(1.0, 2.0, 3.0),
-                    SVector{3,Float64}(1.5, 2.0, 3.0),
-                    SVector{3,Float64}(4.0, 2.0, 3.0),
-                ]
+            if AT in array_list
+                @testset "Float64 ragged output" begin
+                    coords = [
+                        SVector{3,Float64}(1.0, 2.0, 3.0),
+                        SVector{3,Float64}(1.5, 2.0, 3.0),
+                        SVector{3,Float64}(4.0, 2.0, 3.0),
+                    ]
 
-                sys, _ = gpu_cell_list_test_system(
-                    coords;
-                    cutoff=1.0,
-                    boundary=CubicBoundary(10.0),
-                )
+                    sys, _ = gpu_cell_list_test_system(
+                        coords;
+                        cutoff=1.0,
+                        boundary=CubicBoundary(10.0),
+                    )
 
-                result = find_neighbors(sys)
-                CUDA.synchronize()
+                    result = find_neighbors(sys)
 
-                counts = Array(result.counts)
-                matrix = Array(result.neighbors)
+                    counts = Array(result.counts)
+                    matrix = Array(result.neighbors)
 
-                @test eltype(result.state.x) === Float64
-                @test eltype(result.state.cell_x) === Float64
-                @test counts == Int32[1, 1, 0]
-                @test matrix[1:counts[1], 1] == Int32[2]
-                @test matrix[1:counts[2], 2] == Int32[1]
-                @test isempty(matrix[1:counts[3], 3])
+                    @test eltype(result.state.x) === Float64
+                    @test eltype(result.state.cell_x) === Float64
+                    @test counts == Int32[1, 1, 0]
+                    @test matrix[1:counts[1], 1] == Int32[2]
+                    @test matrix[1:counts[2], 2] == Int32[1]
+                    @test isempty(matrix[1:counts[3], 3])
+                end
             end
 
             @testset "Geometric pair output" begin
@@ -966,7 +966,6 @@ end
                 )
 
                 result = find_neighbors(sys)
-                CUDA.synchronize()
 
                 pairs = Array(result.list[1:result.n])
 
@@ -1000,12 +999,11 @@ end
                 sys, _ = gpu_cell_list_test_system(
                     coords;
                     output=:molly_pairs,
-                    eligible=CuArray(eligible),
-                    special=CuArray(special),
+                    eligible=to_device(eligible, AT),
+                    special=to_device(special, AT),
                 )
 
                 result = find_neighbors(sys)
-                CUDA.synchronize()
 
                 pairs = sort(Array(result.list[1:result.n]))
 
@@ -1031,7 +1029,6 @@ end
                 )
 
                 result = find_neighbors(sys)
-                CUDA.synchronize()
 
                 @test Array(result.counts) == Int32[1, 1, 0]
                 @test result.n == 1
@@ -1059,7 +1056,6 @@ end
                 )
 
                 result = find_neighbors(sys)
-                CUDA.synchronize()
 
                 @test Array(result.counts) == fill(Int32(39), n_atoms)
                 @test result.n == n_atoms * (n_atoms - 1) ÷ 2
@@ -1099,13 +1095,12 @@ end
                 )
 
                 first_result = find_neighbors(sys)
-                CUDA.synchronize()
 
-                sys.coords .= CuArray([
+                sys.coords .= to_device([
                     SVector{3,Float32}(1.0, 2.0, 3.0),
                     SVector{3,Float32}(6.0, 2.0, 3.0),
                     SVector{3,Float32}(4.0, 2.0, 3.0),
-                ])
+                ], AT)
 
                 second_result = find_neighbors(
                     sys,
@@ -1114,7 +1109,6 @@ end
                     1,
                     true,
                 )
-                CUDA.synchronize()
 
                 @test Array(second_result.counts) == Int32[0, 0, 0]
                 @test second_result.n == 0
@@ -1151,11 +1145,10 @@ end
                     )
 
                     result = find_neighbors(sys)
-                    CUDA.synchronize()
 
                     @test Array(result.counts) == Int32[2, 2, 2]
-                    @test result.state.max_neighbours >= 2
-                    @test size(result.neighbors, 1) == result.state.max_neighbours
+                    @test result.state.max_neighbors >= 2
+                    @test size(result.neighbors, 1) == result.state.max_neighbors
 
                     if output === :geometric_pairs
                         @test result.n == 3
@@ -1206,8 +1199,8 @@ end
                     end
 
                     nf_ref = DistanceNeighborFinder(
-                        eligible=CuArray(eligible),
-                        special=CuArray(special),
+                        eligible=to_device(eligible, AT),
+                        special=to_device(special, AT),
                         dist_cutoff=1.0f0,
                     )
 
@@ -1220,13 +1213,12 @@ end
                             output=:molly_pairs,
                             cutoff=1.0f0,
                             boundary=boundary,
-                            eligible=CuArray(eligible),
-                            special=CuArray(special),
+                            eligible=to_device(eligible, AT),
+                            special=to_device(special, AT),
                         )
 
                         result = find_neighbors(sys)
                         reference = find_neighbors(sys, nf_ref)
-                        CUDA.synchronize()
 
                         @test result.n == reference.n
                         @test canonical_pairs(result) == canonical_pairs(reference)
@@ -1256,10 +1248,9 @@ end
                 #   buffers behind it are reused
                 for scale in (1.05f0, 0.8f0, 1.3f0)
                     sys.boundary = CubicBoundary(4.0f0 * scale)
-                    sys.coords .= CuArray([c .* scale for c in coords])
+                    sys.coords .= to_device([c .* scale for c in coords], AT)
 
                     scaled = find_neighbors(sys, finder, result, 0, true)
-                    CUDA.synchronize()
 
                     @test scaled.state === result.state
                     @test scaled.counts === result.counts
@@ -1292,12 +1283,11 @@ end
                 )
 
                 result = find_neighbors(sys)
-                CUDA.synchronize()
 
                 counts = Array(result.counts)
 
-                @test maximum(counts) <= result.state.max_neighbours
-                @test result.state.max_neighbours % 32 == 0
+                @test maximum(counts) <= result.state.max_neighbors
+                @test result.state.max_neighbors % 32 == 0
                 @test result.n == sum(counts) ÷ 2
             end
 
@@ -1409,11 +1399,11 @@ end
 
                 # Ragged output has no pair list for the pairwise interactions
                 @test_throws ArgumentError System(
-                    atoms=CuArray([Molly.Atom(index=i, mass=1.0f0) for i in 1:2]),
-                    coords=CuArray([
+                    atoms=to_device([Molly.Atom(index=i, mass=1.0f0) for i in 1:2], AT),
+                    coords=to_device([
                         SVector{3,Float32}(1.0, 1.0, 1.0),
                         SVector{3,Float32}(2.0, 1.0, 1.0),
-                    ]),
+                    ], AT),
                     boundary=CubicBoundary(10.0f0),
                     pairwise_inters=(LennardJones(use_neighbors=true),),
                     neighbor_finder=automatic_finder,
@@ -1421,7 +1411,7 @@ end
                     energy_units=NoUnits,
                 )
 
-                # A system that is not a 3D CuArray system gets an explanation
+                # A system that is not a 3D GPU system gets an explanation
                 cpu_sys = System(
                     atoms=[Molly.Atom(index=i, mass=1.0f0) for i in 1:2],
                     coords=[
