@@ -151,27 +151,33 @@ Every backend is shown over the full range it can reach: Metal is Molly-only (se
 
 | atoms | Molly CUDA | Molly Metal | Molly t8 | Molly t1 | nequip CUDA | nequip t8 | nequip t1 | jax CUDA | jax CPU |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 1.33 | 1.86  | 3.4   | 11.4   | 5.65  | 162  | 14.4   | 6.7   | 13.8  |
-| 256  | 1.47 | 2.08  | 16.9  | 55.7   | 5.59  | 310  | 115.5  | 30.2  | 228.2 |
-| 512  | 1.64 | 2.76  | 35.7  | 123.0  | 5.68  | 400  | 274.2  | 80.4  | 972.2 |
-| 1024 | 2.13 | 3.77  | 106.3 | 308.3  | 5.70  | 573  | 585.1  | 167.5 | —     |
-| 2048 | 3.62 | 6.60  | 206.1 | 653.8  | 7.85  | 747  | 1242.6 | 344.8 | —     |
-| 4096 | 7.32 | 12.83 | 457.0 | 1511.2 | 13.42 | 1899 | —      | 877.0 | —     |
+| 64   | 1.33 | 1.86  | 3.4   | 11.4   | 5.65  | 162  | 13.5   | 6.7   | 13.8  |
+| 256  | 1.47 | 2.08  | 16.9  | 55.7   | 5.59  | 310  | 114.1  | 30.2  | 228.2 |
+| 512  | 1.64 | 2.76  | 35.7  | 123.0  | 5.68  | 400  | 242.8  | 80.4  | 972.2 |
+| 1024 | 2.13 | 3.77  | 106.3 | 308.3  | 5.70  | 573  | 585.9  | 167.5 | —     |
+| 2048 | 3.62 | 6.60  | 206.1 | 653.8  | 7.85  | 747  | 1203.7 | 344.8 | —     |
+| 4096 | 7.32 | 12.83 | 457.0 | 1511.2 | 13.42 | 1899 | 2600.5 | 877.0 | —     |
 
 (`torch.compile` brings nequip CUDA to ~2.5–5 ms — still slower than Molly; omitted for clarity.
 `allegro-jax` uses dense all-pairs, so it scales O(N²) and is far slower at scale.)
 
 ![Allegro energy: all implementations](images/allegro_benchmark_energy.png)
 
-**Forces, time in ms** (Molly analytic vs nequip autograd vs jax autograd; CPU on the RTX 5080 host):
+**Forces, time in ms** (Molly analytic vs nequip/jax autograd). CPU (t1/t8) and CUDA are the RTX 5080
+host; Molly Metal is the Apple M3. Every line spans all seven sizes; `allegro-jax`'s dense CPU forces
+cannot, so only its CUDA column appears.
 
-| atoms | Molly t8 | nequip CUDA | nequip t8 | nequip t1 | jax CUDA | jax CPU |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 45.9   | 15.2 | 357  | 34.8   | 6.6   | 19.7   |
-| 256  | 240.0  | 15.3 | 747  | 301.0  | 30.0  | 288.0  |
-| 512  | 558.4  | 15.3 | 1038 | 685.2  | 79.5  | 1069.5 |
-| 1024 | 1280.7 | 15.4 | 1426 | 1322.7 | 169.3 | —      |
-| 2048 | 2914.6 | 17.1 | 2287 | 2798.8 | 346.3 | —      |
+| atoms | Molly CUDA | Molly Metal | Molly t8 | Molly t1 | nequip CUDA | nequip t8 | nequip t1 | jax CUDA |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 64   | 3.9  | 6.1  | 34.5   | 34.9   | 15.2 | 357   | 33.0   | 6.6   |
+| 256  | 4.5  | 6.5  | 173.7  | 176.3  | 15.3 | 747   | 297.7  | 30.0  |
+| 512  | 4.9  | 7.0  | 434.3  | 454.1  | 15.3 | 1038  | 633.3  | 79.5  |
+| 1024 | 5.9  | 10.1 | 980.0  | 1025.5 | 15.4 | 1426  | 1330.7 | 169.3 |
+| 2048 | 10.0 | 17.3 | 2246.0 | 2209.5 | 17.1 | 2287  | 2785.1 | 346.3 |
+| 4096 | 19.1 | 30.2 | 5110.3 | 5548.7 | 30.3 | 13131 | 5828.9 | 891.9 |
+
+Molly CUDA forces match the CPU analytic forces to machine precision (max |ΔF| ≈ 2e-14, Float64);
+Metal forces to ≈ 1e-5 (Float32). The CUDA backward is the fastest forces path here at every size.
 
 ![Allegro forces: all implementations](images/allegro_benchmark_force.png)
 
@@ -187,14 +193,19 @@ Reading it:
 - **Metal is a Molly-only capability.** Neither reference runs on Apple GPU: nequip-allegro requires
   `float64` (its per-type energy shift casts to global float64) and MPS is float32-only, and
   `allegro-jax` fails to compile under `jax-metal` (`unknown attribute code`). Molly's native Metal
-  energy runs where **both** references cannot. (The figures show t1/t8/CUDA for every backend that
-  runs, over the full range each can reach — `allegro-jax` is dense O(N²), so its CPU line stops at
-  512 atoms.)
-- **Forces are the honest gap.** Molly's analytic CPU forces track nequip's autograd CPU forces
-  closely (comparable to nequip CPU-t1 across the range; nequip CPU-t8 pulls ahead at large N because
-  Molly's backward is not yet threaded). But both nequip and `allegro-jax` run forces on **CUDA**
-  (nequip ~15 ms flat; jax ~6–350 ms O(N²)) and Molly does not yet — a native GPU backward is the
-  outstanding follow-up.
+  **energy and forces** both run where **both** references cannot. (The energy figure shows t1/t8/CUDA
+  for every backend over the full range each can reach — `allegro-jax` is dense O(N²), so its CPU line
+  stops at 512 atoms; the forces figure holds every line to the same seven sizes, 64→4096.)
+- **Forces now run on the GPU too — and win.** Molly's analytic backward is implemented as a native
+  GPU-portable reverse pass (`compute_allegro_forces_ka`, KernelAbstractions), so forces run on CUDA
+  and Metal, not just CPU. On CUDA the backward reproduces the CPU analytic forces to **machine
+  precision** (max |ΔF| ≈ 2e-14, Float64) and is **flat ~4–18 ms from 64 to 4096 atoms — up to ~220×
+  over Molly CPU-t8** and faster than nequip's CUDA autograd forces (~15 ms flat) at every size shown.
+  Metal forces (Float32, max |ΔF| ≈ 1e-5) run **6–30 ms**, ~25× over CPU-t8. On CPU the analytic
+  backward is single-threaded (t1 ≈ t8), so it trails nequip CPU-t8 at large N — threading the CPU
+  backward is the remaining CPU-side follow-up, but the GPU path is the one that matters for
+  production. (`allegro-jax`'s CPU forces are dense and thread-insensitive, so they cannot reach 4096
+  atoms and are omitted from the forces figure, which holds every line to the same seven sizes.)
 
 ---
 
@@ -220,10 +231,12 @@ Reading it:
 - Weights are the small random reference model used by the test suite, not a trained potential.
   Timings depend on the architecture size (channels `C`, latent width `H`, number of layers,
   `l_max`), not on the weight values, so they are representative for a model of this shape.
-- The **energy** forward runs entirely on the GPU (CUDA + Metal, see the GPU section) — neighbour
-  build, geometry and the layer kernels, with no inter-kernel synchronisation. The **forces**
-  (backward) still run on the CPU (with a host-built neighbour list); a native GPU backward is the
-  next step.
+- Both the **energy** forward and the **forces** backward now run entirely on the GPU (CUDA + Metal)
+  as KernelAbstractions kernels over a device-built neighbour list, with no inter-kernel
+  synchronisation. The forces reverse pass keeps all edge-local adjoints in global scratch (no
+  dynamically sized per-thread buffers), gathers the environment adjoint per atom (no atomics), and
+  uses atomics only for the final Cartesian force scatter. Remaining follow-up: threading the CPU
+  backward and a cell-list neighbour build.
 - A head-to-head against the reference `nequip-allegro` (PyTorch) package — analogous to the
   ANI-vs-TorchANI comparison — is future work: it needs a trained checkpoint (or a matched-config
   build) shared between the two implementations for a fair comparison.

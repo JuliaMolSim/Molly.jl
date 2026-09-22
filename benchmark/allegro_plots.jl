@@ -127,8 +127,10 @@ nq_cuda = load_json(joinpath(RES, "allegro_torch_cuda.json"))
 nq_cpu  = load_json(joinpath(RES, "allegro_torch_cpu.json"))
 jx_cuda = load_json(joinpath(RES, "allegro_jax_cuda.json"))         # allegro-jax (e3nn-jax) CUDA
 jx_cpu  = load_json(joinpath(RES, "allegro_jax_cpu.json"))          # allegro-jax CPU
-molly_e = load_json(joinpath(RES, "allegro_energy_cyclops.json"))   # Molly cyclops CPU energy (t8 run)
-molly_f = load_json(joinpath(RES, "allegro_forces_cyclops.json"))   # Molly cyclops CPU energy+forces
+molly_e  = load_json(joinpath(RES, "allegro_energy_cyclops.json"))   # Molly cyclops CPU energy (t8 run)
+molly_f  = load_json(joinpath(RES, "allegro_forces_cyclops.json"))   # Molly cyclops CPU energy+forces
+molly_fc = load_json(joinpath(RES, "allegro_cuda_forces.json"))      # Molly forces: cpu_t1/t8 + CUDA (RTX 5080)
+molly_fm = load_json(joinpath(RES, "allegro_metal_forces.json"))     # Molly forces: cpu_t1/t8 + Metal (Apple M3)
 
 function overlay_plot(title, out, specs)
     fig = Figure(size = (900, 600))
@@ -162,17 +164,26 @@ overlay_plot("Allegro energy: all implementations (t1/t8/CUDA + Metal; Metal=M3,
     ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
     ("nequip-allegro CPU t1",          :orchid,     :dash,    series_key(getk(nq_cpu, "cpu_t1"), "energy_ms")),
     ("allegro-jax CUDA",               :teal,       :dot,     series_key(getk(jx_cuda, "cuda"), "energy_ms")),
-    ("allegro-jax CPU",                :goldenrod,  :dot,     series_key(getk(jx_cpu, "cpu"), "energy_ms")),
+    ("allegro-jax CPU t8",             :goldenrod,  :dot,     series_key(getk(jx_cpu, "cpu_t8"), "energy_ms")),
+    ("allegro-jax CPU t1",             :chocolate,  :dot,     series_key(getk(jx_cpu, "cpu_t1"), "energy_ms")),
 ])
 
-overlay_plot("Allegro forces: all implementations (comparable model; RTX 5080 host)",
+# Molly now has native GPU forces (analytic backward as KA kernels), so the forces plot carries all
+# four Molly backends — CUDA/Metal/CPU-t1/t8 — plus the reference lines that also span the full 64→
+# 4096 range: nequip CUDA/CPU-t1/t8 and allegro-jax CUDA. allegro-jax's CPU forces are dense/
+# poorly-scaling (and thread-insensitive), so they cannot reach 4096 and are omitted here to keep
+# every line at the same seven system sizes. Molly's CPU backward is not yet threaded, so its t1/t8
+# forces lines nearly coincide.
+overlay_plot("Allegro forces: t1/t8/CUDA + Metal, all backends over 64→4096 (Metal=M3, rest=RTX 5080)",
              "allegro_benchmark_force.png", [
-    ("Molly CPU (analytic, t8)",       :navy,       :solid,   series(getk(molly_f, "cpu"))),
+    ("Molly CUDA (RTX 5080)",          :seagreen,   :solid,   series(getk(molly_fc, "cuda"))),
+    ("Molly Metal (M3)",               :purple,     :solid,   series(getk(molly_fm, "metal"))),
+    ("Molly CPU t8",                   :navy,       :solid,   series(getk(molly_fc, "cpu_t8"))),
+    ("Molly CPU t1",                   :royalblue,  :solid,   series(getk(molly_fc, "cpu_t1"))),
     ("nequip-allegro CUDA",            :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "forces_ms")),
     ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "forces_ms")),
     ("nequip-allegro CPU t1",          :orchid,     :dash,    series_key(getk(nq_cpu, "cpu_t1"), "forces_ms")),
     ("allegro-jax CUDA",               :teal,       :dot,     series_key(getk(jx_cuda, "cuda"), "forces_ms")),
-    ("allegro-jax CPU",                :goldenrod,  :dot,     series_key(getk(jx_cpu, "cpu"), "forces_ms")),
 ])
 
 println("done — images in ", IMG)
