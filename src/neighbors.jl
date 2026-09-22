@@ -53,9 +53,16 @@ Obtain a list of close atoms in a [`System`](@ref).
 
 Custom neighbor finders should implement this function.
 
+Returns a [`NeighborList`](@ref) for the classical neighbor finders and a
+[`GPUCellListNeighborList`](@ref) for [`GPUCellListNeighborFinder`](@ref).
+
 For [`GPUNeighborFinder`](@ref), this returns `nothing`: the CUDA pairwise force
 and energy kernels build and cache their interacting tile list internally from
 the neighbor-finder metadata.
+
+A neighbor finder may reuse the device buffers behind `current_neighbors` for the
+list it returns, as [`GPUCellListNeighborFinder`](@ref) does, so the list passed in
+should not be used afterwards.
 """
 find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder; kwargs...)
 
@@ -414,19 +421,40 @@ end
         special=nothing,
     )
 
-GPU cell-list neighbor finder that materializes a per-atom geometric
-neighbor list on the GPU.
+Neighbor finder for CUDA systems that bins atoms into a uniform grid of cells and
+searches the 3x3x3 stencil of cells around each atom.
 
-Output modes:
+This is an `O(N)` alternative to [`DistanceNeighborFinder`](@ref) that returns a
+[`GPUCellListNeighborList`](@ref). Only three-dimensional [`CubicBoundary`](@ref)
+systems with at least three cells along every box axis are supported, i.e. every box
+side must be at least three times `dist_cutoff`.
 
-- `:ragged`: per-atom padded ragged representation only.
-- `:geometric_pairs`: geometric half-pair list with all special flags false.
-- `:molly_pairs`: half-pair list filtered by `eligible`, with flags read
-  from `special`.
+`dist_cutoff` is the neighbor search distance, which should be the interaction cutoff
+distance plus a buffer distance since the list is only updated every `n_steps` steps.
 
-When `max_neighbors` is `nothing`, the initial per-atom capacity is estimated from the global
-number density and neighbor cutoff, with a safety factor of 1.5, and rounded up to a multiple of 32.
-An explicit positive integer overrides this estimate. Capacity overflow is always checked.
+# Output modes
+- `:molly_pairs`: half-pair list filtered by `eligible`, with flags read from
+  `special`. This is the only mode that can be used for the pairwise interactions of
+  a [`System`](@ref), since it is the only one that applies exclusions.
+- `:geometric_pairs`: half-pair list of every pair within `dist_cutoff`, with all
+  special flags false. `eligible` and `special` are ignored, so pairs that a bonded
+  topology excludes are still returned and using this mode for a system with bonded
+  exclusions gives wrong forces.
+- `:ragged`: per-atom padded neighbor matrix only, with no flat pair list.
+  `eligible` and `special` are ignored. This mode is for querying neighbors directly,
+  it can not be used for the pairwise interactions of a [`System`](@ref).
+
+`max_neighbors` is the initial per-atom capacity of the neighbor matrix. When it is
+`nothing` the capacity is estimated from the global number density and `dist_cutoff`
+with a safety factor of 1.5, rounded up to a multiple of 32. An explicit positive
+integer overrides this estimate. Either way the capacity is grown automatically, and
+kept for later calls, if an atom turns out to have more neighbors than it can hold.
+
+The device buffers behind the returned list are owned by that list and are reused,
+and hence overwritten, when it is passed back in as `current_neighbors`. A list that
+is passed to [`find_neighbors`](@ref) should therefore be treated as consumed, since
+any other reference to it, for example one kept by a simulator to compare against a
+trial list, would see the new neighbors with a stale pair count.
 """
 struct GPUCellListNeighborFinder{D,E,S}
     dist_cutoff::D
@@ -491,6 +519,15 @@ function GPUCellListNeighborFinder(;
         size(eligible, 1) == size(eligible, 2) || throw(
             ArgumentError("eligible and special must be square matrices"),
         )
+
+        # The masks are read inside the search kernels, so they have to be on the
+        #   device rather than converted there
+        (eligible isa AbstractGPUArray && special isa AbstractGPUArray) || throw(
+            ArgumentError(
+                "eligible and special must be GPU arrays for :molly_pairs, try " *
+                "eligible=to_device(eligible, AT) where AT is the GPU array type",
+            ),
+        )
     end
 
     return GPUCellListNeighborFinder(
@@ -501,6 +538,43 @@ function GPUCellListNeighborFinder(;
         eligible,
         special,
     )
+end
+
+# Defined here rather than only in the CUDA extension so that unsupported systems get
+#   an explanation rather than a MethodError
+function find_neighbors(sys::System,
+                        nf::GPUCellListNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0,
+                        force_recompute::Bool=false;
+                        kwargs...)
+    throw(ArgumentError("GPUCellListNeighborFinder requires a three-dimensional CuArray " *
+                        "system with a CubicBoundary, got a $(AtomsBase.n_dimensions(sys.boundary))D " *
+                        "$(array_type(sys.coords)) system with a $(typeof(sys.boundary)); " *
+                        "use DistanceNeighborFinder instead"))
+end
+
+function neighbor_finder_masks(nf::GPUCellListNeighborFinder, n_atoms::Integer)
+    if isnothing(nf.eligible)
+        # :ragged and :geometric_pairs ignore exclusions, so all pairs are eligible
+        eligible = trues(n_atoms, n_atoms)
+        for i in 1:n_atoms
+            eligible[i, i] = false
+        end
+        return eligible, falses(n_atoms, n_atoms)
+    end
+    return copy_to_bitmatrix(from_device(nf.eligible)), copy_to_bitmatrix(from_device(nf.special))
+end
+
+function Base.show(io::IO, neighbor_finder::GPUCellListNeighborFinder)
+    println(io, typeof(neighbor_finder))
+    println(io, "  output = ", neighbor_finder.output)
+    if !isnothing(neighbor_finder.eligible)
+        println(io, "  Size of eligible matrix = ", size(neighbor_finder.eligible))
+    end
+    println(io, "  max_neighbors = ", neighbor_finder.max_neighbors)
+    println(io, "  n_steps = ", neighbor_finder.n_steps)
+    print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end
 
 """

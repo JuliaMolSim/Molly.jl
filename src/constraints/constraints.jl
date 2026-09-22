@@ -226,6 +226,11 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
+    if !hasproperty(neighbor_finder, :eligible) || isnothing(neighbor_finder.eligible)
+        throw(ArgumentError("constraints can not be set up with a $(typeof(neighbor_finder)) " *
+                            "that has no eligible matrix, since constrained pairs have to " *
+                            "be excluded from the non-bonded interactions"))
+    end
     atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))
     if isa(neighbor_finder.eligible, AbstractGPUArray)
         i_idx, j_idx = Int[], Int[]

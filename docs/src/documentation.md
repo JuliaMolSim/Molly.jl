@@ -280,7 +280,7 @@ visualize(
 )
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
-The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref) for the classical neighbor finders and `nothing` for [`GPUNeighborFinder`](@ref), whose CUDA kernels manage their tile list internally.
+The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref) for the classical neighbor finders, a [`GPUCellListNeighborList`](@ref) for [`GPUCellListNeighborFinder`](@ref) and `nothing` for [`GPUNeighborFinder`](@ref), whose CUDA kernels manage their tile list internally.
 
 ## Simulating gravity
 
@@ -1795,6 +1795,7 @@ The available neighbor finders are:
 - [`NoNeighborFinder`](@ref)
 - [`CellListMapNeighborFinder`](@ref)
 - [`GPUNeighborFinder`](@ref)
+- [`GPUCellListNeighborFinder`](@ref)
 - [`DistanceNeighborFinder`](@ref)
 - [`TreeNeighborFinder`](@ref)
 

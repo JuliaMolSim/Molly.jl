@@ -1064,16 +1064,16 @@ end
                 @test Array(result.counts) == fill(Int32(39), n_atoms)
                 @test result.n == n_atoms * (n_atoms - 1) ÷ 2
 
-                                cell_counts = Array(result.state.cell_counts)
+                cell_counts = Array(result.state.cell_counts)
                 expected_host_tiles = sum(
                     cld(Int(count), 32)
                     for count in cell_counts
                 )
 
-                @test result.state.n_host_tiles[] == expected_host_tiles
-                @test result.state.n_host_tiles[] == 2
+                @test result.state.n_host_tiles == expected_host_tiles
+                @test result.state.n_host_tiles == 2
 
-                n_host_tiles = result.state.n_host_tiles[]
+                n_host_tiles = result.state.n_host_tiles
 
                 @test Array(
                     result.state.host_tile_starts[1:n_host_tiles],
@@ -1134,13 +1134,14 @@ end
                 @test cached_result === second_result
             end
 
-            @testset "Neighbor capacity overflow" begin
+            @testset "Neighbor capacity growth" begin
                 coords = [
                     SVector{3,Float32}(1.0, 2.0, 3.0),
                     SVector{3,Float32}(1.1, 2.0, 3.0),
                     SVector{3,Float32}(1.2, 2.0, 3.0),
                 ]
 
+                # A capacity that is too small is grown rather than being an error
                 for output in (:ragged, :geometric_pairs)
                     sys, _ = gpu_cell_list_test_system(
                         coords;
@@ -1149,8 +1150,155 @@ end
                         max_neighbors=1,
                     )
 
-                    @test_throws ErrorException find_neighbors(sys)
+                    result = find_neighbors(sys)
+                    CUDA.synchronize()
+
+                    @test Array(result.counts) == Int32[2, 2, 2]
+                    @test result.state.max_neighbours >= 2
+                    @test size(result.neighbors, 1) == result.state.max_neighbours
+
+                    if output === :geometric_pairs
+                        @test result.n == 3
+                    end
                 end
+            end
+
+            @testset "Matches DistanceNeighborFinder" begin
+                Random.seed!(100)
+
+                function canonical_pairs(nl)
+                    pairs = Array(nl.list[1:nl.n])
+                    return Set(
+                        (min(i, j), max(i, j), special)
+                        for (i, j, special) in pairs
+                    )
+                end
+
+                # The last box has exactly three cells along an axis, where the
+                #   3x3x3 stencil wraps around to cover every cell exactly once
+                for (n_atoms, boundary) in (
+                            (300, CubicBoundary(4.0f0)),
+                            (400, CubicBoundary(SVector(4.5f0, 3.2f0, 6.1f0))),
+                            (200, CubicBoundary(3.0f0)),
+                        )
+                    box = Molly.box_sides(boundary)
+                    coords = [
+                        SVector{3,Float32}(rand(Float32, 3) .* box)
+                        for _ in 1:n_atoms
+                    ]
+
+                    eligible = trues(n_atoms, n_atoms)
+                    special = falses(n_atoms, n_atoms)
+                    for i in 1:n_atoms
+                        eligible[i, i] = false
+                    end
+                    for _ in 1:n_atoms
+                        i, j = rand(1:n_atoms), rand(1:n_atoms)
+                        k, l = rand(1:n_atoms), rand(1:n_atoms)
+                        if i != j
+                            eligible[i, j] = false
+                            eligible[j, i] = false
+                        end
+                        if k != l
+                            special[k, l] = true
+                            special[l, k] = true
+                        end
+                    end
+
+                    nf_ref = DistanceNeighborFinder(
+                        eligible=CuArray(eligible),
+                        special=CuArray(special),
+                        dist_cutoff=1.0f0,
+                    )
+
+                    # Coordinates outside the box should give the same neighbors,
+                    #   since they are wrapped during the search
+                    shifts = (zero(box), box, -2 .* box)
+                    for shift in shifts
+                        sys, finder = gpu_cell_list_test_system(
+                            [c .+ shift for c in coords];
+                            output=:molly_pairs,
+                            cutoff=1.0f0,
+                            boundary=boundary,
+                            eligible=CuArray(eligible),
+                            special=CuArray(special),
+                        )
+
+                        result = find_neighbors(sys)
+                        reference = find_neighbors(sys, nf_ref)
+                        CUDA.synchronize()
+
+                        @test result.n == reference.n
+                        @test canonical_pairs(result) == canonical_pairs(reference)
+                    end
+                end
+            end
+
+            @testset "Box change" begin
+                Random.seed!(101)
+                n_atoms = 300
+                boundary = CubicBoundary(4.0f0)
+                coords = [
+                    SVector{3,Float32}(rand(Float32, 3) .* 4.0f0)
+                    for _ in 1:n_atoms
+                ]
+
+                sys, finder = gpu_cell_list_test_system(
+                    coords;
+                    output=:geometric_pairs,
+                    cutoff=1.0f0,
+                    boundary=boundary,
+                )
+
+                result = find_neighbors(sys)
+
+                # A changed box only changes the cell grid, so the state and the
+                #   buffers behind it are reused
+                for scale in (1.05f0, 0.8f0, 1.3f0)
+                    sys.boundary = CubicBoundary(4.0f0 * scale)
+                    sys.coords .= CuArray([c .* scale for c in coords])
+
+                    scaled = find_neighbors(sys, finder, result, 0, true)
+                    CUDA.synchronize()
+
+                    @test scaled.state === result.state
+                    @test scaled.counts === result.counts
+
+                    reference_n = count(
+                        norm(vector(c1 .* scale, c2 .* scale, sys.boundary)) <= 1.0f0
+                        for (i, c1) in enumerate(coords)
+                        for (j, c2) in enumerate(coords) if j < i
+                    )
+
+                    @test scaled.n == reference_n
+                    result = scaled
+                end
+            end
+
+            @testset "Automatic capacity estimate" begin
+                Random.seed!(102)
+                n_atoms = 2000
+                boundary = CubicBoundary(4.0f0)
+                coords = [
+                    SVector{3,Float32}(rand(Float32, 3) .* 4.0f0)
+                    for _ in 1:n_atoms
+                ]
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    output=:geometric_pairs,
+                    cutoff=1.0f0,
+                    boundary=boundary,
+                )
+
+                result = find_neighbors(sys)
+                CUDA.synchronize()
+
+                counts = Array(result.counts)
+
+                @test maximum(counts) <= result.state.max_neighbours
+                @test result.state.max_neighbours % 32 == 0
+                @test result.n == sum(counts) ÷ 2
             end
 
             @testset "Boundary validation" begin
@@ -1240,6 +1388,56 @@ end
                     output=:molly_pairs,
                     eligible=trues(3, 3),
                 )
+
+                # The masks have to be on the device for the search kernels
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:molly_pairs,
+                    eligible=trues(3, 3),
+                    special=falses(3, 3),
+                )
+
+                @test occursin("output = ragged", sprint(show, automatic_finder))
+
+                eligible_mask, special_mask = Molly.neighbor_finder_masks(
+                    automatic_finder,
+                    3,
+                )
+
+                @test !any(eligible_mask[i, i] for i in 1:3)
+                @test !any(special_mask)
+
+                # Ragged output has no pair list for the pairwise interactions
+                @test_throws ArgumentError System(
+                    atoms=CuArray([Molly.Atom(index=i, mass=1.0f0) for i in 1:2]),
+                    coords=CuArray([
+                        SVector{3,Float32}(1.0, 1.0, 1.0),
+                        SVector{3,Float32}(2.0, 1.0, 1.0),
+                    ]),
+                    boundary=CubicBoundary(10.0f0),
+                    pairwise_inters=(LennardJones(use_neighbors=true),),
+                    neighbor_finder=automatic_finder,
+                    force_units=NoUnits,
+                    energy_units=NoUnits,
+                )
+
+                # A system that is not a 3D CuArray system gets an explanation
+                cpu_sys = System(
+                    atoms=[Molly.Atom(index=i, mass=1.0f0) for i in 1:2],
+                    coords=[
+                        SVector{3,Float32}(1.0, 1.0, 1.0),
+                        SVector{3,Float32}(2.0, 1.0, 1.0),
+                    ],
+                    boundary=CubicBoundary(10.0f0),
+                    neighbor_finder=GPUCellListNeighborFinder(
+                        dist_cutoff=1.0f0,
+                        output=:geometric_pairs,
+                    ),
+                    force_units=NoUnits,
+                    energy_units=NoUnits,
+                )
+
+                @test_throws ArgumentError find_neighbors(cpu_sys)
             end
         end
     end

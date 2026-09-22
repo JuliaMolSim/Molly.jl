@@ -934,6 +934,13 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
             sys.coords .= old_coords
             sys.boundary = old_boundary
         end
+        if barostat.trial_find_neighbors
+            # A neighbor finder may reuse the buffers behind the list it is given, in
+            #   which case the trial list is the only valid one from here on and the
+            #   caller has to rebuild its own list
+            neighbors = neighbors_trial
+            recompute_forces = true
+        end
         barostat.n_attempted += 1
     end
     return recompute_forces
@@ -996,6 +1003,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
+        end
+        if barostat.trial_find_neighbors
+            neighbors = neighbors_trial
+            recompute_forces = true
         end
         barostat.n_attempted += 1
     end
@@ -1060,6 +1071,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
+        end
+        if barostat.trial_find_neighbors
+            neighbors = neighbors_trial
+            recompute_forces = true
         end
         barostat.n_attempted += 1
     end

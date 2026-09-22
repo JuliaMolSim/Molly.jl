@@ -629,11 +629,15 @@ end
 """
     GPUCellListNeighborList(counts, neighbors, n, list, state)
 
-GPU cell-list result containing a padded per-atom neighbor matrix and,
-when requested, a flat half-pair list.
+The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
+containing a padded per-atom neighbor matrix and, unless the finder uses
+`output=:ragged`, a flat half-pair list whose first `n` entries of `list` are valid.
 
-For atom `i`, valid ragged entries are stored in
-`neighbors[1:counts[i], i]`.
+For atom `i`, the valid entries of the neighbor matrix are `neighbors[1:counts[i], i]`.
+
+`state` holds the device buffers behind `counts`, `neighbors` and `list`, which are
+reused if this list is passed back to [`find_neighbors`](@ref) as `current_neighbors`.
+See [`GPUCellListNeighborFinder`](@ref) for what that means for holding on to a list.
 """
 struct GPUCellListNeighborList{C,R,L,S}
     counts::C
@@ -680,18 +684,17 @@ struct GPUCellListNeighborList{C,R,L,S}
     end
 end
 
-function Base.length(neighbors::GPUCellListNeighborList)
-    neighbors.list === nothing && throw(
-        ArgumentError(
-            "ragged-only GPU neighbor output has no flat pair list",
-        ),
-    )
+# Zero for ragged output, which has no pair list, so that generic code that asks how
+#   many pairs there are works on every output mode
+Base.length(neighbors::GPUCellListNeighborList) = neighbors.n
 
-    return neighbors.n
+function Base.getindex(neighbors::GPUCellListNeighborList, i::Integer)
+    if isnothing(neighbors.list)
+        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use the " *
+                            "counts and neighbors fields or output=:molly_pairs"))
+    end
+    return neighbors.list[i]
 end
-
-Base.getindex(neighbors::GPUCellListNeighborList, i::Integer) =
-    neighbors.list[i]
 
 Base.firstindex(::GPUCellListNeighborList) = 1
 
@@ -700,6 +703,7 @@ Base.lastindex(neighbors::GPUCellListNeighborList) =
 
 Base.eachindex(neighbors::GPUCellListNeighborList) =
     Base.OneTo(length(neighbors))
+
 """
     NeighborList(n, list)
     NeighborList()
@@ -913,6 +917,13 @@ end
 function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary,
                                on_gpu, strictness)
     neighbor_finder isa NoNeighborFinder && return nothing
+
+    if neighbor_finder isa GPUCellListNeighborFinder && neighbor_finder.output === :ragged &&
+                any(use_neighbors, values(pairwise_inters))
+        throw(ArgumentError("the neighbor finder has output=:ragged, which does not " *
+                            "produce the pair list that the pairwise interactions need, " *
+                            "use output=:molly_pairs"))
+    end
 
     for name in (:eligible, :special)
         hasproperty(neighbor_finder, name) || continue
