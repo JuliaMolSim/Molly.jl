@@ -12,8 +12,9 @@ Systems: the same jittered cubic lattice (2.5 A spacing, seed 1), H/C species, a
 edges within r_max. Energies/forces in float64 to match the other columns. Writes
 results/allegro_jax_<device>.json keyed like the torch bench.
 
-  ~/allegrojax/bin/python allegro_jax_bench.py           # CUDA if visible, else CPU
-  JAX_PLATFORMS=cpu ~/allegrojax/bin/python allegro_jax_bench.py
+  ~/allegrojax/bin/python allegro_jax_bench.py                               # CUDA if visible, else CPU
+  JAX_PLATFORMS=cpu ALLEGRO_JAX_THREADS=1 ~/allegrojax/bin/python allegro_jax_bench.py            # CPU t1
+  JAX_PLATFORMS=cpu ALLEGRO_JAX_THREADS=8 taskset -c 0-7 ~/allegrojax/bin/python allegro_jax_bench.py  # CPU t8
 """
 import json
 import os
@@ -21,7 +22,14 @@ import time
 
 import numpy as np
 
-import jax
+# CPU thread control must be set BEFORE importing jax/XLA. ALLEGRO_JAX_THREADS=1 forces XLA's Eigen
+# pool single-threaded; for a fixed >1 count, pin cores externally (taskset -c 0-<N-1>) so XLA sizes
+# its pool to the affinity mask. The label is taken from ALLEGRO_JAX_THREADS either way.
+_THREADS = int(os.environ.get("ALLEGRO_JAX_THREADS", "0"))   # 0 = default (all cores); CPU-only knob
+if _THREADS == 1:
+    os.environ["XLA_FLAGS"] = (os.environ.get("XLA_FLAGS", "") + " --xla_cpu_multi_thread_eigen=false").strip()
+
+import jax  # noqa: E402
 
 _PLAT = jax.devices()[0].platform.lower()   # "gpu" (cuda), "cpu", or "metal"
 # Apple Metal (jax-metal) is float32-only; everything else runs float64 to match the other columns.
@@ -37,7 +45,12 @@ RC = 4.0
 SIZES = [int(x) for x in
          os.environ.get("ALLEGRO_SIZES", "64,128,256,512,1024,2048,4096").split(",")]
 DEVICE = _PLAT
-KEY = "metal" if "metal" in _PLAT else ("cuda" if _PLAT == "gpu" else "cpu")
+if "metal" in _PLAT:
+    KEY = "metal"
+elif _PLAT == "gpu":
+    KEY = "cuda"
+else:
+    KEY = f"cpu_t{_THREADS}" if _THREADS > 0 else "cpu"
 
 
 class Model(nn.Module):
@@ -120,7 +133,8 @@ def main():
 
     outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
     os.makedirs(outdir, exist_ok=True)
-    path = os.path.join(outdir, f"allegro_jax_{KEY}.json")
+    fkey = "cpu" if KEY.startswith("cpu") else KEY   # cpu_t1/cpu_t8 share one file
+    path = os.path.join(outdir, f"allegro_jax_{fkey}.json")
     prev = json.load(open(path)) if os.path.exists(path) else {}
     prev.update(res)
     json.dump(prev, open(path, "w"), indent=1)

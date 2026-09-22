@@ -815,6 +815,26 @@ if isfile(ALLEGRO_H5) && isfile(ALLEGRO_JSON)
             end
         end
 
+        @testset "GPU forces path (KernelAbstractions CPU backend)" begin
+            # The GPU-portable analytic forces (compute_allegro_forces_ka) must reproduce the CPU
+            # analytic backward on the KA CPU backend; CUDA/Metal run the same kernels (checked in
+            # the GPU consistency testset when a device is available).
+            for sysj in ref.systems
+                coords_A = [SVector{3,Float64}(c...) for c in sysj.coords_A]
+                species = [Int(s) + 1 for s in sysj.species]
+                E, F = Molly.allegro_energy_and_forces(pot.model, coords_A, species, nothing, rc)
+                E_ka, F_ka_dev = Molly.compute_allegro_forces_ka(pot.model, coords_A, species, nothing;
+                                     backend=KernelAbstractions.CPU(), T=Float64)
+                F_ka = Array(F_ka_dev)
+                @test isapprox(E_ka, E; rtol=1e-8)
+                for i in eachindex(F)
+                    @test isapprox(SVector{3,Float64}(F_ka[1, i], F_ka[2, i], F_ka[3, i]), F[i]; atol=1e-8)
+                end
+                @test isapprox(sum(SVector{3,Float64}(F_ka[1, i], F_ka[2, i], F_ka[3, i]) for i in eachindex(F)),
+                               zero(SVector{3,Float64}); atol=1e-8)
+            end
+        end
+
         @testset "calculator: rotation invariance, ΣF≈0, finite differences" begin
             sysj = ref.systems[1]
             sys = mk_allegro_sys(sysj.coords_A, sysj.species)

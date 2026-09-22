@@ -69,6 +69,37 @@ within each block). `r` is an `SVector{3}`; only its direction matters. Supports
     end
 end
 
+# Stack N row vectors (each `∂Y_i/∂r`) into an `SMatrix{N,3}` directly, column-major, with no heap
+# allocation — `vcat` of a generator allocates and is rejected by the Metal compiler. `Val(3N)` keeps
+# the construction fully unrolled so it runs inside GPU kernels.
+@inline _rows_to_smat(rows::NTuple{N,SVector{3,T}}) where {N,T} =
+    SMatrix{N,3,T}(ntuple(idx -> (@inbounds rows[(idx - 1) % N + 1][(idx - 1) ÷ N + 1]), Val(3N)))
+
+# Concrete `lmax = 2` real-SH value + Jacobian, written out element by element (no closures, no
+# runtime-`lmax` union return) so it const-folds and runs inside GPU kernels on CUDA and Metal. The
+# rows are `∂Y_i/∂r = (∇P_i(r̂) − l·Y_i·r̂)/d`; `J` is assembled column-major (∂/∂x, ∂/∂y, ∂/∂z).
+@inline function _real_sph_harm_grad2(r::SVector{3,T}) where T
+    d = sqrt(r[1]^2 + r[2]^2 + r[3]^2); invd = inv(d)
+    x = r[1] * invd; y = r[2] * invd; z = r[3] * invd
+    c1 = T(C1); ca = T(C2A); cb = T(C2B); cc = T(C2C); c5 = T(sqrt(5.0))  # c5 = 2cb, ca = 2cc
+    Y2 = c1 * x;           Y3 = c1 * y;           Y4 = c1 * z
+    Y5 = ca * x * z;       Y6 = ca * x * y;       Y7 = cb * (2y * y - x * x - z * z)
+    Y8 = ca * y * z;       Y9 = cc * (z * z - x * x)
+    Y = SVector{9,T}(one(T), Y2, Y3, Y4, Y5, Y6, Y7, Y8, Y9)
+    r2x = (c1 - Y2 * x) * invd; r2y = (   - Y2 * y) * invd; r2z = (   - Y2 * z) * invd
+    r3x = (   - Y3 * x) * invd; r3y = (c1 - Y3 * y) * invd; r3z = (   - Y3 * z) * invd
+    r4x = (   - Y4 * x) * invd; r4y = (   - Y4 * y) * invd; r4z = (c1 - Y4 * z) * invd
+    r5x = (ca * z - 2Y5 * x) * invd; r5y = (       - 2Y5 * y) * invd; r5z = (ca * x - 2Y5 * z) * invd
+    r6x = (ca * y - 2Y6 * x) * invd; r6y = (ca * x - 2Y6 * y) * invd; r6z = (       - 2Y6 * z) * invd
+    r7x = (-c5 * x - 2Y7 * x) * invd; r7y = (2c5 * y - 2Y7 * y) * invd; r7z = (-c5 * z - 2Y7 * z) * invd
+    r8x = (       - 2Y8 * x) * invd; r8y = (ca * z - 2Y8 * y) * invd; r8z = (ca * y - 2Y8 * z) * invd
+    r9x = (-ca * x - 2Y9 * x) * invd; r9y = (       - 2Y9 * y) * invd; r9z = (ca * z - 2Y9 * z) * invd
+    J = SMatrix{9,3,T}(zero(T), r2x, r3x, r4x, r5x, r6x, r7x, r8x, r9x,
+                       zero(T), r2y, r3y, r4y, r5y, r6y, r7y, r8y, r9y,
+                       zero(T), r2z, r3z, r4z, r5z, r6z, r7z, r8z, r9z)
+    return Y, J
+end
+
 """
     real_sph_harm_grad(lmax, r) -> (Y, J)
 
@@ -99,7 +130,7 @@ and `J::SMatrix{(lmax+1)^2, 3}`. Supports `lmax ≤ 2`.
     if lmax == 1
         Y = SVector{4,T}(one(T), p1[1], p1[2], p1[3])
         # ∂Y_l/∂r = (1/d)(∇P - l Y r̂); l=0 row is zero, l=1 rows use l=1.
-        rows = ntuple(4) do i
+        rows = ntuple(Val(4)) do i
             if i == 1
                 SVector{3,T}(0, 0, 0)
             else
@@ -107,34 +138,9 @@ and `J::SMatrix{(lmax+1)^2, 3}`. Supports `lmax ≤ 2`.
                 (g - one(T) * Y[i] * rh) * invd
             end
         end
-        J = SMatrix{4,3,T}(vcat((r' for r in rows)...))
-        return Y, J
+        return Y, _rows_to_smat(rows)
     end
 
-    # l=2
-    ca, cb, cc = T(C2A), T(C2B), T(C2C)
-    c5 = T(sqrt(5.0))  # = 2·cb, from d/d[.] of (√5/2)(2y²−x²−z²)
-    p2 = poly_l2(x, y, z)
-    # ∇P2 for each e3nn l=2 component (degree-1 polynomials in x,y,z):
-    gP2 = (
-        SVector{3,T}(ca * z, 0, ca * x),               # [0] √15·xz
-        SVector{3,T}(ca * y, ca * x, 0),               # [1] √15·xy
-        SVector{3,T}(-c5 * x, 2c5 * y, -c5 * z),       # [2] (√5/2)(2y²−x²−z²)
-        SVector{3,T}(0, ca * z, ca * y),               # [3] √15·yz
-        SVector{3,T}(-ca * x, 0, ca * z),              # [4] (√15/2)(z²−x²)
-    )
-    Y = SVector{9,T}(one(T), p1[1], p1[2], p1[3], p2[1], p2[2], p2[3], p2[4], p2[5])
-    rows = ntuple(9) do i
-        if i == 1
-            SVector{3,T}(0, 0, 0)
-        elseif i <= 4
-            g = gP1[i - 1]
-            (g - one(T) * Y[i] * rh) * invd
-        else
-            g = gP2[i - 4]
-            (g - T(2) * Y[i] * rh) * invd
-        end
-    end
-    J = SMatrix{9,3,T}(vcat((r' for r in rows)...))
-    return Y, J
+    # l=2 — the concrete, GPU-safe path (also the one the analytic forces use).
+    return _real_sph_harm_grad2(r)
 end
