@@ -109,9 +109,12 @@ speedup_over_cpu8([
     ("CUDA / CPU-t8 (RTX 5080)",  :seagreen,   series(getk(cuda,  "cpu_t8")), series(getk(cuda,  "cuda"))),
 ], "allegro_gpu_speedup.png")
 
-# --- head-to-head: Molly native vs the real nequip-allegro (PyTorch), same RTX 5080 host ----------
+# --- all Allegro implementations: energy + forces (Molly native vs nequip-allegro) ---------------
 # Comparable-size Allegro (l_max=2, 2 layers, ~4 tensor / 16 scalar channels), NOT identical ops.
-# Molly series read "min"; nequip series read "energy_ms". Molly solid, nequip dashed.
+# Molly series read "min"; nequip series read "<key>_ms". Molly solid, nequip dashed/dashdot.
+# nequip-allegro has NO Apple GPU path (float64; MPS is float32-only), so Metal is Molly-only. Molly
+# has no GPU forces yet, so its forces series is CPU-only. CPU/CUDA are the RTX 5080 host; Molly
+# Metal is the Apple M3 (cross-machine).
 function series_key(d, k)
     isnothing(d) && return (Int[], Float64[])
     ks = sort(parse.(Int, collect(string.(keys(d)))))
@@ -119,28 +122,42 @@ function series_key(d, k)
 end
 nq_cuda = load_json(joinpath(RES, "allegro_torch_cuda.json"))
 nq_cpu  = load_json(joinpath(RES, "allegro_torch_cpu.json"))
-if !isnothing(nq_cuda) && !isnothing(cuda)
-    fig = Figure(size = (860, 580))
+molly_e = load_json(joinpath(RES, "allegro_energy_cyclops.json"))   # Molly cyclops CPU energy (t8 run)
+molly_f = load_json(joinpath(RES, "allegro_forces_cyclops.json"))   # Molly cyclops CPU energy+forces
+
+function overlay_plot(title, out, specs)
+    fig = Figure(size = (900, 600))
     ax  = Axis(fig[1, 1], xscale = log10, yscale = log10, xlabel = "number of atoms",
-               ylabel = "energy time (ms)",
-               title = "Allegro energy: Molly vs nequip-allegro (comparable model; Metal on M3, rest on RTX 5080)")
-    # nequip-allegro has NO Apple GPU path (it requires float64; MPS is float32-only), so Metal is a
-    # Molly-only series. CPU/CUDA are the RTX 5080 host; Molly Metal is the Apple M3 (cross-machine).
-    specs = [
-        ("Molly CUDA (RTX 5080)",       :seagreen,   :solid,   series(getk(cuda, "cuda"))),
-        ("Molly Metal (M3)",            :purple,     :solid,   series(getk(metal, "metal"))),
-        ("Molly CPU t8",                :navy,       :solid,   series(getk(cuda, "cpu_t8"))),
-        ("nequip-allegro CUDA (eager)", :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "energy_ms")),
-        ("nequip-allegro CUDA (compiled)", :goldenrod, :dashdot, series_key(getk(nq_cuda, "cuda_c"), "energy_ms")),
-        ("nequip-allegro CPU t8",       :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
-    ]
+               ylabel = "time (ms)", title = title)
+    plotted = false
     for (lbl, col, ls, (xs, ys)) in specs
         isempty(xs) && continue
         scatterlines!(ax, xs, ys, label = lbl, markersize = 9, color = col, linestyle = ls)
+        plotted = true
     end
-    axislegend(ax, position = :lt, labelsize = 11)
-    save(joinpath(IMG, "allegro_vs_nequip_energy.png"), fig, px_per_unit = 2)
-    println("wrote images/allegro_vs_nequip_energy.png")
+    plotted || return
+    axislegend(ax, position = :lt, labelsize = 10, nbanks = 1)
+    save(joinpath(IMG, out), fig, px_per_unit = 2)
+    println("wrote images/", out)
 end
+
+overlay_plot("Allegro energy: all implementations (comparable model; Metal=M3, rest=RTX 5080)",
+             "allegro_benchmark_energy.png", [
+    ("Molly CUDA (RTX 5080)",          :seagreen,   :solid,   series(getk(cuda, "cuda"))),
+    ("Molly Metal (M3)",               :purple,     :solid,   series(getk(metal, "metal"))),
+    ("Molly CPU t8",                   :navy,       :solid,   series(getk(cuda, "cpu_t8"))),
+    ("nequip-allegro CUDA (eager)",    :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "energy_ms")),
+    ("nequip-allegro CUDA (compiled)", :goldenrod,  :dashdot, series_key(getk(nq_cuda, "cuda_c"), "energy_ms")),
+    ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
+])
+
+overlay_plot("Allegro forces: all implementations (comparable model; RTX 5080 host)",
+             "allegro_benchmark_force.png", [
+    ("Molly CPU (analytic, t8)",       :navy,       :solid,   series(getk(molly_f, "cpu"))),
+    ("nequip-allegro CUDA (eager)",    :darkorange, :dash,    series_key(getk(nq_cuda, "cuda"), "forces_ms")),
+    ("nequip-allegro CUDA (compiled)", :goldenrod,  :dashdot, series_key(getk(nq_cuda, "cuda_c"), "forces_ms")),
+    ("nequip-allegro CPU t1",          :seagreen,   :dash,    series_key(getk(nq_cpu, "cpu_t1"), "forces_ms")),
+    ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "forces_ms")),
+])
 
 println("done — images in ", IMG)

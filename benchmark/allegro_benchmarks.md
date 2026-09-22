@@ -159,16 +159,18 @@ is shown both eager and `torch.compile`d (its fast deployment path):
 (The compiled column is noisy — `torch.compile` with dynamic shapes recompiles per size — but the
 ordering is stable.)
 
+![Allegro energy: all implementations](images/allegro_benchmark_energy.png)
+
 **Forces, time in ms** (Molly analytic vs nequip autograd; CPU on the RTX 5080 host):
 
-| atoms | Molly CPU | nequip CPU-t1 | nequip CPU-t8 | nequip CUDA |
-| :---: | :---: | :---: | :---: | :---: |
-| 64   | 45.9   | 34.8 | 411  | 15.2 |
-| 256  | 240.0  | 301  | 802  | 15.3 |
-| 1024 | 1280.7 | 1323 | 1543 | 15.4 |
-| 2048 | 2914.6 | 2799 | 2114 | 17.1 |
+| atoms | Molly CPU | nequip CPU-t1 | nequip CPU-t8 | nequip CUDA (eager) | nequip CUDA (compiled) |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| 64   | 45.9   | 34.8 | 411  | 15.2 | 7.4  |
+| 256  | 240.0  | 301  | 802  | 15.3 | 17.2 |
+| 1024 | 1280.7 | 1323 | 1543 | 15.4 | 11.2 |
+| 2048 | 2914.6 | 2799 | 2114 | 17.1 | 22.4 |
 
-![Molly vs nequip-allegro energy](images/allegro_vs_nequip_energy.png)
+![Allegro forces: all implementations](images/allegro_benchmark_force.png)
 
 Reading it:
 
