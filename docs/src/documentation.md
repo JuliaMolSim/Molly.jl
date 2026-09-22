@@ -160,6 +160,7 @@ To run simulations on the GPU you will need to have a GPU available and then loa
 Modern GPUs can run simulations of over 100,000 atoms, [as seen in the examples](@ref "Testing GPU memory limits").
 Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` in this case.
 Non-CUDA backends are less well-tested with Molly than CUDA.
+The tiled neighbor finder [`GPUNeighborFinder`](@ref) is CUDA-specific, so on other GPU backends the `O(N)` cell list [`GPUCellListNeighborFinder`](@ref) should be used instead.
 
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives much better performance on GPUs.
@@ -1802,7 +1803,7 @@ The available neighbor finders are:
 - [`DistanceNeighborFinder`](@ref)
 - [`TreeNeighborFinder`](@ref)
 
-The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`DistanceNeighborFinder`](@ref) on other GPUs.
+The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`GPUCellListNeighborFinder`](@ref) on other GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
 
 The pairs of atoms that interact are given to a neighbor finder as the number of atoms along with lists of the excluded pairs, which do not interact through the pairwise interactions, for example bonded atoms, and the special pairs, which have scaled interactions, for example 1-4 atoms:
 ```julia
@@ -1850,6 +1851,9 @@ Instead of materializing a conventional neighbor list, it stores sparse excluded
 The memory it uses grows linearly with the number of atoms, and for large systems the interacting tiles are found by searching a tree of bounding boxes, so the time taken also grows close to linearly.
 Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
 When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps` to the number of steps between reordering the atoms and refreshing the tile list.
+
+[`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref).
+It runs on any GPU backend and is the best option on GPUs other than NVIDIA ones, where the tiled kernels of [`GPUNeighborFinder`](@ref) are not available.
 
 ## Analysis
 
