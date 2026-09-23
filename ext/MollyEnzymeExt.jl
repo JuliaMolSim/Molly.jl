@@ -1169,7 +1169,7 @@ function pairwise_adjoint!(rev_kernel, sys, prim, neighbors, step_n, pairwise_in
     elseif !any(use_nl)
         nbs_in = Molly.NoNeighborList(length(sys))
     else
-        error("a mix of pairwise interactions with and without neighbour lists is not " *
+        error("a mix of pairwise interactions with and without neighbor lists is not " *
               "supported by the GPU reverse rules yet")
     end
     length(nbs_in) == 0 && return false

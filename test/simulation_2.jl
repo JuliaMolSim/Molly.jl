@@ -470,9 +470,6 @@ end
     for triclinic in (false, true)
         final_coords_ref, E_start_ref = test_sim(runs[1][2]..., triclinic)
         for (name, args) in runs
-            if triclinic && args[1] == GPUCellListNeighborFinder
-                continue
-            end
             final_coords, E_start = test_sim(args..., triclinic)
             final_coords_f64 = [Float64.(c) for c in from_device(final_coords)]
             coord_diff = final_coords_f64 .- final_coords_ref

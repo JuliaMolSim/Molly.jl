@@ -427,9 +427,11 @@ searches the 3x3x3 stencil of cells around each atom.
 
 Returns a [`GPUCellListNeighborList`](@ref). It runs on any GPU backend and is
 the recommended neighbor finder for non-CUDA GPUs, where [`GPUNeighborFinder`](@ref)
-is not available. Only three-dimensional
-[`CubicBoundary`](@ref) systems with at least three cells along every box axis are
-supported, i.e. every box side must be at least three times `dist_cutoff`.
+is not available. Three-dimensional [`CubicBoundary`](@ref) and
+[`TriclinicBoundary`](@ref) systems are supported, provided the grid has at least
+three cells along every box axis, i.e. opposite box faces are at least three times
+`dist_cutoff` apart. For a [`TriclinicBoundary`](@ref) that distance is smaller than
+the length of the corresponding basis vector.
 
 `dist_cutoff` is the neighbor search distance, which should be the interaction cutoff
 distance plus a buffer distance since the list is only updated every `n_steps` steps.
@@ -613,12 +615,10 @@ in place rather than reallocated when the box changes.
     num_cell_x::Int32
     num_cell_y::Int32
     num_cell_z::Int32
-    cell_Lx::T
-    cell_Ly::T
-    cell_Lz::T
-    box_Lx::T
-    box_Ly::T
-    box_Lz::T
+    # Columns are the box basis vectors, so that a triclinic box is handled the same
+    #   way as a cubic one, along with the inverse that gives fractional coordinates
+    box::SMatrix{3, 3, T, 9}
+    box_inv::SMatrix{3, 3, T, 9}
     cutoff2::T
 end
 
@@ -631,24 +631,50 @@ rebuild, and the rest are fully written before they are read.
 =#
 cell_list_buffer(template, ::Type{T}, dims...) where {T} = similar(template, T, dims...)
 
-function estimate_gpu_cell_list_max_neighbors(n_atoms, box_Lx::T, box_Ly::T, box_Lz::T,
-                                              cutoff::T) where {T}
-    density = T(n_atoms) / (box_Lx * box_Ly * box_Lz)
+function estimate_gpu_cell_list_max_neighbors(n_atoms, box_volume::T, cutoff::T) where {T}
+    density = T(n_atoms) / box_volume
     expected_neighbors = T(1.5) * density * T(4π / 3) * cutoff^3
     return max(CELL_BLOCK_SIZE,
                cld(ceil(Int, expected_neighbors), CELL_BLOCK_SIZE) * CELL_BLOCK_SIZE)
 end
 
+#=
+Distance between the opposite faces of the box along each basis vector.
+
+This is the box side for a `CubicBoundary` and less than the side for a skewed
+`TriclinicBoundary`. Cells have to be at least the cutoff wide by this measure for the
+3x3x3 stencil to contain every neighbor.
+=#
+cell_list_box_widths(boundary::CubicBoundary{3}) = box_sides(boundary)
+
+function cell_list_box_widths(boundary::TriclinicBoundary)
+    bv = boundary.basis_vectors
+    V = volume(boundary)
+    return SVector(V / norm(cross(bv[2], bv[3])), V / norm(cross(bv[1], bv[3])),
+                   V / norm(cross(bv[1], bv[2])))
+end
+
+# The box basis vectors as the columns of a matrix, stripped of units
+function cell_list_box_matrix(boundary::CubicBoundary{3}, ::Type{T}, dist_unit) where {T}
+    return SMatrix{3, 3, T}(Diagonal(T.(ustrip.(dist_unit, box_sides(boundary)))))
+end
+
+function cell_list_box_matrix(boundary::TriclinicBoundary, ::Type{T}, dist_unit) where {T}
+    bv = boundary.basis_vectors
+    return SMatrix{3, 3, T}(T.(ustrip.(dist_unit, hcat(bv[1], bv[2], bv[3]))))
+end
+
 # Cell grid for a box, with cells at least `cutoff` wide so that the 3x3x3 stencil
 #   around a cell covers every neighbor exactly once
-function gpu_cell_list_grid(box_Lx::T, box_Ly::T, box_Lz::T, cutoff::T) where {T}
-    num_cell_x = floor(Int32, box_Lx / cutoff)
-    num_cell_y = floor(Int32, box_Ly / cutoff)
-    num_cell_z = floor(Int32, box_Lz / cutoff)
+function gpu_cell_list_grid(widths::SVector{3, T}, cutoff::T) where {T}
+    num_cell_x = floor(Int32, widths[1] / cutoff)
+    num_cell_y = floor(Int32, widths[2] / cutoff)
+    num_cell_z = floor(Int32, widths[3] / cutoff)
 
     minimum((num_cell_x, num_cell_y, num_cell_z)) >= 3 || throw(ArgumentError(
         "GPUCellListNeighborFinder requires at least three cells along every box " *
-        "axis; box sides are ($box_Lx, $box_Ly, $box_Lz) and cutoff is $cutoff"))
+        "axis; the box is $(widths[1]) by $(widths[2]) by $(widths[3]) wide between " *
+        "opposite faces and the cutoff is $cutoff"))
 
     # Widened before multiplying since the product can overflow Int32
     n_cells = Int(num_cell_x) * Int(num_cell_y) * Int(num_cell_z)
@@ -657,8 +683,7 @@ function gpu_cell_list_grid(box_Lx::T, box_Ly::T, box_Lz::T, cutoff::T) where {T
         "GPUCellListNeighborFinder cell grid has $n_cells cells, which does not fit " *
         "in Int32; use a larger cutoff or a smaller box"))
 
-    return (num_cell_x, num_cell_y, num_cell_z, box_Lx / num_cell_x, box_Ly / num_cell_y,
-            box_Lz / num_cell_z, n_cells)
+    return num_cell_x, num_cell_y, num_cell_z, n_cells
 end
 
 # Upper bound on the number of (cell, tile) pairs, used to size the schedule and to
@@ -677,12 +702,12 @@ function gpu_cell_list_pair_capacity(n_atoms::Integer, max_neighbors::Integer)
     return pair_capacity
 end
 
-function allocate_gpu_cell_list_state(coords, ::Type{T}, box_Lx::T, box_Ly::T, box_Lz::T,
-                                      cutoff::T; max_neighbors=Int32(128),
+function allocate_gpu_cell_list_state(coords, ::Type{T}, box::SMatrix{3, 3, T},
+                                      widths::SVector{3, T}, cutoff::T;
+                                      max_neighbors=Int32(128),
                                       allocate_pairs=false) where {T}
     n_atoms = length(coords)
-    num_cell_x, num_cell_y, num_cell_z, cell_Lx, cell_Ly, cell_Lz, n_cells =
-                                gpu_cell_list_grid(box_Lx, box_Ly, box_Lz, cutoff)
+    num_cell_x, num_cell_y, num_cell_z, n_cells = gpu_cell_list_grid(widths, cutoff)
     max_host_tiles = max_gpu_cell_list_host_tiles(n_atoms, n_cells)
     pair_capacity = (allocate_pairs ? gpu_cell_list_pair_capacity(n_atoms, max_neighbors) : 0)
     pair_buffer() = cell_list_buffer(coords, Int32, allocate_pairs ? n_atoms : 0)
@@ -725,12 +750,8 @@ function allocate_gpu_cell_list_state(coords, ::Type{T}, box_Lx::T, box_Ly::T, b
         num_cell_x=num_cell_x,
         num_cell_y=num_cell_y,
         num_cell_z=num_cell_z,
-        cell_Lx=cell_Lx,
-        cell_Ly=cell_Ly,
-        cell_Lz=cell_Lz,
-        box_Lx=box_Lx,
-        box_Ly=box_Ly,
-        box_Lz=box_Lz,
+        box=box,
+        box_inv=inv(box),
         cutoff2=cutoff * cutoff,
     )
 
@@ -746,10 +767,10 @@ Only the cell buffers depend on the box, and only through the number of cells, s
 box change usually reuses every buffer. The per-atom and output buffers, which are by
 far the largest, are never reallocated here.
 =#
-function update_gpu_cell_list_state!(state::GPUCellListState{T}, box_Lx::T, box_Ly::T,
-                                     box_Lz::T, cutoff::T, max_neighbors::Integer) where {T}
-    num_cell_x, num_cell_y, num_cell_z, cell_Lx, cell_Ly, cell_Lz, n_cells =
-                                gpu_cell_list_grid(box_Lx, box_Ly, box_Lz, cutoff)
+function update_gpu_cell_list_state!(state::GPUCellListState{T}, box::SMatrix{3, 3, T},
+                                     widths::SVector{3, T}, cutoff::T,
+                                     max_neighbors::Integer) where {T}
+    num_cell_x, num_cell_y, num_cell_z, n_cells = gpu_cell_list_grid(widths, cutoff)
 
     if n_cells > state.cell_capacity
         state.cell_counts = cell_list_buffer(state.cell_counts, Int32, n_cells)
@@ -774,12 +795,8 @@ function update_gpu_cell_list_state!(state::GPUCellListState{T}, box_Lx::T, box_
     state.num_cell_x = num_cell_x
     state.num_cell_y = num_cell_y
     state.num_cell_z = num_cell_z
-    state.cell_Lx = cell_Lx
-    state.cell_Ly = cell_Ly
-    state.cell_Lz = cell_Lz
-    state.box_Lx = box_Lx
-    state.box_Ly = box_Ly
-    state.box_Lz = box_Lz
+    state.box = box
+    state.box_inv = inv(box)
     state.cutoff2 = cutoff * cutoff
 
     # The capacity is only ever grown, since shrinking it would force a rebuild the
@@ -815,23 +832,25 @@ function grow_gpu_cell_list_pairs!(state::GPUCellListState, pair_capacity::Integ
     return state
 end
 
-@inline function wrap_cell_list_coord(c::T, box_L::T) where {T}
-    wrapped = c - box_L * floor(c / box_L)
-    # Rounding can land exactly on the box side for small negative coordinates
-    return wrapped < box_L ? wrapped : zero(T)
-end
+# Coordinates in units of the box basis vectors, which are in [0, 1) inside the box
+@inline cell_list_fractional(box_inv::SMatrix{3, 3, T}, coord::SVector{3, T}) where {T} =
+                        box_inv * coord
 
 @kernel inbounds=true function gpu_cell_list_split_coords_kernel!(x, y, z, @Const(coords),
-                                    n_atoms, box_Lx::T, box_Ly::T, box_Lz::T) where {T}
+                                    n_atoms, box::SMatrix{3, 3, T},
+                                    box_inv::SMatrix{3, 3, T}) where {T}
     atom_i = @index(Global, Linear) % Int32
 
     if atom_i <= n_atoms
-        coord = ustrip_vec(coords[atom_i])
+        c = ustrip_vec(coords[atom_i])
+        coord = SVector{3, T}(T(c[1]), T(c[2]), T(c[3]))
         # Coordinates are wrapped here rather than in the cell ID kernel so that atoms
-        #   from an unwrapped structure land in the right cell
-        x[atom_i] = wrap_cell_list_coord(T(coord[1]), box_Lx)
-        y[atom_i] = wrap_cell_list_coord(T(coord[2]), box_Ly)
-        z[atom_i] = wrap_cell_list_coord(T(coord[3]), box_Lz)
+        #   from an unwrapped structure land in the right cell. Subtracting whole box
+        #   images leaves a coordinate that is already inside the box untouched
+        wrapped = coord - box * floor.(cell_list_fractional(box_inv, coord))
+        x[atom_i] = wrapped[1]
+        y[atom_i] = wrapped[2]
+        z[atom_i] = wrapped[3]
     end
 end
 
@@ -839,8 +858,8 @@ function split_gpu_cell_list_coordinates!(state::GPUCellListState, coords)
     n_atoms = Int(state.n_atoms)
     backend = get_backend(coords)
     kernel! = gpu_cell_list_split_coords_kernel!(backend, gpu_threads_cell_list(n_atoms))
-    kernel!(state.x, state.y, state.z, coords, state.n_atoms, state.box_Lx, state.box_Ly,
-            state.box_Lz; ndrange=n_atoms)
+    kernel!(state.x, state.y, state.z, coords, state.n_atoms, state.box, state.box_inv;
+            ndrange=n_atoms)
     return state
 end
 
@@ -860,17 +879,21 @@ end
 
 @kernel inbounds=true function gpu_cell_list_cell_ids_kernel!(cell_ids, cell_counts,
                                     @Const(x), @Const(y), @Const(z), n_atoms, num_cell_x,
-                                    num_cell_y, num_cell_z, cell_Lx, cell_Ly, cell_Lz)
+                                    num_cell_y, num_cell_z, box_inv::SMatrix{3, 3, T}) where {T}
     atom_i = @index(Global, Linear) % Int32
 
     if atom_i <= n_atoms
+        # The grid is uniform in fractional coordinates, which makes the cells
+        #   parallelepipeds that follow a triclinic box
+        s = cell_list_fractional(box_inv, SVector{3, T}(x[atom_i], y[atom_i], z[atom_i]))
         # The coordinates are wrapped, so the clamp only guards against floating point
-        #   landing one cell outside the grid
-        cell_id_x = min(max(floor(Int32, x[atom_i] / cell_Lx), Int32(0)),
+        #   landing one cell outside the grid. Clamping rather than wrapping keeps the
+        #   cell consistent with the coordinate that the distances are computed from
+        cell_id_x = min(max(floor(Int32, s[1] * num_cell_x), Int32(0)),
                         num_cell_x - Int32(1))
-        cell_id_y = min(max(floor(Int32, y[atom_i] / cell_Ly), Int32(0)),
+        cell_id_y = min(max(floor(Int32, s[2] * num_cell_y), Int32(0)),
                         num_cell_y - Int32(1))
-        cell_id_z = min(max(floor(Int32, z[atom_i] / cell_Lz), Int32(0)),
+        cell_id_z = min(max(floor(Int32, s[3] * num_cell_z), Int32(0)),
                         num_cell_z - Int32(1))
         cell = Int32(1) + cell_id_x + num_cell_x * (cell_id_y + num_cell_y * cell_id_z)
         cell_ids[atom_i] = cell
@@ -994,15 +1017,15 @@ end
     end
 end
 
-# Wrap a stencil cell index into the grid, along with the shift that moves a coordinate
-#   into the same periodic image as that cell
-@inline function wrapped_cell_index(cell, num_cell, box_L::T) where {T}
+# Wrap a stencil cell index into the grid, along with the number of box images the
+#   wrap moved by, which gives the shift that brings a candidate into the same image
+@inline function wrapped_cell_index(cell, num_cell)
     if cell < Int32(0)
-        return cell + num_cell, -box_L
+        return cell + num_cell, -one(Int32)
     elseif cell >= num_cell
-        return cell - num_cell, box_L
+        return cell - num_cell, one(Int32)
     else
-        return cell, zero(T)
+        return cell, zero(Int32)
     end
 end
 
@@ -1019,8 +1042,8 @@ group synchronization and the state is kept.
                                     @Const(cell_particles), @Const(host_tile_cells),
                                     @Const(host_tile_starts), @Const(cell_x), @Const(cell_y),
                                     @Const(cell_z), num_cell_x, num_cell_y, num_cell_z,
-                                    box_Lx::T, box_Ly::T, box_Lz::T, cutoff2::T,
-                                    max_neighbors, ::Val{block_size}) where {T, block_size}
+                                    box::SMatrix{3, 3, T}, cutoff2::T, max_neighbors,
+                                    ::Val{block_size}) where {T, block_size}
     host_tile = @index(Group, Linear) % Int32
     lane = @index(Local, Linear) % Int32
 
@@ -1058,11 +1081,14 @@ group synchronization and the state is kept.
         # The stencil cell fixes which periodic image of a candidate is the closest one,
         #   so a shift per cell replaces recomputing the minimum image for every pair
         for dz in Int32(-1):Int32(1)
-            nz, shift_z = wrapped_cell_index(cz + dz, num_cell_z, box_Lz)
+            nz, image_z = wrapped_cell_index(cz + dz, num_cell_z)
+            shift_c = T(image_z) * box[:, 3]
             for dy in Int32(-1):Int32(1)
-                ny, shift_y = wrapped_cell_index(cy + dy, num_cell_y, box_Ly)
+                ny, image_y = wrapped_cell_index(cy + dy, num_cell_y)
+                shift_bc = shift_c + T(image_y) * box[:, 2]
                 for dx in Int32(-1):Int32(1)
-                    nx, shift_x = wrapped_cell_index(cx + dx, num_cell_x, box_Lx)
+                    nx, image_x = wrapped_cell_index(cx + dx, num_cell_x)
+                    shift = shift_bc + T(image_x) * box[:, 1]
                     candidate_cell = Int32(1) + nx + num_cell_x * (ny + num_cell_y * nz)
                     candidate_start = cell_offsets[candidate_cell]
                     n_candidates = cell_counts[candidate_cell]
@@ -1089,9 +1115,9 @@ group synchronization and the state is kept.
                             for candidate_lane in Int32(1):tile_count
                                 atom_j = shared_ids[candidate_lane]
                                 if atom_j != atom_i
-                                    dx_ij = (shared_x[candidate_lane] - x_i) + shift_x
-                                    dy_ij = (shared_y[candidate_lane] - y_i) + shift_y
-                                    dz_ij = (shared_z[candidate_lane] - z_i) + shift_z
+                                    dx_ij = (shared_x[candidate_lane] - x_i) + shift[1]
+                                    dy_ij = (shared_y[candidate_lane] - y_i) + shift[2]
+                                    dz_ij = (shared_z[candidate_lane] - z_i) + shift[3]
                                     r2 = dx_ij * dx_ij + dy_ij * dy_ij + dz_ij * dz_ij
                                     if r2 <= cutoff2
                                         count += Int32(1)
@@ -1135,7 +1161,7 @@ function build_gpu_cell_list!(state::GPUCellListState)
     cell_ids_kernel! = gpu_cell_list_cell_ids_kernel!(backend, n_threads_atoms)
     cell_ids_kernel!(state.cell_ids, state.cell_counts, state.x, state.y, state.z,
                      state.n_atoms, state.num_cell_x, state.num_cell_y, state.num_cell_z,
-                     state.cell_Lx, state.cell_Ly, state.cell_Lz; ndrange=n_atoms)
+                     state.box_inv; ndrange=n_atoms)
 
     # The buffers can be longer than the cell grid after the box has shrunk, but the
     #   counts past n_cells are zero so the scan is still correct over the grid
@@ -1178,9 +1204,9 @@ function query_gpu_cell_list!(state::GPUCellListState)
     search_kernel!(state.neighbor_counts, state.neighbors, state.counters, state.cell_counts,
                    state.cell_offsets, state.cell_particles, state.host_tile_cells,
                    state.host_tile_starts, state.cell_x, state.cell_y, state.cell_z,
-                   state.num_cell_x, state.num_cell_y, state.num_cell_z, state.box_Lx,
-                   state.box_Ly, state.box_Lz, state.cutoff2, state.max_neighbors,
-                   Val(CELL_BLOCK_SIZE); ndrange=(state.max_host_tiles * CELL_BLOCK_SIZE))
+                   state.num_cell_x, state.num_cell_y, state.num_cell_z, state.box,
+                   state.cutoff2, state.max_neighbors, Val(CELL_BLOCK_SIZE);
+                   ndrange=(state.max_host_tiles * CELL_BLOCK_SIZE))
     return state
 end
 
@@ -1295,19 +1321,18 @@ function find_neighbors(sys::System{3, AT},
         return current_neighbors
     end
 
-    sys.boundary isa CubicBoundary || throw(ArgumentError(
-        "GPUCellListNeighborFinder currently supports only three-dimensional " *
-        "CubicBoundary systems, got $(typeof(sys.boundary))"))
+    (sys.boundary isa CubicBoundary{3} || sys.boundary isa TriclinicBoundary) || throw(
+        ArgumentError("GPUCellListNeighborFinder currently supports only " *
+                      "three-dimensional CubicBoundary and TriclinicBoundary systems, " *
+                      "got $(typeof(sys.boundary))"))
 
     has_infinite_boundary(sys.boundary) && throw(ArgumentError(
         "GPUCellListNeighborFinder does not support infinite boundaries"))
 
     dist_unit = unit(zero(eltype(eltype(sys.coords))))
     T = float_type(sys)
-    box = box_sides(sys.boundary)
-    box_Lx = T(ustrip(dist_unit, box[1]))
-    box_Ly = T(ustrip(dist_unit, box[2]))
-    box_Lz = T(ustrip(dist_unit, box[3]))
+    box = cell_list_box_matrix(sys.boundary, T, dist_unit)
+    widths = SVector{3, T}(T.(ustrip.(dist_unit, cell_list_box_widths(sys.boundary))))
     cutoff = T(ustrip(dist_unit, nf.dist_cutoff))
 
     n_atoms = length(sys)
@@ -1315,7 +1340,8 @@ function find_neighbors(sys::System{3, AT},
     pair_mode = (nf.output === :molly_pairs ? Val(:molly) : Val(:geometric))
 
     max_neighbors = if isnothing(nf.max_neighbors)
-        estimate_gpu_cell_list_max_neighbors(n_atoms, box_Lx, box_Ly, box_Lz, cutoff)
+        estimate_gpu_cell_list_max_neighbors(n_atoms, T(ustrip(dist_unit^3,
+                                                              volume(sys.boundary))), cutoff)
     else
         nf.max_neighbors
     end
@@ -1323,7 +1349,7 @@ function find_neighbors(sys::System{3, AT},
     if iszero(n_atoms)
         # Still validated so that the box is reported the same way as for a system that
         #   does have atoms
-        gpu_cell_list_grid(box_Lx, box_Ly, box_Lz, cutoff)
+        gpu_cell_list_grid(widths, cutoff)
         return GPUCellListNeighborList(
             similar(sys.coords, Int32, 0),
             similar(sys.coords, Int32, max_neighbors, 0),
@@ -1336,11 +1362,11 @@ function find_neighbors(sys::System{3, AT},
     state = reusable_gpu_cell_list_state(current_neighbors, n_atoms, T, build_pairs)
 
     if isnothing(state)
-        state = allocate_gpu_cell_list_state(sys.coords, T, box_Lx, box_Ly, box_Lz, cutoff;
+        state = allocate_gpu_cell_list_state(sys.coords, T, box, widths, cutoff;
                                              max_neighbors=Int32(max_neighbors),
                                              allocate_pairs=build_pairs)
     else
-        update_gpu_cell_list_state!(state, box_Lx, box_Ly, box_Lz, cutoff, max_neighbors)
+        update_gpu_cell_list_state!(state, box, widths, cutoff, max_neighbors)
         split_gpu_cell_list_coordinates!(state, sys.coords)
     end
 
@@ -1357,9 +1383,9 @@ The 3x3x3 cell stencil needs at least three cells along every box axis, so every
 side has to be at least three times the neighbor search distance.
 =#
 function gpu_cell_list_suitable(boundary, dist_cutoff)
-    boundary isa CubicBoundary{3} || return false
+    (boundary isa CubicBoundary{3} || boundary isa TriclinicBoundary) || return false
     has_infinite_boundary(boundary) && return false
-    return minimum(box_sides(boundary)) >= 3 * dist_cutoff
+    return minimum(cell_list_box_widths(boundary)) >= 3 * dist_cutoff
 end
 
 # Defined so that unsupported systems get an explanation rather than a MethodError

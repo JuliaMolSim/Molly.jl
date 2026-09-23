@@ -1167,16 +1167,34 @@ end
                     )
                 end
 
-                # The last box has exactly three cells along an axis, where the
-                #   3x3x3 stencil wraps around to cover every cell exactly once
+                # The third box has exactly three cells along an axis, where the
+                #   3x3x3 stencil wraps around to cover every cell exactly once, and
+                #   the last two are triclinic, the last one strongly skewed.
+                # DistanceNeighborFinder uses the approximate minimum image of a
+                #   TriclinicBoundary whereas the cell list finds the true one, so in
+                #   principle the cell list can return extra pairs for a skewed box,
+                #   which is the safe direction. The boxes here do not differ.
                 for (n_atoms, boundary) in (
                             (300, CubicBoundary(4.0f0)),
                             (400, CubicBoundary(SVector(4.5f0, 3.2f0, 6.1f0))),
                             (200, CubicBoundary(3.0f0)),
+                            (300, TriclinicBoundary(SVector(
+                                SVector{3,Float32}(4.0, 0.0, 0.0),
+                                SVector{3,Float32}(0.4, 4.2, 0.0),
+                                SVector{3,Float32}(0.3, 0.5, 4.4),
+                            ))),
+                            (300, TriclinicBoundary(SVector(
+                                SVector{3,Float32}(5.0, 0.0, 0.0),
+                                SVector{3,Float32}(2.0, 6.0, 0.0),
+                                SVector{3,Float32}(3.0, 4.0, 7.0),
+                            ))),
                         )
-                    box = Molly.box_sides(boundary)
+                    bv = (boundary isa TriclinicBoundary ? boundary.basis_vectors :
+                          SVector(SVector{3,Float32}(boundary[1], 0, 0),
+                                  SVector{3,Float32}(0, boundary[2], 0),
+                                  SVector{3,Float32}(0, 0, boundary[3])))
                     coords = [
-                        SVector{3,Float32}(rand(Float32, 3) .* box)
+                        bv[1] * rand(Float32) + bv[2] * rand(Float32) + bv[3] * rand(Float32)
                         for _ in 1:n_atoms
                     ]
 
@@ -1206,7 +1224,7 @@ end
 
                     # Coordinates outside the box should give the same neighbors,
                     #   since they are wrapped during the search
-                    shifts = (zero(box), box, -2 .* box)
+                    shifts = (zero(bv[1]), bv[1] + bv[3], -2 .* bv[2])
                     for shift in shifts
                         sys, finder = gpu_cell_list_test_system(
                             [c .+ shift for c in coords];
@@ -1222,6 +1240,75 @@ end
 
                         @test result.n == reference.n
                         @test canonical_pairs(result) == canonical_pairs(reference)
+                    end
+                end
+            end
+
+            @testset "Triclinic boundary" begin
+                Random.seed!(103)
+
+                # The true minimum image over every neighboring box image
+                function brute_force_pairs(coords, bv, cutoff)
+                    pairs = Set{Tuple{Int32, Int32}}()
+                    for i in eachindex(coords), j in 1:(i - 1)
+                        min_sqdist = typemax(Float32)
+                        for ox in -1:1, oy in -1:1, oz in -1:1
+                            dr = (coords[j] + ox * bv[1] + oy * bv[2] + oz * bv[3]) -
+                                 coords[i]
+                            min_sqdist = min(min_sqdist, sum(abs2, dr))
+                        end
+                        if min_sqdist <= cutoff^2
+                            push!(pairs, (Int32(j), Int32(i)))
+                        end
+                    end
+                    return pairs
+                end
+
+                boundaries = (
+                    TriclinicBoundary(SVector(
+                        SVector{3,Float32}(4.0, 0.0, 0.0),
+                        SVector{3,Float32}(0.4, 4.2, 0.0),
+                        SVector{3,Float32}(0.3, 0.5, 4.4),
+                    )),
+                    TriclinicBoundary(SVector(
+                        SVector{3,Float32}(5.0, 0.0, 0.0),
+                        SVector{3,Float32}(2.0, 6.0, 0.0),
+                        SVector{3,Float32}(3.0, 4.0, 7.0),
+                    )),
+                )
+
+                for boundary in boundaries
+                    bv = boundary.basis_vectors
+                    n_atoms = 300
+                    coords = [
+                        bv[1] * rand(Float32) + bv[2] * rand(Float32) + bv[3] * rand(Float32)
+                        for _ in 1:n_atoms
+                    ]
+
+                    # The cell grid is sized by the distance between opposite faces,
+                    #   which is smaller than the basis vector length when skewed
+                    widths = Molly.cell_list_box_widths(boundary)
+                    @test all(widths .<= Molly.box_sides(boundary))
+
+                    reference = brute_force_pairs(coords, bv, 1.0f0)
+
+                    # Coordinates inside and outside the box should agree with it
+                    for shift in (zero(bv[1]), 2 .* bv[1] - 3 .* bv[2] + bv[3])
+                        sys, _ = gpu_cell_list_test_system(
+                            [c .+ shift for c in coords];
+                            output=:geometric_pairs,
+                            cutoff=1.0f0,
+                            boundary=boundary,
+                        )
+
+                        result = find_neighbors(sys)
+                        pairs = Set(
+                            (min(i, j), max(i, j))
+                            for (i, j, _) in Array(result.list[1:result.n])
+                        )
+
+                        @test result.n == length(reference)
+                        @test pairs == reference
                     end
                 end
             end
@@ -1313,21 +1400,31 @@ end
 
                 @test_throws ArgumentError find_neighbors(infinite_sys)
 
-                triclinic_boundary = TriclinicBoundary(
-                    SVector(
-                        SVector{3,Float32}(10.0, 0.0, 0.0),
-                        SVector{3,Float32}(0.5, 10.0, 0.0),
-                        SVector{3,Float32}(0.0, 0.0, 10.0),
-                    ),
-                )
-
                 triclinic_sys, _ = gpu_cell_list_test_system(
                     coords;
                     cutoff=1.0f0,
-                    boundary=triclinic_boundary,
+                    boundary=TriclinicBoundary(SVector(
+                        SVector{3,Float32}(10.0, 0.0, 0.0),
+                        SVector{3,Float32}(0.5, 10.0, 0.0),
+                        SVector{3,Float32}(0.0, 0.0, 10.0),
+                    )),
                 )
 
-                @test_throws ArgumentError find_neighbors(triclinic_sys)
+                @test Array(find_neighbors(triclinic_sys).counts) == Int32[1, 1]
+
+                # Skewing the box brings the faces closer together than three cells,
+                #   even though every basis vector is more than three cutoffs long
+                skewed_sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    cutoff=1.0f0,
+                    boundary=TriclinicBoundary(SVector(
+                        SVector{3,Float32}(3.6, 0.0, 0.0),
+                        SVector{3,Float32}(3.5, 3.6, 0.0),
+                        SVector{3,Float32}(0.0, 0.0, 3.6),
+                    )),
+                )
+
+                @test_throws ArgumentError find_neighbors(skewed_sys)
             end
 
             @testset "Finder validation" begin
