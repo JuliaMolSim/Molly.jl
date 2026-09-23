@@ -617,3 +617,49 @@ end
         end
     end
 end
+
+@testset "Monte Carlo barostat with GPU cell list" begin
+    # GPUCellListNeighborFinder reuses the buffers behind the list it is given, so the
+    #   barostat has to rebuild rather than keep the list it held before a trial
+    temp = 100.0u"K"
+    n_atoms = 400
+    init_boundary = CubicBoundary(5.0u"nm")
+    coords = place_atoms(n_atoms, init_boundary; min_dist=0.3u"nm")
+
+    for AT in array_list[2:end]
+        atoms = to_device([Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+                           for _ in 1:n_atoms], AT)
+        eligible = to_device(trues(n_atoms, n_atoms), AT)
+        special = to_device(falses(n_atoms, n_atoms), AT)
+        nf_ref = DistanceNeighborFinder(eligible=eligible, special=special,
+                                        dist_cutoff=1.2u"nm")
+
+        for trial_find_neighbors in (false, true)
+            sys = System(
+                atoms=atoms,
+                coords=to_device(coords, AT),
+                boundary=init_boundary,
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                              use_neighbors=true),),
+                neighbor_finder=GPUCellListNeighborFinder(eligible=eligible,
+                                                          special=special, n_steps=10,
+                                                          dist_cutoff=1.2u"nm"),
+                loggers=(volume=VolumeLogger(10),),
+            )
+            rng = Xoshiro(2024)
+            random_velocities!(sys, temp; rng=rng)
+            barostat = MonteCarloBarostat(1.0u"bar", temp, init_boundary; n_steps=10,
+                                          trial_find_neighbors=trial_find_neighbors)
+            simulator = Langevin(dt=0.001u"ps", temperature=temp, friction=1.0u"ps^-1",
+                                 coupling=(barostat,))
+            simulate!(sys, simulator, 200; n_threads=1, rng=rng)
+
+            @test sys.boundary != init_boundary
+            @test all(isfinite, ustrip.(values(sys.loggers.volume)))
+            @test isfinite(ustrip(potential_energy(sys)))
+            # The list at the end of the run should match one from a finder that does
+            #   not share buffers with anything
+            @test length(find_neighbors(sys)) == length(find_neighbors(sys, nf_ref))
+        end
+    end
+end
