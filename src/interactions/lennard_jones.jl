@@ -462,8 +462,8 @@ end
 # Dual topology: one set of parameters per atom, scaled by the energy prefactor λ.
 @inline function λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special,
                                    σ_layout)
-    λ_glob = λ_mixing(λ_mix, (atom_i.λ, atom_j.λ))
-    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); type="LJ")
+    λ_glob = λ_mixing(λ_mix, (atom_i, atom_j))
+    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); lj=true)
     λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(true))
     σ = σ_mixing(σ_mix, atom_i, atom_j)
     ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j)
@@ -472,8 +472,8 @@ end
 
 @inline function λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, atom_i, atom_j, special,
                                    σ_layout::Tuple)
-    λ_glob = λ_mixing(λ_mix, (atom_i.λ, atom_j.λ))
-    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); type="LJ")
+    λ_glob = λ_mixing(λ_mix, (atom_i, atom_j))
+    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); lj=true)
     λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(false))
     if !scheduler.LJindividual || (!scheduler.LJspecial && special)
         # Mix the two end states, then interpolate the pair.

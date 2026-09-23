@@ -1397,7 +1397,7 @@ end
 
 @inline function ewald_pair_qq(scheduler::OpenFEScheduler, atom_i, atom_j, ::Val{T}; special=false) where T
     # OpenFE/OpenMM: charges scaled per atom on one grid
-    λ_glob = T(λ_mixing(MinimumMixing(), (atom_i.λ, atom_j.λ)))
+    λ_glob = T(λ_mixing(MinimumMixing(), (atom_i, atom_j)))
     pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role))
     λ, λR, λ_params = scale_elec_dual(scheduler, λ_glob, pair_role)
     if scheduler.dual
@@ -1419,7 +1419,7 @@ end
     # the same weight `pme_lambda_mesh_weight` gives the mesh, so the two agree by
     # construction. `InsertRole` stands in for any role because the scheduler is required to
     # scale Insert and Delete as mirror images.
-    λ_glob = T(λ_mixing(MinimumMixing(), (atom_i.λ, atom_j.λ)))
+    λ_glob = T(λ_mixing(MinimumMixing(), (atom_i, atom_j)))
     λ, λR, λ_params = scale_elec_dual(scheduler, λ_glob, InsertRole)
     qA = effective_charge(scheduler, atom_i, Val(T), zero(T)) *
          effective_charge(scheduler, atom_j, Val(T), zero(T))

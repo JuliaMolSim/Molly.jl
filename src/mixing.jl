@@ -155,8 +155,10 @@ end
 
 struct MinimumMixing end
 
-@inline function λ_mixing(m::MinimumMixing, lambdas::Tuple{T, Vararg{T}}, args...) where T
-    return min(lambdas...)
+# The mixing gets the atoms of an interaction (2 to 5), so a mixing rule can use any atom field;
+#   this one takes the smallest λ
+@inline function λ_mixing(m::MinimumMixing, atoms::Tuple, args...)
+    return min(map(a -> a.λ, atoms)...)
 end
 
 struct ProductMixing end

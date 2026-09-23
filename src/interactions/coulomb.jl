@@ -1762,7 +1762,7 @@ end
 
 @inline function lambda_pair(inter, atom_i, atom_j)
     T = typeof(ustrip(inter.coulomb_const))
-    λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
+    λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i, atom_j)))
     pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_j.alch_role))
     λ, λR, λ_params = scale_elec_dual(inter.scheduler, λ_glob, pair_role)
     return pair_role, λ, λR, λ_params
