@@ -198,7 +198,7 @@ end
     elseif role == CoreDRole
         return (1-λ), one(λ), one(λ)
     else
-        return one(λ), one(λ), λ
+        return one(λ), one(λ), one(λ)
     end
 end
 
