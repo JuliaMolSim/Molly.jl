@@ -794,7 +794,7 @@ end
 """
     TrajectoryWriter(n_steps, filepath; format="", correction=:pbc, atom_inds=[],
                      excluded_res=String[], write_velocities=false, write_boundary=true,
-                     overwrite=false, suppress_warn=false)
+                     overwrite=false, append_warn=true)
 
 Write 3D structures to a file throughout a simulation.
 
@@ -822,7 +822,7 @@ The file will be appended to, so should be deleted before simulation if it
 already exists.
 Setting `overwrite=true` deletes the file when the logger is constructed if it
 exists, rather than warning and appending to it.
-Setting `suppress_warn=true` appends to an existing file without the warning.
+Setting `append_warn=false` appends to an existing file without the warning.
 
 Not compatible with 2D systems.
 For the PDB format, the box size for the CRYST1 record is taken from the first
@@ -841,19 +841,19 @@ mutable struct TrajectoryWriter{I, T}
     topology::T
     topology_written::Bool
     structure_n::Int
-    suppress_warn::Bool
+    append_warn::Bool
 end
 
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           format::AbstractString="", correction::Symbol=:pbc, atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
                           write_boundary::Bool=true, overwrite::Bool=false,
-                          suppress_warn::Bool=false)
+                          append_warn::Bool=true)
     check_correction_arg(correction)
     if isfile(filepath)
         if overwrite
             rm(filepath)
-        elseif !suppress_warn
+        elseif append_warn
             @warn "TrajectoryWriter created with a file path ($filepath) that already " *
                   "exists, will try to append to this file, use overwrite=true to " *
                   "delete the file instead"
@@ -868,7 +868,7 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
     end
     return TrajectoryWriter(n_steps, filepath, format_used, correction, atom_inds,
                     Set(excluded_res), write_velocities, write_boundary, topology,
-                    false, 0, suppress_warn)
+                    false, 0, append_warn)
 end
 
 Base.deepcopy_internal(tw::TrajectoryWriter, dict::IdDict) = deepcopy_registered(tw, dict)
@@ -888,8 +888,19 @@ function Base.deepcopy(tw::TrajectoryWriter)
         Chemfiles.Topology(),
         false,
         0,
-        true,
+        false,
     )
+end
+
+# The logger a worker process uses for a replica. Writers are rebuilt on the workers at every
+#   call and keep appending to their own file, so the file is never deleted and the append
+#   warning is not repeated.
+worker_logger(logger) = logger
+
+function worker_logger(logger::TrajectoryWriter)
+    return TrajectoryWriter(logger.n_steps, logger.filepath; logger.format, logger.correction,
+                            logger.atom_inds, logger.excluded_res, logger.write_velocities,
+                            logger.write_boundary, overwrite=false, append_warn=false)
 end
 
 function Base.show(io::IO, tw::TrajectoryWriter)

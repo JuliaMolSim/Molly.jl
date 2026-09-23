@@ -49,14 +49,14 @@ end
 end
 
 # λ version of `HarmonicTorsion` for alchemical systems, built by `to_lambda_function`.
-@kwdef struct HarmonicTorsionλ{K, D, LM, SCH}
+@kwdef struct HarmonicTorsionλ{K, D, LM, SCH} <: AlchemicalBondedInteraction
     k::K
     θ0::D
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-Base.zero(::HarmonicTorsionλ{K, D, LM, SCH}) where {K, D, LM, SCH} = HarmonicTorsionλ(k=zero(K), θ0=zero(D))
+is_torsion(::HarmonicTorsionλ) = true
 
 Base.:+(t1::HarmonicTorsionλ, t2::HarmonicTorsionλ) = HarmonicTorsionλ(k=(t1.k + t2.k),
                                                                         θ0=(t1.θ0 + t2.θ0))

@@ -68,7 +68,7 @@ end
 end
 
 # λ version of `UreyBradley` for alchemical systems, built by `to_lambda_function`.
-@kwdef struct UreyBradleyλ{KA, A, KB, D, LM, SCH}
+@kwdef struct UreyBradleyλ{KA, A, KB, D, LM, SCH} <: AlchemicalBondedInteraction
     kangle::KA
     θ0::A
     kbond::KB

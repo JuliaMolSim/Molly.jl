@@ -128,7 +128,7 @@ end
 end
 
 # λ version of `PeriodicTorsion` for alchemical systems, built by `to_lambda_function`.
-struct PeriodicTorsionλ{N, T, E, LM, SCH}
+struct PeriodicTorsionλ{N, T, E, LM, SCH} <: AlchemicalBondedInteraction
     periodicities::NTuple{N, Int}
     phases::NTuple{N, T}
     ks::NTuple{N, E}
@@ -152,6 +152,8 @@ function PeriodicTorsionλ(; periodicities, phases, ks, proper::Bool=true,
     PeriodicTorsionλ{n_terms, T, E, LM, SCH}(tuple(periodicities_pad...), tuple(phases_pad...),
                                     tuple(ks_pad...), proper, λ_mixing, scheduler)
 end
+
+is_torsion(::PeriodicTorsionλ) = true
 
 function Base.zero(d::PeriodicTorsionλ{N, T, E}) where {N, T, E}
     return PeriodicTorsionλ(

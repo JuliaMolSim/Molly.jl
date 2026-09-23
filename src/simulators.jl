@@ -108,9 +108,12 @@ function check_array_nans(svec_arrays, labels, step_n)
         err_msg = "NaNs found at the end of step $step_n:"
         for (svec_array, label) in zip(svec_arrays, labels)
             c = count(isnan_svec, svec_array)
-            idx = findall(x -> isnan_svec(x), svec_array)
             err_msg *= "\n    $label - $c out of $(length(svec_array)) contain a NaN"
-            err_msg *= "\n    indexes: $idx"
+            if c > 0
+                # Only the first few indices, the full list is unreadable for many NaNs
+                idx = findall(isnan_svec, from_device(svec_array))
+                err_msg *= "\n    indices: $(join(first(idx, 10), ", "))" * (c > 10 ? " and more" : "")
+            end
         end
         throw(NaNSimulationError(err_msg))
     end
@@ -2390,7 +2393,7 @@ function remd_propagate_gpu!(sys::ReplicaSystem, rep_id_proc, n_proc, n_steps, s
                         coords=to_device(replica_coords[r], AT),
                         velocities=to_device(replica_velocities[r], AT),
                         boundary=replica_boundaries[r],
-                        loggers=map(process_logger, replica_loggers[k]),
+                        loggers=map(worker_logger, replica_loggers[k]),
                     )
                     simulate!(active_sys, local_int[j], n_steps;
                               n_threads=1, run_loggers=run_loggers, init_step=start_step,
@@ -2464,19 +2467,6 @@ function reinit_c_pointers(val::T) where T
     return T(new_vals...)
 end
 
-# Writers are rebuilt on the workers at every call and keep appending to their own file, so
-#   the file is never deleted and the append warning is not repeated
-function process_logger(logger)
-    if logger isa TrajectoryWriter
-        return TrajectoryWriter(logger.n_steps, logger.filepath;
-                                logger.format, logger.correction, logger.atom_inds,
-                                logger.excluded_res, logger.write_velocities,
-                                logger.write_boundary, overwrite=false, suppress_warn=true)
-    else
-        return logger
-    end
-end
-
 # The replica system whose state systems the workers hold, so that later `simulate_remd!` calls
 # on it (or on the system it returns, which shares its partition) only send coordinates
 const remd_workers_key = Ref{Any}(nothing)
@@ -2501,7 +2491,7 @@ const remd_workers_key = Ref{Any}(nothing)
         @warn("Number of processes ($n_proc) greater than the number of replicas ($k), some processes will be idle during the simulation, 
         consider reducing the number of processes to match the number of replicas for more efficient simulation")
     end
-    println("Attach GPUs to workers")
+    @info "Attaching GPUs to workers"
     @sync for (i, pid) in enumerate(workers())
         @async begin
         remotecall_fetch(pid, gpu_devices) do gpu_devices

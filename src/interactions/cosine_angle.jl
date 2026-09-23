@@ -51,7 +51,7 @@ end
 end
 
 # λ version of `CosineAngle` for alchemical systems, built by `to_lambda_function`.
-@kwdef struct CosineAngleλ{K, D, LM, SCH}
+@kwdef struct CosineAngleλ{K, D, LM, SCH} <: AlchemicalBondedInteraction
     k::K
     θ0::D
     λ_mixing::LM = MinimumMixing()

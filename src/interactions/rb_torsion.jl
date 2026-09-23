@@ -70,7 +70,7 @@ end
 
 # λ version of `RBTorsion` for alchemical systems, built by `to_lambda_function`. The torsion
 # itself is evaluated by `RBTorsion` and scaled by the λ prefactor of the four atoms.
-@kwdef struct RBTorsionλ{T, LM, SCH}
+@kwdef struct RBTorsionλ{T, LM, SCH} <: AlchemicalBondedInteraction
     c0::T
     c1::T
     c2::T
@@ -87,7 +87,7 @@ function to_lambda_function(inter::RBTorsion; λ_mixing=MinimumMixing(),
                       c5=inter.c5, λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
-rb_torsion(d::RBTorsionλ) = RBTorsion(d.c0, d.c1, d.c2, d.c3, d.c4, d.c5)
+is_torsion(::RBTorsionλ) = true
 
 @inline function rb_torsion_λ(d::RBTorsionλ, atom_i, atom_j, atom_k, atom_l)
     T = typeof(ustrip(atom_i.λ))

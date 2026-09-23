@@ -51,7 +51,7 @@ end
 end
 
 # λ version of `HarmonicAngle` for alchemical systems, built by `to_lambda_function`.
-@kwdef struct HarmonicAngleλ{K, D, LM, SCH}
+@kwdef struct HarmonicAngleλ{K, D, LM, SCH} <: AlchemicalBondedInteraction
     k::K
     θ0::D
     λ_mixing::LM = MinimumMixing()

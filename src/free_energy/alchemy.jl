@@ -271,13 +271,38 @@ end
     end
 end
 
-@inline function mix_roles(inter::Any, roles::Tuple{Vararg{AlchemicalRole}}; type="")
-    if type=="LJ" && inter.intraLJ
+# Torsions: a torsion of inserted, deleted or environment atoms only is not scaled, the dummy
+# atoms keep their own torsions at both end states. One that also has a core atom follows that
+# core atom, so only the torsions of one end state act on the core at a time. Without this the
+# insert and delete roles win in `mix_default` and a torsion spanning the core and a dummy atom
+# is never scaled, which leaves the torsions of both end states on at every λ.
+@inline function mix_torsion(roles::Tuple{Vararg{AlchemicalRole}})
+    if any(x->x==CoreRole, roles)
+        return CoreRole
+    elseif any(x->x==CoreIRole, roles)
+        return CoreIRole
+    elseif any(x->x==CoreDRole, roles)
+        return CoreDRole
+    else
+        return EnvRole
+    end
+end
+
+# `lj=true` for Lennard-Jones pairs, where `intraLJ` keeps the pairs within one group on,
+# `torsion=true` for the torsions, see `mix_torsion`
+@inline function mix_roles(inter::Any, roles::Tuple{Vararg{AlchemicalRole}}; lj=false,
+                           torsion=false)
+    if torsion
+        return mix_torsion(roles)
+    elseif lj && inter.intraLJ
         return mix_special(roles)
     else
         return mix_default(roles)
     end
 end
+
+# Whether a λ bonded interaction is a torsion, set to `true` by the λ torsion types
+@inline is_torsion(inter) = false
 
 # End-state parameters an alchemical role interpolates between; insert and delete atoms keep one
 # state's parameters at both ends. Branches on the role value: `Val(alch_role)` is not GPU-compilable.
@@ -289,4 +314,23 @@ end
     else
         return A, B
     end
+end
+
+# Factor on a specific interaction's virial contribution. The default of 1 is correct whenever
+# the force already carries the alchemical scaling.
+@inline virial_lambda_factor(inter, atoms) = 1
+
+# `AbsoluteFESystem` and `RelativeFESystem` convert every specific interaction to its λ
+# counterpart, so only the λ types can appear on an alchemical atom and only they need the
+# coupling supplied.
+@inline function virial_lambda_factor(inter::AlchemicalBondedInteraction, atoms)
+    λ_glob = λ_mixing(inter.λ_mixing, atoms)
+    roles = map(a -> a.alch_role, atoms)
+    # A torsion that follows a core atom is scaled in its force already, so its virial needs no
+    #   second factor. The terms that are not scaled, those of the dummy atoms only, get the
+    #   weight of the end state they belong to here.
+    if is_torsion(inter) && mix_torsion(roles) != EnvRole
+        return one(λ_glob)
+    end
+    return scale_virial_dual(inter.scheduler, λ_glob, mix_default(roles))
 end

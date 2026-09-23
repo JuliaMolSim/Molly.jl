@@ -38,7 +38,7 @@ end
 end
 
 # λ version of `HarmonicBond` for alchemical systems, built by `to_lambda_function`.
-@kwdef struct HarmonicBondλ{K, D, LM, SCH}
+@kwdef struct HarmonicBondλ{K, D, LM, SCH} <: AlchemicalBondedInteraction
     k::K
     r0::D
     λ_mixing::LM = MinimumMixing()

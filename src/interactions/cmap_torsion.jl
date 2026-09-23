@@ -349,14 +349,14 @@ end
 end
 
 # λ version of `CMAPTorsion` for alchemical systems, built by `to_lambda_function`.
-@kwdef struct CMAPTorsionλ{I,L,LM,SCH}
+@kwdef struct CMAPTorsionλ{I,LM,SCH} <: AlchemicalBondedInteraction
     index::I
     size::I
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-Base.zero(::CMAPTorsionλ) = CMAPTorsionλ(index=0, size=0)
+is_torsion(::CMAPTorsionλ) = true
 
 function dict_get(dic, key, inter::CMAPTorsionλ, default)
     if haskey(dic, key)

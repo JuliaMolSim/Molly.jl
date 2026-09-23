@@ -1808,6 +1808,7 @@ from_device(x::Array) = x
 from_device(x::BitArray) = x
 from_device(x) = Array(x)
 from_device(x::StructArray) = replace_storage(Array, x)
+from_device(t::Tuple) = map(from_device, t)
 
 to_device(x::Nothing, ::Type{AT}) where AT = nothing
 to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
@@ -1854,14 +1855,6 @@ function Base.deepcopy_internal(sys::System, dict::IdDict)
     
     dict[sys] = new_sys
     return new_sys::typeof(sys)
-end
-
-function to_device(t::Tuple)
-    return map(to_device, t)
-end
-
-function from_device(t::Tuple)
-    return map(from_device, t)
 end
 
 """

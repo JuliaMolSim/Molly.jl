@@ -43,7 +43,7 @@ end
 end
 
 # λ version of `MorseBond` for alchemical systems, built by `to_lambda_function`.
-@kwdef struct MorseBondλ{T, A, R, LM, SCH}
+@kwdef struct MorseBondλ{T, A, R, LM, SCH} <: AlchemicalBondedInteraction
     D::T
     a::A
     r0::R
