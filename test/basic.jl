@@ -1572,6 +1572,15 @@ end
                     special=falses(3, 3),
                 )
 
+                asymmetric = trues(3, 3)
+                asymmetric[2, 1] = false
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:molly_pairs,
+                    eligible=to_device(asymmetric, AT),
+                    special=to_device(falses(3, 3), AT),
+                )
+
                 @test occursin("output = ragged", sprint(show, automatic_finder))
 
                 eligible_mask, special_mask = Molly.neighbor_finder_masks(

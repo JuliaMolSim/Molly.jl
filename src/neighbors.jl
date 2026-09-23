@@ -26,6 +26,10 @@ function check_neighbor_matrices(eligible, special)
         throw(ArgumentError("size of the eligible matrix $(size(eligible)) must be " *
                             "the same as the size of the special matrix $(size(special))"))
     end
+    if size(eligible, 1) != size(eligible, 2)
+        throw(ArgumentError("eligible and special matrices must be square, " *
+                            "found size $(size(eligible))"))
+    end
     if !isnothing(eligible) && !issymmetric(eligible)
         throw(ArgumentError("eligible matrix is not symmetric"))
     end
@@ -580,21 +584,11 @@ function GPUCellListNeighborFinder(;
     end
 
     if isnothing(n_atoms)
-        isnothing(eligible) && throw(
-            ArgumentError(":molly_pairs requires either eligible or n_atoms"),
-        )
-
-        isnothing(special) && throw(
-            ArgumentError(":molly_pairs requires special"),
-        )
-
-        size(eligible) == size(special) || throw(
-            ArgumentError("eligible and special must have the same size"),
-        )
-
-        size(eligible, 1) == size(eligible, 2) || throw(
-            ArgumentError("eligible and special must be square matrices"),
-        )
+        if isnothing(eligible)
+            throw(ArgumentError(":molly_pairs requires either eligible or n_atoms"))
+        end
+        isnothing(special) && throw(ArgumentError(":molly_pairs requires special"))
+        check_neighbor_matrices(eligible, special)
 
         # The exception lists are read inside the pair kernels, so they have to end up
         #   on the device
@@ -1514,8 +1508,8 @@ end
 #=
 Whether a box can be used with GPUCellListNeighborFinder.
 
-The 3x3x3 cell stencil needs at least three cells along every box axis, so every box
-side has to be at least three times the neighbor search distance.
+The 3x3x3 cell stencil needs at least three cells along every box axis, so opposite
+box faces have to be at least three times the neighbor search distance apart.
 =#
 function gpu_cell_list_suitable(boundary, dist_cutoff)
     (boundary isa CubicBoundary{3} || boundary isa TriclinicBoundary) || return false
@@ -1531,7 +1525,7 @@ function find_neighbors(sys::System,
                         force_recompute::Bool=false;
                         kwargs...)
     throw(ArgumentError("GPUCellListNeighborFinder requires a three-dimensional GPU " *
-                        "system with a CubicBoundary, got a " *
+                        "system with a CubicBoundary or TriclinicBoundary, got a " *
                         "$(AtomsBase.n_dimensions(sys.boundary))D $(array_type(sys.coords)) " *
                         "system with a $(typeof(sys.boundary)); use " *
                         "DistanceNeighborFinder or CellListMapNeighborFinder instead"))
