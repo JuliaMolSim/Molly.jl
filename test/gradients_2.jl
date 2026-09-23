@@ -462,7 +462,7 @@ end
                   n_alchemical, ::Val{T}) where T
         atoms = [Atom(i, 1, T(10.0), T(0.2) * (i % 2 == 0 ? -1 : 1), T(0.3), T(0.4),
                       (i <= n_alchemical ? λ : one(λ)),
-                      (i <= n_alchemical ? Molly.InsertRole : Molly.CoreRole))
+                      (i <= n_alchemical ? Molly.InsertRole : Molly.EnvRole))
                  for i in 1:n_atoms]
 
         sys = System(
@@ -643,7 +643,7 @@ end
     function loss(σ, coords, velocities, boundary, pairwise_inters, neighbor_finder,
                   constraints, simulator, n_steps, n_atoms, atom_mass, rng)
         atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? -charge : charge), σ, ϵ, λ,
-                      Molly.CoreRole) for i in 1:n_atoms]
+                      Molly.EnvRole) for i in 1:n_atoms]
 
         sys = System(
             atoms=atoms,
@@ -737,7 +737,7 @@ end
     function loss_logged(σ, coords, velocities, boundary, pairwise_inters, neighbor_finder,
                             simulator, n_steps, n_atoms, atom_mass, rng)
         atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? -charge : charge), σ, ϵ, λ,
-                        Molly.CoreRole) for i in 1:n_atoms]
+                        Molly.EnvRole) for i in 1:n_atoms]
 
         sys = System(
             atoms=atoms,

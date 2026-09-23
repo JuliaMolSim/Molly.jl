@@ -39,7 +39,7 @@
                   neighbor_finder, simulator, n_steps, n_threads, n_atoms, atom_mass, bond_dists,
                   bond_is, bond_js, angles, torsions, rng, grad_safe, ::Val{T},
                   ::Val{AT}) where {T, AT}
-        atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? T(-0.02) : T(0.02)), σ, T(0.2), T(1.0), Molly.CoreRole)
+        atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? T(-0.02) : T(0.02)), σ, T(0.2), T(1.0), Molly.EnvRole)
                  for i in 1:n_atoms]
         bonds_inner = HarmonicBond{T, T}[]
         for i in 1:(n_atoms ÷ 2)
