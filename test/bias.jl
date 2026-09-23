@@ -296,6 +296,47 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
         CubicBoundary(100.0),
     )
 
+    # Test CalcAngle value calculation
+    # Define three atoms forming a 90-degree (pi/2) angle at the middle atom
+    coords_ang = [
+        SVector(0.1, 0.0, 0.0)u"nm",
+        SVector(0.0, 0.0, 0.0)u"nm",
+        SVector(0.0, 0.1, 0.0)u"nm",
+    ]
+    ang_cv = CalcAngle([1, 2, 3])
+    @test isapprox(
+        calculate_cv(ang_cv, coords_ang, atoms, boundary),
+        1.5707963267948966; # pi/2 radians
+        atol=1e-9
+    )
+
+    # The analytical gradient matches finite differences of the angle
+    coords_ang_gen = [
+        SVector(1.0, 1.0, 1.0)u"nm",
+        SVector(1.1, 1.05, 0.95)u"nm",
+        SVector(1.05, 1.2, 1.1)u"nm",
+    ]
+    grad_ang, θ_ang = Molly.cv_gradient(ang_cv, coords_ang_gen, atoms, boundary)
+    isapprox(θ_ang, calculate_cv(ang_cv, coords_ang_gen, atoms, boundary); atol=1e-12)
+    h = 1e-6u"nm"
+    shift = SVector(h, zero(h), zero(h))
+    c_plus, c_minus = copy(coords_ang_gen), copy(coords_ang_gen)
+    c_plus[1] += shift
+    c_minus[1] -= shift
+
+    grad_fd = (calculate_cv(ang_cv, c_plus, atoms, boundary) -
+                    calculate_cv(ang_cv, c_minus, atoms, boundary)) / (2*h)
+    @test isapprox(grad_ang[1][1],grad_fd)
+
+    # Collinear atoms, where the gradient is singular, give an angle of pi and zero gradients
+    coords_ang_line = [
+        SVector(0.0, 0.0, 0.0)u"nm",
+        SVector(0.1, 0.0, 0.0)u"nm",
+        SVector(0.2, 0.0, 0.0)u"nm",
+    ]
+    grad_line, θ_line = Molly.cv_gradient(ang_cv, coords_ang_line, atoms, boundary)
+    @test isapprox(θ_line, π; atol=1e-6)
+    @test all(v -> all(iszero, v), grad_line)
 end
 
 @testset "Bias potentials" begin

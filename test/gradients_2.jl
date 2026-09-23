@@ -358,13 +358,14 @@ end
     cv_rg    = CalcRg([1, 2, 3, 4])
     cv_rmsd  = CalcRMSD(coords_ref, [1,2,3,4],[1,2,3,4]) 
     cv_tor   = CalcTorsion([1,2,3,4])
+    cv_ang   = CalcAngle([1,2,3])
 
-    cvs = (cv_d_s, cv_d_min, cv_d_max, cv_d_cm, cv_rg, cv_rmsd, cv_tor)
+    cvs = (cv_d_s, cv_d_min, cv_d_max, cv_d_cm, cv_rg, cv_rmsd, cv_tor, cv_ang)
     
     b1 = LinearBias(100.0u"kJ*mol^-1*nm^-1", 0.2u"nm")
     b2 = LinearBias(100.0u"kJ*mol^-1", 0.2)
 
-    bias = (b1, b1, b1, b1, b1, b1, b2)
+    bias = (b1, b1, b1, b1, b1, b1, b2, b2)
 
     for (c, b) in zip(cvs, bias)
         bias_pot = BiasPotential(c, b)
