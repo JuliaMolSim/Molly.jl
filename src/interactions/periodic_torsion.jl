@@ -220,9 +220,11 @@ end
 
 
 function update_lambda_function(existing_lambda::PeriodicTorsionλ, interB::PeriodicTorsion)
-    return PeriodicTorsionλ(periodicities=tuplejoin(existing_lambda.periodicities[1:(end/2)], interB.periodicities), 
-                          phases=tuplejoin(existing_lambda.phases[1:(end/2)], interB.phases), 
-                          ks=tuplejoin(existing_lambda.ks[1:(end/2)], interB.ks), 
+    # The first half of the terms are the end state A terms
+    n_A = Int(length(existing_lambda.ks) ÷ 2)
+    return PeriodicTorsionλ(periodicities=tuplejoin(existing_lambda.periodicities[1:n_A], interB.periodicities),
+                          phases=tuplejoin(existing_lambda.phases[1:n_A], interB.phases),
+                          ks=tuplejoin(existing_lambda.ks[1:n_A], interB.ks),
                           proper=interB.proper,
                           λ_mixing=existing_lambda.λ_mixing, 
                           scheduler=existing_lambda.scheduler)
@@ -233,8 +235,9 @@ end
                        atom_k, atom_l, args...) where {N, T, E}
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
                                         coords_i, coords_j, coords_k, coords_l, boundary)
-    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))
-    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
+    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i, atom_j, atom_k, atom_l)))
+    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role,
+                                        atom_l.alch_role); torsion=true)
     if d.scheduler.dual
         return periodic_torsion_force_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true)),
                                         ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
@@ -265,8 +268,9 @@ end
                                   atom_k, atom_l, args...) where {N, T, E}
     θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
 
-    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))    
-    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role, atom_l.alch_role))
+    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i, atom_j, atom_k, atom_l)))    
+    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role,
+                                        atom_l.alch_role); torsion=true)
     if d.scheduler.dual
         return periodic_torsion_pe_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true)),
                                      θ, Val(N))

@@ -335,3 +335,12 @@ end
     end
     return scale_virial_dual(inter.scheduler, λ_glob, mix_default(roles))
 end
+
+# The energy scaling `λ` and the end state weights `λ_params` of a λ bonded interaction. The
+#   physics is that of the plain interaction built by `plain_interaction(inter, λ_params)`.
+@inline function bonded_lambda(inter::AlchemicalBondedInteraction, atoms)
+    T = typeof(ustrip(first(atoms).λ))
+    λ_glob = T(λ_mixing(inter.λ_mixing, atoms))
+    role = mix_roles(inter.scheduler, map(a -> a.alch_role, atoms); torsion=is_torsion(inter))
+    return scale_dual(inter.scheduler, λ_glob, role)
+end

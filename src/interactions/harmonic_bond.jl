@@ -45,9 +45,11 @@ end
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-Base.zero(::HarmonicBondλ{K, D, LM, SCH}) where {K, D, LM, SCH} = HarmonicBondλ(k=zero(K), r0=zero(D))
+Base.zero(b::HarmonicBondλ) = HarmonicBondλ(k=zero.(b.k), r0=zero.(b.r0), λ_mixing=b.λ_mixing,
+                                            scheduler=b.scheduler)
 
-Base.:+(b1::HarmonicBondλ, b2::HarmonicBondλ) = HarmonicBondλ(k=(b1.k + b2.k), r0=(b1.r0 + b2.r0))
+Base.:+(b1::HarmonicBondλ, b2::HarmonicBondλ) = HarmonicBondλ(k=(b1.k .+ b2.k), r0=(b1.r0 .+ b2.r0),
+                                                              λ_mixing=b1.λ_mixing, scheduler=b1.scheduler)
 
 function to_lambda_function(inter::HarmonicBond; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
     return HarmonicBondλ(k=inter.k, r0=inter.r0, λ_mixing=λ_mixing, scheduler=scheduler)
@@ -82,36 +84,15 @@ function update_lambda_function(existing_lambda::HarmonicBondλ, interB::Harmoni
                          scheduler=existing_lambda.scheduler)
 end
 
-@inline function force(b::HarmonicBondλ{K, D, LM, SCH},coord_i, coord_j, 
-                                    boundary, atom_i, atom_j, args...) where {K, D, LM, SCH}
-    T = typeof(ustrip(atom_i.λ))
-    ab = vector(coord_i, coord_j, boundary)
-    λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))    
-    pair_role = mix_roles(b.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λ_params = scale_dual(b.scheduler, λ_glob, pair_role)
-    k = params_mixing(λ_params, b.k)
-    r0 = params_mixing(λ_params, b.r0)
-    c = k * (norm(ab) - r0)
-    f = c * normalize(ab)
-    return SpecificForce2Atoms(λ*f, λ*-f)
+plain_interaction(b::HarmonicBondλ, λ_params) = HarmonicBond(k=params_mixing(λ_params, b.k), r0=params_mixing(λ_params, b.r0))
+
+@inline function force(b::HarmonicBondλ, coord_i, coord_j, boundary, atom_i, atom_j, args...)
+    λ, λ_params = bonded_lambda(b, (atom_i, atom_j))
+    return λ * force(plain_interaction(b, λ_params), coord_i, coord_j, boundary)
 end
 
-@inline function potential_energy(b::HarmonicBondλ{K, D, LM, SCH}, coord_i, coord_j, 
-                                    boundary, atom_i, atom_j, args...) where {K, D, LM, SCH}
-    T = typeof(ustrip(atom_i.λ))
-    dr = vector(coord_i, coord_j, boundary)
-    r = norm(dr)
-    λ_glob = T(λ_mixing(b.λ_mixing, (atom_i.λ, atom_j.λ)))  
-    pair_role = mix_roles(b.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λ_params = scale_dual(b.scheduler, λ_glob, pair_role)
-    k = params_mixing(λ_params, b.k)
-
-    r0 = params_mixing(λ_params, b.r0)
-    E = λ * (k / 2) * (r - r0) ^ 2
-    return E
-end
-
-@inline function force_λ(b::HarmonicBondλ, coord_i, coord_j, boundary, atoms_i, atoms_j, F, args...)
-    dr = vector(coord_i, coord_j, boundary)
-    return SpecificForce2Atoms(zero_pairwise_force(dr, F), zero_pairwise_force(dr, F))
+@inline function potential_energy(b::HarmonicBondλ, coord_i, coord_j, boundary, atom_i, atom_j,
+                                  args...)
+    λ, λ_params = bonded_lambda(b, (atom_i, atom_j))
+    return λ * potential_energy(plain_interaction(b, λ_params), coord_i, coord_j, boundary)
 end

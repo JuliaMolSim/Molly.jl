@@ -58,9 +58,11 @@ end
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-Base.zero(::HarmonicAngleλ{K, D}) where {K, D} = HarmonicAngleλ(k=zero(K), θ0=zero(D))
+Base.zero(a::HarmonicAngleλ) = HarmonicAngleλ(k=zero.(a.k), θ0=zero.(a.θ0), λ_mixing=a.λ_mixing,
+                                              scheduler=a.scheduler)
 
-Base.:+(a1::HarmonicAngleλ, a2::HarmonicAngleλ) = HarmonicAngleλ(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
+Base.:+(a1::HarmonicAngleλ, a2::HarmonicAngleλ) = HarmonicAngleλ(k=(a1.k .+ a2.k), θ0=(a1.θ0 .+ a2.θ0),
+                                                                 λ_mixing=a1.λ_mixing, scheduler=a1.scheduler)
 
 function Base.show(io::IO, x::HarmonicAngleλ)
     println(io, "HarmonicAngleλ: (k: $(x.k)) - θ0: $(x.θ0) - λ_mixing: $(x.λ_mixing) - scheduler: $(x.scheduler)")
@@ -97,48 +99,17 @@ function update_lambda_function(existing_lambda::HarmonicAngleλ, interB::Harmon
                           scheduler=existing_lambda.scheduler)
 end
 
-@inline function force(a::HarmonicAngleλ, coords_i, coords_j, coords_k, boundary, 
-                        atom_i, atom_j, atom_k, args...)
-    T = typeof(ustrip(atom_i.λ))
-    # In 2D we use then eliminate the cross product
-    ba = vector_pad3D(coords_j, coords_i, boundary)
-    bc = vector_pad3D(coords_j, coords_k, boundary)
-    cross_ba_bc = ba × bc
-    if iszero_value(cross_ba_bc)
-        zf = zero(a.k ./ trim3D(ba, boundary))
-        return SpecificForce3Atoms(zf, zf, zf)
-    end
-    pa = normalize(trim3D( ba × cross_ba_bc, boundary))
-    pc = normalize(trim3D(-bc × cross_ba_bc, boundary))
+plain_interaction(a::HarmonicAngleλ, λ_params) = HarmonicAngle(k=params_mixing(λ_params, a.k), θ0=params_mixing(λ_params, a.θ0))
 
-    λ_glob = T(λ_mixing(a.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ)))    
-    pair_role = mix_roles(a.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role))
-    λ, λ_params = scale_dual(a.scheduler, λ_glob, pair_role)
-    k = params_mixing(λ_params, a.k)
-    θ0 = params_mixing(λ_params, a.θ0)
-
-    angle_term = -k * (acos_bound(dot(ba, bc) / (norm(ba) * norm(bc))) - θ0)
-    fa = (angle_term / norm(ba)) * pa
-    fc = (angle_term / norm(bc)) * pc
-    fb = -fa - fc
-    return SpecificForce3Atoms(λ*fa, λ*fb, λ*fc)
+@inline function force(a::HarmonicAngleλ, coords_i, coords_j, coords_k, boundary, atom_i, atom_j,
+                       atom_k, args...)
+    λ, λ_params = bonded_lambda(a, (atom_i, atom_j, atom_k))
+    return λ * force(plain_interaction(a, λ_params), coords_i, coords_j, coords_k, boundary)
 end
 
-@inline function potential_energy(a::HarmonicAngleλ, coords_i, coords_j,
-                                  coords_k, boundary, atom_i,
+@inline function potential_energy(a::HarmonicAngleλ, coords_i, coords_j, coords_k, boundary, atom_i,
                                   atom_j, atom_k, args...)
-    T = typeof(ustrip(atom_i.λ))
-    θ = bond_angle(coords_i, coords_j, coords_k, boundary)
-    λ_glob = T(λ_mixing(a.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ)))    
-    pair_role = mix_roles(a.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role))
-    λ, λ_params = scale_dual(a.scheduler, λ_glob, pair_role)
-    k = params_mixing(λ_params, a.k)
-    θ0 = params_mixing(λ_params, a.θ0)
-    return λ * (k / 2) * (θ - θ0) ^ 2
-end
-
-@inline function force_λ(a::HarmonicAngleλ, coords_i, coords_j, coords_k, boundary, atom_i,
-                        atom_j, atom_k, F, args...)
-    dr = vector_pad3D(coords_j, coords_i, boundary)
-    return SpecificForce3Atoms(zero_pairwise_force(dr, F), zero_pairwise_force(dr, F), zero_pairwise_force(dr, F))
+    λ, λ_params = bonded_lambda(a, (atom_i, atom_j, atom_k))
+    return λ * potential_energy(plain_interaction(a, λ_params), coords_i, coords_j, coords_k,
+                                boundary)
 end

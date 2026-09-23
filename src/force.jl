@@ -188,6 +188,12 @@ Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 Base.:+(x::SpecificForce5Atoms, y::SpecificForce5Atoms) = SpecificForce5Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4, x.f5 + y.f5)
 
+Base.:*(λ::Number, x::SpecificForce1Atoms) = SpecificForce1Atoms(λ * x.f1)
+Base.:*(λ::Number, x::SpecificForce2Atoms) = SpecificForce2Atoms(λ * x.f1, λ * x.f2)
+Base.:*(λ::Number, x::SpecificForce3Atoms) = SpecificForce3Atoms(λ * x.f1, λ * x.f2, λ * x.f3)
+Base.:*(λ::Number, x::SpecificForce4Atoms) = SpecificForce4Atoms(λ * x.f1, λ * x.f2, λ * x.f3, λ * x.f4)
+Base.:*(λ::Number, x::SpecificForce5Atoms) = SpecificForce5Atoms(λ * x.f1, λ * x.f2, λ * x.f3, λ * x.f4, λ * x.f5)
+
 const INVALID_BUFFER_STEP = -1
 
 # Tracks which step cached virial and pressure buffers are valid for.

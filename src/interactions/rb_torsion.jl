@@ -89,24 +89,19 @@ end
 
 is_torsion(::RBTorsionλ) = true
 
-@inline function rb_torsion_λ(d::RBTorsionλ, atom_i, atom_j, atom_k, atom_l)
-    T = typeof(ustrip(atom_i.λ))
-    λ_glob = T(λ_mixing(d.λ_mixing, (atom_i.λ, atom_j.λ, atom_k.λ, atom_l.λ)))
-    pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role,
-                                        atom_l.alch_role))
-    λ, λ_params = scale_dual(d.scheduler, λ_glob, pair_role)
-    return λ
-end
+plain_interaction(d::RBTorsionλ, λ_params) = RBTorsion(d.c0, d.c1, d.c2, d.c3, d.c4, d.c5)
+
 
 @inline function force(d::RBTorsionλ, coords_i, coords_j, coords_k, coords_l, boundary,
                        atom_i, atom_j, atom_k, atom_l, args...)
-    fs = force(rb_torsion(d), coords_i, coords_j, coords_k, coords_l, boundary)
-    λ = rb_torsion_λ(d, atom_i, atom_j, atom_k, atom_l)
-    return SpecificForce4Atoms(λ * fs.f1, λ * fs.f2, λ * fs.f3, λ * fs.f4)
+    λ, λ_params = bonded_lambda(d, (atom_i, atom_j, atom_k, atom_l))
+    return λ * force(plain_interaction(d, λ_params), coords_i, coords_j, coords_k, coords_l,
+                     boundary)
 end
 
 @inline function potential_energy(d::RBTorsionλ, coords_i, coords_j, coords_k,
                                   coords_l, boundary, atom_i, atom_j, atom_k, atom_l, args...)
-    pe = potential_energy(rb_torsion(d), coords_i, coords_j, coords_k, coords_l, boundary)
-    return rb_torsion_λ(d, atom_i, atom_j, atom_k, atom_l) * pe
+    λ, λ_params = bonded_lambda(d, (atom_i, atom_j, atom_k, atom_l))
+    return λ * potential_energy(plain_interaction(d, λ_params), coords_i, coords_j, coords_k,
+                                coords_l, boundary)
 end

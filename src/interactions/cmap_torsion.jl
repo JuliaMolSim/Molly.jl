@@ -358,113 +358,58 @@ end
 
 is_torsion(::CMAPTorsionλ) = true
 
-function dict_get(dic, key, inter::CMAPTorsionλ, default)
-    if haskey(dic, key)
-        return dic[key][inter.res_id]
-    else
-        return default
-    end
-end
+Base.zero(c::CMAPTorsionλ) = CMAPTorsionλ(index=zero(c.index), size=zero(c.size), λ_mixing=c.λ_mixing,
+                                           scheduler=c.scheduler)
+
+# Move the `data` row index of a CMAP torsion when its list is appended to another
+shift_cmap_index(c::CMAPTorsion, offset) = CMAPTorsion(c.index + offset, c.size)
+shift_cmap_index(c::CMAPTorsionλ, offset) = CMAPTorsionλ(index=c.index + offset, size=c.size,
+                                                      λ_mixing=c.λ_mixing, scheduler=c.scheduler)
 
 function to_lambda_function(inter::CMAPTorsion; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
     return CMAPTorsionλ(index=inter.index, size=inter.size, λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
-
-@inline function force(inter::CMAPTorsionλ, coords_i, coords_j, coords_k, coords_l, 
-                       coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, 
-                       atoms_m, force_units, velocities_i, velocities_j,
-                       velocities_k, velocities_l, velocities_m, step_n, data)
-    v0a, v1a, v2a, cp0a, cp1a, v0b, v1b, v2b, cp0b, cp1b, delta, idx, da, db = cmap_angles(
-                        inter, coords_i, coords_j, coords_k, coords_l, coords_m, boundary)
-
-    # Evaluate the spline to determine the energy and gradients
-    dEdA = (3*data[idx+3,4]*da + 2*data[idx+2,4])*da + data[idx+1,4]
-    dEdB = (3*data[idx+3,4]*db + 2*data[idx+3,3])*db + data[idx+3,2]
-    dEdA = db*dEdA + (3*data[idx+3,3]*da + 2*data[idx+2,3])*da + data[idx+1,3]
-    dEdB = da*dEdB + (3*data[idx+2,4]*db + 2*data[idx+2,3])*db + data[idx+2,2]
-    dEdA = db*dEdA + (3*data[idx+3,2]*da + 2*data[idx+2,2])*da + data[idx+1,2]
-    dEdB = da*dEdB + (3*data[idx+1,4]*db + 2*data[idx+1,3])*db + data[idx+1,2]
-    dEdA = db*dEdA + (3*data[idx+3,1]*da + 2*data[idx+2,1])*da + data[idx+1,1]
-    dEdB = da*dEdB + (3*data[idx,4]*db + 2*data[idx,3])*db + data[idx,2]
-    dEdA /= delta
-    dEdB /= delta
-
-    # Calculate the force to the first torsion
-    normCross1 = dot(cp0a, cp0a)
-    normSqrBC = dot(v1a, v1a)
-    normBC = sqrt(normSqrBC)
-    normCross2 = dot(cp1a, cp1a)
-    dp = inv(normSqrBC)
-    ff = ((-dEdA*normBC)/normCross1, dot(v0a, v1a)*dp, dot(v2a, v1a)*dp, (dEdA*normBC)/normCross2)
-    force1 = ff[1]*cp0a
-    force4 = ff[4]*cp1a
-    d = ff[2]*force1 - ff[3]*force4
-    force2 =  d-force1
-    force3 = -d-force4
-
-    # Calculate the force to the second torsion
-    normCross1 = dot(cp0b, cp0b)
-    normSqrBC = dot(v1b, v1b)
-    normBC = sqrt(normSqrBC)
-    normCross2 = dot(cp1b, cp1b)
-    dp = inv(normSqrBC)
-    ff = ((-dEdB*normBC)/normCross1, dot(v0b, v1b)*dp, dot(v2b, v1b)*dp, (dEdB*normBC)/normCross2)
-    force5 = ff[1]*cp0b
-    force8 = ff[4]*cp1b
-    d = ff[2]*force5 - ff[3]*force8
-    force6 =  d-force5
-    force7 = -d-force8
-
-    # Apply the forces to the atoms
-    fi = force1
-    fj = force2 + force5
-    fk = force3 + force6
-    fl = force4 + force7
-    fm =          force8
-
-    T = typeof(ustrip(atoms_i.λ))
-    λ_glob = T(λ_mixing(inter.λ_mixing, (atoms_i.λ, atoms_j.λ, atoms_k.λ, atoms_l.λ, atoms_m.λ)))
-    pair_role = mix_roles(inter.scheduler, (atoms_i.alch_role, atoms_j.alch_role,
-                                            atoms_k.alch_role, atoms_l.alch_role, atoms_m.alch_role))
-    λ, λ_params = scale_dual(inter.scheduler, λ_glob, pair_role)
-
-    return SpecificForce5Atoms(λ*fi, λ*fj, λ*fk, λ*fl, λ*fm)
+# Single topology: a CMAP grid can not be interpolated, so a term shared by both end states must
+#   be the same in both
+function to_lambda_function_single(interA::CMAPTorsion, interB::Nothing; kwargs...)
+    return to_lambda_function(interA; kwargs...)
 end
 
-@inline function potential_energy(inter::CMAPTorsionλ, coords_i, coords_j, coords_k, coords_l, 
-                    coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, atoms_m, energy_units,
-                    velocities_i, velocities_j, velocities_k, velocities_l, velocities_m,
-                    step_n, data)
-    v0a, v1a, v2a, cp0a, cp1a, v0b, v1b, v2b, cp0b, cp1b, delta, idx, da, db = cmap_angles(
-                        inter, coords_i, coords_j, coords_k, coords_l, coords_m, boundary)
-
-    # Spline with coefficients
-    pe = ((data[idx+3,4]*db + data[idx+3,3])*db + data[idx+3,2])*db + data[idx+3,1]
-    pe = da*pe + ((data[idx+2,4]*db + data[idx+2,3])*db + data[idx+2,2])*db + data[idx+2,1]
-    pe = da*pe + ((data[idx+1,4]*db + data[idx+1,3])*db + data[idx+1,2])*db + data[idx+1,1]
-    pe = da*pe + ((data[idx,4]*db + data[idx,3])*db + data[idx,2])*db + data[idx,1]
-
-    T = typeof(ustrip(atoms_i.λ))
-    λ_glob = T(λ_mixing(inter.λ_mixing, (atoms_i.λ, atoms_j.λ, atoms_k.λ, atoms_l.λ, atoms_m.λ)))
-    pair_role = mix_roles(inter.scheduler, (atoms_i.alch_role, atoms_j.alch_role,
-                                            atoms_k.alch_role, atoms_l.alch_role, atoms_m.alch_role))
-    λ, λ_params = scale_dual(inter.scheduler, λ_glob, pair_role)
-
-    return λ*pe
+function to_lambda_function_single(interA::Nothing, interB::CMAPTorsion; kwargs...)
+    return to_lambda_function(interB; kwargs...)
 end
 
-@inline function force_λ(inter::CMAPTorsionλ, coords_i, coords_j, coords_k, coords_l, 
-                       coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, 
-                       atoms_m, force_units, velocities_i, velocities_j,
-                       velocities_k, velocities_l, velocities_m, step_n, data)
-    v0a, v1a, v2a, cp0a, cp1a, v0b, v1b, v2b, cp0b, cp1b, delta, idx, da, db = cmap_angles(
-                        inter, coords_i, coords_j, coords_k, coords_l, coords_m, boundary)
+function update_lambda_function(existing_lambda::CMAPTorsionλ, interB::CMAPTorsion)
+    if existing_lambda.index != interB.index || existing_lambda.size != interB.size
+        throw(ArgumentError("a CMAP torsion differs between the end states, which single " *
+                            "topology does not support"))
+    end
+    return existing_lambda
+end
 
-    # Spline with coefficients
-    pe = ((data[idx+3,4]*db + data[idx+3,3])*db + data[idx+3,2])*db + data[idx+3,1]
-    pe = da*pe + ((data[idx+2,4]*db + data[idx+2,3])*db + data[idx+2,2])*db + data[idx+2,1]
-    pe = da*pe + ((data[idx+1,4]*db + data[idx+1,3])*db + data[idx+1,2])*db + data[idx+1,1]
-    pe = da*pe + ((data[idx,4]*db + data[idx,3])*db + data[idx,2])*db + data[idx,1]
-    return ustrip(pe)
+
+plain_interaction(inter::CMAPTorsionλ, λ_params) = CMAPTorsion(inter.index, inter.size)
+
+@inline function force(inter::CMAPTorsionλ, coords_i, coords_j, coords_k, coords_l,
+                       coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, atoms_m, args...)
+    λ, λ_params = bonded_lambda(inter, (atoms_i, atoms_j, atoms_k, atoms_l, atoms_m))
+    return λ * force(plain_interaction(inter, λ_params), coords_i, coords_j, coords_k, coords_l,
+                     coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, atoms_m, args...)
+end
+
+@inline function potential_energy(inter::CMAPTorsionλ, coords_i, coords_j, coords_k,
+                                  coords_l, coords_m, boundary, atoms_i, atoms_j, atoms_k,
+                                  atoms_l, atoms_m, args...)
+    λ, λ_params = bonded_lambda(inter, (atoms_i, atoms_j, atoms_k, atoms_l, atoms_m))
+    return λ * potential_energy(plain_interaction(inter, λ_params), coords_i, coords_j,
+                                coords_k, coords_l, coords_m, boundary, atoms_i, atoms_j,
+                                atoms_k, atoms_l, atoms_m, args...)
+end
+
+@inline function force_λ(inter::CMAPTorsionλ, coords_i, coords_j, coords_k, coords_l,
+                         coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, atoms_m, args...)
+    return ustrip(potential_energy(CMAPTorsion(inter.index, inter.size), coords_i, coords_j,
+                                   coords_k, coords_l, coords_m, boundary, atoms_i, atoms_j,
+                                   atoms_k, atoms_l, atoms_m, args...))
 end
