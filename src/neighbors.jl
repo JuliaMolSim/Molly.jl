@@ -413,14 +413,9 @@ function invalidate_cached_neighbors!(buffers::BuffersGPU, nf::GPUNeighborFinder
 end
 
 """
-    GPUCellListNeighborFinder(;
-        dist_cutoff,
-        n_steps=10,
-        max_neighbors=nothing,
-        output=:molly_pairs,
-        eligible=nothing,
-        special=nothing,
-    )
+    GPUCellListNeighborFinder(; dist_cutoff, n_steps=10, max_neighbors=nothing, output=:molly_pairs,
+                              eligible=nothing, special=nothing, n_atoms=nothing, excluded_pairs=(),
+                              special_pairs=(), device_vector_type=nothing)
 
 Neighbor finder for GPU systems that bins atoms into a uniform grid of cells and
 searches the 3x3x3 stencil of cells around each atom.
@@ -436,17 +431,25 @@ the length of the corresponding basis vector.
 `dist_cutoff` is the neighbor search distance, which should be the interaction cutoff
 distance plus a buffer distance since the list is only updated every `n_steps` steps.
 
+Like [`GPUNeighborFinder`](@ref), dense `eligible` and `special` masks are converted
+once at construction into sparse per-atom exception lists and are not retained.
+The exceptions can also be given directly as `excluded_pairs` and
+`special_pairs` alongside `n_atoms` and `device_vector_type`, which avoids building
+the dense masks at all.
+
 # Output modes
-- `:molly_pairs`: half-pair list filtered by `eligible`, with flags read from
-  `special`. This is the only mode that can be used for the pairwise interactions of
-  a [`System`](@ref), since it is the only one that applies exclusions.
+- `:molly_pairs`: half-pair list with excluded pairs removed and the special flag set
+  for special pairs. This is the only mode that can be used for the pairwise
+  interactions of a [`System`](@ref), since it is the only one that applies
+  exclusions.
 - `:geometric_pairs`: half-pair list of every pair within `dist_cutoff`, with all
-  special flags false. `eligible` and `special` are ignored, so pairs that a bonded
-  topology excludes are still returned and using this mode for a system with bonded
-  exclusions gives wrong forces.
-- `:ragged`: per-atom padded neighbor matrix only, with no flat pair list.
-  `eligible` and `special` are ignored. This mode is for querying neighbors directly,
-  it can not be used for the pairwise interactions of a [`System`](@ref).
+  special flags false. The exceptions are ignored, so pairs that a bonded topology
+  excludes are still returned and using this mode for a system with bonded exclusions
+  gives wrong forces.
+- `:ragged`: per-atom padded neighbor matrix only, with no flat pair list. The
+  exceptions are ignored. This mode is for querying neighbors directly, it can not be
+  used for the pairwise interactions of a [`System`](@ref) but can be useful for
+  machine learning potentials.
 
 `max_neighbors` is the initial per-atom capacity of the neighbor matrix. When it is
 `nothing` the capacity is estimated from the global number density and `dist_cutoff`
@@ -460,13 +463,70 @@ is passed to [`find_neighbors`](@ref) should therefore be treated as consumed, s
 any other reference to it, for example one kept by a simulator to compare against a
 trial list, would see the new neighbors with a stale pair count.
 """
-struct GPUCellListNeighborFinder{D,E,S}
+mutable struct GPUCellListNeighborFinder{D, E}
     dist_cutoff::D
     n_steps::Int
     max_neighbors::Union{Nothing, Int}
     output::Symbol
-    eligible::E
-    special::S
+    n_atoms::Int
+    # Compressed per-atom exception lists, see atom_pair_csr
+    excluded_starts::E
+    excluded_js::E
+    special_starts::E
+    special_js::E
+end
+
+#=
+Compress a list of `(i, j)` pairs with `i < j` into per-atom lists.
+
+Only pairs with `atom_i > atom_j` are looked at by the pair kernels, so each pair is
+stored once under the larger of its two indices. `starts[atom_i]` to
+`starts[atom_i + 1] - 1` is the range of `js` holding the partners of `atom_i`. These
+lists are a few entries per atom, so they stay in cache where the dense masks they
+replace do not.
+=#
+function atom_pair_csr(pairs, n_atoms::Integer, ET)
+    starts = ones(Int32, n_atoms + 1)
+    for (_, j) in pairs
+        starts[j + 1] += Int32(1)
+    end
+    for atom_i in 1:n_atoms
+        starts[atom_i + 1] += starts[atom_i] - Int32(1)
+    end
+
+    js = Vector{Int32}(undef, length(pairs))
+    next = copy(starts)
+    for (i, j) in pairs
+        js[next[j]] = i
+        next[j] += Int32(1)
+    end
+
+    return to_device(starts, ET), to_device(js, ET)
+end
+
+# Rebuild the exception lists of a neighbor finder from pairs of atom indices
+function update_sparse_pairs!(nf::GPUCellListNeighborFinder, excluded_pairs, special_pairs)
+    ET = typeof(nf.excluded_js)
+    nf.excluded_starts, nf.excluded_js = atom_pair_csr(
+                normalize_pairs(excluded_pairs; n_atoms=nf.n_atoms), nf.n_atoms, ET)
+    nf.special_starts, nf.special_js = atom_pair_csr(
+                normalize_pairs(special_pairs; n_atoms=nf.n_atoms), nf.n_atoms, ET)
+    return nf
+end
+
+# The pairs of atom indices behind the compressed lists of a neighbor finder
+function sparse_pairs(starts, js)
+    starts_cpu, js_cpu = from_device(starts), from_device(js)
+    return [(js_cpu[k], Int32(atom_i))
+            for atom_i in 1:(length(starts_cpu) - 1)
+            for k in starts_cpu[atom_i]:(starts_cpu[atom_i + 1] - Int32(1))]
+end
+
+function append_excluded_pairs!(nf::GPUCellListNeighborFinder, pairs)
+    update_sparse_pairs!(nf, vcat(sparse_pairs(nf.excluded_starts, nf.excluded_js),
+                                  collect(pairs)),
+                         sparse_pairs(nf.special_starts, nf.special_js))
+    return nf
 end
 
 function GPUCellListNeighborFinder(;
@@ -476,6 +536,10 @@ function GPUCellListNeighborFinder(;
     output::Symbol=:molly_pairs,
     eligible=nothing,
     special=nothing,
+    n_atoms=nothing,
+    excluded_pairs=(),
+    special_pairs=(),
+    device_vector_type=nothing,
 )
     n_steps_int = Int(n_steps)
     max_neighbors_int = isnothing(max_neighbors) ? nothing : Int(max_neighbors)
@@ -507,12 +571,20 @@ function GPUCellListNeighborFinder(;
         ),
     )
 
-    if output === :molly_pairs
-        eligible === nothing && throw(
-            ArgumentError(":molly_pairs requires eligible"),
+    if output !== :molly_pairs
+        # The other modes ignore the exceptions, so nothing is stored for them
+        return GPUCellListNeighborFinder{typeof(dist_cutoff), Nothing}(
+            dist_cutoff, n_steps_int, max_neighbors_int, output,
+            (isnothing(n_atoms) ? 0 : Int(n_atoms)), nothing, nothing, nothing, nothing,
+        )
+    end
+
+    if isnothing(n_atoms)
+        isnothing(eligible) && throw(
+            ArgumentError(":molly_pairs requires either eligible or n_atoms"),
         )
 
-        special === nothing && throw(
+        isnothing(special) && throw(
             ArgumentError(":molly_pairs requires special"),
         )
 
@@ -524,23 +596,34 @@ function GPUCellListNeighborFinder(;
             ArgumentError("eligible and special must be square matrices"),
         )
 
-        # The masks are read inside the search kernels, so they have to be on the
-        #   device rather than converted there
-        (eligible isa AbstractGPUArray && special isa AbstractGPUArray) || throw(
-            ArgumentError(
-                "eligible and special must be GPU arrays for :molly_pairs, try " *
-                "eligible=to_device(eligible, AT) where AT is the GPU array type",
-            ),
+        # The exception lists are read inside the pair kernels, so they have to end up
+        #   on the device
+        ET = gpu_exception_vector_type(eligible, device_vector_type)
+        excluded_pairs, special_pairs = dense_masks_to_pair_lists(
+                    copy_to_bitmatrix(eligible), copy_to_bitmatrix(special))
+
+        return GPUCellListNeighborFinder(;
+            dist_cutoff=dist_cutoff,
+            n_steps=n_steps_int,
+            max_neighbors=max_neighbors_int,
+            output=output,
+            n_atoms=size(eligible, 1),
+            excluded_pairs=excluded_pairs,
+            special_pairs=special_pairs,
+            device_vector_type=ET,
         )
     end
 
-    return GPUCellListNeighborFinder(
-        dist_cutoff,
-        n_steps_int,
-        max_neighbors_int,
-        output,
-        eligible,
-        special,
+    ET = validate_device_vector_type(device_vector_type)
+    n_atoms_int = Int(n_atoms)
+    excluded_starts, excluded_js = atom_pair_csr(
+                normalize_pairs(excluded_pairs; n_atoms=n_atoms_int), n_atoms_int, ET)
+    special_starts, special_js = atom_pair_csr(
+                normalize_pairs(special_pairs; n_atoms=n_atoms_int), n_atoms_int, ET)
+
+    return GPUCellListNeighborFinder{typeof(dist_cutoff), typeof(excluded_starts)}(
+        dist_cutoff, n_steps_int, max_neighbors_int, output, n_atoms_int,
+        excluded_starts, excluded_js, special_starts, special_js,
     )
 end
 
@@ -965,25 +1048,72 @@ end
     end
 end
 
-@inline include_half_pair(::Val{:geometric}, eligible, atom_i, atom_j) = atom_i > atom_j
-@inline include_half_pair(::Val{:molly}, eligible, atom_i, atom_j) = atom_i > atom_j &&
-                                                                     eligible[atom_j, atom_i]
+# Number of exceptions of an atom that are held in registers, see AtomExceptions
+const N_CACHED_EXCEPTIONS = 4
 
-@inline pair_special(::Val{:geometric}, special, atom_i, atom_j) = false
-@inline pair_special(::Val{:molly}, special, atom_i, atom_j) = special[atom_j, atom_i]
+#=
+The exceptions of one atom, i.e. the atoms before it in the list that it is either
+excluded from interacting with or has a special interaction with.
+
+The first few are read into registers when a thread starts on an atom. The list is
+looked at once per candidate pair, so reading it from memory there instead would add
+a load that depends on the candidate to a loop that is already latency-bound, and
+measures slower than the dense mask it replaces. Almost every atom has at most
+`N_CACHED_EXCEPTIONS` exceptions and the rest fall back to reading the tail.
+=#
+struct AtomExceptions{J, N}
+    js::J
+    cached::NTuple{N, Int32}
+    first_k::Int32
+    last_k::Int32
+end
+
+@inline function atom_exceptions(starts, js, atom_i)
+    first_k = starts[atom_i]
+    last_k = starts[atom_i + Int32(1)] - Int32(1)
+    # Val unrolls this, and zero never matches an atom index so it pads a list that
+    #   is shorter than the cache
+    cached = ntuple(Val(N_CACHED_EXCEPTIONS)) do n
+        k = first_k + Int32(n - 1)
+        k <= last_k ? js[k] : Int32(0)
+    end
+    return AtomExceptions(js, cached, first_k, last_k)
+end
+
+@inline atom_exceptions(::Val{:geometric}, starts, js, atom_i) = nothing
+@inline atom_exceptions(::Val{:molly}, starts, js, atom_i) =
+                        atom_exceptions(starts, js, atom_i)
+
+@inline in_exceptions(::Nothing, atom_j) = false
+
+@inline function in_exceptions(exceptions::AtomExceptions{<:Any, N}, atom_j) where {N}
+    found = reduce(|, ntuple(n -> exceptions.cached[n] == atom_j, Val(N)))
+    # The tail of a list longer than the cache, which almost no atom has
+    if exceptions.last_k - exceptions.first_k >= Int32(N)
+        for k in (exceptions.first_k + Int32(N)):exceptions.last_k
+            found |= (exceptions.js[k] == atom_j)
+        end
+    end
+    return found
+end
+
+@inline include_half_pair(excluded, atom_i, atom_j) = atom_i > atom_j &&
+                                                      !in_exceptions(excluded, atom_j)
 
 @kernel inbounds=true function gpu_cell_list_pair_counts_kernel!(pair_counts,
-                                    @Const(neighbor_counts), @Const(neighbors), eligible,
-                                    mode, n_atoms, max_neighbors)
+                                    @Const(neighbor_counts), @Const(neighbors),
+                                    excluded_starts, excluded_js, mode, n_atoms,
+                                    max_neighbors)
     atom_i = @index(Global, Linear) % Int32
 
     if atom_i <= n_atoms
         count = Int32(0)
         # Clamped since an overflowing count is reported but not stored
         n_neighbors = min(neighbor_counts[atom_i], max_neighbors)
+        excluded = atom_exceptions(mode, excluded_starts, excluded_js, atom_i)
 
         for slot in Int32(1):n_neighbors
-            if include_half_pair(mode, eligible, atom_i, neighbors[slot, atom_i])
+            if include_half_pair(excluded, atom_i, neighbors[slot, atom_i])
                 count += Int32(1)
             end
         end
@@ -994,22 +1124,25 @@ end
 
 @kernel inbounds=true function gpu_cell_list_pair_write_kernel!(pair_list,
                                     @Const(pair_offsets), @Const(neighbor_counts),
-                                    @Const(neighbors), eligible, special, mode, n_atoms,
+                                    @Const(neighbors), excluded_starts, excluded_js,
+                                    special_starts, special_js, mode, n_atoms,
                                     max_neighbors, pair_capacity)
     atom_i = @index(Global, Linear) % Int32
 
     if atom_i <= n_atoms
         write_position = pair_offsets[atom_i]
         n_neighbors = min(neighbor_counts[atom_i], max_neighbors)
+        excluded = atom_exceptions(mode, excluded_starts, excluded_js, atom_i)
+        specials = atom_exceptions(mode, special_starts, special_js, atom_i)
 
         for slot in Int32(1):n_neighbors
             atom_j = neighbors[slot, atom_i]
-            if include_half_pair(mode, eligible, atom_i, atom_j)
+            if include_half_pair(excluded, atom_i, atom_j)
                 # The total is checked on the host afterwards, this keeps an overflowing
                 #   write inside the buffer until then
                 if write_position <= pair_capacity
                     pair_list[write_position] = (atom_i, atom_j,
-                                                 pair_special(mode, special, atom_i, atom_j))
+                                                 in_exceptions(specials, atom_j))
                 end
                 write_position += Int32(1)
             end
@@ -1210,14 +1343,15 @@ function query_gpu_cell_list!(state::GPUCellListState)
     return state
 end
 
-function count_pairs_gpu_cell_list!(state::GPUCellListState, mode, eligible)
+function count_pairs_gpu_cell_list!(state::GPUCellListState, mode, nf)
     n_atoms = Int(state.n_atoms)
     backend = get_backend(state.x)
     n_threads_gpu = gpu_threads_cell_list(n_atoms)
 
     pair_counts_kernel! = gpu_cell_list_pair_counts_kernel!(backend, n_threads_gpu)
-    pair_counts_kernel!(state.pair_counts, state.neighbor_counts, state.neighbors, eligible,
-                        mode, state.n_atoms, state.max_neighbors; ndrange=n_atoms)
+    pair_counts_kernel!(state.pair_counts, state.neighbor_counts, state.neighbors,
+                        nf.excluded_starts, nf.excluded_js, mode, state.n_atoms,
+                        state.max_neighbors; ndrange=n_atoms)
 
     AcceleratedKernels.accumulate!(+, state.pair_inclusive_counts, state.pair_counts, backend;
                                    init=Int32(0))
@@ -1229,24 +1363,25 @@ function count_pairs_gpu_cell_list!(state::GPUCellListState, mode, eligible)
     return state
 end
 
-function write_pairs_gpu_cell_list!(state::GPUCellListState, mode, eligible, special)
+function write_pairs_gpu_cell_list!(state::GPUCellListState, mode, nf)
     n_atoms = Int(state.n_atoms)
     backend = get_backend(state.x)
 
     pair_write_kernel! = gpu_cell_list_pair_write_kernel!(backend,
                                                           gpu_threads_cell_list(n_atoms))
     pair_write_kernel!(state.pair_list, state.pair_offsets, state.neighbor_counts,
-                       state.neighbors, eligible, special, mode, state.n_atoms,
+                       state.neighbors, nf.excluded_starts, nf.excluded_js,
+                       nf.special_starts, nf.special_js, mode, state.n_atoms,
                        state.max_neighbors, Int32(state.pair_capacity); ndrange=n_atoms)
 
     return state
 end
 
-function build_pair_list!(state::GPUCellListState, mode, eligible, special)
+function build_pair_list!(state::GPUCellListState, mode, nf)
     isnothing(state.pair_list) && error(
                 "pair buffers were not allocated for this GPU cell-list state")
-    count_pairs_gpu_cell_list!(state, mode, eligible)
-    write_pairs_gpu_cell_list!(state, mode, eligible, special)
+    count_pairs_gpu_cell_list!(state, mode, nf)
+    write_pairs_gpu_cell_list!(state, mode, nf)
     return state
 end
 
@@ -1262,10 +1397,10 @@ end
 Run one full rebuild, growing the buffers and repeating if they turned out to be too
 small. Everything up to the counter read is asynchronous.
 =#
-function rebuild_gpu_cell_list!(state::GPUCellListState, mode, eligible, special, build_pairs)
+function rebuild_gpu_cell_list!(state::GPUCellListState, mode, nf, build_pairs)
     build_gpu_cell_list!(state)
     query_gpu_cell_list!(state)
-    build_pairs && build_pair_list!(state, mode, eligible, special)
+    build_pairs && build_pair_list!(state, mode, nf)
     counters = read_gpu_cell_list_counters!(state)
 
     if counters[COUNTER_N_OVERFLOW] > Int32(0)
@@ -1279,7 +1414,7 @@ function rebuild_gpu_cell_list!(state::GPUCellListState, mode, eligible, special
 
         build_gpu_cell_list!(state)
         query_gpu_cell_list!(state)
-        build_pairs && build_pair_list!(state, mode, eligible, special)
+        build_pairs && build_pair_list!(state, mode, nf)
         counters = read_gpu_cell_list_counters!(state)
 
         iszero(counters[COUNTER_N_OVERFLOW]) || error(
@@ -1293,7 +1428,7 @@ function rebuild_gpu_cell_list!(state::GPUCellListState, mode, eligible, special
 
     if n_pairs > state.pair_capacity
         grow_gpu_cell_list_pairs!(state, n_pairs)
-        write_pairs_gpu_cell_list!(state, mode, eligible, special)
+        write_pairs_gpu_cell_list!(state, mode, nf)
     end
 
     return n_pairs
@@ -1370,7 +1505,7 @@ function find_neighbors(sys::System{3, AT},
         split_gpu_cell_list_coordinates!(state, sys.coords)
     end
 
-    n_pairs = rebuild_gpu_cell_list!(state, pair_mode, nf.eligible, nf.special, build_pairs)
+    n_pairs = rebuild_gpu_cell_list!(state, pair_mode, nf, build_pairs)
 
     return GPUCellListNeighborList(state.neighbor_counts, state.neighbors, n_pairs,
                                    (build_pairs ? state.pair_list : nothing), state)
@@ -1403,24 +1538,32 @@ function find_neighbors(sys::System,
 end
 
 function neighbor_finder_masks(nf::GPUCellListNeighborFinder, n_atoms::Integer)
-    if isnothing(nf.eligible)
-        # :ragged and :geometric_pairs ignore exclusions, so all pairs are eligible
-        eligible = trues(n_atoms, n_atoms)
-        for i in 1:n_atoms
-            eligible[i, i] = false
-        end
-        return eligible, falses(n_atoms, n_atoms)
+    eligible = trues(n_atoms, n_atoms)
+    special = falses(n_atoms, n_atoms)
+    for i in 1:n_atoms
+        eligible[i, i] = false
     end
-    return copy_to_bitmatrix(from_device(nf.eligible)), copy_to_bitmatrix(from_device(nf.special))
+    # :ragged and :geometric_pairs ignore the exceptions, so all pairs are eligible
+    isnothing(nf.excluded_js) && return eligible, special
+    for (i, j) in sparse_pairs(nf.excluded_starts, nf.excluded_js)
+        eligible[i, j] = false
+        eligible[j, i] = false
+    end
+    for (i, j) in sparse_pairs(nf.special_starts, nf.special_js)
+        special[i, j] = true
+        special[j, i] = true
+    end
+    return eligible, special
 end
 
 function Base.show(io::IO, neighbor_finder::GPUCellListNeighborFinder)
     println(io, typeof(neighbor_finder))
     println(io, "  output = ", neighbor_finder.output)
-    if !isnothing(neighbor_finder.eligible)
-        println(io, "  Size of eligible matrix = ", size(neighbor_finder.eligible))
+    if !isnothing(neighbor_finder.excluded_js)
+        println(io, "  n_atoms = ", neighbor_finder.n_atoms)
+        println(io, "  n_excluded = ", length(neighbor_finder.excluded_js))
+        println(io, "  n_special = ", length(neighbor_finder.special_js))
     end
-    println(io, "  max_neighbors = ", neighbor_finder.max_neighbors)
     println(io, "  n_steps = ", neighbor_finder.n_steps)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end

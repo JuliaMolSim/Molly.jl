@@ -1244,6 +1244,94 @@ end
                 end
             end
 
+            @testset "Sparse exceptions" begin
+                Random.seed!(104)
+
+                # Dense masks are converted to per-atom exception lists and not kept
+                n_small = 4
+                eligible_small = trues(n_small, n_small)
+                special_small = falses(n_small, n_small)
+                for i in 1:n_small
+                    eligible_small[i, i] = false
+                end
+                eligible_small[1, 2] = false
+                eligible_small[2, 1] = false
+                special_small[1, 3] = true
+                special_small[3, 1] = true
+
+                finder = GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    eligible=to_device(eligible_small, AT),
+                    special=to_device(special_small, AT),
+                )
+
+                @test finder.n_atoms == n_small
+                @test length(finder.excluded_js) == 1
+                @test length(finder.special_js) == 1
+                @test !hasproperty(finder, :eligible)
+
+                eligible_rt, special_rt = Molly.neighbor_finder_masks(finder, n_small)
+
+                @test eligible_rt == eligible_small
+                @test special_rt == special_small
+
+                # Constraint setup adds excluded pairs to an existing finder
+                Molly.append_excluded_pairs!(finder, [(2, 4)])
+                eligible_app, special_app = Molly.neighbor_finder_masks(finder, n_small)
+
+                @test length(finder.excluded_js) == 2
+                @test !eligible_app[2, 4] && !eligible_app[4, 2]
+                @test special_app == special_small
+
+                # Atoms with more exceptions than are cached in registers take a
+                #   different path in the kernels, so give some atoms many of both
+                n_atoms = 200
+                boundary = CubicBoundary(4.0f0)
+                coords = [
+                    SVector{3,Float32}(rand(Float32, 3) .* 4.0f0)
+                    for _ in 1:n_atoms
+                ]
+
+                eligible = trues(n_atoms, n_atoms)
+                special = falses(n_atoms, n_atoms)
+                for i in 1:n_atoms
+                    eligible[i, i] = false
+                end
+                for i in 1:n_atoms, j in 1:min(i - 1, 8)
+                    eligible[i, j] = false
+                    eligible[j, i] = false
+                end
+                for i in 1:n_atoms, j in 9:min(i - 1, 20)
+                    special[i, j] = true
+                    special[j, i] = true
+                end
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    output=:molly_pairs,
+                    cutoff=1.0f0,
+                    boundary=boundary,
+                    eligible=to_device(eligible, AT),
+                    special=to_device(special, AT),
+                )
+
+                nf_ref = DistanceNeighborFinder(
+                    eligible=to_device(eligible, AT),
+                    special=to_device(special, AT),
+                    dist_cutoff=1.0f0,
+                )
+
+                result = find_neighbors(sys)
+                reference = find_neighbors(sys, nf_ref)
+                canonical(nl) = Set((min(i, j), max(i, j), sp)
+                                    for (i, j, sp) in Array(nl.list[1:nl.n]))
+
+                @test maximum(diff(Array(sys.neighbor_finder.excluded_starts))) > 4
+                @test maximum(diff(Array(sys.neighbor_finder.special_starts))) > 4
+                @test result.n == reference.n
+                @test canonical(result) == canonical(reference)
+            end
+
             @testset "Triclinic boundary" begin
                 Random.seed!(103)
 

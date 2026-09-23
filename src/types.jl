@@ -918,11 +918,17 @@ function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, bounda
                                on_gpu, strictness)
     neighbor_finder isa NoNeighborFinder && return nothing
 
-    if neighbor_finder isa GPUCellListNeighborFinder && neighbor_finder.output === :ragged &&
-                any(use_neighbors, values(pairwise_inters))
-        throw(ArgumentError("the neighbor finder has output=:ragged, which does not " *
-                            "produce the pair list that the pairwise interactions need, " *
-                            "use output=:molly_pairs"))
+    if neighbor_finder isa GPUCellListNeighborFinder
+        if neighbor_finder.output === :ragged && any(use_neighbors, values(pairwise_inters))
+            throw(ArgumentError("the neighbor finder has output=:ragged, which does not " *
+                                "produce the pair list that the pairwise interactions " *
+                                "need, use output=:molly_pairs"))
+        end
+        if neighbor_finder.output === :molly_pairs && neighbor_finder.n_atoms != n_atoms
+            throw(ArgumentError("the neighbor finder was set up for " *
+                                "$(neighbor_finder.n_atoms) atoms but the system has " *
+                                "$n_atoms atoms"))
+        end
     end
 
     for name in (:eligible, :special)

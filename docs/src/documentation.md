@@ -1824,6 +1824,7 @@ When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffe
 [`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref).
 It runs on any GPU backend and is the best option on GPUs other than NVIDIA ones, where the tiled kernels of [`GPUNeighborFinder`](@ref) are not available.
 Three-dimensional [`CubicBoundary`](@ref) and [`TriclinicBoundary`](@ref) systems are supported, as long as opposite box faces are at least three times `dist_cutoff` apart so that the grid has at least three cells along every box axis.
+Like [`GPUNeighborFinder`](@ref) it converts the dense `eligible` and `special` masks into sparse exception lists at construction and does not retain them, since a dense mask is `n_atoms^2` bytes on the device.
 
 ## Analysis
 
