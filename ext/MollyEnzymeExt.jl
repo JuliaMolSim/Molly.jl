@@ -22,6 +22,7 @@ function __init__()
     return nothing
 end
 
+EnzymeRules.inactive_type(::Type{<:GPUCellListNeighborList}) = true
 EnzymeRules.inactive(::typeof(is_on_gpu), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_strictness), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_strictness), args...) = nothing
@@ -65,6 +66,8 @@ EnzymeRules.inactive(::typeof(Molly.uses_gpu_neighbor_finder), args...) = nothin
 EnzymeRules.inactive(::typeof(Molly.claim_block!), args...) = nothing
 EnzymeRules.inactive_type(::Type{<:NoNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:GPUNeighborFinder}) = true
+EnzymeRules.inactive_type(::Type{<:GPUCellListNeighborFinder}) = true
+EnzymeRules.inactive_type(::Type{<:Molly.GPUCellListState}) = true
 EnzymeRules.inactive_type(::Type{<:DistanceNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:TreeNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:CellListMapNeighborFinder}) = true

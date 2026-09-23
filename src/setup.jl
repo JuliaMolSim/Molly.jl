@@ -1621,8 +1621,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
             device_vector_type=AT{Int32, 1},
         )
     elseif neighbor_finder_type in (nothing, GPUCellListNeighborFinder) &&
-                AT <: AbstractGPUArray && !grad_safe &&
-                gpu_cell_list_suitable(boundary, dist_neighbors)
+                AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors)
         neighbor_finder = GPUCellListNeighborFinder(
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),

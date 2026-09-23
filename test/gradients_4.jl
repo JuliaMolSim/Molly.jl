@@ -71,6 +71,8 @@
                 end
                 n_threads = (parallel ? Threads.nthreads() : 1)
                 sys_ref = create_sys(AT, n_threads, nonbonded_method)
+                @test sys_ref.neighbor_finder isa (AT == Array ? CellListMapNeighborFinder :
+                                                   GPUCellListNeighborFinder)
                 plan = ParameterPlan(sys_ref, params_dic)
                 grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
                 autodiff(
