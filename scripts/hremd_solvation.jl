@@ -111,10 +111,8 @@ function setup_alchemical_hremd(pdb_file, solute_indices, traj_prefix; is_vacuum
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = "beutler",
-            Csoftcore = "scaled",
-            array_type = AT,
-            float_type = FT,
+            LJsoftcore = :beutler,
+            Csoftcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -143,16 +141,20 @@ function setup_alchemical_hremd(pdb_file, solute_indices, traj_prefix; is_vacuum
     return repsys, thermo_states, sys_base
 end
 
-# The samples of each state are read back from its trajectory. The vacuum leg keeps the
-# infinite box, which is not written.
-function read_state_samples(sys_base, traj_prefix, K; is_vacuum=false)
+# The samples of each state are read back from its trajectory. A trajectory without a box
+# (the vacuum leg) is read with an infinite box.
+function read_state_samples(sys_base, traj_prefix, K)
     coords_k = []
     boundaries_k = []
     for k in 1:K
-        coords, box_sides = read_trajectory(sys_base, "$(traj_prefix)_state_$(k).dcd")
-        push!(coords_k, coords)
-        push!(boundaries_k, is_vacuum ? fill(sys_base.boundary, length(coords)) :
-                                        [CubicBoundary(b...) for b in box_sides])
+        ens = EnsembleSystem(sys_base, "$(traj_prefix)_state_$(k).dcd")
+        # `read_frame!` updates the same system each time, so copy the coordinates
+        samples = map(1:length(ens.trajectory)) do i
+            frame_sys = read_frame!(ens, i)
+            (copy(frame_sys.coords), frame_sys.boundary)
+        end
+        push!(coords_k, first.(samples))
+        push!(boundaries_k, last.(samples))
     end
     return coords_k, boundaries_k
 end
@@ -229,7 +231,7 @@ log_vac  = repsys_vac.exchange_logger
 coords_solv, boundaries_solv = read_state_samples(base_solv, "$(OUTPUT_PREFIX)_solvated",
                                                   N_LAMBDA_STATES)
 coords_vac, boundaries_vac = read_state_samples(base_vac, "$(OUTPUT_PREFIX)_vacuum",
-                                                N_LAMBDA_STATES; is_vacuum=true)
+                                                N_LAMBDA_STATES)
 
 f_solv = hremd_free_energies(thermo_solv, coords_solv, boundaries_solv)
 f_vac  = hremd_free_energies(thermo_vac, coords_vac, boundaries_vac)

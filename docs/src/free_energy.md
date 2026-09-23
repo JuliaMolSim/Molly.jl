@@ -738,13 +738,32 @@ DefaultLambdaScheduler(
 ```
 the default is dual topology while in OpenFE single topology is used, OpenFE also uses other settings during set up and the differences between default and OpenFE are outlined below.
 
-The other schedulers take the same options and differ in how the electrostatics and sterics are staged along $\lambda$: [`LinearLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) and [`GROMACSLambdaRBFEScheduler`](@ref) (which use two PME grids and scale linearly in between, rather than depositing a scaled charge on the grid, similar to GROMACS approach), [`NAMDLambdaScheduler`](@ref), [`QuartersLambdaScheduler`](@ref) and [`EleScaledLambdaScheduler`](@ref). Below shows how global λ is scaled for the sterics per scheduler and role. 
+All schedulers are a [`LambdaScheduler`](@ref) with a different schedule, e.g. `DefaultLambdaScheduler()` is `LambdaScheduler(Molly.DefaultSchedule())`, so they take the same options and differ in how the electrostatics and sterics are staged along $\lambda$: [`LinearLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) and [`GROMACSLambdaRBFEScheduler`](@ref) (which use two PME grids and scale linearly in between, rather than depositing a scaled charge on the grid, similar to GROMACS approach), [`NAMDLambdaScheduler`](@ref), [`QuartersLambdaScheduler`](@ref) and [`EleScaledLambdaScheduler`](@ref). Below shows how global λ is scaled for the sterics per scheduler and role. 
 
 ![All lambda schedulers with the specific lambda scaling for each role (dual=true)](images/scheduler_plots.png)
 
+### Alchemical roles
+
+Every [`Atom`](@ref) has an `alch_role` that tells the λ interactions how the atom changes along the transformation. [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) set the roles, so they normally do not have to be given by hand. The roles are not exported, e.g. `Molly.InsertRole`.
+
+| Role | Value | Atoms | Along $\lambda$ |
+|---|---|---|---|
+| `EnvRole` | 0 | Atoms that are not alchemical, e.g. solvent, protein and ions. The default of [`Atom`](@ref), and the role of every atom outside the mapping in both setups. | Never scaled. |
+| `CoreRole` | 1 | Single topology: atoms present in both end states whose parameters differ, e.g. the core atoms of a relative transformation. They are not decoupled, but their charges, Lennard-Jones and bonded parameters change because they are connected to alchemical atoms. | Parameters are interpolated between the A and B values; torsions are energy scaled, $(1-\lambda)E^A + \lambda E^B$. |
+| `CoreDRole` | 3 | Dual topology: the copy of a core atom with the parameters of state A. | Scaled by $1-\lambda$, including its bonded terms. |
+| `CoreIRole` | 2 | Dual topology: the copy of a core atom with the parameters of state B, a massless virtual site on its A copy. | Scaled by $\lambda$, including its bonded terms. |
+| `InsertRole` | 4 | Atoms only present in state B, the unique B atoms of a relative transformation. | Coupled from $\lambda = 0$ to $\lambda = 1$, following the scheduler. |
+| `DeleteRole` | 5 | Atoms only present in state A: the unique A atoms of a relative transformation and the decoupled atoms of an absolute one. | Decoupled from $\lambda = 0$ to $\lambda = 1$, following the scheduler. |
+
+An interaction between several atoms takes one role from its atoms, the first present in the order `InsertRole`, `DeleteRole`, `CoreRole`, `CoreIRole`, `CoreDRole`, `EnvRole`. A Lennard-Jones pair between an inserted and an environment atom therefore follows the insertion schedule, and an interaction between environment atoms is never scaled. With `intraLJ=true` the Lennard-Jones interactions within the inserted atoms, or within the deleted atoms, count as environment and stay on at every $\lambda$.
+
+The torsions take their role the other way round: a torsion of inserted, deleted or environment atoms only is never scaled, so the atoms that appear or disappear keep their own torsions at both end states, while a torsion that also has a core atom follows that core atom. Only the torsions of one end state then act on the core at a time.
+
+The schedulers scale the sterics and electrostatics of each role differently (see the plot above). In dual topology the bonded terms of inserted and deleted atoms stay at full strength at every $\lambda$, only their non-bonded interactions are scaled, so these atoms keep their geometry when decoupled; the bonded terms of the core copies are scaled by $\lambda$ and $1-\lambda$. In single topology the bonded parameters are interpolated.
+
 ### Matching OpenFE default settings
 
-Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the `OpenFEScheduler`. When using `OpenFEScheduler(), LJsoftcore="gapsys", Csoftcore="scaled"`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
+Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the `OpenFEScheduler`. When using `OpenFEScheduler(), LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
 
 - Only using a softcore potential for the LennardJones potential, the CoulombEwald direct space is scaled by lambda directly without using a softcore.
 - In CoulombEwald potential, the charges are individually scaled for the regular interactions: 
@@ -771,12 +790,12 @@ scheduler = OpenFEScheduler(
                 intraLJ=false,       # LJ between alchemical atoms is decoupled
                             )
 
-# For system setup, set LJsoftcore="gapsys", Csoftcore="scaled"
+# For system setup, set LJsoftcore=:gapsys, Csoftcore=:scaled
 # More on system setup, see the example below
 sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB;
                         scheduler=scheduler,
-                        LJsoftcore="gapsys",
-                        Csoftcore="scaled"
+                        LJsoftcore=:gapsys,
+                        Csoftcore=:scaled
                       )
 ```
 
@@ -844,24 +863,18 @@ scheduler = DefaultLambdaScheduler(dual=true, intraLJ=true)
 
 sys_solv = AbsoluteFESystem(sysb_solv, global_λ, mapping;
                              temp=298.0u"K",
-                             units=true,
                              scheduler=scheduler,
                              loggers=(),
-                             array_type=AT,
-                             float_type=FT,
-                             LJsoftcore="beutler",
-                             Csoftcore="scaled"
+                             LJsoftcore=:beutler,
+                             Csoftcore=:scaled
                             )
 
 sys_vac = AbsoluteFESystem(sysb_vac, global_λ, mapping;
                             temp=298.0u"K",
-                            units=true,
                             scheduler=scheduler,
                             loggers=(),
-                            array_type=AT,
-                            float_type=FT,
-                            LJsoftcore="beutler",
-                            Csoftcore="scaled"
+                            LJsoftcore=:beutler,
+                            Csoftcore=:scaled
                           )
 ```
 
@@ -895,7 +908,7 @@ ff_B = MolecularForceField(joinpath.(ff_dir, ["tip3p_standard.xml",
 
 # --- Load Systems ---
 sysA = System(
-        joinpath(data_dir,"tyk2_ejm31.pdb"),
+        joinpath(data_dir, "tyk2_ejm31.pdb"),
         ff_A;
         nonbonded_method=SetupPME(approximate_erfc=false),
         center_coords=false,
@@ -940,13 +953,10 @@ Then we can use SystemA and SystemB to set up a hybrid system with a single topo
 global_λ = FT(0.0)
 sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; 
                         temp=298.0u"K", 
-                        units=true,
                         scheduler=OpenFEScheduler(dual=false),
                         loggers=(),
-                        array_type=AT,
-                        float_type=FT,
-                        LJsoftcore="gapsys",
-                        Csoftcore="scaled"
+                        LJsoftcore=:gapsys,
+                        Csoftcore=:scaled
                       )
 ```
 
@@ -1319,10 +1329,8 @@ After minimization and equilibration, the script checks that the barostat has no
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = "beutler",
-            Csoftcore = "scaled",
-            array_type = AT,
-            float_type = FT,
+            LJsoftcore = :beutler,
+            Csoftcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -1851,10 +1859,8 @@ After minimization and equilibration, the script checks that the barostat has no
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = "beutler",
-            Csoftcore = "scaled",
-            array_type = AT,
-            float_type = FT,
+            LJsoftcore = :beutler,
+            Csoftcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -2248,10 +2254,8 @@ After minimization and equilibration, the function checks the box against the cu
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = "beutler",
-            Csoftcore = "scaled",
-            array_type = AT,
-            float_type = FT,
+            LJsoftcore = :beutler,
+            Csoftcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -2277,17 +2281,21 @@ After minimization and equilibration, the function checks the box against the cu
 end
 ```
 
-After the simulation, the samples of each state are read back from its trajectory with [`read_trajectory`](@ref), which returns the coordinates and the box side lengths of every frame. The vacuum leg keeps its infinite box, which is not written.
+After the simulation, the samples of each state are read back from its trajectory with an [`EnsembleSystem`](@ref), which gives the coordinates and the boundary of every frame with [`read_frame!`](@ref). A trajectory without a box, the vacuum leg, is read with an infinite box.
 
 ```julia
-function read_state_samples(sys_base, traj_prefix, K; is_vacuum = false)
+function read_state_samples(sys_base, traj_prefix, K)
     coords_k = []
     boundaries_k = []
     for k in 1:K
-        coords, box_sides = read_trajectory(sys_base, "$(traj_prefix)_state_$(k).dcd")
-        push!(coords_k, coords)
-        push!(boundaries_k, is_vacuum ? fill(sys_base.boundary, length(coords)) :
-                                        [CubicBoundary(b...) for b in box_sides])
+        ens = EnsembleSystem(sys_base, "$(traj_prefix)_state_$(k).dcd")
+        # `read_frame!` updates the same system each time, so copy the coordinates
+        samples = map(1:length(ens.trajectory)) do i
+            frame_sys = read_frame!(ens, i)
+            (copy(frame_sys.coords), frame_sys.boundary)
+        end
+        push!(coords_k, first.(samples))
+        push!(boundaries_k, last.(samples))
     end
     return coords_k, boundaries_k
 end
@@ -2353,7 +2361,7 @@ log_vac  = repsys_vac.exchange_logger
 coords_solv, boundaries_solv = read_state_samples(base_solv, "hremd_solvation_solvated",
                                                   N_LAMBDA_STATES)
 coords_vac, boundaries_vac = read_state_samples(base_vac, "hremd_solvation_vacuum",
-                                                N_LAMBDA_STATES; is_vacuum = true)
+                                                N_LAMBDA_STATES)
 
 f_solv = hremd_free_energies(thermo_solv, coords_solv, boundaries_solv)
 f_vac  = hremd_free_energies(thermo_vac, coords_vac, boundaries_vac)
