@@ -221,7 +221,7 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
 end
 
 """
-    CalcAngle(atom_inds::AbstractVector{Int}; correction=:pbc, has_virial::Bool=true)
+    CalcAngle(atom_inds::AbstractVector{Int}=[], correction=:pbc, has_virial::Bool=true)
 
 A collective variable that calculates the angle defined by three atoms.
 
@@ -248,7 +248,7 @@ function calculate_cv(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...
     return  bond_angle(c[1], c[2], c[3], boundary)
 end
 
-function cv_gradient(cv::CalcAngle, coords, atoms, boundary, velocities; kwargs...)
+function cv_gradient(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
     i, j, k = cv.atom_inds
     ri, rj, rk = coords[i], coords[j], coords[k]
     

@@ -342,7 +342,7 @@ function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t
     # Resolver scans all 6 permutations internally and caches the winner
     p = find_improper_match(t1, t2, t3, t4, indexes, atom_type_of, resnum_of, template_id_of, 
                             element_of; resolver=ff.torsion_resolver, 
-                            type_to_class=ff.type_to_class)
+                            type_to_class=ff.type_to_class, atom_types=ff.atom_types)
     if isnothing(p)
         return nothing
     end
@@ -699,8 +699,8 @@ function System(coord_file::AbstractString,
     atom_type_of = Vector{String}(undef, n_atoms)
     charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
-    template_id_of = Vector{Integer}(undef, n_atoms)
-    resnum_of = Vector{Integer}(undef, n_atoms)
+    template_id_of = Vector{Int}(undef, n_atoms)
+    resnum_of = Vector{Int}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
     # Index of each atom type in the force field, avoiding repeated linear searches
     atom_type_index = Dict{String, Int}(at => i

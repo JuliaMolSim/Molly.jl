@@ -243,7 +243,7 @@ end
 function find_improper_match(t1::AbstractString, t2::AbstractString, t3::AbstractString,
                              t4::AbstractString, indexes, atom_type_of, resnum_of, template_id_of, 
                              element_of; resolver::TorsionResolver{T, E},
-                             type_to_class::Dict{String, String}) where {T, E}
+                             type_to_class::Dict{String, String}, atom_types) where {T, E}
     (c, j, k, l) = indexes
     ic = resolver.improper_cache
     key = (t1, t2, t3, t4)
@@ -389,8 +389,8 @@ function find_improper_match(t1::AbstractString, t2::AbstractString, t3::Abstrac
                     # Elements and masses for tie-break
                     e_a1 = Symbol(element_of[a1])
                     e_a2 = Symbol(element_of[a2])
-                    m_a1 = force_field.atom_types[atom_type_of[a1]].mass
-                    m_a2 = force_field.atom_types[atom_type_of[a2]].mass
+                    m_a1 = atom_types[atom_type_of[a1]].mass
+                    m_a2 = atom_types[atom_type_of[a2]].mass
 
                     # 1) If same element, lower atom index first
                     # 2) Else, prefer carbon; else heavier mass first
@@ -428,8 +428,8 @@ function find_improper_match(t1::AbstractString, t2::AbstractString, t3::Abstrac
                 # Elements and masses for tie-break
                 e_a1 = Symbol(element_of[a1])
                 e_a2 = Symbol(element_of[a2])
-                m_a1 = force_field.atom_types[atom_type_of[a1]].mass
-                m_a2 = force_field.atom_types[atom_type_of[a2]].mass
+                m_a1 = atom_types[atom_type_of[a1]].mass
+                m_a2 = atom_types[atom_type_of[a2]].mass
 
                 # 1) If same element, lower atom index first
                 # 2) Else, prefer carbon; else heavier mass first

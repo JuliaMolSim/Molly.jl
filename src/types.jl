@@ -485,7 +485,7 @@ function Base.append!(il1::InteractionList1Atoms{I, T, D}, il2::InteractionList1
         append!(il1.is,il2.is),
         append!(il1.inters,il2.inters),
         append!(il1.types,il2.types),
-        nothing,
+        il1.data,
     )
 end
 
@@ -495,7 +495,7 @@ function Base.append!(il1::InteractionList2Atoms{I, T, D}, il2::InteractionList2
         append!(il1.js,il2.js),
         append!(il1.inters,il2.inters),
         append!(il1.types,il2.types),
-        nothing
+        il1.data
     )
 end
 
@@ -506,7 +506,7 @@ function Base.append!(il1::InteractionList3Atoms{I, T, D}, il2::InteractionList3
         append!(il1.ks,il2.ks),
         append!(il1.inters,il2.inters),
         append!(il1.types,il2.types),
-        nothing
+        il1.data
     )
 end
 
@@ -518,28 +518,20 @@ function Base.append!(il1::InteractionList4Atoms{I, T, D}, il2::InteractionList4
         append!(il1.ls,il2.ls),
         append!(il1.inters,il2.inters),
         append!(il1.types,il2.types),
-        nothing
+        il1.data
     )
 end
 
 function Base.append!(il1::InteractionList5Atoms{I, T, D}, il2::InteractionList5Atoms{I, T, D}) where {I, T, D}
-    tmp_inters = il1.inters
-    cmaptorsion = typeof(il1.inters[1])
-    matrix = typeof(il1.data)
-    for inter in il2.inters
-        if isa(inter, CMAPTorsion)
-            push!(tmp_inters, cmaptorsion((4*tmp_inters[end].size*tmp_inters[end].size)+tmp_inters[end].index, inter.size, inter.λ, inter.res_num, inter.res_id))
-        elseif isa(inter, CMAPTorsion_L)
-            push!(tmp_inters, cmaptorsion((4*tmp_inters[end].size*tmp_inters[end].size)+tmp_inters[end].index, inter.size, inter.λ, inter.res_num, inter.res_id, inter.λ_id))
-        end
-    end
+    # CMAP indices point to rows of `data`, so the appended ones start after the rows of il1
+    offset = size(il1.data, 1)
     return InteractionList5Atoms(
         append!(il1.is,il2.is),
         append!(il1.js,il2.js),
         append!(il1.ks,il2.ks),
         append!(il1.ls,il2.ls),
         append!(il1.ms,il2.ms),
-        tmp_inters,
+        append!(il1.inters, shift_cmap_index.(il2.inters, offset)),
         append!(il1.types,il2.types),
         vcat(il1.data,il2.data),
     )
@@ -622,7 +614,9 @@ The types used should be bits types if the GPU is going to be used.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 - `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
     transformations.
-- `alch_role::Int32=CoreRole`: Role of the atom in an alchemical transformation.
+- `alch_role::Int32=EnvRole`: role of the atom in an alchemical transformation. `EnvRole`, the
+    default, is an atom that is not alchemical. The other roles are set by
+    [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref).
 """
 struct Atom{T, M, C, S, E, L} # With Float32 numeric fields this fits into 32 bytes
     index::Int32
@@ -642,12 +636,12 @@ function Atom(index, atom_type::T, mass::M, charge::C, σ::S, ϵ::E,
 end
 
 function Atom(; index=Int32(1), atom_type=Int32(1), mass=1.0u"g/mol", charge=0.0,
-              σ=0.0u"nm", ϵ=0.0u"kJ * mol^-1", λ=1.0, alch_role=CoreRole)
+              σ=0.0u"nm", ϵ=0.0u"kJ * mol^-1", λ=1.0, alch_role=EnvRole)
     return Atom(index, atom_type, mass, charge, σ, ϵ, λ, alch_role)
 end
 
 function Base.zero(::Type{Atom{T, M, C, S, E, L}}) where {T, M, C, S, E, L}
-    return Atom(Int32(0), zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), CoreRole)
+    return Atom(Int32(0), zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), EnvRole)
 end
 
 Base.zero(at::Atom) = zero(typeof(at))
