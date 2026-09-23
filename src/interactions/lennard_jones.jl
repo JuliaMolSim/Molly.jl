@@ -2,11 +2,15 @@ export
     LennardJones,
     LJDispersionCorrection,
     LJDispersionCorrectionλ,
+    LennardJonesScaled,
     LennardJonesSoftCoreBeutler,
     LennardJonesSoftCoreGapsys,
     AshbaughHatch,
     LennardJones14,
-    LennardJones14SoftCoreGapsys
+    LennardJones14SoftCoreBeutler,
+    LennardJones14SoftCoreGapsys,
+    LennardJones14Scaled,
+    LennardJonesScaled
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
@@ -66,15 +70,6 @@ end
 
 parameter_prefix(::LennardJones) = "inter_LJ_"
 parameter_fields(::Type{<:LennardJones}) = ((:weight_special, "weight_14"),)
-function to_lambda_function(inter::LennardJones, ::DefaultSoftCore; args...)
-    return LennardJones(cutoff=inter.cutoff, 
-                            use_neighbors=inter.use_neighbors, 
-                            shortcut=inter.shortcut,
-                            σ_mixing=inter.σ_mixing,
-                            ϵ_mixing=inter.ϵ_mixing,
-                            weight_special=inter.weight_special, 
-                            )
-end
 
 @inline function force(inter::LennardJones,
                        dr,
@@ -485,6 +480,154 @@ end
         ϵ = xy_mixing(ϵ_mix, params_mixing(λ_params, atom_i.ϵ), params_mixing(λ_params, atom_j.ϵ))
     end
     return λ, λR, λ_params, σ, ϵ
+end
+
+@doc raw"""
+    LennardJonesScaled(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, λ_mixing,
+                       scheduler, weight_special)
+
+The Lennard-Jones 6-12 interaction between two atoms scaled by an alchemical steric scheduler,
+without a soft core.
+
+The potential energy is defined as
+```math
+V(r_{ij}) = 4\lambda\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
+```
+and the force on each atom by
+```math
+\vec{F}_i = \frac{24\lambda\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
+```
+where ``\lambda`` is the steric coupling of the pair, which the scheduler takes from the
+``\lambda`` of the atoms and their alchemical roles.
+
+If ``\lambda`` is 1.0, this gives the standard [`LennardJones`](@ref) potential and means the
+atom is fully turned on.
+If ``\lambda`` is zero the interaction is turned off.
+As there is no soft core the energy diverges when an atom that is being inserted or deleted
+overlaps another one, so this is for a transformation where that does not happen, for example
+one where only parameters change.
+In single topology ``\lambda`` is one and ``\sigma`` and ``\varepsilon`` are interpolated
+between the end states instead.
+"""
+@kwdef struct LennardJonesScaled{C, H, S, E, LM, SCH, W} <: PairwiseInteraction
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    shortcut::H = LJZeroShortcut()
+    σ_mixing::S = LorentzMixing()
+    ϵ_mixing::E = GeometricMixing()
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+    weight_special::W = 1
+end
+
+use_neighbors(inter::LennardJonesScaled) = inter.use_neighbors
+
+required_atom_fields(inter::LennardJonesScaled) = (:σ, :ϵ, :λ, :alch_role,
+            mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...,
+            mixing_atom_fields(inter.λ_mixing)...)
+
+function Base.zero(lj::LennardJonesScaled{C, H, S, E, LM, SCH, W}) where {C, H, S, E, LM, SCH, W}
+    return LennardJonesScaled(
+        lj.cutoff,
+        lj.use_neighbors,
+        lj.shortcut,
+        lj.σ_mixing,
+        lj.ϵ_mixing,
+        lj.λ_mixing,
+        lj.scheduler,
+        zero(W),
+    )
+end
+
+function Base.:+(l1::LennardJonesScaled, l2::LennardJonesScaled)
+    return LennardJonesScaled(
+        l1.cutoff,
+        l1.use_neighbors,
+        l1.shortcut,
+        l1.σ_mixing,
+        l1.ϵ_mixing,
+        l1.λ_mixing,
+        l1.scheduler,
+        l1.weight_special + l2.weight_special,
+    )
+end
+
+parameter_prefix(::LennardJonesScaled) = "inter_LJ_"
+parameter_fields(::Type{<:LennardJonesScaled}) = ((:weight_special, "weight_14"),)
+
+function to_lambda_function(inter::LennardJones, ::ScaledSoftCore; λ_mixing=MinimumMixing(),
+                            scheduler=DefaultLambdaScheduler(), args...)
+    return LennardJonesScaled(cutoff=inter.cutoff, use_neighbors=inter.use_neighbors,
+                              shortcut=inter.shortcut, σ_mixing=inter.σ_mixing,
+                              ϵ_mixing=inter.ϵ_mixing, λ_mixing=λ_mixing, scheduler=scheduler,
+                              weight_special=inter.weight_special)
+end
+
+@inline function force(inter::LennardJonesScaled,
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...)
+    λ, λR, λ_params, σ, ϵ = λ_params_function(inter.scheduler, inter.λ_mixing, inter.σ_mixing,
+                                              inter.ϵ_mixing, atom_i, atom_j, special)
+
+    if λ <= 0
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    if shortcut_pair(inter.shortcut, atom_i, atom_j)
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    r = sqrt(sum(abs2, dr))
+    if iszero_value(r)
+        return zero_pairwise_force(dr, force_units)
+    end
+
+    params = (σ^2, ϵ)
+    f = force_cutoff(inter.cutoff, inter, r, params)
+    fdr = λ * (f / r) * dr
+    return special ? fdr * inter.weight_special : fdr
+end
+
+function pairwise_force(::LennardJonesScaled, r, (σ2, ϵ))
+    six_term = (σ2 / r^2) ^ 3
+    return (24ϵ / r) * (2 * six_term ^ 2 - six_term)
+end
+
+@inline function potential_energy(inter::LennardJonesScaled,
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...)
+    λ, λR, λ_params, σ, ϵ = λ_params_function(inter.scheduler, inter.λ_mixing, inter.σ_mixing,
+                                              inter.ϵ_mixing, atom_i, atom_j, special)
+
+    if λ <= 0
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    if shortcut_pair(inter.shortcut, atom_i, atom_j)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    r = sqrt(sum(abs2, dr))
+    if iszero_value(r)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    params = (σ^2, ϵ)
+    pe = λ * pe_cutoff(inter.cutoff, inter, r, params)
+    return special ? pe * inter.weight_special : pe
+end
+
+function pairwise_pe(::LennardJonesScaled, r, (σ2, ϵ))
+    six_term = (σ2 / r^2) ^ 3
+    return 4ϵ * (six_term ^ 2 - six_term)
 end
 
 @doc raw"""
@@ -1169,9 +1312,236 @@ end
     return inter.weight_14 * 4 * inter.ϵ14_mixed * (six_term ^ 2 - six_term)
 end
 
+const LennardJones14λ = Union{LennardJones14SoftCoreBeutler, LennardJones14SoftCoreGapsys,
+                              LennardJones14Scaled}
 
-# Specific interaction used to allow different σ/ϵ for 1-4 interactions
-# Assumes no 1-4 Lennard-Jones interaction via the pairwise interactions (weight_special = 0)
+@inline function lj14_lambda_params(inter::LennardJones14λ, atom_i, atom_l)
+    λ_glob = λ_mixing(inter.λ_mixing, (atom_i, atom_l))
+    pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_l.alch_role); lj=true)
+    λ, λR, λ_params = scale_sterics_dual(inter.scheduler, λ_glob, pair_role)
+    return λ, λR, params_mixing(λ_params, inter.σ14_mixed), params_mixing(λ_params, inter.ϵ14_mixed)
+end
+
+@doc raw"""
+    LennardJones14Scaled(; σ14_mixed, ϵ14_mixed, weight_14, λ_mixing, scheduler)
+
+The 1-4 Lennard-Jones interaction of a pair of atoms scaled by λ without a soft core, the λ
+version of [`LennardJones14`](@ref) built by `to_lambda_function(inter, ScaledSoftCore())`.
+
+Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
+[`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
+are those of [`LennardJonesScaled`](@ref) with the σ and ϵ of the pair, weighted by `weight_14`,
+and the pair is coupled like any other Lennard-Jones pair of the alchemical system.
+"""
+@kwdef struct LennardJones14Scaled{S, E, W, LM, SCH}
+    σ14_mixed::S
+    ϵ14_mixed::E
+    weight_14::W
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+end
+
+function Base.zero(lj::LennardJones14Scaled)
+    return LennardJones14Scaled(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed), zero(lj.weight_14),
+                                lj.λ_mixing, lj.scheduler)
+end
+
+function Base.:+(l1::LennardJones14Scaled, l2::LennardJones14Scaled)
+    return LennardJones14Scaled(
+        l1.σ14_mixed .+ l2.σ14_mixed,
+        l1.ϵ14_mixed .+ l2.ϵ14_mixed,
+        l1.weight_14 + l2.weight_14,
+        l1.λ_mixing,
+        l1.scheduler,
+    )
+end
+
+function to_lambda_function(inter::LennardJones14, ::ScaledSoftCore; λ_mixing=MinimumMixing(),
+                            scheduler=DefaultLambdaScheduler(), args...)
+    return LennardJones14Scaled(σ14_mixed=inter.σ14_mixed, ϵ14_mixed=inter.ϵ14_mixed,
+                                weight_14=inter.weight_14, λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::LennardJones14, interB::Nothing, ::ScaledSoftCore;
+                                   λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return LennardJones14Scaled(σ14_mixed=(interA.σ14_mixed, interA.σ14_mixed),
+                                ϵ14_mixed=(interA.ϵ14_mixed, interA.ϵ14_mixed),
+                                weight_14=interA.weight_14, λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::Nothing, interB::LennardJones14, ::ScaledSoftCore;
+                                   λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return LennardJones14Scaled(σ14_mixed=(interB.σ14_mixed, interB.σ14_mixed),
+                                ϵ14_mixed=(zero(interB.ϵ14_mixed), interB.ϵ14_mixed),
+                                weight_14=interB.weight_14, λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function update_lambda_function(existing_lambda::LennardJones14Scaled, interB::LennardJones14)
+    return LennardJones14Scaled(σ14_mixed=(existing_lambda.σ14_mixed[1], interB.σ14_mixed),
+                                ϵ14_mixed=(existing_lambda.ϵ14_mixed[1], interB.ϵ14_mixed),
+                                weight_14=existing_lambda.weight_14,
+                                λ_mixing=existing_lambda.λ_mixing,
+                                scheduler=existing_lambda.scheduler)
+end
+
+@inline function force(inter::LennardJones14Scaled, coords_i, coords_l, boundary, atom_i,
+                       atom_l, force_units, args...)
+    dr = vector(coords_i, coords_l, boundary)
+    λ, λR, σ, ϵ = lj14_lambda_params(inter, atom_i, atom_l)
+    r = norm(dr)
+    if λ <= 0 || iszero_value(r)
+        return SpecificForce2Atoms(zero_pairwise_force(dr, force_units),
+                                   zero_pairwise_force(dr, force_units))
+    end
+
+    six_term = (σ^2 / r^2) ^ 3
+    fl = λ * inter.weight_14 * (24 * ϵ / r^2) * (2 * six_term ^ 2 - six_term) * dr
+    return SpecificForce2Atoms(-fl, fl)
+end
+
+@inline function potential_energy(inter::LennardJones14Scaled, coords_i, coords_l, boundary,
+                                  atom_i, atom_l, energy_units, args...)
+    dr = vector(coords_i, coords_l, boundary)
+    λ, λR, σ, ϵ = lj14_lambda_params(inter, atom_i, atom_l)
+    r = norm(dr)
+    if λ <= 0 || iszero_value(r)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    six_term = (σ^2 / r^2) ^ 3
+    return λ * inter.weight_14 * 4 * ϵ * (six_term ^ 2 - six_term)
+end
+
+@doc raw"""
+    LennardJones14SoftCoreBeutler(; σ14_mixed, ϵ14_mixed, weight_14, α, λ_mixing, scheduler)
+
+The 1-4 Lennard-Jones interaction of a pair of atoms with a Beutler soft core, the λ version of
+[`LennardJones14`](@ref) built by `to_lambda_function(inter, BeutlerSoftCore())`.
+
+Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
+[`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
+are those of [`LennardJonesSoftCoreBeutler`](@ref) with the σ and ϵ of the pair, weighted by
+`weight_14`, and the pair is coupled like any other Lennard-Jones pair of the alchemical system.
+"""
+@kwdef struct LennardJones14SoftCoreBeutler{S, E, W, A, LM, SCH}
+    σ14_mixed::S
+    ϵ14_mixed::E
+    weight_14::W
+    α::A = 0.5
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+end
+
+function Base.zero(lj::LennardJones14SoftCoreBeutler)
+    return LennardJones14SoftCoreBeutler(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed),
+                                         zero(lj.weight_14), zero(lj.α), lj.λ_mixing, lj.scheduler)
+end
+
+function Base.:+(l1::LennardJones14SoftCoreBeutler, l2::LennardJones14SoftCoreBeutler)
+    return LennardJones14SoftCoreBeutler(
+        l1.σ14_mixed .+ l2.σ14_mixed,
+        l1.ϵ14_mixed .+ l2.ϵ14_mixed,
+        l1.weight_14 + l2.weight_14,
+        l1.α + l2.α,
+        l1.λ_mixing,
+        l1.scheduler,
+    )
+end
+
+function to_lambda_function(inter::LennardJones14, ::BeutlerSoftCore; α=0.5, λ_mixing=MinimumMixing(),
+                            scheduler=DefaultLambdaScheduler(), float_type=Float32, args...)
+    return LennardJones14SoftCoreBeutler(σ14_mixed=inter.σ14_mixed, ϵ14_mixed=inter.ϵ14_mixed,
+                                         weight_14=inter.weight_14, α=float_type(α),
+                                         λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::LennardJones14, interB::Nothing, ::BeutlerSoftCore;
+                                   α=0.5, λ_mixing=MinimumMixing(),
+                                   scheduler=DefaultLambdaScheduler())
+    return LennardJones14SoftCoreBeutler(σ14_mixed=(interA.σ14_mixed, interA.σ14_mixed),
+                                         ϵ14_mixed=(interA.ϵ14_mixed, interA.ϵ14_mixed),
+                                         weight_14=interA.weight_14,
+                                         α=convert(typeof(ustrip(interA.σ14_mixed)), α),
+                                         λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::Nothing, interB::LennardJones14, ::BeutlerSoftCore;
+                                   α=0.5, λ_mixing=MinimumMixing(),
+                                   scheduler=DefaultLambdaScheduler())
+    return LennardJones14SoftCoreBeutler(σ14_mixed=(interB.σ14_mixed, interB.σ14_mixed),
+                                         ϵ14_mixed=(zero(interB.ϵ14_mixed), interB.ϵ14_mixed),
+                                         weight_14=interB.weight_14,
+                                         α=convert(typeof(ustrip(interB.σ14_mixed)), α),
+                                         λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function update_lambda_function(existing_lambda::LennardJones14SoftCoreBeutler,
+                                interB::LennardJones14)
+    return LennardJones14SoftCoreBeutler(σ14_mixed=(existing_lambda.σ14_mixed[1], interB.σ14_mixed),
+                                         ϵ14_mixed=(existing_lambda.ϵ14_mixed[1], interB.ϵ14_mixed),
+                                         weight_14=existing_lambda.weight_14, α=existing_lambda.α,
+                                         λ_mixing=existing_lambda.λ_mixing,
+                                         scheduler=existing_lambda.scheduler)
+end
+
+@inline function force(inter::LennardJones14SoftCoreBeutler, coords_i, coords_l, boundary, atom_i,
+                       atom_l, force_units, args...)
+    dr = vector(coords_i, coords_l, boundary)
+    λ, λR, σ, ϵ = lj14_lambda_params(inter, atom_i, atom_l)
+    r = norm(dr)
+    if λ <= 0 || iszero_value(r)
+        return SpecificForce2Atoms(zero_pairwise_force(dr, force_units),
+                                   zero_pairwise_force(dr, force_units))
+    end
+
+    if λ >= 1 && λR >= 1
+        six_term = (σ^2 / r^2) ^ 3
+        fl = inter.weight_14 * (24 * ϵ / r^2) * (2 * six_term ^ 2 - six_term) * dr
+    else
+        σ6 = σ^6
+        C6 = 4 * ϵ * σ6
+        C12 = C6 * σ6
+        σ6_shift = inter.α * (1 - λ * λR) * σ6
+        R = sqrt(cbrt(σ6_shift + r^6))
+        R6 = R^6
+        f = λ * (((12 * C12) / (R6 * R6 * R)) - ((6 * C6) / (R6 * R))) * ((r / R)^5)
+        fl = inter.weight_14 * (f / r) * dr
+    end
+    return SpecificForce2Atoms(-fl, fl)
+end
+
+@inline function potential_energy(inter::LennardJones14SoftCoreBeutler, coords_i, coords_l,
+                                  boundary, atom_i, atom_l, energy_units, args...)
+    dr = vector(coords_i, coords_l, boundary)
+    λ, λR, σ, ϵ = lj14_lambda_params(inter, atom_i, atom_l)
+    r = norm(dr)
+    if λ <= 0 || iszero_value(r)
+        return zero_pairwise_energy(dr, energy_units)
+    end
+
+    if λ >= 1 && λR >= 1
+        six_term = (σ^2 / r^2) ^ 3
+        return inter.weight_14 * 4 * ϵ * (six_term ^ 2 - six_term)
+    else
+        σ6 = σ^6
+        C6 = 4 * ϵ * σ6
+        C12 = C6 * σ6
+        R6 = inter.α * (1 - λ * λR) * σ6 + r^6
+        return inter.weight_14 * λ * ((C12 / (R6 * R6)) - (C6 / R6))
+    end
+end
+
+@doc raw"""
+    LennardJones14SoftCoreGapsys(; σ14_mixed, ϵ14_mixed, weight_14, α, λ_mixing, scheduler)
+
+The 1-4 Lennard-Jones interaction of a pair of atoms with a Gapsys soft core, the λ version of
+[`LennardJones14`](@ref) built by `to_lambda_function(inter, GapsysSoftCore())`.
+
+Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
+[`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
+are those of [`LennardJonesSoftCoreGapsys`](@ref) with the σ and ϵ of the pair, weighted by
+`weight_14`, and the pair is coupled like any other Lennard-Jones pair of the alchemical system.
+"""
 @kwdef struct LennardJones14SoftCoreGapsys{S, E, W, A, LM, SCH}
     σ14_mixed::S
     ϵ14_mixed::E
@@ -1181,21 +1551,15 @@ end
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-function Base.zero(lj::LennardJones14SoftCoreGapsys{S, E, W, A, LM, SCH}) where {S, E, W, A, LM, SCH}
-    return LennardJones14SoftCoreGapsys(
-        zero(S), 
-        zero(E), 
-        zero(W),
-        zero(A),
-        lj.λ_mixing,
-        lj.scheduler,
-        )
+function Base.zero(lj::LennardJones14SoftCoreGapsys)
+    return LennardJones14SoftCoreGapsys(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed),
+                                        zero(lj.weight_14), zero(lj.α), lj.λ_mixing, lj.scheduler)
 end
 
 function Base.:+(l1::LennardJones14SoftCoreGapsys, l2::LennardJones14SoftCoreGapsys)
     return LennardJones14SoftCoreGapsys(
-        l1.σ14_mixed + l2.σ14_mixed,
-        l1.ϵ14_mixed + l2.ϵ14_mixed,
+        l1.σ14_mixed .+ l2.σ14_mixed,
+        l1.ϵ14_mixed .+ l2.ϵ14_mixed,
         l1.weight_14 + l2.weight_14,
         l1.α + l2.α,
         l1.λ_mixing,
@@ -1203,103 +1567,103 @@ function Base.:+(l1::LennardJones14SoftCoreGapsys, l2::LennardJones14SoftCoreGap
     )
 end
 
-function to_lambda_function(inter::LennardJones14, ::GapsysSoftCore; α=0.85, λ_mixing=MinimumMixing(), 
+function to_lambda_function(inter::LennardJones14, ::GapsysSoftCore; α=0.85, λ_mixing=MinimumMixing(),
                             scheduler=DefaultLambdaScheduler(), float_type=Float32, args...)
-    return LennardJones14SoftCoreGapsys(σ14_mixed=inter.σ14_mixed, ϵ14_mixed=inter.ϵ14_mixed, 
-                                        weight_14=inter.weight_14, α=float_type(α), λ_mixing=λ.mixing, 
-                                        scheduler=scheduler)
+    return LennardJones14SoftCoreGapsys(σ14_mixed=inter.σ14_mixed, ϵ14_mixed=inter.ϵ14_mixed,
+                                        weight_14=inter.weight_14, α=float_type(α),
+                                        λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
-@inline function force(inter::LennardJones14SoftCoreGapsys, coords_i, coords_l, boundary, atoms_i, atoms_l, force_units, args...)
-    T = typeof(ustrip(atoms_i.σ))
+function to_lambda_function_single(interA::LennardJones14, interB::Nothing, ::GapsysSoftCore;
+                                   α=0.85, λ_mixing=MinimumMixing(),
+                                   scheduler=DefaultLambdaScheduler())
+    return LennardJones14SoftCoreGapsys(σ14_mixed=(interA.σ14_mixed, interA.σ14_mixed),
+                                        ϵ14_mixed=(interA.ϵ14_mixed, interA.ϵ14_mixed),
+                                        weight_14=interA.weight_14,
+                                        α=convert(typeof(ustrip(interA.σ14_mixed)), α),
+                                        λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::Nothing, interB::LennardJones14, ::GapsysSoftCore;
+                                   α=0.85, λ_mixing=MinimumMixing(),
+                                   scheduler=DefaultLambdaScheduler())
+    return LennardJones14SoftCoreGapsys(σ14_mixed=(interB.σ14_mixed, interB.σ14_mixed),
+                                        ϵ14_mixed=(zero(interB.ϵ14_mixed), interB.ϵ14_mixed),
+                                        weight_14=interB.weight_14,
+                                        α=convert(typeof(ustrip(interB.σ14_mixed)), α),
+                                        λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function update_lambda_function(existing_lambda::LennardJones14SoftCoreGapsys,
+                                interB::LennardJones14)
+    return LennardJones14SoftCoreGapsys(σ14_mixed=(existing_lambda.σ14_mixed[1], interB.σ14_mixed),
+                                        ϵ14_mixed=(existing_lambda.ϵ14_mixed[1], interB.ϵ14_mixed),
+                                        weight_14=existing_lambda.weight_14, α=existing_lambda.α,
+                                        λ_mixing=existing_lambda.λ_mixing,
+                                        scheduler=existing_lambda.scheduler)
+end
+
+@inline function force(inter::LennardJones14SoftCoreGapsys, coords_i, coords_l, boundary, atom_i,
+                       atom_l, force_units, args...)
     dr = vector(coords_i, coords_l, boundary)
-    λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
-    pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λR, λ_params = scale_sterics_dual(inter.scheduler, λ_glob, pair_role)
-
-    if λ <= 0
-        return SpecificForce2Atoms(zero(dr)*force_units, zero(dr)*force_units)
-    end
-
+    λ, λR, σ, ϵ = lj14_lambda_params(inter, atom_i, atom_l)
     r = norm(dr)
-    if iszero_value(r)
-        return SpecificForce2Atoms(zero_pairwise_force(dr, force_units), zero_pairwise_force(dr, force_units))
+    if λ <= 0 || iszero_value(r)
+        return SpecificForce2Atoms(zero_pairwise_force(dr, force_units),
+                                   zero_pairwise_force(dr, force_units))
     end
 
     if λ >= 1 && λR >= 1
-        σ2 = (λ_params * inter.σ14_mixed) ^ 2
-        dr = vector(coords_i, coords_l, boundary)
-        r2 = sum(abs2, dr)
-        six_term = (σ2 / r2) ^ 3
-        fl = inter.weight_14 * (24 * λ_params * inter.ϵ14_mixed / r2) * (2 * six_term ^ 2 - six_term) * dr
-        fi = -fl
-        return SpecificForce2Atoms(fi, fl)
+        six_term = (σ^2 / r^2) ^ 3
+        fl = inter.weight_14 * (24 * ϵ / r^2) * (2 * six_term ^ 2 - six_term) * dr
     else
-        σ6 = (λ_params*inter.σ14_mixed)^6
-        r6 = r^6
-        C6 = 4 * λ_params * inter.ϵ14_mixed * σ6
+        σ6 = σ^6
+        C6 = 4 * ϵ * σ6
         C12 = C6 * σ6
-        val = (26 * σ6 * (1 - (λ*λR))) / 7
-        R = inter.α * sqrt(cbrt(val))
-
+        R = inter.α * sqrt(cbrt((26 * σ6 * (1 - λ * λR)) / 7))
         if r >= R
-            σ2 = (λ_params*inter.σ14_mixed) ^ 2
-            dr = vector(coords_i, coords_l, boundary)
-            r2 = sum(abs2, dr)
-            six_term = (σ2 / r2) ^ 3
-            fl = λ * λR * inter.weight_14 * (24 * λ_params * inter.ϵ14_mixed / r2) * (2 * six_term ^ 2 - six_term) * dr
-            fi = -fl
-            return SpecificForce2Atoms(fi, fl)
+            r6 = r^6
+            f = λ * (((12 * C12) / (r6 * r6 * r)) - ((6 * C6) / (r6 * r)))
         else
             invR = inv(R)
             invR2 = invR^2
             invR6 = invR^6
-            fl = λ * λR * inter.weight_14 * (((-156*C12*(invR6*invR6*invR2)) + (42*C6*(invR2*invR6)))*r +
-                        (168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR))) / r * dr
-            fi = -fl
-            return SpecificForce2Atoms(fi, fl)
+            f = λ * (((-156*C12*(invR6*invR6*invR2)) + (42*C6*(invR2*invR6)))*r +
+                     (168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))
         end
+        fl = inter.weight_14 * (f / r) * dr
     end
+    return SpecificForce2Atoms(-fl, fl)
 end
 
-@inline function potential_energy(inter::LennardJones14SoftCoreGapsys, coords_i, coords_l, boundary, atoms_i, atoms_l, energy_units, args...)
-    T = typeof(ustrip(atoms_i.σ))
+@inline function potential_energy(inter::LennardJones14SoftCoreGapsys, coords_i, coords_l,
+                                  boundary, atom_i, atom_l, energy_units, args...)
     dr = vector(coords_i, coords_l, boundary)
-    λ_glob = T(λ_mixing(inter.λ_mixing, (atom_i.λ, atom_j.λ)))
-    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λR, λ_params = scale_sterics_dual(inter.scheduler, λ_glob, pair_role)
-
-    if λ <= 0
-        return ustrip(zero(dr[1])) * energy_units
-    end
-
+    λ, λR, σ, ϵ = lj14_lambda_params(inter, atom_i, atom_l)
     r = norm(dr)
-    if iszero_value(r)
-        return ustrip(zero(dr[1])) * energy_units
+    if λ <= 0 || iszero_value(r)
+        return zero_pairwise_energy(dr, energy_units)
     end
 
     if λ >= 1 && λR >= 1
-        σ2 = (λ_params*inter.σ14_mixed) ^ 2
-        r2 = r^2
-        six_term = (σ2 / r2) ^ 3
-        return inter.weight_14 * 4 * λ_params * inter.ϵ14_mixed * (six_term ^ 2 - six_term)
+        six_term = (σ^2 / r^2) ^ 3
+        return inter.weight_14 * 4 * ϵ * (six_term ^ 2 - six_term)
     else
-        σ6 = (λ_params*inter.σ14_mixed)^6
-        C6 = 4 * λ_params * inter.ϵ14_mixed * σ6
+        σ6 = σ^6
+        C6 = 4 * ϵ * σ6
         C12 = C6 * σ6
-        val = (26 * σ6 * (1 - (λ*λR))) / 7
-        R = inter.α * sqrt(cbrt(val))
-
-        r6 = r^6
+        R = inter.α * sqrt(cbrt((26 * σ6 * (1 - λ * λR)) / 7))
         if r >= R
-            return λ * λR * inter.weight_14 * ((C12/(r6*r6)) - (C6/(r6)))
+            r6 = r^6
+            return inter.weight_14 * λ * ((C12 / (r6 * r6)) - (C6 / r6))
         else
             invR = inv(R)
             invR2 = invR^2
             invR6 = invR^6
-            return λ * λR * inter.weight_14 * (((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
-                    ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
-                    (91*C12*(invR6*invR6)) - (28*C6*(invR6)))
+            return inter.weight_14 * λ * (
+                ((78*C12*(invR6*invR6*invR2)) - (21*C6*(invR2*invR6)))*(r^2) -
+                ((168*C12*(invR6*invR6*invR)) - (48*C6*(invR6*invR)))*r +
+                (91*C12*(invR6*invR6)) - (28*C6*(invR6)))
         end
     end
 end

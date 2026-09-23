@@ -55,10 +55,6 @@ parameter_fields(::Type{<:Coulomb}) =
     ((:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
 
 
-function to_lambda_function(inter::Coulomb, ::DefaultSoftCore; args...)
-    return Coulomb(cutoff=inter.cutoff,use_neighbors=inter.use_neighbors, 
-                    weight_special=inter.weight_special, coulomb_const=inter.coulomb_const)
-end
 
 @inline function force(inter::Coulomb{C},
                        dr,
@@ -432,7 +428,7 @@ parameter_fields(::Type{<:CoulombSoftCoreBeutler}) =
     end
 
     # 3. Alchemical Path
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, λ_params, pair_role)^6
     σ6_fac = inter.α * (1 - (λ*λR)) * σ6
 
     params = (ke, qij, σ6_fac, λ)
@@ -488,7 +484,7 @@ end
     end
 
     # 3. Alchemical Path
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, λ_params, pair_role)^6
     σ6_fac = inter.α * (1 - (λ*λR)) * σ6
 
     if iszero_value(r)
@@ -791,13 +787,6 @@ parameter_prefix(::CoulombReactionField) = "inter_CO_"
 parameter_fields(::Type{<:CoulombReactionField}) =
     ((:dist_cutoff, "dist_cutoff"), (:solvent_dielectric, "solvent_dielectric"),
      (:weight_special, "weight_14"), (:coulomb_const, "coulomb_const"))
-function to_lambda_function(inter::CoulombReactionField, ::DefaultSoftCore; args...)
-    return CoulombReactionField(dist_cutoff=inter.dist_cutoff, 
-                                    solvent_dielectric=inter.solvent_dielectric,
-                                    use_neighbors=inter.use_neighbors, 
-                                    weight_special=inter.weight_special, 
-                                    coulomb_const=inter.coulomb_const)
-end
 
 
 @inline function force(inter::CoulombReactionField,
@@ -1172,7 +1161,7 @@ end
         end
     end
 
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, λ_params, pair_role)^6
     term = inter.α * (1 - (λ*λR)) * σ6 + r2^3
     f = λ * (ke * qij) * (r2^2 / (term * sqrt(cbrt(term))) - 2 * krf)
 
@@ -1228,7 +1217,7 @@ end
         end
     end
 
-    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+    σ6 = σ_mixing(inter.σ_mixing, atom_i, atom_j, λ_params, pair_role)^6
     σ6_fac = inter.α * (1 - (λ*λR)) * σ6
 
     if iszero_value(r)
@@ -1551,15 +1540,6 @@ parameter_prefix(::CoulombEwald) = "inter_CO_"
 parameter_fields(::Type{<:CoulombEwald}) =
     ((:dist_cutoff, "dist_cutoff"), (:weight_special, "weight_14"),
      (:coulomb_const, "coulomb_const"))
-function to_lambda_function(inter::CoulombEwald, ::DefaultSoftCore; args...)
-    return CoulombEwald(dist_cutoff=inter.dist_cutoff, 
-                                    error_tol=inter.error_tol,
-                                    use_neighbors=inter.use_neighbors, 
-                                    weight_special=inter.weight_special, 
-                                    coulomb_const=inter.coulomb_const,
-                                    approximate_erfc=inter.approximate_erfc,
-                                    )
-end
 
 function calc_erfc(αr::T, exp_mαr2, approximate_erfc) where T
     if approximate_erfc
@@ -1771,17 +1751,14 @@ end
 @inline function softcore_pair_elec_lambda(inter, atom_i, atom_j, special)
     T = typeof(ustrip(inter.coulomb_const))
     pair_role, λ, λR, λ_params = lambda_pair(inter, atom_i, atom_j)
-    if inter.scheduler.dual
+    if !(atom_i.charge isa Tuple)
         qij = atom_i.charge * atom_j.charge
     elseif !(inter.scheduler.Cindividual) || (!(inter.scheduler.Cspecial) && special)
         qij = atom_i.charge .* atom_j.charge
         qij = params_mixing(λ_params, qij)
     else
-        λ, λi = scale_elec(inter.scheduler, T(atom_i.λ), atom_i.alch_role, Val(false))
-        λ, λj = scale_elec(inter.scheduler, T(atom_j.λ), atom_j.alch_role, Val(false))
-        qi = params_mixing(λi, atom_i.charge)
-        qj = params_mixing(λj, atom_j.charge)
-        qij = qi*qj
+        qij = effective_charge(inter.scheduler, atom_i, Val(T)) *
+              effective_charge(inter.scheduler, atom_j, Val(T))
     end
     return pair_role, λ, λR, λ_params, qij
 end
@@ -1930,7 +1907,7 @@ end
         pe_soft = inter.coulomb_const * (qq / r)
         f_soft = inter.coulomb_const * (qq / r^2)
     else
-        term = inter.α * (1 - (λ*λR)) * σ_mixing(inter.σ_mixing, atom_i, atom_j)^6 + r^6
+        term = inter.α * (1 - (λ*λR)) * σ_mixing(inter.σ_mixing, atom_i, atom_j, λ_params, pair_role)^6 + r^6
         pe_soft = inter.coulomb_const * (qq / sqrt(cbrt(term)))
         f_soft = inter.coulomb_const * (qq / (term * sqrt(cbrt(term)))) * r^5
     end
@@ -1968,7 +1945,7 @@ end
         if λ >= 1 && λR >= 1
             pe_soft = zero_pairwise_energy(dr, energy_units)
         else
-            σ6_fac = inter.α * (1 - (λ*λR)) * σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+            σ6_fac = inter.α * (1 - (λ*λR)) * σ_mixing(inter.σ_mixing, atom_i, atom_j, λ_params, pair_role)^6
             pe_soft = overlap_pe_coulomb_softcore_beutler(
                 dr,
                 energy_units,
@@ -1981,7 +1958,7 @@ end
     elseif λ >= 1 && λR >= 1
         pe_soft = inter.coulomb_const * (qq / r)
     else
-        σ6_fac = inter.α * (1 - (λ*λR)) * σ_mixing(inter.σ_mixing, atom_i, atom_j)^6
+        σ6_fac = inter.α * (1 - (λ*λR)) * σ_mixing(inter.σ_mixing, atom_i, atom_j, λ_params, pair_role)^6
         pe_soft = inter.coulomb_const * (qq / sqrt(cbrt(σ6_fac + r^6)))
     end
 
