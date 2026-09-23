@@ -1,4 +1,7 @@
 <ForceField>
+  <Info>
+    <Source Source="openff-2.2.1" sourcePackage="openff-forcefields">Generated with the OpenFF force field openff-2.2.1</Source>
+  </Info>
   <AtomTypes>
     <Type name="BZNC1" element="C" mass="12.01078" class="BZNC1"/>
     <Type name="BZNC2" element="C" mass="12.01078" class="BZNC2"/>
