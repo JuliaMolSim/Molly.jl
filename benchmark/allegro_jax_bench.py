@@ -93,15 +93,22 @@ def edge_index(pos):
     return i, j
 
 
-def timeit(f, reps=5, samples=8):
+def timeit(f, max_reps=40, min_reps=3, budget=4.0):
+    """Best single-call time in ms. Adaptive: keep timing individual calls until either `max_reps`
+    are done or (`min_reps` are done and the total exceeds `budget` seconds). Cheap ops (a few ms
+    here, well above timer noise) get many samples; the dense O(N²) large-N cases, where one call
+    already dominates, stop after `min_reps`. Always the minimum, so a truncated run is a valid,
+    slightly conservative timing measured identically across every size and device."""
     f().block_until_ready()
     best = np.inf
-    for _ in range(reps):
+    t_start = time.perf_counter()
+    for r in range(max_reps):
         t0 = time.perf_counter()
-        for _ in range(samples):
-            out = f()
+        out = f()
         out.block_until_ready()
-        best = min(best, (time.perf_counter() - t0) / samples)
+        best = min(best, time.perf_counter() - t0)
+        if r + 1 >= min_reps and time.perf_counter() - t_start > budget:
+            break
     return best * 1e3  # ms
 
 
