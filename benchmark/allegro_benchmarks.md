@@ -212,6 +212,22 @@ Reading it:
   CPU forces are XLA-fused and fully thread-insensitive, so its t1 and t8 forces lines coincide (the
   dense O(N²) run is timed adaptively so it still reaches 4096 atoms).
 
+### GPU speedup over host CPU-t8
+
+Each GPU backend divided by its **own host's** CPU-t8 (Metal baseline = Apple M3, CUDA baseline =
+RTX 5080 — a within-machine ratio; read the scaling shape, not the cross-machine level):
+
+![Allegro energy: GPU speedup over host CPU-t8](images/allegro_energy_gpu_speedup.png)
+
+![Allegro forces: GPU speedup over host CPU-t8](images/allegro_forces_gpu_speedup.png)
+
+On **forces**, Molly CUDA and nequip CUDA both reach ~300× over their CPU-t8 at 4096 atoms, Molly
+Metal ~25×, allegro-jax CUDA ~45×. On **energy**, note that `nequip`'s ratio is the *highest* not
+because its GPU is fastest but because its CPU is pathologically slow (threaded PyTorch is 100–200 ms
+even at small N), so a large GPU/CPU ratio there is a slow-baseline artefact — Molly's smaller energy
+ratio sits on a much faster CPU. The absolute head-to-head above is the fairer read; the speedup
+curves show each implementation's own GPU-vs-CPU scaling.
+
 ---
 
 ## Reading the numbers
@@ -233,18 +249,28 @@ Reading it:
 
 ## 6mrr trajectory (native MD at biomolecular scale)
 
-To check the potential drives molecular dynamics end-to-end at a real system size, a native-Molly
-Allegro **NVE** trajectory runs on the full **6mrr** system — **15,954 atoms** (H/C/N/O,
-water-dominated, periodic 56.8 × 56.6 × 63.0 Å) — with `compute_allegro_forces_ka` evaluating energy
-and forces on the GPU every step (`benchmark/allegro_trajectory.jl`). 200 steps, dt = 0.1 fs, Float64
-on CUDA / Float32 on Metal:
+To check the potential drives molecular dynamics end-to-end at a real system size, an Allegro MD step
+is timed on the full **6mrr** system — **15,954 atoms** (H/C/N/O, water-dominated, periodic
+56.8 × 56.6 × 63.0 Å, 348,474 edges within `r_c`) — for every backend: Molly (native
+`compute_allegro_forces_ka`), `nequip-allegro` and `allegro-jax`, on CUDA / Metal / CPU-t1 / CPU-t8.
+The per-step energy+forces wall time is the MD throughput (ns/day at dt = 0.1 fs). All use a
+comparable-size model (`l_max = 2`, 2 layers).
 
-| backend | atoms | step time (ms) | throughput (ns/day) |
+| device | Molly | nequip-allegro | allegro-jax |
 | :---: | :---: | :---: | :---: |
-| CUDA (RTX 5080) | 15,954 | 148 | 0.059 |
-| Metal (M3)      | 15,954 | 285 | 0.030 |
+| CUDA (RTX 5080) | **138 ms** (0.063 ns/day) | 165 ms (0.052) | 5.5 s |
+| Metal (M3) | 285 ms (0.030) | — (float64-only) | — (jax-metal) |
+| CPU t8 | 25.0 s | 11.1 s | impractical (dense) |
+| CPU t1 | 45.4 s | 33.3 s | impractical (dense) |
 
-![Allegro 6mrr trajectory: step time and dt-independent drift](images/allegro_trajectory.png)
+![Allegro 6mrr trajectory: throughput by backend and dt-independent drift](images/allegro_trajectory.png)
+
+- **Molly's native GPU forces are the fastest MD step at this scale** — 138 ms vs nequip's 165 ms on
+  CUDA (both fit the comparable model; only Molly also runs on Metal). `allegro-jax` is dense, so its
+  GPU step is ~5.5 s and its CPU step is impractical. On CPU the ranking flips — nequip's autograd
+  backward (11 s t8) beats Molly's allocation-heavy analytic backward (25 s t8) — so **the GPU path is
+  where Molly wins**, which is the path that matters. (Threading helps Molly's CPU backward ~1.8×
+  here, 45 → 25 s; nequip threads ~3×.)
 
 - **The forces are the exact energy gradient — verified independently.** A finite-difference check
   under periodic boundaries matches `compute_allegro_forces_ka`'s forces to `‖F − (−dE/dx)‖ ≈ 1e-9`,
@@ -270,10 +296,11 @@ A physically-trained model was also produced end-to-end: a 4-species (H/C/N/O) A
 `nequip-train` on a 9,000-frame SPICE subset (Solvated Amino Acids + Dipeptides, water+peptide
 chemistry), then driven on 6mrr water through `nequip`'s ASE calculator. Two findings:
 
-- **The full 6mrr does not fit `nequip-allegro` on a 16 GB GPU** — its strided tensor-product
-  contraction allocates **21.5 GiB** for the 15,954-atom graph (all edges at once), so the trained
-  model runs only on a carved water sub-box. Molly's native forces, which stream edges, run the full
-  system in the same memory — the scaling advantage above, made concrete.
+- **The larger trained model does not fit `nequip-allegro` on a 16 GB GPU.** The comparable-size model
+  above fits (165 ms), but this trained model has more tensor features, and its strided tensor-product
+  contraction then allocates **21.5 GiB** for the 15,954-atom graph (all edges at once) → OOM, so it
+  runs only on a carved water sub-box. Molly's native forces, which stream edges, run the full system
+  in far less memory — the same architecture at a size nequip cannot hold.
 - **The small, briefly-trained model is not MD-stable yet.** On an equilibrated water sub-box its NVT
   dynamics heat up and run away within tens of steps (the potential energy falls as kinetic energy
   climbs — the model relaxes toward its own, still-inaccurate energy minimum faster than the

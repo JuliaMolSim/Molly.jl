@@ -188,44 +188,94 @@ overlay_plot("Allegro forces: t1/t8/CUDA + Metal, all backends over 64→4096 (M
     ("allegro-jax CPU t1",             :chocolate,  :dot,     series_key(getk(jx_cpu, "cpu_t1"), "forces_ms")),
 ])
 
-# --- 6mrr trajectory: throughput + energy-drift-vs-dt ------------------------------------------
-# Native-Molly Allegro NVE on the full 6mrr system (15,954 atoms) via compute_allegro_forces_ka.
-# Panel 1: per-step wall time (CUDA vs Metal). Panel 2: the NVE total-energy drift over a matched
-# 10 fs is the SAME at every dt (flat, not the dashed dt² line) — the forces are the exact energy
-# gradient (finite-diff ~1e-9), so the residual drift is the untrained model's spurious stiffness,
-# not integration error.
+# --- GPU speedup over host CPU-t8, all implementations (ANI-style) ------------------------------
+# Each line is a backend's GPU time divided by its OWN host's CPU-t8 time (so it is a within-machine
+# GPU-vs-CPU ratio; Metal baseline = Apple M3, CUDA baseline = RTX 5080 — compare scaling shape, not
+# cross-machine level). Molly Metal/CUDA + nequip CUDA + allegro-jax CUDA, for energy and forces.
+function gpu_speedup_plot(title, out, pairs)
+    fig = Figure(size = (860, 560))
+    ax  = Axis(fig[1, 1], xscale = log10, yscale = log10, xlabel = "number of atoms",
+               ylabel = "GPU speedup over host CPU-t8 (×)", title = title)
+    plotted = false
+    for (lbl, col, ls, (xc, yc), (xg, yg)) in pairs
+        (isempty(xc) || isempty(xg)) && continue
+        common = sort(collect(intersect(xc, xg))); isempty(common) && continue
+        cpu = Dict(xc .=> yc); gpu = Dict(xg .=> yg)
+        scatterlines!(ax, common, [cpu[x] / gpu[x] for x in common], label = lbl,
+                      markersize = 10, linewidth = 2.4, color = col, linestyle = ls)
+        plotted = true
+    end
+    plotted || return
+    hlines!(ax, [1.0], color = :gray, linestyle = :dash)
+    axislegend(ax, position = :lt, labelsize = 11)
+    save(joinpath(IMG, out), fig, px_per_unit = 2)
+    println("wrote images/", out)
+end
+gpu_speedup_plot("Allegro energy: GPU speedup over host CPU (t8)", "allegro_energy_gpu_speedup.png", [
+    ("Molly CUDA / CPU-t8 (RTX 5080)", :seagreen,   :solid, series(getk(cuda,  "cpu_t8")), series(getk(cuda,  "cuda"))),
+    ("Molly Metal / CPU-t8 (M3)",      :purple,     :solid, series(getk(metal, "cpu_t8")), series(getk(metal, "metal"))),
+    ("nequip CUDA / CPU-t8",           :darkorange, :dash,  series_key(getk(nq_cpu, "cpu_t8"), "energy_ms"), series_key(getk(nq_cuda, "cuda"), "energy_ms")),
+    ("allegro-jax CUDA / CPU-t8",      :teal,       :dot,   series_key(getk(jx_cpu, "cpu_t8"), "energy_ms"), series_key(getk(jx_cuda, "cuda"), "energy_ms")),
+])
+gpu_speedup_plot("Allegro forces: GPU speedup over host CPU (t8)", "allegro_forces_gpu_speedup.png", [
+    ("Molly CUDA / CPU-t8 (RTX 5080)", :seagreen,   :solid, series(getk(molly_fc, "cpu_t8")), series(getk(molly_fc, "cuda"))),
+    ("Molly Metal / CPU-t8 (M3)",      :purple,     :solid, series(getk(molly_fm, "cpu_t8")), series(getk(molly_fm, "metal"))),
+    ("nequip CUDA / CPU-t8",           :darkorange, :dash,  series_key(getk(nq_cpu, "cpu_t8"), "forces_ms"), series_key(getk(nq_cuda, "cuda"), "forces_ms")),
+    ("allegro-jax CUDA / CPU-t8",      :teal,       :dot,   series_key(getk(jx_cpu, "cpu_t8"), "forces_ms"), series_key(getk(jx_cuda, "cuda"), "forces_ms")),
+])
+
+# --- 6mrr trajectory: throughput head-to-head + energy-drift-vs-dt -----------------------------
+# All backends on the full 6mrr system (15,954 atoms), one energy+forces step each → MD throughput.
+# Panel 1: per-step wall time for Molly / nequip / allegro-jax × {CUDA, CPU-t1/t8} + Molly Metal
+# (log x). Panel 2: the native-Molly NVE total-energy drift over a matched 10 fs is the SAME at every
+# dt (flat, not the dashed dt² line) — the forces are the exact energy gradient (finite-diff ~1e-9),
+# so the residual drift is the untrained model's spurious stiffness, not integration error.
 traj   = load_json(joinpath(RES, "allegro_trajectory.json"))
 tsweep = load_json(joinpath(RES, "allegro_trajectory_sweep.json"))
+tput   = load_json(joinpath(RES, "allegro_traj_throughput.json"))
 function trajectory_plot(out)
-    isnothing(traj) && return
-    fig = Figure(size = (960, 420))
-    ax1 = Axis(fig[1, 1], ylabel = "step time (ms)", title = "6mrr NVE step time (15,954 atoms)",
-               xticks = (1:2, ["CUDA\n(RTX 5080)", "Metal\n(M3)"]))
-    keys2 = [("cuda", :seagreen), ("metal", :purple)]
-    present = [(k, c) for (k, c) in keys2 if !isnothing(getk(traj, k))]
-    vals = [Float64(traj[k]["step_ms_med"]) for (k, _) in present]
-    barplot!(ax1, 1:length(vals), vals, color = [c for (_, c) in present])
-    for (i, (k, _)) in enumerate(present)
-        nsd = round(Float64(traj[k]["ns_per_day"]); digits = 3)
-        text!(ax1, i, vals[i]; text = "$(nsd) ns/day", align = (:center, :bottom), fontsize = 12)
+    isnothing(tput) && isnothing(traj) && return
+    fig = Figure(size = (1080, 460))
+    # Panel 1: throughput head-to-head (horizontal bars, log x)
+    ax1 = Axis(fig[1, 1], xscale = log10, xlabel = "energy+forces step time (ms, log scale)",
+               title = "6mrr step time by backend (15,954 atoms)")
+    order = ["molly_cuda", "nequip_cuda", "molly_metal", "jax_cuda",
+             "nequip_cpu_t8", "molly_cpu_t8", "nequip_cpu_t1", "molly_cpu_t1",
+             "jax_cpu_t8", "jax_cpu_t1"]
+    disp = Dict("molly_cuda"=>"Molly CUDA", "nequip_cuda"=>"nequip CUDA", "molly_metal"=>"Molly Metal",
+                "jax_cuda"=>"allegro-jax CUDA", "nequip_cpu_t8"=>"nequip CPU t8",
+                "molly_cpu_t8"=>"Molly CPU t8", "nequip_cpu_t1"=>"nequip CPU t1", "molly_cpu_t1"=>"Molly CPU t1",
+                "jax_cpu_t8"=>"allegro-jax CPU t8", "jax_cpu_t1"=>"allegro-jax CPU t1")
+    implcol(k) = startswith(k, "molly") ? :seagreen : (startswith(k, "nequip") ? :darkorange : :teal)
+    present = [k for k in order if !isnothing(getk(tput, k)) && !isnothing(get(tput[k], "ms_step", nothing))]
+    ms = [Float64(tput[k]["ms_step"]) for k in present]
+    ypos = length(present):-1:1                          # fastest at top
+    barplot!(ax1, ypos, ms; direction = :x, color = [implcol(k) for k in present])
+    ax1.yticks = (ypos, [disp[k] for k in present])
+    for (y, k, v) in zip(ypos, present, ms)
+        nsd = Float64(tput[k]["ns_day"])
+        lbl = nsd >= 0.01 ? "$(round(nsd; digits=3)) ns/day" : "$(round(v/1000; digits=1)) s/step"
+        text!(ax1, v, y; text = " " * lbl, align = (:left, :center), fontsize = 10)
     end
-    ylims!(ax1, 0, maximum(vals) * 1.2)
+    xlims!(ax1, 80, maximum(ms) * 12)
+    # legend for implementation colours (top-right is empty — the fast backends have short bars)
+    elems = [PolyElement(color = c) for c in (:seagreen, :darkorange, :teal)]
+    axislegend(ax1, elems, ["Molly", "nequip-allegro", "allegro-jax"], position = :rt, labelsize = 10)
+    # Panel 2: drift vs dt
     ax2 = Axis(fig[1, 2], xscale = log10, yscale = log10, xlabel = "timestep dt (fs)",
-               ylabel = "NVE drift (meV/atom over 10 fs)",
-               title = "Drift is dt-independent (Metal)")
+               ylabel = "NVE drift (meV/atom over 10 fs)", title = "Native drift is dt-independent")
     if !isnothing(tsweep)
         pts = sort([(Float64(v["dt_fs"]), Float64(v["max_drift_meV_atom"]))
                     for (k, v) in tsweep if startswith(String(k), "metal_dt")])
         dts = first.(pts); dr = last.(pts)
         if !isempty(dts)
-            ref = dr[1] .* (dts ./ dts[1]) .^ 2
-            lines!(ax2, dts, ref, color = :gray, linestyle = :dash, label = "dt² reference")
-            scatterlines!(ax2, dts, dr, color = :purple, markersize = 13, linewidth = 3,
-                          label = "measured")
+            lines!(ax2, dts, dr[1] .* (dts ./ dts[1]) .^ 2, color = :gray, linestyle = :dash, label = "dt² reference")
+            scatterlines!(ax2, dts, dr, color = :purple, markersize = 13, linewidth = 3, label = "measured")
             axislegend(ax2, position = :lt, labelsize = 11)
             ylims!(ax2, minimum(dr) * 0.3, maximum(dr) * 3)
         end
     end
+    colsize!(fig.layout, 1, Relative(0.62))
     save(joinpath(IMG, out), fig, px_per_unit = 2)
     println("wrote images/", out)
 end
