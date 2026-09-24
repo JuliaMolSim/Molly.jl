@@ -234,7 +234,8 @@ function alchemical_settings(sys, temp)
     FT = float_type(sys)
     units = (sys.energy_units != NoUnits)
     temp = (units ? FT(ustrip(u"K", temp))u"K" : FT(ustrip(temp)))
-    return FT, units, temp, array_type(sys)
+    grad_safe = sys.grad_safe
+    return FT, units, temp, array_type(sys), grad_safe
 end
 
 function random_velocity_or_zero(mass, temp)
@@ -250,7 +251,8 @@ function alchemical_system(sys_ref, atoms, coords, data, boundary, temp; kwargs.
     velocities = [random_velocity_or_zero(a.mass, temp) for a in atoms]
     return System(; atoms=to_device(atoms, AT), coords=to_device(coords, AT), atoms_data=data,
                   boundary=boundary, velocities=to_device(velocities, AT),
-                  force_units=sys_ref.force_units, energy_units=sys_ref.energy_units, kwargs...)
+                  force_units=sys_ref.force_units, energy_units=sys_ref.energy_units, 
+                  grad_safe=sys_ref.grad_safe, kwargs...)
 end
 
 """
@@ -290,7 +292,7 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
                         LJsoftcore=:gapsys,
                         Csoftcore=:gapsys
                         )
-    FT, units, temp, AT = alchemical_settings(sys, temp)
+    FT, units, temp, AT, grad_safe = alchemical_settings(sys, temp)
     check_softcores(LJsoftcore, Csoftcore)
     lj_sc = softcore_dic[LJsoftcore]
     sys_atoms  = from_device(sys.atoms)
@@ -404,7 +406,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                         LJsoftcore=:gapsys,
                         Csoftcore=:gapsys
                         )
-    FT, units, temp, AT = alchemical_settings(sysA, temp)
+    FT, units, temp, AT, grad_safe = alchemical_settings(sysA, temp)
     check_softcores(LJsoftcore, Csoftcore)
     lj_sc = softcore_dic[LJsoftcore]
     # To-do: Currently not implemented a 1-4 intramolecular LJ interaction for single topology that
@@ -775,19 +777,35 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         eligible[j, i] = false
     end
 
+    neighbor_finder_type = sysA.neighbor_finder
     dist_cutoff_nf = sysA.neighbor_finder.dist_cutoff
-    if uses_gpu_neighbor_finder(AT)
+
+    if neighbor_finder_type == NoNeighborFinder
+        nf = NoNeighborFinder()
+    elseif neighbor_finder_type == GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
         excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
+        n_steps_reorder = sysA.neighbor_finder.n_steps_reorder
         nf = GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=dist_cutoff_nf,
                                excluded_pairs=excluded_pairs, special_pairs=special_pairs,
-                               n_steps_reorder=10, device_vector_type=AT{Int32, 1})
-    elseif AT <: AbstractGPUArray
+                               n_steps_reorder=n_steps_reorder, device_vector_type=AT{Int32, 1})
+    elseif neighbor_finder_type == DistanceNeighborFinder &&
+                (AT <: AbstractGPUArray || has_infinite_boundary(Boundary))
+        n_steps = sysA.neighbor_finder.n_steps
         nf = DistanceNeighborFinder(eligible=to_device(eligible, AT), special=to_device(special, AT),
-                                    n_steps=10, dist_cutoff=dist_cutoff_nf)
-    else
+                                    n_steps=n_steps, dist_cutoff=dist_cutoff_nf)
+    elseif neighbor_finder_type == CellListMapNeighborFinder && !(AT <: AbstractGPUArray)
+        n_steps = sysA.neighbor_finder.n_steps
         nf = CellListMapNeighborFinder(eligible=eligible, special=special,
-                                        n_steps=10, boundary=Boundary, x0=Coords,
+                                        n_steps=n_steps, boundary=Boundary, x0=Coords,
                                         dist_cutoff=dist_cutoff_nf)
+    else
+        n_steps = sysA.neighbor_finder.n_steps
+        nf = neighbor_finder_type(
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
+            n_steps=n_steps,
+            dist_cutoff=dist_cutoff_nf,
+        )
     end
 
     pairwise_inters = lambda_pairwise_inters(sysA, scheduler, LJsoftcore, Csoftcore, FT)
