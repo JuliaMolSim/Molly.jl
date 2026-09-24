@@ -254,6 +254,15 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
                 n_steps = 1
             )
         end
+    elseif ref_nfinder isa GPUCellListNeighborFinder
+        return GPUCellListNeighborFinder(
+            eligible = eligible,
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special = special,
+            n_steps = 1,
+            max_neighbors = ref_nfinder.max_neighbors,
+            output = ref_nfinder.output,
+        )
     elseif ref_nfinder isa TreeNeighborFinder
         return TreeNeighborFinder(
             eligible = eligible,

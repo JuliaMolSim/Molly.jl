@@ -392,6 +392,13 @@ end
                 dist_cutoff=T(1.0)u"nm",
                 device_vector_type=AT{Int32, 1},
             )
+        elseif nft == GPUCellListNeighborFinder
+            neighbor_finder = GPUCellListNeighborFinder(
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                special=to_device(falses(n_atoms, n_atoms), AT),
+                n_steps=10,
+                dist_cutoff=T(1.5)u"nm",
+            )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(
                 eligible=to_device(trues(n_atoms, n_atoms), AT),
@@ -440,10 +447,12 @@ end
         ("CPU parallel f32 NL", [DistanceNeighborFinder, true , true , Array]),
     ]
     for AT in array_list[2:end]
-        push!(runs, ("$AT"       , [NoNeighborFinder      , false, false, AT]))
-        push!(runs, ("$AT f32"   , [NoNeighborFinder      , false, true , AT]))
-        push!(runs, ("$AT NL"    , [DistanceNeighborFinder, false, false, AT]))
-        push!(runs, ("$AT f32 NL", [DistanceNeighborFinder, false, true , AT]))
+        push!(runs, ("$AT"            , [NoNeighborFinder         , false, false, AT]))
+        push!(runs, ("$AT f32"        , [NoNeighborFinder         , false, true , AT]))
+        push!(runs, ("$AT NL"         , [DistanceNeighborFinder   , false, false, AT]))
+        push!(runs, ("$AT f32 NL"     , [DistanceNeighborFinder   , false, true , AT]))
+        push!(runs, ("$AT cell NL"    , [GPUCellListNeighborFinder, false, false, AT]))
+        push!(runs, ("$AT f32 cell NL", [GPUCellListNeighborFinder, false, true , AT]))
     end
     if run_cuda_tests
         AT = CuArray
@@ -452,8 +461,9 @@ end
     end
     if run_metal_tests
         AT = MtlArray
-        push!(runs, ("$AT f32"   , [NoNeighborFinder      , false, true , AT]))
-        push!(runs, ("$AT f32 NL", [DistanceNeighborFinder, false, true , AT]))
+        push!(runs, ("$AT f32"        , [NoNeighborFinder         , false, true , AT]))
+        push!(runs, ("$AT f32 NL"     , [DistanceNeighborFinder   , false, true , AT]))
+        push!(runs, ("$AT f32 cell NL", [GPUCellListNeighborFinder, false, true , AT]))
     end
 
     # Check all simulations give the same result to within some error

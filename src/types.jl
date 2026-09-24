@@ -14,6 +14,7 @@ export
     AtomData,
     MolecularTopology,
     NeighborList,
+    GPUCellListNeighborList,
     System,
     ThermoState,
     ReplicaSystem,
@@ -626,6 +627,85 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
 end
 
 """
+    GPUCellListNeighborList(ragged_counts, ragged_neighbors, n, list, state)
+
+The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
+containing a padded per-atom neighbor matrix and, unless the finder uses
+`output=:ragged`, a flat half-pair list whose first `n` entries of `list` are valid.
+
+Use [`neighbor_pairs`](@ref) to get the pairs and [`ragged_neighbors`](@ref) to get
+the per-atom matrix rather than reading the fields, since the layout is not part of
+the interface. `state` holds the device buffers behind the other fields and is
+internal; they are reused if this list is passed back to [`find_neighbors`](@ref) as
+`current_neighbors`, see [`GPUCellListNeighborFinder`](@ref) for what that means for
+holding on to a list.
+"""
+struct GPUCellListNeighborList{C,R,L,S}
+    ragged_counts::C
+    ragged_neighbors::R
+    n::Int
+    list::L
+    state::S
+
+    function GPUCellListNeighborList(
+        ragged_counts::C,
+        ragged_neighbors::R,
+        n::Integer,
+        list::L,
+        state::S,
+    ) where {C,R,L,S}
+        size(ragged_neighbors, 2) == length(ragged_counts) || throw(
+            ArgumentError(
+                "the second dimension of ragged_neighbors must equal " *
+                "the number of atoms",
+            ),
+        )
+
+        n_int = Int(n)
+
+        if list === nothing
+            iszero(n_int) || throw(
+                ArgumentError("n must be zero when list is nothing"),
+            )
+        else
+            0 <= n_int <= length(list) || throw(
+                ArgumentError(
+                    "n must be between zero and the pair-list capacity",
+                ),
+            )
+        end
+
+        return new{C,R,L,S}(
+            ragged_counts,
+            ragged_neighbors,
+            n_int,
+            list,
+            state,
+        )
+    end
+end
+
+# Zero for ragged output, which has no pair list, so that generic code that asks how
+#   many pairs there are works on every output mode
+Base.length(neighbors::GPUCellListNeighborList) = neighbors.n
+
+function Base.getindex(neighbors::GPUCellListNeighborList, i::Integer)
+    if isnothing(neighbors.list)
+        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use " *
+                            "ragged_neighbors or output=:molly_pairs"))
+    end
+    return neighbors.list[i]
+end
+
+Base.firstindex(::GPUCellListNeighborList) = 1
+
+Base.lastindex(neighbors::GPUCellListNeighborList) =
+    length(neighbors)
+
+Base.eachindex(neighbors::GPUCellListNeighborList) =
+    Base.OneTo(length(neighbors))
+
+"""
     NeighborList(n, list)
     NeighborList()
 
@@ -838,6 +918,19 @@ end
 function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary,
                                on_gpu, strictness)
     neighbor_finder isa NoNeighborFinder && return nothing
+
+    if neighbor_finder isa GPUCellListNeighborFinder
+        if neighbor_finder.output === :ragged && any(use_neighbors, values(pairwise_inters))
+            throw(ArgumentError("the neighbor finder has output=:ragged, which does not " *
+                                "produce the pair list that the pairwise interactions " *
+                                "need, use output=:molly_pairs"))
+        end
+        if neighbor_finder.output === :molly_pairs && neighbor_finder.n_atoms != n_atoms
+            throw(ArgumentError("the neighbor finder was set up for " *
+                                "$(neighbor_finder.n_atoms) atoms but the system has " *
+                                "$n_atoms atoms"))
+        end
+    end
 
     for name in (:eligible, :special)
         hasproperty(neighbor_finder, name) || continue

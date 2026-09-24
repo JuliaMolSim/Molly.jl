@@ -160,6 +160,7 @@ To run simulations on the GPU you will need to have a GPU available and then loa
 Modern GPUs can run simulations of over 100,000 atoms, [as seen in the examples](@ref "Testing GPU memory limits").
 Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` in this case.
 Non-CUDA backends are less well-tested with Molly than CUDA.
+The tiled neighbor finder [`GPUNeighborFinder`](@ref) is CUDA-specific, so on other GPU backends the `O(N)` cell list [`GPUCellListNeighborFinder`](@ref) should be used instead.
 
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives much better performance on GPUs.
@@ -280,7 +281,7 @@ visualize(
 )
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
-The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref) for the classical neighbor finders and `nothing` for [`GPUNeighborFinder`](@ref), whose CUDA kernels manage their tile list internally.
+The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref) for the classical neighbor finders, a [`GPUCellListNeighborList`](@ref) for [`GPUCellListNeighborFinder`](@ref) and `nothing` for [`GPUNeighborFinder`](@ref), whose CUDA kernels manage their tile list internally.
 
 ## Simulating gravity
 
@@ -1795,10 +1796,11 @@ The available neighbor finders are:
 - [`NoNeighborFinder`](@ref)
 - [`CellListMapNeighborFinder`](@ref)
 - [`GPUNeighborFinder`](@ref)
+- [`GPUCellListNeighborFinder`](@ref)
 - [`DistanceNeighborFinder`](@ref)
 - [`TreeNeighborFinder`](@ref)
 
-The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`DistanceNeighborFinder`](@ref) on other GPUs.
+The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`GPUCellListNeighborFinder`](@ref) on other GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
 
 The `dist_cutoff` of a neighbor finder is the distance used to search for neighbors, and is not the same as the interaction cutoff distance (see [Cutoffs](@ref)).
 Since the neighbor list is only rebuilt every `n_steps` steps, `dist_cutoff` should be the interaction cutoff distance plus a buffer distance:
@@ -1818,6 +1820,11 @@ When setting up a [`System`](@ref) from a file the buffer is added automatically
 Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms, build per-tile masks and cache a compact list of interacting `32x32` tiles internally.
 Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
 When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps_reorder` to the number of steps between reorder and tile-list refresh passes.
+
+[`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref), which also gives the neighbors of each atom as a padded matrix via [`ragged_neighbors`](@ref).
+It runs on any GPU backend and is the best option on GPUs other than NVIDIA ones, where the tiled kernels of [`GPUNeighborFinder`](@ref) are not available.
+Three-dimensional [`CubicBoundary`](@ref) and [`TriclinicBoundary`](@ref) systems are supported, as long as opposite box faces are at least three times `dist_cutoff` apart so that the grid has at least three cells along every box axis.
+Like [`GPUNeighborFinder`](@ref) it converts the dense `eligible` and `special` masks into sparse exception lists at construction and does not retain them, since a dense mask is `n_atoms^2` bytes on the device.
 
 ## Analysis
 

@@ -494,9 +494,10 @@ templates is carried out.
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
     [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref)
-    on CUDA compatible GPUs and [`DistanceNeighborFinder`](@ref) on non-CUDA
-    compatible GPUs. [`NoNeighborFinder`](@ref) can be used but in this case bonded
-    atoms will not be excluded from the non-bonded interactions.
+    on CUDA compatible GPUs and [`GPUCellListNeighborFinder`](@ref) on non-CUDA
+    compatible GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the
+    box is too small for a cell list. [`NoNeighborFinder`](@ref) can be used but in
+    this case bonded atoms will not be excluded from the non-bonded interactions.
 - `neighbor_finder_n_steps=10`: the number of steps between neighbor finder
     updates. Can be tuned along with `dist_buffer` to ensure that particles
     do not cross the buffer distance during the update interval.
@@ -1617,6 +1618,17 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
             excluded_pairs=excluded_pairs,
             special_pairs=special_pairs,
             n_steps_reorder=neighbor_finder_n_steps,
+            device_vector_type=AT{Int32, 1},
+        )
+    elseif neighbor_finder_type in (nothing, GPUCellListNeighborFinder) &&
+                AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors)
+        excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
+        neighbor_finder = GPUCellListNeighborFinder(
+            n_atoms=size(eligible, 1),
+            excluded_pairs=excluded_pairs,
+            special_pairs=special_pairs,
+            n_steps=neighbor_finder_n_steps,
+            dist_cutoff=T(dist_neighbors),
             device_vector_type=AT{Int32, 1},
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&

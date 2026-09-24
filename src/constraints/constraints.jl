@@ -222,9 +222,20 @@ function constrained_pairs(constraint_clusters)
 end
 
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
-    if neighbor_finder isa GPUNeighborFinder
+    # These neighbor finders hold sparse exception lists rather than a dense matrix
+    if neighbor_finder isa GPUNeighborFinder || neighbor_finder isa GPUCellListNeighborFinder
+        if neighbor_finder isa GPUCellListNeighborFinder && isnothing(neighbor_finder.excluded_js)
+            throw(ArgumentError("constraints can not be set up with a neighbor finder " *
+                                "that ignores exclusions, since constrained pairs have " *
+                                "to be excluded from the non-bonded interactions"))
+        end
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
         return neighbor_finder
+    end
+    if !hasproperty(neighbor_finder, :eligible) || isnothing(neighbor_finder.eligible)
+        throw(ArgumentError("constraints can not be set up with a $(typeof(neighbor_finder)) " *
+                            "that has no eligible matrix, since constrained pairs have to " *
+                            "be excluded from the non-bonded interactions"))
     end
     atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))
     if isa(neighbor_finder.eligible, AbstractGPUArray)

@@ -544,7 +544,7 @@ sys = System(
 potential_energy(sys)
 forces(sys)
 ```
-For larger or periodic systems, attach a neighbour finder so the AEV uses the minimum-image convention and only the passed-in neighbours. When all pairs are eligible, set `eligible` to all true:
+For larger or periodic systems, attach a neighbor finder so the AEV uses the minimum-image convention and only the passed-in neighbors. When all pairs are eligible, set `eligible` to all true:
 ```julia
 n = length(coords)
 neighbor_finder = DistanceNeighborFinder(

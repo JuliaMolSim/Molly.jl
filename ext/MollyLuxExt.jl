@@ -1436,16 +1436,16 @@ backend of `coords`.
 
 `neighbors` selects the algorithm:
   * `nothing`     — O(N²)/O(N³) all-pairs kernel (only viable for tiny systems).
-  * a `NeighborList` — consume the neighbours from the system's finder (production path;
+  * a `NeighborList` — consume the neighbors from the system's finder (production path;
                     `DistanceNeighborFinder` on GPU, `CellListMapNeighborFinder` on CPU) →
-                    O(N·k)/O(N·k²) neighbour-list kernel. Preferred for ≥1000 atoms.
-  * `:auto`       — O(N²) host build from coords, then the neighbour-list kernel
+                    O(N·k)/O(N·k²) neighbor-list kernel. Preferred for ≥1000 atoms.
+  * `:auto`       — O(N²) host build from coords, then the neighbor-list kernel
                     (benchmarking fallback only — does not use a real finder).
-  * `(off, idx)`  — a precomputed CSR neighbour list (Int32 offsets + indices).
+  * `(off, idx)`  — a precomputed CSR neighbor list (Int32 offsets + indices).
 
 `workgroup` sets the KA workgroup size (tunable per backend).
 
-`write_reduce=true` (with a neighbour list) uses the one-workgroup-per-atom kernel that
+`write_reduce=true` (with a neighbor list) uses the one-workgroup-per-atom kernel that
 accumulates each atom's AEV row in shared threadgroup memory and writes it to global once,
 instead of a global read-modify-write per term. Results match to Float32 rounding (~1e-6).
 
