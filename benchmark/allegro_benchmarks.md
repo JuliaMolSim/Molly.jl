@@ -242,20 +242,24 @@ on CUDA / Float32 on Metal:
 | backend | atoms | step time (ms) | throughput (ns/day) |
 | :---: | :---: | :---: | :---: |
 | CUDA (RTX 5080) | 15,954 | 148 | 0.059 |
-| Metal (M3)      | 15,954 | 249 | 0.035 |
+| Metal (M3)      | 15,954 | 285 | 0.030 |
 
-- **It runs, and forces are consistent dynamically.** The NVE total-energy drift is **identical on
-  CUDA-Float64 and Metal-Float32** (146.6 meV/atom over the same 20 fs), so the drift is not a
-  precision artefact — it is the integration error of the potential, and it **converges as dt²**
-  (0.9 meV/atom over 0.5 fs at dt = 0.05 fs vs 17 meV/atom over 2.5 fs at dt = 0.25 fs, matched
-  10-step runs). That dt² convergence is the dynamical confirmation that the analytic forces are the
-  exact gradient of the energy. `ΣF ≈ 1e-4` at the start.
-- **The absolute drift is large because the model is untrained.** These are the small random
-  reference weights (2-species, so 6mrr's four elements are mapped H→1, {C,N,O}→2 — irrelevant to
-  throughput and to energy conservation), which gives a stiff potential that needs a small dt. A
-  **physically-trained H/C/N/O model** (no public checkpoint exists; training one on a SPICE subset is
-  the follow-up) is what makes a trajectory *stay* structured — the separate "does it look okay"
-  check.
+![Allegro 6mrr trajectory: step time and dt-independent drift](images/allegro_trajectory.png)
+
+- **The forces are the exact energy gradient — verified independently.** A finite-difference check
+  under periodic boundaries matches `compute_allegro_forces_ka`'s forces to `‖F − (−dE/dx)‖ ≈ 1e-9`,
+  and the KA-CPU forces match the CPU analytic backward to ~1e-15. So the forces are correct; the MD
+  step is sound (`ΣF ≈ 1e-4` at the start).
+- **NVE energy is not well conserved — because the reference model is untrained, not because of the
+  integrator.** The total-energy drift (≈ 96 meV/atom over 10 fs) is **the same at every timestep**
+  (dt = 0.05, 0.1, 0.2, 0.4 fs all give ≈ 96.5 meV/atom over a matched 10 fs) and **identical in
+  Float64 and Float32** — so it is neither integration-timestep error (which would scale as dt²) nor
+  roundoff. Its cause is the random reference weights: they make a potential with spurious,
+  unphysically stiff high-frequency modes that no practical timestep integrates conservatively. A
+  **physically-trained, smooth H/C/N/O model** is what gives conservative dynamics (and a trajectory
+  that *stays* structured) — the separate "does it look okay" check, which needs training (below). The
+  reference model is 2-species, so 6mrr's four elements are mapped H→1, {C,N,O}→2; this is irrelevant
+  to throughput and to the point that the forces are exact.
 - **Throughput is neighbour-build-bound.** At 15,954 atoms the per-step cost is dominated by the
   naive O(N²) all-pairs neighbour build (~2.5×10⁸ pairs/step), not the per-edge maths; the cell-list
   neighbour list noted above is the change that turns this into a practical MD throughput.

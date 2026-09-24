@@ -135,6 +135,18 @@ function main()
                      "E0_eV"=>Float64(E0), "maxF"=>maxF)
     open(path, "w") do io; JSON3.pretty(io, prev); end
     println("wrote ", path)
+
+    # Optional dt-sweep accumulator: one entry per (backend, dt) so a matched-time sweep builds the
+    # energy-drift-vs-dt curve (the dt² convergence check) in results/allegro_trajectory_sweep.json.
+    if get(ENV, "ALLEGRO_TRAJ_SWEEP", "0") == "1"
+        spath = joinpath(outdir, "allegro_trajectory_sweep.json")
+        sw = isfile(spath) ? JSON3.read(read(spath, String), Dict{String,Dict{String,Any}}) :
+                             Dict{String,Dict{String,Any}}()
+        sw["$(key)_dt$(dt)"] = Dict{String,Any}("dt_fs"=>dt, "steps"=>steps, "fs"=>steps*dt,
+                                                "max_drift_meV_atom"=>maxdrift, "step_ms_med"=>med)
+        open(spath, "w") do io; JSON3.pretty(io, sw); end
+        println("wrote ", spath)
+    end
 end
 
 main()

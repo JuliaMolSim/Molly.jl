@@ -188,4 +188,47 @@ overlay_plot("Allegro forces: t1/t8/CUDA + Metal, all backends over 64→4096 (M
     ("allegro-jax CPU t1",             :chocolate,  :dot,     series_key(getk(jx_cpu, "cpu_t1"), "forces_ms")),
 ])
 
+# --- 6mrr trajectory: throughput + energy-drift-vs-dt ------------------------------------------
+# Native-Molly Allegro NVE on the full 6mrr system (15,954 atoms) via compute_allegro_forces_ka.
+# Panel 1: per-step wall time (CUDA vs Metal). Panel 2: the NVE total-energy drift over a matched
+# 10 fs is the SAME at every dt (flat, not the dashed dt² line) — the forces are the exact energy
+# gradient (finite-diff ~1e-9), so the residual drift is the untrained model's spurious stiffness,
+# not integration error.
+traj   = load_json(joinpath(RES, "allegro_trajectory.json"))
+tsweep = load_json(joinpath(RES, "allegro_trajectory_sweep.json"))
+function trajectory_plot(out)
+    isnothing(traj) && return
+    fig = Figure(size = (960, 420))
+    ax1 = Axis(fig[1, 1], ylabel = "step time (ms)", title = "6mrr NVE step time (15,954 atoms)",
+               xticks = (1:2, ["CUDA\n(RTX 5080)", "Metal\n(M3)"]))
+    keys2 = [("cuda", :seagreen), ("metal", :purple)]
+    present = [(k, c) for (k, c) in keys2 if !isnothing(getk(traj, k))]
+    vals = [Float64(traj[k]["step_ms_med"]) for (k, _) in present]
+    barplot!(ax1, 1:length(vals), vals, color = [c for (_, c) in present])
+    for (i, (k, _)) in enumerate(present)
+        nsd = round(Float64(traj[k]["ns_per_day"]); digits = 3)
+        text!(ax1, i, vals[i]; text = "$(nsd) ns/day", align = (:center, :bottom), fontsize = 12)
+    end
+    ylims!(ax1, 0, maximum(vals) * 1.2)
+    ax2 = Axis(fig[1, 2], xscale = log10, yscale = log10, xlabel = "timestep dt (fs)",
+               ylabel = "NVE drift (meV/atom over 10 fs)",
+               title = "Drift is dt-independent (Metal)")
+    if !isnothing(tsweep)
+        pts = sort([(Float64(v["dt_fs"]), Float64(v["max_drift_meV_atom"]))
+                    for (k, v) in tsweep if startswith(String(k), "metal_dt")])
+        dts = first.(pts); dr = last.(pts)
+        if !isempty(dts)
+            ref = dr[1] .* (dts ./ dts[1]) .^ 2
+            lines!(ax2, dts, ref, color = :gray, linestyle = :dash, label = "dt² reference")
+            scatterlines!(ax2, dts, dr, color = :purple, markersize = 13, linewidth = 3,
+                          label = "measured")
+            axislegend(ax2, position = :lt, labelsize = 11)
+            ylims!(ax2, minimum(dr) * 0.3, maximum(dr) * 3)
+        end
+    end
+    save(joinpath(IMG, out), fig, px_per_unit = 2)
+    println("wrote images/", out)
+end
+trajectory_plot("allegro_trajectory.png")
+
 println("done — images in ", IMG)
