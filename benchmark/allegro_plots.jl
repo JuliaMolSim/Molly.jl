@@ -151,10 +151,12 @@ function overlay_plot(title, out, specs)
     println("wrote images/", out)
 end
 
-# Full range per backend (not forced uniform): Metal is Molly-only (nequip=float64, allegro-jax
-# hits a jax-metal op limit); allegro-jax is dense O(N^2) so its CPU only reaches ~512 atoms.
-# Colour encodes backend/thread, linestyle encodes framework (Molly solid, nequip dash, jax dot).
-overlay_plot("Allegro energy: all implementations (t1/t8/CUDA + Metal; Metal=M3, rest=RTX 5080)",
+# All backends at the ANI system sizes (500→15,954), plotting every series we have (CPU t1 and t8).
+# CPU t1 is noisy at large N (the shared box was saturated by other users during the run) and some
+# t1 series are partial; allegro-jax is dense O(N²), so its CPU lines stop at 2000 atoms (≈15.5 s
+# already there) and its t1≈t8 (XLA-fused, thread-insensitive). Colour encodes backend, linestyle
+# encodes framework; missing series are simply skipped.
+overlay_plot("Allegro energy: all implementations over 500→15,954 atoms (Metal=M3, rest=RTX 5080)",
              "allegro_benchmark_energy.png", [
     ("Molly CUDA (RTX 5080)",          :seagreen,   :solid,   series(getk(cuda, "cuda"))),
     ("Molly Metal (M3)",               :purple,     :solid,   series(getk(metal, "metal"))),
@@ -164,17 +166,13 @@ overlay_plot("Allegro energy: all implementations (t1/t8/CUDA + Metal; Metal=M3,
     ("nequip-allegro CPU t8",          :crimson,    :dash,    series_key(getk(nq_cpu, "cpu_t8"), "energy_ms")),
     ("nequip-allegro CPU t1",          :orchid,     :dash,    series_key(getk(nq_cpu, "cpu_t1"), "energy_ms")),
     ("allegro-jax CUDA",               :teal,       :dot,     series_key(getk(jx_cuda, "cuda"), "energy_ms")),
-    # allegro-jax CPU is XLA-fused and thread-insensitive, so t1 and t8 land almost on top of each
-    # other — drawn as two lines anyway (over the full 7 sizes) to show that directly.
     ("allegro-jax CPU t8",             :goldenrod,  :dot,     series_key(getk(jx_cpu, "cpu_t8"), "energy_ms")),
     ("allegro-jax CPU t1",             :chocolate,  :dot,     series_key(getk(jx_cpu, "cpu_t1"), "energy_ms")),
 ])
 
-# Molly now has native GPU forces (analytic backward as KA kernels), so the forces plot mirrors the
-# energy one: all four Molly backends (CUDA/Metal/CPU-t1/t8), nequip CUDA/CPU-t1/t8, and allegro-jax
-# CUDA/CPU-t1/t8 — every line over the full 64→4096 range. Molly's CPU backward is threaded, so its
-# t8 line sits below t1; allegro-jax CPU is thread-insensitive, so its t1/t8 forces coincide.
-overlay_plot("Allegro forces: t1/t8/CUDA + Metal, all backends over 64→4096 (Metal=M3, rest=RTX 5080)",
+# Forces mirror the energy plot: Molly has native GPU forces (analytic backward as KA kernels), so
+# all backends appear at CPU-t8 + GPU. Same t1-omission and allegro-jax O(N²) caveats as above.
+overlay_plot("Allegro forces: all backends over 500→15,954 atoms (Metal=M3, rest=RTX 5080)",
              "allegro_benchmark_force.png", [
     ("Molly CUDA (RTX 5080)",          :seagreen,   :solid,   series(getk(molly_fc, "cuda"))),
     ("Molly Metal (M3)",               :purple,     :solid,   series(getk(molly_fm, "metal"))),

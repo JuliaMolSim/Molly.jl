@@ -145,72 +145,66 @@ host** while Metal is the **Apple M3** (cross-machine). Reproduce with `benchmar
 (nequip) and `benchmark/allegro_jax_bench.py` (JAX) alongside `benchmark/allegro_cuda_compare.jl` and
 `benchmark/allegro.jl` (Molly), on the same machine.
 
-**Energy, time in ms.** CPU (t1/t8) and CUDA are the RTX 5080 host; Molly Metal is the Apple M3.
-Metal is Molly-only (see below). `allegro-jax`'s CPU column is one value because it is
-thread-insensitive (t1 ≈ t8); being dense O(N²) it reaches 4096 atoms only via adaptive timing and is
-impractical there (~42 s). The figures draw its t1 and t8 as separate lines, which coincide.
+Sizes follow the ANI-2x benchmark (500 → 15,954 atoms, the full 6mrr protein). CPU (t8) and CUDA are
+the RTX 5080 host; Molly Metal is the Apple M3 (cross-machine — read the scaling, not the cross-device
+level). CPU is shown at t8; t1 is ~2–3× slower (Molly/nequip thread ~2–3×; `allegro-jax` is XLA-fused
+and thread-insensitive, t1 ≈ t8). `allegro-jax` is dense O(N²), so its CPU stops at 2000 atoms
+(already ~15 s there) and its GPU scales far worse than the neighbour-list codes.
 
-| atoms | Molly CUDA | Molly Metal | Molly t8 | Molly t1 | nequip CUDA | nequip t8 | nequip t1 | jax CUDA | jax CPU |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 1.33 | 1.86  | 3.4   | 11.4   | 5.65  | 162  | 13.5   | 6.7   | 13     |
-| 256  | 1.47 | 2.08  | 16.9  | 55.7   | 5.59  | 310  | 114.1  | 30.2  | 195    |
-| 512  | 1.64 | 2.76  | 35.7  | 123.0  | 5.68  | 400  | 242.8  | 80.4  | 859    |
-| 1024 | 2.13 | 3.77  | 106.3 | 308.3  | 5.70  | 573  | 585.9  | 167.5 | 3779   |
-| 2048 | 3.62 | 6.60  | 206.1 | 653.8  | 7.85  | 747  | 1203.7 | 344.8 | 16302  |
-| 4096 | 7.32 | 12.83 | 457.0 | 1511.2 | 13.42 | 1899 | 2600.5 | 877.0 | 42455  |
+**Energy, time in ms:**
 
-(`torch.compile` brings nequip CUDA to ~2.5–5 ms — still slower than Molly; omitted for clarity.
-`allegro-jax` uses dense all-pairs, so it scales O(N²) and is far slower at scale.)
+| atoms | **Molly CUDA** | **Molly Metal** | Molly CPU-t8 | nequip CUDA | nequip CPU-t8 | jax CUDA | jax CPU-t8 |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 500    | **1.6**  | 2.9  | 70   | 5.8  | 523  | 77   | 898   |
+| 1000   | **2.0**  | 4.0  | 104  | 5.9  | 814  | 167  | 3638  |
+| 2000   | **3.8**  | 6.8  | 246  | 7.4  | 771  | 345  | 15511 |
+| 5000   | **9.3**  | 15.7 | 740  | 15.6 | 1811 | 1264 | —     |
+| 8000   | **15.0** | 25.1 | 1565 | 24.6 | 2666 | 1888 | —     |
+| 15,954 | **32.3** | 57.5 | 4338 | 50.1 | 3924 | 4749 | —     |
+
+**Molly CUDA is the fastest energy at every size** — at the full 15,954-atom protein it is **32 ms**,
+vs nequip CUDA 50 ms and allegro-jax CUDA 4.7 s. Molly Metal (57 ms) is the strongest Apple-GPU path,
+and the *only* one: nequip needs float64 and `allegro-jax` fails under `jax-metal`, so neither runs on
+Apple GPU at all.
 
 ![Allegro energy: all implementations](images/allegro_benchmark_energy.png)
 
-**Forces, time in ms** (Molly analytic vs nequip/jax autograd). CPU (t1/t8) and CUDA are the RTX 5080
-host; Molly Metal is the Apple M3. Every line spans all seven sizes (the dense `allegro-jax` CPU run
-is timed adaptively so it reaches 4096; its t1 ≈ t8, one column). Molly's CPU t1/t8 here are a fair
-back-to-back pair; the box is shared, so read the CPU absolutes as ±~30% but the t8/t1 and
-cross-implementation *ratios* as robust.
+**Forces, time in ms** (Molly analytic backward vs nequip/jax autograd):
 
-| atoms | Molly CUDA | Molly Metal | Molly t8 | Molly t1 | nequip CUDA | nequip t8 | nequip t1 | jax CUDA | jax CPU |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 64   | 4.3  | 6.1  | 53.9   | 54.0   | 15.2 | 357   | 33.0   | 6.6   | 17     |
-| 256  | 5.4  | 6.5  | 236.9  | 288.7  | 15.3 | 747   | 297.7  | 30.0  | 219    |
-| 512  | 5.3  | 7.0  | 528.9  | 669.9  | 15.3 | 1038  | 633.3  | 79.5  | 903    |
-| 1024 | 5.6  | 10.1 | 1191.1 | 1577.4 | 15.4 | 1426  | 1330.7 | 169.3 | 3822   |
-| 2048 | 10.6 | 17.3 | 2679.6 | 3588.2 | 17.1 | 2287  | 2785.1 | 346.3 | 16514  |
-| 4096 | 17.9 | 30.2 | 6087.9 | 7760.0 | 30.3 | 13131 | 5828.9 | 891.9 | 42094  |
+| atoms | **Molly CUDA** | **Molly Metal** | Molly CPU-t8 | nequip CUDA | nequip CPU-t8 | jax CUDA | jax CPU-t8 |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 500    | **5.2**  | 7.0   | 389   | 15.7  | 1290 | 79   | 953   |
+| 1000   | **6.0**  | 9.7   | 902   | 15.6  | 2154 | 166  | 3678  |
+| 2000   | **9.3**  | 16.5  | 2098  | 16.9  | 2058 | 350  | 15667 |
+| 5000   | **22.7** | 41.2  | 5862  | 37.2  | 4638 | 1263 | —     |
+| 8000   | **39.1** | 60.3  | 9600  | 54.9  | 5238 | 1835 | —     |
+| 15,954 | **70.8** | 133.1 | 20045 | 115.6 | 9145 | 4801 | —     |
 
-Molly CUDA forces match the CPU analytic forces to machine precision (max |ΔF| ≈ 2e-14, Float64);
-Metal forces to ≈ 1e-5 (Float32). The CUDA backward is the fastest forces path here at every size.
+**Molly CUDA is again the fastest forces path at every size** — 71 ms at 15,954 atoms vs nequip
+CUDA 116 ms and allegro-jax CUDA 4.8 s — and its forces match the CPU analytic backward to machine
+precision (max |ΔF| ≈ 2e-14, Float64; Metal ≈ 1e-5, Float32). Molly Metal (133 ms) is again the only
+Apple-GPU forces path. The one place the references win is **CPU forces**: nequip's optimised torch
+autograd (9.1 s at 15,954) beats Molly's allocation-heavy analytic backward (20 s) — so on CPU
+nequip leads, but on GPU, the path that matters for production MD, Molly is fastest.
 
 ![Allegro forces: all implementations](images/allegro_benchmark_force.png)
 
 Reading it:
 
-- **Energy: Molly's native kernels win clearly.** Molly's CUDA energy is **1.8×–4.2× faster** than
-  nequip-allegro (launch-bound at ~5.6 ms flat; ~2.5–5 ms even with `torch.compile`) and stays
-  sub-10 ms to 4096 atoms. `allegro-jax` uses dense all-pairs, so it scales **O(N²)** and is far
-  slower at scale (877 ms vs Molly's 7 ms at 4096). On CPU, PyTorch's threading is pathological at
-  these sizes (162 ms at 64 atoms on 8 threads, vs Molly's 3.4 ms); Molly's threaded CPU energy is
-  10–50× faster, and Molly single-threaded (t1) still beats nequip's 8-thread energy at every size.
-  Molly Metal (Apple M3) also beats nequip CUDA at small N.
+- **Molly's native GPU wins on both energy and forces, and the lead grows with system size.** At the
+  full 6mrr protein (15,954 atoms) Molly CUDA is 32 ms energy / 71 ms forces — faster than nequip
+  CUDA (50 / 116 ms) and dramatically faster than the dense `allegro-jax` (4.7 / 4.8 s). Molly's
+  forces are the exact analytic gradient (finite-diff ~1e-9), so this is a like-for-like win.
 - **Metal is a Molly-only capability.** Neither reference runs on Apple GPU: nequip-allegro requires
-  `float64` (its per-type energy shift casts to global float64) and MPS is float32-only, and
-  `allegro-jax` fails to compile under `jax-metal` (`unknown attribute code`). Molly's native Metal
-  **energy and forces** both run where **both** references cannot. (The energy figure shows t1/t8/CUDA
-  for every backend over the full range each can reach — `allegro-jax` is dense O(N²), so its CPU line
-  stops at 512 atoms; the forces figure holds every line to the same seven sizes, 64→4096.)
-- **Forces now run on the GPU too — and win.** Molly's analytic backward is implemented as a native
-  GPU-portable reverse pass (`compute_allegro_forces_ka`, KernelAbstractions), so forces run on CUDA
-  and Metal, not just CPU. On CUDA the backward reproduces the CPU analytic forces to **machine
-  precision** (max |ΔF| ≈ 2e-14, Float64) and is **flat ~4–18 ms from 64 to 4096 atoms — ~300× over
-  Molly CPU-t8** and faster than nequip's CUDA autograd forces (~15 ms flat) at every size shown.
-  Metal forces (Float32, max |ΔF| ≈ 1e-5) run **6–30 ms**, ~25× over CPU-t8. The CPU analytic
-  backward is threaded (tape build + both backward passes run per centre atom; only the final
-  Cartesian scatter is serial), so CPU-t8 sits below t1 — but the gain is modest (~1.2× on the
-  12-core broadwell box, ~1.8× on the M3) because the reverse pass is allocation-heavy and so becomes
-  memory-bandwidth-bound at higher core counts; the GPU path is the real forces speedup. `allegro-jax`
-  CPU forces are XLA-fused and fully thread-insensitive, so its t1 and t8 forces lines coincide (the
-  dense O(N²) run is timed adaptively so it still reaches 4096 atoms).
+  `float64` (MPS is float32-only) and `allegro-jax` fails to compile under `jax-metal`. So Molly's
+  native Metal — 57 ms energy / 133 ms forces at 15,954 atoms — is the only Allegro that runs the
+  whole model on the Apple GPU. (At 5000–15,954 atoms Molly Metal on the M3 and nequip CUDA on the
+  RTX 5080 happen to land at nearly the same absolute time, so their lines overlap in the figures.)
+- **The references win only on CPU.** nequip's optimised PyTorch autograd is faster than Molly's
+  allocation-heavy analytic backward on CPU forces (9.1 s vs 20 s at 15,954), and both CPU codes are
+  far behind their own GPUs. `allegro-jax`'s dense O(N²) makes its CPU impractical past 2000 atoms
+  (~15 s there) and its GPU the slowest at scale. The GPU path — where Molly leads — is the one that
+  matters for production MD.
 
 ### GPU speedup over host CPU-t8
 
@@ -221,12 +215,14 @@ RTX 5080 — a within-machine ratio; read the scaling shape, not the cross-machi
 
 ![Allegro forces: GPU speedup over host CPU-t8](images/allegro_forces_gpu_speedup.png)
 
-On **forces**, Molly CUDA and nequip CUDA both reach ~300× over their CPU-t8 at 4096 atoms, Molly
-Metal ~25×, allegro-jax CUDA ~45×. On **energy**, note that `nequip`'s ratio is the *highest* not
-because its GPU is fastest but because its CPU is pathologically slow (threaded PyTorch is 100–200 ms
-even at small N), so a large GPU/CPU ratio there is a slow-baseline artefact — Molly's smaller energy
-ratio sits on a much faster CPU. The absolute head-to-head above is the fairer read; the speedup
-curves show each implementation's own GPU-vs-CPU scaling.
+**These are within-machine ratios, so read them carefully.** On **forces** Molly CUDA rises to ~280×
+its CPU-t8 at 15,954 atoms and nequip CUDA to ~80×, Molly Metal ~25×, allegro-jax CUDA ~45× (its CPU
+baseline stops at 2000). On **energy** `nequip`'s ratio starts *highest* and *drops* — not because its
+GPU is fastest, but because its threaded PyTorch CPU is pathologically slow at small N (100–800 ms),
+so that big ratio is a slow-CPU-baseline artefact that fades as N grows; Molly's ratio sits on a
+genuinely fast CPU and rises with real GPU scaling. **The absolute head-to-head tables above are the
+fair comparison** (there Molly CUDA is fastest outright); the speedup curves only show each
+implementation's own GPU-vs-CPU scaling.
 
 ---
 
