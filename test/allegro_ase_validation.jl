@@ -4,38 +4,45 @@
 #
 # This is the "call the existing package from Python" check from Joe's #283 review: the reference is
 # the package's output, and Molly reproduces it via the package's ASE calculator — no re-implementation
-# in the loop. Offline (needs PythonCall + a Python env with nequip-allegro):
+# in the loop. It needs PythonCall plus a Python env with nequip-allegro, so CI (which has neither
+# PythonCall in the test deps nor the package) skips it; run it offline with:
 #
 #   JULIA_CONDAPKG_BACKEND=Null JULIA_PYTHONCALL_EXE=<env>/bin/python \
 #   PYTHONPATH=$(dirname this_file) julia --project=<env-with-Molly+PythonCall+JSON3> \
 #       test/allegro_ase_validation.jl
 
-using Molly, PythonCall, JSON3
+using Test, Molly, JSON3
 using Molly: SVector
 
-const REF = joinpath(@__DIR__, "..", "data", "allegro_reference", "allegro_package_ref.json")
-ref = JSON3.read(read(REF, String))
-tn = String.(ref.type_names)
+const ASE_REF = joinpath(@__DIR__, "..", "data", "allegro_reference", "allegro_package_ref.json")
+const HAVE_PYTHONCALL = Base.identify_package("PythonCall") !== nothing
 
-pyimport("sys").path.insert(0, @__DIR__)   # so test/allegro_ase_calc.py imports
-ase_calc = pyimport("allegro_ase_calc").make_calc()
+@testset "allegro_ase_validation" begin
+    if !HAVE_PYTHONCALL || !isfile(ASE_REF)
+        @info "Skipping external ASE validation (needs PythonCall + a Python env with " *
+              "nequip-allegro and $(basename(ASE_REF))); not run in CI"
+        @test true
+    else
+        @eval import PythonCall
+        ref = JSON3.read(read(ASE_REF, String))
+        tn = String.(ref.type_names)
 
-ok = true
-for sysj in ref.systems
-    coords = [SVector{3,Float64}(Float64.(c)...) for c in sysj.coords_A]   # Angstrom
-    elems = [tn[Int(t) + 1] for t in sysj.types]
-    n = length(elems)
-    atoms = [Atom(mass=1.0) for _ in 1:n]
-    boundary = CubicBoundary(50.0)
-    calc = ASECalculator(ase_calc=ase_calc, atoms=atoms, coords=coords, boundary=boundary, elements=elems)
-    sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(calc,),
-                 energy_units=NoUnits, force_units=NoUnits)
-    E = potential_energy(sys); F = forces(sys)
-    dE = abs(Float64(E) - Float64(sysj.energy))
-    Fref = [SVector{3,Float64}(fr...) for fr in sysj.forces]
-    dF = maximum(maximum(abs.(F[i] .- Fref[i])) for i in 1:n)
-    global ok &= (dE < 1e-6 && dF < 1e-6)
-    println("  ", rpad(String(sysj.name), 5), " |dE|=", round(dE; sigdigits=2),
-            " max|dF|=", round(dF; sigdigits=2))
+        PythonCall.pyimport("sys").path.insert(0, @__DIR__)   # so test/allegro_ase_calc.py imports
+        ase_calc = PythonCall.pyimport("allegro_ase_calc").make_calc()
+
+        for sysj in ref.systems
+            coords = [SVector{3,Float64}(Float64.(c)...) for c in sysj.coords_A]   # Angstrom
+            elems = [tn[Int(t) + 1] for t in sysj.types]
+            n = length(elems)
+            atoms = [Atom(mass=1.0) for _ in 1:n]
+            boundary = CubicBoundary(50.0)
+            calc = ASECalculator(ase_calc=ase_calc, atoms=atoms, coords=coords, boundary=boundary, elements=elems)
+            sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(calc,),
+                         energy_units=NoUnits, force_units=NoUnits)
+            E = potential_energy(sys); F = forces(sys)
+            Fref = [SVector{3,Float64}(fr...) for fr in sysj.forces]
+            @test isapprox(Float64(E), Float64(sysj.energy); atol=1e-6)
+            @test maximum(maximum(abs.(F[i] .- Fref[i])) for i in 1:n) < 1e-6
+        end
+    end
 end
-println(ok ? "MOLLY-VIA-ASE MATCHES THE PACKAGE" : "MISMATCH")
