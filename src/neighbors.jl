@@ -2,6 +2,10 @@
 
 export
     use_neighbors,
+    neighbor_pairs,
+    has_ragged_neighbors,
+    ragged_neighbors,
+    ragged_counts,
     NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
@@ -20,6 +24,67 @@ For built-in interactions such as [`LennardJones`](@ref) this function accesses
 the `use_neighbors` field of the struct.
 """
 use_neighbors(inter) = false
+
+"""
+    neighbor_pairs(neighbors)
+
+The `(i, j, special)` pairs of a neighbor list, as returned by [`find_neighbors`](@ref).
+
+This is what the pairwise force and energy loops iterate over, so a neighbor list type
+from a custom neighbor finder should define this along with `Base.length`. The result
+indexes into the list rather than copying it, so it should not be used after the list
+is passed back to [`find_neighbors`](@ref), which may overwrite the pairs.
+"""
+neighbor_pairs(nl::NeighborList) = @view nl.list[1:nl.n]
+
+neighbor_pairs(nl::NoNeighborList) = nl
+
+function neighbor_pairs(nl::GPUCellListNeighborList)
+    if isnothing(nl.list)
+        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use " *
+                            "output=:molly_pairs for the pairwise interactions of a System"))
+    end
+    return @view nl.list[1:nl.n]
+end
+
+"""
+    has_ragged_neighbors(neighbors)
+
+Whether a neighbor list also stores its neighbors per atom, default `false`.
+
+See [`ragged_neighbors`](@ref).
+"""
+has_ragged_neighbors(nl) = false
+has_ragged_neighbors(nl::GPUCellListNeighborList) = true
+
+function no_ragged_neighbors(nl)
+    throw(ArgumentError("a $(typeof(nl)) does not store neighbors per atom, use " *
+                        "GPUCellListNeighborFinder for a neighbor list that does"))
+end
+
+"""
+    ragged_neighbors(neighbors)
+
+The neighbors of each atom in a neighbor list, as a padded matrix.
+
+The neighbors of atom `i` are `ragged_neighbors(nl)[1:ragged_counts(nl)[i], i]`, with
+the entries past `ragged_counts(nl)[i]` undefined. Only some neighbor lists store
+this, which [`has_ragged_neighbors`](@ref) reports. The matrix belongs to the list, so
+it should not be used after the list is passed back to [`find_neighbors`](@ref), which
+may overwrite it.
+"""
+ragged_neighbors(nl) = no_ragged_neighbors(nl)
+ragged_neighbors(nl::GPUCellListNeighborList) = nl.ragged_neighbors
+
+"""
+    ragged_counts(neighbors)
+
+The number of neighbors of each atom in a neighbor list.
+
+See [`ragged_neighbors`](@ref) for the neighbors themselves.
+"""
+ragged_counts(nl) = no_ragged_neighbors(nl)
+ragged_counts(nl::GPUCellListNeighborList) = nl.ragged_counts
 
 function check_neighbor_matrices(eligible, special)
     if !isnothing(eligible) && !isnothing(special) && size(eligible) != size(special)
@@ -55,7 +120,10 @@ struct NoNeighborFinder end
 
 Obtain a list of close atoms in a [`System`](@ref).
 
-Custom neighbor finders should implement this function.
+Custom neighbor finders should implement this function. The neighbor list it returns
+should define `Base.length`, giving the number of pairs, and [`neighbor_pairs`](@ref),
+giving the `(i, j, special)` pairs themselves, since that is what the pairwise force
+and energy loops use.
 
 Returns a [`NeighborList`](@ref) for the classical neighbor finders and a
 [`GPUCellListNeighborList`](@ref) for [`GPUCellListNeighborFinder`](@ref).
@@ -450,10 +518,11 @@ the dense masks at all.
   special flags false. The exceptions are ignored, so pairs that a bonded topology
   excludes are still returned and using this mode for a system with bonded exclusions
   gives wrong forces.
-- `:ragged`: per-atom padded neighbor matrix only, with no flat pair list. The
-  exceptions are ignored. This mode is for querying neighbors directly, it can not be
-  used for the pairwise interactions of a [`System`](@ref) but can be useful for
-  machine learning potentials.
+- `:ragged`: per-atom padded neighbor matrix only, read with
+  [`ragged_neighbors`](@ref), and no flat pair list. The exceptions are ignored. This
+  mode is for querying neighbors directly, it cannot be used for the pairwise
+  interactions of a [`System`](@ref) but can be useful for machine learning
+  potentials.
 
 `max_neighbors` is the initial per-atom capacity of the neighbor matrix. When it is
 `nothing` the capacity is estimated from the global number density and `dist_cutoff`

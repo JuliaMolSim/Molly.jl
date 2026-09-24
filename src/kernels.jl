@@ -144,12 +144,8 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU " *
               "you should use GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
-    if typeof(neighbors) == NoNeighborList
-        nbs = neighbors
-    else
-        nbs = @view neighbors.list[1:neighbors.n]
-    end
-    if length(neighbors) > 0
+    nbs = neighbor_pairs(neighbors)
+    if length(nbs) > 0
         backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
@@ -442,12 +438,8 @@ function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:Abs
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU " *
               "you should use GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
-    if typeof(neighbors) == NoNeighborList
-        nbs = neighbors
-    else
-        nbs = @view neighbors.list[1:neighbors.n]
-    end
-    if length(neighbors) > 0
+    nbs = neighbor_pairs(neighbors)
+    if length(nbs) > 0
         backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)

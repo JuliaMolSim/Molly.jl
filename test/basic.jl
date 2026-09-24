@@ -754,6 +754,14 @@ end
     neighbors_ref = find_neighbors(sys)
     n_neighbors_ref = 4602420
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
+    # The pairs of any neighbor list are read the same way
+    @test length(neighbor_pairs(neighbors_ref)) == n_neighbors_ref
+    @test neighbor_pairs(neighbors_ref)[1] == neighbors_ref[1]
+    # Only some neighbor lists store neighbors per atom
+    @test !has_ragged_neighbors(neighbors_ref)
+    @test !has_ragged_neighbors(nothing)
+    @test_throws ArgumentError ragged_neighbors(neighbors_ref)
+    @test_throws ArgumentError ragged_counts(neighbors_ref)
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
     sorted_ref = sort_nbs(neighbors_ref.list)
@@ -914,8 +922,8 @@ end
                 sys, _ = gpu_cell_list_test_system(coords)
                 result = find_neighbors(sys)
 
-                counts = Array(result.counts)
-                matrix = Array(result.neighbors)
+                counts = Array(ragged_counts(result))
+                matrix = Array(ragged_neighbors(result))
 
                 @test counts == Int32[1, 1, 0]
                 @test matrix[1:counts[1], 1] == Int32[2]
@@ -923,6 +931,11 @@ end
                 @test isempty(matrix[1:counts[3], 3])
                 @test result.list === nothing
                 @test result.state.max_neighbors == Int32(32)
+
+                # Ragged output has no pairs to iterate over
+                @test has_ragged_neighbors(result)
+                @test_throws ArgumentError neighbor_pairs(result)
+                @test_throws ArgumentError result[1]
             end
 
             if AT in array_list
@@ -941,8 +954,8 @@ end
 
                     result = find_neighbors(sys)
 
-                    counts = Array(result.counts)
-                    matrix = Array(result.neighbors)
+                    counts = Array(ragged_counts(result))
+                    matrix = Array(ragged_neighbors(result))
 
                     @test eltype(result.state.x) === Float64
                     @test eltype(result.state.cell_x) === Float64
@@ -967,10 +980,14 @@ end
 
                 result = find_neighbors(sys)
 
-                pairs = Array(result.list[1:result.n])
+                pairs = Array(neighbor_pairs(result))
 
                 @test result.n == 1
+                @test length(neighbor_pairs(result)) == length(result) == 1
                 @test pairs == [(Int32(2), Int32(1), false)]
+                # The ragged representation is there for every output mode
+                @test has_ragged_neighbors(result)
+                @test Array(ragged_counts(result)) == Int32[1, 1, 0]
             end
 
             @testset "Molly pair output" begin
@@ -1007,7 +1024,7 @@ end
 
                 pairs = sort(Array(result.list[1:result.n]))
 
-                @test Array(result.counts) == Int32[2, 2, 2]
+                @test Array(ragged_counts(result)) == Int32[2, 2, 2]
                 @test result.n == 2
                 @test pairs == [
                     (Int32(3), Int32(1), true),
@@ -1030,7 +1047,7 @@ end
 
                 result = find_neighbors(sys)
 
-                @test Array(result.counts) == Int32[1, 1, 0]
+                @test Array(ragged_counts(result)) == Int32[1, 1, 0]
                 @test result.n == 1
                 @test Array(result.list[1:1]) ==
                     [(Int32(2), Int32(1), false)]
@@ -1057,7 +1074,7 @@ end
 
                 result = find_neighbors(sys)
 
-                @test Array(result.counts) == fill(Int32(39), n_atoms)
+                @test Array(ragged_counts(result)) == fill(Int32(39), n_atoms)
                 @test result.n == n_atoms * (n_atoms - 1) ÷ 2
 
                 cell_counts = Array(result.state.cell_counts)
@@ -1110,11 +1127,11 @@ end
                     true,
                 )
 
-                @test Array(second_result.counts) == Int32[0, 0, 0]
+                @test Array(ragged_counts(second_result)) == Int32[0, 0, 0]
                 @test second_result.n == 0
                 @test second_result.state.x === first_result.state.x
-                @test second_result.neighbors === first_result.neighbors
-                @test second_result.counts === first_result.counts
+                @test ragged_neighbors(second_result) === ragged_neighbors(first_result)
+                @test ragged_counts(second_result) === ragged_counts(first_result)
                 @test second_result.list === first_result.list
 
                 cached_result = find_neighbors(
@@ -1146,9 +1163,9 @@ end
 
                     result = find_neighbors(sys)
 
-                    @test Array(result.counts) == Int32[2, 2, 2]
+                    @test Array(ragged_counts(result)) == Int32[2, 2, 2]
                     @test result.state.max_neighbors >= 2
-                    @test size(result.neighbors, 1) == result.state.max_neighbors
+                    @test size(ragged_neighbors(result), 1) == result.state.max_neighbors
 
                     if output === :geometric_pairs
                         @test result.n == 3
@@ -1428,7 +1445,7 @@ end
                     scaled = find_neighbors(sys, finder, result, 0, true)
 
                     @test scaled.state === result.state
-                    @test scaled.counts === result.counts
+                    @test ragged_counts(scaled) === ragged_counts(result)
 
                     reference_n = count(
                         norm(vector(c1 .* scale, c2 .* scale, sys.boundary)) <= 1.0f0
@@ -1459,7 +1476,7 @@ end
 
                 result = find_neighbors(sys)
 
-                counts = Array(result.counts)
+                counts = Array(ragged_counts(result))
 
                 @test maximum(counts) <= result.state.max_neighbors
                 @test result.state.max_neighbors % 32 == 0
@@ -1498,7 +1515,7 @@ end
                     )),
                 )
 
-                @test Array(find_neighbors(triclinic_sys).counts) == Int32[1, 1]
+                @test Array(ragged_counts(find_neighbors(triclinic_sys))) == Int32[1, 1]
 
                 # Skewing the box brings the faces closer together than three cells,
                 #   even though every basis vector is more than three cutoffs long

@@ -627,35 +627,36 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
 end
 
 """
-    GPUCellListNeighborList(counts, neighbors, n, list, state)
+    GPUCellListNeighborList(ragged_counts, ragged_neighbors, n, list, state)
 
 The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
 containing a padded per-atom neighbor matrix and, unless the finder uses
 `output=:ragged`, a flat half-pair list whose first `n` entries of `list` are valid.
 
-For atom `i`, the valid entries of the neighbor matrix are `neighbors[1:counts[i], i]`.
-
-`state` holds the device buffers behind `counts`, `neighbors` and `list`, which are
-reused if this list is passed back to [`find_neighbors`](@ref) as `current_neighbors`.
-See [`GPUCellListNeighborFinder`](@ref) for what that means for holding on to a list.
+Use [`neighbor_pairs`](@ref) to get the pairs and [`ragged_neighbors`](@ref) to get
+the per-atom matrix rather than reading the fields, since the layout is not part of
+the interface. `state` holds the device buffers behind the other fields and is
+internal; they are reused if this list is passed back to [`find_neighbors`](@ref) as
+`current_neighbors`, see [`GPUCellListNeighborFinder`](@ref) for what that means for
+holding on to a list.
 """
 struct GPUCellListNeighborList{C,R,L,S}
-    counts::C
-    neighbors::R
+    ragged_counts::C
+    ragged_neighbors::R
     n::Int
     list::L
     state::S
 
     function GPUCellListNeighborList(
-        counts::C,
-        neighbors::R,
+        ragged_counts::C,
+        ragged_neighbors::R,
         n::Integer,
         list::L,
         state::S,
     ) where {C,R,L,S}
-        size(neighbors, 2) == length(counts) || throw(
+        size(ragged_neighbors, 2) == length(ragged_counts) || throw(
             ArgumentError(
-                "the second dimension of neighbors must equal " *
+                "the second dimension of ragged_neighbors must equal " *
                 "the number of atoms",
             ),
         )
@@ -675,8 +676,8 @@ struct GPUCellListNeighborList{C,R,L,S}
         end
 
         return new{C,R,L,S}(
-            counts,
-            neighbors,
+            ragged_counts,
+            ragged_neighbors,
             n_int,
             list,
             state,
@@ -690,8 +691,8 @@ Base.length(neighbors::GPUCellListNeighborList) = neighbors.n
 
 function Base.getindex(neighbors::GPUCellListNeighborList, i::Integer)
     if isnothing(neighbors.list)
-        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use the " *
-                            "counts and neighbors fields or output=:molly_pairs"))
+        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use " *
+                            "ragged_neighbors or output=:molly_pairs"))
     end
     return neighbors.list[i]
 end
