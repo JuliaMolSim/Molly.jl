@@ -1852,7 +1852,7 @@ The memory it uses grows linearly with the number of atoms, and for large system
 Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
 When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps` to the number of steps between reordering the atoms and refreshing the tile list.
 
-[`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref).
+[`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref), which also gives the neighbors of each atom as a padded matrix via [`ragged_neighbors`](@ref).
 It runs on any GPU backend and is the best option on GPUs other than NVIDIA ones, where the tiled kernels of [`GPUNeighborFinder`](@ref) are not available.
 Three-dimensional [`CubicBoundary`](@ref) and [`TriclinicBoundary`](@ref) systems are supported, as long as opposite box faces are at least three times `dist_cutoff` apart so that the grid has at least three cells along every box axis.
 Like [`GPUNeighborFinder`](@ref) it converts the dense `eligible` and `special` masks into sparse exception lists at construction and does not retain them, since a dense mask is `n_atoms^2` bytes on the device.
