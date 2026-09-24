@@ -2436,37 +2436,6 @@ function set_gpu_device!(gpu_id, ::Val{false})
     return nothing
 end
 
-# Reset trajectorywriter on processes
-is_c_pointer_type(::Type{<:Ptr}) = true
-is_c_pointer_type(::Type{<:Chemfiles.CxxPointer}) = true
-is_c_pointer_type(::Type) = false
-
-function has_c_pointer(::Type{T}) where T
-    is_c_pointer_type(T) && return true
-    isprimitivetype(T) && return false
-    
-    return any(has_c_pointer, fieldtypes(T))
-end
-
-function reinit_c_pointers(val::T) where T
-    # Fast-path: If the object contains no C pointers, return it as-is
-    if !has_c_pointer(T)
-        return val
-    end
-
-    # If the object itself is a C-wrapper type (e.g., Chemfiles.Topology)
-    # Re-invoke its constructor T() to allocate fresh memory in this process
-    if applicable(T) && !isabstracttype(T) && hasmethod(T, Tuple{})
-        return T() # Calls Chemfiles.Topology(), Chemfiles.Frame(), etc.
-    end
-
-    # For composite structs (like TrajectoryWriter), map recursively over all fields
-    new_vals = ntuple(i -> reinit_c_pointers(getfield(val, i)), fieldcount(T))
-    
-    # Re-invoke the positional constructor for the parent struct
-    return T(new_vals...)
-end
-
 # The replica system whose state systems the workers hold, so that later `simulate_remd!` calls
 # on it (or on the system it returns, which shares its partition) only send coordinates
 const remd_workers_key = Ref{Any}(nothing)
@@ -2497,7 +2466,7 @@ const remd_workers_key = Ref{Any}(nothing)
         remotecall_fetch(pid, gpu_devices) do gpu_devices
             gpu_id = gpu_devices[i]
             set_gpu_device!(gpu_id, Val(true))
-            println("Worker $pid initialized on GPU $gpu_id")
+            @info "Worker $pid initialized on GPU $gpu_id"
             flush(stdout)
         end
         end

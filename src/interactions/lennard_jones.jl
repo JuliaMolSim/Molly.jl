@@ -1312,16 +1312,6 @@ end
     return inter.weight_14 * 4 * inter.ϵ14_mixed * (six_term ^ 2 - six_term)
 end
 
-const LennardJones14λ = Union{LennardJones14SoftCoreBeutler, LennardJones14SoftCoreGapsys,
-                              LennardJones14Scaled}
-
-@inline function lj14_lambda_params(inter::LennardJones14λ, atom_i, atom_l)
-    λ_glob = λ_mixing(inter.λ_mixing, (atom_i, atom_l))
-    pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_l.alch_role); lj=true)
-    λ, λR, λ_params = scale_sterics_dual(inter.scheduler, λ_glob, pair_role)
-    return λ, λR, params_mixing(λ_params, inter.σ14_mixed), params_mixing(λ_params, inter.ϵ14_mixed)
-end
-
 @doc raw"""
     LennardJones14Scaled(; σ14_mixed, ϵ14_mixed, weight_14, λ_mixing, scheduler)
 
@@ -1666,4 +1656,17 @@ end
                 (91*C12*(invR6*invR6)) - (28*C6*(invR6)))
         end
     end
+end
+
+# λ, soft core coupling and σ/ϵ of a 1-4 pair, shared by the three soft cores above. It is a
+#   Lennard-Jones pair of the alchemical system, so the role follows `intraLJ` and single topology
+#   interpolates the end states, as for the pairwise soft cores
+const LennardJones14λ = Union{LennardJones14SoftCoreBeutler, LennardJones14SoftCoreGapsys,
+                              LennardJones14Scaled}
+
+@inline function lj14_lambda_params(inter::LennardJones14λ, atom_i, atom_l)
+    λ_glob = λ_mixing(inter.λ_mixing, (atom_i, atom_l))
+    pair_role = mix_roles(inter.scheduler, (atom_i.alch_role, atom_l.alch_role); lj=true)
+    λ, λR, λ_params = scale_sterics_dual(inter.scheduler, λ_glob, pair_role)
+    return λ, λR, params_mixing(λ_params, inter.σ14_mixed), params_mixing(λ_params, inter.ϵ14_mixed)
 end

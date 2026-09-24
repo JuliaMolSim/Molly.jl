@@ -1807,6 +1807,7 @@ from_device(t::Tuple) = map(from_device, t)
 to_device(x::Nothing, ::Type{AT}) where AT = nothing
 to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
 to_device(x, ::Type{AT}) where AT = AT(x)
+to_device(t::Tuple, ::Type{AT}) where {AT <: AbstractArray} = map(x -> to_device(x, AT), t)
 
 # `deepcopy(x)` dispatches once, then recurses through `deepcopy_internal` all the way down, so
 # a custom `Base.deepcopy(::T)` is invisible to `deepcopy(sys)` — the interaction tuples would be
