@@ -260,6 +260,26 @@ on CUDA / Float32 on Metal:
   naive O(N²) all-pairs neighbour build (~2.5×10⁸ pairs/step), not the per-edge maths; the cell-list
   neighbour list noted above is the change that turns this into a practical MD throughput.
 
+### Trained-model trajectory: pipeline works, small model not yet MD-stable
+
+A physically-trained model was also produced end-to-end: a 4-species (H/C/N/O) Allegro trained with
+`nequip-train` on a 9,000-frame SPICE subset (Solvated Amino Acids + Dipeptides, water+peptide
+chemistry), then driven on 6mrr water through `nequip`'s ASE calculator. Two findings:
+
+- **The full 6mrr does not fit `nequip-allegro` on a 16 GB GPU** — its strided tensor-product
+  contraction allocates **21.5 GiB** for the 15,954-atom graph (all edges at once), so the trained
+  model runs only on a carved water sub-box. Molly's native forces, which stream edges, run the full
+  system in the same memory — the scaling advantage above, made concrete.
+- **The small, briefly-trained model is not MD-stable yet.** On an equilibrated water sub-box its NVT
+  dynamics heat up and run away within tens of steps (the potential energy falls as kinetic energy
+  climbs — the model relaxes toward its own, still-inaccurate energy minimum faster than the
+  thermostat can drain it), independent of periodic vs. droplet boundaries, minimisation, timestep or
+  friction. This is the expected outcome for a 30-epoch small model and scopes the remaining work
+  precisely: a production-quality trajectory needs substantially more training (more data, epochs, and
+  channels), not more MD tuning. The training and trajectory infrastructure
+  (`benchmark/allegro_trajectory.jl` for the native path; the SPICE training config and ASE driver on
+  the GPU box) is in place for that.
+
 ---
 
 ## Notes and caveats
