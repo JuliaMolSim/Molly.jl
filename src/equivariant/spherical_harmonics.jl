@@ -69,12 +69,6 @@ within each block). `r` is an `SVector{3}`; only its direction matters. Supports
     end
 end
 
-# Stack N row vectors (each `∂Y_i/∂r`) into an `SMatrix{N,3}` directly, column-major, with no heap
-# allocation — `vcat` of a generator allocates and is rejected by the Metal compiler. `Val(3N)` keeps
-# the construction fully unrolled so it runs inside GPU kernels.
-@inline _rows_to_smat(rows::NTuple{N,SVector{3,T}}) where {N,T} =
-    SMatrix{N,3,T}(ntuple(idx -> (@inbounds rows[(idx - 1) % N + 1][(idx - 1) ÷ N + 1]), Val(3N)))
-
 # Concrete `lmax = 2` real-SH value + Jacobian, written out element by element (no closures, no
 # runtime-`lmax` union return) so it const-folds and runs inside GPU kernels on CUDA and Metal. The
 # rows are `∂Y_i/∂r = (∇P_i(r̂) − l·Y_i·r̂)/d`; `J` is assembled column-major (∂/∂x, ∂/∂y, ∂/∂z).
@@ -121,24 +115,21 @@ and `J::SMatrix{(lmax+1)^2, 3}`. Supports `lmax ≤ 2`.
         return Y, J
     end
 
-    # Gradients of the homogeneous polynomials w.r.t. the (unit) components, ∇P_l(r̂).
+    # l=1: P = c1·(x,y,z). ∂Y_l/∂r = (∇P_l(r̂) − l·Y_l·r̂)/d; the l=0 row is zero. Built column-major
+    # and element by element (no closures) so it const-folds and runs inside GPU kernels.
     c1 = T(C1)
-    # l=1: P = c1*(x,y,z) ⇒ ∇ = c1*I
-    gP1 = (SVector{3,T}(c1, 0, 0), SVector{3,T}(0, c1, 0), SVector{3,T}(0, 0, c1))
     p1 = poly_l1(x, y, z)
 
     if lmax == 1
-        Y = SVector{4,T}(one(T), p1[1], p1[2], p1[3])
-        # ∂Y_l/∂r = (1/d)(∇P - l Y r̂); l=0 row is zero, l=1 rows use l=1.
-        rows = ntuple(Val(4)) do i
-            if i == 1
-                SVector{3,T}(0, 0, 0)
-            else
-                g = gP1[i - 1]
-                (g - one(T) * Y[i] * rh) * invd
-            end
-        end
-        return Y, _rows_to_smat(rows)
+        Y2 = p1[1]; Y3 = p1[2]; Y4 = p1[3]
+        Y = SVector{4,T}(one(T), Y2, Y3, Y4)
+        r2x = (c1 - Y2 * x) * invd; r2y = (   - Y2 * y) * invd; r2z = (   - Y2 * z) * invd
+        r3x = (   - Y3 * x) * invd; r3y = (c1 - Y3 * y) * invd; r3z = (   - Y3 * z) * invd
+        r4x = (   - Y4 * x) * invd; r4y = (   - Y4 * y) * invd; r4z = (c1 - Y4 * z) * invd
+        J = SMatrix{4,3,T}(zero(T), r2x, r3x, r4x,
+                           zero(T), r2y, r3y, r4y,
+                           zero(T), r2z, r3z, r4z)
+        return Y, J
     end
 
     # l=2 — the concrete, GPU-safe path (also the one the analytic forces use).
