@@ -231,6 +231,37 @@ Reading it:
 
 ---
 
+## 6mrr trajectory (native MD at biomolecular scale)
+
+To check the potential drives molecular dynamics end-to-end at a real system size, a native-Molly
+Allegro **NVE** trajectory runs on the full **6mrr** system — **15,954 atoms** (H/C/N/O,
+water-dominated, periodic 56.8 × 56.6 × 63.0 Å) — with `compute_allegro_forces_ka` evaluating energy
+and forces on the GPU every step (`benchmark/allegro_trajectory.jl`). 200 steps, dt = 0.1 fs, Float64
+on CUDA / Float32 on Metal:
+
+| backend | atoms | step time (ms) | throughput (ns/day) |
+| :---: | :---: | :---: | :---: |
+| CUDA (RTX 5080) | 15,954 | 148 | 0.059 |
+| Metal (M3)      | 15,954 | 249 | 0.035 |
+
+- **It runs, and forces are consistent dynamically.** The NVE total-energy drift is **identical on
+  CUDA-Float64 and Metal-Float32** (146.6 meV/atom over the same 20 fs), so the drift is not a
+  precision artefact — it is the integration error of the potential, and it **converges as dt²**
+  (0.9 meV/atom over 0.5 fs at dt = 0.05 fs vs 17 meV/atom over 2.5 fs at dt = 0.25 fs, matched
+  10-step runs). That dt² convergence is the dynamical confirmation that the analytic forces are the
+  exact gradient of the energy. `ΣF ≈ 1e-4` at the start.
+- **The absolute drift is large because the model is untrained.** These are the small random
+  reference weights (2-species, so 6mrr's four elements are mapped H→1, {C,N,O}→2 — irrelevant to
+  throughput and to energy conservation), which gives a stiff potential that needs a small dt. A
+  **physically-trained H/C/N/O model** (no public checkpoint exists; training one on a SPICE subset is
+  the follow-up) is what makes a trajectory *stay* structured — the separate "does it look okay"
+  check.
+- **Throughput is neighbour-build-bound.** At 15,954 atoms the per-step cost is dominated by the
+  naive O(N²) all-pairs neighbour build (~2.5×10⁸ pairs/step), not the per-edge maths; the cell-list
+  neighbour list noted above is the change that turns this into a practical MD throughput.
+
+---
+
 ## Notes and caveats
 
 - Weights are the small random reference model used by the test suite, not a trained potential.

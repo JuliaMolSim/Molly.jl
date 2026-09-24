@@ -126,9 +126,13 @@ function main()
     outdir = RES; mkpath(outdir)
     key = BK == "cuda" ? "cuda" : (BK == "metal" ? "metal" : "cpu")
     path = joinpath(outdir, "allegro_trajectory.json")
-    prev = isfile(path) ? Dict(String(k)=>v for (k,v) in JSON3.read(read(path, String))) : Dict{String,Any}()
-    prev[key] = Dict("atoms"=>n, "steps"=>steps, "dt_fs"=>dt, "step_ms_min"=>ms, "step_ms_med"=>med,
-                     "ns_per_day"=>nsday, "max_drift_meV_atom"=>maxdrift, "E0_eV"=>Float64(E0), "maxF"=>maxF)
+    # Parse an existing file into plain nested Dicts so re-serialising the merged result works (a raw
+    # JSON3 object read back in is immutable and JSON3.pretty chokes on the mix).
+    prev = isfile(path) ? JSON3.read(read(path, String), Dict{String,Dict{String,Any}}) :
+                          Dict{String,Dict{String,Any}}()
+    prev[key] = Dict{String,Any}("atoms"=>n, "steps"=>steps, "dt_fs"=>dt, "step_ms_min"=>ms,
+                     "step_ms_med"=>med, "ns_per_day"=>nsday, "max_drift_meV_atom"=>maxdrift,
+                     "E0_eV"=>Float64(E0), "maxF"=>maxF)
     open(path, "w") do io; JSON3.pretty(io, prev); end
     println("wrote ", path)
 end
