@@ -13,3 +13,11 @@ lazy = true
     [[openfe_tyk2.download]]
     sha256 = "2a705a81b80fd95b5751d7c82ad0fcd0c6d24296f2663f126db2ed1715b9c53f"
     url = "https://github.com/ERovers/Molly.jl/releases/download/openfe-tyk2-data-v1/openfe_tyk2_data.tar.gz"
+
+[tyk2_data]
+git-tree-sha1 = "0512ded255e1756a19ad6b07a06c36417aed7993"
+lazy = true
+
+    [[tyk2_data.download]]
+    sha256 = "bfc2cdf5b359622b0afb5961d708b4f5dd699e470367e268f1d961376ad55145"
+    url = "https://github.com/ERovers/Molly.jl/releases/download/tyk2-data-v2/tyk2_data.tar.gz"

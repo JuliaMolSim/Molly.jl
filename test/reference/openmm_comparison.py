@@ -6,7 +6,7 @@ from openmm import *
 from openmm.unit import *
 import os
 
-data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
+data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "data")
 ff_dir = os.path.join(data_dir, "force_fields")
 out_dir = os.path.join(data_dir, "openmm_6mrr")
 pdb_file = os.path.join(data_dir, "6mrr_equil.pdb")
@@ -155,7 +155,8 @@ with open(os.path.join(out_dir, "charmm", f"velocities_{n_steps}steps.txt"), "w"
         of.write(f"{vel.x} {vel.y} {vel.z}\n")
 
 ## Amber14 on TYK2-ejm31 system
-out_dir = os.path.join(data_dir, "openmm_tyk2")
+# TYK2_DIR: a writable copy of the `tyk2_data` artifact (see openfe_comparison.py)
+out_dir = os.environ["TYK2_DIR"]
 pdb_file = os.path.join(data_dir, "tyk2_ejm31.pdb")
 vel_file = os.path.join(out_dir, "velocities_300K.txt")
 

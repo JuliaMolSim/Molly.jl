@@ -89,12 +89,16 @@ def calc_energies_and_forces(openmm_system, openmm_positions, lammie):
     return potential_energy_dict, force_dict
 
 #### TEST VARIABLES ####
-data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
+data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "data")
 ff_dir = os.path.join(data_dir, "force_fields")
-out_dir = os.path.join(data_dir, "openmm_tyk2", "openfe")
+# TYK2_DIR: a writable copy of the `tyk2_data` artifact, found with
+#   julia --project -e 'using Pkg: Pkg; print(Pkg.Artifacts.ensure_artifact_installed("tyk2_data", "Artifacts.toml"))'
+#   and packed again with claude_fe/scripts/make_tyk2_artifact.jl
+tyk2_dir = os.environ["TYK2_DIR"]
+out_dir = os.path.join(tyk2_dir, "openfe")
 os.chdir(out_dir)
-pdb_file = os.path.join(data_dir, "tyk2_openmm.pdb")
-lig_file = os.path.join(data_dir, "tyk2_ligands.sdf")
+pdb_file = os.path.join(tyk2_dir, "tyk2_openmm.pdb")
+lig_file = os.path.join(tyk2_dir, "tyk2_ligands.sdf")
 
 output_prefix = {"bond_only":["CustomBondForce","HarmonicBondForce"], "angle_only":["CustomAngleForce","HarmonicAngleForce"], 
                  "torsion_only":["CustomTorsionForce","PeriodicTorsionForce"], 
@@ -192,6 +196,7 @@ solvent_dag = transformation_solvent.create()
 complex_unit = list(complex_dag.protocol_units)[0]
 results = complex_unit.run(dry=True, verbose=True)
 import pickle
+# This pickle is published as the lazy artifact `openfe_tyk2` of Molly (Artifacts.toml)
 with open(os.path.join(out_dir, "openfe_tyk2_system.pkl"), "wb") as file:
     pickle.dump(results, file)
 
