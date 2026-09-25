@@ -82,14 +82,8 @@ end
 # the tile/finalize kernels below instead, which avoid findmin/findmax's host sync via a
 # device-side reduction -- see the comment above those kernels for the full design.
 
-"""
-    MinMaxScratch
-
-Persistent GPU scratch for the fused CalcMinDist/CalcMaxDist `calculate_cv!`/`cv_gradient!` path
-(see `mindist_tile_kernel!` below). `idx1_dev`/`idx2_dev` are device copies of
-`cv.atom_inds_1`/`atom_inds_2`, uploaded once and reused, avoiding CPU-GPU transfere and allowing CuGraph. `winner_i`/`winner_j`/`r_ij` cache the most recent winning pair so
-`calculate_virial_dist!` can reuse it via `ExtremalPairCache` instead of recomputing the search.
-"""
+# Persistent GPU scratch for the fused CalcMinDist/CalcMaxDist path. Caches the winning pair
+# so calculate_virial_dist! can reuse it via ExtremalPairCache instead of re-searching.
 mutable struct MinMaxScratch{IV, DV, JV, RV, SV, R1V}
     idx1_dev::IV
     idx2_dev::IV
@@ -108,13 +102,8 @@ end
 # one-thread-per-row would.
 const MINDIST_TILE_CAP = 4096
 
-"""
-    ExtremalPairCache
-
-Caches the `(i, j, d, r_ij)` result of an `extremal_pair` call made inside `cv_gradient!`, so a
-`calculate_virial_dist!` call later in the same timestep can reuse it instead of recomputing the
-O(group_a * group_b) search. Populated by `BiasPotential` (bias.jl); otherwise unused.
-"""
+# Caches an extremal_pair result from cv_gradient! so a later calculate_virial_dist! call
+# this timestep can reuse it. Populated by BiasPotential; otherwise unused.
 mutable struct ExtremalPairCache
     valid::Bool
     i::Int
@@ -1351,15 +1340,8 @@ end
 
 const RMSD_TILE_CAP = 1024
 
-"""
-    RmsdScratch
-
-Persistent GPU scratch for the fused CalcRMSD `calculate_cv!`/`cv_gradient!` path.
-`idx_dev`/`coords_used` avoid re-gathering/re-uploading the used atom indices every call;
-`ref_coords_used`/`ref_kabsch` precompute the reference side once (it never changes after
-construction); a reduce/finalize/grad-write kernel trio computes the RMSD value and gradient
-device-side once the Kabsch rotation is known.
-"""
+# Persistent GPU scratch for the fused CalcRMSD path -- avoids re-gathering atom indices and
+# re-computing the reference Kabsch centering (which never changes) every call.
 mutable struct RmsdScratch{IV, CV, RCV, KV, PV}
     idx_dev::IV
     coords_used::CV
@@ -1780,13 +1762,8 @@ zero_cv_value_buffer(cv::CalcTorsion, coords) =
     similar(coords, typeof(float(ustrip(oneunit(eltype(eltype(coords)))))), 1)
 zero_cv_gradient_buffers(cv, coords) = (zero_cv_grad_buffer(cv, coords), zero_cv_value_buffer(cv, coords))
 
-"""
-    calculate_cv_buffered!(cv, coords, atoms, boundary, buff, args...; kwargs...)
-
-Uniform-signature wrapper around `calculate_cv!`, whose positional-argument prefix before `buff`
-varies by CV type (`CalcRg` omits `boundary`; `CalcRMSD` omits `atoms`/`boundary`). Lets callers
-that invoke `calculate_cv!` generically across CV types use one fixed call signature.
-"""
+# Uniform-signature wrapper around calculate_cv! (whose positional args before buff vary by
+# CV type), for callers that dispatch across CV types generically.
 calculate_cv_buffered!(cv::CalcRMSD, coords, atoms, boundary, buff, args...; kwargs...) =
     calculate_cv!(cv, coords, buff; kwargs...)
 calculate_cv_buffered!(cv::CalcRg, coords, atoms, boundary, buff, args...; kwargs...) =

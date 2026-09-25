@@ -708,17 +708,9 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
     return out
 end
 
-"""
-    _gpu_unwrap_fractional(coords, boundary, topology)
-
-GPU-native molecule unwrapping. The CPU `unwrap_molecules` walks the bond graph with a stack-based
-DFS -- an inherently sequential dependency. This gets the same result with no host round trip via
-parallel pointer-doubling on a precomputed spanning-forest `parent` pointer (`topology.parent`):
-each round replaces every atom's (parent, accumulated delta) with its parent's, halving the
-remaining path length to the root, so `topology.n_rounds` (~log2 of the deepest molecule's depth)
-rounds suffice regardless of molecule size. Per-molecule center-of-geometry is a segmented mean via
-sort + inclusive scan (no atomics).
-"""
+# GPU-native molecule unwrapping via parallel pointer-doubling on a precomputed spanning-
+# forest parent pointer -- avoids the CPU version's sequential stack-based DFS. n_rounds
+# rounds (~log2 of deepest molecule depth) suffice regardless of molecule size.
 function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary, topology) where D
     AT = array_type(coords)
     to_frac, to_cart, wrap01 = _frac_cart_closures(boundary, Val(D))

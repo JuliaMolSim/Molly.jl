@@ -248,21 +248,8 @@ function BiasPotential(cv_type::C, bias_type::B) where {C, B}
     return BiasPotential{C, B}(cv_type, bias_type, uses_builtin_cv_gradient!(cv_type))
 end
 
-"""
-    BiasScratch()
-
-Per-`BiasPotential` lazily-allocated scratch: the CV gradient/value/bias-force buffers
-(`grad`, `d_buf`, `fs_svec`, used on both CPU and GPU) and the GPU-only fused-kernel fast
-path's `dist_scratch`/`extremal_cache` (`CalcMinDist`/`CalcMaxDist`/`CalcCMDist`/`CalcRg`/
-`CalcRMSD`; always `nothing` on CPU, since only `ensure_bias_dist_scratch!`'s device-buffer
-branches are gated on `is_gpu_resident`, not this struct itself).
-
-Held one-per-bias in `buffers.bias_scratch` (`BuffersCPU`/`BuffersGPU`, `src/force.jl`),
-matching `sys.general_inters`'s order (`nothing` for non-bias entries), rather than on
-`BiasPotential` itself -- `BiasPotential` stays a plain, immutable description of the CV/bias,
-and all per-step mutable state lives in the buffers alongside everything else the force
-pipeline reuses across steps.
-"""
+# Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch/
+# extremal_cache GPU-only fused-kernel state). One per bias in buffers.bias_scratch (force.jl).
 mutable struct BiasScratch
     grad::Any
     d_buf::Any
@@ -273,15 +260,9 @@ end
 
 BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing, nothing)
 
-"""
-    bias_scratch(buffers, inter_idx)
-
-Locate a `BiasPotential`'s `BiasScratch` slot in `buffers.bias_scratch` by its position in
-`sys.general_inters` (`inter_idx`, threaded through from `force.jl`'s/`energy.jl`'s
-`general_inters` iteration). Falls back to a fresh, call-scoped `BiasScratch` when `buffers`
-is `nothing` (a bare `potential_energy(sys)`/`accelerations(sys)` call with no explicit
-buffers) -- matching pre-persistent-buffer behaviour: no reuse across calls, but correct.
-"""
+# Locate bias's BiasScratch by inter_idx (position in sys.general_inters). Falls back to a
+# fresh throwaway BiasScratch when buffers is nothing (a bare, bufferless call) -- no reuse
+# across calls in that case, matching pre-persistent-buffer behaviour.
 bias_scratch(buffers, inter_idx) = buffers.bias_scratch[inter_idx]::BiasScratch
 bias_scratch(::Nothing, inter_idx) = BiasScratch()
 
@@ -309,16 +290,9 @@ bias_max_abs_ustrip(value) = abs(ustrip(value))
     error(msg)
 end
 
-"""
-    bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
-
-Return the coordinates a `BiasPotential` should use, unwrapping across periodic
-boundaries when `cv_type.correction == :pbc`.
-
-When `buffers`/`step_n` are supplied, routes through the shared, once-per-step
-unwrap cache (`ensure_unwrapped_coords!`, `src/force.jl`) instead of recomputing
-`unwrap_molecules` independently for every attached `BiasPotential`.
-"""
+# Coordinates a BiasPotential should use, unwrapped for correction==:pbc. With buffers/step_n,
+# routes through the shared once-per-step unwrap cache (ensure_unwrapped_coords!, force.jl)
+# instead of recomputing per bias.
 function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
     cv_type.correction != :pbc && return sys.coords
     if !isnothing(buffers) && !isnothing(step_n) && hasproperty(buffers, :unwrapped_coords)
@@ -356,19 +330,9 @@ function bias_dist_scratch_types(coords, atoms)
     return CT, MT, WT, IT
 end
 
-"""
-    ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
-
-Lazily allocate CV-type-specific fused-kernel scratch (`scratch.dist_scratch`, and for
-CalcMinDist/CalcMaxDist also `scratch.extremal_cache`) the first time it's needed.
-
-`extremal_cache` (CalcMinDist/CalcMaxDist) is allocated on both backends, since it's just a
-small virial-reuse cache; `dist_scratch`'s actual device-sized kernel buffers are only
-allocated when `coords` is GPU-resident (the CPU path never uses them). Each CV type's own
-`calculate_cv!`/`cv_gradient!` dispatch only takes its fused-kernel fast path once its
-matching scratch struct has been populated here, falling back to the generic broadcast path
-otherwise. See the matching `*Scratch` docstring in `cv.jl` for why each one exists.
-"""
+# Lazily allocates CV-type-specific fused-kernel scratch. extremal_cache (CalcMinDist/
+# CalcMaxDist) is allocated on both backends (small virial-reuse cache); dist_scratch's
+# actual device-sized buffers are GPU-only.
 function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
     if cv isa CalcDist{<:Union{CalcMinDist, CalcMaxDist}} && scratch.extremal_cache === nothing
         scratch.extremal_cache = ExtremalPairCache(false, 0, 0, nothing, nothing)

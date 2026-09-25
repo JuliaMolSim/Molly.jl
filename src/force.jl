@@ -304,12 +304,8 @@ end
 # BiasPotential with correction==:pbc, src/bias/bias.jl).
 bias_needs_unwrap(inter) = false
 
-"""
-    ensure_unwrapped_coords!(buffers, sys, step_n)
-
-`unwrap_molecules(sys)`, computed at most once per `step_n` and cached on `buffers` so every
-attached `BiasPotential` with `correction==:pbc` shares it instead of recomputing independently.
-"""
+# unwrap_molecules(sys), computed at most once per step_n and cached on buffers so every
+# attached BiasPotential with correction==:pbc shares it.
 function ensure_unwrapped_coords!(buffers, sys, step_n::Integer)
     if !has_unwrap(buffers.validity, step_n)
         buffers.unwrapped_coords[] = unwrap_molecules(sys)
@@ -1378,11 +1374,7 @@ function gpu_forces!(fs,
     end
 end
 
-"""
-    forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step; n_threads)
-
-One step's forces via plain `forces!`, so simulators don't repeat the call themselves.
-"""
+# One step's forces via plain forces!, so simulators don't repeat the call themselves.
 @inline function forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step;
                               n_threads, strictness)
     forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step); n_threads=n_threads, strictness=strictness)
