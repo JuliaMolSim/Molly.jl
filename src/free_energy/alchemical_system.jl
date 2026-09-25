@@ -750,6 +750,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     Interactions = merge(Interactions)
 
     # A pair of atoms is excluded, or special, if it is so in either end state
+    #   Have to take information from neighbourfinder, since constraints drop 
+    #   the interaction from the list of interactions.
     map_A(i) = mapping_A[i]
     map_B(i) = (haskey(mapping_B, i) ? mapping_B[i] : mapping_A[env_BA[i]])
     n_atoms = length(Coords)
@@ -777,34 +779,31 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         eligible[j, i] = false
     end
 
-    neighbor_finder_type = sysA.neighbor_finder
-    dist_cutoff_nf = sysA.neighbor_finder.dist_cutoff
-
-    if neighbor_finder_type == NoNeighborFinder
+    # The neighbour finder of the end states, as `System` setup picks it: the type is compared with
+    #   `isa`, since the finders are parametric and `NoNeighborFinder` has no fields
+    nf_A = sysA.neighbor_finder
+    if nf_A isa NoNeighborFinder
         nf = NoNeighborFinder()
-    elseif neighbor_finder_type == GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
+    elseif nf_A isa GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
         excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
-        n_steps_reorder = sysA.neighbor_finder.n_steps_reorder
-        nf = GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=dist_cutoff_nf,
+        nf = GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=nf_A.dist_cutoff,
                                excluded_pairs=excluded_pairs, special_pairs=special_pairs,
-                               n_steps_reorder=n_steps_reorder, device_vector_type=AT{Int32, 1})
-    elseif neighbor_finder_type == DistanceNeighborFinder &&
+                               n_steps_reorder=nf_A.n_steps_reorder,
+                               device_vector_type=AT{Int32, 1})
+    elseif nf_A isa DistanceNeighborFinder &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(Boundary))
-        n_steps = sysA.neighbor_finder.n_steps
         nf = DistanceNeighborFinder(eligible=to_device(eligible, AT), special=to_device(special, AT),
-                                    n_steps=n_steps, dist_cutoff=dist_cutoff_nf)
-    elseif neighbor_finder_type == CellListMapNeighborFinder && !(AT <: AbstractGPUArray)
-        n_steps = sysA.neighbor_finder.n_steps
-        nf = CellListMapNeighborFinder(eligible=eligible, special=special,
-                                        n_steps=n_steps, boundary=Boundary, x0=Coords,
-                                        dist_cutoff=dist_cutoff_nf)
+                                    n_steps=nf_A.n_steps, dist_cutoff=nf_A.dist_cutoff)
+    elseif nf_A isa CellListMapNeighborFinder && !(AT <: AbstractGPUArray)
+        nf = CellListMapNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
+                                       boundary=Boundary, x0=Coords, dist_cutoff=nf_A.dist_cutoff)
     else
-        n_steps = sysA.neighbor_finder.n_steps
-        nf = neighbor_finder_type(
+        # Another finder, or one that does not suit the device, keeps the masks and the settings
+        nf = typeof(nf_A).name.wrapper(
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
-            n_steps=n_steps,
-            dist_cutoff=dist_cutoff_nf,
+            n_steps=nf_A.n_steps,
+            dist_cutoff=nf_A.dist_cutoff,
         )
     end
 
