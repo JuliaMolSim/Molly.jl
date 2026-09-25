@@ -886,63 +886,6 @@ end
     return needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh
 end
 
-function Molly.is_tile_refresh_step(sys::System{D, <:CuArray, T}, buffers, step_n::Integer) where {D, T}
-    nf = sys.neighbor_finder
-    nf isa GPUNeighborFinder || return false
-    _, _, _, needs_tile_refresh = gpu_neighbor_refresh_flags(buffers, nf, step_n)
-    return needs_tile_refresh
-end
-
-function Molly.invalidate_cuda_graph_cache!(buffers::Molly.BuffersGPU)
-    buffers.graph_exec_no_check[] = nothing
-    buffers.graph_exec_with_check[] = nothing
-    return nothing
-end
-
-"""
-    captured_forces!(fs, sys::System{<:Any, <:CuArray}, args...; kwargs...)
-
-CUDA-graph-captured `forces!` via `CUDA.@captured`, which re-captures on topology change. Not the
-entry point `simulate!` uses (see `captured_forces_once!` below, which capture-once/replays
-instead) -- kept as a safety net for callers without `simulate!`'s own topology-change handling.
-"""
-function Molly.captured_forces!(fs, sys::System{D, <:CuArray, T}, args...; kwargs...) where {D, T}
-    @captured Molly.forces!(fs, sys, args...; kwargs...)
-    return nothing
-end
-
-const BIAS_FINITE_CHECK_SENTINEL_STEP = 1
-
-"""
-    captured_forces_once!(fs, sys::System{<:Any, <:CuArray}, neighbors, step_n, buffers,
-                          Val(needs_vir); kwargs..., do_check=true)
-
-Captures `forces!`'s kernel-launch sequence once, then replays the cached `CuGraphExec` on every
-later call. Never call on a tile-refresh step (`is_tile_refresh_step`) -- its host sync is illegal
-mid-capture; a refresh instead invalidates the cache, forcing recapture next eligible step.
-`do_check` picks one of two separately-cached graphs, since the finite-check kernels' `step_n`
-argument would otherwise freeze at capture time.
-"""
-function Molly.captured_forces_once!(fs, sys::System{D, <:CuArray, T}, args...;
-                                      do_check::Bool=true, kwargs...) where {D, T}
-    buffers = args[3]
-    cache_ref = do_check ? buffers.graph_exec_with_check : buffers.graph_exec_no_check
-    if cache_ref[] === nothing
-        capture_kwargs = (; kwargs..., bias_check=do_check)
-        # Fixed to the sentinel only for the capture call itself, so the captured graph never has
-        # the real, call-specific step_n baked into a kernel argument.
-        capture_args = do_check ?
-            (fs, sys, args[1], BIAS_FINITE_CHECK_SENTINEL_STEP, args[3:end]...) :
-            (fs, sys, args...)
-        graph = CUDA.capture() do
-            Molly.forces!(capture_args...; capture_kwargs...)
-        end
-        cache_ref[] = CUDA.instantiate(graph)
-    end
-    CUDA.launch(cache_ref[]::CuGraphExec)
-    return nothing
-end
-
 function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray, T}, N::Int) where {D, T}
     n_blocks = cld(N, WARPSIZE)
     if sys.boundary isa TriclinicBoundary
@@ -1009,8 +952,7 @@ Cache contract:
 - `buffers.step_n_preprocessed` gates reuse of reordered coordinates and tile
   search work within a simulation step.
 - `buffers.num_pairs` is the host-side cached interacting-tile count used to
-  size the force-kernel launch. A tile refresh changes it, invalidating any
-  cached `use_cuda_graph` `CuGraphExec` ([`invalidate_cuda_graph_cache!`](@ref)).
+  size the force-kernel launch.
 - `sys.neighbor_finder.initialized` only indicates whether the sparse exception
   masks are current. The interacting-tile list still depends on
   `n_steps_reorder` and `dist_cutoff`.
@@ -1043,7 +985,6 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
 
         if needs_tile_refresh
             refresh_interacting_tiles!(buffers, sys, N)
-            Molly.invalidate_cuda_graph_cache!(buffers)
         end
         buffers.step_n_preprocessed = step_n
     end

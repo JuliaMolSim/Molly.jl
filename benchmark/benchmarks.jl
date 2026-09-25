@@ -237,24 +237,3 @@ for group_size in (50, 400, 3200)
         end
     end
 end
-
-# 3. CUDA graph capture smoke check (GPU only): a regression here throws instead of just
-# reporting a slower number.
-if run_cuda_tests
-    let group_a = collect(1:5), group_b = collect(1000:1004)
-        cv_pool = (
-            CalcDist([1], [2], CalcSingleDist(), :wrap),
-            CalcDist(group_a, group_b, CalcCMDist(), :wrap),
-        )
-        biases = ntuple(i -> BiasPotential(cv_pool[i], SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm")), 2)
-        # general_inters can't be attached to an already-built System in place.
-        cg_sys = System(atoms=sys_gpu.atoms, coords=sys_gpu.coords, boundary=sys_gpu.boundary,
-                        velocities=sys_gpu.velocities, pairwise_inters=sys_gpu.pairwise_inters,
-                        general_inters=biases, neighbor_finder=sys_gpu.neighbor_finder)
-        cg_sim = Langevin(dt=0.0002u"ps", temperature=298.0u"K", friction=1.0u"ps^-1")
-        Molly.check_cuda_graph_legality(cg_sys, true)
-        f_capture = () -> (simulate!(cg_sys, cg_sim, 20; use_cuda_graph=true); cg_sys.coords)
-        f_capture() # warm up / compile
-        SUITE["cv"]["cuda_graph capture"] = @benchmarkable $f_capture() evals=1 samples=3 seconds=5
-    end
-end

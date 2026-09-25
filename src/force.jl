@@ -536,9 +536,6 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, ITD, NIT, OIT, 
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
     unwrapped_coords::Base.RefValue{Any}   # shared, once-per-step cache: see ensure_unwrapped_coords!
-    # Cached CuGraphExecs for use_cuda_graph (see captured_forces_once!, MollyCUDAExt.jl); 
-    graph_exec_no_check::Base.RefValue{Any}
-    graph_exec_with_check::Base.RefValue{Any}
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -582,7 +579,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
+                      pre_coupling_ref(),
                       BufferValidity(), box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
@@ -706,7 +703,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
+                      pre_coupling_ref(),
                       BufferValidity(), box_mins, box_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       compressed_masks, tile_is_clean, interacting_tiles_i,
@@ -719,20 +716,8 @@ end
 
 zero_forces(sys) = ustrip_vec.(zero.(sys.coords)) .* sys.force_units
 
-# Generic (CPU) fallback: calls forces! directly. Overridden for CuArray systems in
-# MollyCUDAExt.jl with a CUDA.@captured-wrapped body
-captured_forces!(fs, sys, args...; kwargs...) = forces!(fs, sys, args...; kwargs...)
-
-# Generic fallback for the real capture-once path (MollyCUDAExt.jl); drops the GPU-only `do_check`
-# kwarg and calls forces! directly. Only reached on backends check_cuda_graph_legality already
-# excludes from use_cuda_graph=true.
-captured_forces_once!(fs, sys, args...; do_check::Bool=true, kwargs...) = forces!(fs, sys, args...; kwargs...)
-
 # Whether this step refreshes the GPU tile list. Generic fallback: always false.
 is_tile_refresh_step(sys, buffers, step_n::Integer) = false
-
-# Generic fallback for CuGraph invalidation: a no-op.
-invalidate_cuda_graph_cache!(buffers) = nothing
 
 """
     forces(system, neighbors=find_neighbors(system), step_n=0;
@@ -1306,9 +1291,6 @@ function forces!(fs,
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
-                 cuda_graph_capturing::Bool=false,
-                 defer_finite_check::Bool=false,
-                 bias_check::Bool=true,
                  strictness=default_strictness()) where needs_vir
     # Allow an Enzyme reverse rule
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
@@ -1319,27 +1301,10 @@ function forces!(fs,
     if any(bias_needs_unwrap, values(general_inters))
         ensure_unwrapped_coords!(buffers, sys, step_n)
     end
-    if cuda_graph_capturing
-        # Batches all biases' captured-path tail into 2 launches instead of 2*n_bias.
-        biases, other_inters = split_biases(values(general_inters))
-        for bias in biases
-            coords = bias_coords(sys, bias.cv_type, buffers, step_n)
-            bias_cv_step!(bias, sys, coords, fs, step_n, bias_check)
-        end
-        bias_batched_tail!(fs, biases, step_n, bias_check)
-        for inter in other_inters
-            AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
-                                     n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                     cuda_graph_capturing=cuda_graph_capturing,
-                                     defer_finite_check=defer_finite_check, strictness=strictness)
-        end
-    else
-        for inter in values(general_inters)
-            AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
-                                     n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                     cuda_graph_capturing=cuda_graph_capturing,
-                                     defer_finite_check=defer_finite_check, strictness=strictness)
-        end
+    for inter in values(general_inters)
+        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
+                                 strictness=strictness)
     end
     distribute_forces!(fs, sys, buffers)
 
@@ -1400,55 +1365,12 @@ function gpu_forces!(fs,
 end
 
 """
-    warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers, use_cuda_graph;
-                               n_threads, strictness)
+    forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step; n_threads)
 
-Pre-materializes `BiasPotential` buffers and JIT-compiles captured-path kernels before the step
-loop's first capture, since CUDA graph capture allows neither mid-capture allocation nor
-compilation. Two calls: one plain, one capturing, since only the latter reaches the bias kernels.
-Output is discarded; forces are recomputed on the loop's first iteration regardless.
+One step's forces via plain `forces!`, so simulators don't repeat the call themselves.
 """
-@inline function warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers,
-                                            use_cuda_graph; n_threads, strictness)
-    if use_cuda_graph
-        forces!(forces_t, sys, neighbors, init_step, buffers, Val(false);
-               n_threads=n_threads, defer_finite_check=true, strictness=strictness)
-        forces!(forces_t, sys, neighbors, init_step, buffers, Val(false);
-               n_threads=n_threads, cuda_graph_capturing=true, defer_finite_check=true,
-               strictness=strictness)
-    end
-    return nothing
-end
-
-"""
-    forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step, Val(use_cuda_graph),
-                has_bias_potential, finite_check_every; n_threads)
-
-One step's forces, routing to the captured or plain path so simulators don't repeat the routing
-logic themselves. Only steady-state steps (`use_cuda_graph=true`, no virial, no tile refresh) are
-captured; everything else falls back to plain `forces!`. Also runs the deferred `BiasPotential`
-finiteness check every `finite_check_every` steps (`check_bias_finite_periodic_batched!`,
-`src/bias/bias.jl`).
-"""
-@inline function forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step,
-                              ::Val{false}, has_bias_potential, finite_check_every; n_threads, strictness)
+@inline function forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step;
+                              n_threads, strictness)
     forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step); n_threads=n_threads, strictness=strictness)
-    return nothing
-end
-
-@inline function forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step,
-                              ::Val{true}, has_bias_potential, finite_check_every; n_threads, strictness)
-    run_bias_finite_check = has_bias_potential && step_n % finite_check_every == 0
-    if !needs_vir_step && !is_tile_refresh_step(sys, buffers, step_n)
-        captured_forces_once!(forces_t, sys, neighbors, step_n, buffers, Val(false);
-                              n_threads=n_threads, cuda_graph_capturing=true, defer_finite_check=true,
-                              do_check=run_bias_finite_check, strictness=strictness)
-    else
-        forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-               n_threads=n_threads, defer_finite_check=true, strictness=strictness)
-    end
-    if run_bias_finite_check
-        check_bias_finite_periodic_batched!(values(sys.general_inters))
-    end
     return nothing
 end
