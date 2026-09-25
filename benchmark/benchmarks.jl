@@ -170,9 +170,9 @@ SUITE["cv"] = BenchmarkGroup()
 # kernel path (as a real BiasPotential does) instead of the unbatched fallback.
 function cv_scratch_kwargs(cv, coords, atoms, ::Type{AT}) where AT
     if AT == CuArray && cv isa Union{CalcDist{<:Union{CalcMinDist, CalcMaxDist, CalcCMDist}}, CalcRg, CalcRMSD}
-        tmp_bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
-        Molly.ensure_bias_dist_scratch!(tmp_bias, coords, atoms)
-        return (; scratch=tmp_bias.dist_scratch)
+        tmp_scratch = Molly.BiasScratch()
+        Molly.ensure_bias_dist_scratch!(tmp_scratch, cv, coords, atoms)
+        return (; scratch=tmp_scratch.dist_scratch)
     end
     return NamedTuple()
 end

@@ -759,17 +759,18 @@ end
         bias1 = BiasPotential(cv1, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 0.8u"nm"))
         bias2 = BiasPotential(cv2, SquareBias(250.0u"kJ * mol^-1 * nm^-2", 1.2u"nm"))
         sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias1, bias2))
+        buffers = Molly.init_buffers!(sys, 1)
 
         fs1 = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
-        Molly.AtomsCalculators.forces!(fs1, sys, bias1)
+        Molly.AtomsCalculators.forces!(fs1, sys, bias1; buffers=buffers, inter_idx=1)
         fs2 = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
-        Molly.AtomsCalculators.forces!(fs2, sys, bias2)
-        @test bias1.grad !== bias2.grad
+        Molly.AtomsCalculators.forces!(fs2, sys, bias2; buffers=buffers, inter_idx=2)
+        @test buffers.bias_scratch[1].grad !== buffers.bias_scratch[2].grad
         combined_expected = Molly.from_device(fs1) .+ Molly.from_device(fs2)
 
         fs_sum = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
-        for gi in sys.general_inters
-            Molly.AtomsCalculators.forces!(fs_sum, sys, gi)
+        for (i, gi) in enumerate(sys.general_inters)
+            Molly.AtomsCalculators.forces!(fs_sum, sys, gi; buffers=buffers, inter_idx=i)
         end
         @test all(isapprox.(Molly.from_device(fs_sum), combined_expected; atol=1e-9u"kJ * mol^-1 * nm^-1"))
     end
@@ -787,18 +788,20 @@ end
         cv = CalcDist([1, 2], [3, 4], CalcMinDist(), :wrap)
         bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
 
-        sys_N = System(atoms=atoms, coords=AT(coords_N), boundary=boundary)
+        sys_N = System(atoms=atoms, coords=AT(coords_N), boundary=boundary, general_inters=(bias,))
+        buffers = Molly.init_buffers!(sys_N, 1)
         fs_N = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
-        Molly.AtomsCalculators.forces!(fs_N, sys_N, bias)
+        Molly.AtomsCalculators.forces!(fs_N, sys_N, bias; buffers=buffers, inter_idx=1)
         fs_N_cpu = Molly.from_device(fs_N)
         @test norm(ustrip.(fs_N_cpu[1])) > 0
         @test norm(ustrip.(fs_N_cpu[3])) > 0
         @test norm(ustrip.(fs_N_cpu[2])) == 0
         @test norm(ustrip.(fs_N_cpu[4])) == 0
 
-        sys_N1 = System(atoms=atoms, coords=AT(coords_N1), boundary=boundary)
+        sys_N1 = System(atoms=atoms, coords=AT(coords_N1), boundary=boundary, general_inters=(bias,))
         fs_N1 = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
-        Molly.AtomsCalculators.forces!(fs_N1, sys_N1, bias) # reuses bias.grad from step N
+        # Reuses the SAME buffers (hence the SAME buffers.bias_scratch[1].grad) as step N.
+        Molly.AtomsCalculators.forces!(fs_N1, sys_N1, bias; buffers=buffers, inter_idx=1)
         fs_N1_cpu = Molly.from_device(fs_N1)
         @test norm(ustrip.(fs_N1_cpu[1])) == 0 # not a stale leftover from step N
         @test norm(ustrip.(fs_N1_cpu[3])) == 0

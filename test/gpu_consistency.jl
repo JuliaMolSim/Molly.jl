@@ -266,7 +266,8 @@
                     buffers.fs_mat_reordered,
                     -1,
                     UInt64(0),
-                    0,
+                    0;
+                    bias_scratch=buffers.bias_scratch,
                 )
             end
 
