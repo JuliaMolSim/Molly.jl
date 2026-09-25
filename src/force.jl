@@ -698,7 +698,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
 
     coords_reordered = zero(sys.coords)
     velocities_reordered = zero(sys.velocities)
-    atoms_reordered = zero.(sys.atoms)
+    atoms_reordered = copy(sys.atoms)
 
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
@@ -858,7 +858,7 @@ function forces!(fs,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
                                  inter_idx=i, strictness=strictness)
     end
-    distribute_forces!(fs, sys, buffers)
+    distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
     if needs_vir
         mark_interaction_virial!(buffers.validity, step_n)
@@ -873,12 +873,15 @@ end
 function reduce_force_chunks!(fs_nounits, fs_chunks, vir_nounits, vir_chunks,
                               ::Val{n_threads}, ::Val{needs_vir}) where {n_threads, needs_vir}
     FT = eltype(fs_nounits)
-    @inbounds Threads.@threads for i in eachindex(fs_nounits)
-        f = zero(FT)
-        for chunk_i in 1:n_threads
-            f += fs_chunks[chunk_i][i]
+    n_atoms = length(fs_nounits)
+    @inbounds Threads.@threads for chunk_i in 1:n_threads
+        for i in (((chunk_i - 1) * n_atoms) ÷ n_threads + 1):((chunk_i * n_atoms) ÷ n_threads)
+            f = zero(FT)
+            for ci in 1:n_threads
+                f += fs_chunks[ci][i]
+            end
+            fs_nounits[i] = f
         end
-        fs_nounits[i] = f
     end
 
     if needs_vir
@@ -952,6 +955,9 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     return fs_nounits
 end
 
+# Mark inactive for Enzyme
+claim_block!(next_block_start, block_size) = Threads.atomic_add!(next_block_start, block_size)
+
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, step_n, ::Val{n_threads},
@@ -990,7 +996,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 fs_chunk = fs_chunks[chunk_i]
                 vir_chunk = (needs_vir ? vir_chunks[chunk_i] : nothing)
                 while true
-                    block_start = Threads.atomic_add!(next_block_start, block_size)
+                    block_start = claim_block!(next_block_start, block_size)
                     block_start > n_neighbors && break
                     block_stop = min(block_start + block_size - 1, n_neighbors)
                     pairwise_forces_nl_block!(fs_chunk, vir_chunk, atoms, coords, velocities, boundary,
@@ -1316,7 +1322,7 @@ function forces!(fs,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
                                  inter_idx=i, strictness=strictness)
     end
-    distribute_forces!(fs, sys, buffers)
+    distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
     if needs_vir
         mark_interaction_virial!(buffers.validity, step_n)

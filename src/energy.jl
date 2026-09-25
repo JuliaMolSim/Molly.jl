@@ -341,7 +341,7 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
             Threads.@threads for chunk_i in 1:n_threads
                 pe_chunk = zero(TH)
                 while true
-                    block_start = Threads.atomic_add!(next_block_start, block_size)
+                    block_start = claim_block!(next_block_start, block_size)
                     block_start > n_neighbors && break
                     block_stop = min(block_start + block_size - 1, n_neighbors)
                     pe_chunk += pairwise_pe_nl_block(atoms, coords, velocities, boundary, neighbors,

@@ -19,6 +19,7 @@ export
     random_velocities!,
     bond_angle,
     torsion_angle,
+    momentum,
     remove_CM_motion!,
     pressure,
     scalar_pressure,
@@ -146,7 +147,7 @@ height/width.
 Setting the keyword argument `approx_images` to `false` means the exact closest
 image is found, which is slower.
 
-Not currently compatible with infinite boundaries.
+Not compatible with infinite boundaries.
 """
 struct TriclinicBoundary{D, T, C, A, I} <: AbstractBoundary{D, T, C}
     basis_vectors::SVector{3, SVector{3, C}}
@@ -834,33 +835,40 @@ function maxwell_boltzmann(atom_mass::Real, temp::Real,
 end
 
 """
-    random_velocities(sys, temp; rng=Random.default_rng())
+    random_velocities(sys, temp; rng=Random.default_rng(), remove_CM_motion=false)
 
 Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
 
 Virtual sites are given a velocity of zero.
+Setting `remove_CM_motion=true` removes the center of mass motion from the
+generated velocities with [`remove_CM_motion!`](@ref).
 """
-function random_velocities(sys::System, temp; rng=Random.default_rng())
-    random_velocities!(similar(sys.velocities), sys, temp; rng=rng)
+function random_velocities(sys::System, temp; rng=Random.default_rng(),
+                           remove_CM_motion::Bool=false)
+    random_velocities!(similar(sys.velocities), sys, temp; rng=rng,
+                       remove_CM_motion=remove_CM_motion)
 end
 
 """
-    random_velocities!(sys, temp; rng=Random.default_rng())
-    random_velocities!(vels, sys, temp; rng=Random.default_rng())
+    random_velocities!(sys, temp; rng=Random.default_rng(), remove_CM_motion=false)
+    random_velocities!(vels, sys, temp; rng=Random.default_rng(), remove_CM_motion=false)
 
 Set the velocities of a [`System`](@ref), or a vector, to random velocities
 generated from the Maxwell-Boltzmann distribution.
 
 Virtual sites are given a velocity of zero.
+Setting `remove_CM_motion=true` removes the center of mass motion from the
+generated velocities with [`remove_CM_motion!`](@ref).
 """
-function random_velocities!(sys, temp; rng=Random.default_rng())
-    random_velocities!(sys.velocities, sys, temp; rng=rng)
+function random_velocities!(sys, temp; rng=Random.default_rng(), remove_CM_motion::Bool=false)
+    random_velocities!(sys.velocities, sys, temp; rng=rng, remove_CM_motion=remove_CM_motion)
     return sys
 end
 
 function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::System{<:Any, <:Any, T},
-                            temp; rng=Random.default_rng()) where {D, C, T}
+                            temp; rng=Random.default_rng(),
+                            remove_CM_motion::Bool=false) where {D, C, T}
     ms = from_device(masses(sys))
     vsf = from_device(sys.virtual_site_flags)
     kT = sys.k * temp
@@ -871,11 +879,15 @@ function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::System{<:A
         scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
         vels[i] = randn_svec(SVector{D, T}, i%UInt64, ctr1, key, natoms) * scale
     end
+    if remove_CM_motion
+        remove_CM_motion!(vels, sys)
+    end
     return vels
 end
 
 function random_velocities!(vels::AbstractGPUArray, sys::System{<:Any, <:Any, T},
-                            temp; rng=Random.default_rng()) where T
+                            temp; rng=Random.default_rng(),
+                            remove_CM_motion::Bool=false) where T
     AT = array_type(vels)
     ms = to_device(sys.masses, AT)
     vsf = to_device(sys.virtual_site_flags, AT)
@@ -885,6 +897,9 @@ function random_velocities!(vels::AbstractGPUArray, sys::System{<:Any, <:Any, T}
     backend = get_backend(vels)
     kernel! = random_velocities_kernel!(backend)
     kernel!(vels, ms, kT, vsf, ctr1, key, Val(T); ndrange=length(vels))
+    if remove_CM_motion
+        remove_CM_motion!(vels, sys)
+    end
     return vels
 end
 
@@ -952,6 +967,16 @@ function torsion_vectors(coords_i, coords_j, coords_k, coords_l, boundary)
 end
 
 """
+    momentum(system)
+
+The total momentum of a [`System`](@ref).
+
+This is the sum over atoms of the velocity multiplied by the mass, and is close
+to zero when the center of mass motion is removed with [`remove_CM_motion!`](@ref).
+"""
+momentum(sys) = sum(sys.velocities .* masses(sys))
+
+"""
     remove_CM_motion!(system)
 
 Remove the center of mass motion from a [`System`](@ref).
@@ -966,33 +991,37 @@ of degrees of freedom that is used to calculate temperature assumes that the
 center of mass motion is removed.
 """
 function remove_CM_motion!(sys)
-    masses_cpu = from_device(masses(sys))
-    velocities_cpu = from_device(sys.velocities)
-    cm_momentum = zero(eltype(velocities_cpu)) .* zero(eltype(masses_cpu))
-    for i in eachindex(sys)
-        cm_momentum += velocities_cpu[i] * masses_cpu[i]
+    remove_CM_motion!(sys.velocities, sys)
+    return sys
+end
+
+function remove_CM_motion!(vels::AbstractVector, sys)
+    masses_cpu = masses(sys)
+    cm_momentum = zero(eltype(vels)) .* zero(eltype(masses_cpu))
+    for i in eachindex(vels)
+        cm_momentum += vels[i] * masses_cpu[i]
     end
     cm_velocity = cm_momentum / sys.total_mass
-    for i in eachindex(sys)
+    for i in eachindex(vels)
         if !sys.virtual_site_flags[i]
-            sys.velocities[i] -= cm_velocity
+            vels[i] -= cm_velocity
         end
     end
-    return sys
+    return vels
 end
 
 update_vel(v, cm_v, vsf) = (vsf ? zero(v) : v - cm_v)
 
-# The CUDA extension has a fast 3D CUDA path
-function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
-    cm_momentum = mapreduce((v, m) -> v .* m, +, sys.velocities, masses(sys))
+# The CUDA extension has a fast 3D CUDA path for `remove_CM_motion!(sys)`
+function remove_CM_motion!(vels::AbstractGPUArray, sys)
+    cm_momentum = mapreduce((v, m) -> v .* m, +, vels, masses(sys))
     cm_velocity = cm_momentum / sys.total_mass
     if isempty(sys.virtual_sites)
-        sys.velocities .-= (cm_velocity,)
+        vels .-= (cm_velocity,)
     else
-        sys.velocities .= update_vel.(sys.velocities, (cm_velocity,), sys.virtual_site_flags)
+        vels .= update_vel.(vels, (cm_velocity,), sys.virtual_site_flags)
     end
-    return sys
+    return vels
 end
 
 @doc raw"""
@@ -1237,23 +1266,38 @@ rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
 rebuild_boundary(b::RectangularBoundary, box) = RectangularBoundary(box)
 rebuild_boundary(b::TriclinicBoundary,   box) = TriclinicBoundary(box)
 
+# Check that the interaction cutoff still fits in the box after the boundary is changed,
+#   for example by a barostat
+function check_boundary_change(sys, strictness)
+    max_sqdist = max_zero_beyond(sys.pairwise_inters)
+    if !isnothing(max_sqdist) && !iszero(max_sqdist)
+        check_cutoff_box_size(sqrt(max_sqdist), sys.boundary, strictness; maxlog=1)
+    end
+    return nothing
+end
+
 """
     scale_coords!(sys::System{<:Any, AT}, μ::SMatrix{D,D};
                   rotate::Bool=true,
                   ignore_molecules::Bool=false,
-                  scale_velocities::Bool=false)
+                  scale_velocities::Bool=false,
+                  strictness=:warn)
 
 Rigid-molecular barostat update with optional rotation.
 
 - Box:        B′ = μ * B
 - Positions:  r′ = μ * r  (implemented via COM affine + optional rotation of internal offsets)
 - Velocities: v′ = μ⁻¹ * v  (applied when `scale_velocities=true`)
+
+A warning is given at most once if the new box is too small for the interaction
+cutoff distance.
 """
 function scale_coords!(sys::System{<:Any, AT, T},
                        μ_in::SMatrix{D, D};
                        rotate::Bool=true,
                        ignore_molecules::Bool=false,
-                       scale_velocities::Bool=false) where {AT, T, D}
+                       scale_velocities::Bool=false,
+                       strictness=default_strictness()) where {AT, T, D}
     # This function assumes that constrained atoms, and virtual sites and the atoms that
     #   define them, are in the same molecule, meaning that they are scaled appropriately
     if has_infinite_boundary(sys.boundary)
@@ -1275,6 +1319,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
         if scale_velocities
             sys.velocities .= to_device([μinv * v for v in from_device(sys.velocities)], AT)
         end
+        check_boundary_change(sys, strictness)
         return sys
     else
         # units and host copies
@@ -1351,6 +1396,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
             sys.velocities .= to_device(vels, AT)
         end
 
+        check_boundary_change(sys, strictness)
         return sys
     end
 end
