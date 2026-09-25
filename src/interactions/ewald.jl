@@ -52,15 +52,11 @@ function AtomsCalculators.energy_forces(sys::System,
     return (energy=pe, forces=fs)
 end
 
-# Atom types without an alchemical role keep their charge
-@inline effective_charge(scheduler, atom, ::Val{T}) where T = charge(atom)
-
 @inline function effective_charge(scheduler, atom::Atom, ::Val{T}) where T
     dual_val = scheduler.dual ? Val(true) : Val(false)
     λ, λR, λ_params = scale_elec(scheduler, T(atom.λ), atom.alch_role, dual_val)
     return λ * params_mixing(λ_params, atom.charge)
 end
-
 
 @inline function effective_charge(scheduler, atom::Atom, ::Val{T}, global_λ) where T
     dual_val = scheduler.dual ? Val(true) : Val(false)
@@ -359,7 +355,7 @@ is based on the smooth PME algorithm from
 Only compatible with 3D systems.
 Not compatible with infinite boundaries.
 """
-struct PME{T, D, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: AbstractEwald
+struct PME{T, D, A, I, M, BM, C, RG, CB, RB, VB, P, F, B, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     order::Int
@@ -378,7 +374,6 @@ struct PME{T, D, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: AbstractEw
     charge_grid_buffer::CB
     recip_conv_buffer::RB
     virial_buffer::VB
-    partial_charge_buffer::PB
     pc_sum::P
     pc_abs2_sum::P
     fft_plan::F
@@ -540,17 +535,14 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
         charge_grid_buffer = nothing
         recip_conv_buffer  = to_device(zeros(T, size(recip_grid)), AT)
         virial_buffer      = to_device(zeros(T, 3, 3), AT)
-        partial_charge_buffer = to_device(zeros(T, n_atoms), AT)
     elseif n_threads > 1
         charge_grid_buffer = [zeros(T, size(charge_grid)) for _ in 1:n_spread_threads(n_threads)]
         recip_conv_buffer = zeros(T, n_threads)
         virial_buffer = [zeros(T, 3, 3) for _ in 1:n_threads]
-        partial_charge_buffer = zeros(T, n_atoms)
     else
         charge_grid_buffer = nothing
         recip_conv_buffer = zeros(T, 1)
         virial_buffer = [zeros(T, 3, 3)]
-        partial_charge_buffer = zeros(T, n_atoms)
     end
 
     if fixed_charges && !grad_safe
@@ -579,7 +571,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
 
     return PME(dist_cutoff, error_tol_T, order, T(ϵr), α, mesh_dims, grid_indices, grid_fractions,
                bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z, charge_grid, recip_grid, charge_grid_buffer,
-               recip_conv_buffer, virial_buffer, partial_charge_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan,
+               recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan,
                scheduler, grad_safe)
 end
 
@@ -606,7 +598,6 @@ function Base.deepcopy(pme::PME)
     bsplines_moduli_x   = deepcopy(pme.bsplines_moduli_x)
     bsplines_moduli_y   = deepcopy(pme.bsplines_moduli_y)
     bsplines_moduli_z   = deepcopy(pme.bsplines_moduli_z)
-    partial_charge_buffer = deepcopy(pme.partial_charge_buffer)
 
     # Critical allocations: Main charge grid and working buffers
     charge_grid         = deepcopy(pme.charge_grid)
@@ -633,7 +624,7 @@ function Base.deepcopy(pme::PME)
         grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, 
         bsplines_moduli_x, bsplines_moduli_y, bsplines_moduli_z,
         charge_grid, recip_grid, charge_grid_buffer,
-        recip_conv_buffer, virial_buffer, partial_charge_buffer, pc_sum, pc_abs2_sum, 
+        recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, 
         fft_plan, bfft_plan, scheduler, grad_safe
     )
 end
@@ -663,7 +654,6 @@ function Base.zero(pme::PME)
         charge_grid_buffer,
         zero_or_nothing(pme.recip_conv_buffer),
         zero_or_nothing(pme.virial_buffer),
-        zero_or_nothing(pme.partial_charge_buffer),
         zero_or_nothing(pme.pc_sum),
         zero_or_nothing(pme.pc_abs2_sum),
         pme.fft_plan,
@@ -674,14 +664,14 @@ function Base.zero(pme::PME)
 end
 
 function ==(a::PME, b::PME)
-    return a.dist_cutoff    == b.dist_cutoff    &&
-           a.error_tol      == b.error_tol      &&
-           a.order          == b.order          &&
-           a.ϵr             == b.ϵr             &&
-           a.α              == b.α              &&
-           a.mesh_dims      == b.mesh_dims      &&
-           a.scheduler      == b.scheduler      &&
-           a.grad_safe      == b.grad_safe
+    return a.dist_cutoff == b.dist_cutoff &&
+           a.error_tol   == b.error_tol   &&
+           a.order       == b.order       &&
+           a.ϵr          == b.ϵr          &&
+           a.α           == b.α           &&
+           a.mesh_dims   == b.mesh_dims   &&
+           a.scheduler   == b.scheduler   &&
+           a.grad_safe   == b.grad_safe
 end
 
 function hash(a::PME, h::UInt)
