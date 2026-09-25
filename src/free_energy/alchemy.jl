@@ -43,7 +43,8 @@ struct EleScaledSchedule end
 
 """
     LambdaScheduler(schedule=DefaultSchedule(); dual=true, LJindividual=false,
-                    LJspecial=false, Cindividual=false, Cspecial=false, intraLJ=false)
+                    LJspecial=false, Cindividual=false, Cspecial=false, intraLJ=false,
+                    Tscaled=true)
 
 Turns `global_λ` into the couplings of the steric, electrostatic and bonded interactions of each
 alchemical role.
@@ -66,6 +67,10 @@ that is normally used instead: [`DefaultLambdaScheduler`](@ref), [`LinearLambdaS
 - `Cspecial=false`: the same choice for the Coulomb 1-4 interactions.
 - `intraLJ=false`: whether the Lennard-Jones interactions between alchemical atoms are kept on
     (`true`) or scaled with the atoms (`false`).
+- `Tscaled=true`: whether a torsion that spans core and unique atoms follows the core atom and is
+    scaled (`true`) or follows the unique atom and stays on at every `global_λ` (`false`). `false`
+    by default for [`OpenFEScheduler`](@ref), which does not scale these torsions, so that Molly
+    reproduces it exactly. Torsions of unique atoms only are never scaled either way.
 
 Coulomb interactions between alchemical atoms are always scaled with the atoms, as the PME mesh
 scales the charge of each atom.
@@ -78,15 +83,17 @@ struct LambdaScheduler{S}
     Cindividual::Bool
     Cspecial::Bool
     intraLJ::Bool
+    Tscaled::Bool
 end
 
-# OpenFE uses single topology with individually scaled Coulomb parameters
+# OpenFE uses single topology with individually scaled Coulomb parameters and does not scale the
+#   torsions that span core and unique atoms
 function LambdaScheduler(schedule=DefaultSchedule(); dual=!(schedule isa OpenFESchedule),
                          LJindividual=false, LJspecial=false,
                          Cindividual=(schedule isa OpenFESchedule), Cspecial=false,
-                         intraLJ=false)
+                         intraLJ=false, Tscaled=!(schedule isa OpenFESchedule))
     return LambdaScheduler(schedule, dual, LJindividual, LJspecial, Cindividual, Cspecial,
-                           intraLJ)
+                           intraLJ, Tscaled)
 end
 
 # Allows the aliases to be called like types, e.g. `DefaultLambdaScheduler(dual=false)`
@@ -94,7 +101,8 @@ LambdaScheduler{S}(; kwargs...) where {S} = LambdaScheduler(S(); kwargs...)
 
 """
     DefaultLambdaScheduler(; dual=true, LJindividual=false, LJspecial=false,
-                           Cindividual=false, Cspecial=false, intraLJ=false)
+                           Cindividual=false, Cspecial=false, intraLJ=false,
+                           Tscaled=true)
 
 Lambda scheduler that turns off the electrostatics of an atom before its sterics.
 
@@ -110,7 +118,8 @@ const DefaultLambdaScheduler = LambdaScheduler{DefaultSchedule}
 
 """
     LinearLambdaScheduler(; dual=true, LJindividual=false, LJspecial=false,
-                          Cindividual=false, Cspecial=false, intraLJ=false)
+                          Cindividual=false, Cspecial=false, intraLJ=false,
+                          Tscaled=true)
 
 Lambda scheduler that scales the electrostatics and sterics of all alchemical atoms linearly and
 at the same time, from `global_λ = 0` to `1`.
@@ -121,7 +130,8 @@ const LinearLambdaScheduler = LambdaScheduler{LinearSchedule}
 
 """
     GROMACSLambdaABFEScheduler(; dual=true, LJindividual=false, LJspecial=false,
-                               Cindividual=false, Cspecial=false, intraLJ=false)
+                               Cindividual=false, Cspecial=false, intraLJ=false,
+                               Tscaled=true)
 
 Lambda scheduler for absolute free energy calculations, following GROMACS.
 
@@ -138,7 +148,8 @@ const GROMACSLambdaABFEScheduler = LambdaScheduler{GROMACSABFESchedule}
 
 """
     GROMACSLambdaRBFEScheduler(; dual=true, LJindividual=false, LJspecial=false,
-                               Cindividual=false, Cspecial=false, intraLJ=false)
+                               Cindividual=false, Cspecial=false, intraLJ=false,
+                               Tscaled=true)
 
 Lambda scheduler for relative free energy calculations, following GROMACS.
 
@@ -152,7 +163,8 @@ const GROMACSLambdaRBFEScheduler = LambdaScheduler{GROMACSRBFESchedule}
 
 """
     OpenFEScheduler(; dual=false, LJindividual=false, LJspecial=false,
-                    Cindividual=true, Cspecial=false, intraLJ=false)
+                    Cindividual=true, Cspecial=false, intraLJ=false,
+                    Tscaled=false)
 
 Lambda scheduler that reproduces the relative free energy setup of
 [OpenFE](https://github.com/OpenFreeEnergy/openfe).
@@ -169,7 +181,8 @@ const OpenFEScheduler = LambdaScheduler{OpenFESchedule}
 
 """
     NAMDLambdaScheduler(; dual=true, LJindividual=false, LJspecial=false,
-                        Cindividual=false, Cspecial=false, intraLJ=false)
+                        Cindividual=false, Cspecial=false, intraLJ=false,
+                        Tscaled=true)
 
 Lambda scheduler with overlapping electrostatic and steric stages, similar to the separate
 electrostatic and van der Waals windows in NAMD.
@@ -185,7 +198,8 @@ const NAMDLambdaScheduler = LambdaScheduler{NAMDSchedule}
 
 """
     QuartersLambdaScheduler(; dual=true, LJindividual=false, LJspecial=false,
-                            Cindividual=false, Cspecial=false, intraLJ=false)
+                            Cindividual=false, Cspecial=false, intraLJ=false,
+                            Tscaled=true)
 
 Lambda scheduler that removes the atoms of the first state before adding the atoms of the second
 state.
@@ -201,7 +215,8 @@ const QuartersLambdaScheduler = LambdaScheduler{QuartersSchedule}
 
 """
     EleScaledLambdaScheduler(; dual=true, LJindividual=false, LJspecial=false,
-                             Cindividual=false, Cspecial=false, intraLJ=false)
+                             Cindividual=false, Cspecial=false, intraLJ=false,
+                             Tscaled=true)
 
 Lambda scheduler with the stages of [`DefaultLambdaScheduler`](@ref) and a non-linear
 electrostatic coupling.
@@ -293,7 +308,7 @@ end
 # `torsion=true` for the torsions, see `mix_torsion`
 @inline function mix_roles(inter::Any, roles::Tuple{Vararg{AlchemicalRole}}; lj=false,
                            torsion=false)
-    if torsion
+    if torsion && inter.Tscaled
         return mix_torsion(roles)
     elseif lj && inter.intraLJ
         return mix_special(roles)
@@ -330,7 +345,7 @@ end
     # A torsion that follows a core atom is scaled in its force already, so its virial needs no
     #   second factor. The terms that are not scaled, those of the dummy atoms only, get the
     #   weight of the end state they belong to here.
-    if is_torsion(inter) && mix_torsion(roles) != EnvRole
+    if is_torsion(inter) && inter.scheduler.Tscaled && mix_torsion(roles) != EnvRole
         return one(λ_glob)
     end
     return scale_virial_dual(inter.scheduler, λ_glob, mix_default(roles))
