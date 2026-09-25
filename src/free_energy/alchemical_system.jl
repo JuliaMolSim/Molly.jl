@@ -242,9 +242,10 @@ function random_velocity_or_zero(mass, temp)
     return iszero(mass) ? zero(random_velocity(oneunit(mass), temp)) : random_velocity(mass, temp)
 end
 
-remap_virtual_site(v::VirtualSite, m) = VirtualSite(v.type, m(v.atom_ind), m(v.atom_1),
+remap_virtual_site(v::VirtualSite, m, m_ind=m) = VirtualSite(v.type, m_ind(v.atom_ind), m(v.atom_1),
         (v.atom_2 == 0 ? 0 : m(v.atom_2)), (v.atom_3 == 0 ? 0 : m(v.atom_3)), v.weight_1,
-        v.weight_2, v.weight_3, v.weight_12, v.weight_13, v.weight_cross)
+        v.weight_2, v.weight_3, v.weight_12, v.weight_13, v.weight_cross, v.local_weights,
+        v.local_position)
 
 function alchemical_system(sys_ref, atoms, coords, data, boundary, temp; kwargs...)
     AT = array_type(sys_ref)
@@ -456,7 +457,18 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     Atoms        = []
     Virtual      = []
     vsA          = from_device(sysA.virtual_sites)
+    vsB_all      = from_device(sysB.virtual_sites)
+    vs_inds_A    = Set(v.atom_ind for v in vsA)
+    vs_inds_B    = Set(v.atom_ind for v in vsB_all)
     weight_cross = (isempty(vsA) ? 0.0u"nm^-1" : zero(first(vsA).weight_cross))
+    # A core atom that is a virtual site in one end state has to be one in the other, since the
+    #   copies of a core atom share their position
+    for i in mapping["core"]
+        if (i in vs_inds_A) != (core_mapAB[i] in vs_inds_B)
+            throw(ArgumentError("core atom $i of system A is a virtual site in only one of the " *
+                "end states, make it a unique atom of both instead"))
+        end
+    end
     Data         = []
     Coords       = []
     Interactions = []
@@ -496,7 +508,10 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
 
             push!(Atoms, Atom(index=counter, atom_type=aB.atom_type, mass=(units ? FT(0.0)u"g/mol" : FT(0.0)), charge=aB.charge, σ=aB.σ, ϵ=aB.ϵ, 
                                                 λ=FT(global_λ), alch_role=CoreIRole))
-            push!(Virtual, OneParticleSite(counter, counter-1, weight_cross))
+            # A core virtual site keeps the definition it has in system B, added below
+            if !(core_mapAB[i] in vs_inds_B)
+                push!(Virtual, OneParticleSite(counter, counter-1, weight_cross))
+            end
             push!(Data, AtomData(atom_type=dB.atom_type, atom_name=dB.atom_name, res_number=dB.res_number,
                                         res_name=dB.res_name, chain_id=dB.chain_id, element=dB.element, hetero_atom=dB.hetero_atom))
             push!(Coords, zero(cB))
@@ -836,8 +851,10 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     map_B_real(i) = (haskey(core_mapBA, i) ? mapping_A[core_mapBA[i]] : map_B(i))
     unique_B = Set(mapping["unique_B"])
     vsA = [remap_virtual_site(v, map_A) for v in vsA]
-    vsB = [remap_virtual_site(v, map_B_real) for v in from_device(sysB.virtual_sites)
-           if v.atom_ind in unique_B]
+    # The site of a core atom of B is placed relative to the A copies of its atoms, which are the
+    #   real ones and lie at the same positions as the B copies
+    vsB = [remap_virtual_site(v, map_B_real, map_B) for v in vsB_all
+           if v.atom_ind in unique_B || (scheduler.dual && haskey(core_mapBA, v.atom_ind))]
     virtual_sites = [vsA..., vsB..., Virtual...]
 
     # Constraints of system A + unique constraints of system B.

@@ -2,12 +2,12 @@
 
 # Struct to carry the information necessary to represent the residue templates
 #   defined in the force field XML files
-struct ResidueTemplate{T, IC}
+struct ResidueTemplate{T, IC, P}
     name::String
     atoms::Vector{String}
     elements::Vector{Symbol}
     types::Vector{String}
-    virtual_sites::Vector{VirtualSiteTemplate{T, IC}}
+    virtual_sites::Vector{VirtualSiteTemplate{T, IC, P}}
     bonds::Vector{Tuple{Int, Int}}
     external_bonds::Vector{Int} # Count of external connections per atom
     allowed_patches::Vector{String}

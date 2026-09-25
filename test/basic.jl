@@ -1481,3 +1481,117 @@ end
         end
     end
 end
+
+@testset "Local coordinates virtual site" begin
+    wo, wx, wy = (1.0, 0.0, 0.0), (1.0, -1.0, 0.0), (0.0, -1.0, 1.0)
+    p_coli = SVector(0.164, 0.0, 0.0)
+    @test_throws ArgumentError LocalCoordinatesSite(4, 1, 2, 3, (1.0, 0.1, 0.0), wx, wy, p_coli)
+    @test_throws ArgumentError LocalCoordinatesSite(4, 1, 2, 3, wo, (1.0, -0.5, 0.0), wy, p_coli)
+    @test_throws ArgumentError LocalCoordinatesSite(4, 1, 2, 3, wo, wx, (0.0, 0.0, 1.0), p_coli)
+
+    # 1 Cl, 2 C, 3 C (the frame), 4 the site, 5 a charged probe. The frame atoms and the site are
+    #   excluded from each other as they would be in a molecule, so the numbers are not dominated by
+    #   a clashing Lennard-Jones pair. The reference values are from OpenMM for the same
+    #   LocalCoordinatesSite, see claude_fe/scripts/claude_test_localcoords_openmm.py; OpenMM leaves
+    #   the force of a site in place after distributing it, where Molly zeroes it, so the reference
+    #   force and acceleration of the site are zero here
+    site_defs = ((wo, wx, wy, p_coli),                                       # a CHARMM lone pair
+                 ((0.5, 0.3, 0.2), (1.0, -0.5, -0.5), wy,                    # all three axes in use
+                  SVector(0.05, 0.03, -0.02)))
+
+    for AT in array_list, units in (false, true), (n, (wo_s, wx_s, wy_s, p)) in enumerate(site_defs)
+        if units
+            LU, MU, EU, FU, CU, AU = u"nm", u"g/mol", u"kJ * mol^-1", u"kJ * mol^-1 * nm^-1",
+                                     u"q", u"nm * ps^-2"
+        else
+            LU, MU, EU, FU, CU, AU = NoUnits, NoUnits, NoUnits, NoUnits, NoUnits, NoUnits
+        end
+        masses = [35.45, 12.011, 12.011, 0.0, 12.011]
+        charges = [-0.187, -0.05, -0.1, 0.05, 0.6]
+        atom_masses = to_device(masses * MU, AT)
+        atoms = to_device([Atom(mass=(masses[i] * MU), charge=(charges[i] * CU), σ=(0.3 * LU),
+                                ϵ=((i == 4 ? 0.0 : 0.5) * EU)) for i in 1:5], AT)
+        eligible = trues(5, 5)
+        for i in 1:4, j in 1:4 # the frame atoms and the site do not interact
+            eligible[i, j] = false
+        end
+        sys = System(
+            atoms=atoms,
+            coords=to_device([SVector(1.4387, 1.2, 1.2), SVector(1.27, 1.21, 1.19),
+                              SVector(1.21, 1.34, 1.16), SVector(0.0, 0.0, 0.0),
+                              SVector(1.8, 1.5, 1.35)] * LU, AT),
+            boundary=CubicBoundary(5.0 * LU),
+            pairwise_inters=(LennardJones(use_neighbors=true),
+                             Coulomb(use_neighbors=true,
+                                     coulomb_const=(138.93545764498467 * EU * LU / CU^2))),
+            virtual_sites=to_device(
+                [LocalCoordinatesSite(4, 1, 2, 3, wo_s, wx_s, wy_s, p * LU)], AT),
+            neighbor_finder=DistanceNeighborFinder(eligible=to_device(eligible, AT),
+                                                  dist_cutoff=(Inf * LU)),
+            force_units=FU,
+            energy_units=EU,
+        )
+        @test only(from_device(sys.virtual_sites)).type == 5
+        @test Molly.setup_virtual_sites(sys.virtual_sites, atom_masses, (), AT, 3) ==
+              to_device(BitVector([0, 0, 0, 1, 0]), AT)
+
+        place_virtual_sites!(sys)
+        if n == 1
+        coords_true = to_device([
+            SVector(1.4387, 1.2, 1.2),
+            SVector(1.27, 1.21, 1.19),
+            SVector(1.21, 1.34, 1.16),
+            SVector(1.6021267658902019, 1.1903125805637105, 1.2096874194362894),
+            SVector(1.8, 1.5, 1.35),
+        ] * LU, AT)
+        fs_true = to_device([
+            SVector(33.51980355091106, -2.771480452196368, 1.673093742693272),
+            SVector(9.99643693755027, 26.332535216115925, 11.36398428945213),
+            SVector(18.9272823675432, 5.1328223369608645, 6.095226525141035),
+            SVector(0.0, 0.0, 0.0),
+            SVector(-62.44352285600451, -28.69387710088042, -19.132304557286435),
+        ] * FU, AT)
+        accels_true = to_device([
+            SVector(0.9455515811258407, -0.07817998454714718, 0.047195874264972404),
+            SVector(0.8322734940929373, 2.1923682637678734, 0.9461314036676489),
+            SVector(1.5758290206929648, 0.42734346323876987, 0.50747036259604),
+            SVector(0.0, 0.0, 0.0),
+            SVector(-5.19886128182537, -2.3889665390792127, -1.5928985560974471),
+        ] * AU, AT)
+        E_true = -40.8576806132775 * EU
+        else
+        coords_true = to_device([
+            SVector(1.4387, 1.2, 1.2),
+            SVector(1.27, 1.21, 1.19),
+            SVector(1.21, 1.34, 1.16),
+            SVector(1.4007295987388828, 1.2367910763992112, 1.1700715588273738),
+            SVector(1.8, 1.5, 1.35),
+        ] * LU, AT)
+        fs_true = to_device([
+            SVector(41.31536600272594, 33.512688792377425, 12.92309196856777),
+            SVector(5.44575709898284, 4.474724236660739, 7.1942570393572245),
+            SVector(16.75497551838575, 3.686334129404019, 3.000003433282341),
+            SVector(0.0, 0.0, 0.0),
+            SVector(-63.51609862009453, -41.67374715844218, -23.117352441207334),
+        ] * FU, AT)
+        accels_true = to_device([
+            SVector(1.1654546122066554, 0.9453508827186861, 0.36454420221629813),
+            SVector(0.4533974772277779, 0.37255218022319037, 0.5989723619479831),
+            SVector(1.3949692380639205, 0.3069131737077695, 0.2497713290552278),
+            SVector(0.0, 0.0, 0.0),
+            SVector(-5.288160737665018, -3.469631767416717, -1.924681745167541),
+        ] * AU, AT)
+        E_true = -43.2957221691371 * EU
+        end
+        @test maximum(norm, from_device(sys.coords) .- from_device(coords_true)) < (1e-10 * LU)
+        @test isapprox(potential_energy(sys), E_true; atol=(1e-9 * EU))
+
+        fs = forces(sys)
+        @test maximum(norm, from_device(fs) .- from_device(fs_true)) < (1e-9 * FU)
+        @test iszero(from_device(fs)[4]) # distributed onto the frame atoms
+        @test norm(sum(from_device(fs))) < (1e-10 * FU)
+
+        accels = Molly.calc_accels.(fs, atom_masses)
+        @test maximum(norm, from_device(accels) .- from_device(accels_true)) < (1e-10 * AU)
+    end
+end

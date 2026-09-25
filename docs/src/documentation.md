@@ -1408,7 +1408,7 @@ During supported constrained simulations, Molly can add constraint contributions
 For the initial simulation step, the same preview convention is used so that interactions and constraints both contribute to the logged virial/pressure.
 If a coordinate-scaling coupling method changes the box on a constrained step, virial and pressure loggers record the pre-coupling virial/pressure for that step, matching the state used by the coupling method.
 Other state loggers, such as [`BoxLogger`](@ref), continue to record the current post-coupling state.
-The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
+The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref) and [`LocalCoordinatesSite`](@ref).
 As described previously, custom general interactions should implement virial calculation if required.
 
 ## Loggers
@@ -1742,6 +1742,7 @@ Molly allows virtual sites to be defined in the following ways:
 - [`TwoParticleAverageSite`](@ref): defined by the weighted average of the coordinates of two atoms.
 - [`ThreeParticleAverageSite`](@ref): defined by the weighted average of the coordinates of three atoms.
 - [`OutOfPlaneSite`](@ref): defined by the weighted average of the coordinates of three atoms and the cross product of their relative displacements.
+- [`LocalCoordinatesSite`](@ref): defined by a position in a local coordinate system given by three atoms, matching the site of the same name in OpenMM. This places a site at a fixed distance and orientation whatever the bond lengths are, as used for the lone pairs of a CHARMM force field.
 
 Virtual sites should have an entry in the atom, coordinate and velocity arrays.
 They can be involved in any interaction type, with the forces being distributed back to the parent atoms automatically after all forces have been calculated.
@@ -1749,7 +1750,7 @@ They can be involved in any interaction type, with the forces being distributed 
 They share all the non-bonded exclusions of, and are excluded from, their parent atoms.
 The parent atoms must not be virtual sites themselves.
 They cannot participate in constraints.
-Virtual sites apart from [`OutOfPlaneSite`](@ref) are compatible with virial calculation.
+Virtual sites apart from [`OutOfPlaneSite`](@ref) and [`LocalCoordinatesSite`](@ref) are compatible with virial calculation, since the coordinates of the other sites are linear in the coordinates of their parent atoms.
 
 A virtual site can be set up manually, for example for a molecule of TIP4P water:
 ```julia

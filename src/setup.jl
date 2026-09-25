@@ -156,7 +156,8 @@ chemfiles_name(top, ai) = Chemfiles.name(chemfiles_atom(top, ai))
 # Creates a Dict representation of the system Chains -> Residues -> Graphs
 # It is useful to have all the necessary data in one hashable object
 # It also ensures that the correct names are used for downstream template matching
-function canonicalize_system(top, resname_replacements, atomname_replacements)
+function canonicalize_system(top, resname_replacements, atomname_replacements,
+                             extra_particle_names, strictness)
     canon_system = Dict{String, Dict{Int, ResidueGraph}}()
     if iszero(Chemfiles.count_residues(top))
         # Chemfiles does not assign residues for file types like SDF
@@ -203,6 +204,12 @@ function canonicalize_system(top, resname_replacements, atomname_replacements)
                 end
             end
             if iszero(an) # Extra particle returns 0 from chemfiles
+                atom_elements[li] = :X
+            elseif atom_name in extra_particle_names
+                # A site named like an element, e.g. V, would otherwise be read as vanadium
+                report_issue("atom $atom_name is read as an extra particle, since its type in " *
+                             "the force field has zero mass and no element, rather than as " *
+                             "element $(PeriodicTable.elements[an].symbol)", strictness; maxlog=1)
                 atom_elements[li] = :X
             else
                 atom_elements[li] = Symbol(PeriodicTable.elements[an].symbol)
@@ -400,8 +407,8 @@ function atom_name_to_global_i(atom_name, template_atoms, rgraph_atom_inds, matc
     return rgraph_atom_inds[findfirst(isequal(atom_name_ind), matches)]
 end
 
-function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T}}, template, rgraph,
-                            matches) where T
+function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T, <:Any, P}}, template, rgraph,
+                            matches) where {T, P}
     for vst in template.virtual_sites
         atom_ind = atom_name_to_global_i(vst.name       , template.atoms, rgraph.atom_inds, matches)
         atom_1   = atom_name_to_global_i(vst.atom_name_1, template.atoms, rgraph.atom_inds, matches)
@@ -417,7 +424,7 @@ function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T}}, template, r
         end
         vs = VirtualSite(vst.type, atom_ind, atom_1, atom_2, atom_3, T(vst.weight_1),
                          T(vst.weight_2), T(vst.weight_3), T(vst.weight_12), T(vst.weight_13),
-                         T(vst.weight_cross))
+                         T(vst.weight_cross), T.(vst.local_weights), P.(vst.local_position))
         push!(virtual_sites, vs)
     end
     return virtual_sites
@@ -681,8 +688,13 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
+    # Atom names the force field gives zero mass and no element, so that a virtual site is read as
+    #   an extra particle even when it is named like an element
+    extra_particle_names = Set(tpl.atoms[j] for tpl in values(force_field.residues)
+                               for j in eachindex(tpl.atoms) if tpl.extras[j] &&
+                               iszero_value(force_field.atom_types[tpl.types[j]].mass))
     canonical_system, assume_one_res = canonicalize_system(top, resname_replacements,
-                                                                    atomname_replacements)
+                                            atomname_replacements, extra_particle_names, strictness)
 
     atom_lookup = build_atom_residue_lookup(canonical_system)
 
@@ -706,7 +718,7 @@ function System(coord_file::AbstractString,
     atom_type_index = Dict{String, Int}(at => i
                                         for (i, at) in enumerate(force_field.atom_type_order))
 
-    virtual_sites = VirtualSite{T, IC}[]
+    virtual_sites = VirtualSite{T, IC, typeof(inv(oneunit(IC)))}[]
     # Identical residues, e.g. the water molecules in a solvated system, match the same
     #   template so the search is only carried out once for each distinct residue
     match_cache = Dict{ResidueMatchKey, Tuple{Union{ResidueTemplate, Nothing},
@@ -892,11 +904,11 @@ function System(coord_file::AbstractString,
         end
     end
 
-    # Virtual sites share all the non-bonded exclusions of, and are excluded from,
-    #   their parent atoms
+    # A virtual site shares the non-bonded exclusions of, and is excluded from, the first atom it
+    #   is defined by, which is what OpenMM does with the default of its `excludeWith` attribute
     for vs in virtual_sites
         i = vs.atom_ind
-        for j in (vs.atom_1, vs.atom_2, vs.atom_3)
+        for j in (vs.atom_1,)
             if !iszero(j)
                 for k in 1:n_atoms
                     if !eligible[j, k]

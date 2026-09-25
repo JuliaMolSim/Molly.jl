@@ -499,6 +499,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                       torsion_rule_specs, cmap_rules, custor_rule_specs, nb_atom_classes,
                       ljforce_atom_classes, nbfix_pairs, urey_rule_specs, units, strictness,
                       T, IC)
+    P = typeof(inv(oneunit(IC))) # Length type of a virtual site local position
     if !isfile(ff_file)
         throw(ArgumentError("force field XML file $ff_file does not exist"))
     end
@@ -550,7 +551,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 atoms, types = String[], String[]
                 charges = Union{T, Missing}[]
                 elements = Symbol[]
-                virtual_sites = VirtualSiteTemplate{T, IC}[]
+                virtual_sites = VirtualSiteTemplate{T, IC, P}[]
                 external_bonds_name = String[]
                 externals = Int[]
                 allowed_patches = String[]
@@ -605,6 +606,17 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         push!(allowed_patches, xml_attr(re, "name", ff_file))
                     elseif re.name == "VirtualSite"
                         vs_type = xml_attr(re, "type", ff_file)
+                        # A virtual site shares the exclusions of the first atom it is defined by,
+                        #   which is the default of OpenMM's `excludeWith`; another atom is not
+                        #   supported, so the exclusions would be wrong
+                        if haskey(re, "excludeWith")
+                            report_issue(
+                                "Virtual site attribute excludeWith is not supported, the " *
+                                "exclusions of the first atom of the site are used",
+                                strictness;
+                                error_type=ForceFieldXMLError,
+                            )
+                        end
                         if haskey(re, "siteName")
                             vs_name = re["siteName"]
                         else
@@ -655,11 +667,29 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                                     weight_13, weight_cross)
                             push!(virtual_sites, vs)
                         elseif vs_type == "localCoords"
-                            report_issue(
-                                "Virtual site type $vs_type not supported, ignoring",
-                                strictness;
-                                error_type=ForceFieldXMLError,
-                            )
+                            if haskey(re, "atomName3")
+                                atom_name_3 = re["atomName3"]
+                            else
+                                atom_name_3 = atoms[parse_attr(Int, re, "atom3", ff_file) + 1]
+                            end
+                            # OpenMM allows any number of atoms, Molly supports three
+                            if haskey(re, "wo4") || !haskey(re, "wo3")
+                                throw(ForceFieldXMLError("virtual site $vs_name of residue " *
+                                    "$rname is a localCoords site, which is only supported " *
+                                    "with three atoms in Molly"))
+                            end
+                            origin_weights = ntuple(i -> parse_attr(T, re, "wo$i", ff_file), 3)
+                            x_weights = ntuple(i -> parse_attr(T, re, "wx$i", ff_file), 3)
+                            y_weights = ntuple(i -> parse_attr(T, re, "wy$i", ff_file), 3)
+                            check_local_weights(origin_weights, x_weights, y_weights,
+                                                ForceFieldXMLError)
+                            local_position = SVector{3}(ntuple(
+                                i -> add_units(parse_attr(T, re, "p$i", ff_file), u"nm", units), 3))
+                            vs = VirtualSiteTemplate(5, vs_name, atom_name_1, atom_name_2,
+                                    atom_name_3, zero(T), zero(T), zero(T), zero(T), zero(T),
+                                    zero(IC), SVector{9}(origin_weights..., x_weights...,
+                                    y_weights...), local_position)
+                            push!(virtual_sites, vs)
                         else
                             report_issue(
                                 "Unrecognised virtual site type $vs_type, ignoring",
@@ -1130,7 +1160,7 @@ Failures when reading in force field XML files throw a `ForceFieldXMLError` exce
 struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
     atom_type_order::Vector{String}
-    residues::Dict{String, ResidueTemplate{T, C}}
+    residues::Dict{String, ResidueTemplate{T, C, D}}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
