@@ -623,8 +623,8 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys; n_threads=n_threads)
 
-        forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t_dt, sys, neighbors, step_n, buffers, needs_vir_step;
+                    n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .+= accels_t_dt .* dt_div2
@@ -802,8 +802,8 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
                                         strictness=strictness)
         end
-        forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t_dt, sys, neighbors, step_n, buffers, needs_vir_step;
+                    n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .= velocities_half .+ accels_t_dt .* dt_div2
@@ -1040,8 +1040,8 @@ end
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
-        forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step;
+                    n_threads=n_threads, strictness=strictness)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         coords_copy .= sys.coords
@@ -1178,11 +1178,12 @@ end
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
 
+
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
-        forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step;
+                    n_threads=n_threads, strictness=strictness)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         sys.velocities .+= accels_t .* sim.dt
@@ -1498,8 +1499,8 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
-                strictness=strictness)
+        forces_step!(forces_t, sys, neighbors, step_n, buffers, false;
+                    n_threads=n_threads, strictness=strictness)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         random_velocities!(noise, sys, sim.temperature; rng=rng)
@@ -1622,8 +1623,8 @@ end
         T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
-        forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+        forces_step!(forces_t_dt, sys, neighbors, step_n, buffers, needs_vir_step;
+                    n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .= (v_half .+ accels_t_dt .* dt_div2) ./

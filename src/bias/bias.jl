@@ -232,11 +232,39 @@ gradient functions.
 Enzyme should be imported in the first case.
 
 Virial contributions must be explicitly defined.
+
+CV computation runs fully on the GPU when the `System` is GPU-resident, with no host transfer of
+coordinates, atoms or forces, including `cv_type.correction = :pbc` (the default for the built-in
+CV types), which unwraps bonded molecules across the periodic boundary using a GPU-native
+spanning-forest traversal.
 """
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
+    uses_persistent_buffers::Bool   # set at construction, see uses_builtin_cv_gradient!
 end
+
+function BiasPotential(cv_type::C, bias_type::B) where {C, B}
+    return BiasPotential{C, B}(cv_type, bias_type, uses_builtin_cv_gradient!(cv_type))
+end
+
+# Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch/
+# extremal_cache GPU-only fused-kernel state). One per bias in buffers.bias_scratch (force.jl).
+mutable struct BiasScratch
+    grad::Any
+    d_buf::Any
+    fs_svec::Any
+    dist_scratch::Any
+    extremal_cache::Any
+end
+
+BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing, nothing)
+
+# Locate bias's BiasScratch by inter_idx (position in sys.general_inters). Falls back to a
+# fresh throwaway BiasScratch when buffers is nothing (a bare, bufferless call) -- no reuse
+# across calls in that case, matching pre-persistent-buffer behaviour.
+bias_scratch(buffers, inter_idx) = buffers.bias_scratch[inter_idx]::BiasScratch
+bias_scratch(::Nothing, inter_idx) = BiasScratch()
 
 bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)
 bias_all_finite(value) = isfinite(ustrip(value))
@@ -262,21 +290,127 @@ bias_max_abs_ustrip(value) = abs(ustrip(value))
     error(msg)
 end
 
-function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
-    if bias.cv_type.correction == :pbc
-        coords = unwrap_molecules(sys)
-    else
-        coords = sys.coords
+# Coordinates a BiasPotential should use, unwrapped for correction==:pbc. With buffers/step_n,
+# routes through the shared once-per-step unwrap cache (ensure_unwrapped_coords!, force.jl)
+# instead of recomputing per bias.
+function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
+    cv_type.correction != :pbc && return sys.coords
+    if !isnothing(buffers) && !isnothing(step_n) && hasproperty(buffers, :unwrapped_coords)
+        return ensure_unwrapped_coords!(buffers, sys, step_n)
     end
+    return unwrap_molecules(sys)
+end
 
-    cv_sim = calculate_cv(
-        bias.cv_type,
-        from_device(coords),
-        from_device(sys.atoms),
-        sys.boundary,
-        from_device(sys.velocities);
-        kwargs...,
-    )
+bias_needs_unwrap(b::BiasPotential) = b.cv_type.correction == :pbc
+
+# Lazily allocates scratch.grad/scratch.d_buf. Only reached when bias.uses_persistent_buffers
+# is true (a CV type with a real cv_gradient!/calculate_cv! -- see uses_builtin_cv_gradient! in
+# cv.jl).
+function ensure_bias_buffers!(scratch::BiasScratch, cv_type, coords)
+    if scratch.grad === nothing
+        scratch.grad, scratch.d_buf = zero_cv_gradient_buffers(cv_type, coords)
+    end
+    return nothing
+end
+
+# Uploads a host index Vector to the device once, avoiding the per-call re-upload that
+# `@view coords[cv.atom_inds_1]` would otherwise do on every call (see MinMaxScratch's
+# docstring, cv.jl).
+function upload_idx(coords, inds::Vector{Int})
+    idx_dev = similar(coords, Int, length(inds))
+    copyto!(idx_dev, inds)
+    return idx_dev
+end
+
+function bias_dist_scratch_types(coords, atoms)
+    CT = eltype(coords)
+    MT = fieldtype(eltype(atoms), :mass)
+    WT = typeof(zero(CT) * zero(MT))
+    IT = typeof(sum_abs2(zero(CT)) * zero(MT))
+    return CT, MT, WT, IT
+end
+
+# Lazily allocates CV-type-specific fused-kernel scratch. extremal_cache (CalcMinDist/
+# CalcMaxDist) is allocated on both backends (small virial-reuse cache); dist_scratch's
+# actual device-sized buffers are GPU-only.
+function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
+    if cv isa CalcDist{<:Union{CalcMinDist, CalcMaxDist}} && scratch.extremal_cache === nothing
+        scratch.extremal_cache = ExtremalPairCache(false, 0, 0, nothing, nothing)
+        if is_gpu_resident(coords)
+            idx1_dev, idx2_dev = upload_idx(coords, cv.atom_inds_1), upload_idx(coords, cv.atom_inds_2)
+            na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
+            # T caps kernel worker count at MINDIST_TILE_CAP regardless of na*nb -- see
+            # MinMaxScratch's docstring (cv.jl).
+            T = min(na * nb, MINDIST_TILE_CAP)
+            scratch.dist_scratch = MinMaxScratch(
+                idx1_dev,
+                idx2_dev,
+                similar(coords, eltype(eltype(coords)), T),
+                similar(coords, Int, T),
+                similar(coords, Int, T),
+                similar(coords, T),
+                similar(coords, Int, 1),
+                similar(coords, Int, 1),
+                similar(coords, 1),
+            )
+        end
+    elseif cv isa CalcDist{CalcCMDist} && scratch.dist_scratch === nothing && is_gpu_resident(coords)
+        na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
+        T1, T2 = min(na, 1024), min(nb, 1024)
+        CT, MT, WT, _ = bias_dist_scratch_types(coords, atoms)
+        DT = typeof(zero(CT) / oneunit(eltype(CT))) # unit-stripped direction vector
+        scratch.dist_scratch = CMDistScratch(
+            upload_idx(coords, cv.atom_inds_1), upload_idx(coords, cv.atom_inds_2),
+            similar(coords, MT, T1), similar(coords, WT, T1),
+            similar(coords, MT, T2), similar(coords, WT, T2),
+            similar(coords, DT, 1),
+            similar(coords, MT, 1), similar(coords, MT, 1),
+        )
+    elseif cv isa CalcRg && scratch.dist_scratch === nothing && is_gpu_resident(coords)
+        inds = iszero(length(cv.atom_inds)) ? collect(1:length(coords)) : cv.atom_inds
+        n = length(inds)
+        T = min(n, RG_TILE_CAP)
+        CT, MT, WT, IT = bias_dist_scratch_types(coords, atoms)
+        scratch.dist_scratch = RgScratch(
+            upload_idx(coords, inds),
+            similar(coords, MT, T), similar(coords, WT, T),
+            similar(coords, IT, T),
+            similar(coords, CT, 1), similar(coords, MT, 1),
+        )
+    elseif cv isa CalcRMSD && scratch.dist_scratch === nothing && is_gpu_resident(coords)
+        inds = iszero(length(cv.atom_inds)) ? collect(1:length(coords)) : cv.atom_inds
+        ref_inds = iszero(length(cv.ref_atom_inds)) ? collect(1:length(cv.ref_coords)) : cv.ref_atom_inds
+        ref_coords_used = cv.ref_coords[ref_inds]
+        # cv.ref_coords never changes after construction, so its Kabsch-centered form is computed
+        # once here rather than on every cv_gradient!/calculate_cv! call (RmsdScratch docstring, cv.jl).
+        n = length(inds)
+        T = min(n, RMSD_TILE_CAP)
+        _, _, _, IT = bias_dist_scratch_types(coords, atoms)
+        scratch.dist_scratch = RmsdScratch(upload_idx(coords, inds), similar(coords, length(inds)),
+                                           ref_coords_used, kabsch_centered(ref_coords_used),
+                                           similar(coords, IT, T))
+    end
+    return nothing
+end
+
+function AtomsCalculators.potential_energy(
+    sys, bias::BiasPotential;
+    buffers = nothing,
+    inter_idx = nothing,
+    kwargs...
+)
+    coords = bias_coords(sys, bias.cv_type)
+    scratch = bias_scratch(buffers, inter_idx)
+
+    if bias.uses_persistent_buffers
+        ensure_bias_buffers!(scratch, bias.cv_type, coords)
+        ensure_bias_dist_scratch!(scratch, bias.cv_type, coords, sys.atoms)
+        calculate_cv_buffered!(bias.cv_type, coords, sys.atoms, sys.boundary, scratch.d_buf, sys.velocities;
+                               scratch=scratch.dist_scratch, kwargs...)
+        cv_sim = only(from_device(scratch.d_buf))
+    else
+        cv_sim = calculate_cv(bias.cv_type, coords, sys.atoms, sys.boundary, sys.velocities; kwargs...)
+    end
     check_bias_finite(cv_sim, "collective variable", bias)
 
     pe = potential_energy(bias.bias_type, cv_sim; kwargs...)
@@ -287,22 +421,29 @@ function AtomsCalculators.forces!(
     fs, sys, bias::BiasPotential;
     needs_vir::Bool = false,
     buffers = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
+    step_n = nothing,
+    inter_idx = nothing,
     kwargs...
 )
-    if bias.cv_type.correction == :pbc
-        coords = unwrap_molecules(sys)
-    else
-        coords = sys.coords
-    end
+    coords = bias_coords(sys, bias.cv_type, buffers, step_n)
+    scratch = bias_scratch(buffers, inter_idx)
 
     # Gradient of CV with respect to coordinates
-    d_coords, cv_sim = cv_gradient(
-        bias.cv_type,
-        from_device(coords),
-        from_device(sys.atoms),
-        sys.boundary,
-        from_device(sys.velocities),
-    )
+    if bias.uses_persistent_buffers
+        ensure_bias_buffers!(scratch, bias.cv_type, coords)
+        ensure_bias_dist_scratch!(scratch, bias.cv_type, coords, sys.atoms)
+        cv_gradient!(scratch.grad, scratch.d_buf, bias.cv_type, coords, sys.atoms, sys.boundary, sys.velocities;
+                    extremal_cache=scratch.extremal_cache, scratch=scratch.dist_scratch)
+        d_coords, cv_sim = scratch.grad, only(from_device(scratch.d_buf))
+    else
+        d_coords, cv_sim = cv_gradient(
+            bias.cv_type,
+            coords,
+            sys.atoms,
+            sys.boundary,
+            sys.velocities,
+        )
+    end
     check_bias_finite(cv_sim, "collective variable", bias)
     check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
 
@@ -310,7 +451,16 @@ function AtomsCalculators.forces!(
     d_bias = bias_gradient(bias.bias_type, cv_sim)
     check_bias_finite(d_bias, "bias gradient", bias; cv_sim=cv_sim)
 
-    fs_svec = d_bias .* d_coords
+    if bias.uses_persistent_buffers
+        if scratch.fs_svec === nothing
+            scratch.fs_svec = d_bias .* d_coords
+        else
+            scratch.fs_svec .= d_bias .* d_coords
+        end
+        fs_svec = scratch.fs_svec
+    else
+        fs_svec = d_bias .* d_coords
+    end
     check_bias_finite(
         fs_svec,
         "bias force",
@@ -318,12 +468,12 @@ function AtomsCalculators.forces!(
         cv_sim=cv_sim,
         max_abs_component = bias_max_abs_ustrip(fs_svec),
     )
-    
+
     if needs_vir && bias.cv_type.has_virial
-        calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec,
-                          from_device(sys.atoms), sys.boundary)
+        calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, sys.atoms, sys.boundary;
+                          precomputed_extremum=scratch.extremal_cache)
     end
 
-    fs .-= to_device(fs_svec, typeof(fs))
+    fs .-= fs_svec
     return fs
 end

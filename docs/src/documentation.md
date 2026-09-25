@@ -658,6 +658,15 @@ simulate!(sys, simulator, 100_000)
 ```
 See also [this example](@ref "Protein bias potential").
 
+### GPU offload for biased simulations
+
+A [`BiasPotential`](@ref) adds a CV evaluation, a CV gradient and a bias-gradient calculation on top of the regular force calculation, every step. When `coords` (and the rest of the `System`) is GPU-resident, `calculate_cv`/`cv_gradient` for the built-in CV types run on GPU too, using persistent scratch buffers to avoid allocating on every call -- so a GPU `System` biased by one or more `BiasPotential`s stays GPU-resident end to end, it isn't dropped to CPU for the CV part.
+
+Each of these steps is its own kernel launch, and for small, cheap kernels like most CV/bias calculations, launch (host-dispatch) latency rather than the arithmetic itself tends to dominate the cost. This is a general GPU characteristic, not specific to bias potentials: it's the same reason Molly fuses several of its own hot-path kernels internally (e.g. the persistent-buffer CV paths above fuse a reduce-and-finalize into one launch rather than issuing several small ones) where doing so is worthwhile. As a rough guide:
+
+* **Small systems (up to a few thousand atoms) with one or two CVs**: the extra bias kernels' launch overhead is a significant fraction of the whole step. GPU offload is usually still worth it once the rest of the simulation is already on GPU, but don't expect a large win from the bias machinery alone at this scale -- if you write a custom CV/bias type, look for opportunities to fuse work into fewer kernel launches, the same way the built-in persistent-buffer paths do.
+* **Larger systems, or several simultaneous CVs (e.g. multi-dimensional AWH ladders with 3-10 `BiasPotential`s)**: the CV/bias kernels amortize well over the main force/energy kernels, and GPU offload is clearly worthwhile.
+
 ## Monte Carlo sampling
 
 Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo sampling with Metropolis selection rates.
