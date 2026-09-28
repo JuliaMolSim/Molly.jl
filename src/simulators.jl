@@ -41,16 +41,9 @@ function check_simulate_inputs(init_step::Integer, run_loggers, strictness)
     check_strictness(strictness)
 end
 
-"""
-    check_cuda_graph_legality(sys, use_cuda_graph)
-
-Validates a `use_cuda_graph=true` request (supported by `VelocityVerlet`, `DPDVelocityVerlet`,
-`StormerVerlet`, `NoseHoover`, `Langevin` and `OverdampedLangevin`'s `simulate!` for now), which
-wraps each step's steady-state `forces!` call in a CUDA graph to amortise per-kernel host-dispatch
-overhead -- worthwhile with several attached `BiasPotential`s. Every kernel inside the captured
-region must have zero host syncs and zero GPU allocation, so this errors loudly up front rather
-than failing silently or mid-capture when that doesn't hold.
-"""
+# Validates a use_cuda_graph=true request: every kernel inside the captured region must have zero
+# host syncs and zero GPU allocation, so this errors loudly up front rather than failing silently
+# or mid-capture when that doesn't hold.
 function check_cuda_graph_legality(sys, use_cuda_graph::Bool)
     use_cuda_graph || return nothing
     if !(sys.coords isa AbstractGPUArray)
