@@ -1268,8 +1268,26 @@ end
     end
 end
 
-# Specific interaction used to allow different σ/ϵ for 1-4 interactions
-# Assumes no 1-4 Lennard-Jones interaction via the pairwise interactions (weight_special = 0)
+@doc raw"""
+    LennardJones14(σ14_mixed, ϵ14_mixed, weight_14)
+
+The Lennard-Jones 6-12 interaction of a 1-4 pair with its own σ and ϵ, as a specific interaction
+between the two atoms.
+
+Force fields such as CHARMM give the 1-4 pairs σ and ϵ of their own instead of scaling the
+parameters of the pair, so these pairs are kept in a list of this interaction and left out of the
+pairwise Lennard-Jones, which has `weight_special = 0`. `σ14_mixed` and `ϵ14_mixed` are already
+mixed for the pair and `weight_14` is the 1-4 scaling factor of the force field.
+
+The potential energy is defined as
+```math
+V(r_{ij}) = 4 w_{14} \varepsilon^{14}_{ij} \left[\left(\frac{\sigma^{14}_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma^{14}_{ij}}{r_{ij}}\right)^{6}\right]
+```
+with ``w_{14}`` the 1-4 weight.
+
+The λ versions for alchemical systems are [`LennardJones14Scaled`](@ref),
+[`LennardJones14SoftCoreBeutler`](@ref) and [`LennardJones14SoftCoreGapsys`](@ref).
+"""
 struct LennardJones14{S, E, W}
     σ14_mixed::S
     ϵ14_mixed::E
