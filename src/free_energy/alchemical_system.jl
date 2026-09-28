@@ -188,6 +188,16 @@ const softcore_dic = Dict(:beutler => BeutlerSoftCore(),
                           :gapsys  => GapsysSoftCore(),
                           :scaled  => ScaledSoftCore())
                           
+function check_scheduler(scheduler)
+    if scheduler isa Union{GROMACSLambdaABFEScheduler, GROMACSLambdaRBFEScheduler} &&
+                !scheduler.dual
+        @warn "the GROMACS schedulers mix the energies of the two end states, which is dual " *
+              "topology, so with dual=false the result does not match GROMACS and PME is not " *
+              "supported"
+    end
+    return nothing
+end
+
 function check_softcores(LJsoftcore, Csoftcore)
     if !(LJsoftcore in (:beutler, :gapsys, :scaled))
         throw(ArgumentError("LJsoftcore is $(repr(LJsoftcore)), use :beutler, :gapsys or :scaled"))
@@ -206,8 +216,9 @@ function lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT)
 end
 
 # General interactions
-function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ, two_grid)
+function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ)
     FT, AT = float_type(sys), array_type(sys)
+    two_grid = scheduler isa Union{GROMACSLambdaABFEScheduler, GROMACSLambdaRBFEScheduler}
     inters = []
     for inter in sys.general_inters
         if inter isa PME && two_grid
@@ -223,7 +234,8 @@ function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ, two_g
                                                   scheduler, MinimumMixing(), inter.σ_mix,
                                                   inter.ϵ_mix))
         else
-            @warn "Currently $inter is not implemented for alchemical simulations"
+            @warn "$(typeof(inter).name.name) has no alchemical version yet and is left out of " *
+                  "the system, so its contribution is missing at every λ, the end states included"
         end
     end
     return tuple(inters...)
@@ -297,6 +309,7 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
                         )
     FT, units, temp, AT, grad_safe = alchemical_settings(sys, temp)
     check_softcores(LJsoftcore, Csoftcore)
+    check_scheduler(scheduler)
     lj_sc = softcore_dic[LJsoftcore]
     sys_atoms  = from_device(sys.atoms)
     sys_coords = from_device(sys.coords)
@@ -333,8 +346,7 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     Data = Vector{typeof(Data[1])}(Data)
 
     pairwise_inters = lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT)
-    general_inters = lambda_general_inters(sys, Atoms, Boundary, scheduler, global_λ,
-                                           scheduler isa GROMACSLambdaABFEScheduler)
+    general_inters = lambda_general_inters(sys, Atoms, Boundary, scheduler, global_λ)
     SpecificInteraction = Any[]
     for inter_list in sys.specific_inter_lists
         if inter_list isa InteractionList2Atoms && inter_list.data isa EwaldExclusionData
@@ -411,6 +423,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                         )
     FT, units, temp, AT, grad_safe = alchemical_settings(sysA, temp)
     check_softcores(LJsoftcore, Csoftcore)
+    check_scheduler(scheduler)
     lj_sc = softcore_dic[LJsoftcore]
     # To-do: Currently not implemented a 1-4 intramolecular LJ interaction for single topology that
     #   is not decoupled
@@ -825,10 +838,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     end
 
     pairwise_inters = lambda_pairwise_inters(sysA, scheduler, LJsoftcore, Csoftcore, FT)
-    # GROMACS lambda scheduler use different PME with two charge grids, the use of two grids
-    #   is only possible when insert and delete are scaled linearly at the same time I = (1-D).
-    general_inters = lambda_general_inters(sysA, Atoms, Boundary, scheduler, global_λ,
-                                           scheduler isa GROMACSLambdaRBFEScheduler)
+    general_inters = lambda_general_inters(sysA, Atoms, Boundary, scheduler, global_λ)
 
     # The Ewald exclusions follow the hybrid masks
     for inter in sysA.general_inters

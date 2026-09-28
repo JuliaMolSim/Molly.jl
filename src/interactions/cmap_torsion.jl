@@ -361,6 +361,8 @@ is_torsion(::CMAPTorsionλ) = true
 Base.zero(c::CMAPTorsionλ) = CMAPTorsionλ(index=zero(c.index), size=zero(c.size), λ_mixing=c.λ_mixing,
                                            scheduler=c.scheduler)
 
+Base.:+(c1::CMAPTorsionλ, c2::CMAPTorsionλ) = c1
+
 # Move the `data` row index of a CMAP torsion when its list is appended to another
 shift_cmap_index(c::CMAPTorsion, offset) = CMAPTorsion(c.index + offset, c.size)
 shift_cmap_index(c::CMAPTorsionλ, offset) = CMAPTorsionλ(index=c.index + offset, size=c.size,

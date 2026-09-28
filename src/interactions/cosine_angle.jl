@@ -58,6 +58,13 @@ end
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
+Base.zero(a::CosineAngleλ) = CosineAngleλ(k=zero.(a.k), θ0=zero.(a.θ0), λ_mixing=a.λ_mixing,
+                                          scheduler=a.scheduler)
+
+Base.:+(a1::CosineAngleλ, a2::CosineAngleλ) = CosineAngleλ(k=(a1.k .+ a2.k), θ0=(a1.θ0 .+ a2.θ0),
+                                                           λ_mixing=a1.λ_mixing,
+                                                           scheduler=a1.scheduler)
+
 function to_lambda_function(inter::CosineAngle; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
     return CosineAngleλ(k=inter.k, θ0=inter.θ0, λ_mixing=λ_mixing, scheduler=scheduler)
 end

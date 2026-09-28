@@ -379,8 +379,9 @@ function LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix,
                      for (key, n) in classCounts))
     n_pairs = n_eff * (n_eff + 1) / 2
 
-    ϵσ6_mean  = ϵσ6_sum  / n_pairs
-    ϵσ12_mean = ϵσ12_sum / n_pairs
+    # Every atom decoupled leaves no pairs, where the correction is zero rather than 0/0
+    ϵσ6_mean  = iszero(n_pairs) ? zero(ϵσ6_sum)  : ϵσ6_sum  / n_pairs
+    ϵσ12_mean = iszero(n_pairs) ? zero(ϵσ12_sum) : ϵσ12_sum / n_pairs
 
     π_acc = Tacc(π)
 

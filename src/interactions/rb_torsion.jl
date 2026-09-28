@@ -81,6 +81,17 @@ end
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
+function Base.zero(t::RBTorsionλ)
+    return RBTorsionλ(c0=zero.(t.c0), c1=zero.(t.c1), c2=zero.(t.c2), c3=zero.(t.c3),
+                      c4=zero.(t.c4), c5=zero.(t.c5), λ_mixing=t.λ_mixing, scheduler=t.scheduler)
+end
+
+function Base.:+(t1::RBTorsionλ, t2::RBTorsionλ)
+    return RBTorsionλ(c0=(t1.c0 .+ t2.c0), c1=(t1.c1 .+ t2.c1), c2=(t1.c2 .+ t2.c2),
+                      c3=(t1.c3 .+ t2.c3), c4=(t1.c4 .+ t2.c4), c5=(t1.c5 .+ t2.c5),
+                      λ_mixing=t1.λ_mixing, scheduler=t1.scheduler)
+end
+
 function to_lambda_function(inter::RBTorsion; λ_mixing=MinimumMixing(),
                             scheduler=DefaultLambdaScheduler())
     return RBTorsionλ(c0=inter.c0, c1=inter.c1, c2=inter.c2, c3=inter.c3, c4=inter.c4,

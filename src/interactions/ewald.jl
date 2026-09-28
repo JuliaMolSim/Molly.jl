@@ -53,14 +53,12 @@ function AtomsCalculators.energy_forces(sys::System,
 end
 
 @inline function effective_charge(scheduler, atom::Atom, ::Val{T}) where T
-    dual_val = scheduler.dual ? Val(true) : Val(false)
-    λ, λR, λ_params = scale_elec(scheduler, T(atom.λ), atom.alch_role, dual_val)
+    λ, λR, λ_params = scale_elec_dual(scheduler, T(atom.λ), atom.alch_role)
     return λ * params_mixing(λ_params, atom.charge)
 end
 
 @inline function effective_charge(scheduler, atom::Atom, ::Val{T}, global_λ) where T
-    dual_val = scheduler.dual ? Val(true) : Val(false)
-    λ, λR, λ_params = scale_elec(scheduler, T(global_λ), atom.alch_role, dual_val)
+    λ, λR, λ_params = scale_elec_dual(scheduler, T(global_λ), atom.alch_role)
     return λ * params_mixing(λ_params, atom.charge)
 end
 
