@@ -1382,7 +1382,7 @@ end
     λ_glob = T(λ_mixing(MinimumMixing(), (atom_i, atom_j)))
     pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role))
     λ, λR, λ_params = scale_elec_dual(scheduler, λ_glob, pair_role)
-    if scheduler.dual
+    if !(atom_i.charge isa Tuple)
         qij = atom_i.charge * atom_j.charge
     elseif special
         qij = atom_i.charge .* atom_j.charge

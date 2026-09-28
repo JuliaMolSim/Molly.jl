@@ -250,10 +250,12 @@ remap_virtual_site(v::VirtualSite, m, m_ind=m) = VirtualSite(v.type, m_ind(v.ato
 function alchemical_system(sys_ref, atoms, coords, data, boundary, temp; kwargs...)
     AT = array_type(sys_ref)
     velocities = [random_velocity_or_zero(a.mass, temp) for a in atoms]
-    return System(; atoms=to_device(atoms, AT), coords=to_device(coords, AT), atoms_data=data,
-                  boundary=boundary, velocities=to_device(velocities, AT),
-                  force_units=sys_ref.force_units, energy_units=sys_ref.energy_units, 
-                  grad_safe=sys_ref.grad_safe, kwargs...)
+    sys = System(; atoms=to_device(atoms, AT), coords=to_device(coords, AT), atoms_data=data,
+                 boundary=boundary, velocities=to_device(velocities, AT),
+                 force_units=sys_ref.force_units, energy_units=sys_ref.energy_units, 
+                 grad_safe=sys_ref.grad_safe, kwargs...)
+    place_virtual_sites!(sys)
+    return sys
 end
 
 """
@@ -349,7 +351,7 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
 
     return alchemical_system(sys, Atoms, Coords, Data, Boundary, temp;
         topology=sys.topology,
-        virtual_sites=to_device(sys.virtual_sites, AT),
+        virtual_sites=(isempty(sys.virtual_sites) ? [] : to_device(sys.virtual_sites, AT)),
         pairwise_inters=pairwise_inters,
         specific_inter_lists=to_device.(tuple(SpecificInteraction...), AT),
         neighbor_finder=sys.neighbor_finder,
