@@ -361,9 +361,14 @@ function LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix,
     end
     rep(key) = Atom(σ=key[1], ϵ=key[2], λ=key[3], alch_role=key[4])
 
+    # A dual topology hybrid excludes every pair of an A side atom with a B side atom, so those
+    #   class pairs carry no interaction and must not be counted
+    a_side, b_side = (DeleteRole, CoreDRole), (InsertRole, CoreIRole)
+    excluded_pair(r1, r2) = (r1 in a_side && r2 in b_side) || (r1 in b_side && r2 in a_side)
     ks = collect(keys(classCounts))
     for a in eachindex(ks), b in 1:a
         k1, k2 = ks[a], ks[b]
+        excluded_pair(k1[4], k2[4]) && continue
         n1, n2 = classCounts[k1], classCounts[k2]
         npair = Tacc(a == b ? (n1 * (n1 + 1)) / 2 : n1 * n2)
         λ, _, _, σ, ϵ = λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, rep(k1), rep(k2), false)
@@ -472,8 +477,11 @@ end
     pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role); lj=true)
     λ, λR, λ_params = scale_sterics(scheduler, λ_glob, pair_role, Val(false))
     if !scheduler.LJindividual || (!scheduler.LJspecial && special)
-        # Mix the two end states, then interpolate the pair.
-        σ = σ_mixing(σ_mix, atom_i, atom_j, λ_params, pair_role)
+        # Mix the two end states, then interpolate the pair. OpenFE interpolates σ of an ordinary
+        #   pair with a dummy atom (`relative.py:979`), but for a 1-4 pair it duplicates σ of the
+        #   state the dummy exists in (`:2337`, `:2368`), which is what `switchAB` gives
+        σ_role = (scheduler isa OpenFEScheduler && !special ? CoreRole : pair_role)
+        σ = σ_mixing(σ_mix, atom_i, atom_j, λ_params, σ_role)
         ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j, λ_params, pair_role)
     else
         # Interpolate each atom, then mix. `params_mixing` takes λ_params first.
