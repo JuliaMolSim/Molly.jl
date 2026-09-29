@@ -326,7 +326,9 @@ end
 
 # `AbsoluteFESystem` and `RelativeFESystem` convert every specific interaction to its λ
 # counterpart, so only the λ types can appear on an alchemical atom and only they need the
-# coupling supplied.
+# coupling supplied. Weighting the bonded virial by the coupling comes from master (`6ec6ef4c`,
+# JuliaMolSim/Molly.jl#258); here the default of 1 keeps terms that scale their own forces from
+# being scaled twice, and the coupling has the sense of the role rather than raw `atom.λ`.
 @inline function virial_lambda_factor(inter::AlchemicalBondedInteraction, atoms)
     λ_glob = λ_mixing(inter.λ_mixing, atoms)
     roles = map(a -> a.alch_role, atoms)
