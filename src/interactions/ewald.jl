@@ -1376,21 +1376,13 @@ end
 end
 
 @inline function ewald_pair_qq(scheduler::OpenFEScheduler, atom_i, atom_j, ::Val{T}; special=false) where T
-    # OpenFE/OpenMM: charges scaled per atom on one grid
-    λ_glob = T(λ_mixing(MinimumMixing(), (atom_i, atom_j)))
-    pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role))
-    λ, λR, λ_params = scale_elec_dual(scheduler, λ_glob, pair_role)
-    if !(atom_i.charge isa Tuple)
-        qij = atom_i.charge * atom_j.charge
-    elseif special
-        qij = atom_i.charge .* atom_j.charge
-        qij = params_mixing(λ_params, qij)
-    else
-        qi = effective_charge(scheduler, atom_i, Val(T))
-        qj = effective_charge(scheduler, atom_j, Val(T))
-        qij = qi*qj
+    if special && atom_i.charge isa Tuple
+        λ_glob = T(λ_mixing(MinimumMixing(), (atom_i, atom_j)))
+        pair_role = mix_roles(scheduler, (atom_i.alch_role, atom_j.alch_role))
+        λ, λR, λ_params = scale_elec_dual(scheduler, λ_glob, pair_role)
+        return params_mixing(λ_params, atom_i.charge .* atom_j.charge)
     end
-    return qij
+    return effective_charge(scheduler, atom_i, Val(T)) * effective_charge(scheduler, atom_j, Val(T))
 end
 
 @inline function ewald_pair_qq(scheduler::Union{GROMACSLambdaABFEScheduler,GROMACSLambdaRBFEScheduler}, atom_i, atom_j,
@@ -1563,18 +1555,17 @@ function PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     AT = array_type(atoms)
     n_atoms = length(atoms)
     error_tol_T = T(error_tol)
+    if !scheduler.dual
+        error(" $(scheduler) has dual=false which results in single topology." *
+             "PME_λ only works for dual topology. Use a dual GROMACS scheduler, " *
+             "or `PME` with different lambda scheduler.")
+    end
     mesh_w = pme_lambda_mesh_weight(scheduler, T(λ), Val(T))
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
     if isnothing(mesh_dims)
         mesh_dims = pme_params.(box_sides(boundary), α, error_tol_T)
     else
         mesh_dims = SVector{3, Int}(mesh_dims)
-    end
-
-    if !scheduler.dual
-        error(" $(scheduler) has dual=false which results in single topology." *
-             "PME_λ only works for dual topology. Use a dual GROMACS scheduler, " *
-             "or `PME` with different lambda scheduler.")
     end
 
     # Unlike `PME`, the per-atom arrays keep the same (state, value, atom) layout on
@@ -1829,6 +1820,18 @@ end
         end
         θ1 *= d * (1 - dr)
         bsplines_θ[b, o + 1, a] = θ1
+    end
+    return bsplines_θ, bsplines_dθ
+end
+
+# The inner recursion reads and writes the same elements repeatedly, which the KernelAbstractions
+# CPU backend can drop when it vectorises the workitem loop, so run it in a plain loop there
+function update_bsplines_batch!(bsplines_θ::Array, bsplines_dθ, grid_fractions, order, n_threads)
+    n_batches, n_atoms = size(bsplines_θ, 1), size(grid_fractions, 3)
+    @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
+        for a in chunk_i:n_threads:n_atoms, b in 1:n_batches
+            update_bsplines_inner_batch!(bsplines_θ, bsplines_dθ, grid_fractions, order, b, a)
+        end
     end
     return bsplines_θ, bsplines_dθ
 end

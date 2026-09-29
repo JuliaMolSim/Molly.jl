@@ -1109,11 +1109,12 @@ parameter_fields(::Type{<:CoulombSoftCoreBeutlerReactionField}) =
 
 
 function to_lambda_function(inter::CoulombReactionField, ::BeutlerSoftCore; α=0.3, λ_mixing=MinimumMixing(), 
-                            scheduler=DefaultLambdaScheduler(), float_type=Float32, args...)
+                            scheduler=DefaultLambdaScheduler(), float_type=Float32,
+                            σ_mixing=LorentzMixing(), ϵ_mixing=GeometricMixing(), args...)
     return CoulombSoftCoreBeutlerReactionField(dist_cutoff=inter.dist_cutoff, 
                                                 solvent_dielectric=inter.solvent_dielectric, α=float_type(α), 
-                                                use_neighbors=inter.use_neighbors, σ_mixing=inter.σ_mixing, 
-                                                ϵ_mixing=inter.ϵ_mixing, λ_mixing=λ_mixing, 
+                                                use_neighbors=inter.use_neighbors, σ_mixing=σ_mixing, 
+                                                ϵ_mixing=ϵ_mixing, λ_mixing=λ_mixing, 
                                                 scheduler=scheduler, weight_special=inter.weight_special, 
                                                 coulomb_const=inter.coulomb_const)
 end

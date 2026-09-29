@@ -188,12 +188,16 @@ const softcore_dic = Dict(:beutler => BeutlerSoftCore(),
                           :gapsys  => GapsysSoftCore(),
                           :scaled  => ScaledSoftCore())
                           
-function check_scheduler(scheduler)
+function check_scheduler(scheduler, sys)
     if scheduler isa Union{GROMACSLambdaABFEScheduler, GROMACSLambdaRBFEScheduler} &&
                 !scheduler.dual
-        @warn "the GROMACS schedulers mix the energies of the two end states, which is dual " *
-              "topology, so with dual=false the result does not match GROMACS and PME is not " *
-              "supported"
+        msg = "the GROMACS schedulers mix the energies of the two end states, which is dual " *
+              "topology, so with dual=false the result does not match GROMACS"
+        if any(inter isa AbstractEwald for inter in sys.general_inters)
+            throw(ArgumentError(msg * ", and the two grid mesh it needs is not available in " *
+                                "single topology; use dual=true or another scheduler"))
+        end
+        @warn msg
     end
     return nothing
 end
@@ -224,11 +228,15 @@ function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ)
         if inter isa PME && two_grid
             push!(inters, PME_λ(inter.dist_cutoff, to_device(atoms, AT), boundary;
                                 grad_safe=inter.grad_safe, error_tol=inter.error_tol,
+                                order=inter.order, ϵr=inter.ϵr, mesh_dims=inter.mesh_dims,
                                 fixed_charges=false, scheduler=scheduler, λ=FT(global_λ)))
         elseif inter isa PME
             push!(inters, PME(inter.dist_cutoff, to_device(atoms, AT), boundary;
                               grad_safe=inter.grad_safe, error_tol=inter.error_tol,
+                              order=inter.order, ϵr=inter.ϵr, mesh_dims=inter.mesh_dims,
                               fixed_charges=false, scheduler=scheduler))
+        elseif inter isa Ewald
+            push!(inters, Ewald(inter.dist_cutoff; error_tol=inter.error_tol, scheduler=scheduler))
         elseif inter isa LJDispersionCorrection
             push!(inters, LJDispersionCorrectionλ(to_device(atoms, AT), inter.dist_cutoff,
                                                   scheduler, MinimumMixing(), inter.σ_mix,
@@ -309,7 +317,7 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
                         )
     FT, units, temp, AT, grad_safe = alchemical_settings(sys, temp)
     check_softcores(LJsoftcore, Csoftcore)
-    check_scheduler(scheduler)
+    check_scheduler(scheduler, sys)
     lj_sc = softcore_dic[LJsoftcore]
     sys_atoms  = from_device(sys.atoms)
     sys_coords = from_device(sys.coords)
@@ -423,7 +431,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                         )
     FT, units, temp, AT, grad_safe = alchemical_settings(sysA, temp)
     check_softcores(LJsoftcore, Csoftcore)
-    check_scheduler(scheduler)
+    check_scheduler(scheduler, sysA)
     lj_sc = softcore_dic[LJsoftcore]
     # To-do: Currently not implemented a 1-4 intramolecular LJ interaction for single topology that
     #   is not decoupled
@@ -842,9 +850,10 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
 
     # The Ewald exclusions follow the hybrid masks
     for inter in sysA.general_inters
-        if inter isa PME
+        if inter isa AbstractEwald
             excluded_pairs = find_excluded_pairs(eligible, special)
-            exclusion_data = EwaldExclusionData(FT(inter.dist_cutoff); error_tol=FT(inter.error_tol), scheduler=scheduler)
+            exclusion_data = EwaldExclusionData(FT(inter.dist_cutoff); error_tol=FT(inter.error_tol),
+                                    ϵr=(inter isa PME ? FT(inter.ϵr) : one(FT)), scheduler=scheduler)
             ewald_exclusions = InteractionList2Atoms(
                 to_device([ep[1] for ep in excluded_pairs], AT),
                 to_device([ep[2] for ep in excluded_pairs], AT),
