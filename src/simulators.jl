@@ -2156,7 +2156,10 @@ end
 # Total steps, exchange cycles, steps per cycle and steps left over after the last cycle
 function remd_schedule(remd_sim::ReplicaExchangeMD, n_steps_or_time)
     n_steps = calc_n_steps(n_steps_or_time, remd_sim.dt)
-    n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
+    # In steps, not in time, and rounded: dividing times floors a float, which gave 49 cycles for
+    #   500 steps of 2 fs with a 0.02 ps exchange time, and `cld` rounds 0.1 ps / 1 fs up to 101
+    steps_per_cycle = max(1, round(Int, remd_sim.exchange_time / remd_sim.dt))
+    n_cycles = n_steps ÷ steps_per_cycle
     cycle_length = n_cycles > 0 ? n_steps ÷ n_cycles : 0
     remaining_steps = n_cycles > 0 ? n_steps % n_cycles : n_steps
     return n_steps, n_cycles, cycle_length, remaining_steps

@@ -408,10 +408,3 @@ end
                                 coords_k, coords_l, coords_m, boundary, atoms_i, atoms_j,
                                 atoms_k, atoms_l, atoms_m, args...)
 end
-
-@inline function force_λ(inter::CMAPTorsionλ, coords_i, coords_j, coords_k, coords_l,
-                         coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, atoms_m, args...)
-    return ustrip(potential_energy(CMAPTorsion(inter.index, inter.size), coords_i, coords_j,
-                                   coords_k, coords_l, coords_m, boundary, atoms_i, atoms_j,
-                                   atoms_k, atoms_l, atoms_m, args...))
-end
