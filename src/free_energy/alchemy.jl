@@ -239,9 +239,6 @@ const EleScaledLambdaScheduler = LambdaScheduler{EleScaledSchedule}
 @inline scale_torsion_dual(s, λ, role) =
     s.dual ? scale_torsion(s, λ, role, Val(true)) : scale_torsion(s, λ, role, Val(false))
 
-@inline scale_bias_dual(s, λ, role) =
-    s.dual ? scale_bias(s, λ, role, Val(true)) : scale_bias(s, λ, role, Val(false))
-
 @inline scale_sterics_dual(s, λ, role) =
     s.dual ? scale_sterics(s, λ, role, Val(true)) : scale_sterics(s, λ, role, Val(false))
 
@@ -319,6 +316,18 @@ end
         return A, B
     end
 end
+
+# Single topology interpolates the parameters of the two end states, which needs a convention per
+# interaction. `RBTorsion` and `MorseBond` have none that holds for a staged scheduler: GROMACS
+# interpolates their parameters but only ever with a linear bonded λ, and OpenFE supports neither.
+function no_single_topology(inter)
+    throw(ArgumentError("$(typeof(inter).name.name) has no single topology version, so its " *
+                        "parameters cannot be interpolated between the end states; use a scheduler " *
+                        "with dual=true for this system"))
+end
+
+to_lambda_function_single(interA, interB; kwargs...) =
+    no_single_topology(isnothing(interA) ? interB : interA)
 
 @inline is_torsion(inter) = false
 

@@ -71,6 +71,25 @@ end
 
 plain_interaction(a::CosineAngleλ, λ_params) = CosineAngle(k=params_mixing(λ_params, a.k), θ0=params_mixing(λ_params, a.θ0))
 
+# Single topology: the parameters of the two end states are interpolated, as GROMACS and OpenFE do for
+#   angles. `θ0` takes the short way round only when both end states are on the same branch
+function to_lambda_function_single(interA::CosineAngle, interB::Nothing;
+                                  λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return CosineAngleλ(k=(interA.k, interA.k), θ0=(interA.θ0, interA.θ0), λ_mixing=λ_mixing,
+                        scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::Nothing, interB::CosineAngle;
+                                  λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return CosineAngleλ(k=(interB.k, interB.k), θ0=(interB.θ0, interB.θ0), λ_mixing=λ_mixing,
+                        scheduler=scheduler)
+end
+
+function update_lambda_function(existing_lambda::CosineAngleλ, interB::CosineAngle)
+    return CosineAngleλ(k=(existing_lambda.k[1], interB.k), θ0=(existing_lambda.θ0[1], interB.θ0),
+                        λ_mixing=existing_lambda.λ_mixing, scheduler=existing_lambda.scheduler)
+end
+
 @inline function force(a::CosineAngleλ, coords_i, coords_j, coords_k, boundary, atom_i, atom_j,
                        atom_k, args...)
     λ, λ_params = bonded_lambda(a, (atom_i, atom_j, atom_k))

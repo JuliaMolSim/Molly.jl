@@ -98,6 +98,30 @@ plain_interaction(a::UreyBradleyλ, λ_params) = UreyBradley(
     kangle=params_mixing(λ_params, a.kangle), θ0=params_mixing(λ_params, a.θ0),
     kbond=params_mixing(λ_params, a.kbond), r0=params_mixing(λ_params, a.r0))
 
+# Single topology: each of the four parameters is interpolated between the end states, the angle as
+#   GROMACS and OpenFE do for angles and the 1-3 distance as they do for bonds
+function to_lambda_function_single(interA::UreyBradley, interB::Nothing;
+                                  λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return UreyBradleyλ(kangle=(interA.kangle, interA.kangle), θ0=(interA.θ0, interA.θ0),
+                        kbond=(interA.kbond, interA.kbond), r0=(interA.r0, interA.r0),
+                        λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::Nothing, interB::UreyBradley;
+                                  λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return UreyBradleyλ(kangle=(interB.kangle, interB.kangle), θ0=(interB.θ0, interB.θ0),
+                        kbond=(interB.kbond, interB.kbond), r0=(interB.r0, interB.r0),
+                        λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function update_lambda_function(existing_lambda::UreyBradleyλ, interB::UreyBradley)
+    return UreyBradleyλ(kangle=(existing_lambda.kangle[1], interB.kangle),
+                        θ0=(existing_lambda.θ0[1], interB.θ0),
+                        kbond=(existing_lambda.kbond[1], interB.kbond),
+                        r0=(existing_lambda.r0[1], interB.r0),
+                        λ_mixing=existing_lambda.λ_mixing, scheduler=existing_lambda.scheduler)
+end
+
 @inline function force(a::UreyBradleyλ, coords_i, coords_j, coords_k, boundary, atom_i, atom_j,
                        atom_k, args...)
     λ, λ_params = bonded_lambda(a, (atom_i, atom_j, atom_k))

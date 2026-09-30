@@ -100,7 +100,11 @@ end
 
 is_torsion(::RBTorsionλ) = true
 
-plain_interaction(d::RBTorsionλ, λ_params) = RBTorsion(d.c0, d.c1, d.c2, d.c3, d.c4, d.c5)
+# Interpolates like the other λ types, a no-op in dual topology where the parameters are scalars.
+#   Single topology is refused for this type (`no_single_topology`) until the convention is settled
+plain_interaction(d::RBTorsionλ, λ_params) = RBTorsion(params_mixing(λ_params, d.c0),
+        params_mixing(λ_params, d.c1), params_mixing(λ_params, d.c2), params_mixing(λ_params, d.c3),
+        params_mixing(λ_params, d.c4), params_mixing(λ_params, d.c5))
 
 
 @inline function force(d::RBTorsionλ, coords_i, coords_j, coords_k, coords_l, boundary,
