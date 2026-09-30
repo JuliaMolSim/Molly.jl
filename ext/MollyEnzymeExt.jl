@@ -44,6 +44,7 @@ EnzymeRules.inactive(::typeof(random_velocities!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.setup_virtual_sites), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_gbsa_n_threads), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.atoms_bonded_to_N), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.atoms_carboxylate_O), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.lookup_table), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.radius_classes), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.gb_log_scaling), args...) = nothing
