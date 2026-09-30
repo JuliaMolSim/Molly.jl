@@ -1530,6 +1530,14 @@ struct PME_λ{T, D, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: Abstrac
     λ::T
 end
 
+# The same `PME_λ` at another λ, reusing its grids, buffers and FFT plans: only the mesh weight in
+# the last field depends on λ, so nothing large is allocated. Used by `set_lambda!`
+function pme_lambda_reweight(pme::PME_λ, λ)
+    T = typeof(pme.error_tol)
+    fields = ntuple(i -> getfield(pme, i), fieldcount(typeof(pme)) - 1)
+    return PME_λ(fields..., pme_lambda_mesh_weight(pme.scheduler, T(λ), Val(T)))
+end
+
 # Weight w mixing the end-state grids, E = (1 - w)E[q(0)] + wE[q(1)]. w is the electrostatic
 # coupling rather than global_λ, which requires s_I(λ) == 1 - s_D(λ).
 function pme_lambda_mesh_weight(scheduler::Union{GROMACSLambdaABFEScheduler,GROMACSLambdaRBFEScheduler}, 

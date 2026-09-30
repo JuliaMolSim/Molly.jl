@@ -1,5 +1,6 @@
 export
     AbsoluteFESystem,
+    set_lambda!,
     RelativeFESystem
 
 ### Checks for hybrid system ###
@@ -239,14 +240,53 @@ function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ)
             push!(inters, Ewald(inter.dist_cutoff; error_tol=inter.error_tol, scheduler=scheduler))
         elseif inter isa LJDispersionCorrection
             push!(inters, LJDispersionCorrectionλ(to_device(atoms, AT), inter.dist_cutoff,
-                                                  scheduler, MinimumMixing(), inter.σ_mix,
-                                                  inter.ϵ_mix))
+                                                  MinimumMixing(), inter.σ_mix, inter.ϵ_mix;
+                                                  scheduler=scheduler))
         else
             @warn "$(typeof(inter).name.name) has no alchemical version yet and is left out of " *
                   "the system, so its contribution is missing at every λ, the end states included"
         end
     end
     return tuple(inters...)
+end
+
+"""
+    set_lambda!(sys, λ)
+
+Set the global λ of an alchemical system in place, without rebuilding it.
+
+Only the λ of the alchemical atoms, the mesh weight of [`PME`](@ref)'s two grid form and the
+precomputed factors of the λ dispersion correction depend on λ; the neighbor masks, the interaction
+lists, the topology, the constraints and the virtual sites do not, which is what makes this much
+cheaper than building the system again. Environment atoms keep λ = 1.
+
+A ladder of states can share everything λ-independent:
+
+```julia
+states = [set_lambda!(System(sys), λ) for λ in 0:0.1:1]
+```
+
+`System(sys)` shares its arrays, so the masks exist once, but the states then also share the scratch
+buffers of `PME` and of any constraint algorithm. States run at the same time need their own, which
+`ReplicaSystem` arranges through `remd_unshared`; a hand-written threaded loop over states does not.
+"""
+function set_lambda!(sys::System, λ)
+    FT = float_type(sys)
+    # A new vector rather than a write into the old one, so a system copied from another keeps its λ
+    sys.atoms = to_device([a.alch_role == EnvRole ? a :
+                           Atom(a.index, a.atom_type, a.mass, a.charge, a.σ, a.ϵ, FT(λ),
+                                a.alch_role) for a in from_device(sys.atoms)], array_type(sys))
+    sys.general_inters = map(sys.general_inters) do inter
+        if inter isa PME_λ
+            pme_lambda_reweight(inter, λ)
+        elseif inter isa LJDispersionCorrectionλ
+            LJDispersionCorrectionλ(sys.atoms, inter.dist_cutoff, MinimumMixing(), inter.σ_mix,
+                                    inter.ϵ_mix; scheduler=inter.scheduler)
+        else
+            inter
+        end
+    end
+    return sys
 end
 
 ### General functions for settings and setup ###

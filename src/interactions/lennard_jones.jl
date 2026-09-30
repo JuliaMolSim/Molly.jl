@@ -280,7 +280,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
 end
 
 @doc raw"""
-    LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix, ϵ_mix)
+    LJDispersionCorrectionλ(atoms, dist_cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
 
 The long-range dispersion correction for the [`LennardJones`](@ref) interaction, scaled by λ for
 alchemical transformations.
@@ -306,15 +306,18 @@ volume can change).
 Only compatible with 3D systems.
 Not compatible with cutoffs other than [`DistanceCutoff`](@ref).
 """
-struct LJDispersionCorrectionλ{F6,F12, D,S,E}
+struct LJDispersionCorrectionλ{F6,F12, D,S,E,SCH}
     factor_6::F6
     factor_12::F12
     dist_cutoff::D
     σ_mix::S
     ϵ_mix::E
+    # Kept so that `set_lambda!` can rebuild the factors, which are precomputed from the coupling
+    scheduler::SCH
 end
 
-function LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix, ϵ_mix)
+# The scheduler is a keyword so that this does not clash with the type's own 6 field constructor
+function LJDispersionCorrectionλ(atoms, dist_cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
     T = typeof(ustrip(dist_cutoff))
     n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
@@ -402,6 +405,7 @@ function LJDispersionCorrectionλ(atoms, dist_cutoff, scheduler, λ_mix, σ_mix,
         dist_cutoff,
         σ_mix,
         ϵ_mix,
+        scheduler,
     )
 end
 
