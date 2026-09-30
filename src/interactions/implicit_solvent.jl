@@ -419,7 +419,8 @@ Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculat
 Should be used along with a Coulomb interaction.
 [`SetupImplicitSolventOBC`](@ref) provides parameters when setting up a system from a file.
 
-`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs.
+`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs,
+including any constrained bonds.
 `solvent_dielectric` and `solute_dielectric` are the dielectric constants of the solvent and
 the solute.
 `kappa` is the Debye-Hückel screening parameter, the inverse of the Debye length, and is
@@ -564,6 +565,17 @@ function gb_bond_index(sys)
     return findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
 end
 
+# Bonded pairs used to assign GB radii
+# The topology is preferred since it includes bonds that have been converted to constraints
+function gb_bonds(sys)
+    topology = sys.topology
+    if !isnothing(topology) && !isempty(topology.bonded_atoms)
+        return (is=first.(topology.bonded_atoms), js=last.(topology.bonded_atoms))
+    end
+    bond_index = gb_bond_index(sys)
+    return isnothing(bond_index) ? nothing : sys.specific_inter_lists[bond_index]
+end
+
 function gb_element_dicts(key_prefix, params_dic, default_radii, default_screens)
     element_to_radius = Dict{String, Float64}()
     for k in keys(default_radii)
@@ -586,7 +598,7 @@ function inject_interaction(inter::ImplicitSolventOBC, params_dic, sys)
     ImplicitSolventOBC(
         sys.atoms,
         sys.atoms_data,
-        sys.specific_inter_lists[gb_bond_index(sys)];
+        gb_bonds(sys);
         solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
         solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
         kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
@@ -685,7 +697,8 @@ GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 Should be used along with a Coulomb interaction.
 [`SetupImplicitSolventGBN2`](@ref) provides parameters when setting up a system from a file.
 
-`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs.
+`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs,
+including any constrained bonds.
 `solvent_dielectric` and `solute_dielectric` are the dielectric constants of the solvent and
 the solute.
 `kappa` is the Debye-Hückel screening parameter, the inverse of the Debye length, and is
@@ -897,7 +910,7 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
     ImplicitSolventGBN2(
         sys.atoms,
         sys.atoms_data,
-        sys.specific_inter_lists[gb_bond_index(sys)];
+        gb_bonds(sys);
         solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
         solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
         kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
