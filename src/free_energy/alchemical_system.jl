@@ -150,7 +150,7 @@ end
 
 ### Functions to change interactions to λ versions ###
 # Specific interactions
-function to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc)
+function to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc, lj_params=(;))
     inters_cpu = from_device(inter_list.inters)
     isempty(inters_cpu) && return inter_list
     if !(eltype(inters_cpu) <: LennardJones14) && !hasmethod(to_lambda_function, Tuple{eltype(inters_cpu)})
@@ -158,28 +158,30 @@ function to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc)
               "virial will not follow the alchemical coupling"
         return inter_list
     end
-    new_inters = [lambda_specific(x, scheduler, FT, lj_sc) for x in inters_cpu]
+    new_inters = [lambda_specific(x, scheduler, FT, lj_sc, lj_params) for x in inters_cpu]
     IT = typeof(inter_list).name.wrapper
     fields = getfield.((inter_list,), fieldnames(typeof(inter_list)))
     return IT(fields[1:(end - 3)]..., to_device(new_inters, AT), inter_list.types,
               inter_list.data)
 end
 
-lambda_specific(inter, scheduler, FT, lj_sc) = to_lambda_function(inter; λ_mixing=MinimumMixing(),
-                                                                  scheduler=scheduler)
-lambda_specific(inter::LennardJones14, scheduler, FT, lj_sc) = to_lambda_function(inter, lj_sc;
-        λ_mixing=MinimumMixing(), scheduler=scheduler, float_type=FT)
+lambda_specific(inter, scheduler, FT, lj_sc, lj_params=(;)) = to_lambda_function(inter;
+        λ_mixing=MinimumMixing(), scheduler=scheduler)
+lambda_specific(inter::LennardJones14, scheduler, FT, lj_sc, lj_params=(;)) =
+    to_lambda_function(inter, lj_sc; λ_mixing=MinimumMixing(), scheduler=scheduler, float_type=FT,
+                       lj_params...)
 
-lambda_single(interA, interB, scheduler, lj_sc) = to_lambda_function_single(interA, interB;
-                                                                            scheduler=scheduler)
-lambda_single(interA::LennardJones14, interB::Nothing, scheduler, lj_sc) =
-    to_lambda_function_single(interA, interB, lj_sc; scheduler=scheduler)
-lambda_single(interA::Nothing, interB::LennardJones14, scheduler, lj_sc) =
-    to_lambda_function_single(interA, interB, lj_sc; scheduler=scheduler)
+lambda_single(interA, interB, scheduler, lj_sc, lj_params=(;)) =
+    to_lambda_function_single(interA, interB; scheduler=scheduler)
+lambda_single(interA::LennardJones14, interB::Nothing, scheduler, lj_sc, lj_params=(;)) =
+    to_lambda_function_single(interA, interB, lj_sc; scheduler=scheduler, lj_params...)
+lambda_single(interA::Nothing, interB::LennardJones14, scheduler, lj_sc, lj_params=(;)) =
+    to_lambda_function_single(interA, interB, lj_sc; scheduler=scheduler, lj_params...)
     
-lambda_single_A(inter, scheduler, lj_sc, deleted) = lambda_single(inter, nothing, scheduler, lj_sc)
-function lambda_single_A(inter::LennardJones14, scheduler, lj_sc, deleted)
-    lj14 = lambda_single(inter, nothing, scheduler, lj_sc)
+lambda_single_A(inter, scheduler, lj_sc, deleted, lj_params=(;)) =
+    lambda_single(inter, nothing, scheduler, lj_sc, lj_params)
+function lambda_single_A(inter::LennardJones14, scheduler, lj_sc, deleted, lj_params=(;))
+    lj14 = lambda_single(inter, nothing, scheduler, lj_sc, lj_params)
     return deleted ? update_lambda_function(lj14, LennardJones14(inter.σ14_mixed, zero(inter.ϵ14_mixed),
                                                                   inter.weight_14)) : lj14
 end
@@ -203,20 +205,37 @@ function check_scheduler(scheduler, sys)
     return nothing
 end
 
-function check_softcores(LJsoftcore, Csoftcore)
+# The parameters each soft core takes, so a name that would otherwise be ignored is caught here
+const softcore_param_names = Dict((:beutler, :LJ) => (:α,), (:gapsys, :LJ) => (:α,),
+                                  (:scaled, :LJ) => (), (:beutler, :C) => (:α,),
+                                  (:gapsys, :C) => (:α, :σQ), (:scaled, :C) => ())
+
+function check_softcores(LJsoftcore, Csoftcore, LJsoftcore_params=(;), Csoftcore_params=(;))
     if !(LJsoftcore in (:beutler, :gapsys, :scaled))
         throw(ArgumentError("LJsoftcore is $(repr(LJsoftcore)), use :beutler, :gapsys or :scaled"))
     end
     if !(Csoftcore in (:beutler, :gapsys, :scaled))
         throw(ArgumentError("Csoftcore is $(repr(Csoftcore)), use :beutler, :gapsys or :scaled"))
     end
+    for (side, softcore, params) in ((:LJ, LJsoftcore, LJsoftcore_params),
+                                     (:C, Csoftcore, Csoftcore_params))
+        allowed = softcore_param_names[(softcore, side)]
+        for name in keys(params)
+            if !(name in allowed)
+                throw(ArgumentError("$(side)softcore_params has $name, but the $(repr(softcore)) " *
+                    "soft core takes $(isempty(allowed) ? "no parameters" : join(allowed, ", "))"))
+            end
+        end
+    end
 end
 
-function lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT)
+function lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT, LJsoftcore_params=(;),
+                                Csoftcore_params=(;))
     return map(sys.pairwise_inters) do inter
-        softcore = softcore_dic[inter isa LennardJones ? LJsoftcore : Csoftcore]
+        lj = inter isa LennardJones
+        softcore = softcore_dic[lj ? LJsoftcore : Csoftcore]
         to_lambda_function(inter, softcore; scheduler=scheduler, λ_mixing=MinimumMixing(),
-                           float_type=FT)
+                           float_type=FT, (lj ? LJsoftcore_params : Csoftcore_params)...)
     end
 end
 
@@ -353,10 +372,12 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
                         scheduler=DefaultLambdaScheduler(dual=true),
                         loggers=(),
                         LJsoftcore=:gapsys,
-                        Csoftcore=:gapsys
+                        Csoftcore=:gapsys,
+                        LJsoftcore_params=(;),
+                        Csoftcore_params=(;)
                         )
     FT, units, temp, AT, grad_safe = alchemical_settings(sys, temp)
-    check_softcores(LJsoftcore, Csoftcore)
+    check_softcores(LJsoftcore, Csoftcore, LJsoftcore_params, Csoftcore_params)
     check_scheduler(scheduler, sys)
     lj_sc = softcore_dic[LJsoftcore]
     sys_atoms  = from_device(sys.atoms)
@@ -393,7 +414,8 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     Coords = Vector{typeof(Coords[1])}(Coords)
     Data = Vector{typeof(Data[1])}(Data)
 
-    pairwise_inters = lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT)
+    pairwise_inters = lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT,
+                                           LJsoftcore_params, Csoftcore_params)
     general_inters = lambda_general_inters(sys, Atoms, Boundary, scheduler, global_λ)
     SpecificInteraction = Any[]
     for inter_list in sys.specific_inter_lists
@@ -405,7 +427,7 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
                                    scheduler=scheduler, λ_mix=d.λ_mixing),
             ))
         else
-            push!(SpecificInteraction, to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc))
+            push!(SpecificInteraction, to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc, LJsoftcore_params))
         end
     end
 
@@ -467,10 +489,12 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                         scheduler=DefaultLambdaScheduler(dual=true),
                         loggers=(),
                         LJsoftcore=:gapsys,
-                        Csoftcore=:gapsys
+                        Csoftcore=:gapsys,
+                        LJsoftcore_params=(;),
+                        Csoftcore_params=(;)
                         )
     FT, units, temp, AT, grad_safe = alchemical_settings(sysA, temp)
-    check_softcores(LJsoftcore, Csoftcore)
+    check_softcores(LJsoftcore, Csoftcore, LJsoftcore_params, Csoftcore_params)
     check_scheduler(scheduler, sysA)
     lj_sc = softcore_dic[LJsoftcore]
     # To-do: Currently not implemented a 1-4 intramolecular LJ interaction for single topology that
@@ -710,9 +734,9 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         field_types = fieldtypes(typeof(interaction))[1:end-1]
         
         if scheduler.dual
-            converted_type = typeof(lambda_specific(interaction.inters[1], scheduler, FT, lj_sc))
+            converted_type = typeof(lambda_specific(interaction.inters[1], scheduler, FT, lj_sc, LJsoftcore_params))
         else
-            converted_type = typeof(lambda_single(interaction.inters[1], nothing, scheduler, lj_sc))
+            converted_type = typeof(lambda_single(interaction.inters[1], nothing, scheduler, lj_sc, LJsoftcore_params))
         end
         
         field_types = [field_types[1:end-2]..., Vector{converted_type}, field_types[end]]
@@ -735,10 +759,10 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 end
                 
                 if scheduler.dual
-                    push!(tmp[n_fields-1], lambda_specific(field_tuple[end-1], scheduler, FT, lj_sc))
+                    push!(tmp[n_fields-1], lambda_specific(field_tuple[end-1], scheduler, FT, lj_sc, LJsoftcore_params))
                 else
                     deleted = any(in(unique_A), field_tuple[1:(n_fields - 2)])
-                    push!(tmp[n_fields-1], lambda_single_A(field_tuple[end-1], scheduler, lj_sc, deleted))
+                    push!(tmp[n_fields-1], lambda_single_A(field_tuple[end-1], scheduler, lj_sc, deleted, LJsoftcore_params))
                     single_top_atom_maps[(IT,IIT,P)][Tuple(mapped_atoms)] = length(tmp[n_fields-1])
                 end
                 
@@ -759,7 +783,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         field_types = fieldtypes(typeof(interaction))[1:end-1]
         
         if scheduler.dual
-            converted_type = typeof(lambda_specific(interaction.inters[1], scheduler, FT, lj_sc))
+            converted_type = typeof(lambda_specific(interaction.inters[1], scheduler, FT, lj_sc, LJsoftcore_params))
             field_types = [field_types[1:end-2]..., Vector{converted_type}, field_types[end]]
             tmp = [T() for T in field_types]
             
@@ -773,13 +797,13 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                     for (k, i) in enumerate(atoms_B)
                         push!(tmp[k], haskey(mapping_B, i) ? mapping_B[i] : mapping_A[env_BA[i]])
                     end
-                    push!(tmp[n_fields-1], lambda_specific(field_tuple[end-1], scheduler, FT, lj_sc))
+                    push!(tmp[n_fields-1], lambda_specific(field_tuple[end-1], scheduler, FT, lj_sc, LJsoftcore_params))
                     push!(tmp[n_fields], field_tuple[end])
                 end
             end
             Interactions = push!(Interactions, IT(tmp..., interaction.data))
         else
-            converted_type = typeof(lambda_single(nothing, interaction.inters[1], scheduler, lj_sc))
+            converted_type = typeof(lambda_single(nothing, interaction.inters[1], scheduler, lj_sc, LJsoftcore_params))
             field_types = [field_types[1:end-2]..., Vector{converted_type}, field_types[end]]
             
             tmp_unique_B = [T() for T in field_types]
@@ -813,7 +837,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                     for i in 1:n_fields-2
                         push!(tmp_unique_B[i], mapped_tuple[i])
                     end
-                    push!(tmp_unique_B[n_fields-1], lambda_single(nothing, field_tuple[end-1], scheduler, lj_sc))
+                    push!(tmp_unique_B[n_fields-1], lambda_single(nothing, field_tuple[end-1], scheduler, lj_sc, LJsoftcore_params))
                     push!(tmp_unique_B[n_fields], field_tuple[end])
                 end
 
@@ -885,7 +909,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         )
     end
 
-    pairwise_inters = lambda_pairwise_inters(sysA, scheduler, LJsoftcore, Csoftcore, FT)
+    pairwise_inters = lambda_pairwise_inters(sysA, scheduler, LJsoftcore, Csoftcore, FT,
+                                           LJsoftcore_params, Csoftcore_params)
     general_inters = lambda_general_inters(sysA, Atoms, Boundary, scheduler, global_λ)
 
     # The Ewald exclusions follow the hybrid masks
