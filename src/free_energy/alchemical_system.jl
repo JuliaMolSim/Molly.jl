@@ -69,7 +69,12 @@ function unmap_changing_constraints!(mapping, core_mapAB, sysA, sysB)
     moved = Int[]
     for (i, j) in pairs
         dist_B = get(dists_B, minmax(core_mapAB[i], core_mapAB[j]), nothing)
-        get(dists_A, (i, j), nothing) == dist_B && continue
+        dist_A = get(dists_A, (i, j), nothing)
+        # Two force fields can store the same length with different rounding, so compare with a
+        #   tolerance rather than exactly
+        same = (isnothing(dist_A) || isnothing(dist_B)) ? isnothing(dist_A) == isnothing(dist_B) :
+               isapprox(dist_A, dist_B; rtol=1e-6)
+        same && continue
         if is_H(i)
             push!(moved, i)
         elseif is_H(j)
@@ -556,6 +561,28 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 "end states, make it a unique atom of both instead"))
         end
     end
+    # Single topology keeps one copy of a core atom, so its site is system A's definition; system B
+    #   defining it differently would mean λ = 1 is not system B
+    if !scheduler.dual
+        site_of(vs, ind) = vs[findfirst(v -> v.atom_ind == ind, vs)]
+        for i in mapping["core"]
+            i in vs_inds_A || continue
+            vA, vB = site_of(vsA, i), site_of(vsB_all, core_mapAB[i])
+            # `core_mapAB` maps A to B, and a frame atom that is not a core atom has no counterpart
+            same_atoms = all((getfield(vA, f) == 0) == (getfield(vB, f) == 0) &&
+                             (getfield(vA, f) == 0 ||
+                              get(core_mapAB, getfield(vA, f), nothing) == getfield(vB, f))
+                             for f in (:atom_1, :atom_2, :atom_3))
+            same_shape = all(getfield(vA, f) == getfield(vB, f) for f in
+                (:type, :weight_1, :weight_2, :weight_3, :weight_12, :weight_13, :weight_cross,
+                 :local_weights, :local_position))
+            if !(same_atoms && same_shape)
+                throw(ArgumentError("core atom $i of system A is a virtual site defined " *
+                    "differently in the two end states, which single topology cannot interpolate; " *
+                    "make it a unique atom of both instead"))
+            end
+        end
+    end
     Data         = []
     Coords       = []
     Interactions = []
@@ -930,9 +957,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
     end
 
-    # The virtual sites of system A, unique virtual sites of B, core (virtual) atoms of B mappend 
-    #   to atoms of A
-    # To-do: @Joe please check this part
+    # The virtual sites of system A, the unique sites of B, and in dual topology the sites of the
+    #   core atoms of B, whose atoms are mapped to the A copies since those are the real ones
     core_mapBA = Dict(j => i for (i, j) in core_mapAB)
     map_B_real(i) = (haskey(core_mapBA, i) ? mapping_A[core_mapBA[i]] : map_B(i))
     unique_B = Set(mapping["unique_B"])
@@ -972,15 +998,22 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                     push!(constrained, Set([i, j]))
                 end
             end
-            # Adding an AngleConstraint that's in system B on a core atom, might result
-            #   in an error if the core atom already has a distance constraint.
-            #   So, a constrained angle of B is added as its three distance constraints. Similarly, to how 
-            #   GROMACS represents every constrained angle (`h-angles`) and as LINCS does internally.
-            # To-do: @Joe please check this part
-            for c in angle_csB, dc in to_distance_constraints(remap_angle_constraint(c, map_B_real))
-                if !(Set([dc.i, dc.j]) in constrained)
-                    push!(dist_cs, dc)
-                    push!(constrained, Set([dc.i, dc.j]))
+            # An angle constraint of system B stays one when none of its three pairs is
+            #   constrained already, which is what LINCS needs. A pair of a core atom that is
+            #   constrained in system A makes the triangle coupled, so there it falls back to three
+            #   distance constraints, as GROMACS represents `h-angles` and as LINCS does internally.
+            for c in angle_csB
+                cB = remap_angle_constraint(c, map_B_real)
+                if !any(p in constrained for p in angle_pairs(cB))
+                    push!(angle_cs, cB)
+                    foreach(p -> push!(constrained, p), angle_pairs(cB))
+                    continue
+                end
+                for dc in to_distance_constraints(cB)
+                    if !(Set([dc.i, dc.j]) in constrained)
+                        push!(dist_cs, dc)
+                        push!(constrained, Set([dc.i, dc.j]))
+                    end
                 end
             end
         end
