@@ -1665,7 +1665,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     end
 
     if !isnothing(implicit_solvent)
-        gi_is = setup_implicit_solvent(implicit_solvent, atoms, atoms_data, bonds, n_threads)
+        gi_is = setup_implicit_solvent(implicit_solvent, atoms, atoms_data, bonds_all, n_threads)
         general_inters_is = (gi_is,)
     else
         general_inters_is = ()
