@@ -251,8 +251,28 @@ const gbn2_data_m0 = [
     0.0128101, 0.0119627, 0.0111863,
 ]u"nm^-1" .* 10
 
-# This is force field dependent
-is_carboxylate_O(at_data) = at_data.atom_type == "O2"
+# A carboxylate O is an O bonded only to a C that has three bonds, one of them to another O,
+# Matching OpenMM https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/internal/customgbforces.py
+function atoms_carboxylate_O(atoms_data, bonds)
+    n_atoms = length(atoms_data)
+    carboxylate_O = falses(n_atoms)
+    if isnothing(bonds)
+        return carboxylate_O
+    end
+    bond_pairs = NTuple{2, Int}.(zip(from_device(bonds.is), from_device(bonds.js)))
+    partners = build_adjacency(n_atoms, bond_pairs)
+    for i in 1:n_atoms
+        if atoms_data[i].element != "O" || length(partners[i]) != 1
+            continue
+        end
+        c = partners[i][1]
+        if atoms_data[c].element != "C" || length(partners[c]) != 3
+            continue
+        end
+        carboxylate_O[i] = any(k -> k != i && atoms_data[k].element == "O", partners[c])
+    end
+    return carboxylate_O
+end
 
 function atoms_bonded_to_N(atoms_data, bonds)
     bonded_to_N = falses(length(atoms_data))
@@ -272,11 +292,13 @@ end
 function mbondi2_radii(atoms_data, bonds; use_mbondi3=false,
                         element_to_radius=mbondi2_element_to_radius)
     bonded_to_N = atoms_bonded_to_N(atoms_data, bonds)
-    return map(atoms_data, bonded_to_N) do at_data, at_bonded_to_N
+    carboxylate_O = use_mbondi3 ? atoms_carboxylate_O(atoms_data, bonds) :
+                                  falses(length(atoms_data))
+    return map(atoms_data, bonded_to_N, carboxylate_O) do at_data, at_bonded_to_N, at_carb_O
         if use_mbondi3 && at_data.res_name == "ARG" &&
                 (startswith(at_data.atom_name, "HH") || startswith(at_data.atom_name, "HE"))
             radius = element_to_radius["H_ARG"]
-        elseif use_mbondi3 && is_carboxylate_O(at_data)
+        elseif at_carb_O
             radius = element_to_radius["O_CAR"]
         elseif at_data.element in ("H", "D")
             radius = at_bonded_to_N ? element_to_radius["H_N"] : element_to_radius["H"]

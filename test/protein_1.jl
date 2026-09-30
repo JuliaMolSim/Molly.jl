@@ -578,6 +578,24 @@ end
     end
 end
 
+@testset "GBn2 carboxylate radii" begin
+    # Carboxylate O atoms are found from the bonds, so force fields with different
+    #   atom type names give the same radii
+    radii = map(["ff99SBildn.xml", "protein.ff19SB.xml"]) do ff_file
+        ff = MolecularForceField(joinpath(ff_dir, ff_file))
+        sys = System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            ff;
+            boundary=CubicBoundary(100.0u"nm"),
+            implicit_solvent=SetupImplicitSolventGBN2(),
+            strictness=:nowarn,
+        )
+        return Molly.mbondi3_radii(sys.atoms_data, Molly.gb_bonds(sys))
+    end
+    @test count(==(0.14u"nm"), radii[1]) == 34
+    @test radii[1] == radii[2]
+end
+
 @testset "a99SB-disp protein comparison" begin
     FT = Float64
     AT = Array
