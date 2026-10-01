@@ -259,6 +259,21 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
                    calculate_cv(rg_cv, coords, atoms),
                    atol = 1e-5u"nm")
 
+    # calculate_cv (value path, via radius_gyration) and cv_gradient (gradient path) must agree
+    # on the same mass-weighted center of mass -- with disparate atom masses, not just the
+    # backbone's similar C/N/O masses above, which don't separate the two definitions enough to
+    # catch a mismatch.
+    atoms_disparate = [Atom(mass=10.0u"g/mol"), Atom(mass=20.0u"g/mol"),
+                       Atom(mass=15.0u"g/mol"), Atom(mass=30.0u"g/mol")]
+    coords_disparate = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                        SVector(0.0, 2.0, 0.0)u"nm", SVector(3.0, 1.0, 0.0)u"nm"]
+    rg_cv_disparate = CalcRg()
+    @test isapprox(
+        calculate_cv(rg_cv_disparate, coords_disparate, atoms_disparate),
+        Molly.cv_gradient(rg_cv_disparate, coords_disparate, atoms_disparate, CubicBoundary(20.0u"nm"))[2];
+        atol=1e-9u"nm",
+    )
+
     # Rg of a subset of atoms
     n_atoms_subset = 20
     coords_subset = coords[1:n_atoms_subset]

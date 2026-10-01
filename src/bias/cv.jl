@@ -1155,7 +1155,7 @@ end
     pisum[tid] = acc
 end
 
-@kernel inbounds=true function rg_finalize_value_kernel!(dist_val, @Const(pisum), @Const(mtot_buf))
+@kernel inbounds=true function rg_finalize_kernel!(dist_val, @Const(pisum), @Const(mtot_buf))
     tid = @index(Global, Linear)
     if tid == 1
         T = length(pisum)
@@ -1164,18 +1164,6 @@ end
             Isum += pisum[k]
         end
         dist_val[1] = sqrt(Isum / mtot_buf[1])
-    end
-end
-
-@kernel inbounds=true function rg_finalize_grad_kernel!(d_buf, @Const(pisum), @Const(mtot_buf))
-    tid = @index(Global, Linear)
-    if tid == 1
-        T = length(pisum)
-        Isum = pisum[1]
-        for k in 2:T
-            Isum += pisum[k]
-        end
-        d_buf[1] = sqrt(Isum / mtot_buf[1])
     end
 end
 
@@ -1201,7 +1189,7 @@ function calculate_cv!(cv::CalcRg, coords, atoms, buff, args...; scratch=nothing
         finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos; ndrange=1)
         reduce_isum! = rg_isum_reduce_value_kernel!(backend, min(T, 256))
         reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf; ndrange=T)
-        finalize_val! = rg_finalize_value_kernel!(backend, 1)
+        finalize_val! = rg_finalize_kernel!(backend, 1) # reuse identical kernel as cv_gradient!
         finalize_val!(buff, scratch.partial_isum, scratch.mtot_buf; ndrange=1)
         return nothing
     end
@@ -1240,7 +1228,7 @@ function cv_gradient!(grad, d_buf, cv::CalcRg, coords, atoms, boundary, args...;
         finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos; ndrange=1)
         reduce_isum! = rg_isum_reduce_grad_kernel!(backend, min(T, 256))
         reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf, boundary; ndrange=T)
-        finalize_grad! = rg_finalize_grad_kernel!(backend, 1)
+        finalize_grad! = rg_finalize_kernel!(backend, 1) # reuse identical kernel as calculate_cv!
         finalize_grad!(d_buf, scratch.partial_isum, scratch.mtot_buf; ndrange=1)
         n = length(scratch.idx_dev)
         write! = rg_grad_write_kernel!(backend, min(n, 256))

@@ -58,7 +58,7 @@
         2.0 * sum(abs2, coords2[2] - center_of_mass) +
         3.0 * sum(abs2, coords2[3] - center_of_mass)
     rg_sq = I / 6.0
-    @test radius_gyration(coords2, atoms2) ≈ sqrt(rg_sq) atol=0.05
+    @test radius_gyration(coords2, atoms2) ≈ sqrt(rg_sq) atol=1e-12
 
     coords = [SVector(0.0, 0.0, 0.0), SVector(3.0, 4.0, 0.0)]
     boundary = CubicBoundary(10.0)

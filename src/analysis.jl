@@ -100,10 +100,11 @@ Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates correspond to the same periodic image.
 """
 function radius_gyration(coords, atoms)
-    center = sum(coords) / length(coords)
     atom_masses = mass.(atoms)
+    total_mass = sum(atom_masses)
+    center = sum(coords .* atom_masses) / total_mass
     I = sum(sum_abs2.(coords .- (center,)) .* atom_masses)
-    return sqrt(I / sum(atom_masses))
+    return sqrt(I / total_mass)
 end
 
 @doc raw"""
