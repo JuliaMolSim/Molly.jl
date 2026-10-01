@@ -244,12 +244,12 @@ next_bias_potential_id() = Threads.atomic_add!(BIAS_POTENTIAL_ID_COUNTER, UInt64
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
-    uses_persistent_buffers::Bool   # set at construction, see uses_builtin_cv_gradient!
+    uses_persistent_buffers::Bool   # set at construction, see uses_builtin_cv_gradient
     id::UInt64                      # set at construction, distinguishes structurally-equal biases
 end
 
 function BiasPotential(cv_type::C, bias_type::B) where {C, B}
-    return BiasPotential{C, B}(cv_type, bias_type, uses_builtin_cv_gradient!(cv_type),
+    return BiasPotential{C, B}(cv_type, bias_type, uses_builtin_cv_gradient(cv_type),
                                next_bias_potential_id())
 end
 
@@ -311,7 +311,7 @@ end
 bias_needs_unwrap(b::BiasPotential) = b.cv_type.correction == :pbc
 
 # Lazily allocates scratch.grad/scratch.d_buf. Only reached when bias.uses_persistent_buffers
-# is true (a CV type with a real cv_gradient!/calculate_cv! -- see uses_builtin_cv_gradient! in
+# is true (a CV type with a real cv_gradient!/calculate_cv! -- see uses_builtin_cv_gradient in
 # cv.jl).
 function ensure_bias_buffers!(scratch::BiasScratch, cv_type, coords)
     if scratch.grad === nothing

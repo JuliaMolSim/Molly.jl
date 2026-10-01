@@ -1681,11 +1681,11 @@ end
 # Trait gating BiasPotential's persistent-buffer path to CV types with a buffer-writing
 # calculate_cv!/cv_gradient!; a custom CV that only implements calculate_cv falls back to the
 # generic Enzyme-AD cv_gradient (ext/MollyEnzymeExt.jl), which has no buffer-writing equivalent.
-uses_builtin_cv_gradient!(::CalcDist) = true
-uses_builtin_cv_gradient!(::CalcRg) = true
-uses_builtin_cv_gradient!(::CalcRMSD) = true
-uses_builtin_cv_gradient!(::CalcTorsion) = true
-uses_builtin_cv_gradient!(::Any) = false
+uses_builtin_cv_gradient(::CalcDist) = true
+uses_builtin_cv_gradient(::CalcRg) = true
+uses_builtin_cv_gradient(::CalcRMSD) = true
+uses_builtin_cv_gradient(::CalcTorsion) = true
+uses_builtin_cv_gradient(::Any) = false
 
 # Buffer-shape helpers, deduplicating the grad/d_buf allocation pattern used by every allocating
 # cv_gradient/calculate_cv wrapper above and by BiasPotential's lazy buffer init (bias.jl).
