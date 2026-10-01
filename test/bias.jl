@@ -22,162 +22,201 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
     boundary = CubicBoundary(2.0u"nm")
 
     atom_inds_1 = [1, 2, 3]
-    atom_inds_2 = [4, 5, 6]
-    coords_1 = coords[atom_inds_1]
-    coords_2 = coords[atom_inds_2]
-    atoms_1 = atoms[atom_inds_1]
-    atoms_2 = atoms[atom_inds_2]
+    atom_inds_2 = [4, 5, 6] 
+    ArrayTypes = CUDA.functional() ? [Array, CuArray] : [Array]
 
-    @test isapprox(
-        Molly.center_of_mass(coords_1,atoms_1),
-        SVector(0.625, 1.0, 1.0)u"nm";
-        atol=1e-9u"nm",
-    )
+    for AT in ArrayTypes
+        coords_1 = AT(coords[atom_inds_1])
+        coords_2 = AT(coords[atom_inds_2])
+        atoms_1 = AT(atoms[atom_inds_1])
+        atoms_2 = AT(atoms[atom_inds_2])
 
-    @test isapprox(
-        Molly.center_of_mass(coords_2,atoms_2),
-        SVector(1.0333333333333334, 0.9166666666666666, 1.05)u"nm";
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            Molly.center_of_mass(coords_1, atoms_1),
+            SVector(0.625, 1.0, 1.0)u"nm";
+            atol=1e-9u"nm",
+        )
+        @test isapprox(
+            Molly.center_of_mass(coords_2, atoms_2),
+            SVector(1.0333333333333334, 0.9166666666666666, 1.05)u"nm";
+            atol=1e-9u"nm",
+        )
 
-    calc_dist = CalcCMDist()
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
+        calc_dist = CalcCMDist()
+        dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.4197386753154344u"nm";
-        atol=1e-9u"nm",
-    )
-    Molly.cv_gradient(dist_cv, coords, atoms, boundary)
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.4197386753154344u"nm";
+            atol=1e-9u"nm",
+        )
+        Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        Molly.dist_between_groups(calc_dist, coords_1, coords_2, boundary, atoms_1, atoms_2);
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            Molly.dist_between_groups(calc_dist, coords_1, coords_2, boundary, atoms_1, atoms_2);
+            atol=1e-9u"nm",
+        )
 
-    calc_dist = CalcMinDist()
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
+        calc_dist = CalcMinDist()
+        dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.3u"nm";
-        atol=1e-9u"nm",
-    )
-    Molly.cv_gradient(dist_cv, coords, atoms, boundary)
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.3u"nm";
+            atol=1e-9u"nm",
+        )
+        Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
-    calc_dist = CalcMinDist(:raw)
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
+        calc_dist = CalcMinDist(:raw)
+        dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.36055512754639896u"nm";
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.36055512754639896u"nm";
+            atol=1e-9u"nm",
+        )
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        Molly.dist_between_groups(calc_dist, coords_1, coords_2, boundary);
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            Molly.dist_between_groups(calc_dist, coords_1, coords_2, boundary);
+            atol=1e-9u"nm",
+        )
 
-    calc_dist = CalcMaxDist()
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
+        calc_dist = CalcMaxDist()
+        dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.9695359714832659u"nm";
-        atol=1e-9u"nm",
-    )
-    Molly.cv_gradient(dist_cv, coords, atoms, boundary)
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.9695359714832659u"nm";
+            atol=1e-9u"nm",
+        )
+        Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
-    calc_dist = CalcMaxDist(:raw)
-    dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
+        calc_dist = CalcMaxDist(:raw)
+        dist_cv = CalcDist(atom_inds_1, atom_inds_2, calc_dist, :wrap)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        1.7u"nm";
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            1.7u"nm";
+            atol=1e-9u"nm",
+        )
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        Molly.dist_between_groups(calc_dist, coords_1, coords_2, boundary);
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            Molly.dist_between_groups(calc_dist, coords_1, coords_2, boundary);
+            atol=1e-9u"nm",
+        )
 
-    calc_dist = CalcSingleDist()
-    dist_cv = CalcDist([3], [4], calc_dist, :wrap)
+        # Differently-sized groups: regression test for a transpose bug in
+        # pairwise_distance_matrix's :raw branch that only manifests when the two
+        # groups have different sizes (harmless/undetectable for equal-sized groups)
+        atom_inds_small = [1, 2]
+        coords_small = AT(coords[atom_inds_small])
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.3u"nm";
-        atol=1e-9u"nm",
-    )
-    Molly.cv_gradient(dist_cv, coords, atoms, boundary)
+        calc_dist = CalcMinDist()
+        dist_cv = CalcDist(atom_inds_small, atom_inds_2, calc_dist, :wrap)
 
-    calc_dist = CalcSingleDist(:raw)
-    dist_cv = CalcDist([3], [4], calc_dist, :wrap)
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.36055512754639896u"nm";
+            atol=1e-9u"nm",
+        )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            Molly.dist_between_groups(calc_dist, coords_small, coords_2, boundary);
+            atol=1e-9u"nm",
+        )
+        Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        1.7u"nm";
-        atol=1e-9u"nm",
-    )
+        calc_dist = CalcMaxDist()
+        dist_cv = CalcDist(atom_inds_small, atom_inds_2, calc_dist, :wrap)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        Molly.dist_between_groups(calc_dist, [c3], [c4], boundary);
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.8u"nm";
+            atol=1e-9u"nm",
+        )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            Molly.dist_between_groups(calc_dist, coords_small, coords_2, boundary);
+            atol=1e-9u"nm",
+        )
+        Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
-    dist_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
+        calc_dist = CalcSingleDist()
+        dist_cv = CalcDist([3], [4], calc_dist, :wrap)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.3u"nm";
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.3u"nm";
+            atol=1e-9u"nm",
+        )
+        Molly.cv_gradient(dist_cv, coords, atoms, boundary)
 
-    dist_cv = CalcDist([3], [4], CalcSingleDist(), :wrap)
+        calc_dist = CalcSingleDist(:raw)
+        dist_cv = CalcDist([3], [4], calc_dist, :wrap)
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.3u"nm";
-        atol=1e-9u"nm",
-    )
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            1.7u"nm";
+            atol=1e-9u"nm",
+        )
 
-    dist_cv = CalcDist([5], [6], CalcSingleDist(), :wrap)
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            Molly.dist_between_groups(calc_dist, [c3], [c4], boundary);
+            atol=1e-9u"nm",
+        )
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.6708203932499369u"nm";
-        atol=1e-9u"nm",
-    )
+        dist_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
 
-    dist_cv = CalcDist([1], [2], CalcSingleDist(:raw), :wrap)
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.3u"nm";
+            atol=1e-9u"nm",
+        )
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.3u"nm";
-        atol=1e-9u"nm",
-    )
+        dist_cv = CalcDist([3], [4], CalcSingleDist(), :wrap)
 
-    dist_cv = CalcDist([3], [4], CalcSingleDist(:raw), :wrap)
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.3u"nm";
+            atol=1e-9u"nm",
+        )
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        1.7u"nm";
-        atol=1e-9u"nm",
-    )
+        dist_cv = CalcDist([5], [6], CalcSingleDist(), :wrap)
 
-    dist_cv = CalcDist([5], [6], CalcSingleDist(:raw), :wrap)
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.6708203932499369u"nm";
+            atol=1e-9u"nm",
+        )
 
-    @test isapprox(
-        calculate_cv(dist_cv, coords, atoms, boundary),
-        0.6708203932499369u"nm";
-        atol=1e-9u"nm",
-    )
+        dist_cv = CalcDist([1], [2], CalcSingleDist(:raw), :wrap)
+
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.3u"nm";
+            atol=1e-9u"nm",
+        )
+
+        dist_cv = CalcDist([3], [4], CalcSingleDist(:raw), :wrap)
+
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            1.7u"nm";
+            atol=1e-9u"nm",
+        )
+
+        dist_cv = CalcDist([5], [6], CalcSingleDist(:raw), :wrap)
+
+        @test isapprox(
+            calculate_cv(dist_cv, coords, atoms, boundary),
+            0.6708203932499369u"nm";
+            atol=1e-9u"nm",
+        )
+    end
 
     pdb_path = joinpath(data_dir, "1ssu.pdb")
     struc = read(pdb_path, BioStructures.PDBFormat)
@@ -251,6 +290,18 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
         1.5707963267948966; # pi/2 radians
         atol=1e-9
     )
+
+    for AT in ArrayTypes
+        coords_tor_dev = AT(coords_tor)
+        @test isapprox(
+            calculate_cv(tor_cv, coords_tor_dev, atoms, boundary),
+            1.5707963267948966; # pi/2 radians
+            atol=1e-9
+        )
+        grad_dev, phi_dev = Molly.cv_gradient(tor_cv, coords_tor_dev, atoms, boundary)
+        @test isapprox(phi_dev, 1.5707963267948966; atol=1e-9)
+        @test all(v -> all(x -> isfinite(ustrip(x)), v), grad_dev)
+    end
 
     coords_tor_near = SVector{3, Float32}[
         SVector(0.0f0, 0.0f0, 0.0f0),
@@ -497,39 +548,39 @@ end
     @test pb.r_fb == 0.1
     @test_throws ArgumentError PeriodicFlatBottomBias(1000.0u"kJ * mol^-1", -0.1, 0.0)
     @test_throws ArgumentError PeriodicFlatBottomBias(1000.0u"kJ * mol^-1", NaN, 0.0)
-    
+
     # Inside flat region (no penalty)
     cv_sim_in = 0.05
     @test potential_energy(pb, cv_sim_in) == 0.0u"kJ * mol^-1"
     @test Molly.bias_gradient(pb, cv_sim_in) == 0.0u"kJ * mol^-1"
-    
+
     # Outside region (harmonic penalty)
     cv_sim_out = 0.2
     # Energy: 0.5 * k * (dist - r_fb)^2 = 0.5 * 1000 * (0.2 - 0.1)^2 = 5.0
     @test isapprox(
-        potential_energy(pb, cv_sim_out), 
-        5.0u"kJ * mol^-1"; 
+        potential_energy(pb, cv_sim_out),
+        5.0u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1"
     )
     # Gradient: k * (dist - r_fb) * sign(d_wrapped) = 1000 * 0.1 * 1 = 100.0
     @test isapprox(
-        Molly.bias_gradient(pb, cv_sim_out), 
-        100.0u"kJ * mol^-1"; 
+        Molly.bias_gradient(pb, cv_sim_out),
+        100.0u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1"
     )
 
     # Periodic wrapping test (Target 0, width 0.1, Input ~ -0.2)
-    cv_sim_wrap = 2π - 0.2 
+    cv_sim_wrap = 2π - 0.2
     # Wrapped distance is 0.2, outside the flat bottom
     @test isapprox(
-        potential_energy(pb, cv_sim_wrap), 
-        5.0u"kJ * mol^-1"; 
+        potential_energy(pb, cv_sim_wrap),
+        5.0u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1"
     )
     # Gradient should point towards the target (negative direction)
     @test isapprox(
-        Molly.bias_gradient(pb, cv_sim_wrap), 
-        -100.0u"kJ * mol^-1"; 
+        Molly.bias_gradient(pb, cv_sim_wrap),
+        -100.0u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1"
     )
 
@@ -540,7 +591,39 @@ end
     )
     @test Molly.bias_gradient(pb, π) == Molly.bias_gradient(pb, -π)
     @test Molly.bias_gradient(pb, π) < 0u"kJ * mol^-1"
+end
 
+@testset "Bias correction and GPU" begin
+    coords_uw = [SVector(1.95u"nm", 0.0u"nm", 0.0u"nm"), SVector(0.05u"nm", 0.0u"nm", 0.0u"nm"), SVector(0.15u"nm", 0.0u"nm", 0.0u"nm"),
+                 SVector(1.0u"nm", 1.0u"nm", 1.0u"nm")]
+    boundary_uw = CubicBoundary(2.0u"nm")
+    topology = MolecularTopology([1, 1, 1, 2], [3, 1], [(1, 2), (2, 3)])
+    atoms_uw = [Atom(mass=10.0u"g/mol") for _ in 1:4]
+
+    rg_cv_pbc  = CalcRg([1, 2, 3])
+    rg_cv_wrap = CalcRg([1, 2, 3], :wrap)
+
+    # On CPU, :pbc (molecule-unwrapped) and :wrap (raw) coordinates give meaningfully
+    # different CV values for a molecule straddling the periodic boundary
+    sys_cpu = System(atoms=atoms_uw, coords=coords_uw, boundary=boundary_uw, topology=topology)
+    rg_pbc_cpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_cpu, rg_cv_pbc), sys_cpu.atoms)
+    rg_wrap_cpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_cpu, rg_cv_wrap), sys_cpu.atoms)
+    @test !isapprox(rg_pbc_cpu, rg_wrap_cpu; atol=1e-3u"nm")
+
+    if CUDA.functional()
+        sys_gpu = System(
+            atoms=CuArray(atoms_uw),
+            coords=CuArray(coords_uw),
+            boundary=boundary_uw,
+            topology=topology,
+        )
+        # :pbc now runs fully on GPU (GPU-native unwrap_molecules) and matches the CPU :pbc result
+        rg_pbc_gpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_gpu, rg_cv_pbc), sys_gpu.atoms)
+        @test isapprox(rg_pbc_gpu, rg_pbc_cpu; atol=1e-9u"nm")
+        # :wrap stays fully GPU-resident and matches the CPU :wrap (raw coordinates) result
+        rg_wrap_gpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_gpu, rg_cv_wrap), sys_gpu.atoms)
+        @test isapprox(rg_wrap_gpu, rg_wrap_cpu; atol=1e-9u"nm")
+    end
 end
 
 @testset "Biased simulation" begin
@@ -660,5 +743,89 @@ end
         @test !isapprox(dist_13_mean, 1.5u"nm"; atol=0.05u"nm")
         @test dist_13_mean > dist_12_mean
         @test dist_13_std > dist_12_std
+    end
+end
+
+@testset "BiasPotential persistent buffers" begin
+    atom_mass = 10.0u"g/mol"
+    boundary = CubicBoundary(20.0u"nm")
+
+    @testset "Cross-BiasPotential isolation" for AT in array_list
+        n = 8
+        coords = AT([SVector(Float64(i) * 0.3, 0.0, 0.0)u"nm" for i in 1:n])
+        atoms = AT([Atom(mass=atom_mass) for _ in 1:n])
+        cv1 = CalcDist([1], [2], CalcSingleDist(), :wrap)
+        cv2 = CalcDist([3, 4], [6, 7], CalcMinDist(), :wrap)
+        bias1 = BiasPotential(cv1, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 0.8u"nm"))
+        bias2 = BiasPotential(cv2, SquareBias(250.0u"kJ * mol^-1 * nm^-2", 1.2u"nm"))
+        sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias1, bias2))
+        buffers = Molly.init_buffers!(sys, 1)
+
+        fs1 = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
+        Molly.AtomsCalculators.forces!(fs1, sys, bias1; buffers=buffers, inter_idx=1)
+        fs2 = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
+        Molly.AtomsCalculators.forces!(fs2, sys, bias2; buffers=buffers, inter_idx=2)
+        @test buffers.bias_scratch[1].grad !== buffers.bias_scratch[2].grad
+        combined_expected = Molly.from_device(fs1) .+ Molly.from_device(fs2)
+
+        fs_sum = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
+        for (i, gi) in enumerate(sys.general_inters)
+            Molly.AtomsCalculators.forces!(fs_sum, sys, gi; buffers=buffers, inter_idx=i)
+        end
+        @test all(isapprox.(Molly.from_device(fs_sum), combined_expected; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+    end
+
+    # A reused persistent `grad` buffer must not retain a stale force contribution from a
+    # PREVIOUS step's CalcMinDist winning pair once the winner moves to a different pair.
+    @testset "Stale-winner regression (CalcMinDist)" for AT in array_list
+        atoms = AT([Atom(mass=atom_mass) for _ in 1:4])
+        # Step N: atom 1 closest to atom 3; step N+1: atom 2 closest to atom 4, with atoms
+        # 1 and 3 now far apart.
+        coords_N = [SVector(0.0, 0.0, 0.0)u"nm", SVector(10.0, 0.0, 0.0)u"nm",
+                    SVector(0.5, 0.0, 0.0)u"nm", SVector(15.0, 0.0, 0.0)u"nm"]
+        coords_N1 = [SVector(0.0, 0.0, 0.0)u"nm", SVector(10.0, 0.0, 0.0)u"nm",
+                     SVector(15.0, 0.0, 0.0)u"nm", SVector(10.5, 0.0, 0.0)u"nm"]
+        cv = CalcDist([1, 2], [3, 4], CalcMinDist(), :wrap)
+        bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+
+        sys_N = System(atoms=atoms, coords=AT(coords_N), boundary=boundary, general_inters=(bias,))
+        buffers = Molly.init_buffers!(sys_N, 1)
+        fs_N = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
+        Molly.AtomsCalculators.forces!(fs_N, sys_N, bias; buffers=buffers, inter_idx=1)
+        fs_N_cpu = Molly.from_device(fs_N)
+        @test norm(ustrip.(fs_N_cpu[1])) > 0
+        @test norm(ustrip.(fs_N_cpu[3])) > 0
+        @test norm(ustrip.(fs_N_cpu[2])) == 0
+        @test norm(ustrip.(fs_N_cpu[4])) == 0
+
+        sys_N1 = System(atoms=atoms, coords=AT(coords_N1), boundary=boundary, general_inters=(bias,))
+        fs_N1 = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
+        # Reuses the SAME buffers (hence the SAME buffers.bias_scratch[1].grad) as step N.
+        Molly.AtomsCalculators.forces!(fs_N1, sys_N1, bias; buffers=buffers, inter_idx=1)
+        fs_N1_cpu = Molly.from_device(fs_N1)
+        @test norm(ustrip.(fs_N1_cpu[1])) == 0 # not a stale leftover from step N
+        @test norm(ustrip.(fs_N1_cpu[3])) == 0
+        @test norm(ustrip.(fs_N1_cpu[2])) > 0
+        @test norm(ustrip.(fs_N1_cpu[4])) > 0
+    end
+
+    # The fused GPU kernel for CalcMinDist/CalcMaxDist (extremal_pair_fused) uses O(group_a)
+    # memory instead of the O(group_a * group_b) dense matrix the old implementation
+    # materialized -- assert this directly via CUDA.@allocated, rather than literally
+    # reproducing the ~29GB OOM the O(group^2) approach hit at group~51200 (fragile/GPU-
+    # dependent). At group_a=group_b=2000, O(group) is tens of KB; O(group^2) would be
+    # ~48MB (2000^2 * 12 bytes for SVector{3,Float32}).
+    if CUDA.functional()
+        @testset "CalcMinDist GPU memory is O(group), not O(group^2)" begin
+            na = 2000
+            coords = CuArray([SVector(Float32(i % 100) * 0.01f0, 0f0, 0f0)u"nm" for i in 1:(2 * na)])
+            atoms = CuArray([Atom(mass=10.0f0u"g/mol") for _ in 1:(2 * na)])
+            boundary_f32 = CubicBoundary(100.0f0u"nm")
+            cv = CalcDist(collect(1:na), collect((na + 1):(2 * na)), CalcMinDist(), :wrap)
+            buff = similar(coords, eltype(eltype(coords)), 1)
+            Molly.calculate_cv!(cv, coords, atoms, boundary_f32, buff) # warm up / compile
+            bytes = CUDA.@allocated Molly.calculate_cv!(cv, coords, atoms, boundary_f32, buff)
+            @test bytes < 1_000_000 # tens of KB expected; a dense O(group^2) matrix would be ~48MB
+        end
     end
 end
