@@ -884,6 +884,39 @@ end
         end
     end
 
+    # CalcCMDist gradient with overlapping atom_inds_1/atom_inds_2: the shared atom's force must
+    # be the SUM of both groups' contributions, not whichever group writes/races last.
+    @testset "CalcCMDist gradient with overlapping atom groups" for AT in array_list
+        masses = [10.0, 20.0, 15.0, 5.0]u"g/mol"
+        coords_host = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                       SVector(2.0, 0.0, 0.0)u"nm", SVector(5.0, 0.0, 0.0)u"nm"]
+        atoms = AT([Atom(mass=m) for m in masses])
+        coords = AT(coords_host)
+        cv = CalcDist([1, 2, 3], [3, 4], CalcCMDist(), :wrap) # atom 3 is shared
+        k, target = 400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"
+        bias = BiasPotential(cv, SquareBias(k, target))
+        sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias,))
+        buffers = Molly.init_buffers!(sys, 1)
+
+        fs = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
+        Molly.AtomsCalculators.forces!(fs, sys, bias; buffers=buffers)
+        fs_cpu = Molly.from_device(fs)
+
+        # Independent reference computed directly from the CMDist/SquareBias formulas, not by
+        # calling into any code under test.
+        g1, g2 = [1, 2, 3], [3, 4]
+        M1, M2 = sum(masses[g1]), sum(masses[g2])
+        com1 = sum(coords_host[g1] .* masses[g1]) / M1
+        com2 = sum(coords_host[g2] .* masses[g2]) / M2
+        d = norm(com2 - com1)
+        dir = (com2 - com1) / d
+        # Atom 3 is in both groups, so its CV gradient is the SUM of both groups' contributions.
+        d_cv_d_atom3 = -dir * (masses[3] / M1) + dir * (masses[3] / M2)
+        force_atom3 = -k * (d - target) * d_cv_d_atom3
+
+        @test all(isapprox.(ustrip.(fs_cpu[3]), ustrip.(force_atom3); atol=1e-9))
+    end
+
     # CalcRMSD in a BiasPotential on GPU, with units and a host-built reference.
     if CUDA.functional()
         @testset "CalcRMSD in BiasPotential on GPU matches CPU" begin

@@ -331,6 +331,13 @@ function upload_idx(coords, inds::Vector{Int})
     return idx_dev
 end
 
+# For each atom in inds_a, its position in inds_b (0 if absent). Used by CMDistScratch so
+# cmdist_grad_write_kernel! can detect a shared atom between the two groups without a race.
+function partner_indices(inds_a::Vector{Int}, inds_b::Vector{Int})
+    pos_in_b = Dict(atom => k for (k, atom) in enumerate(inds_b))
+    return [get(pos_in_b, atom, 0) for atom in inds_a]
+end
+
 function bias_dist_scratch_types(coords, atoms)
     CT = eltype(coords)
     MT = fieldtype(eltype(atoms), :mass)
@@ -370,6 +377,8 @@ function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
         DT = typeof(zero(CT) / oneunit(eltype(CT))) # unit-stripped direction vector
         scratch.dist_scratch = CMDistScratch(
             upload_idx(coords, cv.atom_inds_1), upload_idx(coords, cv.atom_inds_2),
+            upload_idx(coords, partner_indices(cv.atom_inds_1, cv.atom_inds_2)),
+            upload_idx(coords, partner_indices(cv.atom_inds_2, cv.atom_inds_1)),
             similar(coords, MT, T1), similar(coords, WT, T1),
             similar(coords, MT, T2), similar(coords, WT, T2),
             similar(coords, DT, 1),

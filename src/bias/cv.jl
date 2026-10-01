@@ -417,9 +417,15 @@ end
 # the small partials), grad-write (per-atom, parallel). A serial ndrange=1 thread would leave
 # the device idle and scaled linearly with group size. calculate_cv! needs reduce+finalize;
 # cv_gradient! needs all three.
+#
+# partner1/partner2 (0 = none, built once at scratch construction) let idx1 and idx2 share an
+# atom without a write race: the idx1-side thread for a shared atom also adds idx2's
+# contribution, and the idx2-side thread for that atom writes nothing.
 mutable struct CMDistScratch{IV, MV, WV, DV, SV}
     idx1_dev::IV
     idx2_dev::IV
+    partner1_dev::IV
+    partner2_dev::IV
     partial_mass1::MV
     partial_wpos1::WV
     partial_mass2::MV
@@ -495,25 +501,28 @@ end
 
 @kernel inbounds=true function cmdist_grad_write_kernel!(grad, @Const(d_buf), @Const(dir_buf),
                                                           @Const(mtot1_buf), @Const(mtot2_buf),
-                                                          @Const(atoms), @Const(idx1), @Const(idx2))
+                                                          @Const(atoms), @Const(idx1), @Const(idx2),
+                                                          @Const(partner1), @Const(partner2))
     tid = @index(Global, Linear)
     na = length(idx1)
     d = d_buf[1]
-    if d > zero(d)
-        dir = dir_buf[1]
-        if tid <= na
-            grad[idx1[tid]] = -dir * (mass(atoms[idx1[tid]]) / mtot1_buf[1])
+    if tid <= na
+        p = partner1[tid]
+        if d > zero(d)
+            dir = dir_buf[1]
+            g = -dir * (mass(atoms[idx1[tid]]) / mtot1_buf[1])
+            if p != 0
+                g += dir * (mass(atoms[idx2[p]]) / mtot2_buf[1])
+            end
+            grad[idx1[tid]] = g
         else
-            k = tid - na
-            grad[idx2[k]] = dir * (mass(atoms[idx2[k]]) / mtot2_buf[1])
+            grad[idx1[tid]] = zero(eltype(grad))
         end
     else
-        z = zero(eltype(grad))
-        if tid <= na
-            grad[idx1[tid]] = z
-        else
-            k = tid - na
-            grad[idx2[k]] = z
+        k = tid - na
+        if partner2[k] == 0 # otherwise already written by its idx1-side partner above
+            d > zero(d) ? grad[idx2[k]] = dir_buf[1] * (mass(atoms[idx2[k]]) / mtot2_buf[1]) :
+                          grad[idx2[k]] = zero(eltype(grad))
         end
     end
 end
@@ -908,7 +917,8 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcCMDist}, coords, atoms, boun
         na, nb = length(scratch.idx1_dev), length(scratch.idx2_dev)
         write! = cmdist_grad_write_kernel!(backend, min(na + nb, 256))
         write!(grad, d_buf, scratch.dir_buf, scratch.mtot1_buf, scratch.mtot2_buf,
-              atoms, scratch.idx1_dev, scratch.idx2_dev; ndrange=na + nb)
+              atoms, scratch.idx1_dev, scratch.idx2_dev, scratch.partner1_dev, scratch.partner2_dev;
+              ndrange=na + nb)
         return nothing
     end
 
@@ -944,11 +954,13 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcCMDist}, coords, atoms, boun
     grad2 = dir .* (m2 ./ M2)
     # @inbounds: cv.atom_inds_1/atom_inds_2 are validated at CV-construction time, always valid
     # indices into `grad` -- without it, GPUArrays' fancy-index setindex! bounds check
-    # (checkindex -> all(...)) is an *extra* host sync on top of the actual write, and (found
-    # directly, verifying CUDA graph capture) raises a device-side exception if this runs inside
-    # a captured region at all.
-    @inbounds grad[cv.atom_inds_1] = ifelse.(mask, grad1, zero.(grad1))
-    @inbounds grad[cv.atom_inds_2] = ifelse.(mask, grad2, zero.(grad2))
+    # (checkindex -> all(...)) is an extra host sync on top of the actual write.
+    #
+    # Accumulate (+=), not assign: atom_inds_1/atom_inds_2 may share an atom.
+    @inbounds grad[cv.atom_inds_1] .= (zero(eltype(grad)),)
+    @inbounds grad[cv.atom_inds_2] .= (zero(eltype(grad)),)
+    @inbounds grad[cv.atom_inds_1] .+= ifelse.(mask, grad1, zero.(grad1))
+    @inbounds grad[cv.atom_inds_2] .+= ifelse.(mask, grad2, zero.(grad2))
 
     return nothing
 end
