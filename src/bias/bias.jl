@@ -299,13 +299,13 @@ bias_max_abs_ustrip(value) = abs(ustrip(value))
     error(msg)
 end
 
-# Coordinates a BiasPotential should use, unwrapped for correction==:pbc. With buffers/step_n,
-# routes through the shared once-per-step unwrap cache (ensure_unwrapped_coords!, force.jl)
+# Coordinates a BiasPotential should use, unwrapped for correction==:pbc. With buffers, routes
+# through the shared once-per-forces!-call unwrap cache (ensure_unwrapped_coords!, force.jl)
 # instead of recomputing per bias.
 function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
     cv_type.correction != :pbc && return sys.coords
     if !isnothing(buffers) && !isnothing(step_n) && hasproperty(buffers, :unwrapped_coords)
-        return ensure_unwrapped_coords!(buffers, sys, step_n)
+        return ensure_unwrapped_coords!(buffers, sys)
     end
     return unwrap_molecules(sys)
 end

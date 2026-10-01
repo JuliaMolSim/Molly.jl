@@ -198,11 +198,9 @@ mutable struct BufferValidity
     pressure_step::Int
     pre_coupling_virial_step::Int
     pre_coupling_pressure_step::Int
-    unwrap_step::Int
 end
 
 BufferValidity() = BufferValidity(
-    INVALID_BUFFER_STEP,
     INVALID_BUFFER_STEP,
     INVALID_BUFFER_STEP,
     INVALID_BUFFER_STEP,
@@ -304,23 +302,14 @@ end
 # BiasPotential with correction==:pbc, src/bias/bias.jl).
 bias_needs_unwrap(inter) = false
 
-# unwrap_molecules(sys), computed at most once per step_n and cached on buffers so every
-# attached BiasPotential with correction==:pbc shares it.
-function ensure_unwrapped_coords!(buffers, sys, step_n::Integer)
-    if !has_unwrap(buffers.validity, step_n)
+# unwrap_molecules(sys), computed at most once per forces! call and cached on buffers so every
+# attached BiasPotential with correction==:pbc shares it. Reset to nothing at the top of each
+# forces! call, since forces! can run more than once at the same step_n (e.g. MTS substeps).
+function ensure_unwrapped_coords!(buffers, sys)
+    if isnothing(buffers.unwrapped_coords[])
         buffers.unwrapped_coords[] = unwrap_molecules(sys)
-        mark_unwrap!(buffers.validity, step_n)
     end
     return buffers.unwrapped_coords[]
-end
-
-function mark_unwrap!(v::BufferValidity, step_n::Integer)
-    v.unwrap_step = Int(step_n)
-    return v
-end
-
-function has_unwrap(v::BufferValidity, step_n::Integer)
-    return v.unwrap_step == step_n
 end
 
 function has_constraint_virial(buffers, step_n::Integer)
@@ -538,7 +527,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, ITD, NIT, OIT, 
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
-    unwrapped_coords::Base.RefValue{Any}   # shared, once-per-step cache: see ensure_unwrapped_coords!
+    unwrapped_coords::Base.RefValue{Any}   # shared, once-per-call cache: see ensure_unwrapped_coords!
     bias_scratch::Any                      # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersCPU
     validity::BufferValidity
     box_mins::C
@@ -1312,8 +1301,9 @@ function forces!(fs,
 
     # Compute unwrap_molecules(sys) at most once here, shared by every attached BiasPotential
     # that needs it (correction==:pbc), instead of each recomputing it independently below.
+    buffers.unwrapped_coords[] = nothing
     if any(bias_needs_unwrap, values(general_inters))
-        ensure_unwrapped_coords!(buffers, sys, step_n)
+        ensure_unwrapped_coords!(buffers, sys)
     end
     for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,

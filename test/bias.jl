@@ -839,14 +839,49 @@ end
         buffers = Molly.init_buffers!(sys_mts, 1)
 
         fs_a_mts = Molly.zero_forces(sys_mts)
-        Molly.forces!(fs_a_mts, sys_mts, nothing, 1, buffers, Val(false);
+        Molly.forces!(fs_a_mts, sys_mts, nothing, 1, buffers, Val(false); n_threads=1,
                       general_inters=fraction_inters[1].general_inters)
         fs_b_mts = Molly.zero_forces(sys_mts)
-        Molly.forces!(fs_b_mts, sys_mts, nothing, 1, buffers, Val(false);
+        Molly.forces!(fs_b_mts, sys_mts, nothing, 1, buffers, Val(false); n_threads=1,
                       general_inters=fraction_inters[2].general_inters)
 
         @test all(isapprox.(Molly.from_device(fs_a_mts), fs_a_ref; atol=1e-9u"kJ * mol^-1 * nm^-1"))
         @test all(isapprox.(Molly.from_device(fs_b_mts), fs_b_ref; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+    end
+
+    # forces! called twice at the SAME step_n with coordinates moved in between (as MTS substeps
+    # or a post-coupling recompute do) must not reuse the first call's cached :pbc unwrap.
+    if CUDA.functional()
+        @testset "Unwrap cache does not persist across forces! calls at the same step_n" begin
+            topology = MolecularTopology([1, 1, 1], [3], [(1, 2), (2, 3)])
+            atoms = CuArray([Atom(mass=atom_mass) for _ in 1:3])
+            coords = CuArray([SVector(1.95, 0.0, 0.0)u"nm", SVector(0.05, 0.0, 0.0)u"nm",
+                              SVector(0.15, 0.0, 0.0)u"nm"])
+            boundary_uw = CubicBoundary(2.0u"nm")
+            cv = CalcRg([1, 2, 3])
+            bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 0.5u"nm"))
+
+            sys = System(atoms=atoms, coords=coords, boundary=boundary_uw, topology=topology,
+                         general_inters=(bias,))
+            buffers = Molly.init_buffers!(sys, 1)
+
+            fs1 = Molly.zero_forces(sys)
+            Molly.forces!(fs1, sys, nothing, 1, buffers, Val(false))
+
+            sys.coords .= CuArray([SVector(0.95, 0.0, 0.0)u"nm", SVector(0.05, 0.0, 0.0)u"nm",
+                                   SVector(0.15, 0.0, 0.0)u"nm"])
+            fs2 = Molly.zero_forces(sys)
+            Molly.forces!(fs2, sys, nothing, 1, buffers, Val(false)) # same step_n as fs1
+
+            sys_ref = System(atoms=atoms, coords=copy(sys.coords), boundary=boundary_uw,
+                             topology=topology, general_inters=(bias,))
+            buffers_ref = Molly.init_buffers!(sys_ref, 1)
+            fs_ref = Molly.zero_forces(sys_ref)
+            Molly.forces!(fs_ref, sys_ref, nothing, 1, buffers_ref, Val(false))
+
+            @test all(isapprox.(Molly.from_device(fs2), Molly.from_device(fs_ref);
+                                atol=1e-9u"kJ * mol^-1 * nm^-1"))
+        end
     end
 
     # CalcRMSD in a BiasPotential on GPU, with units and a host-built reference.
