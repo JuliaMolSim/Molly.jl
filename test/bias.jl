@@ -1077,6 +1077,33 @@ end
         end
     end
 
+    # CalcRg forces AND virial on GPU must match CPU, through BiasPotential's persistent-buffer
+    # path (not just calculate_cv/cv_gradient called directly).
+    if CUDA.functional()
+        @testset "CalcRg virial on GPU matches CPU" begin
+            atoms_v = [Atom(mass=10.0u"g/mol") for _ in 1:4]
+            coords_v = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                       SVector(0.0, 1.0, 0.0)u"nm", SVector(1.0, 1.0, 0.0)u"nm"]
+            cv = CalcRg([1, 2, 3, 4], :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+
+            sys_cpu = System(atoms=atoms_v, coords=coords_v, boundary=boundary, general_inters=(bias,))
+            buffers_cpu = Molly.init_buffers!(sys_cpu, 1)
+            fs_cpu = Molly.zero_forces(sys_cpu)
+            Molly.forces!(fs_cpu, sys_cpu, nothing, 1, buffers_cpu, Val(true); n_threads=1)
+
+            sys_gpu = System(atoms=CuArray(atoms_v), coords=CuArray(coords_v), boundary=boundary,
+                             general_inters=(bias,))
+            buffers_gpu = Molly.init_buffers!(sys_gpu, 1)
+            fs_gpu = Molly.zero_forces(sys_gpu)
+            Molly.forces!(fs_gpu, sys_gpu, nothing, 1, buffers_gpu, Val(true))
+
+            @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+            @test all(isapprox.(ustrip.(Molly.from_device(buffers_gpu.virial)), ustrip.(buffers_cpu.virial);
+                                atol=1e-9))
+        end
+    end
+
     # The fused GPU kernel for CalcMinDist/CalcMaxDist (extremal_pair_fused) uses O(group_a)
     # memory instead of the O(group_a * group_b) dense matrix the old implementation
     # materialized -- assert this directly via CUDA.@allocated, rather than literally
