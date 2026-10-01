@@ -717,11 +717,9 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     to_frac, to_cart, wrap01 = _frac_cart_closures(boundary, Val(D))
     f = wrap01.(to_frac.(coords)) # Dimensionless, GPU-resident
 
-    parent      = topology.parent      isa AT ? topology.parent      : to_device(topology.parent, AT)
-    sort_perm   = topology.sort_perm   isa AT ? topology.sort_perm   : to_device(topology.sort_perm, AT)
-    mol_offsets = topology.mol_offsets isa AT ? topology.mol_offsets : to_device(topology.mol_offsets, AT)
-    atom_mol    = topology.atom_molecule_inds isa AT ? topology.atom_molecule_inds :
-                      to_device(topology.atom_molecule_inds, AT)
+    arrays = device_topology_arrays(topology, AT)
+    parent, sort_perm, mol_offsets, atom_mol = arrays.parent, arrays.sort_perm, arrays.mol_offsets,
+                                               arrays.atom_molecule_inds
 
     minimum_image(df) = df .- round.(df)
 

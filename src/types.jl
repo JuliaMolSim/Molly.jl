@@ -603,6 +603,7 @@ struct MolecularTopology{VI <: AbstractVector{Int32}}
     sort_perm::VI    # length N; permutation grouping atoms contiguously by molecule id
     mol_offsets::VI  # length n_mol+1; 0-based prefix boundaries into sort_perm order
     n_rounds::Int    # pointer-doubling round count for GPU unwrap_molecules; host Int, not device data
+    gpu_cache::Base.RefValue{Any}  # lazily filled device-resident arrays, see device_topology_arrays
 end
 
 function bond_graph(bond_is, bond_js, n_atoms)
@@ -626,21 +627,17 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer; kwargs...)
     end
     molecule_atom_counts = length.(cc)
     bonded_atoms = collect(zip(bond_is, bond_js))
-    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms; kwargs...)
+    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g; kwargs...)
 end
 
 # Spanning forest (parent pointer per atom, self-loop at roots) of the bonded-atom graph via a
-# stack-based DFS. Any consistent spanning tree gives a physically valid unwrap, so the DFS's
-# particular choice doesn't matter for correctness. Feeds `parent`/`n_rounds` for
-# `_gpu_unwrap_fractional`'s pointer-doubling (spatial.jl); the CPU `unwrap_molecules` uses its
-# own independent traversal instead.
-function molecule_spanning_forest(atom_molecule_inds, bonded_atoms)
-    n_atoms = length(atom_molecule_inds)
-    adj = [Int[] for _ in 1:n_atoms]
-    for (i, j) in bonded_atoms
-        push!(adj[i], j)
-        push!(adj[j], i)
-    end
+# stack-based DFS over an already-built graph `g` (avoids rebuilding an adjacency list from
+# bonded_atoms when the caller already has one, e.g. from bond_graph). Any consistent spanning
+# tree gives a physically valid unwrap, so the DFS's particular choice doesn't matter for
+# correctness. Feeds `parent`/`n_rounds` for `_gpu_unwrap_fractional`'s pointer-doubling
+# (spatial.jl); the CPU `unwrap_molecules` uses its own independent traversal instead.
+function molecule_spanning_forest(g)
+    n_atoms = nv(g)
     parent = collect(Int32, 1:n_atoms)   # self-loop default (covers bond-free/isolated atoms too)
     depth = zeros(Int, n_atoms)
     visited = falses(n_atoms)
@@ -650,7 +647,7 @@ function molecule_spanning_forest(atom_molecule_inds, bonded_atoms)
         stack = Int[seed]
         while !isempty(stack)
             i = pop!(stack)
-            for j in adj[i]
+            for j in neighbors(g, i)
                 visited[j] && continue
                 parent[j] = i
                 depth[j] = depth[i] + 1
@@ -666,8 +663,20 @@ end
 
 function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms;
                            array_type::Type{AT}=Array) where AT
+    n_atoms = length(atom_molecule_inds)
+    bond_is = isempty(bonded_atoms) ? Int[] : first.(bonded_atoms)
+    bond_js = isempty(bonded_atoms) ? Int[] : last.(bonded_atoms)
+    g = bond_graph(bond_is, bond_js, n_atoms)
+    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
+                                    array_type=AT)
+end
+
+# Shared by both public constructors once each has (or has built) the bond graph, so the
+# spanning-forest DFS reuses it instead of rebuilding its own adjacency list.
+function molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
+                                  array_type::Type{AT}=Array) where AT
     n_mol = length(molecule_atom_counts)
-    parent_cpu, n_rounds = molecule_spanning_forest(atom_molecule_inds, bonded_atoms)
+    parent_cpu, n_rounds = molecule_spanning_forest(g)
 
     sort_perm_cpu = Int32.(sortperm(atom_molecule_inds))
     mol_offsets_cpu = Vector{Int32}(undef, n_mol + 1)
@@ -680,8 +689,26 @@ function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atom
         Vector{Int32}(atom_molecule_inds), Vector{Int32}(molecule_atom_counts),
         Vector{Tuple{Int32, Int32}}(collect(bonded_atoms)),
         to_device(parent_cpu, AT), to_device(sort_perm_cpu, AT), to_device(mol_offsets_cpu, AT),
-        n_rounds,
+        n_rounds, Base.RefValue{Any}(nothing),
     )
+end
+
+# Device-resident (parent, sort_perm, mol_offsets, atom_molecule_inds) for `topology`, cached on
+# topology.gpu_cache -- avoids re-uploading a topology built without array_type on every
+# unwrap_molecules/molecule_centers call. Only used by _gpu_unwrap_fractional.
+function device_topology_arrays(topology::MolecularTopology, ::Type{AT}) where AT
+    cached = topology.gpu_cache[]
+    !isnothing(cached) && cached.array_type === AT && return cached.arrays
+    arrays = (
+        parent = topology.parent isa AT ? topology.parent : to_device(topology.parent, AT),
+        sort_perm = topology.sort_perm isa AT ? topology.sort_perm : to_device(topology.sort_perm, AT),
+        mol_offsets = topology.mol_offsets isa AT ? topology.mol_offsets :
+                          to_device(topology.mol_offsets, AT),
+        atom_molecule_inds = topology.atom_molecule_inds isa AT ? topology.atom_molecule_inds :
+                                 to_device(topology.atom_molecule_inds, AT),
+    )
+    topology.gpu_cache[] = (array_type=AT, arrays=arrays)
+    return arrays
 end
 
 """
