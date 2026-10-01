@@ -1283,8 +1283,8 @@ end
     L = gb_inv(Lval)
     U = gb_inv(rsrj)
     t3 = (1 + srj*srj*r2inv)*(L*L - U*U)/8 + gb_log(Lval*U)*r2inv/4
-    de = bi * (t3 - I_grad) * rinv
-    return ifelse(ori < rsrj, de, zero(de))
+    t3 = ifelse(ori < rsrj, t3, zero(t3))
+    return bi * (t3 - I_grad) * rinv
 end
 
 # Force on atom i from the change in the Born radii of atom i and of the atoms in jrange

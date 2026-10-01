@@ -596,6 +596,35 @@ end
     @test radii[1] == radii[2]
 end
 
+@testset "GBn2 sulfur forces" begin
+    # Sulfur has a negative GBn2 screening parameter, so for close pairs only the neck
+    #   term contributes to the Born radii, the forces on the disulfide S atoms are
+    #   compared to finite differences of the energy
+    ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"))
+    sys = System(
+        joinpath(data_dir, "openmm_refs", "hewl.pdb"),
+        ff;
+        boundary=CubicBoundary(100.0u"nm"),
+        implicit_solvent=SetupImplicitSolventGBN2(),
+        n_threads=1,
+        strictness=:nowarn,
+    )
+    gb = only(filter(gi -> gi isa ImplicitSolventGBN2, collect(sys.general_inters)))
+    sys_gb = System(sys; pairwise_inters=(), specific_inter_lists=(), general_inters=(gb,))
+    fs = forces(sys_gb; n_threads=1)
+    h = 1e-6u"nm"
+    sg_inds = findall(ad -> ad.res_name == "CYS" && ad.atom_name == "SG", sys.atoms_data)
+    for i in sg_inds[1:3], dim in 1:3
+        dx = SVector(ntuple(d -> d == dim ? h : zero(h), 3))
+        coords_p, coords_m = copy(sys.coords), copy(sys.coords)
+        coords_p[i] += dx
+        coords_m[i] -= dx
+        E_p = potential_energy(System(sys_gb; coords=coords_p); n_threads=1)
+        E_m = potential_energy(System(sys_gb; coords=coords_m); n_threads=1)
+        @test abs(fs[i][dim] + (E_p - E_m) / (2h)) < 1e-4u"kJ * mol^-1 * nm^-1"
+    end
+end
+
 @testset "a99SB-disp protein comparison" begin
     FT = Float64
     AT = Array
