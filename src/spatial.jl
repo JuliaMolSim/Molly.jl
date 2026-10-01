@@ -736,8 +736,12 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     # from root(i) to i
     u = f[cur_parent] .+ cur_delta # Unwrapped fractional coords
 
-    # Segmented (per-molecule) mean via sort + inclusive scan
-    u_sorted = u[sort_perm]
+    # Segmented (per-molecule) mean via sort + inclusive scan. Accumulated in Float64 regardless
+    # of the working float type: a long prefix sum in Float32 can accumulate enough rounding
+    # error, at large atom counts, to put a molecule's center of geometry in the wrong periodic
+    # image. Output (cog) is converted back to the working type.
+    CT = eltype(u) # SVector{D, working float type}
+    u_sorted = SVector{D, Float64}.(u[sort_perm])
     cum      = AcceleratedKernels.accumulate(+, u_sorted; init=zero(eltype(u_sorted)))
     cum_ext  = similar(cum, length(cum) + 1)
     cum_ext[1:1]   .= (zero(eltype(cum)),)
@@ -745,7 +749,7 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     seg_hi  = cum_ext[mol_offsets[2:end]   .+ 1]
     seg_lo  = cum_ext[mol_offsets[1:end-1] .+ 1]
     counts  = mol_offsets[2:end] .- mol_offsets[1:end-1]
-    cog     = (seg_hi .- seg_lo) ./ counts # Length n_mol, fractional center of geometry
+    cog     = CT.((seg_hi .- seg_lo) ./ counts) # Length n_mol, fractional center of geometry
 
     return u, cog, to_cart, wrap01, atom_mol
 end

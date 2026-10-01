@@ -398,6 +398,39 @@
     @test isapprox(uw_mixed_cpu[12], coords_mixed[12]; atol=1e-9)
     @test isapprox(uw_mixed_cpu[13], coords_mixed[13]; atol=1e-9)
 
+    # unwrap_molecules on GPU: the segmented-mean scan is accumulated in Float64 regardless of
+    # the working float type, so a Float32 system doesn't place molecules in the wrong periodic
+    # image (a long Float32 prefix sum can accumulate enough rounding error to do so at this
+    # scale; a Float64 reference system never does).
+    if CUDA.functional()
+        n_mol = 5_000
+        rng_f32 = Xoshiro(42)
+        box_f32 = 50.0f0u"nm"
+        coords_f32 = Vector{SVector{3, Float32}}(undef, n_mol * 3)
+        bonds_i, bonds_j = Int[], Int[]
+        for m in 1:n_mol
+            base = (m - 1) * 3
+            c = SVector{3, Float32}(rand(rng_f32, Float32), rand(rng_f32, Float32),
+                                    rand(rng_f32, Float32)) .* ustrip(box_f32)
+            coords_f32[base + 1] = c
+            coords_f32[base + 2] = c .+ SVector(0.1f0, 0f0, 0f0)
+            coords_f32[base + 3] = c .+ SVector(0f0, 0.1f0, 0f0)
+            push!(bonds_i, base + 1); push!(bonds_j, base + 2)
+            push!(bonds_i, base + 1); push!(bonds_j, base + 3)
+        end
+        boundary_f32 = CubicBoundary(box_f32)
+        topology_f32 = MolecularTopology(bonds_i, bonds_j, n_mol * 3)
+
+        coords_f64 = SVector{3, Float64}.(ustrip_vec.(coords_f32)) .* u"nm"
+        boundary_f64 = CubicBoundary(Float64(ustrip(box_f32)) * u"nm")
+        uw_f32 = from_device(Molly.unwrap_molecules(CuArray(coords_f32 .* u"nm"), boundary_f32,
+                                                     topology_f32))
+        uw_f64_ref = Molly.unwrap_molecules(coords_f64, boundary_f64, topology_f32)
+
+        max_atom_dist = ustrip(maximum(norm.(uw_f32 .- uw_f64_ref)))
+        @test max_atom_dist < 0.1 * ustrip(box_f32) # no molecule a full box vector away
+    end
+
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     for AT in array_list
         sys = System(
