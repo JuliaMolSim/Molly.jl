@@ -243,6 +243,15 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
     )
     @test Molly.cv_gradient(rmsd_cv, coords_1)[2] ≈ calculate_cv(rmsd_cv, coords_1)
 
+    # A reused grad buffer must be zeroed when rmsd_val == 0, not left stale.
+    ref_coords_1atom = [SVector(1.0, 2.0, 3.0)u"nm"] # 1 atom: no Kabsch SVD rotational noise
+    rmsd_cv_1atom = CalcRMSD(ref_coords_1atom)
+    grad_sentinel = [SVector(99.0, 99.0, 99.0)]
+    d_buf_1atom = similar(ref_coords_1atom, eltype(eltype(ref_coords_1atom)), 1)
+    Molly.cv_gradient!(grad_sentinel, d_buf_1atom, rmsd_cv_1atom, ref_coords_1atom)
+    @test only(d_buf_1atom) == 0.0u"nm"
+    @test all(iszero, grad_sentinel[1])
+
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)
     coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
     bb_to_mass = Dict("C" => 12.011u"g/mol", "N" => 14.007u"g/mol", "O" => 15.999u"g/mol")

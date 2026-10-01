@@ -1496,6 +1496,8 @@ function cv_gradient!(grad, d_buf, cv::CalcRMSD, coords, args...; scratch=nothin
     if rmsd_val > zero(rmsd_val)
         factor = 1 / (N * rmsd_val)
         grad[atom_inds_used] = (-factor,) .* diffs
+    else
+        grad[atom_inds_used] .= (zero(eltype(grad)),)
     end
 
     return nothing
