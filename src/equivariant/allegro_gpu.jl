@@ -104,8 +104,9 @@ end
     end
 end
 
-# Per edge: two-body scalar latent x^0 = emb_W2·silu(emb_W1·[R;1hot(Zi);1hot(Zj)]+emb_b1)+emb_b2.
-@kernel inbounds=true function allegro_emb_kernel!(X, A1, @Const(R), @Const(species),
+# Per edge: two-body scalar latent x^0 = u·(emb_W2·silu(emb_W1·[R;1hot(Zi);1hot(Zj)]+emb_b1)+emb_b2),
+# enveloped by the cutoff u so the edge's scalar contribution → 0 smoothly at r_c.
+@kernel inbounds=true function allegro_emb_kernel!(X, A1, @Const(R), @Const(u), @Const(species),
                                                    @Const(ecenter), @Const(ej),
                                                    @Const(W1), @Const(b1), @Const(W2), @Const(b2),
                                                    nb, S, H)
@@ -121,12 +122,13 @@ end
         acc += W1[h, nb + S + zj]
         A1[h, e] = acc / (one(T) + exp(-acc))     # silu
     end
+    ue = u[e]
     for h in 1:H
         acc = b2[h]
         for k in 1:H
             acc += W2[h, k] * A1[k, e]
         end
-        X[h, e] = acc
+        X[h, e] = acc * ue
     end
 end
 
@@ -258,10 +260,11 @@ end
     end
 end
 
-# Per edge: readout E_e = out_W·x + out_b.
-@kernel inbounds=true function allegro_readout_kernel!(Eedge, @Const(X), @Const(oW), @Const(ob), H)
+# Per edge: bias-free readout E_e = out_W·x (→ 0 at r_c). The per-atom shift out_b is added once per
+# atom in the host reduction, so it cannot cause a cutoff discontinuity.
+@kernel inbounds=true function allegro_readout_kernel!(Eedge, @Const(X), @Const(oW), H)
     e = @index(Global, Linear)
-    acc = ob[1]
+    acc = zero(eltype(Eedge))
     for h in 1:H
         acc += oW[1, h] * X[h, e]
     end
@@ -370,7 +373,7 @@ function compute_allegro_energy_ka(m::AllegroModel, coords::AbstractVector{<:SVe
     # No intermediate synchronize: kernels on one backend run in submission order, so each sees the
     # previous one's writes. Only the final reduction (sum) forces a host round-trip.
     allegro_geom_kernel!(backend, workgroup)(Y, u, R, cdev, ecenter, ej, bx, by, bz, gpu.r_c, gpu.env_p, nb; ndrange=ne)
-    allegro_emb_kernel!(backend, workgroup)(X, A1, R, species_d, ecenter, ej, gpu.emb_W1, gpu.emb_b1, gpu.emb_W2, gpu.emb_b2, nb, S, H; ndrange=ne)
+    allegro_emb_kernel!(backend, workgroup)(X, A1, R, u, species_d, ecenter, ej, gpu.emb_W1, gpu.emb_b1, gpu.emb_W2, gpu.emb_b2, nb, S, H; ndrange=ne)
     allegro_init_kernel!(backend, workgroup)(V, Y, u, gpu.init_w, gpu.init_b0, C, o1, o2, o3; ndrange=ne)
 
     for l in 1:gpu.L
@@ -384,6 +387,6 @@ function compute_allegro_energy_ka(m::AllegroModel, coords::AbstractVector{<:SVe
         V, Vn = Vn, V
     end
 
-    allegro_readout_kernel!(backend, workgroup)(Eedge, X, gpu.out_W, gpu.out_b, H; ndrange=ne)
-    return T(sum(Eedge))
+    allegro_readout_kernel!(backend, workgroup)(Eedge, X, gpu.out_W, H; ndrange=ne)
+    return T(sum(Eedge)) + T(m.out_b[1]) * n      # + per-atom shift (every atom, continuous at r_c)
 end

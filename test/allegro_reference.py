@@ -4,7 +4,7 @@ tensor product multiplies the edge's equivariant latent by the CENTRAL ATOM'S EN
 
 Per atom i, per directed edge i<-j:
   Y_ij = SH(rhat_ij); u_ij = envelope(d_ij); R_ij = bessel(d_ij)*u_ij
-  x_ij^0 = MLP_emb([R_ij, 1hot(Zi), 1hot(Zj)])                      # scalar latent (H)
+  x_ij^0 = u_ij * MLP_emb([R_ij, 1hot(Zi), 1hot(Zj)])              # scalar latent (H), -> 0 at r_c
   V_ij^0 = init_lin(Y_ij) * u_ij                                     # equivariant latent, C x (0e+1o+2e)
   for layer L:
     g_ik = envW^L @ x_ik + envb^L                                   # per (channel,l) env weights, C*3
@@ -12,7 +12,7 @@ Per atom i, per directed edge i<-j:
     P_ij = TP_uvu(V_ij, Env_i; w_ij),  w_ij = tpW^L @ x_ij + tpb^L  # feat (x) feat -> feat
     x_ij = x_ij + silu(xW^L @ [x_ij, scalars0e(P_ij)] + xb^L) * u_ij
     V_ij = eqlin^L(P_ij)
-  E_ij = outW @ x_ij + outb ; E = sum_ij E_ij
+  E_i  = outb + sum_j outW @ x_ij ; E = sum_i E_i   # bias-free edge readout (-> 0 at r_c) + per-atom shift
 """
 import numpy as np, json, os, itertools
 import torch
@@ -83,7 +83,7 @@ def edge_precompute(cfg,W,d,rhat,Zi,Zj):
     C,H,nb,rc,S=cfg['C'],cfg['H'],cfg['nb'],cfg['rc'],cfg['S']
     Y=sh(rhat); u=envelope(d,rc); R=bessel(d,rc,nb)*u
     oi=np.zeros(S);oi[Zi]=1;oj=np.zeros(S);oj[Zj]=1
-    x=silu(W['emb_W1']@np.concatenate([R,oi,oj])+W['emb_b1']); x=W['emb_W2']@x+W['emb_b2']
+    x=silu(W['emb_W1']@np.concatenate([R,oi,oj])+W['emb_b1']); x=u*(W['emb_W2']@x+W['emb_b2'])  # x0 enveloped
     V=np.zeros(SHDIM*C)
     for k,l in enumerate(LS):
         for c in range(C):
@@ -142,8 +142,9 @@ def total_energy(cfg,W,paths,cgs,woff,coords,species,rc):
         for key in ec:
             ec[key]['x']=newx[key]; ec[key]['V']=newV[key]
     for i in range(n):
+        E+=float(W['out_b'][0])                              # per-atom shift (continuous at the cutoff)
         for (j,dd,rh) in nbr[i]:
-            E+=float((W['out_W']@ec[(i,j)]['x']+W['out_b'])[0])
+            E+=float((W['out_W']@ec[(i,j)]['x'])[0])          # bias-free edge readout (-> 0 at r_c)
     return E
 
 def num_forces(cfg,W,paths,cgs,woff,coords,species,rc,h=1e-5):

@@ -240,6 +240,7 @@ end
         for h in 1:H
             da1 += W2[h, k] * Xbar[h, e]
         end
+        da1 *= ue                                   # x⁰ = u·g0, so ∂E/∂silu(h1) carries the envelope
         s = one(T) / (one(T) + exp(-h1))
         Dh1[k, e] = da1 * (s * (one(T) + h1 * (one(T) - s)))
     end
@@ -250,7 +251,7 @@ end
 # adjoints Xbar (x⁰) and Vbar (V⁰); Dh1 carries the embedding-MLP adjoint from the previous kernel.
 @kernel inbounds=true function allegro_bwd_twobody_kernel!(F, @Const(Xbar), @Const(Vbar),
         @Const(Ybar), @Const(Ubar), @Const(Dh1), @Const(Y), @Const(u), @Const(coords),
-        @Const(ecenter), @Const(ej), @Const(W1), @Const(iw), @Const(ib0),
+        @Const(ecenter), @Const(ej), @Const(W1), @Const(W2), @Const(b2), @Const(A1), @Const(iw), @Const(ib0),
         bx, by, bz, rc, env_p, nb, S, H, C, o1, o2, o3)
     e = @index(Global, Linear)
     T = eltype(F)
@@ -278,6 +279,14 @@ end
     end
     for c in 1:C
         ub += ib0[c] * Vbar[o1 + c, e]
+    end
+    # ∂E/∂u via the two-body latent x⁰ = u·g0 (g0 = emb_W2·A1 + emb_b2, A1 = silu(h1) from the forward).
+    for h in 1:H
+        g0h = b2[h]
+        for k in 1:H
+            g0h += W2[h, k] * A1[k, e]
+        end
+        ub += g0h * Xbar[h, e]
     end
     # two-body embedding: R_q = B_q·u, both depend on d. ds_in[q] = Σ_k W1[k,q]·Dh1[k]. dEdd via
     # the Bessel-basis derivative; ub picks up the R = B·u envelope path.
@@ -382,7 +391,7 @@ function compute_allegro_forces_ka(m::AllegroModel, coords::AbstractVector{<:SVe
 
     # ---- taped forward ----
     allegro_geom_kernel!(backend, workgroup)(Y, u, R, cdev, ecenter, ej, bx, by, bz, gpu.r_c, gpu.env_p, nb; ndrange=ne)
-    allegro_emb_kernel!(backend, workgroup)(Xt[1], A1, R, species_d, ecenter, ej, gpu.emb_W1, gpu.emb_b1, gpu.emb_W2, gpu.emb_b2, nb, S, H; ndrange=ne)
+    allegro_emb_kernel!(backend, workgroup)(Xt[1], A1, R, u, species_d, ecenter, ej, gpu.emb_W1, gpu.emb_b1, gpu.emb_W2, gpu.emb_b2, nb, S, H; ndrange=ne)
     allegro_init_kernel!(backend, workgroup)(Vt[1], Y, u, gpu.init_w, gpu.init_b0, C, o1, o2, o3; ndrange=ne)
     for l in 1:L
         allegro_dense_kernel!(backend, workgroup)(G, gpu.env_W[l], gpu.env_b[l], Xt[l], 3C, H; ndrange=ne)
@@ -393,7 +402,7 @@ function compute_allegro_forces_ka(m::AllegroModel, coords::AbstractVector{<:SVe
         allegro_eqlin_kernel!(backend, workgroup)(Vt[l + 1], Pt[l], gpu.lin_w[l], gpu.lin_b0[l], C, o1, o2, o3; ndrange=ne)
     end
     Eedge = z1(ne)
-    allegro_readout_kernel!(backend, workgroup)(Eedge, Xt[L + 1], gpu.out_W, gpu.out_b, H; ndrange=ne)
+    allegro_readout_kernel!(backend, workgroup)(Eedge, Xt[L + 1], gpu.out_W, H; ndrange=ne)
 
     # ---- backward ----
     Xbar = z2(H, ne); Vbar = z2(fd, ne)              # adjoints of the current layer's outputs
@@ -415,6 +424,6 @@ function compute_allegro_forces_ka(m::AllegroModel, coords::AbstractVector{<:SVe
         Vbar, VinBar = VinBar, Vbar
     end
     allegro_bwd_emb_dh1_kernel!(backend, workgroup)(Dh1, Xbar, u, cdev, ecenter, ej, species_d, gpu.emb_W1, gpu.emb_b1, gpu.emb_W2, bx, by, bz, gpu.r_c, gpu.env_p, nb, S, H; ndrange=ne)
-    allegro_bwd_twobody_kernel!(backend, workgroup)(F, Xbar, Vbar, Ybar, Ubar, Dh1, Y, u, cdev, ecenter, ej, gpu.emb_W1, gpu.init_w, gpu.init_b0, bx, by, bz, gpu.r_c, gpu.env_p, nb, S, H, C, o1, o2, o3; ndrange=ne)
-    return (T(sum(Eedge)), F)
+    allegro_bwd_twobody_kernel!(backend, workgroup)(F, Xbar, Vbar, Ybar, Ubar, Dh1, Y, u, cdev, ecenter, ej, gpu.emb_W1, gpu.emb_W2, gpu.emb_b2, A1, gpu.init_w, gpu.init_b0, bx, by, bz, gpu.r_c, gpu.env_p, nb, S, H, C, o1, o2, o3; ndrange=ne)
+    return (T(sum(Eedge)) + T(m.out_b[1]) * n, F)   # + per-atom shift (bias-free edge readout)
 end

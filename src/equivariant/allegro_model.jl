@@ -6,7 +6,7 @@
 #
 # Per atom i, per directed edge i<-j (r = r_j - r_i, d = |r|, r̂ = r/d):
 #   Y_ij = real_sph_harm(2, r̂);  u_ij = poly_envelope(d);  R_ij = bessel(d)·u_ij
-#   x_ij^0 = MLP_emb([R_ij, onehot(Z_i), onehot(Z_j)])                    # scalar latent (H)
+#   x_ij^0 = u_ij·MLP_emb([R_ij, onehot(Z_i), onehot(Z_j)])              # scalar latent (H), → 0 at r_c
 #   V_ij^0 = init_lin(Y_ij)·u_ij                                          # equivariant latent, C×(0e+1o+2e)
 #   for each layer L:
 #     g_ik   = env_W^L·x_ik + env_b^L                                     # per (l,channel) env weights (3C)
@@ -14,7 +14,7 @@
 #     P_ij   = TP_uvu(V_ij, Env_i; w_ij),  w_ij = tp_W^L·x_ij + tp_b^L    # feat ⊗ feat → feat
 #     x_ij   = x_ij + silu(x_W^L·[x_ij, scalars_0e(P_ij)] + x_b^L)·u_ij   # residual + cutoff
 #     V_ij   = eqlinear^L(P_ij)
-#   E_ij = out_W·x_ij + out_b;   E = Σ_i Σ_{j∈N(i)} E_ij
+#   E_i  = out_b + Σ_{j∈N(i)} out_W·x_ij;   E = Σ_i E_i   # bias-free edge readout (→0 at r_c) + per-atom shift
 
 """
     AllegroModel
@@ -146,7 +146,9 @@ function allegro_total_energy(m::AllegroModel{T}, coords::AbstractVector{<:SVect
             Y = collect(real_sph_harm(2, rhat))
             u = poly_envelope(d, m.r_c, m.env_p)
             R = bessel_basis(d, m.r_c, Val(m.nb)) .* u
-            x0 = dense_forward(m.emb_W2, m.emb_b2, silu.(dense_forward(m.emb_W1, m.emb_b1,
+            # Envelope the two-body scalar latent so each edge's energy → 0 smoothly at r_c (the
+            # one-hot inputs and MLP biases keep the bare embedding nonzero at the cutoff).
+            x0 = u .* dense_forward(m.emb_W2, m.emb_b2, silu.(dense_forward(m.emb_W1, m.emb_b1,
                      two_body_input(m, R, Int(species[i]), Int(species[j])))))
             push!(Ys[i], Y); push!(us[i], u)
             push!(xs[i], x0); push!(Vs[i], init_equivariant(m, Y, u))
@@ -191,9 +193,9 @@ function allegro_total_energy(m::AllegroModel{T}, coords::AbstractVector{<:SVect
 
     Eatom = zeros(T, n)
     Threads.@threads for i in 1:n
-        s = zero(T)
+        s = m.out_b[1]                            # per-atom energy shift (survives at the cutoff)
         for pos in eachindex(xs[i])
-            s += (m.out_W * xs[i][pos] .+ m.out_b)[1]
+            s += (m.out_W * xs[i][pos])[1]        # bias-free per-edge readout → 0 smoothly at r_c
         end
         Eatom[i] = s
     end
@@ -235,7 +237,7 @@ function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:
             Y = collect(real_sph_harm(2, rhat))
             u = poly_envelope(d, m.r_c, m.env_p)
             R = bessel_basis(d, m.r_c, Val(m.nb)) .* u
-            xe = dense_forward(m.emb_W2, m.emb_b2, silu.(dense_forward(m.emb_W1, m.emb_b1,
+            xe = u .* dense_forward(m.emb_W2, m.emb_b2, silu.(dense_forward(m.emb_W1, m.emb_b1,
                      two_body_input(m, R, Int(species[i]), Int(species[j])))))
             push!(Ys[i], Y); push!(us[i], u); push!(ds[i], d); push!(rhs[i], rhat); push!(jjs[i], j)
             push!(x0[i], xe); push!(V0[i], init_equivariant(m, Y, u))
@@ -298,8 +300,11 @@ function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:
     end
 
     E = zero(T)
-    for i in 1:n, p in eachindex(xin[i])
-        E += (m.out_W * xin[i][p] .+ m.out_b)[1]
+    for i in 1:n
+        E += m.out_b[1]                           # per-atom shift (bias-free per-edge readout below)
+        for p in eachindex(xin[i])
+            E += (m.out_W * xin[i][p])[1]
+        end
     end
 
     # ---- backward ----
@@ -404,13 +409,17 @@ function allegro_energy_and_forces(m::AllegroModel{T}, coords::AbstractVector{<:
             @inbounds for c in 1:C
                 ub += m.init_b0[c] * Vb0[foff[1] + c]
             end
-            # x^0 = emb_W2·silu(emb_W1·s_in + emb_b1) + emb_b2  (recompute the forward)
+            # x^0 = u·(emb_W2·silu(emb_W1·s_in + emb_b1) + emb_b2)  (recompute the forward)
             B, dB = bessel_basis_grad(d, m.r_c, Val(m.nb))
             _, du = poly_envelope_grad(d, m.r_c, m.env_p)
             R = B .* u
             s_in = two_body_input(m, R, Int(species[i]), j <= 0 ? 1 : Int(species[j]))
             h1 = dense_forward(m.emb_W1, m.emb_b1, s_in)
-            da1 = transpose(m.emb_W2) * xb0
+            g0 = dense_forward(m.emb_W2, m.emb_b2, silu.(h1))   # bare embedding, x^0 = u·g0
+            @inbounds for q in eachindex(g0)
+                ub += g0[q] * xb0[q]                            # ∂E/∂u via the two-body latent
+            end
+            da1 = transpose(m.emb_W2) * (u .* xb0)              # ∂E/∂(silu(h1)) carries the envelope
             dh1 = da1 .* silu_grad.(h1)
             ds_in = transpose(m.emb_W1) * dh1
             # R = B·u  (both B and u depend on d)

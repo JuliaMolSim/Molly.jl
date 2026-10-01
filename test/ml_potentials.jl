@@ -801,6 +801,18 @@ if isfile(ALLEGRO_H5) && isfile(ALLEGRO_JSON)
             @test abs(E_full - E_pairs) > 1e-4
         end
 
+        @testset "energy is continuous at the cutoff" begin
+            # Each edge's contribution must vanish smoothly as its length → r_c (the two-body latent
+            # x⁰ is enveloped and the per-edge readout is bias-free), so moving one neighbour across
+            # r_c cannot step the total energy. Only the per-atom shift survives on both sides.
+            pair(d) = Molly.allegro_total_energy(pot.model,
+                [SVector{3,Float64}(0, 0, 0), SVector{3,Float64}(d, 0, 0)], [1, 1], nothing, rc)
+            E_out = pair(rc + 1e-6)                 # no edges within r_c → only the per-atom shift
+            @test isapprox(pair(rc - 1e-6), E_out; atol=1e-6)   # no jump at the cutoff
+            @test isapprox(pair(rc - 1e-3), E_out; atol=1e-2)   # and it approaches smoothly
+            @test abs(pair(0.6 * rc) - E_out) > 1e-3            # a real (nonzero) bond energy inside
+        end
+
         @testset "GPU energy path (KernelAbstractions CPU backend)" begin
             # The GPU-portable forward (compute_allegro_energy_ka) must match the CPU forward on
             # the KA CPU backend; on CUDA/Metal it runs the same kernels (checked in the GPU
