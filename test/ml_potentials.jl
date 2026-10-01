@@ -868,7 +868,9 @@ if isfile(ALLEGRO_H5) && isfile(ALLEGRO_JSON)
             @test isapprox(fs[1][1], -(Ep - Em) / (2h); rtol=1e-4)
         end
 
-        # GPU consistency (host round-trip): runs for the GPU backends in array_list.
+        # GPU consistency: a device-backed System runs the KA kernels on-device (no host CPU
+        # fallback) and must match the CPU System to the device precision. Runs for each GPU in
+        # array_list (Metal is Float32, so compare with a relative tolerance).
         for AT in array_list
             AT == Array && continue
             @testset "AllegroPotential GPU consistency ($AT)" begin
@@ -889,7 +891,8 @@ if isfile(ALLEGRO_H5) && isfile(ALLEGRO_JSON)
                 fg = to_device([zero(SVector{3,Float32}) for _ in 1:n], AT)
                 AtomsCalculators.forces!(fg, sys_gpu, pot)
                 fg_host = Array(fg)
-                @test maximum(maximum(abs.(Float64.(fg_host[i]) .- fc[i])) for i in 1:n) < 1e-4
+                fscale = maximum(maximum(abs.(fc[i])) for i in 1:n)
+                @test maximum(maximum(abs.(Float64.(fg_host[i]) .- fc[i])) for i in 1:n) < 1e-4 * fscale
             end
         end
     end
