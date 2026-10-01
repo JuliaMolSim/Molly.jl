@@ -713,9 +713,6 @@ end
 
 zero_forces(sys) = ustrip_vec.(zero.(sys.coords)) .* sys.force_units
 
-# Whether this step refreshes the GPU tile list. Generic fallback: always false.
-is_tile_refresh_step(sys, buffers, step_n::Integer) = false
-
 """
     forces(system, neighbors=find_neighbors(system), step_n=0;
            n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
@@ -1366,11 +1363,4 @@ function gpu_forces!(fs,
     if needs_vir
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
-end
-
-# One step's forces via plain forces!, so simulators don't repeat the call themselves.
-@inline function forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step;
-                              n_threads, strictness)
-    forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step); n_threads=n_threads, strictness=strictness)
-    return nothing
 end
