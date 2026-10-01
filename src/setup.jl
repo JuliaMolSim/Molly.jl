@@ -704,6 +704,8 @@ function System(coord_file::AbstractString,
     atom_type_of = Vector{String}(undef, n_atoms)
     charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
+    # Index of each atom in its matched residue template, used by the Amber improper ordering
+    template_index_of = zeros(Int, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
     # Index of each atom type in the force field, avoiding repeated linear searches
     atom_type_index = Dict{String, Int}(at => i
@@ -727,6 +729,7 @@ function System(coord_file::AbstractString,
                     atom_type_of[global_idx] = template.types[m_i]
                     charge_of[global_idx] = template.charges[m_i]
                     element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
+                    template_index_of[global_idx] = m_i
                 end
                 add_virtual_sites!(virtual_sites, template, rgraph, matches)
             end
@@ -966,10 +969,10 @@ function System(coord_file::AbstractString,
             t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
         end
 
-        # topology indices for current j,k,l
-        _, r2, res2, ta2 = atom_lookup[j]
-        _, r3, res3, ta3 = atom_lookup[k]
-        _, r4, res4, ta4 = atom_lookup[l]
+        # Residue and template atom indices for current j,k,l
+        # Ties use the template atom order, not the coordinate file order
+        r2, r3, r4 = atom_lookup[j][2], atom_lookup[k][2], atom_lookup[l][2]
+        ta2, ta3, ta4 = template_index_of[j], template_index_of[k], template_index_of[l]
 
         e2 = Symbol(element_of[j])
         e3 = Symbol(element_of[k])
