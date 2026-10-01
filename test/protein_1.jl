@@ -582,6 +582,36 @@ end
     end
 end
 
+@testset "Implicit solvent salt and cutoff forces" begin
+    # With salt screening the cutoff shift of the energy depends on the distance, so it
+    #   contributes to the forces, which are compared to finite differences of the energy
+    ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"))
+    for implicit_solvent in (
+                SetupImplicitSolventOBC(use_OBC2=true, kappa=1.0u"nm^-1", dist_cutoff=1.0u"nm"),
+                SetupImplicitSolventGBN2(kappa=1.0u"nm^-1", dist_cutoff=1.0u"nm"))
+        sys = System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            ff;
+            boundary=CubicBoundary(100.0u"nm"),
+            dispersion_correction=false,
+            implicit_solvent=implicit_solvent,
+            n_threads=1,
+            strictness=:nowarn,
+        )
+        sys_gb = System(sys; pairwise_inters=(), specific_inter_lists=())
+        fs = forces(sys_gb; n_threads=1)
+        for i in 1:200:length(sys), dim in 1:3
+            grad_fd = central_fdm(5, 1; max_range=1e-5)(ustrip(u"nm", sys.coords[i][dim])) do x
+                coords_mod = copy(sys.coords)
+                coords_mod[i] = setindex(coords_mod[i], x * u"nm", dim)
+                E = potential_energy(System(sys_gb; coords=coords_mod); n_threads=1)
+                return ustrip(u"kJ * mol^-1", E)
+            end
+            @test ustrip(u"kJ * mol^-1 * nm^-1", fs[i][dim]) ≈ -grad_fd atol=1e-4
+        end
+    end
+end
+
 @testset "GBn2 carboxylate radii" begin
     # Carboxylate O atoms are found from the bonds, so force fields with different
     #   atom type names give the same radii
