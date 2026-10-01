@@ -286,15 +286,15 @@ end
 bias_max_abs_ustrip(value) = abs(ustrip(value))
 
  function check_bias_finite(value, label::AbstractString, bias::BiasPotential;
-                            cv_sim=nothing, max_abs_component=nothing)
+                            cv_sim=nothing, max_abs_component_fn=nothing)
     bias_all_finite(value) && return value
     msg = "BiasPotential with CV $(typeof(bias.cv_type)) and bias " *
           "$(typeof(bias.bias_type)) produced non-finite $(label)"
     if !isnothing(cv_sim)
         msg *= ", cv_sim=$(cv_sim)"
     end
-    if !isnothing(max_abs_component)
-        msg *= ", max_abs_component=$(max_abs_component)"
+    if !isnothing(max_abs_component_fn)
+        msg *= ", max_abs_component=$(max_abs_component_fn())"
     end
     error(msg)
 end
@@ -488,7 +488,7 @@ function AtomsCalculators.forces!(
         "bias force",
         bias;
         cv_sim=cv_sim,
-        max_abs_component = bias_max_abs_ustrip(fs_svec),
+        max_abs_component_fn = () -> bias_max_abs_ustrip(fs_svec),
     )
 
     if needs_vir && bias.cv_type.has_virial

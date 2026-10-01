@@ -567,6 +567,27 @@ end
         BiasPotential(calc_dist, BiasNaNGradient()),
     )
 
+    # check_bias_finite's max_abs_component_fn is only called (and only appears in the error
+    # message) when the value being checked is actually non-finite.
+    bias_check = BiasPotential(calc_dist, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+    fs_svec_inf = [SVector(Inf, 0.0, 0.0)u"kJ * mol^-1 * nm^-1"]
+    err = try
+        Molly.check_bias_finite(fs_svec_inf, "bias force", bias_check; cv_sim=1.0u"nm",
+                                max_abs_component_fn=() -> Molly.bias_max_abs_ustrip(fs_svec_inf))
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("max_abs_component=Inf", err.msg)
+
+    fs_svec_finite = [SVector(2.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1"]
+    fn_called = Ref(false)
+    Molly.check_bias_finite(fs_svec_finite, "bias force", bias_check; cv_sim=1.0u"nm",
+                            max_abs_component_fn=() -> (fn_called[] = true;
+                                                        Molly.bias_max_abs_ustrip(fs_svec_finite)))
+    @test !fn_called[]
+
     # PeriodicFlatBottomBias tests (Target: 0, Flat bottom width: 0.1)
     pb = PeriodicFlatBottomBias(1000.0u"kJ * mol^-1", 0.1, 0.0)
     @test pb.r_fb == 0.1
