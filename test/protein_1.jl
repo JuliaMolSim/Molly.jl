@@ -596,6 +596,24 @@ end
     @test radii[1] == radii[2]
 end
 
+@testset "Amber improper atom order" begin
+    # Ties between peripheral atoms are broken using the residue template atom order, which
+    #   differs from the PDB atom order for PRO and TRP, the expected orders are from tleap
+    ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"))
+    sys = System(joinpath(data_dir, "openmm_refs", "barn_bar.pdb"), ff)
+    imps = only(filter(il -> il isa InteractionList4Atoms && !first(il.inters).proper,
+                       sys.specific_inter_lists))
+    function improper_names(chain_id, res_number, atom_name)
+        c = findfirst(ad -> (ad.chain_id, ad.res_number, ad.atom_name) ==
+                                    (chain_id, res_number, atom_name), sys.atoms_data)
+        n = only(findall(==(c), imps.ks))
+        return Tuple(sys.atoms_data[i].atom_name for i in (imps.is[n], imps.js[n],
+                                                           imps.ks[n], imps.ls[n]))
+    end
+    @test improper_names("A", 21, "N"  ) == ("C"  , "CD" , "N"  , "CA" )
+    @test improper_names("A", 35, "CE3") == ("CZ3", "CD2", "CE3", "HE3")
+end
+
 @testset "a99SB-disp protein comparison" begin
     FT = Float64
     AT = Array
