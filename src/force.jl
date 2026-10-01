@@ -396,13 +396,13 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
-    bias_scratch::Any               # NTuple, one slot per sys.general_inters entry, see BuffersGPU
+    bias_scratch::Any               # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersGPU
     fs_mat::FM
     validity::BufferValidity
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
-                    kin_tensor, pres_tensor, fs_mat; bias_scratch=())
+                    kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = zero(vir_nounits)
     constraint_virial_chunks = similar(vir_chunks)
@@ -420,7 +420,7 @@ end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                     constraint_virial, constraint_virial_nounits,
-                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=())
+                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
     return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial, constraint_virial_nounits,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
@@ -450,10 +450,9 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
     n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
     fs_mat = zeros(TU, D, n_fs_mat_cols)
 
-    # One slot per sys.general_inters entry, indexed identically to the inter_idx passed into
-    # AtomsCalculators.forces!/potential_energy (force.jl/energy.jl); nothing for non-bias entries.
-    bias_scratch = Tuple(inter isa BiasPotential ? BiasScratch() : nothing
-                         for inter in values(sys.general_inters))
+    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
+                                             for inter in values(sys.general_inters)
+                                             if inter isa BiasPotential)
 
     return BuffersCPU(
         fs_nounits, fs_chunks,
@@ -540,7 +539,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, ITD, NIT, OIT, 
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
     unwrapped_coords::Base.RefValue{Any}   # shared, once-per-step cache: see ensure_unwrapped_coords!
-    bias_scratch::Any                      # NTuple, one slot per sys.general_inters entry, see BuffersCPU
+    bias_scratch::Any                      # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersCPU
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -575,7 +574,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                     interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
                     step_n_preprocessed, sparse_pair_generation, num_pairs,
-                    masks_initialized::Bool=false; bias_scratch=())
+                    masks_initialized::Bool=false; bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
     fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
@@ -704,10 +703,9 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
         sys.neighbor_finder.initialized = false
     end
 
-    # One slot per sys.general_inters entry, indexed identically to the inter_idx passed into
-    # AtomsCalculators.forces!/potential_energy (force.jl/energy.jl); nothing for non-bias entries.
-    bias_scratch = Tuple(inter isa BiasPotential ? BiasScratch() : nothing
-                         for inter in values(sys.general_inters))
+    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
+                                             for inter in values(sys.general_inters)
+                                             if inter isa BiasPotential)
 
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
@@ -853,10 +851,10 @@ function forces!(fs,
         buffers.virial .= buffers.vir_nounits .* sys.energy_units
     end
 
-    for (i, inter) in enumerate(values(general_inters))
+    for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                 inter_idx=i, strictness=strictness)
+                                 strictness=strictness)
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
@@ -1317,10 +1315,10 @@ function forces!(fs,
     if any(bias_needs_unwrap, values(general_inters))
         ensure_unwrapped_coords!(buffers, sys, step_n)
     end
-    for (i, inter) in enumerate(values(general_inters))
+    for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                 inter_idx=i, strictness=strictness)
+                                 strictness=strictness)
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 

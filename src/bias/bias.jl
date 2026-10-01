@@ -238,18 +238,24 @@ coordinates, atoms or forces, including `cv_type.correction = :pbc` (the default
 CV types), which unwraps bonded molecules across the periodic boundary using a GPU-native
 spanning-forest traversal.
 """
+const BIAS_POTENTIAL_ID_COUNTER = Threads.Atomic{UInt64}(0)
+next_bias_potential_id() = Threads.atomic_add!(BIAS_POTENTIAL_ID_COUNTER, UInt64(1))
+
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
     uses_persistent_buffers::Bool   # set at construction, see uses_builtin_cv_gradient!
+    id::UInt64                      # set at construction, distinguishes structurally-equal biases
 end
 
 function BiasPotential(cv_type::C, bias_type::B) where {C, B}
-    return BiasPotential{C, B}(cv_type, bias_type, uses_builtin_cv_gradient!(cv_type))
+    return BiasPotential{C, B}(cv_type, bias_type, uses_builtin_cv_gradient!(cv_type),
+                               next_bias_potential_id())
 end
 
 # Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch/
-# extremal_cache GPU-only fused-kernel state). One per bias in buffers.bias_scratch (force.jl).
+# extremal_cache GPU-only fused-kernel state). One per bias in buffers.bias_scratch (force.jl),
+# keyed on bias.id.
 mutable struct BiasScratch
     grad::Any
     d_buf::Any
@@ -260,11 +266,14 @@ end
 
 BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing, nothing)
 
-# Locate bias's BiasScratch by inter_idx (position in sys.general_inters). Falls back to a
-# fresh throwaway BiasScratch when buffers is nothing (a bare, bufferless call) -- no reuse
-# across calls in that case, matching pre-persistent-buffer behaviour.
-bias_scratch(buffers, inter_idx) = buffers.bias_scratch[inter_idx]::BiasScratch
-bias_scratch(::Nothing, inter_idx) = BiasScratch()
+# Locate bias's BiasScratch by its id, not its position in general_inters -- a position can
+# differ between calls (e.g. MTS integrators pass a different per-level subset each time), so
+# scratch must be looked up by the bias itself. Falls back to a fresh throwaway BiasScratch when
+# buffers is nothing (a bare, bufferless call) -- no reuse across calls in that case, matching
+# pre-persistent-buffer behaviour.
+bias_scratch(buffers, bias::BiasPotential) =
+    get!(BiasScratch, buffers.bias_scratch, bias.id)
+bias_scratch(::Nothing, ::BiasPotential) = BiasScratch()
 
 bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)
 bias_all_finite(value) = isfinite(ustrip(value))
@@ -399,11 +408,10 @@ end
 function AtomsCalculators.potential_energy(
     sys, bias::BiasPotential;
     buffers = nothing,
-    inter_idx = nothing,
     kwargs...
 )
     coords = bias_coords(sys, bias.cv_type)
-    scratch = bias_scratch(buffers, inter_idx)
+    scratch = bias_scratch(buffers, bias)
 
     if bias.uses_persistent_buffers
         ensure_bias_buffers!(scratch, bias.cv_type, coords)
@@ -427,11 +435,10 @@ function AtomsCalculators.forces!(
     needs_vir::Bool = false,
     buffers = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
     step_n = nothing,
-    inter_idx = nothing,
     kwargs...
 )
     coords = bias_coords(sys, bias.cv_type, buffers, step_n)
-    scratch = bias_scratch(buffers, inter_idx)
+    scratch = bias_scratch(buffers, bias)
 
     # Gradient of CV with respect to coordinates
     if bias.uses_persistent_buffers
