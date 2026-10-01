@@ -233,10 +233,12 @@ Enzyme should be imported in the first case.
 
 Virial contributions must be explicitly defined.
 
-CV computation runs fully on the GPU when the `System` is GPU-resident, with no host transfer of
-coordinates, atoms or forces, including `cv_type.correction = :pbc` (the default for the built-in
-CV types), which unwraps bonded molecules across the periodic boundary using a GPU-native
-spanning-forest traversal.
+When the `System` is GPU-resident, built-in CV types other than `CalcRMSD` run fully GPU-resident,
+with no host transfer of coordinates, atoms or forces, including `cv_type.correction = :pbc` (the
+default for the built-in CV types), which unwraps bonded molecules across the periodic boundary
+using a GPU-native spanning-forest traversal. `CalcRMSD` performs a host-side Kabsch alignment
+step every call. Custom (non-built-in) CV types always round-trip coordinates/atoms/gradient to
+and from the host, since arbitrary user code isn't guaranteed GPU-safe.
 """
 const BIAS_POTENTIAL_ID_COUNTER = Threads.Atomic{UInt64}(0)
 next_bias_potential_id() = Threads.atomic_add!(BIAS_POTENTIAL_ID_COUNTER, UInt64(1))
