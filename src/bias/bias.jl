@@ -363,7 +363,7 @@ function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
         )
     elseif cv isa CalcDist{CalcCMDist} && scratch.dist_scratch === nothing && is_gpu_resident(coords)
         na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
-        T1, T2 = min(na, 1024), min(nb, 1024)
+        T1, T2 = min(na, TILE_CAP_DEFAULT), min(nb, TILE_CAP_DEFAULT)
         CT, MT, WT, _ = bias_dist_scratch_types(coords, atoms)
         DT = typeof(zero(CT) / oneunit(eltype(CT))) # unit-stripped direction vector
         scratch.dist_scratch = CMDistScratch(
@@ -378,7 +378,7 @@ function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
     elseif cv isa CalcRg && scratch.dist_scratch === nothing && is_gpu_resident(coords)
         inds = iszero(length(cv.atom_inds)) ? collect(1:length(coords)) : cv.atom_inds
         n = length(inds)
-        T = min(n, RG_TILE_CAP)
+        T = min(n, TILE_CAP_DEFAULT)
         CT, MT, WT, IT = bias_dist_scratch_types(coords, atoms)
         scratch.dist_scratch = RgScratch(
             upload_idx(coords, inds),
@@ -395,7 +395,7 @@ function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
         # cv.ref_coords never changes after construction, so its Kabsch-centered form is computed
         # once here rather than on every cv_gradient!/calculate_cv! call (RmsdScratch docstring, cv.jl).
         n = length(inds)
-        T = min(n, RMSD_TILE_CAP)
+        T = min(n, TILE_CAP_DEFAULT)
         CT = eltype(coords)
         IT = typeof(sum_abs2(zero(CT))) # unweighted nm^2, unlike bias_dist_scratch_types' mass-weighted IT
         scratch.dist_scratch = RmsdScratch(upload_idx(coords, inds), similar(coords, length(inds)),

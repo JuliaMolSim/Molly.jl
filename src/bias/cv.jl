@@ -93,8 +93,12 @@ end
 # Caps mindist_tile_kernel!'s parallel workers (also the finalize kernel's serial-scan length,
 # trading finalize cost against tile parallelism). 4096 keeps that scan in the few-microsecond
 # range while still giving a small/lopsided group (e.g. na=5, nb=1e5) far more concurrency than
-# one-thread-per-row would.
+# one-thread-per-row would. Deliberately larger than TILE_CAP_DEFAULT: MinDist/MaxDist's na*nb
+# pair counts grow faster than the per-atom counts the other CVs tile over.
 const MINDIST_TILE_CAP = 4096
+
+# Shared partial-reduction-then-single-thread-finalize worker cap for Rg, RMSD and CMDist.
+const TILE_CAP_DEFAULT = 1024
 
 @kernel inbounds=true function extremal_pair_row_kernel!(out_dist, out_j, out_disp,
                                                           @Const(coords_1), @Const(coords_2),
@@ -1027,8 +1031,6 @@ end
 # reduce+finalize pairs back to back -- COM reduce/finalize, then an Isum reduce/finalize using
 # the now-known COM -- plus a final grad-write kernel (gradient path only) that writes each
 # atom's entry in parallel. `calculate_cv!` needs the first 4 stages; `cv_gradient!` needs all 5.
-const RG_TILE_CAP = 1024
-
 mutable struct RgScratch{IV, MV, WV, IsV, CV, MtV}
     idx_dev::IV
     partial_mass::MV
@@ -1283,8 +1285,6 @@ function calculate_cv(cv::CalcRMSD, coords, args...; kwargs...)
     calculate_cv!(cv, coords, buff, args...; kwargs...)
     return only(from_device(buff))
 end
-
-const RMSD_TILE_CAP = 1024
 
 # Persistent GPU scratch for the fused CalcRMSD path -- avoids re-gathering atom indices and
 # re-computing the reference Kabsch centering (which never changes) every call.
