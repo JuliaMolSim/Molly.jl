@@ -8,8 +8,6 @@ export
     CalcDist,
     calculate_cv,
     cv_gradient,
-    calculate_cv!,
-    cv_gradient!,
     CalcRg,
     CalcRMSD,
     CalcTorsion
@@ -592,12 +590,9 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     return only(from_device(buff))
 end
 
-"""
-    calculate_cv!(cv, coords, atoms, boundary, buff, velocities; kwargs...)
-
-Mutating counterpart to [`calculate_cv`](@ref): writes the CV value into the preallocated
-1-element `buff` instead of allocating and returning it.
-"""
+# Mutating counterpart to calculate_cv: writes the CV value into the preallocated 1-element
+# `buff` instead of allocating and returning it. Positional args before `buff` vary by CV
+# type (see calculate_cv_buffered! for a uniform-signature wrapper); not exported.
 function calculate_cv!(cv::CalcDist, coords, atoms, boundary, buff, args...; kwargs...)
     coords_1 = @view coords[cv.atom_inds_1]
     coords_2 = @view coords[cv.atom_inds_2]
@@ -716,9 +711,9 @@ Supported CV Types:
 - `CalcRMSD`: Root-mean-square deviation from a reference structure using Kabsch alignment.
 - `CalcTorsion`: Torsion (dihedral) angle defined by four atoms.
 
-Allocates the gradient array and a 1-element CV-value buffer, then delegates to
-[`cv_gradient!`](@ref), which writes into them in place. Call `cv_gradient!` directly
-with reused buffers to avoid the per-call allocation (e.g. across repeated timesteps).
+Allocates the gradient array and a 1-element CV-value buffer on every call.
+[`BiasPotential`](@ref) reuses buffers across timesteps internally and is the
+allocation-avoiding path for biased simulations.
 """
 function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args...; kwargs...)
     grad = ustrip_vec.(zero(coords))
@@ -727,13 +722,10 @@ function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args
     return grad, only(from_device(d_buf))
 end
 
-"""
-    cv_gradient!(grad, d_buf, cv, coords, atoms, boundary, velocities; kwargs...)
-
-Mutating counterpart to [`cv_gradient`](@ref): writes the gradient into the preallocated
-`grad` (same shape/backend as `coords`) and the CV value into the preallocated 1-element
-`d_buf`, instead of allocating and returning them.
-"""
+# Mutating counterpart to cv_gradient: writes the gradient into the preallocated `grad`
+# (same shape/backend as `coords`) and the CV value into the preallocated 1-element `d_buf`,
+# instead of allocating and returning them. Positional args before `grad`/`d_buf`/`cv` vary
+# by CV type; not exported.
 function cv_gradient!(grad, d_buf, cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args...; kwargs...)
     i, j = cv.atom_inds_1[1], cv.atom_inds_2[1]
     c1 = @view coords[i:i]
