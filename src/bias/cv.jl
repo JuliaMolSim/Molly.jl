@@ -82,18 +82,14 @@ end
 # the tile/finalize kernels below instead, which avoid findmin/findmax's host sync via a
 # device-side reduction -- see the comment above those kernels for the full design.
 
-# Persistent GPU scratch for the fused CalcMinDist/CalcMaxDist path. Caches the winning pair
-# so calculate_virial_dist! can reuse it via ExtremalPairCache instead of re-searching.
-mutable struct MinMaxScratch{IV, DV, JV, RV, SV, R1V}
+# Persistent GPU scratch for the fused CalcMinDist/CalcMaxDist path.
+mutable struct MinMaxScratch{IV, DV, JV, RV}
     idx1_dev::IV
     idx2_dev::IV
     out_dist::DV
     out_i::JV
     out_j::JV
     out_disp::RV
-    winner_i::SV
-    winner_j::SV
-    r_ij::R1V
 end
 
 # Caps mindist_tile_kernel!'s parallel workers (also the finalize kernel's serial-scan length,
@@ -101,16 +97,6 @@ end
 # range while still giving a small/lopsided group (e.g. na=5, nb=1e5) far more concurrency than
 # one-thread-per-row would.
 const MINDIST_TILE_CAP = 4096
-
-# Caches an extremal_pair result from cv_gradient! so a later calculate_virial_dist! call
-# this timestep can reuse it. Populated by BiasPotential; otherwise unused.
-mutable struct ExtremalPairCache
-    valid::Bool
-    i::Int
-    j::Int
-    d::Any
-    r_ij::Any
-end
 
 @kernel inbounds=true function extremal_pair_row_kernel!(out_dist, out_j, out_disp,
                                                           @Const(coords_1), @Const(coords_2),
@@ -229,7 +215,7 @@ end
     end
 end
 
-@kernel inbounds=true function mindist_finalize_grad_kernel!(grad, d_buf, winner_i, winner_j, r_ij_buf,
+@kernel inbounds=true function mindist_finalize_grad_kernel!(grad, d_buf,
                                                               @Const(out_dist), @Const(out_i), @Const(out_j),
                                                               @Const(out_disp), @Const(idx1), @Const(idx2),
                                                               ::Val{is_min}) where is_min
@@ -244,9 +230,6 @@ end
         best_i, best_j, best_r = out_i[best_slot], out_j[best_slot], out_disp[best_slot]
 
         d_buf[1] = best_d
-        winner_i[1] = best_i
-        winner_j[1] = best_j
-        r_ij_buf[1] = best_r
         if best_d > zero(best_d)
             dir = best_r / best_d
             grad[idx1[best_i]] = -dir
@@ -267,11 +250,10 @@ function mindist_calculate_cv_fused!(dist_val, scratch::MinMaxScratch, coords, b
     return nothing
 end
 
-# Zero host syncs except one small readback when `extremal_cache` is supplied, to populate it for
-# calculate_virial_dist!'s reuse. That readback is safe even though virial steps run outside CUDA
-# graph capture entirely (simulators.jl), so it never needs to be graph-legal.
+# Zero host syncs. calculate_virial_dist! recomputes the extremal pair itself on the rare steps
+# that need it, instead of this being asked to cache it on every step.
 function mindist_gradient_fused!(grad, d_buf, scratch::MinMaxScratch, coords, boundary, closest::Bool,
-                                 is_min::Val, extremal_cache)
+                                 is_min::Val)
     backend = get_backend(coords)
     T = length(scratch.out_dist)
     kernel_a! = mindist_tile_kernel!(backend, min(T, 256))
@@ -283,14 +265,8 @@ function mindist_gradient_fused!(grad, d_buf, scratch::MinMaxScratch, coords, bo
     kernel_clear!(grad, scratch.idx1_dev, scratch.idx2_dev; ndrange=na + nb)
 
     kernel_b! = mindist_finalize_grad_kernel!(backend, 1)
-    kernel_b!(grad, d_buf, scratch.winner_i, scratch.winner_j, scratch.r_ij, scratch.out_dist, scratch.out_i,
+    kernel_b!(grad, d_buf, scratch.out_dist, scratch.out_i,
              scratch.out_j, scratch.out_disp, scratch.idx1_dev, scratch.idx2_dev, is_min; ndrange=1)
-
-    if extremal_cache !== nothing
-        extremal_cache.valid = true
-        extremal_cache.i, extremal_cache.j = only(from_device(scratch.winner_i)), only(from_device(scratch.winner_j))
-        extremal_cache.d, extremal_cache.r_ij = only(from_device(d_buf)), only(from_device(scratch.r_ij))
-    end
     return nothing
 end
 
@@ -805,10 +781,10 @@ function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, args...
 end
 
 function cv_gradient!(grad, d_buf, cv::CalcDist{CalcMinDist}, coords, atoms, boundary, args...;
-                      extremal_cache=nothing, scratch=nothing, kwargs...)
+                      scratch=nothing, kwargs...)
     if scratch !== nothing && is_gpu_resident(coords)
         mindist_gradient_fused!(grad, d_buf, scratch, coords, boundary, cv.dist_type.calc_type == :closest,
-                                Val(true), extremal_cache)
+                                Val(true))
         return nothing
     end
 
@@ -817,10 +793,6 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcMinDist}, coords, atoms, bou
 
     i, j, d, r_ij = extremal_pair(c1, c2, cv.dist_type.calc_type, findmin, boundary)
     d_buf .= d
-    if extremal_cache !== nothing
-        extremal_cache.valid, extremal_cache.i, extremal_cache.j = true, i, j
-        extremal_cache.d, extremal_cache.r_ij = d, r_ij
-    end
 
     # necessary to clear the whole candidate set to remove previous results
     zg = zero(eltype(grad))
@@ -853,10 +825,10 @@ function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, args...
 end
 
 function cv_gradient!(grad, d_buf, cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, args...;
-                      extremal_cache=nothing, scratch=nothing, kwargs...)
+                      scratch=nothing, kwargs...)
     if scratch !== nothing && is_gpu_resident(coords)
         mindist_gradient_fused!(grad, d_buf, scratch, coords, boundary, cv.dist_type.calc_type == :closest,
-                                Val(false), extremal_cache)
+                                Val(false))
         return nothing
     end
 
@@ -865,10 +837,6 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcMaxDist}, coords, atoms, bou
 
     i, j, d, r_ij = extremal_pair(c1, c2, cv.dist_type.calc_type, findmax, boundary)
     d_buf .= d
-    if extremal_cache !== nothing
-        extremal_cache.valid, extremal_cache.i, extremal_cache.j = true, i, j
-        extremal_cache.d, extremal_cache.r_ij = d, r_ij
-    end
 
     # See CalcMinDist's cv_gradient! for why this clear is needed with a reused `grad` buffer.
     zg = zero(eltype(grad))
@@ -965,10 +933,8 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcCMDist}, coords, atoms, boun
     return nothing
 end
 
-function calculate_virial!(virial_buff, cv::CalcDist, coords, forces, atoms, boundary;
-                           precomputed_extremum=nothing, kwargs...)
-    calculate_virial_dist!(virial_buff, cv.dist_type, cv, coords, forces, atoms, boundary;
-                           precomputed_extremum=precomputed_extremum)
+function calculate_virial!(virial_buff, cv::CalcDist, coords, forces, atoms, boundary; kwargs...)
+    calculate_virial_dist!(virial_buff, cv.dist_type, cv, coords, forces, atoms, boundary)
 end
 
 function calculate_virial_dist!(virial_buff, dt::CalcSingleDist, cv, coords, forces, atoms, boundary;
@@ -988,32 +954,20 @@ function calculate_virial_dist!(virial_buff, dt::CalcSingleDist, cv, coords, for
     virial_buff .+= r_ji * transpose(f_i)
 end
 
-# `precomputed_extremum`, if a valid `ExtremalPairCache` from this timestep's `cv_gradient!` call,
-# skips recomputing the O(group_a * group_b) extremal search.
-function calculate_virial_dist!(virial_buff, dt::CalcMinDist, cv, coords, forces, atoms, boundary;
-                                precomputed_extremum=nothing, kwargs...)
-    if precomputed_extremum !== nothing && precomputed_extremum.valid
-        r_ij = precomputed_extremum.r_ij
-    else
-        c1 = @view coords[cv.atom_inds_1]
-        c2 = @view coords[cv.atom_inds_2]
-        _, _, _, r_ij = extremal_pair(c1, c2, dt.calc_type, findmin, boundary)
-    end
+function calculate_virial_dist!(virial_buff, dt::CalcMinDist, cv, coords, forces, atoms, boundary; kwargs...)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+    _, _, _, r_ij = extremal_pair(c1, c2, dt.calc_type, findmin, boundary)
     r_ji = -r_ij
 
     f_sum = sum(forces[cv.atom_inds_1])
     virial_buff .+= r_ji * transpose(f_sum)
 end
 
-function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces, atoms, boundary;
-                                precomputed_extremum=nothing, kwargs...)
-    if precomputed_extremum !== nothing && precomputed_extremum.valid
-        r_ij = precomputed_extremum.r_ij
-    else
-        c1 = @view coords[cv.atom_inds_1]
-        c2 = @view coords[cv.atom_inds_2]
-        _, _, _, r_ij = extremal_pair(c1, c2, dt.calc_type, findmax, boundary)
-    end
+function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces, atoms, boundary; kwargs...)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+    _, _, _, r_ij = extremal_pair(c1, c2, dt.calc_type, findmax, boundary)
     r_ji = -r_ij
 
     f_sum = sum(forces[cv.atom_inds_1])

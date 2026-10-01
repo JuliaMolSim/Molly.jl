@@ -253,18 +253,16 @@ function BiasPotential(cv_type::C, bias_type::B) where {C, B}
                                next_bias_potential_id())
 end
 
-# Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch/
-# extremal_cache GPU-only fused-kernel state). One per bias in buffers.bias_scratch (force.jl),
-# keyed on bias.id.
+# Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch GPU-only
+# fused-kernel state). One per bias in buffers.bias_scratch (force.jl), keyed on bias.id.
 mutable struct BiasScratch
     grad::Any
     d_buf::Any
     fs_svec::Any
     dist_scratch::Any
-    extremal_cache::Any
 end
 
-BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing, nothing)
+BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing)
 
 # Locate bias's BiasScratch by its id, not its position in general_inters -- a position can
 # differ between calls (e.g. MTS integrators pass a different per-level subset each time), so
@@ -346,30 +344,23 @@ function bias_dist_scratch_types(coords, atoms)
     return CT, MT, WT, IT
 end
 
-# Lazily allocates CV-type-specific fused-kernel scratch. extremal_cache (CalcMinDist/
-# CalcMaxDist) is allocated on both backends (small virial-reuse cache); dist_scratch's
-# actual device-sized buffers are GPU-only.
+# Lazily allocates CV-type-specific fused-kernel scratch. GPU-only device-sized buffers.
 function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
-    if cv isa CalcDist{<:Union{CalcMinDist, CalcMaxDist}} && scratch.extremal_cache === nothing
-        scratch.extremal_cache = ExtremalPairCache(false, 0, 0, nothing, nothing)
-        if is_gpu_resident(coords)
-            idx1_dev, idx2_dev = upload_idx(coords, cv.atom_inds_1), upload_idx(coords, cv.atom_inds_2)
-            na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
-            # T caps kernel worker count at MINDIST_TILE_CAP regardless of na*nb -- see
-            # MinMaxScratch's docstring (cv.jl).
-            T = min(na * nb, MINDIST_TILE_CAP)
-            scratch.dist_scratch = MinMaxScratch(
-                idx1_dev,
-                idx2_dev,
-                similar(coords, eltype(eltype(coords)), T),
-                similar(coords, Int, T),
-                similar(coords, Int, T),
-                similar(coords, T),
-                similar(coords, Int, 1),
-                similar(coords, Int, 1),
-                similar(coords, 1),
-            )
-        end
+    if cv isa CalcDist{<:Union{CalcMinDist, CalcMaxDist}} && scratch.dist_scratch === nothing &&
+       is_gpu_resident(coords)
+        idx1_dev, idx2_dev = upload_idx(coords, cv.atom_inds_1), upload_idx(coords, cv.atom_inds_2)
+        na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
+        # T caps kernel worker count at MINDIST_TILE_CAP regardless of na*nb -- see
+        # MinMaxScratch's docstring (cv.jl).
+        T = min(na * nb, MINDIST_TILE_CAP)
+        scratch.dist_scratch = MinMaxScratch(
+            idx1_dev,
+            idx2_dev,
+            similar(coords, eltype(eltype(coords)), T),
+            similar(coords, Int, T),
+            similar(coords, Int, T),
+            similar(coords, T),
+        )
     elseif cv isa CalcDist{CalcCMDist} && scratch.dist_scratch === nothing && is_gpu_resident(coords)
         na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
         T1, T2 = min(na, 1024), min(nb, 1024)
@@ -454,7 +445,7 @@ function AtomsCalculators.forces!(
         ensure_bias_buffers!(scratch, bias.cv_type, coords)
         ensure_bias_dist_scratch!(scratch, bias.cv_type, coords, sys.atoms)
         cv_gradient!(scratch.grad, scratch.d_buf, bias.cv_type, coords, sys.atoms, sys.boundary, sys.velocities;
-                    extremal_cache=scratch.extremal_cache, scratch=scratch.dist_scratch)
+                    scratch=scratch.dist_scratch)
         d_coords, cv_sim = scratch.grad, only(from_device(scratch.d_buf))
     else
         # Custom CV types aren't guaranteed GPU-safe, so run them on the CPU.
@@ -493,8 +484,7 @@ function AtomsCalculators.forces!(
 
     if needs_vir && bias.cv_type.has_virial
         if bias.uses_persistent_buffers
-            calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, sys.atoms, sys.boundary;
-                              precomputed_extremum=scratch.extremal_cache)
+            calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, sys.atoms, sys.boundary)
         else
             calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec,
                               from_device(sys.atoms), sys.boundary)
