@@ -836,6 +836,40 @@ end
         end
     end
 
+    # A user-defined CV type in a BiasPotential on GPU.
+    if CUDA.functional()
+        @testset "Custom CV type in BiasPotential on GPU matches CPU" begin
+            struct XCoordDistCV
+                correction::Symbol
+            end
+            Molly.calculate_cv(cv::XCoordDistCV, coords, atoms, boundary, velocities; kwargs...) =
+                coords[2][1] - coords[1][1]
+            Molly.cv_gradient(cv::XCoordDistCV, coords, atoms, boundary, velocities; kwargs...) =
+                ([SVector(-1.0, 0.0, 0.0), SVector(1.0, 0.0, 0.0)] .* oneunit(coords[1][1] / coords[1][1]),
+                 coords[2][1] - coords[1][1])
+
+            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.5, 0.0, 0.0)u"nm"]
+            cv = XCoordDistCV(:wrap)
+            bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+
+            atoms_cpu = [Atom(mass=10.0u"g/mol") for _ in 1:2]
+            sys_cpu = System(atoms=atoms_cpu, coords=coords, boundary=boundary, general_inters=(bias,))
+            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
+            fs_cpu = zeros(SVector{3, Float64}, 2) .* u"kJ * mol^-1 * nm^-1"
+            Molly.AtomsCalculators.forces!(fs_cpu, sys_cpu, bias)
+
+            atoms_gpu = CuArray([Atom(mass=10.0u"g/mol") for _ in 1:2])
+            sys_gpu = System(atoms=atoms_gpu, coords=CuArray(coords), boundary=boundary, general_inters=(bias,))
+            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
+            fs_gpu = CuArray(zeros(SVector{3, Float64}, 2)) .* u"kJ * mol^-1 * nm^-1"
+            Molly.AtomsCalculators.forces!(fs_gpu, sys_gpu, bias)
+
+            @test ustrip(pe_gpu) ≈ ustrip(pe_cpu)
+            @test all(isapprox.(ustrip.(Molly.from_device(fs_gpu)), ustrip.(fs_cpu); atol=1e-10))
+            @test ustrip(fs_cpu[1][1]) != 0
+        end
+    end
+
     # The fused GPU kernel for CalcMinDist/CalcMaxDist (extremal_pair_fused) uses O(group_a)
     # memory instead of the O(group_a * group_b) dense matrix the old implementation
     # materialized -- assert this directly via CUDA.@allocated, rather than literally

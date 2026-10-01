@@ -412,7 +412,9 @@ function AtomsCalculators.potential_energy(
                                scratch=scratch.dist_scratch, kwargs...)
         cv_sim = only(from_device(scratch.d_buf))
     else
-        cv_sim = calculate_cv(bias.cv_type, coords, sys.atoms, sys.boundary, sys.velocities; kwargs...)
+        # Custom CV types aren't guaranteed GPU-safe, so run them on the CPU.
+        cv_sim = calculate_cv(bias.cv_type, from_device(coords), from_device(sys.atoms),
+                              sys.boundary, from_device(sys.velocities); kwargs...)
     end
     check_bias_finite(cv_sim, "collective variable", bias)
 
@@ -439,12 +441,13 @@ function AtomsCalculators.forces!(
                     extremal_cache=scratch.extremal_cache, scratch=scratch.dist_scratch)
         d_coords, cv_sim = scratch.grad, only(from_device(scratch.d_buf))
     else
+        # Custom CV types aren't guaranteed GPU-safe, so run them on the CPU.
         d_coords, cv_sim = cv_gradient(
             bias.cv_type,
-            coords,
-            sys.atoms,
+            from_device(coords),
+            from_device(sys.atoms),
             sys.boundary,
-            sys.velocities,
+            from_device(sys.velocities),
         )
     end
     check_bias_finite(cv_sim, "collective variable", bias)
@@ -473,10 +476,15 @@ function AtomsCalculators.forces!(
     )
 
     if needs_vir && bias.cv_type.has_virial
-        calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, sys.atoms, sys.boundary;
-                          precomputed_extremum=scratch.extremal_cache)
+        if bias.uses_persistent_buffers
+            calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, sys.atoms, sys.boundary;
+                              precomputed_extremum=scratch.extremal_cache)
+        else
+            calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec,
+                              from_device(sys.atoms), sys.boundary)
+        end
     end
 
-    fs .-= fs_svec
+    fs .-= bias.uses_persistent_buffers ? fs_svec : to_device(fs_svec, typeof(fs))
     return fs
 end
