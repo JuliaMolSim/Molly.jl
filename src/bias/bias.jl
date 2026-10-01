@@ -380,12 +380,15 @@ function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
     elseif cv isa CalcRMSD && scratch.dist_scratch === nothing && is_gpu_resident(coords)
         inds = iszero(length(cv.atom_inds)) ? collect(1:length(coords)) : cv.atom_inds
         ref_inds = iszero(length(cv.ref_atom_inds)) ? collect(1:length(cv.ref_coords)) : cv.ref_atom_inds
-        ref_coords_used = cv.ref_coords[ref_inds]
+        ref_coords_host = cv.ref_coords[ref_inds]
+        AT = array_type(coords)
+        ref_coords_used = ref_coords_host isa AT ? ref_coords_host : to_device(ref_coords_host, AT)
         # cv.ref_coords never changes after construction, so its Kabsch-centered form is computed
         # once here rather than on every cv_gradient!/calculate_cv! call (RmsdScratch docstring, cv.jl).
         n = length(inds)
         T = min(n, RMSD_TILE_CAP)
-        _, _, _, IT = bias_dist_scratch_types(coords, atoms)
+        CT = eltype(coords)
+        IT = typeof(sum_abs2(zero(CT))) # unweighted nm^2, unlike bias_dist_scratch_types' mass-weighted IT
         scratch.dist_scratch = RmsdScratch(upload_idx(coords, inds), similar(coords, length(inds)),
                                            ref_coords_used, kabsch_centered(ref_coords_used),
                                            similar(coords, IT, T))

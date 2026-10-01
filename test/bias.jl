@@ -809,6 +809,33 @@ end
         @test norm(ustrip.(fs_N1_cpu[4])) > 0
     end
 
+    # CalcRMSD in a BiasPotential on GPU, with units and a host-built reference.
+    if CUDA.functional()
+        @testset "CalcRMSD in BiasPotential on GPU matches CPU" begin
+            ref_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                          SVector(0.0, 1.0, 0.0)u"nm", SVector(0.0, 0.0, 1.0)u"nm"]
+            coords = [SVector(0.1, 0.0, 0.0)u"nm", SVector(1.1, 0.0, 0.0)u"nm",
+                      SVector(0.0, 1.1, 0.0)u"nm", SVector(0.0, 0.0, 1.1)u"nm"]
+            cv = CalcRMSD(ref_coords)
+            bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 0.0u"nm"))
+
+            atoms_cpu = [Atom(mass=10.0u"g/mol") for _ in 1:4]
+            sys_cpu = System(atoms=atoms_cpu, coords=coords, boundary=boundary, general_inters=(bias,))
+            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
+            fs_cpu = zeros(SVector{3, Float64}, 4) .* u"kJ * mol^-1 * nm^-1"
+            Molly.AtomsCalculators.forces!(fs_cpu, sys_cpu, bias)
+
+            atoms_gpu = CuArray([Atom(mass=10.0u"g/mol") for _ in 1:4])
+            sys_gpu = System(atoms=atoms_gpu, coords=CuArray(coords), boundary=boundary, general_inters=(bias,))
+            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
+            fs_gpu = CuArray(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
+            Molly.AtomsCalculators.forces!(fs_gpu, sys_gpu, bias)
+
+            @test ustrip(pe_gpu) ≈ ustrip(pe_cpu)
+            @test all(isapprox.(ustrip.(Molly.from_device(fs_gpu)), ustrip.(fs_cpu); atol=1e-10))
+        end
+    end
+
     # The fused GPU kernel for CalcMinDist/CalcMaxDist (extremal_pair_fused) uses O(group_a)
     # memory instead of the O(group_a * group_b) dense matrix the old implementation
     # materialized -- assert this directly via CUDA.@allocated, rather than literally
