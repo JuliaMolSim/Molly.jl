@@ -340,7 +340,7 @@ end
 
 function bias_dist_scratch_types(coords, atoms)
     CT = eltype(coords)
-    MT = fieldtype(eltype(atoms), :mass)
+    MT = Base.promote_op(mass, eltype(atoms))
     WT = typeof(zero(CT) * zero(MT))
     IT = typeof(sum_abs2(zero(CT)) * zero(MT))
     return CT, MT, WT, IT

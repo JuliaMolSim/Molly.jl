@@ -1002,6 +1002,33 @@ end
         end
     end
 
+    # A custom atom type with no field literally named :mass, only a mass(atom) overload, must
+    # work through the GPU scratch path (bias_dist_scratch_types reads mass()'s return type,
+    # not the :mass field directly).
+    if CUDA.functional()
+        @testset "Custom atom type (no :mass field) in CMDist bias on GPU matches CPU" begin
+            struct SimpleMassAtom
+                m::Float64
+            end
+            Molly.mass(a::SimpleMassAtom) = a.m * u"g/mol"
+
+            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                     SVector(5.0, 0.0, 0.0)u"nm", SVector(6.0, 0.0, 0.0)u"nm"]
+            atoms = [SimpleMassAtom(10.0), SimpleMassAtom(20.0), SimpleMassAtom(15.0), SimpleMassAtom(5.0)]
+            cv = CalcDist([1, 2], [3, 4], CalcCMDist(), :wrap)
+            bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+
+            sys_cpu = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias,))
+            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
+
+            sys_gpu = System(atoms=CuArray(atoms), coords=CuArray(coords), boundary=boundary,
+                             general_inters=(bias,))
+            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
+
+            @test isapprox(ustrip(pe_gpu), ustrip(pe_cpu); atol=1e-9)
+        end
+    end
+
     # The fused GPU kernel for CalcMinDist/CalcMaxDist (extremal_pair_fused) uses O(group_a)
     # memory instead of the O(group_a * group_b) dense matrix the old implementation
     # materialized -- assert this directly via CUDA.@allocated, rather than literally
