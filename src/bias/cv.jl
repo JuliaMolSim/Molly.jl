@@ -1317,7 +1317,7 @@ end
     pisum[tid] = acc
 end
 
-@kernel inbounds=true function rmsd_finalize_value_kernel!(dist_val, @Const(pisum), n)
+@kernel inbounds=true function rmsd_finalize_kernel!(dist_val, @Const(pisum), n)
     tid = @index(Global, Linear)
     if tid == 1
         T = length(pisum)
@@ -1326,18 +1326,6 @@ end
             Isum += pisum[k]
         end
         dist_val[1] = sqrt(Isum / n)
-    end
-end
-
-@kernel inbounds=true function rmsd_finalize_grad_kernel!(d_buf, @Const(pisum), n)
-    tid = @index(Global, Linear)
-    if tid == 1
-        T = length(pisum)
-        Isum = pisum[1]
-        for k in 2:T
-            Isum += pisum[k]
-        end
-        d_buf[1] = sqrt(Isum / n)
     end
 end
 
@@ -1366,7 +1354,7 @@ function calculate_cv!(cv::CalcRMSD, coords, buff, args...; scratch=nothing, kwa
         T = length(scratch.partial_isum)
         reduce! = rmsd_isum_reduce_kernel!(backend, min(T, 256))
         reduce!(scratch.partial_isum, scratch.ref_coords_used, scratch.coords_used, rot, trans_1, trans_2; ndrange=T)
-        finalize! = rmsd_finalize_value_kernel!(backend, 1)
+        finalize! = rmsd_finalize_kernel!(backend, 1) # reuse identical kernel as cv_gradient!
         finalize!(buff, scratch.partial_isum, n; ndrange=1)
         return nothing
     end
@@ -1422,7 +1410,7 @@ function cv_gradient!(grad, d_buf, cv::CalcRMSD, coords, args...; scratch=nothin
         T = length(scratch.partial_isum)
         reduce! = rmsd_isum_reduce_kernel!(backend, min(T, 256))
         reduce!(scratch.partial_isum, scratch.ref_coords_used, scratch.coords_used, rot, trans_1, trans_2; ndrange=T)
-        finalize! = rmsd_finalize_grad_kernel!(backend, 1)
+        finalize! = rmsd_finalize_kernel!(backend, 1) # reuse identical kernel as calculate_cv!
         finalize!(d_buf, scratch.partial_isum, n; ndrange=1)
         write! = rmsd_grad_write_kernel!(backend, min(n, 256))
         write!(grad, d_buf, scratch.ref_coords_used, scratch.coords_used, scratch.idx_dev,
