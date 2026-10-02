@@ -1519,9 +1519,9 @@ function pme_lambda_mesh_weight(scheduler::Union{GROMACSLambdaABFEScheduler,GROM
 end
 
 function PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-             ϵr=1.0, fixed_charges=true, mesh_dims=nothing, eligible=nothing, special=nothing,
-             scheduler=GROMACSLambdaABFEScheduler(dual=true), λ=0.0, grad_safe=false,
-             n_threads::Integer=Threads.nthreads())
+               ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
+               scheduler=GROMACSLambdaABFEScheduler(dual=true), λ=0.0, grad_safe=false,
+               n_threads::Integer=Threads.nthreads())
     T = typeof(ustrip(dist_cutoff))
     AT = array_type(atoms)
     n_atoms = length(atoms)
@@ -1551,7 +1551,6 @@ function PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     # touches the reciprocal space grid.
     charge_grid = to_device(zeros(T, mesh_dims[3], mesh_dims[2], mesh_dims[1], 2), AT)
     recip_grid = to_device(zeros(Complex{T}, mesh_dims[3] ÷ 2 + 1, mesh_dims[2], mesh_dims[1], 2), AT)
-    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
 
     bsplines_moduli = pme_bspline_moduli(T, order, mesh_dims)
 

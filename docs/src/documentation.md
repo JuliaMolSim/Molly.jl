@@ -1747,7 +1747,7 @@ Molly allows virtual sites to be defined in the following ways:
 Virtual sites should have an entry in the atom, coordinate and velocity arrays.
 They can be involved in any interaction type, with the forces being distributed back to the parent atoms automatically after all forces have been calculated.
 [`forces`](@ref), [`accelerations`](@ref) and `sys.velocities` are zero for virtual site atoms since they are not integrated.
-They share all the non-bonded exclusions of, and are excluded from, their parent atoms.
+They share all the non-bonded exclusions of, and are excluded from, the first of their parent atoms.
 The parent atoms must not be virtual sites themselves.
 They cannot participate in constraints.
 Virtual sites apart from [`OutOfPlaneSite`](@ref) and [`LocalCoordinatesSite`](@ref) are compatible with virial calculation, since the coordinates of the other sites are linear in the coordinates of their parent atoms.
