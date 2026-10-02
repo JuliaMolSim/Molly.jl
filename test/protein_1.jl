@@ -598,30 +598,28 @@ end
 
 @testset "GBn2 sulfur forces" begin
     # Sulfur has a negative GBn2 screening parameter, so for close pairs only the neck
-    #   term contributes to the Born radii, the forces on the disulfide S atoms are
-    #   compared to finite differences of the energy
+    #   term contributes, the GB forces on disulfide S atoms are checked against the energy
     ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"))
     sys = System(
         joinpath(data_dir, "openmm_refs", "hewl.pdb"),
         ff;
         boundary=CubicBoundary(100.0u"nm"),
+        dispersion_correction=false,
         implicit_solvent=SetupImplicitSolventGBN2(),
         n_threads=1,
         strictness=:nowarn,
     )
-    gb = only(filter(gi -> gi isa ImplicitSolventGBN2, collect(sys.general_inters)))
-    sys_gb = System(sys; pairwise_inters=(), specific_inter_lists=(), general_inters=(gb,))
+    sys_gb = System(sys; pairwise_inters=(), specific_inter_lists=())
     fs = forces(sys_gb; n_threads=1)
-    h = 1e-6u"nm"
     sg_inds = findall(ad -> ad.res_name == "CYS" && ad.atom_name == "SG", sys.atoms_data)
     for i in sg_inds[1:3], dim in 1:3
-        dx = SVector(ntuple(d -> d == dim ? h : zero(h), 3))
-        coords_p, coords_m = copy(sys.coords), copy(sys.coords)
-        coords_p[i] += dx
-        coords_m[i] -= dx
-        E_p = potential_energy(System(sys_gb; coords=coords_p); n_threads=1)
-        E_m = potential_energy(System(sys_gb; coords=coords_m); n_threads=1)
-        @test abs(fs[i][dim] + (E_p - E_m) / (2h)) < 1e-4u"kJ * mol^-1 * nm^-1"
+        grad_fd = central_fdm(5, 1)(ustrip(u"nm", sys.coords[i][dim])) do x
+            coords_mod = copy(sys.coords)
+            coords_mod[i] = setindex(coords_mod[i], x * u"nm", dim)
+            E = potential_energy(System(sys_gb; coords=coords_mod); n_threads=1)
+            return ustrip(u"kJ * mol^-1", E)
+        end
+        @test ustrip(u"kJ * mol^-1 * nm^-1", fs[i][dim]) ≈ -grad_fd atol=1e-4
     end
 end
 
