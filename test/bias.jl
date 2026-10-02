@@ -108,9 +108,8 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
             atol=1e-9u"nm",
         )
 
-        # Differently-sized groups: regression test for a transpose bug in
-        # pairwise_distance_matrix's :raw branch that only manifests when the two
-        # groups have different sizes (harmless/undetectable for equal-sized groups)
+        # Differently-sized groups: regression test for a transpose bug in the :raw branch that
+        # only manifests when the two groups have different sizes (undetectable for equal sizes)
         atom_inds_small = [1, 2]
         coords_small = AT(coords[atom_inds_small])
 

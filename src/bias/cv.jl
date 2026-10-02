@@ -29,36 +29,41 @@ end
 
 function calculate_virial(cv, args...; kwargs...) end
 
-function pairwise_displacement_matrix(coords_1::AbstractArray{SVector{D, C}},
-                                      coords_2::AbstractArray{SVector{D, C}},
-                                      calc_type,
-                                      boundary) where {D, C}
-    c1_col = reshape(coords_1, length(coords_1), 1)
-    c2_row = reshape(coords_2, 1, length(coords_2))
-    if calc_type == :closest
-        return vector.(c1_col, c2_row, (boundary,))
-    else
-        return c2_row .- c1_col
-    end
-end
-
-function pairwise_distance_matrix(coords_1, coords_2, calc_type, boundary)
-    return norm.(pairwise_displacement_matrix(coords_1, coords_2, calc_type, boundary))
-end
-
 # Finds the pair (i, j) minimizing/maximizing the distance between two groups of atoms, using
 # `extremum_fn = findmin`/`findmax`. Returns the indices, the extremal distance, and the
-# coords_1[i] -> coords_2[j] displacement vector, without scalar-indexing (safe for CuArray).
-#
-# CPU-only: materializes the full group_a x group_b displacement matrix. GPU-resident coords
-# always go through MinMaxScratch's tiled kernels instead (see calculate_cv!/cv_gradient! below).
+# coords_1[i] -> coords_2[j] displacement vector. Allocation-free double loop; CPU only.
 function extremal_pair(coords_1, coords_2, calc_type, extremum_fn, boundary)
-    diffs = pairwise_displacement_matrix(coords_1, coords_2, calc_type, boundary)
-    dist_matrix = norm.(diffs)
-    d, idx = extremum_fn(dist_matrix)
+    is_min = extremum_fn === findmin
+    closest = calc_type == :closest
+
+    T = eltype(eltype(coords_1))
+    sample_d2 = oneunit(T)^2
+    best_d2 = (is_min ? typemax : typemin)(typeof(ustrip(sample_d2))) * oneunit(sample_d2)
+    best_i, best_j = 1, 1
+
+    for (i, p1) in enumerate(coords_1), (j, p2) in enumerate(coords_2)
+        rij = closest ? vector(p1, p2, boundary) : p2 - p1
+        d2 = sum(abs2, rij)
+        better = is_min ? (d2 < best_d2) : (d2 > best_d2)
+        if better
+            best_d2, best_i, best_j = d2, i, j
+        end
+    end
+
+    r_ij = closest ? vector(coords_1[best_i], coords_2[best_j], boundary) :
+                      coords_2[best_j] - coords_1[best_i]
+    return best_i, best_j, sqrt(best_d2), r_ij
+end
+
+# GPU fallback with no index lists to build a MinMaxScratch from (dist_between_groups(!) called
+# directly). Materializes the displacement matrix via broadcast.
+function extremal_pair(coords_1::AbstractGPUArray, coords_2, calc_type, extremum_fn, boundary)
+    diffs = calc_type == :closest ?
+        vector.(reshape(coords_1, :, 1), reshape(coords_2, 1, :), (boundary,)) :
+        reshape(coords_2, 1, :) .- reshape(coords_1, :, 1)
+    d, idx = extremum_fn(norm.(diffs))
     i, j = Tuple(idx)
-    r_ij = only(from_device(diffs[i:i, j:j]))
-    return i, j, d, r_ij
+    return i, j, d, only(from_device(diffs[i:i, j:j]))
 end
 
 # A fancy-index @view of a CuArray isn't itself an AbstractGPUArray, so unwrap via `parent`.
