@@ -358,13 +358,14 @@ end
     cv_rg    = CalcRg([1, 2, 3, 4])
     cv_rmsd  = CalcRMSD(coords_ref, [1,2,3,4],[1,2,3,4]) 
     cv_tor   = CalcTorsion([1,2,3,4])
+    cv_ang   = CalcAngle([1,2,3])
 
-    cvs = (cv_d_s, cv_d_min, cv_d_max, cv_d_cm, cv_rg, cv_rmsd, cv_tor)
+    cvs = (cv_d_s, cv_d_min, cv_d_max, cv_d_cm, cv_rg, cv_rmsd, cv_tor, cv_ang)
     
     b1 = LinearBias(100.0u"kJ*mol^-1*nm^-1", 0.2u"nm")
     b2 = LinearBias(100.0u"kJ*mol^-1", 0.2)
 
-    bias = (b1, b1, b1, b1, b1, b1, b2)
+    bias = (b1, b1, b1, b1, b1, b1, b2, b2)
 
     for (c, b) in zip(cvs, bias)
         bias_pot = BiasPotential(c, b)
@@ -462,7 +463,7 @@ end
                   n_alchemical, ::Val{T}) where T
         atoms = [Atom(i, 1, T(10.0), T(0.2) * (i % 2 == 0 ? -1 : 1), T(0.3), T(0.4),
                       (i <= n_alchemical ? λ : one(λ)),
-                      (i <= n_alchemical ? Molly.InsertRole : Molly.CoreRole))
+                      (i <= n_alchemical ? Molly.InsertRole : Molly.EnvRole))
                  for i in 1:n_atoms]
 
         sys = System(
@@ -643,7 +644,7 @@ end
     function loss(σ, coords, velocities, boundary, pairwise_inters, neighbor_finder,
                   constraints, simulator, n_steps, n_atoms, atom_mass, rng)
         atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? -charge : charge), σ, ϵ, λ,
-                      Molly.CoreRole) for i in 1:n_atoms]
+                      Molly.EnvRole) for i in 1:n_atoms]
 
         sys = System(
             atoms=atoms,
@@ -737,7 +738,7 @@ end
     function loss_logged(σ, coords, velocities, boundary, pairwise_inters, neighbor_finder,
                             simulator, n_steps, n_atoms, atom_mass, rng)
         atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? -charge : charge), σ, ϵ, λ,
-                        Molly.CoreRole) for i in 1:n_atoms]
+                        Molly.EnvRole) for i in 1:n_atoms]
 
         sys = System(
             atoms=atoms,
@@ -1035,42 +1036,42 @@ end
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("DoubleExponentialSC", DoubleExponentialSoftCore(α=T(16.766), β=T(4.427),
                                     weight_special=w, cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true), ()),
+                                    use_neighbors=true), lost_w),
         ("Gravity"          , Gravity(G=T(1.0), use_neighbors=true), ()),
         ("LJSCBeutler"      , LennardJonesSoftCoreBeutler(α=T(0.5), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), lost_w),
+                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("LJSCGapsys"       , LennardJonesSoftCoreGapsys(α=T(0.85), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), lost_w),
+                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("Coulomb"          , Coulomb(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
                                     weight_special=w, coulomb_const=cc), ()),
         ("CoulombScaled"    , CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), lost_wc),
+                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCBeutler" , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), lost_wc),
+                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCGapsys"  , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
                                     σQ=T(1.0), use_neighbors=true, weight_special=w,
-                                    coulomb_const=cc), lost_wc),
+                                    coulomb_const=cc), ()),
         ("CoulombRF"        , CoulombReactionField(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CRFScaled"        , CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), lost_wc),
+                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CRFSCBeutler"     , CoulombSoftCoreBeutlerReactionField(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), lost_wc),
+                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CRFSCGapsys"      , CoulombSoftCoreGapsysReactionField(dist_cutoff=nb_cutoff,
                                     σQ=T(1.0), use_neighbors=true, weight_special=w,
-                                    coulomb_const=cc), lost_wc),
+                                    coulomb_const=cc), ()),
         ("CoulombEwald"     , CoulombEwald(dist_cutoff=nb_cutoff, use_neighbors=true,
                                     weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CoulombEwaldScaled", CoulombEwaldScaled(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc,
-                                    approximate_erfc=false), lost_wc),
+                                    approximate_erfc=false), ()),
         ("CEwaldSCBeutler"  , CoulombSoftCoreBeutlerEwald(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc,
-                                    approximate_erfc=false), lost_wc),
+                                    approximate_erfc=false), ()),
         ("CEwaldSCGapsys"   , CoulombSoftCoreGapsysEwald(dist_cutoff=nb_cutoff, σQ=T(1.0),
                                     use_neighbors=true, weight_special=w, coulomb_const=cc,
-                                    approximate_erfc=false), lost_wc),
+                                    approximate_erfc=false), ()),
         ("Yukawa"           , Yukawa(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
                                     weight_special=w, coulomb_const=cc, kappa=T(1.0)), ()),
     ]

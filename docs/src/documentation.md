@@ -471,7 +471,7 @@ water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff) # Res
 
 Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`ReplicaExchangeMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
 On CPU these are run in parallel by dividing up the number of available threads.
-For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1 ps:
+For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 2.5 ps:
 ```julia
 using Molly
 using Statistics
@@ -774,6 +774,7 @@ The available pairwise interactions are:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCoreBeutler`](@ref)
 - [`LennardJonesSoftCoreGapsys`](@ref)
+- [`LennardJonesScaled`](@ref)
 - [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
@@ -795,6 +796,7 @@ The available specific interactions (1-5 atoms) are:
 - [`HarmonicBond`](@ref) - 2 atoms
 - [`MorseBond`](@ref) - 2 atoms
 - [`FENEBond`](@ref) - 2 atoms
+- [`LennardJones14`](@ref) - 2 atoms
 - [`EwaldExclusion`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
@@ -1110,6 +1112,7 @@ The following built-in interactions can use a cutoff:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCoreBeutler`](@ref)
 - [`LennardJonesSoftCoreGapsys`](@ref)
+- [`LennardJonesScaled`](@ref)
 - [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
@@ -1406,7 +1409,7 @@ During supported constrained simulations, Molly can add constraint contributions
 For the initial simulation step, the same preview convention is used so that interactions and constraints both contribute to the logged virial/pressure.
 If a coordinate-scaling coupling method changes the box on a constrained step, virial and pressure loggers record the pre-coupling virial/pressure for that step, matching the state used by the coupling method.
 Other state loggers, such as [`BoxLogger`](@ref), continue to record the current post-coupling state.
-The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
+The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref) and [`LocalCoordinatesSite`](@ref).
 As described previously, custom general interactions should implement virial calculation if required.
 
 ## Loggers
@@ -1740,6 +1743,7 @@ Molly allows virtual sites to be defined in the following ways:
 - [`TwoParticleAverageSite`](@ref): defined by the weighted average of the coordinates of two atoms.
 - [`ThreeParticleAverageSite`](@ref): defined by the weighted average of the coordinates of three atoms.
 - [`OutOfPlaneSite`](@ref): defined by the weighted average of the coordinates of three atoms and the cross product of their relative displacements.
+- [`LocalCoordinatesSite`](@ref): defined by a position in a local coordinate system given by three atoms, matching the site of the same name in OpenMM. This places a site at a fixed distance and orientation whatever the bond lengths are, as used for the lone pairs of a CHARMM force field.
 
 Virtual sites should have an entry in the atom, coordinate and velocity arrays.
 They can be involved in any interaction type, with the forces being distributed back to the parent atoms automatically after all forces have been calculated.
@@ -1747,7 +1751,7 @@ They can be involved in any interaction type, with the forces being distributed 
 They share all the non-bonded exclusions of, and are excluded from, their parent atoms.
 The parent atoms must not be virtual sites themselves.
 They cannot participate in constraints.
-Virtual sites apart from [`OutOfPlaneSite`](@ref) are compatible with virial calculation.
+Virtual sites apart from [`OutOfPlaneSite`](@ref) and [`LocalCoordinatesSite`](@ref) are compatible with virial calculation, since the coordinates of the other sites are linear in the coordinates of their parent atoms.
 
 A virtual site can be set up manually, for example for a molecule of TIP4P water:
 ```julia

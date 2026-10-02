@@ -107,23 +107,23 @@ abstract type ConstraintKernelData{D, N, M} end
 @inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer, l::Integer) = 1
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer)
-    return λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    return λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
 end
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer)
-    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    λ = λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[k])))
     return λ
 end
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer, l::Integer)
-    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[l]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[l]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[k], atoms[l]))
+    λ = λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[l])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[l])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[k], atoms[l])))
     return λ
 end
 

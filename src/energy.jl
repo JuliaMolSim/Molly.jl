@@ -107,7 +107,8 @@ is used, taking into account pairwise interactions, specific interactions, and t
 Contributions from implicit solvent methods and bias potentials are ignored.
 For constrained systems, constraint contributions are approximated using a
 deterministic small-step constraint preview.
-Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
+Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref) and
+[`LocalCoordinatesSite`](@ref).
 
 To calculate the scalar virial, see [`scalar_virial`](@ref).
 """

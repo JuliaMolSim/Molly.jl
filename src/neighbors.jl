@@ -25,13 +25,17 @@ function check_neighbor_matrices(eligible, special)
         throw(ArgumentError("size of the eligible matrix $(size(eligible)) must be " *
                             "the same as the size of the special matrix $(size(special))"))
     end
-    if !isnothing(eligible) && !issymmetric(eligible)
+    if !isnothing(eligible) && !is_symmetric_mask(eligible)
         throw(ArgumentError("eligible matrix is not symmetric"))
     end
-    if !isnothing(special) && !issymmetric(special)
+    if !isnothing(special) && !is_symmetric_mask(special)
         throw(ArgumentError("special matrix is not symmetric"))
     end
 end
+
+is_symmetric_mask(m) = issymmetric(m)
+# issymmetric on a BitMatrix builds A - A' as a dense Int matrix (8 bytes per atom pair)
+is_symmetric_mask(m::BitMatrix) = (m == copy(transpose(m)))
 
 """
     NoNeighborFinder()
