@@ -257,29 +257,29 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
     bb_to_mass = Dict("C" => 12.011u"g/mol", "N" => 14.007u"g/mol", "O" => 15.999u"g/mol")
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
 
+    boundary_rg = CubicBoundary(20.0u"nm")
+
     # Rg of all atoms
     rg_cv = CalcRg()
     @test isapprox(
-        calculate_cv(rg_cv, coords, atoms),
+        calculate_cv(rg_cv, coords, atoms, boundary_rg),
         11.51225678195222u"Å";
         atol=1e-6u"nm",
     )
-    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"))[2],
-                   calculate_cv(rg_cv, coords, atoms),
+    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, boundary_rg)[2],
+                   calculate_cv(rg_cv, coords, atoms, boundary_rg),
                    atol = 1e-5u"nm")
 
-    # calculate_cv (value path, via radius_gyration) and cv_gradient (gradient path) must agree
-    # on the same mass-weighted center of mass -- with disparate atom masses, not just the
-    # backbone's similar C/N/O masses above, which don't separate the two definitions enough to
-    # catch a mismatch.
+    # Disparate masses, unlike the backbone's similar C/N/O masses above, separate the two
+    # definitions enough to catch a value/gradient COM mismatch.
     atoms_disparate = [Atom(mass=10.0u"g/mol"), Atom(mass=20.0u"g/mol"),
                        Atom(mass=15.0u"g/mol"), Atom(mass=30.0u"g/mol")]
     coords_disparate = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
                         SVector(0.0, 2.0, 0.0)u"nm", SVector(3.0, 1.0, 0.0)u"nm"]
     rg_cv_disparate = CalcRg()
     @test isapprox(
-        calculate_cv(rg_cv_disparate, coords_disparate, atoms_disparate),
-        Molly.cv_gradient(rg_cv_disparate, coords_disparate, atoms_disparate, CubicBoundary(20.0u"nm"))[2];
+        calculate_cv(rg_cv_disparate, coords_disparate, atoms_disparate, boundary_rg),
+        Molly.cv_gradient(rg_cv_disparate, coords_disparate, atoms_disparate, boundary_rg)[2];
         atol=1e-9u"nm",
     )
 
@@ -289,12 +289,12 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
     atoms_subset = atoms[1:n_atoms_subset]
     rg_cv = CalcRg([i for i=1:n_atoms_subset])
     @test isapprox(
-        calculate_cv(rg_cv, coords, atoms),
+        calculate_cv(rg_cv, coords, atoms, boundary_rg),
         radius_gyration(coords_subset,atoms_subset);
         atol=1e-6u"nm",
     )
-    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"))[2],
-                   calculate_cv(rg_cv, coords, atoms),
+    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, boundary_rg)[2],
+                   calculate_cv(rg_cv, coords, atoms, boundary_rg),
                    atol = 1e-5u"nm")
 
     # Test CalcTorsion value calculation
@@ -648,12 +648,12 @@ end
     rg_cv_pbc  = CalcRg([1, 2, 3])
     rg_cv_wrap = CalcRg([1, 2, 3], :wrap)
 
-    # On CPU, :pbc (molecule-unwrapped) and :wrap (raw) coordinates give meaningfully
-    # different CV values for a molecule straddling the periodic boundary
+    # :pbc (topology-unwrapped) and :wrap (raw, PBC-aware COM) agree for a molecule straddling
+    # the boundary when every atom is within one periodic image of the others.
     sys_cpu = System(atoms=atoms_uw, coords=coords_uw, boundary=boundary_uw, topology=topology)
-    rg_pbc_cpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_cpu, rg_cv_pbc), sys_cpu.atoms)
-    rg_wrap_cpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_cpu, rg_cv_wrap), sys_cpu.atoms)
-    @test !isapprox(rg_pbc_cpu, rg_wrap_cpu; atol=1e-3u"nm")
+    rg_pbc_cpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_cpu, rg_cv_pbc), sys_cpu.atoms, boundary_uw)
+    rg_wrap_cpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_cpu, rg_cv_wrap), sys_cpu.atoms, boundary_uw)
+    @test isapprox(rg_pbc_cpu, rg_wrap_cpu; atol=1e-9u"nm")
 
     if CUDA.functional()
         sys_gpu = System(
@@ -663,10 +663,10 @@ end
             topology=topology,
         )
         # :pbc now runs fully on GPU (GPU-native unwrap_molecules) and matches the CPU :pbc result
-        rg_pbc_gpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_gpu, rg_cv_pbc), sys_gpu.atoms)
+        rg_pbc_gpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_gpu, rg_cv_pbc), sys_gpu.atoms, boundary_uw)
         @test isapprox(rg_pbc_gpu, rg_pbc_cpu; atol=1e-9u"nm")
         # :wrap stays fully GPU-resident and matches the CPU :wrap (raw coordinates) result
-        rg_wrap_gpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_gpu, rg_cv_wrap), sys_gpu.atoms)
+        rg_wrap_gpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_gpu, rg_cv_wrap), sys_gpu.atoms, boundary_uw)
         @test isapprox(rg_wrap_gpu, rg_wrap_cpu; atol=1e-9u"nm")
     end
 end

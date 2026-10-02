@@ -362,6 +362,7 @@ function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
             similar(coords, Int, T),
             similar(coords, Int, T),
             similar(coords, T),
+            similar(coords, 1),
         )
     elseif cv isa CalcDist{CalcCMDist} && scratch.dist_scratch === nothing && is_gpu_resident(coords)
         na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
@@ -486,7 +487,8 @@ function AtomsCalculators.forces!(
 
     if needs_vir && bias.cv_type.has_virial
         if bias.uses_persistent_buffers
-            calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, sys.atoms, sys.boundary)
+            calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, sys.atoms, sys.boundary;
+                             scratch=scratch.dist_scratch)
         else
             calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec,
                               from_device(sys.atoms), sys.boundary)
