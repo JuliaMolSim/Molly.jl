@@ -900,3 +900,43 @@ else
     @warn "Skipping AllegroPotential tests — reference files not found. " *
           "Run test/allegro_reference.py (needs e3nn) to generate them."
 end
+
+# ============================================================================
+# External validation of the NATIVE implementation against the REAL nequip-allegro package: the
+# bit-exact port (AllegroPackageModel) loads the package's own exported weights and must reproduce
+# the package's energy and forces. This is the non-circular check — the reference comes from the
+# actual package (test/allegro_package_reference.py), not from a second re-implementation.
+# ============================================================================
+const ALLEGRO_PKG_H5  = joinpath(ALLEGRO_DIR, "allegro_package_weights.h5")
+const ALLEGRO_PKG_REF = joinpath(ALLEGRO_DIR, "allegro_package_ref.json")
+
+if isfile(ALLEGRO_PKG_H5) && isfile(ALLEGRO_PKG_REF)
+    @testset "AllegroPackageModel reproduces the real nequip-allegro package" begin
+        m = load_allegro_package(ALLEGRO_PKG_H5; T=Float64)
+        ref = JSON3.read(read(ALLEGRO_PKG_REF, String))
+        @test m.type_names == String.(ref.type_names)
+        for sysj in ref.systems
+            coords = [SVector{3,Float64}(c...) for c in sysj.coords_A]
+            species = [Int(t) for t in sysj.types]          # 0-based package type indices
+            # energy reproduces the package forward to numerical precision
+            E = Molly.allegro_package_total_energy(m, coords, species)
+            @test isapprox(E, Float64(sysj.energy); atol=1e-6)
+            # forces = -dE/dr (finite-differenced) match the package's autograd forces
+            h = 1e-6
+            Fref = [SVector{3,Float64}(f...) for f in sysj.forces]
+            maxdf = 0.0
+            for i in eachindex(coords), b in 1:3
+                cp = copy(coords); cm = copy(coords)
+                cp[i] = setindex(cp[i], cp[i][b] + h, b)
+                cm[i] = setindex(cm[i], cm[i][b] - h, b)
+                fd = -(Molly.allegro_package_total_energy(m, cp, species) -
+                       Molly.allegro_package_total_energy(m, cm, species)) / (2h)
+                maxdf = max(maxdf, abs(fd - Fref[i][b]))
+            end
+            @test maxdf < 1e-5
+        end
+    end
+else
+    @warn "Skipping AllegroPackageModel package-validation tests — run " *
+          "test/allegro_package_reference.py (needs nequip-allegro) to generate the reference."
+end

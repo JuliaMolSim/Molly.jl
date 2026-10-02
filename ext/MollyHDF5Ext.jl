@@ -52,4 +52,46 @@ function Molly.AllegroPotential(path::AbstractString; T::Type=Float32)
     end
 end
 
+"""
+    load_allegro_package(path; T=Float64) -> AllegroPackageModel
+
+Load the real `nequip-allegro` package weights (HDF5 from `test/allegro_package_reference.py`) into a
+bit-exact native [`AllegroPackageModel`](@ref). Linear weights are read as `(out, in)` (the h5 reversal
+of the package's `(in, out)`); the per-layer `tp` weights and `w3j` tables are restored to the package
+orientation `(channel, path)` and `(path, i, j, k)`.
+"""
+function Molly.load_allegro_package(path::AbstractString; T::Type=Float64)
+    h5open(path, "r") do f
+        cfg = attrs(f["config"])
+        S = Int(cfg["num_scalar_features"]); C = Int(cfg["num_tensor_features"])
+        nb = Int(cfg["num_bessels"]); L = Int(cfg["num_layers"]); p = Int(cfg["polynomial_cutoff_p"])
+        rmax = T(cfg["r_max"]); avg = T(cfg["avg_num_neighbors"])
+        tn = String.(read(f["type_names"]))
+        pre = "model__func__"
+        g(k) = T.(read(f["w/" * pre * k]))                 # h5 reversal -> (out, in) for linear weights
+        full_reverse(A) = permutedims(A, reverse(ntuple(identity, ndims(A))))
+        latW0 = Matrix{T}[]; latW2 = Matrix{T}[]
+        tpw = Matrix{T}[]; tpw3j = Array{T}[]; tpdiag = Bool[]; tpnk = Int[]
+        for l in 0:(L - 1)
+            push!(latW0, g("allegro__latents__$(l)__mlp__0__weight"))
+            push!(latW2, g("allegro__latents__$(l)__mlp__2__weight"))
+            push!(tpw, permutedims(g("allegro__tps__$(l)__weights"), (2, 1)))   # -> (C, n_paths)
+            w3j = full_reverse(g("allegro__tps__$(l)__w3j"))                     # -> (n_paths, i, [j,] k)
+            push!(tpw3j, w3j); push!(tpdiag, ndims(w3j) == 3); push!(tpnk, size(w3j, ndims(w3j)))
+        end
+        return Molly.AllegroPackageModel{T}(S, C, nb, L, p, rmax, avg, tn,
+            vec(g("radial_chemical_embed__bessel_encode__bessel_weights")),
+            g("radial_chemical_embed__type_embed__center_embed__weight"),
+            g("radial_chemical_embed__type_embed__neighbor_embed__weight"),
+            g("radial_chemical_embed__type_embed__basis_linear__mlp__0__weight"),
+            g("scalar_embed_mlp__mlp_module__mlp__0__weight"),
+            g("scalar_embed_mlp__mlp_module__mlp__2__weight"),
+            g("tensor_embed__env_embed_linear__mlp__0__weight"),
+            g("allegro__first_layer_env_embed_projection__mlp__0__weight"),
+            latW0, latW2, tpw, tpw3j, tpdiag, tpnk,
+            g("edge_readout__mlp_module__mlp__0__weight"),
+            g("edge_readout__mlp_module__mlp__2__weight"))
+    end
+end
+
 end # module

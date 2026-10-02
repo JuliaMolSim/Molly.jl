@@ -8,7 +8,8 @@ export
     ANIPotential,
     ani2x_data_dir,
     compute_aevs,
-    AllegroPotential
+    AllegroPotential,
+    load_allegro_package
 
 # Base type for ML interatomic potentials, a shared supertype for current and future ones.
 abstract type AbstractMLPotential end

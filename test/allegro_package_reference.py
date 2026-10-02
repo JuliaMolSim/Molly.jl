@@ -107,7 +107,21 @@ def main():
                 arr = arr * float(buffers[akey].detach().cpu().numpy())
         export[k.replace(".", "__")] = arr
     np.savez(os.path.join(outdir, "allegro_package_weights.npz"), **export)
-    print("wrote", os.path.join(outdir, "allegro_package_ref.json"), "and _weights.npz")
+    # also write HDF5 so the native Julia port (ext/MollyHDF5Ext.jl) can load the real weights
+    import h5py
+    with h5py.File(os.path.join(outdir, "allegro_package_weights.h5"), "w") as f:
+        g = f.create_group("w")
+        for k, arr in export.items():
+            g[k] = np.asarray(arr, dtype=np.float64)
+        cg = f.create_group("config")
+        for k in ("l_max", "num_layers", "num_scalar_features", "num_tensor_features"):
+            cg.attrs[k] = int(CFG[k])
+        cg.attrs["r_max"] = float(CFG["r_max"])
+        cg.attrs["avg_num_neighbors"] = float(CFG["avg_num_neighbors"])
+        cg.attrs["num_bessels"] = int(CFG["radial_chemical_embed"]["num_bessels"])
+        cg.attrs["polynomial_cutoff_p"] = int(CFG["radial_chemical_embed"]["polynomial_cutoff_p"])
+        f["type_names"] = [t.encode() for t in TYPE_NAMES]
+    print("wrote", os.path.join(outdir, "allegro_package_ref.json"), "_weights.npz and _weights.h5")
 
 if __name__ == "__main__":
     main()
