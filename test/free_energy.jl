@@ -1,7 +1,7 @@
-# --- End state helpers ---
-# Hybrid atom -> end state atom (0 for a dummy), in the atom order of RelativeFESystem: core atoms
-#   (an A and a B copy each in dual topology), atoms unique to A, to B, environment. `real` marks
-#   the atoms of the end state. `n_end` is the number of atoms of the end state system.
+# Loading the TYK2 test data from OpenFE from artifact
+tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
+                normpath(@__DIR__, "..", "Artifacts.toml"))
+
 function end_state_map(mapping, core_mapAB, n_end, dual, state)
     h2e, real = Int[], Bool[]
     for i in mapping["core"]
@@ -19,8 +19,6 @@ function end_state_map(mapping, core_mapAB, n_end, dual, state)
     return [h2e; env], [real; trues(length(env))]
 end
 
-# The bonded terms of the dummy atoms stay on at the end states and are left out; the nonbonded
-#   terms of a dummy are off at the end states
 function real_terms(il, real)
     eltype(il.inters) <: Union{EwaldExclusion, Molly.LennardJones14λ} && return il
     atom_fields = fieldnames(typeof(il))[1:(end - 3)]
@@ -29,9 +27,6 @@ function real_terms(il, real)
                                    il.inters[keep], il.types[keep], il.data)
 end
 
-# Energy and force differences of a hybrid system at an end state to the end state system `ref`,
-#   at the positions of `ref`, and the largest force on a dummy atom. The forces on the two copies
-#   of a core atom in dual topology are summed.
 function end_state_diff(sys, ref, h2e, real)
     coords = [h2e[i] > 0 ? ref.coords[h2e[i]] : c for (i, c) in enumerate(sys.coords)]
     sys = System(sys; coords=coords,
@@ -46,7 +41,6 @@ function end_state_diff(sys, ref, h2e, real)
             maximum(norm, fs[h2e .== 0]; init=norm(zero(fs[1]))))
 end
 
-# The TYK2 ligand of a complex PDB file alone, for small systems in vacuum
 function ligand_pdb(file)
     lines = readlines(file)
     serials = Set(l[7:11] for l in lines if startswith(l, "HETATM") && l[18:20] == "UNK")
@@ -56,7 +50,6 @@ function ligand_pdb(file)
     return out
 end
 
-# ejm31 (A) and ejm50 (B) in vacuum, with the mapping of the OpenFE TYK2 test
 function tyk2_ligands(; kwargs...)
     build(lig) = System(ligand_pdb(joinpath(data_dir, "tyk2_$lig.pdb")),
                         MolecularForceField(joinpath(data_dir, "$lig.xml"); units=true);

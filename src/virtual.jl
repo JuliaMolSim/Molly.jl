@@ -42,13 +42,18 @@ end
 
 # Only a LocalCoordinatesSite uses the local coordinates fields, so the other site types are
 #   constructed without them, with the length type taken from weight_cross
-for VS in (:VirtualSite, :VirtualSiteTemplate)
-    @eval function $VS(type, atom_ind_or_name, atom_1, atom_2, atom_3, weight_1, weight_2::T,
-                       weight_3, weight_12, weight_13, weight_cross) where T
-        return $VS(type, atom_ind_or_name, atom_1, atom_2, atom_3, weight_1, weight_2, weight_3,
-                   weight_12, weight_13, weight_cross, zero(SVector{9, T}),
-                   zero(SVector{3, typeof(inv(oneunit(weight_cross)))}))
-    end
+function VirtualSite(type, atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2::T, weight_3,
+                     weight_12, weight_13, weight_cross) where T
+    return VirtualSite(type, atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2, weight_3,
+                       weight_12, weight_13, weight_cross, zero(SVector{9, T}),
+                       zero(SVector{3, typeof(inv(oneunit(weight_cross)))}))
+end
+
+function VirtualSiteTemplate(type, atom_name, atom_1, atom_2, atom_3, weight_1, weight_2::T,
+                             weight_3, weight_12, weight_13, weight_cross) where T
+    return VirtualSiteTemplate(type, atom_name, atom_1, atom_2, atom_3, weight_1, weight_2,
+                               weight_3, weight_12, weight_13, weight_cross, zero(SVector{9, T}),
+                               zero(SVector{3, typeof(inv(oneunit(weight_cross)))}))
 end
 
 @doc raw"""

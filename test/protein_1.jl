@@ -1,3 +1,7 @@
+# Loading the TYK2 test data from OpenMM from artifact
+tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
+                normpath(@__DIR__, "..", "Artifacts.toml"))
+
 @testset "Amber OpenMM protein comparison" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     show(devnull, ff)

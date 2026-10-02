@@ -464,7 +464,8 @@ function Base.show(io::IO, sil::T) where T <: SpecificInteractionList
     print(io, nameof(T), " with ", length(sil.is), " interactions of type ", eltype(sil.inters))
 end
 
-function merge(interactions)
+# Named apart from the built-in `merge` to keep the two separate
+function merge_interactions(interactions)
     interactions_final = []
     cache = []
     for (i,inter) in enumerate(interactions)

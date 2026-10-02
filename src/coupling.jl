@@ -406,9 +406,9 @@ virial_incompatible_sites(vs) = false
 
 function warn_virial_sites(sys, barostat)
     if virial_incompatible_sites(sys.virtual_sites)
-        @warn "the system has virtual sites that are not compatible with the virial, so the " *
-              "pressure $(nameof(typeof(barostat))) uses is wrong; MonteCarloBarostat needs no " *
-              "virial" maxlog=1
+        report_issue("the system has virtual sites that are not compatible with the virial, so " *
+                     "the pressure $(nameof(typeof(barostat))) uses is wrong; " *
+                     "MonteCarloBarostat needs no virial", :warn; maxlog=1)
     end
     return nothing
 end

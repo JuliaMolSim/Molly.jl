@@ -876,7 +876,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
     end
 
-    Interactions = merge(Interactions)
+    Interactions = merge_interactions(Interactions)
 
     # A pair of atoms is excluded, or special, if it is so in either end state
     #   Have to take information from neighbourfinder, since constraints drop 

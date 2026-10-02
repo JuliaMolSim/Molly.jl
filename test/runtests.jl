@@ -1,5 +1,4 @@
 using Molly
-using LazyArtifacts: LazyArtifacts
 using ParallelTestRunner
 using Suppressor
 
@@ -120,11 +119,6 @@ const init_code_block = quote
     const data_dir = normpath(@__DIR__, "..", "data")
     const ff_dir     = joinpath(data_dir, "force_fields")
     const openmm_dir = joinpath(data_dir, "openmm_6mrr")
-    # The TYK2 reference data is a lazy artifact of the package, downloaded on first use as the
-    #   ANI-2x one is. `artifact"tyk2_data"` can not be used here, since it looks for Artifacts.toml
-    #   upwards from this file and stops at test/Project.toml, so the path is given explicitly
-    const tyk2_dir   = LazyArtifacts.ensure_artifact_installed("tyk2_data",
-                            normpath(@__DIR__, "..", "Artifacts.toml"))
 end
 
 # Allow @suppress_err to work in the quote block
@@ -149,5 +143,6 @@ runtests(
     init_code=init_code,
     exeflags=["--threads=$n_threads_per_job"],
     retries=1,
-    serial=["basic", "protein_1", "free_energy"]
+    # `String[]`, not `[]`, the keyword taking a `Vector{String}`
+    serial=(haskey(ENV, "CI") ? ["basic", "protein_1", "free_energy"] : String[])
 )
