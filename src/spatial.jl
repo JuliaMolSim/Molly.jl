@@ -1259,9 +1259,8 @@ end
 function molecule_centers(coords::AbstractGPUArray,
                           boundary::AbstractBoundary{<:Any, T},
                           topology) where T
-    isnothing(topology) && return coords
-    _, cog, to_cart, wrap01, _ = _gpu_unwrap_fractional(coords, boundary, topology)
-    return to_cart.(wrap01.(cog))
+    AT = array_type(coords)
+    return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
 end
 
 rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
