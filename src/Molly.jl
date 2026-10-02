@@ -39,6 +39,7 @@ using Statistics
 using StatsBase
 
 include("types.jl")
+include("sparse_pairs.jl")
 include("parameters.jl")
 include("units.jl")
 include("cuda_config.jl")

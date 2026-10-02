@@ -8,8 +8,9 @@ Morton ordering for spatial locality, and a tiled preprocessing pipeline.
 The pipeline generally follows these steps:
 1.  **Reordering**: Atoms are periodically reordered based on Morton (Z-order) curves
     to improve cache hits during pairwise interactions.
-2.  **Compression**: Interaction matrices (eligibility and special interactions) are
-    compressed into bitmasks (32x32 tiles) to save memory and speed up lookups.
+2.  **Exceptions**: The sparse per-atom lists of excluded and special pairs are
+    translated into Morton positions, so that the bitmasks of the few 32x32 tiles
+    that contain exceptions can be built on the fly without storing a mask per tile.
 3.  **Tile Finding**: A kernel identifies pairs of 32x32 atom blocks (tiles) that are
     within the interaction cutoff, using bounding box checks.
 4.  **Execution**: Specialized kernels iterate over the list of interacting tiles,
@@ -265,7 +266,7 @@ function autotune_prepare_common_state!(buffers, sys::System{D, <:CuArray}, N::I
     sides = box_sides(sys.boundary)
     cell_width = sides ./ (2^morton_bits)
     sorted_morton_seq!(buffers, sys.coords, cell_width, morton_bits)
-    compress_sparse!(buffers, sys.neighbor_finder, Val(N))
+    refresh_tile_exceptions!(buffers, sys.neighbor_finder, Val(N))
     buffers.sparse_pair_generation = sys.neighbor_finder.cache_generation
     reorder_system_gpu!(buffers, sys)
     KernelAbstractions.synchronize(get_backend(sys.coords))
@@ -289,8 +290,8 @@ function autotune_tile_kernel(buffers, sys::System{D, <:CuArray}, N::Int) where 
         Val(n_blocks),
         Val(D),
         max_tiles,
-        buffers.compressed_masks,
-        buffers.tile_is_clean,
+        buffers.block_exc_min,
+        buffers.block_exc_max,
     )
 end
 
@@ -311,8 +312,8 @@ function launch_autotune_tile_kernel!(kernel, buffers, sys::System{D, <:CuArray}
         Val(n_blocks),
         Val(D),
         max_tiles,
-        buffers.compressed_masks,
-        buffers.tile_is_clean;
+        buffers.block_exc_min,
+        buffers.block_exc_max;
         blocks=(cld(n_blocks, threads_xy[1]), cld(n_blocks, threads_xy[2])),
         threads=threads_xy,
     )
@@ -358,6 +359,13 @@ that does not cause a tile buffer overflow.
 - `N`: Number of atoms.
 """
 function autotune_tile_threads!(buffers, sys::System{D, <:CuArray}, N::Int) where D
+    n_blocks = cld(N, Int(WARPSIZE))
+    # Also grows the tile list to fit, so that the candidates below do not overflow it
+    find_interacting_tiles!(buffers, sys, n_blocks)
+    if use_tile_tree(sys, n_blocks)
+        # The tree search has no block shape to tune
+        return nothing
+    end
     kernel = autotune_tile_kernel(buffers, sys, N)
     candidates = autotune_tile_thread_candidates(kernel)
     best_threads = first(candidates)
@@ -408,7 +416,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T, TH}, pairwi
             pairwise_inters,
             sys.boundary,
             0,
-            buffers.compressed_masks,
+            tile_exceptions(buffers, sys.neighbor_finder),
             Val(false),
             Val(T),
             Val(TH),
@@ -435,7 +443,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T, TH}, pairwi
         pairwise_inters,
         sys.boundary,
         0,
-        buffers.compressed_masks,
+        tile_exceptions(buffers, sys.neighbor_finder),
         Val(false),
         Val(T),
         Val(TH),
@@ -543,7 +551,7 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pair
                 pairwise_inters,
                 sys.boundary,
                 0,
-                buffers.compressed_masks,
+                tile_exceptions(buffers, sys.neighbor_finder),
                 Val(false),
                 Val(T),
                 Val(TH),
@@ -592,7 +600,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pai
         pairwise_inters,
         sys.boundary,
         0,
-        buffers.compressed_masks,
+        tile_exceptions(buffers, sys.neighbor_finder),
         Val(T),
         Val(TH),
         Val(D),
@@ -627,7 +635,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pai
                 pairwise_inters,
                 sys.boundary,
                 0,
-                buffers.compressed_masks,
+                tile_exceptions(buffers, sys.neighbor_finder),
                 Val(T),
                 Val(TH),
                 Val(D),
@@ -654,7 +662,7 @@ end
     autotune_cuda_launch_config(sys, pairwise_inters, force_maxregs_override)
 
 Perform a full autotuning run for the CUDA pairwise kernels.
-Sets up temporary GPU buffers and Morton/mask states, then individually tunes the tile search
+Sets up temporary GPU buffers and Morton/exception states, then individually tunes the tile search
 threads, force `block_y`, and energy `block_y`. Returns a populated `CUDALaunchConfig`.
 
 # Arguments
@@ -668,6 +676,9 @@ function autotune_cuda_launch_config(sys::System{D, <:CuArray, T}, pairwise_inte
     buffers = Molly.init_buffers!(sys, 1, true)
     autotune_prepare_common_state!(buffers, sys, N)
     tile_threads = autotune_tile_threads!(buffers, sys, N)
+    # Time the kernels on the pruned tile list that a simulation evaluates, since an
+    #   unpruned list over-represents tiles that are skipped or need exclusion masks
+    prune_interacting_tiles!(buffers, sys, N)
     force_block_y = autotune_force_block_y!(buffers, sys, pairwise_inters, N, force_maxregs_override)
     energy_block_y = autotune_energy_block_y!(buffers, sys, pairwise_inters, N)
     return Molly.CUDALaunchConfig(
@@ -736,31 +747,6 @@ function Molly.optimize_cuda_launch_config!(sys::System{D, <:CuArray, T}) where 
         Molly.cuda_force_block_y(tuned_config),
     )
 end
-
-# The following functions handle indexing for the upper triangular part of the
-# N_blocks x N_blocks tile matrix, stored as a 1D array.
-
-"""
-    upper_tile_count(n_blocks::Integer)
-
-Returns the total number of tiles in the upper triangular part of an `n_blocks` x `n_blocks` matrix,
-including the diagonal.
-"""
-upper_tile_count(n_blocks::Integer) = (Int64(n_blocks) * (Int64(n_blocks) + 1)) ÷ 2
-
-"""
-    upper_tile_index(i::Integer, j::Integer, n_blocks::Integer)
-
-Maps 2D block indices `(i, j)` to a 1D index in the upper triangular storage.
-Assumes `i <= j`.
-"""
-@inline function upper_tile_index(i::Int32, j::Int32, n_blocks::Int32)
-    r = Int64(i - Int32(1))
-    n = Int64(n_blocks)
-    return Int32((r * (2 * n - r + 1)) ÷ 2 + Int64(j - i + Int32(1)))
-end
-
-@inline upper_tile_index(i::Integer, j::Integer, n_blocks::Integer) = upper_tile_index(Int32(i), Int32(j), Int32(n_blocks))
 
 function force_launch_params(sys, kernel)
     config = Molly.cuda_launch_config(sys)
@@ -886,7 +872,7 @@ end
 @inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder, step_n)
     first_preprocess = (buffers.step_n_preprocessed == -1)
     step_changed = (step_n != buffers.step_n_preprocessed)
-    needs_morton_refresh = (first_preprocess || (step_changed && step_n % nf.n_steps_reorder == 0))
+    needs_morton_refresh = (first_preprocess || (step_changed && step_n % nf.n_steps == 0))
     sparse_changed = (buffers.sparse_pair_generation != nf.cache_generation)
     needs_reorder = true # Coordinates can be changed at any point
     needs_sparse_refresh = (needs_morton_refresh || !nf.initialized || sparse_changed)
@@ -907,29 +893,15 @@ function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray, T}, N::In
             Val(N), sys.boundary, Val(D))
     end
 
-    max_tiles = length(buffers.interacting_tiles_i)
-    reset_interacting_tile_state!(buffers)
-    tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
-        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-        buffers.box_mins, buffers.box_maxs, sys.boundary, Val(sys.neighbor_finder.dist_cutoff_2),
-        Val(n_blocks), Val(D), max_tiles,
-        buffers.compressed_masks, buffers.tile_is_clean)
-    tile_threads_xy = tile_launch_params(sys, tile_kernel)
+    find_interacting_tiles!(buffers, sys, n_blocks)
+    prune_interacting_tiles!(buffers, sys, N)
+    return nothing
+end
 
-    tile_kernel(
-        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
-        buffers.box_mins, buffers.box_maxs, sys.boundary, Val(sys.neighbor_finder.dist_cutoff_2),
-        Val(n_blocks), Val(D), max_tiles,
-        buffers.compressed_masks, buffers.tile_is_clean;
-        blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
-        threads=tile_threads_xy)
-
-    buffers.num_pairs = only(from_device(buffers.num_interacting_tiles))
-    throw_if_interacting_tiles_overflowed(buffers)
-
-    # Refine the bounding-box candidates with an exact atom-pair test
+# Refine the bounding-box candidates with an exact atom-pair test, which also decides which
+#   tiles hold exclusions or special pairs
+function prune_interacting_tiles!(buffers, sys, N::Int)
+    n_blocks = cld(N, WARPSIZE)
     if buffers.num_pairs > 0
         prune_y = 4
         @cuda threads=(32, prune_y) blocks=cld(buffers.num_pairs, prune_y) always_inline=true prune_interacting_tiles_kernel!(
@@ -937,9 +909,79 @@ function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray, T}, N::In
             buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
             buffers.num_interacting_tiles,
             buffers.coords_reordered, Val(N), Val(sys.neighbor_finder.dist_cutoff_2),
-            Val(n_blocks), sys.boundary)
+            Val(n_blocks), sys.boundary, tile_exceptions(buffers, sys.neighbor_finder))
     end
-    return nothing
+    return buffers
+end
+
+#=
+Build the list of interacting tiles and set `buffers.num_pairs` to its length.
+The tile counter is incremented for every tile found, including those that do not fit,
+so when the list overflows its vectors are grown to the number found and the search is
+repeated. The vectors start at a size that is enough for typical systems, see
+`init_buffers!`, and are kept for later searches.
+=#
+function find_interacting_tiles!(buffers, sys, n_blocks)
+    search! = use_tile_tree(sys, n_blocks) ? find_interacting_tiles_tree! :
+                                             find_interacting_tiles_all_pairs!
+    reset_interacting_tile_state!(buffers)
+    search!(buffers, sys, n_blocks)
+    n_tiles = Int(only(from_device(buffers.num_interacting_tiles)))
+    if n_tiles > length(buffers.interacting_tiles_i)
+        grow_interacting_tiles!(buffers, n_tiles)
+        reset_interacting_tile_state!(buffers)
+        search!(buffers, sys, n_blocks)
+        n_tiles = Int(only(from_device(buffers.num_interacting_tiles)))
+        throw_if_interacting_tiles_overflowed(buffers)
+    end
+    buffers.num_pairs = n_tiles
+    return buffers
+end
+
+# Replace the interacting tile vectors with ones that hold at least `n_tiles` tiles,
+#   with some headroom so that the list does not have to grow again straight away
+function grow_interacting_tiles!(buffers, n_tiles)
+    capacity = cld(5 * n_tiles, 4)
+    buffers.interacting_tiles_i = similar(buffers.interacting_tiles_i, capacity)
+    buffers.interacting_tiles_j = similar(buffers.interacting_tiles_j, capacity)
+    buffers.interacting_tiles_type = similar(buffers.interacting_tiles_type, capacity)
+    buffers.interacting_tiles_diag = similar(buffers.interacting_tiles_diag, capacity)
+    return buffers
+end
+
+# Search every pair of blocks for interacting tiles
+function find_interacting_tiles_all_pairs!(buffers, sys::System{D}, n_blocks) where D
+    max_tiles = length(buffers.interacting_tiles_i)
+    tile_kernel = @cuda launch=false find_interacting_blocks_kernel!(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+        buffers.box_mins, buffers.box_maxs, sys.boundary, Val(sys.neighbor_finder.dist_cutoff_2),
+        Val(n_blocks), Val(D), max_tiles,
+        buffers.block_exc_min, buffers.block_exc_max)
+    tile_threads_xy = tile_launch_params(sys, tile_kernel)
+
+    tile_kernel(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+        buffers.box_mins, buffers.box_maxs, sys.boundary, Val(sys.neighbor_finder.dist_cutoff_2),
+        Val(n_blocks), Val(D), max_tiles,
+        buffers.block_exc_min, buffers.block_exc_max;
+        blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
+        threads=tile_threads_xy)
+    return buffers
+end
+
+# Search for interacting tiles by walking a tree of block bounding boxes
+function find_interacting_tiles_tree!(buffers, sys::System{D}, n_blocks) where D
+    top, offsets = build_tile_tree!(buffers, n_blocks, Val(D))
+    n_threads = 128
+    @cuda threads=n_threads blocks=cld(n_blocks, n_threads) find_interacting_blocks_tree_kernel!(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
+        buffers.num_interacting_tiles, buffers.interacting_tiles_overflow,
+        buffers.box_mins, buffers.box_maxs, buffers.tree_mins, buffers.tree_maxs, offsets,
+        Val(top), sys.boundary, Val(sys.neighbor_finder.dist_cutoff_2), Val(n_blocks), Val(D),
+        length(buffers.interacting_tiles_i), buffers.block_exc_min, buffers.block_exc_max)
+    return buffers
 end
 
 """
@@ -948,22 +990,21 @@ end
 Maintainer entry point for the CUDA tiled pairwise force path.
 
 Pipeline:
-1. Rebuild the Morton ordering and compressed tile masks when the
+1. Rebuild the Morton ordering and the Morton-ordered exception data when the
    [`GPUNeighborFinder`](@ref) reorder cadence invalidates them.
 2. Reorder coordinates, velocities, and atoms into Morton order.
 3. Recompute the compact list of interacting 32x32 tiles when the cached tile
-   list is stale for the current `dist_cutoff`.
-4. Launch `force_kernel!` over that compact tile list, reverse the reorder, and
-   surface overflow errors.
+   list is stale for the current `dist_cutoff`, growing it if it overflows.
+4. Launch `force_kernel!` over that compact tile list and reverse the reorder.
 
 Cache contract:
 - `buffers.step_n_preprocessed` gates reuse of reordered coordinates and tile
   search work within a simulation step.
 - `buffers.num_pairs` is the host-side cached interacting-tile count used to
   size the force-kernel launch.
-- `sys.neighbor_finder.initialized` only indicates whether the sparse exception
-  masks are current. The interacting-tile list still depends on
-  `n_steps_reorder` and `dist_cutoff`.
+- `sys.neighbor_finder.initialized` only indicates whether the Morton-ordered
+  exception data is current. The interacting-tile list still depends on
+  the neighbor finder's `n_steps` and `dist_cutoff`.
 """
 function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
                          nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, TH, needs_vir}
@@ -982,7 +1023,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
         end
 
         if needs_sparse_refresh
-            compress_sparse!(buffers, nf, Val(N))
+            refresh_tile_exceptions!(buffers, nf, Val(N))
             nf.initialized = true
             buffers.sparse_pair_generation = nf.cache_generation
         end
@@ -1003,7 +1044,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
         buffers.virial_nounits,
         buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
         Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
-        sys.boundary, step_n, buffers.compressed_masks,
+        sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
         Val(needs_vir), Val(T), Val(TH), Val(D),
         buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
         buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
@@ -1021,7 +1062,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
             buffers.virial_nounits,
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
             Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
-            sys.boundary, step_n, buffers.compressed_masks,
+            sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
             Val(needs_vir), Val(T), Val(TH), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
             buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
@@ -1038,7 +1079,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
             buffers.virial_nounits,
             buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
             Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
-            sys.boundary, step_n, buffers.compressed_masks,
+            sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
             Val(needs_vir), Val(T), Val(TH), Val(D),
             buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
             buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
@@ -1057,7 +1098,7 @@ end
 
 Maintainer entry point for the CUDA tiled pairwise energy path.
 
-This follows the same Morton reorder -> sparse mask compression -> tile search
+This follows the same Morton reorder -> exception translation -> tile search
 pipeline as `pairwise_forces_loop_gpu!`, but launches `energy_kernel!` instead
 of the force kernel. The key difference is that energy evaluation reuses any
 preprocessing already performed for the current step so forces and energies can
@@ -1084,7 +1125,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         end
 
         if needs_sparse_refresh
-            compress_sparse!(buffers, nf, Val(N))
+            refresh_tile_exceptions!(buffers, nf, Val(N))
             nf.initialized = true
             buffers.sparse_pair_generation = nf.cache_generation
         end
@@ -1103,7 +1144,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) energy_kernel!(
             pe_vec_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
-            sys.boundary, step_n, buffers.compressed_masks,
+            sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
             Val(T), Val(TH), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
             buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
@@ -1120,7 +1161,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         kernel(
                 pe_vec_nounits, buffers.coords_reordered,
                 buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
-                sys.boundary, step_n, buffers.compressed_masks,
+                sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
                 Val(T), Val(TH), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
                 buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
@@ -1443,8 +1484,9 @@ end
 
 # Mask state of tile `(i, j)` before any exclusions or special pairs are applied:
 # everything eligible apart from diagonal self-interactions and out-of-bounds
-# boundary masking, and nothing special. Shared by the full initialization and the
-# incremental restore in `reset_sparse_exceptions_kernel!` so the two cannot drift.
+# boundary masking, and nothing special.
+# Row `lane` of a tile describes atom `lane` of block `i` and bit `32 - s` of the row
+# describes atom `s` of block `j`.
 @inline function pristine_tile_masks(i, j, lane, n_blocks, r)
     eligible_bitmask = UInt32(0xFFFFFFFF)
 
@@ -1462,250 +1504,175 @@ end
     return eligible_bitmask, UInt32(0x00000000)
 end
 
-# Write tile `(i, j)`'s pristine mask row for `lane`, plus its clean flag
-@inline function store_pristine_tile!(compressed_masks, tile_is_clean, tile_idx, i, j, lane,
-                                      n_blocks, r)
-    eligible_bitmask, special_bitmask = pristine_tile_masks(i, j, lane, n_blocks, r)
-    @inbounds compressed_masks[lane, 1, tile_idx] = eligible_bitmask
-    @inbounds compressed_masks[lane, 2, tile_idx] = special_bitmask
-    if lane == 1
-        @inbounds tile_is_clean[tile_idx] = pristine_tile_is_clean(i, j, n_blocks)
-    end
-    return nothing
-end
-
-# Whether tile `(i, j)` is clean when no exception touches it
-@inline pristine_tile_is_clean(i, j, n_blocks) = (i < j) && (j < n_blocks)
-
-"""
-    init_compressed_masks_kernel!(compressed_masks, tile_is_clean, N, n_upper_tiles)
-
-Optimistically initialize the compressed mask array for each 32x32 tile in the
-upper-triangular space.
-All interactions within a tile are initially marked as eligible (`0xFFFFFFFF`),
-except for diagonal self-interactions and out-of-bounds boundary masking.
-Tiles are also initially tagged as clean.
-
-This touches every one of the `O(n_blocks^2)` tiles, so it runs once per buffer set;
-subsequent refreshes use `reset_sparse_exceptions_kernel!` instead.
-"""
-function init_compressed_masks_kernel!(compressed_masks, tile_is_clean, ::Val{N}, ::Val{n_upper_tiles}) where {N, n_upper_tiles}
-    lane = laneid()
-    n_blocks = ceil(Int32, N / 32)
-    tile_idx = blockIdx().x
-
-    if tile_idx > n_upper_tiles
-        return nothing
-    end
-
-    # Binary search for i such that S(i) <= tile_idx < S(i+1)
-    # S(i) = ((i - 1) * (2 * n_blocks - i + 2)) / 2 + 1
-    low = Int32(1)
-    high = Int32(n_blocks)
-    i = Int32(1)
-    while low <= high
-        mid = (low + high) ÷ Int32(2)
-        start_idx_mid = ((Int64(mid) - 1) * (2 * Int64(n_blocks) - Int64(mid) + 2)) ÷ 2 + 1
-        if start_idx_mid <= tile_idx
-            i = mid
-            low = mid + Int32(1)
-        else
-            high = mid - Int32(1)
-        end
-    end
-    
-    start_idx_i = ((Int64(i) - 1) * (2 * Int64(n_blocks) - Int64(i) + 2)) ÷ 2 + 1
-    j = i + Int32(tile_idx - start_idx_i)
-
-    r = Int32((N - 1) % 32 + 1)
-
-    store_pristine_tile!(compressed_masks, tile_is_clean, tile_idx, i, j, lane, n_blocks, r)
-
-    return nothing
+#=
+The exclusions and special pairs read by the tiled kernels.
+The per-atom lists of `nf.eligible` and `nf.special`, which are SparsePairMatrix values
+on the device, are indexed by original atom index. `buffers.excluded_pos` and
+`buffers.special_pos` hold, for each list entry, the Morton position of the partner atom,
+refreshed by `refresh_tile_exceptions!` whenever the Morton order changes. This takes
+memory proportional to the number of exceptions, where a mask per tile takes memory
+proportional to `n_atoms^2`.
+The NamedTuple is converted to device arrays when a kernel is launched.
+=#
+function tile_exceptions(buffers, nf::GPUNeighborFinder)
+    return (
+        morton_seq=buffers.morton_seq,
+        excluded_starts=nf.eligible.starts,
+        excluded_pos=buffers.excluded_pos,
+        special_starts=nf.special.starts,
+        special_pos=buffers.special_pos,
+    )
 end
 
 """
-    apply_sparse_exceptions_kernel!(excluded_i, excluded_j, special_i, special_j,
-                                    inv_morton_seq, compressed_masks, tile_is_clean,
-                                    n_blocks, n_excluded, n_special)
+    refresh_tile_exceptions!(buffers, nf, N)
 
-Process sparse exception pairs (exclusions and specials) by atomically clearing
-or setting the appropriate bits in the `compressed_masks` array. Uses the inverse
-Morton mapping to translate original atom indices into their new tiled layout, and
-marks any tile modified in this way as no longer clean.
+Translate the sparse exception lists stored on [`GPUNeighborFinder`](@ref) into the
+Morton-ordered form read by the tiled CUDA pairwise kernels.
+
+This needs work proportional to the number of atoms and exceptions: the inverse Morton
+map is updated, the partner of each exception is converted to its Morton position and
+the range of blocks holding the partners of the atoms of each 32-atom block is found,
+which lets the tile search mark most tiles as free of exceptions without looking at
+the atoms.
 """
-function apply_sparse_exceptions_kernel!(
-    excluded_i, excluded_j, special_i, special_j,
-    inv_morton_seq, compressed_masks, tile_is_clean,
-    ::Val{n_blocks}, ::Val{n_excluded}, ::Val{n_special}
-) where {n_blocks, n_excluded, n_special}
-    excluded_i_ro = CUDA_CORE.Const(excluded_i)
-    excluded_j_ro = CUDA_CORE.Const(excluded_j)
-    special_i_ro =  CUDA_CORE.Const(special_i)
-    special_j_ro =  CUDA_CORE.Const(special_j)
-    inv_morton_seq_ro = CUDA_CORE.Const(inv_morton_seq)
-
-    idx = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
-    
-    if idx <= n_excluded
-        @inbounds orig_i = excluded_i_ro[idx]
-        @inbounds orig_j = excluded_j_ro[idx]
-        
-        @inbounds p_i = inv_morton_seq_ro[orig_i]
-        @inbounds p_j = inv_morton_seq_ro[orig_j]
-        
-        if p_i > p_j
-            p_i, p_j = p_j, p_i
-        end
-        
-        t_i = (p_i - Int32(1)) ÷ Int32(32) + Int32(1)
-        t_j = (p_j - Int32(1)) ÷ Int32(32) + Int32(1)
-        tile_idx = upper_tile_index(t_i, t_j, Int32(n_blocks))
-        
-        lane_i = (p_i - Int32(1)) % Int32(32) + Int32(1)
-        lane_j = (p_j - Int32(1)) % Int32(32) + Int32(1)
-        
-        target_bit = UInt32(1) << (Int32(32) - lane_j)
-        
-        # For exclusions, mask_type = 1
-        linear_idx = Int64(lane_i) + Int64(64) * (Int64(tile_idx) - Int64(1))
-        
-        CUDA.atomic_and!(pointer(compressed_masks, linear_idx), ~target_bit)
-        @inbounds tile_is_clean[tile_idx] = false
-    end
-    
-    if idx <= n_special
-        @inbounds orig_i = special_i_ro[idx]
-        @inbounds orig_j = special_j_ro[idx]
-        
-        @inbounds p_i = inv_morton_seq_ro[orig_i]
-        @inbounds p_j = inv_morton_seq_ro[orig_j]
-        
-        if p_i > p_j
-            p_i, p_j = p_j, p_i
-        end
-        
-        t_i = (p_i - Int32(1)) ÷ Int32(32) + Int32(1)
-        t_j = (p_j - Int32(1)) ÷ Int32(32) + Int32(1)
-        tile_idx = upper_tile_index(t_i, t_j, Int32(n_blocks))
-        
-        lane_i = (p_i - Int32(1)) % Int32(32) + Int32(1)
-        lane_j = (p_j - Int32(1)) % Int32(32) + Int32(1)
-        
-        target_bit = UInt32(1) << (Int32(32) - lane_j)
-        
-        # For special, mask_type = 2
-        linear_idx = Int64(lane_i) + Int64(32) + Int64(64) * (Int64(tile_idx) - Int64(1))
-        
-        CUDA.atomic_or!(pointer(compressed_masks, linear_idx), target_bit)
-        @inbounds tile_is_clean[tile_idx] = false
-    end
-    
-    return nothing
-end
-
-# Undo a previous `apply_sparse_exceptions_kernel!` pass by restoring the mask words it
-# modified to their pristine, exception-free state.
-# This is that pass's exact inverse: it repeats the same index arithmetic, one thread
-# per exception pair, and overwrites the single word each pair touched instead of
-# clearing or setting a bit in it. It therefore has to be given the same
-# `inv_morton_seq` and exception pairs the pass used. Threads landing on the same word
-# write identical values, which is harmless.
-function reset_sparse_exceptions_kernel!(
-    excluded_i, excluded_j, special_i, special_j,
-    inv_morton_seq, compressed_masks, tile_is_clean,
-    ::Val{N}, ::Val{n_blocks}, ::Val{n_excluded}, ::Val{n_special}
-) where {N, n_blocks, n_excluded, n_special}
-    excluded_i_ro = CUDA_CORE.Const(excluded_i)
-    excluded_j_ro = CUDA_CORE.Const(excluded_j)
-    special_i_ro =  CUDA_CORE.Const(special_i)
-    special_j_ro =  CUDA_CORE.Const(special_j)
-    inv_morton_seq_ro = CUDA_CORE.Const(inv_morton_seq)
-
-    idx = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
-    r = Int32((N - 1) % 32 + 1)
-
-    if idx <= n_excluded
-        @inbounds p_i = inv_morton_seq_ro[excluded_i_ro[idx]]
-        @inbounds p_j = inv_morton_seq_ro[excluded_j_ro[idx]]
-        t_i, t_j, tile_idx, lane_i = exception_tile_location(p_i, p_j, Int32(n_blocks))
-        eligible_bitmask, _ = pristine_tile_masks(t_i, t_j, lane_i, Int32(n_blocks), r)
-        @inbounds compressed_masks[lane_i, 1, tile_idx] = eligible_bitmask
-        @inbounds tile_is_clean[tile_idx] = pristine_tile_is_clean(t_i, t_j, Int32(n_blocks))
-    end
-
-    if idx <= n_special
-        @inbounds p_i = inv_morton_seq_ro[special_i_ro[idx]]
-        @inbounds p_j = inv_morton_seq_ro[special_j_ro[idx]]
-        t_i, t_j, tile_idx, lane_i = exception_tile_location(p_i, p_j, Int32(n_blocks))
-        @inbounds compressed_masks[lane_i, 2, tile_idx] = UInt32(0x00000000)
-        @inbounds tile_is_clean[tile_idx] = pristine_tile_is_clean(t_i, t_j, Int32(n_blocks))
-    end
-
-    return nothing
-end
-
-# Locate the tile and mask row an exception pair at Morton positions `p_i`/`p_j` writes
-# to, matching `apply_sparse_exceptions_kernel!`
-@inline function exception_tile_location(p_i, p_j, n_blocks)
-    if p_i > p_j
-        p_i, p_j = p_j, p_i
-    end
-
-    t_i = (p_i - Int32(1)) ÷ Int32(32) + Int32(1)
-    t_j = (p_j - Int32(1)) ÷ Int32(32) + Int32(1)
-    tile_idx = upper_tile_index(t_i, t_j, n_blocks)
-    lane_i = (p_i - Int32(1)) % Int32(32) + Int32(1)
-
-    return t_i, t_j, tile_idx, lane_i
-end
-
-"""
-    compress_sparse!(buffers, nf, N)
-
-Convert the sparse exception pairs stored on [`GPUNeighborFinder`](@ref) into the
-Morton-ordered tile masks consumed by the tiled CUDA pairwise kernels.
-"""
-function compress_sparse!(buffers, nf::GPUNeighborFinder, ::Val{N}) where N
-    n_blocks = ceil(Int32, N / 32)
-    n_upper_tiles = upper_tile_count(n_blocks)
-    n_exc = length(nf.excluded_i)
-    n_spec = length(nf.special_i)
-    n_max = max(n_exc, n_spec)
-
-    # Stage B: get the masks back to their exception-free state. Rewriting all
-    # `n_upper_tiles` of them costs O(n_blocks^2) and dominates the neighbour-list
-    # refresh, but only the words the previous scatter dirtied are ever stale, and
-    # there is at most one per exception pair. So initialize in full once and
-    # afterwards restore just those words. Recovering them means repeating the
-    # previous scatter's index arithmetic, which needs the inverse Morton map from
-    # that refresh -- hence this runs before Stage A overwrites it. A changed
-    # exception set makes those indices unrecoverable, so it falls back to a full
-    # initialization (the masks are stale for the new pairs either way).
-    if buffers.masks_initialized && buffers.sparse_pair_generation == nf.cache_generation
-        if n_max > 0
-            @cuda threads=256 blocks=cld(Int32(n_max), Int32(256)) reset_sparse_exceptions_kernel!(
-                nf.excluded_i, nf.excluded_j, nf.special_i, nf.special_j,
-                buffers.morton_seq_inv, buffers.compressed_masks, buffers.tile_is_clean,
-                Val(N), Val(n_blocks), Val(Int32(n_exc)), Val(Int32(n_spec)))
-        end
-    else
-        @cuda blocks=n_upper_tiles threads=32 init_compressed_masks_kernel!(
-            buffers.compressed_masks, buffers.tile_is_clean, Val(N), Val(n_upper_tiles))
-        buffers.masks_initialized = true
-    end
-
-    # Stage A: Inverse Morton Mapping
+function refresh_tile_exceptions!(buffers, nf::GPUNeighborFinder, ::Val{N}) where N
+    n_blocks = cld(N, 32)
     @cuda threads=256 blocks=cld(N, 256) update_inv_morton_kernel!(
         buffers.morton_seq_inv, buffers.morton_seq, Val(N))
 
-    # Stage C: Atomic Scatter
-    if n_max > 0
-        @cuda threads=256 blocks=cld(Int32(n_max), Int32(256)) apply_sparse_exceptions_kernel!(
-            nf.excluded_i, nf.excluded_j, nf.special_i, nf.special_j,
-            buffers.morton_seq_inv, buffers.compressed_masks, buffers.tile_is_clean,
-            Val(n_blocks), Val(Int32(n_exc)), Val(Int32(n_spec)))
+    # The number of exceptions changes when pairs are added to the neighbor finder
+    if length(buffers.excluded_pos) != length(nf.eligible.partners)
+        buffers.excluded_pos = similar(buffers.excluded_pos, length(nf.eligible.partners))
     end
+    if length(buffers.special_pos) != length(nf.special.partners)
+        buffers.special_pos = similar(buffers.special_pos, length(nf.special.partners))
+    end
+    if length(buffers.block_exc_min) != n_blocks
+        buffers.block_exc_min = similar(buffers.block_exc_min, n_blocks)
+        buffers.block_exc_max = similar(buffers.block_exc_max, n_blocks)
+    end
+
+    n_threads = 256
+    @cuda threads=n_threads blocks=cld(n_blocks * 32, n_threads) tile_exceptions_kernel!(
+        buffers.excluded_pos, buffers.special_pos, buffers.block_exc_min,
+        buffers.block_exc_max, nf.eligible.starts, nf.eligible.partners,
+        nf.special.starts, nf.special.partners, buffers.morton_seq,
+        buffers.morton_seq_inv, Val(N), Val(n_blocks))
+    return buffers
+end
+
+# Convert the partners of one atom's exception list to Morton positions, returning the
+#   lowest and highest block they fall in
+@inline function translate_exception_list!(pos, starts, partners, morton_seq_inv, atom_i,
+                                           min_block, max_block)
+    @inbounds k_start, k_end = starts[atom_i], starts[atom_i + Int32(1)]
+    k = k_start
+    @inbounds while k < k_end
+        q = morton_seq_inv[partners[k]]
+        pos[k] = q
+        block_q = ((q - Int32(1)) >> 5) + Int32(1)
+        min_block = min(min_block, block_q)
+        max_block = max(max_block, block_q)
+        k += Int32(1)
+    end
+    return min_block, max_block
+end
+
+#=
+One thread per Morton position `p`, so that each warp covers one 32-atom block.
+The thread converts the exception partners of the atom at `p` to Morton positions,
+writing each list entry once since each atom belongs to one position. The warp then
+reduces the lowest and highest block holding a partner of any atom in the block, which
+is `typemax(Int32)` and `0` for a block without exceptions.
+=#
+function tile_exceptions_kernel!(excluded_pos, special_pos, block_exc_min, block_exc_max,
+                                 excluded_starts, excluded_partners, special_starts,
+                                 special_partners, morton_seq, morton_seq_inv,
+                                 ::Val{N}, ::Val{n_blocks}) where {N, n_blocks}
+    p = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    min_block = typemax(Int32)
+    max_block = Int32(0)
+    if p <= N
+        @inbounds atom_i = morton_seq[p]
+        min_block, max_block = translate_exception_list!(excluded_pos, excluded_starts,
+                    excluded_partners, morton_seq_inv, atom_i, min_block, max_block)
+        min_block, max_block = translate_exception_list!(special_pos, special_starts,
+                    special_partners, morton_seq_inv, atom_i, min_block, max_block)
+    end
+
+    # Every thread of the warp takes part, including those past the last atom
+    offset = Int32(16)
+    while offset > Int32(0)
+        min_block = min(min_block, CUDA.shfl_xor_sync(0xFFFFFFFF, min_block, offset))
+        max_block = max(max_block, CUDA.shfl_xor_sync(0xFFFFFFFF, max_block, offset))
+        offset >>= Int32(1)
+    end
+
+    block_i = ((p - Int32(1)) >> 5) + Int32(1)
+    if laneid() == Int32(1) && block_i <= n_blocks
+        @inbounds block_exc_min[block_i] = min_block
+        @inbounds block_exc_max[block_i] = max_block
+    end
+    return nothing
+end
+
+# Whether the atom at Morton position `p` has an exclusion or special pair with an atom
+#   in block `block_i`
+@inline function atom_has_partner_in_block(tile_exceptions, p, block_i)
+    morton_seq = CUDA_CORE.Const(tile_exceptions.morton_seq)
+    excluded_starts = CUDA_CORE.Const(tile_exceptions.excluded_starts)
+    excluded_pos = CUDA_CORE.Const(tile_exceptions.excluded_pos)
+    special_starts = CUDA_CORE.Const(tile_exceptions.special_starts)
+    special_pos = CUDA_CORE.Const(tile_exceptions.special_pos)
+
+    @inbounds atom_i = morton_seq[p]
+    found = false
+    @inbounds for k in excluded_starts[atom_i]:(excluded_starts[atom_i + Int32(1)] - Int32(1))
+        found |= (((excluded_pos[k] - Int32(1)) >> 5) + Int32(1) == block_i)
+    end
+    @inbounds for k in special_starts[atom_i]:(special_starts[atom_i + Int32(1)] - Int32(1))
+        found |= (((special_pos[k] - Int32(1)) >> 5) + Int32(1) == block_i)
+    end
+    return found
+end
+
+#=
+The eligible and special bitmask rows of tile `(i, j)` for atom `lane` of block `i`,
+built from the exceptions of that atom.
+This replaces a stored mask per tile. It is only called for the tiles that can contain
+an exception, i.e. the few tiles that `prune_interacting_tiles_kernel!` marks as masked
+and the diagonal and boundary tiles, and each atom only has a few exceptions.
+Bits for pairs that a kernel does not evaluate, such as the pairs below the diagonal of
+a diagonal tile, may be set as the exception lists hold each pair under both atoms.
+=#
+@inline function tile_exception_masks(tile_exceptions, i, j, lane, n_blocks, r,
+                                      ::Val{N}) where N
+    eligible_bitmask, special_bitmask = pristine_tile_masks(i, j, lane, n_blocks, r)
+    p = (i - Int32(1)) * Int32(32) + lane
+    if p <= N
+        morton_seq = CUDA_CORE.Const(tile_exceptions.morton_seq)
+        excluded_starts = CUDA_CORE.Const(tile_exceptions.excluded_starts)
+        excluded_pos = CUDA_CORE.Const(tile_exceptions.excluded_pos)
+        special_starts = CUDA_CORE.Const(tile_exceptions.special_starts)
+        special_pos = CUDA_CORE.Const(tile_exceptions.special_pos)
+
+        @inbounds atom_i = morton_seq[p]
+        j_0 = (j - Int32(1)) * Int32(32)
+        @inbounds for k in excluded_starts[atom_i]:(excluded_starts[atom_i + Int32(1)] - Int32(1))
+            slot = excluded_pos[k] - j_0
+            if Int32(1) <= slot <= Int32(32)
+                eligible_bitmask &= ~(UInt32(1) << (Int32(32) - slot))
+            end
+        end
+        @inbounds for k in special_starts[atom_i]:(special_starts[atom_i + Int32(1)] - Int32(1))
+            slot = special_pos[k] - j_0
+            if Int32(1) <= slot <= Int32(32)
+                special_bitmask |= UInt32(1) << (Int32(32) - slot)
+            end
+        end
+    end
+    return eligible_bitmask, special_bitmask
 end
 
 #=
@@ -1750,20 +1717,27 @@ That's why the calculations are done in the following order:
                                     interacting_tiles_type, num_interacting_tiles,
                                     interacting_tiles_overflow, mins, maxs, boundary,
                                     r_cut2, N_blocks, D, max_total_tiles,
-                                    compressed_masks, tile_is_clean)
+                                    block_exc_min, block_exc_max)
 
 Scan the upper-triangular matrix of 32x32 Morton-ordered atom tiles and append
 only those whose bounding boxes fall within `r_cut`.
+
+A full off-diagonal tile is marked clean, i.e. free of exclusions and special pairs,
+unless each block lies in the range of blocks holding exception partners of the
+other, see `refresh_tile_exceptions!`. That test is conservative and
+`prune_interacting_tiles_kernel!` marks the tiles that pass it but hold no exception
+as clean.
 """
 function find_interacting_blocks_kernel!(
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
     interacting_tiles_overflow,
     mins::AbstractArray{C}, maxs::AbstractArray{C}, boundary, ::Val{r_cut2}, ::Val{N_blocks}, ::Val{D}, max_total_tiles,
-    compressed_masks, tile_is_clean
+    block_exc_min, block_exc_max
 ) where {C, r_cut2, N_blocks, D}
     mins_ro = CUDA_CORE.Const(mins)
     maxs_ro = CUDA_CORE.Const(maxs)
-    tile_is_clean_ro = CUDA_CORE.Const(tile_is_clean)
+    block_exc_min_ro = CUDA_CORE.Const(block_exc_min)
+    block_exc_max_ro = CUDA_CORE.Const(block_exc_max)
     i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     j = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
 
@@ -1776,21 +1750,188 @@ function find_interacting_blocks_kernel!(
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
         
         if sum(d_block .* d_block) <= r_cut2
-            is_clean = (i < j) && (j < N_blocks)
-            if is_clean
-                mask_idx = upper_tile_index(Int32(i), Int32(j), Int32(N_blocks))
-                @inbounds is_clean = tile_is_clean_ro[mask_idx]
-            end
+            emit_interacting_tile!(interacting_tiles_i, interacting_tiles_j,
+                                   interacting_tiles_type, num_interacting_tiles,
+                                   interacting_tiles_overflow, max_total_tiles,
+                                   block_exc_min_ro, block_exc_max_ro, Int32(i), Int32(j),
+                                   Int32(N_blocks))
+        end
+    end
+    return nothing
+end
 
-            idx = CUDA.atomic_add!(pointer(num_interacting_tiles, 1), Int32(1)) + Int32(1)
-            if idx <= max_total_tiles
-                @inbounds interacting_tiles_i[idx] = Int32(i)
-                @inbounds interacting_tiles_j[idx] = Int32(j)
-                @inbounds interacting_tiles_type[idx] = is_clean ? UInt8(0) : UInt8(1)
+# Append tile `(i, j)`, `i <= j`, to the interacting tile list, marking it clean if it is
+#   a full off-diagonal tile and the block ranges of `refresh_tile_exceptions!` rule out
+#   an exception in it
+@inline function emit_interacting_tile!(interacting_tiles_i, interacting_tiles_j,
+                                        interacting_tiles_type, num_interacting_tiles,
+                                        interacting_tiles_overflow, max_total_tiles,
+                                        block_exc_min, block_exc_max, i, j, N_blocks)
+    is_clean = (i < j) && (j < N_blocks)
+    if is_clean
+        @inbounds may_have_exception = (block_exc_min[i] <= j <= block_exc_max[i]) &&
+                                       (block_exc_min[j] <= i <= block_exc_max[j])
+        is_clean = !may_have_exception
+    end
+
+    idx = CUDA.atomic_add!(pointer(num_interacting_tiles, 1), Int32(1)) + Int32(1)
+    if idx <= max_total_tiles
+        @inbounds interacting_tiles_i[idx] = i
+        @inbounds interacting_tiles_j[idx] = j
+        @inbounds interacting_tiles_type[idx] = is_clean ? UInt8(0) : UInt8(1)
+    else
+        CUDA.atomic_add!(pointer(interacting_tiles_overflow, 1), Int32(1))
+    end
+    return nothing
+end
+
+#=
+Tree search for the interacting tiles.
+
+The brute-force search above tests all `n_blocks^2 / 2` pairs of blocks, which dominates
+the run time from about a million atoms. Since the blocks are consecutive runs of
+Morton-ordered atoms, runs of consecutive blocks are spatially compact, so the bounding
+boxes of the blocks can be merged pairwise into an implicit binary tree: level 0 holds
+the blocks and node `n` of level `k` holds the union of the boxes of blocks
+`(n - 1) * 2^k + 1` to `n * 2^k`. One thread per block `i` then walks the tree from the
+root, skipping every subtree whose box is further than the cutoff from block `i` or
+that only holds blocks `j < i`, which takes time proportional to the number of
+interacting tiles times the depth of the tree.
+
+The box distance only gets smaller as a box grows, so a subtree that is skipped holds
+no block that the brute-force search would have accepted and the two searches give the
+same tiles. Only orthorhombic boundaries use the tree, see `use_tile_tree`.
+=#
+
+# Number of blocks from which the tree search is used
+# Below this the all-pairs search is faster, since there are too few blocks to keep
+#   the GPU busy with one thread walking the tree per block
+const TILE_TREE_MIN_BLOCKS = 6000
+
+function use_tile_tree(sys, n_blocks)
+    sys.boundary isa TriclinicBoundary && return false
+    min_blocks = something(env_override("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS"), TILE_TREE_MIN_BLOCKS)
+    return n_blocks >= min_blocks
+end
+
+# The number of levels above the blocks and, for each of those levels `k`, the offset
+#   of its nodes in the tree arrays
+function tile_tree_levels(n_blocks::Integer)
+    top = 0
+    while (1 << top) < n_blocks
+        top += 1
+    end
+    offsets = zeros(Int32, 32)
+    offset = 0
+    for k in 1:top
+        offsets[k] = offset
+        offset += cld(n_blocks, 1 << k)
+    end
+    return top, NTuple{32, Int32}(offsets)
+end
+
+# Fill node `n` of a tree level with the union of the boxes of its two children
+function build_tile_tree_level_kernel!(tree_mins, tree_maxs, src_mins, src_maxs, src_offset,
+                                       dst_offset, n_src, n_dst, ::Val{D}) where D
+    n = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    if n <= n_dst
+        c1 = Int32(2) * n - Int32(1)
+        c2 = Int32(2) * n
+        @inbounds for d in 1:D
+            lo = src_mins[src_offset + c1, d]
+            hi = src_maxs[src_offset + c1, d]
+            if c2 <= n_src
+                lo = min(lo, src_mins[src_offset + c2, d])
+                hi = max(hi, src_maxs[src_offset + c2, d])
+            end
+            tree_mins[dst_offset + n, d] = lo
+            tree_maxs[dst_offset + n, d] = hi
+        end
+    end
+    return nothing
+end
+
+function build_tile_tree!(buffers, n_blocks, ::Val{D}) where D
+    top, offsets = tile_tree_levels(n_blocks)
+    n_threads = 256
+    for k in 1:top
+        n_src = cld(n_blocks, 1 << (k - 1))
+        n_dst = cld(n_blocks, 1 << k)
+        if k == 1
+            src_mins, src_maxs, src_offset = buffers.box_mins, buffers.box_maxs, Int32(0)
+        else
+            src_mins, src_maxs, src_offset = buffers.tree_mins, buffers.tree_maxs, offsets[k - 1]
+        end
+        @cuda threads=n_threads blocks=cld(n_dst, n_threads) build_tile_tree_level_kernel!(
+            buffers.tree_mins, buffers.tree_maxs, src_mins, src_maxs, src_offset,
+            offsets[k], Int32(n_src), Int32(n_dst), Val(D))
+    end
+    return top, offsets
+end
+
+# The bounding box stored in row `idx` of a pair of (n, D) min and max arrays
+@inline function stored_box(mins, maxs, idx, ::Val{D}) where D
+    r_min = SVector{D}(ntuple(d -> @inbounds(mins[idx, d]), Val(D)))
+    r_max = SVector{D}(ntuple(d -> @inbounds(maxs[idx, d]), Val(D)))
+    return r_min, r_max
+end
+
+function find_interacting_blocks_tree_kernel!(
+    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type, num_interacting_tiles,
+    interacting_tiles_overflow, mins::AbstractArray{C}, maxs::AbstractArray{C},
+    tree_mins, tree_maxs, tree_offsets, ::Val{top}, boundary, ::Val{r_cut2},
+    ::Val{N_blocks}, ::Val{D}, max_total_tiles, block_exc_min, block_exc_max,
+) where {C, top, r_cut2, N_blocks, D}
+    mins_ro = CUDA_CORE.Const(mins)
+    maxs_ro = CUDA_CORE.Const(maxs)
+    tree_mins_ro = CUDA_CORE.Const(tree_mins)
+    tree_maxs_ro = CUDA_CORE.Const(tree_maxs)
+    block_exc_min_ro = CUDA_CORE.Const(block_exc_min)
+    block_exc_max_ro = CUDA_CORE.Const(block_exc_max)
+
+    i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    if i > N_blocks
+        return nothing
+    end
+    r_min_i, r_max_i = stored_box(mins_ro, maxs_ro, i, Val(D))
+
+    # Depth-first walk without a stack: after a node is done, move to its right sibling,
+    #   going up while the node is a right child, and stop on returning to the root
+    k = Int32(top)
+    n = Int32(1)
+    while true
+        n_nodes_k = Int32((Int64(N_blocks) + (Int64(1) << k) - 1) >> k)
+        # The node holds blocks up to min(n * 2^k, N_blocks), which has to reach i
+        visit = (n <= n_nodes_k) && ((Int64(n) << k) >= i)
+        if visit
+            if k == Int32(0)
+                r_min_j, r_max_j = stored_box(mins_ro, maxs_ro, n, Val(D))
             else
-                CUDA.atomic_add!(pointer(interacting_tiles_overflow, 1), Int32(1))
+                @inbounds node = tree_offsets[k] + n
+                r_min_j, r_max_j = stored_box(tree_mins_ro, tree_maxs_ro, node, Val(D))
+            end
+            d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+            visit = sum(d_block .* d_block) <= r_cut2
+        end
+        if visit
+            if k == Int32(0)
+                emit_interacting_tile!(interacting_tiles_i, interacting_tiles_j,
+                                       interacting_tiles_type, num_interacting_tiles,
+                                       interacting_tiles_overflow, max_total_tiles,
+                                       block_exc_min_ro, block_exc_max_ro, Int32(i), n,
+                                       Int32(N_blocks))
+            else
+                k -= Int32(1)
+                n = Int32(2) * n - Int32(1)
+                continue
             end
         end
+        while iszero(n & Int32(1)) && k < Int32(top)
+            n >>= Int32(1)
+            k += Int32(1)
+        end
+        k == Int32(top) && break
+        n += Int32(1)
     end
     return nothing
 end
@@ -1809,15 +1950,19 @@ block `i` and the `s`-th atom of block `j` sets bit `(s - l) & 31`. Tiles with n
 in-range pair at all get an empty mask and are marked `TILE_DEAD` so the kernels drop
 them immediately.
 
-This only runs on a neighbor list rebuild, so its cost is amortised over
-`n_steps_reorder` steps. Only full off-diagonal tiles (`i < j < n_blocks`) are
+This only runs on a neighbor list rebuild, so its cost is amortised over the `n_steps`
+steps of the neighbor finder. Only full off-diagonal tiles (`i < j < n_blocks`) are
 analysed; the diagonal and the final partial block make up a vanishing fraction of the
 list and keep a fully populated mask.
+
+Tiles that the block ranges in `find_interacting_blocks_kernel!` could not rule out as
+holding an exclusion or special pair are checked exactly here, and marked clean if
+none of their atom pairs is an exception.
 =#
 function prune_interacting_tiles_kernel!(
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
     interacting_tiles_diag, num_interacting_tiles, coords_var, ::Val{N}, ::Val{r_cut2},
-    ::Val{n_blocks}, boundary) where {N, r_cut2, n_blocks}
+    ::Val{n_blocks}, boundary, tile_exceptions) where {N, r_cut2, n_blocks}
     coords = CUDA_CORE.Const(coords_var)
     tiles_i_ro = CUDA_CORE.Const(interacting_tiles_i)
     tiles_j_ro = CUDA_CORE.Const(interacting_tiles_j)
@@ -1841,6 +1986,9 @@ function prune_interacting_tiles_kernel!(
         return nothing
     end
 
+    # Read before the shuffles below, which every lane passes before lane 1 writes the
+    # type, so the value and the branch on it are the same for the whole warp
+    @inbounds tile_type = interacting_tiles_type[idx]
     @inbounds coords_j = coords[(j - a) * warpsize() + lane]
     i_0_tile = (i - a) * warpsize()
 
@@ -1862,10 +2010,20 @@ function prune_interacting_tiles_kernel!(
         offset ÷= Int32(2)
     end
 
+    # Exact test for an exception between the blocks, from the atoms of block j
+    has_exception = true
+    if tile_type == UInt8(1) && lane_mask != UInt32(0)
+        lane_has_exception = atom_has_partner_in_block(tile_exceptions,
+                                                       (j - a) * warpsize() + lane, i)
+        has_exception = CUDA.vote_any_sync(0xFFFFFFFF, lane_has_exception)
+    end
+
     if lane == a
         @inbounds interacting_tiles_diag[idx] = lane_mask
         if lane_mask == UInt32(0)
             @inbounds interacting_tiles_type[idx] = TILE_DEAD
+        elseif !has_exception
+            @inbounds interacting_tiles_type[idx] = UInt8(0)
         end
     end
     return nothing
@@ -1873,7 +2031,7 @@ end
 
 """
     force_kernel!(fs_mat, global_virial, coords, velocities, atoms, N, r_cut2, force_units,
-                  inters_tuple, boundary, step_n, compressed_masks, needs_vir, T, D,
+                  inters_tuple, boundary, step_n, tile_exceptions, needs_vir, T, D,
                   interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
                   interacting_tiles_diag, num_interacting_tiles)
 
@@ -1893,8 +2051,9 @@ Tile cases:
 3. Diagonal tiles, where only unique pairs are evaluated.
 4. The terminal corner tile, where both axes are partial.
 
-CLEAN tiles skip bitmask loads entirely; mask-backed tiles consult
-`compressed_masks` to apply exclusions and special-pair handling.
+CLEAN tiles skip the bitmasks entirely; mask-backed tiles build them from the
+sparse exception lists in `tile_exceptions` to apply exclusions and special-pair
+handling.
 """
 function force_kernel!(
     fs_mat,
@@ -1908,7 +2067,7 @@ function force_kernel!(
     inters_tuple,
     boundary,
     step_n,
-    compressed_masks,
+    tile_exceptions,
     ::Val{needs_vir},
     ::Val{T},
     ::Val{TH},
@@ -1923,7 +2082,6 @@ function force_kernel!(
     coords = CUDA_CORE.Const(coords_var)
     velocities = CUDA_CORE.Const(velocities_var)
     atoms = CUDA_CORE.Const(atoms_var)
-    compressed_masks_ro = CUDA_CORE.Const(compressed_masks)
     tiles_i_ro = CUDA_CORE.Const(interacting_tiles_i)
     tiles_j_ro = CUDA_CORE.Const(interacting_tiles_j)
     tiles_type_ro = CUDA_CORE.Const(interacting_tiles_type)
@@ -1991,8 +2149,6 @@ function force_kernel!(
 
     vir_xx = zero(T); vir_yy = zero(T); vir_zz = zero(T)
     vir_xy = zero(T); vir_xz = zero(T); vir_yz = zero(T)
-
-    mask_idx = upper_tile_index(i, j, n_blocks)
 
     j_0_tile = (j - a) * warpsize()
     index_j = j_0_tile + lane
@@ -2068,8 +2224,8 @@ function force_kernel!(
                 end
             end
         else # EXCLUDED
-            @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-            @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+            eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
+                                                        lane, n_blocks, r, Val(N))
 
             active = diag_mask
             @inbounds while active != UInt32(0)
@@ -2141,8 +2297,8 @@ function force_kernel!(
         @inbounds vel_i = velocities[index_i]
         @inbounds atoms_i = atoms[index_i]
         
-        @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-        @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+        eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
+                                                    lane, n_blocks, r, Val(N))
 
         @inbounds for m in a:r
             idx_j = j_0_tile + m
@@ -2203,8 +2359,8 @@ function force_kernel!(
         @inbounds vel_i = velocities[index_i]
         @inbounds atoms_i = atoms[index_i]
         
-        @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-        @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+        eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
+                                                    lane, n_blocks, r, Val(N))
 
         @inbounds for m in (lane + a) : warpsize()
             idx_j = j_0_tile + m
@@ -2266,8 +2422,8 @@ function force_kernel!(
             @inbounds vel_i = velocities[index_i]
             @inbounds atoms_i = atoms[index_i]
             
-            @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-            @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+            eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
+                                                        lane, n_blocks, r, Val(N))
 
             @inbounds for m in (lane + a) : r
                 idx_j = j_0_tile + m
@@ -2390,7 +2546,7 @@ end
 
 """
     energy_kernel!(energy_nounits, coords, velocities, atoms, N, r_cut2, energy_units,
-                   inters_tuple, boundary, step_n, compressed_masks, T, D,
+                   inters_tuple, boundary, step_n, tile_exceptions, T, D,
                    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
                    interacting_tiles_diag, num_interacting_tiles)
 
@@ -2414,7 +2570,7 @@ function energy_kernel!(
     inters_tuple,
     boundary,
     step_n,
-    compressed_masks,
+    tile_exceptions,
     ::Val{T},
     ::Val{TH},
     ::Val{D},
@@ -2428,7 +2584,6 @@ function energy_kernel!(
     coords = CUDA_CORE.Const(coords_var)
     velocities = CUDA_CORE.Const(velocities_var)
     atoms = CUDA_CORE.Const(atoms_var)
-    compressed_masks_ro = CUDA_CORE.Const(compressed_masks)
     tiles_i_ro = CUDA_CORE.Const(interacting_tiles_i)
     tiles_j_ro = CUDA_CORE.Const(interacting_tiles_j)
     tiles_type_ro = CUDA_CORE.Const(interacting_tiles_type)
@@ -2481,8 +2636,6 @@ function energy_kernel!(
     sh_vel = @inbounds CuDynamicSharedArray(eltype(velocities_var), (32, by), stage_off_v)
 
     r = Int32((N - 1) % 32 + 1)
-
-    mask_idx = upper_tile_index(i, j, n_blocks)
 
     j_0_tile = (j - a) * warpsize()
     index_j = j_0_tile + lane
@@ -2539,8 +2692,8 @@ function energy_kernel!(
                 end
             end
         else # EXCLUDED
-            @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-            @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+            eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
+                                                        lane, n_blocks, r, Val(N))
 
             active = diag_mask
             @inbounds while active != UInt32(0)
@@ -2579,8 +2732,8 @@ function energy_kernel!(
         @inbounds coords_i = coords[index_i]
         @inbounds vel_i = velocities[index_i]
         @inbounds atoms_i = atoms[index_i]
-        @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-        @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+        eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
+                                                    lane, n_blocks, r, Val(N))
 
         @inbounds for m in a:r
             idx_j = j_0_tile + m
@@ -2609,8 +2762,8 @@ function energy_kernel!(
         @inbounds coords_i = coords[index_i]
         @inbounds vel_i = velocities[index_i]
         @inbounds atoms_i = atoms[index_i]
-        @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-        @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+        eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
+                                                    lane, n_blocks, r, Val(N))
 
         @inbounds for m in (lane + a) : warpsize()
             idx_j = j_0_tile + m
@@ -2640,8 +2793,8 @@ function energy_kernel!(
             @inbounds coords_i = coords[index_i]
             @inbounds vel_i = velocities[index_i]
             @inbounds atoms_i = atoms[index_i]
-            @inbounds eligible_bitmask = compressed_masks_ro[lane, 1, mask_idx]
-            @inbounds special_bitmask = compressed_masks_ro[lane, 2, mask_idx]
+            eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
+                                                        lane, n_blocks, r, Val(N))
 
             @inbounds for m in (lane + a) : r
                 idx_j = j_0_tile + m

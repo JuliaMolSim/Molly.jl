@@ -370,12 +370,15 @@
             sys.neighbor_finder = GPUNeighborFinder(
                 n_atoms=length(sys),
                 dist_cutoff=0.0u"nm",
-                device_vector_type=AT{Int32, 1},
+                array_type=AT,
             )
         else
-            no_nbs = falses(length(sys), length(sys))
+            # Systems set up from a file use sparse eligible matrices, so the replacement
+            #   has to as well to have the same type
+            # With listed=true and no pairs listed, no pair is eligible
+            no_nbs = SparsePairMatrix(length(sys), (); listed=true, array_type=AT)
             sys.neighbor_finder = DistanceNeighborFinder(
-                eligible=to_device(no_nbs, AT),
+                eligible=no_nbs,
                 dist_cutoff=1.0u"nm",
             )
         end
@@ -693,15 +696,16 @@ end
         eligible_nonsym = [false false false; false true false; true false true]
         boundary=CubicBoundary(10.0u"nm")
         if neighbor_finder == CellListMapNeighborFinder
-            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm",
+            nf = neighbor_finder(n_atoms=3, n_steps=10, dist_cutoff=2.0u"nm",
                                  boundary=boundary)
             @test_throws ArgumentError neighbor_finder(eligible=eligible_nonsym,
                                                        dist_cutoff=2.0u"nm", boundary=boundary)
         else
-            nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
+            nf = neighbor_finder(n_atoms=3, n_steps=10, dist_cutoff=2.0u"nm")
             @test_throws ArgumentError neighbor_finder(eligible=eligible_nonsym,
                                                        dist_cutoff=2.0u"nm")
         end
+        @test nf.eligible isa SparsePairMatrix && nf.special isa SparsePairMatrix
         s = System(
             atoms=[Atom(), Atom(), Atom()],
             coords=[
@@ -727,7 +731,7 @@ end
     ]
     boundary = CubicBoundary(10.0u"nm")
     neighbor_finder=CellListMapNeighborFinder(
-        eligible=trues(3, 3), n_steps=10, x0=coords,
+        n_atoms=3, n_steps=10, x0=coords,
         boundary=boundary, dist_cutoff=2.0u"nm",
     )
     sys = System(
@@ -740,6 +744,9 @@ end
     @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=Threads.nthreads())
     @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
+    push!(neighbors, (3, 4, true))
+    @test neighbors.n == 2
+    @test neighbors.list == [(Int32(1), Int32(2), false), (Int32(3), Int32(4), true)]
 
     # Test CellListMapNeighborFinder with TriclinicBoundary
     boundary = TriclinicBoundary(
@@ -751,7 +758,7 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=0.01u"nm")
     atoms = fill(Atom(), n_atoms)
     dist_cutoff = 0.6u"nm"
-    nf = CellListMapNeighborFinder(eligible=trues(n_atoms, n_atoms), 
+    nf = CellListMapNeighborFinder(n_atoms=n_atoms,
                                    dist_cutoff=dist_cutoff,
                                    boundary=boundary,
                                   )
@@ -796,26 +803,7 @@ end
     sorted_ref = sort_nbs(neighbors_ref.list)
     identical_to_ref(nl) = (nl.n == neighbors_ref.n && sort_nbs(nl.list) == sorted_ref)
 
-    function dense_masks(nf::GPUNeighborFinder)
-        eligible = trues(nf.n_atoms, nf.n_atoms)
-        special = falses(nf.n_atoms, nf.n_atoms)
-        for i in 1:nf.n_atoms
-            eligible[i, i] = false
-        end
-        for (i, j) in zip(Array(nf.excluded_i), Array(nf.excluded_j))
-            eligible[i, j] = false
-            eligible[j, i] = false
-        end
-        for (i, j) in zip(Array(nf.special_i), Array(nf.special_j))
-            special[i, j] = true
-            special[j, i] = true
-        end
-        return eligible, special
-    end
-
-    function dense_masks(nf::Union{DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder})
-        return BitMatrix(Array(nf.eligible)), BitMatrix(Array(nf.special))
-    end
+    dense_masks(nf) = Molly.neighbor_finder_masks(nf)
 
     eligible_cpu, special_cpu = dense_masks(sys.neighbor_finder)
 
@@ -871,12 +859,27 @@ end
             strictness=:nowarn,
         )
         eligible_gpu, special_gpu = dense_masks(sys_gpu.neighbor_finder)
-        for neighbor_finder in (DistanceNeighborFinder,)
-            nf_gpu = neighbor_finder(
-                eligible=to_device(eligible_gpu, AT),
-                special=to_device(special_gpu, AT),
-                dist_cutoff=dist_cutoff,
-            )
+        nf_gpu_dense = DistanceNeighborFinder(
+            eligible=to_device(eligible_gpu, AT),
+            special=to_device(special_gpu, AT),
+            dist_cutoff=dist_cutoff,
+        )
+        nf_gpu_moved = DistanceNeighborFinder(
+            eligible=eligible_gpu,
+            special=special_gpu,
+            dist_cutoff=dist_cutoff,
+            array_type=AT,
+        )
+        nf_gpu_sparse = DistanceNeighborFinder(
+            n_atoms=length(sys_gpu),
+            excluded_pairs=Molly.ineligible_pairs(eligible_gpu),
+            special_pairs=Molly.true_pairs(special_gpu),
+            dist_cutoff=dist_cutoff,
+            array_type=AT,
+        )
+        @test nf_gpu_moved.eligible isa AT
+        @test Molly.neighbor_matrix_on_gpu(nf_gpu_sparse.eligible)
+        for nf_gpu in (nf_gpu_dense, nf_gpu_moved, nf_gpu_sparse)
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
             @test length(neighbors_gpu) == gpu_neighbors_ref.n
             GPUArrays.allowscalar() do
@@ -888,7 +891,7 @@ end
 
     # Tests specific for the interface of CellListMapNeighborFinder, when
     # infinite boundaries are provided.
-    nf = CellListMapNeighborFinder(eligible=trues(100, 100), 
+    nf = CellListMapNeighborFinder(n_atoms=100,
                                    dist_cutoff=0.6u"nm",
                                    boundary=CubicBoundary(SVector(Inf, Inf, Inf) .* u"nm"),
                                   )
@@ -938,8 +941,11 @@ end
         dist_cutoff=1.0,
         excluded_pairs=((1, 3), (4, 2)),
         special_pairs=((1, 4),),
-        device_vector_type=Vector{Int32},
+        n_steps=5,
+        array_type=Array,
     )
+    @test nf.n_steps == 5
+    @test nf.eligible.starts isa Vector{Int32}
     eligible, special = Molly.neighbor_finder_masks(nf)
     @test size(eligible) == (4, 4)
     @test size(special) == (4, 4)
@@ -953,21 +959,132 @@ end
         n_atoms=4,
         dist_cutoff=1.0,
         excluded_pairs=((0, 2),),
-        device_vector_type=Vector{Int32},
+        array_type=Array,
     )
     @test_throws ArgumentError GPUNeighborFinder(
         n_atoms=4,
         dist_cutoff=1.0,
         special_pairs=((1, 5),),
-        device_vector_type=Vector{Int32},
+        array_type=Array,
     )
+    # array_type is required unless eligible is given on the GPU, and has to store Int32s
     @test_throws ArgumentError GPUNeighborFinder(
         n_atoms=4,
         dist_cutoff=1.0,
     )
+    @test_throws ArgumentError GPUNeighborFinder(n_atoms=4, dist_cutoff=1.0, array_type=5)
+    @test_throws ArgumentError GPUNeighborFinder(n_atoms=4, dist_cutoff=1.0,
+                                                 array_type=Vector{Float32})
+    @test_throws ArgumentError GPUNeighborFinder(eligible=trues(4, 4), dist_cutoff=1.0)
 
     @test_throws ArgumentError Molly.update_sparse_pairs!(nf, ((1, 2),), ((2, 5),))
     @test_throws ArgumentError Molly.append_excluded_pairs!(nf, ((3, 6),))
+end
+
+@testset "Sparse pair matrices" begin
+    n_atoms = 6
+    excluded_pairs = [(1, 2), (3, 2), (2, 1), (5, 6)]
+    special_pairs = [(1, 3), (6, 4)]
+    eligible = SparsePairMatrix(n_atoms, excluded_pairs; listed=false)
+    special = SparsePairMatrix(n_atoms, special_pairs; listed=true)
+    eligible_dense = trues(n_atoms, n_atoms)
+    special_dense = falses(n_atoms, n_atoms)
+    for i in 1:n_atoms
+        eligible_dense[i, i] = false
+    end
+    for (i, j) in excluded_pairs
+        eligible_dense[i, j] = eligible_dense[j, i] = false
+    end
+    for (i, j) in special_pairs
+        special_dense[i, j] = special_dense[j, i] = true
+    end
+
+    @test size(eligible) == (n_atoms, n_atoms)
+    @test eligible == eligible_dense
+    @test special == special_dense
+    @test issymmetric(eligible) && issymmetric(special)
+    @test Molly.n_listed_pairs(eligible) == 3
+    @test Molly.listed_pairs(eligible) == [(1, 2), (2, 3), (5, 6)]
+    @test Molly.copy_to_bitmatrix(eligible) == eligible_dense
+    @test zero(eligible) == falses(n_atoms, n_atoms)
+    @test copy(special) == special_dense
+    @test Molly.ineligible_pairs(eligible) == Molly.ineligible_pairs(eligible_dense)
+    @test Molly.true_pairs(special) == Molly.true_pairs(special_dense)
+    @test Molly.find_excluded_pairs(eligible, special) ==
+                Molly.find_excluded_pairs(eligible_dense, special_dense)
+    @test_throws ArgumentError SparsePairMatrix(n_atoms, [(1, 7)])
+
+    # Only the listed pairs are eligible
+    whitelist = SparsePairMatrix(n_atoms, [(1, 4), (2, 5)]; listed=false)
+    whitelist.listed = true
+    @test whitelist[1, 4] && whitelist[5, 2] && !whitelist[1, 2] && !whitelist[4, 4]
+    @test Molly.ineligible_pairs(whitelist) == Molly.ineligible_pairs(BitMatrix(whitelist))
+    sparse_el = Molly.sparse_eligible(whitelist, n_atoms, Vector{Int32})
+    @test !sparse_el.listed && sparse_el == BitMatrix(whitelist)
+
+    mat_add = copy(eligible)
+    Molly.exclude_pairs!(mat_add, [(4, 1)])
+    @test !mat_add[1, 4] && !mat_add[4, 1] && Molly.n_listed_pairs(mat_add) == 4
+    Molly.exclude_pairs!(whitelist, [(4, 1)])
+    @test !whitelist[1, 4] && whitelist[2, 5]
+
+    # Sparse inputs give the same neighbors as dense ones for every neighbor finder
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
+    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; dist_cutoff=1.0u"nm",
+                 dist_buffer=0.0u"nm")
+    @test sys.neighbor_finder.eligible isa SparsePairMatrix
+    el_sparse, sp_sparse = sys.neighbor_finder.eligible, sys.neighbor_finder.special
+    el_dense, sp_dense = Molly.neighbor_finder_masks(sys.neighbor_finder)
+    sort_nbs(nl) = sort([(min(i, j), max(i, j), s) for (i, j, s) in nl.list[1:nl.n]])
+    for nf_type in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
+        kwargs = (nf_type == CellListMapNeighborFinder ? (boundary=sys.boundary,) : ())
+        nf_dense = nf_type(; eligible=el_dense, special=sp_dense, dist_cutoff=1.0u"nm",
+                           kwargs...)
+        nf_sparse = nf_type(; eligible=el_sparse, special=sp_sparse, dist_cutoff=1.0u"nm",
+                            kwargs...)
+        nf_pairs = nf_type(; n_atoms=length(sys), excluded_pairs=Molly.listed_pairs(el_sparse),
+                           special_pairs=Molly.listed_pairs(sp_sparse), dist_cutoff=1.0u"nm",
+                           kwargs...)
+        nbs_dense = sort_nbs(find_neighbors(sys, nf_dense))
+        @test count(nb -> nb[3], nbs_dense) > 0
+        for nf in (nf_sparse, nf_pairs)
+            @test sort_nbs(find_neighbors(sys, nf)) == nbs_dense
+        end
+    end
+end
+
+@testset "Dense neighbor matrix warning" begin
+    # The threshold is lowered so that small matrices can be used
+    check_dense(matrix, strictness) = Molly.check_dense_neighbor_matrix(
+                                            matrix, "eligible", strictness; warn_n_atoms=10)
+    @test_logs (:warn, r"dense eligible matrix") check_dense(trues(11, 11), :warn)
+    @test_logs (:warn, r"dense eligible matrix") check_dense(ones(Bool, 11, 11), :warn)
+    @test_throws ArgumentError check_dense(trues(11, 11), :error)
+    @test_logs check_dense(trues(11, 11), :nowarn)
+    @test_logs check_dense(trues(10, 10), :warn)
+    # Sparse and lazy matrices do not take memory proportional to n_atoms^2
+    @test_logs check_dense(SparsePairMatrix(11, (); listed=false), :warn)
+    @test_logs check_dense(Molly.Fill(true, 11, 11), :warn)
+    @test_logs check_dense(nothing, :warn)
+
+    # Each neighbor finder checks the matrices it is given, this errors before the large
+    #   matrix is checked for symmetry
+    n_large = Molly.dense_matrix_warn_n_atoms + 1
+    eligible_large = falses(n_large, n_large)
+    @test_throws ArgumentError DistanceNeighborFinder(eligible=eligible_large,
+                                                      dist_cutoff=1.0, strictness=:error)
+    @test_throws ArgumentError TreeNeighborFinder(eligible=eligible_large,
+                                                  dist_cutoff=1.0, strictness=:error)
+    @test_throws ArgumentError CellListMapNeighborFinder(eligible=eligible_large,
+                    dist_cutoff=1.0, boundary=CubicBoundary(10.0), strictness=:error)
+    @test_throws ArgumentError GPUNeighborFinder(eligible=eligible_large, dist_cutoff=1.0,
+                                                 array_type=Array, strictness=:error)
+    @test_throws ArgumentError DistanceNeighborFinder(n_atoms=n_large,
+                    special=eligible_large, dist_cutoff=1.0, strictness=:error)
+    @test_throws ArgumentError DistanceNeighborFinder(n_atoms=10, dist_cutoff=1.0,
+                                                      strictness=:wrong)
+    # The sparse form does not warn however large the system is
+    @test_logs DistanceNeighborFinder(n_atoms=n_large, dist_cutoff=1.0)
 end
 
 @testset "Replica System" begin

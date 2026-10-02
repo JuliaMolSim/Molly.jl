@@ -455,9 +455,10 @@ function hash(a::InteractionList5Atoms, h::UInt)
     ks     = from_device(a.ks)
     ls     = from_device(a.ls)
     ms     = from_device(a.ms)
+    data   = (a.data isa AbstractArray ? from_device(a.data) : a.data)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(js, hash(ks, hash(ls, hash(ms, hash(inters, hash(types, hash(a.data, h))))))))
+    return hash(is, hash(js, hash(ks, hash(ls, hash(ms, hash(inters, hash(types, hash(data, h))))))))
 end
 
 function Base.show(io::IO, sil::T) where T <: SpecificInteractionList
@@ -987,12 +988,13 @@ function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, bounda
                                 "$(size(mask)) but the system has $n_atoms atoms, it " *
                                 "should be $((n_atoms, n_atoms))"))
         end
-        if on_gpu && !isa(mask, AbstractGPUArray)
+        if on_gpu && !neighbor_matrix_on_gpu(mask)
             throw(ArgumentError("the atoms are on the GPU but the $name matrix of the " *
-                                "neighbor finder is not, try $name=to_device($name, AT) " *
-                                "where AT is the GPU array type"))
+                                "neighbor finder is not, give array_type=AT when " *
+                                "constructing the neighbor finder where AT is the GPU " *
+                                "array type, for example CuArray"))
         end
-        if !on_gpu && isa(mask, AbstractGPUArray)
+        if !on_gpu && neighbor_matrix_on_gpu(mask)
             throw(ArgumentError("the atoms are not on the GPU but the $name matrix " *
                                 "of the neighbor finder is"))
         end

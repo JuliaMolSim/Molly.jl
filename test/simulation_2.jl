@@ -390,13 +390,14 @@ end
             neighbor_finder = GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=T(1.0)u"nm",
-                device_vector_type=AT{Int32, 1},
+                array_type=AT,
             )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 n_steps=10,
                 dist_cutoff=T(1.5)u"nm",
+                array_type=AT,
             )
         else
             neighbor_finder = NoNeighborFinder()
@@ -628,11 +629,7 @@ end
         function run_mts(inner_step_neighbors, n_steps_neighbors)
             sys.coords .= coords_start
             sys.velocities .= velocities_start
-            if nf isa GPUNeighborFinder
-                nf.n_steps_reorder = n_steps_neighbors
-            else
-                nf.n_steps = n_steps_neighbors
-            end
+            nf.n_steps = n_steps_neighbors
             sim = MTSIntegrator(
                 dt=1.0u"fs",
                 pi_fractions=(1, 1),

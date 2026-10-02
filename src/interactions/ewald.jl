@@ -436,55 +436,19 @@ function pme_bspline_moduli(::Type{T}, order, mesh_dims) where {T}
     return bsplines_moduli
 end
 
+# The pairs (i, j), i < j, excluded from the reciprocal space sum, i.e. the pairs that are
+#   not eligible or are special, in ascending order
+# The eligible and special matrices can be dense or SparsePairMatrix and a missing matrix
+#   means that every pair is eligible or that no pair is special
 function find_excluded_pairs(eligible, special)
-    excluded_pairs = Tuple{Int32, Int32}[]
-    if !(isnothing(eligible) && isnothing(special))
-        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
-        eligible_cpu = (isnothing(eligible) ? nothing : to_bitmatrix(from_device(eligible)))
-        special_cpu  = (isnothing(special ) ? nothing : to_bitmatrix(from_device(special )))
-        # Only a small fraction of the n_atoms^2 entries are excluded, so scan the mask
-        #   64 entries at a time and skip the chunks with nothing set
-        n_entries = n_atoms * n_atoms
-        n_chunks = cld(n_entries, 64)
-        eligible_chunks = (isnothing(eligible_cpu) ? nothing : eligible_cpu.chunks)
-        special_chunks  = (isnothing(special_cpu ) ? nothing : special_cpu.chunks )
-        # Bits past the end of the last chunk are unset in a BitArray but are set by the
-        #   negation below, so mask them off
-        end_mask = ~zero(UInt64) >>> ((-n_entries) & 63)
-        for ci in 1:n_chunks
-            # A missing eligible matrix means every pair is eligible, a missing special
-            #   matrix means no pair is special, so neither excludes anything
-            chunk = zero(UInt64)
-            if !isnothing(eligible_chunks)
-                chunk = ~eligible_chunks[ci]
-            end
-            if !isnothing(special_chunks)
-                chunk |= special_chunks[ci]
-            end
-            if ci == n_chunks
-                chunk &= end_mask
-            end
-            while !iszero(chunk)
-                # Column-major linear index of the set bit, zero-based
-                li = (ci - 1) * 64 + trailing_zeros(chunk)
-                j, i = divrem(li, n_atoms)
-                if i < j
-                    push!(excluded_pairs, (Int32(i + 1), Int32(j + 1)))
-                end
-                chunk &= chunk - one(UInt64)
-            end
-        end
-        # The scan runs down the columns, sort to give the same order as looping over
-        #   i and then j
-        sort!(excluded_pairs)
-    end
-    return excluded_pairs
+    ineligible = (isnothing(eligible) ? Tuple{Int32, Int32}[] : ineligible_pairs(eligible))
+    specials   = (isnothing(special ) ? Tuple{Int32, Int32}[] : true_pairs(special))
+    return normalize_pairs(vcat(ineligible, specials))
 end
 
 function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, order=5,
-             ϵr=1.0, fixed_charges=true, mesh_dims=nothing, eligible=nothing, special=nothing,
-             scheduler=DefaultLambdaScheduler(), float_type_high=Float64, grad_safe=false,
-             n_threads::Integer=Threads.nthreads())
+             ϵr=1.0, fixed_charges=true, mesh_dims=nothing, scheduler=DefaultLambdaScheduler(),
+             float_type_high=Float64, grad_safe=false, n_threads::Integer=Threads.nthreads())
     T = typeof(ustrip(dist_cutoff))
     TH = float_type_high
     AT = array_type(atoms)
@@ -524,7 +488,6 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
     charge_grid = to_device(zeros(T, mesh_dims[3], mesh_dims[2], mesh_dims[1]), AT)
     recip_grid = to_device(zeros(Complex{T}, mesh_dims[3] ÷ 2 + 1, mesh_dims[2], mesh_dims[1]),
                            AT)
-    excluded_pairs = to_device(find_excluded_pairs(eligible, special), AT)
 
     bsplines_moduli = pme_bspline_moduli(T, order, mesh_dims)
 

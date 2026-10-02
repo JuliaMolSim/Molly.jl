@@ -598,7 +598,7 @@ With this, we can also produce a weight matrix and a vector of target weights, u
 # MBAR.jl
 
 # Returns the weights matrix and the target weights
-W_s, w_target = mbar_weights(u, u_target, F_k, logN, N_counts; check=true, shifts=shifts)
+W_s, w_target = mbar_weights(u, u_target, F_k, N_counts, logN; check=true, shifts=shifts)
 ```
 
 And finally, we can estimate the PMF using the output of the previous step by calling the [`pmf_with_uncertainty`](@ref) method:

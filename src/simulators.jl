@@ -2137,7 +2137,7 @@ Coupling, removing the center of mass motion and running loggers applies per out
     set to `false` or `0` to not remove center of mass motion.
 - `inner_step_neighbors=false`: whether to force recomputation of the neighbors at every
     inner step, useful when force calculation is slow compared to neighbor finding. If used,
-    the `n_steps`/`n_steps_reorder` arguments to the neighbor finder are ignored.
+    the `n_steps` argument of the neighbor finder is ignored.
 """
 struct MTSIntegrator{NF, NP, NS, NG, S, C} <: AbstractMTSIntegrator{NF, NP, NS, NG}
     ordered_fractions::NTuple{NF, Int}
@@ -2187,7 +2187,7 @@ Coupling, removing the center of mass motion and running loggers applies per out
     set to `false` or `0` to not remove center of mass motion.
 - `inner_step_neighbors=false`: whether to force recomputation of the neighbors at every
     inner step, useful when force calculation is slow compared to neighbor finding. If used,
-    the `n_steps`/`n_steps_reorder` arguments to the neighbor finder are ignored.
+    the `n_steps` argument of the neighbor finder is ignored.
 """
 struct MTSLangevinIntegrator{NF, NP, NS, NG, S, K, F, C, T} <: AbstractMTSIntegrator{NF, NP, NS, NG}
     ordered_fractions::NTuple{NF, Int}

@@ -226,6 +226,10 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
+    if neighbor_finder.eligible isa SparsePairMatrix
+        exclude_pairs!(neighbor_finder.eligible, constrained_pairs(constraint_clusters))
+        return neighbor_finder
+    end
     atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))
     if isa(neighbor_finder.eligible, AbstractGPUArray)
         i_idx, j_idx = Int[], Int[]

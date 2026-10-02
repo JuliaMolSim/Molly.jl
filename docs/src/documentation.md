@@ -229,18 +229,13 @@ specific_inter_lists = (bonds,) # Don't forget the trailing comma!
 ```
 This time we are also going to use a neighbor list to speed up the Lennard-Jones calculation since we don't care about interactions beyond a certain distance.
 We can use the built-in [`DistanceNeighborFinder`](@ref).
-The arguments are a 2D array of eligible interacting pairs, the number of steps between each update and the distance cutoff to be classed as a neighbor.
+The arguments are the number of atoms, the pairs of atoms excluded from the non-bonded interactions, the number of steps between each update and the distance cutoff to be classed as a neighbor.
 Since the neighbor finder is run every 10 steps we should also use a distance cutoff for the neighbor list that is larger than the cutoff for the interaction.
 ```julia
 # All pairs apart from bonded pairs are eligible for non-bonded interactions
-eligible = trues(n_atoms, n_atoms)
-for i in 1:(n_atoms ÷ 2)
-    eligible[i, i + (n_atoms ÷ 2)] = false
-    eligible[i + (n_atoms ÷ 2), i] = false
-end
-
 neighbor_finder = DistanceNeighborFinder(
-    eligible=eligible,
+    n_atoms=n_atoms,
+    excluded_pairs=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
     n_steps=10,
     dist_cutoff=1.5u"nm",
 )
@@ -1405,8 +1400,8 @@ Molly.needs_virial(c::MyCoupler) = c.n_steps
 Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
-Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
-Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods and bias potentials are ignored.
+Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions, the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, and bias potentials.
+Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods are ignored.
 During supported constrained simulations, Molly can add constraint contributions to the total virial for steps where a barostat or virial/pressure logger requests it.
 For the initial simulation step, the same preview convention is used so that interactions and constraints both contribute to the logged virial/pressure.
 If a coordinate-scaling coupling method changes the box on a constrained step, virial and pressure loggers record the pre-coupling virial/pressure for that step, matching the state used by the coupling method.
@@ -1562,7 +1557,7 @@ specific_inter_lists = (InteractionList2Atoms(
 ),)
 
 # Define system
-nf = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.6u"nm")
+nf = DistanceNeighborFinder(n_atoms=n_atoms, dist_cutoff=0.6u"nm")
 
 sys = System(
     atoms=atoms,
@@ -1808,24 +1803,52 @@ The available neighbor finders are:
 
 The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`DistanceNeighborFinder`](@ref) on other GPUs.
 
-The `dist_cutoff` of a neighbor finder is the distance used to search for neighbors, and is not the same as the interaction cutoff distance (see [Cutoffs](@ref)).
-Since the neighbor list is only rebuilt every `n_steps` steps, `dist_cutoff` should be the interaction cutoff distance plus a buffer distance:
+The pairs of atoms that interact are given to a neighbor finder as the number of atoms along with lists of the excluded pairs, which do not interact through the pairwise interactions, for example bonded atoms, and the special pairs, which have scaled interactions, for example 1-4 atoms:
 ```julia
 dist_cutoff = 1.0u"nm" # Interaction cutoff distance
 dist_buffer = 0.2u"nm" # Buffer distance
 neighbor_finder = DistanceNeighborFinder(
-    eligible=eligible,
+    n_atoms=n_atoms,
+    excluded_pairs=[(1, 2), (2, 3), (1, 3)],
+    special_pairs=[(1, 4)],
     n_steps=10,
     dist_cutoff=(dist_cutoff + dist_buffer),
 )
 ```
+Every neighbor finder takes these arguments.
+The pairs can be given as any iterable of `(i, j)` pairs, or as a sparse matrix whose `true` entries are the pairs.
+They are stored as [`SparsePairMatrix`](@ref)s, so the memory used is proportional to the number of pairs and grows linearly with the number of atoms.
+For a system on the GPU using [`DistanceNeighborFinder`](@ref) or [`GPUNeighborFinder`](@ref), give the array type of the system as `array_type`, for example `array_type=CuArray`, so that the pairs are stored on the GPU.
+Systems set up from a file store the pairs in this way.
+
+The `dist_cutoff` of a neighbor finder is the distance used to search for neighbors, and is not the same as the interaction cutoff distance (see [Cutoffs](@ref)).
+Since the neighbor list is only rebuilt every `n_steps` steps, `dist_cutoff` should be the interaction cutoff distance plus a buffer distance, as above.
 The buffer distance should be larger than the distance an atom can move in `n_steps` steps, otherwise interacting pairs can be missed.
 When setting up a [`System`](@ref) from a file the buffer is added automatically and the two distances are given separately as the `dist_cutoff` and `dist_buffer` keyword arguments.
 
+Alternatively, the pairs can be described by an `eligible` matrix, which is `false` for pairs excluded from the pairwise interactions, and a `special` matrix, which is `true` for special pairs:
+```julia
+# All pairs are eligible apart from each atom with itself
+eligible = trues(n_atoms, n_atoms)
+for i in 1:n_atoms
+    eligible[i, i] = false
+end
+neighbor_finder = DistanceNeighborFinder(
+    eligible=eligible,
+    special=falses(n_atoms, n_atoms),
+    n_steps=10,
+    dist_cutoff=(dist_cutoff + dist_buffer),
+)
+```
+Dense matrices take memory proportional to the square of the number of atoms, which limits the size of system that can be simulated, especially on the GPU.
+They can be useful for small systems or patterns of pairs that are not sparse.
+A [`SparsePairMatrix`](@ref) can also be given as the `eligible` and `special` matrices.
+
 [`GPUNeighborFinder`](@ref) follows a different CUDA-specific path based on the tiled GPU strategy of [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
-Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms, build per-tile masks and cache a compact list of interacting `32x32` tiles internally.
+Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms and cache a compact list of interacting `32x32` tiles internally, building the exclusion masks of the few tiles that need them from the sparse pairs.
+The memory it uses grows linearly with the number of atoms, and for large systems the interacting tiles are found by searching a tree of bounding boxes, so the time taken also grows close to linearly.
 Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
-When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps_reorder` to the number of steps between reorder and tile-list refresh passes.
+When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps` to the number of steps between reordering the atoms and refreshing the tile list.
 
 ## Analysis
 

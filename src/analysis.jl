@@ -93,8 +93,8 @@ Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates correspond to the same periodic image.
 """
 function radius_gyration(coords, atoms)
-    center = mean(coords)
     atom_masses = mass.(atoms)
+    center = sum(coords .* atom_masses) / sum(atom_masses) # Center of mass
     I = sum(sum_abs2.(coords .- (center,)) .* atom_masses)
     return sqrt(I / sum(atom_masses))
 end
@@ -115,6 +115,18 @@ function hydrodynamic_radius(coords::AbstractArray{SVector{D, T}}, boundary) whe
     dists = distances(coords, boundary) .+ diag
     sum_inv_dists = sum(inv.(dists)) - sum(inv(diag))
     inv_R_hyd = sum_inv_dists / (2 * n_atoms^2)
+    return inv(inv_R_hyd)
+end
+
+function hydrodynamic_radius(coords::Array{SVector{D, T}}, boundary) where {D, T}
+    n_atoms = length(coords)
+    sum_inv_dists = zero(inv(oneunit(T)))
+    for j in 2:n_atoms
+        for i in 1:(j - 1)
+            sum_inv_dists += inv(norm(vector(coords[i], coords[j], boundary)))
+        end
+    end
+    inv_R_hyd = 2 * sum_inv_dists / (2 * n_atoms^2)
     return inv(inv_R_hyd)
 end
 
