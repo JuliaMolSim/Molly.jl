@@ -1316,6 +1316,9 @@ function forces!(fs,
         end
     end
 
+    # Enforce rewrap in each forces! call.
+    buffers.unwrapped_coords[] = nothing
+
     return fs, buffers
 end
 
