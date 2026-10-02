@@ -518,6 +518,43 @@ end
           potential_energy(water_mol2) ≈ potential_energy(water_sdf) ≈ 11.90186520388919u"kJ/mol"
 end
 
+@testset "Molecules split over a triclinic boundary" begin
+    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
+    sys = System(joinpath(data_dir, "water_3mol_triclinic.pdb"), ff; dist_cutoff=0.5u"nm")
+    coords_whole, bonds = copy(sys.coords), sys.topology.bonded_atoms
+    # Put the first oxygen in a box corner so that its hydrogens are wrapped away from it
+    sys.coords .= wrap_coords.(coords_whole .- (coords_whole[1] - SVector(0.01, 0.01, 0.01)u"nm",),
+                               (sys.boundary,))
+    @test any(((i, j),) -> norm(sys.coords[j] - sys.coords[i]) > 1.0u"nm", bonds)
+    coords_unwrap = Molly.unwrap_molecules(sys)
+    @test all(((i, j),) -> coords_unwrap[j] - coords_unwrap[i] ≈ coords_whole[j] - coords_whole[i],
+              bonds)
+    @test all(wrap_coords.(coords_unwrap, (sys.boundary,)) .≈ sys.coords)
+
+    # Scaling the box moves molecules rigidly, keeping the fractional coordinates of their
+    #   centers, as barostats require
+    μ = SMatrix{3, 3}([1.05 0.02 0.0; 0.0 0.97 0.0; 0.0 0.0 1.03])
+    frac_centers(s) = [ustrip.(Molly.boxmatrix(s.boundary)) \
+                       ustrip.(sum(Molly.unwrap_molecules(s)[i:(i + 2)]) / 3) for i in 1:3:9]
+    for rotate in (true, false)
+        sys_scale = deepcopy(sys)
+        scale_coords!(sys_scale, μ; rotate=rotate)
+        @test Molly.boxmatrix(sys_scale.boundary) ≈ μ * Molly.boxmatrix(sys.boundary)
+        @test frac_centers(sys_scale) ≈ frac_centers(sys)
+        @test all(((i, j),) -> norm(vector(sys_scale.coords[i], sys_scale.coords[j],
+                    sys_scale.boundary)) ≈ norm(coords_whole[j] - coords_whole[i]), bonds)
+    end
+
+    # Written structures keep molecules whole and store the triclinic box
+    pdb_fp = tempname() * ".pdb"
+    write_structure(pdb_fp, sys)
+    sys_read = System(pdb_fp, ff; dist_cutoff=0.5u"nm")
+    @test all(b -> isapprox(b[1], b[2]; atol=1e-3u"nm"),
+              zip(sys_read.boundary.basis_vectors, sys.boundary.basis_vectors))
+    @test all(((i, j),) -> isapprox(norm(sys_read.coords[j] - sys_read.coords[i]),
+                                    norm(coords_whole[j] - coords_whole[i]); atol=1e-4u"nm"), bonds)
+end
+
 @testset "System setup" begin
     FT = Float64
     AT = Array
@@ -969,6 +1006,15 @@ end
     # We use a dummy integrator since it's required by ThermoState
     intg = VelocityVerlet(dt=0.002u"ps")
     thermo_states = [ThermoState(sys, intg; temperature=temp) for _ in 1:n_replicas]
+
+    # The ensemble can be inferred from the integrator, with 1 bar nm^3 = 0.0602214 kJ/mol
+    intg_npt = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 1.0u"ps"),
+                              MonteCarloBarostat(1.0u"bar", temp, boundary)))
+    intg_lang = Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1")
+    for ts in (ThermoState(sys, intg_npt), ThermoState(sys, intg_lang; pressure=1.0u"bar"))
+        @test ts.beta ≈ thermo_states[1].beta ≈ 1 / (0.008314462618 * 298.0)
+        @test ts.p ≈ 0.0602214076
+    end
 
     # Initialize repsys via the generalized constructor
     repsys = ReplicaSystem(

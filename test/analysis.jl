@@ -114,3 +114,42 @@
     coords_wrap = wrap_coords.(coords, (boundary,))
     @test isapprox(hydrodynamic_radius(coords_wrap, boundary), 21.00006825680275u"Å"; atol=1e-6u"nm")
 end
+
+@testset "MBAR" begin
+    # Umbrella windows on a harmonic potential sampled exactly, which gives analytic
+    #   free energies and PMF (reduced units, β = 1)
+    rng = Xoshiro(10)
+    κ0, κ, μs, n = 1.0, 5.0, range(-2.0, 2.0; length=9), 2_000
+    x = [κ * μ / (κ0 + κ) + randn(rng) / sqrt(κ0 + κ) for μ in μs for _ in 1:n]
+    win_of, N_k = repeat(eachindex(μs); inner=n), fill(n, length(μs))
+    u = [0.5 * κ0 * xi^2 + 0.5 * κ * (xi - μ)^2 for xi in x, μ in μs]
+    f, logN = iterate_mbar(u, win_of, N_k)
+    # The tolerance is about 4 standard errors of the last window
+    @test f ≈ @.(0.5 * κ0 * κ / (κ0 + κ) * (μs^2 - μs[1]^2)) atol=0.25
+
+    u_target = 0.5 .* κ0 .* x .^ 2
+    shifts = vec(minimum(u; dims=2))
+    _, w_target, _ = mbar_weights(u .- shifts, u_target, f, N_k, logN; shifts=shifts)
+    @test sum(w_target .* x .^ 2) ≈ 1 / κ0 rtol=0.05 # Equipartition in the target state
+
+    R_k = [x[win_of .== k] for k in eachindex(μs)]
+    pmf_res = pmf_with_uncertainty(u, u_target, f, N_k, logN, R_k; edges=-1.5:0.25:1.5)
+    F_diff = pmf_res.F .- 0.5 .* κ0 .* pmf_res.centers .^ 2
+    @test all(abs.(F_diff .- mean(F_diff)) .< 4 .* pmf_res.sigma_F)
+    @test mbar_pmf(u, u_target, f, N_k, logN, x, (-1.5, 1.5, 12)).F ≈ pmf_res.F
+end
+
+@testset "Statistical inefficiency" begin
+    # An AR(1) series with coefficient φ has statistical inefficiency (1 + φ) / (1 - φ)
+    rng = Xoshiro(11)
+    φ, n = 0.8, 100_000
+    series = zeros(n)
+    for i in 2:n
+        series[i] = φ * series[i - 1] + randn(rng)
+    end
+    si = Molly.statistical_inefficiency(series)
+    @test si.inefficiency ≈ (1 + φ) / (1 - φ) rtol=0.1
+    @test si.effective_size == n ÷ si.stride
+    @test Molly.subsample(series, si.stride) == series[1:si.stride:end]
+    @test Molly.statistical_inefficiency(randn(rng, n)).inefficiency ≈ 1 atol=0.05
+end

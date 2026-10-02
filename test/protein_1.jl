@@ -492,6 +492,7 @@ end
 
 @testset "Implicit solvent" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml"])...)
+    ff_nounits = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"); units=false)
 
     for AT in array_list
         for solvent_model in (:obc2, :gbn2)
@@ -550,6 +551,21 @@ end
             end
 
             if AT == Array
+                # Parameters survive extraction and injection, and equal dielectrics with no
+                #   salt or surface tension remove the implicit solvent energy
+                sys_nu = System(joinpath(data_dir, "6mrr_nowater.pdb"), ff_nounits; units=false,
+                                boundary=CubicBoundary(100.0), dist_cutoff=5.0,
+                                nonbonded_method=DistanceCutoff(5.0), dispersion_correction=false,
+                                implicit_solvent=implicit_solvent, strictness=:nowarn, n_threads=1)
+                params = extract_parameters(sys_nu)
+                @test potential_energy(inject_gradients(sys_nu, params); n_threads=1) ≈
+                        ustrip(E_molly)
+                prefix = (solvent_model == :obc2 ? "inter_OBC_" : "inter_GB_")
+                params[prefix * "solvent_dielectric"] = params[prefix * "solute_dielectric"]
+                params[prefix * "kappa"] = params[prefix * "sa_factor"] = 0.0
+                @test potential_energy(inject_gradients(sys_nu, params); n_threads=1) ≈
+                        potential_energy(System(sys_nu; general_inters=()); n_threads=1)
+
                 bench_result = @benchmark AtomsCalculators.forces!($forces_molly, $sys_1,
                                     $(sys_1.general_inters[1]); n_threads=1) samples=5 evals=1
                 @test bench_result.allocs == 0
