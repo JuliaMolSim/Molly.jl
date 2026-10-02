@@ -719,8 +719,6 @@ function find_neighbors(sys::System{D, AT},
     # The inclusive prefix sum of the per-word neighbor counts gives the index one past the
     #   last neighbor written by each mask word, from which the fill kernel subtracts its
     #   own count to get its write offset
-    # The inclusive version is used because AcceleratedKernels.accumulate! with
-    #   inclusive=false gives the wrong result past the first block
     AcceleratedKernels.accumulate!(+, counts, backend; init=Int32(0))
     n_neighbors = Int(only(Array(@view counts[n_masks:n_masks])))
     neighbors_list = similar(sys.coords, Tuple{Int32, Int32, Bool}, n_neighbors)
@@ -1015,19 +1013,14 @@ function neighbor_finder_masks(nf::Union{GPUNeighborFinder, DistanceNeighborFind
     return copy_to_bitmatrix(from_device(nf.eligible)), copy_to_bitmatrix(from_device(nf.special))
 end
 
-function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder,
+function Base.show(io::IO, neighbor_finder::Union{GPUNeighborFinder, DistanceNeighborFinder,
                                 TreeNeighborFinder, CellListMapNeighborFinder})
+    n_atoms = size(neighbor_finder.eligible, 1)
+    n_excluded = n_atoms_to_n_pairs(n_atoms) - n_true_pairs(neighbor_finder.eligible)
     println(io, typeof(neighbor_finder))
-    println(io, "  Size of eligible matrix = " , size(neighbor_finder.eligible))
+    println(io, "  n_atoms = " , n_atoms)
+    println(io, "  n_excluded = " , n_excluded)
+    println(io, "  n_special = " , n_true_pairs(neighbor_finder.special))
     println(io, "  n_steps = " , neighbor_finder.n_steps)
-    print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
-end
-
-function Base.show(io::IO, neighbor_finder::GPUNeighborFinder)
-    println(io, typeof(neighbor_finder))
-    println(io, "  n_atoms = " , neighbor_finder.n_atoms)
-    println(io, "  n_excluded = " , length(neighbor_finder.excluded_i))
-    println(io, "  n_special = " , length(neighbor_finder.special_i))
-    println(io, "  n_steps_reorder = " , neighbor_finder.n_steps_reorder)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end

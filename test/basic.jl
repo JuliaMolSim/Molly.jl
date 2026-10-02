@@ -720,7 +720,12 @@ end
         @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
         @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
-        show(devnull, nf)
+        nf_show = sprint(show, nf)
+        @test occursin("n_atoms = 3", nf_show)
+        @test occursin("n_excluded = 0", nf_show)
+        @test occursin("n_special = 0", nf_show)
+        @test occursin("n_steps = 10", nf_show)
+        @test occursin("dist_cutoff = 2.0 nm", nf_show)
     end
 
     # Test passing the boundary and coordinates as keyword arguments to CellListMapNeighborFinder
@@ -804,6 +809,9 @@ end
     identical_to_ref(nl) = (nl.n == neighbors_ref.n && sort_nbs(nl.list) == sorted_ref)
 
     dense_masks(nf) = Molly.neighbor_finder_masks(nf)
+    # Everything shown for a neighbor finder apart from the first line, the type, which
+    #   differs between dense and sparse eligible and special matrices
+    show_counts(nf) = join(split(sprint(show, nf), '\n')[2:end], '\n')
 
     eligible_cpu, special_cpu = dense_masks(sys.neighbor_finder)
 
@@ -879,6 +887,8 @@ end
         )
         @test nf_gpu_moved.eligible isa AT
         @test Molly.neighbor_matrix_on_gpu(nf_gpu_sparse.eligible)
+        @test show_counts(nf_gpu_dense) == show_counts(nf_gpu_sparse)
+        @test occursin("n_atoms = $(length(sys_gpu))", show_counts(nf_gpu_dense))
         for nf_gpu in (nf_gpu_dense, nf_gpu_moved, nf_gpu_sparse)
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
             @test length(neighbors_gpu) == gpu_neighbors_ref.n
@@ -954,6 +964,11 @@ end
     @test !eligible[2, 4] && !eligible[4, 2]
     @test special[1, 4] && special[4, 1]
     @test eligible[1, 2]
+    nf_show = sprint(show, nf)
+    @test occursin("n_atoms = 4", nf_show)
+    @test occursin("n_excluded = 2", nf_show)
+    @test occursin("n_special = 1", nf_show)
+    @test occursin("n_steps = 5", nf_show)
 
     @test_throws ArgumentError GPUNeighborFinder(
         n_atoms=4,
@@ -1005,6 +1020,9 @@ end
     @test issymmetric(eligible) && issymmetric(special)
     @test Molly.n_listed_pairs(eligible) == 3
     @test Molly.listed_pairs(eligible) == [(1, 2), (2, 3), (5, 6)]
+    @test Molly.n_true_pairs(eligible) == Molly.n_true_pairs(eligible_dense) ==
+                Molly.n_atoms_to_n_pairs(n_atoms) - 3
+    @test Molly.n_true_pairs(special) == Molly.n_true_pairs(special_dense) == 2
     @test Molly.copy_to_bitmatrix(eligible) == eligible_dense
     @test zero(eligible) == falses(n_atoms, n_atoms)
     @test copy(special) == special_dense
@@ -1019,6 +1037,7 @@ end
     whitelist.listed = true
     @test whitelist[1, 4] && whitelist[5, 2] && !whitelist[1, 2] && !whitelist[4, 4]
     @test Molly.ineligible_pairs(whitelist) == Molly.ineligible_pairs(BitMatrix(whitelist))
+    @test Molly.n_true_pairs(whitelist) == Molly.n_true_pairs(BitMatrix(whitelist)) == 2
     sparse_el = Molly.sparse_eligible(whitelist, n_atoms, Vector{Int32})
     @test !sparse_el.listed && sparse_el == BitMatrix(whitelist)
 
@@ -1035,7 +1054,10 @@ end
     @test sys.neighbor_finder.eligible isa SparsePairMatrix
     el_sparse, sp_sparse = sys.neighbor_finder.eligible, sys.neighbor_finder.special
     el_dense, sp_dense = Molly.neighbor_finder_masks(sys.neighbor_finder)
+
     sort_nbs(nl) = sort([(min(i, j), max(i, j), s) for (i, j, s) in nl.list[1:nl.n]])
+    show_counts(nf) = join(split(sprint(show, nf), '\n')[2:end], '\n')
+
     for nf_type in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         kwargs = (nf_type == CellListMapNeighborFinder ? (boundary=sys.boundary,) : ())
         nf_dense = nf_type(; eligible=el_dense, special=sp_dense, dist_cutoff=1.0u"nm",
@@ -1050,6 +1072,12 @@ end
         for nf in (nf_sparse, nf_pairs)
             @test sort_nbs(find_neighbors(sys, nf)) == nbs_dense
         end
+        @test show_counts(nf_dense) == show_counts(nf_sparse) == show_counts(nf_pairs)
+        @test occursin("n_atoms = $(length(sys))", show_counts(nf_dense))
+        @test occursin("n_excluded = $(length(Molly.ineligible_pairs(el_sparse)))",
+                       show_counts(nf_dense))
+        @test occursin("n_special = $(length(Molly.true_pairs(sp_sparse)))",
+                       show_counts(nf_dense))
     end
 end
 

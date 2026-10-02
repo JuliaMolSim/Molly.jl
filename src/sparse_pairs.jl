@@ -85,6 +85,20 @@ neighbor_matrix_on_gpu(m::SparsePairMatrix) = m.starts isa AbstractGPUArray
 n_listed_pairs(m::SparsePairMatrix) = length(m.partners) ÷ 2
 
 #=
+The number of pairs `(i, j)`, `i < j`, that are true in a symmetric eligible or special
+matrix, counting each pair once, i.e. the number of pairs returned by `true_pairs`.
+=#
+function n_true_pairs(m::SparsePairMatrix)
+    return m.listed ? n_listed_pairs(m) : n_atoms_to_n_pairs(m.n_atoms) - n_listed_pairs(m)
+end
+
+function n_true_pairs(m::AbstractMatrix)
+    # The matrix is symmetric, so each off-diagonal pair is counted twice by the sum, and
+    #   the diagonal is not a pair of different atoms so is not counted at all
+    return (sum(m) - sum(@view m[diagind(m)])) ÷ 2
+end
+
+#=
 Whether atom `i` is in the sorted partner list of atom `j`.
 Works on CPU and inside GPU kernels. The lists are short, a few entries for most atoms,
 so a linear scan that stops at the first partner not below `i` is used.
