@@ -985,8 +985,12 @@ end
             return fs_cpu
         end
 
-        # Asserts forces! with virial through `bias` match on sys_cpu/sys_gpu.
+        # Asserts potential_energy and forces! with virial through `bias` match on sys_cpu/sys_gpu.
         function fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
+            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
+            @test ustrip(pe_gpu) ≈ ustrip(pe_cpu)
+
             buffers_cpu = Molly.init_buffers!(sys_cpu, 1)
             fs_cpu = Molly.zero_forces(sys_cpu)
             Molly.forces!(fs_cpu, sys_cpu, nothing, 1, buffers_cpu, Val(true); n_threads=1)
@@ -1049,7 +1053,7 @@ end
 
             sys_cpu = System(sys_cpu_base; atoms=atoms)
             sys_gpu = System(sys_gpu_base; atoms=CuArray(atoms))
-            pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias; check_forces=false)
+            pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
         end
 
         # CalcMinDist/CalcMaxDist forces AND virial on GPU must match CPU, since
@@ -1069,6 +1073,33 @@ end
             bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
             sys_cpu = System(sys_cpu_base; general_inters=(bias,))
             sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        @testset "CalcCMDist virial on GPU matches CPU" begin
+            cv = CalcDist([1, 2], [3, 4], CalcCMDist(), :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+            sys_cpu = System(sys_cpu_base; general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        @testset "CalcSingleDist virial on GPU matches CPU" begin
+            cv = CalcDist([1], [4], CalcSingleDist(), :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+            sys_cpu = System(sys_cpu_base; general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        # sys_cpu_base's atoms are collinear (undefined torsion); use a non-planar fixture instead.
+        @testset "CalcTorsion virial on GPU matches CPU" begin
+            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                     SVector(1.0, 1.0, 0.0)u"nm", SVector(1.0, 1.0, 1.0)u"nm"]
+            cv = CalcTorsion([1, 2, 3, 4], :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1", 0.5))
+            sys_cpu = System(sys_cpu_base; coords=coords, general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; coords=CuArray(coords), general_inters=(bias,))
             fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
         end
 
