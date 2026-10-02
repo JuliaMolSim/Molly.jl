@@ -331,6 +331,9 @@ to_lambda_function_single(interA, interB; kwargs...) =
 
 @inline is_torsion(inter) = false
 
+@inline torsion_scaled(inter, roles) =
+    is_torsion(inter) && inter.scheduler.Tscaled && mix_torsion(roles) != EnvRole
+
 @inline virial_lambda_factor(inter, atoms) = 1
 
 # `AbsoluteFESystem` and `RelativeFESystem` convert every specific interaction to its λ
@@ -341,9 +344,7 @@ to_lambda_function_single(interA, interB; kwargs...) =
 @inline function virial_lambda_factor(inter::AlchemicalBondedInteraction, atoms)
     λ_glob = λ_mixing(inter.λ_mixing, atoms)
     roles = map(a -> a.alch_role, atoms)
-    if is_torsion(inter) && inter.scheduler.Tscaled && mix_torsion(roles) != EnvRole
-        return one(λ_glob)
-    end
+    torsion_scaled(inter, roles) && return one(λ_glob)
     return scale_virial_dual(inter.scheduler, λ_glob, mix_default(roles))
 end
 
@@ -351,5 +352,6 @@ end
     T = typeof(ustrip(first(atoms).λ))
     λ_glob = T(λ_mixing(inter.λ_mixing, atoms))
     role = mix_roles(inter.scheduler, map(a -> a.alch_role, atoms); torsion=is_torsion(inter))
-    return scale_dual(inter.scheduler, λ_glob, role)
+    return is_torsion(inter) ? scale_torsion_dual(inter.scheduler, λ_glob, role) :
+                               scale_dual(inter.scheduler, λ_glob, role)
 end

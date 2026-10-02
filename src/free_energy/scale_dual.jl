@@ -28,14 +28,20 @@ end
     end
 end
 
-@inline function scale_torsion(::Any, λ::T, role::AlchemicalRole, dual::Val{true}, args...) where T
+@inline function scale_torsion(::Any, λ::T, role::AlchemicalRole, dual::Val{true}) where T
     if role == CoreIRole
-        return (λ,λ,λ,λ,λ,λ)
+        return λ, one(λ)
     elseif role == CoreDRole
-        return ((1-λ),(1-λ),(1-λ),(1-λ),(1-λ),(1-λ))
+        return (1-λ), one(λ)
     else
-        return (one(λ),one(λ),one(λ),one(λ),one(λ),one(λ))
+        return one(λ), one(λ)
     end
+end
+
+@inline function scale_torsion(s, λ::T, role::AlchemicalRole, dual::Val{true},
+                               ::Val{N}) where {T, N}
+    λ_t, _ = scale_torsion(s, λ, role, dual)
+    return ntuple(_ -> λ_t, Val(N))
 end
 
 ################################

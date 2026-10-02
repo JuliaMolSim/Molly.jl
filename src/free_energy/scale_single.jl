@@ -18,9 +18,6 @@ https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_r
     end
 end
 
-# Single topology never scales the force (the first return of `scale` is always `one(λ)`), it
-# interpolates parameters instead, and a bond inside the alchemical group has both end state
-# parameters non-zero so it stays on. `CoreRole` is present in both states.
 @inline function scale_virial(::Any, λ::T, role::AlchemicalRole, dual::Val{false}, args...) where T
     if role == InsertRole
         return λ
@@ -31,13 +28,19 @@ end
     end
 end
 
-@inline function scale_torsion(::Any, λ::T, role::AlchemicalRole, dual::Val{false}, args...) where T
+@inline function scale_torsion(::Any, λ::T, role::AlchemicalRole, dual::Val{false}) where T
     if role == CoreRole
-        return ((1-λ),(1-λ),(1-λ),(1-λ),(1-λ),(1-λ),λ,λ,λ,λ,λ,λ)
+        return one(λ), λ
     else
-        λ = one(λ)
-        return (λ,λ,λ,λ,λ,λ,λ,λ,λ,λ,λ,λ)
+        return one(λ), zero(λ)
     end
+end
+
+@inline function scale_torsion(::Any, λ::T, role::AlchemicalRole, dual::Val{false}, ::Val{N},
+                               ::Val{NA}) where {T, N, NA}
+    wA = role == CoreRole ? (1-λ) : one(λ)
+    wB = role == CoreRole ? λ     : one(λ)
+    return ntuple(i -> i <= NA ? wA : wB, Val(N))
 end
 
 ################################

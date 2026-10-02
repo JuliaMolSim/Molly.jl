@@ -372,24 +372,6 @@ function to_lambda_function(inter::CMAPTorsion; λ_mixing=MinimumMixing(), sched
     return CMAPTorsionλ(index=inter.index, size=inter.size, λ_mixing=λ_mixing, scheduler=scheduler)
 end
 
-# Single topology: a CMAP grid can not be interpolated, so a term shared by both end states must
-#   be the same in both
-function to_lambda_function_single(interA::CMAPTorsion, interB::Nothing; kwargs...)
-    return to_lambda_function(interA; kwargs...)
-end
-
-function to_lambda_function_single(interA::Nothing, interB::CMAPTorsion; kwargs...)
-    return to_lambda_function(interB; kwargs...)
-end
-
-function update_lambda_function(existing_lambda::CMAPTorsionλ, interB::CMAPTorsion)
-    if existing_lambda.index != interB.index || existing_lambda.size != interB.size
-        throw(ArgumentError("a CMAP torsion differs between the end states, which single " *
-                            "topology does not support"))
-    end
-    return existing_lambda
-end
-
 
 plain_interaction(inter::CMAPTorsionλ, λ_params) = CMAPTorsion(inter.index, inter.size)
 

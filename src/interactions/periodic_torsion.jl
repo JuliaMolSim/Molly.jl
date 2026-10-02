@@ -239,10 +239,12 @@ end
     pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role,
                                         atom_l.alch_role); torsion=true)
     if d.scheduler.dual
-        return periodic_torsion_force_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true)),
+        return periodic_torsion_force_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true),
+                                        Val(N)),
                                         ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
     else
-        return periodic_torsion_force_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(false)),
+        return periodic_torsion_force_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(false),
+                                        Val(N), Val(N ÷ 2)),
                                         ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ, Val(N))
     end
 end
@@ -272,11 +274,11 @@ end
     pair_role = mix_roles(d.scheduler, (atom_i.alch_role, atom_j.alch_role, atom_k.alch_role,
                                         atom_l.alch_role); torsion=true)
     if d.scheduler.dual
-        return periodic_torsion_pe_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true)),
-                                     θ, Val(N))
+        return periodic_torsion_pe_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(true),
+                                     Val(N)), θ, Val(N))
     else
-        return periodic_torsion_pe_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(false)),
-                                     θ, Val(N))
+        return periodic_torsion_pe_λ(d, scale_torsion(d.scheduler, λ_glob, pair_role, Val(false),
+                                     Val(N), Val(N ÷ 2)), θ, Val(N))
     end
 end
 

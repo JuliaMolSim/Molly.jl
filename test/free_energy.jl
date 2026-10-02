@@ -279,7 +279,12 @@ end
                    "unique_B" => sort([nameB[n] for n in uniq_B]))
     core_mapAB = Dict(i => nameB[sysA.atoms_data[i].atom_name] for i in core)
 
-    for scheduler in (DefaultLambdaScheduler(dual=true), OpenFEScheduler(dual=false))
+    # A CHARMM protein carries backbone CMAP terms, whose grid single topology can not interpolate
+    @test_throws ArgumentError RelativeFESystem(sysA, sysB, FT(0), mapping, core_mapAB;
+                        scheduler=OpenFEScheduler(dual=false), LJsoftcore=:gapsys,
+                        Csoftcore=:gapsys)
+
+    for scheduler in (DefaultLambdaScheduler(dual=true),)
         for (λ, ref, state) in ((0.0, sysA, :A), (1.0, sysB, :B))
             sys = RelativeFESystem(sysA, sysB, FT(λ), mapping, core_mapAB; scheduler=scheduler,
                                    LJsoftcore=:gapsys, Csoftcore=:gapsys)
