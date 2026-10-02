@@ -806,14 +806,14 @@ end
         sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias1, bias2))
         buffers = Molly.init_buffers!(sys, 1)
 
-        fs1 = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
+        fs1 = Molly.zero_forces(sys)
         Molly.AtomsCalculators.forces!(fs1, sys, bias1; buffers=buffers)
-        fs2 = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
+        fs2 = Molly.zero_forces(sys)
         Molly.AtomsCalculators.forces!(fs2, sys, bias2; buffers=buffers)
         @test buffers.bias_scratch[bias1.id].grad !== buffers.bias_scratch[bias2.id].grad
         combined_expected = Molly.from_device(fs1) .+ Molly.from_device(fs2)
 
-        fs_sum = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
+        fs_sum = Molly.zero_forces(sys)
         for gi in sys.general_inters
             Molly.AtomsCalculators.forces!(fs_sum, sys, gi; buffers=buffers)
         end
@@ -844,7 +844,7 @@ end
 
         sys_N = System(atoms=atoms, coords=AT(coords_N), boundary=boundary, general_inters=(bias,))
         buffers = Molly.init_buffers!(sys_N, 1)
-        fs_N = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
+        fs_N = Molly.zero_forces(sys_N)
         Molly.AtomsCalculators.forces!(fs_N, sys_N, bias; buffers=buffers)
         fs_N_cpu = Molly.from_device(fs_N)
         @test norm(ustrip.(fs_N_cpu[1])) > 0
@@ -853,7 +853,7 @@ end
         @test norm(ustrip.(fs_N_cpu[4])) == 0
 
         sys_N1 = System(atoms=atoms, coords=AT(coords_N1), boundary=boundary, general_inters=(bias,))
-        fs_N1 = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
+        fs_N1 = Molly.zero_forces(sys_N1)
         # Reuses the SAME buffers (hence the SAME buffers.bias_scratch[bias.id].grad) as step N.
         Molly.AtomsCalculators.forces!(fs_N1, sys_N1, bias; buffers=buffers)
         fs_N1_cpu = Molly.from_device(fs_N1)
@@ -943,7 +943,7 @@ end
         sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias,))
         buffers = Molly.init_buffers!(sys, 1)
 
-        fs = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
+        fs = Molly.zero_forces(sys)
         Molly.AtomsCalculators.forces!(fs, sys, bias; buffers=buffers)
         fs_cpu = Molly.from_device(fs)
 
@@ -962,8 +962,44 @@ end
         @test all(isapprox.(ustrip.(fs_cpu[3]), ustrip.(force_atom3); atol=1e-9))
     end
 
-    # CalcRMSD in a BiasPotential on GPU, with units and a host-built reference.
+    # Shared base system for the testsets below, remade per-testset via System(sys; coords=..,
+    # atoms=..) instead of rebuilding from scratch.
     if CUDA.functional()
+        atoms_v = [Atom(mass=10.0u"g/mol") for _ in 1:4]
+        coords_v = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                   SVector(5.0, 0.0, 0.0)u"nm", SVector(6.0, 0.0, 0.0)u"nm"]
+        sys_cpu_base = System(atoms=atoms_v, coords=coords_v, boundary=boundary)
+        sys_gpu_base = System(atoms=CuArray(atoms_v), coords=CuArray(coords_v), boundary=boundary)
+
+        # Asserts potential_energy (and forces! if check_forces) through `bias` match on
+        # sys_cpu/sys_gpu; returns fs_cpu (or nothing if !check_forces) for any extra caller checks.
+        function pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias; check_forces=true)
+            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
+            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
+            @test ustrip(pe_gpu) ≈ ustrip(pe_cpu)
+            check_forces || return nothing
+            fs_cpu = Molly.zero_forces(sys_cpu)
+            Molly.AtomsCalculators.forces!(fs_cpu, sys_cpu, bias)
+            fs_gpu = Molly.zero_forces(sys_gpu)
+            Molly.AtomsCalculators.forces!(fs_gpu, sys_gpu, bias)
+            @test all(isapprox.(ustrip.(Molly.from_device(fs_gpu)), ustrip.(fs_cpu); atol=1e-10))
+            return fs_cpu
+        end
+
+        # Asserts forces! with virial through `bias` match on sys_cpu/sys_gpu.
+        function fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+            buffers_cpu = Molly.init_buffers!(sys_cpu, 1)
+            fs_cpu = Molly.zero_forces(sys_cpu)
+            Molly.forces!(fs_cpu, sys_cpu, nothing, 1, buffers_cpu, Val(true); n_threads=1)
+            buffers_gpu = Molly.init_buffers!(sys_gpu, 1)
+            fs_gpu = Molly.zero_forces(sys_gpu)
+            Molly.forces!(fs_gpu, sys_gpu, nothing, 1, buffers_gpu, Val(true))
+            @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+            @test all(isapprox.(ustrip.(Molly.from_device(buffers_gpu.virial)), ustrip.(buffers_cpu.virial);
+                                atol=1e-9))
+            return nothing
+        end
+
         @testset "CalcRMSD in BiasPotential on GPU matches CPU" begin
             ref_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
                           SVector(0.0, 1.0, 0.0)u"nm", SVector(0.0, 0.0, 1.0)u"nm"]
@@ -972,25 +1008,13 @@ end
             cv = CalcRMSD(ref_coords)
             bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 0.0u"nm"))
 
-            atoms_cpu = [Atom(mass=10.0u"g/mol") for _ in 1:4]
-            sys_cpu = System(atoms=atoms_cpu, coords=coords, boundary=boundary, general_inters=(bias,))
-            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
-            fs_cpu = zeros(SVector{3, Float64}, 4) .* u"kJ * mol^-1 * nm^-1"
-            Molly.AtomsCalculators.forces!(fs_cpu, sys_cpu, bias)
-
-            atoms_gpu = CuArray([Atom(mass=10.0u"g/mol") for _ in 1:4])
-            sys_gpu = System(atoms=atoms_gpu, coords=CuArray(coords), boundary=boundary, general_inters=(bias,))
-            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
-            fs_gpu = CuArray(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
-            Molly.AtomsCalculators.forces!(fs_gpu, sys_gpu, bias)
-
-            @test ustrip(pe_gpu) ≈ ustrip(pe_cpu)
-            @test all(isapprox.(ustrip.(Molly.from_device(fs_gpu)), ustrip.(fs_cpu); atol=1e-10))
+            sys_cpu = System(sys_cpu_base; coords=coords)
+            sys_gpu = System(sys_gpu_base; coords=CuArray(coords))
+            pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
         end
-    end
 
-    # A user-defined CV type in a BiasPotential on GPU.
-    if CUDA.functional()
+        # cv_gradient returns one SVector per atom with no atom-index list (bias.jl's non-built-in
+        # path applies it as a dense per-atom array), so this needs its own atom count, not base.
         @testset "Custom CV type in BiasPotential on GPU matches CPU" begin
             struct XCoordDistCV
                 correction::Symbol
@@ -1001,118 +1025,58 @@ end
                 ([SVector(-1.0, 0.0, 0.0), SVector(1.0, 0.0, 0.0)] .* oneunit(coords[1][1] / coords[1][1]),
                  coords[2][1] - coords[1][1])
 
-            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.5, 0.0, 0.0)u"nm"]
             cv = XCoordDistCV(:wrap)
             bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
 
-            atoms_cpu = [Atom(mass=10.0u"g/mol") for _ in 1:2]
-            sys_cpu = System(atoms=atoms_cpu, coords=coords, boundary=boundary, general_inters=(bias,))
-            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
-            fs_cpu = zeros(SVector{3, Float64}, 2) .* u"kJ * mol^-1 * nm^-1"
-            Molly.AtomsCalculators.forces!(fs_cpu, sys_cpu, bias)
-
-            atoms_gpu = CuArray([Atom(mass=10.0u"g/mol") for _ in 1:2])
-            sys_gpu = System(atoms=atoms_gpu, coords=CuArray(coords), boundary=boundary, general_inters=(bias,))
-            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
-            fs_gpu = CuArray(zeros(SVector{3, Float64}, 2)) .* u"kJ * mol^-1 * nm^-1"
-            Molly.AtomsCalculators.forces!(fs_gpu, sys_gpu, bias)
-
-            @test ustrip(pe_gpu) ≈ ustrip(pe_cpu)
-            @test all(isapprox.(ustrip.(Molly.from_device(fs_gpu)), ustrip.(fs_cpu); atol=1e-10))
+            # coords_v[1:2]'s distance (1.0 nm) would exactly match dist0, giving a zero gradient.
+            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.5, 0.0, 0.0)u"nm"]
+            sys_cpu = System(atoms=atoms_v[1:2], coords=coords, boundary=boundary)
+            sys_gpu = System(atoms=CuArray(atoms_v[1:2]), coords=CuArray(coords), boundary=boundary)
+            fs_cpu = pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
             @test ustrip(fs_cpu[1][1]) != 0
         end
-    end
 
-    # A custom atom type with no field literally named :mass, only a mass(atom) overload, must
-    # work through the GPU scratch path (bias_dist_scratch_types reads mass()'s return type,
-    # not the :mass field directly).
-    if CUDA.functional()
+        # A custom atom type with no :mass field, only a mass(atom) overload, must work through
+        # the GPU scratch path (bias_dist_scratch_types reads mass()'s return type).
         @testset "Custom atom type (no :mass field) in CMDist bias on GPU matches CPU" begin
             struct SimpleMassAtom
                 m::Float64
             end
             Molly.mass(a::SimpleMassAtom) = a.m * u"g/mol"
 
-            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
-                     SVector(5.0, 0.0, 0.0)u"nm", SVector(6.0, 0.0, 0.0)u"nm"]
             atoms = [SimpleMassAtom(10.0), SimpleMassAtom(20.0), SimpleMassAtom(15.0), SimpleMassAtom(5.0)]
             cv = CalcDist([1, 2], [3, 4], CalcCMDist(), :wrap)
             bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
 
-            sys_cpu = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias,))
-            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
-
-            sys_gpu = System(atoms=CuArray(atoms), coords=CuArray(coords), boundary=boundary,
-                             general_inters=(bias,))
-            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
-
-            @test isapprox(ustrip(pe_gpu), ustrip(pe_cpu); atol=1e-9)
+            sys_cpu = System(sys_cpu_base; atoms=atoms)
+            sys_gpu = System(sys_gpu_base; atoms=CuArray(atoms))
+            pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias; check_forces=false)
         end
-    end
 
-    # CalcMinDist/CalcMaxDist forces AND virial on GPU must match CPU, since
-    # calculate_virial_dist! recomputes the extremal pair instead of reading a cache.
-    if CUDA.functional()
+        # CalcMinDist/CalcMaxDist forces AND virial on GPU must match CPU, since
+        # calculate_virial_dist! recomputes the extremal pair instead of reading a cache.
         @testset "CalcMinDist/CalcMaxDist virial on GPU matches CPU" for dist_type in (CalcMinDist(), CalcMaxDist())
-            atoms_v = [Atom(mass=10.0u"g/mol") for _ in 1:4]
-            coords_v = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
-                       SVector(5.0, 0.0, 0.0)u"nm", SVector(6.0, 0.0, 0.0)u"nm"]
             cv = CalcDist([1, 2], [3, 4], dist_type, :wrap)
             bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
-
-            sys_cpu = System(atoms=atoms_v, coords=coords_v, boundary=boundary, general_inters=(bias,))
-            buffers_cpu = Molly.init_buffers!(sys_cpu, 1)
-            fs_cpu = Molly.zero_forces(sys_cpu)
-            Molly.forces!(fs_cpu, sys_cpu, nothing, 1, buffers_cpu, Val(true); n_threads=1)
-
-            sys_gpu = System(atoms=CuArray(atoms_v), coords=CuArray(coords_v), boundary=boundary,
-                             general_inters=(bias,))
-            buffers_gpu = Molly.init_buffers!(sys_gpu, 1)
-            fs_gpu = Molly.zero_forces(sys_gpu)
-            Molly.forces!(fs_gpu, sys_gpu, nothing, 1, buffers_gpu, Val(true))
-
-            @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
-            @test all(isapprox.(ustrip.(Molly.from_device(buffers_gpu.virial)), ustrip.(buffers_cpu.virial);
-                                atol=1e-9))
+            sys_cpu = System(sys_cpu_base; general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
         end
-    end
 
-    # CalcRg forces AND virial on GPU must match CPU, through BiasPotential's persistent-buffer
-    # path (not just calculate_cv/cv_gradient called directly).
-    if CUDA.functional()
+        # CalcRg forces AND virial on GPU must match CPU, through BiasPotential's persistent-buffer
+        # path (not just calculate_cv/cv_gradient called directly).
         @testset "CalcRg virial on GPU matches CPU" begin
-            atoms_v = [Atom(mass=10.0u"g/mol") for _ in 1:4]
-            coords_v = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
-                       SVector(0.0, 1.0, 0.0)u"nm", SVector(1.0, 1.0, 0.0)u"nm"]
             cv = CalcRg([1, 2, 3, 4], :wrap)
             bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
-
-            sys_cpu = System(atoms=atoms_v, coords=coords_v, boundary=boundary, general_inters=(bias,))
-            buffers_cpu = Molly.init_buffers!(sys_cpu, 1)
-            fs_cpu = Molly.zero_forces(sys_cpu)
-            Molly.forces!(fs_cpu, sys_cpu, nothing, 1, buffers_cpu, Val(true); n_threads=1)
-
-            sys_gpu = System(atoms=CuArray(atoms_v), coords=CuArray(coords_v), boundary=boundary,
-                             general_inters=(bias,))
-            buffers_gpu = Molly.init_buffers!(sys_gpu, 1)
-            fs_gpu = Molly.zero_forces(sys_gpu)
-            Molly.forces!(fs_gpu, sys_gpu, nothing, 1, buffers_gpu, Val(true))
-
-            @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
-            @test all(isapprox.(ustrip.(Molly.from_device(buffers_gpu.virial)), ustrip.(buffers_cpu.virial);
-                                atol=1e-9))
+            sys_cpu = System(sys_cpu_base; general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
         end
-    end
 
-    # The fused GPU kernel for CalcMinDist/CalcMaxDist (extremal_pair_fused) uses O(group_a)
-    # memory instead of the O(group_a * group_b) dense matrix the old implementation
-    # materialized -- assert this directly via CUDA.@allocated, rather than literally
-    # reproducing the ~29GB OOM the O(group^2) approach hit at group~51200 (fragile/GPU-
-    # dependent). At group_a=group_b=2000, O(group) is tens of KB; O(group^2) would be
-    # ~48MB (2000^2 * 12 bytes for SVector{3,Float32}).
-    if CUDA.functional()
+        # The fused GPU kernel for CalcMinDist/CalcMaxDist uses O(group) memory, not O(group^2) --
+        # assert via CUDA.@allocated rather than reproducing the OOM the old approach hit.
         @testset "CalcMinDist GPU memory is O(group), not O(group^2)" begin
-            na = 2000
+            na = 500
             coords = CuArray([SVector(Float32(i % 100) * 0.01f0, 0f0, 0f0)u"nm" for i in 1:(2 * na)])
             atoms = CuArray([Atom(mass=10.0f0u"g/mol") for _ in 1:(2 * na)])
             boundary_f32 = CubicBoundary(100.0f0u"nm")
@@ -1120,7 +1084,7 @@ end
             buff = similar(coords, eltype(eltype(coords)), 1)
             Molly.calculate_cv!(cv, coords, atoms, boundary_f32, buff) # warm up / compile
             bytes = CUDA.@allocated Molly.calculate_cv!(cv, coords, atoms, boundary_f32, buff)
-            @test bytes < 1_000_000 # tens of KB expected; a dense O(group^2) matrix would be ~48MB
+            @test bytes < 500_000 # a few KB expected; O(group^2) at na=500 would be ~3MB
         end
     end
 end
