@@ -1311,6 +1311,12 @@ function kernel_min_max!(
                     end
                 end
             end
+            # Level p reads slots written by other lanes at level p - 1. Lanes of a
+            # warp are not guaranteed to run in lockstep (independent thread
+            # scheduling since Volta), so a warp barrier is required between levels.
+            # The enclosing branch is uniform across the block (n - r is a multiple
+            # of 32 and threads=32), so all lanes reach this barrier.
+            sync_warp()
         end
         if local_i == D32
             @inbounds for k in a:b
@@ -1334,6 +1340,9 @@ function kernel_min_max!(
         xyz_min[k] =  10 * box_sides(boundary, k) # very large (arbitrary) value
         xyz_max[k] = -10 * box_sides(boundary, k)
     end
+    # Publish the r_smem writes from lanes 1:r and the xyz_min/xyz_max initialisation
+    # by all lanes before lane 1 reads and updates them.
+    sync_threads()
     if local_i == a
         for j in a:r
             @inbounds begin
@@ -1414,6 +1423,12 @@ function kernel_min_max_triclinic!(
                     end
                 end
             end
+            # Level p reads slots written by other lanes at level p - 1. Lanes of a
+            # warp are not guaranteed to run in lockstep (independent thread
+            # scheduling since Volta), so a warp barrier is required between levels.
+            # The enclosing branch is uniform across the block (n - r is a multiple
+            # of 32 and threads=32), so all lanes reach this barrier.
+            sync_warp()
         end
         if local_i == D32
             @inbounds for k in a:b
@@ -1442,6 +1457,9 @@ function kernel_min_max_triclinic!(
         xyz_min[k] =  10 * box_sides(boundary, k) # Very large (arbitrary) value
         xyz_max[k] = -10 * box_sides(boundary, k)
     end
+    # Publish the r_smem writes from lanes 1:r and the xyz_min/xyz_max initialisation
+    # by all lanes before lane 1 reads and updates them.
+    sync_threads()
     if local_i == a
         for j in a:r
             @inbounds begin
