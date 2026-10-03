@@ -7,7 +7,9 @@
 export
     ANIPotential,
     ani2x_data_dir,
-    compute_aevs
+    compute_aevs,
+    AllegroPotential,
+    load_allegro_package
 
 # Base type for ML interatomic potentials, a shared supertype for current and future ones.
 abstract type AbstractMLPotential end
@@ -94,4 +96,170 @@ end
 # On-device analytic ANI forces (implementation in ext/MollyLuxExt.jl).
 function compute_ani_forces_ka(args...; kwargs...)
     error("compute_ani_forces_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
+end
+
+# ---- Shared ML-potential unit / coordinate conversion -------------------------------------------
+# Molly stores unitless coordinates in nm; the ML potentials work internally in Å. These helpers
+# are shared by ANIPotential (ext/MollyLuxExt.jl) and AllegroPotential.
+
+const NM_TO_ANGSTROM = 10
+
+# In-place conversion of coordinates to unitless Å in a pre-allocated buffer (zero allocations).
+# The unit check is on the element type (no indexing), so it also works for device arrays.
+function coords_to_angstrom_into!(out::AbstractVector{SVector{D,TF}},
+                                  coords::AbstractVector{SVector{D,T}}) where {D, TF, T}
+    if T <: Real   # unitless Molly coords are nm
+        @inbounds for i in eachindex(coords)
+            out[i] = SVector{D,TF}(coords[i]) * TF(NM_TO_ANGSTROM)
+        end
+    else
+        @inbounds for i in eachindex(coords)
+            out[i] = SVector{D,TF}(ustrip.(u"Å", coords[i]))
+        end
+    end
+    return out
+end
+
+# Non-mutating conversion of coordinates to unitless Å, staying on the coords' device. Unitless
+# Molly coords are treated as nm. The unit check is on the element type so this works on GPU arrays.
+function coords_to_angstrom(coords)
+    eltype(eltype(coords)) <: Real ? coords .* NM_TO_ANGSTROM : ustrip_vec.(u"Å", coords)
+end
+
+# Convert a boundary to unitless Å (unitless side lengths are treated as nm).
+strip_boundary(b::CubicBoundary) =
+    unit(b.side_lengths[1]) == NoUnits ? CubicBoundary(b.side_lengths .* NM_TO_ANGSTROM) :
+                                         CubicBoundary(ustrip.(u"Å", b.side_lengths))
+
+function strip_boundary(b::TriclinicBoundary{D, T, C, A}) where {D, T, C, A}
+    if unit(b.basis_vectors[1][1]) == NoUnits
+        bv = SVector(ntuple(i -> b.basis_vectors[i] .* NM_TO_ANGSTROM, 3))
+    else
+        bv = SVector(ntuple(i -> ustrip.(u"Å", b.basis_vectors[i]), 3))
+    end
+    return TriclinicBoundary(bv; approx_images=A)
+end
+
+# Convert an ML-potential energy (eV, unitless) to the system's energy units. In the no-units case
+# the Molly convention is kJ/mol.
+function ml_energy_to_units(E_eV, energy_units)
+    if energy_units == NoUnits
+        return ustrip(u"kJ * mol^-1", E_eV * Unitful.Na * u"eV")
+    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        return uconvert(energy_units, E_eV * Unitful.Na * u"eV")
+    else
+        return uconvert(energy_units, E_eV * u"eV")
+    end
+end
+
+# Convert an ML-potential force SVector (eV/Å, unitless) to the system's force units. In the
+# no-units case the Molly convention is kJ/mol/nm (the eV/Å → kJ/mol/nm conversion includes the
+# Å → nm factor, so no extra scaling is needed).
+function ml_force_to_units(fi::SVector{D,T}, force_units) where {D, T}
+    if force_units == NoUnits
+        return ustrip.(u"kJ * mol^-1 * nm^-1", fi .* (Unitful.Na * u"eV/Å"))
+    elseif dimension(force_units) == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        return uconvert.(force_units, fi .* (Unitful.Na * u"eV/Å"))
+    else
+        return uconvert.(force_units, fi .* u"eV/Å")
+    end
+end
+
+# ---- Allegro (equivariant GNN) potential -------------------------------------------------------
+#
+# Allegro (Musaelian et al. 2023) is a strictly-local O(3)-equivariant potential: its energy is a
+# sum over directed edges within a cutoff. The equivariant primitives (irreps, real spherical
+# harmonics, Clebsch-Gordan tensor products, equivariant linear layers), the model forward and
+# analytic forces all live in core Molly (src/equivariant/); only loading weights from an HDF5 file
+# needs the extension (loaded with `using HDF5`).
+
+# SiLU / swish activation, the scalar nonlinearity in Allegro's latent MLPs.
+silu(x::T) where T = x / (one(T) + exp(-x))
+
+"""
+    AllegroPotential(path; T=Float32)
+
+Load a native Allegro equivariant neural-network potential from an HDF5 file exported by
+`test/allegro_reference.py`. Requires `HDF5` to be loaded.
+
+The element of each atom is read from `atoms_data[i].element` and mapped through the model's
+species list. Coordinates without units are treated as nm (Molly convention) and converted to the
+Å the model uses. A CPU system runs the threaded analytic forward/backward; a GPU system runs the
+KernelAbstractions kernels on-device (energy and the whole reverse pass), with no host CPU fallback.
+"""
+struct AllegroPotential{M, SP, D} <: AbstractMLPotential
+    model::M           # AllegroModel (config + precomputed tensor-product paths/CG + weights)
+    species_map::SP    # Dict{String,Int}: element → 1-based index
+    cutoff::D          # r_cutoff, plain Float (Å)
+    buffers::Ref{Any}  # lazily-initialized per-edge scratch buffers
+end
+
+# Fallback constructor. The real `AbstractString` method is in ext/MollyHDF5Ext.jl (needs HDF5);
+# `path` is left untyped here so that method is strictly more specific and does not overwrite this
+# one (method overwriting is an error during extension precompilation).
+function AllegroPotential(path; kwargs...)
+    error("AllegroPotential requires HDF5 to be loaded: `using HDF5`")
+end
+
+# Lazily build and cache the device Allegro model (weights uploaded once) for a given backend and
+# element type, so an MD run does not re-upload the weights every step.
+function allegro_device_model(inter::AllegroPotential, backend, ::Type{T}) where T
+    c = inter.buffers[]
+    if c isa Tuple && length(c) == 3 && c[1] === typeof(backend) && c[2] === T
+        return c[3]::AllegroGPU
+    end
+    gpu = build_allegro_gpu(inter.model, backend, T)
+    inter.buffers[] = (typeof(backend), T, gpu)
+    return gpu
+end
+
+# Energy: sum over directed edges within the cutoff, in the system's energy units. A CPU system runs
+# the threaded analytic forward; a GPU system runs the KernelAbstractions kernels on-device.
+function AtomsCalculators.potential_energy(sys::System{D, AT, T}, inter::AllegroPotential;
+                                           kwargs...) where {D, AT, T}
+    m = inter.model
+    species = [inter.species_map[sys.atoms_data[i].element] for i in eachindex(sys.coords)]
+    bnd = strip_boundary(sys.boundary)
+    E = if AT <: Array
+        coords_A = [SVector{3,Float64}(c) for c in coords_to_angstrom(sys.coords)]
+        allegro_total_energy(m, coords_A, species, bnd, m.r_c)
+    else
+        coords  = coords_to_angstrom(sys.coords)            # Å, unitless; stays on the device
+        backend = KernelAbstractions.get_backend(coords)
+        TT      = eltype(eltype(coords))
+        gpu     = allegro_device_model(inter, backend, TT)
+        compute_allegro_energy_ka(m, coords, species, bnd; backend=backend, T=TT, gpu=gpu)
+    end
+    return ml_energy_to_units(E, sys.energy_units)
+end
+
+# Analytic forces F = -∂E/∂r, accumulated into `fs` in the system's force units. CPU: threaded
+# analytic backward; GPU: the on-device KernelAbstractions reverse pass (no host CPU fallback).
+function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::AllegroPotential;
+                                  kwargs...) where {D, AT, T}
+    m = inter.model
+    species = [inter.species_map[sys.atoms_data[i].element] for i in eachindex(sys.coords)]
+    bnd = strip_boundary(sys.boundary)
+    if AT <: Array
+        coords_A = [SVector{3,Float64}(c) for c in coords_to_angstrom(sys.coords)]
+        F = allegro_forces(m, coords_A, species, bnd, m.r_c)   # eV/Å
+        @inbounds for i in eachindex(fs)
+            fs[i] += ml_force_to_units(SVector{D,Float64}(F[i]), sys.force_units)
+        end
+    else
+        coords  = coords_to_angstrom(sys.coords)
+        backend = KernelAbstractions.get_backend(coords)
+        TT      = eltype(eltype(coords))
+        gpu     = allegro_device_model(inter, backend, TT)
+        _, Fdev = compute_allegro_forces_ka(m, coords, species, bnd; backend=backend, T=TT, gpu=gpu)
+        Fh = Array(Fdev)                                       # (3, n) host, eV/Å
+        FU = eltype(eltype(fs))                                # unit-carrying scalar type of `fs`
+        inc = Vector{SVector{D, FU}}(undef, length(fs))
+        @inbounds for i in eachindex(fs)
+            fui = ml_force_to_units(SVector{D,Float64}(Fh[1, i], Fh[2, i], Fh[3, i]), sys.force_units)
+            inc[i] = SVector{D, FU}(ntuple(k -> fui[k], D))
+        end
+        fs .+= to_device(inc, AT)
+    end
+    return fs
 end
