@@ -1359,7 +1359,7 @@ end
                 coords_i, coords_j, boundary, vel_i, vel_j, step_n,
             ) : SVector(zero_pairwise_energy(dr, energy_units))
 
-            sum_E += ustrip(pe[1])
+            sum_E += convert(typeof(sum_E), ustrip(pe[1]))
         end
     end
     return sum_E
@@ -1813,7 +1813,7 @@ function energy_kernel!(
                 inters_tuple, dr, atoms_i, atoms_j, Val(energy_units), (spec & 0x1) == true,
                 coords_i, coords_j, boundary, vel_i, vel_j, step_n,
             ) : SVector(zero_pairwise_energy(dr, energy_units))
-            sum_E += ustrip(pe[1])
+            sum_E += convert(typeof(sum_E), ustrip(pe[1]))
         end
     elseif i == j
         # Diagonal tiles and the terminal corner tile, see force_kernel!
@@ -1840,7 +1840,7 @@ function energy_kernel!(
                     inters_tuple, dr, atoms_i, atoms_j, Val(energy_units),
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n,
                 ) : SVector(zero_pairwise_energy(dr, energy_units))
-                sum_E += ustrip(pe[1])
+                sum_E += convert(typeof(sum_E), ustrip(pe[1]))
             end
         end
     end

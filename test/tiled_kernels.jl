@@ -63,4 +63,47 @@
         @test isapprox(vir, vir_ref; rtol=1e-10)
         @test isapprox(pe, pe_ref; rtol=1e-10)
     end
+
+    # A Float32 system with the default Float64 `coulomb_const` and `solvent_dielectric` of
+    #   CoulombReactionField, so that the pair energies are Float64 while the energy is
+    #   accumulated in Float32: the accumulator must not become a `Union` that is only
+    #   Float64 on some work-items, which gave a NaN energy on the CPU backend
+    for AT in tiled_array_types
+        Random.seed!(777)
+        n_atoms = 777
+        boundary = CubicBoundary(2.8f0u"nm")
+        r_cut = 1.0f0u"nm"
+        coords = place_atoms(n_atoms, boundary; min_dist=0.1f0u"nm")
+        atoms = [Atom(index=i, mass=10.0f0u"g/mol", charge=(isodd(i) ? 0.3f0 : -0.3f0),
+                      σ=0.2f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms]
+        pairwise_inters = (LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut),
+                                        weight_special=0.5f0),
+                           CoulombReactionField(dist_cutoff=r_cut, use_neighbors=true,
+                                                weight_special=0.5f0))
+        @test pairwise_inters[2].coulomb_const isa Quantity{Float64}
+        sys_all = System(atoms=atoms, coords=coords, boundary=boundary,
+                         pairwise_inters=pairwise_inters,
+                         neighbor_finder=DistanceNeighborFinder(n_atoms=n_atoms,
+                                                                dist_cutoff=r_cut))
+        close_pairs = [(nb[1], nb[2]) for nb in find_neighbors(sys_all).list]
+        shuffle!(close_pairs)
+        excluded_pairs = close_pairs[1:900]
+        special_pairs = close_pairs[901:1400]
+        cpu_sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                         pairwise_inters=pairwise_inters,
+                         neighbor_finder=DistanceNeighborFinder(n_atoms=n_atoms,
+                            dist_cutoff=r_cut, excluded_pairs=excluded_pairs,
+                            special_pairs=special_pairs))
+        tiled_sys = System(atoms=to_device(atoms, AT), coords=to_device(coords, AT),
+                           boundary=boundary, pairwise_inters=pairwise_inters,
+                           neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms,
+                                dist_cutoff=r_cut, excluded_pairs=excluded_pairs,
+                                special_pairs=special_pairs, array_type=AT))
+
+        fs_ref = ustrip_vec.(forces(cpu_sys))
+        pe_ref = ustrip(potential_energy(cpu_sys))
+        fs, _, pe = tiled_forces_pe(tiled_sys)
+        @test maximum(norm.(fs .- fs_ref)) < 1e-5 * maximum(norm.(fs_ref))
+        @test isapprox(pe, pe_ref; rtol=1e-5)
+    end
 end
