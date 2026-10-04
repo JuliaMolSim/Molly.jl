@@ -187,14 +187,15 @@ This is a bit-exact native port of the real `nequip-allegro` (allegro 0.8.3) mod
 package's own weights reproduces its energy and forces to numerical precision (validated in
 `test/ml_potentials.jl`). The element of each atom is read from `atoms_data[i].element` and mapped
 through the model's `type_names`. Coordinates without units are treated as nm (Molly convention) and
-converted to the Å the model uses. Energy and forces are currently computed on the CPU (forces by
-automatic differentiation); a GPU path is a planned follow-up, so a GPU-backed system is supported
-via a host round-trip.
+converted to the Å the model uses. A CPU system runs the analytic forward/backward on the host; a GPU
+system runs the KernelAbstractions forward/backward on-device (energy and the analytic reverse pass),
+caching the uploaded device model so an MD run does not re-upload the weights each step.
 """
 struct AllegroPotential{M, SP, D} <: AbstractMLPotential
     model::M           # AllegroPackageModel (bit-exact nequip-allegro port)
     species_map::SP    # Dict{String,Int}: element → 0-based type index (package convention)
     cutoff::D          # r_max, plain Float (Å)
+    gpu_cache::Base.RefValue{Any}   # lazily-built device model, keyed by (backend type, eltype)
 end
 
 # Fallback constructor. The real `AbstractString` method is in ext/MollyHDF5Ext.jl (needs HDF5);
@@ -207,24 +208,59 @@ end
 _allegro_species(inter::AllegroPotential, sys) =
     [inter.species_map[sys.atoms_data[i].element] for i in eachindex(sys.coords)]
 
-# Energy in the system's energy units. Computed on the CPU (a GPU system takes a host round-trip
-# until the GPU kernels for the exact ops are ported).
-function AtomsCalculators.potential_energy(sys::System, inter::AllegroPotential; kwargs...)
-    coords_A = [SVector{3,Float64}(c) for c in from_device(coords_to_angstrom(sys.coords))]
-    E = allegro_package_total_energy(inter.model, coords_A, _allegro_species(inter, sys))
+# Lazily build and cache the device model (weights uploaded once) for a backend/eltype.
+function allegro_package_device_model(inter::AllegroPotential, backend, ::Type{T}) where T
+    c = inter.gpu_cache[]
+    if c isa Tuple && length(c) == 3 && c[1] === typeof(backend) && c[2] === T
+        return c[3]::AllegroPackageGPU
+    end
+    gpu = build_allegro_package_gpu(inter.model, backend, T)
+    inter.gpu_cache[] = (typeof(backend), T, gpu)
+    return gpu
+end
+
+# Energy in the system's energy units. CPU: host analytic forward; GPU: KA forward on-device.
+function AtomsCalculators.potential_energy(sys::System{D, AT, T}, inter::AllegroPotential;
+                                           kwargs...) where {D, AT, T}
+    species = _allegro_species(inter, sys)
+    E = if AT <: Array
+        coords_A = [SVector{3,Float64}(c) for c in coords_to_angstrom(sys.coords)]
+        allegro_package_total_energy(inter.model, coords_A, species)
+    else
+        coords  = coords_to_angstrom(sys.coords)            # Å, unitless; stays on device
+        backend = KernelAbstractions.get_backend(coords); TT = eltype(eltype(coords))
+        gpu     = allegro_package_device_model(inter, backend, TT)
+        compute_allegro_package_energy_ka(inter.model, coords, species;
+            backend=backend, T=TT, gpu=gpu, boundary=strip_boundary(sys.boundary))
+    end
     return ml_energy_to_units(E, sys.energy_units)
 end
 
-# Forces F = -∂E/∂r (automatic differentiation of the exact forward), accumulated into `fs` in the
-# system's force units.
-function AtomsCalculators.forces!(fs, sys::System, inter::AllegroPotential; kwargs...)
-    coords_A = [SVector{3,Float64}(c) for c in from_device(coords_to_angstrom(sys.coords))]
-    F = allegro_package_forces(inter.model, coords_A, _allegro_species(inter, sys))  # eV/Å
-    inc = [ml_force_to_units(SVector{3,Float64}(F[i]), sys.force_units) for i in eachindex(F)]
-    if fs isa Array
-        fs .+= inc
+# Analytic forces F = -∂E/∂r, accumulated into `fs` in the system's force units. CPU: host reverse
+# pass; GPU: the on-device KA reverse pass (no host CPU fallback).
+function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::AllegroPotential;
+                                  kwargs...) where {D, AT, T}
+    species = _allegro_species(inter, sys)
+    if AT <: Array
+        coords_A = [SVector{3,Float64}(c) for c in coords_to_angstrom(sys.coords)]
+        F = allegro_package_forces(inter.model, coords_A, species)   # eV/Å
+        @inbounds for i in eachindex(fs)
+            fs[i] += ml_force_to_units(SVector{D,Float64}(F[i]), sys.force_units)
+        end
     else
-        fs .+= to_device(convert.(eltype(fs), inc), array_type(sys))
+        coords  = coords_to_angstrom(sys.coords)
+        backend = KernelAbstractions.get_backend(coords); TT = eltype(eltype(coords))
+        gpu     = allegro_package_device_model(inter, backend, TT)
+        _, Fdev = compute_allegro_package_energy_and_forces_ka(inter.model, coords, species;
+            backend=backend, T=TT, gpu=gpu, boundary=strip_boundary(sys.boundary))
+        Fh = Array(Fdev)                                            # (3, n) host, eV/Å
+        FU = eltype(eltype(fs))
+        inc = Vector{SVector{D, FU}}(undef, length(fs))
+        @inbounds for i in eachindex(fs)
+            fui = ml_force_to_units(SVector{D,Float64}(Fh[1, i], Fh[2, i], Fh[3, i]), sys.force_units)
+            inc[i] = SVector{D, FU}(ntuple(k -> fui[k], D))
+        end
+        fs .+= to_device(inc, AT)
     end
     return fs
 end

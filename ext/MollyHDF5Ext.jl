@@ -22,7 +22,7 @@ function Molly.AllegroPotential(path::AbstractString; T::Type=Float64)
     model = Molly.load_allegro_package(path; T=T)
     # element → 0-based type index, the convention the package model uses
     species_map = Dict{String,Int}(name => i - 1 for (i, name) in enumerate(model.type_names))
-    return Molly.AllegroPotential(model, species_map, model.r_max)
+    return Molly.AllegroPotential(model, species_map, model.r_max, Base.RefValue{Any}(nothing))
 end
 
 """

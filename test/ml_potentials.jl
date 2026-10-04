@@ -792,6 +792,31 @@ if isfile(ALLEGRO_PKG_H5) && isfile(ALLEGRO_PKG_REF)
             @test maximum(maximum(abs.(ustrip.(u"eV/Å", fs[i]) .- Fref[i])) for i in 1:n) < 1e-6
         end
     end
+
+    # GPU consistency: a device-backed System runs the KA forward + analytic reverse on-device and
+    # must match the CPU System to device precision. Runs for each GPU backend in array_list (skipped
+    # on CI, which has none); Metal is Float32, so compare with a relative tolerance.
+    for AT in array_list
+        AT == Array && continue
+        @testset "AllegroPotential GPU consistency ($AT)" begin
+            potg = AllegroPotential(ALLEGRO_PKG_H5; T=Float32)
+            refg = JSON3.read(read(ALLEGRO_PKG_REF, String)); tng = String.(refg.type_names)
+            sysj = refg.systems[1]
+            coords = [SVector{3,Float32}(Float32(c[1] / 10), Float32(c[2] / 10), Float32(c[3] / 10))
+                      for c in sysj.coords_A]
+            n = length(coords)
+            atoms = [Atom(mass=1.0f0, charge=0.0f0, σ=0.0f0, ϵ=0.0f0, λ=0.0f0) for _ in 1:n]
+            ad = [AtomData(element=tng[Int(t) + 1]) for t in sysj.types]
+            mk(cc, aa) = System(atoms=aa, coords=cc, boundary=CubicBoundary(100.0f0), atoms_data=ad,
+                                general_inters=(potg,), energy_units=NoUnits, force_units=NoUnits)
+            sys_cpu = mk(coords, atoms)
+            sys_gpu = mk(to_device(coords, AT), to_device(atoms, AT))
+            @test isapprox(potential_energy(sys_cpu), potential_energy(sys_gpu); rtol=1e-4)
+            fc = forces(sys_cpu); fg = Array(forces(sys_gpu))
+            fscale = maximum(maximum(abs.(fc[i])) for i in 1:n)
+            @test maximum(maximum(abs.(Float64.(fg[i]) .- fc[i])) for i in 1:n) < 1e-4 * fscale
+        end
+    end
 else
     @warn "Skipping AllegroPackageModel package-validation tests — run " *
           "test/allegro_package_reference.py (needs nequip-allegro) to generate the reference."
