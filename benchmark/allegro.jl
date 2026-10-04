@@ -9,8 +9,9 @@
 #   ALLEGRO_BK=metal julia --project=<env>  benchmark/allegro.jl
 #   ALLEGRO_BK=cuda  julia --project=<env>  benchmark/allegro.jl
 using Molly, HDF5, JSON3, Random, Printf
-using Molly: SVector, to_device, allegro_package_energy_and_forces,
-             compute_allegro_package_energy_and_forces_ka, build_allegro_package_gpu
+using Molly: SVector, to_device, allegro_package_total_energy, allegro_package_energy_and_forces,
+             compute_allegro_package_energy_ka, compute_allegro_package_energy_and_forces_ka,
+             build_allegro_package_gpu
 
 const BK  = lowercase(get(ENV, "ALLEGRO_BK", "cpu"))
 const ROOT = dirname(@__DIR__)
@@ -53,15 +54,18 @@ gpu = BK == "cpu" ? nothing : build_allegro_package_gpu(m, backend(), TT)
 rows = Dict{String,Any}()
 for n in SIZES
     coords, species, L = random_system(n, rng)
-    ms = if BK == "cpu"
-        timeit(() -> allegro_package_energy_and_forces(m, coords, species))
+    ms_e, ms_ef = if BK == "cpu"
+        (timeit(() -> allegro_package_total_energy(m, coords, species)),
+         timeit(() -> allegro_package_energy_and_forces(m, coords, species)))
     else
         cdev = devc([SVector{3,TT}(TT.(c)...) for c in coords])
-        timeit(() -> compute_allegro_package_energy_and_forces_ka(m, cdev, species;
-                        backend=backend(), T=TT, gpu=gpu))
+        (timeit(() -> compute_allegro_package_energy_ka(m, cdev, species;
+                        backend=backend(), T=TT, gpu=gpu)),
+         timeit(() -> compute_allegro_package_energy_and_forces_ka(m, cdev, species;
+                        backend=backend(), T=TT, gpu=gpu)))
     end
-    rows["n$n"] = Dict("atoms"=>n, "box_A"=>L, "ms_energy_forces"=>ms)
-    @printf("  N=%5d  box=%.1f Å   %8.2f ms\n", n, L, ms)
+    rows["n$n"] = Dict("atoms"=>n, "box_A"=>L, "ms_energy"=>ms_e, "ms_energy_forces"=>ms_ef)
+    @printf("  N=%5d  box=%.1f Å   energy %8.2f ms   energy+forces %8.2f ms\n", n, L, ms_e, ms_ef)
 end
 
 mkpath(RES)
