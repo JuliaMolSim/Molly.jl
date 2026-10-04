@@ -84,6 +84,16 @@ speedup is within-machine. One energy + analytic-forces evaluation, ms:
 - This cyclops CPU is markedly slower per core than the Apple M-series table above (different
   hardware) — which is why the native-vs-package comparison below is kept to one machine at a time.
 
+### Figures
+
+Energy + forces time vs system size across all backends (Metal = Apple, CUDA = RTX 5080; log–log):
+
+![Energy + forces vs system size across backends](images/allegro_backends_vs_N.png)
+
+Within-machine GPU speedup over host CPU (8 threads):
+
+![GPU speedup over host CPU-t8](images/allegro_gpu_speedup.png)
+
 ## Native Molly vs the real nequip-allegro package (same hardware)
 
 Identical architecture and weights (23,056 parameters) — the native model loads the package's own
@@ -118,6 +128,10 @@ Same shape on CPU: Molly wins at small N; torch's BLAS-backed matmuls scale bett
 takeaway is that the native port is competitive with — and at small system sizes faster than — the
 reference package it reproduces, while being pure Julia with analytic forces.
 
+Native Molly (solid) vs the package (dashed), CUDA and CPU-t8 on the same box — note the crossovers:
+
+![Native Molly vs the nequip-allegro package](images/allegro_vs_package.png)
+
 ---
 
 ## Reproduce
@@ -138,6 +152,14 @@ Real-package head-to-head on the same hardware (needs `nequip-allegro`):
 ```
 PKG_DEV=cpu  <python-with-nequip-allegro> benchmark/allegro_package_bench.py
 PKG_DEV=cuda <python-with-nequip-allegro> benchmark/allegro_package_bench.py
+```
+
+Figures (writes `benchmark/images/allegro_*.png`) — put the Apple run in
+`results/allegro_bench_apple.json` and the RTX 5080 box run in `results/allegro_bench_cyclops.json`
+(or a single `results/allegro_bench.json` for one machine):
+
+```
+julia --project=<env-with-CairoMakie+JSON3> benchmark/allegro_plots.jl
 ```
 
 Weights + reference (`data/allegro_reference/allegro_package_*`) are regenerated with
