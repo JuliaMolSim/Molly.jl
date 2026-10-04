@@ -8,9 +8,8 @@
 # Axis/normalization convention: matches e3nn's real spherical harmonics
 # (`o3.spherical_harmonics(l, x, normalize=true, normalization="component")`, verified against
 # e3nn 0.6.0 to ~1e-15). l=1 is (x, y, z); l=2 is
-# [√15·xz, √15·xy, (√5/2)(2y²−x²−z²), √15·yz, (√15/2)(z²−x²)]. This is internally consistent with
-# the Clebsch-Gordan coefficients in clebsch_gordan.jl (both derive from the same real transform),
-# so the tensor product is exactly equivariant, and the bit-match to e3nn lets trained weights load.
+# [√15·xz, √15·xy, (√5/2)(2y²−x²−z²), √15·yz, (√15/2)(z²−x²)]. The bit-match to e3nn's convention is
+# what lets the native Allegro model load and reproduce the real nequip-allegro package's weights.
 #
 # Pure StaticArrays maths, no Lux/HDF5 — lives in core Molly. Internal (unexported).
 

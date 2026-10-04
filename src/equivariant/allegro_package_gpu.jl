@@ -5,7 +5,7 @@
 # per-layer Wigner-3j path weights are pre-folded into `ww3j[u,i,j,k] = Σ_p w[u,p]·w3j[p,i,j,k]` at
 # build time, so the TP kernels are a plain contraction.
 
-struct AllegroPackageGPU{T, VT, MT, A3, IT}
+struct AllegroPackageGPU{T, VT, MT, A3}
     S::Int; C::Int; nb::Int; L::Int; p::Int
     r_max::T; avg_nn::T
     nks::Vector{Int}; inlens::Vector{Int}
@@ -15,7 +15,6 @@ struct AllegroPackageGPU{T, VT, MT, A3, IT}
     ww3j::Vector{A3}                       # per layer, flattened (C*9*9*nk) device vector
     lat_W0::Vector{MT}; lat_W2::Vector{MT}
     ro_W0::MT; ro_W2::MT
-    _it::IT                                # unused marker to carry the Int array type
 end
 
 _pkgdev(backend, ::Type{T}, A::AbstractArray) where {T} =
@@ -42,13 +41,11 @@ function build_allegro_package_gpu(m::AllegroPackageModel, backend, ::Type{T}) w
     end
     inlens = [l * m.S + C for l in 1:m.L]
     md(A) = _pkgdev(backend, T, A)
-    return AllegroPackageGPU{T, typeof(md(m.bessel_w)), typeof(md(m.basis_W)), eltype(ww),
-                             typeof(_pkgdev_i(backend, Int32[1]))}(
+    return AllegroPackageGPU{T, typeof(md(m.bessel_w)), typeof(md(m.basis_W)), eltype(ww)}(
         m.S, C, m.nb, m.L, m.p, T(m.r_max), T(m.avg_nn), copy(m.tp_nk), inlens,
         md(m.bessel_w), md(m.center_embed), md(m.neighbor_embed), md(m.basis_W),
         md(m.semb_W0), md(m.semb_W2), md(m.env_W), md(m.proj_W),
-        ww, map(md, m.lat_W0), map(md, m.lat_W2), md(m.ro_W0), md(m.ro_W2),
-        _pkgdev_i(backend, Int32[1]))
+        ww, map(md, m.lat_W0), map(md, m.lat_W2), md(m.ro_W0), md(m.ro_W2))
 end
 
 @inline _pkg_ir(i) = i == 1 ? 1 : (i <= 4 ? 2 : 3)
