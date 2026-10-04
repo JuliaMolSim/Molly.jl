@@ -1,8 +1,8 @@
-# Bit-exact native port of the real `nequip-allegro` (allegro 0.8.3) Allegro model forward. Unlike the
-# simplified `AllegroModel` in allegro_model.jl, this reproduces the package's *exact* operations, so
-# loading the package's own exported weights reproduces its energy and forces to ~1e-6. It is the
-# non-circular external validation of the native implementation (see test/allegro_package_reference.py
-# for the reference generator and the loader `load_allegro_package` in ext/MollyHDF5Ext.jl).
+# Bit-exact native port of the real `nequip-allegro` (allegro 0.8.3) Allegro model forward: loading
+# the package's own exported weights reproduces its energy and forces to ~1e-6. This is the native
+# implementation behind `AllegroPotential`, validated non-circularly against the actual package (see
+# test/allegro_package_reference.py for the reference generator and the loader `load_allegro_package`
+# in ext/MollyHDF5Ext.jl). Energy is computed here; forces are `allegro_package_forces` (AD).
 #
 # Op sequence (per directed edge i<-j, r = r_j - r_i, d = |r|, r̂ = r/d), config l_max=2:
 #   normed = d / r_max;  u = DimeNet polynomial cutoff (p);  bessel_k = sinc(normed·k)·k·u  (k=1..nb)
