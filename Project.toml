@@ -61,11 +61,10 @@ MollyPythonCallExt = "PythonCall"
 
 [sources]
 # TODO: remove once JuliaGPU/KernelAbstractions.jl#830 and #831 are released
-KernelAbstractions = {path = "/home/vchuravy/.julia/tmp-ka/KA-molly"}
-KernelInterface = {path = "/home/vchuravy/.julia/tmp-ka/KA-molly/lib/KernelInterface"}
-# TODO: StructArrays restricts its KernelAbstractions weak dependency to 0.9, this local
-#   copy only widens that compat bound
-StructArrays = {path = "/home/vchuravy/.julia/tmp-ka/StructArrays"}
+KernelAbstractions = {url = "https://github.com/JuliaGPU/KernelAbstractions.jl", rev = "vc/groupreduce"}
+KernelInterface = {url = "https://github.com/JuliaGPU/KernelAbstractions.jl", rev = "vc/groupreduce", subdir = "lib/KernelInterface"}
+# TODO: remove once JuliaArrays/StructArrays.jl#359 (KernelAbstractions 0.10) is released
+StructArrays = {url = "https://github.com/JuliaArrays/StructArrays.jl", rev = "mg/ka-0.10"}
 
 [compat]
 AcceleratedKernels = "0.5"
