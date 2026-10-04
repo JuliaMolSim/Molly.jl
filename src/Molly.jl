@@ -18,6 +18,7 @@ using Distributions
 using EzXML
 using FFTW
 using FillArrays: Fill
+using ForwardDiff: ForwardDiff
 using GPUArrays
 using Graphs
 using KernelAbstractions

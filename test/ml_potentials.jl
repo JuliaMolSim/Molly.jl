@@ -921,19 +921,10 @@ if isfile(ALLEGRO_PKG_H5) && isfile(ALLEGRO_PKG_REF)
             # energy reproduces the package forward to numerical precision
             E = Molly.allegro_package_total_energy(m, coords, species)
             @test isapprox(E, Float64(sysj.energy); atol=1e-6)
-            # forces = -dE/dr (finite-differenced) match the package's autograd forces
-            h = 1e-6
+            # analytic forces F = -∂E/∂r (automatic differentiation) match the package's autograd forces
+            F = allegro_package_forces(m, coords, species)
             Fref = [SVector{3,Float64}(f...) for f in sysj.forces]
-            maxdf = 0.0
-            for i in eachindex(coords), b in 1:3
-                cp = copy(coords); cm = copy(coords)
-                cp[i] = setindex(cp[i], cp[i][b] + h, b)
-                cm[i] = setindex(cm[i], cm[i][b] - h, b)
-                fd = -(Molly.allegro_package_total_energy(m, cp, species) -
-                       Molly.allegro_package_total_energy(m, cm, species)) / (2h)
-                maxdf = max(maxdf, abs(fd - Fref[i][b]))
-            end
-            @test maxdf < 1e-5
+            @test maximum(maximum(abs.(F[i] .- Fref[i])) for i in eachindex(F)) < 1e-6
         end
     end
 else

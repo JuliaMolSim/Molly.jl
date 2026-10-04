@@ -71,13 +71,21 @@ function Molly.load_allegro_package(path::AbstractString; T::Type=Float64)
         g(k) = T.(read(f["w/" * pre * k]))                 # h5 reversal -> (out, in) for linear weights
         full_reverse(A) = permutedims(A, reverse(ntuple(identity, ndims(A))))
         latW0 = Matrix{T}[]; latW2 = Matrix{T}[]
-        tpw = Matrix{T}[]; tpw3j = Array{T}[]; tpdiag = Bool[]; tpnk = Int[]
+        tpw = Matrix{T}[]; tpw3j = Array{T,4}[]; tpnk = Int[]
         for l in 0:(L - 1)
             push!(latW0, g("allegro__latents__$(l)__mlp__0__weight"))
             push!(latW2, g("allegro__latents__$(l)__mlp__2__weight"))
             push!(tpw, permutedims(g("allegro__tps__$(l)__weights"), (2, 1)))   # -> (C, n_paths)
             w3j = full_reverse(g("allegro__tps__$(l)__w3j"))                     # -> (n_paths, i, [j,] k)
-            push!(tpw3j, w3j); push!(tpdiag, ndims(w3j) == 3); push!(tpnk, size(w3j, ndims(w3j)))
+            if ndims(w3j) == 3     # diagonal layer (i==j): expand (p, i, k) -> (p, i, j, k) with j==i
+                np_, ni, nk_ = size(w3j)
+                w4 = zeros(T, np_, ni, ni, nk_)
+                for pth in 1:np_, i in 1:ni, k in 1:nk_
+                    w4[pth, i, i, k] = w3j[pth, i, k]
+                end
+                w3j = w4
+            end
+            push!(tpw3j, w3j); push!(tpnk, size(w3j, 4))
         end
         return Molly.AllegroPackageModel{T}(S, C, nb, L, p, rmax, avg, tn,
             vec(g("radial_chemical_embed__bessel_encode__bessel_weights")),
@@ -88,7 +96,7 @@ function Molly.load_allegro_package(path::AbstractString; T::Type=Float64)
             g("scalar_embed_mlp__mlp_module__mlp__2__weight"),
             g("tensor_embed__env_embed_linear__mlp__0__weight"),
             g("allegro__first_layer_env_embed_projection__mlp__0__weight"),
-            latW0, latW2, tpw, tpw3j, tpdiag, tpnk,
+            latW0, latW2, tpw, tpw3j, tpnk,
             g("edge_readout__mlp_module__mlp__0__weight"),
             g("edge_readout__mlp_module__mlp__2__weight"))
     end

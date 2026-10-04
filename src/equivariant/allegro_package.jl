@@ -28,8 +28,7 @@ struct AllegroPackageModel{T}
     proj_W::Matrix{T}            # first-layer projection (S+3C, S)
     lat_W0::Vector{Matrix{T}}; lat_W2::Vector{Matrix{T}}  # per-layer latent MLP
     tp_w::Vector{Matrix{T}}      # per layer (C, n_paths)
-    tp_w3j::Vector{Array{T}}     # per layer: (n_paths,9,9,9) non-diag or (n_paths,9,nk) diag
-    tp_diag::Vector{Bool}
+    tp_w3j::Vector{Array{T,4}}   # per layer (n_paths, 9, 9, nk); a diagonal layer is expanded to full
     tp_nk::Vector{Int}
     ro_W0::Matrix{T}; ro_W2::Matrix{T}
 end
@@ -86,27 +85,30 @@ function allegro_package_total_energy(m::AllegroPackageModel{Tw},
             node[ec[e], u, i] += SH[e, i] * env_w[e, (u - 1) * 3 + _irrep_of(i)]
         end
         node ./= sqrt(m.avg_nn)
-        w3j = m.tp_w3j[l]; wtp = m.tp_w[l]; nk = m.tp_nk[l]; diag = m.tp_diag[l]; npath = size(w3j, 1)
+        w3j = m.tp_w3j[l]; wtp = m.tp_w[l]; nk = m.tp_nk[l]; npath = size(w3j, 1)
         out = zeros(T, ne, C, nk)
         @inbounds for e in 1:ne, u in 1:C, k in 1:nk
             s = zero(T)
-            if diag
-                for i in 1:9
-                    wv = zero(T); for pth in 1:npath; wv += wtp[u, pth] * w3j[pth, i, k]; end
-                    s += tf[e, u, i] * node[ec[e], u, i] * wv
+            for i in 1:9, j in 1:9
+                wv = zero(T)
+                for pth in 1:npath
+                    wv += wtp[u, pth] * w3j[pth, i, j, k]
                 end
-            else
-                for i in 1:9, j in 1:9
-                    wv = zero(T); for pth in 1:npath; wv += wtp[u, pth] * w3j[pth, i, j, k]; end
-                    s += tf[e, u, i] * node[ec[e], u, j] * wv
-                end
+                s += tf[e, u, i] * node[ec[e], u, j] * wv
             end
             out[e, u, k] = s
         end
         tf = out
-        # DenseNet latent: input = cat(all accumulated scalar features so far, this TP's 0e scalars)
+        # DenseNet latent: input = cat(all accumulated scalar features so far, this TP's 0e scalars).
+        # Built into an explicit buffer (no splatting) so the forward stays type-stable for Enzyme.
+        inp = Vector{T}(undef, l * S + C)
         @inbounds for e in 1:ne
-            inp = vcat((acc[q][e, :] for q in 1:l)..., tf[e, :, 1])
+            for q in 1:l, c in 1:S
+                inp[(q - 1) * S + c] = acc[q][e, c]
+            end
+            for u in 1:C
+                inp[l * S + u] = tf[e, u, 1]
+            end
             lat = m.lat_W2[l] * _silu.(m.lat_W0[l] * inp)
             acc[l + 1][e, :] = lat[1:S]
             if l < m.L
@@ -116,11 +118,35 @@ function allegro_package_total_energy(m::AllegroPackageModel{Tw},
     end
     # readout + per-centre-atom edgewise reduce with 1/√(2·avg_nn)
     atom = zeros(T, n)
+    ef = Vector{T}(undef, (m.L + 1) * S)
     @inbounds for e in 1:ne
-        ef = vcat((acc[q][e, :] for q in 1:(m.L + 1))...)
+        for q in 1:(m.L + 1), c in 1:S
+            ef[(q - 1) * S + c] = acc[q][e, c]
+        end
         atom[ec[e]] += (m.ro_W2 * _silu.(m.ro_W0 * ef))[1]
     end
     return sum(atom) / sqrt(2 * m.avg_nn)
+end
+
+"""
+    allegro_package_forces(m::AllegroPackageModel, coords, species) -> Vector{SVector{3}}
+
+Analytic forces `F = -∂E/∂r` of the bit-exact Allegro port, by reverse... forward-mode automatic
+differentiation (`ForwardDiff`) of [`allegro_package_total_energy`](@ref). `coords` are `SVector{3}`
+in Å and `species` are 0-based type indices; the forces are in eV/Å and reproduce the package's own
+autograd forces to numerical precision.
+"""
+function allegro_package_forces(m::AllegroPackageModel, coords::AbstractVector{<:SVector{3}},
+                                species::AbstractVector{<:Integer})
+    n = length(coords)
+    x0 = Vector{Float64}(undef, 3n)
+    @inbounds for i in 1:n, k in 1:3
+        x0[3 * (i - 1) + k] = coords[i][k]
+    end
+    E(x) = allegro_package_total_energy(m,
+        [SVector{3,eltype(x)}(x[3i - 2], x[3i - 1], x[3i]) for i in 1:n], species)
+    g = ForwardDiff.gradient(E, x0)
+    return [SVector{3,Float64}(-g[3i - 2], -g[3i - 1], -g[3i]) for i in 1:n]
 end
 
 """
