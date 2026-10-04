@@ -204,3 +204,168 @@ function compute_allegro_package_energy_ka(m::AllegroPackageModel,
     KernelAbstractions.synchronize(backend)
     return T(sum(atom)) / sqrt(2 * gpu.avg_nn)
 end
+
+# GPU-safe sinc and its derivative (Julia's sinc/cosc don't compile for Metal).
+@inline _sincg(z::T) where {T} = sin(T(pi) * z) / (T(pi) * z)
+@inline _coscg(z::T) where {T} = cos(T(pi) * z) / z - sin(T(pi) * z) / (T(pi) * z * z)
+
+# ---- backward kernels (per directed edge) ----
+@kernel inbounds=true function pkg_tp_bwd_kernel!(tfin_bar, node_bar, @Const(out_bar),
+        @Const(tfin), @Const(node), @Const(ww), @Const(ecenter), C, nk)
+    e = @index(Global, Linear); T = eltype(tfin_bar); c = ecenter[e]
+    for u in 1:C
+        for i in 1:9
+            ai = zero(T)
+            for j in 1:9, k in 1:nk
+                ai += out_bar[(k - 1) * C + u, e] * node[(j - 1) * C + u, c] *
+                      ww[(((k - 1) * 9 + (j - 1)) * 9 + (i - 1)) * C + u]
+            end
+            tfin_bar[(i - 1) * C + u, e] += ai     # per-edge: no atomic
+        end
+        for j in 1:9
+            aj = zero(T)
+            for i in 1:9, k in 1:nk
+                aj += out_bar[(k - 1) * C + u, e] * tfin[(i - 1) * C + u, e] *
+                      ww[(((k - 1) * 9 + (j - 1)) * 9 + (i - 1)) * C + u]
+            end
+            Atomix.@atomic node_bar[(j - 1) * C + u, c] += aj
+        end
+    end
+end
+
+@kernel inbounds=true function pkg_envscatter_bwd_kernel!(envw_bar, SH_bar, @Const(node_bar),
+        @Const(envw), @Const(SH), @Const(ecenter), C, invs)
+    e = @index(Global, Linear); T = eltype(envw_bar); c = ecenter[e]
+    for j in 1:9
+        ir = _pkg_ir(j); sb = zero(T)
+        for u in 1:C
+            nbv = node_bar[(j - 1) * C + u, c] * invs
+            envw_bar[(u - 1) * 3 + ir, e] += nbv * SH[j, e]
+            sb += nbv * envw[(u - 1) * 3 + ir, e]
+        end
+        SH_bar[j, e] += sb
+    end
+end
+
+@kernel inbounds=true function pkg_tf0_bwd_kernel!(wenv_bar, SH_bar, @Const(tf_bar), @Const(wenv), @Const(SH), C)
+    e = @index(Global, Linear); T = eltype(wenv_bar)
+    for i in 1:9
+        ir = _pkg_ir(i); sb = zero(T)
+        for u in 1:C
+            tb = tf_bar[(i - 1) * C + u, e]
+            wenv_bar[(u - 1) * 3 + ir, e] += tb * SH[i, e]
+            sb += tb * wenv[(u - 1) * 3 + ir, e]
+        end
+        SH_bar[i, e] += sb
+    end
+end
+
+@kernel inbounds=true function pkg_geom_bwd_kernel!(F, @Const(bessel_bar), @Const(SH_bar), @Const(dd),
+        @Const(rh), @Const(coords), @Const(ecenter), @Const(ej), @Const(bw), bx, by, bz, rc, p, nb)
+    e = @index(Global, Linear); T = eltype(F)
+    d = dd[e]; x = d / rc; u = _pkg_cutf(x, p); du = _pkg_cutgf(x, p) / rc
+    dEdd = zero(T)
+    for k in 1:nb
+        bwk = bw[k]; arg = x * bwk
+        dbdd = bwk * (_coscg(arg) * bwk / rc * u + _sincg(arg) * du)     # ∂(sinc(x·bw)·bw·u)/∂d
+        dEdd += bessel_bar[k, e] * dbdd
+    end
+    dx, dy, dz = _pkg_edge(coords[ecenter[e]], coords[ej[e]], T(bx), T(by), T(bz))
+    _, J = _real_sph_harm_grad2(SVector{3,T}(dx, dy, dz))
+    gx = dEdd * rh[1, e]; gy = dEdd * rh[2, e]; gz = dEdd * rh[3, e]
+    for q in 1:9
+        gx += J[q, 1] * SH_bar[q, e]; gy += J[q, 2] * SH_bar[q, e]; gz += J[q, 3] * SH_bar[q, e]
+    end
+    i = ecenter[e]; j = ej[e]                   # r = coords[j]-coords[i]; F = -∂E/∂coords
+    Atomix.@atomic F[1, j] += -gx; Atomix.@atomic F[2, j] += -gy; Atomix.@atomic F[3, j] += -gz
+    Atomix.@atomic F[1, i] += gx;  Atomix.@atomic F[2, i] += gy;  Atomix.@atomic F[3, i] += gz
+end
+
+"""
+    compute_allegro_package_energy_and_forces_ka(m, coords, species; backend, T, gpu, boundary) -> (E, F)
+
+GPU-portable energy and analytic forces of the bit-exact Allegro port. `F` is a `(3, n)` array on
+`backend` (`F = -∂E/∂r`, eV/Å). Mirrors the CPU reverse pass; MLP adjoints are transposed matmuls,
+the tensor-product / scatter / geometry adjoints are kernels.
+"""
+function compute_allegro_package_energy_and_forces_ka(m::AllegroPackageModel,
+        coords::AbstractVector{<:SVector{3}}, species::AbstractVector{<:Integer};
+        backend = KernelAbstractions.get_backend(coords),
+        T::Type = eltype(eltype(coords)),
+        gpu::AllegroPackageGPU = build_allegro_package_gpu(m, backend, T),
+        boundary = nothing, workgroup::Int = 64)
+    n = length(coords); S = gpu.S; C = gpu.C; L = gpu.L
+    bx, by, bz = boundary === nothing ? (zero(T), zero(T), zero(T)) :
+        (T(ustrip(boundary.side_lengths[1])), T(ustrip(boundary.side_lengths[2])), T(ustrip(boundary.side_lengths[3])))
+    ci, cj = _pkg_edges_host(Array(coords), Float64(gpu.r_max), Float64(bx), Float64(by), Float64(bz))
+    ne = length(ci)
+    F = KernelAbstractions.zeros(backend, T, 3, n)
+    ne == 0 && return (zero(T), F)
+    ec = _pkgdev_i(backend, ci); ej = _pkgdev_i(backend, cj)
+    sp = _pkgdev_i(backend, Int32.(collect(species)))
+    z2(a, b) = KernelAbstractions.zeros(backend, T, a, b)
+    invs = one(T) / sqrt(gpu.avg_nn); scale = one(T) / sqrt(2 * gpu.avg_nn)
+    # ---- taped forward ----
+    SH = z2(9, ne); bessel = z2(gpu.nb, ne); dd = KernelAbstractions.zeros(backend, T, ne); rh = z2(3, ne)
+    pkg_geom_kernel!(backend, workgroup)(SH, bessel, dd, rh, coords, ec, ej, gpu.bessel_w,
+        bx, by, bz, gpu.r_max, gpu.p, gpu.nb; ndrange=ne)
+    te = vcat(gpu.center_embed[:, sp[ec] .+ 1], gpu.neighbor_embed[:, sp[ej] .+ 1])
+    tb = te .* (gpu.basis_W * bessel)
+    pre_semb = gpu.semb_W0 * tb
+    embS = gpu.semb_W2 * _pkg_silu.(pre_semb)
+    wenv = gpu.env_W * embS
+    tf = z2(C * 9, ne); pkg_tf0_kernel!(backend, workgroup)(tf, SH, wenv, C; ndrange=ne)
+    pr = gpu.proj_W * embS
+    acc = KernelAbstractions.zeros(backend, T, S, ne, L + 1); acc[:, :, 1] = pr[1:S, :]
+    envw_hist = Vector{Any}(undef, L); envw_hist[1] = pr[S + 1:S + 3C, :]
+    tf_hist = Vector{Any}(undef, L + 1); tf_hist[1] = tf
+    node_hist = Vector{Any}(undef, L); lat_pre = Vector{Any}(undef, L)
+    for l in 1:L
+        nk = gpu.nks[l]
+        node = KernelAbstractions.zeros(backend, T, C * 9, n)
+        pkg_envscatter_kernel!(backend, workgroup)(node, SH, envw_hist[l], ec, C; ndrange=ne)
+        node = node .* invs; node_hist[l] = node
+        out = z2(C * nk, ne)
+        pkg_tp_kernel!(backend, workgroup)(out, tf_hist[l], node, gpu.ww3j[l], ec, C, nk; ndrange=ne)
+        tf_hist[l + 1] = out
+        inp = vcat(reshape(permutedims(acc[:, :, 1:l], (1, 3, 2)), l * S, ne), out[1:C, :])
+        pre = gpu.lat_W0[l] * inp; lat_pre[l] = pre
+        lat = gpu.lat_W2[l] * _pkg_silu.(pre)
+        acc[:, :, l + 1] = lat[1:S, :]
+        l < L && (envw_hist[l + 1] = lat[S + 1:S + 3C, :])
+    end
+    ef = reshape(permutedims(acc, (1, 3, 2)), (L + 1) * S, ne)
+    p_ro = gpu.ro_W0 * ef
+    eedge = gpu.ro_W2 * _pkg_silu.(p_ro)
+    atom = KernelAbstractions.zeros(backend, T, n)
+    pkg_readout_scatter_kernel!(backend, workgroup)(atom, eedge, ec; ndrange=ne)
+    # ---- reverse pass ----
+    ef_bar = (transpose(gpu.ro_W0) * (transpose(gpu.ro_W2) .* _pkg_silu_grad.(p_ro))) .* scale
+    acc_bar = permutedims(reshape(ef_bar, S, L + 1, ne), (1, 3, 2))        # (S, ne, L+1)
+    SH_bar = z2(9, ne)
+    tf_bar = z2(C * gpu.nks[L], ne); envw_bar = z2(3C, ne)
+    for l in L:-1:1
+        nk = gpu.nks[l]
+        lat_bar = l < L ? vcat(acc_bar[:, :, l + 1], envw_bar) : acc_bar[:, :, l + 1]
+        inp_bar = transpose(gpu.lat_W0[l]) * (_pkg_silu_grad.(lat_pre[l]) .* (transpose(gpu.lat_W2[l]) * lat_bar))
+        acc_bar[:, :, 1:l] = acc_bar[:, :, 1:l] .+ permutedims(reshape(inp_bar[1:l * S, :], S, l, ne), (1, 3, 2))
+        tf_bar[1:C, :] = tf_bar[1:C, :] .+ inp_bar[l * S + 1:l * S + C, :]
+        tfin_bar = z2(C * 9, ne); node_bar = KernelAbstractions.zeros(backend, T, C * 9, n)
+        pkg_tp_bwd_kernel!(backend, workgroup)(tfin_bar, node_bar, tf_bar, tf_hist[l], node_hist[l],
+            gpu.ww3j[l], ec, C, nk; ndrange=ne)
+        new_envw_bar = z2(3C, ne)
+        pkg_envscatter_bwd_kernel!(backend, workgroup)(new_envw_bar, SH_bar, node_bar, envw_hist[l], SH, ec, C, invs; ndrange=ne)
+        tf_bar = tfin_bar; envw_bar = new_envw_bar
+    end
+    wenv_bar = z2(3C, ne)
+    pkg_tf0_bwd_kernel!(backend, workgroup)(wenv_bar, SH_bar, tf_bar, wenv, SH, C; ndrange=ne)
+    pr_bar = vcat(acc_bar[:, :, 1], envw_bar)
+    embS_bar = transpose(gpu.env_W) * wenv_bar .+ transpose(gpu.proj_W) * pr_bar
+    pre_bar = _pkg_silu_grad.(pre_semb) .* (transpose(gpu.semb_W2) * embS_bar)
+    basis_bar = (transpose(gpu.semb_W0) * pre_bar) .* te
+    bessel_bar = transpose(gpu.basis_W) * basis_bar
+    pkg_geom_bwd_kernel!(backend, workgroup)(F, bessel_bar, SH_bar, dd, rh, coords, ec, ej,
+        gpu.bessel_w, bx, by, bz, gpu.r_max, gpu.p, gpu.nb; ndrange=ne)
+    KernelAbstractions.synchronize(backend)
+    return (T(sum(atom)) / sqrt(2 * gpu.avg_nn), F)
+end
