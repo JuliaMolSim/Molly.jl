@@ -99,9 +99,10 @@ function compute_ani_forces_ka(args...; kwargs...)
     error("compute_ani_forces_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
 end
 
-# ---- Shared ML-potential unit / coordinate conversion -------------------------------------------
+# ---- AllegroPotential unit / coordinate conversion ----------------------------------------------
 # Molly stores unitless coordinates in nm; the ML potentials work internally in Å. These helpers
-# are shared by ANIPotential (ext/MollyLuxExt.jl) and AllegroPotential.
+# convert to/from Å for AllegroPotential. ANIPotential keeps its own equivalent copies in
+# ext/MollyLuxExt.jl so this PR leaves the ANI extension untouched.
 
 const NM_TO_ANGSTROM = 10
 
