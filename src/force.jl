@@ -651,6 +651,13 @@ is reset if it is a [`GPUNeighborFinder`](@ref).
 =#
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                        for_pe::Bool=false) where {D, T, TH}
+    return init_buffers_gpu(sys, n_threads, for_pe)
+end
+
+# Not restricted to GPU arrays, so that the GPU code path can be tested with `Array`s on
+#   the CPU backend of KernelAbstractions
+function init_buffers_gpu(sys::System{D, <:Any, T, TH}, n_threads,
+                          for_pe::Bool=false) where {D, T, TH}
     N = length(sys)
     C = eltype(eltype(sys.coords))
     n_blocks = cld(N, 32)

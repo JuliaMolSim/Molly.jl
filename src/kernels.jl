@@ -1,4 +1,4 @@
-# KernelAbstractions.jl kernels, CUDA kernels are in an extension
+# KernelAbstractions.jl kernels, the tiled kernels of GPUNeighborFinder are in gpu_tiles.jl
 
 kernel_maybe_velocity(velocities, i) = velocities[i]
 kernel_maybe_velocity(::Nothing, i) = nothing

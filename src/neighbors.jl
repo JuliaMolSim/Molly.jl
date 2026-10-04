@@ -148,7 +148,7 @@ Obtain a list of close atoms in a [`System`](@ref).
 
 Custom neighbor finders should implement this function.
 
-For [`GPUNeighborFinder`](@ref), this returns `nothing`: the CUDA pairwise force
+For [`GPUNeighborFinder`](@ref), this returns `nothing`: the tiled pairwise force
 and energy kernels build and cache their interacting tile list internally from
 the neighbor-finder metadata.
 """
@@ -172,10 +172,12 @@ uses_gpu_neighbor_finder(AT) = false
     GPUNeighborFinder(; eligible, dist_cutoff, special=nothing, n_steps=10,
                       array_type=nothing, initialized=false, strictness=:warn)
 
-Neighbor finder for CUDA systems that uses Molly's tiled pairwise kernels.
+Neighbor finder for GPU systems that uses Molly's tiled pairwise kernels.
+These need a KernelAbstractions backend that supports sub-groups of 32 work-items
+with shuffles, such as CUDA, see `Molly.supports_tiled_kernels`.
 
 `GPUNeighborFinder` does not materialize a conventional per-atom neighbor list.
-Instead, the CUDA pairwise force and energy paths reorder atoms on a Morton
+Instead, the tiled pairwise force and energy paths reorder atoms on a Morton
 curve and build a compact list of interacting 32x32 tiles directly on the device.
 The exclusions and special pairs are read from per-atom sparse lists inside the
 tiles that contain them, so the memory used grows linearly with the number of
@@ -332,7 +334,7 @@ function GPUNeighborFinder(;
                 eligible_sparse, special_sparse)
 end
 
-# The interacting tile list is constructed within the CUDA pairwise kernels.
+# The interacting tile list is constructed within the tiled pairwise kernels.
 find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
 
 # Mark neighbor data cached in `buffers` as stale so that it is rebuilt on the next force
