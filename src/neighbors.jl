@@ -719,7 +719,7 @@ function find_neighbors(sys::System{D, AT},
     # The inclusive prefix sum of the per-word neighbor counts gives the index one past the
     #   last neighbor written by each mask word, from which the fill kernel subtracts its
     #   own count to get its write offset
-    AcceleratedKernels.accumulate!(+, counts, backend; init=Int32(0))
+    AcceleratedKernels.accumulate!(+, counts; backend=backend, init=Int32(0))
     n_neighbors = Int(only(Array(@view counts[n_masks:n_masks])))
     neighbors_list = similar(sys.coords, Tuple{Int32, Int32, Bool}, n_neighbors)
 
