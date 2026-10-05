@@ -963,6 +963,29 @@ end
         @test all(isapprox.(ustrip.(fs_cpu[3]), ustrip.(force_atom3); atol=1e-9))
     end
 
+    # The same group of atoms in two periodic images -- crossing the box, and not -- must give the
+    # same forces and virial.
+    @testset "CalcRg :wrap virial for a group crossing the boundary" for AT in array_list
+        coords_cross = [SVector(1.9, 0.0, 0.0)u"nm", SVector(1.95, 0.0, 0.0)u"nm",
+                        SVector(0.05, 0.0, 0.0)u"nm", SVector(0.1, 0.0, 0.0)u"nm"]
+        coords_whole = [SVector(-0.1, 0.0, 0.0)u"nm", SVector(-0.05, 0.0, 0.0)u"nm",
+                        SVector(0.05, 0.0, 0.0)u"nm", SVector(0.1, 0.0, 0.0)u"nm"]
+        bias = BiasPotential(CalcRg([1, 2, 3, 4], :wrap), SquareBias(300.0u"kJ * mol^-1 * nm^-2", 0.5u"nm"))
+        function forces_virial(coords)
+            sys = System(atoms=AT([Atom(mass=10.0u"g/mol") for _ in 1:4]), coords=AT(coords),
+                         boundary=CubicBoundary(2.0u"nm"), general_inters=(bias,))
+            buffers = Molly.init_buffers!(sys, 1)
+            fs = Molly.zero_forces(sys)
+            Molly.forces!(fs, sys, nothing, 1, buffers, Val(true); n_threads=1)
+            return ustrip.(Molly.from_device(fs)), ustrip.(Molly.from_device(buffers.virial))
+        end
+        fs_cross, virial_cross = forces_virial(coords_cross)
+        fs_whole, virial_whole = forces_virial(coords_whole)
+        @test all(isapprox.(fs_cross, fs_whole; atol=1e-9))
+        @test all(isapprox.(virial_cross, virial_whole; atol=1e-9))
+        @test !iszero(virial_whole)
+    end
+
     # Shared base system for the testsets below, remade per-testset via System(sys; coords=..,
     # atoms=..) instead of rebuilding from scratch.
     if CUDA.functional()

@@ -1204,16 +1204,10 @@ end
 function calculate_virial!(virial_buff, cv::CalcRg, coords, forces, atoms, boundary; kwargs...)
     # Select the relevant atoms/coordinates
     ids = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
-    c_used = @view coords[ids]
     f_used = @view forces[ids]
-    a_used = @view atoms[ids]
 
-    # Calculate Center of Mass of the group to define relative coordinates
-    com_buf = similar(c_used, 1)
-    center_of_mass!(c_used, a_used, com_buf)
-
-    # Accumulate sum( (r_i - r_com) * F_i^T )
-    r_ic_all = vector.(com_buf, c_used, (boundary,))
+    # Accumulate sum( (r_i - r_com) * F_i^T ) with the same minimum-image r_i - r_com as the CV
+    r_ic_all, _, _ = rg_dists_cpu(coords, atoms, ids, boundary)
     virial_buff .+= sum(r_ic_all .* transpose.(f_used))
 end
 
