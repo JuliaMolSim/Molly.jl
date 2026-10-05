@@ -49,6 +49,10 @@ end
 ### Neighborfinder functions ###
 neighbor_exclusions(nf::NoNeighborFinder) = (Tuple{Int32, Int32}[], Tuple{Int32, Int32}[])
 neighbor_exclusions(nf) = dense_masks_to_pair_lists(from_device(nf.eligible), from_device(nf.special))
+# The output modes other than :molly_pairs ignore the exclusions and store none
+neighbor_exclusions(nf::GPUCellListNeighborFinder) = (isnothing(nf.eligible) ?
+                neighbor_exclusions(NoNeighborFinder()) :
+                dense_masks_to_pair_lists(nf.eligible, nf.special))
 
 ### Constraints ###
 # Core atom can't have different constraint lengths or angles between A and B
@@ -914,6 +918,12 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     elseif nf_A isa CellListMapNeighborFinder && !(AT <: AbstractGPUArray)
         nf = CellListMapNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
                                        boundary=Boundary, x0=Coords, dist_cutoff=nf_A.dist_cutoff)
+    elseif nf_A isa GPUCellListNeighborFinder && AT <: AbstractGPUArray
+        # The default output, since the hybrid needs the exclusions applied even if an end
+        #   state did not
+        nf = GPUCellListNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
+                                       dist_cutoff=nf_A.dist_cutoff, array_type=AT,
+                                       max_neighbors=nf_A.max_neighbors, ragged=nf_A.ragged)
     else
         # Another finder, or one that does not suit the device, keeps the masks and the settings
         nf = typeof(nf_A).name.wrapper(
