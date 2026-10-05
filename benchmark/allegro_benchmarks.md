@@ -66,39 +66,37 @@ exceed the 16 GB card; `—` = not run.
 
 | atoms | Molly CUDA | nequip CUDA | allegro-jax CUDA | Molly Metal |
 | ---: | ---: | ---: | ---: | ---: |
-| 500   | **11**  | 18   | 107  | 17   |
-| 1000  | **15**  | 19   | 216  | 46   |
-| 2000  | **25**  | 30   | 462  | 125  |
-| 4000  | **58**  | 66   | 1131 | 254  |
-| 8000  | **129** | 144  | 2719 | 530  |
-| 15954 | **232** | OOM  | 7226 | 1065 |
+| 500   | **10**  | 18   | 107  | 27   |
+| 1000  | **16**  | 19   | 216  | 45   |
+| 2000  | **29**  | 30   | 462  | 126  |
+| 4000  | **53**  | 66   | 1131 | 252  |
+| 8000  | **130** | 144  | 2719 | 517  |
+| 15954 | **252** | OOM  | 7226 | 1073 |
 
 **CPU** on the RTX 5080 host (12-core), `Float64`, single thread (t1) and 8 threads (t8, run with
 `julia --gcthreads=8` so garbage collection is parallel — see below):
 
 | atoms | Molly t1 | nequip t1 | jax t1 | Molly t8 | nequip t8 | jax t8 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 500   | **694**   | 1456  | 1691   | **1241** | 1279  | 1416  |
-| 1000  | **1575**  | 3199  | 6780   | **1710** | 1940  | 6119  |
-| 2000  | **3637**  | 6901  | 28020  | **2586** | 3877  | 21474 |
-| 4000  | **8052**  | 15850 | 126854 | **4830** | 6284  | 72152 |
-| 8000  | **17895** | 34539 | —      | **10944**| 11813 | —     |
-| 15954 | —         | 72939 | —      | 22478    | 21505 | —     |
+| 500   | **746**   | 1456  | 1691   | **531**  | 1279  | 1416  |
+| 1000  | **1666**  | 3199  | 6780   | **1188** | 1940  | 6119  |
+| 2000  | **3515**  | 6901  | 28020  | **2185** | 3877  | 21474 |
+| 4000  | **7477**  | 15850 | 126854 | **4333** | 6284  | 72152 |
+| 8000  | **18457** | 34539 | —      | **8883** | 11813 | —     |
+| 15954 | —         | 72939 | —      | **17858**| 21505 | —     |
 
 Reading it (**bold** = fastest in that row/group):
 - **CUDA — Molly wins at every size.** It is 1.1–1.9× faster than the real package, and because the
   analytic reverse pass has a far smaller memory footprint than the package's autograd backward,
-  **Molly is the only CUDA implementation that reaches the full 6mrr system** (15,954 atoms, 0.23 s) —
+  **Molly is the only CUDA implementation that reaches the full 6mrr system** (15,954 atoms, 0.25 s) —
   the package OOMs there. allegro-jax is 5–30× slower than Molly on CUDA.
 - **Metal — uncontested.** Neither the package nor allegro-jax has a `Float64` Apple-GPU path, so Molly
   is the only Allegro that runs on Apple Silicon (16k in 1.1 s).
 - **CPU single thread (t1) — Molly wins at every size**, ~2× faster than the package and 2–16× faster
   than allegro-jax.
-- **CPU 8 threads (t8) — Molly wins 5 of 6 sizes** (up to 1.5× faster than the package), and is within
-  a few percent at 15,954 atoms (that largest point is noisy on the shared box — a less-loaded run gave
-  Molly 18.0 s there, ahead of the package's 21.5 s). t8 needs `--gcthreads=8` because each evaluation
-  allocates large temporaries and the ~35% GC must be parallel to scale; a reusable workspace (the next
-  optimisation) would remove that allocation entirely and widen the lead.
+- **CPU 8 threads (t8) — Molly wins at every size too**, 1.2–2.4× faster than the package (run with
+  `--gcthreads=8` so the per-evaluation GC is parallel). A reusable workspace that removes the per-call
+  allocation entirely is the next optimisation and would widen the lead further.
 
 ### GPU speedup over host CPU (t8)
 
