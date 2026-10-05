@@ -52,11 +52,12 @@ def make_system(n, rng):
 
 
 def edge_index(pos):
-    # KD-tree neighbour pairs within r_c (both directions), so this scales to ~16k atoms.
+    # KD-tree neighbour pairs within r_c (both directions), so this scales to ~16k atoms. The (2, ne)
+    # tensor must be contiguous — nequip does `edge_index.view(-1)`, which rejects a transposed view.
     tree = cKDTree(pos)
     pairs = tree.query_pairs(RC, output_type="ndarray")      # i<j
-    ij = np.concatenate([pairs, pairs[:, ::-1]], axis=0).T    # both directions
-    return torch.tensor(ij, dtype=torch.long, device=DEVICE), ij.shape[1]
+    ij = np.ascontiguousarray(np.concatenate([pairs, pairs[:, ::-1]], axis=0).T)   # both directions
+    return torch.tensor(ij, dtype=torch.long, device=DEVICE).contiguous(), ij.shape[1]
 
 
 def make_inputs(pos, types):
