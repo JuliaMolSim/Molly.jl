@@ -734,12 +734,16 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     # from root(i) to i
     u = f[cur_parent] .+ cur_delta # Unwrapped fractional coords
 
-    # Segmented (per-molecule) mean via sort + inclusive scan. Accumulated in Float64 regardless
-    # of the working float type: a long prefix sum in Float32 can accumulate enough rounding
-    # error, at large atom counts, to put a molecule's center of geometry in the wrong periodic
-    # image. Output (cog) is converted back to the working type.
+    # Segmented (per-molecule) mean via sort + inclusive scan. Accumulated in Float64 where the
+    # backend supports it: a long prefix sum in Float32 can accumulate enough rounding error, at
+    # large atom counts, to put a molecule's center of geometry in the wrong periodic image.
+    # Output (cog) is converted back to the working type.
     CT = eltype(u) # SVector{D, working float type}
-    u_sorted = SVector{D, Float64}.(u[sort_perm])
+    FT = default_float_type_high(coords, eltype(CT))
+    FT == Float64 || @warn "GPU unwrap_molecules accumulates in $FT since this backend does " *
+                           "not support Float64; molecules may be put in the wrong periodic " *
+                           "image for large systems" maxlog=1
+    u_sorted = SVector{D, FT}.(u[sort_perm])
     cum      = AcceleratedKernels.accumulate(+, u_sorted; init=zero(eltype(u_sorted)))
     cum_ext  = similar(cum, length(cum) + 1)
     cum_ext[1:1]   .= (zero(eltype(cum)),)
