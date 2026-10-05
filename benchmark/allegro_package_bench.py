@@ -93,8 +93,18 @@ def main():
     energy_net = model.model.func    # inner SequentialGraphNetwork: total energy, no force backward
     print(f"nequip-allegro bench | device={DEVICE} key={KEY} | "
           f"params={sum(p.numel() for p in model.parameters())} | sizes={SIZES}")
+    outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+    os.makedirs(outdir, exist_ok=True)
+    path = os.path.join(outdir, f"allegro_torch_{DEVICE}.json")
+
+    def save(res):
+        # Write after every size so an OOM at a large N keeps the smaller-N results.
+        prev = json.load(open(path)) if os.path.exists(path) else {}
+        prev[KEY] = res
+        json.dump(prev, open(path, "w"), indent=1)
+
     rng = np.random.default_rng(1)
-    res = {KEY: {}}
+    res = {}
     for n in SIZES:
         pos, types, L = make_system(n, rng)
         build, ne = make_inputs(pos, types)
@@ -103,17 +113,20 @@ def main():
                 return energy_net(build(False))[AtomicDataDict.TOTAL_ENERGY_KEY].sum()
         def forces():
             return model(build(True))[AtomicDataDict.FORCE_KEY]
-        te = timeit(energy)
-        tf = timeit(forces)
-        res[KEY][str(n)] = {"energy_ms": te, "forces_ms": tf, "edges": int(ne)}
+        try:
+            te = timeit(energy)
+            tf = timeit(forces)
+        except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+            print(f"  n={n:5d} FAILED ({type(e).__name__}) — forces backward too large for this GPU; "
+                  f"stopping the sweep here")
+            if DEVICE == "cuda":
+                torch.cuda.empty_cache()
+            break
+        res[str(n)] = {"energy_ms": te, "forces_ms": tf, "edges": int(ne)}
         print(f"  n={n:5d} edges={ne:7d} energy={te:9.3f} ms  forces={tf:9.3f} ms")
-
-    outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
-    os.makedirs(outdir, exist_ok=True)
-    path = os.path.join(outdir, f"allegro_torch_{DEVICE}.json")
-    prev = json.load(open(path)) if os.path.exists(path) else {}
-    prev.update(res)
-    json.dump(prev, open(path, "w"), indent=1)
+        save(res)
+        if DEVICE == "cuda":
+            torch.cuda.empty_cache()
     print("wrote", path)
 
 
