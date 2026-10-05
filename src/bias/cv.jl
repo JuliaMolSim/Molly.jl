@@ -976,6 +976,9 @@ end
 Bias the radius of gyration of a group of atoms.
 
 Given as an argument to [`BiasPotential`](@ref).
+The center of mass and the distances to it use the minimum image convention, so with
+`correction=:wrap` the value is also correct for a group that crosses the periodic boundary,
+unlike [`radius_gyration`](@ref), which assumes all coordinates are in one periodic image.
 
 # Arguments
 - `atom_inds=[]`: indices of the atoms in the group, `[]` uses all atoms.
