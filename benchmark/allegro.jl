@@ -11,7 +11,7 @@
 using Molly, HDF5, JSON3, Random, Printf
 using Molly: SVector, to_device, allegro_package_total_energy, allegro_package_energy_and_forces,
              compute_allegro_package_energy_ka, compute_allegro_package_energy_and_forces_ka,
-             build_allegro_package_gpu, pkg_build_edges
+             build_allegro_package_gpu, pkg_build_edges, pkg_edges_cpu
 
 const BK  = lowercase(get(ENV, "ALLEGRO_BK", "cpu"))
 const ROOT = dirname(@__DIR__)
@@ -55,8 +55,9 @@ rows = Dict{String,Any}()
 for n in SIZES
     coords, species, L = random_system(n, rng)
     ms_e, ms_ef = if BK == "cpu"
-        (timeit(() -> allegro_package_total_energy(m, coords, species)),
-         timeit(() -> allegro_package_energy_and_forces(m, coords, species)))
+        ced = get(ENV, "ALLEGRO_INCLUDE_NL", "0") == "1" ? nothing : pkg_edges_cpu(coords, m.r_max)
+        (timeit(() -> allegro_package_total_energy(m, coords, species; edges=ced)),
+         timeit(() -> allegro_package_energy_and_forces(m, coords, species; edges=ced)))
     else
         cdev = devc([SVector{3,TT}(TT.(c)...) for c in coords])
         # Precompute the neighbour list once (reused across MD steps in practice), so the timed region

@@ -44,6 +44,17 @@ end
     -((p+1)*(p+2)/2)*p*x^(p-1) + p*(p+2)*(p+1)*x^p - (p*(p+1)/2)*(p+2)*x^(p+1) : zero(x)
 @inline _irrep_of(i) = i == 1 ? 1 : (i <= 4 ? 2 : 3)   # which l-block (1,2,3) a SH component belongs to
 
+# Directed edges (centre i, neighbour j) within the cutoff, open box. Callers in an MD loop can build
+# this once and pass it to the `edges` kwarg to skip the rebuild on every energy/forces evaluation.
+function pkg_edges_cpu(coords, rc)
+    n = length(coords); edg = Tuple{Int,Int}[]
+    @inbounds for i in 1:n, j in 1:n
+        i == j && continue
+        norm(coords[j] - coords[i]) < rc && push!(edg, (i, j))
+    end
+    return edg
+end
+
 """
     allegro_package_total_energy(m::AllegroPackageModel, coords, species) -> T
 
@@ -52,19 +63,16 @@ type indices into `m.type_names` (the package convention). Reproduces the `nequi
 energy to numerical precision when `m` is loaded from the package's exported weights.
 """
 function allegro_package_total_energy(m::AllegroPackageModel{Tw},
-        coords::AbstractVector{<:SVector{3}}, species::AbstractVector{<:Integer}) where Tw
+        coords::AbstractVector{<:SVector{3}}, species::AbstractVector{<:Integer};
+        edges = nothing) where Tw
     T = promote_type(Tw, eltype(eltype(coords)))
     n = length(coords); S = m.S; C = m.C; rc = m.r_max
-    edges = Tuple{Int,Int}[]
-    for i in 1:n, j in 1:n
-        i == j && continue
-        @inbounds norm(coords[j] - coords[i]) < rc && push!(edges, (i, j))
-    end
-    ne = length(edges)
+    edg = edges === nothing ? pkg_edges_cpu(coords, rc) : edges
+    ne = length(edg)
     ne == 0 && return zero(T)
-    ec = Int[e[1] for e in edges]
+    ec = Int[e[1] for e in edg]
     SH = Matrix{T}(undef, ne, 9); embS = Matrix{T}(undef, ne, S)
-    @inbounds for (e, (i, j)) in enumerate(edges)
+    @inbounds for (e, (i, j)) in enumerate(edg)
         r = coords[j] - coords[i]; d = norm(r)
         SH[e, :] = collect(real_sph_harm(2, r / d))
         x = d / rc; u = _pkg_cut(x, m.p)
@@ -144,26 +152,23 @@ tensor products, the environment scatter, the two-body embedding, and the spheri
 the package's own autograd forces to numerical precision.
 """
 function allegro_package_energy_and_forces(m::AllegroPackageModel{Tw},
-        coords::AbstractVector{<:SVector{3}}, species::AbstractVector{<:Integer}) where Tw
+        coords::AbstractVector{<:SVector{3}}, species::AbstractVector{<:Integer};
+        edges = nothing) where Tw
     T = promote_type(Tw, eltype(eltype(coords)))
     n = length(coords); S = m.S; C = m.C; rc = m.r_max; L = m.L; nb = m.nb
     invs = one(T) / sqrt(m.avg_nn)
-    edges = Tuple{Int,Int}[]
-    for i in 1:n, j in 1:n
-        i == j && continue
-        @inbounds norm(coords[j] - coords[i]) < rc && push!(edges, (i, j))
-    end
-    ne = length(edges)
+    edg = edges === nothing ? pkg_edges_cpu(coords, rc) : edges
+    ne = length(edg)
     F = [zero(SVector{3,T}) for _ in 1:n]
     ne == 0 && return (zero(T), F)
-    ec = Int[e[1] for e in edges]
+    ec = Int[e[1] for e in edg]
     Hs = size(m.semb_W0, 1)                              # scalar-embed hidden width
 
     # ---------- taped forward ----------
     SH = Matrix{T}(undef, ne, 9); dists = Vector{T}(undef, ne)
     rhat = Vector{SVector{3,T}}(undef, ne); rraw = Vector{SVector{3,T}}(undef, ne)
     te = Matrix{T}(undef, ne, S); pre_semb = Matrix{T}(undef, ne, Hs); embS = Matrix{T}(undef, ne, S)
-    @inbounds for (e, (i, j)) in enumerate(edges)
+    @inbounds for (e, (i, j)) in enumerate(edg)
         r = coords[j] - coords[i]; d = norm(r); rh = r / d
         dists[e] = d; rhat[e] = rh; rraw[e] = r
         SH[e, :] = collect(real_sph_harm(2, rh))
@@ -288,7 +293,7 @@ function allegro_package_energy_and_forces(m::AllegroPackageModel{Tw},
     end
     # scalar-embed MLP → bessel → d; SH Jacobian → r; scatter to atoms
     @inbounds for e in 1:ne
-        (i, j) = edges[e]
+        (i, j) = edg[e]
         pre_bar = _silu_grad.(pre_semb[e, :]) .* (m.semb_W2' * embS_bar[e, :])
         basis_bar = (m.semb_W0' * pre_bar) .* te[e, :]
         bessel_bar = m.basis_W' * basis_bar
