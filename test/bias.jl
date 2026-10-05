@@ -1117,6 +1117,11 @@ end
             Molly.calculate_cv!(cv, coords, atoms, boundary_f32, buff) # warm up / compile
             bytes = CUDA.@allocated Molly.calculate_cv!(cv, coords, atoms, boundary_f32, buff)
             @test bytes < 500_000 # a few KB expected; O(group^2) at na=500 would be ~3MB
+
+            coords_1, coords_2 = coords[1:na], coords[(na + 1):end]
+            Molly.dist_between_groups(CalcMinDist(), coords_1, coords_2, boundary_f32) # warm up
+            bytes = CUDA.@allocated Molly.dist_between_groups(CalcMinDist(), coords_1, coords_2, boundary_f32)
+            @test bytes < 500_000
         end
     end
 end

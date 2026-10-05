@@ -55,17 +55,6 @@ function extremal_pair(coords_1, coords_2, calc_type, extremum_fn, boundary)
     return best_i, best_j, sqrt(best_d2), r_ij
 end
 
-# GPU fallback with no index lists to build a MinMaxScratch from (dist_between_groups(!) called
-# directly). Materializes the displacement matrix via broadcast.
-function extremal_pair(coords_1::AbstractGPUArray, coords_2, calc_type, extremum_fn, boundary)
-    diffs = calc_type == :closest ?
-        vector.(reshape(coords_1, :, 1), reshape(coords_2, 1, :), (boundary,)) :
-        reshape(coords_2, 1, :) .- reshape(coords_1, :, 1)
-    d, idx = extremum_fn(norm.(diffs))
-    i, j = Tuple(idx)
-    return i, j, d, only(from_device(diffs[i:i, j:j]))
-end
-
 # A fancy-index @view of a CuArray isn't itself an AbstractGPUArray, so unwrap via `parent`.
 is_gpu_resident(x::AbstractGPUArray) = true
 is_gpu_resident(x::SubArray) = is_gpu_resident(parent(x))
@@ -274,6 +263,20 @@ function dist_between_groups!(md::CalcMinDist, coords_1, coords_2, dist_val, bou
     return nothing
 end
 
+# GPU groups with no index lists or persistent scratch: stack them and run the tiled kernels on a
+# throwaway MinMaxScratch.
+function dist_between_groups_gpu!(md, coords_1, coords_2, dist_val, boundary)
+    na, nb = length(coords_1), length(coords_2)
+    coords = vcat(coords_1, coords_2)
+    scratch = minmax_scratch(coords, collect(1:na), collect((na + 1):(na + nb)))
+    mindist_calculate_cv_fused!(dist_val, scratch, coords, boundary, md.calc_type == :closest,
+                                Val(md isa CalcMinDist))
+    return nothing
+end
+
+dist_between_groups!(md::CalcMinDist, coords_1::AbstractGPUArray, coords_2, dist_val, boundary,
+                     args...; kwargs...) = dist_between_groups_gpu!(md, coords_1, coords_2, dist_val, boundary)
+
 """
     CalcMaxDist(calc_type=:closest)
 
@@ -307,6 +310,9 @@ function dist_between_groups!(md::CalcMaxDist, coords_1, coords_2, dist_val, bou
     dist_val .= d
     return nothing
 end
+
+dist_between_groups!(md::CalcMaxDist, coords_1::AbstractGPUArray, coords_2, dist_val, boundary,
+                     args...; kwargs...) = dist_between_groups_gpu!(md, coords_1, coords_2, dist_val, boundary)
 
 """
     CalcCMDist(calc_type=:closest)
