@@ -9,9 +9,11 @@
 #   ALLEGRO_BK=metal julia --project=<env>  benchmark/allegro.jl
 #   ALLEGRO_BK=cuda  julia --project=<env>  benchmark/allegro.jl
 using Molly, HDF5, JSON3, Random, Printf
-using Molly: SVector, to_device, allegro_package_total_energy, allegro_package_energy_and_forces,
+using LinearAlgebra: BLAS
+using Molly: SVector, to_device,
              compute_allegro_package_energy_ka, compute_allegro_package_energy_and_forces_ka,
-             build_allegro_package_gpu, pkg_build_edges, pkg_edges_cpu
+             build_allegro_package_gpu, pkg_build_edges
+const KA = Molly.KernelAbstractions
 
 const BK  = lowercase(get(ENV, "ALLEGRO_BK", "cpu"))
 const ROOT = dirname(@__DIR__)
@@ -27,7 +29,9 @@ elseif BK == "metal"
     using Metal
     const TT = Float32; backend() = Metal.MetalBackend(); devc(x) = to_device(x, MtlArray); sync() = Metal.synchronize()
 else
-    const TT = Float64; backend() = nothing; devc(x) = x; sync() = nothing
+    # CPU goes through the SAME KernelAbstractions path (batched BLAS gemms + threaded kernels) as the
+    # GPU backends — far faster than a per-edge scalar loop, and it uses Julia + BLAS threads.
+    const TT = Float64; backend() = KA.CPU(); devc(x) = x; sync() = nothing
 end
 
 function random_system(n, rng)
@@ -47,29 +51,26 @@ end
 
 m = load_allegro_package(H5; T=Float64)
 rng = MersenneTwister(1)
+# For CPU, match BLAS threads to the Julia thread count so the cpu_t<N> label is accurate (the matmuls
+# dominate and otherwise BLAS would use all cores even in a "t1" run).
+BK == "cpu" && BLAS.set_num_threads(Threads.nthreads())
 key = BK == "cpu" ? "cpu_t$(Threads.nthreads())" : BK
 println("native Allegro benchmark | backend=$BK T=$TT | sizes=$SIZES")
-gpu = BK == "cpu" ? nothing : build_allegro_package_gpu(m, backend(), TT)
+gpu = build_allegro_package_gpu(m, backend(), TT)
 
 rows = Dict{String,Any}()
 for n in SIZES
     coords, species, L = random_system(n, rng)
-    ms_e, ms_ef = if BK == "cpu"
-        ced = get(ENV, "ALLEGRO_INCLUDE_NL", "0") == "1" ? nothing : pkg_edges_cpu(coords, m.r_max)
-        (timeit(() -> allegro_package_total_energy(m, coords, species; edges=ced)),
-         timeit(() -> allegro_package_energy_and_forces(m, coords, species; edges=ced)))
-    else
-        cdev = devc([SVector{3,TT}(TT.(c)...) for c in coords])
-        # Precompute the neighbour list once (reused across MD steps in practice), so the timed region
-        # is the model evaluation — matching the nequip-allegro / allegro-jax benches, which also pass
-        # precomputed edges. ALLEGRO_INCLUDE_NL=1 instead times the full build+evaluate pipeline.
-        ed = get(ENV, "ALLEGRO_INCLUDE_NL", "0") == "1" ? nothing :
-             pkg_build_edges(cdev, TT(gpu.r_max), zero(TT), zero(TT), zero(TT); backend=backend())
-        (timeit(() -> compute_allegro_package_energy_ka(m, cdev, species;
-                        backend=backend(), T=TT, gpu=gpu, edges=ed)),
-         timeit(() -> compute_allegro_package_energy_and_forces_ka(m, cdev, species;
-                        backend=backend(), T=TT, gpu=gpu, edges=ed)))
-    end
+    cdev = devc([SVector{3,TT}(TT.(c)...) for c in coords])
+    # Precompute the neighbour list once (reused across MD steps in practice), so the timed region is
+    # the model evaluation — matching the nequip-allegro / allegro-jax benches, which also pass
+    # precomputed edges. ALLEGRO_INCLUDE_NL=1 instead times the full build+evaluate pipeline.
+    ed = get(ENV, "ALLEGRO_INCLUDE_NL", "0") == "1" ? nothing :
+         pkg_build_edges(cdev, TT(gpu.r_max), zero(TT), zero(TT), zero(TT); backend=backend())
+    ms_e  = timeit(() -> compute_allegro_package_energy_ka(m, cdev, species;
+                        backend=backend(), T=TT, gpu=gpu, edges=ed))
+    ms_ef = timeit(() -> compute_allegro_package_energy_and_forces_ka(m, cdev, species;
+                        backend=backend(), T=TT, gpu=gpu, edges=ed))
     rows["n$n"] = Dict("atoms"=>n, "box_A"=>L, "ms_energy"=>ms_e, "ms_energy_forces"=>ms_ef)
     @printf("  N=%5d  box=%.1f Å   energy %8.2f ms   energy+forces %8.2f ms\n", n, L, ms_e, ms_ef)
 end

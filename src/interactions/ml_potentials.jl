@@ -224,16 +224,18 @@ end
 function AtomsCalculators.potential_energy(sys::System{D, AT, T}, inter::AllegroPotential;
                                            kwargs...) where {D, AT, T}
     species = _allegro_species(inter, sys)
-    E = if AT <: Array
-        coords_A = [SVector{3,Float64}(c) for c in coords_to_angstrom(sys.coords)]
-        allegro_package_total_energy(inter.model, coords_A, species)
+    # Both CPU and GPU go through the KernelAbstractions path (batched BLAS + threaded kernels). On CPU
+    # this is far faster than a per-edge scalar loop; the backend is the only difference.
+    if AT <: Array
+        coords = [SVector{3,Float64}(c) for c in coords_to_angstrom(sys.coords)]
+        backend = KernelAbstractions.CPU(); TT = Float64
     else
         coords  = coords_to_angstrom(sys.coords)            # Å, unitless; stays on device
         backend = KernelAbstractions.get_backend(coords); TT = eltype(eltype(coords))
-        gpu     = allegro_package_device_model(inter, backend, TT)
-        compute_allegro_package_energy_ka(inter.model, coords, species;
-            backend=backend, T=TT, gpu=gpu, boundary=strip_boundary(sys.boundary))
     end
+    gpu = allegro_package_device_model(inter, backend, TT)
+    E = compute_allegro_package_energy_ka(inter.model, coords, species;
+            backend=backend, T=TT, gpu=gpu, boundary=strip_boundary(sys.boundary))
     return ml_energy_to_units(E, sys.energy_units)
 end
 
@@ -243,25 +245,22 @@ function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::AllegroPoten
                                   kwargs...) where {D, AT, T}
     species = _allegro_species(inter, sys)
     if AT <: Array
-        coords_A = [SVector{3,Float64}(c) for c in coords_to_angstrom(sys.coords)]
-        F = allegro_package_forces(inter.model, coords_A, species)   # eV/Å
-        @inbounds for i in eachindex(fs)
-            fs[i] += ml_force_to_units(SVector{D,Float64}(F[i]), sys.force_units)
-        end
+        coords = [SVector{3,Float64}(c) for c in coords_to_angstrom(sys.coords)]
+        backend = KernelAbstractions.CPU(); TT = Float64
     else
         coords  = coords_to_angstrom(sys.coords)
         backend = KernelAbstractions.get_backend(coords); TT = eltype(eltype(coords))
-        gpu     = allegro_package_device_model(inter, backend, TT)
-        _, Fdev = compute_allegro_package_energy_and_forces_ka(inter.model, coords, species;
-            backend=backend, T=TT, gpu=gpu, boundary=strip_boundary(sys.boundary))
-        Fh = Array(Fdev)                                            # (3, n) host, eV/Å
-        FU = eltype(eltype(fs))
-        inc = Vector{SVector{D, FU}}(undef, length(fs))
-        @inbounds for i in eachindex(fs)
-            fui = ml_force_to_units(SVector{D,Float64}(Fh[1, i], Fh[2, i], Fh[3, i]), sys.force_units)
-            inc[i] = SVector{D, FU}(ntuple(k -> fui[k], D))
-        end
-        fs .+= to_device(inc, AT)
     end
+    gpu = allegro_package_device_model(inter, backend, TT)
+    _, Fdev = compute_allegro_package_energy_and_forces_ka(inter.model, coords, species;
+        backend=backend, T=TT, gpu=gpu, boundary=strip_boundary(sys.boundary))
+    Fh = Array(Fdev)                                                # (3, n) host, eV/Å
+    FU = eltype(eltype(fs))
+    inc = Vector{SVector{D, FU}}(undef, length(fs))
+    @inbounds for i in eachindex(fs)
+        fui = ml_force_to_units(SVector{D,Float64}(Fh[1, i], Fh[2, i], Fh[3, i]), sys.force_units)
+        inc[i] = SVector{D, FU}(ntuple(k -> fui[k], D))
+    end
+    fs .+= to_device(inc, AT)
     return fs
 end
