@@ -834,6 +834,24 @@ end
         @test length(intersect([bias1], [bias2])) == 1
     end
 
+    # Scratch buffers are keyed by id, so a System rejects two biases sharing one (as a
+    # field-wise copy or a bias loaded from disk can give).
+    @testset "Biases sharing an id are rejected when building a System" begin
+        atoms = [Atom(mass=10.0u"g/mol") for _ in 1:4]
+        coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.5, 0.0, 0.0)u"nm",
+                  SVector(5.0, 0.0, 0.0)u"nm", SVector(7.0, 0.0, 0.0)u"nm"]
+        bias_type = SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm")
+        cv_a = CalcDist([1], [2], CalcSingleDist(), :wrap)
+        cv_b = CalcDist([3], [4], CalcSingleDist(), :wrap)
+        bias_a = BiasPotential(cv_a, bias_type)
+        bias_b = BiasPotential(cv_b, bias_type)
+        bias_same_id = BiasPotential{typeof(cv_b), typeof(bias_type)}(cv_b, bias_type, true, bias_a.id)
+        build(inters) = System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0u"nm"),
+                               general_inters=inters)
+        @test build((bias_a, bias_b)) isa System
+        @test_throws ArgumentError build((bias_a, bias_same_id))
+    end
+
     # A reused persistent `grad` buffer must not retain a stale force contribution from a
     # PREVIOUS step's CalcMinDist winning pair once the winner moves to a different pair.
     @testset "Stale-winner regression (CalcMinDist)" for AT in array_list

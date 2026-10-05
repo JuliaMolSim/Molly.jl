@@ -242,6 +242,11 @@ default for the built-in CV types), which unwraps bonded molecules across the pe
 using a GPU-native spanning-forest traversal. `CalcRMSD` performs a host-side Kabsch alignment
 step every call. Custom (non-built-in) CV types always round-trip coordinates/atoms/gradient to
 and from the host, since arbitrary user code isn't guaranteed GPU-safe.
+
+Each `BiasPotential` gets a unique internal id when it is constructed, and no two biases
+in a [`System`](@ref) may share an id (an `ArgumentError` is thrown when the `System` is built).
+To copy a bias with a different CV, build a new one with `BiasPotential(cv_type, bias_type)`
+instead of copying its fields.
 """
 struct BiasPotential{C, B}
     cv_type::C
@@ -259,6 +264,15 @@ end
 Base.:(==)(a::BiasPotential, b::BiasPotential) = a.cv_type == b.cv_type && a.bias_type == b.bias_type
 Base.isequal(a::BiasPotential, b::BiasPotential) = isequal(a.cv_type, b.cv_type) && isequal(a.bias_type, b.bias_type)
 Base.hash(b::BiasPotential, h::UInt) = hash(b.cv_type, hash(b.bias_type, hash(:BiasPotential, h)))
+
+# Scratch buffers are keyed by id, so no two biases in a System may share one.
+function check_bias_ids(general_inters)
+    ids = [inter.id for inter in values(general_inters) if inter isa BiasPotential]
+    length(ids) == length(Set(ids)) || throw(ArgumentError("BiasPotentials in general_inters " *
+        "share an id and would share scratch buffers, build each one with " *
+        "BiasPotential(cv_type, bias_type)"))
+    return nothing
+end
 
 # Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch GPU-only
 # fused-kernel state). One per bias in buffers.bias_scratch (force.jl), keyed on bias.id.
