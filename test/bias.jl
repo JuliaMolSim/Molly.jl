@@ -370,6 +370,10 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
         CubicBoundary(100.0),
     )
 
+    # CalcSingleDist needs exactly one atom per group, checked at construction on every backend
+    @test_throws ArgumentError CalcDist([1, 2], [3], CalcSingleDist())
+    @test_throws ArgumentError CalcDist([1], [2, 3], CalcSingleDist())
+    @test_throws ArgumentError CalcDist(Int[], [3], CalcSingleDist())
 end
 
 @testset "Bias potentials" begin

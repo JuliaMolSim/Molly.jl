@@ -540,6 +540,9 @@ struct CalcDist{DT}
     function CalcDist(atom_inds_1, atom_inds_2, dist_type::DT=CalcMinDist(),
                       correction=:pbc, has_virial = true) where DT
         check_correction_arg(correction)
+        if dist_type isa CalcSingleDist && (length(atom_inds_1) != 1 || length(atom_inds_2) != 1)
+            throw(ArgumentError("CalcSingleDist can only be used with atom groups containing one atom"))
+        end
         return new{DT}(atom_inds_1, atom_inds_2, dist_type, correction, has_virial)
     end
 end
