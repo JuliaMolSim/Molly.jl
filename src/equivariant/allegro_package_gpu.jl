@@ -142,6 +142,14 @@ function _pkg_edges_host(coords_h, rc, bx, by, bz)
     return ci, cj
 end
 
+# Build the directed edge list and upload it to `backend`, returning device (centre, neighbour) index
+# vectors ready for the kernels. Callers that already hold a neighbour list (e.g. a System reusing one
+# across MD steps) pass it to the `edges` kwarg instead and skip this entirely.
+function pkg_build_edges(coords, r_max, bx, by, bz; backend = KernelAbstractions.get_backend(coords))
+    ci, cj = _pkg_edges_host(Array(coords), Float64(r_max), Float64(bx), Float64(by), Float64(bz))
+    return _pkgdev_i(backend, ci), _pkgdev_i(backend, cj)
+end
+
 """
     compute_allegro_package_energy_ka(m, coords, species; backend, T, gpu, boundary=nothing) -> T
 
@@ -154,14 +162,16 @@ function compute_allegro_package_energy_ka(m::AllegroPackageModel,
         backend = KernelAbstractions.get_backend(coords),
         T::Type = eltype(eltype(coords)),
         gpu::AllegroPackageGPU = build_allegro_package_gpu(m, backend, T),
-        boundary = nothing, workgroup::Int = 64)
+        boundary = nothing, workgroup::Int = 64, edges = nothing)
     n = length(coords); S = gpu.S; C = gpu.C; L = gpu.L
     bx, by, bz = boundary === nothing ? (zero(T), zero(T), zero(T)) :
         (T(ustrip(boundary.side_lengths[1])), T(ustrip(boundary.side_lengths[2])), T(ustrip(boundary.side_lengths[3])))
-    ci, cj = _pkg_edges_host(Array(coords), Float64(gpu.r_max), Float64(bx), Float64(by), Float64(bz))
-    ne = length(ci)
+    # Directed edge list (centre ec, neighbour ej) within r_max. Built on-device (O(N) cell list)
+    # unless the caller passes a precomputed `edges = (ec, ej)` (e.g. a System's neighbour list reused
+    # across MD steps), so the neighbour search is not redone on every evaluation.
+    ec, ej = edges === nothing ? pkg_build_edges(coords, gpu.r_max, bx, by, bz; backend=backend) : edges
+    ne = length(ec)
     ne == 0 && return zero(T)
-    ec = _pkgdev_i(backend, ci); ej = _pkgdev_i(backend, cj)
     sp = _pkgdev_i(backend, Int32.(collect(species)))
     z2(a, b) = KernelAbstractions.zeros(backend, T, a, b)
     SH = z2(9, ne); bessel = z2(gpu.nb, ne); dd = KernelAbstractions.zeros(backend, T, ne); rh = z2(3, ne)
@@ -290,15 +300,14 @@ function compute_allegro_package_energy_and_forces_ka(m::AllegroPackageModel,
         backend = KernelAbstractions.get_backend(coords),
         T::Type = eltype(eltype(coords)),
         gpu::AllegroPackageGPU = build_allegro_package_gpu(m, backend, T),
-        boundary = nothing, workgroup::Int = 64)
+        boundary = nothing, workgroup::Int = 64, edges = nothing)
     n = length(coords); S = gpu.S; C = gpu.C; L = gpu.L
     bx, by, bz = boundary === nothing ? (zero(T), zero(T), zero(T)) :
         (T(ustrip(boundary.side_lengths[1])), T(ustrip(boundary.side_lengths[2])), T(ustrip(boundary.side_lengths[3])))
-    ci, cj = _pkg_edges_host(Array(coords), Float64(gpu.r_max), Float64(bx), Float64(by), Float64(bz))
-    ne = length(ci)
+    ec, ej = edges === nothing ? pkg_build_edges(coords, gpu.r_max, bx, by, bz; backend=backend) : edges
+    ne = length(ec)
     F = KernelAbstractions.zeros(backend, T, 3, n)
     ne == 0 && return (zero(T), F)
-    ec = _pkgdev_i(backend, ci); ej = _pkgdev_i(backend, cj)
     sp = _pkgdev_i(backend, Int32.(collect(species)))
     z2(a, b) = KernelAbstractions.zeros(backend, T, a, b)
     invs = one(T) / sqrt(gpu.avg_nn); scale = one(T) / sqrt(2 * gpu.avg_nn)

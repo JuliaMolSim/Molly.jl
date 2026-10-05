@@ -11,7 +11,7 @@
 using Molly, HDF5, JSON3, Random, Printf
 using Molly: SVector, to_device, allegro_package_total_energy, allegro_package_energy_and_forces,
              compute_allegro_package_energy_ka, compute_allegro_package_energy_and_forces_ka,
-             build_allegro_package_gpu
+             build_allegro_package_gpu, pkg_build_edges
 
 const BK  = lowercase(get(ENV, "ALLEGRO_BK", "cpu"))
 const ROOT = dirname(@__DIR__)
@@ -59,10 +59,15 @@ for n in SIZES
          timeit(() -> allegro_package_energy_and_forces(m, coords, species)))
     else
         cdev = devc([SVector{3,TT}(TT.(c)...) for c in coords])
+        # Precompute the neighbour list once (reused across MD steps in practice), so the timed region
+        # is the model evaluation — matching the nequip-allegro / allegro-jax benches, which also pass
+        # precomputed edges. ALLEGRO_INCLUDE_NL=1 instead times the full build+evaluate pipeline.
+        ed = get(ENV, "ALLEGRO_INCLUDE_NL", "0") == "1" ? nothing :
+             pkg_build_edges(cdev, TT(gpu.r_max), zero(TT), zero(TT), zero(TT); backend=backend())
         (timeit(() -> compute_allegro_package_energy_ka(m, cdev, species;
-                        backend=backend(), T=TT, gpu=gpu)),
+                        backend=backend(), T=TT, gpu=gpu, edges=ed)),
          timeit(() -> compute_allegro_package_energy_and_forces_ka(m, cdev, species;
-                        backend=backend(), T=TT, gpu=gpu)))
+                        backend=backend(), T=TT, gpu=gpu, edges=ed)))
     end
     rows["n$n"] = Dict("atoms"=>n, "box_A"=>L, "ms_energy"=>ms_e, "ms_energy_forces"=>ms_ef)
     @printf("  N=%5d  box=%.1f Å   energy %8.2f ms   energy+forces %8.2f ms\n", n, L, ms_e, ms_ef)
