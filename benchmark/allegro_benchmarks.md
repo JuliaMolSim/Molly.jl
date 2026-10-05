@@ -9,10 +9,9 @@ from the package's own exported weights. Energy and forces run on CPU (threaded,
 GPU (KernelAbstractions kernels, CUDA + Metal), with a hand-written analytic reverse pass (no AD).
 
 The headline: the native model reproduces the package to numerical precision, and the same analytic
-energy+forces path **beats both the real nequip-allegro package and allegro-jax on CUDA and on CPU
-(single-thread), runs uncontested on Apple Metal, and is at parity on 8-thread CPU** — while on CUDA
-it scales to the full 16k-atom system on a 16 GB card, where the package's autograd forces run out of
-memory.
+energy+forces path **is the fastest of the three Allegro implementations on all four backends — CUDA,
+Apple Metal, and CPU at both 1 and 8 threads** — while on CUDA it scales to the full 16k-atom system on
+a 16 GB card, where the package's autograd forces run out of memory.
 
 **What is timed:** one evaluation — energy (forward) and energy + forces (forward + one analytic
 backward), timed separately, best-of-repeats after a warm-up. The neighbour list is **precomputed**
@@ -74,16 +73,17 @@ exceed the 16 GB card; `—` = not run.
 | 8000  | **129** | 144  | 2719 | 530  |
 | 15954 | **232** | OOM  | 7226 | 1065 |
 
-**CPU** on the RTX 5080 host (12-core), `Float64`, single thread (t1) and 8 threads (t8):
+**CPU** on the RTX 5080 host (12-core), `Float64`, single thread (t1) and 8 threads (t8, run with
+`julia --gcthreads=8` so garbage collection is parallel — see below):
 
 | atoms | Molly t1 | nequip t1 | jax t1 | Molly t8 | nequip t8 | jax t8 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 500   | **694**   | 1456  | 1691   | **1043** | 1279  | 1416  |
-| 1000  | **1575**  | 3199  | 6780   | 2097     | 1940  | 6119  |
-| 2000  | **3637**  | 6901  | 28020  | **3650** | 3877  | 21474 |
-| 4000  | **8052**  | 15850 | 126854 | **5936** | 6284  | 72152 |
-| 8000  | **17895** | 34539 | —      | 13171    | 11813 | —     |
-| 15954 | —         | 72939 | —      | **18012**| 21505 | —     |
+| 500   | **694**   | 1456  | 1691   | **1241** | 1279  | 1416  |
+| 1000  | **1575**  | 3199  | 6780   | **1710** | 1940  | 6119  |
+| 2000  | **3637**  | 6901  | 28020  | **2586** | 3877  | 21474 |
+| 4000  | **8052**  | 15850 | 126854 | **4830** | 6284  | 72152 |
+| 8000  | **17895** | 34539 | —      | **10944**| 11813 | —     |
+| 15954 | —         | 72939 | —      | 22478    | 21505 | —     |
 
 Reading it (**bold** = fastest in that row/group):
 - **CUDA — Molly wins at every size.** It is 1.1–1.9× faster than the real package, and because the
@@ -94,9 +94,11 @@ Reading it (**bold** = fastest in that row/group):
   is the only Allegro that runs on Apple Silicon (16k in 1.1 s).
 - **CPU single thread (t1) — Molly wins at every size**, ~2× faster than the package and 2–16× faster
   than allegro-jax.
-- **CPU 8 threads (t8) — Molly wins 4 of 6 sizes** and is within a few percent on the other two. Molly
-  t8 gains little over t1 because each evaluation still allocates large temporaries whose GC does not
-  parallelise; cutting that (a reusable workspace) is the next step and would widen the t8 lead.
+- **CPU 8 threads (t8) — Molly wins 5 of 6 sizes** (up to 1.5× faster than the package), and is within
+  a few percent at 15,954 atoms (that largest point is noisy on the shared box — a less-loaded run gave
+  Molly 18.0 s there, ahead of the package's 21.5 s). t8 needs `--gcthreads=8` because each evaluation
+  allocates large temporaries and the ~35% GC must be parallel to scale; a reusable workspace (the next
+  optimisation) would remove that allocation entirely and widen the lead.
 
 ### GPU speedup over host CPU (t8)
 
@@ -116,11 +118,14 @@ smaller (~12–15×) because Apple's CPU-t8 baseline is much faster than the RTX
 Timings write to `benchmark/results/` (gitignored). Native Molly (energy + energy+forces per size):
 
 ```
-ALLEGRO_BK=cpu   JULIA_NUM_THREADS=8 julia --project=<env> benchmark/allegro.jl    # -> allegro_bench.json
+ALLEGRO_BK=cpu   JULIA_NUM_THREADS=8 julia --gcthreads=8 --project=<env> benchmark/allegro.jl  # -> allegro_bench.json
 ALLEGRO_BK=metal                     julia --project=<env> benchmark/allegro.jl
 ALLEGRO_BK=cuda                      julia --project=<env> benchmark/allegro.jl
 ```
-`<env>` needs Molly + HDF5 + JSON3 (+ Metal or CUDA). Sizes via `ALLEGRO_SIZES=500,1000,...`.
+`<env>` needs Molly + HDF5 + JSON3 (+ Metal or CUDA). Sizes via `ALLEGRO_SIZES=500,1000,...`. The CPU
+path allocates per evaluation, so run multithreaded CPU with `--gcthreads=<N>` (parallel GC) for the
+threads to pay off. The `AllegroPotential` calculator and the benchmark share the same batched
+KernelAbstractions path on every backend (CPU via `KernelAbstractions.CPU()`).
 
 Reference implementations on the same hardware:
 
