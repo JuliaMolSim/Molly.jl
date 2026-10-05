@@ -1064,6 +1064,7 @@ Exclusions and special pairs can be given with `excluded_pairs` and `special_pai
 The memory used grows linearly with the number of atoms, as does the time taken per step.
 On a NVIDIA RTX A6000 (48 GB), 160 million atoms fit and 168 million run out of memory, which is around 300 bytes per atom.
 Systems set up from a structure file with a force field use more memory per atom, for example a solvated protein with PME uses around 1 KB per atom.
+On GPUs other than NVIDIA ones, [`GPUCellListNeighborFinder`](@ref) stores an explicit list of pairs, which takes more memory: with `ragged=false` the same example fits 23 million atoms on the same GPU, around 2.2 KB per atom, and a solvated protein with PME fits 11.6 million atoms.
 
 ## Variations of the Morse potential
 

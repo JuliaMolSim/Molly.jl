@@ -268,7 +268,9 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             special = special,
             n_steps = 1,
             max_neighbors = ref_nfinder.max_neighbors,
-            output = ref_nfinder.output,
+            output = :molly_pairs,
+            ragged = ref_nfinder.ragged,
+            strictness = :nowarn,
         )
     elseif ref_nfinder isa TreeNeighborFinder
         return TreeNeighborFinder(

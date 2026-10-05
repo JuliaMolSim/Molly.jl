@@ -508,6 +508,9 @@ energy calculations.
 Every buffer takes memory proportional to the number of atoms or the number of
 exceptions, apart from the interacting-tile vectors which are sized from the number
 of atom blocks.
+The Morton order, block, tile, exception and reordered buffers are only used by the
+CUDA tiled kernels of [`GPUNeighborFinder`](@ref), so they are empty for other neighbor
+finders.
 =#
 mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR, VR, AR,
                           fs_re}
@@ -653,12 +656,14 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                        for_pe::Bool=false) where {D, T, TH}
     N = length(sys)
     C = eltype(eltype(sys.coords))
-    n_blocks = cld(N, 32)
+    tiled = sys.neighbor_finder isa GPUNeighborFinder
+    N_tiled = (tiled ? N : 0)
+    n_blocks = cld(N_tiled, 32)
     n_upper_tiles = upper_tile_count(n_blocks)
     backend = get_backend(sys.coords)
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
-    fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N)
+    fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N_tiled)
     pe_vec_noun  = KernelAbstractions.zeros(backend, TH, 1)
     virial       = zeros(TH, D, D) .* sys.energy_units
     virial_nu    = KernelAbstractions.zeros(backend, TH, D, D)
@@ -671,12 +676,12 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     n_tree_nodes = block_tree_n_nodes(n_blocks)
     tree_mins = KernelAbstractions.zeros(backend, C, n_tree_nodes, D)
     tree_maxs = KernelAbstractions.zeros(backend, C, n_tree_nodes, D)
-    morton_seq = KernelAbstractions.zeros(backend, Int32, N)
-    morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N)
-    morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
-    morton_seq_inv = KernelAbstractions.zeros(backend, Int32, N)
+    morton_seq = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    morton_seq_inv = KernelAbstractions.zeros(backend, Int32, N_tiled)
     # Sized from the sparse exception lists, which only GPUNeighborFinder reads here
-    if sys.neighbor_finder isa GPUNeighborFinder
+    if tiled
         n_excluded_entries = length(sys.neighbor_finder.eligible.partners)
         n_special_entries = length(sys.neighbor_finder.special.partners)
     else
@@ -696,11 +701,11 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
     interacting_tiles_overflow = KernelAbstractions.zeros(backend, Int32, 1)
 
-    coords_reordered = zero(sys.coords)
-    velocities_reordered = zero(sys.velocities)
-    atoms_reordered = copy(sys.atoms)
+    coords_reordered = (tiled ? zero(sys.coords) : similar(sys.coords, 0))
+    velocities_reordered = (tiled ? zero(sys.velocities) : similar(sys.velocities, 0))
+    atoms_reordered = (tiled ? copy(sys.atoms) : similar(sys.atoms, 0))
 
-    if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
+    if !for_pe && tiled
         sys.neighbor_finder.initialized = false
     end
 

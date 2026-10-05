@@ -629,10 +629,7 @@ end
     for AT in array_list[2:end]
         atoms = to_device([Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                            for _ in 1:n_atoms], AT)
-        eligible = to_device(trues(n_atoms, n_atoms), AT)
-        special = to_device(falses(n_atoms, n_atoms), AT)
-        nf_ref = DistanceNeighborFinder(eligible=eligible, special=special,
-                                        dist_cutoff=1.2u"nm")
+        nf_ref = DistanceNeighborFinder(n_atoms=n_atoms, dist_cutoff=1.2u"nm", array_type=AT)
 
         for trial_find_neighbors in (false, true)
             sys = System(
@@ -641,9 +638,8 @@ end
                 boundary=init_boundary,
                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
                                               use_neighbors=true),),
-                neighbor_finder=GPUCellListNeighborFinder(eligible=eligible,
-                                                          special=special, n_steps=10,
-                                                          dist_cutoff=1.2u"nm"),
+                neighbor_finder=GPUCellListNeighborFinder(n_atoms=n_atoms, n_steps=10,
+                                                          dist_cutoff=1.2u"nm", array_type=AT),
                 loggers=(volume=VolumeLogger(10),),
             )
             rng = Xoshiro(2024)

@@ -1557,14 +1557,14 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         )
     elseif neighbor_finder_type in (nothing, GPUCellListNeighborFinder) &&
                 AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors)
-        excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
         neighbor_finder = GPUCellListNeighborFinder(
-            n_atoms=size(eligible, 1),
-            excluded_pairs=excluded_pairs,
-            special_pairs=special_pairs,
+            eligible=eligible,
+            special=special,
             n_steps=neighbor_finder_n_steps,
             dist_cutoff=T(dist_neighbors),
-            device_vector_type=AT{Int32, 1},
+            array_type=AT,
+            ragged=false,
+            strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary))

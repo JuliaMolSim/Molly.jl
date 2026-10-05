@@ -1314,7 +1314,7 @@ end
             @testset "Sparse exceptions" begin
                 Random.seed!(104)
 
-                # Dense masks are converted to per-atom exception lists and not kept
+                # Dense masks are converted to sparse matrices and not kept
                 n_small = 4
                 eligible_small = trues(n_small, n_small)
                 special_small = falses(n_small, n_small)
@@ -1333,9 +1333,11 @@ end
                 )
 
                 @test finder.n_atoms == n_small
-                @test length(finder.excluded_js) == 1
-                @test length(finder.special_js) == 1
-                @test !hasproperty(finder, :eligible)
+                @test finder.eligible isa SparsePairMatrix
+                @test finder.special isa SparsePairMatrix
+                @test Molly.neighbor_matrix_on_gpu(finder.eligible)
+                @test Molly.n_listed_pairs(finder.eligible) == 1
+                @test Molly.n_listed_pairs(finder.special) == 1
 
                 eligible_rt, special_rt = Molly.neighbor_finder_masks(finder, n_small)
 
@@ -1346,7 +1348,7 @@ end
                 Molly.append_excluded_pairs!(finder, [(2, 4)])
                 eligible_app, special_app = Molly.neighbor_finder_masks(finder, n_small)
 
-                @test length(finder.excluded_js) == 2
+                @test Molly.n_listed_pairs(finder.eligible) == 2
                 @test !eligible_app[2, 4] && !eligible_app[4, 2]
                 @test special_app == special_small
 
@@ -1393,10 +1395,130 @@ end
                 canonical(nl) = Set((min(i, j), max(i, j), sp)
                                     for (i, j, sp) in Array(nl.list[1:nl.n]))
 
-                @test maximum(diff(Array(sys.neighbor_finder.excluded_starts))) > 4
-                @test maximum(diff(Array(sys.neighbor_finder.special_starts))) > 4
+                # The kernels compare against the partners before an atom, so some atoms
+                #   need more of those than are cached
+                function max_earlier_partners(m)
+                    starts, partners = Array(m.starts), Array(m.partners)
+                    return maximum(count(<(i), partners[starts[i]:(starts[i + 1] - 1)])
+                                   for i in 1:(length(starts) - 1))
+                end
+                n_cached = Molly.N_CACHED_EXCEPTIONS
+                @test max_earlier_partners(sys.neighbor_finder.eligible) > n_cached
+                @test max_earlier_partners(sys.neighbor_finder.special) > n_cached
                 @test result.n == reference.n
                 @test canonical(result) == canonical(reference)
+
+                # Sparse matrices are used as they are, including an eligible matrix that
+                #   lists the pairs that can interact rather than the excluded ones
+                excluded_pairs = Molly.ineligible_pairs(eligible)
+                special_pairs = Molly.true_pairs(special)
+                allowed_pairs = [(i, j) for i in 1:n_atoms for j in (i + 1):n_atoms
+                                 if eligible[i, j] && rand() < 0.5]
+                eligible_allowed = falses(n_atoms, n_atoms)
+                for (i, j) in allowed_pairs
+                    eligible_allowed[i, j] = true
+                    eligible_allowed[j, i] = true
+                end
+                for (eligible_sparse, eligible_dense) in (
+                            (SparsePairMatrix(n_atoms, excluded_pairs; listed=false,
+                                              array_type=AT), eligible),
+                            (SparsePairMatrix(n_atoms, allowed_pairs; listed=true,
+                                              array_type=AT), eligible_allowed))
+                    special_sparse = SparsePairMatrix(n_atoms, special_pairs; listed=true,
+                                                      array_type=AT)
+                    sys_sparse, finder_sparse = gpu_cell_list_test_system(
+                        coords;
+                        output=:molly_pairs,
+                        cutoff=1.0f0,
+                        boundary=boundary,
+                        eligible=eligible_sparse,
+                        special=special_sparse,
+                    )
+                    @test finder_sparse.eligible.listed == eligible_sparse.listed
+                    nf_dense = DistanceNeighborFinder(
+                        eligible=to_device(eligible_dense, AT),
+                        special=to_device(special, AT),
+                        dist_cutoff=1.0f0,
+                    )
+                    result_sparse = find_neighbors(sys_sparse)
+                    reference_dense = find_neighbors(sys_sparse, nf_dense)
+                    @test result_sparse.n == reference_dense.n
+                    @test canonical(result_sparse) == canonical(reference_dense)
+                end
+
+                # The same pairs from the keyword arguments, with no special matrix
+                finder_kw = GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:molly_pairs,
+                    n_atoms=n_atoms,
+                    excluded_pairs=excluded_pairs,
+                    array_type=AT,
+                )
+                @test Molly.n_listed_pairs(finder_kw.special) == 0
+                result_kw = find_neighbors(sys, finder_kw)
+                @test result_kw.n == reference.n
+                @test all(!sp for (_, _, sp) in Array(result_kw.list[1:result_kw.n]))
+
+                # A large sparse matrix is not made dense on construction
+                n_big = 200_000
+                eligible_big = SparsePairMatrix(n_big, [(1, 2)]; listed=false, array_type=AT)
+                finder_big = GPUCellListNeighborFinder(dist_cutoff=1.0f0,
+                                                       eligible=eligible_big)
+                @test (@allocated GPUCellListNeighborFinder(dist_cutoff=1.0f0,
+                                                            eligible=eligible_big)) < 10^7
+                @test size(finder_big.special) == (n_big, n_big)
+            end
+
+            @testset "Pairs without the per-atom matrix" begin
+                Random.seed!(105)
+                n_atoms = 400
+                canonical_ragged(nl) = Set((min(i, j), max(i, j), sp)
+                                           for (i, j, sp) in Array(nl.list[1:nl.n]))
+                excluded = [(i, j) for i in 1:n_atoms for j in (i + 1):min(i + 6, n_atoms)]
+                specials = [(i, i + 7) for i in 1:(n_atoms - 7)]
+                eligible = SparsePairMatrix(n_atoms, excluded; listed=false, array_type=AT)
+                special = SparsePairMatrix(n_atoms, specials; listed=true, array_type=AT)
+                atoms = to_device([Molly.Atom(index=i, mass=1.0f0) for i in 1:n_atoms], AT)
+                for boundary in (CubicBoundary(4.0f0), TriclinicBoundary(SVector(
+                                    SVector{3,Float32}(4.0, 0.0, 0.0),
+                                    SVector{3,Float32}(0.4, 4.2, 0.0),
+                                    SVector{3,Float32}(0.3, 0.5, 4.4))))
+                    bv = (boundary isa TriclinicBoundary ? boundary.basis_vectors :
+                          SVector(SVector{3,Float32}(boundary[1], 0, 0),
+                                  SVector{3,Float32}(0, boundary[2], 0),
+                                  SVector{3,Float32}(0, 0, boundary[3])))
+                    coords = to_device([bv[1] * rand(Float32) + bv[2] * rand(Float32) +
+                                        bv[3] * rand(Float32) for _ in 1:n_atoms], AT)
+                    for output in (:molly_pairs, :geometric_pairs)
+                        lists = map((true, false)) do ragged
+                            nf = GPUCellListNeighborFinder(dist_cutoff=1.0f0, output=output,
+                                        ragged=ragged, eligible=eligible, special=special)
+                            sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                                         neighbor_finder=nf, force_units=NoUnits,
+                                         energy_units=NoUnits)
+                            nl = find_neighbors(sys)
+                            # A rebuild into the buffers of the previous list
+                            nl_reused = find_neighbors(sys, nf, nl, 0, true)
+                            return nl, nl_reused
+                        end
+                        (nl_ragged, _), (nl_pairs, nl_pairs_reused) = lists
+                        @test has_ragged_neighbors(nl_ragged)
+                        @test !has_ragged_neighbors(nl_pairs)
+                        @test_throws ArgumentError ragged_neighbors(nl_pairs)
+                        @test_throws ArgumentError ragged_counts(nl_pairs)
+                        @test nl_pairs.n == nl_ragged.n > 0
+                        @test canonical_ragged(nl_pairs) == canonical_ragged(nl_ragged)
+                        @test canonical_ragged(nl_pairs_reused) == canonical_ragged(nl_ragged)
+                        @test all(i > j for (i, j, _) in Array(nl_pairs.list[1:nl_pairs.n]))
+                        @test any(sp for (_, _, sp) in Array(nl_pairs.list[1:nl_pairs.n])) ==
+                                                            (output == :molly_pairs)
+                    end
+                end
+                @test_throws ArgumentError GPUCellListNeighborFinder(dist_cutoff=1.0f0,
+                                                        output=:ragged, ragged=false)
+                @test occursin("ragged = false", sprint(show, GPUCellListNeighborFinder(
+                                        dist_cutoff=1.0f0, output=:geometric_pairs,
+                                        ragged=false)))
             end
 
             @testset "Triclinic boundary" begin
@@ -1631,7 +1753,8 @@ end
                     eligible=trues(3, 3),
                 )
 
-                # The masks have to be on the device for the search kernels
+                # The pairs have to end up on the device for the search kernels, so
+                #   matrices on the CPU need array_type
                 @test_throws ArgumentError GPUCellListNeighborFinder(
                     dist_cutoff=1.0f0,
                     output=:molly_pairs,

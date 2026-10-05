@@ -696,7 +696,12 @@ end
         else
             # The forces still correspond to the restored coordinates
             sys.coords .= coords_prev
-            neighbors = neighbors_prev
+            if neighbors !== neighbors_prev
+                # The previous list can not be reused since a neighbor finder may have
+                #   reused the buffers behind it for a trial list
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                           n_threads=n_threads)
+            end
             n_hist = 0
         end
 

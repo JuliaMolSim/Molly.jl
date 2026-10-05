@@ -394,10 +394,10 @@ end
             )
         elseif nft == GPUCellListNeighborFinder
             neighbor_finder = GPUCellListNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
-                special=to_device(falses(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 n_steps=10,
                 dist_cutoff=T(1.5)u"nm",
+                array_type=AT,
             )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(

@@ -770,8 +770,9 @@ end
     GPUCellListNeighborList(ragged_counts, ragged_neighbors, n, list, state)
 
 The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
-containing a padded per-atom neighbor matrix and, unless the finder uses
-`output=:ragged`, a flat half-pair list whose first `n` entries of `list` are valid.
+containing a padded per-atom neighbor matrix, unless the finder uses `ragged=false`,
+and, unless the finder uses `output=:ragged`, a flat half-pair list whose first `n`
+entries of `list` are valid.
 
 Use [`neighbor_pairs`](@ref) to get the pairs and [`ragged_neighbors`](@ref) to get
 the per-atom matrix rather than reading the fields, since the layout is not part of
@@ -794,12 +795,12 @@ struct GPUCellListNeighborList{C,R,L,S}
         list::L,
         state::S,
     ) where {C,R,L,S}
-        size(ragged_neighbors, 2) == length(ragged_counts) || throw(
-            ArgumentError(
-                "the second dimension of ragged_neighbors must equal " *
-                "the number of atoms",
-            ),
-        )
+        # Both are nothing when the per-atom matrix is not stored
+        if !(isnothing(ragged_neighbors) && isnothing(ragged_counts)) &&
+                !(size(ragged_neighbors, 2) == length(ragged_counts))
+            throw(ArgumentError("the second dimension of ragged_neighbors must equal " *
+                                "the number of atoms"))
+        end
 
         n_int = Int(n)
 
