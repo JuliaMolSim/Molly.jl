@@ -214,6 +214,9 @@ function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
     end
 end
 
+const BIAS_POTENTIAL_ID_COUNTER = Threads.Atomic{UInt64}(0)
+next_bias_potential_id() = Threads.atomic_add!(BIAS_POTENTIAL_ID_COUNTER, UInt64(1))
+
 """
     BiasPotential(cv_type, bias_type)
 
@@ -240,9 +243,6 @@ using a GPU-native spanning-forest traversal. `CalcRMSD` performs a host-side Ka
 step every call. Custom (non-built-in) CV types always round-trip coordinates/atoms/gradient to
 and from the host, since arbitrary user code isn't guaranteed GPU-safe.
 """
-const BIAS_POTENTIAL_ID_COUNTER = Threads.Atomic{UInt64}(0)
-next_bias_potential_id() = Threads.atomic_add!(BIAS_POTENTIAL_ID_COUNTER, UInt64(1))
-
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
