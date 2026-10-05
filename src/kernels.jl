@@ -1,4 +1,4 @@
-# KernelAbstractions.jl kernels, CUDA kernels are in an extension
+# KernelAbstractions.jl kernels, the tiled kernels of GPUNeighborFinder are in gpu_tiles.jl
 
 kernel_maybe_velocity(velocities, i) = velocities[i]
 kernel_maybe_velocity(::Nothing, i) = nothing
@@ -608,8 +608,11 @@ function sorted_morton_seq!(buffers, coords, w, morton_bits)
     n_threads_gpu = 32
     kernel! = sorted_morton_seq_kernel!(backend, n_threads_gpu)
     kernel!(buffers.morton_seq_buffer_1, coords, w, morton_bits; ndrange=length(coords))
-    AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1;
-                                 temp=buffers.morton_seq_buffer_2, block_size=512)
+    # AcceleratedKernels 0.5 chooses a sort on the host itself, and takes the block size
+    #   of the GPU merge sort through the algorithm
+    alg = backend isa KernelAbstractions.CPU ? AcceleratedKernels.Auto() :
+                                               AcceleratedKernels.MergeSort(block_size=512)
+    AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1; alg=alg)
     return buffers
 end
 
