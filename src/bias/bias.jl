@@ -255,6 +255,11 @@ function BiasPotential(cv_type::C, bias_type::B) where {C, B}
                                next_bias_potential_id())
 end
 
+# id is the scratch key only; equality and hashing ignore it (thermo.jl's master-system intersect).
+Base.:(==)(a::BiasPotential, b::BiasPotential) = a.cv_type == b.cv_type && a.bias_type == b.bias_type
+Base.isequal(a::BiasPotential, b::BiasPotential) = isequal(a.cv_type, b.cv_type) && isequal(a.bias_type, b.bias_type)
+Base.hash(b::BiasPotential, h::UInt) = hash(b.cv_type, hash(b.bias_type, hash(:BiasPotential, h)))
+
 # Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch GPU-only
 # fused-kernel state). One per bias in buffers.bias_scratch (force.jl), keyed on bias.id.
 mutable struct BiasScratch

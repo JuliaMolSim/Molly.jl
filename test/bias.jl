@@ -823,9 +823,11 @@ end
         cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
         bias1 = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
         bias2 = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
-        @test bias1.cv_type == bias2.cv_type && bias1.bias_type == bias2.bias_type
         @test !(bias1 === bias2) # the id field makes them distinct, as intended
         @test bias1.id != bias2.id
+        # ...but they compare equal, so thermo.jl's intersect can move a shared restraint
+        @test bias1 == bias2 && isequal(bias1, bias2) && hash(bias1) == hash(bias2)
+        @test length(intersect([bias1], [bias2])) == 1
     end
 
     # A reused persistent `grad` buffer must not retain a stale force contribution from a
