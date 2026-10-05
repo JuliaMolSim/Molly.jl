@@ -834,9 +834,10 @@ end
         @test length(intersect([bias1], [bias2])) == 1
     end
 
-    # Scratch buffers are keyed by id, so a System rejects two biases sharing one (as a
-    # field-wise copy or a bias loaded from disk can give).
-    @testset "Biases sharing an id are rejected when building a System" begin
+    # A System rejects biases that would corrupt the scratch buffers or run the unchecked kernels
+    # out of range: two biases sharing an id (as a field-wise copy or a bias loaded from disk
+    # can give), and atom indices outside the system.
+    @testset "Invalid biases are rejected when building a System" begin
         atoms = [Atom(mass=10.0u"g/mol") for _ in 1:4]
         coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.5, 0.0, 0.0)u"nm",
                   SVector(5.0, 0.0, 0.0)u"nm", SVector(7.0, 0.0, 0.0)u"nm"]
@@ -850,6 +851,15 @@ end
                                general_inters=inters)
         @test build((bias_a, bias_b)) isa System
         @test_throws ArgumentError build((bias_a, bias_same_id))
+
+        for cv in (CalcDist([1], [5], CalcSingleDist(), :wrap), CalcDist([1, 2], [3, 9], CalcMinDist(), :wrap),
+                   CalcDist([1, 2], [3, 6], CalcMaxDist(), :wrap), CalcDist([0, 2], [3, 4], CalcCMDist(), :wrap),
+                   CalcRg([1, 2, 7], :wrap), CalcRMSD(coords[1:3], [1, 2, 6], [], :wrap))
+            @test_throws ArgumentError build((BiasPotential(cv, bias_type),))
+        end
+        @test_throws ArgumentError build((BiasPotential(CalcTorsion([1, 2, 3, 5], :wrap),
+                                                        SquareBias(400.0u"kJ * mol^-1", 1.0)),))
+        @test build((BiasPotential(CalcRg([], :wrap), bias_type),)) isa System # empty means all atoms
     end
 
     # A reused persistent `grad` buffer must not retain a stale force contribution from a

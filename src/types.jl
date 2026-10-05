@@ -1227,6 +1227,7 @@ function System(;
                             "type $(typeof(general_inters))"))
     end
     check_bias_ids(general_inters)
+    check_bias_atom_inds(general_inters, n_atoms)
 
     if !all(i -> i isa PairwiseInteraction, values(pairwise_inters))
         throw(ArgumentError("not all pairwise_inters are a subtype of PairwiseInteraction, " *

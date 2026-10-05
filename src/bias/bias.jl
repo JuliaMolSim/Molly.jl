@@ -274,6 +274,19 @@ function check_bias_ids(general_inters)
     return nothing
 end
 
+# The CV kernels run without bounds checks, so atom indices must be in range before they get there.
+function check_bias_atom_inds(general_inters, n_atoms)
+    for inter in values(general_inters)
+        inter isa BiasPotential || continue
+        for inds in atom_index_lists(inter.cv_type), i in inds
+            1 <= i <= n_atoms || throw(ArgumentError("atom index $i of the " *
+                "$(nameof(typeof(inter.cv_type))) in a BiasPotential is outside the $n_atoms " *
+                "atoms of the system"))
+        end
+    end
+    return nothing
+end
+
 # Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch GPU-only
 # fused-kernel state). One per bias in buffers.bias_scratch (force.jl), keyed on bias.id.
 mutable struct BiasScratch

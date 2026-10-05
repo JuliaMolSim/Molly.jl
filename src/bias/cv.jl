@@ -1673,6 +1673,11 @@ uses_builtin_cv_gradient(::CalcRMSD) = true
 uses_builtin_cv_gradient(::CalcTorsion) = true
 uses_builtin_cv_gradient(::Any) = false
 
+# The atom index lists a CV owns, checked against the system size in check_bias_atom_inds.
+atom_index_lists(cv::CalcDist) = (cv.atom_inds_1, cv.atom_inds_2)
+atom_index_lists(cv::Union{CalcRg, CalcRMSD, CalcTorsion}) = (cv.atom_inds,)
+atom_index_lists(cv) = () # custom CV types are not checked
+
 # Buffer-shape helpers, deduplicating the grad/d_buf allocation pattern used by every allocating
 # cv_gradient/calculate_cv wrapper above and by BiasPotential's lazy buffer init (bias.jl).
 zero_cv_grad_buffer(cv, coords)  = ustrip_vec.(zero(coords))
