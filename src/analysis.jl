@@ -101,7 +101,8 @@ coordinates correspond to the same periodic image.
 """
 function radius_gyration(coords, atoms)
     atom_masses = mass.(atoms)
-    center = sum(coords .* atom_masses) / sum(atom_masses) # Center of mass
+    total_mass = sum(atom_masses)
+    center = sum(coords .* atom_masses) / total_mass # Center of mass
     I = sum(sum_abs2.(coords .- (center,)) .* atom_masses)
     return sqrt(I / total_mass)
 end
