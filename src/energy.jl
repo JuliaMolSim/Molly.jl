@@ -262,7 +262,8 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, strictness=strictness),
+                                              n_threads=n_threads, buffers=buffers,
+                                              strictness=strictness),
         )
     end
 
@@ -524,7 +525,8 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                n_threads=n_threads, strictness=strictness),
+                                n_threads=n_threads, buffers=buffers,
+                                strictness=strictness),
         )
     end
 

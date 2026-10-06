@@ -304,6 +304,20 @@ function has_interaction_virial(buffers, step_n::Integer)
     return has_interaction_virial(buffers.validity, step_n)
 end
 
+# Whether a general_inters entry needs sys's unwrapped coordinates this step (true only for a
+# BiasPotential with correction==:pbc, src/bias/bias.jl).
+bias_needs_unwrap(inter) = false
+
+# unwrap_molecules(sys), computed at most once per forces! call and cached on buffers so every
+# attached BiasPotential with correction==:pbc shares it. Reset to nothing at the top of each
+# forces! call, since forces! can run more than once at the same step_n (e.g. MTS substeps).
+function ensure_unwrapped_coords!(buffers, sys)
+    if isnothing(buffers.unwrapped_coords[])
+        buffers.unwrapped_coords[] = unwrap_molecules(sys)
+    end
+    return buffers.unwrapped_coords[]
+end
+
 function has_constraint_virial(buffers, step_n::Integer)
     return has_constraint_virial(buffers.validity, step_n)
 end
@@ -377,12 +391,13 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
+    bias_scratch::Any               # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersGPU
     fs_mat::FM
     validity::BufferValidity
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
-                    kin_tensor, pres_tensor, fs_mat)
+                    kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = zero(vir_nounits)
     constraint_virial_chunks = similar(vir_chunks)
@@ -395,19 +410,19 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      fs_mat, BufferValidity())
+                      bias_scratch, fs_mat, BufferValidity())
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                     constraint_virial, constraint_virial_nounits,
-                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat)
+                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
     return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial, constraint_virial_nounits,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      fs_mat, BufferValidity())
+                      bias_scratch, fs_mat, BufferValidity())
 end
 
 function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH}
@@ -429,6 +444,11 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
     # Use an empty matrix if no virtual sites to keep this function type stable
     n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
     fs_mat = zeros(TU, D, n_fs_mat_cols)
+
+    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
+                                             for inter in values(sys.general_inters)
+                                             if inter isa BiasPotential)
+
     return BuffersCPU(
         fs_nounits, fs_chunks,
         vir, vir_nounits, vir_chunks,
@@ -438,6 +458,7 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
         pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
         constraint_scratch_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
         constraint_scratch_ref(),
+        bias_scratch,
         fs_mat,
         BufferValidity(),
     )
@@ -529,6 +550,8 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR,
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
+    unwrapped_coords::Base.RefValue{Any}   # shared, once-per-call cache: see ensure_unwrapped_coords!
+    bias_scratch::Any                      # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersCPU
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -566,7 +589,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                     interacting_tiles_diag, num_interacting_tiles,
                     interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
-                    step_n_preprocessed, sparse_pair_generation, num_pairs)
+                    step_n_preprocessed, sparse_pair_generation, num_pairs,
+                    bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
     fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
@@ -575,6 +599,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      pre_coupling_ref(), bias_scratch,
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -709,10 +734,15 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
         sys.neighbor_finder.initialized = false
     end
 
+    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
+                                             for inter in values(sys.general_inters)
+                                             if inter isa BiasPotential)
+
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      pre_coupling_ref(), bias_scratch,
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -1300,6 +1330,12 @@ function forces!(fs,
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
                 specific_inter_lists, n_threads)
 
+    # Compute unwrap_molecules(sys) at most once here, shared by every attached BiasPotential
+    # that needs it (correction==:pbc), instead of each recomputing it independently below.
+    buffers.unwrapped_coords[] = nothing
+    if any(bias_needs_unwrap, values(general_inters))
+        ensure_unwrapped_coords!(buffers, sys)
+    end
     for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
@@ -1313,6 +1349,9 @@ function forces!(fs,
             mark_total_virial!(buffers.validity, step_n)
         end
     end
+
+    # Enforce rewrap in each forces! call.
+    buffers.unwrapped_coords[] = nothing
 
     return fs, buffers
 end

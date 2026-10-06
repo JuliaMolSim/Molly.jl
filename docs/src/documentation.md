@@ -654,6 +654,15 @@ simulate!(sys, simulator, 100_000)
 ```
 See also [this example](@ref "Protein bias potential").
 
+### GPU offload for biased simulations
+
+A [`BiasPotential`](@ref) adds a CV evaluation, a CV gradient and a bias-gradient calculation on top of the regular force calculation, every step. When `coords` (and the rest of the `System`) is GPU-resident, `calculate_cv`/`cv_gradient` for built-in CV types other than [`CalcRMSD`](@ref) run on GPU too, using persistent scratch buffers to avoid allocating on every call -- so a GPU `System` biased by one or more `BiasPotential`s stays GPU-resident end to end for those CV types, it isn't dropped to CPU for the CV part. `CalcRMSD` performs a host-side Kabsch alignment step every call, and custom (non-built-in) CV types always round-trip to the host, since arbitrary user code isn't guaranteed GPU-safe.
+
+The persistent-buffer CV paths fuse their reduce-and-finalize steps into as few kernel launches as the computation allows, rather than issuing one launch per intermediate step. As a rough guide:
+
+* **Small systems (up to a few thousand atoms) with one or two CVs**: the extra bias kernels' launch overhead is a significant fraction of the whole step. GPU offload is usually still worth it once the rest of the simulation is already on GPU, but don't expect a large win from the bias machinery alone at this scale.
+* **Larger systems, or several simultaneous CVs (e.g. multi-dimensional AWH ladders with 3-10 `BiasPotential`s)**: the CV/bias kernels amortize well over the main force/energy kernels, and GPU offload is clearly worthwhile.
+
 ## Monte Carlo sampling
 
 Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo sampling with Metropolis selection rates.

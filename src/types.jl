@@ -736,10 +736,15 @@ Topology information for a system.
 Stores the index of the molecule each atom belongs to, the number of
 atoms in each molecule and the list of bonded atom pairs.
 """
-struct MolecularTopology
+struct MolecularTopology{VI <: AbstractVector{Int32}}
     atom_molecule_inds::Vector{Int32}
     molecule_atom_counts::Vector{Int32}
     bonded_atoms::Vector{Tuple{Int32, Int32}}
+    parent::VI       # length N; spanning-forest parent per atom, parent[root] == root
+    sort_perm::VI    # length N; permutation grouping atoms contiguously by molecule id
+    mol_offsets::VI  # length n_mol+1; 0-based prefix boundaries into sort_perm order
+    n_rounds::Int    # pointer-doubling round count for GPU unwrap_molecules; host Int, not device data
+    gpu_cache::Base.RefValue{Any}  # lazily filled device-resident arrays, see device_topology_arrays
 end
 
 function bond_graph(bond_is, bond_js, n_atoms)
@@ -750,9 +755,9 @@ function bond_graph(bond_is, bond_js, n_atoms)
     return g
 end
 
-MolecularTopology(amis, macs) = MolecularTopology(amis, macs, [])
+MolecularTopology(amis, macs; kwargs...) = MolecularTopology(amis, macs, []; kwargs...)
 
-function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
+function MolecularTopology(bond_is, bond_js, n_atoms::Integer; kwargs...)
     g = bond_graph(bond_is, bond_js, n_atoms)
     cc = connected_components(g)
     atom_molecule_inds = zeros(Int32, n_atoms)
@@ -763,7 +768,88 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
     end
     molecule_atom_counts = length.(cc)
     bonded_atoms = collect(zip(bond_is, bond_js))
-    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
+    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g; kwargs...)
+end
+
+# Spanning forest (parent pointer per atom, self-loop at roots) of the bonded-atom graph via a
+# stack-based DFS over an already-built graph `g` (avoids rebuilding an adjacency list from
+# bonded_atoms when the caller already has one, e.g. from bond_graph). Any consistent spanning
+# tree gives a physically valid unwrap, so the DFS's particular choice doesn't matter for
+# correctness. Feeds `parent`/`n_rounds` for `_gpu_unwrap_fractional`'s pointer-doubling
+# (spatial.jl); the CPU `unwrap_molecules` uses its own independent traversal instead.
+function molecule_spanning_forest(g)
+    n_atoms = nv(g)
+    parent = collect(Int32, 1:n_atoms)   # self-loop default (covers bond-free/isolated atoms too)
+    depth = zeros(Int, n_atoms)
+    visited = falses(n_atoms)
+    for seed in 1:n_atoms
+        visited[seed] && continue
+        visited[seed] = true
+        stack = Int[seed]
+        while !isempty(stack)
+            i = pop!(stack)
+            for j in neighbors(g, i)
+                visited[j] && continue
+                parent[j] = i
+                depth[j] = depth[i] + 1
+                visited[j] = true
+                push!(stack, j)
+            end
+        end
+    end
+    max_depth = maximum(depth; init=0)
+    n_rounds = max_depth <= 1 ? 0 : ceil(Int, log2(max_depth)) + 1  # +1 safety margin
+    return parent, n_rounds
+end
+
+function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms;
+                           array_type::Type{AT}=Array) where AT
+    n_atoms = length(atom_molecule_inds)
+    bond_is = isempty(bonded_atoms) ? Int[] : first.(bonded_atoms)
+    bond_js = isempty(bonded_atoms) ? Int[] : last.(bonded_atoms)
+    g = bond_graph(bond_is, bond_js, n_atoms)
+    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
+                                    array_type=AT)
+end
+
+# Shared by both public constructors once each has (or has built) the bond graph, so the
+# spanning-forest DFS reuses it instead of rebuilding its own adjacency list.
+function molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
+                                  array_type::Type{AT}=Array) where AT
+    n_mol = length(molecule_atom_counts)
+    parent_cpu, n_rounds = molecule_spanning_forest(g)
+
+    sort_perm_cpu = Int32.(sortperm(atom_molecule_inds))
+    mol_offsets_cpu = Vector{Int32}(undef, n_mol + 1)
+    mol_offsets_cpu[1] = 0
+    for m in 1:n_mol
+        mol_offsets_cpu[m + 1] = mol_offsets_cpu[m] + molecule_atom_counts[m]
+    end
+
+    return MolecularTopology(
+        Vector{Int32}(atom_molecule_inds), Vector{Int32}(molecule_atom_counts),
+        Vector{Tuple{Int32, Int32}}(collect(bonded_atoms)),
+        to_device(parent_cpu, AT), to_device(sort_perm_cpu, AT), to_device(mol_offsets_cpu, AT),
+        n_rounds, Base.RefValue{Any}(nothing),
+    )
+end
+
+# Device-resident (parent, sort_perm, mol_offsets, atom_molecule_inds) for `topology`, cached on
+# topology.gpu_cache -- avoids re-uploading a topology built without array_type on every
+# unwrap_molecules/molecule_centers call. Only used by _gpu_unwrap_fractional.
+function device_topology_arrays(topology::MolecularTopology, ::Type{AT}) where AT
+    cached = topology.gpu_cache[]
+    !isnothing(cached) && cached.array_type === AT && return cached.arrays
+    arrays = (
+        parent = topology.parent isa AT ? topology.parent : to_device(topology.parent, AT),
+        sort_perm = topology.sort_perm isa AT ? topology.sort_perm : to_device(topology.sort_perm, AT),
+        mol_offsets = topology.mol_offsets isa AT ? topology.mol_offsets :
+                          to_device(topology.mol_offsets, AT),
+        atom_molecule_inds = topology.atom_molecule_inds isa AT ? topology.atom_molecule_inds :
+                                 to_device(topology.atom_molecule_inds, AT),
+    )
+    topology.gpu_cache[] = (array_type=AT, arrays=arrays)
+    return arrays
 end
 
 """
@@ -1375,6 +1461,8 @@ function System(;
         throw(ArgumentError("general_inters should be a Tuple or a NamedTuple but has " *
                             "type $(typeof(general_inters))"))
     end
+    check_bias_ids(general_inters)
+    check_bias_atom_inds(general_inters, n_atoms)
 
     if !all(i -> i isa PairwiseInteraction, values(pairwise_inters))
         throw(ArgumentError("not all pairwise_inters are a subtype of PairwiseInteraction, " *
