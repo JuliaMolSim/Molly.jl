@@ -738,3 +738,103 @@ end
         @test maximum(norm.(from_device(sim.coords) .- c_ref)) < 1e-3
     end
 end
+
+# ============================================================================
+# AllegroPotential — the bit-exact native port of the real nequip-allegro package. The equivariant
+# primitives are tested in test/equivariant.jl; the exact match to the package (energy and forces) is
+# validated below against the package's own exported weights and reference output.
+# ============================================================================
+const ALLEGRO_DIR  = joinpath(@__DIR__, "..", "data", "allegro_reference")
+# ============================================================================
+# External validation of the NATIVE implementation against the REAL nequip-allegro package: the
+# bit-exact port (AllegroPackageModel) loads the package's own exported weights and must reproduce
+# the package's energy and forces. This is the non-circular check — the reference comes from the
+# actual package (test/allegro_package_reference.py), not from a second re-implementation.
+# ============================================================================
+const ALLEGRO_PKG_H5  = joinpath(ALLEGRO_DIR, "allegro_package_weights.h5")
+const ALLEGRO_PKG_REF = joinpath(ALLEGRO_DIR, "allegro_package_ref.json")
+
+if isfile(ALLEGRO_PKG_H5) && isfile(ALLEGRO_PKG_REF)
+    @testset "AllegroPackageModel reproduces the real nequip-allegro package" begin
+        m = load_allegro_package(ALLEGRO_PKG_H5; T=Float64)
+        ref = JSON3.read(read(ALLEGRO_PKG_REF, String))
+        @test m.type_names == String.(ref.type_names)
+        for sysj in ref.systems
+            coords = [SVector{3,Float64}(c...) for c in sysj.coords_A]
+            species = [Int(t) for t in sysj.types]          # 0-based package type indices
+            # energy reproduces the package forward to numerical precision
+            E = Molly.allegro_package_total_energy(m, coords, species)
+            @test isapprox(E, Float64(sysj.energy); atol=1e-6)
+            # analytic forces F = -∂E/∂r (automatic differentiation) match the package's autograd forces
+            F = allegro_package_forces(m, coords, species)
+            Fref = [SVector{3,Float64}(f...) for f in sysj.forces]
+            @test maximum(maximum(abs.(F[i] .- Fref[i])) for i in eachindex(F)) < 1e-6
+        end
+    end
+
+    @testset "AllegroPackageModel energy/forces are continuous at the cutoff" begin
+        # The two-body scalar embedding is multiplied by the polynomial cutoff envelope (as in the
+        # package's TwoBodyBesselScalarEmbed), so each edge's contribution goes smoothly to zero at
+        # r_c with no discontinuity. Sweep a C-N pair across the cutoff:
+        m = load_allegro_package(ALLEGRO_PKG_H5; T=Float64)
+        rc = m.r_max; sp = [1, 2]
+        epair(r) = Molly.allegro_package_total_energy(m, [SVector(0.0, 0.0, 0.0), SVector(r, 0.0, 0.0)], sp)
+        @test epair(rc) == 0 && epair(rc + 1e-3) == 0            # exactly zero at and beyond the cutoff
+        @test 0 < epair(rc - 0.1) < 1e-3                         # small and nonzero just inside
+        @test epair(rc - 1e-3) < epair(rc - 0.1)                 # decays toward the cutoff
+        @test isapprox(epair(rc - 1e-6), epair(rc + 1e-6); atol=1e-10)   # no jump across r_c
+        _, Fin  = Molly.allegro_package_energy_and_forces(m, [SVector(0.0, 0.0, 0.0), SVector(rc - 0.1, 0.0, 0.0)], sp)
+        _, Fout = Molly.allegro_package_energy_and_forces(m, [SVector(0.0, 0.0, 0.0), SVector(rc + 1e-3, 0.0, 0.0)], sp)
+        @test 0 < maximum(abs.(Fin[2]))                         # nonzero force just inside
+        @test all(iszero, Fout[2])                              # force vanishes at/beyond the cutoff
+    end
+
+    @testset "AllegroPotential System reproduces the package (energy + forces)" begin
+        # the full MD path: a System with AllegroPotential as a general interaction, through
+        # AtomsCalculators + unit handling, reproduces the package energy and forces.
+        pot = AllegroPotential(ALLEGRO_PKG_H5; T=Float64)
+        ref = JSON3.read(read(ALLEGRO_PKG_REF, String))
+        tn = String.(ref.type_names)
+        for sysj in ref.systems
+            coords = [SVector{3,Float64}(c...) * u"Å" for c in sysj.coords_A]
+            n = length(coords)
+            atoms = [Atom(mass=1.0u"u") for _ in 1:n]
+            ad = [AtomData(element=tn[Int(t) + 1]) for t in sysj.types]
+            sys = System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0u"Å"), atoms_data=ad,
+                         general_inters=(pot,), energy_units=u"eV", force_units=u"eV/Å")
+            E = ustrip(u"eV", potential_energy(sys))
+            @test isapprox(E, Float64(sysj.energy); atol=1e-6)
+            fs = forces(sys)
+            Fref = [SVector{3,Float64}(f...) for f in sysj.forces]
+            @test maximum(maximum(abs.(ustrip.(u"eV/Å", fs[i]) .- Fref[i])) for i in 1:n) < 1e-6
+        end
+    end
+
+    # GPU consistency: a device-backed System runs the KA forward + analytic reverse on-device and
+    # must match the CPU System to device precision. Runs for each GPU backend in array_list (skipped
+    # on CI, which has none); Metal is Float32, so compare with a relative tolerance.
+    for AT in array_list
+        AT == Array && continue
+        @testset "AllegroPotential GPU consistency ($AT)" begin
+            potg = AllegroPotential(ALLEGRO_PKG_H5; T=Float32)
+            refg = JSON3.read(read(ALLEGRO_PKG_REF, String)); tng = String.(refg.type_names)
+            sysj = refg.systems[1]
+            coords = [SVector{3,Float32}(Float32(c[1] / 10), Float32(c[2] / 10), Float32(c[3] / 10))
+                      for c in sysj.coords_A]
+            n = length(coords)
+            atoms = [Atom(mass=1.0f0, charge=0.0f0, σ=0.0f0, ϵ=0.0f0, λ=0.0f0) for _ in 1:n]
+            ad = [AtomData(element=tng[Int(t) + 1]) for t in sysj.types]
+            mk(cc, aa) = System(atoms=aa, coords=cc, boundary=CubicBoundary(100.0f0), atoms_data=ad,
+                                general_inters=(potg,), energy_units=NoUnits, force_units=NoUnits)
+            sys_cpu = mk(coords, atoms)
+            sys_gpu = mk(to_device(coords, AT), to_device(atoms, AT))
+            @test isapprox(potential_energy(sys_cpu), potential_energy(sys_gpu); rtol=1e-4)
+            fc = forces(sys_cpu); fg = Array(forces(sys_gpu))
+            fscale = maximum(maximum(abs.(fc[i])) for i in 1:n)
+            @test maximum(maximum(abs.(Float64.(fg[i]) .- fc[i])) for i in 1:n) < 1e-4 * fscale
+        end
+    end
+else
+    @warn "Skipping AllegroPackageModel package-validation tests — run " *
+          "test/allegro_package_reference.py (needs nequip-allegro) to generate the reference."
+end
