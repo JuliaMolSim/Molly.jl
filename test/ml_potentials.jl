@@ -772,6 +772,23 @@ if isfile(ALLEGRO_PKG_H5) && isfile(ALLEGRO_PKG_REF)
         end
     end
 
+    @testset "AllegroPackageModel energy/forces are continuous at the cutoff" begin
+        # The two-body scalar embedding is multiplied by the polynomial cutoff envelope (as in the
+        # package's TwoBodyBesselScalarEmbed), so each edge's contribution goes smoothly to zero at
+        # r_c with no discontinuity. Sweep a C-N pair across the cutoff:
+        m = load_allegro_package(ALLEGRO_PKG_H5; T=Float64)
+        rc = m.r_max; sp = [1, 2]
+        epair(r) = Molly.allegro_package_total_energy(m, [SVector(0.0, 0.0, 0.0), SVector(r, 0.0, 0.0)], sp)
+        @test epair(rc) == 0 && epair(rc + 1e-3) == 0            # exactly zero at and beyond the cutoff
+        @test 0 < epair(rc - 0.1) < 1e-3                         # small and nonzero just inside
+        @test epair(rc - 1e-3) < epair(rc - 0.1)                 # decays toward the cutoff
+        @test isapprox(epair(rc - 1e-6), epair(rc + 1e-6); atol=1e-10)   # no jump across r_c
+        _, Fin  = Molly.allegro_package_energy_and_forces(m, [SVector(0.0, 0.0, 0.0), SVector(rc - 0.1, 0.0, 0.0)], sp)
+        _, Fout = Molly.allegro_package_energy_and_forces(m, [SVector(0.0, 0.0, 0.0), SVector(rc + 1e-3, 0.0, 0.0)], sp)
+        @test 0 < maximum(abs.(Fin[2]))                         # nonzero force just inside
+        @test all(iszero, Fout[2])                              # force vanishes at/beyond the cutoff
+    end
+
     @testset "AllegroPotential System reproduces the package (energy + forces)" begin
         # the full MD path: a System with AllegroPotential as a general interaction, through
         # AtomsCalculators + unit handling, reproduces the package energy and forces.
