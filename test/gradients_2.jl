@@ -358,13 +358,14 @@ end
     cv_rg    = CalcRg([1, 2, 3, 4])
     cv_rmsd  = CalcRMSD(coords_ref, [1,2,3,4],[1,2,3,4]) 
     cv_tor   = CalcTorsion([1,2,3,4])
+    cv_ang   = CalcAngle([1,2,3])
 
-    cvs = (cv_d_s, cv_d_min, cv_d_max, cv_d_cm, cv_rg, cv_rmsd, cv_tor)
+    cvs = (cv_d_s, cv_d_min, cv_d_max, cv_d_cm, cv_rg, cv_rmsd, cv_tor, cv_ang)
     
     b1 = LinearBias(100.0u"kJ*mol^-1*nm^-1", 0.2u"nm")
     b2 = LinearBias(100.0u"kJ*mol^-1", 0.2)
 
-    bias = (b1, b1, b1, b1, b1, b1, b2)
+    bias = (b1, b1, b1, b1, b1, b1, b2, b2)
 
     for (c, b) in zip(cvs, bias)
         bias_pot = BiasPotential(c, b)
@@ -462,7 +463,7 @@ end
                   n_alchemical, ::Val{T}) where T
         atoms = [Atom(i, 1, T(10.0), T(0.2) * (i % 2 == 0 ? -1 : 1), T(0.3), T(0.4),
                       (i <= n_alchemical ? λ : one(λ)),
-                      (i <= n_alchemical ? Molly.InsertRole : Molly.CoreRole))
+                      (i <= n_alchemical ? Molly.InsertRole : Molly.EnvRole))
                  for i in 1:n_atoms]
 
         sys = System(
@@ -643,7 +644,7 @@ end
     function loss(σ, coords, velocities, boundary, pairwise_inters, neighbor_finder,
                   constraints, simulator, n_steps, n_atoms, atom_mass, rng)
         atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? -charge : charge), σ, ϵ, λ,
-                      Molly.CoreRole) for i in 1:n_atoms]
+                      Molly.EnvRole) for i in 1:n_atoms]
 
         sys = System(
             atoms=atoms,
@@ -722,6 +723,62 @@ end
                             coupling=(ImmediateThermostat(temp),)); nf=nf)
     end
 
+    # The energy minimizers do not take a number of steps
+    function loss_min(σ, coords, velocities, boundary, pairwise_inters, neighbor_finder,
+                      minimizer, n_atoms, atom_mass)
+        atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? -charge : charge), σ, ϵ, λ,
+                      Molly.EnvRole) for i in 1:n_atoms]
+
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=pairwise_inters,
+            neighbor_finder=neighbor_finder,
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+
+        simulate!(sys, minimizer; n_threads=1)
+
+        return mean_min_separation(sys.coords, boundary)
+    end
+
+    function test_min_grad(name, minimizer; tol=1e-5)
+        grad_enzyme = autodiff(
+            set_runtime_activity(Reverse),
+            loss_min,
+            Active,
+            Active(σ_start),
+            Duplicated(copy(coords), zero(coords)),
+            Duplicated(copy(velocities), zero(velocities)),
+            Const(boundary), Const((lj, crf)), Const(neighbor_finder),
+            Const(minimizer), Const(n_atoms), Const(atom_mass),
+        )[1][1]
+        grad_fd = central_fdm(6, 1)(σ_start) do σ
+            loss_min(σ, copy(coords), copy(velocities), boundary, (lj, crf),
+                     neighbor_finder, minimizer, n_atoms, atom_mass)
+        end
+        frac_diff = abs(grad_enzyme - grad_fd) / abs(grad_fd)
+        @test frac_diff < tol
+    end
+
+    # A tolerance of zero means that the number of steps taken does not depend on σ, so
+    #   the loss is smooth and can be compared to finite differences
+    n_min_steps = 10
+    minimizers = [
+        ("SteepestDescentMinimizer", SteepestDescentMinimizer(step_size=T(0.01),
+                                        tol=zero(T), max_steps=n_min_steps)),
+        ("FIREMinimizer"           , FIREMinimizer(dt=T(0.001), dt_max=T(0.01),
+                                        tol=zero(T), max_steps=n_min_steps)),
+        ("LBFGSMinimizer"          , LBFGSMinimizer(step_size=T(0.01), tol=zero(T),
+                                        max_steps=n_min_steps)),
+    ]
+    for (name, minimizer) in minimizers
+        test_min_grad(name, minimizer)
+    end
+
     dist_constraints = [DistanceConstraint(Int32(2i - 1), Int32(2i), T(0.6)) for i in 1:10]
     shake = SHAKE_RATTLE(
         n_atoms=n_atoms,
@@ -737,7 +794,7 @@ end
     function loss_logged(σ, coords, velocities, boundary, pairwise_inters, neighbor_finder,
                             simulator, n_steps, n_atoms, atom_mass, rng)
         atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? -charge : charge), σ, ϵ, λ,
-                        Molly.CoreRole) for i in 1:n_atoms]
+                        Molly.EnvRole) for i in 1:n_atoms]
 
         sys = System(
             atoms=atoms,
@@ -1035,42 +1092,42 @@ end
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("DoubleExponentialSC", DoubleExponentialSoftCore(α=T(16.766), β=T(4.427),
                                     weight_special=w, cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true), ()),
+                                    use_neighbors=true), lost_w),
         ("Gravity"          , Gravity(G=T(1.0), use_neighbors=true), ()),
         ("LJSCBeutler"      , LennardJonesSoftCoreBeutler(α=T(0.5), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), lost_w),
+                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("LJSCGapsys"       , LennardJonesSoftCoreGapsys(α=T(0.85), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), lost_w),
+                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("Coulomb"          , Coulomb(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
                                     weight_special=w, coulomb_const=cc), ()),
         ("CoulombScaled"    , CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), lost_wc),
+                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCBeutler" , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), lost_wc),
+                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCGapsys"  , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
                                     σQ=T(1.0), use_neighbors=true, weight_special=w,
-                                    coulomb_const=cc), lost_wc),
+                                    coulomb_const=cc), ()),
         ("CoulombRF"        , CoulombReactionField(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CRFScaled"        , CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), lost_wc),
+                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CRFSCBeutler"     , CoulombSoftCoreBeutlerReactionField(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), lost_wc),
+                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CRFSCGapsys"      , CoulombSoftCoreGapsysReactionField(dist_cutoff=nb_cutoff,
                                     σQ=T(1.0), use_neighbors=true, weight_special=w,
-                                    coulomb_const=cc), lost_wc),
+                                    coulomb_const=cc), ()),
         ("CoulombEwald"     , CoulombEwald(dist_cutoff=nb_cutoff, use_neighbors=true,
                                     weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CoulombEwaldScaled", CoulombEwaldScaled(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc,
-                                    approximate_erfc=false), lost_wc),
+                                    approximate_erfc=false), ()),
         ("CEwaldSCBeutler"  , CoulombSoftCoreBeutlerEwald(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc,
-                                    approximate_erfc=false), lost_wc),
+                                    approximate_erfc=false), ()),
         ("CEwaldSCGapsys"   , CoulombSoftCoreGapsysEwald(dist_cutoff=nb_cutoff, σQ=T(1.0),
                                     use_neighbors=true, weight_special=w, coulomb_const=cc,
-                                    approximate_erfc=false), lost_wc),
+                                    approximate_erfc=false), ()),
         ("Yukawa"           , Yukawa(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
                                     weight_special=w, coulomb_const=cc, kappa=T(1.0)), ()),
     ]

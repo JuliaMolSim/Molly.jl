@@ -7,7 +7,7 @@ from openmm import *
 from openmm.unit import *
 import os
 
-data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
+data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "data")
 ff_dir = os.path.join(data_dir, "force_fields")
 out_dir = os.path.join(data_dir, "openmm_6mrr")
 pdb_file = os.path.join(data_dir, "6mrr_nowater.pdb")

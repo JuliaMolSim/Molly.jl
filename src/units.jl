@@ -98,13 +98,21 @@ function check_other_units(atoms, boundary, sys_units::NamedTuple)
     end
 
     for at in from_device(atoms)
-        if hasproperty(at, :σ) && at.σ != 0.0u"nm" && unit(at.σ) != sys_units[:length]
-            throw(ArgumentError("Atom σ has $(unit(at.σ)) units but length unit of coords " *
-                                "was $(sys_units[:length])"))
+        if hasproperty(at, :σ)
+            for σ in at.σ
+                if σ != 0.0u"nm" && unit(σ) != sys_units[:length]
+                    throw(ArgumentError("Atom σ has $(unit(σ)) units but length unit of " *
+                                        "coords was $(sys_units[:length])"))
+                end
+            end
         end
-        if hasproperty(at, :ϵ) && at.ϵ != 0.0u"kJ * mol^-1" && unit(at.ϵ) != sys_units[:energy]
-            throw(ArgumentError("Atom ϵ has $(unit(at.ϵ)) units but system energy unit " *
-                                "was $(sys_units[:energy])"))
+        if hasproperty(at, :ϵ)
+            for ϵ in at.ϵ
+                if ϵ != 0.0u"kJ * mol^-1" && unit(ϵ) != sys_units[:energy]
+                    throw(ArgumentError("Atom ϵ has $(unit(ϵ)) units but system energy " *
+                                        "unit was $(sys_units[:energy])"))
+                end
+            end
         end
     end
 end

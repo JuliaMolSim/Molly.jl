@@ -32,14 +32,16 @@ For more discussion, see the [OpenMM FAQs](https://github.com/openmm/openmm/wiki
 
 To define your own neighbor finder, first define the `struct`:
 ```julia
-struct MyNeighborFinder
-    eligible::BitArray{2}
-    special::BitArray{2}
+struct MyNeighborFinder{E, S}
+    eligible::E
+    special::S
     n_steps::Int
     # Any other properties, e.g. a distance cutoff
 end
 ```
 Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
+When a [`System`](@ref) is set up from a file with `neighbor_finder_type=MyNeighborFinder`, the `eligible` and `special` matrices are given as [`SparsePairMatrix`](@ref)s.
+These can be indexed like any other `AbstractMatrix{Bool}` but take memory proportional to the number of pairs rather than to the square of the number of atoms, so avoid field types like `BitArray{2}` that would convert them to dense matrices.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
 function Molly.find_neighbors(sys,

@@ -1,0 +1,26 @@
+ATOM      1  C1x UNK X   0      25.950   5.296   4.793  1.00  0.00           C  
+ATOM      2  C2x UNK X   0      26.377   5.024   3.476  1.00  0.00           C  
+ATOM      3  C3x UNK X   0      27.339   5.853   2.861  1.00  0.00           C  
+ATOM      4  C4x UNK X   0      27.872   6.955   3.562  1.00  0.00           C  
+ATOM      5  C5x UNK X   0      27.445   7.228   4.879  1.00  0.00           C  
+ATOM      6  C6x UNK X   0      26.485   6.397   5.495  1.00  0.00           C  
+ATOM      7  H1x UNK X   0      25.210   4.658   5.267  1.00  0.00           H  
+ATOM      8  H2x UNK X   0      25.966   4.176   2.937  1.00  0.00           H  
+ATOM      9  H3x UNK X   0      27.668   5.643   1.848  1.00  0.00           H  
+ATOM     10  H4x UNK X   0      28.612   7.595   3.089  1.00  0.00           H  
+ATOM     11  H5x UNK X   0      27.855   8.076   5.418  1.00  0.00           H  
+ATOM     12  H6x UNK X   0      26.157   6.607   6.509  1.00  0.00           H  
+TER      13      UNK X   0
+CONECT    1    2    6    7
+CONECT    2    1    3    8
+CONECT    3    2    4    9
+CONECT    4    3    5   10
+CONECT    5    4    6   11
+CONECT    6    1    5   12
+CONECT    7    1
+CONECT    8    2
+CONECT    9    3
+CONECT   10    4
+CONECT   11    5
+CONECT   12    6
+END

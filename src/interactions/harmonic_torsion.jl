@@ -47,3 +47,59 @@ end
     θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
     return d.k * (θ - d.θ0)^2
 end
+
+# λ version of `HarmonicTorsion` for alchemical systems, built by `to_lambda_function`.
+@kwdef struct HarmonicTorsionλ{K, D, LM, SCH} <: AlchemicalBondedInteraction
+    k::K
+    θ0::D
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+end
+
+is_torsion(::HarmonicTorsionλ) = true
+
+Base.zero(t::HarmonicTorsionλ) = HarmonicTorsionλ(k=zero.(t.k), θ0=zero.(t.θ0), λ_mixing=t.λ_mixing,
+                                                  scheduler=t.scheduler)
+
+Base.:+(t1::HarmonicTorsionλ, t2::HarmonicTorsionλ) = HarmonicTorsionλ(k=(t1.k .+ t2.k),
+                                                                        θ0=(t1.θ0 .+ t2.θ0),
+                                                                        λ_mixing=t1.λ_mixing,
+                                                                        scheduler=t1.scheduler)
+
+function to_lambda_function(inter::HarmonicTorsion; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return HarmonicTorsionλ(k=inter.k, θ0=inter.θ0, λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::HarmonicTorsion, interB::Nothing;
+                                   λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return HarmonicTorsionλ(k=(interA.k, interA.k), θ0=(interA.θ0, interA.θ0), λ_mixing=λ_mixing,
+                            scheduler=scheduler)
+end
+
+function to_lambda_function_single(interA::Nothing, interB::HarmonicTorsion;
+                                   λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return HarmonicTorsionλ(k=(interB.k, interB.k), θ0=(interB.θ0, interB.θ0), λ_mixing=λ_mixing,
+                            scheduler=scheduler)
+end
+
+function update_lambda_function(existing_lambda::HarmonicTorsionλ, interB::HarmonicTorsion)
+    return HarmonicTorsionλ(k=(existing_lambda.k[1], interB.k), θ0=(existing_lambda.θ0[1], interB.θ0),
+                            λ_mixing=existing_lambda.λ_mixing, scheduler=existing_lambda.scheduler)
+end
+
+plain_interaction(d::HarmonicTorsionλ, λ_params) =
+    HarmonicTorsion(k=params_mixing(λ_params, d.k), θ0=params_mixing(λ_params, d.θ0))
+
+@inline function force(d::HarmonicTorsionλ, coords_i, coords_j, coords_k, coords_l,
+                       boundary, atom_i, atom_j, atom_k, atom_l, args...)
+    λ, λ_params = bonded_lambda(d, (atom_i, atom_j, atom_k, atom_l))
+    return λ * force(plain_interaction(d, λ_params), coords_i, coords_j, coords_k, coords_l,
+                     boundary)
+end
+
+@inline function potential_energy(d::HarmonicTorsionλ, coords_i, coords_j, coords_k,
+                                  coords_l, boundary, atom_i, atom_j, atom_k, atom_l, args...)
+    λ, λ_params = bonded_lambda(d, (atom_i, atom_j, atom_k, atom_l))
+    return λ * potential_energy(plain_interaction(d, λ_params), coords_i, coords_j, coords_k,
+                                coords_l, boundary)
+end

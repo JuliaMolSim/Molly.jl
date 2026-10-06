@@ -41,3 +41,38 @@ end
     ralp = exp(-b.a * (r - b.r0))
     return b.D * (1 - ralp)^2
 end
+
+# λ version of `MorseBond` for alchemical systems, built by `to_lambda_function`.
+@kwdef struct MorseBondλ{T, A, R, LM, SCH} <: AlchemicalBondedInteraction
+    D::T
+    a::A
+    r0::R
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+end
+
+Base.zero(b::MorseBondλ) = MorseBondλ(D=zero.(b.D), a=zero.(b.a), r0=zero.(b.r0), λ_mixing=b.λ_mixing,
+                                      scheduler=b.scheduler)
+
+Base.:+(b1::MorseBondλ, b2::MorseBondλ) = MorseBondλ(D=(b1.D .+ b2.D), a=(b1.a .+ b2.a),
+                                                  r0=(b1.r0 .+ b2.r0), λ_mixing=b1.λ_mixing,
+                                                  scheduler=b1.scheduler)
+
+
+function to_lambda_function(inter::MorseBond; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return MorseBondλ(D=inter.D, a=inter.a, r0=inter.r0, λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+plain_interaction(b::MorseBondλ, λ_params) = MorseBond(D=params_mixing(λ_params, b.D), a=params_mixing(λ_params, b.a),
+                                                   r0=params_mixing(λ_params, b.r0))
+
+@inline function force(b::MorseBondλ, coord_i, coord_j, boundary, atom_i, atom_j, args...)
+    λ, λ_params = bonded_lambda(b, (atom_i, atom_j))
+    return λ * force(plain_interaction(b, λ_params), coord_i, coord_j, boundary)
+end
+
+@inline function potential_energy(b::MorseBondλ, coord_i, coord_j, boundary, atom_i, atom_j,
+                                  args...)
+    λ, λ_params = bonded_lambda(b, (atom_i, atom_j))
+    return λ * potential_energy(plain_interaction(b, λ_params), coord_i, coord_j, boundary)
+end

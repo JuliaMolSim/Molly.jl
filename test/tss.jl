@@ -15,12 +15,12 @@ function make_tss_thermo_states(; n_atoms=6, n_states=3)
     thermo_states = ThermoState[]
     for lambda in range(1.0, 0.6; length=n_states)
         atoms = [Atom(mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1",
-                      λ=lambda) for _ in 1:n_atoms]
+                      λ=lambda, alch_role=Molly.InsertRole) for _ in 1:n_atoms]
         sys = System(
             atoms=atoms,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder,
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")
@@ -651,5 +651,21 @@ end
         @test partitioned_inputs.u_target ≈ full_inputs.u_target
         @test partitioned_inputs.shifts ≈ full_inputs.shifts
         @test partitioned_inputs.win_of == full_inputs.win_of
+
+        # CHARMM CMAP terms, which use 5-atom interaction lists, are kept in the partition,
+        #   here with the default cell list neighbor finder of periodic systems on CPU
+        ff = MolecularForceField(joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+                                 strictness=:nowarn)
+        for AT in array_list
+            sys = System(joinpath(data_dir, "6mrr_nowater.pdb"), ff; array_type=AT,
+                         float_type=Float64, boundary=CubicBoundary(5.0u"nm"),
+                         nonbonded_method=DistanceCutoff(1.0u"nm"), strictness=:nowarn)
+            temp_states = [ThermoState(sys, VelocityVerlet(dt=0.001u"ps"); temperature=temp)
+                           for temp in (300.0u"K", 320.0u"K")]
+            partition = Molly.AlchemicalPartition(temp_states)
+            AT == Array && @test partition.master_sys.neighbor_finder isa CellListMapNeighborFinder
+            @test Molly.evaluate_energy_all!(partition, sys.coords, sys.boundary) ≈
+                  fill(potential_energy(sys), 2)
+        end
     end
 end

@@ -107,23 +107,23 @@ abstract type ConstraintKernelData{D, N, M} end
 @inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer, l::Integer) = 1
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer)
-    return λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    return λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
 end
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer)
-    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    λ = λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[k])))
     return λ
 end
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer, l::Integer)
-    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[l]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[l]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[k], atoms[l]))
+    λ = λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[l])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[l])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[k], atoms[l])))
     return λ
 end
 
@@ -222,8 +222,19 @@ function constrained_pairs(constraint_clusters)
 end
 
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
+    # GPUNeighborFinder caches data derived from its exception lists, so they are updated
+    #   through the neighbor finder
     if neighbor_finder isa GPUNeighborFinder
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
+        return neighbor_finder
+    end
+    if !hasproperty(neighbor_finder, :eligible) || isnothing(neighbor_finder.eligible)
+        throw(ArgumentError("constraints can not be set up with a $(typeof(neighbor_finder)) " *
+                            "that has no eligible matrix, since constrained pairs have to " *
+                            "be excluded from the non-bonded interactions"))
+    end
+    if neighbor_finder.eligible isa SparsePairMatrix
+        exclude_pairs!(neighbor_finder.eligible, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
     atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))

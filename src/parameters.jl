@@ -386,6 +386,7 @@ A dictionary of the force field parameters of a system, keyed by strings, for us
 
 An interaction contributes its parameters if it defines [`parameter_prefix`](@ref) and
 [`parameter_fields`](@ref).
+May not work with units.
 """
 function extract_parameters(sys::System{<:Any, <:Any, T}, ff=nothing) where T
     params_dic = Dict{String, T}()

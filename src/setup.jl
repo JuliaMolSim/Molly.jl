@@ -156,7 +156,8 @@ chemfiles_name(top, ai) = Chemfiles.name(chemfiles_atom(top, ai))
 # Creates a Dict representation of the system Chains -> Residues -> Graphs
 # It is useful to have all the necessary data in one hashable object
 # It also ensures that the correct names are used for downstream template matching
-function canonicalize_system(top, resname_replacements, atomname_replacements)
+function canonicalize_system(top, resname_replacements, atomname_replacements,
+                             extra_particle_names, strictness)
     canon_system = Dict{String, Dict{Int, ResidueGraph}}()
     if iszero(Chemfiles.count_residues(top))
         # Chemfiles does not assign residues for file types like SDF
@@ -203,6 +204,12 @@ function canonicalize_system(top, resname_replacements, atomname_replacements)
                 end
             end
             if iszero(an) # Extra particle returns 0 from chemfiles
+                atom_elements[li] = :X
+            elseif atom_name in extra_particle_names
+                # A site named like an element, e.g. V, would otherwise be read as vanadium
+                report_issue("atom $atom_name is read as an extra particle, since its type in " *
+                             "the force field has zero mass and no element, rather than as " *
+                             "element $(PeriodicTable.elements[an].symbol)", strictness; maxlog=1)
                 atom_elements[li] = :X
             else
                 atom_elements[li] = Symbol(PeriodicTable.elements[an].symbol)
@@ -337,25 +344,20 @@ function resolve_proper_torsion(ff::MolecularForceField, t1::AbstractString, t2:
 end
 
 function resolve_improper_torsion(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
-                                  t3::AbstractString, t4::AbstractString)
+                                  t3::AbstractString, t4::AbstractString, indexes, atom_type_of, 
+                                  resnum_of, template_id_of, element_of)
     # Resolver scans all 6 permutations internally and caches the winner
-    p = find_improper_match(t1, t2, t3, t4; resolver=ff.torsion_resolver,
-                                                type_to_class=ff.type_to_class)
+    p = find_improper_match(t1, t2, t3, t4, indexes, atom_type_of, resnum_of, template_id_of, 
+                            element_of; resolver=ff.torsion_resolver, 
+                            type_to_class=ff.type_to_class, atom_types=ff.atom_types)
     if isnothing(p)
-        return (nothing, ("", "", "", ""))
+        return nothing
     end
 
     # Recover matched permutation from cache to return the oriented key
     ic = ff.torsion_resolver.improper_cache
     cache_hit = get(ic, (t1, t2, t3, t4), :miss)
-    if cache_hit == :miss
-        return (p, (t1, t2, t3, t4)) # Fallback
-    else
-        perm, _ = cache_hit
-        src = (t1, t2, t3, t4)
-        key = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
-        return (p, key)
-    end
+    return cache_hit
 end
 
 function resolve_cmap(ff::MolecularForceField, t1::AbstractString, t2::AbstractString,
@@ -405,8 +407,8 @@ function atom_name_to_global_i(atom_name, template_atoms, rgraph_atom_inds, matc
     return rgraph_atom_inds[findfirst(isequal(atom_name_ind), matches)]
 end
 
-function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T}}, template, rgraph,
-                            matches) where T
+function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T, <:Any, P}}, template, rgraph,
+                            matches) where {T, P}
     for vst in template.virtual_sites
         atom_ind = atom_name_to_global_i(vst.name       , template.atoms, rgraph.atom_inds, matches)
         atom_1   = atom_name_to_global_i(vst.atom_name_1, template.atoms, rgraph.atom_inds, matches)
@@ -422,7 +424,7 @@ function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T}}, template, r
         end
         vs = VirtualSite(vst.type, atom_ind, atom_1, atom_2, atom_3, T(vst.weight_1),
                          T(vst.weight_2), T(vst.weight_3), T(vst.weight_12), T(vst.weight_13),
-                         T(vst.weight_cross))
+                         T(vst.weight_cross), T.(vst.local_weights), P.(vst.local_position))
         push!(virtual_sites, vs)
     end
     return virtual_sites
@@ -494,9 +496,10 @@ templates is carried out.
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
     [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref)
-    on CUDA compatible GPUs and [`DistanceNeighborFinder`](@ref) on non-CUDA
-    compatible GPUs. [`NoNeighborFinder`](@ref) can be used but in this case bonded
-    atoms will not be excluded from the non-bonded interactions.
+    on CUDA compatible GPUs and [`GPUCellListNeighborFinder`](@ref) on non-CUDA
+    compatible GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the
+    box is too small for a cell list. [`NoNeighborFinder`](@ref) can be used but in
+    this case bonded atoms will not be excluded from the non-bonded interactions.
 - `neighbor_finder_n_steps=10`: the number of steps between neighbor finder
     updates. Can be tuned along with `dist_buffer` to ensure that particles
     do not cross the buffer distance during the update interval.
@@ -686,8 +689,13 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
+    # Atom names the force field gives zero mass and no element, so that a virtual site is read as
+    #   an extra particle even when it is named like an element
+    extra_particle_names = Set(tpl.atoms[j] for tpl in values(force_field.residues)
+                               for j in eachindex(tpl.atoms) if tpl.extras[j] &&
+                               iszero_value(force_field.atom_types[tpl.types[j]].mass))
     canonical_system, assume_one_res = canonicalize_system(top, resname_replacements,
-                                                                    atomname_replacements)
+                                            atomname_replacements, extra_particle_names, strictness)
 
     atom_lookup = build_atom_residue_lookup(canonical_system)
 
@@ -704,12 +712,14 @@ function System(coord_file::AbstractString,
     atom_type_of = Vector{String}(undef, n_atoms)
     charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
+    template_id_of = Vector{Int}(undef, n_atoms)
+    resnum_of = Vector{Int}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
     # Index of each atom type in the force field, avoiding repeated linear searches
     atom_type_index = Dict{String, Int}(at => i
                                         for (i, at) in enumerate(force_field.atom_type_order))
 
-    virtual_sites = VirtualSite{T, IC}[]
+    virtual_sites = VirtualSite{T, IC, typeof(inv(oneunit(IC)))}[]
     # Identical residues, e.g. the water molecules in a solvated system, match the same
     #   template so the search is only carried out once for each distinct residue
     match_cache = Dict{ResidueMatchKey, Tuple{Union{ResidueTemplate, Nothing},
@@ -727,6 +737,8 @@ function System(coord_file::AbstractString,
                     atom_type_of[global_idx] = template.types[m_i]
                     charge_of[global_idx] = template.charges[m_i]
                     element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
+                    template_id_of[global_idx] = m_i
+                    resnum_of[global_idx] = resnum_from_atom_idx(global_idx, atom_lookup)
                 end
                 add_virtual_sites!(virtual_sites, template, rgraph, matches)
             end
@@ -767,8 +779,8 @@ function System(coord_file::AbstractString,
     htors_il  = InteractionList4Atoms(HarmonicTorsion{E, T})
     cmaps_il  = InteractionList5Atoms(CMAPTorsion)
     bonds_ub_flags = Bool[] # Whether a bond is a Urey-Bradley bond
-    eligible = trues(n_atoms, n_atoms)
-    special  = falses(n_atoms, n_atoms)
+    excluded_pairs = Tuple{Int32, Int32}[]
+    special_pairs  = Tuple{Int32, Int32}[]
     torsion_n_terms = 6
     weight_14_coulomb, weight_14_lj = T(force_field.weight_14_coulomb), T(force_field.weight_14_lj)
     σs_14 = (units ? typeof(one(T) * u"nm")[] : T[])
@@ -846,7 +858,6 @@ function System(coord_file::AbstractString,
             element=element_of[ai],
             hetero_atom=hetero_atoms[ai],
         ))
-        eligible[ai, ai] = false
     end
     atoms = to_device([atoms_abst...], AT)
 
@@ -862,8 +873,7 @@ function System(coord_file::AbstractString,
         push!(bonds_il.types, atom_types_to_string(t1,t2))
         push!(bonds_il.inters, HarmonicBond(T(hb.k), T(hb.r0)))
         push!(bonds_ub_flags, false)
-        eligible[i, j] = false
-        eligible[j, i] = false
+        push!(excluded_pairs, (Int32(i), Int32(j)))
     end
 
     # Angles
@@ -879,8 +889,7 @@ function System(coord_file::AbstractString,
             push!(angles_il.ks, k)
             push!(angles_il.types, atom_types_to_string(t1, t2, t3))
             push!(angles_il.inters, HarmonicAngle(T(ha.k), T(ha.θ0)))
-            eligible[i, k] = false
-            eligible[k, i] = false
+            push!(excluded_pairs, (Int32(i), Int32(k)))
         end
         if !isnothing(hb)
             push!(bonds_il.is, i)
@@ -888,28 +897,11 @@ function System(coord_file::AbstractString,
             push!(bonds_il.types, atom_types_to_string(t1, t2, t3))
             push!(bonds_il.inters, HarmonicBond(T(hb.k), T(hb.r0)))
             push!(bonds_ub_flags, true)
-            eligible[i, k] = false
-            eligible[k, i] = false
+            push!(excluded_pairs, (Int32(i), Int32(k)))
         end
     end
 
-    # Virtual sites share all the non-bonded exclusions of, and are excluded from,
-    #   their parent atoms
-    for vs in virtual_sites
-        i = vs.atom_ind
-        for j in (vs.atom_1, vs.atom_2, vs.atom_3)
-            if !iszero(j)
-                for k in 1:n_atoms
-                    if !eligible[j, k]
-                        eligible[i, k] = false
-                        eligible[k, i] = false
-                    end
-                end
-                eligible[i, j] = false
-                eligible[j, i] = false
-            end
-        end
-    end
+    add_virtual_site_exclusions!(excluded_pairs, virtual_sites, n_atoms)
 
     # Proper torsions
     for (i,j,k,l) in top_torsions
@@ -932,160 +924,85 @@ function System(coord_file::AbstractString,
                 proper=true,
             ))
         end
-        special[i, l] = true
-        special[l, i] = true
+        push!(special_pairs, (Int32(i), Int32(l)))
     end
 
     # Impropers (Amber ordering)
     for (c, j, k, l) in top_impropers
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
-        # Resolve improper params and oriented key (central first)
-        tt, key = resolve_improper_torsion(force_field, t1, t2, t3, t4)
-        isnothing(tt) && continue
-        tt isa HarmonicTorsionType && continue
-
-        # Recover metadata from resolver cache
+        # See if signature is already in cache
         ic = force_field.torsion_resolver.improper_cache
         hit = get(ic, (t1, t2, t3, t4), :miss)
-        ordering = "default"
-        has_wild = false
-        if hit != :miss
+        if hit == nothing
+            # Previously checked, and doesn't appear in the database
+            continue
+        elseif hit != :miss
+            # Signature was cached
+            # Collect permutation and parameters
             perm, ridx = hit
             r = force_field.torsion_resolver.rules[ridx]
-            ordering = r.ordering
-            has_wild = r.has_wildcard
+            tt = force_field.torsion_resolver.rules[ridx].params
+            isnothing(tt) && continue
+            tt isa HarmonicTorsionType && continue
 
             # Reorder indices based on how atoms were permuted
             src_atoms = (c, j, k, l)
             j = src_atoms[perm[2]]
             k = src_atoms[perm[3]]
             l = src_atoms[perm[4]]
-
-            # refresh types after remapping
-            t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
+            src = (t1, t2, t3, t4)
+            types = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         end
 
-        # topology indices for current j,k,l
-        _, r2, res2, ta2 = atom_lookup[j]
-        _, r3, res3, ta3 = atom_lookup[k]
-        _, r4, res4, ta4 = atom_lookup[l]
+        if hit == :miss
+            # Signature was not found
+            # Resolve improper params and oriented key (central first)
+            hit = resolve_improper_torsion(force_field, t1, t2, t3, t4, (c,j,k,l), 
+                             atom_type_of, resnum_of, template_id_of, element_of)
+            if hit == nothing
+                continue
+            elseif hit == :miss
+                error("Can't match torsion, but something wrong in implementation")
+            end
+            perm, ridx = hit
+            r = force_field.torsion_resolver.rules[ridx]
+            tt = force_field.torsion_resolver.rules[ridx].params               
+            isnothing(tt) && continue
+            tt isa HarmonicTorsionType && continue
 
-        e2 = Symbol(element_of[j])
-        e3 = Symbol(element_of[k])
-        e4 = Symbol(element_of[l])
-
-        if ordering == "amber"
-            # OpenMM amber branch, with/without wildcards
-            if !has_wild
-                if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j,   l)   = (l,   j)
-                    (r2,  r4)  = (r4,  r2)
-                    (ta2, ta4) = (ta4, ta2)
-                end
-                if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k,   l)   = (l,   k)
-                    (r3,  r4)  = (r4,  r3)
-                    (ta3, ta4) = (ta4, ta3)
-                end
-                if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
-                    (j, k) = (k, j)
+            # Reorder indices based on how atoms were permuted
+            src_atoms = (c, j, k, l)
+            j = src_atoms[perm[2]]
+            k = src_atoms[perm[3]]
+            l = src_atoms[perm[4]]
+            src = (t1, t2, t3, t4)
+            types = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
+        end
+        if hit != :miss
+            if r.ordering=="smirnoff"
+                a1, a2, a3, a4 = c, j, k, l
+                for (x1, x2, x3, x4) in ((a1,a2,a3,a4),
+                                        (a1,a3,a4,a2),
+                                        (a1,a4,a2,a3))
+                    push!(imps_il.is, x1)
+                    push!(imps_il.js, x2)
+                    push!(imps_il.ks, x3)
+                    push!(imps_il.ls, x4)
+                    push!(imps_il.types, atom_types_to_string(types...))
+                    push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
+                                                phases=T.(tt.phases), ks=T.(tt.ks), proper=false))
                 end
             else
-                if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j,   l)   = (l,   j)
-                    (r2,  r4)  = (r4,  r2)
-                    (ta2, ta4) = (ta4, ta2)
-                end
-                if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k,   l)   = (l,   k)
-                    (r3,  r4)  = (r4,  r3)
-                    (ta3, ta4) = (ta4, ta3)
-                end
-                if r2 > r3 || (r2 == r3 && ta2 > ta3)
-                    (j, k) = (k, j)
-                end
+                push!(imps_il.is, j)
+                push!(imps_il.js, k)
+                push!(imps_il.ks, c)
+                push!(imps_il.ls, l)
+                push!(imps_il.types, atom_types_to_string(types...))
+                push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
+                                                    phases=T.(tt.phases), ks=T.(tt.ks), proper=false))
             end
-        elseif ordering == "charmm"
-            # If wildcards were used then apply the same Amber tie-break, else unambiguous
-            if has_wild
-                if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                    (j,   l)   = (l,   j)
-                    (r2,  r4)  = (r4,  r2)
-                    (ta2, ta4) = (ta4, ta2)
-                end
-                if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                    (k,   l)   = (l,   k)
-                    (r3,  r4)  = (r4,  r3)
-                    (ta3, ta4) = (ta4, ta3)
-                end
-            end
-        elseif ordering == "smirnoff"
-            # Add the trefoil set
-            a1, a2, a3, a4 = c, j, k, l
-            for (x1, x2, x3, x4) in ((a1,a2,a3,a4),
-                                     (a1,a3,a4,a2),
-                                     (a1,a4,a2,a3))
-                p1, p2, cen, p3 = x2, x3, x1, x4
-                push!(imps_il.is, p1)
-                push!(imps_il.js, p2)
-                push!(imps_il.ks, cen)
-                push!(imps_il.ls, p3)
-                push!(imps_il.types, atom_types_to_string(key...))
-                push!(imps_il.inters, PeriodicTorsion(
-                    periodicities=tt.periodicities,
-                    phases=T.(tt.phases),
-                    ks=T.(tt.ks),
-                    proper=false,
-                ))
-            end
-            continue # Skip the single-add fallback below
-        else
-            # ordering == "default"
-            # Only if a wildcard is present
-            if has_wild
-                # Mirror the permutation on the current topology atoms (c,j,k,l)
-                src_atoms = (c, j, k, l)
-
-                # We need the two peripheral atoms in positions 2 and 3, and the remaining
-                #   peripheral in 4
-                a1 = src_atoms[perm[2]]
-                a2 = src_atoms[perm[3]]
-                a4 = src_atoms[perm[4]]
-
-                # Elements and masses for tie-break
-                e_a1 = Symbol(element_of[a1])
-                e_a2 = Symbol(element_of[a2])
-                m_a1 = T(force_field.atom_types[atom_type_of[a1]].mass)
-                m_a2 = T(force_field.atom_types[atom_type_of[a2]].mass)
-
-                # 1) If same element, lower atom index first
-                # 2) Else, prefer carbon; else heavier mass first
-                if e_a1 == e_a2
-                    if a1 > a2
-                        (a1, a2) = (a2, a1)
-                    end
-                elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
-                    (a1, a2) = (a2, a1)
-                end
-
-                # Reassign current triplet to ordered pair and remaining peripheral
-                j, k, l = a1, a2, a4
-            end
-            # If no wildcard leave j, k, l as-is
         end
-
-        push!(imps_il.is, j)
-        push!(imps_il.js, k)
-        push!(imps_il.ks, c)
-        push!(imps_il.ls, l)
-        push!(imps_il.types, atom_types_to_string(key...))
-        push!(imps_il.inters, PeriodicTorsion(
-            periodicities=tt.periodicities,
-            phases=T.(tt.phases),
-            ks=T.(tt.ks),
-            proper=false,
-        ))
     end
     empty!(force_field.torsion_resolver.improper_cache)
 
@@ -1093,77 +1010,60 @@ function System(coord_file::AbstractString,
     for (c, j, k, l) in top_impropers
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
 
-        # Resolve improper params and oriented key (central first)
-        tt, key = resolve_improper_torsion(force_field, t1, t2, t3, t4)
-        isnothing(tt) && continue
-        tt isa PeriodicTorsionType && continue
-
-        # Recover metadata from resolver cache
+        # See if signature is already in cache
         ic = force_field.torsion_resolver.improper_cache
         hit = get(ic, (t1, t2, t3, t4), :miss)
-        ordering = "default"
-        has_wild = false
-        if hit != :miss
+        if hit == nothing
+            # Previously checked, and doesn't appear in the database
+            continue
+        elseif hit != :miss
+            # Signature was cached
+            # Collect permutation and parameters
             perm, ridx = hit
-            r = force_field.torsion_resolver.rules[ridx]
-            has_wild = r.has_wildcard
+            tt = force_field.torsion_resolver.rules[ridx].params
+            isnothing(tt) && continue
+            tt isa PeriodicTorsionType && continue
 
             # Reorder indices based on how atoms were permuted
             src_atoms = (c, j, k, l)
             j = src_atoms[perm[2]]
             k = src_atoms[perm[3]]
             l = src_atoms[perm[4]]
-
-            # refresh types after remapping
-            t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
+            src = (t1, t2, t3, t4)
+            types = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         end
 
-        # topology indices for current j,k,l
-        _, r2, res2, ta2 = atom_lookup[j]
-        _, r3, res3, ta3 = atom_lookup[k]
-        _, r4, res4, ta4 = atom_lookup[l]
-
-        e2 = Symbol(element_of[j])
-        e3 = Symbol(element_of[k])
-        e4 = Symbol(element_of[l])
-
-        if has_wild
-            # Mirror the permutation on the current topology atoms (c,j,k,l)
-            src_atoms = (c, j, k, l)
-
-            # We need the two peripheral atoms in positions 2 and 3, and the remaining
-            #   peripheral in 4
-            a1 = src_atoms[perm[2]]
-            a2 = src_atoms[perm[3]]
-            a4 = src_atoms[perm[4]]
-
-            # Elements and masses for tie-break
-            e_a1 = Symbol(element_of[a1])
-            e_a2 = Symbol(element_of[a2])
-            m_a1 = T(force_field.atom_types[atom_type_of[a1]].mass)
-            m_a2 = T(force_field.atom_types[atom_type_of[a2]].mass)
-
-            # 1) If same element, lower atom index first
-            # 2) Else, prefer carbon; else heavier mass first
-            if e_a1 == e_a2
-                if a1 > a2
-                    (a1, a2) = (a2, a1)
-                end
-            elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
-                (a1, a2) = (a2, a1)
+        if hit == :miss
+            # Signature was not found
+            # Resolve improper params and oriented key (central first)
+            hit = resolve_improper_torsion(force_field, t1, t2, t3, t4, (c,j,k,l), 
+                             atom_type_of, resnum_of, template_id_of, element_of)
+            if hit == nothing
+                continue
+            elseif hit == :miss
+                error("Can't match torsion, but something wrong in implementation")
             end
+            perm, ridx = hit
+            tt = force_field.torsion_resolver.rules[ridx].params               
+            isnothing(tt) && continue
+            tt isa PeriodicTorsionType && continue
 
-            # Reassign current triplet to ordered pair and remaining peripheral.
-            j, k, l = a1, a2, a4
+            # Reorder indices based on how atoms were permuted
+            src_atoms = (c, j, k, l)
+            j = src_atoms[perm[2]]
+            k = src_atoms[perm[3]]
+            l = src_atoms[perm[4]]
+            src = (t1, t2, t3, t4)
+            types = (src[perm[1]], src[perm[2]], src[perm[3]], src[perm[4]])
         end
-        # If no wildcard leave j, k, l as-is
-
-        push!(htors_il.is, c)
-        push!(htors_il.js, j)
-        push!(htors_il.ks, k)
-        push!(htors_il.ls, l)
-        push!(htors_il.types, atom_types_to_string(key...))
-        push!(htors_il.inters, HarmonicTorsion(k=T(tt.k), θ0=T(tt.θ0)))
+        if hit != :miss
+            push!(htors_il.is, c)
+            push!(htors_il.js, j)
+            push!(htors_il.ks, k)
+            push!(htors_il.ls, l)
+            push!(htors_il.types, atom_types_to_string(types...))
+            push!(htors_il.inters, HarmonicTorsion(k=T(tt.k), θ0=T(tt.θ0)))
+        end
     end
 
     # CMAP corrections
@@ -1236,6 +1136,9 @@ function System(coord_file::AbstractString,
         end
     end
 
+    eligible = SparsePairMatrix(n_atoms, excluded_pairs; listed=false)
+    special  = SparsePairMatrix(n_atoms, special_pairs; listed=true)
+
     return System(T, TH, AT, atoms, coords, boundary_used, velocities,
                   atoms_data, virtual_sites_type, loggers, data, force_field.global_params, bonds_il, bonds_ub_flags,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
@@ -1245,6 +1148,38 @@ function System(coord_file::AbstractString,
                   grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
                   hydrogen_mass, strictness, launch_config, autotune_launch,
                   constraint_algorithm, n_threads)
+end
+
+#=
+A virtual site shares the non-bonded exclusions of, and is excluded from, the first atom it
+    is defined by, which is what OpenMM does with the default of its `excludeWith` attribute.
+The sites are processed in order and a site sees the exclusions added for earlier sites,
+    so for example a second site on the same atom is excluded from the first.
+`excluded_pairs` holds the exclusions found so far, the new ones are appended.
+=#
+function add_virtual_site_exclusions!(excluded_pairs, virtual_sites, n_atoms)
+    isempty(virtual_sites) && return excluded_pairs
+    partners = [Int32[] for _ in 1:n_atoms]
+    for (i, j) in excluded_pairs
+        push!(partners[i], j)
+        push!(partners[j], i)
+    end
+    function exclude!(i, j)
+        if i != j
+            push!(excluded_pairs, (Int32(i), Int32(j)))
+            push!(partners[i], j)
+            push!(partners[j], i)
+        end
+    end
+    for vs in virtual_sites
+        i, j = vs.atom_ind, vs.atom_1
+        # Copied since excluding the site from j extends the list of j
+        for k in copy(partners[j])
+            exclude!(i, k)
+        end
+        exclude!(i, j)
+    end
+    return excluded_pairs
 end
 
 const water_residue_names = ("SOL", "WAT", "HOH", "H2O")
@@ -1611,21 +1546,35 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         neighbor_finder = GPUNeighborFinder(
             n_atoms=size(eligible, 1),
             # GPUNeighborFinder reuses Morton ordering and tile metadata across
-            # `n_steps_reorder`, so its search radius needs the same buffer as
-            # the dense neighbor-list paths.
+            # `n_steps`, so its search radius needs the same buffer as the other
+            # neighbor finders
             dist_cutoff=T(dist_neighbors),
             excluded_pairs=excluded_pairs,
             special_pairs=special_pairs,
-            n_steps_reorder=neighbor_finder_n_steps,
-            device_vector_type=AT{Int32, 1},
+            n_steps=neighbor_finder_n_steps,
+            array_type=AT,
+            strictness=strictness,
+        )
+    elseif neighbor_finder_type in (nothing, GPUCellListNeighborFinder) &&
+                AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors)
+        neighbor_finder = GPUCellListNeighborFinder(
+            eligible=eligible,
+            special=special,
+            n_steps=neighbor_finder_n_steps,
+            dist_cutoff=T(dist_neighbors),
+            array_type=AT,
+            ragged=false,
+            strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary))
         neighbor_finder = DistanceNeighborFinder(
-            eligible=to_device(eligible, AT),
-            special=to_device(special, AT),
+            eligible=eligible,
+            special=special,
             n_steps=neighbor_finder_n_steps,
             dist_cutoff=T(dist_neighbors),
+            array_type=AT,
+            strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
         # CellListMap requires the cell list cutoff to fit twice in the box
@@ -1644,6 +1593,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
             x0=coords,
             boundary=boundary,
             dist_cutoff=T(dist_neighbors),
+            strictness=strictness,
         )
     else
         neighbor_finder = neighbor_finder_type(
@@ -1665,7 +1615,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     end
 
     if !isnothing(implicit_solvent)
-        gi_is = setup_implicit_solvent(implicit_solvent, atoms, atoms_data, bonds, n_threads)
+        gi_is = setup_implicit_solvent(implicit_solvent, atoms, atoms_data, bonds_all, n_threads)
         general_inters_is = (gi_is,)
     else
         general_inters_is = ()
