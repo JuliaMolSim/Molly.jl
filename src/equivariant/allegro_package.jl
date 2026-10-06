@@ -318,8 +318,8 @@ end
 """
     allegro_package_forces(m::AllegroPackageModel, coords, species) -> Vector{SVector{3}}
 
-Analytic forces `F = -∂E/∂r` of the bit-exact Allegro port (see
-[`allegro_package_energy_and_forces`](@ref)). `coords` are `SVector{3}` in Å, `species` are 0-based
+Analytic forces `F = -∂E/∂r` of the bit-exact Allegro port (via `allegro_package_energy_and_forces`,
+an internal function). `coords` are `SVector{3}` in Å, `species` are 0-based
 type indices; forces are in eV/Å and reproduce the package's autograd forces to numerical precision.
 """
 allegro_package_forces(m::AllegroPackageModel, coords::AbstractVector{<:SVector{3}},
