@@ -1219,6 +1219,8 @@ end
             bytes = CUDA.@allocated Molly.dist_between_groups(CalcMinDist(), coords_1, coords_2, boundary_f32)
             @test bytes < 500_000
         end
+    end
+end
 @testset "Bias virial" begin
     # The virial of a bias is minus the derivative of its energy with respect to a
     #   homogeneous strain, W = -(dU/dε)ᵀ, here for a molecule split over the boundary
