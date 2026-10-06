@@ -2,17 +2,22 @@
 # (AllegroPackageModel). Mirrors the CPU paths in allegro_package.jl op-for-op, so loading the real
 # nequip-allegro weights reproduces the package energy and forces on CUDA / Metal to device precision.
 # One thread per directed edge for the per-edge ops; Atomix atomics for the edge→atom scatters. The
-# per-layer Wigner-3j path weights are pre-folded into `ww3j[u,i,j,k] = Σ_p w[u,p]·w3j[p,i,j,k]` at
-# build time, so the TP kernels are a plain contraction.
+# per-layer Wigner-3j path weights are pre-folded into `w[u] = Σ_p w[u,p]·w3j[p,i,j,k]` at build time
+# and stored as a SPARSE list of the non-zero (i,j,k) output components (angular-momentum selection
+# rules zero out ~89%), so the tensor-product kernels iterate only the active paths.
 
-struct AllegroPackageGPU{T, VT, MT, A3}
+struct AllegroPackageGPU{T, VT, MT, A3, VI}
     S::Int; C::Int; nb::Int; L::Int; p::Int
     r_max::T; avg_nn::T
-    nks::Vector{Int}; inlens::Vector{Int}
+    nks::Vector{Int}; inlens::Vector{Int}; tpnnz::Vector{Int}
     bessel_w::VT
     center_embed::MT; neighbor_embed::MT; basis_W::MT
     semb_W0::MT; semb_W2::MT; env_W::MT; proj_W::MT
-    ww3j::Vector{A3}                       # per layer, flattened (C*9*9*nk) device vector
+    # Sparse Wigner-3j tensor-product paths per layer: the active (i,j,k) output-component index lists
+    # (`tpi`/`tpj`/`tpk`, length `tpnnz`) and the per-(path, channel) folded weights `tpw` (flattened
+    # nnz*C, channel fastest). ~89% of (i,j,k) triples are zero by angular-momentum selection rules, so
+    # iterating only the active paths makes the TP kernels ~9x cheaper than the dense 9x9xnk loop.
+    tpi::Vector{VI}; tpj::Vector{VI}; tpk::Vector{VI}; tpw::Vector{A3}
     lat_W0::Vector{MT}; lat_W2::Vector{MT}
     ro_W0::MT; ro_W2::MT
 end
@@ -30,22 +35,31 @@ CUDA/CPU), pre-folding the per-layer path weights into the Wigner-3j tables. Bui
 """
 function build_allegro_package_gpu(m::AllegroPackageModel, backend, ::Type{T}) where {T}
     C = m.C
-    ww = map(1:m.L) do l
+    # Fold the per-layer path weights into the Wigner-3j table and keep only the non-zero (i,j,k)
+    # output components as a sparse path list (angular-momentum selection rules zero out ~89%).
+    sparse = map(1:m.L) do l
         w3j = m.tp_w3j[l]; wtp = m.tp_w[l]; nk = m.tp_nk[l]; npath = size(w3j, 1)
-        f = zeros(T, C * 9 * 9 * nk)
-        @inbounds for u in 1:C, i in 1:9, j in 1:9, k in 1:nk
-            s = zero(T); for pth in 1:npath; s += wtp[u, pth] * w3j[pth, i, j, k]; end
-            f[(((k - 1) * 9 + (j - 1)) * 9 + (i - 1)) * C + u] = s   # layout [u,i,j,k], u fastest
+        ti = Int32[]; tj = Int32[]; tk = Int32[]; wv = T[]
+        @inbounds for k in 1:nk, j in 1:9, i in 1:9
+            vals = ntuple(C) do u
+                s = zero(T); for pth in 1:npath; s += wtp[u, pth] * w3j[pth, i, j, k]; end; s
+            end
+            if any(!iszero, vals)
+                push!(ti, i); push!(tj, j); push!(tk, k)
+                for u in 1:C; push!(wv, vals[u]); end          # flattened nnz*C, channel u fastest
+            end
         end
-        _pkgdev(backend, T, f)
+        (_pkgdev_i(backend, ti), _pkgdev_i(backend, tj), _pkgdev_i(backend, tk), _pkgdev(backend, T, wv), length(ti))
     end
+    tpi = [s[1] for s in sparse]; tpj = [s[2] for s in sparse]; tpk = [s[3] for s in sparse]
+    tpw = [s[4] for s in sparse]; tpnnz = [s[5] for s in sparse]
     inlens = [l * m.S + C for l in 1:m.L]
     md(A) = _pkgdev(backend, T, A)
-    return AllegroPackageGPU{T, typeof(md(m.bessel_w)), typeof(md(m.basis_W)), eltype(ww)}(
-        m.S, C, m.nb, m.L, m.p, T(m.r_max), T(m.avg_nn), copy(m.tp_nk), inlens,
+    return AllegroPackageGPU{T, typeof(md(m.bessel_w)), typeof(md(m.basis_W)), eltype(tpw), eltype(tpi)}(
+        m.S, C, m.nb, m.L, m.p, T(m.r_max), T(m.avg_nn), copy(m.tp_nk), inlens, tpnnz,
         md(m.bessel_w), md(m.center_embed), md(m.neighbor_embed), md(m.basis_W),
         md(m.semb_W0), md(m.semb_W2), md(m.env_W), md(m.proj_W),
-        ww, map(md, m.lat_W0), map(md, m.lat_W2), md(m.ro_W0), md(m.ro_W2))
+        tpi, tpj, tpk, tpw, map(md, m.lat_W0), map(md, m.lat_W2), md(m.ro_W0), md(m.ro_W2))
 end
 
 @inline _pkg_ir(i) = i == 1 ? 1 : (i <= 4 ? 2 : 3)
@@ -110,15 +124,16 @@ end
     end
 end
 
-@kernel inbounds=true function pkg_tp_kernel!(out, @Const(tfin), @Const(node), @Const(ww), @Const(ecenter), C, nk)
-    e = @index(Global, Linear); T = eltype(out); c = ecenter[e]
-    for k in 1:nk, u in 1:C
-        s = zero(T)
-        for i in 1:9, j in 1:9
-            s += tfin[(i - 1) * C + u, e] * node[(j - 1) * C + u, c] *
-                 ww[(((k - 1) * 9 + (j - 1)) * 9 + (i - 1)) * C + u]
+# Strided Wigner-3j contraction, sparse over the active (i,j,k) paths. `out` (C*nk, ne) is pre-zeroed
+# and accumulated: out[k,u,e] += Σ_paths tfin[i,u,e]·node[j,u,c]·w[path,u].
+@kernel inbounds=true function pkg_tp_kernel!(out, @Const(tfin), @Const(node),
+        @Const(ti), @Const(tj), @Const(tk), @Const(w), @Const(ecenter), C, nnz)
+    e = @index(Global, Linear); c = ecenter[e]
+    for t in 1:nnz
+        i = ti[t]; j = tj[t]; k = tk[t]; base = (t - 1) * C
+        for u in 1:C
+            out[(k - 1) * C + u, e] += tfin[(i - 1) * C + u, e] * node[(j - 1) * C + u, c] * w[base + u]
         end
-        out[(k - 1) * C + u, e] = s
     end
 end
 
@@ -197,7 +212,7 @@ function compute_allegro_package_energy_ka(m::AllegroPackageModel,
         pkg_envscatter_kernel!(backend, workgroup)(node, SH, envw, ec, C; ndrange=ne)
         node = node .* invs
         out = z2(C * nk, ne)
-        pkg_tp_kernel!(backend, workgroup)(out, tf, node, gpu.ww3j[l], ec, C, nk; ndrange=ne)
+        pkg_tp_kernel!(backend, workgroup)(out, tf, node, gpu.tpi[l], gpu.tpj[l], gpu.tpk[l], gpu.tpw[l], ec, C, gpu.tpnnz[l]; ndrange=ne)
         inp = vcat(reshape(permutedims(acc[:, :, 1:l], (1, 3, 2)), l * S, ne), out[1:C, :])
         lat = gpu.lat_W2[l] * _pkg_silu.(gpu.lat_W0[l] * inp)                      # (outlen, ne)
         acc[:, :, l + 1] = lat[1:S, :]
@@ -217,25 +232,17 @@ end
 @inline _coscg(z::T) where {T} = cos(T(pi) * z) / z - sin(T(pi) * z) / (T(pi) * z * z)
 
 # ---- backward kernels (per directed edge) ----
+# Reverse of the sparse TP contraction. tfin_bar and node_bar are pre-zeroed; each active path adds to
+# the tf-input gradient (per-edge, no atomic) and the node gradient (scattered to the centre, atomic).
 @kernel inbounds=true function pkg_tp_bwd_kernel!(tfin_bar, node_bar, @Const(out_bar),
-        @Const(tfin), @Const(node), @Const(ww), @Const(ecenter), C, nk)
-    e = @index(Global, Linear); T = eltype(tfin_bar); c = ecenter[e]
-    for u in 1:C
-        for i in 1:9
-            ai = zero(T)
-            for j in 1:9, k in 1:nk
-                ai += out_bar[(k - 1) * C + u, e] * node[(j - 1) * C + u, c] *
-                      ww[(((k - 1) * 9 + (j - 1)) * 9 + (i - 1)) * C + u]
-            end
-            tfin_bar[(i - 1) * C + u, e] += ai     # per-edge: no atomic
-        end
-        for j in 1:9
-            aj = zero(T)
-            for i in 1:9, k in 1:nk
-                aj += out_bar[(k - 1) * C + u, e] * tfin[(i - 1) * C + u, e] *
-                      ww[(((k - 1) * 9 + (j - 1)) * 9 + (i - 1)) * C + u]
-            end
-            Atomix.@atomic node_bar[(j - 1) * C + u, c] += aj
+        @Const(tfin), @Const(node), @Const(ti), @Const(tj), @Const(tk), @Const(w), @Const(ecenter), C, nnz)
+    e = @index(Global, Linear); c = ecenter[e]
+    for t in 1:nnz
+        i = ti[t]; j = tj[t]; k = tk[t]; base = (t - 1) * C
+        for u in 1:C
+            ob = out_bar[(k - 1) * C + u, e] * w[base + u]
+            tfin_bar[(i - 1) * C + u, e] += ob * node[(j - 1) * C + u, c]
+            Atomix.@atomic node_bar[(j - 1) * C + u, c] += ob * tfin[(i - 1) * C + u, e]
         end
     end
 end
@@ -332,7 +339,7 @@ function compute_allegro_package_energy_and_forces_ka(m::AllegroPackageModel,
         pkg_envscatter_kernel!(backend, workgroup)(node, SH, envw_hist[l], ec, C; ndrange=ne)
         node = node .* invs; node_hist[l] = node
         out = z2(C * nk, ne)
-        pkg_tp_kernel!(backend, workgroup)(out, tf_hist[l], node, gpu.ww3j[l], ec, C, nk; ndrange=ne)
+        pkg_tp_kernel!(backend, workgroup)(out, tf_hist[l], node, gpu.tpi[l], gpu.tpj[l], gpu.tpk[l], gpu.tpw[l], ec, C, gpu.tpnnz[l]; ndrange=ne)
         tf_hist[l + 1] = out
         inp = vcat(reshape(permutedims(acc[:, :, 1:l], (1, 3, 2)), l * S, ne), out[1:C, :])
         pre = gpu.lat_W0[l] * inp; lat_pre[l] = pre
@@ -358,7 +365,7 @@ function compute_allegro_package_energy_and_forces_ka(m::AllegroPackageModel,
         tf_bar[1:C, :] = tf_bar[1:C, :] .+ inp_bar[l * S + 1:l * S + C, :]
         tfin_bar = z2(C * 9, ne); node_bar = KernelAbstractions.zeros(backend, T, C * 9, n)
         pkg_tp_bwd_kernel!(backend, workgroup)(tfin_bar, node_bar, tf_bar, tf_hist[l], node_hist[l],
-            gpu.ww3j[l], ec, C, nk; ndrange=ne)
+            gpu.tpi[l], gpu.tpj[l], gpu.tpk[l], gpu.tpw[l], ec, C, gpu.tpnnz[l]; ndrange=ne)
         new_envw_bar = z2(3C, ne)
         pkg_envscatter_bwd_kernel!(backend, workgroup)(new_envw_bar, SH_bar, node_bar, envw_hist[l], SH, ec, C, invs; ndrange=ne)
         tf_bar = tfin_bar; envw_bar = new_envw_bar
