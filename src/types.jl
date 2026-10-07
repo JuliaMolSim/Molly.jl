@@ -1,5 +1,4 @@
 # Types
-import Base: ==, hash
 
 export
     PairwiseInteraction,
@@ -371,14 +370,14 @@ function Base.:+(il1::InteractionList5Atoms, il2::InteractionList5Atoms)
     )
 end
 
-function ==(a::InteractionList1Atoms, b::InteractionList1Atoms)
+function Base.:(==)(a::InteractionList1Atoms, b::InteractionList1Atoms)
     return a.is == b.is && 
            a.inters == b.inters && 
            a.types == b.types && 
            a.data == b.data
 end
 
-function ==(a::InteractionList2Atoms, b::InteractionList2Atoms)
+function Base.:(==)(a::InteractionList2Atoms, b::InteractionList2Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.inters == b.inters && 
@@ -386,7 +385,7 @@ function ==(a::InteractionList2Atoms, b::InteractionList2Atoms)
            a.data == b.data
 end
 
-function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
+function Base.:(==)(a::InteractionList3Atoms, b::InteractionList3Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.ks == b.ks && 
@@ -395,7 +394,7 @@ function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
            a.data == b.data
 end
 
-function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
+function Base.:(==)(a::InteractionList4Atoms, b::InteractionList4Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.ks == b.ks && 
@@ -405,7 +404,7 @@ function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
            a.data == b.data
 end
 
-function ==(a::InteractionList5Atoms, b::InteractionList5Atoms)
+function Base.:(==)(a::InteractionList5Atoms, b::InteractionList5Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.ks == b.ks && 
@@ -416,14 +415,14 @@ function ==(a::InteractionList5Atoms, b::InteractionList5Atoms)
            a.data == b.data
 end
 
-function hash(a::InteractionList1Atoms, h::UInt)
+function Base.hash(a::InteractionList1Atoms, h::UInt)
     is     = from_device(a.is)
     inters = from_device(a.inters)
     types  = from_device(a.types)
     return hash(is, hash(inters, hash(types, hash(a.data, h))))
 end
 
-function hash(a::InteractionList2Atoms, h::UInt)
+function Base.hash(a::InteractionList2Atoms, h::UInt)
     is     = from_device(a.is)
     js     = from_device(a.js)
     inters = from_device(a.inters)
@@ -431,7 +430,7 @@ function hash(a::InteractionList2Atoms, h::UInt)
     return hash(is, hash(js, hash(inters, hash(types, hash(a.data, h)))))
 end
 
-function hash(a::InteractionList3Atoms, h::UInt)
+function Base.hash(a::InteractionList3Atoms, h::UInt)
     is     = from_device(a.is)
     js     = from_device(a.js)
     ks     = from_device(a.ks)
@@ -440,7 +439,7 @@ function hash(a::InteractionList3Atoms, h::UInt)
     return hash(is, hash(js, hash(ks, hash(inters, hash(types, hash(a.data, h))))))
 end
 
-function hash(a::InteractionList4Atoms, h::UInt)
+function Base.hash(a::InteractionList4Atoms, h::UInt)
     is     = from_device(a.is)
     js     = from_device(a.js)
     ks     = from_device(a.ks)
@@ -450,7 +449,7 @@ function hash(a::InteractionList4Atoms, h::UInt)
     return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, hash(a.data, h)))))))
 end
 
-function hash(a::InteractionList5Atoms, h::UInt)
+function Base.hash(a::InteractionList5Atoms, h::UInt)
     is     = from_device(a.is)
     js     = from_device(a.js)
     ks     = from_device(a.ks)
@@ -472,7 +471,7 @@ function merge_interactions(interactions)
     cache = []
     for (i,inter) in enumerate(interactions)
         i in cache && continue
-        idx = findall(x->typeof(x)==typeof(inter), interactions)
+        idx = findall(x->typeof(x) == typeof(inter), interactions)
         inters = interactions[idx[1]]
         for j in idx[2:end]
             inters = append!(inters,interactions[j])
@@ -804,7 +803,7 @@ struct GPUCellListNeighborList{C,R,L,S}
 
         n_int = Int(n)
 
-        if list === nothing
+        if isnothing(list)
             iszero(n_int) || throw(
                 ArgumentError("n must be zero when list is nothing"),
             )
@@ -1061,12 +1060,12 @@ function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, bounda
     neighbor_finder isa NoNeighborFinder && return nothing
 
     if neighbor_finder isa GPUCellListNeighborFinder
-        if neighbor_finder.output === :ragged && any(use_neighbors, values(pairwise_inters))
+        if neighbor_finder.output == :ragged && any(use_neighbors, values(pairwise_inters))
             throw(ArgumentError("the neighbor finder has output=:ragged, which does not " *
                                 "produce the pair list that the pairwise interactions " *
                                 "need, use output=:molly_pairs"))
         end
-        if neighbor_finder.output === :molly_pairs && neighbor_finder.n_atoms != n_atoms
+        if neighbor_finder.output == :molly_pairs && neighbor_finder.n_atoms != n_atoms
             throw(ArgumentError("the neighbor finder was set up for " *
                                 "$(neighbor_finder.n_atoms) atoms but the system has " *
                                 "$n_atoms atoms"))

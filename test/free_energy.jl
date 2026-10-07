@@ -252,11 +252,17 @@ end
     # CHARMM36 protein with the CGenFF TYK2 ligands: separate 1-4 Lennard-Jones and CMAP terms,
     #   and a lone pair on each aromatic chlorine as a LocalCoordinatesSite
     FT = Float64
-    build(lig) = System(joinpath(tyk2_dir, "tyk2_charmm_$(lig)_conect.pdb"),
-                        MolecularForceField(joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...,
-                                            joinpath(tyk2_dir, "$(lig)_charmm.xml"); units=true);
-                        nonbonded_method=SetupPME(approximate_erfc=false), center_coords=false,
-                        dist_cutoff=FT(0.9)u"nm")
+    build(lig) = System(
+        joinpath(tyk2_dir, "tyk2_charmm_$(lig)_conect.pdb"),
+        MolecularForceField(
+            joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...,
+            joinpath(tyk2_dir, "$(lig)_charmm.xml");
+            units=true,
+            strictness=:nowarn,
+        );
+        nonbonded_method=SetupPME(approximate_erfc=false), center_coords=false,
+        dist_cutoff=FT(0.9)u"nm",
+    )
     sysA, sysB = build("ejm31"), build("ejm50")
     @test length(sysA.virtual_sites) == 2 && length(sysB.virtual_sites) == 2
     @test all(vs -> vs.type == 5, sysA.virtual_sites) # LocalCoordinatesSite
