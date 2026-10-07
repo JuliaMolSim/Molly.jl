@@ -406,13 +406,13 @@ virial_incompatible_sites(vs::AbstractVector{<:VirtualSite}) =
     any(v -> v.type == 4 || v.type == 5, from_device(vs))
 virial_incompatible_sites(vs) = false
 
-function warn_virial_sites(sys, barostat)
+function warn_virial_sites(sys, barostat, strictness)
     if virial_incompatible_sites(sys.virtual_sites)
-        report_issue("the system has virtual sites that are not compatible with the virial, so " *
-                     "the pressure $(nameof(typeof(barostat))) uses is wrong; " *
-                     "MonteCarloBarostat needs no virial", :warn; maxlog=1)
+        err_msg = "the system has virtual sites that are not compatible with the virial, so " *
+                  "the pressure used by $(nameof(typeof(barostat))) is wrong; " *
+                  "MonteCarloBarostat needs no virial"
+        report_issue(err_msg, strictness; maxlog=1)
     end
-    return nothing
 end
 
 function apply_coupling!(sys::System{D},
@@ -428,7 +428,7 @@ function apply_coupling!(sys::System{D},
     if step_n % barostat.n_steps != 0
         return false
     end
-    warn_virial_sites(sys, barostat)
+    warn_virial_sites(sys, barostat, strictness)
 
     # Pressure in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
@@ -649,7 +649,7 @@ function apply_coupling!(sys::System{D},
     if step_n % barostat.n_steps != 0
         return false
     end
-    warn_virial_sites(sys, barostat)
+    warn_virial_sites(sys, barostat, strictness)
 
     # Pressure tensor in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
