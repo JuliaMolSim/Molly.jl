@@ -4,7 +4,6 @@
 export
     accelerations,
     force,
-    pairwise_force,
     SpecificForce1Atoms,
     SpecificForce2Atoms,
     SpecificForce3Atoms,
@@ -12,6 +11,8 @@ export
     SpecificForce5Atoms,
     forces,
     forces_virial
+
+@public pairwise_force
 
 # Apply F = ma but give massless particles zero acceleration
 calc_accels(f, m) = (iszero(m) ? zero(f / oneunit(m)) : (f / m))

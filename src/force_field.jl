@@ -3,6 +3,13 @@
 export
     MolecularForceField
 
+@public ForceFieldXMLError
+
+"""
+    ForceFieldXMLError(msg)
+
+An error when reading a force field XML file.
+"""
 struct ForceFieldXMLError <: Exception
     msg::String
 end

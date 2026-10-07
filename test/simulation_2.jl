@@ -245,13 +245,13 @@ end
 
     simulator_uniform = MetropolisMonteCarlo(
         temperature=temp,
-        trial_moves=random_uniform_translation!,
+        trial_moves=Molly.random_uniform_translation!,
         trial_args=Dict(:shift_size => 0.1u"nm"),
     )
 
     simulator_gaussian = MetropolisMonteCarlo(
         temperature=temp,
-        trial_moves=random_normal_translation!,
+        trial_moves=Molly.random_normal_translation!,
         trial_args=Dict(:shift_size => 0.1u"nm"),
     )
 

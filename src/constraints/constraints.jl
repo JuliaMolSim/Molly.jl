@@ -1,11 +1,12 @@
 export
     DistanceConstraint,
     AngleConstraint,
-    apply_position_constraints!,
-    apply_velocity_constraints!,
     check_position_constraints,
     check_velocity_constraints,
     check_constraints
+
+@public apply_position_constraints!,
+    apply_velocity_constraints!
 
 # Split `n_items` constraints or clusters over at most `n_threads` chunks on CPU
 # The ranges are contiguous rather than strided, since the per-constraint data is read in order
@@ -402,8 +403,8 @@ function calculate_n_dof(D::Integer, n_atoms::Integer, boundary)
 end
 
 """
-    apply_position_constraints!(sys, coord_storage; context=nothing, n_threads=Threads.nthreads(),
-                                strictness=:warn)
+    apply_position_constraints!(sys, coord_storage; context=nothing,
+                                n_threads=Threads.nthreads(), strictness=:warn)
     apply_position_constraints!(sys, coord_storage, vel_storage, dt; context=nothing,
                                 n_threads=Threads.nthreads(), strictness=:warn)
 

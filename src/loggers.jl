@@ -1,12 +1,8 @@
 # Loggers to record properties throughout a simulation
 
 export
-    apply_loggers!,
     GeneralObservableLogger,
     values,
-    log_property!,
-    logger_virial_interval,
-    logger_pressure_interval,
     TemperatureLogger,
     CoordinatesLogger,
     BoxLogger,
@@ -29,6 +25,11 @@ export
     AverageObservableLogger,
     ReplicaExchangeLogger,
     MonteCarloLogger
+
+@public apply_loggers!,
+    log_property!,
+    logger_virial_interval,
+    logger_pressure_interval
 
 function check_run_loggers(run_loggers)
     if !(run_loggers == true || run_loggers == false || run_loggers == :skipstart)

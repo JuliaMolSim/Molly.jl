@@ -3,13 +3,16 @@
 
 export
     place_atoms,
-    place_diatomics,
+    place_diatomics
+
+@public MissingResidueTemplateError,
     is_any_atom,
     is_heavy_atom,
     add_position_restraints
 
 """
-    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100, rng=Random.default_rng())
+    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100,
+                rng=Random.default_rng())
 
 Generate random coordinates.
 
@@ -430,6 +433,11 @@ function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T, <:Any, P}}, t
     return virtual_sites
 end
 
+"""
+    MissingResidueTemplateError(msg)
+
+An error when a residue cannot be matched to a residue template.
+"""
 struct MissingResidueTemplateError <: Exception
     msg::String
 end
@@ -1688,7 +1696,8 @@ function is_heavy_atom(at, at_data)
 end
 
 """
-    add_position_restraints(sys, k; atom_selector=is_any_atom, restrain_coords=sys.coords)
+    add_position_restraints(sys, k; atom_selector=Molly.is_any_atom,
+                            restrain_coords=sys.coords)
 
 Return a copy of a [`System`](@ref) with [`HarmonicPositionRestraint`](@ref)s added to restrain the
 atoms.
@@ -1697,7 +1706,7 @@ The force constant `k` can be a single value or an array of equal length to the 
 in the system.
 The `atom_selector` function takes in each atom and atom data and determines whether to restrain
 that atom.
-For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
+For example, [`Molly.is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
 """
 function add_position_restraints(sys::System{<:Any, AT, T, TH},
                                  k;

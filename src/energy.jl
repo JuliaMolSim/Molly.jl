@@ -2,12 +2,13 @@
 
 export
     total_energy,
-    kinetic_energy_tensor,
     kinetic_energy,
     virial,
     scalar_virial,
     temperature,
-    potential_energy,
+    potential_energy
+
+@public kinetic_energy_tensor,
     pairwise_pe
 
 """

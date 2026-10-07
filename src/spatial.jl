@@ -6,12 +6,9 @@ export
     TriclinicBoundary,
     volume,
     density,
-    box_center,
     scale_boundary,
     random_coord,
-    vector_1D,
     vector,
-    wrap_coord_1D,
     wrap_coords,
     random_velocity,
     maxwell_boltzmann,
@@ -25,6 +22,10 @@ export
     scalar_pressure,
     scale_coords!,
     dipole_moment
+
+@public box_center,
+    vector_1D,
+    wrap_coord_1D
 
 # Parameters are dimension, float type and coordinate type
 abstract type AbstractBoundary{D, T, C} end
@@ -718,7 +719,8 @@ end
     random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
                     k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits};
                     dims=3, rng=Random.default_rng())
-    random_velocity(atom_mass::Real, temp::Real, k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
+    random_velocity(atom_mass::Real, temp::Real,
+                    k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
                     dims=3, rng=Random.default_rng())
 
 Generate a random velocity from the Maxwell-Boltzmann distribution, with

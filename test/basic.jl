@@ -1,12 +1,12 @@
 @testset "Spatial" begin
-    @test vector_1D(4.0, 6.0, 10.0) ==  2.0
-    @test vector_1D(1.0, 9.0, 10.0) == -2.0
-    @test vector_1D(6.0, 4.0, 10.0) == -2.0
-    @test vector_1D(9.0, 1.0, 10.0) ==  2.0
+    @test Molly.vector_1D(4.0, 6.0, 10.0) ==  2.0
+    @test Molly.vector_1D(1.0, 9.0, 10.0) == -2.0
+    @test Molly.vector_1D(6.0, 4.0, 10.0) == -2.0
+    @test Molly.vector_1D(9.0, 1.0, 10.0) ==  2.0
 
-    @test vector_1D(4.0u"nm", 6.0u"nm", 10.0u"nm") ==  2.0u"nm"
-    @test vector_1D(1.0u"m" , 9.0u"m" , 10.0u"m" ) == -2.0u"m"
-    @test_throws Unitful.DimensionError vector_1D(6.0u"nm", 4.0u"nm", 10.0)
+    @test Molly.vector_1D(4.0u"nm", 6.0u"nm", 10.0u"nm") ==  2.0u"nm"
+    @test Molly.vector_1D(1.0u"m" , 9.0u"m" , 10.0u"m" ) == -2.0u"m"
+    @test_throws Unitful.DimensionError Molly.vector_1D(6.0u"nm", 4.0u"nm", 10.0)
 
     @test vector(
         SVector(4.0, 1.0, 6.0),
@@ -29,13 +29,13 @@
         CubicBoundary(SVector(10.0, 10.0, 10.0)u"nm"),
     ) == SVector(2.0, -2.0, -2.0)u"nm"
 
-    @test wrap_coord_1D(8.0 , 10.0) == 8.0
-    @test wrap_coord_1D(12.0, 10.0) == 2.0
-    @test wrap_coord_1D(-2.0, 10.0) == 8.0
+    @test Molly.wrap_coord_1D(8.0 , 10.0) == 8.0
+    @test Molly.wrap_coord_1D(12.0, 10.0) == 2.0
+    @test Molly.wrap_coord_1D(-2.0, 10.0) == 8.0
 
-    @test wrap_coord_1D(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
-    @test wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
-    @test_throws ErrorException wrap_coord_1D(-2.0u"nm", 10.0)
+    @test Molly.wrap_coord_1D(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
+    @test Molly.wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
+    @test_throws ErrorException Molly.wrap_coord_1D(-2.0u"nm", 10.0)
 
     # Bond and torsion angles
     b_ang = CubicBoundary(10.0u"nm")
@@ -146,7 +146,7 @@
     @test !Molly.has_infinite_boundary(b)
     @test volume(b) == 120.0u"nm^3"
     @test volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
-    @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
+    @test Molly.box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
     sb = scale_boundary(b, 1.1)
     @test sb.side_lengths ≈ SVector(4.4, 5.5, 6.6)u"nm"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0, 6.0)u"nm"
@@ -180,11 +180,11 @@
     sys_dens_scaled = System(sys_dens; boundary=CubicBoundary(1.0u"nm"))
     @test density(sys_dens_scaled) ≈ 8 * density(sys_dens)
 
-    apply_loggers!(sys_dens)
+    Molly.apply_loggers!(sys_dens)
     @test values(sys_dens.loggers.density) == [density(sys_dens)]
-    apply_loggers!(sys_dens, nothing, 1, nothing, false)
+    Molly.apply_loggers!(sys_dens, nothing, 1, nothing, false)
     @test length(values(sys_dens.loggers.density)) == 1
-    apply_loggers!(sys_dens, nothing, 1)
+    Molly.apply_loggers!(sys_dens, nothing, 1)
     @test length(values(sys_dens.loggers.density)) == 2
     show(devnull, sys_dens.loggers.density)
 
@@ -196,7 +196,7 @@
     @test !Molly.has_infinite_boundary(b)
     @test volume(b) == 20.0u"m^2"
     @test volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
-    @test box_center(b) == SVector(2.0, 2.5)u"m"
+    @test Molly.box_center(b) == SVector(2.0, 2.5)u"m"
     sb = scale_boundary(b, 0.9)
     @test sb.side_lengths ≈ SVector(3.6, 4.5)u"m"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0)u"m"
@@ -266,7 +266,7 @@
 
     @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
-    @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
+    @test isapprox(Molly.box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
     sb = scale_boundary(b, 1.2)
     @test [sb.α, sb.β, sb.γ] ≈ [b.α, b.β, b.γ]
     @test volume(sb) ≈ volume(b) * 1.2^3
@@ -427,7 +427,7 @@
         a2 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(7.0, 8.0)u"nm/ps"], AT)
         a3 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(NaN, 8.0)u"nm/ps"], AT)
         Molly.check_array_nans((a1, a2), ("a1", "a2"), 10)
-        @test_throws NaNSimulationError Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
+        @test_throws Molly.NaNSimulationError Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
     end
 end
 
@@ -505,8 +505,8 @@ end
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
-        @test_throws MissingResidueTemplateError System(joinpath(data_dir, "imatinib.pdb"), ff;
-                                                        boundary=boundary)
+        @test_throws Molly.MissingResidueTemplateError System(joinpath(data_dir, "imatinib.pdb"),
+                                                              ff; boundary=boundary)
     end
 
     water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff;
@@ -597,7 +597,7 @@ end
 
         if struc_name == "sgpb_omtky3"
             # Catch if disulfide bonds are not added properly
-            @test_throws MissingResidueTemplateError System(
+            @test_throws Molly.MissingResidueTemplateError System(
                 pdb_file,
                 ff;
                 array_type=AT,
@@ -639,7 +639,7 @@ end
     @test ff_tip3p.custom_nonbonded == false
 
     ff_fp = joinpath(ff_dir, "tip4pfb.xml")
-    @test_throws ForceFieldXMLError MolecularForceField(ff_fp, ff_fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(ff_fp, ff_fp)
 end
 
 @testset "Double exponential force field setup" begin
@@ -807,10 +807,10 @@ end
     @test length(neighbor_pairs(neighbors_ref)) == n_neighbors_ref
     @test neighbor_pairs(neighbors_ref)[1] == neighbors_ref[1]
     # Only some neighbor lists store neighbors per atom
-    @test !has_ragged_neighbors(neighbors_ref)
-    @test !has_ragged_neighbors(nothing)
+    @test !Molly.has_ragged_neighbors(neighbors_ref)
+    @test !Molly.has_ragged_neighbors(nothing)
     @test_throws ArgumentError ragged_neighbors(neighbors_ref)
-    @test_throws ArgumentError ragged_counts(neighbors_ref)
+    @test_throws ArgumentError Molly.ragged_counts(neighbors_ref)
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
     sorted_ref = sort_nbs(neighbors_ref.list)
@@ -972,7 +972,7 @@ end
                 sys, _ = gpu_cell_list_test_system(coords)
                 result = find_neighbors(sys)
 
-                counts = Array(ragged_counts(result))
+                counts = Array(Molly.ragged_counts(result))
                 matrix = Array(ragged_neighbors(result))
 
                 @test counts == Int32[1, 1, 0]
@@ -983,7 +983,7 @@ end
                 @test result.state.max_neighbors == Int32(32)
 
                 # Ragged output has no pairs to iterate over
-                @test has_ragged_neighbors(result)
+                @test Molly.has_ragged_neighbors(result)
                 @test_throws ArgumentError neighbor_pairs(result)
                 @test_throws ArgumentError result[1]
             end
@@ -1004,7 +1004,7 @@ end
 
                     result = find_neighbors(sys)
 
-                    counts = Array(ragged_counts(result))
+                    counts = Array(Molly.ragged_counts(result))
                     matrix = Array(ragged_neighbors(result))
 
                     @test eltype(result.state.x) === Float64
@@ -1036,8 +1036,8 @@ end
                 @test length(neighbor_pairs(result)) == length(result) == 1
                 @test pairs == [(Int32(2), Int32(1), false)]
                 # The ragged representation is there for every output mode
-                @test has_ragged_neighbors(result)
-                @test Array(ragged_counts(result)) == Int32[1, 1, 0]
+                @test Molly.has_ragged_neighbors(result)
+                @test Array(Molly.ragged_counts(result)) == Int32[1, 1, 0]
             end
 
             @testset "Molly pair output" begin
@@ -1074,7 +1074,7 @@ end
 
                 pairs = sort(Array(result.list[1:result.n]))
 
-                @test Array(ragged_counts(result)) == Int32[2, 2, 2]
+                @test Array(Molly.ragged_counts(result)) == Int32[2, 2, 2]
                 @test result.n == 2
                 @test pairs == [
                     (Int32(3), Int32(1), true),
@@ -1097,7 +1097,7 @@ end
 
                 result = find_neighbors(sys)
 
-                @test Array(ragged_counts(result)) == Int32[1, 1, 0]
+                @test Array(Molly.ragged_counts(result)) == Int32[1, 1, 0]
                 @test result.n == 1
                 @test Array(result.list[1:1]) ==
                     [(Int32(2), Int32(1), false)]
@@ -1124,7 +1124,7 @@ end
 
                 result = find_neighbors(sys)
 
-                @test Array(ragged_counts(result)) == fill(Int32(39), n_atoms)
+                @test Array(Molly.ragged_counts(result)) == fill(Int32(39), n_atoms)
                 @test result.n == n_atoms * (n_atoms - 1) ÷ 2
 
                 cell_counts = Array(result.state.cell_counts)
@@ -1177,11 +1177,11 @@ end
                     true,
                 )
 
-                @test Array(ragged_counts(second_result)) == Int32[0, 0, 0]
+                @test Array(Molly.ragged_counts(second_result)) == Int32[0, 0, 0]
                 @test second_result.n == 0
                 @test second_result.state.x === first_result.state.x
                 @test ragged_neighbors(second_result) === ragged_neighbors(first_result)
-                @test ragged_counts(second_result) === ragged_counts(first_result)
+                @test Molly.ragged_counts(second_result) === Molly.ragged_counts(first_result)
                 @test second_result.list === first_result.list
 
                 cached_result = find_neighbors(
@@ -1213,7 +1213,7 @@ end
 
                     result = find_neighbors(sys)
 
-                    @test Array(ragged_counts(result)) == Int32[2, 2, 2]
+                    @test Array(Molly.ragged_counts(result)) == Int32[2, 2, 2]
                     @test result.state.max_neighbors >= 2
                     @test size(ragged_neighbors(result), 1) == result.state.max_neighbors
 
@@ -1502,10 +1502,10 @@ end
                             return nl, nl_reused
                         end
                         (nl_ragged, _), (nl_pairs, nl_pairs_reused) = lists
-                        @test has_ragged_neighbors(nl_ragged)
-                        @test !has_ragged_neighbors(nl_pairs)
+                        @test Molly.has_ragged_neighbors(nl_ragged)
+                        @test !Molly.has_ragged_neighbors(nl_pairs)
                         @test_throws ArgumentError ragged_neighbors(nl_pairs)
-                        @test_throws ArgumentError ragged_counts(nl_pairs)
+                        @test_throws ArgumentError Molly.ragged_counts(nl_pairs)
                         @test nl_pairs.n == nl_ragged.n > 0
                         @test canonical_ragged(nl_pairs) == canonical_ragged(nl_ragged)
                         @test canonical_ragged(nl_pairs_reused) == canonical_ragged(nl_ragged)
@@ -1617,7 +1617,7 @@ end
                     scaled = find_neighbors(sys, finder, result, 0, true)
 
                     @test scaled.state === result.state
-                    @test ragged_counts(scaled) === ragged_counts(result)
+                    @test Molly.ragged_counts(scaled) === Molly.ragged_counts(result)
 
                     reference_n = count(
                         norm(vector(c1 .* scale, c2 .* scale, sys.boundary)) <= 1.0f0
@@ -1648,7 +1648,7 @@ end
 
                 result = find_neighbors(sys)
 
-                counts = Array(ragged_counts(result))
+                counts = Array(Molly.ragged_counts(result))
 
                 @test maximum(counts) <= result.state.max_neighbors
                 @test result.state.max_neighbors % 32 == 0
@@ -1687,7 +1687,7 @@ end
                     )),
                 )
 
-                @test Array(ragged_counts(find_neighbors(triclinic_sys))) == Int32[1, 1]
+                @test Array(Molly.ragged_counts(find_neighbors(triclinic_sys))) == Int32[1, 1]
 
                 # Skewing the box brings the faces closer together than three cells,
                 #   even though every basis vector is more than three cutoffs long
@@ -2289,14 +2289,14 @@ end
      <AtomTypes>
       <Type name="AR" class="Ar" element="Ar"/>
      </AtomTypes>""")
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Attribute that cannot be parsed
     fp = write_ff("bad_mass.xml", """
      <AtomTypes>
       <Type name="AR" class="Ar" element="Ar" mass="heavy"/>
      </AtomTypes>""")
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Residue template referring to an unknown atom type
     fp = write_ff("bad_type.xml", types_block * """
@@ -2305,7 +2305,7 @@ end
        <Atom name="AR" type="ARR" charge="0.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Atom types have to come before the residue templates that use them
     fp_types = write_ff("types_only.xml", types_block * nb_block)
@@ -2316,7 +2316,7 @@ end
       </Residue>
      </Residues>""")
     @test length(MolecularForceField(fp_types, fp_res).residues) == 1
-    @test_throws ForceFieldXMLError MolecularForceField(fp_res, fp_types)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp_res, fp_types)
 
     # Duplicate atom names in a residue template
     fp = write_ff("dup_atom.xml", types_block * """
@@ -2326,7 +2326,7 @@ end
        <Atom name="AR" type="AR" charge="0.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Duplicate residue templates
     fp = write_ff("dup_res.xml", types_block * """
@@ -2338,7 +2338,7 @@ end
        <Atom name="AR2" type="AR" charge="1.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Bond in a residue template referring to an unknown atom name
     fp = write_ff("bad_bond.xml", types_block * """
@@ -2348,18 +2348,18 @@ end
        <Bond atomName1="AR" atomName2="ZZ"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Both an atom type and an atom class given for the same atom
     fp = write_ff("type_class.xml", types_block * """
      <HarmonicBondForce>
       <Bond type1="AR" class1="Ar" type2="AR" k="100.0" length="0.1"/>
      </HarmonicBondForce>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Atom type with no non-bonded parameters
     fp = write_ff("no_nb.xml", types_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # A residue template with a higher override level replaces one with a lower level
     fp = write_ff("override.xml", """
@@ -2406,7 +2406,7 @@ end
             startswith(line, "HETATM  279") || println(out, line)
         end
     end
-    @test_throws MissingResidueTemplateError System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
+    @test_throws Molly.MissingResidueTemplateError System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
 end
 
 @testset "AtomsBase conversion" begin

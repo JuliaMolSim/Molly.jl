@@ -1,11 +1,12 @@
 # Taking gradients with respect to force field parameters
 
 export
-    parameter_prefix,
-    parameter_fields,
     ParameterPlan,
     extract_parameters,
     inject_gradients
+
+@public parameter_prefix,
+    parameter_fields
 
 """
     parameter_prefix(inter)
@@ -16,7 +17,7 @@ example `"inter_HB_CT/CT_"`.
 
 Return `nothing`, the default, for an interaction with no differentiable parameters.
 Specific interactions are given the interaction type as a second argument, so their keys
-can depend on it. Define this along with [`parameter_fields`](@ref) to make a custom
+can depend on it. Define this along with [`Molly.parameter_fields`](@ref) to make a custom
 interaction work with [`extract_parameters`](@ref) and `inject_gradients`.
 """
 parameter_prefix(inter) = nothing
@@ -28,7 +29,7 @@ parameter_prefix(inter, inter_type) = parameter_prefix(inter)
 A tuple of `(field, key_suffix)` pairs naming the differentiable parameters of an
 interaction type, for example `((:k, "k"), (:r0, "r0"))`.
 
-The key of a parameter is [`parameter_prefix`](@ref) followed by its suffix. Interactions
+The key of a parameter is [`Molly.parameter_prefix`](@ref) followed by its suffix. Interactions
 whose parameters do not correspond one-to-one with fields, such as
 [`PeriodicTorsion`](@ref), instead define `parameter_keys`, `parameter_values` and
 `inject_parameters` directly.
@@ -402,8 +403,8 @@ end
 A dictionary of the force field parameters of a system, keyed by strings, for use with
 `inject_gradients`.
 
-An interaction contributes its parameters if it defines [`parameter_prefix`](@ref) and
-[`parameter_fields`](@ref).
+An interaction contributes its parameters if it defines [`Molly.parameter_prefix`](@ref)
+and [`Molly.parameter_fields`](@ref).
 
 The values are plain numbers of the float type of the system. On a system with units they
 are in the units that each parameter is stored with in the system, for example kJ mol⁻¹ nm⁻²

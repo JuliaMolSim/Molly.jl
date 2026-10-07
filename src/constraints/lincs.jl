@@ -225,7 +225,8 @@ end
 
 """
     SetupLINCS(; dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
-               n_rec=4, n_iter=1, iter_vel_correction::Bool=false, gpu_block_size::Integer=128)
+               n_rec=4, n_iter=1, iter_vel_correction::Bool=false,
+               gpu_block_size::Integer=128)
 
 Set up constraints using the LINCS (LINear Constraint Solver) algorithm.
 

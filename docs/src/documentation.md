@@ -402,12 +402,12 @@ Other options detailed in the docstring for [`System`](@ref) include overriding 
 The `strictness` keyword argument determines behavior when encountering possible problems and can be set to `:error` or `:nowarn` rather than the default `:warn`.
 It can be set globally with the `MOLLY_STRICTNESS` environmental variable.
 
-Harmonic position restraints can be added to a [`System`](@ref) for equilibration using [`add_position_restraints`](@ref):
+Harmonic position restraints can be added to a [`System`](@ref) for equilibration using [`Molly.add_position_restraints`](@ref):
 ```julia
-sys_res = add_position_restraints(
+sys_res = Molly.add_position_restraints(
     sys,
     100_000.0u"kJ * mol^-1 * nm^-2";
-    atom_selector=is_heavy_atom,
+    atom_selector=Molly.is_heavy_atom,
 )
 ```
 
@@ -682,7 +682,7 @@ trial_args = Dict(:shift_size => 0.1u"nm")
 for t in temperatures
     sim = MetropolisMonteCarlo(;
         temperature=t,
-        trial_moves=random_uniform_translation!,
+        trial_moves=Molly.random_uniform_translation!,
         trial_args=trial_args,
     )
 
@@ -698,7 +698,7 @@ visualize(sys.loggers.coords, boundary, "sim_montecarlo.gif")
 
 `trial_moves` should be a function that takes a [`System`](@ref) as its argument and optional keyword arguments `trial_args`.
 It should modify the coordinates as appropriate, accounting for any boundary conditions.
-[`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
+[`Molly.random_uniform_translation!`](@ref) and [`Molly.random_normal_translation!`](@ref) are provided as common trial move functions.
 [`MonteCarloLogger`](@ref) records various properties throughout the simulation.
 
 ## Units
@@ -867,7 +867,7 @@ If it is `true`, you must specify a neighbor finder when setting up the [`System
 For built-in interactions this function accesses the `use_neighbors` field of the struct.
 To work on the GPU the `struct` should be a bits type, i.e. `isbitstype(MyPairwiseInter)` should be `true`.
 
-Next, you need to define a method for the [`force`](@ref) and [`pairwise_force`](@ref) functions acting between a pair of atoms.
+Next, you need to define a method for the [`force`](@ref) and [`Molly.pairwise_force`](@ref) functions acting between a pair of atoms.
 
 This has a set series of arguments:
 ```julia
@@ -898,8 +898,8 @@ function Molly.pairwise_force(::MyPairwiseInter, r, params)
     return f
 end
 ```
-The logic here is that any parameter mixing, shortcutting or setup is done in [`force`](@ref) then `force_cutoff` is used to apply the cutoff by calling [`pairwise_force`](@ref), which calculates the force magnitude solely from interatomic distance `r`.
-`params` should not include any distance-based information, since [`pairwise_force`](@ref) may be called for other distances to apply the cutoff.
+The logic here is that any parameter mixing, shortcutting or setup is done in [`force`](@ref) then `force_cutoff` is used to apply the cutoff by calling [`Molly.pairwise_force`](@ref), which calculates the force magnitude solely from interatomic distance `r`.
+`params` should not include any distance-based information, since [`Molly.pairwise_force`](@ref) may be called for other distances to apply the cutoff.
 
 Most of the arguments to [`force`](@ref) will generally not be used but are passed to allow maximum flexibility.
 You can use `args...` to indicate unused further arguments, e.g. `Molly.force(inter::MyPairwiseInter, vec_ij, args...)`.
@@ -933,7 +933,7 @@ Note that you can also use a named tuple instead of a tuple if you want to acces
 pairwise_inters = (MyPairwiseInter=MyPairwiseInter(NoCutoff(), 1.0),)
 ```
 
-If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define methods for the [`potential_energy`](@ref) and [`pairwise_pe`](@ref) functions.
+If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define methods for the [`potential_energy`](@ref) and [`Molly.pairwise_pe`](@ref) functions.
 These have the same arguments and logic as [`force`](@ref), except the fifth argument to [`potential_energy`](@ref) is the energy units not the force units, and should return a single value corresponding to the potential energy:
 ```julia
 function Molly.potential_energy(inter::MyPairwiseInter,
@@ -1132,13 +1132,13 @@ MyCutoff(dist_cutoff::D) where D = MyCutoff{1, D}(dist_cutoff)
 
 function Molly.pe_apply_cutoff(::MyCutoff, inter, r, params)
     # Modify the potential energy, pairwise_pe with other values of r can be used
-    pe_r = pairwise_pe(inter, r, params)
+    pe_r = Molly.pairwise_pe(inter, r, params)
     return pe_r
 end
 
 function Molly.force_apply_cutoff(::MyCutoff, inter, r, params)
     # Modify the force magnitude, pairwise_force with other values of r can be used
-    f_r = pairwise_force(inter, r, params)
+    f_r = Molly.pairwise_force(inter, r, params)
     return f_r
 end
 ```
@@ -1190,7 +1190,7 @@ random_coord(b) # SVector(2.651062310435411, 2.1702306804433973, 0.9518105403051
 wrap_coords(SVector(1.0, 1.0, 1.0)u"nm", b) # SVector(3.2, 1.0, 1.0)u"nm"
 ```
 
-The [`box_center`](@ref), `AtomsBase.n_dimensions`, [`float_type`](@ref), [`place_atoms`](@ref) and [`place_diatomics`](@ref) functions are also available for boundaries.
+The [`Molly.box_center`](@ref), `AtomsBase.n_dimensions`, [`float_type`](@ref), [`place_atoms`](@ref) and [`place_diatomics`](@ref) functions are also available for boundaries.
 
 The appropriate boundary to use will depend on your simulation.
 For example, having different lengths in each dimension would usually only make sense in a situation where forces or restraints depended on the dimension.
@@ -1268,15 +1268,15 @@ function Molly.simulate!(sys,
         sys.velocities .+= (accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
-        recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
-                                           n_threads=n_threads)
+        recompute_forces = Molly.apply_coupling!(sys, buffers, sim.coupling, sim, neighbors,
+                                                 step_n; n_threads=n_threads)
 
         # Remove center of mass motion like this
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
         # Computed quantities can also be given as keyword arguments to apply_loggers!
-        apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
+        Molly.apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
@@ -1298,7 +1298,7 @@ struct MyREMDSimulator
     # Other properties of the simulation
 end
 ```
-Then define the function that carries out the exchange, [`remd_exchange!`](@ref):
+Then define the function that carries out the exchange, [`Molly.remd_exchange!`](@ref):
 ```julia
 function Molly.remd_exchange!(sys::ReplicaSystem,
                               sim::MyREMDSimulator,
@@ -1467,12 +1467,12 @@ end
 ```
 The use of `n_steps` is optional and is an example of how to record a property periodically throughout the simulation.
 If a custom logger needs the total virial for constrained simulations, define
-[`logger_virial_interval`](@ref) so the simulator can compute the virial on the
+[`Molly.logger_virial_interval`](@ref) so the simulator can compute the virial on the
 same interval:
 ```julia
 Molly.logger_virial_interval(logger::MyLogger) = logger.n_steps
 ```
-If it specifically logs pressure, also define [`logger_pressure_interval`](@ref):
+If it specifically logs pressure, also define [`Molly.logger_pressure_interval`](@ref):
 ```julia
 Molly.logger_pressure_interval(logger::MyLogger) = logger.n_steps
 ```
@@ -1515,9 +1515,9 @@ function my_pe_observable(sys::System, neighbors, step_n, buffers; n_threads::In
     end
 end
 ```
-These keyword arguments are also available in [`log_property!`](@ref).
+These keyword arguments are also available in [`Molly.log_property!`](@ref).
 Which values are passed depends on the simulator being used, for example [`SteepestDescentMinimizer`](@ref) passes `current_potential_energy` because it uses it for minimization.
-Note that loggers are called after [`apply_coupling!`](@ref), so the coordinates may have changed since the potential energy or forces were computed.
+Note that loggers are called after [`Molly.apply_coupling!`](@ref), so the coordinates may have changed since the potential energy or forces were computed.
 
 A logger which records the property every `n_steps` can be constructed through
 ```julia

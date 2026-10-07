@@ -17,8 +17,10 @@ export
     MTSLangevinIntegrator,
     ReplicaExchangeMD,
     simulate_remd!,
+    MetropolisMonteCarlo
+
+@public NaNSimulationError,
     remd_exchange!,
-    MetropolisMonteCarlo,
     random_uniform_translation!,
     random_normal_translation!
 
@@ -88,6 +90,11 @@ next_nograd!(::Nothing) = nothing
 update_nograd!(progress, val) = ProgressMeter.update!(progress, val)
 update_nograd!(::Nothing, val) = nothing
 
+"""
+    NaNSimulationError(msg)
+
+An error when a `NaN` is encountered during a simulation or setup.
+"""
 struct NaNSimulationError <: Exception
     msg::String
 end
@@ -2540,7 +2547,8 @@ function simulate!(sys::ReplicaSystem,
 end
 
 @doc raw"""
-    remd_exchange!(sys::ReplicaSystem, sim::ReplicaExchangeMD, i::Integer, j::Integer; <keyword arguments>)
+    remd_exchange!(sys::ReplicaSystem, sim::ReplicaExchangeMD, i::Integer, j::Integer;
+                   rng=Random.default_rng())
 
 Attempt a generalized replica exchange between the replicas in thermodynamic states `i` and `j`.
 """
@@ -2549,7 +2557,6 @@ function remd_exchange!(sys::ReplicaSystem,
                         i::Integer,
                         j::Integer;
                         rng=Random.default_rng())
-    
     # Identify the replica m and n assigned to the thermodynamic states i and j, respectively
     m = sys.state_indices[i]
     n = sys.state_indices[j]

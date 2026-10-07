@@ -1134,8 +1134,8 @@ end
     for (name, inter, broken) in pairwise_inters
         sys_ref = pairwise_sys(inter)
         params_dic = Dict{String, Float64}()
-        Molly.extract_block!(params_dic, parameter_prefix(inter), Molly.parameter_keys(inter),
-                             Molly.parameter_values(inter))
+        Molly.extract_block!(params_dic, Molly.parameter_prefix(inter),
+                             Molly.parameter_keys(inter), Molly.parameter_values(inter))
         test_params(name, sys_ref, params_dic, broken)
     end
 
@@ -1172,7 +1172,7 @@ end
         sys_ref = specific_sys(inter_list)
         params_dic = Dict{String, Float64}()
         for (inter, inter_type) in zip(inter_list.inters, inter_list.types)
-            Molly.extract_block!(params_dic, parameter_prefix(inter, inter_type),
+            Molly.extract_block!(params_dic, Molly.parameter_prefix(inter, inter_type),
                                  Molly.parameter_keys(inter), Molly.parameter_values(inter))
         end
         test_params(name, sys_ref, params_dic)

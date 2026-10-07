@@ -1,7 +1,6 @@
 # Temperature and pressure coupling methods
 
 export
-    apply_coupling!,
     ImmediateThermostat,
     VelocityRescaleThermostat,
     AndersenThermostat,
@@ -9,6 +8,8 @@ export
     BerendsenBarostat,
     CRescaleBarostat,
     MonteCarloBarostat
+
+@public apply_coupling!
 
 """
     apply_coupling!(system, buffers, coupling, simulator, neighbors=nothing, step_n=0;

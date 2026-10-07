@@ -3,9 +3,7 @@
 export
     use_neighbors,
     neighbor_pairs,
-    has_ragged_neighbors,
     ragged_neighbors,
-    ragged_counts,
     NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
@@ -13,6 +11,9 @@ export
     DistanceNeighborFinder,
     TreeNeighborFinder,
     CellListMapNeighborFinder
+
+@public has_ragged_neighbors,
+    ragged_counts
 
 """
     use_neighbors(inter)
@@ -74,8 +75,8 @@ The neighbors of each atom in a neighbor list, as a padded matrix.
 
 The neighbors of atom `i` are `ragged_neighbors(nl)[1:ragged_counts(nl)[i], i]`, with
 the entries past `ragged_counts(nl)[i]` undefined. Only some neighbor lists store
-this, which [`has_ragged_neighbors`](@ref) reports. The matrix belongs to the list, so
-it should not be used after the list is passed back to [`find_neighbors`](@ref), which
+this, which [`Molly.has_ragged_neighbors`](@ref) reports. The matrix belongs to the list,
+so it should not be used after the list is passed back to [`find_neighbors`](@ref), which
 may overwrite it.
 """
 ragged_neighbors(nl) = no_ragged_neighbors(nl)
