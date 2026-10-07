@@ -43,6 +43,16 @@ using SparseArrays
 using Statistics
 using StatsBase
 
+# Replace with public keyword when support for Julia 1.10 is dropped
+macro public(ex)
+    if VERSION >= v"1.11.0-DEV.469"
+        args = (ex isa Symbol ? (ex,) : (Base.isexpr(ex, :tuple) ? ex.args : error("@public failed to parse")))
+        esc(Expr(:public, args...))
+    else
+        nothing
+    end
+end
+
 include("types.jl")
 include("sparse_pairs.jl")
 include("parameters.jl")
