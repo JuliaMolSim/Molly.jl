@@ -1,3 +1,8 @@
+"""
+Main module for Molly.jl - molecular simulation in Julia.
+
+See https://juliamolsim.github.io/Molly.jl/stable for documentation.
+"""
 module Molly
 
 using Reexport
@@ -99,6 +104,5 @@ include("free_energy/scale_dual.jl")
 include("free_energy/TSS.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
-
 
 end

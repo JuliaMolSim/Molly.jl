@@ -71,7 +71,7 @@ end
 
 The immediate velocity rescaling thermostat for controlling temperature.
 
-Velocities are immediately rescaled to match a target temperature.
+Velocities are immediately rescaled to match a target temperature (isokinetic ensemble).
 The scaling factor for the velocities each step is
 ```math
 \lambda = \sqrt{\frac{T_0}{T}}
@@ -230,6 +230,7 @@ end
 
 The Berendsen thermostat for controlling temperature.
 
+See [Berendsen et al. 1984](https://doi.org/10.1063/1.448118).
 The scaling factor for the velocities each step is
 ```math
 \lambda^2 = 1 + \frac{\delta t}{\tau} \left( \frac{T_0}{T} - 1 \right)
@@ -259,6 +260,7 @@ end
 
 The Berendsen barostat for controlling pressure.
 
+See [Berendsen et al. 1984](https://doi.org/10.1063/1.448118).
 The scaling factor for the box every `n_steps` steps is
 ```math
 \mu_{ij} = \delta_{ij} - \frac{\Delta t}{3\, \tau_p} \kappa_{ij} \left(P_{0ij} - P_{ij}(t) \right).
