@@ -493,7 +493,6 @@ function AtomsCalculators.forces!(
         )
     end
     check_bias_finite(cv_sim, "collective variable", bias)
-    check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
 
     # Gradient of bias function with respect to CV
     d_bias = bias_gradient(bias.bias_type, cv_sim)
@@ -509,13 +508,17 @@ function AtomsCalculators.forces!(
     else
         fs_svec = d_bias .* d_coords
     end
-    check_bias_finite(
-        fs_svec,
-        "bias force",
-        bias;
-        cv_sim=cv_sim,
-        max_abs_component_fn = () -> bias_max_abs_ustrip(fs_svec),
-    )
+    # d_bias is finite, so a non-finite d_coords always gives a non-finite fs_svec
+    if !bias_all_finite(fs_svec)
+        check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
+        check_bias_finite(
+            fs_svec,
+            "bias force",
+            bias;
+            cv_sim=cv_sim,
+            max_abs_component_fn = () -> bias_max_abs_ustrip(fs_svec),
+        )
+    end
 
     if needs_vir && bias.cv_type.has_virial
         if bias.uses_persistent_buffers

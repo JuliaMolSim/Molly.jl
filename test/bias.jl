@@ -2,6 +2,15 @@ struct BiasNaNGradient end
 
 Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
 
+struct CVNaNGradient
+    correction::Symbol
+    has_virial::Bool
+end
+
+Molly.calculate_cv(::CVNaNGradient, coords, args...; kwargs...) = 1.0u"nm"
+Molly.cv_gradient(::CVNaNGradient, coords, args...; kwargs...) =
+    (fill(SVector(NaN, 0.0, 0.0), length(coords)), 1.0u"nm")
+
 @testset "Collective variables" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
@@ -610,6 +619,14 @@ end
         sys,
         BiasPotential(calc_dist, BiasNaNGradient()),
     )
+    err_grad = try
+        AtomsCalculators.forces!(fs_bad, sys, BiasPotential(CVNaNGradient(:wrap, false), lb))
+        nothing
+    catch e
+        e
+    end
+    @test err_grad isa ErrorException
+    @test occursin("non-finite CV gradient", err_grad.msg)
 
     # check_bias_finite's max_abs_component_fn is only called (and only appears in the error
     # message) when the value being checked is actually non-finite.
