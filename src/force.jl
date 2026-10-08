@@ -304,6 +304,16 @@ function has_interaction_virial(buffers, step_n::Integer)
     return has_interaction_virial(buffers.validity, step_n)
 end
 
+# unwrap_molecules(sys), computed at most once per forces! call and cached on buffers so every
+# attached BiasPotential with correction==:pbc shares it. Reset to nothing at the top of each
+# forces! call, since forces! can run more than once at the same step_n (e.g. MTS substeps).
+function ensure_unwrapped_coords!(buffers, sys)
+    if isnothing(buffers.unwrapped_coords[])
+        buffers.unwrapped_coords[] = unwrap_molecules(sys)
+    end
+    return buffers.unwrapped_coords[]
+end
+
 function has_constraint_virial(buffers, step_n::Integer)
     return has_constraint_virial(buffers.validity, step_n)
 end
@@ -377,12 +387,13 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
+    bias_scratch::Any               # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersGPU
     fs_mat::FM
     validity::BufferValidity
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
-                    kin_tensor, pres_tensor, fs_mat)
+                    kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = zero(vir_nounits)
     constraint_virial_chunks = similar(vir_chunks)
@@ -395,19 +406,19 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      fs_mat, BufferValidity())
+                      bias_scratch, fs_mat, BufferValidity())
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                     constraint_virial, constraint_virial_nounits,
-                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat)
+                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
     return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial, constraint_virial_nounits,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      fs_mat, BufferValidity())
+                      bias_scratch, fs_mat, BufferValidity())
 end
 
 function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH}
@@ -429,6 +440,11 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
     # Use an empty matrix if no virtual sites to keep this function type stable
     n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
     fs_mat = zeros(TU, D, n_fs_mat_cols)
+
+    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
+                                             for inter in values(sys.general_inters)
+                                             if inter isa BiasPotential)
+
     return BuffersCPU(
         fs_nounits, fs_chunks,
         vir, vir_nounits, vir_chunks,
@@ -438,6 +454,7 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
         pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
         constraint_scratch_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
         constraint_scratch_ref(),
+        bias_scratch,
         fs_mat,
         BufferValidity(),
     )
@@ -529,6 +546,11 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR,
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
+    unwrapped_coords::Base.RefValue{Any}   # shared, once-per-call cache: see ensure_unwrapped_coords!
+    bias_scratch::Any                      # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersCPU
+    # Cached CuGraphExecs for use_cuda_graph (see captured_forces_once!, MollyCUDAExt.jl)
+    graph_exec_no_check::Base.RefValue{Any}
+    graph_exec_with_check::Base.RefValue{Any}
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -566,7 +588,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                     interacting_tiles_diag, num_interacting_tiles,
                     interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
-                    step_n_preprocessed, sparse_pair_generation, num_pairs)
+                    step_n_preprocessed, sparse_pair_generation, num_pairs;
+                    bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
     fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
@@ -575,6 +598,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      pre_coupling_ref(), bias_scratch, pre_coupling_ref(), pre_coupling_ref(),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -709,10 +733,15 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
         sys.neighbor_finder.initialized = false
     end
 
+    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
+                                             for inter in values(sys.general_inters)
+                                             if inter isa BiasPotential)
+
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      pre_coupling_ref(), bias_scratch, pre_coupling_ref(), pre_coupling_ref(),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -725,6 +754,21 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
 end
 
 zero_forces(sys) = ustrip_vec.(zero.(sys.coords)) .* sys.force_units
+
+# Generic (CPU) fallback: calls forces! directly. Overridden for CuArray systems in
+# MollyCUDAExt.jl with a CUDA.@captured-wrapped body
+captured_forces!(fs, sys, args...; kwargs...) = forces!(fs, sys, args...; kwargs...)
+
+# Generic fallback for the real capture-once path (MollyCUDAExt.jl); drops the GPU-only `do_check`
+# kwarg and calls forces! directly. Only reached on backends check_cuda_graph_legality already
+# excludes from use_cuda_graph=true.
+captured_forces_once!(fs, sys, args...; do_check::Bool=true, kwargs...) = forces!(fs, sys, args...; kwargs...)
+
+# Whether this step refreshes the GPU tile list. Generic fallback: always false.
+is_tile_refresh_step(sys, buffers, step_n::Integer) = false
+
+# Generic fallback for CuGraph invalidation: a no-op.
+invalidate_cuda_graph_cache!(buffers) = nothing
 
 """
     forces(system, neighbors=find_neighbors(system), step_n=0;
@@ -1295,15 +1339,37 @@ function forces!(fs,
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
+                 cuda_graph_capturing::Bool=false,
+                 defer_finite_check::Bool=false,
+                 bias_check::Bool=true,
                  strictness=default_strictness()) where needs_vir
     # Allow an Enzyme reverse rule
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
                 specific_inter_lists, n_threads)
 
-    for inter in values(general_inters)
-        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
-                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                 strictness=strictness)
+    buffers.unwrapped_coords[] = nothing # Filled by the first BiasPotential that needs it
+    if cuda_graph_capturing
+        # Batches all biases' captured-path tail into 2 launches instead of 2*n_bias
+        biases, others = split_biases(Tuple(values(general_inters)))
+        scratches = map(b -> bias_scratch(buffers, b), biases)
+        for (bias, scratch) in zip(biases, scratches)
+            coords = bias_coords(sys, bias.cv_type, buffers, step_n)
+            bias_cv_step!(bias, scratch, sys, coords, fs, step_n, bias_check)
+        end
+        bias_batched_tail!(fs, biases, scratches, step_n, bias_check)
+        for inter in others
+            AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                     n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
+                                     cuda_graph_capturing=cuda_graph_capturing,
+                                     defer_finite_check=defer_finite_check, strictness=strictness)
+        end
+    else
+        for inter in values(general_inters)
+            AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                     n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
+                                     cuda_graph_capturing=cuda_graph_capturing,
+                                     defer_finite_check=defer_finite_check, strictness=strictness)
+        end
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
@@ -1313,6 +1379,9 @@ function forces!(fs,
             mark_total_virial!(buffers.validity, step_n)
         end
     end
+
+    # Enforce rewrap in each forces! call.
+    buffers.unwrapped_coords[] = nothing
 
     return fs, buffers
 end
@@ -1361,4 +1430,48 @@ function gpu_forces!(fs,
     if needs_vir
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
+end
+
+# Pre-materializes BiasPotential scratch and JIT-compiles captured-path kernels before the step
+# loop's first capture, since CUDA graph capture allows neither mid-capture allocation nor
+# compilation. Two calls: one plain, one capturing, since only the latter reaches the bias
+# kernels. Output is discarded; forces are recomputed on the loop's first iteration regardless.
+@inline function warmup_cuda_graph_capture!(forces_t, sys, neighbors, init_step, buffers,
+                                            use_cuda_graph; n_threads, strictness)
+    if use_cuda_graph
+        forces!(forces_t, sys, neighbors, init_step, buffers, Val(false);
+               n_threads=n_threads, defer_finite_check=true, strictness=strictness)
+        forces!(forces_t, sys, neighbors, init_step, buffers, Val(false);
+               n_threads=n_threads, cuda_graph_capturing=true, defer_finite_check=true,
+               strictness=strictness)
+    end
+    return nothing
+end
+
+# One step's forces, routing to the captured or plain path so simulators don't repeat the
+# routing logic themselves. Only steady-state steps (use_cuda_graph=true, no virial, no tile
+# refresh) are captured; everything else falls back to plain forces!. Also runs the deferred
+# BiasPotential finiteness check every finite_check_every steps
+# (check_bias_finite_periodic_batched!, src/bias/bias.jl).
+@inline function forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step,
+                              ::Val{false}, has_bias_potential, finite_check_every; n_threads, strictness)
+    forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step); n_threads=n_threads, strictness=strictness)
+    return nothing
+end
+
+@inline function forces_step!(forces_t, sys, neighbors, step_n, buffers, needs_vir_step,
+                              ::Val{true}, has_bias_potential, finite_check_every; n_threads, strictness)
+    run_bias_finite_check = has_bias_potential && step_n % finite_check_every == 0
+    if !needs_vir_step && !is_tile_refresh_step(sys, buffers, step_n)
+        captured_forces_once!(forces_t, sys, neighbors, step_n, buffers, Val(false);
+                              n_threads=n_threads, cuda_graph_capturing=true, defer_finite_check=true,
+                              do_check=run_bias_finite_check, strictness=strictness)
+    else
+        forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
+               n_threads=n_threads, defer_finite_check=true, strictness=strictness)
+    end
+    if run_bias_finite_check
+        check_bias_finite_periodic_batched!(values(sys.general_inters), buffers)
+    end
+    return nothing
 end
