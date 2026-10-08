@@ -342,8 +342,6 @@ function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
     return unwrap_molecules(sys)
 end
 
-bias_needs_unwrap(b::BiasPotential) = b.cv_type.correction == :pbc
-
 # Lazily allocates scratch.grad/scratch.d_buf. Only reached when bias.uses_persistent_buffers
 # is true (a CV type with a real cv_gradient!/calculate_cv! -- see uses_builtin_cv_gradient in
 # cv.jl).

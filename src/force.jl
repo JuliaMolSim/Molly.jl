@@ -304,10 +304,6 @@ function has_interaction_virial(buffers, step_n::Integer)
     return has_interaction_virial(buffers.validity, step_n)
 end
 
-# Whether a general_inters entry needs sys's unwrapped coordinates this step (true only for a
-# BiasPotential with correction==:pbc, src/bias/bias.jl).
-bias_needs_unwrap(inter) = false
-
 # unwrap_molecules(sys), computed at most once per forces! call and cached on buffers so every
 # attached BiasPotential with correction==:pbc shares it. Reset to nothing at the top of each
 # forces! call, since forces! can run more than once at the same step_n (e.g. MTS substeps).
@@ -1330,12 +1326,7 @@ function forces!(fs,
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
                 specific_inter_lists, n_threads)
 
-    # Compute unwrap_molecules(sys) at most once here, shared by every attached BiasPotential
-    # that needs it (correction==:pbc), instead of each recomputing it independently below.
-    buffers.unwrapped_coords[] = nothing
-    if any(bias_needs_unwrap, values(general_inters))
-        ensure_unwrapped_coords!(buffers, sys)
-    end
+    buffers.unwrapped_coords[] = nothing # Filled by the first BiasPotential that needs it
     for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
