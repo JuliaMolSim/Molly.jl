@@ -1114,6 +1114,11 @@ end
             sys_cpu = System(sys_cpu_base; coords=coords)
             sys_gpu = System(sys_gpu_base; coords=CuArray(coords))
             pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+
+            # A device reference works on both CPU and GPU systems
+            bias_dev = BiasPotential(CalcRMSD(CuArray(ref_coords)), bias.bias_type)
+            @test calculate_cv(bias_dev.cv_type, coords) ≈ calculate_cv(cv, coords)
+            pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias_dev)
         end
 
         # cv_gradient returns one SVector per atom with no atom-index list (bias.jl's non-built-in

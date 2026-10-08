@@ -1279,11 +1279,7 @@ Given as an argument to [`BiasPotential`](@ref).
 The two sets of coordinates are superimposed using the Kabsch algorithm.
 
 # Arguments
-- `ref_coords`: reference coordinates. Should be constructed with an array type matching the
-    `System` this CV will be used with (a plain `Array` for CPU, or the same GPU array type,
-    e.g. `CuArray`/`ROCArray`, as the system's coordinates for GPU) — this is not converted
-    automatically, the same convention already implicitly expected of `atoms`/`coords`/
-    `velocities` elsewhere.
+- `ref_coords`: reference coordinates.
 - `atom_inds=[]`: indices of the atoms in the group, `[]` uses all atoms.
 - `ref_atom_inds=[]`: indices of the reference coordinates to use, `[]` uses all coordinates.
 - `correction=:pbc`: the correction to be applied to the molecules. `:pbc` keeps molecules
@@ -1301,8 +1297,9 @@ struct CalcRMSD{RC}
 
     function CalcRMSD(ref_coords, atom_inds=[], ref_atom_inds=[], correction=:pbc, has_virial = true)
         check_correction_arg(correction)
-        RC = typeof(ref_coords)
-        new{RC}(ref_coords, atom_inds, ref_atom_inds, correction, has_virial)
+        ref_coords_cpu = from_device(ref_coords)
+        RC = typeof(ref_coords_cpu)
+        new{RC}(ref_coords_cpu, atom_inds, ref_atom_inds, correction, has_virial)
     end
 end
 
