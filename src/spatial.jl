@@ -727,8 +727,8 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     f = wrap01.(to_frac.(coords)) # Dimensionless, GPU-resident
 
     arrays = device_topology_arrays(topology, AT)
-    parent, sort_perm, mol_offsets, atom_mol = arrays.parent, arrays.sort_perm, arrays.mol_offsets,
-                                               arrays.atom_molecule_inds
+    parent, cluster_inds, sort_perm, cluster_offsets = arrays.parent, arrays.cluster_inds,
+                                                       arrays.sort_perm, arrays.cluster_offsets
 
     minimum_image(df) = df .- round.(df)
 
@@ -749,7 +749,7 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     # from root(i) to i
     u = @inbounds(f[cur_parent]) .+ cur_delta # Unwrapped fractional coords
 
-    # Segmented (per-molecule) mean via sort + inclusive scan. Accumulated in Float64 where the
+    # Segmented (per bonded cluster) mean via sort + inclusive scan. Accumulated in Float64 where the
     # backend supports it: a long prefix sum in Float32 can accumulate enough rounding error, at
     # large atom counts, to put a molecule's center of geometry in the wrong periodic image.
     # Output (cog) is converted back to the working type.
@@ -763,19 +763,19 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     cum_ext  = similar(cum, length(cum) + 1)
     cum_ext[1:1]   .= (zero(eltype(cum)),)
     cum_ext[2:end] .= cum
-    seg_hi  = @inbounds cum_ext[mol_offsets[2:end]   .+ 1]
-    seg_lo  = @inbounds cum_ext[mol_offsets[1:end-1] .+ 1]
-    counts  = mol_offsets[2:end] .- mol_offsets[1:end-1]
-    cog     = CT.((seg_hi .- seg_lo) ./ counts) # Length n_mol, fractional center of geometry
+    seg_hi  = @inbounds cum_ext[cluster_offsets[2:end]   .+ 1]
+    seg_lo  = @inbounds cum_ext[cluster_offsets[1:end-1] .+ 1]
+    counts  = cluster_offsets[2:end] .- cluster_offsets[1:end-1]
+    cog     = CT.((seg_hi .- seg_lo) ./ counts) # Length n_clusters, fractional center of geometry
 
-    return u, cog, to_cart, wrap01, atom_mol
+    return u, cog, to_cart, wrap01, cluster_inds
 end
 
 function unwrap_molecules(coords::AbstractGPUArray{<:SVector{D}}, boundary, topology) where D
     isnothing(topology) && return coords
-    u, cog, to_cart, _, atom_mol = _gpu_unwrap_fractional(coords, boundary, topology)
+    u, cog, to_cart, _, cluster_inds = _gpu_unwrap_fractional(coords, boundary, topology)
     floor_sv(v) = floor.(v) # `v` is one SVector; broadcasts over its own components
-    u = u .- @inbounds(floor_sv.(cog)[atom_mol])
+    u = u .- @inbounds(floor_sv.(cog)[cluster_inds])
     return to_cart.(u)
 end
 

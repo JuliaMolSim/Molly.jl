@@ -398,6 +398,19 @@
     @test isapprox(uw_mixed_cpu[12], coords_mixed[12]; atol=1e-9)
     @test isapprox(uw_mixed_cpu[13], coords_mixed[13]; atol=1e-9)
 
+    # One molecule made of two bonded clusters, the bonded pair crossing the boundary: each
+    # cluster is placed in the box on its own
+    coords_split = [SVector(1.9, 0.0, 0.0), SVector(0.1, 0.0, 0.0), SVector(1.9, 0.0, 0.0)]
+    boundary_split = CubicBoundary(2.0)
+    topology_split = MolecularTopology([1, 1, 1], [3], [(1, 2)])
+    uw_split_cpu = Molly.unwrap_molecules(coords_split, boundary_split, topology_split)
+    @test isapprox(uw_split_cpu, [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0),
+                                  SVector(1.9, 0.0, 0.0)]; atol=1e-9)
+    for AT in array_list
+        uw_split_gpu = Molly.unwrap_molecules(AT(coords_split), boundary_split, topology_split)
+        @test isapprox(from_device(uw_split_gpu), uw_split_cpu; atol=1e-9)
+    end
+
     # unwrap_molecules on GPU: the segmented-mean scan is accumulated in Float64 regardless of
     # the working float type, so a Float32 system doesn't place molecules in the wrong periodic
     # image (a long Float32 prefix sum can accumulate enough rounding error to do so at this

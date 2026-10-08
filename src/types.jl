@@ -741,8 +741,9 @@ struct MolecularTopology{VI <: AbstractVector{Int32}}
     molecule_atom_counts::Vector{Int32}
     bonded_atoms::Vector{Tuple{Int32, Int32}}
     parent::VI       # length N; spanning-forest parent per atom, parent[root] == root
-    sort_perm::VI    # length N; permutation grouping atoms contiguously by molecule id
-    mol_offsets::VI  # length n_mol+1; 0-based prefix boundaries into sort_perm order
+    cluster_inds::VI # length N; bonded cluster (spanning tree) index per atom
+    sort_perm::VI    # length N; permutation grouping atoms contiguously by bonded cluster
+    cluster_offsets::VI # length n_clusters+1; 0-based prefix boundaries into sort_perm order
     n_rounds::Int    # pointer-doubling round count for GPU unwrap_molecules; host Int, not device data
     gpu_cache::Base.RefValue{Any}  # lazily filled device-resident arrays, see device_topology_arrays
 end
@@ -780,17 +781,22 @@ end
 function molecule_spanning_forest(g)
     n_atoms = nv(g)
     parent = collect(Int32, 1:n_atoms)   # self-loop default (covers bond-free/isolated atoms too)
+    cluster = zeros(Int32, n_atoms)
     depth = zeros(Int, n_atoms)
     visited = falses(n_atoms)
+    n_clusters = 0
     for seed in 1:n_atoms
         visited[seed] && continue
         visited[seed] = true
+        n_clusters += 1
+        cluster[seed] = n_clusters
         stack = Int[seed]
         while !isempty(stack)
             i = pop!(stack)
             for j in neighbors(g, i)
                 visited[j] && continue
                 parent[j] = i
+                cluster[j] = n_clusters
                 depth[j] = depth[i] + 1
                 visited[j] = true
                 push!(stack, j)
@@ -799,7 +805,7 @@ function molecule_spanning_forest(g)
     end
     max_depth = maximum(depth; init=0)
     n_rounds = max_depth <= 1 ? 0 : ceil(Int, log2(max_depth)) + 1  # +1 safety margin
-    return parent, n_rounds
+    return parent, cluster, n_clusters, n_rounds
 end
 
 function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms;
@@ -816,25 +822,26 @@ end
 # spanning-forest DFS reuses it instead of rebuilding its own adjacency list.
 function molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
                                   array_type::Type{AT}=Array) where AT
-    n_mol = length(molecule_atom_counts)
-    parent_cpu, n_rounds = molecule_spanning_forest(g)
+    parent_cpu, cluster_cpu, n_clusters, n_rounds = molecule_spanning_forest(g)
 
-    sort_perm_cpu = Int32.(sortperm(atom_molecule_inds))
-    mol_offsets_cpu = Vector{Int32}(undef, n_mol + 1)
-    mol_offsets_cpu[1] = 0
-    for m in 1:n_mol
-        mol_offsets_cpu[m + 1] = mol_offsets_cpu[m] + molecule_atom_counts[m]
+    # Segments for the GPU unwrap are bonded clusters, as in the CPU unwrap, which can be
+    # smaller than the molecules given by atom_molecule_inds
+    sort_perm_cpu = Int32.(sortperm(cluster_cpu))
+    cluster_offsets_cpu = zeros(Int32, n_clusters + 1)
+    for c in cluster_cpu
+        cluster_offsets_cpu[c + 1] += 1
     end
+    cumsum!(cluster_offsets_cpu, cluster_offsets_cpu)
 
     return MolecularTopology(
         Vector{Int32}(atom_molecule_inds), Vector{Int32}(molecule_atom_counts),
         Vector{Tuple{Int32, Int32}}(collect(bonded_atoms)),
-        to_device(parent_cpu, AT), to_device(sort_perm_cpu, AT), to_device(mol_offsets_cpu, AT),
-        n_rounds, Base.RefValue{Any}(nothing),
+        to_device(parent_cpu, AT), to_device(cluster_cpu, AT), to_device(sort_perm_cpu, AT),
+        to_device(cluster_offsets_cpu, AT), n_rounds, Base.RefValue{Any}(nothing),
     )
 end
 
-# Device-resident (parent, sort_perm, mol_offsets, atom_molecule_inds) for `topology`, cached on
+# Device-resident (parent, cluster_inds, sort_perm, cluster_offsets) for `topology`, cached on
 # topology.gpu_cache -- avoids re-uploading a topology built without array_type on every
 # unwrap_molecules/molecule_centers call. Only used by _gpu_unwrap_fractional.
 function device_topology_arrays(topology::MolecularTopology, ::Type{AT}) where AT
@@ -842,11 +849,11 @@ function device_topology_arrays(topology::MolecularTopology, ::Type{AT}) where A
     !isnothing(cached) && cached.array_type === AT && return cached.arrays
     arrays = (
         parent = topology.parent isa AT ? topology.parent : to_device(topology.parent, AT),
+        cluster_inds = topology.cluster_inds isa AT ? topology.cluster_inds :
+                           to_device(topology.cluster_inds, AT),
         sort_perm = topology.sort_perm isa AT ? topology.sort_perm : to_device(topology.sort_perm, AT),
-        mol_offsets = topology.mol_offsets isa AT ? topology.mol_offsets :
-                          to_device(topology.mol_offsets, AT),
-        atom_molecule_inds = topology.atom_molecule_inds isa AT ? topology.atom_molecule_inds :
-                                 to_device(topology.atom_molecule_inds, AT),
+        cluster_offsets = topology.cluster_offsets isa AT ? topology.cluster_offsets :
+                              to_device(topology.cluster_offsets, AT),
     )
     topology.gpu_cache[] = (array_type=AT, arrays=arrays)
     return arrays
