@@ -621,7 +621,7 @@ function _frac_cart_closures(boundary, ::Val{D}) where D
         end
         Bm = reduce(hcat, boundary.basis_vectors)
         B  = SMatrix{3, 3}(Bm)
-        to_frac = (r::SVector{3}) -> B \ r # Dimensionless
+        to_frac = (r::SVector{3}) -> ustrip.(B) \ ustrip.(unit(eltype(B)), r) # Dimensionless
         to_cart = (f::SVector{3}) -> B * f # Length units
     else
         sl = boundary.side_lengths
@@ -709,6 +709,15 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
     return out
 end
 
+# One pointer-doubling round: jump to the grandparent and accumulate the delta to it. Fused into
+# one kernel since fancy-indexed gathers (p[p]) each run a bounds-check reduction with a host sync.
+@kernel inbounds=true function unwrap_round_kernel!(p_out, d_out, @Const(p_in), @Const(d_in))
+    i = @index(Global, Linear)
+    j = p_in[i]
+    p_out[i] = p_in[j]
+    d_out[i] = d_in[i] + d_in[j]
+end
+
 # GPU-native molecule unwrapping via parallel pointer-doubling on a precomputed spanning-
 # forest parent pointer -- avoids the CPU version's sequential stack-based DFS. n_rounds
 # rounds (~log2 of deepest molecule depth) suffice regardless of molecule size.
@@ -717,44 +726,56 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     to_frac, to_cart, wrap01 = _frac_cart_closures(boundary, Val(D))
     f = wrap01.(to_frac.(coords)) # Dimensionless, GPU-resident
 
-    parent      = topology.parent      isa AT ? topology.parent      : to_device(topology.parent, AT)
-    sort_perm   = topology.sort_perm   isa AT ? topology.sort_perm   : to_device(topology.sort_perm, AT)
-    mol_offsets = topology.mol_offsets isa AT ? topology.mol_offsets : to_device(topology.mol_offsets, AT)
-    atom_mol    = topology.atom_molecule_inds isa AT ? topology.atom_molecule_inds :
-                      to_device(topology.atom_molecule_inds, AT)
+    arrays = device_topology_arrays(topology, AT)
+    parent, cluster_inds, sort_perm, cluster_offsets = arrays.parent, arrays.cluster_inds,
+                                                       arrays.sort_perm, arrays.cluster_offsets
 
     minimum_image(df) = df .- round.(df)
 
-    cur_delta  = minimum_image.(f .- f[parent]) # One-hop delta to spanning-tree parent
+    cur_delta  = minimum_image.(f .- @inbounds(f[parent])) # One-hop delta to spanning-tree parent
     cur_parent = parent
-    for _ in 1:topology.n_rounds # Pointer doubling
-        gp         = cur_parent[cur_parent]            # Gather (fancy-indexed, GPU-safe)
-        cur_delta  = cur_delta .+ cur_delta[cur_parent]
-        cur_parent = gp
+    if topology.n_rounds > 0 # Pointer doubling, swapping between two buffer pairs
+        round! = unwrap_round_kernel!(get_backend(coords), 256)
+        p_in, d_in = copy(parent), cur_delta # copy: the cached parent must not be overwritten
+        p_out, d_out = similar(p_in), similar(d_in)
+        for _ in 1:topology.n_rounds
+            round!(p_out, d_out, p_in, d_in; ndrange=length(p_in))
+            p_in, p_out = p_out, p_in
+            d_in, d_out = d_out, d_in
+        end
+        cur_parent, cur_delta = p_in, d_in
     end
     # Postcondition: cur_parent[i] == root(i); cur_delta[i] == accumulated minimum-image delta
     # from root(i) to i
-    u = f[cur_parent] .+ cur_delta # Unwrapped fractional coords
+    u = @inbounds(f[cur_parent]) .+ cur_delta # Unwrapped fractional coords
 
-    # Segmented (per-molecule) mean via sort + inclusive scan
-    u_sorted = u[sort_perm]
+    # Segmented (per bonded cluster) mean via sort + inclusive scan. Accumulated in Float64 where the
+    # backend supports it: a long prefix sum in Float32 can accumulate enough rounding error, at
+    # large atom counts, to put a molecule's center of geometry in the wrong periodic image.
+    # Output (cog) is converted back to the working type.
+    CT = eltype(u) # SVector{D, working float type}
+    FT = default_float_type_high(coords, eltype(CT))
+    FT == Float64 || @warn "GPU unwrap_molecules accumulates in $FT since this backend does " *
+                           "not support Float64; molecules may be put in the wrong periodic " *
+                           "image for large systems" maxlog=1
+    u_sorted = SVector{D, FT}.(@inbounds(u[sort_perm]))
     cum      = AcceleratedKernels.accumulate(+, u_sorted; init=zero(eltype(u_sorted)))
     cum_ext  = similar(cum, length(cum) + 1)
     cum_ext[1:1]   .= (zero(eltype(cum)),)
     cum_ext[2:end] .= cum
-    seg_hi  = cum_ext[mol_offsets[2:end]   .+ 1]
-    seg_lo  = cum_ext[mol_offsets[1:end-1] .+ 1]
-    counts  = mol_offsets[2:end] .- mol_offsets[1:end-1]
-    cog     = (seg_hi .- seg_lo) ./ counts # Length n_mol, fractional center of geometry
+    seg_hi  = @inbounds cum_ext[cluster_offsets[2:end]   .+ 1]
+    seg_lo  = @inbounds cum_ext[cluster_offsets[1:end-1] .+ 1]
+    counts  = cluster_offsets[2:end] .- cluster_offsets[1:end-1]
+    cog     = CT.((seg_hi .- seg_lo) ./ counts) # Length n_clusters, fractional center of geometry
 
-    return u, cog, to_cart, wrap01, atom_mol
+    return u, cog, to_cart, wrap01, cluster_inds
 end
 
 function unwrap_molecules(coords::AbstractGPUArray{<:SVector{D}}, boundary, topology) where D
     isnothing(topology) && return coords
-    u, cog, to_cart, _, atom_mol = _gpu_unwrap_fractional(coords, boundary, topology)
+    u, cog, to_cart, _, cluster_inds = _gpu_unwrap_fractional(coords, boundary, topology)
     floor_sv(v) = floor.(v) # `v` is one SVector; broadcasts over its own components
-    u = u .- floor_sv.(cog)[atom_mol]
+    u = u .- @inbounds(floor_sv.(cog)[cluster_inds])
     return to_cart.(u)
 end
 
@@ -1257,9 +1278,8 @@ end
 function molecule_centers(coords::AbstractGPUArray,
                           boundary::AbstractBoundary{<:Any, T},
                           topology) where T
-    isnothing(topology) && return coords
-    _, cog, to_cart, wrap01, _ = _gpu_unwrap_fractional(coords, boundary, topology)
-    return to_cart.(wrap01.(cog))
+    AT = array_type(coords)
+    return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
 end
 
 rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)

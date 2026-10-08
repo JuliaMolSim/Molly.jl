@@ -251,8 +251,28 @@ const gbn2_data_m0 = [
     0.0128101, 0.0119627, 0.0111863,
 ]u"nm^-1" .* 10
 
-# This is force field dependent
-is_carboxylate_O(at_data) = at_data.atom_type == "O2"
+# A carboxylate O is an O bonded only to a C that has three bonds, one of them to another O,
+# Matching OpenMM https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/internal/customgbforces.py
+function atoms_carboxylate_O(atoms_data, bonds)
+    n_atoms = length(atoms_data)
+    carboxylate_O = falses(n_atoms)
+    if isnothing(bonds)
+        return carboxylate_O
+    end
+    bond_pairs = NTuple{2, Int}.(zip(from_device(bonds.is), from_device(bonds.js)))
+    partners = build_adjacency(n_atoms, bond_pairs)
+    for i in 1:n_atoms
+        if atoms_data[i].element != "O" || length(partners[i]) != 1
+            continue
+        end
+        c = partners[i][1]
+        if atoms_data[c].element != "C" || length(partners[c]) != 3
+            continue
+        end
+        carboxylate_O[i] = any(k -> k != i && atoms_data[k].element == "O", partners[c])
+    end
+    return carboxylate_O
+end
 
 function atoms_bonded_to_N(atoms_data, bonds)
     bonded_to_N = falses(length(atoms_data))
@@ -272,11 +292,13 @@ end
 function mbondi2_radii(atoms_data, bonds; use_mbondi3=false,
                         element_to_radius=mbondi2_element_to_radius)
     bonded_to_N = atoms_bonded_to_N(atoms_data, bonds)
-    return map(atoms_data, bonded_to_N) do at_data, at_bonded_to_N
+    carboxylate_O = use_mbondi3 ? atoms_carboxylate_O(atoms_data, bonds) :
+                                  falses(length(atoms_data))
+    return map(atoms_data, bonded_to_N, carboxylate_O) do at_data, at_bonded_to_N, at_carb_O
         if use_mbondi3 && at_data.res_name == "ARG" &&
                 (startswith(at_data.atom_name, "HH") || startswith(at_data.atom_name, "HE"))
             radius = element_to_radius["H_ARG"]
-        elseif use_mbondi3 && is_carboxylate_O(at_data)
+        elseif at_carb_O
             radius = element_to_radius["O_CAR"]
         elseif at_data.element in ("H", "D")
             radius = at_bonded_to_N ? element_to_radius["H_N"] : element_to_radius["H"]
@@ -419,7 +441,8 @@ Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculat
 Should be used along with a Coulomb interaction.
 [`SetupImplicitSolventOBC`](@ref) provides parameters when setting up a system from a file.
 
-`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs.
+`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs,
+including any constrained bonds.
 `solvent_dielectric` and `solute_dielectric` are the dielectric constants of the solvent and
 the solute.
 `kappa` is the Debye-Hückel screening parameter, the inverse of the Debye length, and is
@@ -564,6 +587,17 @@ function gb_bond_index(sys)
     return findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
 end
 
+# Bonded pairs used to assign GB radii
+# The topology is preferred since it includes bonds that have been converted to constraints
+function gb_bonds(sys)
+    topology = sys.topology
+    if !isnothing(topology) && !isempty(topology.bonded_atoms)
+        return (is=first.(topology.bonded_atoms), js=last.(topology.bonded_atoms))
+    end
+    bond_index = gb_bond_index(sys)
+    return isnothing(bond_index) ? nothing : sys.specific_inter_lists[bond_index]
+end
+
 function gb_element_dicts(key_prefix, params_dic, default_radii, default_screens)
     element_to_radius = Dict{String, Float64}()
     for k in keys(default_radii)
@@ -586,7 +620,7 @@ function inject_interaction(inter::ImplicitSolventOBC, params_dic, sys)
     ImplicitSolventOBC(
         sys.atoms,
         sys.atoms_data,
-        sys.specific_inter_lists[gb_bond_index(sys)];
+        gb_bonds(sys);
         solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
         solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
         kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
@@ -685,7 +719,8 @@ GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 Should be used along with a Coulomb interaction.
 [`SetupImplicitSolventGBN2`](@ref) provides parameters when setting up a system from a file.
 
-`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs.
+`atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs,
+including any constrained bonds.
 `solvent_dielectric` and `solute_dielectric` are the dielectric constants of the solvent and
 the solute.
 `kappa` is the Debye-Hückel screening parameter, the inverse of the Debye length, and is
@@ -897,7 +932,7 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
     ImplicitSolventGBN2(
         sys.atoms,
         sys.atoms_data,
-        sys.specific_inter_lists[gb_bond_index(sys)];
+        gb_bonds(sys);
         solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
         solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
         kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
@@ -1024,6 +1059,11 @@ gb_neck_dist_scale(::Type{T}, ::typeof(NoUnits)) where {T} = T(10)
 @inline function gb_sqdist_cutoff(inter::AbstractGBSA)
     dist_cutoff = ustrip(gb_length_unit(inter), inter.dist_cutoff)
     return iszero(dist_cutoff) ? typemax(dist_cutoff) : dist_cutoff^2
+end
+
+@inline function gb_dist_cutoff_inv(inter::AbstractGBSA)
+    dist_cutoff = ustrip(gb_length_unit(inter), inter.dist_cutoff)
+    return iszero(dist_cutoff) ? zero(inv(dist_cutoff)) : inv(dist_cutoff)
 end
 
 # Data required for the GBn2 neck correction, nothing for models without a neck term
@@ -1188,8 +1228,10 @@ end
 end
 
 # Polarisation energy derivatives for a pair of atoms, also used for the self term
-#   by passing a squared distance of zero and Bj equal to Bi
-@inline function gb_pair_gpol(r2, charge_ij, Bi, Bj, factor_solute, factor_solvent, kappa)
+#   by passing a squared distance of zero, Bj equal to Bi and dist_cutoff_inv of zero
+#   as the self term is not shifted by the cutoff
+@inline function gb_pair_gpol(r2, charge_ij, Bi, Bj, factor_solute, factor_solvent, kappa,
+                              dist_cutoff_inv)
     alpha2_ij = Bi * Bj
     D_term = gb_div(r2, 4 * alpha2_ij)
     exp_term = gb_exp(-D_term)
@@ -1202,7 +1244,8 @@ end
     else
         exp_kappa = gb_exp(-kappa * denominator)
         pre_factor = factor_solute + exp_kappa * factor_solvent +
-                        kappa * denominator * exp_kappa * factor_solvent
+                        kappa * denominator * exp_kappa * factor_solvent *
+                        (1 - denominator * dist_cutoff_inv)
     end
     Gpol = pre_factor * charge_ij * denominator_inv
     dGpol_dr = -Gpol * (1 - exp_term/4) * denominator2_inv
@@ -1213,7 +1256,8 @@ end
 # Born force and direct force on atom i from the atoms in jrange
 # The self term is included when jrange contains i
 @inline function gb_force_1_partial(coords, charges, Bs, sqdist_cutoff, factor_solute,
-                                    factor_solvent, kappa, boundary, lu, i, jrange)
+                                    factor_solvent, kappa, dist_cutoff_inv, boundary, lu,
+                                    i, jrange)
     @inbounds begin
         coord_i, charge_i, Bi = ustrip.(lu, coords[i]), charges[i], ustrip(lu, Bs[i])
         f_i = zero(coord_i)
@@ -1221,7 +1265,8 @@ end
         for j in jrange
             if j == i
                 _, dGpol_dalpha2_ij = gb_pair_gpol(zero(born_force_i), charge_i^2, Bi, Bi,
-                                                   factor_solute, factor_solvent, kappa)
+                                                   factor_solute, factor_solvent, kappa,
+                                                   zero(dist_cutoff_inv))
                 born_force_i += dGpol_dalpha2_ij * Bi
             else
                 dr = vector(coord_i, ustrip.(lu, coords[j]), boundary)
@@ -1231,7 +1276,7 @@ end
                 end
                 Bj = ustrip(lu, Bs[j])
                 dGpol_dr, dGpol_dalpha2_ij = gb_pair_gpol(r2, charge_i * charges[j], Bi, Bj,
-                                                    factor_solute, factor_solvent, kappa)
+                                    factor_solute, factor_solvent, kappa, dist_cutoff_inv)
                 born_force_i += dGpol_dalpha2_ij * Bj
                 f_i += dr * dGpol_dr
             end
@@ -1248,8 +1293,8 @@ end
     L = gb_inv(Lval)
     U = gb_inv(rsrj)
     t3 = (1 + srj*srj*r2inv)*(L*L - U*U)/8 + gb_log(Lval*U)*r2inv/4
-    de = bi * (t3 - I_grad) * rinv
-    return ifelse(ori < rsrj, de, zero(de))
+    t3 = ifelse(ori < rsrj, t3, zero(t3))
+    return bi * (t3 - I_grad) * rinv
 end
 
 # Force on atom i from the change in the Born radii of atom i and of the atoms in jrange
@@ -1434,7 +1479,7 @@ end
                                        n_atoms, chunk_i, n_chunks)
     lu = gb_length_unit(inter)
     sqdist_cutoff, bnd = gb_sqdist_cutoff(inter), ustrip(lu, boundary)
-    kappa = ustrip(inv(lu), inter.kappa)
+    kappa, dist_cutoff_inv = ustrip(inv(lu), inter.kappa), gb_dist_cutoff_inv(inter)
     factor_solute, factor_solvent = ustrip(inter.factor_solute), ustrip(inter.factor_solvent)
     fill!(chunk, zero(eltype(chunk)))
     @inbounds begin
@@ -1443,8 +1488,8 @@ end
             coord_i, charge_i = ustrip.(lu, coords[i]), atom_charges[i]
             Bi = ustrip(lu, Bs[i])
             f_i = zero(coord_i)
-            _, dGpol_dalpha2_ii = gb_pair_gpol(zero(Bi), charge_i^2, Bi, Bi,
-                                               factor_solute, factor_solvent, kappa)
+            _, dGpol_dalpha2_ii = gb_pair_gpol(zero(Bi), charge_i^2, Bi, Bi, factor_solute,
+                                               factor_solvent, kappa, zero(dist_cutoff_inv))
             born_force_i = dGpol_dalpha2_ii * Bi
             for j in (i + 1):n_atoms
                 dr = vector(coord_i, ustrip.(lu, coords[j]), bnd)
@@ -1454,7 +1499,7 @@ end
                 end
                 Bj = ustrip(lu, Bs[j])
                 dGpol_dr, dGpol_dalpha2_ij = gb_pair_gpol(r2, charge_i * atom_charges[j],
-                                        Bi, Bj, factor_solute, factor_solvent, kappa)
+                        Bi, Bj, factor_solute, factor_solvent, kappa, dist_cutoff_inv)
                 born_force_i += dGpol_dalpha2_ij * Bj
                 chunk[j, 4] += dGpol_dalpha2_ij * Bi
                 fdr = dr * dGpol_dr
@@ -1554,8 +1599,7 @@ end
                                      chunk_i, n_chunks)
     lu = gb_length_unit(inter)
     or, offset = inter.offset_radii, ustrip(lu, inter.offset)
-    dist_cutoff = ustrip(lu, inter.dist_cutoff)
-    dist_cutoff_inv = iszero(dist_cutoff) ? zero(inv(dist_cutoff)) : inv(dist_cutoff)
+    dist_cutoff_inv = gb_dist_cutoff_inv(inter)
     sqdist_cutoff, bnd = gb_sqdist_cutoff(inter), ustrip(lu, boundary)
     kappa = ustrip(inv(lu), inter.kappa)
     factor_solute, factor_solvent = ustrip(inter.factor_solute), ustrip(inter.factor_solvent)
@@ -1654,7 +1698,7 @@ function forces_gbsa!(fs, born_forces, sys::System{D, <:AbstractGPUArray, T}, in
     kernel_1! = gbsa_force_1_kernel!(backend, gpu_threads_gbsa())
     kernel_1!(fs_mat, born_forces_mod, sys.coords, atom_charges, Bs, bnd, sqdist_cutoff,
               ustrip(inter.factor_solute), ustrip(inter.factor_solvent),
-              ustrip(inv(lu), inter.kappa), lu, n_chunks, Val(D);
+              ustrip(inv(lu), inter.kappa), gb_dist_cutoff_inv(inter), lu, n_chunks, Val(D);
               ndrange=(n_atoms * n_chunks))
 
     kernel_s! = gbsa_born_scale_kernel!(backend, gpu_threads_gbsa())
@@ -1673,16 +1717,16 @@ end
 
 @kernel inbounds=true function gbsa_force_1_kernel!(fs_mat, born_forces_mod, @Const(coords),
                             @Const(charges), @Const(Bs), boundary, sqdist_cutoff,
-                            factor_solute, factor_solvent, kappa, lu, n_chunks,
-                            ::Val{D}) where D
+                            factor_solute, factor_solvent, kappa, dist_cutoff_inv, lu,
+                            n_chunks, ::Val{D}) where D
     idx = @index(Global, Linear)
     n_atoms = length(coords)
 
     if idx <= n_atoms * n_chunks
         i, chunk_i = gbsa_atom_chunk(idx, n_atoms)
         born_force_i, f_i = gb_force_1_partial(coords, charges, Bs, sqdist_cutoff,
-                                factor_solute, factor_solvent, kappa, boundary, lu, i,
-                                chunk_i:n_chunks:n_atoms)
+                                factor_solute, factor_solvent, kappa, dist_cutoff_inv,
+                                boundary, lu, i, chunk_i:n_chunks:n_atoms)
         Atomix.@atomic born_forces_mod[i] += convert(eltype(born_forces_mod), born_force_i)
         for dim in 1:D
             Atomix.@atomic fs_mat[dim, i] += convert(eltype(fs_mat), f_i[dim])
@@ -1735,8 +1779,7 @@ function gbsa_energy(sys::System{<:Any, <:AbstractGPUArray}, inter, Bs, atom_cha
     n_chunks = gbsa_n_chunks(n_atoms)
     backend = get_backend(sys.coords)
     lu = gb_length_unit(inter)
-    dist_cutoff = ustrip(lu, inter.dist_cutoff)
-    dist_cutoff_inv = iszero(dist_cutoff) ? zero(inv(dist_cutoff)) : inv(dist_cutoff)
+    dist_cutoff_inv = gb_dist_cutoff_inv(inter)
     # The energy accumulator is zeroed by gbsa_setup!
     pes = inter.buffer_pes
 

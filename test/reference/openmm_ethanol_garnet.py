@@ -7,7 +7,7 @@ import openmm
 from openmm import Context, Platform, VerletIntegrator, app, unit
 
 
-data_dir = Path(__file__).resolve().parent.parent / "data"
+data_dir = Path(__file__).resolve().parent.parent.parent / "data"
 pdb = app.PDBFile(str(data_dir / "ethanol_garnet.pdb"))
 
 templates = ElementTree.parse(

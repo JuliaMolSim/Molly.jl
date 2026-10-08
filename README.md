@@ -24,7 +24,7 @@ Implemented features include:
 - Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin and Nosé-Hoover integrators.
 - Andersen, Berendsen and velocity rescaling thermostats.
 - C-rescale, Monte Carlo and Berendsen barostats with flexible virial calculation.
-- Steepest descent energy minimization.
+- Steepest descent, FIRE and L-BFGS energy minimization.
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.
 - Periodic, triclinic and infinite boundary conditions.
@@ -36,6 +36,7 @@ Implemented features include:
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
 - Set up crystal systems using [SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl).
 - Flexible bias potentials and collective variables.
+- Native support for the [ANI](https://github.com/aiqm/torchani) machine learning interatomic potential.
 - Automatic multithreading.
 - GPU acceleration on all backends supported by [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl), with better performance on CUDA-enabled devices.
 - Run with Float64, Float32 or other float types.

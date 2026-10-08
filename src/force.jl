@@ -188,6 +188,12 @@ Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 Base.:+(x::SpecificForce5Atoms, y::SpecificForce5Atoms) = SpecificForce5Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4, x.f5 + y.f5)
 
+Base.:*(λ::Number, x::SpecificForce1Atoms) = SpecificForce1Atoms(λ * x.f1)
+Base.:*(λ::Number, x::SpecificForce2Atoms) = SpecificForce2Atoms(λ * x.f1, λ * x.f2)
+Base.:*(λ::Number, x::SpecificForce3Atoms) = SpecificForce3Atoms(λ * x.f1, λ * x.f2, λ * x.f3)
+Base.:*(λ::Number, x::SpecificForce4Atoms) = SpecificForce4Atoms(λ * x.f1, λ * x.f2, λ * x.f3, λ * x.f4)
+Base.:*(λ::Number, x::SpecificForce5Atoms) = SpecificForce5Atoms(λ * x.f1, λ * x.f2, λ * x.f3, λ * x.f4, λ * x.f5)
+
 const INVALID_BUFFER_STEP = -1
 
 # Tracks which step cached virial and pressure buffers are valid for.
@@ -198,11 +204,9 @@ mutable struct BufferValidity
     pressure_step::Int
     pre_coupling_virial_step::Int
     pre_coupling_pressure_step::Int
-    unwrap_step::Int
 end
 
 BufferValidity() = BufferValidity(
-    INVALID_BUFFER_STEP,
     INVALID_BUFFER_STEP,
     INVALID_BUFFER_STEP,
     INVALID_BUFFER_STEP,
@@ -300,27 +304,14 @@ function has_interaction_virial(buffers, step_n::Integer)
     return has_interaction_virial(buffers.validity, step_n)
 end
 
-# Whether a general_inters entry needs sys's unwrapped coordinates this step (true only for a
-# BiasPotential with correction==:pbc, src/bias/bias.jl).
-bias_needs_unwrap(inter) = false
-
-# unwrap_molecules(sys), computed at most once per step_n and cached on buffers so every
-# attached BiasPotential with correction==:pbc shares it.
-function ensure_unwrapped_coords!(buffers, sys, step_n::Integer)
-    if !has_unwrap(buffers.validity, step_n)
+# unwrap_molecules(sys), computed at most once per forces! call and cached on buffers so every
+# attached BiasPotential with correction==:pbc shares it. Reset to nothing at the top of each
+# forces! call, since forces! can run more than once at the same step_n (e.g. MTS substeps).
+function ensure_unwrapped_coords!(buffers, sys)
+    if isnothing(buffers.unwrapped_coords[])
         buffers.unwrapped_coords[] = unwrap_molecules(sys)
-        mark_unwrap!(buffers.validity, step_n)
     end
     return buffers.unwrapped_coords[]
-end
-
-function mark_unwrap!(v::BufferValidity, step_n::Integer)
-    v.unwrap_step = Int(step_n)
-    return v
-end
-
-function has_unwrap(v::BufferValidity, step_n::Integer)
-    return v.unwrap_step == step_n
 end
 
 function has_constraint_virial(buffers, step_n::Integer)
@@ -396,13 +387,13 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
-    bias_scratch::Any               # NTuple, one slot per sys.general_inters entry, see BuffersGPU
+    bias_scratch::Any               # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersGPU
     fs_mat::FM
     validity::BufferValidity
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
-                    kin_tensor, pres_tensor, fs_mat; bias_scratch=())
+                    kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = zero(vir_nounits)
     constraint_virial_chunks = similar(vir_chunks)
@@ -420,7 +411,7 @@ end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                     constraint_virial, constraint_virial_nounits,
-                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=())
+                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
     return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial, constraint_virial_nounits,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
@@ -450,10 +441,9 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
     n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
     fs_mat = zeros(TU, D, n_fs_mat_cols)
 
-    # One slot per sys.general_inters entry, indexed identically to the inter_idx passed into
-    # AtomsCalculators.forces!/potential_energy (force.jl/energy.jl); nothing for non-bias entries.
-    bias_scratch = Tuple(inter isa BiasPotential ? BiasScratch() : nothing
-                         for inter in values(sys.general_inters))
+    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
+                                             for inter in values(sys.general_inters)
+                                             if inter isa BiasPotential)
 
     return BuffersCPU(
         fs_nounits, fs_chunks,
@@ -471,6 +461,17 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
 end
 
 upper_tile_count(n_blocks::Integer) = (Int64(n_blocks) * (Int64(n_blocks) + 1)) ÷ 2
+
+# Number of nodes above the blocks in the tree of block bounding boxes used by the CUDA
+#   tile search, where level k has cld(n_blocks, 2^k) nodes and the top level one node
+function block_tree_n_nodes(n_blocks::Integer)
+    n_nodes, n = 0, n_blocks
+    while n > 1
+        n = cld(n, 2)
+        n_nodes += n
+    end
+    return n_nodes
+end
 
 #=
     BuffersGPU
@@ -494,12 +495,15 @@ energy calculations.
   Reusable scratch arrays for constraint virial snapshots and initial-step previews.
 - `validity`: Step metadata describing which tensor buffers are current.
 - `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
+- `tree_mins`, `tree_maxs`: Bounding boxes of runs of consecutive blocks, the internal
+  nodes of the tree searched for interacting tiles in large systems.
 - `morton_seq`, `morton_seq_buffer_1`, `morton_seq_buffer_2`, `morton_seq_inv`:
   Morton-order indices and temporary buffers for reordering atoms on the GPU.
-- `compressed_masks`: 32x32 bitmasks (eligibility and special flags) for each
-  upper-triangular tile in Morton order.
-- `tile_is_clean`: Boolean flag for each tile indicating whether it contains no
-  exclusions or special pairs and can skip mask lookups.
+- `excluded_pos`, `special_pos`: Morton position of the partner atom of each entry
+  of the sparse excluded and special lists of a [`GPUNeighborFinder`](@ref).
+- `block_exc_min`, `block_exc_max`: for each 32-atom block, the lowest and highest
+  block holding an exception partner of one of its atoms, used to rule out
+  exceptions in most tiles without looking at the atoms.
 - `interacting_tiles_i`, `interacting_tiles_j`, `interacting_tiles_type`:
   parallel 1D vectors describing the compact list of tiles currently inside the
   interaction cutoff.
@@ -517,13 +521,16 @@ energy calculations.
   and tile metadata.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
-- `masks_initialized`: whether `compressed_masks`/`tile_is_clean` hold a full
-  exception-free initialization. Once set, later refreshes only restore the tiles
-  the previous sparse scatter dirtied instead of rewriting the whole
-  `O(n_blocks^2)` array.
+
+Every buffer takes memory proportional to the number of atoms or the number of
+exceptions, apart from the interacting-tile vectors which are sized from the number
+of atom blocks.
+The Morton order, block, tile, exception and reordered buffers are only used by the
+CUDA tiled kernels of [`GPUNeighborFinder`](@ref), so they are empty for other neighbor
+finders.
 =#
-mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, ITD, NIT, OIT, CR, VR, AR,
-                          fs_re, TIC}
+mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR, VR, AR,
+                          fs_re}
     fs_mat::F
     pe_vec_nounits::P
     virial::V
@@ -539,20 +546,24 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, ITD, NIT, OIT, 
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
-    unwrapped_coords::Base.RefValue{Any}   # shared, once-per-step cache: see ensure_unwrapped_coords!
-    bias_scratch::Any                      # NTuple, one slot per sys.general_inters entry, see BuffersCPU
+    unwrapped_coords::Base.RefValue{Any}   # shared, once-per-call cache: see ensure_unwrapped_coords!
+    bias_scratch::Any                      # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersCPU
     # Cached CuGraphExecs for use_cuda_graph (see captured_forces_once!, MollyCUDAExt.jl)
     graph_exec_no_check::Base.RefValue{Any}
     graph_exec_with_check::Base.RefValue{Any}
     validity::BufferValidity
     box_mins::C
     box_maxs::C
+    tree_mins::C
+    tree_maxs::C
     morton_seq::M
     morton_seq_buffer_1::M
     morton_seq_buffer_2::M
     morton_seq_inv::M
-    compressed_masks::R
-    tile_is_clean::TIC
+    excluded_pos::M
+    special_pos::M
+    block_exc_min::M
+    block_exc_max::M
     interacting_tiles_i::IT
     interacting_tiles_j::IT
     interacting_tiles_type::ITT
@@ -567,18 +578,18 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, R, IT, ITT, ITD, NIT, OIT, 
     step_n_preprocessed::Int
     sparse_pair_generation::UInt64
     num_pairs::Int
-    masks_initialized::Bool
 end
 
 function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, pres_tensor,
-                    box_mins, box_maxs, morton_seq, morton_seq_buffer_1,
-                    morton_seq_buffer_2, morton_seq_inv, compressed_masks, tile_is_clean,
+                    box_mins, box_maxs, tree_mins, tree_maxs, morton_seq, morton_seq_buffer_1,
+                    morton_seq_buffer_2, morton_seq_inv, excluded_pos, special_pos,
+                    block_exc_min, block_exc_max,
                     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
                     interacting_tiles_diag, num_interacting_tiles,
                     interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
-                    step_n_preprocessed, sparse_pair_generation, num_pairs,
-                    masks_initialized::Bool=false; bias_scratch=())
+                    step_n_preprocessed, sparse_pair_generation, num_pairs;
+                    bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
     fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
@@ -588,15 +599,15 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       pre_coupling_ref(), bias_scratch, pre_coupling_ref(), pre_coupling_ref(),
-                      BufferValidity(), box_mins, box_maxs, morton_seq,
+                      BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
-                      compressed_masks, tile_is_clean, interacting_tiles_i,
+                      excluded_pos, special_pos, block_exc_min, block_exc_max,
+                      interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
                       num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
-                      step_n_preprocessed, sparse_pair_generation, num_pairs,
-                      masks_initialized)
+                      step_n_preprocessed, sparse_pair_generation, num_pairs)
 end
 
 function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
@@ -669,12 +680,14 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                        for_pe::Bool=false) where {D, T, TH}
     N = length(sys)
     C = eltype(eltype(sys.coords))
-    n_blocks = cld(N, 32)
+    tiled = sys.neighbor_finder isa GPUNeighborFinder
+    N_tiled = (tiled ? N : 0)
+    n_blocks = cld(N_tiled, 32)
     n_upper_tiles = upper_tile_count(n_blocks)
     backend = get_backend(sys.coords)
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
-    fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N)
+    fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N_tiled)
     pe_vec_noun  = KernelAbstractions.zeros(backend, TH, 1)
     virial       = zeros(TH, D, D) .* sys.energy_units
     virial_nu    = KernelAbstractions.zeros(backend, TH, D, D)
@@ -684,14 +697,27 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     pres         = ustrip_vec.(zero(virial)) * (sys.energy_units == NoUnits ? NoUnits : u"bar")
     box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
     box_maxs = KernelAbstractions.zeros(backend, C, n_blocks, D)
-    morton_seq = KernelAbstractions.zeros(backend, Int32, N)
-    morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N)
-    morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
-    morton_seq_inv = KernelAbstractions.zeros(backend, Int32, N)
-    compressed_masks = KernelAbstractions.zeros(backend, UInt32, 32, 2, n_upper_tiles)
-    tile_is_clean = KernelAbstractions.zeros(backend, Bool, n_upper_tiles)
+    n_tree_nodes = block_tree_n_nodes(n_blocks)
+    tree_mins = KernelAbstractions.zeros(backend, C, n_tree_nodes, D)
+    tree_maxs = KernelAbstractions.zeros(backend, C, n_tree_nodes, D)
+    morton_seq = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    morton_seq_inv = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    # Sized from the sparse exception lists, which only GPUNeighborFinder reads here
+    if tiled
+        n_excluded_entries = length(sys.neighbor_finder.eligible.partners)
+        n_special_entries = length(sys.neighbor_finder.special.partners)
+    else
+        n_excluded_entries, n_special_entries = 0, 0
+    end
+    excluded_pos = KernelAbstractions.zeros(backend, Int32, n_excluded_entries)
+    special_pos = KernelAbstractions.zeros(backend, Int32, n_special_entries)
+    block_exc_min = KernelAbstractions.zeros(backend, Int32, n_blocks)
+    block_exc_max = KernelAbstractions.zeros(backend, Int32, n_blocks)
 
-    max_interacting_blocks = min(n_upper_tiles, 1024 * n_blocks)
+    # Enough for typical systems, the CUDA tile search grows these vectors if needed
+    max_interacting_blocks = min(n_upper_tiles, 192 * n_blocks)
     interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
     interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
     interacting_tiles_type = KernelAbstractions.zeros(backend, UInt8, max_interacting_blocks)
@@ -699,32 +725,32 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     num_interacting_tiles = KernelAbstractions.zeros(backend, Int32, 1)
     interacting_tiles_overflow = KernelAbstractions.zeros(backend, Int32, 1)
 
-    coords_reordered = zero(sys.coords)
-    velocities_reordered = zero(sys.velocities)
-    atoms_reordered = copy(sys.atoms)
+    coords_reordered = (tiled ? zero(sys.coords) : similar(sys.coords, 0))
+    velocities_reordered = (tiled ? zero(sys.velocities) : similar(sys.velocities, 0))
+    atoms_reordered = (tiled ? copy(sys.atoms) : similar(sys.atoms, 0))
 
-    if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
+    if !for_pe && tiled
         sys.neighbor_finder.initialized = false
     end
 
-    # One slot per sys.general_inters entry, indexed identically to the inter_idx passed into
-    # AtomsCalculators.forces!/potential_energy (force.jl/energy.jl); nothing for non-bias entries.
-    bias_scratch = Tuple(inter isa BiasPotential ? BiasScratch() : nothing
-                         for inter in values(sys.general_inters))
+    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
+                                             for inter in values(sys.general_inters)
+                                             if inter isa BiasPotential)
 
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       pre_coupling_ref(), bias_scratch, pre_coupling_ref(), pre_coupling_ref(),
-                      BufferValidity(), box_mins, box_maxs, morton_seq,
+                      BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
-                      compressed_masks, tile_is_clean, interacting_tiles_i,
+                      excluded_pos, special_pos, block_exc_min, block_exc_max,
+                      interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
                       num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
-                      -1, UInt64(0), 0, false)
+                      -1, UInt64(0), 0)
 end
 
 zero_forces(sys) = ustrip_vec.(zero.(sys.coords)) .* sys.force_units
@@ -868,10 +894,10 @@ function forces!(fs,
         buffers.virial .= buffers.vir_nounits .* sys.energy_units
     end
 
-    for (i, inter) in enumerate(values(general_inters))
+    for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                 inter_idx=i, strictness=strictness)
+                                 strictness=strictness)
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
@@ -1123,7 +1149,7 @@ end
 
     if needs_vir
         r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
-        λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+        λ = virial_lambda_factor(inter, (atoms[i], atoms[j]))
         v = λ * r_ji * transpose(sf.f1)
         vir_nounits .+= ustrip.(v)
     end
@@ -1146,9 +1172,7 @@ end
     if needs_vir
         r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j (second atom is the reference, MIC)
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
-        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-        λ = minimum((λ_ji, λ_jk))
+        λ = virial_lambda_factor(inter, (atoms[i], atoms[j], atoms[k]))
         vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) + r_jk * transpose(sf.f3))
     end
     return fs_nounits
@@ -1174,10 +1198,7 @@ end
         r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
         r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
-        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-        λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
-        λ = minimum((λ_ji, λ_jk, λ_jl))
+        λ = virial_lambda_factor(inter, (atoms[i], atoms[j], atoms[k], atoms[l]))
         vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) +
                                 r_jk * transpose(sf.f3) +
                                 r_jl * transpose(sf.f4) )
@@ -1208,11 +1229,7 @@ end
         r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
         r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
         r_jm = vector(coords[j], coords[m], boundary) # r_m - r_j
-        λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-        λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-        λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
-        λ_jm = λ_mixing(MinimumMixing(), atoms[j], atoms[m])
-        λ = minimum((λ_ji, λ_jk, λ_jl, λ_jm))
+        λ = virial_lambda_factor(inter, (atoms[i], atoms[j], atoms[k], atoms[l], atoms[m]))
         vir_nounits .+= λ * ustrip.(r_ji * transpose(sf.f1) +
                                 r_jk * transpose(sf.f3) +
                                 r_jl * transpose(sf.f4) +
@@ -1330,36 +1347,27 @@ function forces!(fs,
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
                 specific_inter_lists, n_threads)
 
-    # Compute unwrap_molecules(sys) at most once here, shared by every attached BiasPotential
-    # that needs it (correction==:pbc), instead of each recomputing it independently below.
-    if any(bias_needs_unwrap, values(general_inters))
-        ensure_unwrapped_coords!(buffers, sys, step_n)
-    end
+    buffers.unwrapped_coords[] = nothing # Filled by the first BiasPotential that needs it
     if cuda_graph_capturing
-        # Batches all biases' captured-path tail into 2 launches instead of 2*n_bias. Splitting
-        # (i, inter) pairs (not just inter) keeps each bias's inter_idx paired with its own
-        # buffers.bias_scratch slot through the split.
-        gi = values(general_inters)
-        idx_inters = ntuple(i -> (i, gi[i]), length(gi))
-        idx_biases, idx_others = split_biases(idx_inters)
-        biases    = map(last, idx_biases)
-        scratches = map(p -> buffers.bias_scratch[first(p)], idx_biases)
+        # Batches all biases' captured-path tail into 2 launches instead of 2*n_bias
+        biases, others = split_biases(Tuple(values(general_inters)))
+        scratches = map(b -> bias_scratch(buffers, b), biases)
         for (bias, scratch) in zip(biases, scratches)
             coords = bias_coords(sys, bias.cv_type, buffers, step_n)
             bias_cv_step!(bias, scratch, sys, coords, fs, step_n, bias_check)
         end
         bias_batched_tail!(fs, biases, scratches, step_n, bias_check)
-        for (i, inter) in idx_others
+        for inter in others
             AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                      n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                     inter_idx=i, cuda_graph_capturing=cuda_graph_capturing,
+                                     cuda_graph_capturing=cuda_graph_capturing,
                                      defer_finite_check=defer_finite_check, strictness=strictness)
         end
     else
-        for (i, inter) in enumerate(values(general_inters))
+        for inter in values(general_inters)
             AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                      n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                     inter_idx=i, cuda_graph_capturing=cuda_graph_capturing,
+                                     cuda_graph_capturing=cuda_graph_capturing,
                                      defer_finite_check=defer_finite_check, strictness=strictness)
         end
     end
@@ -1371,6 +1379,9 @@ function forces!(fs,
             mark_total_virial!(buffers.validity, step_n)
         end
     end
+
+    # Enforce rewrap in each forces! call.
+    buffers.unwrapped_coords[] = nothing
 
     return fs, buffers
 end
@@ -1460,7 +1471,7 @@ end
                n_threads=n_threads, defer_finite_check=true, strictness=strictness)
     end
     if run_bias_finite_check
-        check_bias_finite_periodic_batched!(values(sys.general_inters), buffers.bias_scratch)
+        check_bias_finite_periodic_batched!(values(sys.general_inters), buffers)
     end
     return nothing
 end

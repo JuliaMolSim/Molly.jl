@@ -15,7 +15,7 @@
             neighbor_finder=GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=T(5.0),
-                device_vector_type=CuArray{Int32, 1},
+                array_type=CuArray,
             ),
             force_units=NoUnits,
             energy_units=NoUnits
@@ -191,7 +191,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms_tri,
                     dist_cutoff=T(4.0),
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -276,7 +276,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_cg,
                     dist_cutoff=T(0.9),
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -347,7 +347,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_uc,
                     dist_cutoff=T(0.9),
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits,

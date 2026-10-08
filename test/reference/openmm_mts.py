@@ -6,7 +6,7 @@ from openmm import *
 from openmm.unit import *
 import os
 
-data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
+data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "data")
 out_dir = os.path.join(data_dir, "openmm_tip4pfb")
 
 platform = Platform.getPlatformByName("Reference")

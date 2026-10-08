@@ -119,7 +119,7 @@ velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 lj = LennardJones(cutoff=DistanceCutoff(1.5), use_neighbors=true)
 pairwise_inters = (lj,)
 neighbor_finder = DistanceNeighborFinder(
-    eligible=trues(n_atoms, n_atoms),
+    n_atoms=n_atoms,
     n_steps=10,
     dist_cutoff=1.8,
 )
@@ -213,7 +213,7 @@ The RDF looks as follows, with the purple line corresponding to the desired dist
 ![LJ RDF](images/rdf_lj.png)
 
 To make this run on the GPU the appropriate objects should be transferred to the GPU with `CuArray`: `coords`, `velocities`, `atoms` and any state owned by the chosen neighbor finder.
-For [`DistanceNeighborFinder`](@ref) this includes the `eligible` matrix;
+For [`DistanceNeighborFinder`](@ref) give `array_type=CuArray` when constructing it, so that it stores the excluded and special pairs on the GPU.
 If using custom interactions or some built-in interactions you may need to define methods of `zero` and `+` for your interaction type.
 
 It is common to require a loss function formed from values throughout a simulation.

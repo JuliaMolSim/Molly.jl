@@ -11,9 +11,11 @@ export
     Atom,
     mass,
     charge,
+    lambda,
     AtomData,
     MolecularTopology,
     NeighborList,
+    GPUCellListNeighborList,
     System,
     ThermoState,
     ReplicaSystem,
@@ -454,13 +456,143 @@ function hash(a::InteractionList5Atoms, h::UInt)
     ks     = from_device(a.ks)
     ls     = from_device(a.ls)
     ms     = from_device(a.ms)
+    data   = (a.data isa AbstractArray ? from_device(a.data) : a.data)
     inters = from_device(a.inters)
     types  = from_device(a.types)
-    return hash(is, hash(js, hash(ks, hash(ls, hash(ms, hash(inters, hash(types, hash(a.data, h))))))))
+    return hash(is, hash(js, hash(ks, hash(ls, hash(ms, hash(inters, hash(types, hash(data, h))))))))
 end
 
 function Base.show(io::IO, sil::T) where T <: SpecificInteractionList
     print(io, nameof(T), " with ", length(sil.is), " interactions of type ", eltype(sil.inters))
+end
+
+# Named apart from the built-in `merge` to keep the two separate
+function merge_interactions(interactions)
+    interactions_final = []
+    cache = []
+    for (i,inter) in enumerate(interactions)
+        i in cache && continue
+        idx = findall(x->typeof(x)==typeof(inter), interactions)
+        inters = interactions[idx[1]]
+        for j in idx[2:end]
+            inters = append!(inters,interactions[j])
+        end
+        push!(interactions_final, inters)
+        append!(cache,idx)
+    end
+    return interactions_final
+end
+
+function Base.append!(il1::InteractionList1Atoms{I, T, D}, il2::InteractionList1Atoms{I, T, D}) where {I, T, D}
+    return InteractionList1Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.inters,il2.inters),
+        append!(il1.types,il2.types),
+        il1.data,
+    )
+end
+
+function Base.append!(il1::InteractionList2Atoms{I, T, D}, il2::InteractionList2Atoms{I, T, D}) where {I, T, D}
+    return InteractionList2Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.js,il2.js),
+        append!(il1.inters,il2.inters),
+        append!(il1.types,il2.types),
+        il1.data
+    )
+end
+
+function Base.append!(il1::InteractionList3Atoms{I, T, D}, il2::InteractionList3Atoms{I, T, D}) where {I, T, D}
+    return InteractionList3Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.js,il2.js),
+        append!(il1.ks,il2.ks),
+        append!(il1.inters,il2.inters),
+        append!(il1.types,il2.types),
+        il1.data
+    )
+end
+
+function Base.append!(il1::InteractionList4Atoms{I, T, D}, il2::InteractionList4Atoms{I, T, D}) where {I, T, D}
+    return InteractionList4Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.js,il2.js),
+        append!(il1.ks,il2.ks),
+        append!(il1.ls,il2.ls),
+        append!(il1.inters,il2.inters),
+        append!(il1.types,il2.types),
+        il1.data
+    )
+end
+
+function Base.append!(il1::InteractionList5Atoms{I, T, D}, il2::InteractionList5Atoms{I, T, D}) where {I, T, D}
+    # CMAP indices point to rows of `data`, so the appended ones start after the rows of il1
+    offset = size(il1.data, 1)
+    return InteractionList5Atoms(
+        append!(il1.is,il2.is),
+        append!(il1.js,il2.js),
+        append!(il1.ks,il2.ks),
+        append!(il1.ls,il2.ls),
+        append!(il1.ms,il2.ms),
+        append!(il1.inters, shift_cmap_index.(il2.inters, offset)),
+        append!(il1.types,il2.types),
+        vcat(il1.data,il2.data),
+    )
+end
+
+function to_device(il1::InteractionList1Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList1Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data, AT),
+    )
+end
+
+function to_device(il1::InteractionList2Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList2Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.js, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data, AT),
+    )
+end
+
+function to_device(il1::InteractionList3Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList3Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.js, AT),
+        to_device(il1.ks, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data, AT),
+    )
+end
+
+function to_device(il1::InteractionList4Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList4Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.js, AT),
+        to_device(il1.ks, AT),
+        to_device(il1.ls, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data, AT),
+    )
+end
+
+function to_device(il1::InteractionList5Atoms{I, T, D}, ::Type{AT}) where {I, T, D, AT}
+    return InteractionList5Atoms(
+        to_device(il1.is, AT),
+        to_device(il1.js, AT),
+        to_device(il1.ks, AT),
+        to_device(il1.ls, AT),
+        to_device(il1.ms, AT),
+        to_device(il1.inters,AT),
+        il1.types,
+        to_device(il1.data,AT),
+    )
 end
 
 """
@@ -485,7 +617,9 @@ The types used should be bits types if the GPU is going to be used.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 - `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
     transformations.
-- `alch_role::Int32=CoreRole`: Role of the atom in an alchemical transformation.
+- `alch_role::Int32=EnvRole`: role of the atom in an alchemical transformation. `EnvRole`, the
+    default, is an atom that is not alchemical. The other roles are set by
+    [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref).
 """
 struct Atom{T, M, C, S, E, L} # With Float32 numeric fields this fits into 32 bytes
     index::Int32
@@ -505,12 +639,12 @@ function Atom(index, atom_type::T, mass::M, charge::C, σ::S, ϵ::E,
 end
 
 function Atom(; index=Int32(1), atom_type=Int32(1), mass=1.0u"g/mol", charge=0.0,
-              σ=0.0u"nm", ϵ=0.0u"kJ * mol^-1", λ=1.0, alch_role=CoreRole)
+              σ=0.0u"nm", ϵ=0.0u"kJ * mol^-1", λ=1.0, alch_role=EnvRole)
     return Atom(index, atom_type, mass, charge, σ, ϵ, λ, alch_role)
 end
 
 function Base.zero(::Type{Atom{T, M, C, S, E, L}}) where {T, M, C, S, E, L}
-    return Atom(Int32(0), zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), CoreRole)
+    return Atom(Int32(0), zero(T), zero(M), zero(C), zero(S), zero(E), zero(L), EnvRole)
 end
 
 Base.zero(at::Atom) = zero(typeof(at))
@@ -540,6 +674,13 @@ Custom atom types should implement this function if charges are going to be used
 unless they have a `charge` field defined, which the function accesses by default.
 """
 @inline charge(atom) = atom.charge
+
+"""
+    lambda(atom)
+
+The lambda of an [`Atom`](@ref).
+"""
+lambda(atom) = atom.λ
 
 """
     mass(atom)
@@ -600,9 +741,11 @@ struct MolecularTopology{VI <: AbstractVector{Int32}}
     molecule_atom_counts::Vector{Int32}
     bonded_atoms::Vector{Tuple{Int32, Int32}}
     parent::VI       # length N; spanning-forest parent per atom, parent[root] == root
-    sort_perm::VI    # length N; permutation grouping atoms contiguously by molecule id
-    mol_offsets::VI  # length n_mol+1; 0-based prefix boundaries into sort_perm order
+    cluster_inds::VI # length N; bonded cluster (spanning tree) index per atom
+    sort_perm::VI    # length N; permutation grouping atoms contiguously by bonded cluster
+    cluster_offsets::VI # length n_clusters+1; 0-based prefix boundaries into sort_perm order
     n_rounds::Int    # pointer-doubling round count for GPU unwrap_molecules; host Int, not device data
+    gpu_cache::Base.RefValue{Any}  # lazily filled device-resident arrays, see device_topology_arrays
 end
 
 function bond_graph(bond_is, bond_js, n_atoms)
@@ -626,33 +769,34 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer; kwargs...)
     end
     molecule_atom_counts = length.(cc)
     bonded_atoms = collect(zip(bond_is, bond_js))
-    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms; kwargs...)
+    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g; kwargs...)
 end
 
 # Spanning forest (parent pointer per atom, self-loop at roots) of the bonded-atom graph via a
-# stack-based DFS. Any consistent spanning tree gives a physically valid unwrap, so the DFS's
-# particular choice doesn't matter for correctness. Feeds `parent`/`n_rounds` for
-# `_gpu_unwrap_fractional`'s pointer-doubling (spatial.jl); the CPU `unwrap_molecules` uses its
-# own independent traversal instead.
-function molecule_spanning_forest(atom_molecule_inds, bonded_atoms)
-    n_atoms = length(atom_molecule_inds)
-    adj = [Int[] for _ in 1:n_atoms]
-    for (i, j) in bonded_atoms
-        push!(adj[i], j)
-        push!(adj[j], i)
-    end
+# stack-based DFS over an already-built graph `g` (avoids rebuilding an adjacency list from
+# bonded_atoms when the caller already has one, e.g. from bond_graph). Any consistent spanning
+# tree gives a physically valid unwrap, so the DFS's particular choice doesn't matter for
+# correctness. Feeds `parent`/`n_rounds` for `_gpu_unwrap_fractional`'s pointer-doubling
+# (spatial.jl); the CPU `unwrap_molecules` uses its own independent traversal instead.
+function molecule_spanning_forest(g)
+    n_atoms = nv(g)
     parent = collect(Int32, 1:n_atoms)   # self-loop default (covers bond-free/isolated atoms too)
+    cluster = zeros(Int32, n_atoms)
     depth = zeros(Int, n_atoms)
     visited = falses(n_atoms)
+    n_clusters = 0
     for seed in 1:n_atoms
         visited[seed] && continue
         visited[seed] = true
+        n_clusters += 1
+        cluster[seed] = n_clusters
         stack = Int[seed]
         while !isempty(stack)
             i = pop!(stack)
-            for j in adj[i]
+            for j in neighbors(g, i)
                 visited[j] && continue
                 parent[j] = i
+                cluster[j] = n_clusters
                 depth[j] = depth[i] + 1
                 visited[j] = true
                 push!(stack, j)
@@ -661,28 +805,139 @@ function molecule_spanning_forest(atom_molecule_inds, bonded_atoms)
     end
     max_depth = maximum(depth; init=0)
     n_rounds = max_depth <= 1 ? 0 : ceil(Int, log2(max_depth)) + 1  # +1 safety margin
-    return parent, n_rounds
+    return parent, cluster, n_clusters, n_rounds
 end
 
 function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms;
                            array_type::Type{AT}=Array) where AT
-    n_mol = length(molecule_atom_counts)
-    parent_cpu, n_rounds = molecule_spanning_forest(atom_molecule_inds, bonded_atoms)
+    n_atoms = length(atom_molecule_inds)
+    bond_is = isempty(bonded_atoms) ? Int[] : first.(bonded_atoms)
+    bond_js = isempty(bonded_atoms) ? Int[] : last.(bonded_atoms)
+    g = bond_graph(bond_is, bond_js, n_atoms)
+    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
+                                    array_type=AT)
+end
 
-    sort_perm_cpu = Int32.(sortperm(atom_molecule_inds))
-    mol_offsets_cpu = Vector{Int32}(undef, n_mol + 1)
-    mol_offsets_cpu[1] = 0
-    for m in 1:n_mol
-        mol_offsets_cpu[m + 1] = mol_offsets_cpu[m] + molecule_atom_counts[m]
+# Shared by both public constructors once each has (or has built) the bond graph, so the
+# spanning-forest DFS reuses it instead of rebuilding its own adjacency list.
+function molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
+                                  array_type::Type{AT}=Array) where AT
+    parent_cpu, cluster_cpu, n_clusters, n_rounds = molecule_spanning_forest(g)
+
+    # Segments for the GPU unwrap are bonded clusters, as in the CPU unwrap, which can be
+    # smaller than the molecules given by atom_molecule_inds
+    sort_perm_cpu = Int32.(sortperm(cluster_cpu))
+    cluster_offsets_cpu = zeros(Int32, n_clusters + 1)
+    for c in cluster_cpu
+        cluster_offsets_cpu[c + 1] += 1
     end
+    cumsum!(cluster_offsets_cpu, cluster_offsets_cpu)
 
     return MolecularTopology(
         Vector{Int32}(atom_molecule_inds), Vector{Int32}(molecule_atom_counts),
         Vector{Tuple{Int32, Int32}}(collect(bonded_atoms)),
-        to_device(parent_cpu, AT), to_device(sort_perm_cpu, AT), to_device(mol_offsets_cpu, AT),
-        n_rounds,
+        to_device(parent_cpu, AT), to_device(cluster_cpu, AT), to_device(sort_perm_cpu, AT),
+        to_device(cluster_offsets_cpu, AT), n_rounds, Base.RefValue{Any}(nothing),
     )
 end
+
+# Device-resident (parent, cluster_inds, sort_perm, cluster_offsets) for `topology`, cached on
+# topology.gpu_cache -- avoids re-uploading a topology built without array_type on every
+# unwrap_molecules/molecule_centers call. Only used by _gpu_unwrap_fractional.
+function device_topology_arrays(topology::MolecularTopology, ::Type{AT}) where AT
+    cached = topology.gpu_cache[]
+    !isnothing(cached) && cached.array_type === AT && return cached.arrays
+    arrays = (
+        parent = topology.parent isa AT ? topology.parent : to_device(topology.parent, AT),
+        cluster_inds = topology.cluster_inds isa AT ? topology.cluster_inds :
+                           to_device(topology.cluster_inds, AT),
+        sort_perm = topology.sort_perm isa AT ? topology.sort_perm : to_device(topology.sort_perm, AT),
+        cluster_offsets = topology.cluster_offsets isa AT ? topology.cluster_offsets :
+                              to_device(topology.cluster_offsets, AT),
+    )
+    topology.gpu_cache[] = (array_type=AT, arrays=arrays)
+    return arrays
+end
+
+"""
+    GPUCellListNeighborList(ragged_counts, ragged_neighbors, n, list, state)
+
+The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
+containing a padded per-atom neighbor matrix, unless the finder uses `ragged=false`,
+and, unless the finder uses `output=:ragged`, a flat half-pair list whose first `n`
+entries of `list` are valid.
+
+Use [`neighbor_pairs`](@ref) to get the pairs and [`ragged_neighbors`](@ref) to get
+the per-atom matrix rather than reading the fields, since the layout is not part of
+the interface. `state` holds the device buffers behind the other fields and is
+internal; they are reused if this list is passed back to [`find_neighbors`](@ref) as
+`current_neighbors`, see [`GPUCellListNeighborFinder`](@ref) for what that means for
+holding on to a list.
+"""
+struct GPUCellListNeighborList{C,R,L,S}
+    ragged_counts::C
+    ragged_neighbors::R
+    n::Int
+    list::L
+    state::S
+
+    function GPUCellListNeighborList(
+        ragged_counts::C,
+        ragged_neighbors::R,
+        n::Integer,
+        list::L,
+        state::S,
+    ) where {C,R,L,S}
+        # Both are nothing when the per-atom matrix is not stored
+        if !(isnothing(ragged_neighbors) && isnothing(ragged_counts)) &&
+                !(size(ragged_neighbors, 2) == length(ragged_counts))
+            throw(ArgumentError("the second dimension of ragged_neighbors must equal " *
+                                "the number of atoms"))
+        end
+
+        n_int = Int(n)
+
+        if list === nothing
+            iszero(n_int) || throw(
+                ArgumentError("n must be zero when list is nothing"),
+            )
+        else
+            0 <= n_int <= length(list) || throw(
+                ArgumentError(
+                    "n must be between zero and the pair-list capacity",
+                ),
+            )
+        end
+
+        return new{C,R,L,S}(
+            ragged_counts,
+            ragged_neighbors,
+            n_int,
+            list,
+            state,
+        )
+    end
+end
+
+# Zero for ragged output, which has no pair list, so that generic code that asks how
+#   many pairs there are works on every output mode
+Base.length(neighbors::GPUCellListNeighborList) = neighbors.n
+
+function Base.getindex(neighbors::GPUCellListNeighborList, i::Integer)
+    if isnothing(neighbors.list)
+        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use " *
+                            "ragged_neighbors or output=:molly_pairs"))
+    end
+    return neighbors.list[i]
+end
+
+Base.firstindex(::GPUCellListNeighborList) = 1
+
+Base.lastindex(neighbors::GPUCellListNeighborList) =
+    length(neighbors)
+
+Base.eachindex(neighbors::GPUCellListNeighborList) =
+    Base.OneTo(length(neighbors))
 
 """
     NeighborList(n, list)
@@ -898,6 +1153,19 @@ function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, bounda
                                on_gpu, strictness)
     neighbor_finder isa NoNeighborFinder && return nothing
 
+    if neighbor_finder isa GPUCellListNeighborFinder
+        if neighbor_finder.output === :ragged && any(use_neighbors, values(pairwise_inters))
+            throw(ArgumentError("the neighbor finder has output=:ragged, which does not " *
+                                "produce the pair list that the pairwise interactions " *
+                                "need, use output=:molly_pairs"))
+        end
+        if neighbor_finder.output === :molly_pairs && neighbor_finder.n_atoms != n_atoms
+            throw(ArgumentError("the neighbor finder was set up for " *
+                                "$(neighbor_finder.n_atoms) atoms but the system has " *
+                                "$n_atoms atoms"))
+        end
+    end
+
     for name in (:eligible, :special)
         hasproperty(neighbor_finder, name) || continue
         mask = getproperty(neighbor_finder, name)
@@ -907,12 +1175,13 @@ function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, bounda
                                 "$(size(mask)) but the system has $n_atoms atoms, it " *
                                 "should be $((n_atoms, n_atoms))"))
         end
-        if on_gpu && !isa(mask, AbstractGPUArray)
+        if on_gpu && !neighbor_matrix_on_gpu(mask)
             throw(ArgumentError("the atoms are on the GPU but the $name matrix of the " *
-                                "neighbor finder is not, try $name=to_device($name, AT) " *
-                                "where AT is the GPU array type"))
+                                "neighbor finder is not, give array_type=AT when " *
+                                "constructing the neighbor finder where AT is the GPU " *
+                                "array type, for example CuArray"))
         end
-        if !on_gpu && isa(mask, AbstractGPUArray)
+        if !on_gpu && neighbor_matrix_on_gpu(mask)
             throw(ArgumentError("the atoms are not on the GPU but the $name matrix " *
                                 "of the neighbor finder is"))
         end
@@ -1199,6 +1468,8 @@ function System(;
         throw(ArgumentError("general_inters should be a Tuple or a NamedTuple but has " *
                             "type $(typeof(general_inters))"))
     end
+    check_bias_ids(general_inters)
+    check_bias_atom_inds(general_inters, n_atoms)
 
     if !all(i -> i isa PairwiseInteraction, values(pairwise_inters))
         throw(ArgumentError("not all pairwise_inters are a subtype of PairwiseInteraction, " *
@@ -1569,8 +1840,11 @@ construction where `n` is the number of threads to be used per replica.
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
     to duplicating the boundary of the reference system (the first `ThermoState`).
-- `replica_loggers=nothing`: Logger collections for each replica. Stateful logger objects and
-    `TrajectoryWriter` file paths cannot be shared across replicas.
+- `replica_neighbor_finders=nothing`: The neighbor finder of each thermodynamic state. If not
+    provided, each state gets a copy of the neighbor finder of its system.
+- `replica_loggers=nothing`: Logger collections for each thermodynamic state, recording the replica
+    currently in that state. Stateful logger objects and `TrajectoryWriter` file paths cannot be
+    shared between states.
 - `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
     a default [`ReplicaExchangeLogger`](@ref) is used.
 - `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
@@ -1698,14 +1972,77 @@ function AtomsBase.atomic_number(sys::ReplicaSystem)
     end
 end
 
+function ReplicaSystem(sys::ReplicaSystem{D, <:Any, T, TH};
+                       replica_coords=sys.replica_coords,
+                       replica_velocities=sys.replica_velocities) where {D, T, TH}
+    AT = array_type(replica_coords[1])
+    return ReplicaSystem{D, AT, T, TH, typeof(sys.partition), typeof(sys.betas), typeof(sys.integrators),
+                         typeof(replica_coords), typeof(replica_velocities),
+                         typeof(sys.replica_boundaries), typeof(sys.replica_neighbor_finders),
+                         typeof(sys.replica_loggers), typeof(sys.state_pairwise_inters),
+                         typeof(sys.state_specific_inter_lists), typeof(sys.state_general_inters),
+                         typeof(sys.exchange_logger), typeof(sys.data)}(
+        sys.partition, sys.n_replicas, sys.betas, sys.integrators, replica_coords, replica_velocities,
+        sys.replica_boundaries, sys.replica_neighbor_finders, sys.replica_loggers,
+        sys.state_pairwise_inters, sys.state_specific_inter_lists, sys.state_general_inters,
+        sys.state_indices, sys.exchange_logger, sys.current_step, sys.initial_log_pending, sys.data,
+    )
+end
+
 # Avoid unnecessary Array calls on CPU
 from_device(x::Array) = x
 from_device(x::BitArray) = x
 from_device(x) = Array(x)
 from_device(x::StructArray) = replace_storage(Array, x)
+from_device(t::Tuple) = map(from_device, t)
 
+to_device(x::Nothing, ::Type{AT}) where AT = nothing
 to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
 to_device(x, ::Type{AT}) where AT = AT(x)
+to_device(t::Tuple, ::Type{AT}) where {AT <: AbstractArray} = map(x -> to_device(x, AT), t)
+
+# `deepcopy(x)` dispatches once, then recurses through `deepcopy_internal` all the way down, so
+# a custom `Base.deepcopy(::T)` is invisible to `deepcopy(sys)` — the interaction tuples would be
+# walked straight past. Types needing one register it through this helper instead, which is the
+# documented extension point (CUDA.jl handles `CuArray` the same way) and threads the shared
+# `IdDict`, so repeated references stay shared and cycles terminate.
+#
+# Do not "fix" this by overriding `Base.deepcopy_internal(::Tuple, ::IdDict)`: that signature is
+# identical to Base's, so it is an overwrite rather than an addition, and Julia refuses to
+# precompile any module that does it — which silently costs minutes of JIT on every fresh
+# process.
+# Only call this for a type that has its own `Base.deepcopy` method: it is what stops the
+# recursion. Without one, `deepcopy(x)` falls back to `deepcopy_internal(x, IdDict())`, which
+# lands right back here and loops forever.
+function deepcopy_registered(x, dict::IdDict)
+    haskey(dict, x) && return dict[x]::typeof(x)
+    y = deepcopy(x)
+    dict[x] = y
+    return y
+end
+
+reference_array(t::Tuple) = Any[t...]
+
+function Base.deepcopy_internal(sys::System, dict::IdDict)
+    # 1. Check if already copied to handle references/cycles
+    if haskey(dict, sys)
+        return dict[sys]::typeof(sys)
+    end
+
+    # 2. Extract and recursively deepcopy fields via Julia dispatch
+    field_copies = ntuple(fieldcount(typeof(sys))) do i
+        fname = fieldname(typeof(sys), i)
+        fval  = getfield(sys, fname)
+        Base.deepcopy_internal(fval, dict)
+    end
+
+    # 3. Construct a new System instance with the copied fields
+    new_sys = ccall(:jl_new_structv, Any, (Any, Ptr{Any}, UInt32), 
+                    typeof(sys), reference_array(field_copies), length(field_copies))
+    
+    dict[sys] = new_sys
+    return new_sys::typeof(sys)
+end
 
 """
     array_type(sys)
@@ -2213,6 +2550,8 @@ function update_ase_calc! end
 # ForwardDiff.jl checks both value and derivative
 # This could be extended to only check the value for Duals
 iszero_value(x) = iszero(x)
+iszero_value(x::SVector) = all(iszero_value, x)
+iszero_value(x::Tuple) = all(iszero_value, x)
 
 # Only use threading if a condition is true
 macro maybe_threads(flag, expr)

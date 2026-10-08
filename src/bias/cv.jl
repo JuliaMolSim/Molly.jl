@@ -8,10 +8,9 @@ export
     CalcDist,
     calculate_cv,
     cv_gradient,
-    calculate_cv!,
-    cv_gradient!,
     CalcRg,
     CalcRMSD,
+    CalcAngle,
     CalcTorsion
 
 # Does not account for periodic boundary conditions, assumes appropriate unwrapping
@@ -31,36 +30,30 @@ end
 
 function calculate_virial(cv, args...; kwargs...) end
 
-function pairwise_displacement_matrix(coords_1::AbstractArray{SVector{D, C}},
-                                      coords_2::AbstractArray{SVector{D, C}},
-                                      calc_type,
-                                      boundary) where {D, C}
-    c1_col = reshape(coords_1, length(coords_1), 1)
-    c2_row = reshape(coords_2, 1, length(coords_2))
-    if calc_type == :closest
-        return vector.(c1_col, c2_row, (boundary,))
-    else
-        return c2_row .- c1_col
-    end
-end
-
-function pairwise_distance_matrix(coords_1, coords_2, calc_type, boundary)
-    return norm.(pairwise_displacement_matrix(coords_1, coords_2, calc_type, boundary))
-end
-
 # Finds the pair (i, j) minimizing/maximizing the distance between two groups of atoms, using
 # `extremum_fn = findmin`/`findmax`. Returns the indices, the extremal distance, and the
-# coords_1[i] -> coords_2[j] displacement vector, without scalar-indexing (safe for CuArray).
-#
-# CPU / generic fallback: materializes the full group_a x group_b displacement matrix. Fine on
-# CPU; on GPU this is replaced by `extremal_pair_fused` below, which avoids the O(Na*Nb) matrix.
-function extremal_pair_dense(coords_1, coords_2, calc_type, extremum_fn, boundary)
-    diffs = pairwise_displacement_matrix(coords_1, coords_2, calc_type, boundary)
-    dist_matrix = norm.(diffs)
-    d, idx = extremum_fn(dist_matrix)
-    i, j = Tuple(idx)
-    r_ij = only(from_device(diffs[i:i, j:j]))
-    return i, j, d, r_ij
+# coords_1[i] -> coords_2[j] displacement vector. Allocation-free double loop; CPU only.
+function extremal_pair(coords_1, coords_2, calc_type, extremum_fn, boundary)
+    is_min = extremum_fn === findmin
+    closest = calc_type == :closest
+
+    T = eltype(eltype(coords_1))
+    sample_d2 = oneunit(T)^2
+    best_d2 = (is_min ? typemax : typemin)(typeof(ustrip(sample_d2))) * oneunit(sample_d2)
+    best_i, best_j = 1, 1
+
+    for (i, p1) in enumerate(coords_1), (j, p2) in enumerate(coords_2)
+        rij = closest ? vector(p1, p2, boundary) : p2 - p1
+        d2 = sum(abs2, rij)
+        better = is_min ? (d2 < best_d2) : (d2 > best_d2)
+        if better
+            best_d2, best_i, best_j = d2, i, j
+        end
+    end
+
+    r_ij = closest ? vector(coords_1[best_i], coords_2[best_j], boundary) :
+                      coords_2[best_j] - coords_1[best_i]
+    return best_i, best_j, sqrt(best_d2), r_ij
 end
 
 # A fancy-index @view of a CuArray isn't itself an AbstractGPUArray, so unwrap via `parent`.
@@ -68,88 +61,34 @@ is_gpu_resident(x::AbstractGPUArray) = true
 is_gpu_resident(x::SubArray) = is_gpu_resident(parent(x))
 is_gpu_resident(x) = false
 
-function extremal_pair(coords_1, coords_2, calc_type, extremum_fn, boundary)
-    if is_gpu_resident(coords_1)
-        return extremal_pair_fused(coords_1, coords_2, calc_type, extremum_fn, boundary)
-    else
-        return extremal_pair_dense(coords_1, coords_2, calc_type, extremum_fn, boundary)
-    end
-end
-
-# GPU-native `extremal_pair`: avoids materializing the dense group_a x group_b displacement matrix
-# (O(group_a * group_b) memory -- OOMs for large groups). Fallback used with no persistent
-# `MinMaxScratch` (e.g. ad-hoc `calculate_cv`/`cv_gradient` calls); BiasPotential's usual path uses
-# the tile/finalize kernels below instead, which avoid findmin/findmax's host sync via a
-# device-side reduction -- see the comment above those kernels for the full design.
-
-# Persistent GPU scratch for the fused CalcMinDist/CalcMaxDist path. Caches the winning pair
-# so calculate_virial_dist! can reuse it via ExtremalPairCache instead of re-searching.
-mutable struct MinMaxScratch{IV, DV, JV, RV, SV, R1V}
+# Persistent GPU scratch for the fused CalcMinDist/CalcMaxDist path. r_ij holds the winning
+# pair's displacement for calculate_virial_dist! to read back, written by cv_gradient! each call.
+mutable struct MinMaxScratch{IV, DV, JV, RV}
     idx1_dev::IV
     idx2_dev::IV
     out_dist::DV
     out_i::JV
     out_j::JV
     out_disp::RV
-    winner_i::SV
-    winner_j::SV
-    r_ij::R1V
+    r_ij::RV
 end
 
 # Caps mindist_tile_kernel!'s parallel workers (also the finalize kernel's serial-scan length,
 # trading finalize cost against tile parallelism). 4096 keeps that scan in the few-microsecond
 # range while still giving a small/lopsided group (e.g. na=5, nb=1e5) far more concurrency than
-# one-thread-per-row would.
+# one-thread-per-row would. Deliberately larger than TILE_CAP_DEFAULT: MinDist/MaxDist's na*nb
+# pair counts grow faster than the per-atom counts the other CVs tile over.
 const MINDIST_TILE_CAP = 4096
 
-# Caches an extremal_pair result from cv_gradient! so a later calculate_virial_dist! call
-# this timestep can reuse it. Populated by BiasPotential; otherwise unused.
-mutable struct ExtremalPairCache
-    valid::Bool
-    i::Int
-    j::Int
-    d::Any
-    r_ij::Any
-end
+# Shared partial-reduction-then-single-thread-finalize worker cap for Rg, RMSD and CMDist.
+const TILE_CAP_DEFAULT = 1024
 
-@kernel inbounds=true function extremal_pair_row_kernel!(out_dist, out_j, out_disp,
-                                                          @Const(coords_1), @Const(coords_2),
-                                                          boundary, closest::Bool, ::Val{is_min}) where is_min
-    i = @index(Global, Linear)
-    if i <= length(coords_1)
-        ci = coords_1[i]
-        r1 = closest ? vector(ci, coords_2[1], boundary) : coords_2[1] - ci
-        best_d, best_j, best_disp = norm(r1), 1, r1
-        for j in 2:length(coords_2)
-            rij = closest ? vector(ci, coords_2[j], boundary) : coords_2[j] - ci
-            d = norm(rij)
-            better = is_min ? (d < best_d) : (d > best_d)
-            if better
-                best_d, best_j, best_disp = d, j, rij
-            end
-        end
-        out_dist[i] = best_d
-        out_j[i] = best_j
-        out_disp[i] = best_disp
-    end
-end
-
-function extremal_pair_fused(coords_1, coords_2, calc_type, extremum_fn, boundary)
-    na = length(coords_1)
-    out_dist = similar(coords_1, eltype(eltype(coords_1)), na)
-    out_j = similar(coords_1, Int, na)
-    out_disp = similar(coords_1, na)
-
-    closest = calc_type == :closest
-    is_min = extremum_fn === findmin
-    backend = get_backend(coords_1)
-    kernel! = extremal_pair_row_kernel!(backend, min(na, 256))
-    kernel!(out_dist, out_j, out_disp, coords_1, coords_2, boundary, closest, Val(is_min); ndrange=na)
-
-    d, i = extremum_fn(out_dist)
-    j = only(from_device(out_j[i:i]))
-    r_ij = only(from_device(out_disp[i:i]))
-    return i, j, d, r_ij
+# Throwaway MinMaxScratch for a bare GPU calculate_cv/cv_gradient call with no BiasPotential scratch.
+function minmax_scratch(coords, inds1::Vector{Int}, inds2::Vector{Int})
+    T = min(length(inds1) * length(inds2), MINDIST_TILE_CAP)
+    return MinMaxScratch(upload_idx(coords, inds1), upload_idx(coords, inds2),
+                         similar(coords, eltype(eltype(coords)), T), similar(coords, Int, T),
+                         similar(coords, Int, T), similar(coords, T), similar(coords, 1))
 end
 
 # --------------------------------------------------------------
@@ -229,7 +168,7 @@ end
     end
 end
 
-@kernel inbounds=true function mindist_finalize_grad_kernel!(grad, d_buf, winner_i, winner_j, r_ij_buf,
+@kernel inbounds=true function mindist_finalize_grad_kernel!(grad, d_buf, r_ij_buf,
                                                               @Const(out_dist), @Const(out_i), @Const(out_j),
                                                               @Const(out_disp), @Const(idx1), @Const(idx2),
                                                               ::Val{is_min}) where is_min
@@ -244,8 +183,6 @@ end
         best_i, best_j, best_r = out_i[best_slot], out_j[best_slot], out_disp[best_slot]
 
         d_buf[1] = best_d
-        winner_i[1] = best_i
-        winner_j[1] = best_j
         r_ij_buf[1] = best_r
         if best_d > zero(best_d)
             dir = best_r / best_d
@@ -267,11 +204,10 @@ function mindist_calculate_cv_fused!(dist_val, scratch::MinMaxScratch, coords, b
     return nothing
 end
 
-# Zero host syncs except one small readback when `extremal_cache` is supplied, to populate it for
-# calculate_virial_dist!'s reuse. That readback is safe even though virial steps run outside CUDA
-# graph capture entirely (simulators.jl), so it never needs to be graph-legal.
+# Zero host syncs. calculate_virial_dist! recomputes the extremal pair itself on the rare steps
+# that need it, instead of this being asked to cache it on every step.
 function mindist_gradient_fused!(grad, d_buf, scratch::MinMaxScratch, coords, boundary, closest::Bool,
-                                 is_min::Val, extremal_cache)
+                                 is_min::Val)
     backend = get_backend(coords)
     T = length(scratch.out_dist)
     kernel_a! = mindist_tile_kernel!(backend, min(T, 256))
@@ -283,14 +219,8 @@ function mindist_gradient_fused!(grad, d_buf, scratch::MinMaxScratch, coords, bo
     kernel_clear!(grad, scratch.idx1_dev, scratch.idx2_dev; ndrange=na + nb)
 
     kernel_b! = mindist_finalize_grad_kernel!(backend, 1)
-    kernel_b!(grad, d_buf, scratch.winner_i, scratch.winner_j, scratch.r_ij, scratch.out_dist, scratch.out_i,
+    kernel_b!(grad, d_buf, scratch.r_ij, scratch.out_dist, scratch.out_i,
              scratch.out_j, scratch.out_disp, scratch.idx1_dev, scratch.idx2_dev, is_min; ndrange=1)
-
-    if extremal_cache !== nothing
-        extremal_cache.valid = true
-        extremal_cache.i, extremal_cache.j = only(from_device(scratch.winner_i)), only(from_device(scratch.winner_j))
-        extremal_cache.d, extremal_cache.r_ij = only(from_device(d_buf)), only(from_device(scratch.r_ij))
-    end
     return nothing
 end
 
@@ -334,6 +264,20 @@ function dist_between_groups!(md::CalcMinDist, coords_1, coords_2, dist_val, bou
     return nothing
 end
 
+# GPU groups with no index lists or persistent scratch: stack them and run the tiled kernels on a
+# throwaway MinMaxScratch.
+function dist_between_groups_gpu!(md, coords_1, coords_2, dist_val, boundary)
+    na, nb = length(coords_1), length(coords_2)
+    coords = vcat(coords_1, coords_2)
+    scratch = minmax_scratch(coords, collect(1:na), collect((na + 1):(na + nb)))
+    mindist_calculate_cv_fused!(dist_val, scratch, coords, boundary, md.calc_type == :closest,
+                                Val(md isa CalcMinDist))
+    return nothing
+end
+
+dist_between_groups!(md::CalcMinDist, coords_1::AbstractGPUArray, coords_2, dist_val, boundary,
+                     args...; kwargs...) = dist_between_groups_gpu!(md, coords_1, coords_2, dist_val, boundary)
+
 """
     CalcMaxDist(calc_type=:closest)
 
@@ -367,6 +311,9 @@ function dist_between_groups!(md::CalcMaxDist, coords_1, coords_2, dist_val, bou
     dist_val .= d
     return nothing
 end
+
+dist_between_groups!(md::CalcMaxDist, coords_1::AbstractGPUArray, coords_2, dist_val, boundary,
+                     args...; kwargs...) = dist_between_groups_gpu!(md, coords_1, coords_2, dist_val, boundary)
 
 """
     CalcCMDist(calc_type=:closest)
@@ -417,9 +364,15 @@ end
 # the small partials), grad-write (per-atom, parallel). A serial ndrange=1 thread would leave
 # the device idle and scaled linearly with group size. calculate_cv! needs reduce+finalize;
 # cv_gradient! needs all three.
+#
+# partner1/partner2 (0 = none, built once at scratch construction) let idx1 and idx2 share an
+# atom without a write race: the idx1-side thread for a shared atom also adds idx2's
+# contribution, and the idx2-side thread for that atom writes nothing.
 mutable struct CMDistScratch{IV, MV, WV, DV, SV}
     idx1_dev::IV
     idx2_dev::IV
+    partner1_dev::IV
+    partner2_dev::IV
     partial_mass1::MV
     partial_wpos1::WV
     partial_mass2::MV
@@ -495,25 +448,28 @@ end
 
 @kernel inbounds=true function cmdist_grad_write_kernel!(grad, @Const(d_buf), @Const(dir_buf),
                                                           @Const(mtot1_buf), @Const(mtot2_buf),
-                                                          @Const(atoms), @Const(idx1), @Const(idx2))
+                                                          @Const(atoms), @Const(idx1), @Const(idx2),
+                                                          @Const(partner1), @Const(partner2))
     tid = @index(Global, Linear)
     na = length(idx1)
     d = d_buf[1]
-    if d > zero(d)
-        dir = dir_buf[1]
-        if tid <= na
-            grad[idx1[tid]] = -dir * (mass(atoms[idx1[tid]]) / mtot1_buf[1])
+    if tid <= na
+        p = partner1[tid]
+        if d > zero(d)
+            dir = dir_buf[1]
+            g = -dir * (mass(atoms[idx1[tid]]) / mtot1_buf[1])
+            if p != 0
+                g += dir * (mass(atoms[idx2[p]]) / mtot2_buf[1])
+            end
+            grad[idx1[tid]] = g
         else
-            k = tid - na
-            grad[idx2[k]] = dir * (mass(atoms[idx2[k]]) / mtot2_buf[1])
+            grad[idx1[tid]] = zero(eltype(grad))
         end
     else
-        z = zero(eltype(grad))
-        if tid <= na
-            grad[idx1[tid]] = z
-        else
-            k = tid - na
-            grad[idx2[k]] = z
+        k = tid - na
+        if partner2[k] == 0 # otherwise already written by its idx1-side partner above
+            d > zero(d) ? grad[idx2[k]] = dir_buf[1] * (mass(atoms[idx2[k]]) / mtot2_buf[1]) :
+                          grad[idx2[k]] = zero(eltype(grad))
         end
     end
 end
@@ -585,6 +541,9 @@ struct CalcDist{DT}
     function CalcDist(atom_inds_1, atom_inds_2, dist_type::DT=CalcMinDist(),
                       correction=:pbc, has_virial = true) where DT
         check_correction_arg(correction)
+        if dist_type isa CalcSingleDist && (length(atom_inds_1) != 1 || length(atom_inds_2) != 1)
+            throw(ArgumentError("CalcSingleDist can only be used with atom groups containing one atom"))
+        end
         return new{DT}(atom_inds_1, atom_inds_2, dist_type, correction, has_virial)
     end
 end
@@ -607,12 +566,9 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     return only(from_device(buff))
 end
 
-"""
-    calculate_cv!(cv, coords, atoms, boundary, buff, velocities; kwargs...)
-
-Mutating counterpart to [`calculate_cv`](@ref): writes the CV value into the preallocated
-1-element `buff` instead of allocating and returning it.
-"""
+# Mutating counterpart to calculate_cv: writes the CV value into the preallocated 1-element
+# `buff` instead of allocating and returning it. Positional args before `buff` vary by CV
+# type (see calculate_cv_buffered! for a uniform-signature wrapper); not exported.
 function calculate_cv!(cv::CalcDist, coords, atoms, boundary, buff, args...; kwargs...)
     coords_1 = @view coords[cv.atom_inds_1]
     coords_2 = @view coords[cv.atom_inds_2]
@@ -626,7 +582,8 @@ end
 # (see MinMaxScratch's docstring); falls back to the generic method otherwise (CPU, or no scratch).
 function calculate_cv!(cv::CalcDist{<:Union{CalcMinDist, CalcMaxDist}}, coords, atoms, boundary, buff,
                        args...; scratch=nothing, kwargs...)
-    if scratch !== nothing && is_gpu_resident(coords)
+    if is_gpu_resident(coords)
+        scratch = isnothing(scratch) ? minmax_scratch(coords, cv.atom_inds_1, cv.atom_inds_2) : scratch
         closest = cv.dist_type.calc_type == :closest
         is_min = cv.dist_type isa CalcMinDist
         mindist_calculate_cv_fused!(buff, scratch, coords, boundary, closest, Val(is_min))
@@ -704,6 +661,71 @@ function calculate_cv!(cv::CalcDist{CalcSingleDist}, coords::AbstractGPUArray, a
     return nothing
 end
 
+"""
+    CalcAngle(atom_inds::AbstractVector{Int}=[], correction=:pbc, has_virial::Bool=true)
+
+A collective variable that calculates the angle defined by three atoms.
+
+The angle is defined by the angle between the vectors (j -> i) and (j -> k), where the indices are given by `atom_inds`.
+
+# Fields
+- `atom_inds::AbstractVector{Int}`: The indices of the three atoms (i, j, k) defining the angle.
+- `correction::Symbol`: The method used to handle periodic boundary conditions. Defaults to `:pbc`.
+- `has_virial::Bool`: Whether the virial contribution should be calculated for this collective variable. Defaults to `true`.
+"""
+struct CalcAngle
+    atom_inds::Vector{Int}
+    correction::Symbol
+    has_virial::Bool
+
+    function CalcAngle(atom_inds=[], correction=:pbc, has_virial = true)
+        check_correction_arg(correction)
+        return new(atom_inds, correction, has_virial)
+    end
+end
+
+function calculate_cv(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
+    c = @view coords[collect(cv.atom_inds)]
+    return  bond_angle(c[1], c[2], c[3], boundary)
+end
+
+function cv_gradient(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
+    i, j, k = cv.atom_inds
+    ri, rj, rk = coords[i], coords[j], coords[k]
+    
+    ba = vector_pad3D(rj, ri, boundary)
+    bc = vector_pad3D(rj, rk, boundary)
+    cross_ba_bc = ba × bc
+    theta = bond_angle(ri, rj, rk, boundary)
+
+    grad = ustrip.(zero(coords)) / oneunit(eltype(eltype(coords)))
+    if iszero_value(cross_ba_bc)
+        return -grad, theta
+    end
+    pa = normalize(trim3D( ba × cross_ba_bc, boundary))
+    pc = normalize(trim3D(-bc × cross_ba_bc, boundary))
+
+    grad_i = pa / norm(ba)
+    grad_k = pc / norm(bc)
+    grad[i] = -grad_i
+    grad[k] = -grad_k
+    grad[j] = grad_i + grad_k
+
+    return -grad, theta 
+end
+
+function calculate_virial!(virial_buff, cv::CalcAngle, coords, forces, atoms, boundary)
+    ids = collect(cv.atom_inds)
+    c = @view coords[ids]
+    f = @view forces[ids]
+    r_ji = vector(c[2], c[1], boundary) 
+    r_jk = vector(c[2], c[3], boundary)
+    
+    virial_buff .+= r_ji * transpose(f[1]) + 
+                    r_jk * transpose(f[3])
+end
+
+
 # Computes the analytical gradient of the distance between two atoms.
 #
 # Mathematics:
@@ -731,9 +753,9 @@ Supported CV Types:
 - `CalcRMSD`: Root-mean-square deviation from a reference structure using Kabsch alignment.
 - `CalcTorsion`: Torsion (dihedral) angle defined by four atoms.
 
-Allocates the gradient array and a 1-element CV-value buffer, then delegates to
-[`cv_gradient!`](@ref), which writes into them in place. Call `cv_gradient!` directly
-with reused buffers to avoid the per-call allocation (e.g. across repeated timesteps).
+Allocates the gradient array and a 1-element CV-value buffer on every call.
+[`BiasPotential`](@ref) reuses buffers across timesteps internally and is the
+allocation-avoiding path for biased simulations.
 """
 function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args...; kwargs...)
     grad = ustrip_vec.(zero(coords))
@@ -742,13 +764,10 @@ function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args
     return grad, only(from_device(d_buf))
 end
 
-"""
-    cv_gradient!(grad, d_buf, cv, coords, atoms, boundary, velocities; kwargs...)
-
-Mutating counterpart to [`cv_gradient`](@ref): writes the gradient into the preallocated
-`grad` (same shape/backend as `coords`) and the CV value into the preallocated 1-element
-`d_buf`, instead of allocating and returning them.
-"""
+# Mutating counterpart to cv_gradient: writes the gradient into the preallocated `grad`
+# (same shape/backend as `coords`) and the CV value into the preallocated 1-element `d_buf`,
+# instead of allocating and returning them. Positional args before `grad`/`d_buf`/`cv` vary
+# by CV type; not exported.
 function cv_gradient!(grad, d_buf, cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args...; kwargs...)
     i, j = cv.atom_inds_1[1], cv.atom_inds_2[1]
     c1 = @view coords[i:i]
@@ -796,10 +815,11 @@ function cv_gradient(cv::CalcDist{CalcMinDist}, coords, atoms, boundary, args...
 end
 
 function cv_gradient!(grad, d_buf, cv::CalcDist{CalcMinDist}, coords, atoms, boundary, args...;
-                      extremal_cache=nothing, scratch=nothing, kwargs...)
-    if scratch !== nothing && is_gpu_resident(coords)
+                      scratch=nothing, kwargs...)
+    if is_gpu_resident(coords)
+        scratch = isnothing(scratch) ? minmax_scratch(coords, cv.atom_inds_1, cv.atom_inds_2) : scratch
         mindist_gradient_fused!(grad, d_buf, scratch, coords, boundary, cv.dist_type.calc_type == :closest,
-                                Val(true), extremal_cache)
+                                Val(true))
         return nothing
     end
 
@@ -808,10 +828,6 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcMinDist}, coords, atoms, bou
 
     i, j, d, r_ij = extremal_pair(c1, c2, cv.dist_type.calc_type, findmin, boundary)
     d_buf .= d
-    if extremal_cache !== nothing
-        extremal_cache.valid, extremal_cache.i, extremal_cache.j = true, i, j
-        extremal_cache.d, extremal_cache.r_ij = d, r_ij
-    end
 
     # necessary to clear the whole candidate set to remove previous results
     zg = zero(eltype(grad))
@@ -844,10 +860,11 @@ function cv_gradient(cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, args...
 end
 
 function cv_gradient!(grad, d_buf, cv::CalcDist{CalcMaxDist}, coords, atoms, boundary, args...;
-                      extremal_cache=nothing, scratch=nothing, kwargs...)
-    if scratch !== nothing && is_gpu_resident(coords)
+                      scratch=nothing, kwargs...)
+    if is_gpu_resident(coords)
+        scratch = isnothing(scratch) ? minmax_scratch(coords, cv.atom_inds_1, cv.atom_inds_2) : scratch
         mindist_gradient_fused!(grad, d_buf, scratch, coords, boundary, cv.dist_type.calc_type == :closest,
-                                Val(false), extremal_cache)
+                                Val(false))
         return nothing
     end
 
@@ -856,10 +873,6 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcMaxDist}, coords, atoms, bou
 
     i, j, d, r_ij = extremal_pair(c1, c2, cv.dist_type.calc_type, findmax, boundary)
     d_buf .= d
-    if extremal_cache !== nothing
-        extremal_cache.valid, extremal_cache.i, extremal_cache.j = true, i, j
-        extremal_cache.d, extremal_cache.r_ij = d, r_ij
-    end
 
     # See CalcMinDist's cv_gradient! for why this clear is needed with a reused `grad` buffer.
     zg = zero(eltype(grad))
@@ -908,7 +921,8 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcCMDist}, coords, atoms, boun
         na, nb = length(scratch.idx1_dev), length(scratch.idx2_dev)
         write! = cmdist_grad_write_kernel!(backend, min(na + nb, 256))
         write!(grad, d_buf, scratch.dir_buf, scratch.mtot1_buf, scratch.mtot2_buf,
-              atoms, scratch.idx1_dev, scratch.idx2_dev; ndrange=na + nb)
+              atoms, scratch.idx1_dev, scratch.idx2_dev, scratch.partner1_dev, scratch.partner2_dev;
+              ndrange=na + nb)
         return nothing
     end
 
@@ -944,19 +958,19 @@ function cv_gradient!(grad, d_buf, cv::CalcDist{CalcCMDist}, coords, atoms, boun
     grad2 = dir .* (m2 ./ M2)
     # @inbounds: cv.atom_inds_1/atom_inds_2 are validated at CV-construction time, always valid
     # indices into `grad` -- without it, GPUArrays' fancy-index setindex! bounds check
-    # (checkindex -> all(...)) is an *extra* host sync on top of the actual write, and (found
-    # directly, verifying CUDA graph capture) raises a device-side exception if this runs inside
-    # a captured region at all.
-    @inbounds grad[cv.atom_inds_1] = ifelse.(mask, grad1, zero.(grad1))
-    @inbounds grad[cv.atom_inds_2] = ifelse.(mask, grad2, zero.(grad2))
+    # (checkindex -> all(...)) is an extra host sync on top of the actual write.
+    #
+    # Accumulate (+=), not assign: atom_inds_1/atom_inds_2 may share an atom.
+    @inbounds grad[cv.atom_inds_1] .= (zero(eltype(grad)),)
+    @inbounds grad[cv.atom_inds_2] .= (zero(eltype(grad)),)
+    @inbounds grad[cv.atom_inds_1] .+= ifelse.(mask, grad1, zero.(grad1))
+    @inbounds grad[cv.atom_inds_2] .+= ifelse.(mask, grad2, zero.(grad2))
 
     return nothing
 end
 
-function calculate_virial!(virial_buff, cv::CalcDist, coords, forces, atoms, boundary;
-                           precomputed_extremum=nothing, kwargs...)
-    calculate_virial_dist!(virial_buff, cv.dist_type, cv, coords, forces, atoms, boundary;
-                           precomputed_extremum=precomputed_extremum)
+function calculate_virial!(virial_buff, cv::CalcDist, coords, forces, atoms, boundary; kwargs...)
+    calculate_virial_dist!(virial_buff, cv.dist_type, cv, coords, forces, atoms, boundary; kwargs...)
 end
 
 function calculate_virial_dist!(virial_buff, dt::CalcSingleDist, cv, coords, forces, atoms, boundary;
@@ -976,33 +990,27 @@ function calculate_virial_dist!(virial_buff, dt::CalcSingleDist, cv, coords, for
     virial_buff .+= r_ji * transpose(f_i)
 end
 
-# `precomputed_extremum`, if a valid `ExtremalPairCache` from this timestep's `cv_gradient!` call,
-# skips recomputing the O(group_a * group_b) extremal search.
+# scratch's r_ij (if a MinMaxScratch) already has this step's winning pair, written by
+# cv_gradient! which always runs first -- read it back instead of re-searching.
+minmax_r_ij(scratch, c1, c2, calc_type, extremum_fn, boundary) =
+    scratch isa MinMaxScratch ? only(from_device(scratch.r_ij)) :
+    extremal_pair(c1, c2, calc_type, extremum_fn, boundary)[4]
+
 function calculate_virial_dist!(virial_buff, dt::CalcMinDist, cv, coords, forces, atoms, boundary;
-                                precomputed_extremum=nothing, kwargs...)
-    if precomputed_extremum !== nothing && precomputed_extremum.valid
-        r_ij = precomputed_extremum.r_ij
-    else
-        c1 = @view coords[cv.atom_inds_1]
-        c2 = @view coords[cv.atom_inds_2]
-        _, _, _, r_ij = extremal_pair(c1, c2, dt.calc_type, findmin, boundary)
-    end
-    r_ji = -r_ij
+                                scratch=nothing, kwargs...)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+    r_ji = -minmax_r_ij(scratch, c1, c2, dt.calc_type, findmin, boundary)
 
     f_sum = sum(forces[cv.atom_inds_1])
     virial_buff .+= r_ji * transpose(f_sum)
 end
 
 function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces, atoms, boundary;
-                                precomputed_extremum=nothing, kwargs...)
-    if precomputed_extremum !== nothing && precomputed_extremum.valid
-        r_ij = precomputed_extremum.r_ij
-    else
-        c1 = @view coords[cv.atom_inds_1]
-        c2 = @view coords[cv.atom_inds_2]
-        _, _, _, r_ij = extremal_pair(c1, c2, dt.calc_type, findmax, boundary)
-    end
-    r_ji = -r_ij
+                                scratch=nothing, kwargs...)
+    c1 = @view coords[cv.atom_inds_1]
+    c2 = @view coords[cv.atom_inds_2]
+    r_ji = -minmax_r_ij(scratch, c1, c2, dt.calc_type, findmax, boundary)
 
     f_sum = sum(forces[cv.atom_inds_1])
     virial_buff .+= r_ji * transpose(f_sum)
@@ -1057,9 +1065,9 @@ struct CalcRg
     end
 end
 
-function calculate_cv(cv::CalcRg, coords, atoms, args...; kwargs...)
+function calculate_cv(cv::CalcRg, coords, atoms, boundary, args...; kwargs...)
     buff = similar(coords, eltype(eltype(coords)), 1)
-    calculate_cv!(cv, coords, atoms, buff, args...; kwargs...)
+    calculate_cv!(cv, coords, atoms, boundary, buff, args...; kwargs...)
     return only(from_device(buff))
 end
 
@@ -1069,8 +1077,6 @@ end
 # reduce+finalize pairs back to back -- COM reduce/finalize, then an Isum reduce/finalize using
 # the now-known COM -- plus a final grad-write kernel (gradient path only) that writes each
 # atom's entry in parallel. `calculate_cv!` needs the first 4 stages; `cv_gradient!` needs all 5.
-const RG_TILE_CAP = 1024
-
 mutable struct RgScratch{IV, MV, WV, IsV, CV, MtV}
     idx_dev::IV
     partial_mass::MV
@@ -1080,7 +1086,8 @@ mutable struct RgScratch{IV, MV, WV, IsV, CV, MtV}
     mtot_buf::MtV
 end
 
-@kernel inbounds=true function rg_com_reduce_kernel!(pmass, pwpos, @Const(coords), @Const(atoms), @Const(idx))
+@kernel inbounds=true function rg_com_reduce_kernel!(pmass, pwpos, @Const(coords), @Const(atoms),
+                                                      @Const(idx))
     tid = @index(Global, Linear)
     T = length(pmass)
     n = length(idx)
@@ -1110,11 +1117,9 @@ end
     end
 end
 
-# Two separate kernels, not one with a boundary/use_pbc flag: calculate_cv! has no `boundary` to
-# pass (matches radius_gyration's CPU definition, no PBC correction), while cv_gradient! does.
-# This value/gradient asymmetry predates this rework and is preserved as-is.
-@kernel inbounds=true function rg_isum_reduce_value_kernel!(pisum, @Const(coords), @Const(atoms),
-                                                             @Const(idx), @Const(com_buf))
+# Shared by calculate_cv! and cv_gradient!, calculate_cv! stops after the finalize kernel
+@kernel inbounds=true function rg_isum_reduce_kernel!(pisum, @Const(coords), @Const(atoms),
+                                                       @Const(idx), @Const(com_buf))
     tid = @index(Global, Linear)
     T = length(pisum)
     n = length(idx)
@@ -1128,22 +1133,7 @@ end
     pisum[tid] = acc
 end
 
-@kernel inbounds=true function rg_isum_reduce_grad_kernel!(pisum, @Const(coords), @Const(atoms),
-                                                            @Const(idx), @Const(com_buf), boundary)
-    tid = @index(Global, Linear)
-    T = length(pisum)
-    n = length(idx)
-    com = com_buf[1]
-    acc = zero(eltype(pisum))
-    k = tid
-    while k <= n
-        acc += sum_abs2(vector(com, coords[idx[k]], boundary)) * mass(atoms[idx[k]])
-        k += T
-    end
-    pisum[tid] = acc
-end
-
-@kernel inbounds=true function rg_finalize_value_kernel!(dist_val, @Const(pisum), @Const(mtot_buf))
+@kernel inbounds=true function rg_finalize_kernel!(dist_val, @Const(pisum), @Const(mtot_buf))
     tid = @index(Global, Linear)
     if tid == 1
         T = length(pisum)
@@ -1155,48 +1145,47 @@ end
     end
 end
 
-@kernel inbounds=true function rg_finalize_grad_kernel!(d_buf, @Const(pisum), @Const(mtot_buf))
-    tid = @index(Global, Linear)
-    if tid == 1
-        T = length(pisum)
-        Isum = pisum[1]
-        for k in 2:T
-            Isum += pisum[k]
-        end
-        d_buf[1] = sqrt(Isum / mtot_buf[1])
-    end
-end
-
 @kernel inbounds=true function rg_grad_write_kernel!(grad, @Const(d_buf), @Const(coords), @Const(atoms),
-                                                      @Const(idx), @Const(com_buf), @Const(mtot_buf), boundary)
+                                                      @Const(idx), @Const(com_buf), @Const(mtot_buf))
     tid = @index(Global, Linear)
     rg = d_buf[1]
     if rg > zero(rg)
         factor = 1 / (mtot_buf[1] * rg)
-        grad[idx[tid]] = factor * mass(atoms[idx[tid]]) * vector(com_buf[1], coords[idx[tid]], boundary)
+        grad[idx[tid]] = factor * mass(atoms[idx[tid]]) * (coords[idx[tid]] - com_buf[1])
     else
         grad[idx[tid]] = zero(eltype(grad))
     end
 end
 
-function calculate_cv!(cv::CalcRg, coords, atoms, buff, args...; scratch=nothing, kwargs...)
-    if scratch !== nothing && is_gpu_resident(coords)
+# Center-of-mass distances, shared by calculate_cv!, cv_gradient! and calculate_virial!
+function rg_dists_cpu(coords, atoms, atom_inds)
+    c_used = @view coords[atom_inds]
+    a_used = @view atoms[atom_inds]
+    m_used = mass.(a_used)
+    M_total = sum(m_used; dims=1)
+    com_buf = sum(c_used .* m_used; dims=1) ./ M_total
+    r_ic_all = c_used .- com_buf
+    return r_ic_all, m_used, M_total
+end
+
+function calculate_cv!(cv::CalcRg, coords, atoms, boundary, buff, args...; scratch=nothing, kwargs...)
+    if !isnothing(scratch) && is_gpu_resident(coords)
         backend = get_backend(coords)
         T = length(scratch.partial_mass)
         reduce_com! = rg_com_reduce_kernel!(backend, min(T, 256))
         reduce_com!(scratch.partial_mass, scratch.partial_wpos, coords, atoms, scratch.idx_dev; ndrange=T)
         finalize_com! = rg_com_finalize_kernel!(backend, 1)
-        finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos; ndrange=1)
-        reduce_isum! = rg_isum_reduce_value_kernel!(backend, min(T, 256))
+        finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos;
+                      ndrange=1)
+        reduce_isum! = rg_isum_reduce_kernel!(backend, min(T, 256))
         reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf; ndrange=T)
-        finalize_val! = rg_finalize_value_kernel!(backend, 1)
+        finalize_val! = rg_finalize_kernel!(backend, 1) # reuse identical kernel as cv_gradient!
         finalize_val!(buff, scratch.partial_isum, scratch.mtot_buf; ndrange=1)
         return nothing
     end
     atom_inds_used = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
-    coords_used = @view coords[atom_inds_used]
-    atoms_used = @view atoms[atom_inds_used]
-    buff .= radius_gyration(coords_used, atoms_used)
+    r_ic_all, m_used, M_total = rg_dists_cpu(coords, atoms, atom_inds_used)
+    buff .= sqrt.(sum(sum_abs2.(r_ic_all) .* m_used; dims=1) ./ M_total)
     return nothing
 end
 
@@ -1219,36 +1208,27 @@ function cv_gradient(cv::CalcRg, coords, atoms, boundary, args...; kwargs...)
 end
 
 function cv_gradient!(grad, d_buf, cv::CalcRg, coords, atoms, boundary, args...; scratch=nothing, kwargs...)
-    if scratch !== nothing && is_gpu_resident(coords)
+    if !isnothing(scratch) && is_gpu_resident(coords)
         backend = get_backend(coords)
         T = length(scratch.partial_mass)
         reduce_com! = rg_com_reduce_kernel!(backend, min(T, 256))
         reduce_com!(scratch.partial_mass, scratch.partial_wpos, coords, atoms, scratch.idx_dev; ndrange=T)
         finalize_com! = rg_com_finalize_kernel!(backend, 1)
-        finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos; ndrange=1)
-        reduce_isum! = rg_isum_reduce_grad_kernel!(backend, min(T, 256))
-        reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf, boundary; ndrange=T)
-        finalize_grad! = rg_finalize_grad_kernel!(backend, 1)
+        finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos;
+                      ndrange=1)
+        reduce_isum! = rg_isum_reduce_kernel!(backend, min(T, 256))
+        reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf; ndrange=T)
+        finalize_grad! = rg_finalize_kernel!(backend, 1) # reuse identical kernel as calculate_cv!
         finalize_grad!(d_buf, scratch.partial_isum, scratch.mtot_buf; ndrange=1)
         n = length(scratch.idx_dev)
         write! = rg_grad_write_kernel!(backend, min(n, 256))
-        write!(grad, d_buf, coords, atoms, scratch.idx_dev, scratch.com_buf, scratch.mtot_buf, boundary; ndrange=n)
+        write!(grad, d_buf, coords, atoms, scratch.idx_dev, scratch.com_buf, scratch.mtot_buf; ndrange=n)
         return nothing
     end
 
     atom_inds_used = iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds
-    c_used = @view coords[atom_inds_used]
-    a_used = @view atoms[atom_inds_used]
-
-    com_buf = similar(c_used, 1)
-    center_of_mass!(c_used, a_used, com_buf)
-    m_used = mass.(a_used)
-    # sum(...; dims=1), not sum(...): stays device-resident -- see the center_of_mass! note above.
-    M_total = sum(m_used; dims=1)
-
-    r_ic_all = vector.(com_buf, c_used, (boundary,))
-    rg_sq = sum(sum_abs2.(r_ic_all) .* m_used; dims=1) ./ M_total
-    rg = sqrt.(rg_sq)
+    r_ic_all, m_used, M_total = rg_dists_cpu(coords, atoms, atom_inds_used)
+    rg = sqrt.(sum(sum_abs2.(r_ic_all) .* m_used; dims=1) ./ M_total)
     d_buf .= rg
 
     # use mask to avoid host-sync
@@ -1282,16 +1262,10 @@ end
 function calculate_virial!(virial_buff, cv::CalcRg, coords, forces, atoms, boundary; kwargs...)
     # Select the relevant atoms/coordinates
     ids = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
-    c_used = @view coords[ids]
     f_used = @view forces[ids]
-    a_used = @view atoms[ids]
-
-    # Calculate Center of Mass of the group to define relative coordinates
-    com_buf = similar(c_used, 1)
-    center_of_mass!(c_used, a_used, com_buf)
 
     # Accumulate sum( (r_i - r_com) * F_i^T )
-    r_ic_all = vector.(com_buf, c_used, (boundary,))
+    r_ic_all, _, _ = rg_dists_cpu(coords, atoms, ids)
     virial_buff .+= sum(r_ic_all .* transpose.(f_used))
 end
 
@@ -1305,11 +1279,7 @@ Given as an argument to [`BiasPotential`](@ref).
 The two sets of coordinates are superimposed using the Kabsch algorithm.
 
 # Arguments
-- `ref_coords`: reference coordinates. Should be constructed with an array type matching the
-    `System` this CV will be used with (a plain `Array` for CPU, or the same GPU array type,
-    e.g. `CuArray`/`ROCArray`, as the system's coordinates for GPU) — this is not converted
-    automatically, the same convention already implicitly expected of `atoms`/`coords`/
-    `velocities` elsewhere.
+- `ref_coords`: reference coordinates.
 - `atom_inds=[]`: indices of the atoms in the group, `[]` uses all atoms.
 - `ref_atom_inds=[]`: indices of the reference coordinates to use, `[]` uses all coordinates.
 - `correction=:pbc`: the correction to be applied to the molecules. `:pbc` keeps molecules
@@ -1327,8 +1297,9 @@ struct CalcRMSD{RC}
 
     function CalcRMSD(ref_coords, atom_inds=[], ref_atom_inds=[], correction=:pbc, has_virial = true)
         check_correction_arg(correction)
-        RC = typeof(ref_coords)
-        new{RC}(ref_coords, atom_inds, ref_atom_inds, correction, has_virial)
+        ref_coords_cpu = from_device(ref_coords)
+        RC = typeof(ref_coords_cpu)
+        new{RC}(ref_coords_cpu, atom_inds, ref_atom_inds, correction, has_virial)
     end
 end
 
@@ -1338,8 +1309,6 @@ function calculate_cv(cv::CalcRMSD, coords, args...; kwargs...)
     return only(from_device(buff))
 end
 
-const RMSD_TILE_CAP = 1024
-
 # Persistent GPU scratch for the fused CalcRMSD path -- avoids re-gathering atom indices and
 # re-computing the reference Kabsch centering (which never changes) every call.
 mutable struct RmsdScratch{IV, CV, RCV, KV, PV}
@@ -1348,6 +1317,19 @@ mutable struct RmsdScratch{IV, CV, RCV, KV, PV}
     ref_coords_used::RCV
     ref_kabsch::KV
     partial_isum::PV
+end
+
+# Throwaway RmsdScratch for a bare GPU calculate_cv/cv_gradient call with no BiasPotential scratch.
+function rmsd_scratch(cv::CalcRMSD, coords)
+    inds = iszero(length(cv.atom_inds)) ? collect(1:length(coords)) : cv.atom_inds
+    ref_inds = iszero(length(cv.ref_atom_inds)) ? collect(1:length(cv.ref_coords)) : cv.ref_atom_inds
+    ref_coords_host = cv.ref_coords[ref_inds]
+    AT = array_type(coords)
+    ref_coords_used = ref_coords_host isa AT ? ref_coords_host : to_device(ref_coords_host, AT)
+    T = min(length(inds), TILE_CAP_DEFAULT)
+    IT = typeof(sum_abs2(zero(eltype(coords))))
+    return RmsdScratch(upload_idx(coords, inds), similar(coords, length(inds)),
+                       ref_coords_used, kabsch_centered(ref_coords_used), similar(coords, IT, T))
 end
 
 @kernel inbounds=true function gather_kernel!(dst, @Const(src), @Const(idx))
@@ -1371,7 +1353,7 @@ end
     pisum[tid] = acc
 end
 
-@kernel inbounds=true function rmsd_finalize_value_kernel!(dist_val, @Const(pisum), n)
+@kernel inbounds=true function rmsd_finalize_kernel!(dist_val, @Const(pisum), n)
     tid = @index(Global, Linear)
     if tid == 1
         T = length(pisum)
@@ -1380,18 +1362,6 @@ end
             Isum += pisum[k]
         end
         dist_val[1] = sqrt(Isum / n)
-    end
-end
-
-@kernel inbounds=true function rmsd_finalize_grad_kernel!(d_buf, @Const(pisum), n)
-    tid = @index(Global, Linear)
-    if tid == 1
-        T = length(pisum)
-        Isum = pisum[1]
-        for k in 2:T
-            Isum += pisum[k]
-        end
-        d_buf[1] = sqrt(Isum / n)
     end
 end
 
@@ -1410,7 +1380,8 @@ end
 end
 
 function calculate_cv!(cv::CalcRMSD, coords, buff, args...; scratch=nothing, kwargs...)
-    if scratch !== nothing && is_gpu_resident(coords)
+    if is_gpu_resident(coords)
+        scratch = isnothing(scratch) ? rmsd_scratch(cv, coords) : scratch
         backend = get_backend(coords)
         n = length(scratch.idx_dev)
         kernel! = gather_kernel!(backend, min(n, 256))
@@ -1420,7 +1391,7 @@ function calculate_cv!(cv::CalcRMSD, coords, buff, args...; scratch=nothing, kwa
         T = length(scratch.partial_isum)
         reduce! = rmsd_isum_reduce_kernel!(backend, min(T, 256))
         reduce!(scratch.partial_isum, scratch.ref_coords_used, scratch.coords_used, rot, trans_1, trans_2; ndrange=T)
-        finalize! = rmsd_finalize_value_kernel!(backend, 1)
+        finalize! = rmsd_finalize_kernel!(backend, 1) # reuse identical kernel as cv_gradient!
         finalize!(buff, scratch.partial_isum, n; ndrange=1)
         return nothing
     end
@@ -1466,7 +1437,8 @@ function cv_gradient(cv::CalcRMSD, coords, args...; kwargs...)
 end
 
 function cv_gradient!(grad, d_buf, cv::CalcRMSD, coords, args...; scratch=nothing, kwargs...)
-    if scratch !== nothing && is_gpu_resident(coords)
+    if is_gpu_resident(coords)
+        scratch = isnothing(scratch) ? rmsd_scratch(cv, coords) : scratch
         backend = get_backend(coords)
         n = length(scratch.idx_dev)
         kernel! = gather_kernel!(backend, min(n, 256))
@@ -1476,7 +1448,7 @@ function cv_gradient!(grad, d_buf, cv::CalcRMSD, coords, args...; scratch=nothin
         T = length(scratch.partial_isum)
         reduce! = rmsd_isum_reduce_kernel!(backend, min(T, 256))
         reduce!(scratch.partial_isum, scratch.ref_coords_used, scratch.coords_used, rot, trans_1, trans_2; ndrange=T)
-        finalize! = rmsd_finalize_grad_kernel!(backend, 1)
+        finalize! = rmsd_finalize_kernel!(backend, 1) # reuse identical kernel as calculate_cv!
         finalize!(d_buf, scratch.partial_isum, n; ndrange=1)
         write! = rmsd_grad_write_kernel!(backend, min(n, 256))
         write!(grad, d_buf, scratch.ref_coords_used, scratch.coords_used, scratch.idx_dev,
@@ -1496,6 +1468,8 @@ function cv_gradient!(grad, d_buf, cv::CalcRMSD, coords, args...; scratch=nothin
     if rmsd_val > zero(rmsd_val)
         factor = 1 / (N * rmsd_val)
         grad[atom_inds_used] = (-factor,) .* diffs
+    else
+        grad[atom_inds_used] .= (zero(eltype(grad)),)
     end
 
     return nothing
@@ -1745,11 +1719,16 @@ end
 # Trait gating BiasPotential's persistent-buffer path to CV types with a buffer-writing
 # calculate_cv!/cv_gradient!; a custom CV that only implements calculate_cv falls back to the
 # generic Enzyme-AD cv_gradient (ext/MollyEnzymeExt.jl), which has no buffer-writing equivalent.
-uses_builtin_cv_gradient!(::CalcDist) = true
-uses_builtin_cv_gradient!(::CalcRg) = true
-uses_builtin_cv_gradient!(::CalcRMSD) = true
-uses_builtin_cv_gradient!(::CalcTorsion) = true
-uses_builtin_cv_gradient!(::Any) = false
+uses_builtin_cv_gradient(::CalcDist) = true
+uses_builtin_cv_gradient(::CalcRg) = true
+uses_builtin_cv_gradient(::CalcRMSD) = true
+uses_builtin_cv_gradient(::CalcTorsion) = true
+uses_builtin_cv_gradient(::Any) = false
+
+# The atom index lists a CV owns, checked against the system size in check_bias_atom_inds.
+atom_index_lists(cv::CalcDist) = (cv.atom_inds_1, cv.atom_inds_2)
+atom_index_lists(cv::Union{CalcRg, CalcRMSD, CalcTorsion}) = (cv.atom_inds,)
+atom_index_lists(cv) = () # custom CV types are not checked
 
 # Buffer-shape helpers, deduplicating the grad/d_buf allocation pattern used by every allocating
 # cv_gradient/calculate_cv wrapper above and by BiasPotential's lazy buffer init (bias.jl).
@@ -1767,6 +1746,6 @@ zero_cv_gradient_buffers(cv, coords) = (zero_cv_grad_buffer(cv, coords), zero_cv
 calculate_cv_buffered!(cv::CalcRMSD, coords, atoms, boundary, buff, args...; kwargs...) =
     calculate_cv!(cv, coords, buff; kwargs...)
 calculate_cv_buffered!(cv::CalcRg, coords, atoms, boundary, buff, args...; kwargs...) =
-    calculate_cv!(cv, coords, atoms, buff; kwargs...)
+    calculate_cv!(cv, coords, atoms, boundary, buff; kwargs...)
 calculate_cv_buffered!(cv, coords, atoms, boundary, buff, args...; kwargs...) =
     calculate_cv!(cv, coords, atoms, boundary, buff, args...; kwargs...)

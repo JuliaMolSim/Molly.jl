@@ -15,6 +15,7 @@ using Combinatorics
 using DataStructures
 using Distances
 using Distributions
+using Distributed
 using EzXML
 using FFTW
 using FillArrays: Fill
@@ -38,6 +39,7 @@ using Statistics
 using StatsBase
 
 include("types.jl")
+include("sparse_pairs.jl")
 include("parameters.jl")
 include("units.jl")
 include("cuda_config.jl")
@@ -91,8 +93,12 @@ include("free_energy/mbar.jl")
 include("free_energy/reweighting.jl")
 include("free_energy/pmf_deconvolution.jl")
 include("free_energy/AWH.jl")
+include("free_energy/alchemical_system.jl")
+include("free_energy/scale_single.jl")
+include("free_energy/scale_dual.jl")
 include("free_energy/TSS.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
+
 
 end

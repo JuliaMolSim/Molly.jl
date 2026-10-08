@@ -101,13 +101,14 @@ The virial, in its most general form, is defined as:
 where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
 respectively, acting on atom ``i``.
 The [virial definition from LAMMPS](https://docs.lammps.org/compute_stress_atom.html)
-is used, taking into account pairwise interactions, specific interactions, and the
+is used, taking into account pairwise interactions, specific interactions, the
 [`Ewald`](@ref) and [`PME`](@ref) methods computed as indicated in
-[Essmann et al. 1995](https://doi.org/10.1063/1.470117).
-Contributions from implicit solvent methods and bias potentials are ignored.
+[Essmann et al. 1995](https://doi.org/10.1063/1.470117), and bias potentials.
+Contributions from implicit solvent methods are ignored.
 For constrained systems, constraint contributions are approximated using a
 deterministic small-step constraint preview.
-Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
+Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref) and
+[`LocalCoordinatesSite`](@ref).
 
 To calculate the scalar virial, see [`scalar_virial`](@ref).
 """
@@ -257,11 +258,11 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           Val(TH), step_n)
     end
 
-    for (i, inter) in enumerate(values(general_inters))
+    for inter in values(general_inters)
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, buffers=buffers, inter_idx=i,
+                                              n_threads=n_threads, buffers=buffers,
                                               strictness=strictness),
         )
     end
@@ -520,11 +521,11 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
     pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
                               specific_inter_lists, n_threads)
 
-    for (i, inter) in enumerate(values(general_inters))
+    for inter in values(general_inters)
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                n_threads=n_threads, buffers=buffers, inter_idx=i,
+                                n_threads=n_threads, buffers=buffers,
                                 strictness=strictness),
         )
     end

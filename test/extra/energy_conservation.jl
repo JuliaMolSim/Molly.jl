@@ -32,7 +32,7 @@ using Test
                     neighbor_finder=GPUNeighborFinder(
                         n_atoms=n_atoms,
                         dist_cutoff=dist_cutoff,
-                        device_vector_type=AT{Int32, 1},
+                        array_type=AT,
                     )
                 else
                     neighbor_finder=DistanceNeighborFinder(

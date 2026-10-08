@@ -152,7 +152,7 @@ end
 
 @testset "Hamiltonian REMD" begin
     Random.seed!(1234)
-    rng = Xoshiro(10)
+    rng = Xoshiro(100)
     n_atoms = 100
     n_steps = 20_000
     atom_mass = 10.0u"g/mol"
@@ -173,14 +173,14 @@ end
     for i in 1:n_replicas
         # Embed the lambda values directly into the atoms for this thermodynamic state
         atoms_λ = [Atom(mass=atom_mass, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", 
-                        λ =λ_vals[i]) for _ in 1:n_atoms]
+                        λ =λ_vals[i], alch_role=Molly.InsertRole) for _ in 1:n_atoms]
         
         sys = System(
             atoms=atoms_λ,
             coords=coords,
             boundary=boundary,
             # SoftCore no longer takes λ; it relies on the atom's λ properties
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder
         )
         # All states share the exact same temperature and integrator parameters
@@ -390,13 +390,21 @@ end
             neighbor_finder = GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=T(1.0)u"nm",
-                device_vector_type=AT{Int32, 1},
+                array_type=AT,
+            )
+        elseif nft == GPUCellListNeighborFinder
+            neighbor_finder = GPUCellListNeighborFinder(
+                n_atoms=n_atoms,
+                n_steps=10,
+                dist_cutoff=T(1.5)u"nm",
+                array_type=AT,
             )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 n_steps=10,
                 dist_cutoff=T(1.5)u"nm",
+                array_type=AT,
             )
         else
             neighbor_finder = NoNeighborFinder()
@@ -440,10 +448,12 @@ end
         ("CPU parallel f32 NL", [DistanceNeighborFinder, true , true , Array]),
     ]
     for AT in array_list[2:end]
-        push!(runs, ("$AT"       , [NoNeighborFinder      , false, false, AT]))
-        push!(runs, ("$AT f32"   , [NoNeighborFinder      , false, true , AT]))
-        push!(runs, ("$AT NL"    , [DistanceNeighborFinder, false, false, AT]))
-        push!(runs, ("$AT f32 NL", [DistanceNeighborFinder, false, true , AT]))
+        push!(runs, ("$AT"            , [NoNeighborFinder         , false, false, AT]))
+        push!(runs, ("$AT f32"        , [NoNeighborFinder         , false, true , AT]))
+        push!(runs, ("$AT NL"         , [DistanceNeighborFinder   , false, false, AT]))
+        push!(runs, ("$AT f32 NL"     , [DistanceNeighborFinder   , false, true , AT]))
+        push!(runs, ("$AT cell NL"    , [GPUCellListNeighborFinder, false, false, AT]))
+        push!(runs, ("$AT f32 cell NL", [GPUCellListNeighborFinder, false, true , AT]))
     end
     if run_cuda_tests
         AT = CuArray
@@ -452,8 +462,9 @@ end
     end
     if run_metal_tests
         AT = MtlArray
-        push!(runs, ("$AT f32"   , [NoNeighborFinder      , false, true , AT]))
-        push!(runs, ("$AT f32 NL", [DistanceNeighborFinder, false, true , AT]))
+        push!(runs, ("$AT f32"        , [NoNeighborFinder         , false, true , AT]))
+        push!(runs, ("$AT f32 NL"     , [DistanceNeighborFinder   , false, true , AT]))
+        push!(runs, ("$AT f32 cell NL", [GPUCellListNeighborFinder, false, true , AT]))
     end
 
     # Check all simulations give the same result to within some error
@@ -628,11 +639,7 @@ end
         function run_mts(inner_step_neighbors, n_steps_neighbors)
             sys.coords .= coords_start
             sys.velocities .= velocities_start
-            if nf isa GPUNeighborFinder
-                nf.n_steps_reorder = n_steps_neighbors
-            else
-                nf.n_steps = n_steps_neighbors
-            end
+            nf.n_steps = n_steps_neighbors
             sim = MTSIntegrator(
                 dt=1.0u"fs",
                 pi_fractions=(1, 1),
@@ -676,14 +683,14 @@ end
     for i in 1:n_windows
         # Embed the lambda values directly into the atoms
         atoms_λ = [Atom(mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", 
-                        λ = λ_vals[i]) for _ in 1:n_atoms]
+                        λ=λ_vals[i], alch_role=Molly.InsertRole) for _ in 1:n_atoms]
         
         # Define the system at this specific lambda state
         sys = System(
             atoms=atoms_λ,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),),
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder,
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")

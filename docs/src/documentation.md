@@ -160,6 +160,7 @@ To run simulations on the GPU you will need to have a GPU available and then loa
 Modern GPUs can run simulations of over 100,000 atoms, [as seen in the examples](@ref "Testing GPU memory limits").
 Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` in this case.
 Non-CUDA backends are less well-tested with Molly than CUDA.
+The tiled neighbor finder [`GPUNeighborFinder`](@ref) is CUDA-specific, so on other GPU backends the `O(N)` cell list [`GPUCellListNeighborFinder`](@ref) should be used instead.
 
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives much better performance on GPUs.
@@ -229,18 +230,13 @@ specific_inter_lists = (bonds,) # Don't forget the trailing comma!
 ```
 This time we are also going to use a neighbor list to speed up the Lennard-Jones calculation since we don't care about interactions beyond a certain distance.
 We can use the built-in [`DistanceNeighborFinder`](@ref).
-The arguments are a 2D array of eligible interacting pairs, the number of steps between each update and the distance cutoff to be classed as a neighbor.
+The arguments are the number of atoms, the pairs of atoms excluded from the non-bonded interactions, the number of steps between each update and the distance cutoff to be classed as a neighbor.
 Since the neighbor finder is run every 10 steps we should also use a distance cutoff for the neighbor list that is larger than the cutoff for the interaction.
 ```julia
 # All pairs apart from bonded pairs are eligible for non-bonded interactions
-eligible = trues(n_atoms, n_atoms)
-for i in 1:(n_atoms ÷ 2)
-    eligible[i, i + (n_atoms ÷ 2)] = false
-    eligible[i + (n_atoms ÷ 2), i] = false
-end
-
 neighbor_finder = DistanceNeighborFinder(
-    eligible=eligible,
+    n_atoms=n_atoms,
+    excluded_pairs=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
     n_steps=10,
     dist_cutoff=1.5u"nm",
 )
@@ -280,7 +276,7 @@ visualize(
 )
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
-The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref) for the classical neighbor finders and `nothing` for [`GPUNeighborFinder`](@ref), whose CUDA kernels manage their tile list internally.
+The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref) for the classical neighbor finders, a [`GPUCellListNeighborList`](@ref) for [`GPUCellListNeighborFinder`](@ref) and `nothing` for [`GPUNeighborFinder`](@ref), whose CUDA kernels manage their tile list internally.
 
 ## Simulating gravity
 
@@ -471,7 +467,7 @@ water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff) # Res
 
 Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`ReplicaExchangeMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
 On CPU these are run in parallel by dividing up the number of available threads.
-For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1 ps:
+For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 2.5 ps:
 ```julia
 using Molly
 using Statistics
@@ -660,11 +656,11 @@ See also [this example](@ref "Protein bias potential").
 
 ### GPU offload for biased simulations
 
-A [`BiasPotential`](@ref) adds a CV evaluation, a CV gradient and a bias-gradient calculation on top of the regular force calculation, every step. When `coords` (and the rest of the `System`) is GPU-resident, `calculate_cv`/`cv_gradient` for the built-in CV types run on GPU too, using persistent scratch buffers to avoid allocating on every call -- so a GPU `System` biased by one or more `BiasPotential`s stays GPU-resident end to end, it isn't dropped to CPU for the CV part.
+A [`BiasPotential`](@ref) adds a CV evaluation, a CV gradient and a bias-gradient calculation on top of the regular force calculation, every step. When `coords` (and the rest of the `System`) is GPU-resident, `calculate_cv`/`cv_gradient` for built-in CV types other than [`CalcRMSD`](@ref) run on GPU too, using persistent scratch buffers to avoid allocating on every call -- so a GPU `System` biased by one or more `BiasPotential`s stays GPU-resident end to end for those CV types, it isn't dropped to CPU for the CV part. `CalcRMSD` performs a host-side Kabsch alignment step every call, and custom (non-built-in) CV types always round-trip to the host, since arbitrary user code isn't guaranteed GPU-safe.
 
-Each of these steps is its own kernel launch, and for small, cheap kernels like most CV/bias calculations, launch (host-dispatch) latency rather than the arithmetic itself tends to dominate the cost. This is a general GPU characteristic, not specific to bias potentials: it's the same reason Molly fuses several of its own hot-path kernels internally (e.g. the persistent-buffer CV paths above fuse a reduce-and-finalize into one launch rather than issuing several small ones) where doing so is worthwhile. As a rough guide:
+The persistent-buffer CV paths fuse their reduce-and-finalize steps into as few kernel launches as the computation allows, rather than issuing one launch per intermediate step. As a rough guide:
 
-* **Small systems (up to a few thousand atoms) with one or two CVs**: the extra bias kernels' launch overhead is a significant fraction of the whole step. GPU offload is usually still worth it once the rest of the simulation is already on GPU, but don't expect a large win from the bias machinery alone at this scale -- if you write a custom CV/bias type, look for opportunities to fuse work into fewer kernel launches, the same way the built-in persistent-buffer paths do.
+* **Small systems (up to a few thousand atoms) with one or two CVs**: the extra bias kernels' launch overhead is a significant fraction of the whole step. GPU offload is usually still worth it once the rest of the simulation is already on GPU, but don't expect a large win from the bias machinery alone at this scale.
 * **Larger systems, or several simultaneous CVs (e.g. multi-dimensional AWH ladders with 3-10 `BiasPotential`s)**: the CV/bias kernels amortize well over the main force/energy kernels, and GPU offload is clearly worthwhile.
 
 #### CUDA graph capture (`use_cuda_graph`)
@@ -804,6 +800,7 @@ The available pairwise interactions are:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCoreBeutler`](@ref)
 - [`LennardJonesSoftCoreGapsys`](@ref)
+- [`LennardJonesScaled`](@ref)
 - [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
@@ -825,6 +822,7 @@ The available specific interactions (1-5 atoms) are:
 - [`HarmonicBond`](@ref) - 2 atoms
 - [`MorseBond`](@ref) - 2 atoms
 - [`FENEBond`](@ref) - 2 atoms
+- [`LennardJones14`](@ref) - 2 atoms
 - [`EwaldExclusion`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
@@ -1140,6 +1138,7 @@ The following built-in interactions can use a cutoff:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCoreBeutler`](@ref)
 - [`LennardJonesSoftCoreGapsys`](@ref)
+- [`LennardJonesScaled`](@ref)
 - [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
@@ -1232,6 +1231,8 @@ Simulators define what type of simulation is run.
 This could be anything from a simple energy minimization to complicated replica exchange MD.
 The available simulators are:
 - [`SteepestDescentMinimizer`](@ref)
+- [`FIREMinimizer`](@ref)
+- [`LBFGSMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
 - [`DPDVelocityVerlet`](@ref)
 - [`Verlet`](@ref)
@@ -1430,13 +1431,13 @@ Molly.needs_virial(c::MyCoupler) = c.n_steps
 Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
-Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
-Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods and bias potentials are ignored.
+Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions, the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, and bias potentials.
+Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods are ignored.
 During supported constrained simulations, Molly can add constraint contributions to the total virial for steps where a barostat or virial/pressure logger requests it.
 For the initial simulation step, the same preview convention is used so that interactions and constraints both contribute to the logged virial/pressure.
 If a coordinate-scaling coupling method changes the box on a constrained step, virial and pressure loggers record the pre-coupling virial/pressure for that step, matching the state used by the coupling method.
 Other state loggers, such as [`BoxLogger`](@ref), continue to record the current post-coupling state.
-The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref).
+The virial is compatible with virtual sites apart from [`OutOfPlaneSite`](@ref) and [`LocalCoordinatesSite`](@ref).
 As described previously, custom general interactions should implement virial calculation if required.
 
 ## Loggers
@@ -1520,7 +1521,7 @@ simulate!(sys, simulator, 100) # Default run_loggers=true
 simulate!(sys, simulator, 100; run_loggers=:skipstart)
 simulate!(sys, simulator, 100; run_loggers=:skipstart)
 ```
-Running loggers can be disabled entirely with `run_loggers=false`, which is the default for [`SteepestDescentMinimizer`](@ref).
+Running loggers can be disabled entirely with `run_loggers=false`, which is the default for the energy minimizers such as [`SteepestDescentMinimizer`](@ref).
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
@@ -1587,7 +1588,7 @@ specific_inter_lists = (InteractionList2Atoms(
 ),)
 
 # Define system
-nf = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.6u"nm")
+nf = DistanceNeighborFinder(n_atoms=n_atoms, dist_cutoff=0.6u"nm")
 
 sys = System(
     atoms=atoms,
@@ -1701,6 +1702,8 @@ Due to the nature of the velocity treatment in each integrator, the velocities s
 
 The following simulators automatically use harmonic bonds in place of constraints, where the force constant can be adjusted by changing `constraint_bond_constant`:
 - [`SteepestDescentMinimizer`](@ref)
+- [`FIREMinimizer`](@ref)
+- [`LBFGSMinimizer`](@ref)
 
 Simulators incompatible with constraints will print a warning and continue without applying constraints when used with systems containing constraints.
 
@@ -1770,14 +1773,15 @@ Molly allows virtual sites to be defined in the following ways:
 - [`TwoParticleAverageSite`](@ref): defined by the weighted average of the coordinates of two atoms.
 - [`ThreeParticleAverageSite`](@ref): defined by the weighted average of the coordinates of three atoms.
 - [`OutOfPlaneSite`](@ref): defined by the weighted average of the coordinates of three atoms and the cross product of their relative displacements.
+- [`LocalCoordinatesSite`](@ref): defined by a position in a local coordinate system given by three atoms, matching the site of the same name in OpenMM. This places a site at a fixed distance and orientation whatever the bond lengths are, as used for the lone pairs of a CHARMM force field.
 
 Virtual sites should have an entry in the atom, coordinate and velocity arrays.
 They can be involved in any interaction type, with the forces being distributed back to the parent atoms automatically after all forces have been calculated.
 [`forces`](@ref), [`accelerations`](@ref) and `sys.velocities` are zero for virtual site atoms since they are not integrated.
-They share all the non-bonded exclusions of, and are excluded from, their parent atoms.
+They share all the non-bonded exclusions of, and are excluded from, the first of their parent atoms.
 The parent atoms must not be virtual sites themselves.
 They cannot participate in constraints.
-Virtual sites apart from [`OutOfPlaneSite`](@ref) are compatible with virial calculation.
+Virtual sites apart from [`OutOfPlaneSite`](@ref) and [`LocalCoordinatesSite`](@ref) are compatible with virial calculation, since the coordinates of the other sites are linear in the coordinates of their parent atoms.
 
 A virtual site can be set up manually, for example for a molecule of TIP4P water:
 ```julia
@@ -1825,29 +1829,65 @@ The available neighbor finders are:
 - [`NoNeighborFinder`](@ref)
 - [`CellListMapNeighborFinder`](@ref)
 - [`GPUNeighborFinder`](@ref)
+- [`GPUCellListNeighborFinder`](@ref)
 - [`DistanceNeighborFinder`](@ref)
 - [`TreeNeighborFinder`](@ref)
 
-The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`DistanceNeighborFinder`](@ref) on other GPUs.
+The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`GPUCellListNeighborFinder`](@ref) on other GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
 
-The `dist_cutoff` of a neighbor finder is the distance used to search for neighbors, and is not the same as the interaction cutoff distance (see [Cutoffs](@ref)).
-Since the neighbor list is only rebuilt every `n_steps` steps, `dist_cutoff` should be the interaction cutoff distance plus a buffer distance:
+The pairs of atoms that interact are given to a neighbor finder as the number of atoms along with lists of the excluded pairs, which do not interact through the pairwise interactions, for example bonded atoms, and the special pairs, which have scaled interactions, for example 1-4 atoms:
 ```julia
 dist_cutoff = 1.0u"nm" # Interaction cutoff distance
 dist_buffer = 0.2u"nm" # Buffer distance
 neighbor_finder = DistanceNeighborFinder(
-    eligible=eligible,
+    n_atoms=n_atoms,
+    excluded_pairs=[(1, 2), (2, 3), (1, 3)],
+    special_pairs=[(1, 4)],
     n_steps=10,
     dist_cutoff=(dist_cutoff + dist_buffer),
 )
 ```
+Every neighbor finder takes these arguments.
+The pairs can be given as any iterable of `(i, j)` pairs, or as a sparse matrix whose `true` entries are the pairs.
+They are stored as [`SparsePairMatrix`](@ref)s, so the memory used is proportional to the number of pairs and grows linearly with the number of atoms.
+For a system on the GPU using [`DistanceNeighborFinder`](@ref), [`GPUNeighborFinder`](@ref) or [`GPUCellListNeighborFinder`](@ref), give the array type of the system as `array_type`, for example `array_type=CuArray`, so that the pairs are stored on the GPU.
+Systems set up from a file store the pairs in this way.
+
+The `dist_cutoff` of a neighbor finder is the distance used to search for neighbors, and is not the same as the interaction cutoff distance (see [Cutoffs](@ref)).
+Since the neighbor list is only rebuilt every `n_steps` steps, `dist_cutoff` should be the interaction cutoff distance plus a buffer distance, as above.
 The buffer distance should be larger than the distance an atom can move in `n_steps` steps, otherwise interacting pairs can be missed.
 When setting up a [`System`](@ref) from a file the buffer is added automatically and the two distances are given separately as the `dist_cutoff` and `dist_buffer` keyword arguments.
 
+Alternatively, the pairs can be described by an `eligible` matrix, which is `false` for pairs excluded from the pairwise interactions, and a `special` matrix, which is `true` for special pairs:
+```julia
+# All pairs are eligible apart from each atom with itself
+eligible = trues(n_atoms, n_atoms)
+for i in 1:n_atoms
+    eligible[i, i] = false
+end
+neighbor_finder = DistanceNeighborFinder(
+    eligible=eligible,
+    special=falses(n_atoms, n_atoms),
+    n_steps=10,
+    dist_cutoff=(dist_cutoff + dist_buffer),
+)
+```
+Dense matrices take memory proportional to the square of the number of atoms, which limits the size of system that can be simulated, especially on the GPU.
+They can be useful for small systems or patterns of pairs that are not sparse.
+A [`SparsePairMatrix`](@ref) can also be given as the `eligible` and `special` matrices.
+
 [`GPUNeighborFinder`](@ref) follows a different CUDA-specific path based on the tiled GPU strategy of [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
-Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms, build per-tile masks and cache a compact list of interacting `32x32` tiles internally.
+Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms and cache a compact list of interacting `32x32` tiles internally, building the exclusion masks of the few tiles that need them from the sparse pairs.
+The memory it uses grows linearly with the number of atoms, and for large systems the interacting tiles are found by searching a tree of bounding boxes, so the time taken also grows close to linearly.
 Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
-When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps_reorder` to the number of steps between reorder and tile-list refresh passes.
+When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps` to the number of steps between reordering the atoms and refreshing the tile list.
+
+[`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref), which also gives the neighbors of each atom as a padded matrix via [`ragged_neighbors`](@ref).
+It runs on any GPU backend and is the best option on GPUs other than NVIDIA ones, where the tiled kernels of [`GPUNeighborFinder`](@ref) are not available.
+Three-dimensional [`CubicBoundary`](@ref) and [`TriclinicBoundary`](@ref) systems are supported, as long as opposite box faces are at least three times `dist_cutoff` apart so that the grid has at least three cells along every box axis.
+Like [`GPUNeighborFinder`](@ref) it stores the exclusions and special pairs as [`SparsePairMatrix`](@ref)s on the device, converting dense `eligible` and `special` matrices at construction rather than keeping them, since a dense mask is `n_atoms^2` bytes on the device.
+Most of the memory it uses for a large system is the per-atom neighbor matrix and the pair list.
+The matrix can be left out with `ragged=false` when only the pairs are needed, as for the pairwise interactions of a [`System`](@ref), which roughly doubles the number of atoms that fit on a GPU; systems set up from a file do this.
 
 ## Analysis
 

@@ -241,19 +241,13 @@ end
 
 # Impropers: lookup with 6-permutation scan and cache
 function find_improper_match(t1::AbstractString, t2::AbstractString, t3::AbstractString,
-                             t4::AbstractString; resolver::TorsionResolver{T, E},
-                             type_to_class::Dict{String, String}) where {T, E}
-    key = (t1, t2, t3, t4)
+                             t4::AbstractString, indexes, atom_type_of, resnum_of, template_id_of, 
+                             element_of; resolver::TorsionResolver{T, E},
+                             type_to_class::Dict{String, String}, atom_types) where {T, E}
+    (c, j, k, l) = indexes
     ic = resolver.improper_cache
-    if haskey(ic, key)
-        v = ic[key]
-        if v == :miss
-            return nothing
-        else
-            return resolver.rules[(v::Tuple{NTuple{4, Int}, Int})[2]].params
-        end
-    end
-
+    key = (t1, t2, t3, t4)
+    
     # Candidates by central atom 1 (type → class → wild)
     cand = Int[]
     c1 = type_to_class[t1]
@@ -265,6 +259,7 @@ function find_improper_match(t1::AbstractString, t2::AbstractString, t3::Abstrac
     bestperm = (1,2,3,4)
     bestspec = Int8(-1)
 
+    found_match = false
     for (p2,p3,p4,perm) in (
         (t2,t3,t4,(1,2,3,4)),
         (t2,t4,t3,(1,2,4,3)),
@@ -280,21 +275,178 @@ function find_improper_match(t1::AbstractString, t2::AbstractString, t3::Abstrac
             if matches(r.p2, p2, type_to_class) && matches(r.p3, p3, type_to_class) &&
                                                         matches(r.p4, p4, type_to_class)
                 if !r.has_wildcard
-                    ic[key] = (perm, i)
-                    return r.params
+                    bestspec, best, bestperm = r.specificity, i, perm
+                    found_match = true
+                    break
                 elseif r.specificity > bestspec
                     bestspec, best, bestperm = r.specificity, i, perm
                 end
             end
         end
+        if found_match
+            break
+        end
     end
 
     if best == 0
-        ic[key] = :miss
+        ic[key] = nothing
         return nothing
     else
-        ic[key] = (bestperm, best)
-        return resolver.rules[best].params
+        if resolver.rules[best].params isa PeriodicTorsionType
+            r = resolver.rules[best]
+            ordering = r.ordering
+            has_wild = r.has_wildcard
+
+            # Reorder indices based on how atoms were permuted
+            src_atoms = (c, j, k, l)
+            j = src_atoms[bestperm[2]]
+            k = src_atoms[bestperm[3]]
+            l = src_atoms[bestperm[4]]
+            p1, p2, p3, p4 = bestperm 
+
+            # refresh types after remapping
+            t2, t3, t4 = atom_type_of[j], atom_type_of[k], atom_type_of[l]
+
+            # topology indices for current j,k,l
+            r2 = resnum_of[j]
+            r3 = resnum_of[k]
+            r4 = resnum_of[l]
+
+            ta2 = template_id_of[j]
+            ta3 = template_id_of[k]
+            ta4 = template_id_of[l]
+
+            e2 = Symbol(element_of[j])
+            e3 = Symbol(element_of[k])
+            e4 = Symbol(element_of[l])
+
+            if ordering == "amber"
+                # OpenMM amber branch, with/without wildcards
+                if !has_wild
+                    if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                        (j,   l)   = (l,   j)
+                        (r2,  r4)  = (r4,  r2)
+                        (ta2, ta4) = (ta4, ta2)
+                        (p2, p4)   = (p4, p2)
+                    end
+                    if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                        (k,   l)   = (l,   k)
+                        (r3,  r4)  = (r4,  r3)
+                        (ta3, ta4) = (ta4, ta3)
+                        (p3, p4)   = (p4, p3)
+                    end
+                    if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
+                        (j, k) = (k, j)
+                        (p2, p3) = (p3, p2)
+                    end
+                else
+                    if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                        (j,   l)   = (l,   j)
+                        (r2,  r4)  = (r4,  r2)
+                        (ta2, ta4) = (ta4, ta2)
+                        (p2, p4)   = (p4, p2)
+                    end
+                    if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                        (k,   l)   = (l,   k)
+                        (r3,  r4)  = (r4,  r3)
+                        (ta3, ta4) = (ta4, ta3)
+                        (p3, p4)   = (p4, p3)
+                    end
+                    if r2 > r3 || (r2 == r3 && ta2 > ta3)
+                        (j, k) = (k, j)
+                        (p2, p3) = (p3, p2)
+                    end
+                end
+            elseif ordering == "charmm"
+                # If wildcards were used then apply the same Amber tie-break, else unambiguous
+                if has_wild
+                    if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                        (j,   l)   = (l,   j)
+                        (r2,  r4)  = (r4,  r2)
+                        (ta2, ta4) = (ta4, ta2)
+                        (p2, p4)   = (p4, p2)
+                    end
+                    if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                        (k,   l)   = (l,   k)
+                        (r3,  r4)  = (r4,  r3)
+                        (ta3, ta4) = (ta4, ta3)
+                        (p3, p4)   = (p4, p3)
+                    end
+                end
+            elseif ordering == "default"
+                # ordering == "default"
+                # Only if a wildcard is present
+                if has_wild
+                    # Mirror the permutation on the current topology atoms (c,j,k,l)
+                    src_atoms = (c, j, k, l)
+
+                    # We need the two peripheral atoms in positions 2 and 3, and the remaining
+                    #   peripheral in 4
+                    a1 = src_atoms[bestperm[2]]
+                    a2 = src_atoms[bestperm[3]]
+                    a4 = src_atoms[bestperm[4]]
+
+                    # Elements and masses for tie-break
+                    e_a1 = Symbol(element_of[a1])
+                    e_a2 = Symbol(element_of[a2])
+                    m_a1 = atom_types[atom_type_of[a1]].mass
+                    m_a2 = atom_types[atom_type_of[a2]].mass
+
+                    # 1) If same element, lower atom index first
+                    # 2) Else, prefer carbon; else heavier mass first
+                    if e_a1 == e_a2
+                        if a1 > a2
+                            (a1, a2) = (a2, a1)
+                            (p2, p3) = (p3, p2)
+                        end
+                    elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
+                        (a1, a2) = (a2, a1)
+                        (p2, p3) = (p3, p2)
+                    end
+                end
+                # If no wildcard leave j, k, l as-is
+            end
+            bestperm = (p1, p2, p3, p4)
+            ic[key] = (bestperm, best)
+            return resolver.rules[best].params
+        elseif resolver.rules[best].params isa HarmonicTorsionType
+            r = resolver.rules[best]
+            has_wild = r.has_wildcard
+
+            # Reorder indices based on how atoms were permuted
+            # Mirror the permutation on the current topology atoms (c,j,k,l)
+            src_atoms = (c, j, k, l)
+
+            # We need the two peripheral atoms in positions 2 and 3, and the remaining
+            #   peripheral in 4
+            a1 = src_atoms[bestperm[2]]
+            a2 = src_atoms[bestperm[3]]
+            a4 = src_atoms[bestperm[4]]
+            p1, p2, p3, p4 = bestperm
+
+            if has_wild
+                # Elements and masses for tie-break
+                e_a1 = Symbol(element_of[a1])
+                e_a2 = Symbol(element_of[a2])
+                m_a1 = atom_types[atom_type_of[a1]].mass
+                m_a2 = atom_types[atom_type_of[a2]].mass
+
+                # 1) If same element, lower atom index first
+                # 2) Else, prefer carbon; else heavier mass first
+                if e_a1 == e_a2
+                    if a1 > a2
+                        (a1, a2) = (a2, a1)
+                        (p2, p3) = (p3, p2)
+                    end
+                elseif !(e_a1 == :C) && (e_a2 == :C || m_a1 < m_a2)
+                    (a1, a2) = (a2, a1)
+                    (p2, p3) = (p3, p2)
+                end
+            end
+            bestperm = (p1, p2, p3, p4)
+            ic[key] = (bestperm, best)
+            return resolver.rules[best].params
+        end
     end
 end
 
@@ -347,6 +499,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                       torsion_rule_specs, cmap_rules, custor_rule_specs, nb_atom_classes,
                       ljforce_atom_classes, nbfix_pairs, urey_rule_specs, units, strictness,
                       T, IC)
+    P = typeof(inv(oneunit(IC))) # Length type of a virtual site local position
     if !isfile(ff_file)
         throw(ArgumentError("force field XML file $ff_file does not exist"))
     end
@@ -398,7 +551,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                 atoms, types = String[], String[]
                 charges = Union{T, Missing}[]
                 elements = Symbol[]
-                virtual_sites = VirtualSiteTemplate{T, IC}[]
+                virtual_sites = VirtualSiteTemplate{T, IC, P}[]
                 external_bonds_name = String[]
                 externals = Int[]
                 allowed_patches = String[]
@@ -453,6 +606,17 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                         push!(allowed_patches, xml_attr(re, "name", ff_file))
                     elseif re.name == "VirtualSite"
                         vs_type = xml_attr(re, "type", ff_file)
+                        # A virtual site shares the exclusions of the first atom it is defined by,
+                        #   which is the default of OpenMM's `excludeWith`; another atom is not
+                        #   supported, so the exclusions would be wrong
+                        if haskey(re, "excludeWith")
+                            report_issue(
+                                "Virtual site attribute excludeWith is not supported, the " *
+                                "exclusions of the first atom of the site are used",
+                                strictness;
+                                error_type=ForceFieldXMLError,
+                            )
+                        end
                         if haskey(re, "siteName")
                             vs_name = re["siteName"]
                         else
@@ -503,11 +667,29 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
                                     weight_13, weight_cross)
                             push!(virtual_sites, vs)
                         elseif vs_type == "localCoords"
-                            report_issue(
-                                "Virtual site type $vs_type not supported, ignoring",
-                                strictness;
-                                error_type=ForceFieldXMLError,
-                            )
+                            if haskey(re, "atomName3")
+                                atom_name_3 = re["atomName3"]
+                            else
+                                atom_name_3 = atoms[parse_attr(Int, re, "atom3", ff_file) + 1]
+                            end
+                            # OpenMM allows any number of atoms, Molly supports three
+                            if haskey(re, "wo4") || !haskey(re, "wo3")
+                                throw(ForceFieldXMLError("virtual site $vs_name of residue " *
+                                    "$rname is a localCoords site, which is only supported " *
+                                    "with three atoms in Molly"))
+                            end
+                            origin_weights = ntuple(i -> parse_attr(T, re, "wo$i", ff_file), 3)
+                            x_weights = ntuple(i -> parse_attr(T, re, "wx$i", ff_file), 3)
+                            y_weights = ntuple(i -> parse_attr(T, re, "wy$i", ff_file), 3)
+                            check_local_weights(origin_weights, x_weights, y_weights,
+                                                ForceFieldXMLError)
+                            local_position = SVector{3}(ntuple(
+                                i -> add_units(parse_attr(T, re, "p$i", ff_file), u"nm", units), 3))
+                            vs = VirtualSiteTemplate(5, vs_name, atom_name_1, atom_name_2,
+                                    atom_name_3, zero(T), zero(T), zero(T), zero(T), zero(T),
+                                    zero(IC), SVector{9}(origin_weights..., x_weights...,
+                                    y_weights...), local_position)
+                            push!(virtual_sites, vs)
                         else
                             report_issue(
                                 "Unrecognised virtual site type $vs_type, ignoring",
@@ -978,7 +1160,7 @@ Failures when reading in force field XML files throw a `ForceFieldXMLError` exce
 struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
     atom_type_order::Vector{String}
-    residues::Dict{String, ResidueTemplate{T, C}}
+    residues::Dict{String, ResidueTemplate{T, C, D}}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T

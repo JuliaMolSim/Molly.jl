@@ -47,12 +47,15 @@ const init_code_block = quote
     using Molly
     using Molly: from_device, to_device, NaNSimulationError, ForceFieldXMLError,
                  MissingResidueTemplateError
+    # The workers evaluate this block, so they need the lazy artifact machinery below
+    using LazyArtifacts: LazyArtifacts
     using Aqua
     import AtomsBase
     using AtomsBaseTesting
     import AtomsCalculators
     using BenchmarkTools
     import BioStructures
+    using BSON
     import Chemfiles
     using Enzyme
     using FiniteDifferences
@@ -140,4 +143,6 @@ runtests(
     init_code=init_code,
     exeflags=["--threads=$n_threads_per_job"],
     retries=1,
+    # `String[]`, not `[]`, the keyword taking a `Vector{String}`
+    serial=(haskey(ENV, "CI") ? ["basic", "protein_1", "free_energy"] : String[])
 )

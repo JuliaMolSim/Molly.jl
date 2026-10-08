@@ -2,6 +2,15 @@ struct BiasNaNGradient end
 
 Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
 
+struct CVNaNGradient
+    correction::Symbol
+    has_virial::Bool
+end
+
+Molly.calculate_cv(::CVNaNGradient, coords, args...; kwargs...) = 1.0u"nm"
+Molly.cv_gradient(::CVNaNGradient, coords, args...; kwargs...) =
+    (fill(SVector(NaN, 0.0, 0.0), length(coords)), 1.0u"nm")
+
 @testset "Collective variables" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
@@ -108,9 +117,8 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
             atol=1e-9u"nm",
         )
 
-        # Differently-sized groups: regression test for a transpose bug in
-        # pairwise_distance_matrix's :raw branch that only manifests when the two
-        # groups have different sizes (harmless/undetectable for equal-sized groups)
+        # Differently-sized groups: regression test for a transpose bug in the :raw branch that
+        # only manifests when the two groups have different sizes (undetectable for equal sizes)
         atom_inds_small = [1, 2]
         coords_small = AT(coords[atom_inds_small])
 
@@ -243,21 +251,45 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
     )
     @test Molly.cv_gradient(rmsd_cv, coords_1)[2] ≈ calculate_cv(rmsd_cv, coords_1)
 
+    # A reused grad buffer must be zeroed when rmsd_val == 0, not left stale.
+    ref_coords_1atom = [SVector(1.0, 2.0, 3.0)u"nm"] # 1 atom: no Kabsch SVD rotational noise
+    rmsd_cv_1atom = CalcRMSD(ref_coords_1atom)
+    grad_sentinel = [SVector(99.0, 99.0, 99.0)]
+    d_buf_1atom = similar(ref_coords_1atom, eltype(eltype(ref_coords_1atom)), 1)
+    Molly.cv_gradient!(grad_sentinel, d_buf_1atom, rmsd_cv_1atom, ref_coords_1atom)
+    @test only(d_buf_1atom) == 0.0u"nm"
+    @test all(iszero, grad_sentinel[1])
+
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)
     coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
     bb_to_mass = Dict("C" => 12.011u"g/mol", "N" => 14.007u"g/mol", "O" => 15.999u"g/mol")
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
 
+    boundary_rg = CubicBoundary(20.0u"nm")
+
     # Rg of all atoms
     rg_cv = CalcRg()
     @test isapprox(
-        calculate_cv(rg_cv, coords, atoms),
+        calculate_cv(rg_cv, coords, atoms, boundary_rg),
         11.51225678195222u"Å";
         atol=1e-6u"nm",
     )
-    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"))[2],
-                   calculate_cv(rg_cv, coords, atoms),
+    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, boundary_rg)[2],
+                   calculate_cv(rg_cv, coords, atoms, boundary_rg),
                    atol = 1e-5u"nm")
+
+    # Disparate masses, unlike the backbone's similar C/N/O masses above, separate the two
+    # definitions enough to catch a value/gradient COM mismatch.
+    atoms_disparate = [Atom(mass=10.0u"g/mol"), Atom(mass=20.0u"g/mol"),
+                       Atom(mass=15.0u"g/mol"), Atom(mass=30.0u"g/mol")]
+    coords_disparate = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                        SVector(0.0, 2.0, 0.0)u"nm", SVector(3.0, 1.0, 0.0)u"nm"]
+    rg_cv_disparate = CalcRg()
+    @test isapprox(
+        calculate_cv(rg_cv_disparate, coords_disparate, atoms_disparate, boundary_rg),
+        Molly.cv_gradient(rg_cv_disparate, coords_disparate, atoms_disparate, boundary_rg)[2];
+        atol=1e-9u"nm",
+    )
 
     # Rg of a subset of atoms
     n_atoms_subset = 20
@@ -265,12 +297,12 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
     atoms_subset = atoms[1:n_atoms_subset]
     rg_cv = CalcRg([i for i=1:n_atoms_subset])
     @test isapprox(
-        calculate_cv(rg_cv, coords, atoms),
+        calculate_cv(rg_cv, coords, atoms, boundary_rg),
         radius_gyration(coords_subset,atoms_subset);
         atol=1e-6u"nm",
     )
-    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, CubicBoundary(20.0u"nm"))[2],
-                   calculate_cv(rg_cv, coords, atoms),
+    @test isapprox(Molly.cv_gradient(rg_cv, coords, atoms, boundary_rg)[2],
+                   calculate_cv(rg_cv, coords, atoms, boundary_rg),
                    atol = 1e-5u"nm")
 
     # Test CalcTorsion value calculation
@@ -347,6 +379,51 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
         CubicBoundary(100.0),
     )
 
+    # CalcSingleDist needs exactly one atom per group, checked at construction on every backend
+    @test_throws ArgumentError CalcDist([1, 2], [3], CalcSingleDist())
+    @test_throws ArgumentError CalcDist([1], [2, 3], CalcSingleDist())
+    @test_throws ArgumentError CalcDist(Int[], [3], CalcSingleDist())
+    # Test CalcAngle value calculation
+    # Define three atoms forming a 90-degree (pi/2) angle at the middle atom
+    coords_ang = [
+        SVector(0.1, 0.0, 0.0)u"nm",
+        SVector(0.0, 0.0, 0.0)u"nm",
+        SVector(0.0, 0.1, 0.0)u"nm",
+    ]
+    ang_cv = CalcAngle([1, 2, 3])
+    @test isapprox(
+        calculate_cv(ang_cv, coords_ang, atoms, boundary),
+        1.5707963267948966; # pi/2 radians
+        atol=1e-9
+    )
+
+    # The analytical gradient matches finite differences of the angle
+    coords_ang_gen = [
+        SVector(1.0, 1.0, 1.0)u"nm",
+        SVector(1.1, 1.05, 0.95)u"nm",
+        SVector(1.05, 1.2, 1.1)u"nm",
+    ]
+    grad_ang, θ_ang = Molly.cv_gradient(ang_cv, coords_ang_gen, atoms, boundary)
+    isapprox(θ_ang, calculate_cv(ang_cv, coords_ang_gen, atoms, boundary); atol=1e-12)
+    h = 1e-6u"nm"
+    shift = SVector(h, zero(h), zero(h))
+    c_plus, c_minus = copy(coords_ang_gen), copy(coords_ang_gen)
+    c_plus[1] += shift
+    c_minus[1] -= shift
+
+    grad_fd = (calculate_cv(ang_cv, c_plus, atoms, boundary) -
+                    calculate_cv(ang_cv, c_minus, atoms, boundary)) / (2*h)
+    @test isapprox(grad_ang[1][1],grad_fd)
+
+    # Collinear atoms, where the gradient is singular, give an angle of pi and zero gradients
+    coords_ang_line = [
+        SVector(0.0, 0.0, 0.0)u"nm",
+        SVector(0.1, 0.0, 0.0)u"nm",
+        SVector(0.2, 0.0, 0.0)u"nm",
+    ]
+    grad_line, θ_line = Molly.cv_gradient(ang_cv, coords_ang_line, atoms, boundary)
+    @test isapprox(θ_line, π; atol=1e-6)
+    @test all(v -> all(iszero, v), grad_line)
 end
 
 @testset "Bias potentials" begin
@@ -542,6 +619,35 @@ end
         sys,
         BiasPotential(calc_dist, BiasNaNGradient()),
     )
+    err_grad = try
+        AtomsCalculators.forces!(fs_bad, sys, BiasPotential(CVNaNGradient(:wrap, false), lb))
+        nothing
+    catch e
+        e
+    end
+    @test err_grad isa ErrorException
+    @test occursin("non-finite CV gradient", err_grad.msg)
+
+    # check_bias_finite's max_abs_component_fn is only called (and only appears in the error
+    # message) when the value being checked is actually non-finite.
+    bias_check = BiasPotential(calc_dist, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+    fs_svec_inf = [SVector(Inf, 0.0, 0.0)u"kJ * mol^-1 * nm^-1"]
+    err = try
+        Molly.check_bias_finite(fs_svec_inf, "bias force", bias_check; cv_sim=1.0u"nm",
+                                max_abs_component_fn=() -> Molly.bias_max_abs_ustrip(fs_svec_inf))
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("max_abs_component=Inf", err.msg)
+
+    fs_svec_finite = [SVector(2.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1"]
+    fn_called = Ref(false)
+    Molly.check_bias_finite(fs_svec_finite, "bias force", bias_check; cv_sim=1.0u"nm",
+                            max_abs_component_fn=() -> (fn_called[] = true;
+                                                        Molly.bias_max_abs_ustrip(fs_svec_finite)))
+    @test !fn_called[]
 
     # PeriodicFlatBottomBias tests (Target: 0, Flat bottom width: 0.1)
     pb = PeriodicFlatBottomBias(1000.0u"kJ * mol^-1", 0.1, 0.0)
@@ -603,12 +709,16 @@ end
     rg_cv_pbc  = CalcRg([1, 2, 3])
     rg_cv_wrap = CalcRg([1, 2, 3], :wrap)
 
-    # On CPU, :pbc (molecule-unwrapped) and :wrap (raw) coordinates give meaningfully
-    # different CV values for a molecule straddling the periodic boundary
+    # :pbc unwraps the molecule straddling the boundary to atoms at -0.05, 0.05 and 0.15 nm
     sys_cpu = System(atoms=atoms_uw, coords=coords_uw, boundary=boundary_uw, topology=topology)
-    rg_pbc_cpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_cpu, rg_cv_pbc), sys_cpu.atoms)
-    rg_wrap_cpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_cpu, rg_cv_wrap), sys_cpu.atoms)
-    @test !isapprox(rg_pbc_cpu, rg_wrap_cpu; atol=1e-3u"nm")
+    rg_pbc_cpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_cpu, rg_cv_pbc), sys_cpu.atoms, boundary_uw)
+    rg_wrap_cpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_cpu, rg_cv_wrap), sys_cpu.atoms, boundary_uw)
+    @test isapprox(rg_pbc_cpu, 0.1 * sqrt(2 / 3) * u"nm"; atol=1e-9u"nm")
+
+    # :wrap agrees with :pbc for the same molecule shifted so that it does not cross the boundary
+    coords_in_box = wrap_coords.(coords_uw .+ (SVector(1.0, 0.0, 0.0)u"nm",), (boundary_uw,))
+    rg_wrap_in_box = calculate_cv(rg_cv_wrap, coords_in_box, atoms_uw, boundary_uw)
+    @test isapprox(rg_pbc_cpu, rg_wrap_in_box; atol=1e-9u"nm")
 
     if CUDA.functional()
         sys_gpu = System(
@@ -618,10 +728,10 @@ end
             topology=topology,
         )
         # :pbc now runs fully on GPU (GPU-native unwrap_molecules) and matches the CPU :pbc result
-        rg_pbc_gpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_gpu, rg_cv_pbc), sys_gpu.atoms)
+        rg_pbc_gpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_gpu, rg_cv_pbc), sys_gpu.atoms, boundary_uw)
         @test isapprox(rg_pbc_gpu, rg_pbc_cpu; atol=1e-9u"nm")
         # :wrap stays fully GPU-resident and matches the CPU :wrap (raw coordinates) result
-        rg_wrap_gpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_gpu, rg_cv_wrap), sys_gpu.atoms)
+        rg_wrap_gpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_gpu, rg_cv_wrap), sys_gpu.atoms, boundary_uw)
         @test isapprox(rg_wrap_gpu, rg_wrap_cpu; atol=1e-9u"nm")
     end
 end
@@ -761,18 +871,57 @@ end
         sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias1, bias2))
         buffers = Molly.init_buffers!(sys, 1)
 
-        fs1 = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
-        Molly.AtomsCalculators.forces!(fs1, sys, bias1; buffers=buffers, inter_idx=1)
-        fs2 = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
-        Molly.AtomsCalculators.forces!(fs2, sys, bias2; buffers=buffers, inter_idx=2)
-        @test buffers.bias_scratch[1].grad !== buffers.bias_scratch[2].grad
+        fs1 = Molly.zero_forces(sys)
+        Molly.AtomsCalculators.forces!(fs1, sys, bias1; buffers=buffers)
+        fs2 = Molly.zero_forces(sys)
+        Molly.AtomsCalculators.forces!(fs2, sys, bias2; buffers=buffers)
+        @test buffers.bias_scratch[bias1.id].grad !== buffers.bias_scratch[bias2.id].grad
         combined_expected = Molly.from_device(fs1) .+ Molly.from_device(fs2)
 
-        fs_sum = AT(zeros(SVector{3, Float64}, n)) .* u"kJ * mol^-1 * nm^-1"
-        for (i, gi) in enumerate(sys.general_inters)
-            Molly.AtomsCalculators.forces!(fs_sum, sys, gi; buffers=buffers, inter_idx=i)
+        fs_sum = Molly.zero_forces(sys)
+        for gi in sys.general_inters
+            Molly.AtomsCalculators.forces!(fs_sum, sys, gi; buffers=buffers)
         end
         @test all(isapprox.(Molly.from_device(fs_sum), combined_expected; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+    end
+
+    @testset "Scratch isolation between structurally-identical biases" begin
+        cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
+        bias1 = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+        bias2 = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+        @test !(bias1 === bias2) # the id field makes them distinct, as intended
+        @test bias1.id != bias2.id
+        # ...but they compare equal, so thermo.jl's intersect can move a shared restraint
+        @test bias1 == bias2 && isequal(bias1, bias2) && hash(bias1) == hash(bias2)
+        @test length(intersect([bias1], [bias2])) == 1
+    end
+
+    # A System rejects biases that would corrupt the scratch buffers or run the unchecked kernels
+    # out of range: two biases sharing an id (as a field-wise copy or a bias loaded from disk
+    # can give), and atom indices outside the system.
+    @testset "Invalid biases are rejected when building a System" begin
+        atoms = [Atom(mass=10.0u"g/mol") for _ in 1:4]
+        coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.5, 0.0, 0.0)u"nm",
+                  SVector(5.0, 0.0, 0.0)u"nm", SVector(7.0, 0.0, 0.0)u"nm"]
+        bias_type = SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm")
+        cv_a = CalcDist([1], [2], CalcSingleDist(), :wrap)
+        cv_b = CalcDist([3], [4], CalcSingleDist(), :wrap)
+        bias_a = BiasPotential(cv_a, bias_type)
+        bias_b = BiasPotential(cv_b, bias_type)
+        bias_same_id = BiasPotential{typeof(cv_b), typeof(bias_type)}(cv_b, bias_type, true, bias_a.id)
+        build(inters) = System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0u"nm"),
+                               general_inters=inters)
+        @test build((bias_a, bias_b)) isa System
+        @test_throws ArgumentError build((bias_a, bias_same_id))
+
+        for cv in (CalcDist([1], [5], CalcSingleDist(), :wrap), CalcDist([1, 2], [3, 9], CalcMinDist(), :wrap),
+                   CalcDist([1, 2], [3, 6], CalcMaxDist(), :wrap), CalcDist([0, 2], [3, 4], CalcCMDist(), :wrap),
+                   CalcRg([1, 2, 7], :wrap), CalcRMSD(coords[1:3], [1, 2, 6], [], :wrap))
+            @test_throws ArgumentError build((BiasPotential(cv, bias_type),))
+        end
+        @test_throws ArgumentError build((BiasPotential(CalcTorsion([1, 2, 3, 5], :wrap),
+                                                        SquareBias(400.0u"kJ * mol^-1", 1.0)),))
+        @test build((BiasPotential(CalcRg([], :wrap), bias_type),)) isa System # empty means all atoms
     end
 
     # A reused persistent `grad` buffer must not retain a stale force contribution from a
@@ -790,8 +939,8 @@ end
 
         sys_N = System(atoms=atoms, coords=AT(coords_N), boundary=boundary, general_inters=(bias,))
         buffers = Molly.init_buffers!(sys_N, 1)
-        fs_N = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
-        Molly.AtomsCalculators.forces!(fs_N, sys_N, bias; buffers=buffers, inter_idx=1)
+        fs_N = Molly.zero_forces(sys_N)
+        Molly.AtomsCalculators.forces!(fs_N, sys_N, bias; buffers=buffers)
         fs_N_cpu = Molly.from_device(fs_N)
         @test norm(ustrip.(fs_N_cpu[1])) > 0
         @test norm(ustrip.(fs_N_cpu[3])) > 0
@@ -799,9 +948,9 @@ end
         @test norm(ustrip.(fs_N_cpu[4])) == 0
 
         sys_N1 = System(atoms=atoms, coords=AT(coords_N1), boundary=boundary, general_inters=(bias,))
-        fs_N1 = AT(zeros(SVector{3, Float64}, 4)) .* u"kJ * mol^-1 * nm^-1"
-        # Reuses the SAME buffers (hence the SAME buffers.bias_scratch[1].grad) as step N.
-        Molly.AtomsCalculators.forces!(fs_N1, sys_N1, bias; buffers=buffers, inter_idx=1)
+        fs_N1 = Molly.zero_forces(sys_N1)
+        # Reuses the SAME buffers (hence the SAME buffers.bias_scratch[bias.id].grad) as step N.
+        Molly.AtomsCalculators.forces!(fs_N1, sys_N1, bias; buffers=buffers)
         fs_N1_cpu = Molly.from_device(fs_N1)
         @test norm(ustrip.(fs_N1_cpu[1])) == 0 # not a stale leftover from step N
         @test norm(ustrip.(fs_N1_cpu[3])) == 0
@@ -809,15 +958,277 @@ end
         @test norm(ustrip.(fs_N1_cpu[4])) > 0
     end
 
-    # The fused GPU kernel for CalcMinDist/CalcMaxDist (extremal_pair_fused) uses O(group_a)
-    # memory instead of the O(group_a * group_b) dense matrix the old implementation
-    # materialized -- assert this directly via CUDA.@allocated, rather than literally
-    # reproducing the ~29GB OOM the O(group^2) approach hit at group~51200 (fragile/GPU-
-    # dependent). At group_a=group_b=2000, O(group) is tens of KB; O(group^2) would be
-    # ~48MB (2000^2 * 12 bytes for SVector{3,Float32}).
+    @testset "Scratch isolation across MTS levels" for AT in array_list
+        atoms = AT([Atom(mass=atom_mass) for _ in 1:4])
+        boundary_mts = CubicBoundary(50.0u"nm")
+        coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(20.0, 0.0, 0.0)u"nm",
+                 SVector(0.5, 0.0, 0.0)u"nm", SVector(21.5, 0.0, 0.0)u"nm"]
+        bias_a = BiasPotential(CalcDist([1, 2], [3], CalcMinDist(), :wrap),
+                               SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+        bias_b = BiasPotential(CalcDist([1, 2], [4], CalcMinDist(), :wrap),
+                               SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+
+        sys_a = System(atoms=atoms, coords=AT(coords), boundary=boundary_mts, general_inters=(bias_a,))
+        fs_a_ref = Molly.from_device(forces(sys_a))
+        sys_b = System(atoms=atoms, coords=AT(coords), boundary=boundary_mts, general_inters=(bias_b,))
+        fs_b_ref = Molly.from_device(forces(sys_b))
+
+        sys_mts = System(atoms=atoms, coords=AT(coords), boundary=boundary_mts, general_inters=(bias_a, bias_b))
+        sim = MTSIntegrator(dt=1.0u"fs", gi_fractions=(1, 2), remove_CM_motion=false)
+        fraction_inters = Molly.mts_interaction_groups(sys_mts, sim)
+        buffers = Molly.init_buffers!(sys_mts, 1)
+
+        fs_a_mts = Molly.zero_forces(sys_mts)
+        Molly.forces!(fs_a_mts, sys_mts, nothing, 1, buffers, Val(false); n_threads=1,
+                      general_inters=fraction_inters[1].general_inters)
+        fs_b_mts = Molly.zero_forces(sys_mts)
+        Molly.forces!(fs_b_mts, sys_mts, nothing, 1, buffers, Val(false); n_threads=1,
+                      general_inters=fraction_inters[2].general_inters)
+
+        @test all(isapprox.(Molly.from_device(fs_a_mts), fs_a_ref; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+        @test all(isapprox.(Molly.from_device(fs_b_mts), fs_b_ref; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+    end
+
+    # forces! called twice at the SAME step_n with coordinates moved in between (as MTS substeps
+    # or a post-coupling recompute do) must not reuse the first call's cached :pbc unwrap.
     if CUDA.functional()
+        @testset "Unwrap cache does not persist across forces! calls at the same step_n" begin
+            topology = MolecularTopology([1, 1, 1], [3], [(1, 2), (2, 3)])
+            atoms = CuArray([Atom(mass=atom_mass) for _ in 1:3])
+            coords = CuArray([SVector(1.95, 0.0, 0.0)u"nm", SVector(0.05, 0.0, 0.0)u"nm",
+                              SVector(0.15, 0.0, 0.0)u"nm"])
+            boundary_uw = CubicBoundary(2.0u"nm")
+            cv = CalcRg([1, 2, 3])
+            bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 0.5u"nm"))
+
+            sys = System(atoms=atoms, coords=coords, boundary=boundary_uw, topology=topology,
+                         general_inters=(bias,))
+            buffers = Molly.init_buffers!(sys, 1)
+
+            fs1 = Molly.zero_forces(sys)
+            Molly.forces!(fs1, sys, nothing, 1, buffers, Val(false))
+
+            sys.coords .= CuArray([SVector(0.95, 0.0, 0.0)u"nm", SVector(0.05, 0.0, 0.0)u"nm",
+                                   SVector(0.15, 0.0, 0.0)u"nm"])
+            fs2 = Molly.zero_forces(sys)
+            Molly.forces!(fs2, sys, nothing, 1, buffers, Val(false)) # same step_n as fs1
+
+            sys_ref = System(atoms=atoms, coords=copy(sys.coords), boundary=boundary_uw,
+                             topology=topology, general_inters=(bias,))
+            buffers_ref = Molly.init_buffers!(sys_ref, 1)
+            fs_ref = Molly.zero_forces(sys_ref)
+            Molly.forces!(fs_ref, sys_ref, nothing, 1, buffers_ref, Val(false))
+
+            @test all(isapprox.(Molly.from_device(fs2), Molly.from_device(fs_ref);
+                                atol=1e-9u"kJ * mol^-1 * nm^-1"))
+        end
+    end
+
+    # CalcCMDist gradient with overlapping atom_inds_1/atom_inds_2: the shared atom's force must
+    # be the SUM of both groups' contributions, not whichever group writes/races last.
+    @testset "CalcCMDist gradient with overlapping atom groups" for AT in array_list
+        masses = [10.0, 20.0, 15.0, 5.0]u"g/mol"
+        coords_host = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                       SVector(2.0, 0.0, 0.0)u"nm", SVector(5.0, 0.0, 0.0)u"nm"]
+        atoms = AT([Atom(mass=m) for m in masses])
+        coords = AT(coords_host)
+        cv = CalcDist([1, 2, 3], [3, 4], CalcCMDist(), :wrap) # atom 3 is shared
+        k, target = 400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"
+        bias = BiasPotential(cv, SquareBias(k, target))
+        sys = System(atoms=atoms, coords=coords, boundary=boundary, general_inters=(bias,))
+        buffers = Molly.init_buffers!(sys, 1)
+
+        fs = Molly.zero_forces(sys)
+        Molly.AtomsCalculators.forces!(fs, sys, bias; buffers=buffers)
+        fs_cpu = Molly.from_device(fs)
+
+        # Independent reference computed directly from the CMDist/SquareBias formulas, not by
+        # calling into any code under test.
+        g1, g2 = [1, 2, 3], [3, 4]
+        M1, M2 = sum(masses[g1]), sum(masses[g2])
+        com1 = sum(coords_host[g1] .* masses[g1]) / M1
+        com2 = sum(coords_host[g2] .* masses[g2]) / M2
+        d = norm(com2 - com1)
+        dir = (com2 - com1) / d
+        # Atom 3 is in both groups, so its CV gradient is the SUM of both groups' contributions.
+        d_cv_d_atom3 = -dir * (masses[3] / M1) + dir * (masses[3] / M2)
+        force_atom3 = -k * (d - target) * d_cv_d_atom3
+
+        @test all(isapprox.(ustrip.(fs_cpu[3]), ustrip.(force_atom3); atol=1e-9))
+    end
+
+    # A whole chain longer than half the box, or than the box, must match radius_gyration
+    @testset "CalcRg :pbc for an extended chain" for AT in array_list, frac in (0.4, 0.6, 0.8, 1.2)
+        boundary_chain = CubicBoundary(6.0u"nm")
+        n = 21
+        coords_whole = [SVector(frac * 6.0 * (i - 1) / (n - 1), 1.0, 1.0)u"nm" for i in 1:n]
+        atoms_chain = [Atom(mass=(10.0 + 5 * (i % 3)) * u"g/mol") for i in 1:n]
+        rg = radius_gyration(coords_whole, atoms_chain)
+        @test calculate_cv(CalcRg(collect(1:n)), coords_whole, atoms_chain, boundary_chain) ≈ rg
+
+        k, target = 300.0u"kJ * mol^-1 * nm^-2", 0.8 * rg
+        sys = System(atoms=AT(atoms_chain), coords=AT(wrap_coords.(coords_whole, (boundary_chain,))),
+                     boundary=boundary_chain, topology=MolecularTopology(1:(n - 1), 2:n, n),
+                     general_inters=(BiasPotential(CalcRg(collect(1:n)), SquareBias(k, target)),))
+        @test potential_energy(sys) ≈ k / 2 * (rg - target)^2
+        masses = mass.(atoms_chain)
+        com = sum(coords_whole .* masses) / sum(masses)
+        fs_expected = -k * (rg - target) .* masses .* (coords_whole .- (com,)) ./ (sum(masses) * rg)
+        fs = Molly.from_device(forces(sys))
+        @test all(isapprox.(fs, fs_expected; atol=1e-6u"kJ * mol^-1 * nm^-1"))
+    end
+
+    # Shared base system for the testsets below, remade per-testset via System(sys; coords=..,
+    # atoms=..) instead of rebuilding from scratch.
+    if CUDA.functional()
+        atoms_v = [Atom(mass=10.0u"g/mol") for _ in 1:4]
+        coords_v = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                   SVector(5.0, 0.0, 0.0)u"nm", SVector(6.0, 0.0, 0.0)u"nm"]
+        sys_cpu_base = System(atoms=atoms_v, coords=coords_v, boundary=boundary)
+        sys_gpu_base = System(atoms=CuArray(atoms_v), coords=CuArray(coords_v), boundary=boundary)
+
+        # Asserts potential_energy (and forces! if check_forces) through `bias` match on
+        # sys_cpu/sys_gpu; returns fs_cpu (or nothing if !check_forces) for any extra caller checks.
+        function pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias; check_forces=true)
+            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
+            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
+            @test ustrip(pe_gpu) ≈ ustrip(pe_cpu)
+            check_forces || return nothing
+            fs_cpu = Molly.zero_forces(sys_cpu)
+            Molly.AtomsCalculators.forces!(fs_cpu, sys_cpu, bias)
+            fs_gpu = Molly.zero_forces(sys_gpu)
+            Molly.AtomsCalculators.forces!(fs_gpu, sys_gpu, bias)
+            @test all(isapprox.(ustrip.(Molly.from_device(fs_gpu)), ustrip.(fs_cpu); atol=1e-10))
+            return fs_cpu
+        end
+
+        # Asserts potential_energy and forces! with virial through `bias` match on sys_cpu/sys_gpu.
+        function fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+            pe_cpu = Molly.AtomsCalculators.potential_energy(sys_cpu, bias)
+            pe_gpu = Molly.AtomsCalculators.potential_energy(sys_gpu, bias)
+            @test ustrip(pe_gpu) ≈ ustrip(pe_cpu)
+
+            buffers_cpu = Molly.init_buffers!(sys_cpu, 1)
+            fs_cpu = Molly.zero_forces(sys_cpu)
+            Molly.forces!(fs_cpu, sys_cpu, nothing, 1, buffers_cpu, Val(true); n_threads=1)
+            buffers_gpu = Molly.init_buffers!(sys_gpu, 1)
+            fs_gpu = Molly.zero_forces(sys_gpu)
+            Molly.forces!(fs_gpu, sys_gpu, nothing, 1, buffers_gpu, Val(true))
+            @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+            @test all(isapprox.(ustrip.(Molly.from_device(buffers_gpu.virial)), ustrip.(buffers_cpu.virial);
+                                atol=1e-9))
+            return nothing
+        end
+
+        @testset "CalcRMSD in BiasPotential on GPU matches CPU" begin
+            ref_coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                          SVector(0.0, 1.0, 0.0)u"nm", SVector(0.0, 0.0, 1.0)u"nm"]
+            coords = [SVector(0.1, 0.0, 0.0)u"nm", SVector(1.1, 0.0, 0.0)u"nm",
+                      SVector(0.0, 1.1, 0.0)u"nm", SVector(0.0, 0.0, 1.1)u"nm"]
+            cv = CalcRMSD(ref_coords)
+            bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 0.0u"nm"))
+
+            sys_cpu = System(sys_cpu_base; coords=coords)
+            sys_gpu = System(sys_gpu_base; coords=CuArray(coords))
+            pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+
+            # A device reference works on both CPU and GPU systems
+            bias_dev = BiasPotential(CalcRMSD(CuArray(ref_coords)), bias.bias_type)
+            @test calculate_cv(bias_dev.cv_type, coords) ≈ calculate_cv(cv, coords)
+            pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias_dev)
+        end
+
+        # cv_gradient returns one SVector per atom with no atom-index list (bias.jl's non-built-in
+        # path applies it as a dense per-atom array), so this needs its own atom count, not base.
+        @testset "Custom CV type in BiasPotential on GPU matches CPU" begin
+            struct XCoordDistCV
+                correction::Symbol
+            end
+            Molly.calculate_cv(cv::XCoordDistCV, coords, atoms, boundary, velocities; kwargs...) =
+                coords[2][1] - coords[1][1]
+            Molly.cv_gradient(cv::XCoordDistCV, coords, atoms, boundary, velocities; kwargs...) =
+                ([SVector(-1.0, 0.0, 0.0), SVector(1.0, 0.0, 0.0)] .* oneunit(coords[1][1] / coords[1][1]),
+                 coords[2][1] - coords[1][1])
+
+            cv = XCoordDistCV(:wrap)
+            bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+
+            # coords_v[1:2]'s distance (1.0 nm) would exactly match dist0, giving a zero gradient.
+            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.5, 0.0, 0.0)u"nm"]
+            sys_cpu = System(atoms=atoms_v[1:2], coords=coords, boundary=boundary)
+            sys_gpu = System(atoms=CuArray(atoms_v[1:2]), coords=CuArray(coords), boundary=boundary)
+            fs_cpu = pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+            @test ustrip(fs_cpu[1][1]) != 0
+        end
+
+        # A custom atom type with no :mass field, only a mass(atom) overload, must work through
+        # the GPU scratch path (bias_dist_scratch_types reads mass()'s return type).
+        @testset "Custom atom type (no :mass field) in CMDist bias on GPU matches CPU" begin
+            struct SimpleMassAtom
+                m::Float64
+            end
+            Molly.mass(a::SimpleMassAtom) = a.m * u"g/mol"
+
+            atoms = [SimpleMassAtom(10.0), SimpleMassAtom(20.0), SimpleMassAtom(15.0), SimpleMassAtom(5.0)]
+            cv = CalcDist([1, 2], [3, 4], CalcCMDist(), :wrap)
+            bias = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+
+            sys_cpu = System(sys_cpu_base; atoms=atoms)
+            sys_gpu = System(sys_gpu_base; atoms=CuArray(atoms))
+            pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        # CalcMinDist/CalcMaxDist forces AND virial on GPU must match CPU, since
+        # calculate_virial_dist! recomputes the extremal pair instead of reading a cache.
+        @testset "CalcMinDist/CalcMaxDist virial on GPU matches CPU" for dist_type in (CalcMinDist(), CalcMaxDist())
+            cv = CalcDist([1, 2], [3, 4], dist_type, :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+            sys_cpu = System(sys_cpu_base; general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        # CalcRg forces AND virial on GPU must match CPU, through BiasPotential's persistent-buffer
+        # path (not just calculate_cv/cv_gradient called directly).
+        @testset "CalcRg virial on GPU matches CPU" begin
+            cv = CalcRg([1, 2, 3, 4], :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+            sys_cpu = System(sys_cpu_base; general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        @testset "CalcCMDist virial on GPU matches CPU" begin
+            cv = CalcDist([1, 2], [3, 4], CalcCMDist(), :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+            sys_cpu = System(sys_cpu_base; general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        @testset "CalcSingleDist virial on GPU matches CPU" begin
+            cv = CalcDist([1], [4], CalcSingleDist(), :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+            sys_cpu = System(sys_cpu_base; general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        # sys_cpu_base's atoms are collinear (undefined torsion); use a non-planar fixture instead.
+        @testset "CalcTorsion virial on GPU matches CPU" begin
+            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                     SVector(1.0, 1.0, 0.0)u"nm", SVector(1.0, 1.0, 1.0)u"nm"]
+            cv = CalcTorsion([1, 2, 3, 4], :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1", 0.5))
+            sys_cpu = System(sys_cpu_base; coords=coords, general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; coords=CuArray(coords), general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        # The fused GPU kernel for CalcMinDist/CalcMaxDist uses O(group) memory, not O(group^2) --
+        # assert via CUDA.@allocated rather than reproducing the OOM the old approach hit.
         @testset "CalcMinDist GPU memory is O(group), not O(group^2)" begin
-            na = 2000
+            na = 500
             coords = CuArray([SVector(Float32(i % 100) * 0.01f0, 0f0, 0f0)u"nm" for i in 1:(2 * na)])
             atoms = CuArray([Atom(mass=10.0f0u"g/mol") for _ in 1:(2 * na)])
             boundary_f32 = CubicBoundary(100.0f0u"nm")
@@ -825,7 +1236,49 @@ end
             buff = similar(coords, eltype(eltype(coords)), 1)
             Molly.calculate_cv!(cv, coords, atoms, boundary_f32, buff) # warm up / compile
             bytes = CUDA.@allocated Molly.calculate_cv!(cv, coords, atoms, boundary_f32, buff)
-            @test bytes < 1_000_000 # tens of KB expected; a dense O(group^2) matrix would be ~48MB
+            @test bytes < 500_000 # a few KB expected; O(group^2) at na=500 would be ~3MB
+
+            coords_1, coords_2 = coords[1:na], coords[(na + 1):end]
+            Molly.dist_between_groups(CalcMinDist(), coords_1, coords_2, boundary_f32) # warm up
+            bytes = CUDA.@allocated Molly.dist_between_groups(CalcMinDist(), coords_1, coords_2, boundary_f32)
+            @test bytes < 500_000
         end
+    end
+end
+@testset "Bias virial" begin
+    # The virial of a bias is minus the derivative of its energy with respect to a
+    #   homogeneous strain, W = -(dU/dε)ᵀ, here for a molecule split over the boundary
+    boundary = CubicBoundary(2.0u"nm")
+    coords_whole = [SVector(-0.15, -0.10, 0.05), SVector(0.05, -0.12, -0.08),
+                    SVector(0.12, 0.08, 0.10), SVector(-0.05, 0.15, -0.12),
+                    SVector(0.20, -0.05, 0.18), SVector(-0.18, 0.12, 0.15)]u"nm"
+    atoms = [Atom(mass=m * u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+             for m in (12.0, 1.0, 16.0, 14.0, 12.0, 32.0)]
+    topology = MolecularTopology([1, 2, 3, 4, 5], [2, 3, 4, 5, 6], 6)
+    ref_coords = [1.1 * c + SVector(0.02, -0.01, 0.03)u"nm" for c in coords_whole]
+    k = 500.0u"kJ * mol^-1 * nm^-2"
+    cvs_biases = (
+        (CalcDist([1], [5], CalcSingleDist()), SquareBias(k, 0.2u"nm")),
+        (CalcDist([1, 2], [4, 5, 6], CalcMinDist()), SquareBias(k, 0.4u"nm")),
+        (CalcDist([1, 2, 3], [5, 6], CalcMaxDist(:raw)), SquareBias(k, 0.2u"nm")),
+        (CalcDist([1, 2, 3], [4, 5, 6], CalcCMDist()), SquareBias(k, 0.3u"nm")),
+        (CalcRg(), SquareBias(k, 0.1u"nm")),
+        (CalcRMSD(ref_coords), SquareBias(k, 0.0u"nm")),
+        (CalcTorsion([1, 2, 3, 4]), SquareBias(50.0u"kJ * mol^-1", 0.5)),
+    )
+    for (cv, bias) in cvs_biases
+        sys = System(atoms=atoms, coords=wrap_coords.(coords_whole, (boundary,)),
+                     boundary=boundary, topology=topology,
+                     general_inters=(BiasPotential(cv, bias),))
+        h = 1e-6
+        dU_dε = map(Iterators.product(1:3, 1:3)) do (a, b)
+            Us = map((h, -h)) do δ
+                μ = SMatrix{3, 3}(I + δ * (1:3 .== a) * (1:3 .== b)')
+                cv_val = calculate_cv(cv, [μ * c for c in coords_whole], atoms, boundary)
+                return Molly.potential_energy(bias, cv_val)
+            end
+            return (Us[1] - Us[2]) / 2h
+        end
+        @test virial(sys) ≈ -transpose(dU_dε) rtol=1e-6
     end
 end

@@ -397,6 +397,22 @@ end
 
 needs_virial(c::BerendsenBarostat) = c.n_steps
 
+# `OutOfPlaneSite` and `LocalCoordinatesSite` do not contribute to the virial, so a barostat that
+# works from it sees a pressure that is missing those sites. A system without sites holds them in an
+# untyped empty vector, which the second method keeps out of the type analysis
+virial_incompatible_sites(vs::AbstractVector{<:VirtualSite}) =
+    any(v -> v.type == 4 || v.type == 5, from_device(vs))
+virial_incompatible_sites(vs) = false
+
+function warn_virial_sites(sys, barostat)
+    if virial_incompatible_sites(sys.virtual_sites)
+        report_issue("the system has virtual sites that are not compatible with the virial, so " *
+                     "the pressure $(nameof(typeof(barostat))) uses is wrong; " *
+                     "MonteCarloBarostat needs no virial", :warn; maxlog=1)
+    end
+    return nothing
+end
+
 function apply_coupling!(sys::System{D},
                          buffers,
                          barostat::BerendsenBarostat{PT, CT, ST, ICT, FT},
@@ -410,6 +426,7 @@ function apply_coupling!(sys::System{D},
     if step_n % barostat.n_steps != 0
         return false
     end
+    warn_virial_sites(sys, barostat)
 
     # Pressure in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
@@ -630,6 +647,7 @@ function apply_coupling!(sys::System{D},
     if step_n % barostat.n_steps != 0
         return false
     end
+    warn_virial_sites(sys, barostat)
 
     # Pressure tensor in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
@@ -934,6 +952,13 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
             sys.coords .= old_coords
             sys.boundary = old_boundary
         end
+        if barostat.trial_find_neighbors
+            # A neighbor finder may reuse the buffers behind the list it is given, in
+            #   which case the trial list is the only valid one from here on and the
+            #   caller has to rebuild its own list
+            neighbors = neighbors_trial
+            recompute_forces = true
+        end
         barostat.n_attempted += 1
     end
     return recompute_forces
@@ -996,6 +1021,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
+        end
+        if barostat.trial_find_neighbors
+            neighbors = neighbors_trial
+            recompute_forces = true
         end
         barostat.n_attempted += 1
     end
@@ -1060,6 +1089,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
+        end
+        if barostat.trial_find_neighbors
+            neighbors = neighbors_trial
+            recompute_forces = true
         end
         barostat.n_attempted += 1
     end

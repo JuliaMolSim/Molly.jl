@@ -22,6 +22,7 @@ function __init__()
     return nothing
 end
 
+EnzymeRules.inactive_type(::Type{<:GPUCellListNeighborList}) = true
 EnzymeRules.inactive(::typeof(is_on_gpu), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_strictness), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_strictness), args...) = nothing
@@ -44,6 +45,7 @@ EnzymeRules.inactive(::typeof(random_velocities!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.setup_virtual_sites), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_gbsa_n_threads), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.atoms_bonded_to_N), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.atoms_carboxylate_O), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.lookup_table), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.radius_classes), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.gb_log_scaling), args...) = nothing
@@ -65,6 +67,8 @@ EnzymeRules.inactive(::typeof(Molly.uses_gpu_neighbor_finder), args...) = nothin
 EnzymeRules.inactive(::typeof(Molly.claim_block!), args...) = nothing
 EnzymeRules.inactive_type(::Type{<:NoNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:GPUNeighborFinder}) = true
+EnzymeRules.inactive_type(::Type{<:GPUCellListNeighborFinder}) = true
+EnzymeRules.inactive_type(::Type{<:Molly.GPUCellListState}) = true
 EnzymeRules.inactive_type(::Type{<:DistanceNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:TreeNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:CellListMapNeighborFinder}) = true
@@ -1169,7 +1173,7 @@ function pairwise_adjoint!(rev_kernel, sys, prim, neighbors, step_n, pairwise_in
     elseif !any(use_nl)
         nbs_in = Molly.NoNeighborList(length(sys))
     else
-        error("a mix of pairwise interactions with and without neighbour lists is not " *
+        error("a mix of pairwise interactions with and without neighbor lists is not " *
               "supported by the GPU reverse rules yet")
     end
     length(nbs_in) == 0 && return false
