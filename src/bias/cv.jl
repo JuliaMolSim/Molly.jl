@@ -1045,9 +1045,6 @@ end
 Bias the radius of gyration of a group of atoms.
 
 Given as an argument to [`BiasPotential`](@ref).
-The center of mass and the distances to it use the minimum image convention, so with
-`correction=:wrap` the value is also correct for a group that crosses the periodic boundary,
-unlike [`radius_gyration`](@ref), which assumes all coordinates are in one periodic image.
 
 # Arguments
 - `atom_inds=[]`: indices of the atoms in the group, `[]` uses all atoms.
@@ -1089,19 +1086,16 @@ mutable struct RgScratch{IV, MV, WV, IsV, CV, MtV}
     mtot_buf::MtV
 end
 
-# Accumulates mass-weighted minimum-image displacement from idx[1] (not raw position), so COM
-# stays meaningful when the group spans the boundary under :wrap.
 @kernel inbounds=true function rg_com_reduce_kernel!(pmass, pwpos, @Const(coords), @Const(atoms),
-                                                      @Const(idx), boundary)
+                                                      @Const(idx))
     tid = @index(Global, Linear)
     T = length(pmass)
     n = length(idx)
-    anchor = coords[idx[1]]
     acc, mtot = zero(eltype(pwpos)), zero(eltype(pmass))
     k = tid
     while k <= n
         mk = mass(atoms[idx[k]])
-        acc += vector(anchor, coords[idx[k]], boundary) * mk
+        acc += coords[idx[k]] * mk
         mtot += mk
         k += T
     end
@@ -1109,8 +1103,7 @@ end
     pwpos[tid] = acc
 end
 
-@kernel inbounds=true function rg_com_finalize_kernel!(com_buf, mtot_buf, @Const(pmass), @Const(pwpos),
-                                                        @Const(coords), @Const(idx))
+@kernel inbounds=true function rg_com_finalize_kernel!(com_buf, mtot_buf, @Const(pmass), @Const(pwpos))
     tid = @index(Global, Linear)
     if tid == 1
         T = length(pmass)
@@ -1119,15 +1112,14 @@ end
             mtot += pmass[k]
             wpos += pwpos[k]
         end
-        com_buf[1] = coords[idx[1]] + wpos / mtot
+        com_buf[1] = wpos / mtot
         mtot_buf[1] = mtot
     end
 end
 
-# PBC-aware (vector()) so calculate_cv! and cv_gradient! agree on Rg's definition when a group
-# spans the boundary under :wrap; shared by both (calculate_cv! stops after the finalize kernel).
+# Shared by calculate_cv! and cv_gradient!, calculate_cv! stops after the finalize kernel
 @kernel inbounds=true function rg_isum_reduce_kernel!(pisum, @Const(coords), @Const(atoms),
-                                                       @Const(idx), @Const(com_buf), boundary)
+                                                       @Const(idx), @Const(com_buf))
     tid = @index(Global, Linear)
     T = length(pisum)
     n = length(idx)
@@ -1135,7 +1127,7 @@ end
     acc = zero(eltype(pisum))
     k = tid
     while k <= n
-        acc += sum_abs2(vector(com, coords[idx[k]], boundary)) * mass(atoms[idx[k]])
+        acc += sum_abs2(coords[idx[k]] - com) * mass(atoms[idx[k]])
         k += T
     end
     pisum[tid] = acc
@@ -1154,28 +1146,25 @@ end
 end
 
 @kernel inbounds=true function rg_grad_write_kernel!(grad, @Const(d_buf), @Const(coords), @Const(atoms),
-                                                      @Const(idx), @Const(com_buf), @Const(mtot_buf), boundary)
+                                                      @Const(idx), @Const(com_buf), @Const(mtot_buf))
     tid = @index(Global, Linear)
     rg = d_buf[1]
     if rg > zero(rg)
         factor = 1 / (mtot_buf[1] * rg)
-        grad[idx[tid]] = factor * mass(atoms[idx[tid]]) * vector(com_buf[1], coords[idx[tid]], boundary)
+        grad[idx[tid]] = factor * mass(atoms[idx[tid]]) * (coords[idx[tid]] - com_buf[1])
     else
         grad[idx[tid]] = zero(eltype(grad))
     end
 end
 
-# PBC-aware (vector()) center-of-mass distances, shared by calculate_cv! and cv_gradient!.
-# COM is an anchor-relative minimum-image mass average, not a raw position average.
-function rg_dists_cpu(coords, atoms, atom_inds, boundary)
+# Center-of-mass distances, shared by calculate_cv!, cv_gradient! and calculate_virial!
+function rg_dists_cpu(coords, atoms, atom_inds)
     c_used = @view coords[atom_inds]
     a_used = @view atoms[atom_inds]
     m_used = mass.(a_used)
     M_total = sum(m_used; dims=1)
-    anchor = c_used[1:1]
-    disp_from_anchor = vector.(anchor, c_used, (boundary,))
-    com_buf = anchor .+ sum(disp_from_anchor .* m_used; dims=1) ./ M_total
-    r_ic_all = vector.(com_buf, c_used, (boundary,))
+    com_buf = sum(c_used .* m_used; dims=1) ./ M_total
+    r_ic_all = c_used .- com_buf
     return r_ic_all, m_used, M_total
 end
 
@@ -1184,18 +1173,18 @@ function calculate_cv!(cv::CalcRg, coords, atoms, boundary, buff, args...; scrat
         backend = get_backend(coords)
         T = length(scratch.partial_mass)
         reduce_com! = rg_com_reduce_kernel!(backend, min(T, 256))
-        reduce_com!(scratch.partial_mass, scratch.partial_wpos, coords, atoms, scratch.idx_dev, boundary; ndrange=T)
+        reduce_com!(scratch.partial_mass, scratch.partial_wpos, coords, atoms, scratch.idx_dev; ndrange=T)
         finalize_com! = rg_com_finalize_kernel!(backend, 1)
-        finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos,
-                      coords, scratch.idx_dev; ndrange=1)
+        finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos;
+                      ndrange=1)
         reduce_isum! = rg_isum_reduce_kernel!(backend, min(T, 256))
-        reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf, boundary; ndrange=T)
+        reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf; ndrange=T)
         finalize_val! = rg_finalize_kernel!(backend, 1) # reuse identical kernel as cv_gradient!
         finalize_val!(buff, scratch.partial_isum, scratch.mtot_buf; ndrange=1)
         return nothing
     end
     atom_inds_used = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
-    r_ic_all, m_used, M_total = rg_dists_cpu(coords, atoms, atom_inds_used, boundary)
+    r_ic_all, m_used, M_total = rg_dists_cpu(coords, atoms, atom_inds_used)
     buff .= sqrt.(sum(sum_abs2.(r_ic_all) .* m_used; dims=1) ./ M_total)
     return nothing
 end
@@ -1223,22 +1212,22 @@ function cv_gradient!(grad, d_buf, cv::CalcRg, coords, atoms, boundary, args...;
         backend = get_backend(coords)
         T = length(scratch.partial_mass)
         reduce_com! = rg_com_reduce_kernel!(backend, min(T, 256))
-        reduce_com!(scratch.partial_mass, scratch.partial_wpos, coords, atoms, scratch.idx_dev, boundary; ndrange=T)
+        reduce_com!(scratch.partial_mass, scratch.partial_wpos, coords, atoms, scratch.idx_dev; ndrange=T)
         finalize_com! = rg_com_finalize_kernel!(backend, 1)
-        finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos,
-                      coords, scratch.idx_dev; ndrange=1)
+        finalize_com!(scratch.com_buf, scratch.mtot_buf, scratch.partial_mass, scratch.partial_wpos;
+                      ndrange=1)
         reduce_isum! = rg_isum_reduce_kernel!(backend, min(T, 256))
-        reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf, boundary; ndrange=T)
+        reduce_isum!(scratch.partial_isum, coords, atoms, scratch.idx_dev, scratch.com_buf; ndrange=T)
         finalize_grad! = rg_finalize_kernel!(backend, 1) # reuse identical kernel as calculate_cv!
         finalize_grad!(d_buf, scratch.partial_isum, scratch.mtot_buf; ndrange=1)
         n = length(scratch.idx_dev)
         write! = rg_grad_write_kernel!(backend, min(n, 256))
-        write!(grad, d_buf, coords, atoms, scratch.idx_dev, scratch.com_buf, scratch.mtot_buf, boundary; ndrange=n)
+        write!(grad, d_buf, coords, atoms, scratch.idx_dev, scratch.com_buf, scratch.mtot_buf; ndrange=n)
         return nothing
     end
 
     atom_inds_used = iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds
-    r_ic_all, m_used, M_total = rg_dists_cpu(coords, atoms, atom_inds_used, boundary)
+    r_ic_all, m_used, M_total = rg_dists_cpu(coords, atoms, atom_inds_used)
     rg = sqrt.(sum(sum_abs2.(r_ic_all) .* m_used; dims=1) ./ M_total)
     d_buf .= rg
 
@@ -1275,8 +1264,8 @@ function calculate_virial!(virial_buff, cv::CalcRg, coords, forces, atoms, bound
     ids = (iszero(length(cv.atom_inds)) ? eachindex(coords) : cv.atom_inds)
     f_used = @view forces[ids]
 
-    # Accumulate sum( (r_i - r_com) * F_i^T ) with the same minimum-image r_i - r_com as the CV
-    r_ic_all, _, _ = rg_dists_cpu(coords, atoms, ids, boundary)
+    # Accumulate sum( (r_i - r_com) * F_i^T )
+    r_ic_all, _, _ = rg_dists_cpu(coords, atoms, ids)
     virial_buff .+= sum(r_ic_all .* transpose.(f_used))
 end
 

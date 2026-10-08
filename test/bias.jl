@@ -692,12 +692,16 @@ end
     rg_cv_pbc  = CalcRg([1, 2, 3])
     rg_cv_wrap = CalcRg([1, 2, 3], :wrap)
 
-    # :pbc (topology-unwrapped) and :wrap (raw, PBC-aware COM) agree for a molecule straddling
-    # the boundary when every atom is within one periodic image of the others.
+    # :pbc unwraps the molecule straddling the boundary to atoms at -0.05, 0.05 and 0.15 nm
     sys_cpu = System(atoms=atoms_uw, coords=coords_uw, boundary=boundary_uw, topology=topology)
     rg_pbc_cpu = calculate_cv(rg_cv_pbc, Molly.bias_coords(sys_cpu, rg_cv_pbc), sys_cpu.atoms, boundary_uw)
     rg_wrap_cpu = calculate_cv(rg_cv_wrap, Molly.bias_coords(sys_cpu, rg_cv_wrap), sys_cpu.atoms, boundary_uw)
-    @test isapprox(rg_pbc_cpu, rg_wrap_cpu; atol=1e-9u"nm")
+    @test isapprox(rg_pbc_cpu, 0.1 * sqrt(2 / 3) * u"nm"; atol=1e-9u"nm")
+
+    # :wrap agrees with :pbc for the same molecule shifted so that it does not cross the boundary
+    coords_in_box = wrap_coords.(coords_uw .+ (SVector(1.0, 0.0, 0.0)u"nm",), (boundary_uw,))
+    rg_wrap_in_box = calculate_cv(rg_cv_wrap, coords_in_box, atoms_uw, boundary_uw)
+    @test isapprox(rg_pbc_cpu, rg_wrap_in_box; atol=1e-9u"nm")
 
     if CUDA.functional()
         sys_gpu = System(
@@ -1036,27 +1040,25 @@ end
         @test all(isapprox.(ustrip.(fs_cpu[3]), ustrip.(force_atom3); atol=1e-9))
     end
 
-    # The same group of atoms in two periodic images -- crossing the box, and not -- must give the
-    # same forces and virial.
-    @testset "CalcRg :wrap virial for a group crossing the boundary" for AT in array_list
-        coords_cross = [SVector(1.9, 0.0, 0.0)u"nm", SVector(1.95, 0.0, 0.0)u"nm",
-                        SVector(0.05, 0.0, 0.0)u"nm", SVector(0.1, 0.0, 0.0)u"nm"]
-        coords_whole = [SVector(-0.1, 0.0, 0.0)u"nm", SVector(-0.05, 0.0, 0.0)u"nm",
-                        SVector(0.05, 0.0, 0.0)u"nm", SVector(0.1, 0.0, 0.0)u"nm"]
-        bias = BiasPotential(CalcRg([1, 2, 3, 4], :wrap), SquareBias(300.0u"kJ * mol^-1 * nm^-2", 0.5u"nm"))
-        function forces_virial(coords)
-            sys = System(atoms=AT([Atom(mass=10.0u"g/mol") for _ in 1:4]), coords=AT(coords),
-                         boundary=CubicBoundary(2.0u"nm"), general_inters=(bias,))
-            buffers = Molly.init_buffers!(sys, 1)
-            fs = Molly.zero_forces(sys)
-            Molly.forces!(fs, sys, nothing, 1, buffers, Val(true); n_threads=1)
-            return ustrip.(Molly.from_device(fs)), ustrip.(Molly.from_device(buffers.virial))
-        end
-        fs_cross, virial_cross = forces_virial(coords_cross)
-        fs_whole, virial_whole = forces_virial(coords_whole)
-        @test all(isapprox.(fs_cross, fs_whole; atol=1e-9))
-        @test all(isapprox.(virial_cross, virial_whole; atol=1e-9))
-        @test !iszero(virial_whole)
+    # A whole chain longer than half the box, or than the box, must match radius_gyration
+    @testset "CalcRg :pbc for an extended chain" for AT in array_list, frac in (0.4, 0.6, 0.8, 1.2)
+        boundary_chain = CubicBoundary(6.0u"nm")
+        n = 21
+        coords_whole = [SVector(frac * 6.0 * (i - 1) / (n - 1), 1.0, 1.0)u"nm" for i in 1:n]
+        atoms_chain = [Atom(mass=(10.0 + 5 * (i % 3)) * u"g/mol") for i in 1:n]
+        rg = radius_gyration(coords_whole, atoms_chain)
+        @test calculate_cv(CalcRg(collect(1:n)), coords_whole, atoms_chain, boundary_chain) ≈ rg
+
+        k, target = 300.0u"kJ * mol^-1 * nm^-2", 0.8 * rg
+        sys = System(atoms=AT(atoms_chain), coords=AT(wrap_coords.(coords_whole, (boundary_chain,))),
+                     boundary=boundary_chain, topology=MolecularTopology(1:(n - 1), 2:n, n),
+                     general_inters=(BiasPotential(CalcRg(collect(1:n)), SquareBias(k, target)),))
+        @test potential_energy(sys) ≈ k / 2 * (rg - target)^2
+        masses = mass.(atoms_chain)
+        com = sum(coords_whole .* masses) / sum(masses)
+        fs_expected = -k * (rg - target) .* masses .* (coords_whole .- (com,)) ./ (sum(masses) * rg)
+        fs = Molly.from_device(forces(sys))
+        @test all(isapprox.(fs, fs_expected; atol=1e-6u"kJ * mol^-1 * nm^-1"))
     end
 
     # Shared base system for the testsets below, remade per-testset via System(sys; coords=..,
