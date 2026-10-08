@@ -589,7 +589,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                     interacting_tiles_diag, num_interacting_tiles,
                     interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
-                    step_n_preprocessed, sparse_pair_generation, num_pairs,
+                    step_n_preprocessed, sparse_pair_generation, num_pairs;
                     bias_scratch=Dict{UInt64, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
