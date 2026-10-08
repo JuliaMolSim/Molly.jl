@@ -388,6 +388,14 @@
                                                              friction=T(1.0));
                                                    general_inters=(bias_uc,))
             @test all(isapprox.(coords_false, coords_true; atol=T(1e-9)))
+
+            # Biases of different types, passed to the batched kernels as one mixed tuple
+            bias_lin = BiasPotential(CalcDist([3], [4], CalcSingleDist(), :wrap),
+                                     LinearBias(T(10.0), T(1.0)))
+            coords_false, coords_true = run_coords(Langevin(dt=T(0.001), temperature=temp_uc,
+                                                             friction=T(1.0));
+                                                   general_inters=(bias_uc, bias_lin))
+            @test all(isapprox.(coords_false, coords_true; atol=T(1e-9)))
         end
 
     else

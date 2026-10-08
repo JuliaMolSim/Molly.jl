@@ -500,7 +500,7 @@ end
 # bias_type/array at compile time and batch all biases into 3 kernel launches per step instead of
 # 3*n_bias -- see force.jl's cuda_graph_capturing branch for the call site.
 #
-# Recursion over the NTuples keeps indexing type-stable/
+# Recursion over the tuples keeps indexing type-stable/
 # GPU-codegen-safe when the tuple element types differ per bias (d_buf/d_bias_buf/bad_step have a
 # different Unitful eltype per bias). The helpers below assume at least one bias, so the base case is the 1-tuple.
 @inline function _bias_apply_recurse(grads::Tuple{Any}, fs_svecs::Tuple{Any}, d_bias_bufs::Tuple{Any}, i)
@@ -514,8 +514,8 @@ end
     return v + _bias_apply_recurse(Base.tail(grads), Base.tail(fs_svecs), Base.tail(d_bias_bufs), i)
 end
 
-@kernel inbounds=true function bias_batched_apply_kernel!(fs, grads::NTuple{N}, fs_svecs::NTuple{N},
-                                                            d_bias_bufs::NTuple{N}) where N
+@kernel inbounds=true function bias_batched_apply_kernel!(fs, grads::Tuple, fs_svecs::Tuple,
+                                                            d_bias_bufs::Tuple)
     i = @index(Global, Linear)
     fs[i] -= _bias_apply_recurse(grads, fs_svecs, d_bias_bufs, i)
 end
@@ -539,8 +539,8 @@ end
 # ndrange=max(n_atoms) simply reads out via its own bounds check (as bias_finite_check_kernel!
 # does per-array). Each bias's bad_step is written independently, needing no atomic (see
 # check_bias_finite_deferred!).
-@kernel inbounds=true function bias_batched_finite_kernel!(values::NTuple{N}, bad_steps::NTuple{N},
-                                                             step_n::Int) where N
+@kernel inbounds=true function bias_batched_finite_kernel!(values::Tuple, bad_steps::Tuple,
+                                                             step_n::Int)
     i = @index(Global, Linear)
     _bias_check_recurse(values, bad_steps, i, step_n)
 end
@@ -576,10 +576,10 @@ end
     return _bias_gradient_recurse(Base.tail(d_bias_bufs), Base.tail(d_bufs), Base.tail(bias_types))
 end
 
-# Batches bias_gradient across every bias in one launch; bias_types is a plain NTuple of
+# Batches bias_gradient across every bias in one launch; bias_types is a plain Tuple of
 # bias_type values passed through as kernel arguments (like other bitstype-ish scalar args).
-@kernel inbounds=true function bias_batched_gradient_kernel!(d_bias_bufs::NTuple{N}, @Const(d_bufs::NTuple{N}),
-                                                               bias_types::NTuple{N}) where N
+@kernel inbounds=true function bias_batched_gradient_kernel!(d_bias_bufs::Tuple, @Const(d_bufs::Tuple),
+                                                               bias_types::Tuple)
     idx = @index(Global, Linear)
     idx == 1 && _bias_gradient_recurse(d_bias_bufs, d_bufs, bias_types)
 end
