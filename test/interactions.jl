@@ -138,8 +138,9 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5)
+    # CoreIRole atoms are scaled by their λ (dual topology); the default CoreRole is not
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
     inter = LennardJonesSoftCoreBeutler(α=0.3)
     @test isapprox(
         force(inter, dr14, a1, a1),
@@ -208,8 +209,11 @@
         )
         core = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
         ref_inter = LennardJones()
+        # intraLJ=true keeps the sterics between alchemical atoms of the same role on
+        scheduler = DefaultLambdaScheduler(intraLJ=true)
 
-        for inter in (LennardJonesSoftCoreBeutler(α=0.3), LennardJonesSoftCoreGapsys(α=0.85))
+        for inter in (LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler),
+                      LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler))
             @test isapprox(
                 force(inter, dr13, alch_i, alch_j),
                 force(ref_inter, dr13, alch_i, alch_j);
@@ -248,7 +252,7 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
+    AH_a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
     @test isapprox(
         potential_energy(inter, dr13, AH_a1, AH_a1),
         -0.058520865u"kJ * mol^-1";
@@ -281,7 +285,7 @@
         -0.5 * 0.08202077553076385u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
-    AH_off = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0)
+    AH_off = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0, alch_role=Molly.CoreIRole)
     @test all(iszero, force(inter, dr13, AH_off, AH_a1))
     @test iszero(potential_energy(inter, dr13, AH_off, AH_a1))
 
@@ -396,20 +400,22 @@
 
     @testset "Scaled Coulomb matches pre-scaled charges" begin
         λ_state = 0.75
-        scheduler = Molly.DefaultLambdaScheduler()
-        λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+        scheduler = DefaultLambdaScheduler()
+        λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
         raw_i = Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole)
         raw_j = Atom(charge=-0.8, λ=λ_state, alch_role=Molly.InsertRole)
-        ref_i = Atom(charge=1.0 * λ_elec)
-        ref_j = Atom(charge=-0.8 * λ_elec)
+        # Dual topology scales the pair energy once in the plain and reaction field forms, and
+        # each charge in the Ewald form so that it agrees with the mesh
+        pair_i, pair_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8)
+        charge_i, charge_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8 * λ_elec)
         rc_test = 1.0u"nm"
 
-        for (scaled_inter, ref_inter) in (
-            (CoulombScaled(scheduler=scheduler), Coulomb()),
+        for (scaled_inter, ref_inter, ref_i, ref_j) in (
+            (CoulombScaled(scheduler=scheduler), Coulomb(), pair_i, pair_j),
             (CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
-             CoulombReactionField(dist_cutoff=rc_test)),
+             CoulombReactionField(dist_cutoff=rc_test), pair_i, pair_j),
             (CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
-             CoulombEwald(dist_cutoff=rc_test)),
+             CoulombEwald(dist_cutoff=rc_test), charge_i, charge_j),
         )
             @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
                            force(ref_inter, dr12, ref_i, ref_j);
@@ -443,10 +449,9 @@
             @test iszero(potential_energy(scaled_inter, dr_zero, raw_i, raw_j))
         end
 
-        scheduler = Molly.EleScaledLambdaScheduler()
-        λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
-        ref_i = Atom(charge=1.0 * λ_elec)
-        ref_j = Atom(charge=-0.8 * λ_elec)
+        scheduler = EleScaledLambdaScheduler()
+        λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
+        ref_i, ref_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8)
         scaled_inter = CoulombScaled(scheduler=scheduler)
 
         @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
@@ -457,8 +462,8 @@
                        atol=1e-9u"kJ * mol^-1")
     end
 
-    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5)
-    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5)
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1", λ = 0.5, alch_role=Molly.CoreIRole)
     inter = CoulombSoftCoreBeutler(α=0.3)
     @test isapprox(
         force(inter, dr13, a1, a1),
@@ -521,8 +526,8 @@
         )
 
         a1_rf = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
-        a1_l0 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0)
-        a1_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
+        a1_l0 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0, alch_role=Molly.CoreIRole)
+        a1_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole)
 
         @testset "lambda one matches reaction field" begin
             for dr_test in (dr12, dr13, dr14)
@@ -679,8 +684,8 @@
         )
 
         a1_l1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
-        a1_l0 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0)
-        a1_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
+        a1_l0 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.0, alch_role=Molly.CoreIRole)
+        a1_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole)
 
         @testset "lambda one matches CoulombEwald" begin
             for dr_test in (dr12, dr13, dr14_ewald)
@@ -761,7 +766,7 @@
 
     @testset "Soft-core Exact Overlap Safeguards" begin
         dr_zero = zero(dr12)
-        overlap_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
+        overlap_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole)
         overlap_inters = (
             LennardJonesSoftCoreBeutler(α=0.3),
             LennardJonesSoftCoreGapsys(α=0.85),
@@ -785,8 +790,8 @@
             charge=1.0,
             σ=0.3u"nm",
             ϵ=0.2u"kJ * mol^-1",
-            λ=0.25,
-            alch_role=Molly.DeleteRole,
+            λ=0.0,
+            alch_role=Molly.InsertRole,
         )
         core_atom = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
 
@@ -809,8 +814,8 @@
 
         @testset "default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = Molly.DefaultLambdaScheduler()
-            λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+            scheduler = DefaultLambdaScheduler()
+            λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [
                 Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole),
@@ -858,8 +863,8 @@
 
         @testset "non-default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = Molly.EleScaledLambdaScheduler()
-            λ_elec = Molly.scale_elec(scheduler, λ_state, Molly.InsertRole)
+            scheduler = EleScaledLambdaScheduler()
+            λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [
                 Atom(charge=1.2, λ=λ_state, alch_role=Molly.InsertRole),
@@ -899,8 +904,8 @@
             Atom(charge=-1.0, σ=0.25u"nm", ϵ=0.15u"kJ * mol^-1", λ=1.0),
         ]
         atoms_l05 = [
-            Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5),
-            Atom(charge=-1.0, σ=0.25u"nm", ϵ=0.15u"kJ * mol^-1", λ=0.5),
+            Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole),
+            Atom(charge=-1.0, σ=0.25u"nm", ϵ=0.15u"kJ * mol^-1", λ=0.5, alch_role=Molly.CoreIRole),
         ]
 
         sys_ref = System(
@@ -1396,6 +1401,20 @@
         atol=1e-7u"kJ * mol^-1",
     )
 
+    sys_mb = System(
+        atoms=[Atom(mass=1.0u"g/mol")],
+        coords=[SVector(-0.5, 0.25)u"nm"],
+        boundary=RectangularBoundary(Inf * u"nm"),
+        general_inters=(MullerBrown(),),
+    )
+    # match_mode is :all by default, so this asserts exactly one warning is logged
+    @test_logs (:warn, r"virial contribution for MullerBrown") begin
+        for _ in 1:3
+            virial(sys_mb)
+        end
+    end
+    @test_throws ErrorException virial(sys_mb; strictness=:error)
+
     # RBTorsion tests
     # Use proper non-collinear geometry for torsion - atoms arranged in a dihedral
     c1t = SVector(0.0, 0.0, 0.0)u"nm"
@@ -1403,20 +1422,48 @@
     c3t = SVector(0.2, 0.1, 0.0)u"nm"
     c4t = SVector(0.3, 0.1, 0.1)u"nm"
     boundary_rb = CubicBoundary(5.0u"nm")
-    
-    rb1 = RBTorsion(f1=10.0u"kJ * mol^-1", f2=20.0u"kJ * mol^-1",
-                    f3=30.0u"kJ * mol^-1", f4=5.0u"kJ * mol^-1")
-    
-    # Test that force calculation produces expected values (regression test)
+
+    rb_coeffs = (1.0, 10.0, 20.0, 30.0, 5.0, 2.0) .* u"kJ * mol^-1"
+    rb1 = RBTorsion(c0=rb_coeffs[1], c1=rb_coeffs[2], c2=rb_coeffs[3],
+                    c3=rb_coeffs[4], c4=rb_coeffs[5], c5=rb_coeffs[6])
+
     fs = force(rb1, c1t, c2t, c3t, c4t, boundary_rb)
-    @test isapprox(norm(fs.f1), 497.6067743425172u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(norm(fs.f2), 673.7627575276049u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(norm(fs.f3), 351.86112450195805u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(norm(fs.f4), 287.2934051172337u"kJ * mol^-1 * nm^-1"; atol=1e-9u"kJ * mol^-1 * nm^-1")
-    
-    # Test potential energy calculation
+    @test isapprox(fs.f1, SVector(0.0, 0.0, 785.8213324448034)u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(fs.f2, SVector(-130.9702220741338, 130.9702220741338,
+                                  -1047.7617765930711)u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(fs.f3, SVector(392.9106662224017, -392.9106662224017,
+                                  0.0)u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(fs.f4, SVector(-261.9404441482678, 261.9404441482678,
+                                  261.9404441482678)u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(norm(fs.f1 + fs.f2 + fs.f3 + fs.f4), 0.0u"kJ * mol^-1 * nm^-1";
+                   atol=1e-9u"kJ * mol^-1 * nm^-1")
+
     pe = potential_energy(rb1, c1t, c2t, c3t, c4t, boundary_rb)
-    @test isapprox(pe, 47.38033871712585u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
+    @test isapprox(pe, 19.89752766583465u"kJ * mol^-1"; atol=1e-9u"kJ * mol^-1")
+
+    # ψ = ϕ - 180°, so at ϕ = 180° the energy is the sum of the coefficients and
+    #   at ϕ = 0° the odd coefficients change sign
+    c1_trans = SVector(0.0, 0.1, 0.0)u"nm"
+    c2_trans = SVector(0.0, 0.0, 0.0)u"nm"
+    c3_trans = SVector(0.1, 0.0, 0.0)u"nm"
+    c4_trans = SVector(0.1, -0.1, 0.0)u"nm"
+    c4_cis   = SVector(0.1, 0.1, 0.0)u"nm"
+    @test torsion_angle(c1_trans, c2_trans, c3_trans, c4_trans, boundary_rb) ≈ π
+    @test potential_energy(rb1, c1_trans, c2_trans, c3_trans, c4_trans, boundary_rb) ≈
+          sum(rb_coeffs)
+    @test torsion_angle(c1_trans, c2_trans, c3_trans, c4_cis, boundary_rb) ≈ 0.0 atol=1e-12
+    @test potential_energy(rb1, c1_trans, c2_trans, c3_trans, c4_cis, boundary_rb) ≈
+          sum((-1)^n * rb_coeffs[n + 1] for n in 0:5)
+
+    # The constant term does not contribute to the force
+    rb_c0 = RBTorsion(c0=3.0u"kJ * mol^-1", c1=0.0u"kJ * mol^-1", c2=0.0u"kJ * mol^-1",
+                      c3=0.0u"kJ * mol^-1", c4=0.0u"kJ * mol^-1", c5=0.0u"kJ * mol^-1")
+    @test potential_energy(rb_c0, c1t, c2t, c3t, c4t, boundary_rb) ≈ 3.0u"kJ * mol^-1"
+    @test iszero(force(rb_c0, c1t, c2t, c3t, c4t, boundary_rb).f1)
 
     # PeriodicTorsion tests
     pt1 = PeriodicTorsion(periodicities=(1, 2, 3), phases=(0.0, Float64(π/2), Float64(π)),
@@ -1569,6 +1616,26 @@
 
     InteractionList2Atoms([1, 2], [3, 4], [0.0, 0.0])
     @test_throws ArgumentError InteractionList2Atoms([1, 2], [3, 4], [0.0])
+
+    # Indexing and iterating over specific interaction lists
+    bond_1 = HarmonicBond(k=100.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm")
+    bond_2 = HarmonicBond(k=200.0u"kJ * mol^-1 * nm^-2", r0=0.2u"nm")
+    il2 = InteractionList2Atoms([1, 3], [2, 4], [bond_1, bond_2], ["b1", "b2"])
+    @test length(il2) == 2
+    @test eachindex(il2) == 1:2
+    @test il2[1] == (i=1, j=2, inter=bond_1, type="b1")
+    @test il2[end] == (i=3, j=4, inter=bond_2, type="b2")
+    @test collect(il2) == [il2[1], il2[2]]
+    @test [entry.i for entry in il2] == [1, 3]
+    il1 = InteractionList1Atoms([2], [HarmonicPositionRestraint(
+                    k=100.0u"kJ * mol^-1 * nm^-2", x0=SVector(1.0, 1.0, 1.0)u"nm")])
+    @test il1[1].i == 2
+    il3 = InteractionList3Atoms([1], [2], [3],
+                                [HarmonicAngle(k=10.0u"kJ * mol^-1", θ0=2.0)])
+    @test (il3[1].i, il3[1].j, il3[1].k) == (1, 2, 3)
+    il4 = InteractionList4Atoms([1], [2], [3], [4],
+                    [PeriodicTorsion(periodicities=[1], phases=[0.0], ks=[10.0u"kJ * mol^-1"])])
+    @test (il4[1].i, il4[1].j, il4[1].k, il4[1].l) == (1, 2, 3, 4)
 end
 
 @testset "Cutoffs" begin
@@ -1633,7 +1700,93 @@ end
     end
 end
 
-@testset "Ewald" begin
+@testset "Force is minus the energy gradient" begin
+    # The reference values above check force and potential_energy separately, so also
+    #   check that they are consistent with each other by finite differences
+    boundary_fd = CubicBoundary(5.0u"nm")
+    atom_i = Atom(index=1, atom_type=1, charge= 0.6, σ=0.25u"nm", ϵ=0.3u"kJ * mol^-1", λ=1.0)
+    atom_j = Atom(index=2, atom_type=2, charge=-0.4, σ=0.32u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
+    kbT = 2.479u"kJ * mol^-1"
+
+    pairwise_inters_fd = (
+        LennardJones(),
+        LennardJones(cutoff=ShiftedPotentialCutoff(0.9u"nm")),
+        LennardJones(cutoff=ShiftedForceCutoff(0.9u"nm")),
+        LennardJones(cutoff=CubicSplineCutoff(0.5u"nm", 0.9u"nm")),
+        LennardJonesSoftCoreBeutler(α=0.3),
+        LennardJonesSoftCoreGapsys(α=0.85),
+        SoftSphere(),
+        Mie(m=5, n=10),
+        DoubleExponential(α=12.159626, β=4.326311),
+        Coulomb(),
+        CoulombReactionField(dist_cutoff=0.9u"nm"),
+        Yukawa(),
+    )
+    h_pair = 1e-7u"nm"
+    dx = SVector(h_pair, zero(h_pair), zero(h_pair))
+    for inter in pairwise_inters_fd
+        for r in (0.3u"nm", 0.45u"nm", 0.7u"nm")
+            dr = SVector(r, zero(r), zero(r))
+            dU_dx = (potential_energy(inter, dr + dx, atom_i, atom_j) -
+                     potential_energy(inter, dr - dx, atom_i, atom_j)) / 2h_pair
+            @test isapprox(force(inter, dr, atom_i, atom_j)[1], -dU_dx;
+                           rtol=1e-4, atol=1e-5u"kJ * mol^-1 * nm^-1")
+        end
+    end
+
+    # Check every coordinate of a specific interaction against a central difference
+    function test_energy_gradient(inter, coords, boundary)
+        fs = force(inter, coords..., boundary)
+        fs_atoms = [getproperty(fs, p) for p in propertynames(fs)]
+        h = 1e-7 * oneunit(eltype(eltype(coords)))
+        for ai in eachindex(coords)
+            for d in 1:length(coords[ai])
+                δ = SVector(ntuple(k -> (k == d ? h : zero(h)), length(coords[ai])))
+                cs_p, cs_m = collect(coords), collect(coords)
+                cs_p[ai] += δ
+                cs_m[ai] -= δ
+                dU_dx = (potential_energy(inter, cs_p..., boundary) -
+                         potential_energy(inter, cs_m..., boundary)) / 2h
+                @test isapprox(fs_atoms[ai][d], -dU_dx;
+                               rtol=1e-4, atol=1e-4 * oneunit(dU_dx))
+            end
+        end
+    end
+
+    c1_fd = SVector(1.00, 1.00, 1.00)u"nm"
+    c2_fd = SVector(1.23, 1.05, 0.97)u"nm"
+    c3_fd = SVector(1.41, 1.22, 1.06)u"nm"
+    c4_fd = SVector(1.55, 1.19, 1.28)u"nm"
+
+    test_energy_gradient(HarmonicPositionRestraint(k=300.0u"kJ * mol^-1 * nm^-2", x0=c1_fd),
+                         (c2_fd,), boundary_fd)
+    test_energy_gradient(HarmonicBond(k=3000.0u"kJ * mol^-1 * nm^-2", r0=0.2u"nm"),
+                         (c1_fd, c2_fd), boundary_fd)
+    test_energy_gradient(MorseBond(D=100.0u"kJ * mol^-1", a=10.0u"nm^-1", r0=0.2u"nm"),
+                         (c1_fd, c2_fd), boundary_fd)
+    test_energy_gradient(FENEBond(k=10.0u"nm^-2" * kbT, r0=1.6u"nm", σ=1.0u"nm", ϵ=kbT),
+                         (c1_fd, c2_fd), boundary_fd)
+    test_energy_gradient(HarmonicAngle(k=300.0u"kJ * mol^-1", θ0=0.8),
+                         (c1_fd, c2_fd, c3_fd), boundary_fd)
+    test_energy_gradient(CosineAngle(k=10.0 * kbT, θ0=0.9),
+                         (c1_fd, c2_fd, c3_fd), boundary_fd)
+    test_energy_gradient(UreyBradley(kangle=300.0u"kJ * mol^-1", θ0=0.8,
+                                     kbond=10_000.0u"kJ * mol^-1 * nm^-2", r0=0.3u"nm"),
+                         (c1_fd, c2_fd, c3_fd), boundary_fd)
+    test_energy_gradient(PeriodicTorsion(periodicities=(1, 2, 3),
+                                         phases=(0.0, Float64(π / 2), Float64(π)),
+                                         ks=(10.0u"kJ * mol^-1", 5.0u"kJ * mol^-1",
+                                             2.0u"kJ * mol^-1"), proper=true),
+                         (c1_fd, c2_fd, c3_fd, c4_fd), boundary_fd)
+    test_energy_gradient(RBTorsion(c0=1.0u"kJ * mol^-1", c1=10.0u"kJ * mol^-1",
+                                   c2=20.0u"kJ * mol^-1", c3=30.0u"kJ * mol^-1",
+                                   c4=5.0u"kJ * mol^-1", c5=2.0u"kJ * mol^-1"),
+                         (c1_fd, c2_fd, c3_fd, c4_fd), boundary_fd)
+    test_energy_gradient(HarmonicTorsion(1000.0u"kJ * mol^-1", -1.8),
+                         (c1_fd, c2_fd, c3_fd, c4_fd), boundary_fd)
+end
+
+@testset "Ewald and PME" begin
     dist_cutoff = 0.9u"nm"
     E_openmm = -5.465127432466375u"kJ/mol"
     Fs_openmm = [
@@ -1648,30 +1801,35 @@ end
         SVector(71.2789625237053  , -18.668854487669485, -74.8618171164182  ),
     ] * u"kJ * mol^-1 * nm^-1"
 
-    for AT in array_list
-        for n_threads in n_threads_list
-            for T in (Float64, Float32)
-                if (n_threads > 1 && AT != Array) || (T == Float64 && AT == MtlArray)
+    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
+
+    for AT in array_list_metal
+        for T in (Float64, Float32)
+            if T == Float64 && AT == MtlArray
+                continue
+            end
+            sys_init = System(
+                joinpath(data_dir, "water_3mol_cubic.pdb"),
+                ff;
+                array_type=AT,
+                float_type=T,
+                dist_cutoff=T(dist_cutoff),
+                dist_buffer=zero(T(dist_cutoff)),
+                nonbonded_method=SetupEwald(),
+                dispersion_correction=false,
+                center_coords=false,
+                strictness=:nowarn,
+            )
+            sys = System(
+                sys_init;
+                pairwise_inters=(sys_init.pairwise_inters[2],),
+                specific_inter_lists=(sys_init.specific_inter_lists[end],),
+            )
+
+            for n_threads in n_threads_list
+                if n_threads > 1 && AT != Array
                     continue
                 end
-                ff = MolecularForceField(T, joinpath(ff_dir, "tip3p_standard.xml"))
-                sys_init = System(
-                    joinpath(data_dir, "water_3mol_cubic.pdb"),
-                    ff;
-                    array_type=AT,
-                    dist_cutoff=T(dist_cutoff),
-                    dist_buffer=zero(T(dist_cutoff)),
-                    nonbonded_method=:ewald,
-                    dispersion_correction=false,
-                    center_coords=false,
-                    strictness=:nowarn,
-                )
-                sys = System(
-                    sys_init;
-                    pairwise_inters=(sys_init.pairwise_inters[2],),
-                    specific_inter_lists=(sys_init.specific_inter_lists[end],),
-                )
-
                 @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=2e-4u"kJ/mol"
                 fs = from_device(forces(sys; n_threads=n_threads))
                 @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"
@@ -1681,11 +1839,13 @@ end
                 E_gi2, fs_gi2 = AtomsCalculators.energy_forces!(fs_gi2, sys,
                                                 sys.general_inters[1]; n_threads=n_threads)
                 @test E_gi == E_gi2
-                @test fs_gi == fs_gi2
+                # Not guaranteed to be exact on GPU
+                @test maximum(norm.(fs_gi .- fs_gi2)) < 1e-4u"kJ * mol^-1 * nm^-1"
             end
         end
     end
 
+    pme_mesh_dims = (18, 19, 20)
     pme_data = (
         (
             "water_3mol_cubic.pdb",
@@ -1720,30 +1880,33 @@ end
     )
 
     for (pdb_fp, E_openmm, Fs_openmm) in pme_data
-        for AT in array_list
-            for n_threads in n_threads_list
-                for T in (Float64, Float32)
-                    if (n_threads > 1 && AT != Array) || (T == Float64 && AT == MtlArray)
+        for AT in array_list_metal
+            for T in (Float64, Float32)
+                if T == Float64 && AT == MtlArray
+                    continue
+                end
+                sys_init = System(
+                    joinpath(data_dir, pdb_fp),
+                    ff;
+                    array_type=AT,
+                    float_type=T,
+                    dist_cutoff=T(dist_cutoff),
+                    dist_buffer=zero(T(dist_cutoff)),
+                    nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
+                    dispersion_correction=false,
+                    center_coords=false,
+                    strictness=:nowarn,
+                )
+                sys = System(
+                    sys_init;
+                    pairwise_inters=(sys_init.pairwise_inters[2],),
+                    specific_inter_lists=(sys_init.specific_inter_lists[end],),
+                )
+
+                for n_threads in n_threads_list
+                    if n_threads > 1 && AT != Array
                         continue
                     end
-                    ff = MolecularForceField(T, joinpath(ff_dir, "tip3p_standard.xml"))
-                    sys_init = System(
-                        joinpath(data_dir, pdb_fp),
-                        ff;
-                        array_type=AT,
-                        dist_cutoff=T(dist_cutoff),
-                        dist_buffer=zero(T(dist_cutoff)),
-                        nonbonded_method=:pme,
-                        dispersion_correction=false,
-                        center_coords=false,
-                        strictness=:nowarn,
-                    )
-                    sys = System(
-                        sys_init;
-                        pairwise_inters=(sys_init.pairwise_inters[2],),
-                        specific_inter_lists=(sys_init.specific_inter_lists[end],),
-                    )
-
                     @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=2e-4u"kJ/mol"
                     fs = from_device(forces(sys; n_threads=n_threads))
                     @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"
@@ -1752,11 +1915,44 @@ end
                     fs_gi2 = zero(fs_gi)
                     E_gi2, fs_gi2 = AtomsCalculators.energy_forces!(fs_gi2, sys,
                                                     sys.general_inters[1]; n_threads=n_threads)
-                    @test E_gi == E_gi2
-                    @test fs_gi == fs_gi2
+                    @test abs(E_gi - E_gi2) < 1e-4u"kJ * mol^-1"
+                    @test maximum(norm.(fs_gi .- fs_gi2)) < 1e-4u"kJ * mol^-1 * nm^-1"
                 end
             end
         end
+    end
+
+    # The net charge correction contributes to the virial, so check the long range virial
+    #   against a finite difference of the energy under affine box scaling for a system
+    #   that is not neutral: tr(W) = -dU/dλ where coords -> λ*coords and boundary -> λ*boundary
+    n_atoms = 40
+    L = 2.0
+    rng = Xoshiro(3)
+    qs = randn(rng, n_atoms)
+    qs .+= (4.0 - sum(qs)) / n_atoms # Net charge of 4
+    atoms = [Atom(index=i, mass=1.0, charge=qs[i], σ=0.3, ϵ=0.2) for i in 1:n_atoms]
+    coords_start = [SVector{3}(rand(rng, 3) .* L) for _ in 1:n_atoms]
+
+    function scaled_system(method, λ)
+        boundary = CubicBoundary(λ * L)
+        inter = (method === :ewald ? Ewald(0.7) :
+                    PME(0.7, atoms, boundary; mesh_dims=(16, 16, 16)))
+        return System(
+            atoms=atoms,
+            coords=[λ .* c for c in coords_start],
+            boundary=boundary,
+            general_inters=(inter,),
+            force_units=NoUnits,
+            energy_units=NoUnits,
+            strictness=:nowarn,
+        )
+    end
+
+    for method in (:ewald, :pme)
+        h = 1e-6
+        dU_dλ = (potential_energy(scaled_system(method, 1 + h), nothing) -
+                    potential_energy(scaled_system(method, 1 - h), nothing)) / (2h)
+        @test tr(virial(scaled_system(method, 1.0), nothing; n_threads=1)) ≈ -dU_dλ rtol=1e-5
     end
 end
 

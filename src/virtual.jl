@@ -5,10 +5,11 @@ export
     TwoParticleAverageSite,
     ThreeParticleAverageSite,
     OutOfPlaneSite,
+    LocalCoordinatesSite,
     place_virtual_sites!
 
-struct VirtualSite{T, IC}
-    type::Int # 1/2/3/4 for OneParticleSite/TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite
+struct VirtualSite{T, IC, P}
+    type::Int # 1/2/3/4/5 for OneParticleSite/TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite/LocalCoordinatesSite
     atom_ind::Int
     atom_1::Int
     atom_2::Int # 0 in OneParticleSite case
@@ -19,9 +20,11 @@ struct VirtualSite{T, IC}
     weight_12::T
     weight_13::T
     weight_cross::IC # Units are 1/L
+    local_weights::SVector{9, T} # Origin, x and y weights in the LocalCoordinatesSite case
+    local_position::SVector{3, P} # Units are L
 end
 
-struct VirtualSiteTemplate{T, IC}
+struct VirtualSiteTemplate{T, IC, P}
     type::Int
     name::String
     atom_name_1::String
@@ -33,6 +36,24 @@ struct VirtualSiteTemplate{T, IC}
     weight_12::T
     weight_13::T
     weight_cross::IC
+    local_weights::SVector{9, T}
+    local_position::SVector{3, P}
+end
+
+# Only a LocalCoordinatesSite uses the local coordinates fields, so the other site types are
+#   constructed without them, with the length type taken from weight_cross
+function VirtualSite(type, atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2::T, weight_3,
+                     weight_12, weight_13, weight_cross) where T
+    return VirtualSite(type, atom_ind, atom_1, atom_2, atom_3, weight_1, weight_2, weight_3,
+                       weight_12, weight_13, weight_cross, zero(SVector{9, T}),
+                       zero(SVector{3, typeof(inv(oneunit(weight_cross)))}))
+end
+
+function VirtualSiteTemplate(type, atom_name, atom_1, atom_2, atom_3, weight_1, weight_2::T,
+                             weight_3, weight_12, weight_13, weight_cross) where T
+    return VirtualSiteTemplate(type, atom_name, atom_1, atom_2, atom_3, weight_1, weight_2,
+                               weight_3, weight_12, weight_13, weight_cross, zero(SVector{9, T}),
+                               zero(SVector{3, typeof(inv(oneunit(weight_cross)))}))
 end
 
 @doc raw"""
@@ -45,6 +66,8 @@ Returns a `VirtualSite` defined by:
 \mathbf{r} = \mathbf{r}_1
 ```
 This can be useful in alchemical simulations when multiple versions of an atom are required.
+
+Not compatible with gradient calculation using Enzyme.
 """
 function OneParticleSite(atom_ind::Integer, atom_1::Integer, weight_cross=0.0u"nm^-1")
     # Optional weight_cross allows arrays of different virtual site types to be
@@ -64,6 +87,8 @@ Returns a `VirtualSite` defined by:
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2
 ```
 where ``w_1 + w_2`` must equal 1.
+
+Not compatible with gradient calculation using Enzyme.
 """
 function TwoParticleAverageSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, weight_1::T,
                                 weight_2::T, weight_cross=(zero(T) * u"nm^-1")) where T
@@ -85,6 +110,8 @@ Returns a `VirtualSite` defined by:
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2 + w_3 \mathbf{r}_3
 ```
 where ``w_1 + w_2 + w_3`` must equal 1.
+
+Not compatible with gradient calculation using Enzyme.
 """
 function ThreeParticleAverageSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer,
                                   atom_3::Integer, weight_1::T, weight_2::T, weight_3::T,
@@ -109,12 +136,84 @@ Returns a `VirtualSite` defined by:
 ```
 
 Only compatible with 3D systems.
-Not currently compatible with virial calculation.
+Not compatible with virial calculation.
+Not compatible with gradient calculation using Enzyme.
 """
 function OutOfPlaneSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer, atom_3::Integer,
                         weight_12::T, weight_13::T, weight_cross) where T
     return VirtualSite(4, atom_ind, atom_1, atom_2, atom_3, zero(T), zero(T),
                        zero(T), weight_12, weight_13, weight_cross)
+end
+
+@doc raw"""
+    LocalCoordinatesSite(atom_ind, atom_1, atom_2, atom_3, origin_weights, x_weights,
+                         y_weights, local_position)
+
+A virtual site defined by a position in a local coordinate system given by three atoms,
+matching the `LocalCoordinatesSite` of OpenMM.
+
+Returns a `VirtualSite` defined by:
+```math
+\begin{aligned}
+\mathbf{o} &= \sum_i w_i^o \mathbf{r}_i &
+\mathbf{x} &= \sum_i w_i^x \mathbf{r}_i &
+\mathbf{y} &= \sum_i w_i^y \mathbf{r}_i \\
+\hat{\mathbf{x}} &= \frac{\mathbf{x}}{|\mathbf{x}|} &
+\hat{\mathbf{z}} &= \frac{\mathbf{x} \times \mathbf{y}}{|\mathbf{x} \times \mathbf{y}|} &
+\hat{\mathbf{y}} &= \hat{\mathbf{z}} \times \hat{\mathbf{x}}
+\end{aligned}
+```
+```math
+\mathbf{r} = \mathbf{o} + p_1 \hat{\mathbf{x}} + p_2 \hat{\mathbf{y}} + p_3 \hat{\mathbf{z}}
+```
+where ``\mathbf{p}`` is `local_position`, ``\sum_i w_i^o`` must equal 1 and ``\sum_i w_i^x``
+and ``\sum_i w_i^y`` must equal 0.
+
+Since the axes follow the atoms rather than the box, this places sites at a fixed distance
+and orientation, such as the lone pairs of a CHARMM force field.
+
+Only compatible with 3D systems.
+Not compatible with virial calculation.
+Not compatible with gradient calculation using Enzyme.
+"""
+function LocalCoordinatesSite(atom_ind::Integer, atom_1::Integer, atom_2::Integer,
+                              atom_3::Integer, origin_weights, x_weights, y_weights,
+                              local_position)
+    check_local_weights(origin_weights, x_weights, y_weights, ArgumentError)
+    local_weights = SVector{9}(origin_weights..., x_weights..., y_weights...)
+    p = SVector{3}(local_position...)
+    T = eltype(local_weights)
+    return VirtualSite(5, atom_ind, atom_1, atom_2, atom_3, zero(T), zero(T), zero(T), zero(T),
+                       zero(T), zero(inv(oneunit(eltype(p)))), local_weights, p)
+end
+
+# The weights of a LocalCoordinatesSite have to give an origin and two directions, as in OpenMM
+function check_local_weights(origin_weights, x_weights, y_weights, error_type)
+    if !isapprox(sum(origin_weights), 1)
+        throw(error_type("origin_weights must sum to 1 for a LocalCoordinatesSite, found " *
+                         "$(sum(origin_weights))"))
+    end
+    for (name, weights) in (("x_weights", x_weights), ("y_weights", y_weights))
+        if !isapprox(sum(weights), 0; atol=1e-6)
+            throw(error_type("$name must sum to 0 for a LocalCoordinatesSite, found " *
+                             "$(sum(weights))"))
+        end
+    end
+    return nothing
+end
+
+# The axes of a LocalCoordinatesSite and the inverse norms used by the force distribution;
+#   a zero direction gives zero axes, as in OpenMM, and the site sits at the origin
+@inline function local_axes(xdir, ydir)
+    zdir = cross(xdir, ydir)
+    inv_norm_x, inv_norm_z = inv_norm_or_zero(xdir), inv_norm_or_zero(zdir)
+    dx, dz = xdir * inv_norm_x, zdir * inv_norm_z
+    return dx, cross(dz, dx), dz, inv_norm_x, inv_norm_z
+end
+
+@inline function inv_norm_or_zero(v)
+    n = norm(v)
+    return iszero(n) ? zero(inv(oneunit(n))) : inv(n)
 end
 
 function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D,
@@ -125,11 +224,12 @@ function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D,
 
     for (vi, vs) in enumerate(virtual_sites_cpu)
         i = vs.atom_ind
-        if !(vs.type in 1:4)
-            error("unrecognised virtual site type $(vs.type), should be 1/2/3/4")
+        if !(vs.type in 1:5)
+            error("unrecognised virtual site type $(vs.type), should be 1/2/3/4/5")
         end
-        if D != 3 && vs.type == 4
-            error("OutOfPlaneSite is only compatible with 3D systems")
+        if D != 3 && vs.type in (4, 5)
+            site_name = (vs.type == 4 ? "OutOfPlaneSite" : "LocalCoordinatesSite")
+            error("$site_name is only compatible with 3D systems")
         end
         if i > n_atoms
             error("virtual site $vi defines atom number $i but there are only " *
@@ -180,17 +280,20 @@ function setup_virtual_sites(virtual_sites, atom_masses, constraints, AT, D,
 end
 
 """
-    place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+    place_virtual_sites!(sys, virtual_sites=sys.virtual_sites; n_threads=Threads.nthreads())
 
 Set the coordinates of virtual sites based on the coordinates of the atoms that define them.
 """
-function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites)
+function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites;
+                              n_threads::Integer=Threads.nthreads())
     # Assumes that each virtual site is only defined once
-    if length(virtual_sites) > 0
+    n_vs = length(virtual_sites)
+    if n_vs > 0
         backend = get_backend(sys.coords)
         n_threads_dev = 256
-        kernel! = place_virtual_sites_kernel!(backend, n_threads_dev)
-        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=length(virtual_sites))
+        kernel! = backend_kernel(place_virtual_sites_kernel!, backend, n_threads_dev)
+        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
+                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
     end
     return sys
 end
@@ -218,25 +321,46 @@ end
             cross_r12_r13 = cross(r12, r13) # Units L^2
             vs_coord = coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
                        vs.weight_cross * cross_r12_r13
+        else # vs.type == 5
+            # Assumes 3D
+            # The origin weights sum to 1 and the direction weights to 0, so the sums over the
+            #   atoms can use r1 and relative vectors and stay in one periodic image
+            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+            w, p = vs.local_weights, vs.local_position
+            dx, dy, dz = local_axes(w[5] * r12 + w[6] * r13, w[8] * r12 + w[9] * r13)
+            vs_coord = coords[vs.atom_1] + w[2] * r12 + w[3] * r13 +
+                       p[1] * dx + p[2] * dy + p[3] * dz
         end
         coords[vs.atom_ind] = wrap_coords(vs_coord, boundary)
     end
 end
 
 function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
-                            virtual_sites=sys.virtual_sites) where {D, T}
+                            virtual_sites=sys.virtual_sites;
+                            n_threads::Integer=Threads.nthreads()) where {D, T}
     # Assumes that each virtual site is only defined once
-    if length(virtual_sites) > 0
+    n_vs = length(virtual_sites)
+    if n_vs > 0
         copy_forces_to_matrix!(buffers.fs_mat, fs, Val(D))
         backend = get_backend(sys.coords)
         n_threads_dev = 128
-        kernel! = distribute_forces_kernel!(backend, n_threads_dev)
-        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites;
-                ndrange=length(virtual_sites))
-        fs_mat_flat = reshape(buffers.fs_mat, length(sys) * D)
-        fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* sys.force_units
+        kernel! = backend_kernel(distribute_forces_kernel!, backend, n_threads_dev)
+        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
+                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
+        copy_matrix_to_forces!(fs, buffers.fs_mat, sys.force_units, Val(D), Val(T))
     end
     return fs
+end
+
+function copy_matrix_to_forces!(fs, fs_mat, force_units, ::Val{D}, ::Val{T}) where {D, T}
+    fs_mat_flat = reshape(fs_mat, length(fs) * D)
+    fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* force_units
+    return fs
+end
+
+function copy_matrix_to_forces!(fs::AbstractGPUArray, fs_mat, force_units, D::Val, T::Val)
+    return apply_force_units_gpu!(fs, fs_mat, force_units, D, T)
 end
 
 function copy_forces_to_matrix!(fs_mat::AbstractMatrix{T}, fs, ::Val{D}) where {T, D}
@@ -313,6 +437,26 @@ end
                 Atomix.@atomic fs_mat[dim, vs.atom_2] += ustrip(f2[dim])
                 Atomix.@atomic fs_mat[dim, vs.atom_3] += ustrip(f3[dim])
             end
+        elseif vs.type == 5
+            # Assumes 3D, the lengths are stripped to the unit of the coordinates so that the
+            #   derivatives below are in force units
+            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+            lu = unit(eltype(r12))
+            w = vs.local_weights
+            xdir = ustrip.(lu, w[5] * r12 + w[6] * r13)
+            ydir = ustrip.(lu, w[8] * r12 + w[9] * r13)
+            p = ustrip.(lu, vs.local_position)
+            dx, dy, dz, inv_norm_x, inv_norm_z = local_axes(xdir, ydir)
+            f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind])
+            for j in 1:3
+                atom_j = (j == 1 ? vs.atom_1 : (j == 2 ? vs.atom_2 : vs.atom_3))
+                f_j = local_coords_force(f, p, w[j], w[3 + j], w[6 + j], xdir, ydir, dx, dy, dz,
+                                         inv_norm_x, inv_norm_z)
+                for dim in 1:D
+                    Atomix.@atomic fs_mat[dim, atom_j] += f_j[dim]
+                end
+            end
         end
         # Now the virtual site force has been distributed onto the other atoms,
         #   it can be set to zero
@@ -320,6 +464,32 @@ end
             fs_mat[dim, vs.atom_ind] = zero(T)
         end
     end
+end
+
+# The force on one of the three atoms of a LocalCoordinatesSite, the closed form derivative of
+#   OpenMM (ReferenceVirtualSites.cpp), term by term; all lengths are unit-stripped
+@inline function local_coords_force(f, p, wo, wx, wy, xdir, ydir, dx, dy, dz, inv_norm_x,
+                                    inv_norm_z)
+    wxs = wx * inv_norm_x
+    t = (wx * ydir - wy * xdir) * inv_norm_z
+    s = cross(dz, t)
+    fp1, fp2, fp3 = p * f[1], p * f[2], p * f[3]
+    f1 = SVector(
+        fp1[1]*wxs*(1-dx[1]*dx[1]) + fp1[3]*(dz[1]*s[1]       ) + fp1[2]*((-dx[1]*dy[1]        )*wxs + dy[1]*s[1] - dx[2]*t[2] - dx[3]*t[3]),
+        fp1[1]*wxs*( -dx[1]*dx[2]) + fp1[3]*(dz[1]*s[2] + t[3]) + fp1[2]*((-dx[2]*dy[1] - dz[3])*wxs + dy[1]*s[2] + dx[2]*t[1]),
+        fp1[1]*wxs*( -dx[1]*dx[3]) + fp1[3]*(dz[1]*s[3] - t[2]) + fp1[2]*((-dx[3]*dy[1] + dz[2])*wxs + dy[1]*s[3] + dx[3]*t[1]),
+    )
+    f2 = SVector(
+        fp2[1]*wxs*( -dx[2]*dx[1]) + fp2[3]*(dz[2]*s[1] - t[3]) - fp2[2]*(( dx[1]*dy[2] - dz[3])*wxs - dy[2]*s[1] - dx[1]*t[2]),
+        fp2[1]*wxs*(1-dx[2]*dx[2]) + fp2[3]*(dz[2]*s[2]       ) - fp2[2]*(( dx[2]*dy[2]        )*wxs - dy[2]*s[2] + dx[1]*t[1] + dx[3]*t[3]),
+        fp2[1]*wxs*( -dx[2]*dx[3]) + fp2[3]*(dz[2]*s[3] + t[1]) - fp2[2]*(( dx[3]*dy[2] + dz[1])*wxs - dy[2]*s[3] - dx[3]*t[2]),
+    )
+    f3 = SVector(
+        fp3[1]*wxs*( -dx[3]*dx[1]) + fp3[3]*(dz[3]*s[1] + t[2]) + fp3[2]*((-dx[1]*dy[3] - dz[2])*wxs + dy[3]*s[1] + dx[1]*t[3]),
+        fp3[1]*wxs*( -dx[3]*dx[2]) + fp3[3]*(dz[3]*s[2] - t[1]) + fp3[2]*((-dx[2]*dy[3] + dz[1])*wxs + dy[3]*s[2] + dx[2]*t[3]),
+        fp3[1]*wxs*(1-dx[3]*dx[3]) + fp3[3]*(dz[3]*s[3]       ) + fp3[2]*((-dx[3]*dy[3]        )*wxs + dy[3]*s[3] - dx[1]*t[1] - dx[2]*t[2]),
+    )
+    return f1 + f2 + f3 + wo * f
 end
 
 function pick_non_virtual_site(sys, rng=Random.default_rng())

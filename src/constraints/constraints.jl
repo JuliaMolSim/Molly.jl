@@ -7,6 +7,16 @@ export
     check_velocity_constraints,
     check_constraints
 
+# Split `n_items` constraints or clusters over at most `n_threads` chunks on CPU
+# The ranges are contiguous rather than strided, since the per-constraint data is read in order
+@inline function n_constraint_chunks(n_items::Integer, n_threads::Integer)
+    return (n_threads > 1 && n_items > 1) ? Int(n_threads) : 1
+end
+
+@inline function constraint_chunk_range(n_items::Integer, chunk_i::Integer, n_chunks::Integer)
+    return (((chunk_i - 1) * n_items) ÷ n_chunks + 1):((chunk_i * n_items) ÷ n_chunks)
+end
+
 """
     DistanceConstraint(i, j, dist)
 
@@ -59,9 +69,7 @@ struct PositionConstraintApplication <: AbstractConstraintApplication end
 
 struct VelocityConstraintApplication <: AbstractConstraintApplication end
 
-Base.@kwdef struct ConstraintApplicationContext{
-    K <: AbstractConstraintApplication, B, A, DT, S, CB, VB,
-}
+@kwdef struct ConstraintApplicationContext{K <: AbstractConstraintApplication, B, A, DT, S, CB, VB}
     kind::K
     needs_virial::Bool = false
     step_n::Int = 0
@@ -77,11 +85,14 @@ function copyto_constraint_scratch!(scratch, values)
     if isnothing(scratch)
         return copy(values)
     elseif scratch isa Base.RefValue
-        if isnothing(scratch[])
+        # The scratch buffer is stored untyped, so it is asserted to the type of the
+        #   values here, otherwise the copy below is a runtime dispatch every step
+        if !(scratch[] isa typeof(values))
             scratch[] = similar(values)
         end
-        scratch[] .= values
-        return scratch[]
+        buffer = scratch[]::typeof(values)
+        buffer .= values
+        return buffer
     else
         scratch .= values
         return scratch
@@ -96,23 +107,23 @@ abstract type ConstraintKernelData{D, N, M} end
 @inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer, l::Integer) = 1
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer)
-    return λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+    return λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
 end
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer)
-    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
+    λ = λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[k])))
     return λ
 end
 
 @inline function constraint_virial_lambda(atoms, i::Integer, j::Integer, k::Integer, l::Integer)
-    λ = λ_mixing(MinimumMixing(), atoms[i], atoms[j])
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[i], atoms[l]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[k]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[j], atoms[l]))
-    λ = min(λ, λ_mixing(MinimumMixing(), atoms[k], atoms[l]))
+    λ = λ_mixing(MinimumMixing(), (atoms[i], atoms[j]))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[i], atoms[l])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[k])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[j], atoms[l])))
+    λ = min(λ, λ_mixing(MinimumMixing(), (atoms[k], atoms[l])))
     return λ
 end
 
@@ -144,8 +155,8 @@ function order_atoms(is, js)
     elseif length(central_atoms) == 0 # Will trigger if just 1 bond in constraint (e.g. C-C)
         return unique_atoms
     else
-        error("cannot find central atom, constraint chains of 4 atoms (e.g. C-C-C-C) " *
-              "are not permitted")
+        throw(ArgumentError("cannot find central atom, constraint chains of 4 atoms " *
+                            "(e.g. C-C-C-C) are not permitted"))
     end
 end
 
@@ -211,8 +222,19 @@ function constrained_pairs(constraint_clusters)
 end
 
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
+    # GPUNeighborFinder caches data derived from its exception lists, so they are updated
+    #   through the neighbor finder
     if neighbor_finder isa GPUNeighborFinder
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
+        return neighbor_finder
+    end
+    if !hasproperty(neighbor_finder, :eligible) || isnothing(neighbor_finder.eligible)
+        throw(ArgumentError("constraints can not be set up with a $(typeof(neighbor_finder)) " *
+                            "that has no eligible matrix, since constrained pairs have to " *
+                            "be excluded from the non-bonded interactions"))
+    end
+    if neighbor_finder.eligible isa SparsePairMatrix
+        exclude_pairs!(neighbor_finder.eligible, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
     atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))
@@ -245,6 +267,9 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
         return neighbor_finder
     end
 end
+
+# Extended for GPU elsewhere
+move_constraints_to_device(constraint_algo, ::Type) = constraint_algo
 
 # Check for interactions between angle and non-angle clusters,
 # builds only non-angle clusters
@@ -304,9 +329,9 @@ function build_central_atom_clusters(num_atoms::Integer,
                 # Skip angle constraints, we will build them later if needed
                 continue
             else
-                error("constraint clusters with more than 3 constraints or too few unique " *
-                      "atoms are not unsupported, found $N_constraint constraints and " *
-                      "$N_unique unique atoms")
+                throw(ArgumentError("constraint clusters with more than 3 constraints or too few " *
+                                    "unique atoms are not unsupported, found $N_constraint " *
+                                    "constraints and $N_unique unique atoms"))
             end
         end
     end

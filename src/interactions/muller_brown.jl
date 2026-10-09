@@ -16,7 +16,7 @@ It is often used for testing algorithms that find transition states or explore
 minimum energy pathways.
 There are 3 minima and 2 saddle points with the default parameters.
 
-Not currently compatible with virial calculation.
+Not compatible with virial calculation.
 """
 struct MullerBrown{D, T, L, F, E}
     A::D  # Units of energy
@@ -66,7 +66,13 @@ end
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
-                                                            inter::MullerBrown; kwargs...)
+                                        inter::MullerBrown; needs_vir=false,
+                                        strictness=default_strictness(), kwargs...)                
+    if needs_vir
+        err_str = "The virial contribution for MullerBrown is not implemented " *
+                  "and will be ignored"
+        report_issue(err_str, strictness; maxlog=1)
+    end
     fs .+= force_muller_brown.((inter,), sys.coords)
     return fs
 end

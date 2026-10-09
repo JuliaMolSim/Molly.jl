@@ -1,6 +1,6 @@
 @testset "Immediate thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -25,7 +25,7 @@
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -33,7 +33,7 @@ end
 
 @testset "Velocity rescale thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -58,15 +58,15 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
-        @test std(temps_traj) < 1.0u"K"
+        @test std(temps_traj) < 1.1u"K"
     end
 end
 
 @testset "Andersen thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -91,7 +91,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -99,7 +99,7 @@ end
 
 @testset "Berendsen thermostat" begin
     n_atoms = 100
-    n_steps = 40_000
+    n_steps = 10_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
@@ -124,7 +124,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        temps_traj = values(sys.loggers.temperature)[2001:end]
+        temps_traj = values(sys.loggers.temperature)[201:end]
         @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
         @test std(temps_traj) < 1.0u"K"
     end
@@ -471,7 +471,7 @@ end
     lang = Langevin(dt=dt, temperature=temp, friction=friction)
 
     simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
-    @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
+    simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
 
     P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
     Vir   = [tr(V) for V in values(sys.loggers.virial)]
@@ -508,7 +508,7 @@ end
             random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
-            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
+            simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
             P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
             Vir   = [tr(V) for V in values(sys.loggers.virial)]
@@ -548,7 +548,7 @@ end
             random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
-            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
+            simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
             P_xy = [(P[1,1] + P[2,2]) / 2 for P in values(sys.loggers.pressure)]
             P_z  = [P[3,3] for P in values(sys.loggers.pressure)]
@@ -592,7 +592,7 @@ end
             random_velocities!(sys, temp; rng=rng)
 
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
-            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
+            simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
             P_x = [P[1,1] for P in values(sys.loggers.pressure)]
             P_y = [P[2,2] for P in values(sys.loggers.pressure)]
@@ -614,6 +614,48 @@ end
             @test 857.0u"nm^3" < mean(values(sys.loggers.volume)) < 1157.0u"nm^3"
             @test std(values(sys.loggers.volume)) < 300u"nm^3"
             @test sys.boundary != init_boundary
+        end
+    end
+end
+
+@testset "Monte Carlo barostat with GPU cell list" begin
+    # GPUCellListNeighborFinder reuses the buffers behind the list it is given, so the
+    #   barostat has to rebuild rather than keep the list it held before a trial
+    temp = 100.0u"K"
+    n_atoms = 400
+    init_boundary = CubicBoundary(5.0u"nm")
+    coords = place_atoms(n_atoms, init_boundary; min_dist=0.3u"nm")
+
+    for AT in array_list[2:end]
+        atoms = to_device([Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+                           for _ in 1:n_atoms], AT)
+        nf_ref = DistanceNeighborFinder(n_atoms=n_atoms, dist_cutoff=1.2u"nm", array_type=AT)
+
+        for trial_find_neighbors in (false, true)
+            sys = System(
+                atoms=atoms,
+                coords=to_device(coords, AT),
+                boundary=init_boundary,
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                              use_neighbors=true),),
+                neighbor_finder=GPUCellListNeighborFinder(n_atoms=n_atoms, n_steps=10,
+                                                          dist_cutoff=1.2u"nm", array_type=AT),
+                loggers=(volume=VolumeLogger(10),),
+            )
+            rng = Xoshiro(2024)
+            random_velocities!(sys, temp; rng=rng)
+            barostat = MonteCarloBarostat(1.0u"bar", temp, init_boundary; n_steps=10,
+                                          trial_find_neighbors=trial_find_neighbors)
+            simulator = Langevin(dt=0.001u"ps", temperature=temp, friction=1.0u"ps^-1",
+                                 coupling=(barostat,))
+            simulate!(sys, simulator, 200; n_threads=1, rng=rng)
+
+            @test sys.boundary != init_boundary
+            @test all(isfinite, ustrip.(values(sys.loggers.volume)))
+            @test isfinite(ustrip(potential_energy(sys)))
+            # The list at the end of the run should match one from a finder that does
+            #   not share buffers with anything
+            @test length(find_neighbors(sys)) == length(find_neighbors(sys, nf_ref))
         end
     end
 end

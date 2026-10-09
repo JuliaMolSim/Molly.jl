@@ -19,6 +19,7 @@ export
     random_velocities!,
     bond_angle,
     torsion_angle,
+    momentum,
     remove_CM_motion!,
     pressure,
     scalar_pressure,
@@ -146,7 +147,7 @@ height/width.
 Setting the keyword argument `approx_images` to `false` means the exact closest
 image is found, which is slower.
 
-Not currently compatible with infinite boundaries.
+Not compatible with infinite boundaries.
 """
 struct TriclinicBoundary{D, T, C, A, I} <: AbstractBoundary{D, T, C}
     basis_vectors::SVector{3, SVector{3, C}}
@@ -292,6 +293,8 @@ end
 Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 
 AtomsBase.n_dimensions(::AbstractBoundary{D}) where {D} = D
+AtomsBase.n_dimensions(::Union{System{D}, ReplicaSystem{D}}) where {D} = D
+
 float_type(::AbstractBoundary{<:Any, T}) where {T} = T
 length_type(b::AbstractBoundary{<:Any, <:Any, C}) where {C} = C
 
@@ -299,6 +302,9 @@ Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
+Unitful.ustrip(b::TriclinicBoundary) = TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors))
+Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary) = TriclinicBoundary(
+                                            map(bv -> ustrip.(u, bv), b.basis_vectors))
 
 function AtomsBase.cell_vectors(b::CubicBoundary{3, <:Any, C}) where C
     z = zero(C)
@@ -490,12 +496,10 @@ version of the coordinate accounting for the periodic boundaries.
 """
 function vector_1D(c1, c2, side_length)
     v12 = c2 - c1
-    v12_p_sl = v12 + side_length
-    v12_m_sl = v12 - side_length
+    half_sl = side_length / 2
     return ifelse(
-        v12 > zero(c1),
-        ifelse( v12 < -v12_m_sl, v12, v12_m_sl),
-        ifelse(-v12 <  v12_p_sl, v12, v12_p_sl),
+        v12 >  half_sl, v12 - side_length,
+        ifelse(v12 < -half_sl, v12 + side_length, v12),
     )
 end
 
@@ -620,7 +624,7 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
         end
         Bm = reduce(hcat, boundary.basis_vectors)
         B  = SMatrix{3, 3}(Bm)
-        to_frac = (r::SVector{3}) -> B \ r # Dimensionless
+        to_frac = (r::SVector{3}) -> ustrip.(B) \ ustrip.(unit(eltype(B)), r) # Dimensionless
         to_cart = (f::SVector{3}) -> B * f # Length units
     else
         sl = boundary.side_lengths
@@ -775,34 +779,40 @@ function maxwell_boltzmann(atom_mass::Real, temp::Real,
 end
 
 """
-    random_velocities(sys, temp; rng=Random.default_rng())
+    random_velocities(sys, temp; rng=Random.default_rng(), remove_CM_motion=false)
 
 Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
 
 Virtual sites are given a velocity of zero.
+Setting `remove_CM_motion=true` removes the center of mass motion from the
+generated velocities with [`remove_CM_motion!`](@ref).
 """
-function random_velocities(sys::System, temp; rng=Random.default_rng())
-    random_velocities!(similar(sys.velocities), sys, temp; rng=rng)
+function random_velocities(sys::System, temp; rng=Random.default_rng(),
+                           remove_CM_motion::Bool=false)
+    random_velocities!(similar(sys.velocities), sys, temp; rng=rng,
+                       remove_CM_motion=remove_CM_motion)
 end
 
 """
-    random_velocities!(sys, temp; rng=Random.default_rng())
-    random_velocities!(vels, sys, temp; rng=Random.default_rng())
+    random_velocities!(sys, temp; rng=Random.default_rng(), remove_CM_motion=false)
+    random_velocities!(vels, sys, temp; rng=Random.default_rng(), remove_CM_motion=false)
 
 Set the velocities of a [`System`](@ref), or a vector, to random velocities
 generated from the Maxwell-Boltzmann distribution.
 
 Virtual sites are given a velocity of zero.
+Setting `remove_CM_motion=true` removes the center of mass motion from the
+generated velocities with [`remove_CM_motion!`](@ref).
 """
-function random_velocities!(sys, temp; rng=Random.default_rng())
-    random_velocities!(sys.velocities, sys, temp; rng=rng)
+function random_velocities!(sys, temp; rng=Random.default_rng(), remove_CM_motion::Bool=false)
+    random_velocities!(sys.velocities, sys, temp; rng=rng, remove_CM_motion=remove_CM_motion)
     return sys
 end
 
-function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys, temp;
-                            rng=Random.default_rng()) where {D, C}
-    FT = float_type(sys)
+function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys::System{<:Any, <:Any, T},
+                            temp; rng=Random.default_rng(),
+                            remove_CM_motion::Bool=false) where {D, C, T}
     ms = from_device(masses(sys))
     vsf = from_device(sys.virtual_site_flags)
     kT = sys.k * temp
@@ -811,13 +821,17 @@ function random_velocities!(vels::AbstractVector{SVector{D, C}}, sys, temp;
     natoms = UInt64(length(ms))
     @inbounds @simd ivdep for i in eachindex(vels, vsf, ms)
         scale = ifelse(vsf[i], zero(C), C(Base.FastMath.sqrt_fast(kT/ms[i])))
-        vels[i] = randn_svec(SVector{D, FT}, i%UInt64, ctr1, key, natoms) * scale
+        vels[i] = randn_svec(SVector{D, T}, i%UInt64, ctr1, key, natoms) * scale
+    end
+    if remove_CM_motion
+        remove_CM_motion!(vels, sys)
     end
     return vels
 end
 
-function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.default_rng())
-    FT = float_type(sys)
+function random_velocities!(vels::AbstractGPUArray, sys::System{<:Any, <:Any, T},
+                            temp; rng=Random.default_rng(),
+                            remove_CM_motion::Bool=false) where T
     AT = array_type(vels)
     ms = to_device(sys.masses, AT)
     vsf = to_device(sys.virtual_site_flags, AT)
@@ -826,7 +840,10 @@ function random_velocities!(vels::AbstractGPUArray, sys, temp; rng=Random.defaul
     key = rand(rng, UInt64)
     backend = get_backend(vels)
     kernel! = random_velocities_kernel!(backend)
-    kernel!(vels, ms, kT, vsf, ctr1, key, Val(FT); ndrange=length(vels))
+    kernel!(vels, ms, kT, vsf, ctr1, key, Val(T); ndrange=length(vels))
+    if remove_CM_motion
+        remove_CM_motion!(vels, sys)
+    end
     return vels
 end
 
@@ -894,6 +911,16 @@ function torsion_vectors(coords_i, coords_j, coords_k, coords_l, boundary)
 end
 
 """
+    momentum(system)
+
+The total momentum of a [`System`](@ref).
+
+This is the sum over atoms of the velocity multiplied by the mass, and is close
+to zero when the center of mass motion is removed with [`remove_CM_motion!`](@ref).
+"""
+momentum(sys) = sum(sys.velocities .* masses(sys))
+
+"""
     remove_CM_motion!(system)
 
 Remove the center of mass motion from a [`System`](@ref).
@@ -908,33 +935,37 @@ of degrees of freedom that is used to calculate temperature assumes that the
 center of mass motion is removed.
 """
 function remove_CM_motion!(sys)
-    masses_cpu = from_device(masses(sys))
-    velocities_cpu = from_device(sys.velocities)
-    cm_momentum = zero(eltype(velocities_cpu)) .* zero(eltype(masses_cpu))
-    for i in eachindex(sys)
-        cm_momentum += velocities_cpu[i] * masses_cpu[i]
+    remove_CM_motion!(sys.velocities, sys)
+    return sys
+end
+
+function remove_CM_motion!(vels::AbstractVector, sys)
+    masses_cpu = masses(sys)
+    cm_momentum = zero(eltype(vels)) .* zero(eltype(masses_cpu))
+    for i in eachindex(vels)
+        cm_momentum += vels[i] * masses_cpu[i]
     end
     cm_velocity = cm_momentum / sys.total_mass
-    for i in eachindex(sys)
+    for i in eachindex(vels)
         if !sys.virtual_site_flags[i]
-            sys.velocities[i] -= cm_velocity
+            vels[i] -= cm_velocity
         end
     end
-    return sys
+    return vels
 end
 
 update_vel(v, cm_v, vsf) = (vsf ? zero(v) : v - cm_v)
 
-# The CUDA extension has a fast 3D CUDA path
-function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
-    cm_momentum = mapreduce((v, m) -> v .* m, +, sys.velocities, masses(sys))
+# The CUDA extension has a fast 3D CUDA path for `remove_CM_motion!(sys)`
+function remove_CM_motion!(vels::AbstractGPUArray, sys)
+    cm_momentum = mapreduce((v, m) -> v .* m, +, vels, masses(sys))
     cm_velocity = cm_momentum / sys.total_mass
     if isempty(sys.virtual_sites)
-        sys.velocities .-= (cm_velocity,)
+        vels .-= (cm_velocity,)
     else
-        sys.velocities .= update_vel.(sys.velocities, (cm_velocity,), sys.virtual_site_flags)
+        vels .= update_vel.(vels, (cm_velocity,), sys.virtual_site_flags)
     end
-    return sys
+    return vels
 end
 
 @doc raw"""
@@ -942,7 +973,7 @@ end
              recompute=true, n_threads=Threads.nthreads(),
              pairwise_inters=system.pairwise_inters,
              specific_inter_lists=system.specific_inter_lists,
-             general_inters=system.general_inters)
+             general_inters=system.general_inters, strictness=:warn)
 
 Calculate the pressure tensor of the system.
 
@@ -1033,7 +1064,7 @@ end
                     recompute=true, n_threads=Threads.nthreads(),
                     pairwise_inters=system.pairwise_inters,
                     specific_inter_lists=system.specific_inter_lists,
-                    general_inters=system.general_inters)
+                    general_inters=system.general_inters, strictness=:warn)
 
 Calculate the pressure of the system as a scalar.
 
@@ -1064,7 +1095,7 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
 
     is_triclinic = hasproperty(boundary, :basis_vectors)
     if is_triclinic && D != 3
-        error("Triclinic boundary only defined for 3-dimensions")
+        error("triclinic boundary only defined for 3-dimensions")
     end
 
     # Build frac<->cart transforms
@@ -1178,29 +1209,45 @@ rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
 rebuild_boundary(b::RectangularBoundary, box) = RectangularBoundary(box)
 rebuild_boundary(b::TriclinicBoundary,   box) = TriclinicBoundary(box)
 
+# Check that the interaction cutoff still fits in the box after the boundary is changed,
+#   for example by a barostat
+function check_boundary_change(sys, strictness)
+    max_sqdist = max_zero_beyond(sys.pairwise_inters)
+    if !isnothing(max_sqdist) && !iszero(max_sqdist)
+        check_cutoff_box_size(sqrt(max_sqdist), sys.boundary, strictness; maxlog=1)
+    end
+    return nothing
+end
+
 """
     scale_coords!(sys::System{<:Any, AT}, μ::SMatrix{D,D};
                   rotate::Bool=true,
                   ignore_molecules::Bool=false,
-                  scale_velocities::Bool=false)
+                  scale_velocities::Bool=false,
+                  strictness=:warn)
 
 Rigid-molecular barostat update with optional rotation.
 
 - Box:        B′ = μ * B
 - Positions:  r′ = μ * r  (implemented via COM affine + optional rotation of internal offsets)
 - Velocities: v′ = μ⁻¹ * v  (applied when `scale_velocities=true`)
+
+A warning is given at most once if the new box is too small for the interaction
+cutoff distance.
 """
-function scale_coords!(sys::System{<:Any, AT},
-                       μ::SMatrix{D, D};
+function scale_coords!(sys::System{<:Any, AT, T},
+                       μ_in::SMatrix{D, D};
                        rotate::Bool=true,
                        ignore_molecules::Bool=false,
-                       scale_velocities::Bool=false) where {AT, D}
+                       scale_velocities::Bool=false,
+                       strictness=default_strictness()) where {AT, T, D}
     # This function assumes that constrained atoms, and virtual sites and the atoms that
     #   define them, are in the same molecule, meaning that they are scaled appropriately
     if has_infinite_boundary(sys.boundary)
-        throw(AssertionError("infinite boundary not supported"))
+        throw(ArgumentError("infinite boundary not supported for scale_coords!"))
     end
 
+    μ = SMatrix{D, D, T}(μ_in) # Convert scaling matrix to float type of the system
     μinv = inv(μ)
 
     if ignore_molecules || isnothing(sys.topology)
@@ -1215,6 +1262,7 @@ function scale_coords!(sys::System{<:Any, AT},
         if scale_velocities
             sys.velocities .= to_device([μinv * v for v in from_device(sys.velocities)], AT)
         end
+        check_boundary_change(sys, strictness)
         return sys
     else
         # units and host copies
@@ -1291,6 +1339,7 @@ function scale_coords!(sys::System{<:Any, AT},
             sys.velocities .= to_device(vels, AT)
         end
 
+        check_boundary_change(sys, strictness)
         return sys
     end
 end

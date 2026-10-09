@@ -71,12 +71,17 @@ required_atom_fields(inter::DPDInteraction) = (:index,)
 pairwise_uses_velocity(::DPDInteraction) = true
 
 function Base.zero(d::DPDInteraction)
-    return DPDInteraction(d.a, d.γ, d.σ, d.r_c, d.dt, d.use_neighbors)
+    return DPDInteraction(d.a, d.γ, d.σ, d.r_c, d.dt, d.use_neighbors, d.key)
 end
 
 function Base.:+(d1::DPDInteraction, ::DPDInteraction)
-    return DPDInteraction(d1.a, d1.γ, d1.σ, d1.r_c, d1.dt, d1.use_neighbors)
+    return DPDInteraction(d1.a, d1.γ, d1.σ, d1.r_c, d1.dt, d1.use_neighbors, d1.key)
 end
+
+parameter_prefix(::DPDInteraction) = "inter_DPD_"
+parameter_fields(::Type{<:DPDInteraction}) =
+    ((:a, "a"), (:γ, "γ"), (:σ, "σ"), (:r_c, "r_c"))
+
 
 # Deterministic per-pair Gaussian noise via hash-based Box-Muller transform.
 # Symmetric in (i, j) to ensure momentum conservation.

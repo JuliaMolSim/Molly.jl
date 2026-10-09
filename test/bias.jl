@@ -296,6 +296,47 @@ Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
         CubicBoundary(100.0),
     )
 
+    # Test CalcAngle value calculation
+    # Define three atoms forming a 90-degree (pi/2) angle at the middle atom
+    coords_ang = [
+        SVector(0.1, 0.0, 0.0)u"nm",
+        SVector(0.0, 0.0, 0.0)u"nm",
+        SVector(0.0, 0.1, 0.0)u"nm",
+    ]
+    ang_cv = CalcAngle([1, 2, 3])
+    @test isapprox(
+        calculate_cv(ang_cv, coords_ang, atoms, boundary),
+        1.5707963267948966; # pi/2 radians
+        atol=1e-9
+    )
+
+    # The analytical gradient matches finite differences of the angle
+    coords_ang_gen = [
+        SVector(1.0, 1.0, 1.0)u"nm",
+        SVector(1.1, 1.05, 0.95)u"nm",
+        SVector(1.05, 1.2, 1.1)u"nm",
+    ]
+    grad_ang, θ_ang = Molly.cv_gradient(ang_cv, coords_ang_gen, atoms, boundary)
+    isapprox(θ_ang, calculate_cv(ang_cv, coords_ang_gen, atoms, boundary); atol=1e-12)
+    h = 1e-6u"nm"
+    shift = SVector(h, zero(h), zero(h))
+    c_plus, c_minus = copy(coords_ang_gen), copy(coords_ang_gen)
+    c_plus[1] += shift
+    c_minus[1] -= shift
+
+    grad_fd = (calculate_cv(ang_cv, c_plus, atoms, boundary) -
+                    calculate_cv(ang_cv, c_minus, atoms, boundary)) / (2*h)
+    @test isapprox(grad_ang[1][1],grad_fd)
+
+    # Collinear atoms, where the gradient is singular, give an angle of pi and zero gradients
+    coords_ang_line = [
+        SVector(0.0, 0.0, 0.0)u"nm",
+        SVector(0.1, 0.0, 0.0)u"nm",
+        SVector(0.2, 0.0, 0.0)u"nm",
+    ]
+    grad_line, θ_line = Molly.cv_gradient(ang_cv, coords_ang_line, atoms, boundary)
+    @test isapprox(θ_line, π; atol=1e-6)
+    @test all(v -> all(iszero, v), grad_line)
 end
 
 @testset "Bias potentials" begin
@@ -557,15 +598,18 @@ end
     end
 
     # No units
+    n_steps, burn_in = 50_000, 250
+
     for AT in array_list
         n_atoms = 10
         boundary = CubicBoundary(10.0)
         temp = 298.0
         atom_mass = 10.0
+        rng = Xoshiro(1000)
 
         atoms = to_device([Atom(mass=atom_mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms], AT)
-        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3), AT)
-        velocities = to_device([random_velocity(atom_mass, temp) for i in 1:n_atoms], AT)
+        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3, rng=rng), AT)
+        velocities = to_device([random_velocity(atom_mass, temp; rng=rng) for i in 1:n_atoms], AT)
         pairwise_inters = (LennardJones(),)
 
         define_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
@@ -592,15 +636,15 @@ end
             ),
         )
 
-        simulate!(sys, simulator, 200_000)
+        simulate!(sys, simulator, n_steps; rng=rng)
 
         pair_dists_12 = values(sys.loggers.pair_dist_12)
         pair_dists_13 = values(sys.loggers.pair_dist_13)
 
-        dist_12_mean = mean(pair_dists_12[1000:end])
-        dist_13_mean = mean(pair_dists_13[1000:end])
-        dist_12_std = std(pair_dists_12[1000:100:end])
-        dist_13_std = std(pair_dists_13[1000:100:end])
+        dist_12_mean = mean(pair_dists_12[burn_in:end])
+        dist_13_mean = mean(pair_dists_13[burn_in:end])
+        dist_12_std = std(pair_dists_12[burn_in:100:end])
+        dist_13_std = std(pair_dists_13[burn_in:100:end])
 
         @test isapprox(dist_12_mean, 1.5; atol=0.05)
         @test !isapprox(dist_13_mean, 1.5; atol=0.05)
@@ -614,10 +658,11 @@ end
         boundary = CubicBoundary(10.0u"nm")
         temp = 298.0u"K"
         atom_mass = 10.0u"g/mol"
+        rng = Xoshiro(1000)
 
         atoms = to_device([Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms], AT)
-        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"), AT)
-        velocities = to_device([random_velocity(atom_mass, temp) for i in 1:n_atoms], AT)
+        coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng), AT)
+        velocities = to_device([random_velocity(atom_mass, temp; rng=rng) for i in 1:n_atoms], AT)
         pairwise_inters = (LennardJones(),)
 
         define_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
@@ -642,15 +687,15 @@ end
             ),
         )
 
-        simulate!(sys, simulator, 200_000)
+        simulate!(sys, simulator, n_steps; rng=rng)
 
         pair_dists_12 = values(sys.loggers.pair_dist_12)
         pair_dists_13 =values(sys.loggers.pair_dist_13)
 
-        dist_12_mean = mean(pair_dists_12[1000:end])
-        dist_13_mean = mean(pair_dists_13[1000:end])
-        dist_12_std = std(pair_dists_12[1000:100:end])
-        dist_13_std = std(pair_dists_13[1000:100:end])
+        dist_12_mean = mean(pair_dists_12[burn_in:end])
+        dist_13_mean = mean(pair_dists_13[burn_in:end])
+        dist_12_std = std(pair_dists_12[burn_in:100:end])
+        dist_13_std = std(pair_dists_13[burn_in:100:end])
 
         @test isapprox(dist_12_mean, 1.5u"nm"; atol=0.05u"nm")
         @test !isapprox(dist_13_mean, 1.5u"nm"; atol=0.05u"nm")
@@ -931,3 +976,40 @@ end
 end
 
 
+@testset "Bias virial" begin
+    # The virial of a bias is minus the derivative of its energy with respect to a
+    #   homogeneous strain, W = -(dU/dε)ᵀ, here for a molecule split over the boundary
+    boundary = CubicBoundary(2.0u"nm")
+    coords_whole = [SVector(-0.15, -0.10, 0.05), SVector(0.05, -0.12, -0.08),
+                    SVector(0.12, 0.08, 0.10), SVector(-0.05, 0.15, -0.12),
+                    SVector(0.20, -0.05, 0.18), SVector(-0.18, 0.12, 0.15)]u"nm"
+    atoms = [Atom(mass=m * u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+             for m in (12.0, 1.0, 16.0, 14.0, 12.0, 32.0)]
+    topology = MolecularTopology([1, 2, 3, 4, 5], [2, 3, 4, 5, 6], 6)
+    ref_coords = [1.1 * c + SVector(0.02, -0.01, 0.03)u"nm" for c in coords_whole]
+    k = 500.0u"kJ * mol^-1 * nm^-2"
+    cvs_biases = (
+        (CalcDist([1], [5], CalcSingleDist()), SquareBias(k, 0.2u"nm")),
+        (CalcDist([1, 2], [4, 5, 6], CalcMinDist()), SquareBias(k, 0.4u"nm")),
+        (CalcDist([1, 2, 3], [5, 6], CalcMaxDist(:raw)), SquareBias(k, 0.2u"nm")),
+        (CalcDist([1, 2, 3], [4, 5, 6], CalcCMDist()), SquareBias(k, 0.3u"nm")),
+        (CalcRg(), SquareBias(k, 0.1u"nm")),
+        (CalcRMSD(ref_coords), SquareBias(k, 0.0u"nm")),
+        (CalcTorsion([1, 2, 3, 4]), SquareBias(50.0u"kJ * mol^-1", 0.5)),
+    )
+    for (cv, bias) in cvs_biases
+        sys = System(atoms=atoms, coords=wrap_coords.(coords_whole, (boundary,)),
+                     boundary=boundary, topology=topology,
+                     general_inters=(BiasPotential(cv, bias),))
+        h = 1e-6
+        dU_dε = map(Iterators.product(1:3, 1:3)) do (a, b)
+            Us = map((h, -h)) do δ
+                μ = SMatrix{3, 3}(I + δ * (1:3 .== a) * (1:3 .== b)')
+                cv_val = calculate_cv(cv, [μ * c for c in coords_whole], atoms, boundary)
+                return Molly.potential_energy(bias, cv_val)
+            end
+            return (Us[1] - Us[2]) / 2h
+        end
+        @test virial(sys) ≈ -transpose(dU_dε) rtol=1e-6
+    end
+end

@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use Molly, please cite the following paper."
+title: "Molly.jl"
+abstract: "Molecular simulation in Julia."
+repository-code: "https://github.com/JuliaMolSim/Molly.jl"
+license: MIT
+type: software
+authors:
+  - family-names: Greener
+    given-names: "Joe G"
+preferred-citation:
+  type: article
+  title: "Differentiable simulation to develop molecular dynamics force fields for disordered proteins"
+  authors:
+    - family-names: Greener
+      given-names: "Joe G"
+  journal: "Chemical Science"
+  year: 2024
+  volume: 15
+  start: 4897
+  end: 4909
+  doi: "10.1039/D3SC05230C"

@@ -1,4 +1,5 @@
-export CMAPTorsion
+export 
+    CMAPTorsion
 
 """
     CMAPTorsion(index, size)
@@ -15,18 +16,22 @@ struct CMAPTorsion
     size::Int
 end
 
-Base.zero(::CMAPTorsion) = CMAPTorsion(0, 0)
+Base.zero(::Type{CMAPTorsion}) = CMAPTorsion(0, 0)
+Base.zero(c::CMAPTorsion) = zero(typeof(c))
 
 Base.:+(c1::CMAPTorsion, c2::CMAPTorsion) = c1
+
+##### Helper functions for calculation CMAPS #####
 
 function cmap_coefficients(n, mp::Vector{E}) where E
     c = cmap_map_derivatives(n, mp)
     coeff_matrix = Matrix{E}(undef, n*n*4, 4)
     for j in 1:(n*n)
-        coeff_matrix[(j-1)*4+1, :] .= c[j, 1:4]
-        coeff_matrix[(j-1)*4+2, :] .= c[j, 5:8]
-        coeff_matrix[(j-1)*4+3, :] .= c[j, 9:12]
-        coeff_matrix[(j-1)*4+4, :] .= c[j, 13:16]
+        for row in 1:4
+            for col in 1:4
+                coeff_matrix[(j-1)*4+row, col] = c[j, (row-1)*4+col]
+            end
+        end
     end
     return coeff_matrix
 end
@@ -197,7 +202,7 @@ end
 function evaluate_spline_derivative(x, y, deriv, t)
     n = length(x)
     if t < x[1] || t > x[n]
-        error()
+        error("CMAP value out of range")
     end
 
     lower = 1
@@ -341,4 +346,47 @@ end
     pe = da*pe + ((data[idx+1,4]*db + data[idx+1,3])*db + data[idx+1,2])*db + data[idx+1,1]
     pe = da*pe + ((data[idx,4]*db + data[idx,3])*db + data[idx,2])*db + data[idx,1]
     return pe
+end
+
+# λ version of `CMAPTorsion` for alchemical systems, built by `to_lambda_function`.
+@kwdef struct CMAPTorsionλ{I,LM,SCH} <: AlchemicalBondedInteraction
+    index::I
+    size::I
+    λ_mixing::LM = MinimumMixing()
+    scheduler::SCH = DefaultLambdaScheduler()
+end
+
+is_torsion(::CMAPTorsionλ) = true
+
+Base.zero(c::CMAPTorsionλ) = CMAPTorsionλ(index=zero(c.index), size=zero(c.size), λ_mixing=c.λ_mixing,
+                                           scheduler=c.scheduler)
+
+Base.:+(c1::CMAPTorsionλ, c2::CMAPTorsionλ) = c1
+
+# Move the `data` row index of a CMAP torsion when its list is appended to another
+shift_cmap_index(c::CMAPTorsion, offset) = CMAPTorsion(c.index + offset, c.size)
+shift_cmap_index(c::CMAPTorsionλ, offset) = CMAPTorsionλ(index=c.index + offset, size=c.size,
+                                                      λ_mixing=c.λ_mixing, scheduler=c.scheduler)
+
+function to_lambda_function(inter::CMAPTorsion; λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    return CMAPTorsionλ(index=inter.index, size=inter.size, λ_mixing=λ_mixing, scheduler=scheduler)
+end
+
+
+plain_interaction(inter::CMAPTorsionλ, λ_params) = CMAPTorsion(inter.index, inter.size)
+
+@inline function force(inter::CMAPTorsionλ, coords_i, coords_j, coords_k, coords_l,
+                       coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, atoms_m, args...)
+    λ, λ_params = bonded_lambda(inter, (atoms_i, atoms_j, atoms_k, atoms_l, atoms_m))
+    return λ * force(plain_interaction(inter, λ_params), coords_i, coords_j, coords_k, coords_l,
+                     coords_m, boundary, atoms_i, atoms_j, atoms_k, atoms_l, atoms_m, args...)
+end
+
+@inline function potential_energy(inter::CMAPTorsionλ, coords_i, coords_j, coords_k,
+                                  coords_l, coords_m, boundary, atoms_i, atoms_j, atoms_k,
+                                  atoms_l, atoms_m, args...)
+    λ, λ_params = bonded_lambda(inter, (atoms_i, atoms_j, atoms_k, atoms_l, atoms_m))
+    return λ * potential_energy(plain_interaction(inter, λ_params), coords_i, coords_j,
+                                coords_k, coords_l, coords_m, boundary, atoms_i, atoms_j,
+                                atoms_k, atoms_l, atoms_m, args...)
 end

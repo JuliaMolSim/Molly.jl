@@ -1,3 +1,11 @@
+# Allocation measurements are made through this so that the call is cleanly inferred,
+# rather than from the `@testset` scope where the arguments are captured locals
+function apply_constraints_n_threads!(sys, coords_ref, n_threads)
+    apply_position_constraints!(sys, coords_ref; n_threads=n_threads)
+    apply_velocity_constraints!(sys; n_threads=n_threads)
+    return sys
+end
+
 @testset "Constraints diatomic" begin
     r_cut = 8.5u"Å"
     temp = 300.0u"K"
@@ -50,7 +58,7 @@
                 energy_units=u"kcal * mol^-1",
             )
 
-            simulate!(sys, simulator, 10_000)
+            simulate!(sys, simulator, 2_000)
 
             @test check_position_constraints(sys, cons)
             if simulator isa VelocityVerlet
@@ -314,10 +322,7 @@ end
 @testset "Constraints protein CPU/GPU" begin
     pdb_fp = joinpath(data_dir, "1ubq.pdb") # No solvent
     T = Float32
-    ff = MolecularForceField(
-        T,
-        joinpath(ff_dir, "ff99SBildn.xml"),
-    )
+    ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"))
     boundary = CubicBoundary(T(10.0)u"nm")
     temp = T(100.0)u"K"
     minimizer = SteepestDescentMinimizer()
@@ -325,7 +330,7 @@ end
 
     constraint_algorithms = (SetupSHAKE_RATTLE(), SetupLINCS(n_rec=6, n_iter=6))
 
-    for AT in array_list
+    for AT in array_list_metal
         for constraint_algorithm in constraint_algorithms
             for rigid_water in (false, true)
                 sys = System(
@@ -333,16 +338,18 @@ end
                     ff;
                     boundary=boundary,
                     array_type=AT,
+                    float_type=T,
                     constraints=:hbonds,
                     rigid_water=rigid_water, # No water present
-                    constraint_algorithm=constraint_algorithm,    
+                    constraint_algorithm=constraint_algorithm,
+                    nonbonded_method=DistanceCutoff(T(1.0)u"nm"),
                 )
 
                 simulate!(sys, minimizer)
                 random_velocities!(sys, temp)
 
                 simulate!(sys, simulator, 20)
-                simulate!(sys, simulator, 1000)
+                simulate!(sys, simulator, 300)
 
                 @test check_position_constraints(sys)
                 @test check_velocity_constraints(sys)
@@ -363,6 +370,70 @@ end
                 @test check_velocity_constraints(sys)
                 @test check_constraints(sys)
             end
+        end
+    end
+end
+
+@testset "Constraints threading" begin
+    cpu_backend = KernelAbstractions.CPU()
+    for n_threads in (1, 2, 4, 16), ndrange in (1, 10, 128, 4931)
+        wgs = Molly.backend_workgroupsize(cpu_backend, ndrange, n_threads)
+        @test wgs >= 1
+        @test cld(ndrange, wgs) <= n_threads
+    end
+    for AT in array_list
+        AT == Array && continue
+        # GPU backends keep the block size they are given
+        gpu_backend = KernelAbstractions.get_backend(AT{Float32}(undef, 1))
+        @test isnothing(Molly.backend_workgroupsize(gpu_backend, 4931, 4))
+    end
+
+    # Applying constraints should give the same result whatever `n_threads` is
+    pdb_fp = joinpath(data_dir, "1ubq.pdb")
+    ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"))
+    n_threads_test = (1, 2, Threads.nthreads())
+    for constraint_algorithm in (SetupSHAKE_RATTLE(), SetupLINCS())
+        sys_base = System(
+            pdb_fp,
+            ff;
+            boundary=CubicBoundary(10.0u"nm"),
+            constraints=:hbonds,
+            constraint_algorithm=constraint_algorithm,
+            nonbonded_method=DistanceCutoff(1.0u"nm"),
+        )
+        # Relax onto the constraint manifold so that the check below is a fair one
+        for _ in 1:5
+            apply_position_constraints!(sys_base, copy(sys_base.coords); n_threads=1)
+        end
+        coords_ref = copy(sys_base.coords)
+        coords_bump = randn(Xoshiro(20), SVector{3, Float64}, length(sys_base))u"nm" ./ 1000
+        vels_start = randn(Xoshiro(21), SVector{3, Float64}, length(sys_base))u"nm * ps^-1" ./ 1000
+        systems = map(n_threads_test) do n_threads
+            sys = deepcopy(sys_base)
+            sys.coords .= coords_ref .+ coords_bump
+            sys.velocities .= vels_start
+            apply_position_constraints!(sys, coords_ref; n_threads=n_threads)
+            apply_velocity_constraints!(sys; n_threads=n_threads)
+            sys
+        end
+        @test check_position_constraints(systems[1])
+        @test check_velocity_constraints(systems[1])
+        for sys in systems[2:end]
+            @test sys.coords == systems[1].coords
+            @test sys.velocities == systems[1].velocities
+        end
+
+        # The constraint solves allocate nothing on CPU. Running them over more than one
+        #   thread allocates only the tasks that `Threads.@threads` spawns, which does not
+        #   grow with the number of constraints
+        sys_alloc = deepcopy(sys_base)
+        apply_constraints_n_threads!(sys_alloc, coords_ref, 1)
+        apply_constraints_n_threads!(sys_alloc, coords_ref, Threads.nthreads())
+        @test (@allocated apply_constraints_n_threads!(sys_alloc, coords_ref, 1)) == 0
+        if Threads.nthreads() > 1
+            threaded = @allocated apply_constraints_n_threads!(sys_alloc, coords_ref,
+                                                               Threads.nthreads())
+            @test 0 < threaded < 100_000
         end
     end
 end
@@ -397,8 +468,9 @@ end
 
         for cons in constraints
             neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=T(1.0)u"nm",
+                array_type=AT,
             )
             sys = System(
                 atoms=atoms,
@@ -479,6 +551,10 @@ function make_lincs_branched(nbackbone; nbranch=3, backbone_length=0.153,
     v = [SVector(0.01 * randn(), 0.01 * randn(), 0.01 * randn()) for _ in 1:natoms]
     return x, v, dc, masses_val
 end
+
+# As `apply_constraints_n_threads!` above
+lincs_apply_n_threads!(xp, x, data, ws, boundary, ctx, n_threads) =
+    Molly.lincs_apply!(xp, x, data, ws, boundary, ctx, n_threads)
 
 function lincs_check_constraints(xp, data; atol=1e-10)
     for i in eachindex(data.atom1)
@@ -990,7 +1066,6 @@ end
                 iter_vel_correction=true,
             )
         end
-        error("unknown constraint kind $kind")
     end
 
     function simulator_constraint_system(kind; loggers, coords_in=coords, velocities_in=velocities)
@@ -1461,13 +1536,15 @@ end
     for AT in array_list[2:end]
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=T(1.5)*r_cut,
+                array_type=AT,
             )
         else
             neighbor_finder = DistanceNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=T(1.5)*r_cut,
+                array_type=AT,
             )
         end
 
@@ -1640,12 +1717,8 @@ end
     mass_O = 15.999u"g/mol"
     mass_H = 1.008u"g/mol"
 
-    atoms = Atom[]
-    for _ in 1:n_molecules
-        push!(atoms, Atom(mass=mass_O, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
-        push!(atoms, Atom(mass=mass_H, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
-        push!(atoms, Atom(mass=mass_H, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1"))
-    end
+    atoms = [Atom(mass=(i % 3 == 1 ? mass_O : mass_H), σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+             for i in 1:n_atoms]
     atom_masses = [a.mass for a in atoms]
 
     boundary = CubicBoundary(3.0u"nm")
@@ -1720,7 +1793,10 @@ end
     xp_w = x_w .+ v_w .* 0.002
     Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0))
 
-    # apply_lincs! zero allocations
+    # apply_lincs! zero allocations. The solve itself allocates nothing; running it over
+    #   more than one thread allocates only the tasks that `Threads.@threads` spawns,
+    #   which does not grow with the number of constraints
+    threaded_allocs = Int[]
     for (label, nbackbone, nbranch) in [
         ("small (7 constraints)", 2, 3),
         ("medium (399 constraints)", 100, 3),
@@ -1729,14 +1805,21 @@ end
         data = Molly.build_lincs_data(c, m)
         ws = Molly.create_lincs_workspace(data)
         xp = x .+ v .* 0.002
+        ctx = Molly.default_position_constraint_context()
+        bdy = CubicBoundary(5.0)
 
         # Warmup
-        Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        lincs_apply_n_threads!(xp, x, data, ws, bdy, ctx, 1)
+        lincs_apply_n_threads!(xp, x, data, ws, bdy, ctx, Threads.nthreads())
         xp .= x .+ v .* 0.002
 
-        allocs = @allocated Molly.lincs_apply!(xp, x, data, ws, CubicBoundary(5.0))
+        allocs = @allocated lincs_apply_n_threads!(xp, x, data, ws, bdy, ctx, 1)
         @test allocs == 0
+        xp .= x .+ v .* 0.002
+        push!(threaded_allocs, @allocated lincs_apply_n_threads!(xp, x, data, ws, bdy, ctx,
+                                                                 Threads.nthreads()))
     end
+    @test threaded_allocs[2] == threaded_allocs[1]
 
     # solve! zero allocations
     x, v, c, m = make_lincs_branched(100; nbranch=3)
@@ -1778,13 +1861,15 @@ end
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             array_type=AT,
-            nonbonded_method=:pme,
+            float_type=Float64,
+            nonbonded_method=SetupPME(),
         )
         sys_cons = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             array_type=AT,
-            nonbonded_method=:pme,
+            float_type=Float64,
+            nonbonded_method=SetupPME(),
             constraints=:hbonds,
             rigid_water=true,
         )

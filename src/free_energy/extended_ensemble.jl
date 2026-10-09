@@ -28,14 +28,14 @@ function ExtendedStateSpace(thermo_states::AbstractArray{<:ThermoState};
 
     thermo_states_vec = collect(thermo_states)
     ref_sys = first(thermo_states_vec).system
-    FT = typeof(ustrip(ref_sys.total_mass))
+    TH = float_type_high(ref_sys)
     partition = AlchemicalPartition(thermo_states_vec; reuse_neighbors=reuse_neighbors)
 
     systems = [ts.system for ts in thermo_states_vec]
     integrators = [ts.integrator for ts in thermo_states_vec]
     betas = [ts.beta for ts in thermo_states_vec]
     has_pressure = [!isnothing(ts.p) for ts in thermo_states_vec]
-    pressures = [isnothing(ts.p) ? zero(FT) : ts.p for ts in thermo_states_vec]
+    pressures = [isnothing(ts.p) ? zero(TH) : ts.p for ts in thermo_states_vec]
 
     state_pairwise_inters = [ts.system.pairwise_inters for ts in thermo_states_vec]
     state_specific_inter_lists = [ts.system.specific_inter_lists for ts in thermo_states_vec]

@@ -50,6 +50,10 @@ function Base.:+(b1::Buckingham, b2::Buckingham)
                       b1.C_mixing, b1.weight_special + b2.weight_special)
 end
 
+parameter_prefix(::Buckingham) = "inter_BU_"
+parameter_fields(::Type{<:Buckingham}) = ((:weight_special, "weight_14"),)
+
+
 @inline function force(inter::Buckingham,
                        dr,
                        atom_i,

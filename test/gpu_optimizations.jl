@@ -1,6 +1,5 @@
-
 @testset "GPU Optimizations" begin
-    if CUDA.functional()
+    if run_cuda_tests
         n_atoms = 100
         D = 3
         T = Float64
@@ -16,7 +15,7 @@
             neighbor_finder=GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=T(5.0),
-                device_vector_type=CuArray{Int32, 1},
+                array_type=CuArray,
             ),
             force_units=NoUnits,
             energy_units=NoUnits
@@ -120,7 +119,7 @@
             Molly.reset_cuda_launch_config!(sys)
         end
 
-        @testset "Setup-time CUDA Launch Autotune" begin
+        @testset "Setup-time CUDA launch autotune" begin
             ext = Base.get_extension(Molly, :MollyCUDAExt)
             @test ext !== nothing
 
@@ -130,7 +129,8 @@
                 joinpath(data_dir, "water_3mol_cubic.pdb"),
                 ff;
                 array_type=CuArray,
-                nonbonded_method=:cutoff,
+                float_type=T,
+                nonbonded_method=SetupCoulombReactionField(),
                 dist_cutoff=0.6u"nm",
                 dist_buffer=0.1u"nm",
                 launch_config=launch_config,
@@ -191,7 +191,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms_tri,
                     dist_cutoff=T(4.0),
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -248,8 +248,5 @@
                 @test fs_mat[3, orig_idx] ≈ 1.0
             end
         end
-
-    else
-        @warn "CUDA not functional, skipping GPU optimization tests"
     end
 end

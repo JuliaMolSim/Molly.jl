@@ -28,6 +28,20 @@ end
 
 FENEBond(; k, r0, σ, ϵ) = FENEBond{typeof(k), typeof(r0), typeof(ϵ)}(k, r0, σ, ϵ)
 
+function Base.zero(::Type{FENEBond{K, D, E}}) where {K, D, E}
+    return FENEBond(k=zero(K), r0=zero(D), σ=zero(D), ϵ=zero(E))
+end
+
+Base.zero(b::FENEBond) = zero(typeof(b))
+
+function Base.:+(b1::FENEBond, b2::FENEBond)
+    return FENEBond(k=(b1.k + b2.k), r0=(b1.r0 + b2.r0), σ=(b1.σ + b2.σ), ϵ=(b1.ϵ + b2.ϵ))
+end
+
+parameter_prefix(::FENEBond, inter_type) = "inter_FB_$(inter_type)_"
+parameter_fields(::Type{<:FENEBond}) = ((:k, "k"), (:r0, "r0"), (:σ, "σ"), (:ϵ, "ϵ"))
+
+
 @inline function force(b::FENEBond, coord_i, coord_j, boundary, args...)
     dr = vector(coord_i, coord_j, boundary)
     r = sqrt(sum(abs2, dr))

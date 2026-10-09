@@ -83,7 +83,15 @@ required_atom_fields(inter) = nothing
 end
 
 @inline resolve_atom_fields(::Nothing, ::Type{A}) where {A} = fieldnames(A)
-@inline resolve_atom_fields(syms::Tuple, ::Type{A}) where {A} = syms
+@inline resolve_atom_fields(syms::Tuple, ::Type{A}) where {A} = resolve_atom_fields(Val(syms), A)
+
+# A custom atom type may provide a value such as the mass or charge through a method
+# rather than through a field of that name, so the narrowed list can name a field that
+# does not exist. Fall back to the conservative default of shuffling every field when
+# that happens.
+@generated function resolve_atom_fields(::Val{syms}, ::Type{A}) where {syms, A}
+    return all(n -> hasfield(A, n), syms) ? :(syms) : :(fieldnames(A))
+end
 
 # Extract the values of `syms` from an atom as a tuple (the warp-shuffle payload)
 @inline atom_shuffle_payload(atom, ::Val{syms}) where {syms} = map(s -> getfield(atom, s), syms)
@@ -133,15 +141,11 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
                     pairwise_inters, neighbors, ::Val{needs_vir},
                     step_n) where {D, needs_vir}
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
-              "should use DistanceNeighborFinder instead")
+        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU " *
+              "you should use GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
-    if typeof(neighbors) == NoNeighborList
-        nbs = neighbors
-    else
-        nbs = @view neighbors.list[1:neighbors.n]
-    end
-    if length(neighbors) > 0
+    nbs = neighbor_pairs(neighbors)
+    if length(nbs) > 0
         backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
@@ -289,8 +293,7 @@ end
             Atomix.@atomic fs_mat[dim, j] += f2val
             if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
-                # Ewald exclusions are already lambda-weighted through charge scaling
-                λ = inters[inter_i] isa EwaldExclusion ? 1 : λ_mixing(MinimumMixing(), atoms[i], atoms[j])
+                λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j]))
                 @inbounds for alpha in 1:D
                     Atomix.@atomic vir[alpha, dim] += λ * ustrip(r_ji[alpha]) * f1val
                 end
@@ -324,9 +327,7 @@ end
             if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j (second atom is the reference, MIC)
                 r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
-                λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-                λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-                λ = minimum((λ_ji, λ_jk))
+                λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k]))
                 @inbounds for alpha in 1:D
                     Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val)
@@ -365,10 +366,7 @@ end
                 r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
                 r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
                 r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j
-                λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-                λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-                λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
-                λ = minimum((λ_ji, λ_jk, λ_jl))
+                λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k], atoms[l]))
                 @inbounds for alpha in 1:D
                     Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val +
@@ -412,11 +410,7 @@ end
                 r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
                 r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j
                 r_jm = vector(coords[j], coords[m], boundary) # r_m - r_j
-                λ_ji = λ_mixing(MinimumMixing(), atoms[j], atoms[i])
-                λ_jk = λ_mixing(MinimumMixing(), atoms[j], atoms[k])
-                λ_jl = λ_mixing(MinimumMixing(), atoms[j], atoms[l])
-                λ_jm = λ_mixing(MinimumMixing(), atoms[j], atoms[m])
-                λ = minimum((λ_ji, λ_jk, λ_jl, λ_jm))
+                λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k], atoms[l], atoms[m]))
                 @inbounds for alpha in 1:D
                     Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val +
@@ -431,15 +425,11 @@ end
 function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:AbstractGPUArray},
                                pairwise_inters, neighbors, step_n)
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
-              "should use DistanceNeighborFinder instead")
+        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU " *
+              "you should use GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
-    if typeof(neighbors) == NoNeighborList
-        nbs = neighbors
-    else
-        nbs = @view neighbors.list[1:neighbors.n]
-    end
-    if length(neighbors) > 0
+    nbs = neighbor_pairs(neighbors)
+    if length(nbs) > 0
         backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
@@ -703,23 +693,29 @@ end
     end
 end
 
-# `Float32` gets a dedicated
-# method; any other `AbstractFloat` (including `Float64`) falls back to
-# drawing in `Float64` and converting.
+# `Float32` gets a dedicated method, any other `AbstractFloat` (including `Float64`)
+#   falls back to drawing in `Float64` and converting
 # After calling this advance ctr0 by at least 2*natoms
-@inline function randn_svec(::Type{SVector{2, Float32}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64)
+@inline function randn_svec(::Type{SVector{2, Float32}}, ctr0::UInt64, ctr1::UInt64,
+                            key::UInt64, natoms::UInt64)
     c1, c2, c3, c4 = randn_f32(ctr0, ctr1, key)
     SVector{2, Float32}(c1, c2)
 end
-@inline function randn_svec(::Type{SVector{3, Float32}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64)
+
+@inline function randn_svec(::Type{SVector{3, Float32}}, ctr0::UInt64, ctr1::UInt64,
+                            key::UInt64, natoms::UInt64)
     c1, c2, c3, c4 = randn_f32(ctr0, ctr1, key)
     SVector{3, Float32}(c1, c2, c3)
 end
-@inline function randn_svec(::Type{SVector{2, FT}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
+
+@inline function randn_svec(::Type{SVector{2, FT}}, ctr0::UInt64, ctr1::UInt64,
+                            key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
     c1, c2 = randn_f64(ctr0, ctr1, key)
     SVector{2, FT}(c1, c2)
 end
-@inline function randn_svec(::Type{SVector{3, FT}}, ctr0::UInt64, ctr1::UInt64, key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
+
+@inline function randn_svec(::Type{SVector{3, FT}}, ctr0::UInt64, ctr1::UInt64,
+                            key::UInt64, natoms::UInt64) where {FT <: AbstractFloat}
     c1, c2 = randn_f64(ctr0, ctr1, key)
     ctr0 += natoms
     c3, c4 = randn_f64(ctr0, ctr1, key)
@@ -762,6 +758,38 @@ end
 end
 
 # Fused inner part of a Langevin step
+function langevin_o_step!(
+        vels::AbstractVector{SVector{D, C}},
+        vel_scales::AbstractVector,
+        noise_scales::AbstractVector,
+        philox_ctr1::UInt64,
+        philox_key::UInt64,
+        ::Type{FT},
+    ) where {D, C, FT}
+    natoms = UInt64(length(vels))
+    @inbounds @simd ivdep for i in eachindex(vels, vel_scales, noise_scales)
+        philox_ctr0 = i%UInt64
+        noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
+        vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
+    end
+    return vels
+end
+
+function langevin_o_step!(
+            vels::AbstractGPUArray,
+            vel_scales::AbstractVector,
+            noise_scales::AbstractVector,
+            philox_ctr1::UInt64,
+            philox_key::UInt64,
+            ::Type{FT},
+        ) where {FT}
+    backend = get_backend(vels)
+    kernel! = langevin_o_step_kernel!(backend)
+    kernel!(vels, vel_scales, noise_scales, philox_ctr1, philox_key,
+            Val{FT}(); ndrange=length(vels))
+    return vels
+end
+
 @kernel function langevin_o_step_kernel!(
         vels::AbstractVector{SVector{D, C}},
         @Const(vel_scales::AbstractVector),
@@ -777,36 +805,4 @@ end
         noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
         vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
     end
-end
-# host
-function langevin_o_step!(
-        vels::AbstractVector{SVector{D, C}},
-        vel_scales::AbstractVector,
-        noise_scales::AbstractVector,
-        philox_ctr1::UInt64,
-        philox_key::UInt64,
-        ::Type{FT},
-    ) where {D, C, FT}
-    natoms = UInt64(length(vels))
-    @inbounds @simd ivdep for i in eachindex(vels, vel_scales, noise_scales)
-        philox_ctr0 = i%UInt64
-        noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
-        vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
-    end
-    nothing
-end
-# device
-function langevin_o_step!(
-            vels::AbstractGPUArray,
-            vel_scales::AbstractVector,
-            noise_scales::AbstractVector,
-            philox_ctr1::UInt64,
-            philox_key::UInt64,
-            ::Type{FT},
-        ) where {FT}
-    backend = get_backend(vels)
-    kernel! = langevin_o_step_kernel!(backend)
-    kernel!(vels, vel_scales, noise_scales, philox_ctr1, philox_key,
-            Val{FT}(); ndrange=length(vels))
-    nothing
 end

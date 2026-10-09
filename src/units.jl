@@ -19,7 +19,8 @@ ustrip_vec(x...) = ustrip.(x...)
 
 function check_force_units(F, force_units)
     if unit(F) != force_units
-        error("system force units are ", force_units, " but encountered force units ", unit(F))
+        throw(ArgumentError("system force units are $force_units but encountered " *
+                            "force units $(unit(F))"))
     end
 end
 
@@ -27,7 +28,8 @@ check_force_units(F::SVector, force_units) = @inbounds check_force_units(F[1], f
 
 function check_energy_units(E, energy_units)
     if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
+        throw(ArgumentError("system energy units are $energy_units but encountered " *
+                            "energy units $(unit(E))"))
     end
 end
 
@@ -66,8 +68,9 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
 
     if !(energy_is_molar == mass_is_molar && energy_is_molar == force_is_molar)
         throw(ArgumentError("System was constructed with inconsistent energy, force and mass " *
-            "units. All must be molar, non-molar or unitless. For example, kcal and kg is " *
-            "allowed but kcal/mol and kg is not. Units were $([energy_units, mass_units, force_units])"))
+                            "units. All must be molar, non-molar or unitless. For example, " *
+                            "kcal and kg is allowed but kcal/mol and kg is not. Units were " *
+                            "$([energy_units, mass_units, force_units])."))
     end
 
     no_dim_arr = [dim == NoDims for dim in (length_dim, vel_dim, energy_dim, force_dim, mass_dim)]
@@ -75,45 +78,41 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
     # If something has NoDims, all other data must have NoDims
     if any(no_dim_arr) && !all(no_dim_arr)
         throw(ArgumentError("either coords, velocities, masses or energy_units has " *
-            "NoDims/NoUnits but the others do have units. Molly does not permit mixing " *
-            "data with and without units."))
+                            "NoDims/NoUnits but the others do have units"))
     end
 
     # Check derived units
     if force_units != (energy_units / length_units)
         throw(ArgumentError("force_units was specified as $force_units, but that is " *
-            "different from energy_units divided by the coordinate length units"))
+                            "different from energy_units divided by the coordinate length units"))
     end
 
     return NamedTuple{(:length, :velocity, :mass, :energy, :force)}((length_units,
         vel_units, mass_units, energy_units, force_units))
 end
 
-function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
-    atoms = from_device(atoms_dev)
-    box_units = unit(length_type(boundary))
-
-    if !all(sys_units[:length] .== box_units)
-        throw(ArgumentError("simulation box constructed with $box_units but length unit " *
-                            "on coords was $(sys_units[:length])"))
+function check_other_units(atoms, boundary, sys_units::NamedTuple)
+    if unit(length_type(boundary)) != sys_units[:length]
+        throw(ArgumentError("simulation box constructed with $(unit(length_type(boundary))) " *
+                            "but length unit of coords was $(sys_units[:length])"))
     end
 
-    sigmas   = getproperty.(atoms[hasproperty.(atoms, :σ)], :σ)
-    epsilons = getproperty.(atoms[hasproperty.(atoms, :ϵ)], :ϵ)
-
-    if !all(sigmas .== 0.0u"nm")
-        σ_units = unit.(sigmas)
-        if !all(sys_units[:length] .== σ_units)
-            throw(ArgumentError("Atom σ has $(σ_units[1]) units but length unit on coords " *
-                                "was $(sys_units[:length])"))
+    for at in from_device(atoms)
+        if hasproperty(at, :σ)
+            for σ in at.σ
+                if σ != 0.0u"nm" && unit(σ) != sys_units[:length]
+                    throw(ArgumentError("Atom σ has $(unit(σ)) units but length unit of " *
+                                        "coords was $(sys_units[:length])"))
+                end
+            end
         end
-    end
-
-    if !all(epsilons .== 0.0u"kJ * mol^-1")
-        ϵ_units = unit.(epsilons)
-        if !all(sys_units[:energy] .== ϵ_units)
-            throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit " *
-                                "was $(sys_units[:energy])"))
+        if hasproperty(at, :ϵ)
+            for ϵ in at.ϵ
+                if ϵ != 0.0u"kJ * mol^-1" && unit(ϵ) != sys_units[:energy]
+                    throw(ArgumentError("Atom ϵ has $(unit(ϵ)) units but system energy " *
+                                        "unit was $(sys_units[:energy])"))
+                end
+            end
         end
     end
 end
@@ -121,8 +120,8 @@ end
 function validate_energy_units(energy_units)
     valid_energy_dimensions = [u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2", u"𝐋^2 * 𝐌 * 𝐓^-2", NoDims]
     if !(dimension(energy_units) in valid_energy_dimensions)
-        throw(ArgumentError("$energy_units do not have dimensions of energy. Energy units must " *
-            "be energy, energy/number, or NoUnits, e.g. kcal or kcal/mol."))
+        throw(ArgumentError("$energy_units do not have dimensions of energy; energy units must " *
+                            "be energy, energy/number, or NoUnits, e.g. kcal or kcal/mol"))
     end
 end
 
@@ -136,8 +135,8 @@ function validate_masses(masses)
     mass_dimension = dimension(eltype(masses))
 
     if !(mass_dimension in valid_mass_dimensions)
-        throw(ArgumentError("mass units have dimension $mass_dimension. Mass units must be " *
-            "mass, mass/number or NoUnits, e.g. 1.0u\"kg\", 1.0u\"kg/mol\" or 1.0."))
+        throw(ArgumentError("mass units have dimension $mass_dimension; mass units must be mass, " *
+                            "mass/number or NoUnits, e.g. 1.0u\"kg\", 1.0u\"kg/mol\" or 1.0"))
     end
 
     return mass_dimension, mass_units[1]
@@ -156,8 +155,8 @@ function validate_coords(coords)
     coord_dimension = (dimension ∘ eltype ∘ eltype)(coords)
 
     if !(coord_dimension in valid_length_dimensions)
-        throw(ArgumentError("coordinate units have dimension $coord_dimension. Length units " *
-            "must be length or NoUnits, e.g. 1.0u\"m\" or 1.0."))
+        throw(ArgumentError("coordinate units have dimension $coord_dimension; length units " *
+                            "must be length or NoUnits, e.g. 1.0u\"m\" or 1.0"))
     end
 
     return coord_dimension, coord_units[1][1]
@@ -176,8 +175,8 @@ function validate_velocities(velocities)
     velocity_dimension = (dimension ∘ eltype ∘ eltype)(velocities)
 
     if !(velocity_dimension in valid_velocity_dimensions)
-        throw(ArgumentError("velocity units have dimension $velocity_dimension. Velocity units " *
-            "must be velocity or NoUnits, e.g. 1.0u\"m/s\" or 1.0."))
+        throw(ArgumentError("velocity units have dimension $velocity_dimension; velocity units " *
+                            "must be velocity or NoUnits, e.g. 1.0u\"m/s\" or 1.0"))
     end
 
     return velocity_dimension, velocity_units[1][1]
@@ -228,5 +227,18 @@ function energy_remove_mol(x)
         return x / T(Unitful.Na)
     else
         return x
+    end
+end
+
+# Allow setup structs to have unitful defaults
+function convert_setup_quantity(x, units, T)
+    if units
+        return T(x)
+    else
+        if unit(x) == NoUnits
+            return T(x)
+        else
+            return T(ustrip(x))
+        end
     end
 end

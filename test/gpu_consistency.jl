@@ -1,5 +1,5 @@
 @testset "GPU Consistency" begin
-    if CUDA.functional()
+    if run_cuda_tests
         @testset "33-atom (No Cancellation)" begin
             n_atoms = 33
             D = 3
@@ -16,7 +16,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=T(5.0),
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits
@@ -77,7 +77,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits
@@ -197,7 +197,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=3.0u"nm",
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -231,10 +231,11 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=20.0u"nm",
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
+                strictness=:nowarn,
             )
 
             function with_tiny_tile_capacity(buffers)
@@ -248,15 +249,20 @@
                     buffers.pres_tensor,
                     buffers.box_mins,
                     buffers.box_maxs,
+                    buffers.tree_mins,
+                    buffers.tree_maxs,
                     buffers.morton_seq,
                     buffers.morton_seq_buffer_1,
                     buffers.morton_seq_buffer_2,
                     buffers.morton_seq_inv,
-                    buffers.compressed_masks,
-                    buffers.tile_is_clean,
+                    buffers.excluded_pos,
+                    buffers.special_pos,
+                    buffers.block_exc_min,
+                    buffers.block_exc_max,
                     CUDA.zeros(Int32, tiny_capacity),
                     CUDA.zeros(Int32, tiny_capacity),
                     CUDA.zeros(UInt8, tiny_capacity),
+                    CUDA.zeros(UInt32, tiny_capacity),
                     CUDA.zeros(Int32, 1),
                     CUDA.zeros(Int32, 1),
                     buffers.coords_reordered,
@@ -272,7 +278,8 @@
             overflow_force_buffers = with_tiny_tile_capacity(Molly.init_buffers!(sys_gpu_overflow, 1))
             overflow_energy_buffers = with_tiny_tile_capacity(Molly.init_buffers!(sys_gpu_overflow, 1, true))
 
-            @test_throws ErrorException Molly.forces!(
+            # The tile list grows to fit rather than overflowing
+            fs_tiny, _ = Molly.forces!(
                 Molly.zero_forces(sys_gpu_overflow),
                 sys_gpu_overflow,
                 nothing,
@@ -280,8 +287,13 @@
                 overflow_force_buffers,
                 Val(false),
             )
-            @test_throws ErrorException potential_energy(sys_gpu_overflow, nothing, 0,
-                                                         overflow_energy_buffers)
+            fs_ref = forces(sys_gpu_overflow, nothing)
+            @test length(overflow_force_buffers.interacting_tiles_i) >= overflow_force_buffers.num_pairs > 1
+            @test isapprox(map(f -> ustrip.(f), Array(fs_tiny)),
+                           map(f -> ustrip.(f), Array(fs_ref)); rtol=1e-8)
+            pe_tiny = potential_energy(sys_gpu_overflow, nothing, 0, overflow_energy_buffers)
+            @test length(overflow_energy_buffers.interacting_tiles_i) >= overflow_energy_buffers.num_pairs > 1
+            @test isapprox(pe_tiny, potential_energy(sys_gpu_overflow, nothing); rtol=1e-8)
         end
 
         @testset "Triclinic Boundary" begin
@@ -304,7 +316,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits
@@ -359,23 +371,11 @@
                     dist_cutoff=r_cut,
                     excluded_pairs=excluded_pairs,
                     special_pairs=special_pairs,
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits
             )
-
-            eligible = trues(n_atoms, n_atoms)
-            for (i, j) in excluded_pairs
-                eligible[i, j] = eligible[j, i] = false
-            end
-            special = falses(n_atoms, n_atoms)
-            for (i, j) in special_pairs
-                special[i, j] = special[j, i] = true
-                # For DistanceNeighborFinder, if it is special it must also be eligible 
-                # to be included in the neighbor list with the special flag.
-                eligible[i, j] = eligible[j, i] = true 
-            end
 
             cpu_sys = System(
                 atoms=atoms,
@@ -383,8 +383,9 @@
                 boundary=boundary,
                 pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=DistanceNeighborFinder(
-                    eligible=eligible,
-                    special=special,
+                    n_atoms=n_atoms,
+                    excluded_pairs=excluded_pairs,
+                    special_pairs=special_pairs,
                     dist_cutoff=r_cut,
                 ),
                 force_units=NoUnits,
@@ -402,6 +403,76 @@
                 @test isapprox(fs_gpu_cpu[i], fs_cpu[i], rtol=1e-8, atol=1e-10)
             end
             @test isapprox(pe_gpu, pe_cpu, rtol=1e-8, atol=1e-10)
+        end
+
+        @testset "Tile tree search and sparse exceptions" begin
+            ext = Base.get_extension(Molly, :MollyCUDAExt)
+            n_atoms = 8000
+            T = Float64
+            boundary = CubicBoundary(T(4.5))
+            r_cut = T(1.0)
+            Random.seed!(7)
+            coords = place_atoms(n_atoms, boundary; min_dist=T(0.1))
+            atoms = [Atom(index=i, mass=T(10.0), charge=T(0.0), σ=T(0.2), ϵ=T(0.2))
+                     for i in 1:n_atoms]
+            pairwise_inters = (LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),)
+
+            # Random exclusions and special pairs among close atoms, so that they matter
+            sys_all = System(atoms=atoms, coords=coords, boundary=boundary,
+                             pairwise_inters=pairwise_inters,
+                             neighbor_finder=DistanceNeighborFinder(
+                                 n_atoms=n_atoms, dist_cutoff=r_cut),
+                             force_units=NoUnits, energy_units=NoUnits)
+            close_pairs = [(nb[1], nb[2]) for nb in find_neighbors(sys_all).list]
+            shuffle!(close_pairs)
+            excluded_pairs = close_pairs[1:2000]
+            special_pairs = close_pairs[2001:3000]
+
+            cpu_sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                             pairwise_inters=pairwise_inters,
+                             neighbor_finder=DistanceNeighborFinder(
+                                 n_atoms=n_atoms, dist_cutoff=r_cut,
+                                 excluded_pairs=excluded_pairs, special_pairs=special_pairs),
+                             force_units=NoUnits, energy_units=NoUnits)
+            gpu_sys = System(atoms=CuArray(atoms), coords=CuArray(coords), boundary=boundary,
+                             pairwise_inters=pairwise_inters,
+                             neighbor_finder=GPUNeighborFinder(
+                                 n_atoms=n_atoms, dist_cutoff=r_cut,
+                                 excluded_pairs=excluded_pairs, special_pairs=special_pairs,
+                                 array_type=CuArray),
+                             force_units=NoUnits, energy_units=NoUnits)
+            @test Molly.n_listed_pairs(gpu_sys.neighbor_finder.eligible) == 2000
+            @test Molly.n_listed_pairs(gpu_sys.neighbor_finder.special) == 1000
+
+            fs_cpu = forces(cpu_sys)
+            pe_cpu = potential_energy(cpu_sys)
+
+            # The tree search finds the same tiles as the search over all pairs of blocks
+            buffers = Molly.init_buffers!(gpu_sys, 1)
+            Molly.forces!(Molly.zero_forces(gpu_sys), gpu_sys, nothing, 0, buffers, Val(false))
+            n_blocks = cld(n_atoms, 32)
+            tile_list(buffers) = sort(collect(zip(
+                Array(buffers.interacting_tiles_i)[1:buffers.num_pairs],
+                Array(buffers.interacting_tiles_j)[1:buffers.num_pairs],
+            )))
+            function search_tiles!(search!)
+                ext.reset_interacting_tile_state!(buffers)
+                search!(buffers, gpu_sys, n_blocks)
+                buffers.num_pairs = Int(only(Array(buffers.num_interacting_tiles)))
+                return tile_list(buffers)
+            end
+            tiles_all_pairs = search_tiles!(ext.find_interacting_tiles_all_pairs!)
+            @test search_tiles!(ext.find_interacting_tiles_tree!) == tiles_all_pairs
+            @test length(tiles_all_pairs) > n_blocks
+
+            for tree_min_blocks in ("1", "1000000")
+                withenv("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS" => tree_min_blocks) do
+                    fs_gpu = Array(forces(gpu_sys, nothing))
+                    pe_gpu = potential_energy(gpu_sys, nothing)
+                    @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
+                    @test isapprox(pe_gpu, pe_cpu; rtol=1e-10)
+                end
+            end
         end
 
         @testset "Non-Neighborlist GPU Path" begin
@@ -467,8 +538,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    n_steps_reorder=25,
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -508,7 +578,7 @@
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -553,7 +623,7 @@
                     neighbor_finder=GPUNeighborFinder(
                         n_atoms=n_atoms,
                         dist_cutoff=1.2u"nm",
-                        device_vector_type=CuArray{Int32, 1},
+                        array_type=CuArray,
                     ),
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1",
@@ -672,7 +742,5 @@
             @test vels_cpu != init_vels
             @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT)
         end
-    else
-        @warn "CUDA not functional, skipping GPU consistency tests"
     end
 end

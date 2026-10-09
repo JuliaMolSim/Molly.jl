@@ -2,15 +2,16 @@
 
 ## Running tests
 
+We use [ParallelTestRunner.jl](https://github.com/JuliaTesting/ParallelTestRunner.jl) to run the tests in parallel across multiple threads.
+This allows different test groups to be run, for example `julia test/runtests.jl gradients` for the gradient tests or `julia test/runtests.jl \!gradients \!extra` for the non-gradient tests.
 The tests will automatically include multithreading and/or GPU tests if multiple threads and/or a GPU are available.
-Errors appearing at the start of the test run due to unavailable backends is expected.
-`test/runtests.jl` does not include all the tests, see the test directory for more, though these extra tests do not need to be run for every change.
+Warnings appearing at the start of the test run due to unavailable backends is expected.
+`test/runtests.jl` does not include all the tests, see the `test/extra` directory for more, though these extra tests do not need to be run for every change.
 Various environmental variables can be set to modify the tests:
 - `VISTESTS` determines whether to run the [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) plotting tests which will error on remote systems where a display is not available, default `VISTESTS=1`.
-- `GPUTESTS` determines whether to run the GPU tests, default `GPUTESTS=1`.
+- `GPUTESTS` determines whether to run the GPU tests if a GPU is available, default `GPUTESTS=1`.
 - `DEVICE` determines which GPU to run the GPU tests on, default `DEVICE=0`.
-- `GROUP` can be used to run a subset of the tests, options `All`/`Protein`/`Gradients`/`NotGradients`, default `GROUP=All`.
-The CI run does not carry out all tests - for example the GPU and parallel CPU tests are not run - and this is reflected in the code coverage.
+The CI run does not carry out all tests - for example the GPU tests are not run - and this is reflected in the code coverage.
 Running the test file locally gives higher coverage.
 
 ## Periodic boundary conditions
@@ -31,14 +32,16 @@ For more discussion, see the [OpenMM FAQs](https://github.com/openmm/openmm/wiki
 
 To define your own neighbor finder, first define the `struct`:
 ```julia
-struct MyNeighborFinder
-    eligible::BitArray{2}
-    special::BitArray{2}
+struct MyNeighborFinder{E, S}
+    eligible::E
+    special::S
     n_steps::Int
     # Any other properties, e.g. a distance cutoff
 end
 ```
 Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
+When a [`System`](@ref) is set up from a file with `neighbor_finder_type=MyNeighborFinder`, the `eligible` and `special` matrices are given as [`SparsePairMatrix`](@ref)s.
+These can be indexed like any other `AbstractMatrix{Bool}` but take memory proportional to the number of pairs rather than to the square of the number of atoms, so avoid field types like `BitArray{2}` that would convert them to dense matrices.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
 function Molly.find_neighbors(sys,
@@ -63,6 +66,20 @@ function Molly.find_neighbors(sys,
 end
 ```
 To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`System`](@ref).
+
+## Exception types
+
+Molly throws various standard exception types, especially `ArgumentError`s, but also has its own error types:
+
+| Exception type                | Description                                                                                     |
+| :---------------------------- | :---------------------------------------------------------------------------------------------- |
+| `NaNSimulationError`          | A `NaN` is encountered during a simulation or setup                                             |
+| `ForceFieldXMLError`          | An error reading a force field XML file, [see more here](@ref "Simulating a protein")           |
+| `MissingResidueTemplateError` | A residue cannot be matched to a residue template, [see more here](@ref "Simulating a protein") |
+
+## Fast math
+
+On CUDA GPUs the pairwise force and energy kernels are compiled with fast math for `Float32` systems, where the loss in precision is not noticeable. `Float64` systems do not use fast math, since there is a noticeable loss in precision and that path is much slower anyway.
 
 ## Benchmarks
 

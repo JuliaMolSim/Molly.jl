@@ -65,6 +65,10 @@ function Base.:+(m1::Mie, m2::Mie)
     )
 end
 
+parameter_prefix(::Mie) = "inter_MIE_"
+parameter_fields(::Type{<:Mie}) = ((:weight_special, "weight_14"),)
+
+
 @inline function force(inter::Mie,
                        dr,
                        atom_i,

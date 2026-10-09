@@ -140,30 +140,30 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
     active_state = ActiveThermoState(state_space, first_state)
     n_λ = n_states(state_space)
     ref_sys = state_space.systems[first_state]
-    FT = typeof(ustrip(ref_sys.total_mass))
+    TH = float_type_high(ref_sys)
 
     # Handle Target Distribution (ρ)
     if isnothing(ρ)
-        rho_val = fill(FT(1/n_λ), n_λ)
+        rho_val = fill(TH(1/n_λ), n_λ)
     else
-        rho_val = eltype(ρ) != FT ? FT.(ρ) : ρ
+        rho_val = eltype(ρ) != TH ? TH.(ρ) : ρ
     end
     log_ρ = log.(rho_val)
 
-    stats = AWHStats(Int[], Int[], Vector{FT}[], FT[], Symbol[], FT[])
+    stats = AWHStats(Int[], Int[], Vector{TH}[], TH[], Symbol[], TH[])
 
-    return AWHState{FT, typeof(state_space), typeof(active_state)}(
+    return AWHState{TH, typeof(state_space), typeof(active_state)}(
         state_space,
         active_state,
-        zeros(FT, n_λ),
+        zeros(TH, n_λ),
         rho_val,
         log_ρ,
-        zeros(FT, n_λ),
-        zeros(FT, n_λ),
-        zeros(FT, n_λ),
-        zeros(FT, n_λ),
-        zero(FT),
-        FT(n_bias),
+        zeros(TH, n_λ),
+        zeros(TH, n_λ),
+        zeros(TH, n_λ),
+        zeros(TH, n_λ),
+        zero(TH),
+        TH(n_bias),
         0,
         true,
         Set{Int}(),
@@ -444,9 +444,9 @@ function update_active_sys!(awh_sim::AWHSimulation, active_idx::Int)
 end
 
 # Reweights coordinates along λ windows and accumulates histogram
-function process_sample(awh::AWHState{FT},
+function process_sample(awh::AWHState,
                         active_state::ActiveThermoState = awh.active_state;
-                        weight_relevance::Real = 0.1) where FT
+                        weight_relevance::Real = 0.1)
     n_win = n_states(awh.state_space)
     coords = active_state.active_sys.coords
     bound  = active_state.active_sys.boundary

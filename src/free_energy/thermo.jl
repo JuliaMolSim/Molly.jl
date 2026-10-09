@@ -74,7 +74,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                              reuse_neighbors::Bool=true)
     n_λ = length(thermo_states)
     ref_sys = thermo_states[1].system
-    FT = typeof(ustrip(ref_sys.total_mass))
+    TH = float_type_high(ref_sys)
 
     # 1. Identify Global Solute Indices (Perturbed Atoms)
     solute_indices = Set{Int}()
@@ -124,7 +124,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     list_1a = [Vector{InteractionList1Atoms}() for _ in 1:n_λ]
     list_2a = [Vector{InteractionList2Atoms}() for _ in 1:n_λ]
     list_3a = [Vector{InteractionList3Atoms}() for _ in 1:n_λ]
-    list_4a = [Vector{InteractionList4Atoms}() for _ in 1:n_λ]
+    list_4a = [Union{InteractionList4Atoms, InteractionList5Atoms}[] for _ in 1:n_λ]
 
     @inbounds for (i, tstate) in enumerate(thermo_states)
         sils = tstate.system.specific_inter_lists
@@ -135,7 +135,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                 push!(list_2a[i], inter)
             elseif inter isa InteractionList3Atoms
                 push!(list_3a[i], inter)
-            elseif inter isa InteractionList4Atoms
+            elseif inter isa Union{InteractionList4Atoms, InteractionList5Atoms}
                 push!(list_4a[i], inter)
             end
         end
@@ -208,7 +208,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     end
 
     # Initialize cache values with safe defaults
-    initial_pe = zero(FT) * master_sys.energy_units
+    initial_pe = zero(TH) * master_sys.energy_units
 
     return AlchemicalPartition(
         master_sys,
@@ -221,13 +221,17 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
+# The eligible and special matrices are dense, since the partitions exclude dense patterns of
+#   pairs such as all solvent-solvent pairs, so the warning neighbor finders give for large
+#   dense matrices is turned off as it suggests giving the pairs sparsely
 function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::Bool = true, boundary = nothing)
     if ref_nfinder isa DistanceNeighborFinder
         return DistanceNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special   = special,
-            n_steps = 1
+            n_steps = 1,
+            strictness = :nowarn,
         )
     elseif ref_nfinder isa CellListMapNeighborFinder
         return CellListMapNeighborFinder(
@@ -236,6 +240,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             special = special,
             n_steps = 1,
             boundary = boundary,
+            strictness = :nowarn,
         )
     elseif ref_nfinder isa GPUNeighborFinder
         if !reuse_neighbors
@@ -243,23 +248,37 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special = special,
-                n_steps_reorder = 1,
-                initialized = ref_nfinder.initialized
+                n_steps = 1,
+                initialized = ref_nfinder.initialized,
+                strictness = :nowarn,
             )
         else
             return DistanceNeighborFinder(
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special   = special,
-                n_steps = 1
+                n_steps = 1,
+                strictness = :nowarn,
             )
         end
+    elseif ref_nfinder isa GPUCellListNeighborFinder
+        return GPUCellListNeighborFinder(
+            eligible = eligible,
+            dist_cutoff = ref_nfinder.dist_cutoff,
+            special = special,
+            n_steps = 1,
+            max_neighbors = ref_nfinder.max_neighbors,
+            output = :molly_pairs,
+            ragged = ref_nfinder.ragged,
+            strictness = :nowarn,
+        )
     elseif ref_nfinder isa TreeNeighborFinder
         return TreeNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = special,
-            n_steps = 1
+            n_steps = 1,
+            strictness = :nowarn,
         )
     elseif ref_nfinder isa NoNeighborFinder
         return NoNeighborFinder()

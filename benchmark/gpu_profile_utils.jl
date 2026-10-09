@@ -5,7 +5,7 @@ using StaticArrays
 
 function gpu_cuda_ext()
     ext = Base.get_extension(Molly, :MollyCUDAExt)
-    ext === nothing && error("MollyCUDAExt is not loaded; import CUDA before profiling GPU kernels.")
+    isnothing(ext) && error("MollyCUDAExt is not loaded, import CUDA before profiling GPU kernels")
     return ext
 end
 
@@ -41,7 +41,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
                                  buffers=Molly.init_buffers!(sys, 1)) where {D, T}
     ext = gpu_cuda_ext()
     pairwise_inters = Tuple(filter(use_neighbors, values(sys.pairwise_inters)))
-    isempty(pairwise_inters) && error("No neighbor-list pairwise interactions found to profile.")
+    isempty(pairwise_inters) && error("no neighbor-list pairwise interactions found to profile")
 
     N = length(sys.coords)
     n_blocks = cld(N, 32)
@@ -53,7 +53,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
 
     morton_sort_ms = 0.0
     compress_ms = 0.0
-    reorder_needed = step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
+    reorder_needed = step_n % sys.neighbor_finder.n_steps == 0 || !sys.neighbor_finder.initialized
     if reorder_needed
         morton_bits = 10
         sides = box_sides(sys.boundary)
@@ -63,7 +63,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             sys.neighbor_finder.initialized = true
         end
         compress_ms = gpu_stage_time_ms!() do
-            ext.compress_sparse!(buffers, sys.neighbor_finder, Val(N))
+            ext.refresh_tile_exceptions!(buffers, sys.neighbor_finder, Val(N))
         end
     end
 
@@ -117,8 +117,8 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             Val(n_blocks),
             Val(D),
             max_tiles,
-            buffers.compressed_masks,
-            buffers.tile_is_clean,
+            buffers.block_exc_min,
+            buffers.block_exc_max,
         )
         tile_threads_xy = ext.tile_launch_params(tile_kernel)
         tile_kernel(
@@ -134,8 +134,8 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             Val(n_blocks),
             Val(D),
             max_tiles,
-            buffers.compressed_masks,
-            buffers.tile_is_clean;
+            buffers.block_exc_min,
+            buffers.block_exc_max;
             blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
             threads=tile_threads_xy,
         )
@@ -155,7 +155,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
         pairwise_inters,
         sys.boundary,
         step_n,
-        buffers.compressed_masks,
+        ext.tile_exceptions(buffers, sys.neighbor_finder),
         Val(needs_vir),
         Val(T),
         Val(D),
@@ -183,7 +183,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
                 pairwise_inters,
                 sys.boundary,
                 step_n,
-                buffers.compressed_masks,
+                ext.tile_exceptions(buffers, sys.neighbor_finder),
                 Val(needs_vir),
                 Val(T),
                 Val(D),
@@ -206,7 +206,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
             pairwise_inters,
             sys.boundary,
             step_n,
-            buffers.compressed_masks,
+            ext.tile_exceptions(buffers, sys.neighbor_finder),
             Val(needs_vir),
             Val(T),
             Val(D),
@@ -249,7 +249,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
                                   buffers=Molly.init_buffers!(sys, 1, true)) where {D, T}
     ext = gpu_cuda_ext()
     pairwise_inters = Tuple(filter(use_neighbors, values(sys.pairwise_inters)))
-    isempty(pairwise_inters) && error("No neighbor-list pairwise interactions found to profile.")
+    isempty(pairwise_inters) && error("no neighbor-list pairwise interactions found to profile")
 
     N = length(sys.coords)
     n_blocks = cld(N, 32)
@@ -259,7 +259,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
 
     morton_sort_ms = 0.0
     compress_ms = 0.0
-    reorder_needed = step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
+    reorder_needed = step_n % sys.neighbor_finder.n_steps == 0 || !sys.neighbor_finder.initialized
     if reorder_needed
         morton_bits = 10
         sides = box_sides(sys.boundary)
@@ -269,7 +269,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             sys.neighbor_finder.initialized = true
         end
         compress_ms = gpu_stage_time_ms!() do
-            ext.compress_sparse!(buffers, sys.neighbor_finder, Val(N))
+            ext.refresh_tile_exceptions!(buffers, sys.neighbor_finder, Val(N))
         end
     end
 
@@ -323,8 +323,8 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             Val(n_blocks),
             Val(D),
             max_tiles,
-            buffers.compressed_masks,
-            buffers.tile_is_clean,
+            buffers.block_exc_min,
+            buffers.block_exc_max,
         )
         tile_threads_xy = ext.tile_launch_params(tile_kernel)
         tile_kernel(
@@ -340,8 +340,8 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             Val(n_blocks),
             Val(D),
             max_tiles,
-            buffers.compressed_masks,
-            buffers.tile_is_clean;
+            buffers.block_exc_min,
+            buffers.block_exc_max;
             blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
             threads=tile_threads_xy,
         )
@@ -360,7 +360,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
         pairwise_inters,
         sys.boundary,
         step_n,
-        buffers.compressed_masks,
+        ext.tile_exceptions(buffers, sys.neighbor_finder),
         Val(T),
         Val(D),
         buffers.interacting_tiles_i,
@@ -383,7 +383,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
             pairwise_inters,
             sys.boundary,
             step_n,
-            buffers.compressed_masks,
+            ext.tile_exceptions(buffers, sys.neighbor_finder),
             Val(T),
             Val(D),
             buffers.interacting_tiles_i,

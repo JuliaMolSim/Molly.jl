@@ -76,27 +76,10 @@ function Base.:+(i1::DoubleExponential, i2::DoubleExponential)
     )
 end
 
-function inject_interaction(inter::DoubleExponential, params_dic)
-    key_prefix = "inter_DEXP_"
-    return DoubleExponential(
-        inter.cutoff,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "alpha", inter.α),
-        dict_get(params_dic, key_prefix * "beta", inter.β),
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-    )
-end
+parameter_prefix(::DoubleExponential) = "inter_DEXP_"
+parameter_fields(::Type{<:DoubleExponential}) =
+    ((:α, "alpha"), (:β, "beta"), (:weight_special, "weight_14"))
 
-function extract_parameters!(params_dic, inter::DoubleExponential, ff)
-    key_prefix = "inter_DEXP_"
-    params_dic[key_prefix * "alpha"] = inter.α
-    params_dic[key_prefix * "beta"] = inter.β
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
-end
 
 const two_power_sixth = 2 ^ (1 / 6)
 
@@ -259,28 +242,18 @@ function Base.:+(i1::DoubleExponentialSoftCore, i2::DoubleExponentialSoftCore)
     )
 end
 
-function inject_interaction(inter::DoubleExponentialSoftCore, params_dic)
-    key_prefix = "inter_DEXPSC_"
-    return DoubleExponentialSoftCore(
-        inter.cutoff,
-        inter.use_neighbors,
-        dict_get(params_dic, key_prefix * "alpha", inter.α),
-        dict_get(params_dic, key_prefix * "beta", inter.β),
-        inter.shortcut,
-        inter.σ_mixing,
-        inter.ϵ_mixing,
-        inter.λ_mixing,
-        inter.scheduler,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-    )
-end
+parameter_prefix(::DoubleExponentialSoftCore) = "inter_DEXP_"
+parameter_fields(::Type{<:DoubleExponentialSoftCore}) =
+    ((:α, "alpha"), (:β, "beta"), (:weight_special, "weight_14"))
 
-function extract_parameters!(params_dic, inter::DoubleExponentialSoftCore, ff)
-    key_prefix = "inter_DEXPSC_"
-    params_dic[key_prefix * "alpha"] = inter.α
-    params_dic[key_prefix * "beta"] = inter.β
-    params_dic[key_prefix * "weight_14"] = inter.weight_special
-    return params_dic
+
+# Energy prefactor, soft-core coupling and mixed σ/ϵ of a pair, from the scheduler as for the
+# Lennard-Jones soft cores
+@inline function dexp_lambda_params(inter::DoubleExponentialSoftCore{C, T}, atom_i, atom_j,
+                                    special) where {C, T}
+    λ, λR, _, σ, ϵ = λ_params_function(inter.scheduler, inter.λ_mixing, inter.σ_mixing,
+                                       inter.ϵ_mixing, atom_i, atom_j, special)
+    return T(λ), T(λ * λR), σ, ϵ
 end
 
 @inline function force(
@@ -293,8 +266,7 @@ end
     args...
 ) where {C, T}
 
-    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
-    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
+    λ, λ_soft, σ, ϵ = dexp_lambda_params(inter, atom_i, atom_j, special)
     if λ <= 0
         return zero_pairwise_force(dr, force_units)
     end
@@ -306,13 +278,11 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
-    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     rm = σ * T(two_power_sixth)
     # Following  https://doi.org/10.1039/d3dd00070b
     # αs = (1.1 + λ(α − 1.1)) and βs = (1 + λ(β − 1))
-    α_s = T(1.1 + λ * (inter.α - 1.1))
-    β_s = T(1 + λ * (inter.β - 1))
+    α_s = T(1.1 + λ_soft * (inter.α - 1.1))
+    β_s = T(1 + λ_soft * (inter.β - 1))
     params = (α_s, β_s, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
     fdr = (λ * f / r) * dr
@@ -338,9 +308,7 @@ end
     args...
 ) where {C, T}
 
-    # Mix Lambda
-    λ_glob = T(λ_mixing(inter.λ_mixing, atom_i, atom_j))
-    λ = T(sterics_lambda(inter.scheduler, atom_i, atom_j, λ_glob))
+    λ, λ_soft, σ, ϵ = dexp_lambda_params(inter, atom_i, atom_j, special)
     if λ <= 0
         return zero_pairwise_energy(dr, energy_units)
     end
@@ -348,13 +316,11 @@ end
         return zero_pairwise_energy(dr, energy_units)
     end
     r = sqrt(sum(abs2, dr))
-    σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
-    ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     rm = σ * T(two_power_sixth)
     # Following  https://doi.org/10.1039/d3dd00070b
     # αs = (1.1 + λ(α − 1.1)) and βs = (1 + λ(β − 1))
-    α_s = T(1.1 + λ * (inter.α - 1.1))
-    β_s = T(1 + λ * (inter.β - 1))
+    α_s = T(1.1 + λ_soft * (inter.α - 1.1))
+    β_s = T(1 + λ_soft * (inter.β - 1))
     params = (α_s, β_s, rm, ϵ)
     pe = pe_cutoff(inter.cutoff, inter, r, params)
     if special

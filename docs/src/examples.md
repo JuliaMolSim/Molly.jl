@@ -23,7 +23,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    nonbonded_method=:cutoff,
+    nonbonded_method=SetupCoulombReactionField(),
     loggers=(temp=TemperatureLogger(100),),
 )
 
@@ -213,7 +213,7 @@ lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
 sir = SIRInteraction(0.5, 0.06, 0.01) # Does not use the neighbor list
 pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
-    eligible=trues(n_people, n_people),
+    n_atoms=n_people,
     n_steps=10,
     dist_cutoff=2.0,
 )
@@ -274,7 +274,6 @@ protein_inds = 1:1170
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(
-    T,
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
 )
@@ -293,9 +292,10 @@ end
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    nonbonded_method=:pme,
+    nonbonded_method=SetupPME(),
     loggers=(gyration=GyrationLogger(50),),
     array_type=AT,
+    float_type=T,
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -409,13 +409,11 @@ atoms = [Atom(mass=10.0u"g/mol", σ=1.0u"nm", ϵ=0.5u"kJ * mol^-1") for _ in 1:n
 
 # Since we are using a generic pairwise Lennard-Jones potential too we need to
 #   exclude adjacent monomers from the neighbor list
-eligible = trues(n_atoms, n_atoms)
+excluded_pairs = Tuple{Int, Int}[]
 for pol_i in 1:n_polymers
     for mon_i in 1:n_bonds_mon
         i = (pol_i - 1) * n_monomers + mon_i
-        j = (pol_i - 1) * n_monomers + mon_i + 1
-        eligible[i, j] = false
-        eligible[j, i] = false
+        push!(excluded_pairs, (i, i + 1))
     end
 end
 
@@ -424,7 +422,8 @@ lj = LennardJones(
     use_neighbors=true,
 )
 neighbor_finder = DistanceNeighborFinder(
-    eligible=eligible,
+    n_atoms=n_atoms,
+    excluded_pairs=excluded_pairs,
     n_steps=10,
     dist_cutoff=5.5u"nm",
 )
@@ -518,9 +517,60 @@ save("polymer_angle.png", f)
 
 There is [an example](https://acesuit.github.io/ACEmd.jl/stable/molly) of using ACE potentials in Molly via [ACEmd.jl](https://github.com/ACEsuit/ACEmd.jl).
 
+## ANI neural network potentials
+
+[`ANIPotential`](@ref) is a native Julia implementation of the [ANI-2x](https://doi.org/10.1021/acs.jctc.0c00121) neural network potential (H, C, N, O, S, F, Cl), with no Python runtime dependency.
+It becomes available when [Lux.jl](https://github.com/LuxDL/Lux.jl) and [HDF5.jl](https://github.com/JuliaIO/HDF5.jl) are loaded. Both energy and forces work with just those two packages; forces use an analytic backward pass built on [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) (a core Molly dependency), which runs on CPU or GPU.
+The weights (`ani2x.h5`) are distributed as a lazily-downloaded artifact; `ani2x_data_dir()` returns its location (downloading it on first use).
+```julia
+using Molly
+using Lux, HDF5 # required to construct and run an ANIPotential (energy and forces)
+
+pot = ANIPotential(joinpath(ani2x_data_dir(), "ani2x.h5"))
+
+# A single water molecule (energies are in eV, forces in eV/Å)
+sys = System(
+    atoms      = [Atom(mass=15.999u"u"), Atom(mass=1.008u"u"), Atom(mass=1.008u"u")],
+    coords     = [SVector(0.0, 0.0, 0.0)u"Å", SVector(0.96, 0.0, 0.0)u"Å",
+                  SVector(-0.24, 0.93, 0.0)u"Å"],
+    boundary   = CubicBoundary(100.0u"Å"),
+    atoms_data = [AtomData(element="O"), AtomData(element="H"), AtomData(element="H")],
+    general_inters = (ani=pot,),
+    force_units    = u"eV/Å",
+    energy_units   = u"eV",
+)
+
+potential_energy(sys)
+forces(sys)
+```
+For larger or periodic systems, attach a neighbor finder so the AEV uses the minimum-image convention and only the passed-in neighbors. When all pairs are eligible, only the number of atoms needs to be given:
+```julia
+neighbor_finder = DistanceNeighborFinder(
+    n_atoms     = length(sys),
+    dist_cutoff = (Float64(pot.cutoff) + 1.0)u"Å",
+)
+sys = System(sys; neighbor_finder=neighbor_finder)
+```
+(`CellListMapNeighborFinder` works too.)
+An NVE trajectory can be written to a DCD file with a [`TrajectoryWriter`](@ref):
+```julia
+sys = System(sys; loggers=(writer=TrajectoryWriter(10, "water_ani.dcd"),))
+random_velocities!(sys, 300.0u"K")
+simulate!(sys, VelocityVerlet(dt=0.5u"fs"), 1000)
+```
+The same energy and forces run on the GPU: put the system's device arrays on a GPU array type (`CuArray` for CUDA, `MtlArray` for Metal, `ROCArray` for ROCm) and the KernelAbstractions kernels run on that device.
+```julia
+using CUDA
+sys_gpu = System(sys; atoms=CuArray(sys.atoms), coords=CuArray(sys.coords),
+                 velocities=CuArray(sys.velocities))
+potential_energy(sys_gpu)
+forces(sys_gpu)
+```
+The atomic environment vectors can also be computed directly with `compute_aevs_ka`, and a full energy evaluation kept on-device with `compute_ani_energy_ka`, when [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) is loaded.
+
 ## Python ASE calculator
 
-[`ASECalculator`](@ref) can be used along with [PythonCall.jl](https://github.com/JuliaPy/PythonCall.jl) to use a Python [ASE](https://wiki.fysik.dtu.dk/ase) calculator with Molly.
+[`ASECalculator`](@ref) can be used along with [PythonCall.jl](https://github.com/JuliaPy/PythonCall.jl) to use a Python [ASE](https://ase-lib.org) calculator with Molly.
 Here we simulate a dipeptide molecule in a vacuum with [MACE-OFF23](https://github.com/ACEsuit/mace-off):
 ```julia
 using Molly
@@ -569,7 +619,7 @@ simulate!(deepcopy(sys), simulator, 5; run_loggers=false)
 @time simulate!(sys, simulator, 2000)
 ```
 
-Another example using [psi4](https://wiki.fysik.dtu.dk/ase/ase/calculators/psi4.html) to get the potential energy of a water molecule:
+Another example using [psi4](https://docs.ase-lib.org/ase/calculators/psi4.html) to get the potential energy of a water molecule:
 ```julia
 using Molly
 using PythonCall # Python packages ase and psi4 need to be installed beforehand
@@ -822,7 +872,7 @@ pairwise_inters = (
     BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
-    eligible=trues(n_atoms, n_atoms),
+    n_atoms=n_atoms,
     n_steps=10,
     dist_cutoff=2.2,
 )
@@ -982,7 +1032,7 @@ function check_sim(n_atoms)
     neighbor_finder = GPUNeighborFinder(
         n_atoms=n_atoms,
         dist_cutoff=1.0f0u"nm",
-        device_vector_type=CuArray{Int32, 1},
+        array_type=CuArray,
     )
     pis = (LennardJones(cutoff=DistanceCutoff(1.0f0u"nm"), use_neighbors=true),)
     sys = System(
@@ -998,23 +1048,23 @@ function check_sim(n_atoms)
 end
 
 function test_natoms()
-    n_atoms = 40_000
+    n_atoms = 1_000_000
     while true
         fs = check_sim(n_atoms)
         println(n_atoms, " atoms okay")
-        n_atoms += 20_000
+        n_atoms *= 2
     end
 end
 
 test_natoms()
 ```
-This constructor is the preferred way to use [`GPUNeighborFinder`](@ref) when all pairs are eligible.
-If you need exclusions or special-pair handling, pass them with `excluded_pairs` and `special_pairs`.
+All pairs are eligible here, so only the number of atoms is given to [`GPUNeighborFinder`](@ref).
+Exclusions and special pairs can be given with `excluded_pairs` and `special_pairs`.
 
-The results before running out of memory on different GPUs are:
-- 60,000 on NVIDIA GeForce RTX 2080 Ti (11 GB).
-- 140,000 on NVIDIA RTX A6000 (48 GB).
-- 120,000 on NVIDIA GeForce RTX 5090 (32 GB).
+The memory used grows linearly with the number of atoms, as does the time taken per step.
+On a NVIDIA RTX A6000 (48 GB), 160 million atoms fit and 168 million run out of memory, which is around 300 bytes per atom.
+Systems set up from a structure file with a force field use more memory per atom, for example a solvated protein with PME uses around 1 KB per atom.
+On GPUs other than NVIDIA ones, [`GPUCellListNeighborFinder`](@ref) stores an explicit list of pairs, which takes more memory: with `ragged=false` the same example fits 23 million atoms on the same GPU, around 2.2 KB per atom, and a solvated protein with PME fits 11.6 million atoms.
 
 ## Variations of the Morse potential
 
@@ -1292,7 +1342,7 @@ shake = SHAKE_RATTLE(
 )
 
 neighbor_finder = DistanceNeighborFinder(
-    eligible=trues(length(atoms), length(atoms)),
+    n_atoms=length(atoms),
     dist_cutoff=1.5*r_cut,
 )
 
