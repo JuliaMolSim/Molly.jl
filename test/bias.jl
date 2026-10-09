@@ -771,6 +771,51 @@ end
     gh2d_uneven = GridHills(1.0, (0.1, 0.2), (0.0, 0.0), (1.0, 2.0), (3, 5))
     @test size(gh2d_uneven.values) == (3, 5)
     @test all(isapprox.(gh2d_uneven.bin_width, (0.5, 0.5); atol=1e-9))
+
+    # Integer grid bounds are converted to floats
+    gh_int = GridHills(1.0, 0.1, 0, 5, 51)
+    @test only(gh_int.bin_width) isa AbstractFloat
+    @test isapprox(only(gh_int.bin_width), 0.1; atol=1e-9)
+
+    # Leaving the grid throws an error by default
+    @test_throws ArgumentError potential_energy(gh, 2.5)
+    @test_throws ArgumentError Molly.bias_gradient(gh, -0.5)
+    @test_throws ArgumentError add_hill!(gh, 2.5)
+
+    # With out_of_grid_error=false the bias warns and is held constant outside the grid,
+    #   so it exerts no force there
+    gh_soft = GridHills(1.0, 0.2, 0.0, 2.0, 5; out_of_grid_error=false)
+    add_hill!(gh_soft, 2.0)
+    @test_logs (:warn,) potential_energy(gh_soft, 2.5)
+    @test isapprox(potential_energy(gh_soft, 2.5), potential_energy(gh_soft, 2.0); atol=1e-9)
+    @test Molly.bias_gradient(gh_soft, 2.5) == 0.0
+    @test !iszero(Molly.bias_gradient(gh_soft, 1.9))
+
+    gh2d_soft = GridHills(1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 9; out_of_grid_error=false)
+    add_hill!(gh2d_soft, (1.0, 1.9))
+    grad_out = Molly.bias_gradient(gh2d_soft, (1.1, 2.5))
+    grad_edge = Molly.bias_gradient(gh2d_soft, (1.1, 2.0))
+    @test grad_out[2] == 0.0
+    @test isapprox(grad_out[1], grad_edge[1]; atol=1e-9)
+end
+
+@testset "MetaDynamicsBias default centers" begin
+    # Without explicit centers, deposits keep the units and precision of sigma
+    md_units = MetaDynamicsBias(2.0u"kJ * mol^-1", 0.5u"nm")
+    add_hill!(md_units, 1.0u"nm")
+    @test md_units.memory.centers == [1.0u"nm"]
+
+    md_tuple = MetaDynamicsBias(2.0, (0.5, 1.0))
+    add_hill!(md_tuple, (1.0, 2.0))
+    @test md_tuple.memory.centers == [(1.0, 2.0)]
+
+    md_f64 = MetaDynamicsBias(2.0, 0.5)
+    add_hill!(md_f64, 0.1)
+    @test eltype(md_f64.memory.centers) == Float64
+    @test md_f64.memory.centers[1] === 0.1
+
+    md_f32 = MetaDynamicsBias(2.0f0, 0.5f0)
+    @test eltype(md_f32.memory.centers) == Float32
 end
 
 @testset "MetaDynamicsBias via BiasPotential" begin
@@ -905,6 +950,36 @@ end
         AtomsCalculators.forces!(fs3, sys3, bias3)
     end
     @test length(bias3.memory.centers) == 2
+    @test bias3.n_deposits[] == 2
+
+    # With a step number, deposits are paced by step: hills at steps 3 and 6 only, and
+    #   recomputing forces within a step adds no extra hill
+    bias_step = MetaDynamicsBias((cv1, cv2), 5.0, (0.1, 0.1); deposit_interval=3)
+    for step_n in 1:6, _ in 1:2
+        AtomsCalculators.forces!(fs3, sys3, bias_step; step_n=step_n)
+    end
+    @test bias_step.n_deposits[] == 2
+    @test bias_step.last_deposit_step[] == 6
+end
+
+@testset "MetaDynamicsBias step pacing in simulation" begin
+    # A ForcesLogger recomputes forces at logged steps, which must not add hills
+    atoms = [Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2]
+    coords = [SVector(1.0, 1.0, 1.0), SVector(1.3, 1.0, 1.0)]
+    boundary = CubicBoundary(3.0)
+    bias = MetaDynamicsBias((CalcDist([1], [2], CalcSingleDist(), :wrap),), 0.1, 0.05;
+                            deposit_interval=5)
+    n_steps = 20
+    sys = System(
+        atoms=atoms, coords=coords, boundary=boundary,
+        velocities=[SVector(0.0, 0.0, 0.0) for _ in 1:2],
+        general_inters=(bias,), force_units=NoUnits, energy_units=NoUnits,
+        loggers=(forces=ForcesLogger(Float64, 1),),
+    )
+    simulate!(sys, VelocityVerlet(dt=0.002), n_steps)
+    # Steps 0, 5, 10, 15 and 20
+    @test bias.n_deposits[] == n_steps ÷ 5 + 1
+    @test length(bias.memory.centers) == bias.n_deposits[]
 end
 
 @testset "MetaDynamicsBias simulation" begin

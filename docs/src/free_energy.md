@@ -2621,7 +2621,7 @@ tempering = WellTemperedTempering(10.0, kT)                  # bias_factor (dime
 bias = MetaDynamicsBias((calc_dist,), memory; deposit_interval=200, tempering=tempering)
 ```
 
-`deposit_interval=200` paces the deposits to every 200th force evaluation. `bias` needs no external logger to know when to deposit a hill, since it hooks directly into `forces!`; we just add it to `general_inters` and simulate as normal:
+`deposit_interval=200` deposits a hill every 200 simulation steps; recomputing forces within a step (e.g. by a logger or coupler) adds no extra hills. The CV must stay within `[grid_min, grid_max]`: by default leaving the grid throws an error, while `GridHills(...; out_of_grid_error=false)` instead warns once and holds the bias constant (no force) outside the grid. `bias` needs no external logger to know when to deposit a hill, since it hooks directly into `forces!`; we just add it to `general_inters` and simulate as normal:
 
 ```julia
 simulator = VelocityVerlet(dt=0.002, coupling=AndersenThermostat(temp, 0.1)) # dt in ps, coupling const in ps

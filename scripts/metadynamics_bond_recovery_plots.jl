@@ -46,7 +46,7 @@ function run_metadynamics(tempering; label="")
     velocities = [random_velocity(mass, temp) for i in 1:2]
 
     memory = GridHills(0.0025, 0.01, grid_min, grid_max, n_bins)
-    # deposit_interval paces deposits directly off forces! (called every step regardless of
+    # deposit_interval paces deposits by simulation step from within forces! (called every step regardless of
     # simulator), so no external logger is needed to drive hill deposition
     bias = MetaDynamicsBias((calc_dist,), memory; deposit_interval=deposit_interval,
                             tempering=tempering)
@@ -72,7 +72,7 @@ function run_metadynamics(tempering; label="")
 
     print("$(label): ")
     @time simulate!(sys, simulator, n_steps)
-    n_deposits = bias.call_count[] ÷ bias.deposit_interval
+    n_deposits = bias.n_deposits[]
     println("  $(n_deposits) hills deposited onto a $(n_bins)-point grid over [$(grid_min), $(grid_max)]")
 
     return bias, values(sys.loggers.dist)
