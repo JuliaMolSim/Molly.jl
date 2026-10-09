@@ -99,6 +99,7 @@ include("free_energy/scale_dual.jl")
 include("free_energy/TSS.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
+include("bias/meta_dynamics.jl")
 
 
 end
