@@ -2429,9 +2429,6 @@ Contrary to the rest of Molly, unitless quantities are assumed to have ASE units
 Å for length, eV for energy, u for mass, and Å sqrt(u/eV) for time.
 Unitful quantities will be converted as appropriate.
 
-Not compatible with [`TriclinicBoundary`](@ref).
-Not compatible with virial calculation.
-
 # Arguments
 - `ase_calc`: the ASE calculator created with PythonCall.
 - `atoms`: the atoms, or atom equivalents, in the system.

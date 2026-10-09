@@ -114,6 +114,7 @@ function AtomsCalculators.forces!(fs,
                                   ase_calc::ASECalculator;
                                   buffers=nothing,
                                   needs_vir=false,
+                                  strictness=Molly.default_strictness(),
                                   kwargs...) where {D, AT, T}
     Molly.update_ase_calc!(ase_calc, sys)
     forces_py = ase_calc.ase_atoms.get_forces()
@@ -129,7 +130,15 @@ function AtomsCalculators.forces!(fs,
     fs .+= to_device(fs_unit, AT)
     if needs_vir
         # W = Σ r ⊗ f = -V σ, with the ASE stress σ in eV/Å^3
-        stress = pyconvert(Matrix{T}, ase_calc.ase_atoms.get_stress(voigt=false))
+        stress = try
+            pyconvert(Matrix{T}, ase_calc.ase_atoms.get_stress(voigt=false))
+        catch e
+            not_impl = pyimport("ase.calculators.calculator").PropertyNotImplementedError
+            (e isa PyException && pyisinstance(e.v, not_impl)) || rethrow()
+            Molly.report_issue("The ASE calculator does not provide the stress, so its " *
+                               "virial contribution will be ignored", strictness; maxlog=1)
+            zeros(T, D, D)
+        end
         vir = -pyconvert(T, ase_calc.ase_atoms.get_volume()) .* stress
         buffers.virial .+= from_ase_energy(vir, sys.energy_units)
     end
