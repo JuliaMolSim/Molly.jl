@@ -1,6 +1,5 @@
 # Long range electrostatic summation methods
 # Based on the OpenMM source code
-import Base: ==, hash
 
 export
     Ewald,
@@ -8,6 +7,8 @@ export
     PME,
     SetupPME,
     EwaldExclusion
+
+@public PME_λ
 
 abstract type AbstractEwald end
 
@@ -264,13 +265,13 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
     return total_E
 end
 
-function ==(a::Ewald, b::Ewald)
+function Base.:(==)(a::Ewald, b::Ewald)
     return a.dist_cutoff == b.dist_cutoff &&
            a.error_tol   == b.error_tol   &&
            a.scheduler == b.scheduler
 end
 
-function hash(a::Ewald, h::UInt)
+function Base.hash(a::Ewald, h::UInt)
     v = hash(a.dist_cutoff, h)
     v = hash(a.error_tol, v)
     return hash(a.scheduler, v)
@@ -624,7 +625,7 @@ function Base.zero(pme::PME)
     )
 end
 
-function ==(a::PME, b::PME)
+function Base.:(==)(a::PME, b::PME)
     return a.dist_cutoff == b.dist_cutoff &&
            a.error_tol   == b.error_tol   &&
            a.order       == b.order       &&
@@ -635,7 +636,7 @@ function ==(a::PME, b::PME)
            a.grad_safe   == b.grad_safe
 end
 
-function hash(a::PME, h::UInt)
+function Base.hash(a::PME, h::UInt)
     v = hash(a.dist_cutoff, h)
     v = hash(a.error_tol, v)
     v = hash(a.order, v)
@@ -1462,8 +1463,40 @@ end
     return E
 end
 
-# PME with λ-dependent charges, mixing the end-state grids as GROMACS does. Only works with
-# `GROMACSLambdaABFEScheduler` and `GROMACSLambdaRBFEScheduler`.
+@doc raw"""
+    PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5, ϵr=1.0,
+          fixed_charges=true, mesh_dims=nothing,
+          scheduler=GROMACSLambdaABFEScheduler(), λ=0.0, grad_safe=false,
+          n_threads=Threads.nthreads())
+
+Particle mesh Ewald (PME) summation for long range electrostatics in an alchemical system,
+the λ version of [`PME`](@ref) that mixes the two end states as GROMACS does.
+
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert a [`PME`](@ref) to this
+type when the scheduler is [`GROMACSLambdaABFEScheduler`](@ref) or
+[`GROMACSLambdaRBFEScheduler`](@ref).
+These are the only schedulers it is compatible with, and they have to use dual topology.
+The charges of the two end states are spread onto separate grids and the potential energy is
+defined as
+```math
+E = (1 - \lambda_q) E_{\mathrm{PME}}(q^A) + \lambda_q E_{\mathrm{PME}}(q^B)
+```
+where ``E_{\mathrm{PME}}(q)`` is the [`PME`](@ref) potential energy for atomic charges ``q``.
+``q^A`` and ``q^B`` are the charges of the atoms at a global λ of 0 and 1, where the atoms
+that are switched off in an end state have zero charge.
+``\lambda_q`` is the electrostatic coupling that the scheduler gives at the global λ `λ`,
+which is ``\min(2\lambda, 1)`` for [`GROMACSLambdaABFEScheduler`](@ref) and ``\lambda`` for
+[`GROMACSLambdaRBFEScheduler`](@ref).
+The forces and the virial are mixed in the same way.
+The potential energy is linear in ``\lambda_q``, whereas [`PME`](@ref) with a scheduler uses
+one grid on which the charge of each atom is scaled.
+
+[`set_lambda!`](@ref) changes the global λ of a system without rebuilding the grids.
+`fixed_charges` is accepted for consistency with [`PME`](@ref) but has no effect, as the
+charges of the end states are always recalculated from the atoms.
+See [`PME`](@ref) for the other arguments, the interactions that this should be used
+alongside and the systems that it is compatible with.
+"""
 struct PME_λ{T, D, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
@@ -1685,7 +1718,7 @@ function Base.zero(pme::PME_λ)
     )
 end
 
-function ==(a::PME_λ, b::PME_λ)
+function Base.:(==)(a::PME_λ, b::PME_λ)
     return a.dist_cutoff    == b.dist_cutoff    &&
            a.error_tol      == b.error_tol      &&
            a.order          == b.order          &&
@@ -1697,7 +1730,7 @@ function ==(a::PME_λ, b::PME_λ)
            a.λ              == b.λ
 end
 
-function hash(a::PME_λ, h::UInt)
+function Base.hash(a::PME_λ, h::UInt)
     v = hash(a.dist_cutoff, h)
     v = hash(a.error_tol, v)
     v = hash(a.order, v)

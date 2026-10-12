@@ -1,16 +1,16 @@
 export
     LennardJones,
     LJDispersionCorrection,
-    LJDispersionCorrectionλ,
-    LennardJonesScaled,
     LennardJonesSoftCoreBeutler,
     LennardJonesSoftCoreGapsys,
     AshbaughHatch,
     LennardJones14,
     LennardJones14SoftCoreBeutler,
-    LennardJones14SoftCoreGapsys,
-    LennardJones14Scaled,
-    LennardJonesScaled
+    LennardJones14SoftCoreGapsys
+
+@public LJDispersionCorrectionλ,
+    LennardJonesScaled,
+    LennardJones14Scaled
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)

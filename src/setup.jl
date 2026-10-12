@@ -460,8 +460,6 @@ templates is carried out.
     file by default.
 - `velocities=nothing`: the velocities of the atoms in the system, set to
     zero by default.
-- `loggers=()`: the loggers that record properties of interest during a
-    simulation.
 - `units::Bool=true`: whether to use Unitful quantities. Should match the
     corresponding argument used for the force field argument.
 - `array_type=Array`: the array type for the simulation, for example
@@ -522,6 +520,8 @@ templates is carried out.
 - `disulfide_bonds=true`: whether or not to look for disulfide bonds between CYS
     residues in the structure file and add them to the topology. Uses geometric
     arguments to assign them.
+- `loggers=()`: the loggers that record properties of interest during a
+    simulation.
 - `n_threads=Threads.nthreads()`: the number of threads the simulation will likely
     be run on, used for example when setting up PME and implicit solvent. Only
     relevant when running on CPU.
@@ -535,7 +535,6 @@ function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
                 boundary=nothing,
                 velocities=nothing,
-                loggers=(),
                 units::Bool=true,
                 array_type::Type{AT}=Array,
                 float_type=(array_type <: AbstractGPUArray ? Float32 : Float64),
@@ -557,6 +556,7 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=nothing,
                 disulfide_bonds::Bool=true,
+                loggers=(),
                 n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
                 strictness=default_strictness(),

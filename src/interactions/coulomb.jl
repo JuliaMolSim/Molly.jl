@@ -1,18 +1,19 @@
 export
     Coulomb,
-    CoulombScaled,
     CoulombSoftCoreBeutler,
     CoulombSoftCoreGapsys,
     CoulombReactionField,
     SetupCoulombReactionField,
-    CoulombReactionFieldScaled,
     CoulombSoftCoreBeutlerReactionField,
     CoulombSoftCoreGapsysReactionField,
     CoulombEwald,
-    CoulombEwaldScaled,
     CoulombSoftCoreBeutlerEwald,
     CoulombSoftCoreGapsysEwald,
     Yukawa
+
+@public CoulombScaled,
+    CoulombReactionFieldScaled,
+    CoulombEwaldScaled
 
 const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
 

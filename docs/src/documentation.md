@@ -770,7 +770,6 @@ The available pairwise interactions are:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCoreBeutler`](@ref)
 - [`LennardJonesSoftCoreGapsys`](@ref)
-- [`LennardJonesScaled`](@ref)
 - [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
@@ -785,7 +784,9 @@ The available pairwise interactions are:
 - [`CoulombSoftCoreBeutlerEwald`](@ref)
 - [`CoulombSoftCoreGapsysEwald`](@ref)
 - [`Yukawa`](@ref)
+- [`DoubleExponential`](@ref)
 - [`Gravity`](@ref)
+- [`DPDInteraction`](@ref)
 
 The available specific interactions (1-5 atoms) are:
 - [`HarmonicPositionRestraint`](@ref) - 1 atom
@@ -793,12 +794,16 @@ The available specific interactions (1-5 atoms) are:
 - [`MorseBond`](@ref) - 2 atoms
 - [`FENEBond`](@ref) - 2 atoms
 - [`LennardJones14`](@ref) - 2 atoms
+- [`LennardJones14SoftCoreBeutler`](@ref) - 2 atoms
+- [`LennardJones14SoftCoreGapsys`](@ref) - 2 atoms
 - [`EwaldExclusion`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
 - [`UreyBradley`](@ref) - 3 atoms
 - [`PeriodicTorsion`](@ref) - 4 atoms
 - [`RBTorsion`](@ref) - 4 atoms
+- [`HarmonicTorsion`](@ref) - 4 atoms
+- [`CMAPTorsion`](@ref) - 5 atoms
 
 The available general interactions are:
 - [`Ewald`](@ref)
@@ -809,6 +814,7 @@ The available general interactions are:
 - [`MullerBrown`](@ref)
 - [`ASECalculator`](@ref)
 
+In addition there are lambda-scaled variants for many of the above interactions (`λ` or `Scaled` suffixes).
 Some interactions combine instances of the above.
 For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction, the [`EwaldExclusion`](@ref) specific interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
 
@@ -1104,11 +1110,10 @@ The available cutoffs are:
 - [`CubicSplineCutoff`](@ref)
 - [`PolynomialCutoff`](@ref)
 
-The following built-in interactions can use a cutoff:
+The following built-in interactions (and their lambda-scaled variants) can use a cutoff:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCoreBeutler`](@ref)
 - [`LennardJonesSoftCoreGapsys`](@ref)
-- [`LennardJonesScaled`](@ref)
 - [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
@@ -1117,6 +1122,7 @@ The following built-in interactions can use a cutoff:
 - [`CoulombSoftCoreBeutler`](@ref)
 - [`CoulombSoftCoreGapsys`](@ref)
 - [`Yukawa`](@ref)
+- [`DoubleExponential`](@ref)
 - [`Gravity`](@ref)
 In addition, [`CoulombReactionField`](@ref), [`CoulombEwald`](@ref) and the implicit solvent and Ewald general interactions have a `dist_cutoff` argument for a cutoff distance.
 Cutoffs combine well with neighbor finders, provided that the cutoff distance is less than the neighbor distance (see [Neighbor finders](@ref) for more).

@@ -1374,32 +1374,32 @@ simulate!(sys, simulator, 10_000)
 
 ### Installation
 
-1. Install the KIM API and make the shared library discoverable:
-    ```bash
-    conda create -n kim-api kim-api=2.4 -c conda-forge
-    conda activate kim-api
-    export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
-    ```
+Install the KIM API and make the shared library discoverable:
+```bash
+conda create -n kim-api kim-api=2.4 -c conda-forge
+conda activate kim-api
+export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
+```
 
-2. Install the required [OpenKIM model](https://openkim.org/browse/models/alphabetical):
-    ```bash
-    $ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006
-    Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
-    Found installed driver... SW__MD_335816936951_005
-    [100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
-    Install the project...
-    -- Install configuration: "Debug"
-    -- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
-    -- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
-    
-    Success!
-    ```
+Install the required [OpenKIM model](https://openkim.org/browse/models/alphabetical):
+```bash
+$ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006
+Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
+Found installed driver... SW__MD_335816936951_005
+[100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
+Install the project...
+-- Install configuration: "Debug"
+-- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
+-- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
 
-3. Add the package to your Julia environment:
-    ```julia
-    using Pkg
-    Pkg.add("KIM_API")
-    ```
+Success!
+```
+
+Add the package to your Julia environment:
+```julia
+using Pkg
+Pkg.add("KIM_API")
+```
 
 ### Stillinger-Weber silicon supercell
 
