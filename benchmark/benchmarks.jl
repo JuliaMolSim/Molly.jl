@@ -161,6 +161,8 @@ SUITE["protein"]["CPU parallel NL"] = @benchmarkable simulate!($(sys), $(sim), $
 # Biased simulations of the protein system, on CPU and on GPU
 prot = findall(ad -> ad.res_name != "HOH", sys.atoms_data)
 g1, g2 = prot[1:(length(prot) ÷ 2)], prot[(length(prot) ÷ 2 + 1):end]
+# Measures the cost per step: the whole-protein :wrap groups may cross the boundary, which
+# makes the CV values meaningless but doesn't change the work done
 function bias_sets(FT)
     sq = SquareBias(FT(300)u"kJ * mol^-1 * nm^-2", FT(1)u"nm")
     return [
