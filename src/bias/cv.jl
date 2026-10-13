@@ -528,6 +528,8 @@ Given as an argument to [`BiasPotential`](@ref).
 - `correction=:pbc`: the correction to be applied to the molecules. `:pbc` keeps molecules
     whole, `:wrap` wraps all atoms inside the simulation box. If using multiple atoms in
     a group, they should generally be in the same molecule and `:pbc` should be used.
+    With [`CalcCMDist`](@ref), each centre of mass is taken from the corrected coordinates, so
+    with `:wrap` a group must not cross the boundary.
     `:pbc` runs fully on the GPU for GPU-resident `System`s, using a GPU-native
     bonded-topology traversal.
 """
@@ -1080,8 +1082,9 @@ Given as an argument to [`BiasPotential`](@ref).
 # Arguments
 - `atom_inds=[]`: indices of the atoms in the group, `[]` uses all atoms.
 - `correction=:pbc`: the correction to be applied to the molecules. `:pbc` keeps molecules
-    whole, `:wrap` wraps all atoms inside the simulation box. Generally atoms in a group
-    should be in the same molecule and `:pbc` should be used.
+    whole, `:wrap` wraps all atoms inside the simulation box. The centre of mass is taken from
+    the corrected coordinates, so with `:wrap` the group must not cross the boundary, and with
+    `:pbc` it should be one bonded molecule.
     `:pbc` runs fully on the GPU for GPU-resident `System`s, using a GPU-native
     bonded-topology traversal.
 """

@@ -233,9 +233,9 @@ Enzyme should be imported in the first case.
 
 Virial contributions must be explicitly defined.
 
-When the `System` is GPU-resident, [`CalcDist`](@ref), [`CalcRg`](@ref) and
-[`CalcTorsion`](@ref) run on the GPU without any transfer to the host, also with
-`cv_type.correction = :pbc`, which unwraps bonded molecules on the GPU.
+When the `System` is GPU-resident, [`CalcDist`](@ref), [`CalcRg`](@ref), [`CalcTorsion`](@ref)
+and [`CalcAngle`](@ref) run on the GPU, also with `cv_type.correction = :pbc`, which unwraps
+bonded molecules on the GPU. On steps without a virial they need no transfer to the host.
 [`CalcRMSD`](@ref) does the same apart from a host-side Kabsch alignment every step.
 Other CV types, including custom ones, copy the coordinates and atoms to the host and the
 gradient back, since arbitrary user code isn't guaranteed to be GPU-safe.

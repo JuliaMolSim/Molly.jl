@@ -657,7 +657,7 @@ See also [this example](@ref "Protein bias potential").
 ### GPU offload for biased simulations
 
 When the [`System`](@ref) is on the GPU:
-- [`CalcDist`](@ref), [`CalcRg`](@ref), [`CalcTorsion`](@ref) and [`CalcAngle`](@ref) are calculated on the GPU without any transfer to the host, also with `correction=:pbc`.
+- [`CalcDist`](@ref), [`CalcRg`](@ref), [`CalcTorsion`](@ref) and [`CalcAngle`](@ref) are calculated on the GPU without any transfer to the host on steps without a virial, also with `correction=:pbc`.
 - [`CalcRMSD`](@ref) is calculated on the GPU apart from the Kabsch alignment, which is done on the host every step.
 - Other CV types, including custom ones, copy the coordinates and atoms to the host and the gradient back every step.
 - With the GPU CV types, `bias_gradient` also runs on the GPU if the `bias_type` is an isbits type, and on the host otherwise.
