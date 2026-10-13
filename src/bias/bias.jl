@@ -345,14 +345,18 @@ function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
     return unwrap_molecules(sys)
 end
 
-# Partition a heterogeneous tuple of interactions into its BiasPotential entries and everything
-# else, preserving each group's relative order. Recurses rather than using filter, which isn't
-# type-stable on a mixed-type Tuple.
+# Partition a heterogeneous tuple of interactions into the BiasPotentials whose CV has built-in
+# kernels and everything else, preserving each group's relative order. Recurses rather than
+# using filter, which isn't type-stable on a mixed-type Tuple.
 @inline split_biases(::Tuple{}) = (), ()
 @inline function split_biases(t::Tuple)
     rest_biases, rest_others = split_biases(Base.tail(t))
     x = first(t)
-    return x isa BiasPotential ? ((x, rest_biases...), rest_others) : (rest_biases, (x, rest_others...))
+    if x isa BiasPotential && uses_builtin_cv_gradient(x.cv_type)
+        return (x, rest_biases...), rest_others
+    else
+        return rest_biases, (x, rest_others...)
+    end
 end
 
 # Lazily allocates scratch.grad/scratch.d_buf. Only reached when bias.uses_persistent_buffers
@@ -567,6 +571,9 @@ function bias_batched_tail!(fs, biases::Tuple, scratches::Tuple, step_n)
     check_kernel!(fs_svecs, d_bufs, map(s -> s.bad_step, scratches), Int(step_n); ndrange=n_atoms)
     return nothing
 end
+
+# Steps between readbacks of the non-finite flags in the GPU forces!
+const BIAS_FINITE_CHECK_EVERY = 20
 
 # Reads back the non-finite flags of every attached BiasPotential with one host sync. A no-op
 # for biases that haven't used the sync-free path yet.

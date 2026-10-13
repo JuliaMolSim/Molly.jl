@@ -1327,7 +1327,25 @@ function forces!(fs,
                 specific_inter_lists, n_threads)
 
     buffers.unwrapped_coords[] = nothing # Filled by the first BiasPotential that needs it
-    for inter in values(general_inters)
+    # BiasPotentials with built-in CV kernels take the sync-free path, see bias_batched_tail!
+    biases, others = split_biases(Tuple(values(general_inters)))
+    scratches = map(b -> bias_scratch(buffers, b), biases)
+    for (bias, scratch) in zip(biases, scratches)
+        bias_cv_step!(bias, scratch, sys, bias_coords(sys, bias.cv_type, buffers, step_n), fs)
+    end
+    bias_batched_tail!(fs, biases, scratches, step_n)
+    if needs_vir
+        for (bias, scratch) in zip(biases, scratches)
+            bias.cv_type.has_virial || continue
+            calculate_virial!(buffers.virial, bias.cv_type,
+                              bias_coords(sys, bias.cv_type, buffers, step_n), -scratch.fs_svec,
+                              sys.atoms, sys.boundary; scratch=scratch.dist_scratch)
+        end
+    end
+    if step_n % BIAS_FINITE_CHECK_EVERY == 0
+        check_bias_finite_periodic_batched!(biases, buffers)
+    end
+    for inter in others
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
                                  strictness=strictness)
