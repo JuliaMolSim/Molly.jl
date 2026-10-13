@@ -685,43 +685,85 @@ struct CalcAngle
 end
 
 function calculate_cv(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
-    c = @view coords[collect(cv.atom_inds)]
-    return  bond_angle(c[1], c[2], c[3], boundary)
+    buff = zero_cv_value_buffer(cv, coords)
+    calculate_cv!(cv, coords, atoms, boundary, buff, args...; kwargs...)
+    return only(from_device(buff))
 end
 
-function cv_gradient(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
+function calculate_cv!(cv::CalcAngle, coords, atoms, boundary, buff, args...; kwargs...)
     i, j, k = cv.atom_inds
-    ri, rj, rk = coords[i], coords[j], coords[k]
-    
+    buff .= bond_angle(coords[i], coords[j], coords[k], boundary)
+    return nothing
+end
+
+@kernel inbounds=true function angle_cv_kernel!(d_buf, @Const(coords), i, j, k, boundary)
+    if @index(Global, Linear) == 1
+        d_buf[1] = bond_angle(coords[i], coords[j], coords[k], boundary)
+    end
+end
+
+function calculate_cv!(cv::CalcAngle, coords::AbstractGPUArray, atoms, boundary,
+                       buff::AbstractGPUArray, args...; kwargs...)
+    i, j, k = cv.atom_inds
+    kernel! = angle_cv_kernel!(get_backend(coords), 1)
+    kernel!(buff, coords, i, j, k, boundary; ndrange=1)
+    return nothing
+end
+
+# Angle and its gradient with respect to atoms i, j and k, shared by the CPU method and the GPU
+# kernel. The gradient is zero for collinear atoms, where it is undefined.
+@inline function angle_cv_gradient(ri, rj, rk, boundary)
     ba = vector_pad3D(rj, ri, boundary)
     bc = vector_pad3D(rj, rk, boundary)
     cross_ba_bc = ba × bc
     theta = bond_angle(ri, rj, rk, boundary)
-
-    grad = ustrip.(zero(coords)) / oneunit(eltype(eltype(coords)))
     if iszero_value(cross_ba_bc)
-        return -grad, theta
+        g = zero(trim3D(ba, boundary)) / oneunit(eltype(ba))^2
+        return theta, g, g, g
     end
-    pa = normalize(trim3D( ba × cross_ba_bc, boundary))
-    pc = normalize(trim3D(-bc × cross_ba_bc, boundary))
-
-    grad_i = pa / norm(ba)
-    grad_k = pc / norm(bc)
-    grad[i] = -grad_i
-    grad[k] = -grad_k
-    grad[j] = grad_i + grad_k
-
-    return -grad, theta 
+    grad_i = normalize(trim3D( ba × cross_ba_bc, boundary)) / norm(ba)
+    grad_k = normalize(trim3D(-bc × cross_ba_bc, boundary)) / norm(bc)
+    return theta, grad_i, -(grad_i + grad_k), grad_k
 end
 
-function calculate_virial!(virial_buff, cv::CalcAngle, coords, forces, atoms, boundary)
-    ids = collect(cv.atom_inds)
-    c = @view coords[ids]
-    f = @view forces[ids]
-    r_ji = vector(c[2], c[1], boundary) 
+function cv_gradient(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
+    grad, d_buf = zero_cv_gradient_buffers(cv, coords)
+    cv_gradient!(grad, d_buf, cv, coords, atoms, boundary, args...; kwargs...)
+    return grad, only(from_device(d_buf))
+end
+
+function cv_gradient!(grad, d_buf, cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
+    i, j, k = cv.atom_inds
+    theta, grad[i], grad[j], grad[k] = angle_cv_gradient(coords[i], coords[j], coords[k], boundary)
+    d_buf .= theta
+    return nothing
+end
+
+@kernel inbounds=true function angle_cv_gradient_kernel!(grad, d_buf, @Const(coords), i, j, k,
+                                                        boundary)
+    if @index(Global, Linear) == 1
+        theta, grad[i], grad[j], grad[k] = angle_cv_gradient(coords[i], coords[j], coords[k],
+                                                             boundary)
+        d_buf[1] = theta
+    end
+end
+
+function cv_gradient!(grad::AbstractGPUArray, d_buf::AbstractGPUArray, cv::CalcAngle,
+                      coords::AbstractGPUArray, atoms, boundary, args...; kwargs...)
+    i, j, k = cv.atom_inds
+    kernel! = angle_cv_gradient_kernel!(get_backend(coords), 1)
+    kernel!(grad, d_buf, coords, i, j, k, boundary; ndrange=1)
+    return nothing
+end
+
+function calculate_virial!(virial_buff, cv::CalcAngle, coords, forces, atoms, boundary; kwargs...)
+    ids = cv.atom_inds
+    c = from_device(coords[ids])
+    f = from_device(forces[ids])
+    r_ji = vector(c[2], c[1], boundary)
     r_jk = vector(c[2], c[3], boundary)
-    
-    virial_buff .+= r_ji * transpose(f[1]) + 
+
+    virial_buff .+= r_ji * transpose(f[1]) +
                     r_jk * transpose(f[3])
 end
 
@@ -1723,21 +1765,23 @@ uses_builtin_cv_gradient(::CalcDist) = true
 uses_builtin_cv_gradient(::CalcRg) = true
 uses_builtin_cv_gradient(::CalcRMSD) = true
 uses_builtin_cv_gradient(::CalcTorsion) = true
+uses_builtin_cv_gradient(::CalcAngle) = true
 uses_builtin_cv_gradient(::Any) = false
 
 # The atom index lists a CV owns, checked against the system size in check_bias_atom_inds.
 atom_index_lists(cv::CalcDist) = (cv.atom_inds_1, cv.atom_inds_2)
-atom_index_lists(cv::Union{CalcRg, CalcRMSD, CalcTorsion}) = (cv.atom_inds,)
+atom_index_lists(cv::Union{CalcRg, CalcRMSD, CalcTorsion, CalcAngle}) = (cv.atom_inds,)
 atom_index_lists(cv) = () # custom CV types are not checked
 
 # Buffer-shape helpers, deduplicating the grad/d_buf allocation pattern used by every allocating
 # cv_gradient/calculate_cv wrapper above and by BiasPotential's lazy buffer init (bias.jl).
 zero_cv_grad_buffer(cv, coords)  = ustrip_vec.(zero(coords))
 zero_cv_value_buffer(cv, coords) = similar(coords, eltype(eltype(coords)), 1)
-# CalcTorsion's CV value/gradient are unitless (an angle), unlike the other (length-valued) types.
-zero_cv_grad_buffer(cv::CalcTorsion, coords) =
+# CalcTorsion's and CalcAngle's CV values are unitless angles, unlike the other (length-valued)
+# types.
+zero_cv_grad_buffer(cv::Union{CalcTorsion, CalcAngle}, coords) =
     ustrip_vec.(zero(coords)) / oneunit(eltype(eltype(coords)))
-zero_cv_value_buffer(cv::CalcTorsion, coords) =
+zero_cv_value_buffer(cv::Union{CalcTorsion, CalcAngle}, coords) =
     similar(coords, typeof(float(ustrip(oneunit(eltype(eltype(coords)))))), 1)
 zero_cv_gradient_buffers(cv, coords) = (zero_cv_grad_buffer(cv, coords), zero_cv_value_buffer(cv, coords))
 

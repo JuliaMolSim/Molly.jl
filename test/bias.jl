@@ -1225,8 +1225,17 @@ end
             fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
         end
 
-        # Biases of different types are batched in one tuple by the sync-free path, while
-        # CalcAngle (no built-in kernels) still goes through AtomsCalculators.forces!
+        @testset "CalcAngle virial on GPU matches CPU" begin
+            coords = [SVector(1.0, 0.2, 0.0)u"nm", SVector(0.0, 0.0, 0.0)u"nm",
+                     SVector(0.3, 1.0, 0.4)u"nm", SVector(5.0, 0.0, 0.0)u"nm"]
+            cv = CalcAngle([1, 2, 3], :wrap)
+            bias = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1", 1.0))
+            sys_cpu = System(sys_cpu_base; coords=coords, general_inters=(bias,))
+            sys_gpu = System(sys_gpu_base; coords=CuArray(coords), general_inters=(bias,))
+            fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
+        end
+
+        # Biases of different CV and bias types are batched in one tuple by the sync-free path
         @testset "Mixed biases on GPU match CPU" begin
             coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
                      SVector(1.0, 1.0, 0.0)u"nm", SVector(1.0, 1.0, 1.0)u"nm"]
