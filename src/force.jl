@@ -388,13 +388,13 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
-    bias_scratch::Any               # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersGPU
+    bias_scratch::Any               # IdDict{BiasPotential, BiasScratch}, see bias_scratch
     fs_mat::FM
     validity::BufferValidity
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
-                    kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
+                    kin_tensor, pres_tensor, fs_mat; bias_scratch=IdDict{BiasPotential, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = zero(vir_nounits)
     constraint_virial_chunks = similar(vir_chunks)
@@ -412,7 +412,7 @@ end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                     constraint_virial, constraint_virial_nounits,
-                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=Dict{UInt64, BiasScratch}())
+                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=IdDict{BiasPotential, BiasScratch}())
     return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial, constraint_virial_nounits,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
@@ -442,9 +442,7 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
     n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
     fs_mat = zeros(TU, D, n_fs_mat_cols)
 
-    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
-                                             for inter in values(sys.general_inters)
-                                             if inter isa BiasPotential)
+    bias_scratch = IdDict{BiasPotential, BiasScratch}()
 
     return BuffersCPU(
         fs_nounits, fs_chunks,
@@ -548,7 +546,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR,
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
     unwrapped_coords::Base.RefValue{Any}   # shared, once-per-call cache: see ensure_unwrapped_coords!
-    bias_scratch::Any                      # Dict{UInt64, BiasScratch} keyed by bias.id, see BuffersCPU
+    bias_scratch::Any                      # IdDict{BiasPotential, BiasScratch}, see bias_scratch
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -587,7 +585,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                     interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
                     step_n_preprocessed, sparse_pair_generation, num_pairs;
-                    bias_scratch=Dict{UInt64, BiasScratch}())
+                    bias_scratch=IdDict{BiasPotential, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
     fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
@@ -731,9 +729,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
         sys.neighbor_finder.initialized = false
     end
 
-    bias_scratch = Dict{UInt64, BiasScratch}(inter.id => BiasScratch()
-                                             for inter in values(sys.general_inters)
-                                             if inter isa BiasPotential)
+    bias_scratch = IdDict{BiasPotential, BiasScratch}()
 
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),

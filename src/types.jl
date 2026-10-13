@@ -1468,7 +1468,6 @@ function System(;
         throw(ArgumentError("general_inters should be a Tuple or a NamedTuple but has " *
                             "type $(typeof(general_inters))"))
     end
-    check_bias_ids(general_inters)
     check_bias_atom_inds(general_inters, n_atoms)
 
     if !all(i -> i isa PairwiseInteraction, values(pairwise_inters))

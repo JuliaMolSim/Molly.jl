@@ -214,9 +214,6 @@ function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
     end
 end
 
-const BIAS_POTENTIAL_ID_COUNTER = Threads.Atomic{UInt64}(0)
-next_bias_potential_id() = Threads.atomic_add!(BIAS_POTENTIAL_ID_COUNTER, UInt64(1))
-
 """
     BiasPotential(cv_type, bias_type)
 
@@ -246,34 +243,10 @@ With the GPU CV types, `bias_gradient` also runs on the GPU if the `bias_type` i
 type, and on the host otherwise.
 For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps
 and at the end of [`simulate!`](@ref), with the step at which they first appeared.
-
-Each `BiasPotential` gets a unique internal id when it is constructed, and no two biases
-in a [`System`](@ref) may share an id (an `ArgumentError` is thrown when the `System` is built).
-To copy a bias with a different CV, build a new one with `BiasPotential(cv_type, bias_type)`
-instead of copying its fields.
 """
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
-    id::UInt64 # set at construction, distinguishes structurally-equal biases
-end
-
-function BiasPotential(cv_type::C, bias_type::B) where {C, B}
-    return BiasPotential{C, B}(cv_type, bias_type, next_bias_potential_id())
-end
-
-# id is the scratch key only; equality and hashing ignore it (thermo.jl's master-system intersect).
-Base.:(==)(a::BiasPotential, b::BiasPotential) = a.cv_type == b.cv_type && a.bias_type == b.bias_type
-Base.isequal(a::BiasPotential, b::BiasPotential) = isequal(a.cv_type, b.cv_type) && isequal(a.bias_type, b.bias_type)
-Base.hash(b::BiasPotential, h::UInt) = hash(b.cv_type, hash(b.bias_type, hash(:BiasPotential, h)))
-
-# Scratch buffers are keyed by id, so no two biases in a System may share one.
-function check_bias_ids(general_inters)
-    ids = [inter.id for inter in values(general_inters) if inter isa BiasPotential]
-    length(ids) == length(Set(ids)) || throw(ArgumentError("BiasPotentials in general_inters " *
-        "share an id and would share scratch buffers, build each one with " *
-        "BiasPotential(cv_type, bias_type)"))
-    return nothing
 end
 
 # The CV kernels run without bounds checks, so atom indices must be in range before they get there.
@@ -290,8 +263,8 @@ function check_bias_atom_inds(general_inters, n_atoms)
 end
 
 # Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch,
-# d_bias_buf and bad_step GPU-only). One per bias in buffers.bias_scratch (force.jl), keyed on
-# bias.id.
+# d_bias_buf and bad_step GPU-only). One per bias in buffers.bias_scratch (force.jl), keyed by
+# the bias.
 mutable struct BiasScratch
     grad::Any
     d_buf::Any
@@ -303,13 +276,10 @@ end
 
 BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing, nothing, nothing)
 
-# Locate bias's BiasScratch by its id, not its position in general_inters -- a position can
-# differ between calls (e.g. MTS integrators pass a different per-level subset each time), so
-# scratch must be looked up by the bias itself. Falls back to a fresh throwaway BiasScratch when
-# buffers is nothing (a bare, bufferless call) -- no reuse across calls in that case, matching
-# pre-persistent-buffer behaviour.
-bias_scratch(buffers, bias::BiasPotential) =
-    get!(BiasScratch, buffers.bias_scratch, bias.id)
+# Keyed by the bias itself (===), since its position in general_inters can differ between calls
+# (e.g. MTS levels). Identical biases compute identical values, so they can share a scratch.
+# A bufferless call gets a throwaway BiasScratch.
+bias_scratch(buffers, bias::BiasPotential) = get!(BiasScratch, buffers.bias_scratch, bias)
 bias_scratch(::Nothing, ::BiasPotential) = BiasScratch()
 
 bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)

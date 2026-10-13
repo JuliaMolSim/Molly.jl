@@ -884,7 +884,7 @@ end
         Molly.AtomsCalculators.forces!(fs1, sys, bias1; buffers=buffers)
         fs2 = Molly.zero_forces(sys)
         Molly.AtomsCalculators.forces!(fs2, sys, bias2; buffers=buffers)
-        @test buffers.bias_scratch[bias1.id].grad !== buffers.bias_scratch[bias2.id].grad
+        @test buffers.bias_scratch[bias1].grad !== buffers.bias_scratch[bias2].grad
         combined_expected = Molly.from_device(fs1) .+ Molly.from_device(fs2)
 
         fs_sum = Molly.zero_forces(sys)
@@ -894,20 +894,37 @@ end
         @test all(isapprox.(Molly.from_device(fs_sum), combined_expected; atol=1e-9u"kJ * mol^-1 * nm^-1"))
     end
 
-    @testset "Scratch isolation between structurally-identical biases" begin
-        cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
-        bias1 = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
-        bias2 = BiasPotential(cv, SquareBias(400.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
-        @test !(bias1 === bias2) # the id field makes them distinct, as intended
-        @test bias1.id != bias2.id
-        # ...but they compare equal, so thermo.jl's intersect can move a shared restraint
-        @test bias1 == bias2 && isequal(bias1, bias2) && hash(bias1) == hash(bias2)
-        @test length(intersect([bias1], [bias2])) == 1
+    # Scratch is keyed by the bias (===): biases of different sizes get their own, the same bias
+    # listed twice shares one and contributes twice
+    @testset "Biases sharing or not sharing scratch" for AT in array_list
+        n = 12
+        coords = [SVector(0.3 * i, 0.1 * (i % 3), 0.0)u"nm" for i in 1:n]
+        atoms = [Atom(mass=atom_mass) for _ in 1:n]
+        sq = SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm")
+        b_35 = BiasPotential(CalcDist([1, 2, 3], [6, 7, 8, 9, 10], CalcMinDist(), :wrap), sq)
+        b_72 = BiasPotential(CalcDist(collect(1:7), [11, 12], CalcMinDist(), :wrap), sq)
+        build(inters, AT) = System(atoms=AT(atoms), coords=AT(coords), boundary=boundary,
+                                   general_inters=inters)
+        fs(inters) = Molly.from_device(forces(build(inters, AT)))
+        atol = 1e-9u"kJ * mol^-1 * nm^-1"
+
+        sys = build((b_35, b_72), AT)
+        buffers = Molly.init_buffers!(sys, 1)
+        Molly.forces!(Molly.zero_forces(sys), sys, nothing, 0, buffers, Val(false))
+        @test buffers.bias_scratch[b_35].grad !== buffers.bias_scratch[b_72].grad
+        @test all(isapprox.(fs((b_35, b_72)), forces(build((b_35, b_72), Array)); atol=atol))
+        @test all(isapprox.(fs((b_35, b_72)), fs((b_35,)) .+ fs((b_72,)); atol=atol))
+
+        sys_twice = build((b_35, b_35), AT)
+        buffers_twice = Molly.init_buffers!(sys_twice, 1)
+        Molly.forces!(Molly.zero_forces(sys_twice), sys_twice, nothing, 0, buffers_twice, Val(false))
+        @test length(buffers_twice.bias_scratch) == 1
+        @test any(f -> !iszero(f), fs((b_35,)))
+        @test all(isapprox.(fs((b_35, b_35)), 2 .* fs((b_35,)); atol=atol))
     end
 
-    # A System rejects biases that would corrupt the scratch buffers or run the unchecked kernels
-    # out of range: two biases sharing an id (as a field-wise copy or a bias loaded from disk
-    # can give), and atom indices outside the system.
+    # A System rejects biases whose atom indices are outside the system, since the CV kernels run
+    # without bounds checks
     @testset "Invalid biases are rejected when building a System" begin
         atoms = [Atom(mass=10.0u"g/mol") for _ in 1:4]
         coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.5, 0.0, 0.0)u"nm",
@@ -917,11 +934,9 @@ end
         cv_b = CalcDist([3], [4], CalcSingleDist(), :wrap)
         bias_a = BiasPotential(cv_a, bias_type)
         bias_b = BiasPotential(cv_b, bias_type)
-        bias_same_id = BiasPotential{typeof(cv_b), typeof(bias_type)}(cv_b, bias_type, bias_a.id)
         build(inters) = System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0u"nm"),
                                general_inters=inters)
         @test build((bias_a, bias_b)) isa System
-        @test_throws ArgumentError build((bias_a, bias_same_id))
 
         for cv in (CalcDist([1], [5], CalcSingleDist(), :wrap), CalcDist([1, 2], [3, 9], CalcMinDist(), :wrap),
                    CalcDist([1, 2], [3, 6], CalcMaxDist(), :wrap), CalcDist([0, 2], [3, 4], CalcCMDist(), :wrap),
@@ -958,7 +973,7 @@ end
 
         sys_N1 = System(atoms=atoms, coords=AT(coords_N1), boundary=boundary, general_inters=(bias,))
         fs_N1 = Molly.zero_forces(sys_N1)
-        # Reuses the SAME buffers (hence the SAME buffers.bias_scratch[bias.id].grad) as step N.
+        # Reuses the SAME buffers (hence the SAME buffers.bias_scratch[bias].grad) as step N.
         Molly.AtomsCalculators.forces!(fs_N1, sys_N1, bias; buffers=buffers)
         fs_N1_cpu = Molly.from_device(fs_N1)
         @test norm(ustrip.(fs_N1_cpu[1])) == 0 # not a stale leftover from step N

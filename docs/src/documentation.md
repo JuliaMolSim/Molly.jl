@@ -535,10 +535,8 @@ A bias potential needs to be defined for every CV using the [`BiasPotential`](@r
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
-    id::UInt64
 end
 ```
-The `id` is set when the bias is constructed and is used internally, so build copies of a bias with `BiasPotential(cv_type, bias_type)` rather than by copying its fields.
 
 [`BiasPotential`](@ref) is a general interaction in Molly, and the potential energy and forces that result from the bias are calculated with `AtomsCalculators.potential_energy` and `AtomsCalculators.forces!` methods that take the [`BiasPotential`](@ref) struct as input.
 In the force calculation, the gradient of the bias potential with respect to the CV and the gradient of the CV function with respect to the system coordinates are calculated in two separate steps.
