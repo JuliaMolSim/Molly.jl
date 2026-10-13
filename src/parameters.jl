@@ -44,11 +44,20 @@ parameter_fields(x) = parameter_fields(typeof(x))
 @inline parameter_keys(::Type{T}) where {T} = map(last, parameter_fields(T))
 @inline parameter_keys(x) = parameter_keys(typeof(x))
 
-# Current values of the parameters, in the same order
+# Current values of the parameters, in the same order, with any units they are stored with
 @inline parameter_values(inter) = map(f -> getfield(inter, first(f)), parameter_fields(inter))
 
+# Convert a parameter value to the type of the field it replaces. On a system with units,
+#   a plain number is taken to be in the units of the field, which are re-attached, and a
+#   value with units is converted to them. Otherwise this is `convert`, so the unitless and
+#   differentiable path is unchanged.
+@inline convert_parameter(::Type{T}, x) where {T} = convert(T, x)
+@inline convert_parameter(::Type{T}, x::Real) where {T <: Unitful.AbstractQuantity} =
+    convert(T, x * unit(T))
+
 # A copy of `inter` with its differentiable parameters replaced by `values`, which are in the
-# order given by `parameter_fields`
+#   order given by `parameter_fields`, either plain numbers in the units of the fields or
+#   values with units
 @inline inject_parameters(inter, vals...) = inject_parameters(inter, vals)
 
 @generated function inject_parameters(inter::T, vals::Tuple) where {T}
@@ -62,7 +71,7 @@ parameter_fields(x) = parameter_fields(typeof(x))
     args = Expr[]
     for (i, fname) in enumerate(fieldnames(T))
         if haskey(pos, fname)
-            push!(args, :(convert($(fieldtype(T, i)), vals[$(pos[fname])])))
+            push!(args, :(convert_parameter($(fieldtype(T, i)), vals[$(pos[fname])])))
         else
             push!(args, :(getfield(inter, $i)))
         end
@@ -76,8 +85,9 @@ const atom_parameter_keys = ("mass", "σ", "ϵ")
 @inline atom_parameter_values(at) = (at.mass, at.σ, at.ϵ)
 
 @inline function inject_atom(at, m, s, e)
-    return Atom(at.index, at.atom_type, convert(typeof(at.mass), m), at.charge,
-                convert(typeof(at.σ), s), convert(typeof(at.ϵ), e), at.λ, at.alch_role)
+    return Atom(at.index, at.atom_type, convert_parameter(typeof(at.mass), m), at.charge,
+                convert_parameter(typeof(at.σ), s), convert_parameter(typeof(at.ϵ), e),
+                at.λ, at.alch_role)
 end
 
 """
@@ -90,6 +100,9 @@ Building the plan is where the dictionary keys are formed and looked up. A plan 
 for any dictionary with the same keys, so it can be reused across a gradient calculation
 and across finite differencing, but it must be rebuilt if the set of keys or the system
 changes.
+
+`sys` may have units. The dictionary values are then plain numbers in the units that each
+parameter is stored with in `sys`, as returned by [`extract_parameters`](@ref).
 """
 struct ParameterPlan{V, A, I}
     keys::Vector{String}           # Distinct parameters that this system uses, in slot order
@@ -146,7 +159,7 @@ function plan_block!(plan_state, prefixes, values_per_element, suffixes)
         for (i, prefix) in enumerate(prefixes)
             key = prefix * suffixes[f]
             push!(slots, plan_slot!(keys_v, key_index, params_dic, key))
-            push!(defaults, values_per_element[i][f])
+            push!(defaults, ustrip(values_per_element[i][f]))
         end
         push!(ranges, start:length(slots))
     end
@@ -306,7 +319,7 @@ end
 @inline function injected_masses(sys, flat, plan, ::Type{AT}) where {AT}
     isempty(plan.ranges[1]) && return sys.masses, sys.total_mass
     m_host = first(target_views(flat, plan, 1, Val(3)))
-    masses_host = convert.(eltype(sys.masses), m_host)
+    masses_host = convert_parameter.(eltype(sys.masses), m_host)
     return to_device(masses_host, AT), sum(masses_host)
 end
 
@@ -340,6 +353,11 @@ system. Build it once outside the function being differentiated and pass it in; 
 two-argument form builds one on every call, which is convenient but much slower. `coords`
 replaces the coordinates of `sys`, so that a gradient can also be taken with respect to
 them.
+
+`sys` may have units, in which case the values in `params_dic` are plain numbers in the
+units that each parameter is stored with in `sys`, as returned by
+[`extract_parameters`](@ref). The unit of each field is re-attached when it is replaced.
+Gradients are only supported for systems without units.
 """
 inject_gradients(sys::System, params_dic) =
     inject_gradients(sys, params_dic, ParameterPlan(sys, params_dic))
@@ -373,7 +391,7 @@ function extract_block!(params_dic, prefix, keys_t, values_t)
     isnothing(prefix) && return params_dic
     @inbounds for i in eachindex(keys_t)
         key = prefix * keys_t[i]
-        haskey(params_dic, key) || (params_dic[key] = values_t[i])
+        haskey(params_dic, key) || (params_dic[key] = ustrip(values_t[i]))
     end
     return params_dic
 end
@@ -386,6 +404,11 @@ A dictionary of the force field parameters of a system, keyed by strings, for us
 
 An interaction contributes its parameters if it defines [`parameter_prefix`](@ref) and
 [`parameter_fields`](@ref).
+
+The values are plain numbers of the float type of the system. On a system with units they
+are in the units that each parameter is stored with in the system, for example kJ mol⁻¹ nm⁻²
+for a bond force constant in a system set up with the default units, and the units are
+re-attached by [`ParameterPlan`](@ref) and `inject_gradients`.
 """
 function extract_parameters(sys::System{<:Any, <:Any, T}, ff=nothing) where T
     params_dic = Dict{String, T}()
