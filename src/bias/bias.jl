@@ -296,7 +296,7 @@ mutable struct BiasScratch
     fs_svec::Any
     dist_scratch::Any
     d_bias_buf::Any # bias_gradient output on the device
-    bad_step::Any   # first step with a non-finite value, or 0
+    bad_step::Any   # first step with a non-finite value, or -1
 end
 
 BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing, nothing, nothing)
@@ -414,7 +414,7 @@ end
 function ensure_bias_finite_buffer!(scratch::BiasScratch)
     if isnothing(scratch.bad_step)
         scratch.bad_step = similar(scratch.d_buf, Int, 1)
-        scratch.bad_step .= 0
+        scratch.bad_step .= -1
     end
     return nothing
 end
@@ -466,7 +466,7 @@ end
 @inline function _bias_check_one(fs_svec, d_buf, bad_step, i, step_n)
     bad = (i <= length(fs_svec) && !bias_all_finite(fs_svec[i])) ||
           (i == 1 && !bias_all_finite(d_buf[1]))
-    if bad && bad_step[1] == 0
+    if bad && bad_step[1] < 0
         bad_step[1] = step_n
     end
     return nothing
@@ -529,7 +529,7 @@ function check_bias_finite_periodic_batched!(general_inters, buffers)
     isempty(live) && return nothing
     bad_steps_h = from_device(reduce(vcat, map(bs -> bs[2].bad_step, live)))
     for ((bias, _), bad_step) in zip(live, bad_steps_h)
-        if bad_step != 0
+        if bad_step >= 0
             error("BiasPotential with CV $(typeof(bias.cv_type)) and bias " *
                   "$(typeof(bias.bias_type)) first produced a non-finite value at step $bad_step")
         end

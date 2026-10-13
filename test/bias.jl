@@ -1280,6 +1280,13 @@ end
             end
             @test err isa ErrorException
             @test occursin("non-finite value at step 1", err.msg)
+
+            # A bare forces call runs at step 0, so it is checked at once
+            @test_throws ErrorException forces(sys_gpu)
+            bias_tors = BiasPotential(CalcTorsion([1, 1, 3, 4], :wrap), # zero-length bond
+                                      SquareBias(50.0u"kJ * mol^-1", 0.5))
+            @test_throws ArgumentError forces(System(sys_cpu_base; general_inters=(bias_tors,)))
+            @test_throws ErrorException forces(System(sys_gpu_base; general_inters=(bias_tors,)))
         end
 
         # The fused GPU kernel for CalcMinDist/CalcMaxDist uses O(group) memory, not O(group^2) --
