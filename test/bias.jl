@@ -1225,6 +1225,54 @@ end
             fs_virial_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
         end
 
+        # Biases of different types are batched in one tuple by the sync-free path, while
+        # CalcAngle (no built-in kernels) still goes through AtomsCalculators.forces!
+        @testset "Mixed biases on GPU match CPU" begin
+            coords = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                     SVector(1.0, 1.0, 0.0)u"nm", SVector(1.0, 1.0, 1.0)u"nm"]
+            k = 300.0u"kJ * mol^-1 * nm^-2"
+            k_a = 300.0u"kJ * mol^-1"
+            biases = (
+                BiasPotential(CalcDist([1], [4], CalcSingleDist(), :wrap), SquareBias(k, 1.0u"nm")),
+                BiasPotential(CalcTorsion([1, 2, 3, 4], :wrap), SquareBias(k_a, 0.5)),
+                BiasPotential(CalcDist([1, 2], [3, 4], CalcCMDist(), :wrap), SquareBias(k, 1.0u"nm")),
+                BiasPotential(CalcDist([1, 2], [3, 4], CalcMinDist(), :wrap), SquareBias(k, 0.5u"nm")),
+                BiasPotential(CalcDist([1, 2], [3, 4], CalcMaxDist(), :wrap), SquareBias(k, 1.0u"nm")),
+                BiasPotential(CalcRg([1, 2, 3, 4], :wrap),
+                              LinearBias(100.0u"kJ * mol^-1 * nm^-1", 0.5u"nm")),
+                BiasPotential(CalcAngle([1, 2, 3], :wrap), SquareBias(k_a, 1.0)),
+            )
+            sys_cpu = System(sys_cpu_base; coords=coords, general_inters=biases)
+            sys_gpu = System(sys_gpu_base; coords=CuArray(coords), general_inters=biases)
+            buffers_cpu = Molly.init_buffers!(sys_cpu, 1)
+            fs_cpu = Molly.zero_forces(sys_cpu)
+            Molly.forces!(fs_cpu, sys_cpu, nothing, 1, buffers_cpu, Val(true); n_threads=1)
+            buffers_gpu = Molly.init_buffers!(sys_gpu, 1)
+            fs_gpu = Molly.zero_forces(sys_gpu)
+            Molly.forces!(fs_gpu, sys_gpu, nothing, 1, buffers_gpu, Val(true))
+            @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+            @test all(isapprox.(ustrip.(Molly.from_device(buffers_gpu.virial)),
+                                ustrip.(buffers_cpu.virial); atol=1e-9))
+        end
+
+        # Non-finite values are recorded on the device and reported every
+        # BIAS_FINITE_CHECK_EVERY steps, naming the first step they appeared at
+        @testset "Non-finite bias forces are reported on GPU" begin
+            bias = BiasPotential(CalcDist([1], [4], CalcSingleDist(), :wrap), BiasNaNGradient())
+            sys_gpu = System(sys_gpu_base; general_inters=(bias,))
+            buffers = Molly.init_buffers!(sys_gpu, 1)
+            fs = Molly.zero_forces(sys_gpu)
+            @test Molly.forces!(fs, sys_gpu, nothing, 1, buffers, Val(false)) isa Tuple
+            err = try
+                Molly.forces!(fs, sys_gpu, nothing, Molly.BIAS_FINITE_CHECK_EVERY, buffers, Val(false))
+                nothing
+            catch e
+                e
+            end
+            @test err isa ErrorException
+            @test occursin("non-finite value at step 1", err.msg)
+        end
+
         # The fused GPU kernel for CalcMinDist/CalcMaxDist uses O(group) memory, not O(group^2) --
         # assert via CUDA.@allocated rather than reproducing the OOM the old approach hit.
         @testset "CalcMinDist GPU memory is O(group), not O(group^2)" begin
