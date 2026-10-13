@@ -609,7 +609,7 @@ function Molly.bias_gradient(bias_fn::bias_type, cv_sim;  kwargs...)
 end
 ```
 On a GPU system, `bias_gradient` of a custom bias type runs on the host.
-To run it on the GPU without a host transfer, define `Molly.uses_device_bias_gradient(::MyBias) = true`; the method must then be GPU-compilable and must not read host memory.
+To run it on the GPU without a host transfer, define `Molly.uses_device_bias_gradient(::MyBias) = true`; the method must then be GPU-compilable and must not read host memory, otherwise the GPU can fail with an illegal memory access and stay unusable for the rest of the Julia session.
 
 Once the CV and the bias function have been defined, a [`BiasPotential`](@ref) can be constructed and added as a general interaction in the system setup, e.g. `general_inters = (BiasPotential(cv_type, bias_type),)`.
 A system can be biased along multiple CVs simultaneously by adding several [`BiasPotential`](@ref)s to `general_inters`.

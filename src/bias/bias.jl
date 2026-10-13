@@ -3,6 +3,7 @@
 export
     LinearBias,
     bias_gradient,
+    uses_device_bias_gradient,
     SquareBias,
     FlatBottomSquareBias,
     PeriodicFlatBottomBias,
@@ -319,10 +320,19 @@ function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
     return unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 end
 
-# Whether bias_gradient of this bias type runs inside the GPU kernel of the sync-free path.
-# Built-in bias types opt in when their parameters are plain data. Custom bias types run it on
-# the host; define this as true for a bias type whose bias_gradient is GPU-compilable and reads
-# no host memory.
+"""
+    uses_device_bias_gradient(bias_type)
+
+Whether `bias_gradient` of `bias_type` runs inside the GPU kernel of a [`BiasPotential`](@ref)
+with a GPU CV type, without a transfer to the host.
+
+Defaults to `false`, so custom bias types run `bias_gradient` on the host.
+The built-in bias types return `true` when their parameters are plain data.
+Define `Molly.uses_device_bias_gradient(::MyBias) = true` only if `bias_gradient` for `MyBias`
+is GPU-compilable and reads no host memory, for example no global arrays.
+A wrong opt-in can cause an illegal memory access, which leaves the GPU unusable for the rest
+of the Julia session.
+"""
 uses_device_bias_gradient(bias_type) = false
 uses_device_bias_gradient(b::Union{LinearBias, SquareBias, FlatBottomSquareBias,
                                    PeriodicFlatBottomBias}) = isbits(b)
