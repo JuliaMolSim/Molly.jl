@@ -2429,6 +2429,9 @@ Contrary to the rest of Molly, unitless quantities are assumed to have ASE units
 Å for length, eV for energy, u for mass, and Å sqrt(u/eV) for time.
 Unitful quantities will be converted as appropriate.
 
+The virial is calculated only if the ASE calculator supports stress calculation.
+Otherwise the virial contribution is ignored with a warning.
+
 # Arguments
 - `ase_calc`: the ASE calculator created with PythonCall.
 - `atoms`: the atoms, or atom equivalents, in the system.

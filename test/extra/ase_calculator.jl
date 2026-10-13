@@ -85,45 +85,61 @@ end
 end
 
 @testset "Python ASE virial" begin
-    # The ASE Lennard-Jones calculator should match the Molly one in a triclinic box
+    # The ASE Lennard-Jones calculator should match the Molly one
     lj = pyimport("ase.calculators.lj")
     n_atoms = 50
-    boundary = TriclinicBoundary(SVector(18.0, 0.0, 0.0)u"Å", SVector(3.0, 17.0, 0.0)u"Å",
-                                 SVector(2.0, -2.0, 18.0)u"Å")
-    coords = place_atoms(n_atoms, boundary; min_dist=3.0u"Å")
-    
     sigma, epsilon, rc = 3.4, 0.0104, 7.0
-    atoms = fill(Atom(mass=39.948u"u", σ=sigma*u"Å", ϵ=epsilon*u"eV"), n_atoms)
 
-    calc = ASECalculator(
-        ase_calc=lj.LennardJones(; sigma, epsilon, rc),
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        elements=fill("Ar", n_atoms),
+    boundary_trc = TriclinicBoundary(
+        SVector(18.0, 0.0, 0.0)u"Å",
+        SVector(3.0, 17.0, 0.0)u"Å",
+        SVector(2.0, -2.0, 18.0)u"Å",
     )
+    coords_trc = place_atoms(n_atoms, boundary_trc; min_dist=3.0u"Å")
+    # Making directions infinite does not bring these atoms closer together
+    coords_cube = place_atoms(n_atoms, CubicBoundary(18.0u"Å"); min_dist=3.0u"Å")
 
-    sys_ase = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        general_inters=(calc,),
-        energy_units=u"eV",
-        force_units=u"eV/Å",
-    )
+    for (boundary, coords, units) in (
+            (boundary_trc, coords_trc, true),
+            (TriclinicBoundary(ustrip_vec.(u"Å", boundary_trc.basis_vectors)),
+             ustrip_vec.(u"Å", coords_trc), false),
+            (CubicBoundary(18.0u"Å", 18.0u"Å", Inf * u"Å"), coords_cube, true),
+            (CubicBoundary(Inf * u"Å"), coords_cube, true),
+        )
+        # Unitless quantities are in ASE units
+        L, E, M = (units ? (u"Å", u"eV", u"u") : (NoUnits, NoUnits, NoUnits))
+        atoms = fill(Atom(mass=39.948M, σ=sigma*L, ϵ=epsilon*E), n_atoms)
 
-    sys_molly = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        pairwise_inters=(LennardJones(cutoff=ShiftedPotentialCutoff(rc*u"Å")),),
-        energy_units=u"eV",
-        force_units=u"eV/Å",
-    )
+        calc = ASECalculator(
+            ase_calc=lj.LennardJones(; sigma, epsilon, rc),
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            elements=fill("Ar", n_atoms),
+        )
 
-    @test potential_energy(sys_ase) ≈ potential_energy(sys_molly)
-    @test ustrip_vec.(u"eV/Å", forces(sys_ase)) ≈ ustrip_vec.(u"eV/Å", forces(sys_molly))
-    @test virial(sys_ase) ≈ virial(sys_molly)
+        sys_ase = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            general_inters=(calc,),
+            energy_units=E,
+            force_units=E/L,
+        )
+
+        sys_molly = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            pairwise_inters=(LennardJones(cutoff=ShiftedPotentialCutoff(rc*L)),),
+            energy_units=E,
+            force_units=E/L,
+        )
+
+        @test potential_energy(sys_ase) ≈ potential_energy(sys_molly)
+        @test ustrip_vec.(forces(sys_ase)) ≈ ustrip_vec.(forces(sys_molly))
+        @test virial(sys_ase) ≈ virial(sys_molly)
+    end
 
     # Calculators that do not provide the stress, such as TIP3P, give no virial contribution
     tip3p = pyimport("ase.calculators.tip3p")
@@ -151,4 +167,6 @@ end
 
     @test iszero(virial(sys_w; strictness=:nowarn))
     @test_throws ErrorException virial(sys_w; strictness=:error)
+    fs_w = Molly.zero_forces(sys_w)
+    @test_throws ArgumentError AtomsCalculators.forces!(fs_w, sys_w, calc_w; needs_vir=true)
 end

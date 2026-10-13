@@ -117,6 +117,21 @@ function AtomsCalculators.forces!(fs,
                                   strictness=Molly.default_strictness(),
                                   kwargs...) where {D, AT, T}
     Molly.update_ase_calc!(ase_calc, sys)
+    # The stress is requested before the forces since some calculators only calculate
+    #   the stress when asked, but then also calculate the forces
+    if needs_vir
+        isnothing(buffers) && throw(ArgumentError(
+            "buffers must be provided to calculate the virial"))
+        if "stress" in ase_calc.ase_atoms.calc.implemented_properties
+            # W = Σ r ⊗ f = -V σ, with the ASE stress σ in eV/Å^3
+            stress = pyconvert(Matrix{T}, ase_calc.ase_atoms.get_stress(voigt=false))
+            vir = -pyconvert(T, ase_calc.ase_atoms.get_volume()) .* stress
+            buffers.virial .+= from_ase_energy(vir, sys.energy_units)
+        else
+            Molly.report_issue("The ASE calculator does not provide the stress, so its " *
+                               "virial contribution will be ignored", strictness; maxlog=1)
+        end
+    end
     forces_py = ase_calc.ase_atoms.get_forces()
     forces_flat = reshape(transpose(pyconvert(Matrix{T}, forces_py)), length(sys) * D)
     fs_svec = reinterpret(SVector{D, T}, forces_flat)
@@ -128,20 +143,6 @@ function AtomsCalculators.forces!(fs,
         fs_unit = uconvert_vec.(sys.force_units, fs_svec * u"eV/Å")
     end
     fs .+= to_device(fs_unit, AT)
-    if needs_vir
-        # W = Σ r ⊗ f = -V σ, with the ASE stress σ in eV/Å^3
-        stress = try
-            pyconvert(Matrix{T}, ase_calc.ase_atoms.get_stress(voigt=false))
-        catch e
-            not_impl = pyimport("ase.calculators.calculator").PropertyNotImplementedError
-            (e isa PyException && pyisinstance(e.v, not_impl)) || rethrow()
-            Molly.report_issue("The ASE calculator does not provide the stress, so its " *
-                               "virial contribution will be ignored", strictness; maxlog=1)
-            zeros(T, D, D)
-        end
-        vir = -pyconvert(T, ase_calc.ase_atoms.get_volume()) .* stress
-        buffers.virial .+= from_ase_energy(vir, sys.energy_units)
-    end
     return fs
 end
 
