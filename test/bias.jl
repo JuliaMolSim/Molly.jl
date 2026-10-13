@@ -937,6 +937,10 @@ end
         build(inters) = System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0u"nm"),
                                general_inters=inters)
         @test build((bias_a, bias_b)) isa System
+        @test_throws ArgumentError CalcAngle([1, 2, 3, 4])
+        @test_throws ArgumentError CalcAngle([1, 2])
+        @test_throws ArgumentError CalcTorsion([1, 2, 3])
+        @test_throws ArgumentError CalcTorsion([1, 2, 3, 4, 5])
 
         for cv in (CalcDist([1], [5], CalcSingleDist(), :wrap), CalcDist([1, 2], [3, 9], CalcMinDist(), :wrap),
                    CalcDist([1, 2], [3, 6], CalcMaxDist(), :wrap), CalcDist([0, 2], [3, 4], CalcCMDist(), :wrap),

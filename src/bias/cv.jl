@@ -677,6 +677,8 @@ struct CalcAngle
 
     function CalcAngle(atom_inds=[], correction=:pbc, has_virial = true)
         check_correction_arg(correction)
+        length(atom_inds) == 3 || throw(ArgumentError("CalcAngle needs 3 atom indices, got " *
+                                                      "$(length(atom_inds))"))
         return new(atom_inds, correction, has_virial)
     end
 end
@@ -1550,6 +1552,8 @@ struct CalcTorsion
     function CalcTorsion(atom_inds=[], correction=:pbc, has_virial=true;
                          gradient_singularity_tol=1e-6)
         check_correction_arg(correction)
+        length(atom_inds) == 4 || throw(ArgumentError("CalcTorsion needs 4 atom indices, got " *
+                                                      "$(length(atom_inds))"))
         tol = Float64(gradient_singularity_tol)
         if !isfinite(tol) || tol <= 0
             throw(ArgumentError("gradient_singularity_tol must be finite and positive, " *
