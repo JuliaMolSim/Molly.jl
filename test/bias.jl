@@ -11,6 +11,15 @@ Molly.calculate_cv(::CVNaNGradient, coords, args...; kwargs...) = 1.0u"nm"
 Molly.cv_gradient(::CVNaNGradient, coords, args...; kwargs...) =
     (fill(SVector(NaN, 0.0, 0.0), length(coords)), 1.0u"nm")
 
+# A bias type that isn't isbits, so its bias_gradient can't run in a GPU kernel
+struct TableBias{K, T}
+    k::K
+    targets::Vector{T}
+end
+
+Molly.potential_energy(b::TableBias, cv_sim; kwargs...) = b.k * (cv_sim - b.targets[1])^2 / 2
+Molly.bias_gradient(b::TableBias, cv_sim) = b.k * (cv_sim - b.targets[1])
+
 @testset "Collective variables" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
@@ -1293,6 +1302,16 @@ end
                              velocities=copy(sys_gpu_base.velocities), general_inters=(bias,))
             @test_throws "non-finite value at step 1" simulate!(sys_run, VelocityVerlet(dt=0.002u"ps"),
                                                                 5; init_step=1)
+        end
+
+        @testset "Non-isbits bias type on GPU matches CPU" begin
+            bias = BiasPotential(CalcDist([1], [4], CalcSingleDist(), :wrap),
+                                 TableBias(300.0u"kJ * mol^-1 * nm^-2", [1.0u"nm"]))
+            @test !Molly.uses_device_bias_gradient(bias.bias_type)
+            fs_cpu = forces(System(sys_cpu_base; general_inters=(bias,)))
+            fs_gpu = forces(System(sys_gpu_base; general_inters=(bias,)))
+            @test any(f -> !iszero(f), fs_cpu)
+            @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
         end
 
         # The fused GPU kernel for CalcMinDist/CalcMaxDist uses O(group) memory, not O(group^2) --

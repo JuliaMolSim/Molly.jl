@@ -242,6 +242,8 @@ When the `System` is GPU-resident, [`CalcDist`](@ref), [`CalcRg`](@ref) and
 [`CalcRMSD`](@ref) does the same apart from a host-side Kabsch alignment every step.
 Other CV types, including custom ones, copy the coordinates and atoms to the host and the
 gradient back, since arbitrary user code isn't guaranteed to be GPU-safe.
+With the GPU CV types, `bias_gradient` also runs on the GPU if the `bias_type` is an isbits
+type, and on the host otherwise.
 For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps
 and at the end of [`simulate!`](@ref), with the step at which they first appeared.
 
@@ -345,14 +347,20 @@ function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
     return unwrap_molecules(sys)
 end
 
-# Partition a heterogeneous tuple of interactions into the BiasPotentials whose CV has built-in
-# kernels and everything else, preserving each group's relative order. Recurses rather than
+# Whether bias_gradient of this bias type can run inside a GPU kernel. Bias types with
+# non-isbits fields (e.g. a Vector) can't, and take the host path; override for an isbits type
+# whose bias_gradient isn't GPU-compilable.
+uses_device_bias_gradient(bias_type) = isbits(bias_type)
+
+# Partition a heterogeneous tuple of interactions into the BiasPotentials that take the sync-free
+# path and everything else, preserving each group's relative order. Recurses rather than
 # using filter, which isn't type-stable on a mixed-type Tuple.
 @inline split_biases(::Tuple{}) = (), ()
 @inline function split_biases(t::Tuple)
     rest_biases, rest_others = split_biases(Base.tail(t))
     x = first(t)
-    if x isa BiasPotential && uses_builtin_cv_gradient(x.cv_type)
+    if x isa BiasPotential && uses_builtin_cv_gradient(x.cv_type) &&
+            uses_device_bias_gradient(x.bias_type)
         return (x, rest_biases...), rest_others
     else
         return rest_biases, (x, rest_others...)
