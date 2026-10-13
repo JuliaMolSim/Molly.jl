@@ -287,16 +287,19 @@ function check_bias_atom_inds(general_inters, n_atoms)
     return nothing
 end
 
-# Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch GPU-only
-# fused-kernel state). One per bias in buffers.bias_scratch (force.jl), keyed on bias.id.
+# Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch,
+# d_bias_buf and bad_step GPU-only). One per bias in buffers.bias_scratch (force.jl), keyed on
+# bias.id.
 mutable struct BiasScratch
     grad::Any
     d_buf::Any
     fs_svec::Any
     dist_scratch::Any
+    d_bias_buf::Any # bias_gradient output on the device
+    bad_step::Any   # first step with a non-finite value, or 0
 end
 
-BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing)
+BiasScratch() = BiasScratch(nothing, nothing, nothing, nothing, nothing, nothing)
 
 # Locate bias's BiasScratch by its id, not its position in general_inters -- a position can
 # differ between calls (e.g. MTS integrators pass a different per-level subset each time), so
@@ -340,6 +343,16 @@ function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
         return ensure_unwrapped_coords!(buffers, sys)
     end
     return unwrap_molecules(sys)
+end
+
+# Partition a heterogeneous tuple of interactions into its BiasPotential entries and everything
+# else, preserving each group's relative order. Recurses rather than using filter, which isn't
+# type-stable on a mixed-type Tuple.
+@inline split_biases(::Tuple{}) = (), ()
+@inline function split_biases(t::Tuple)
+    rest_biases, rest_others = split_biases(Base.tail(t))
+    x = first(t)
+    return x isa BiasPotential ? ((x, rest_biases...), rest_others) : (rest_biases, (x, rest_others...))
 end
 
 # Lazily allocates scratch.grad/scratch.d_buf. Only reached when bias.uses_persistent_buffers
@@ -434,6 +447,139 @@ function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
         scratch.dist_scratch = RmsdScratch(upload_idx(coords, inds), similar(coords, length(inds)),
                                            ref_coords_used, kabsch_centered(ref_coords_used),
                                            similar(coords, IT, T))
+    end
+    return nothing
+end
+
+function ensure_bias_gradient_buffer!(scratch::BiasScratch, bias_type)
+    if isnothing(scratch.d_bias_buf)
+        # bias_gradient's output units differ from d_buf's own, so derive the eltype from a
+        # sample call rather than `similar(scratch.d_buf, 1)`.
+        sample = bias_gradient(bias_type, oneunit(eltype(scratch.d_buf)))
+        scratch.d_bias_buf = similar(scratch.d_buf, typeof(sample), 1)
+    end
+    return nothing
+end
+
+function ensure_bias_finite_buffer!(scratch::BiasScratch)
+    if isnothing(scratch.bad_step)
+        scratch.bad_step = similar(scratch.d_buf, Int, 1)
+        scratch.bad_step .= 0
+    end
+    return nothing
+end
+
+# Sync-free GPU path for the biases with persistent buffers: bias_cv_step! runs each bias's CV
+# kernels, then bias_batched_tail! evaluates bias_gradient, applies the forces and checks them
+# for every bias at once in 3 launches, without reading anything back to the host. Non-finite
+# values are recorded on the device and reported by check_bias_finite_periodic_batched!.
+#
+# The kernels recurse over tuples with one entry per bias, which keeps indexing type-stable when
+# the element types differ per bias (d_buf/d_bias_buf have a different Unitful eltype per bias).
+# The helpers assume at least one bias, so the base case is the 1-tuple.
+@inline function _bias_gradient_recurse(d_bias_bufs::Tuple{Any}, d_bufs::Tuple{Any}, bias_types::Tuple{Any})
+    d_bias_bufs[1][1] = bias_gradient(bias_types[1], d_bufs[1][1])
+    return nothing
+end
+@inline function _bias_gradient_recurse(d_bias_bufs::Tuple, d_bufs::Tuple, bias_types::Tuple)
+    d_bias_bufs[1][1] = bias_gradient(bias_types[1], d_bufs[1][1])
+    return _bias_gradient_recurse(Base.tail(d_bias_bufs), Base.tail(d_bufs), Base.tail(bias_types))
+end
+
+# bias_types is a plain Tuple of bias_type values passed through as kernel arguments
+@kernel inbounds=true function bias_batched_gradient_kernel!(d_bias_bufs::Tuple, @Const(d_bufs::Tuple),
+                                                               bias_types::Tuple)
+    idx = @index(Global, Linear)
+    idx == 1 && _bias_gradient_recurse(d_bias_bufs, d_bufs, bias_types)
+end
+
+@inline function _bias_apply_recurse(grads::Tuple{Any}, fs_svecs::Tuple{Any}, d_bias_bufs::Tuple{Any}, i)
+    v = d_bias_bufs[1][1] * grads[1][i]
+    fs_svecs[1][i] = v
+    return v
+end
+@inline function _bias_apply_recurse(grads::Tuple, fs_svecs::Tuple, d_bias_bufs::Tuple, i)
+    v = d_bias_bufs[1][1] * grads[1][i]
+    fs_svecs[1][i] = v
+    return v + _bias_apply_recurse(Base.tail(grads), Base.tail(fs_svecs), Base.tail(d_bias_bufs), i)
+end
+
+@kernel inbounds=true function bias_batched_apply_kernel!(fs, grads::Tuple, fs_svecs::Tuple,
+                                                            d_bias_bufs::Tuple)
+    i = @index(Global, Linear)
+    fs[i] -= _bias_apply_recurse(grads, fs_svecs, d_bias_bufs, i)
+end
+
+# d_bias is finite whenever the CV value is, so a non-finite CV gradient always gives a
+# non-finite force: checking the CV value and the forces covers everything. Each bias's bad_step
+# is only ever set to the same step_n, so no atomic is needed.
+@inline function _bias_check_one(fs_svec, d_buf, bad_step, i, step_n)
+    bad = (i <= length(fs_svec) && !bias_all_finite(fs_svec[i])) ||
+          (i == 1 && !bias_all_finite(d_buf[1]))
+    if bad && bad_step[1] == 0
+        bad_step[1] = step_n
+    end
+    return nothing
+end
+@inline function _bias_check_recurse(fs_svecs::Tuple{Any}, d_bufs::Tuple{Any}, bad_steps::Tuple{Any},
+                                     i, step_n)
+    return _bias_check_one(fs_svecs[1], d_bufs[1], bad_steps[1], i, step_n)
+end
+@inline function _bias_check_recurse(fs_svecs::Tuple, d_bufs::Tuple, bad_steps::Tuple, i, step_n)
+    _bias_check_one(fs_svecs[1], d_bufs[1], bad_steps[1], i, step_n)
+    return _bias_check_recurse(Base.tail(fs_svecs), Base.tail(d_bufs), Base.tail(bad_steps), i, step_n)
+end
+
+@kernel inbounds=true function bias_batched_finite_kernel!(fs_svecs::Tuple, @Const(d_bufs::Tuple),
+                                                             bad_steps::Tuple, step_n::Int)
+    i = @index(Global, Linear)
+    _bias_check_recurse(fs_svecs, d_bufs, bad_steps, i, step_n)
+end
+
+# Per-bias half of the sync-free path: the CV kernels, which differ per CV type
+function bias_cv_step!(bias::BiasPotential, scratch::BiasScratch, sys, coords, fs)
+    ensure_bias_buffers!(scratch, bias.cv_type, coords)
+    ensure_bias_dist_scratch!(scratch, bias.cv_type, coords, sys.atoms)
+    ensure_bias_gradient_buffer!(scratch, bias.bias_type)
+    ensure_bias_finite_buffer!(scratch)
+    cv_gradient!(scratch.grad, scratch.d_buf, bias.cv_type, coords, sys.atoms, sys.boundary,
+                 sys.velocities; scratch=scratch.dist_scratch)
+    isnothing(scratch.fs_svec) && (scratch.fs_svec = similar(fs))
+    return nothing
+end
+
+# Batched half of the sync-free path, after bias_cv_step! has run for every bias.
+# scratches pairs 1:1 with biases.
+function bias_batched_tail!(fs, biases::Tuple, scratches::Tuple, step_n)
+    isempty(biases) && return nothing
+    grads       = map(s -> s.grad,       scratches)
+    d_bufs      = map(s -> s.d_buf,      scratches)
+    fs_svecs    = map(s -> s.fs_svec,    scratches)
+    d_bias_bufs = map(s -> s.d_bias_buf, scratches)
+    bias_types  = map(b -> b.bias_type,  biases)
+    backend = get_backend(fs)
+    n_atoms = length(first(grads))
+    grad_kernel! = bias_batched_gradient_kernel!(backend, 1)
+    grad_kernel!(d_bias_bufs, d_bufs, bias_types; ndrange=1)
+    apply_kernel! = bias_batched_apply_kernel!(backend, min(n_atoms, 256))
+    apply_kernel!(fs, grads, fs_svecs, d_bias_bufs; ndrange=n_atoms)
+    check_kernel! = bias_batched_finite_kernel!(backend, min(n_atoms, 256))
+    check_kernel!(fs_svecs, d_bufs, map(s -> s.bad_step, scratches), Int(step_n); ndrange=n_atoms)
+    return nothing
+end
+
+# Reads back the non-finite flags of every attached BiasPotential with one host sync. A no-op
+# for biases that haven't used the sync-free path yet.
+function check_bias_finite_periodic_batched!(general_inters, buffers)
+    live = Tuple((b, bias_scratch(buffers, b)) for b in general_inters
+                 if b isa BiasPotential && !isnothing(bias_scratch(buffers, b).bad_step))
+    isempty(live) && return nothing
+    bad_steps_h = from_device(reduce(vcat, map(bs -> bs[2].bad_step, live)))
+    for ((bias, _), bad_step) in zip(live, bad_steps_h)
+        if bad_step != 0
+            error("BiasPotential with CV $(typeof(bias.cv_type)) and bias " *
+                  "$(typeof(bias.bias_type)) first produced a non-finite value at step $bad_step")
+        end
     end
     return nothing
 end
