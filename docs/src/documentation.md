@@ -535,8 +535,10 @@ A bias potential needs to be defined for every CV using the [`BiasPotential`](@r
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
+    id::UInt64
 end
 ```
+The `id` is set when the bias is constructed and is used internally, so build copies of a bias with `BiasPotential(cv_type, bias_type)` rather than by copying its fields.
 
 [`BiasPotential`](@ref) is a general interaction in Molly, and the potential energy and forces that result from the bias are calculated with `AtomsCalculators.potential_energy` and `AtomsCalculators.forces!` methods that take the [`BiasPotential`](@ref) struct as input.
 In the force calculation, the gradient of the bias potential with respect to the CV and the gradient of the CV function with respect to the system coordinates are calculated in two separate steps.
@@ -547,8 +549,8 @@ The available CV types are:
 - [`CalcRg`](@ref), the radius of gyration of a set of atoms.
 - [`CalcRMSD`](@ref), the RMSD of a set of atoms to a target structure.
 - [`CalcTorsion`](@ref), the torsion angle defined by four atoms.
+- [`CalcAngle`](@ref), the angle defined by three atoms.
 
-Currently, CV calculation is always done on the CPU.
 Other CV functions can be added by the user.
 Every CV type needs to have its own struct, an associated method of the [`calculate_cv`](@ref) function and potentially a method for the `cv_gradient` function.
 
@@ -656,12 +658,11 @@ See also [this example](@ref "Protein bias potential").
 
 ### GPU offload for biased simulations
 
-A [`BiasPotential`](@ref) adds a CV evaluation, a CV gradient and a bias-gradient calculation on top of the regular force calculation, every step. When `coords` (and the rest of the `System`) is GPU-resident, `calculate_cv`/`cv_gradient` for built-in CV types other than [`CalcRMSD`](@ref) run on GPU too, using persistent scratch buffers to avoid allocating on every call -- so a GPU `System` biased by one or more `BiasPotential`s stays GPU-resident end to end for those CV types, it isn't dropped to CPU for the CV part. `CalcRMSD` performs a host-side Kabsch alignment step every call, and custom (non-built-in) CV types always round-trip to the host, since arbitrary user code isn't guaranteed GPU-safe.
-
-The persistent-buffer CV paths fuse their reduce-and-finalize steps into as few kernel launches as the computation allows, rather than issuing one launch per intermediate step. As a rough guide:
-
-* **Small systems (up to a few thousand atoms) with one or two CVs**: the extra bias kernels' launch overhead is a significant fraction of the whole step. GPU offload is usually still worth it once the rest of the simulation is already on GPU, but don't expect a large win from the bias machinery alone at this scale.
-* **Larger systems, or several simultaneous CVs (e.g. multi-dimensional AWH ladders with 3-10 `BiasPotential`s)**: the CV/bias kernels amortize well over the main force/energy kernels, and GPU offload is clearly worthwhile.
+When the [`System`](@ref) is on the GPU:
+- [`CalcDist`](@ref), [`CalcRg`](@ref), [`CalcTorsion`](@ref) and [`CalcAngle`](@ref) are calculated on the GPU without any transfer to the host, also with `correction=:pbc`.
+- [`CalcRMSD`](@ref) is calculated on the GPU apart from the Kabsch alignment, which is done on the host every step.
+- Other CV types, including custom ones, copy the coordinates and atoms to the host and the gradient back every step.
+- For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps, with the step at which they first appeared.
 
 ## Monte Carlo sampling
 
