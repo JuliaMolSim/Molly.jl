@@ -919,14 +919,15 @@ end
 
         sys = build((b_35, b_72), AT)
         buffers = Molly.init_buffers!(sys, 1)
-        Molly.forces!(Molly.zero_forces(sys), sys, nothing, 0, buffers, Val(false))
+        Molly.forces!(Molly.zero_forces(sys), sys, nothing, 0, buffers, Val(false); n_threads=1)
         @test buffers.bias_scratch[b_35].grad !== buffers.bias_scratch[b_72].grad
         @test all(isapprox.(fs((b_35, b_72)), forces(build((b_35, b_72), Array)); atol=atol))
         @test all(isapprox.(fs((b_35, b_72)), fs((b_35,)) .+ fs((b_72,)); atol=atol))
 
         sys_twice = build((b_35, b_35), AT)
         buffers_twice = Molly.init_buffers!(sys_twice, 1)
-        Molly.forces!(Molly.zero_forces(sys_twice), sys_twice, nothing, 0, buffers_twice, Val(false))
+        Molly.forces!(Molly.zero_forces(sys_twice), sys_twice, nothing, 0, buffers_twice, Val(false);
+                      n_threads=1)
         @test length(buffers_twice.bias_scratch) == 1
         @test any(f -> !iszero(f), fs((b_35,)))
         @test all(isapprox.(fs((b_35, b_35)), 2 .* fs((b_35,)); atol=atol))
