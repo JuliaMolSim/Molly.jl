@@ -21,13 +21,14 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
             neighbor_finder = GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
-                device_vector_type=AT{Int32, 1},
+                array_type=AT,
             )
         else
             neighbor_finder = DistanceNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 n_steps=10,
                 dist_cutoff=2.0u"nm",
+                array_type=AT,
             )
         end
 
@@ -82,7 +83,7 @@ end
     n_frames = (n_steps ÷ 100) + 1
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
+    simulator = VelocityVerlet(dt=2.0u"fs", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
 
     TV = typeof(random_velocity(10.0u"g/mol", temp))
     TP = typeof(0.2u"kJ * mol^-1")
@@ -190,7 +191,7 @@ end
             show(devnull, a)
         end
 
-        nf_tree = TreeNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
+        nf_tree = TreeNeighborFinder(n_atoms=n_atoms, n_steps=10, dist_cutoff=2.0u"nm")
         neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
         neighbors_tree = find_neighbors(sys, nf_tree; n_threads=n_threads)
         @test length(neighbors.list) == length(neighbors_tree.list)
@@ -295,7 +296,7 @@ end
         @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
                             typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
 
-        simulator_unc = VelocityVerlet(dt=0.002u"ps")
+        simulator_unc = VelocityVerlet(dt=2.0u"fs")
         simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads, run_loggers=false)
     end
 end
@@ -361,13 +362,14 @@ end
             neighbor_finder = GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
-                device_vector_type=AT{Int32, 1},
+                array_type=AT,
             )
         else
             neighbor_finder = DistanceNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 n_steps=10,
                 dist_cutoff=2.0u"nm",
+                array_type=AT,
             )
         end
         sys = System(
@@ -445,11 +447,7 @@ Molly.charge(a::AtomWithAccessors) = a.q
     coords_start = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
     vels_start = [random_velocity(10.0u"g/mol", temp; rng=Xoshiro(i)) for i in 1:n_atoms]
     bonds = [HarmonicBond(k=10_000.0u"kJ * mol^-1 * nm^-2", r0=0.2u"nm") for _ in 1:(n_atoms ÷ 2)]
-    eligible = trues(n_atoms, n_atoms)
-    for i in 1:2:n_atoms
-        eligible[i, i + 1] = false
-        eligible[i + 1, i] = false
-    end
+    excluded_pairs = [(i, i + 1) for i in 1:2:n_atoms]
     charge_i(i) = (isodd(i) ? 0.2 : -0.2)
     make_ref_atom(i) = Atom(index=i, mass=10.0u"g/mol", charge=charge_i(i),
                             σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
@@ -476,14 +474,16 @@ Molly.charge(a::AtomWithAccessors) = a.q
             neighbor_finder = GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=1.2u"nm",
-                excluded_pairs=[(i, i + 1) for i in 1:2:n_atoms],
-                device_vector_type=AT{Int32, 1},
+                excluded_pairs=excluded_pairs,
+                array_type=AT,
             )
         else
             neighbor_finder = DistanceNeighborFinder(
-                eligible=to_device(copy(eligible), AT),
+                n_atoms=n_atoms,
+                excluded_pairs=excluded_pairs,
                 n_steps=10,
                 dist_cutoff=1.2u"nm",
+                array_type=AT,
             )
         end
         cutoff = DistanceCutoff(1.0u"nm")
@@ -613,7 +613,7 @@ end
             neighbor_finder=GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
-                device_vector_type=CuArray{Int32, 1},
+                array_type=CuArray,
             ),
             loggers=(
                 coords=CoordinatesLogger(100),
@@ -716,7 +716,7 @@ end
                 neighbor_finder_gpu = GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=1.2u"nm",
-                    device_vector_type=CuArray{Int32, 1},
+                    array_type=CuArray,
                 )
             else
                 neighbor_finder_gpu = NoNeighborFinder()

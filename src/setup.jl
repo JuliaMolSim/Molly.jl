@@ -496,9 +496,10 @@ templates is carried out.
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
     [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref)
-    on CUDA compatible GPUs and [`DistanceNeighborFinder`](@ref) on non-CUDA
-    compatible GPUs. [`NoNeighborFinder`](@ref) can be used but in this case bonded
-    atoms will not be excluded from the non-bonded interactions.
+    on CUDA compatible GPUs and [`GPUCellListNeighborFinder`](@ref) on non-CUDA
+    compatible GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the
+    box is too small for a cell list. [`NoNeighborFinder`](@ref) can be used but in
+    this case bonded atoms will not be excluded from the non-bonded interactions.
 - `neighbor_finder_n_steps=10`: the number of steps between neighbor finder
     updates. Can be tuned along with `dist_buffer` to ensure that particles
     do not cross the buffer distance during the update interval.
@@ -778,8 +779,8 @@ function System(coord_file::AbstractString,
     htors_il  = InteractionList4Atoms(HarmonicTorsion{E, T})
     cmaps_il  = InteractionList5Atoms(CMAPTorsion)
     bonds_ub_flags = Bool[] # Whether a bond is a Urey-Bradley bond
-    eligible = trues(n_atoms, n_atoms)
-    special  = falses(n_atoms, n_atoms)
+    excluded_pairs = Tuple{Int32, Int32}[]
+    special_pairs  = Tuple{Int32, Int32}[]
     torsion_n_terms = 6
     weight_14_coulomb, weight_14_lj = T(force_field.weight_14_coulomb), T(force_field.weight_14_lj)
     σs_14 = (units ? typeof(one(T) * u"nm")[] : T[])
@@ -857,7 +858,6 @@ function System(coord_file::AbstractString,
             element=element_of[ai],
             hetero_atom=hetero_atoms[ai],
         ))
-        eligible[ai, ai] = false
     end
     atoms = to_device([atoms_abst...], AT)
 
@@ -873,8 +873,7 @@ function System(coord_file::AbstractString,
         push!(bonds_il.types, atom_types_to_string(t1,t2))
         push!(bonds_il.inters, HarmonicBond(T(hb.k), T(hb.r0)))
         push!(bonds_ub_flags, false)
-        eligible[i, j] = false
-        eligible[j, i] = false
+        push!(excluded_pairs, (Int32(i), Int32(j)))
     end
 
     # Angles
@@ -890,8 +889,7 @@ function System(coord_file::AbstractString,
             push!(angles_il.ks, k)
             push!(angles_il.types, atom_types_to_string(t1, t2, t3))
             push!(angles_il.inters, HarmonicAngle(T(ha.k), T(ha.θ0)))
-            eligible[i, k] = false
-            eligible[k, i] = false
+            push!(excluded_pairs, (Int32(i), Int32(k)))
         end
         if !isnothing(hb)
             push!(bonds_il.is, i)
@@ -899,28 +897,11 @@ function System(coord_file::AbstractString,
             push!(bonds_il.types, atom_types_to_string(t1, t2, t3))
             push!(bonds_il.inters, HarmonicBond(T(hb.k), T(hb.r0)))
             push!(bonds_ub_flags, true)
-            eligible[i, k] = false
-            eligible[k, i] = false
+            push!(excluded_pairs, (Int32(i), Int32(k)))
         end
     end
 
-    # A virtual site shares the non-bonded exclusions of, and is excluded from, the first atom it
-    #   is defined by, which is what OpenMM does with the default of its `excludeWith` attribute
-    for vs in virtual_sites
-        i = vs.atom_ind
-        for j in (vs.atom_1,)
-            if !iszero(j)
-                for k in 1:n_atoms
-                    if !eligible[j, k]
-                        eligible[i, k] = false
-                        eligible[k, i] = false
-                    end
-                end
-                eligible[i, j] = false
-                eligible[j, i] = false
-            end
-        end
-    end
+    add_virtual_site_exclusions!(excluded_pairs, virtual_sites, n_atoms)
 
     # Proper torsions
     for (i,j,k,l) in top_torsions
@@ -943,8 +924,7 @@ function System(coord_file::AbstractString,
                 proper=true,
             ))
         end
-        special[i, l] = true
-        special[l, i] = true
+        push!(special_pairs, (Int32(i), Int32(l)))
     end
 
     # Impropers (Amber ordering)
@@ -1156,6 +1136,9 @@ function System(coord_file::AbstractString,
         end
     end
 
+    eligible = SparsePairMatrix(n_atoms, excluded_pairs; listed=false)
+    special  = SparsePairMatrix(n_atoms, special_pairs; listed=true)
+
     return System(T, TH, AT, atoms, coords, boundary_used, velocities,
                   atoms_data, virtual_sites_type, loggers, data, force_field.global_params, bonds_il, bonds_ub_flags,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
@@ -1165,6 +1148,38 @@ function System(coord_file::AbstractString,
                   grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
                   hydrogen_mass, strictness, launch_config, autotune_launch,
                   constraint_algorithm, n_threads)
+end
+
+#=
+A virtual site shares the non-bonded exclusions of, and is excluded from, the first atom it
+    is defined by, which is what OpenMM does with the default of its `excludeWith` attribute.
+The sites are processed in order and a site sees the exclusions added for earlier sites,
+    so for example a second site on the same atom is excluded from the first.
+`excluded_pairs` holds the exclusions found so far, the new ones are appended.
+=#
+function add_virtual_site_exclusions!(excluded_pairs, virtual_sites, n_atoms)
+    isempty(virtual_sites) && return excluded_pairs
+    partners = [Int32[] for _ in 1:n_atoms]
+    for (i, j) in excluded_pairs
+        push!(partners[i], j)
+        push!(partners[j], i)
+    end
+    function exclude!(i, j)
+        if i != j
+            push!(excluded_pairs, (Int32(i), Int32(j)))
+            push!(partners[i], j)
+            push!(partners[j], i)
+        end
+    end
+    for vs in virtual_sites
+        i, j = vs.atom_ind, vs.atom_1
+        # Copied since excluding the site from j extends the list of j
+        for k in copy(partners[j])
+            exclude!(i, k)
+        end
+        exclude!(i, j)
+    end
+    return excluded_pairs
 end
 
 const water_residue_names = ("SOL", "WAT", "HOH", "H2O")
@@ -1531,21 +1546,35 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         neighbor_finder = GPUNeighborFinder(
             n_atoms=size(eligible, 1),
             # GPUNeighborFinder reuses Morton ordering and tile metadata across
-            # `n_steps_reorder`, so its search radius needs the same buffer as
-            # the dense neighbor-list paths.
+            # `n_steps`, so its search radius needs the same buffer as the other
+            # neighbor finders
             dist_cutoff=T(dist_neighbors),
             excluded_pairs=excluded_pairs,
             special_pairs=special_pairs,
-            n_steps_reorder=neighbor_finder_n_steps,
-            device_vector_type=AT{Int32, 1},
+            n_steps=neighbor_finder_n_steps,
+            array_type=AT,
+            strictness=strictness,
+        )
+    elseif neighbor_finder_type in (nothing, GPUCellListNeighborFinder) &&
+                AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors)
+        neighbor_finder = GPUCellListNeighborFinder(
+            eligible=eligible,
+            special=special,
+            n_steps=neighbor_finder_n_steps,
+            dist_cutoff=T(dist_neighbors),
+            array_type=AT,
+            ragged=false,
+            strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary))
         neighbor_finder = DistanceNeighborFinder(
-            eligible=to_device(eligible, AT),
-            special=to_device(special, AT),
+            eligible=eligible,
+            special=special,
             n_steps=neighbor_finder_n_steps,
             dist_cutoff=T(dist_neighbors),
+            array_type=AT,
+            strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
         # CellListMap requires the cell list cutoff to fit twice in the box
@@ -1564,6 +1593,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
             x0=coords,
             boundary=boundary,
             dist_cutoff=T(dist_neighbors),
+            strictness=strictness,
         )
     else
         neighbor_finder = neighbor_finder_type(

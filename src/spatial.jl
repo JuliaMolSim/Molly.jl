@@ -624,7 +624,7 @@ function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topolo
         end
         Bm = reduce(hcat, boundary.basis_vectors)
         B  = SMatrix{3, 3}(Bm)
-        to_frac = (r::SVector{3}) -> B \ r # Dimensionless
+        to_frac = (r::SVector{3}) -> ustrip.(B) \ ustrip.(unit(eltype(B)), r) # Dimensionless
         to_cart = (f::SVector{3}) -> B * f # Length units
     else
         sl = boundary.side_lengths

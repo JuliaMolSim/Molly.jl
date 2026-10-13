@@ -213,7 +213,7 @@ lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
 sir = SIRInteraction(0.5, 0.06, 0.01) # Does not use the neighbor list
 pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
-    eligible=trues(n_people, n_people),
+    n_atoms=n_people,
     n_steps=10,
     dist_cutoff=2.0,
 )
@@ -409,13 +409,11 @@ atoms = [Atom(mass=10.0u"g/mol", σ=1.0u"nm", ϵ=0.5u"kJ * mol^-1") for _ in 1:n
 
 # Since we are using a generic pairwise Lennard-Jones potential too we need to
 #   exclude adjacent monomers from the neighbor list
-eligible = trues(n_atoms, n_atoms)
+excluded_pairs = Tuple{Int, Int}[]
 for pol_i in 1:n_polymers
     for mon_i in 1:n_bonds_mon
         i = (pol_i - 1) * n_monomers + mon_i
-        j = (pol_i - 1) * n_monomers + mon_i + 1
-        eligible[i, j] = false
-        eligible[j, i] = false
+        push!(excluded_pairs, (i, i + 1))
     end
 end
 
@@ -424,7 +422,8 @@ lj = LennardJones(
     use_neighbors=true,
 )
 neighbor_finder = DistanceNeighborFinder(
-    eligible=eligible,
+    n_atoms=n_atoms,
+    excluded_pairs=excluded_pairs,
     n_steps=10,
     dist_cutoff=5.5u"nm",
 )
@@ -544,11 +543,10 @@ sys = System(
 potential_energy(sys)
 forces(sys)
 ```
-For larger or periodic systems, attach a neighbour finder so the AEV uses the minimum-image convention and only the passed-in neighbours. When all pairs are eligible, set `eligible` to all true:
+For larger or periodic systems, attach a neighbor finder so the AEV uses the minimum-image convention and only the passed-in neighbors. When all pairs are eligible, only the number of atoms needs to be given:
 ```julia
-n = length(coords)
 neighbor_finder = DistanceNeighborFinder(
-    eligible    = trues(n, n),
+    n_atoms     = length(sys),
     dist_cutoff = (Float64(pot.cutoff) + 1.0)u"Å",
 )
 sys = System(sys; neighbor_finder=neighbor_finder)
@@ -874,7 +872,7 @@ pairwise_inters = (
     BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
-    eligible=trues(n_atoms, n_atoms),
+    n_atoms=n_atoms,
     n_steps=10,
     dist_cutoff=2.2,
 )
@@ -1034,7 +1032,7 @@ function check_sim(n_atoms)
     neighbor_finder = GPUNeighborFinder(
         n_atoms=n_atoms,
         dist_cutoff=1.0f0u"nm",
-        device_vector_type=CuArray{Int32, 1},
+        array_type=CuArray,
     )
     pis = (LennardJones(cutoff=DistanceCutoff(1.0f0u"nm"), use_neighbors=true),)
     sys = System(
@@ -1050,23 +1048,23 @@ function check_sim(n_atoms)
 end
 
 function test_natoms()
-    n_atoms = 40_000
+    n_atoms = 1_000_000
     while true
         fs = check_sim(n_atoms)
         println(n_atoms, " atoms okay")
-        n_atoms += 20_000
+        n_atoms *= 2
     end
 end
 
 test_natoms()
 ```
-This constructor is the preferred way to use [`GPUNeighborFinder`](@ref) when all pairs are eligible.
-If you need exclusions or special-pair handling, pass them with `excluded_pairs` and `special_pairs`.
+All pairs are eligible here, so only the number of atoms is given to [`GPUNeighborFinder`](@ref).
+Exclusions and special pairs can be given with `excluded_pairs` and `special_pairs`.
 
-The results before running out of memory on different GPUs are:
-- 60,000 on NVIDIA GeForce RTX 2080 Ti (11 GB).
-- 140,000 on NVIDIA RTX A6000 (48 GB).
-- 120,000 on NVIDIA GeForce RTX 5090 (32 GB).
+The memory used grows linearly with the number of atoms, as does the time taken per step.
+On a NVIDIA RTX A6000 (48 GB), 160 million atoms fit and 168 million run out of memory, which is around 300 bytes per atom.
+Systems set up from a structure file with a force field use more memory per atom, for example a solvated protein with PME uses around 1 KB per atom.
+On GPUs other than NVIDIA ones, [`GPUCellListNeighborFinder`](@ref) stores an explicit list of pairs, which takes more memory: with `ragged=false` the same example fits 23 million atoms on the same GPU, around 2.2 KB per atom, and a solvated protein with PME fits 11.6 million atoms.
 
 ## Variations of the Morse potential
 
@@ -1344,7 +1342,7 @@ shake = SHAKE_RATTLE(
 )
 
 neighbor_finder = DistanceNeighborFinder(
-    eligible=trues(length(atoms), length(atoms)),
+    n_atoms=length(atoms),
     dist_cutoff=1.5*r_cut,
 )
 

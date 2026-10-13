@@ -38,7 +38,7 @@ By default all ensemble members are loaded and their energies averaged. Pass
 
 Coordinates without units are treated as nm following the Molly convention, and
 converted internally to the Å the ANI parameters use. Periodic systems must use a
-neighbour finder; the neighbour-list path applies the minimum-image convention.
+neighbor finder; the neighbor-list path applies the minimum-image convention.
 
 Note: the ANI-2x weights are `Float32`, so the energy/force paths run in `Float32`
 internally regardless of the system's coordinate type.

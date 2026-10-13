@@ -46,7 +46,7 @@ function setup_benchmark_system(n_atoms;
             excluded_pairs=(),
             special_pairs=(),
             dist_cutoff=r_cut,
-            device_vector_type=CuArray{Int32, 1},
+            array_type=CuArray,
         ),
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",

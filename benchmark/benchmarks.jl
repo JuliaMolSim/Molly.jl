@@ -85,7 +85,7 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
                 dist_cutoff=cutoff.dist_cutoff,
                 excluded_pairs=(),
                 special_pairs=(),
-                device_vector_type=AT{Int32, 1},
+                array_type=AT,
             )
         else
             neighbor_finder = DistanceNeighborFinder(

@@ -33,7 +33,7 @@ function pairwise_distance_matrix(coords_1::AbstractArray{SVector{D, C}},
         end
     else
         for i in eachindex(coords_1), j in eachindex(coords_2)
-            dist_matrix[i, j] = norm(coords_2[i] - coords_1[j])
+            dist_matrix[i, j] = norm(coords_2[j] - coords_1[i])
         end
     end
     return dist_matrix

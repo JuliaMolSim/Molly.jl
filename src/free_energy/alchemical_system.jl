@@ -47,14 +47,12 @@ function check_unique_env_bonds(sys, unique_inds, ligand, to_A, state, host_list
 end
 
 ### Neighborfinder functions ###
-function neighbor_exclusions(nf::GPUNeighborFinder)
-    excluded = collect(zip(from_device(nf.excluded_i), from_device(nf.excluded_j)))
-    special  = collect(zip(from_device(nf.special_i ), from_device(nf.special_j )))
-    return excluded, special
-end
-
 neighbor_exclusions(nf::NoNeighborFinder) = (Tuple{Int32, Int32}[], Tuple{Int32, Int32}[])
 neighbor_exclusions(nf) = dense_masks_to_pair_lists(from_device(nf.eligible), from_device(nf.special))
+# The output modes other than :molly_pairs ignore the exclusions and store none
+neighbor_exclusions(nf::GPUCellListNeighborFinder) = (isnothing(nf.eligible) ?
+                neighbor_exclusions(NoNeighborFinder()) :
+                dense_masks_to_pair_lists(nf.eligible, nf.special))
 
 ### Constraints ###
 # Core atom can't have different constraint lengths or angles between A and B
@@ -884,29 +882,26 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     map_A(i) = mapping_A[i]
     map_B(i) = (haskey(mapping_B, i) ? mapping_B[i] : mapping_A[env_BA[i]])
     n_atoms = length(Coords)
-    eligible = trues(n_atoms, n_atoms)
-    for i in 1:n_atoms
-        eligible[i, i] = false
-    end
-    special = falses(n_atoms, n_atoms)
+    excluded_hybrid = Tuple{Int32, Int32}[]
+    special_hybrid  = Tuple{Int32, Int32}[]
     for (sys_x, map_x) in ((sysA, map_A), (sysB, map_B))
         excluded_x, special_x = neighbor_exclusions(sys_x.neighbor_finder)
         for (i, j) in excluded_x
-            eligible[map_x(i), map_x(j)] = false
-            eligible[map_x(j), map_x(i)] = false
+            push!(excluded_hybrid, (map_x(i), map_x(j)))
         end
         for (i, j) in special_x
-            special[map_x(i), map_x(j)] = true
-            special[map_x(j), map_x(i)] = true
+            push!(special_hybrid, (map_x(i), map_x(j)))
         end
     end
 
     # The unique alchemical groups are excluded from interating
-    pairs = collect(Iterators.product(unique_groups["sysA"], unique_groups["sysB"]))
-    for (i, j) in pairs
-        eligible[i, j] = false
-        eligible[j, i] = false
+    for i in unique_groups["sysA"], j in unique_groups["sysB"]
+        push!(excluded_hybrid, (i, j))
     end
+
+    # The pairs are stored sparsely, as in the neighbor finders of the end states
+    eligible = SparsePairMatrix(n_atoms, excluded_hybrid; listed=false)
+    special  = SparsePairMatrix(n_atoms, special_hybrid; listed=true)
 
     # The neighbour finder of the end states, as `System` setup picks it: the type is compared with
     #   `isa`, since the finders are parametric and `NoNeighborFinder` has no fields
@@ -914,18 +909,21 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     if nf_A isa NoNeighborFinder
         nf = NoNeighborFinder()
     elseif nf_A isa GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
-        excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
-        nf = GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=nf_A.dist_cutoff,
-                               excluded_pairs=excluded_pairs, special_pairs=special_pairs,
-                               n_steps_reorder=nf_A.n_steps_reorder,
-                               device_vector_type=AT{Int32, 1})
+        nf = GPUNeighborFinder(eligible=eligible, special=special, dist_cutoff=nf_A.dist_cutoff,
+                               n_steps=nf_A.n_steps, array_type=AT)
     elseif nf_A isa DistanceNeighborFinder &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(Boundary))
-        nf = DistanceNeighborFinder(eligible=to_device(eligible, AT), special=to_device(special, AT),
-                                    n_steps=nf_A.n_steps, dist_cutoff=nf_A.dist_cutoff)
+        nf = DistanceNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
+                                    dist_cutoff=nf_A.dist_cutoff, array_type=AT)
     elseif nf_A isa CellListMapNeighborFinder && !(AT <: AbstractGPUArray)
         nf = CellListMapNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
                                        boundary=Boundary, x0=Coords, dist_cutoff=nf_A.dist_cutoff)
+    elseif nf_A isa GPUCellListNeighborFinder && AT <: AbstractGPUArray
+        # The default output, since the hybrid needs the exclusions applied even if an end
+        #   state did not
+        nf = GPUCellListNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
+                                       dist_cutoff=nf_A.dist_cutoff, array_type=AT,
+                                       max_neighbors=nf_A.max_neighbors, ragged=nf_A.ragged)
     else
         # Another finder, or one that does not suit the device, keeps the masks and the settings
         nf = typeof(nf_A).name.wrapper(

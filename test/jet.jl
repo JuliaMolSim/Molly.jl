@@ -378,9 +378,18 @@
         for (sim_name, sim) in simulators
             JET.test_call(simulate!, Base.typesof(sys, sim, 1); jet_config...)
         end
-        minimizer = SteepestDescentMinimizer(step_size=0.01u"nm", max_steps=2,
-                                                tol=1000.0u"kJ * mol^-1 * nm^-1")
-        JET.test_call(simulate!, Base.typesof(sys, minimizer); jet_config...)
+        tol = 1000.0u"kJ * mol^-1 * nm^-1"
+        minimizers = [
+            "SteepestDescentMinimizer" => SteepestDescentMinimizer(step_size=0.01u"nm",
+                                                max_steps=2, tol=tol),
+            "FIREMinimizer"            => FIREMinimizer(dt=0.001u"ps", dt_max=0.01u"ps",
+                                                max_steps=2, tol=tol),
+            "LBFGSMinimizer"           => LBFGSMinimizer(step_size=0.01u"nm",
+                                                max_steps=2, tol=tol),
+        ]
+        for (minimizer_name, minimizer) in minimizers
+            JET.test_call(simulate!, Base.typesof(sys, minimizer); jet_config...)
+        end
     end
 
     # Couplers

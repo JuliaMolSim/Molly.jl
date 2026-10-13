@@ -213,3 +213,71 @@
         end
     end
 end
+
+@testset "Protein energy minimization" begin
+    pme_mesh_dims = (46, 46, 51)
+    ff = MolecularForceField(
+        joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+        strictness=:nowarn,
+    )
+    tol = 1000.0u"kJ * mol^-1 * nm^-1"
+    max_steps = 100
+    # A new minimizer is made for each run so that the log stream is empty
+    # The minimizers use harmonic bonds in place of the constraints, so the energies and
+    #   forces they print are not the same as those of the system itself
+    minimizers = [
+        "SteepestDescentMinimizer" => () -> SteepestDescentMinimizer(tol=tol,
+                                    max_steps=max_steps, log_stream=IOBuffer()),
+        "FIREMinimizer"            => () -> FIREMinimizer(tol=tol,
+                                    max_steps=max_steps, log_stream=IOBuffer()),
+        "LBFGSMinimizer"           => () -> LBFGSMinimizer(tol=tol,
+                                    max_steps=max_steps, log_stream=IOBuffer()),
+    ]
+    cpu_results = Dict{String, Any}()
+
+    for AT in array_list
+        sys = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            nonbonded_method=SetupPME(mesh_dims=pme_mesh_dims),
+            center_coords=false,
+            constraints=:hbonds,
+            rigid_water=true,
+            array_type=AT,
+            float_type=Float64,
+        )
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        coords_start = copy(sys.coords)
+        coords_start_cpu = from_device(coords_start)
+        E_start = potential_energy(sys)
+        max_force_start = maximum(norm, forces(sys))
+        @test max_force_start > tol
+
+        for (minimizer_name, make_minimizer) in minimizers
+            minimizer = make_minimizer()
+            sys.coords .= coords_start
+            simulate!(sys, minimizer)
+            log_str = String(take!(minimizer.log_stream))
+            # Minimization should stop on convergence rather than running out of steps
+            @test count("Step ", log_str) - 1 < max_steps
+
+            E_min = potential_energy(sys)
+            max_force_min = maximum(norm, forces(sys))
+            @test E_min < E_start - 35_000.0u"kJ * mol^-1"
+            @test max_force_min < max_force_start
+            @test max_force_min < 3_000.0u"kJ * mol^-1 * nm^-1"
+            disps = from_device(vector.(coords_start, sys.coords, (sys.boundary,)))
+            @test maximum(norm, disps) < 0.3u"nm"
+            rmsd_min = rmsd(coords_start_cpu, coords_start_cpu .+ disps)
+            @test 0.001u"nm" < rmsd_min < 0.1u"nm"
+
+            if AT == Array
+                cpu_results[minimizer_name] = (E_min, rmsd_min)
+            else
+                E_min_cpu, rmsd_min_cpu = cpu_results[minimizer_name]
+                @test isapprox(E_min, E_min_cpu; rtol=1e-3)
+                @test isapprox(rmsd_min, rmsd_min_cpu; rtol=1e-2)
+            end
+        end
+    end
+end

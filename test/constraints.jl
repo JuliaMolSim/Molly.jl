@@ -468,8 +468,9 @@ end
 
         for cons in constraints
             neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=T(1.0)u"nm",
+                array_type=AT,
             )
             sys = System(
                 atoms=atoms,
@@ -1535,13 +1536,15 @@ end
     for AT in array_list[2:end]
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=T(1.5)*r_cut,
+                array_type=AT,
             )
         else
             neighbor_finder = DistanceNeighborFinder(
-                eligible=to_device(trues(n_atoms, n_atoms), AT),
+                n_atoms=n_atoms,
                 dist_cutoff=T(1.5)*r_cut,
+                array_type=AT,
             )
         end
 

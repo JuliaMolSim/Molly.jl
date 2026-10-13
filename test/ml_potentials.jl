@@ -499,7 +499,7 @@ end
 #          scalar CPU path on a multi-element system. Runs on the KA CPU backend
 #          (no GPU needed); the same kernel runs on Metal/CUDA/ROCm.
 # ============================================================================
-@testset "ANIPotential: KA neighbour-list kernel matches all-pairs (CPU backend)" begin
+@testset "ANIPotential: KA neighbor-list kernel matches all-pairs (CPU backend)" begin
     h5_path = joinpath(ANI_DIR, "ani2x.h5")
     pdb     = joinpath(REF_DIR, "..", "6mrr_equil.pdb")
     pot  = ANIPotential(h5_path; ensemble_idx=1)

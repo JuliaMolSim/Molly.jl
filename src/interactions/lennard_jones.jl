@@ -186,15 +186,23 @@ function LJDispersionCorrection(atoms::AbstractArray,
     ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
     ϵσ12_sum = zero(Tacc) * ϵσ12_unit
 
-    # Include each unordered atom pair once.
-    for i in 1:n_atoms
-        atom_i = atoms_cpu[i]
-        for j in 1:i
-            atom_j = atoms_cpu[j]
+    # The sum runs over each unordered atom pair once, including the pairs of an atom
+    #   with itself
+    # Atoms that only differ in their index give the same terms, so the sum is taken over
+    #   pairs of groups of such atoms weighted by the number of atom pairs, which avoids
+    #   a loop over all n_atoms^2 pairs
+    group_atoms, group_counts = identical_atom_groups(atoms_cpu)
+    for gi in eachindex(group_atoms)
+        atom_i = group_atoms[gi]
+        n_i = group_counts[gi]
+        for gj in 1:gi
+            atom_j = group_atoms[gj]
+            n_j = group_counts[gj]
+            n_pairs_group = (gi == gj ? (n_i * (n_i + 1)) ÷ 2 : n_i * n_j)
             σ = σ_mixing(σ_mix, atom_i, atom_j)
             ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j)
-            ϵσ6_sum  += Tacc(ustrip(ϵσ6_unit, ϵ * σ^6)) * ϵσ6_unit
-            ϵσ12_sum += Tacc(ustrip(ϵσ12_unit, ϵ * σ^12)) * ϵσ12_unit
+            ϵσ6_sum  += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ6_unit, ϵ * σ^6)) * ϵσ6_unit
+            ϵσ12_sum += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ12_unit, ϵ * σ^12)) * ϵσ12_unit
         end
     end
 
@@ -225,6 +233,31 @@ function LJDispersionCorrection(atoms::AbstractArray,
         σ_mix,
         ϵ_mix,
     )
+end
+
+# The fields of an atom other than its index, as a tuple
+@generated function atom_group_key(atom)
+    fields = [fn for fn in fieldnames(atom) if fn != :index]
+    return Expr(:tuple, (:(getfield(atom, $(QuoteNode(fn)))) for fn in fields)...)
+end
+
+# Group atoms that are identical apart from their index, returning one atom from each
+#   group and the number of atoms in each group, in order of first appearance
+function identical_atom_groups(atoms)
+    group_atoms = eltype(atoms)[]
+    group_counts = Int[]
+    isempty(atoms) && return group_atoms, group_counts
+    K = (isconcretetype(eltype(atoms)) ? typeof(atom_group_key(first(atoms))) : Any)
+    group_inds = Dict{K, Int}()
+    for atom in atoms
+        gi = get!(group_inds, atom_group_key(atom)) do
+            push!(group_atoms, atom)
+            push!(group_counts, 0)
+            length(group_atoms)
+        end
+        group_counts[gi] += 1
+    end
+    return group_atoms, group_counts
 end
 
 Base.zero(::Type{LJDispersionCorrection{F6, F12, D, S, E}}) where {F6, F12, D, S, E} =

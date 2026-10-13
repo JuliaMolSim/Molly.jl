@@ -703,3 +703,41 @@ end
         @test dist_13_std > dist_12_std
     end
 end
+
+@testset "Bias virial" begin
+    # The virial of a bias is minus the derivative of its energy with respect to a
+    #   homogeneous strain, W = -(dU/dε)ᵀ, here for a molecule split over the boundary
+    boundary = CubicBoundary(2.0u"nm")
+    coords_whole = [SVector(-0.15, -0.10, 0.05), SVector(0.05, -0.12, -0.08),
+                    SVector(0.12, 0.08, 0.10), SVector(-0.05, 0.15, -0.12),
+                    SVector(0.20, -0.05, 0.18), SVector(-0.18, 0.12, 0.15)]u"nm"
+    atoms = [Atom(mass=m * u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+             for m in (12.0, 1.0, 16.0, 14.0, 12.0, 32.0)]
+    topology = MolecularTopology([1, 2, 3, 4, 5], [2, 3, 4, 5, 6], 6)
+    ref_coords = [1.1 * c + SVector(0.02, -0.01, 0.03)u"nm" for c in coords_whole]
+    k = 500.0u"kJ * mol^-1 * nm^-2"
+    cvs_biases = (
+        (CalcDist([1], [5], CalcSingleDist()), SquareBias(k, 0.2u"nm")),
+        (CalcDist([1, 2], [4, 5, 6], CalcMinDist()), SquareBias(k, 0.4u"nm")),
+        (CalcDist([1, 2, 3], [5, 6], CalcMaxDist(:raw)), SquareBias(k, 0.2u"nm")),
+        (CalcDist([1, 2, 3], [4, 5, 6], CalcCMDist()), SquareBias(k, 0.3u"nm")),
+        (CalcRg(), SquareBias(k, 0.1u"nm")),
+        (CalcRMSD(ref_coords), SquareBias(k, 0.0u"nm")),
+        (CalcTorsion([1, 2, 3, 4]), SquareBias(50.0u"kJ * mol^-1", 0.5)),
+    )
+    for (cv, bias) in cvs_biases
+        sys = System(atoms=atoms, coords=wrap_coords.(coords_whole, (boundary,)),
+                     boundary=boundary, topology=topology,
+                     general_inters=(BiasPotential(cv, bias),))
+        h = 1e-6
+        dU_dε = map(Iterators.product(1:3, 1:3)) do (a, b)
+            Us = map((h, -h)) do δ
+                μ = SMatrix{3, 3}(I + δ * (1:3 .== a) * (1:3 .== b)')
+                cv_val = calculate_cv(cv, [μ * c for c in coords_whole], atoms, boundary)
+                return Molly.potential_energy(bias, cv_val)
+            end
+            return (Us[1] - Us[2]) / 2h
+        end
+        @test virial(sys) ≈ -transpose(dU_dε) rtol=1e-6
+    end
+end
