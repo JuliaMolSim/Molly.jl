@@ -225,58 +225,6 @@ function tss_global_index(state::TSSLocalEstimator, local_state::Int)
     return state.state_indices[local_state]
 end
 
-function tss_sample_global_state(rng::AbstractRNG, state::TSSLocalEstimator)
-    idx = sample_state(rng, state.weights)
-    return tss_global_index(state, idx)
-end
-
-function process_tss_sample!(state::TSSLocalEstimator, active_state::ActiveThermoState)
-    coords = active_state.active_sys.coords
-    boundary = active_state.active_sys.boundary
-
-    evaluate_energy_subset!(
-        state.evaluation_energies,
-        state.state_space.partition,
-        coords,
-        boundary,
-        state.evaluation_state_indices,
-    )
-
-    reduced_potentials!(
-        state.evaluation_reduced_pot,
-        state.evaluation_energies,
-        state.state_space,
-        boundary,
-        state.evaluation_state_indices,
-    )
-    check_tss_finite!(state.evaluation_reduced_pot, "evaluation reduced potentials", state)
-
-    for (local_k, global_k) in enumerate(state.state_indices)
-        eval_k = state.evaluation_local_index_by_state[global_k]
-        state.energies[local_k] = state.evaluation_energies[eval_k]
-        state.reduced_pot[local_k] = state.evaluation_reduced_pot[eval_k]
-    end
-
-    check_tss_finite!(state.reduced_pot, "reduced potentials", state)
-
-    @. state.log_state_bias = state.f + state.log_dens
-    check_tss_finite!(state.log_state_bias, "log state bias", state)
-    conditional_state_weights!(
-        state.weights,
-        state.log_state_bias,
-        state.reduced_pot,
-        state.scratch
-    )
-    check_tss_probabilities!(state.weights, "conditional weights", state)
-
-    return state.weights
-
-end
-
-function process_tss_sample!(state::TSSLocalEstimator)
-    return process_tss_sample!(state, state.active_state)
-end
-
 function tss_log_den!(state::TSSLocalEstimator)
     @. state.log_state_bias = state.f + state.log_dens
     check_tss_finite!(state.log_state_bias, "log state bias", state)

@@ -78,6 +78,46 @@ function make_tss_pmf_thermo_states(; n_atoms=4, n_states=4)
     ]
 end
 
+mutable struct TSSSampleCounter
+    n::Int
+end
+
+Molly.log_tss_sample!(counter::TSSSampleCounter, sample::TSSSample) = (counter.n += 1; counter)
+
+function tss_sample_record(sample)
+    return (
+        step=sample.step,
+        replica_index=sample.replica_index,
+        coords=copy(sample.system.coords),
+        boundary=sample.system.boundary,
+        active_state=sample.active_state,
+        active_window=sample.active_window,
+        state_indices=copy(sample.state_indices),
+        reduced_potentials=copy(sample.reduced_potentials),
+        log_den=sample.log_den,
+        weights=copy(sample.weights),
+    )
+end
+
+function tss_sample_loggers(n_steps)
+    return (
+        count=TSSSampleCounter(0),
+        all=TSSSampleLogger(tss_sample_record, Any, 1),
+        strided=TSSSampleLogger(tss_sample_record, Any, n_steps),
+    )
+end
+
+# Reduced potentials of a recorded sample, evaluated independently on each
+# window state's own system
+function tss_reference_reduced_potentials(thermo_states, record)
+    return map(record.state_indices) do state_i
+        sys = System(thermo_states[state_i].system;
+                     coords=copy(record.coords), boundary=record.boundary)
+        energy = potential_energy(sys, find_neighbors(sys))
+        return Molly.reduced_potential(thermo_states[state_i], energy, record.boundary)
+    end
+end
+
 @testset "Times Square Sampling (TSS)" begin
     thermo_states = make_tss_thermo_states()
 
@@ -367,6 +407,195 @@ end
             n_replicas=2,
             first_states=[1, 3],
             loggers=tss_step_logger(),
+        )
+    end
+
+    @testset "sample loggers" begin
+        n_md_steps, n_cycles, self_adjustment_steps = 2, 3, 2
+        n_samples = n_cycles * self_adjustment_steps
+        # The initial configuration at step 0, then one sample per MD block
+        sample_steps = collect(0:n_md_steps:(n_samples * n_md_steps))
+        strided_steps = filter(step -> step % 4 == 0, sample_steps)
+        @test strided_steps == [0, 4, 8, 12]
+
+        function check_reduced_potentials(thermo_states, records)
+            for record in records
+                @test record.reduced_potentials ≈
+                      tss_reference_reduced_potentials(thermo_states, record) rtol=1e-8
+            end
+        end
+
+        # Single replica, adaptive and frozen
+        single_states = make_tss_thermo_states()
+        function run_single(; frozen=false, sample_loggers=())
+            state = Molly.TSSState(single_states; first_state=1, ETA=1.0, dens_reg=1e-4)
+            sim = Molly.TSSSimulation(state;
+                n_md_steps=n_md_steps,
+                n_cycles=n_cycles,
+                self_adjustment_steps=self_adjustment_steps,
+                log_freq=1,
+                frozen=frozen,
+                sample_loggers=sample_loggers,
+            )
+            Molly.simulate!(sim; rng=MersenneTwister(21), show_progress=false)
+            return state, sim
+        end
+
+        let
+            loggers = tss_sample_loggers(4)
+            state, sim = run_single(sample_loggers=loggers)
+            records = values(loggers.all)
+            @test loggers.count.n == n_samples + 1
+            @test [record.step for record in records] == sample_steps
+            @test [record.step for record in values(loggers.strided)] == strided_steps
+            @test all(record -> record.replica_index == 1, records)
+            @test all(record -> record.state_indices == [1, 2, 3], records)
+            @test first(records).active_state == 1
+            # The statistics record the last sample of each cycle
+            last_records = records[(1 + self_adjustment_steps):self_adjustment_steps:end]
+            @test [record.active_state for record in last_records] == state.stats.visited_state
+            @test [record.active_window for record in last_records] == state.stats.update_window
+            @test all(record -> sum(record.weights) ≈ 1, records)
+            check_reduced_potentials(single_states, records)
+
+            reference_state, reference_sim = run_single()
+            @test reference_state.estimators[1].f == state.estimators[1].f
+            @test reference_state.stats.visited_state == state.stats.visited_state
+            @test reference_sim.replicas[1].active_state.active_sys.coords ==
+                  sim.replicas[1].active_state.active_sys.coords
+
+            # As for the system loggers, a resumed run does not log its start again
+            Molly.simulate!(sim; rng=MersenneTwister(22), show_progress=false)
+            @test loggers.count.n == 2 * n_samples + 1
+            @test [record.step for record in values(loggers.all)] ==
+                  collect(0:n_md_steps:(2 * n_samples * n_md_steps))
+        end
+
+        # Single replica, frozen
+        frozen_loggers = tss_sample_loggers(4)
+        frozen_state, _ = run_single(frozen=true, sample_loggers=frozen_loggers)
+        frozen_records = values(frozen_loggers.all)
+        @test frozen_loggers.count.n == n_samples + 1
+        @test [record.step for record in frozen_records] == sample_steps
+        check_reduced_potentials(single_states, frozen_records)
+        for record in frozen_records
+            estimator = frozen_state.estimators[record.active_window]
+            log_bias = estimator.f .+ estimator.log_dens .- record.reduced_potentials
+            @test record.log_den ≈ Molly.logsumexp(log_bias)
+            @test record.weights ≈ exp.(log_bias .- record.log_den)
+        end
+
+        # Multiple replicas, adaptive and frozen, serial and threaded
+        multi_states = make_tss_thermo_states(n_states=4)
+        graph4 = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
+        function run_multi(parallel; frozen=false, with_loggers=true)
+            state = Molly.TSSState(multi_states;
+                graph=graph4,
+                first_state=1,
+                first_window=1,
+                ETA=1.0,
+                dens_reg=1e-4,
+                history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+            )
+            replica_sample_loggers = [tss_sample_loggers(4), tss_sample_loggers(4)]
+            sim = Molly.TSSSimulation(state;
+                n_md_steps=n_md_steps,
+                n_cycles=n_cycles,
+                self_adjustment_steps=self_adjustment_steps,
+                log_freq=1,
+                n_replicas=2,
+                first_states=[1, 3],
+                frozen=frozen,
+                replica_sample_loggers=(with_loggers ? replica_sample_loggers : nothing),
+            )
+            Molly.simulate!(sim;
+                replica_rngs=[MersenneTwister(31), MersenneTwister(32)],
+                n_threads=2,
+                replica_parallel=parallel,
+                show_progress=false,
+            )
+            return state, sim, replica_sample_loggers
+        end
+
+        for frozen in (false, true)
+            state, sim, replica_loggers = run_multi(:serial; frozen=frozen)
+            for (replica_i, loggers) in enumerate(replica_loggers)
+                records = values(loggers.all)
+                @test loggers.count.n == n_samples + 1
+                @test [record.step for record in records] == sample_steps
+                @test [record.step for record in values(loggers.strided)] == strided_steps
+                @test all(record -> record.replica_index == replica_i, records)
+                @test all(record -> record.state_indices ==
+                                    state.windows[record.active_window].state_indices,
+                          records)
+                @test all(record -> record.active_state in record.state_indices, records)
+                @test first(records).active_state == [1, 3][replica_i]
+                # The initial configuration is reported in the window of the first cycle
+                @test records[1].active_window == records[2].active_window
+                for cycle in 1:n_cycles
+                    cycle_records = records[(1 + (cycle - 1) * self_adjustment_steps + 1):(1 + cycle * self_adjustment_steps)]
+                    @test allequal(record.active_window for record in cycle_records)
+                    if !frozen
+                        @test last(cycle_records).active_state ==
+                              state.stats.replica_visited_states[cycle][replica_i]
+                        @test last(cycle_records).active_window ==
+                              state.stats.replica_update_windows[cycle][replica_i]
+                    end
+                end
+                check_reduced_potentials(multi_states, records)
+            end
+
+            reference_state, reference_sim, _ = run_multi(:serial; frozen=frozen, with_loggers=false)
+            @test [est.f for est in reference_state.estimators] == [est.f for est in state.estimators]
+            @test all(
+                reference_sim.replicas[i].active_state.active_sys.coords ==
+                sim.replicas[i].active_state.active_sys.coords
+                for i in 1:2
+            )
+
+            if Threads.nthreads() > 1
+                _, _, threaded_loggers = run_multi(:threads; frozen=frozen)
+                for (serial, threaded) in zip(replica_loggers, threaded_loggers)
+                    @test threaded.count.n == serial.count.n
+                    @test values(threaded.all) == values(serial.all)
+                end
+            end
+        end
+
+        @test_throws ArgumentError TSSSampleLogger(tss_sample_record, Any, 0)
+        @test_throws ArgumentError Molly.TSSSimulation(
+            Molly.TSSState(single_states; first_state=1, ETA=1.0, dens_reg=1e-4);
+            n_md_steps=1,
+            n_cycles=1,
+            sample_loggers=[TSSSampleCounter(0)],
+        )
+        multi_state = Molly.TSSState(multi_states;
+            graph=graph4,
+            first_state=1,
+            first_window=1,
+            ETA=1.0,
+            dens_reg=1e-4,
+            history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0, phi=1.2),
+        )
+        @test_throws ArgumentError Molly.TSSSimulation(multi_state;
+            n_md_steps=1, n_cycles=1, n_replicas=2, first_states=[1, 3],
+            sample_loggers=(count=TSSSampleCounter(0),),
+        )
+        @test_throws ArgumentError Molly.TSSSimulation(multi_state;
+            n_md_steps=1, n_cycles=1, n_replicas=2, first_states=[1, 3],
+            replica_sample_loggers=[(count=TSSSampleCounter(0),)],
+        )
+        shared_counter = TSSSampleCounter(0)
+        @test_throws ArgumentError Molly.TSSSimulation(multi_state;
+            n_md_steps=1, n_cycles=1, n_replicas=2, first_states=[1, 3],
+            replica_sample_loggers=[(count=shared_counter,), (count=shared_counter,)],
+        )
+        @test_throws ArgumentError Molly.TSSSimulation(
+            Molly.TSSState(single_states; first_state=1, ETA=1.0, dens_reg=1e-4);
+            n_md_steps=1,
+            n_cycles=1,
+            sample_loggers=(count=TSSSampleCounter(0),),
+            replica_sample_loggers=[(count=TSSSampleCounter(0),)],
         )
     end
 
