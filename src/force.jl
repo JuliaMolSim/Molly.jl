@@ -765,8 +765,8 @@ end
 function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads, kwargs...)
-    check_bias_finite_flags!(sys.general_inters, buffers)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
+            check_flags=true, kwargs...)
     return fs
 end
 
@@ -794,12 +794,12 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
     buffers = init_buffers!(sys, n_threads)
     if length(sys.constraints) > 0
         fs, _ = compute_initial_total_virial!(buffers, sys, neighbors, step_n;
-                                              n_threads=n_threads, kwargs...)
+                                              n_threads=n_threads, check_flags=true, kwargs...)
     else
         fs = zero_forces(sys)
-        forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
+        forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads,
+                check_flags=true, kwargs...)
     end
-    check_bias_finite_flags!(sys.general_inters, buffers)
     return fs, buffers.virial
 end
 
@@ -813,7 +813,8 @@ function forces!(fs,
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
-                 strictness=default_strictness()) where {T, TH, needs_vir}
+                 strictness=default_strictness(),
+                 check_flags::Bool=false) where {T, TH, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(TH) * sys.energy_units)
     else
@@ -1319,7 +1320,8 @@ function forces!(fs,
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
-                 strictness=default_strictness()) where needs_vir
+                 strictness=default_strictness(),
+                 check_flags::Bool=false) where needs_vir
     # Allow an Enzyme reverse rule
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
                 specific_inter_lists, n_threads)
@@ -1340,7 +1342,7 @@ function forces!(fs,
                               sys.atoms, sys.boundary; scratch=scratch.dist_scratch)
         end
     end
-    if step_n % BIAS_FINITE_CHECK_EVERY == 0
+    if check_flags || step_n % BIAS_FINITE_CHECK_EVERY == 0
         check_bias_finite_flags!(biases, buffers)
     end
     for inter in others

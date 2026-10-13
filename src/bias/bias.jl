@@ -503,9 +503,9 @@ end
 # Steps between readbacks of the non-finite flags in the GPU forces!
 const BIAS_FINITE_CHECK_EVERY = 20
 
-# Reads back the non-finite flags of every attached BiasPotential with one host sync, every
-# BIAS_FINITE_CHECK_EVERY steps and at the end of simulate!. A no-op for biases that haven't
-# used the sync-free path.
+# Reads back the non-finite flags of every attached BiasPotential with one host sync: every
+# BIAS_FINITE_CHECK_EVERY steps, when forces! gets check_flags=true, and at the end of
+# simulate!. A no-op for biases that haven't used the sync-free path.
 function check_bias_finite_flags!(general_inters, buffers)
     live = Tuple((b, bias_scratch(buffers, b)) for b in general_inters
                  if b isa BiasPotential && !isnothing(bias_scratch(buffers, b).bad_step))
