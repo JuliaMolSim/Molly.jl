@@ -1089,6 +1089,7 @@ end
         atoms_chain = [Atom(mass=(10.0 + 5 * (i % 3)) * u"g/mol") for i in 1:n]
         rg = radius_gyration(coords_whole, atoms_chain)
         @test calculate_cv(CalcRg(collect(1:n)), coords_whole, atoms_chain, boundary_chain) ≈ rg
+        @test calculate_cv(CalcRg(collect(1:n)), coords_whole, atoms_chain) ≈ rg
 
         k, target = 300.0u"kJ * mol^-1 * nm^-2", 0.8 * rg
         sys = System(atoms=AT(atoms_chain), coords=AT(wrap_coords.(coords_whole, (boundary_chain,))),

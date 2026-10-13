@@ -1094,7 +1094,7 @@ struct CalcRg
     end
 end
 
-function calculate_cv(cv::CalcRg, coords, atoms, boundary, args...; kwargs...)
+function calculate_cv(cv::CalcRg, coords, atoms, boundary=nothing, args...; kwargs...)
     buff = similar(coords, eltype(eltype(coords)), 1)
     calculate_cv!(cv, coords, atoms, boundary, buff, args...; kwargs...)
     return only(from_device(buff))
