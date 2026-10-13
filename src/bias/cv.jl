@@ -661,7 +661,7 @@ function calculate_cv!(cv::CalcDist{CalcSingleDist}, coords::AbstractGPUArray, a
 end
 
 """
-    CalcAngle(atom_inds::AbstractVector{Int}=[], correction=:pbc, has_virial::Bool=true)
+    CalcAngle(atom_inds::AbstractVector{Int}, correction=:pbc, has_virial::Bool=true)
 
 A collective variable that calculates the angle defined by three atoms.
 
@@ -677,7 +677,7 @@ struct CalcAngle
     correction::Symbol
     has_virial::Bool
 
-    function CalcAngle(atom_inds=[], correction=:pbc, has_virial = true)
+    function CalcAngle(atom_inds, correction=:pbc, has_virial = true)
         check_correction_arg(correction)
         length(atom_inds) == 3 || throw(ArgumentError("CalcAngle needs 3 atom indices, got " *
                                                       "$(length(atom_inds))"))
@@ -1528,7 +1528,7 @@ function calculate_virial!(virial_buff, cv::CalcRMSD, coords, forces, atoms, bou
 end
 
 """
-    CalcTorsion(atom_inds::AbstractVector{Int}=[], correction=:pbc, has_virial::Bool=true;
+    CalcTorsion(atom_inds::AbstractVector{Int}, correction=:pbc, has_virial::Bool=true;
                 gradient_singularity_tol=1e-6)
 
 A collective variable that calculates the torsion angle (dihedral) defined by four atoms.
@@ -1552,7 +1552,7 @@ struct CalcTorsion
     has_virial::Bool
     gradient_singularity_tol::Float64
 
-    function CalcTorsion(atom_inds=[], correction=:pbc, has_virial=true;
+    function CalcTorsion(atom_inds, correction=:pbc, has_virial=true;
                          gradient_singularity_tol=1e-6)
         check_correction_arg(correction)
         length(atom_inds) == 4 || throw(ArgumentError("CalcTorsion needs 4 atom indices, got " *
