@@ -344,7 +344,7 @@ function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
     if !isnothing(buffers) && !isnothing(step_n) && hasproperty(buffers, :unwrapped_coords)
         return ensure_unwrapped_coords!(buffers, sys)
     end
-    return unwrap_molecules(sys)
+    return unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 end
 
 # Whether bias_gradient of this bias type can run inside a GPU kernel. Bias types with

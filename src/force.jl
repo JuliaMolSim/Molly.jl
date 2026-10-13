@@ -304,12 +304,13 @@ function has_interaction_virial(buffers, step_n::Integer)
     return has_interaction_virial(buffers.validity, step_n)
 end
 
-# unwrap_molecules(sys), computed at most once per forces! call and cached on buffers so every
-# attached BiasPotential with correction==:pbc shares it. Reset to nothing at the top of each
-# forces! call, since forces! can run more than once at the same step_n (e.g. MTS substeps).
+# Unwrapped coordinates on the device of sys.coords, computed at most once per forces! call and
+# cached on buffers so every attached BiasPotential with correction==:pbc shares it. Reset to
+# nothing at the top of each forces! call, since forces! can run more than once at the same
+# step_n (e.g. MTS substeps).
 function ensure_unwrapped_coords!(buffers, sys)
     if isnothing(buffers.unwrapped_coords[])
-        buffers.unwrapped_coords[] = unwrap_molecules(sys)
+        buffers.unwrapped_coords[] = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
     end
     return buffers.unwrapped_coords[]
 end

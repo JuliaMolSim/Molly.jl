@@ -608,8 +608,8 @@ end
 # Unwrap coordinates so that molecules are not split over the boundary
 # Ensures that the center of geometry of bonded clusters of atoms
 # (we assume those are molecules!) falls always inside the simulation box.
-# Returns coordinates on CPU
-unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+# Returns coordinates on CPU; the 3-argument form keeps device coordinates on the device
+unwrap_molecules(sys) = from_device(unwrap_molecules(sys.coords, sys.boundary, sys.topology))
 
 # Closures converting between Cartesian and fractional (dimensionless, box-relative)
 # coordinates for a given boundary, plus a wrap-into-[0,1) helper. Shared by the CPU
