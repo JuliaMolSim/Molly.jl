@@ -662,7 +662,7 @@ When the [`System`](@ref) is on the GPU:
 - [`CalcDist`](@ref), [`CalcRg`](@ref), [`CalcTorsion`](@ref) and [`CalcAngle`](@ref) are calculated on the GPU without any transfer to the host, also with `correction=:pbc`.
 - [`CalcRMSD`](@ref) is calculated on the GPU apart from the Kabsch alignment, which is done on the host every step.
 - Other CV types, including custom ones, copy the coordinates and atoms to the host and the gradient back every step.
-- For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps, with the step at which they first appeared.
+- For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps and at the end of [`simulate!`](@ref), with the step at which they first appeared.
 
 ## Monte Carlo sampling
 

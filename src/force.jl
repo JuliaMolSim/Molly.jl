@@ -1343,7 +1343,7 @@ function forces!(fs,
         end
     end
     if step_n % BIAS_FINITE_CHECK_EVERY == 0
-        check_bias_finite_periodic_batched!(biases, buffers)
+        check_bias_finite_flags!(biases, buffers)
     end
     for inter in others
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,

@@ -242,8 +242,8 @@ When the `System` is GPU-resident, [`CalcDist`](@ref), [`CalcRg`](@ref) and
 [`CalcRMSD`](@ref) does the same apart from a host-side Kabsch alignment every step.
 Other CV types, including custom ones, copy the coordinates and atoms to the host and the
 gradient back, since arbitrary user code isn't guaranteed to be GPU-safe.
-For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps,
-with the step at which they first appeared.
+For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps
+and at the end of [`simulate!`](@ref), with the step at which they first appeared.
 
 Each `BiasPotential` gets a unique internal id when it is constructed, and no two biases
 in a [`System`](@ref) may share an id (an `ArgumentError` is thrown when the `System` is built).
@@ -422,7 +422,7 @@ end
 # Sync-free GPU path for the biases with persistent buffers: bias_cv_step! runs each bias's CV
 # kernels, then bias_batched_tail! evaluates bias_gradient, applies the forces and checks them
 # for every bias at once in 3 launches, without reading anything back to the host. Non-finite
-# values are recorded on the device and reported by check_bias_finite_periodic_batched!.
+# values are recorded on the device and reported by check_bias_finite_flags!.
 #
 # The kernels recurse over tuples with one entry per bias, which keeps indexing type-stable when
 # the element types differ per bias (d_buf/d_bias_buf have a different Unitful eltype per bias).
@@ -521,9 +521,10 @@ end
 # Steps between readbacks of the non-finite flags in the GPU forces!
 const BIAS_FINITE_CHECK_EVERY = 20
 
-# Reads back the non-finite flags of every attached BiasPotential with one host sync. A no-op
-# for biases that haven't used the sync-free path yet.
-function check_bias_finite_periodic_batched!(general_inters, buffers)
+# Reads back the non-finite flags of every attached BiasPotential with one host sync, every
+# BIAS_FINITE_CHECK_EVERY steps and at the end of simulate!. A no-op for biases that haven't
+# used the sync-free path.
+function check_bias_finite_flags!(general_inters, buffers)
     live = Tuple((b, bias_scratch(buffers, b)) for b in general_inters
                  if b isa BiasPotential && !isnothing(bias_scratch(buffers, b).bad_step))
     isempty(live) && return nothing

@@ -319,6 +319,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         end
         update_nograd!(progress, ustrip(max_force))
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -485,6 +486,7 @@ end
         end
         update_nograd!(progress, ustrip(max_force))
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -726,6 +728,7 @@ end
         end
         update_nograd!(progress, ustrip(max_force))
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -1129,6 +1132,7 @@ end
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -1308,6 +1312,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -1425,6 +1430,7 @@ end
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -1535,6 +1541,7 @@ end
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -1685,6 +1692,7 @@ end
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -1864,6 +1872,7 @@ end
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -1976,6 +1985,7 @@ end
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -2109,6 +2119,7 @@ end
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 
@@ -2473,6 +2484,7 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         end
         next_nograd!(progress)
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return sys
 end
 

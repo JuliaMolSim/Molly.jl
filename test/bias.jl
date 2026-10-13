@@ -1287,6 +1287,12 @@ end
                                       SquareBias(50.0u"kJ * mol^-1", 0.5))
             @test_throws ArgumentError forces(System(sys_cpu_base; general_inters=(bias_tors,)))
             @test_throws ErrorException forces(System(sys_gpu_base; general_inters=(bias_tors,)))
+
+            # A run that ends before the next periodic check is checked at its end
+            sys_run = System(sys_gpu_base; coords=copy(sys_gpu_base.coords),
+                             velocities=copy(sys_gpu_base.velocities), general_inters=(bias,))
+            @test_throws "non-finite value at step 1" simulate!(sys_run, VelocityVerlet(dt=0.002u"ps"),
+                                                                5; init_step=1)
         end
 
         # The fused GPU kernel for CalcMinDist/CalcMaxDist uses O(group) memory, not O(group^2) --
