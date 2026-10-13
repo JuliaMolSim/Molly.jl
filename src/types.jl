@@ -2487,8 +2487,10 @@ end
 
 @inline backend_workgroupsize(backend, ndrange, n_threads) = nothing
 
-@inline function backend_workgroupsize(::KernelAbstractions.CPU, ndrange, n_threads)
-    return max(cld(ndrange, max(n_threads, 1)), 1)
+@inline function backend_workgroupsize(backend::KernelAbstractions.CPU, ndrange, n_threads)
+    # The CPU backend of KernelAbstractions 0.10 is an OpenCL backend (POCL), which limits
+    #   the size of a workgroup
+    return clamp(cld(ndrange, max(n_threads, 1)), 1, KI.max_work_group_size(backend))
 end
 
 function default_strictness()

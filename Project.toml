@@ -22,6 +22,7 @@ FillArrays = "1a297f60-69ca-5386-bcde-b61e274b549b"
 GPUArrays = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
 Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+KernelInterface = "4ee993da-d684-4d17-a7dd-4e58e78d92bf"
 LazyArtifacts = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
@@ -58,8 +59,15 @@ MollyKernelDensityExt = "KernelDensity"
 MollyLuxExt = ["Lux", "HDF5"]
 MollyPythonCallExt = "PythonCall"
 
+[sources]
+# TODO: remove once JuliaGPU/KernelAbstractions.jl#830 and #831 are released
+KernelAbstractions = {url = "https://github.com/JuliaGPU/KernelAbstractions.jl", rev = "vc/groupreduce"}
+KernelInterface = {url = "https://github.com/JuliaGPU/KernelAbstractions.jl", rev = "vc/groupreduce", subdir = "lib/KernelInterface"}
+# TODO: remove once JuliaArrays/StructArrays.jl#359 (KernelAbstractions 0.10) is released
+StructArrays = {url = "https://github.com/JuliaArrays/StructArrays.jl", rev = "mg/ka-0.10"}
+
 [compat]
-AcceleratedKernels = "0.4.3"
+AcceleratedKernels = "0.5"
 Atomix = "0.1, 1.0"
 AtomsBase = "0.5"
 AtomsCalculators = "0.2"
@@ -81,7 +89,8 @@ GLMakie = "0.8, 0.9, 0.10, 0.11, 0.12, 0.13"
 GPUArrays = "11"
 Graphs = "1.8"
 HDF5 = "0.17"
-KernelAbstractions = "0.9.43"
+KernelAbstractions = "0.10"
+KernelInterface = "0.4"
 KernelDensity = "0.5, 0.6"
 LazyArtifacts = "1"
 LinearAlgebra = "1.9"

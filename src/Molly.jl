@@ -22,6 +22,7 @@ using FillArrays: Fill
 using GPUArrays
 using Graphs
 using KernelAbstractions
+import KernelInterface as KI
 using NearestNeighbors
 import PeriodicTable
 using PhiloxRNG: randn_f64, randn_f32, philox4x32_10
@@ -80,6 +81,7 @@ include("constraints/lincs.jl")
 include("simulators.jl")
 include("coupling.jl")
 include("neighbors.jl")
+include("gpu_tiles.jl")
 include("loggers.jl")
 include("analysis.jl")
 include("residues.jl")
