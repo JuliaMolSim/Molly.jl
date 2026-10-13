@@ -236,12 +236,14 @@ Enzyme should be imported in the first case.
 
 Virial contributions must be explicitly defined.
 
-When the `System` is GPU-resident, built-in CV types other than `CalcRMSD` run fully GPU-resident,
-with no host transfer of coordinates, atoms or forces, including `cv_type.correction = :pbc` (the
-default for the built-in CV types), which unwraps bonded molecules across the periodic boundary
-using a GPU-native spanning-forest traversal. `CalcRMSD` performs a host-side Kabsch alignment
-step every call. Custom (non-built-in) CV types always round-trip coordinates/atoms/gradient to
-and from the host, since arbitrary user code isn't guaranteed GPU-safe.
+When the `System` is GPU-resident, [`CalcDist`](@ref), [`CalcRg`](@ref) and
+[`CalcTorsion`](@ref) run on the GPU without any transfer to the host, also with
+`cv_type.correction = :pbc`, which unwraps bonded molecules on the GPU.
+[`CalcRMSD`](@ref) does the same apart from a host-side Kabsch alignment every step.
+Other CV types, including custom ones, copy the coordinates and atoms to the host and the
+gradient back, since arbitrary user code isn't guaranteed to be GPU-safe.
+For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps,
+with the step at which they first appeared.
 
 Each `BiasPotential` gets a unique internal id when it is constructed, and no two biases
 in a [`System`](@ref) may share an id (an `ArgumentError` is thrown when the `System` is built).
