@@ -21,6 +21,14 @@ end
 Molly.potential_energy(b::TableBias, cv_sim; kwargs...) = b.k * (cv_sim - b.targets[1])^2 / 2
 Molly.bias_gradient(b::TableBias, cv_sim) = b.k * (cv_sim - b.targets[1])
 
+# A plain-data custom bias type that doesn't opt in, so bias_gradient runs on the host
+struct PlainBias{K}
+    k::K
+end
+
+Molly.potential_energy(b::PlainBias, cv_sim; kwargs...) = b.k * cv_sim^2 / 2
+Molly.bias_gradient(b::PlainBias, cv_sim) = b.k * cv_sim
+
 @testset "Collective variables" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
@@ -1319,6 +1327,13 @@ end
             @test_throws ErrorException forces(sys_gpu)
             @test_throws "non-finite value at step 7" forces(sys_gpu, nothing, 7)
             @test_throws "non-finite value at step 7" forces_virial(sys_gpu, nothing, 7)
+            @test_throws "non-finite value at step 7" virial(sys_gpu, nothing, 7)
+            @test_throws "non-finite value at step 7" pressure(sys_gpu, nothing, 7)
+            @test_throws "non-finite value at step 7" accelerations(sys_gpu, nothing, 7)
+            @test_throws "non-finite value at step 7" pressure(sys_gpu, nothing, 7,
+                                                               Molly.init_buffers!(sys_gpu, 1))
+            @test_throws "non-finite value at step 7" forces(sys_gpu_base, nothing, 7;
+                                                             general_inters=(bias,))
             bias_tors = BiasPotential(CalcTorsion([1, 1, 3, 4], :wrap), # zero-length bond
                                       SquareBias(50.0u"kJ * mol^-1", 0.5))
             @test_throws ArgumentError forces(System(sys_cpu_base; general_inters=(bias_tors,)))
@@ -1336,6 +1351,10 @@ end
                                  TableBias(300.0u"kJ * mol^-1 * nm^-2", [1.0u"nm"]))
             @test !Molly.uses_device_bias_gradient(bias.bias_type)
             @test Molly.uses_device_bias_gradient(SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+            cv = CalcDist([1], [4], CalcSingleDist(), :wrap)
+            host_biases = (BiasPotential(cv, PlainBias(300.0u"kJ * mol^-1 * nm^-2")),
+                           BiasPotential(cv, SquareBias(big(300.0)u"kJ * mol^-1 * nm^-2", big(1.0)u"nm")))
+            @test all(b -> isempty(first(Molly.split_biases((b,)))), host_biases)
             fs_cpu = forces(System(sys_cpu_base; general_inters=(bias,)))
             fs_gpu = forces(System(sys_gpu_base; general_inters=(bias,)))
             @test any(f -> !iszero(f), fs_cpu)
