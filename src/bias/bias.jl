@@ -320,11 +320,12 @@ function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
 end
 
 # Whether bias_gradient of this bias type runs inside the GPU kernel of the sync-free path.
-# Custom bias types run it on the host; define this as true for a bias type whose
-# bias_gradient is GPU-compilable and reads no host memory.
+# Built-in bias types opt in when their parameters are plain data. Custom bias types run it on
+# the host; define this as true for a bias type whose bias_gradient is GPU-compilable and reads
+# no host memory.
 uses_device_bias_gradient(bias_type) = false
-uses_device_bias_gradient(::Union{LinearBias, SquareBias, FlatBottomSquareBias,
-                                  PeriodicFlatBottomBias}) = true
+uses_device_bias_gradient(b::Union{LinearBias, SquareBias, FlatBottomSquareBias,
+                                   PeriodicFlatBottomBias}) = isbits(b)
 
 # Partition a heterogeneous tuple of interactions into the BiasPotentials that take the sync-free
 # path and everything else, preserving each group's relative order. Recurses rather than
