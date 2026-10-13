@@ -253,13 +253,11 @@ instead of copying its fields.
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
-    uses_persistent_buffers::Bool   # set at construction, see uses_builtin_cv_gradient
-    id::UInt64                      # set at construction, distinguishes structurally-equal biases
+    id::UInt64 # set at construction, distinguishes structurally-equal biases
 end
 
 function BiasPotential(cv_type::C, bias_type::B) where {C, B}
-    return BiasPotential{C, B}(cv_type, bias_type, uses_builtin_cv_gradient(cv_type),
-                               next_bias_potential_id())
+    return BiasPotential{C, B}(cv_type, bias_type, next_bias_potential_id())
 end
 
 # id is the scratch key only; equality and hashing ignore it (thermo.jl's master-system intersect).
@@ -361,9 +359,8 @@ end
     end
 end
 
-# Lazily allocates scratch.grad/scratch.d_buf. Only reached when bias.uses_persistent_buffers
-# is true (a CV type with a real cv_gradient!/calculate_cv! -- see uses_builtin_cv_gradient in
-# cv.jl).
+# Lazily allocates scratch.grad/scratch.d_buf. Only reached for CV types with
+# uses_builtin_cv_gradient (cv.jl), which have a real cv_gradient!/calculate_cv!.
 function ensure_bias_buffers!(scratch::BiasScratch, cv_type, coords)
     if scratch.grad === nothing
         scratch.grad, scratch.d_buf = zero_cv_gradient_buffers(cv_type, coords)
@@ -601,7 +598,7 @@ function AtomsCalculators.potential_energy(
     coords = bias_coords(sys, bias.cv_type)
     scratch = bias_scratch(buffers, bias)
 
-    if bias.uses_persistent_buffers
+    if uses_builtin_cv_gradient(bias.cv_type)
         ensure_bias_buffers!(scratch, bias.cv_type, coords)
         ensure_bias_dist_scratch!(scratch, bias.cv_type, coords, sys.atoms)
         calculate_cv_buffered!(bias.cv_type, coords, sys.atoms, sys.boundary, scratch.d_buf, sys.velocities;
@@ -629,7 +626,7 @@ function AtomsCalculators.forces!(
     scratch = bias_scratch(buffers, bias)
 
     # Gradient of CV with respect to coordinates
-    if bias.uses_persistent_buffers
+    if uses_builtin_cv_gradient(bias.cv_type)
         ensure_bias_buffers!(scratch, bias.cv_type, coords)
         ensure_bias_dist_scratch!(scratch, bias.cv_type, coords, sys.atoms)
         cv_gradient!(scratch.grad, scratch.d_buf, bias.cv_type, coords, sys.atoms, sys.boundary, sys.velocities;
@@ -651,7 +648,7 @@ function AtomsCalculators.forces!(
     d_bias = bias_gradient(bias.bias_type, cv_sim)
     check_bias_finite(d_bias, "bias gradient", bias; cv_sim=cv_sim)
 
-    if bias.uses_persistent_buffers
+    if uses_builtin_cv_gradient(bias.cv_type)
         if scratch.fs_svec === nothing
             scratch.fs_svec = d_bias .* d_coords
         else
@@ -674,7 +671,7 @@ function AtomsCalculators.forces!(
     end
 
     if needs_vir && bias.cv_type.has_virial
-        if bias.uses_persistent_buffers
+        if uses_builtin_cv_gradient(bias.cv_type)
             calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, sys.atoms, sys.boundary;
                              scratch=scratch.dist_scratch)
         else
@@ -683,6 +680,6 @@ function AtomsCalculators.forces!(
         end
     end
 
-    fs .-= bias.uses_persistent_buffers ? fs_svec : to_device(fs_svec, typeof(fs))
+    fs .-= uses_builtin_cv_gradient(bias.cv_type) ? fs_svec : to_device(fs_svec, typeof(fs))
     return fs
 end

@@ -908,7 +908,7 @@ end
         cv_b = CalcDist([3], [4], CalcSingleDist(), :wrap)
         bias_a = BiasPotential(cv_a, bias_type)
         bias_b = BiasPotential(cv_b, bias_type)
-        bias_same_id = BiasPotential{typeof(cv_b), typeof(bias_type)}(cv_b, bias_type, true, bias_a.id)
+        bias_same_id = BiasPotential{typeof(cv_b), typeof(bias_type)}(cv_b, bias_type, bias_a.id)
         build(inters) = System(atoms=atoms, coords=coords, boundary=CubicBoundary(100.0u"nm"),
                                general_inters=inters)
         @test build((bias_a, bias_b)) isa System
