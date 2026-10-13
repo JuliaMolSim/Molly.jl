@@ -1,6 +1,7 @@
 struct BiasNaNGradient end
 
 Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
+Molly.uses_device_bias_gradient(::BiasNaNGradient) = true
 
 struct CVNaNGradient
     correction::Symbol
@@ -11,7 +12,7 @@ Molly.calculate_cv(::CVNaNGradient, coords, args...; kwargs...) = 1.0u"nm"
 Molly.cv_gradient(::CVNaNGradient, coords, args...; kwargs...) =
     (fill(SVector(NaN, 0.0, 0.0), length(coords)), 1.0u"nm")
 
-# A bias type that isn't isbits, so its bias_gradient can't run in a GPU kernel
+# A custom bias type, so bias_gradient runs on the host
 struct TableBias{K, T}
     k::K
     targets::Vector{T}
@@ -1324,10 +1325,11 @@ end
                                                                 5; init_step=1)
         end
 
-        @testset "Non-isbits bias type on GPU matches CPU" begin
+        @testset "Custom bias type on GPU matches CPU" begin
             bias = BiasPotential(CalcDist([1], [4], CalcSingleDist(), :wrap),
                                  TableBias(300.0u"kJ * mol^-1 * nm^-2", [1.0u"nm"]))
             @test !Molly.uses_device_bias_gradient(bias.bias_type)
+            @test Molly.uses_device_bias_gradient(SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
             fs_cpu = forces(System(sys_cpu_base; general_inters=(bias,)))
             fs_gpu = forces(System(sys_gpu_base; general_inters=(bias,)))
             @test any(f -> !iszero(f), fs_cpu)

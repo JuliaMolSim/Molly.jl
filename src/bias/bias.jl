@@ -239,8 +239,9 @@ bonded molecules on the GPU. On steps without a virial they need no transfer to 
 [`CalcRMSD`](@ref) does the same apart from a host-side Kabsch alignment every step.
 Other CV types, including custom ones, copy the coordinates and atoms to the host and the
 gradient back, since arbitrary user code isn't guaranteed to be GPU-safe.
-With the GPU CV types, `bias_gradient` also runs on the GPU if the `bias_type` is an isbits
-type, and on the host otherwise.
+With the GPU CV types, `bias_gradient` of the built-in bias types also runs on the GPU. Custom
+bias types run it on the host, unless `Molly.uses_device_bias_gradient(::MyBias) = true` is
+defined, which requires a GPU-compilable `bias_gradient` that reads no host memory.
 For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps
 and at the end of [`simulate!`](@ref), with the step at which they first appeared.
 """
@@ -317,10 +318,12 @@ function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
     return unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 end
 
-# Whether bias_gradient of this bias type can run inside a GPU kernel. Bias types with
-# non-isbits fields (e.g. a Vector) can't, and take the host path; override for an isbits type
-# whose bias_gradient isn't GPU-compilable.
-uses_device_bias_gradient(bias_type) = isbits(bias_type)
+# Whether bias_gradient of this bias type runs inside the GPU kernel of the sync-free path.
+# Custom bias types run it on the host; define this as true for a bias type whose
+# bias_gradient is GPU-compilable and reads no host memory.
+uses_device_bias_gradient(bias_type) = false
+uses_device_bias_gradient(::Union{LinearBias, SquareBias, FlatBottomSquareBias,
+                                  PeriodicFlatBottomBias}) = true
 
 # Partition a heterogeneous tuple of interactions into the BiasPotentials that take the sync-free
 # path and everything else, preserving each group's relative order. Recurses rather than

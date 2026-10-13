@@ -608,6 +608,8 @@ function Molly.bias_gradient(bias_fn::bias_type, cv_sim;  kwargs...)
     return bias_grad
 end
 ```
+On a GPU system, `bias_gradient` of a custom bias type runs on the host.
+To run it on the GPU without a host transfer, define `Molly.uses_device_bias_gradient(::MyBias) = true`; the method must then be GPU-compilable and must not read host memory.
 
 Once the CV and the bias function have been defined, a [`BiasPotential`](@ref) can be constructed and added as a general interaction in the system setup, e.g. `general_inters = (BiasPotential(cv_type, bias_type),)`.
 A system can be biased along multiple CVs simultaneously by adding several [`BiasPotential`](@ref)s to `general_inters`.
@@ -660,7 +662,7 @@ When the [`System`](@ref) is on the GPU:
 - [`CalcDist`](@ref), [`CalcRg`](@ref), [`CalcTorsion`](@ref) and [`CalcAngle`](@ref) are calculated on the GPU without any transfer to the host on steps without a virial, also with `correction=:pbc`.
 - [`CalcRMSD`](@ref) is calculated on the GPU apart from the Kabsch alignment, which is done on the host every step.
 - Other CV types, including custom ones, copy the coordinates and atoms to the host and the gradient back every step.
-- With the GPU CV types, `bias_gradient` also runs on the GPU if the `bias_type` is an isbits type, and on the host otherwise.
+- With the GPU CV types, `bias_gradient` of the built-in bias types also runs on the GPU; custom bias types run it on the host unless they opt in (see above).
 - For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps and at the end of [`simulate!`](@ref), with the step at which they first appeared.
 
 ## Monte Carlo sampling
