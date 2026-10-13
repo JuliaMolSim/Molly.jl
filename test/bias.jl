@@ -1100,6 +1100,10 @@ end
         sys = System(atoms=AT(atoms_chain), coords=AT(wrap_coords.(coords_whole, (boundary_chain,))),
                      boundary=boundary_chain, topology=MolecularTopology(1:(n - 1), 2:n, n),
                      general_inters=(BiasPotential(CalcRg(collect(1:n)), SquareBias(k, target)),))
+        @test Molly.unwrap_molecules(sys) isa Array
+        uw_cpu = Molly.unwrap_molecules(wrap_coords.(coords_whole, (boundary_chain,)), boundary_chain,
+                                        sys.topology)
+        @test all(isapprox.(Molly.unwrap_molecules(sys), uw_cpu; atol=1e-6u"nm"))
         @test potential_energy(sys) ≈ k / 2 * (rg - target)^2
         masses = mass.(atoms_chain)
         com = sum(coords_whole .* masses) / sum(masses)
