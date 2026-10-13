@@ -646,6 +646,35 @@ end
     @test radii[1] == radii[2]
 end
 
+@testset "Implicit solvent parameter injection" begin
+    # Parameters given when setting up the system are kept when they are extracted and
+    #   injected again, and a changed value in the dictionary is used
+    ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"); units=false)
+    radii = merge(Molly.mbondi2_element_to_radius, Dict("N" => 0.165u"nm"))
+    for (implicit_solvent, key) in (
+                (SetupImplicitSolventOBC(element_to_radius=radii,
+                    element_to_screen=merge(Molly.obc_element_to_screen, Dict("O" => 0.9))),
+                 "inter_OBC_radius_O"),
+                (SetupImplicitSolventGBN2(element_to_radius=radii,
+                    atom_params=merge(Molly.gbn2_atom_params, Dict("C_α" => 0.8))),
+                 "inter_GB_radius_O"))
+        sys = System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            ff;
+            units=false,
+            boundary=CubicBoundary(100.0),
+            dispersion_correction=false,
+            implicit_solvent=implicit_solvent,
+            strictness=:nowarn,
+        )
+        gb_energy(s) = potential_energy(System(s; pairwise_inters=(), specific_inter_lists=()))
+        params_dic = Molly.extract_parameters(sys, ff)
+        @test gb_energy(inject_gradients(sys, params_dic)) ≈ gb_energy(sys)
+        params_dic[key] += 0.01
+        @test !(gb_energy(inject_gradients(sys, params_dic)) ≈ gb_energy(sys))
+    end
+end
+
 @testset "GBn2 sulfur forces" begin
     # Sulfur has a negative GBn2 screening parameter, so for close pairs only the neck
     #   term contributes, the GB forces on disulfide S atoms are checked against the energy
