@@ -613,7 +613,7 @@ unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 
 # Closures converting between Cartesian and fractional (dimensionless, box-relative)
 # coordinates for a given boundary, plus a wrap-into-[0,1) helper. Shared by the CPU
-# (unwrap_molecules/molecule_centers) and GPU (_gpu_unwrap_fractional) implementations.
+# (unwrap_molecules/molecule_centers) and GPU (unwrap_molecules) implementations.
 function _frac_cart_closures(boundary, ::Val{D}) where D
     if hasproperty(boundary, :basis_vectors)
         if D != 3
@@ -721,7 +721,8 @@ end
 # GPU-native molecule unwrapping via parallel pointer-doubling on a precomputed spanning-
 # forest parent pointer -- avoids the CPU version's sequential stack-based DFS. n_rounds
 # rounds (~log2 of deepest molecule depth) suffice regardless of molecule size.
-function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary, topology) where D
+function unwrap_molecules(coords::AbstractGPUArray{<:SVector{D}}, boundary, topology) where D
+    isnothing(topology) && return coords
     AT = array_type(coords)
     to_frac, to_cart, wrap01 = _frac_cart_closures(boundary, Val(D))
     f = wrap01.(to_frac.(coords)) # Dimensionless, GPU-resident
@@ -768,12 +769,7 @@ function _gpu_unwrap_fractional(coords::AbstractGPUArray{<:SVector{D}}, boundary
     counts  = cluster_offsets[2:end] .- cluster_offsets[1:end-1]
     cog     = CT.((seg_hi .- seg_lo) ./ counts) # Length n_clusters, fractional center of geometry
 
-    return u, cog, to_cart, wrap01, cluster_inds
-end
-
-function unwrap_molecules(coords::AbstractGPUArray{<:SVector{D}}, boundary, topology) where D
-    isnothing(topology) && return coords
-    u, cog, to_cart, _, cluster_inds = _gpu_unwrap_fractional(coords, boundary, topology)
+    # Shift each cluster by whole box vectors so its center of geometry is in the box
     floor_sv(v) = floor.(v) # `v` is one SVector; broadcasts over its own components
     u = u .- @inbounds(floor_sv.(cog)[cluster_inds])
     return to_cart.(u)

@@ -776,7 +776,7 @@ end
 # stack-based DFS over an already-built graph `g` (avoids rebuilding an adjacency list from
 # bonded_atoms when the caller already has one, e.g. from bond_graph). Any consistent spanning
 # tree gives a physically valid unwrap, so the DFS's particular choice doesn't matter for
-# correctness. Feeds `parent`/`n_rounds` for `_gpu_unwrap_fractional`'s pointer-doubling
+# correctness. Feeds `parent`/`n_rounds` for the pointer doubling of the GPU `unwrap_molecules`
 # (spatial.jl); the CPU `unwrap_molecules` uses its own independent traversal instead.
 function molecule_spanning_forest(g)
     n_atoms = nv(g)
@@ -843,7 +843,7 @@ end
 
 # Device-resident (parent, cluster_inds, sort_perm, cluster_offsets) for `topology`, cached on
 # topology.gpu_cache -- avoids re-uploading a topology built without array_type on every
-# unwrap_molecules/molecule_centers call. Only used by _gpu_unwrap_fractional.
+# unwrap_molecules/molecule_centers call. Only used by the GPU unwrap_molecules.
 function device_topology_arrays(topology::MolecularTopology, ::Type{AT}) where AT
     cached = topology.gpu_cache[]
     !isnothing(cached) && cached.array_type === AT && return cached.arrays
