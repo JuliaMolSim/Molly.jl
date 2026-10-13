@@ -632,22 +632,20 @@ end
     end
 end
 
+# Distance between atoms i and j and its gradient with respect to both, shared by the CPU method
+# and the GPU kernel. The gradient is zero for coincident atoms.
+@inline function single_dist_cv_gradient(ri, rj, boundary, closest::Bool)
+    r_ij = closest ? vector(ri, rj, boundary) : rj - ri
+    d = norm(r_ij)
+    dir = d > zero(d) ? r_ij / d : zero(r_ij) / oneunit(d)
+    return d, -dir, dir
+end
+
 @kernel inbounds=true function single_dist_cv_gradient_kernel!(grad, d_buf, @Const(coords),
                                                                 i, j, boundary, closest::Bool)
-    idx = @index(Global, Linear)
-    if idx == 1
-        r_ij = closest ? vector(coords[i], coords[j], boundary) : coords[j] - coords[i]
-        d = norm(r_ij)
-        d_buf[1] = d
-        if d > zero(d)
-            dir = r_ij / d
-            grad[i] = -dir
-            grad[j] = dir
-        else
-            z = zero(r_ij) / oneunit(d)
-            grad[i] = z
-            grad[j] = z
-        end
+    if @index(Global, Linear) == 1
+        d_buf[1], grad[i], grad[j] = single_dist_cv_gradient(coords[i], coords[j], boundary,
+                                                             closest)
     end
 end
 
@@ -812,19 +810,9 @@ end
 # by CV type; not exported.
 function cv_gradient!(grad, d_buf, cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args...; kwargs...)
     i, j = cv.atom_inds_1[1], cv.atom_inds_2[1]
-    c1 = @view coords[i:i]
-    c2 = @view coords[j:j]
-
-    r_ij = cv.dist_type.calc_type == :closest ? vector.(c1, c2, (boundary,)) : c2 .- c1
-    d = norm.(r_ij)
+    closest = cv.dist_type.calc_type == :closest
+    d, grad[i], grad[j] = single_dist_cv_gradient(coords[i], coords[j], boundary, closest)
     d_buf .= d
-
-    mask = d .> zero(eltype(d))
-    d_safe = ifelse.(mask, d, oneunit.(d))
-    dir = r_ij ./ d_safe
-    grad[i:i] .= ifelse.(mask, .-dir, zero(dir))
-    grad[j:j] .= ifelse.(mask, dir, zero(dir))
-
     return nothing
 end
 
@@ -1618,12 +1606,53 @@ end
 # ∇_{r_l} ϕ = - (|b_2| / |n|^2) * n
 # ∇_{r_j} ϕ = - (1 + (b_1 · b_2)/|b_2|^2) * ∇_{r_i} ϕ + ((b_2 · b_3)/|b_2|^2) * ∇_{r_l} ϕ
 # ∇_{r_k} ϕ =   ((b_1 · b_2)/|b_2|^2) * ∇_{r_i} ϕ - (1 + (b_2 · b_3)/|b_2|^2) * ∇_{r_l} ϕ
+torsion_bond_ok(norm_value) = isfinite(ustrip(norm_value)) && norm_value > zero(norm_value)
+
 function check_torsion_bond_norm(norm_value, label::AbstractString)
-    if !isfinite(ustrip(norm_value)) || norm_value <= zero(norm_value)
+    if !torsion_bond_ok(norm_value)
         throw(ArgumentError("CalcTorsion cannot compute a finite gradient because $(label) " *
                             "has non-positive or non-finite length ($(norm_value))"))
     end
     return norm_value
+end
+
+# Torsion angle and its gradient with respect to atoms i, j, k and l, shared by the CPU method
+# and the GPU kernel. A bond of zero or non-finite length gives a NaN gradient: the CPU method
+# throws before getting here, the GPU path reports it through the non-finite check.
+@inline function torsion_cv_gradient(ri, rj, rk, rl, boundary, tol)
+    b1 = vector(ri, rj, boundary)
+    b2 = vector(rj, rk, boundary)
+    b3 = vector(rk, rl, boundary)
+    m = cross(b1, b2)
+    n = cross(b2, b3)
+    b1n, b2n, b3n = norm(b1), norm(b2), norm(b3)
+    phi = torsion_angle(ri, rj, rk, rl, boundary)
+
+    if !torsion_bond_ok(b1n) || !torsion_bond_ok(b2n) || !torsion_bond_ok(b3n)
+        nan_s = NaN / oneunit(b2n)
+        nan_v = SVector(nan_s, nan_s, nan_s)
+        return phi, nan_v, nan_v, nan_v, nan_v
+    end
+    length_scale = max(b1n, b2n, b3n)
+    norm_floor = tol * length_scale
+    b1n_eff = max(b1n, norm_floor)
+    b2n_eff = max(b2n, norm_floor)
+    b3n_eff = max(b3n, norm_floor)
+
+    m_sq_eff = max(sum(abs2, m), (tol * b1n_eff * b2n_eff)^2)
+    n_sq_eff = max(sum(abs2, n), (tol * b2n_eff * b3n_eff)^2)
+    b2_sq_eff = max(b2n^2, b2n_eff^2)
+
+    grad_i =  (b2n_eff / m_sq_eff) * m
+    grad_l = -(b2n_eff / n_sq_eff) * n
+
+    b1_dot_b2 = dot(b1, b2)
+    b3_dot_b2 = dot(b3, b2)
+
+    grad_j = -(1 + b1_dot_b2 / b2_sq_eff) * grad_i + (b3_dot_b2 / b2_sq_eff) * grad_l
+    grad_k =  (b1_dot_b2 / b2_sq_eff) * grad_i - (1 + b3_dot_b2 / b2_sq_eff) * grad_l
+
+    return phi, -grad_i, -grad_j, -grad_k, -grad_l
 end
 
 function cv_gradient(cv::CalcTorsion, coords, atoms, boundary, args...; kwargs...)
@@ -1636,96 +1665,21 @@ end
 
 function cv_gradient!(grad, d_buf, cv::CalcTorsion, coords, atoms, boundary, args...; kwargs...)
     i, j, k, l = cv.atom_inds
-    pts = from_device(coords[[i, j, k, l]])
-    ri, rj, rk, rl = pts[1], pts[2], pts[3], pts[4]
-
-    b1 = vector(ri, rj, boundary)
-    b2 = vector(rj, rk, boundary)
-    b3 = vector(rk, rl, boundary)
-
-    m = cross(b1, b2)
-    n = cross(b2, b3)
-
-    b1_norm = check_torsion_bond_norm(norm(b1), "bond i-j")
-    b2_norm = check_torsion_bond_norm(norm(b2), "bond j-k")
-    b3_norm = check_torsion_bond_norm(norm(b3), "bond k-l")
-    FT = typeof(float(ustrip(b2_norm)))
-    tol = FT(cv.gradient_singularity_tol)
-    length_scale = max(b1_norm, b2_norm, b3_norm)
-    norm_floor = tol * length_scale
-    b1_norm_eff = max(b1_norm, norm_floor)
-    b2_norm_eff = max(b2_norm, norm_floor)
-    b3_norm_eff = max(b3_norm, norm_floor)
-
-    m_sq = sum(abs2, m)
-    n_sq = sum(abs2, n)
-    b2_sq = b2_norm^2
-    m_sq_eff = max(m_sq, (tol * b1_norm_eff * b2_norm_eff)^2)
-    n_sq_eff = max(n_sq, (tol * b2_norm_eff * b3_norm_eff)^2)
-    b2_sq_eff = max(b2_sq, b2_norm_eff^2)
-
-    phi = torsion_angle(ri, rj, rk, rl, boundary)
+    ri, rj, rk, rl = coords[i], coords[j], coords[k], coords[l]
+    check_torsion_bond_norm(norm(vector(ri, rj, boundary)), "bond i-j")
+    check_torsion_bond_norm(norm(vector(rj, rk, boundary)), "bond j-k")
+    check_torsion_bond_norm(norm(vector(rk, rl, boundary)), "bond k-l")
+    tol = typeof(float(ustrip(oneunit(eltype(ri)))))(cv.gradient_singularity_tol)
+    phi, grad[i], grad[j], grad[k], grad[l] = torsion_cv_gradient(ri, rj, rk, rl, boundary, tol)
     d_buf .= phi
-
-    grad_i =  (b2_norm_eff / m_sq_eff) * m
-    grad_l = -(b2_norm_eff / n_sq_eff) * n
-
-    b1_dot_b2 = dot(b1, b2)
-    b3_dot_b2 = dot(b3, b2)
-
-    grad_j = -(1 + b1_dot_b2 / b2_sq_eff) * grad_i + (b3_dot_b2 / b2_sq_eff) * grad_l
-    grad_k = (b1_dot_b2 / b2_sq_eff) * grad_i - (1 + b3_dot_b2 / b2_sq_eff) * grad_l
-
-    grad[[i, j, k, l]] = -[grad_i, grad_j, grad_k, grad_l]
-
     return nothing
 end
 
-# check_torsion_bond_norm's CPU throw has no GPU equivalent (kernels can't throw catchable
-# exceptions), so the degenerate case writes NaN into the affected atoms' gradient instead --
-# still fails loud, via check_bias_finite's existing non-finite-gradient check (bias.jl).
 @kernel inbounds=true function torsion_cv_gradient_kernel!(grad, d_buf, @Const(coords),
                                                             i, j, k, l, boundary, tol)
-    idx = @index(Global, Linear)
-    if idx == 1
-        ri, rj, rk, rl = coords[i], coords[j], coords[k], coords[l]
-        b1 = vector(ri, rj, boundary)
-        b2 = vector(rj, rk, boundary)
-        b3 = vector(rk, rl, boundary)
-        m = cross(b1, b2)
-        n = cross(b2, b3)
-        b1n, b2n, b3n = norm(b1), norm(b2), norm(b3)
-        d_buf[1] = torsion_angle(ri, rj, rk, rl, boundary)
-
-        degenerate = !isfinite(ustrip(b1n)) || b1n <= zero(b1n) ||
-                     !isfinite(ustrip(b2n)) || b2n <= zero(b2n) ||
-                     !isfinite(ustrip(b3n)) || b3n <= zero(b3n)
-        if degenerate
-            nan_s = NaN / oneunit(b2n)   # same unit-attaching idiom as `zero(r_ij) / oneunit(d)` above
-            nan_v = SVector(nan_s, nan_s, nan_s)
-            grad[i] = nan_v; grad[j] = nan_v; grad[k] = nan_v; grad[l] = nan_v
-        else
-            length_scale = max(b1n, b2n, b3n)
-            norm_floor = tol * length_scale
-            b1n_eff = max(b1n, norm_floor)
-            b2n_eff = max(b2n, norm_floor)
-            b3n_eff = max(b3n, norm_floor)
-
-            m_sq_eff = max(sum(abs2, m), (tol * b1n_eff * b2n_eff)^2)
-            n_sq_eff = max(sum(abs2, n), (tol * b2n_eff * b3n_eff)^2)
-            b2_sq_eff = max(b2n^2, b2n_eff^2)
-
-            grad_i =  (b2n_eff / m_sq_eff) * m
-            grad_l = -(b2n_eff / n_sq_eff) * n
-
-            b1_dot_b2 = dot(b1, b2)
-            b3_dot_b2 = dot(b3, b2)
-
-            grad_j = -(1 + b1_dot_b2 / b2_sq_eff) * grad_i + (b3_dot_b2 / b2_sq_eff) * grad_l
-            grad_k =  (b1_dot_b2 / b2_sq_eff) * grad_i - (1 + b3_dot_b2 / b2_sq_eff) * grad_l
-
-            grad[i] = -grad_i; grad[j] = -grad_j; grad[k] = -grad_k; grad[l] = -grad_l
-        end
+    if @index(Global, Linear) == 1
+        d_buf[1], grad[i], grad[j], grad[k], grad[l] = torsion_cv_gradient(
+                        coords[i], coords[j], coords[k], coords[l], boundary, tol)
     end
 end
 
