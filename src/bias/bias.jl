@@ -393,63 +393,10 @@ function bias_dist_scratch_types(coords, atoms)
 end
 
 # Lazily allocates CV-type-specific fused-kernel scratch. GPU-only device-sized buffers.
+# Builds the GPU scratch of a CV once, see cv_scratch (cv.jl)
 function ensure_bias_dist_scratch!(scratch::BiasScratch, cv, coords, atoms)
-    if cv isa CalcDist{<:Union{CalcMinDist, CalcMaxDist}} && scratch.dist_scratch === nothing &&
-       is_gpu_resident(coords)
-        idx1_dev, idx2_dev = upload_idx(coords, cv.atom_inds_1), upload_idx(coords, cv.atom_inds_2)
-        na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
-        # T caps kernel worker count at MINDIST_TILE_CAP regardless of na*nb -- see
-        # MinMaxScratch's docstring (cv.jl).
-        T = min(na * nb, MINDIST_TILE_CAP)
-        scratch.dist_scratch = MinMaxScratch(
-            idx1_dev,
-            idx2_dev,
-            similar(coords, eltype(eltype(coords)), T),
-            similar(coords, Int, T),
-            similar(coords, Int, T),
-            similar(coords, T),
-            similar(coords, 1),
-        )
-    elseif cv isa CalcDist{CalcCMDist} && scratch.dist_scratch === nothing && is_gpu_resident(coords)
-        na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
-        T1, T2 = min(na, TILE_CAP_DEFAULT), min(nb, TILE_CAP_DEFAULT)
-        CT, MT, WT, _ = bias_dist_scratch_types(coords, atoms)
-        DT = typeof(zero(CT) / oneunit(eltype(CT))) # unit-stripped direction vector
-        scratch.dist_scratch = CMDistScratch(
-            upload_idx(coords, cv.atom_inds_1), upload_idx(coords, cv.atom_inds_2),
-            upload_idx(coords, partner_indices(cv.atom_inds_1, cv.atom_inds_2)),
-            upload_idx(coords, partner_indices(cv.atom_inds_2, cv.atom_inds_1)),
-            similar(coords, MT, T1), similar(coords, WT, T1),
-            similar(coords, MT, T2), similar(coords, WT, T2),
-            similar(coords, DT, 1),
-            similar(coords, MT, 1), similar(coords, MT, 1),
-        )
-    elseif cv isa CalcRg && scratch.dist_scratch === nothing && is_gpu_resident(coords)
-        inds = iszero(length(cv.atom_inds)) ? collect(1:length(coords)) : cv.atom_inds
-        n = length(inds)
-        T = min(n, TILE_CAP_DEFAULT)
-        CT, MT, WT, IT = bias_dist_scratch_types(coords, atoms)
-        scratch.dist_scratch = RgScratch(
-            upload_idx(coords, inds),
-            similar(coords, MT, T), similar(coords, WT, T),
-            similar(coords, IT, T),
-            similar(coords, CT, 1), similar(coords, MT, 1),
-        )
-    elseif cv isa CalcRMSD && scratch.dist_scratch === nothing && is_gpu_resident(coords)
-        inds = iszero(length(cv.atom_inds)) ? collect(1:length(coords)) : cv.atom_inds
-        ref_inds = iszero(length(cv.ref_atom_inds)) ? collect(1:length(cv.ref_coords)) : cv.ref_atom_inds
-        ref_coords_host = cv.ref_coords[ref_inds]
-        AT = array_type(coords)
-        ref_coords_used = ref_coords_host isa AT ? ref_coords_host : to_device(ref_coords_host, AT)
-        # cv.ref_coords never changes after construction, so its Kabsch-centered form is computed
-        # once here rather than on every cv_gradient!/calculate_cv! call (RmsdScratch docstring, cv.jl).
-        n = length(inds)
-        T = min(n, TILE_CAP_DEFAULT)
-        CT = eltype(coords)
-        IT = typeof(sum_abs2(zero(CT))) # unweighted nm^2, unlike bias_dist_scratch_types' mass-weighted IT
-        scratch.dist_scratch = RmsdScratch(upload_idx(coords, inds), similar(coords, length(inds)),
-                                           ref_coords_used, kabsch_centered(ref_coords_used),
-                                           similar(coords, IT, T))
+    if isnothing(scratch.dist_scratch) && is_gpu_resident(coords)
+        scratch.dist_scratch = cv_scratch(cv, coords, atoms)
     end
     return nothing
 end

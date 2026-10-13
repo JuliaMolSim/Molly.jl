@@ -1727,6 +1727,43 @@ atom_index_lists(cv::CalcDist) = (cv.atom_inds_1, cv.atom_inds_2)
 atom_index_lists(cv::Union{CalcRg, CalcRMSD, CalcTorsion, CalcAngle}) = (cv.atom_inds,)
 atom_index_lists(cv) = () # custom CV types are not checked
 
+# GPU scratch of a CV for its persistent-buffer kernels, or nothing for CVs that need none. A CV
+# opts in by adding a method.
+cv_scratch(cv, coords, atoms) = nothing
+
+cv_scratch(cv::CalcDist{<:Union{CalcMinDist, CalcMaxDist}}, coords, atoms) =
+    minmax_scratch(coords, cv.atom_inds_1, cv.atom_inds_2)
+
+cv_scratch(cv::CalcRMSD, coords, atoms) = rmsd_scratch(cv, coords)
+
+function cv_scratch(cv::CalcDist{CalcCMDist}, coords, atoms)
+    na, nb = length(cv.atom_inds_1), length(cv.atom_inds_2)
+    T1, T2 = min(na, TILE_CAP_DEFAULT), min(nb, TILE_CAP_DEFAULT)
+    CT, MT, WT, _ = bias_dist_scratch_types(coords, atoms)
+    DT = typeof(zero(CT) / oneunit(eltype(CT))) # unit-stripped direction vector
+    return CMDistScratch(
+        upload_idx(coords, cv.atom_inds_1), upload_idx(coords, cv.atom_inds_2),
+        upload_idx(coords, partner_indices(cv.atom_inds_1, cv.atom_inds_2)),
+        upload_idx(coords, partner_indices(cv.atom_inds_2, cv.atom_inds_1)),
+        similar(coords, MT, T1), similar(coords, WT, T1),
+        similar(coords, MT, T2), similar(coords, WT, T2),
+        similar(coords, DT, 1),
+        similar(coords, MT, 1), similar(coords, MT, 1),
+    )
+end
+
+function cv_scratch(cv::CalcRg, coords, atoms)
+    inds = iszero(length(cv.atom_inds)) ? collect(1:length(coords)) : cv.atom_inds
+    T = min(length(inds), TILE_CAP_DEFAULT)
+    CT, MT, WT, IT = bias_dist_scratch_types(coords, atoms)
+    return RgScratch(
+        upload_idx(coords, inds),
+        similar(coords, MT, T), similar(coords, WT, T),
+        similar(coords, IT, T),
+        similar(coords, CT, 1), similar(coords, MT, 1),
+    )
+end
+
 # Buffer-shape helpers, deduplicating the grad/d_buf allocation pattern used by every allocating
 # cv_gradient/calculate_cv wrapper above and by BiasPotential's lazy buffer init (bias.jl).
 zero_cv_grad_buffer(cv, coords)  = ustrip_vec.(zero(coords))
