@@ -567,8 +567,7 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
 end
 
 # Mutating counterpart to calculate_cv: writes the CV value into the preallocated 1-element
-# `buff` instead of allocating and returning it. Positional args before `buff` vary by CV
-# type (see calculate_cv_buffered! for a uniform-signature wrapper); not exported.
+# `buff` instead of allocating and returning it; not exported.
 function calculate_cv!(cv::CalcDist, coords, atoms, boundary, buff, args...; kwargs...)
     coords_1 = @view coords[cv.atom_inds_1]
     coords_2 = @view coords[cv.atom_inds_2]
@@ -1333,9 +1332,9 @@ struct CalcRMSD{RC}
     end
 end
 
-function calculate_cv(cv::CalcRMSD, coords, args...; kwargs...)
+function calculate_cv(cv::CalcRMSD, coords, atoms=nothing, boundary=nothing, args...; kwargs...)
     buff = similar(coords, eltype(eltype(coords)), 1)
-    calculate_cv!(cv, coords, buff, args...; kwargs...)
+    calculate_cv!(cv, coords, atoms, boundary, buff, args...; kwargs...)
     return only(from_device(buff))
 end
 
@@ -1409,7 +1408,8 @@ end
     end
 end
 
-function calculate_cv!(cv::CalcRMSD, coords, buff, args...; scratch=nothing, kwargs...)
+function calculate_cv!(cv::CalcRMSD, coords, atoms, boundary, buff, args...; scratch=nothing,
+                       kwargs...)
     if is_gpu_resident(coords)
         scratch = isnothing(scratch) ? rmsd_scratch(cv, coords) : scratch
         backend = get_backend(coords)
@@ -1738,12 +1738,3 @@ zero_cv_grad_buffer(cv::Union{CalcTorsion, CalcAngle}, coords) =
 zero_cv_value_buffer(cv::Union{CalcTorsion, CalcAngle}, coords) =
     similar(coords, typeof(float(ustrip(oneunit(eltype(eltype(coords)))))), 1)
 zero_cv_gradient_buffers(cv, coords) = (zero_cv_grad_buffer(cv, coords), zero_cv_value_buffer(cv, coords))
-
-# Uniform-signature wrapper around calculate_cv! (whose positional args before buff vary by
-# CV type), for callers that dispatch across CV types generically.
-calculate_cv_buffered!(cv::CalcRMSD, coords, atoms, boundary, buff, args...; kwargs...) =
-    calculate_cv!(cv, coords, buff; kwargs...)
-calculate_cv_buffered!(cv::CalcRg, coords, atoms, boundary, buff, args...; kwargs...) =
-    calculate_cv!(cv, coords, atoms, boundary, buff; kwargs...)
-calculate_cv_buffered!(cv, coords, atoms, boundary, buff, args...; kwargs...) =
-    calculate_cv!(cv, coords, atoms, boundary, buff, args...; kwargs...)

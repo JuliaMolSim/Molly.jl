@@ -601,8 +601,8 @@ function AtomsCalculators.potential_energy(
     if uses_builtin_cv_gradient(bias.cv_type)
         ensure_bias_buffers!(scratch, bias.cv_type, coords)
         ensure_bias_dist_scratch!(scratch, bias.cv_type, coords, sys.atoms)
-        calculate_cv_buffered!(bias.cv_type, coords, sys.atoms, sys.boundary, scratch.d_buf, sys.velocities;
-                               scratch=scratch.dist_scratch, kwargs...)
+        calculate_cv!(bias.cv_type, coords, sys.atoms, sys.boundary, scratch.d_buf, sys.velocities;
+                      scratch=scratch.dist_scratch, kwargs...)
         cv_sim = only(from_device(scratch.d_buf))
     else
         # Custom CV types aren't guaranteed GPU-safe, so run them on the CPU.
