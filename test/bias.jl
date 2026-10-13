@@ -1311,8 +1311,10 @@ end
             @test err isa ErrorException
             @test occursin("non-finite value at step 1", err.msg)
 
-            # A bare forces call runs at step 0, so it is checked at once
+            # One-off calls read the flags before returning, at any step
             @test_throws ErrorException forces(sys_gpu)
+            @test_throws "non-finite value at step 7" forces(sys_gpu, nothing, 7)
+            @test_throws "non-finite value at step 7" forces_virial(sys_gpu, nothing, 7)
             bias_tors = BiasPotential(CalcTorsion([1, 1, 3, 4], :wrap), # zero-length bond
                                       SquareBias(50.0u"kJ * mol^-1", 0.5))
             @test_throws ArgumentError forces(System(sys_cpu_base; general_inters=(bias_tors,)))

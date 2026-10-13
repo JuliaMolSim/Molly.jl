@@ -122,6 +122,7 @@ function virial(sys, neighbors, step_n::Integer=0;
         buffers = init_buffers!(sys, n_threads)
         compute_initial_total_virial!(buffers, sys, neighbors, step_n;
                                       n_threads=n_threads, kwargs...)
+        check_bias_finite_flags!(sys.general_inters, buffers)
         return buffers.virial
     else
         _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)

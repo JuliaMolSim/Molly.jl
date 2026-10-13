@@ -1115,6 +1115,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     elseif length(sys.constraints) > 0 && !has_total_virial(buffers, step_n)
         error("cannot calculate pressure for constrained systems without a valid total virial")
     end
+    isnothing(buffers_in) && check_bias_finite_flags!(sys.general_inters, buffers)
 
     if isnothing(kin_tensor)
         # Always evaluate K in case velocities were rescaled by a thermostat

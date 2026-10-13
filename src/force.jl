@@ -766,6 +766,7 @@ function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nt
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
     forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads, kwargs...)
+    check_bias_finite_flags!(sys.general_inters, buffers)
     return fs
 end
 
@@ -794,12 +795,12 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
     if length(sys.constraints) > 0
         fs, _ = compute_initial_total_virial!(buffers, sys, neighbors, step_n;
                                               n_threads=n_threads, kwargs...)
-        return fs, buffers.virial
     else
         fs = zero_forces(sys)
         forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
-        return fs, buffers.virial
     end
+    check_bias_finite_flags!(sys.general_inters, buffers)
+    return fs, buffers.virial
 end
 
 function forces!(fs,
