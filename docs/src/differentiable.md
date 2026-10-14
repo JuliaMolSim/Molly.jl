@@ -74,7 +74,6 @@ A custom interaction becomes compatible with this interface by defining [`parame
 
 The same functions also work on systems with units, for example to put modified parameters into a system that is then simulated without gradients.
 In this case [`extract_parameters`](@ref) returns plain numbers in the units that each parameter is stored with in the system, and [`ParameterPlan`](@ref) and [`inject_gradients`](@ref) take the dictionary values in those units and re-attach the units of each parameter.
-Gradients are only supported for unitless systems.
 
 ## Pairwise interaction gradients
 
