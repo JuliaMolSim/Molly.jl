@@ -48,7 +48,8 @@ collective variable.
 """
 function bias_gradient(lb::LinearBias, cv_sim)
     d = cv_sim - lb.cv_target
-    iszero(d) && return zero(lb.k)
+    # Zero with the type of the other branch, which is float even for integer k
+    iszero(d) && return zero(lb.k * d / oneunit(d))
     return lb.k * d / abs(d)
 end
 

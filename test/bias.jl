@@ -1357,6 +1357,13 @@ end
             @test_throws ArgumentError forces(System(sys_cpu_base; general_inters=(bias_tors,)))
             @test_throws ErrorException forces(System(sys_gpu_base; general_inters=(bias_tors,)))
 
+            # A NaN CV with an integer-k LinearBias whose sample call lands on its zero branch
+            bias_lin = BiasPotential(CalcDist([1], [4], CalcSingleDist(), :wrap),
+                                     LinearBias(100u"kJ * mol^-1 * nm^-1", 1.0u"nm"))
+            sys_nan = System(sys_gpu_base; coords=copy(sys_gpu_base.coords), general_inters=(bias_lin,))
+            sys_nan.coords[4:4] .= Ref(SVector(NaN, 0.0, 0.0)u"nm")  # System rejects NaN coordinates
+            @test_throws "non-finite value at step 0" forces(sys_nan)
+
             # A run that ends before the next periodic check is checked at its end
             sys_run = System(sys_gpu_base; coords=copy(sys_gpu_base.coords),
                              velocities=copy(sys_gpu_base.velocities), general_inters=(bias,))
