@@ -4608,7 +4608,7 @@ function refresh_reaxff_shielding(pair, atom_i, atom_j, p_vdW1)
 end
 
 
-"""
+#=
     Molly.enzyme_forces_and_energy(sys, inter::ReaxFF, eem::EEM; neighbors)
 
 Return `(forces, energy)` for the ReaxFF and EEM interactions, for use in loss
@@ -4628,7 +4628,7 @@ parameters are changed.
 
 Call once to initialize the interaction state before constructing Enzyme shadow
 objects.
-"""
+=#
 function enzyme_forces_and_energy(sys, inter::ReaxFF, eem::EEM; neighbors)
     atom_parameters = inter.device_params.atom_parameters
     off_diagonal_parameters = inter.device_params.off_diagonal_parameters
