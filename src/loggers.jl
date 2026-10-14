@@ -936,7 +936,7 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
     end
 end
 
-function validate_replica_loggers(replica_loggers)
+function validate_replica_loggers(replica_loggers; name::AbstractString="replica_loggers")
     seen_loggers = Tuple{Any, Int}[]
     seen_paths = Dict{String, Int}()
     for (replica_i, loggers) in pairs(replica_loggers)
@@ -944,7 +944,7 @@ function validate_replica_loggers(replica_loggers)
             if !isbitstype(typeof(logger))
                 for (seen_logger, prev_i) in seen_loggers
                     if logger === seen_logger && prev_i != replica_i
-                        throw(ArgumentError("replica_loggers cannot reuse the same " *
+                        throw(ArgumentError("$(name) cannot reuse the same " *
                                             "stateful logger object across replicas"))
                     end
                 end
@@ -954,7 +954,7 @@ function validate_replica_loggers(replica_loggers)
                 filepath = abspath(logger.filepath)
                 prev_i = get(seen_paths, filepath, nothing)
                 if !isnothing(prev_i) && prev_i != replica_i
-                    throw(ArgumentError("replica_loggers cannot contain multiple " *
+                    throw(ArgumentError("$(name) cannot contain multiple " *
                                         "TrajectoryWriters with the same filepath ($filepath)"))
                 end
                 seen_paths[filepath] = replica_i
