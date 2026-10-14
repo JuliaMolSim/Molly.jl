@@ -1107,11 +1107,11 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     if recompute && length(sys.constraints) > 0
         if isnothing(buffers_in) || !has_total_virial(buffers, step_n)
             compute_initial_total_virial!(buffers, sys, neighbors, step_n;
-                                          n_threads=n_threads, check_flags=true, kwargs...)
+                                          n_threads=n_threads, kwargs..., check_flags=true)
         end
     elseif recompute
         forces!(zero_forces(sys), sys, neighbors, step_n, buffers, Val(true);
-                n_threads=n_threads, check_flags=true, kwargs...)
+                n_threads=n_threads, kwargs..., check_flags=true)
     elseif length(sys.constraints) > 0 && !has_total_virial(buffers, step_n)
         error("cannot calculate pressure for constrained systems without a valid total virial")
     end

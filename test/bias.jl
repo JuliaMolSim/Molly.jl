@@ -1328,6 +1328,7 @@ end
             @test_throws ErrorException forces(sys_gpu)
             @test_throws "non-finite value at step 7" forces(sys_gpu, nothing, 7)
             @test_throws "non-finite value at step 7" forces_virial(sys_gpu, nothing, 7)
+            @test_throws "non-finite value at step 7" forces(sys_gpu, nothing, 7; check_flags=false)
             @test_throws "non-finite value at step 7" virial(sys_gpu, nothing, 7)
             @test_throws "non-finite value at step 7" pressure(sys_gpu, nothing, 7)
             @test_throws "non-finite value at step 7" accelerations(sys_gpu, nothing, 7)

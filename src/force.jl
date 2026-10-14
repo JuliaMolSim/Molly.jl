@@ -765,8 +765,8 @@ end
 function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
-            check_flags=true, kwargs...)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads, kwargs...,
+            check_flags=true)
     return fs
 end
 
@@ -794,11 +794,11 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
     buffers = init_buffers!(sys, n_threads)
     if length(sys.constraints) > 0
         fs, _ = compute_initial_total_virial!(buffers, sys, neighbors, step_n;
-                                              n_threads=n_threads, check_flags=true, kwargs...)
+                                              n_threads=n_threads, kwargs..., check_flags=true)
     else
         fs = zero_forces(sys)
-        forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads,
-                check_flags=true, kwargs...)
+        forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...,
+                check_flags=true)
     end
     return fs, buffers.virial
 end
@@ -1321,6 +1321,7 @@ function forces!(fs,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
                  strictness=default_strictness(),
+                 # Reads the GPU bias flags at once; set by calls that drop their buffers
                  check_flags::Bool=false) where needs_vir
     # Allow an Enzyme reverse rule
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
