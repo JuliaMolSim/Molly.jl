@@ -59,7 +59,7 @@ function setup_progress(n_steps, show_progress)
             n_steps;
             enabled=true,
             showspeed=true,
-            desc="Simulating:",
+            desc="Simulating: ",
             color=:green,
             barglyphs=BarGlyphs('|', '█', ['▁', '▂', '▃', '▄', '▅', '▆', '▇'], ' ', '|'),
         )
@@ -280,6 +280,7 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
             break
         end
 
+        trial_states = map(save_mc_trial_state, values(sys.general_inters))
         coords_copy .= sys.coords
         sys.coords .+= hn .* F ./ max_force
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -288,7 +289,6 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                     n_threads=n_threads)
-        neighbors_rebuilt = (neighbors !== neighbors_copy)
         E_trial = minimizer_potential_energy(sys, neighbors, step_n, buffers, sis,
                                              n_threads, strictness)
         if E_trial < E
@@ -298,11 +298,11 @@ by the `num_md_steps` defined in the `AWHSimulation` struct.
                     E_trial, " - max force ", max_force, " - accepted")
         else
             sys.coords .= coords_copy
-            if neighbors_rebuilt
-                # The previous list can not be reused since a neighbor finder may have
-                #   reused the buffers behind it for the list just found
-                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                           n_threads=n_threads)
+            neighbors = find_neighbors(
+                sys, sys.neighbor_finder, neighbors_copy, step_n, true;
+                n_threads=n_threads)
+            for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
+                restore_mc_trial_state!(sys, inter, snapshot)
             end
             hn = hn / 5
             println(sim.log_stream, "Step ", step_n, " - potential energy ",
@@ -653,6 +653,7 @@ end
             g_dot_p = -sum_dot(F, p)
         end
 
+        trial_states = map(save_mc_trial_state, values(sys.general_inters))
         coords_prev .= sys.coords
         neighbors_prev = neighbors
         E_prev = E
@@ -696,11 +697,12 @@ end
         else
             # The forces still correspond to the restored coordinates
             sys.coords .= coords_prev
-            if neighbors !== neighbors_prev
-                # The previous list can not be reused since a neighbor finder may have
-                #   reused the buffers behind it for a trial list
-                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                           n_threads=n_threads)
+            # The previous list can not be reused since a neighbor finder may have
+            #   reused the buffers behind it for a trial list
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                       n_threads=n_threads)
+            for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
+                restore_mc_trial_state!(sys, inter, snapshot)
             end
             n_hist = 0
         end
@@ -1073,6 +1075,8 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys; n_threads=n_threads)
 
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
@@ -1107,9 +1111,9 @@ end
             pressure_kin_tensor_valid ? pressure_kin_tensor : nothing; n_threads=n_threads,
             rng=rng)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
-                                   n_threads=n_threads)
         if recompute_forces
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                       n_threads=n_threads)
             recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
                                              needs_vir_step, n_threads, strictness)
             forces_t, forces_t_dt = forces_t_dt, forces_t
@@ -1252,6 +1256,8 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
                                         strictness=strictness)
         end
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
@@ -1286,9 +1292,9 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
             pressure_kin_tensor_valid ? pressure_kin_tensor : nothing; n_threads=n_threads,
             rng=rng)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
-                                   n_threads=n_threads)
         if recompute_forces
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                       n_threads=n_threads)
             recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
                                              needs_vir_step, n_threads, strictness)
             forces_t, forces_t_dt = forces_t_dt, forces_t
@@ -1664,6 +1670,8 @@ end
         end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys; n_threads=n_threads)
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -1672,8 +1680,10 @@ end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng, strictness=strictness)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
-                                   n_threads=n_threads)
+        if recompute_forces
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                    n_threads=n_threads)
+        end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        strictness=strictness, current_forces=forces_t)
@@ -2044,8 +2054,9 @@ end
                                n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
-    forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
-            strictness=strictness)
+    needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
+    forces!(forces_t, sys, neighbors, init_step, buffers, Val(needs_vir_init);
+            n_threads=n_threads, strictness=strictness)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
@@ -2072,6 +2083,8 @@ end
         T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, strictness=strictness)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
@@ -2087,9 +2100,9 @@ end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng, strictness=strictness)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
-                                    n_threads=n_threads)
         if recompute_forces
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                       n_threads=n_threads)
             forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                     n_threads=n_threads, strictness=strictness)
             forces_t, forces_t_dt = forces_t_dt, forces_t
@@ -3003,6 +3016,7 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
+        trial_states = map(save_mc_trial_state, values(sys.general_inters))
         coords_old .= sys.coords
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -3020,6 +3034,11 @@ end
             E_old = E_new
         else
             sys.coords .= coords_old
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                       n_threads=n_threads)
+            for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
+                restore_mc_trial_state!(sys, inter, snapshot)
+            end
             apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
                            strictness=strictness, current_potential_energy=E_old, success=false,
                            energy_rate=(E_old / (sys.k * sim.temperature)))

@@ -236,15 +236,24 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters,
                           strictness=default_strictness()) where TH
+    pe = zero(TH) * sys.energy_units
+    for inter in values(general_inters)
+        if evaluate_before_pairwise(inter)
+            pe += uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, strictness=strictness),
+            )
+        end
+    end
+
     if length(pairwise_inters) > 0
         use_vel = any_uses_velocity(pairwise_inters)
-        pe = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
+        pe += with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
             pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
                              neighbors, sys.energy_units, length(sys), pis_nonl, pis_nl,
                              step_n, Val(TH), Val(n_threads), Val(use_vel), Val(sys.grad_safe))
         end
-    else
-        pe = zero(TH) * sys.energy_units
     end
 
     if length(specific_inter_lists) > 0
@@ -259,6 +268,7 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
     end
 
     for inter in values(general_inters)
+        evaluate_before_pairwise(inter) && continue
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
@@ -516,11 +526,23 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters,
                           strictness=default_strictness())
+    pe = zero(float_type_high(sys)) * sys.energy_units
+    for inter in values(general_inters)
+        if evaluate_before_pairwise(inter)
+            pe += uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, strictness=strictness),
+            )
+        end
+    end
+
     # Allow an Enzyme reverse rule
-    pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
+    pe += gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
                               specific_inter_lists, n_threads)
 
     for inter in values(general_inters)
+        evaluate_before_pairwise(inter) && continue
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
